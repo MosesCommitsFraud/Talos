@@ -10,6 +10,8 @@ RUN sed -i 's|http://deb.debian.org|https://deb.debian.org|g' /etc/apt/sources.l
     curl \
     default-libmysqlclient-dev \
     fd-find \
+    freetds-bin \
+    freetds-dev \
     gfortran \
     git \
     gosu \
@@ -28,6 +30,9 @@ RUN sed -i 's|http://deb.debian.org|https://deb.debian.org|g' /etc/apt/sources.l
     sudo \
     tini \
     tree \
+    tdsodbc \
+    unixodbc \
+    unixodbc-dev \
     unzip \
     wget \
     zip \
