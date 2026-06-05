@@ -15,8 +15,8 @@ from pydantic import ValidationError
 from core.models import ChatMessage
 from src.request_models import ChatRequest
 from src.llm_core import llm_call_async, stream_llm, stream_llm_with_fallback
+from src.agent_loop import stream_agent_loop
 from src import agent_runs
-from src.talos_opencode import stream_opencode_agent
 from src.model_context import estimate_tokens
 from src.chat_helpers import coerce_message_and_session
 from src.endpoint_resolver import normalize_base as _normalize_base, build_chat_url
@@ -982,20 +982,39 @@ def setup_chat_routes(
                 finally:
                     _active_streams.pop(session, None)
             else:
-                # ── Agent mode: delegated to per-user sandboxed opencode ──
+                # ── Agent mode: full agent loop with tools ──
                 _agent_rounds = 0
                 _agent_tool_calls = 0
                 _answered_by = None  # set if the selected model failed and a fallback answered
                 try:
-                    async for chunk in stream_opencode_agent(
-                        user=_user,
+                    from src.settings import get_setting
+                    from src.agent_tools import MAX_AGENT_ROUNDS as _DEFAULT_ROUNDS
+                    _tool_budget = int(get_setting("agent_max_tool_calls", 0))
+                    # Per-message round cap from settings; clamp defensively in
+                    # case settings.json was hand-edited to a bad value.
+                    try:
+                        _max_rounds = int(get_setting("agent_max_rounds", _DEFAULT_ROUNDS) or _DEFAULT_ROUNDS)
+                    except (TypeError, ValueError):
+                        _max_rounds = _DEFAULT_ROUNDS
+                    _max_rounds = max(1, min(_max_rounds, 200))
+
+                    async for chunk in stream_agent_loop(
+                        sess.endpoint_url,
+                        sess.model,
+                        messages,
+                        headers=sess.headers,
+                        temperature=ctx.preset.temperature,
+                        max_tokens=ctx.preset.max_tokens,
+                        prompt_type=preset_id,
+                        max_tool_calls=_tool_budget,
+                        max_rounds=_max_rounds,
+                        context_length=ctx.context_length,
+                        active_document=active_doc,
                         session_id=session,
-                        message=message,
-                        messages=messages,
-                        attachment_ids=att_ids,
-                        upload_handler=upload_handler,
-                        auth_manager=getattr(request.app.state, "auth_manager", None),
                         disabled_tools=disabled_tools if disabled_tools else None,
+                        owner=_user,
+                        fallbacks=_fallback_candidates,
+                        workspace=workspace or None,
                     ):
                         if chunk.startswith("data: ") and not chunk.startswith("data: [DONE]"):
                             try:

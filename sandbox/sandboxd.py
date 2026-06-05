@@ -18,9 +18,6 @@ OPENCODE_HOST = os.getenv("TALOS_OPENCODE_HOST", "0.0.0.0")
 OPENCODE_PUBLIC_HOST = os.getenv("TALOS_OPENCODE_PUBLIC_HOST", "talos-sandbox")
 PORT_BASE = int(os.getenv("TALOS_OPENCODE_PORT_BASE", "41000"))
 IDLE_SECONDS = int(os.getenv("TALOS_OPENCODE_IDLE_SECONDS", "3600"))
-VLLM_BASE_URL = os.getenv("VLLM_BASE_URL", "http://192.168.10.91:8000/v1")
-VLLM_API_KEY = os.getenv("VLLM_API_KEY", "not-needed")
-VLLM_MODEL = os.getenv("VLLM_MODEL", "qwen3-llm")
 
 app = FastAPI(title="Talos Sandbox", version="0.1.0")
 
@@ -89,32 +86,6 @@ def ensure_user(user_id: str) -> tuple[str, Path]:
     if subprocess.run(["id", "-u", name], capture_output=True).returncode != 0:
         _run(["useradd", "--create-home", "--home-dir", str(home), "--shell", "/bin/bash", name])
     home.mkdir(parents=True, exist_ok=True)
-    config_path = home / "opencode.json"
-    config_path.write_text(json.dumps({
-        "$schema": "https://opencode.ai/config.json",
-        "model": f"vllm/{VLLM_MODEL}",
-        "provider": {
-            "vllm": {
-                "npm": "@ai-sdk/openai-compatible",
-                "name": "vLLM Spark",
-                "options": {"baseURL": VLLM_BASE_URL, "apiKey": VLLM_API_KEY},
-                "models": {
-                    VLLM_MODEL: {
-                        "name": VLLM_MODEL,
-                        "tool_call": True,
-                    }
-                },
-            }
-        },
-        "permission": {
-            "read": "allow",
-            "edit": "allow",
-            "bash": {"*": "allow"},
-            "webfetch": "deny",
-            "websearch": "deny",
-            "external_directory": {"*": "deny"},
-        },
-    }, indent=2), encoding="utf-8")
     _run(["chown", "-R", f"{name}:{name}", str(home)])
     return name, home
 
