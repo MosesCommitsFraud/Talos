@@ -18,8 +18,8 @@
   (function(){
     try {
       // Theme is locked to the GPT palette — no per-user theme switching.
-      var t = { name:'gpt', colors:{ bg:'#212121', fg:'#ececec', panel:'#171717', border:'#424242', red:'#949494',
-                advanced:{ sendBtnBg:'#949494', sendBtnHover:'#7f7f7f', userBubbleBg:'#2f2f2f', aiBubbleBg:'#171717', inputBg:'#2f2f2f' } } };
+      var t = { name:'gpt', colors:{ bg:'#212121', fg:'#ececec', panel:'#171717', border:'#424242', red:'#3d87cb',
+                advanced:{ sendBtnBg:'#3d87cb', sendBtnHover:'#336fa8', userBubbleBg:'#2f2f2f', aiBubbleBg:'#171717', inputBg:'#2f2f2f' } } };
       if (t && t.colors) {
         var s = document.documentElement.style;
         var c = t.colors;
@@ -102,7 +102,7 @@
   (function(){
     try {
       var path = (window.location.pathname || '').toLowerCase();
-      var ac = '#949494'; // GPT theme accent (locked)
+      var ac = '#3d87cb'; // accent (locked) — blue from macs-logo.svg
       // Shapes are line-stroke SVGs (no emoji glyphs). Each entry returns
       // the inner SVG markup rendered against currentColor=`ac`.
       var SHAPES = {

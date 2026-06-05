@@ -12,8 +12,8 @@ import { snapModalToZone } from './tileManager.js';
 // presets/custom themes were removed. THEMES is kept (one entry) so the few
 // consumers that still reference it keep working.
 export const THEMES = {
-  gpt:        { bg:'#212121', fg:'#ececec', panel:'#171717', border:'#424242', red:'#949494',
-                advanced: { sendBtnBg: '#949494', sendBtnHover: '#7f7f7f',
+  gpt:        { bg:'#212121', fg:'#ececec', panel:'#171717', border:'#424242', red:'#3d87cb',
+                advanced: { sendBtnBg: '#3d87cb', sendBtnHover: '#336fa8',
                             userBubbleBg: '#2f2f2f', aiBubbleBg: '#171717',
                             inputBg: '#2f2f2f' } },
 };
