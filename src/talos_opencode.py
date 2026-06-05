@@ -27,26 +27,6 @@ def _safe_user_id(user: str | None) -> str:
     return user or "anonymous"
 
 
-def _history_prompt(messages: list[dict[str, Any]], current_message: str) -> tuple[str | None, str]:
-    system_parts: list[str] = []
-    turns: list[str] = []
-    for msg in messages or []:
-        role = str(msg.get("role") or "user")
-        content = msg.get("content")
-        if isinstance(content, list):
-            content = "\n".join(str(part.get("text", "")) for part in content if isinstance(part, dict))
-        content = str(content or "").strip()
-        if not content:
-            continue
-        if role == "system":
-            system_parts.append(content)
-        else:
-            turns.append(f"{role.upper()}:\n{content}")
-    if not turns and current_message:
-        turns.append(f"USER:\n{current_message}")
-    return "\n\n".join(system_parts) or None, "\n\n".join(turns).strip()
-
-
 def _latest_prompt(current_message: str, attachment_paths: list[str]) -> str:
     prompt = current_message or "Please review the attached files."
     if attachment_paths:
@@ -57,7 +37,7 @@ def _latest_prompt(current_message: str, attachment_paths: list[str]) -> str:
 
 def _opencode_tools(disabled_tools: set[str] | None) -> dict[str, bool]:
     disabled = disabled_tools or set()
-    tools = {"webfetch": False, "websearch": False}
+    tools: dict[str, bool] = {}
     if {"bash", "python"} & disabled:
         tools["bash"] = False
     if "read_file" in disabled:
@@ -76,7 +56,16 @@ async def _ensure_runtime(client: httpx.AsyncClient, user_id: str, chat_id: str)
     workspace_resp.raise_for_status()
     opencode_resp = await client.post(f"{SANDBOX_URL}/users/{user_id}/opencode/start")
     opencode_resp.raise_for_status()
-    return workspace_resp.json()["workspace"], opencode_resp.json()["base_url"].rstrip("/")
+    base_url = opencode_resp.json()["base_url"].rstrip("/")
+    for _ in range(40):
+        try:
+            resp = await client.get(f"{base_url}/app")
+            if resp.status_code < 500:
+                break
+        except httpx.HTTPError:
+            pass
+        await asyncio.sleep(0.25)
+    return workspace_resp.json()["workspace"], base_url
 
 
 async def _copy_attachments(
@@ -170,13 +159,11 @@ async def stream_opencode_agent(
     async with httpx.AsyncClient(timeout=httpx.Timeout(OPENCODE_TIMEOUT, connect=20.0)) as client:
         workspace, base_url = await _ensure_runtime(client, user_id, session_id)
         attachment_paths = await _copy_attachments(client, user_id, session_id, upload_handler, attachment_ids, user, auth_manager)
-        oc_session_id, is_new_session = await _session_id(client, base_url, user_id, session_id, workspace)
-        system_text, history_text = _history_prompt(messages, message)
-        prompt_text = history_text if is_new_session else _latest_prompt(message, attachment_paths)
-        if is_new_session and attachment_paths:
-            prompt_text = f"{prompt_text}\n\nFiles available in the workspace:\n" + "\n".join(f"- {p}" for p in attachment_paths)
+        oc_session_id, _is_new_session = await _session_id(client, base_url, user_id, session_id, workspace)
+        prompt_text = _latest_prompt(message, attachment_paths)
 
         queue: asyncio.Queue[dict[str, Any] | BaseException | None] = asyncio.Queue()
+        message_roles: dict[str, str] = {}
 
         async def read_events() -> None:
             try:
@@ -200,12 +187,13 @@ async def stream_opencode_agent(
 
         async def send_prompt() -> None:
             try:
+                tools = _opencode_tools(disabled_tools)
                 body = {
                     "agent": agent,
-                    "system": system_text,
-                    "tools": _opencode_tools(disabled_tools),
                     "parts": [{"type": "text", "text": prompt_text}],
                 }
+                if tools:
+                    body["tools"] = tools
                 resp = await client.post(
                     f"{base_url}/session/{oc_session_id}/message",
                     params={"directory": workspace},
@@ -228,8 +216,14 @@ async def stream_opencode_agent(
                     break
                 event_type = item.get("type")
                 props = item.get("properties") or {}
-                if event_type == "message.part.updated":
+                if event_type == "message.updated":
+                    info = props.get("info") or {}
+                    if isinstance(info, dict) and info.get("id"):
+                        message_roles[str(info["id"])] = str(info.get("role") or "")
+                elif event_type == "message.part.updated":
                     part = props.get("part") or {}
+                    if message_roles.get(str(part.get("messageID"))) != "assistant":
+                        continue
                     part_type = part.get("type")
                     if part_type == "text":
                         delta = props.get("delta")
