@@ -1,0 +1,29 @@
+services:
+  talos-app:
+    volumes:
+      - ./app.py:/app/app.py:z
+      - ./core:/app/core:z
+      - ./routes:/app/routes:z
+      - ./services:/app/services:z
+      - ./src:/app/src:z
+      - ./static:/app/static:z
+      - ./data:/app/data:z
+      - ./logs:/app/logs:z
+    environment:
+      - TALOS_DEV_RELOAD=true
+    command:
+      - uvicorn
+      - app:app
+      - --host
+      - 0.0.0.0
+      - --port
+      - "7000"
+      - --reload
+      - --reload-dir
+      - /app/static
+      - --reload-dir
+      - /app/src
+      - --reload-dir
+      - /app/routes
+      - --reload-dir
+      - /app/core
