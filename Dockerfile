@@ -5,7 +5,9 @@ FROM python:3.12-slim
 # nodejs/npm are kept for existing static build/tooling compatibility.
 # gosu lets the entrypoint drop privileges cleanly so signals still reach
 # uvicorn directly (no extra shell layer like `su`/`sudo` would add).
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN sed -i 's|http://deb.debian.org|https://deb.debian.org|g' /etc/apt/sources.list.d/debian.sources \
+    && apt-get update -o Acquire::Retries=5 \
+    && apt-get install -y --no-install-recommends -o Acquire::Retries=5 \
     build-essential \
     curl \
     git \
