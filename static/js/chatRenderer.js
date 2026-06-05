@@ -2058,7 +2058,7 @@ export function addMessage(role, content, modelName, metadata) {
     const isSlash = metadata?.source === 'slash';
     const isCompacted = metadata?.compacted;
     const resolvedModel = modelName || metadata?.model;
-    var _roleText = role === 'user' ? 'You' : (isSlash || isCompacted) ? 'Talos' : shortModel(resolvedModel);
+    var _roleText = role === 'user' ? '' : (isSlash || isCompacted) ? 'Talos' : shortModel(resolvedModel);
     if (role === 'assistant' && (metadata?.research || metadata?.research_clarification)) {
       _roleText += ' (Research)';
     }

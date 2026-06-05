@@ -1965,32 +1965,52 @@ body.bg-pattern-sparkles {
       align-items: flex-end;
       margin-left: auto;
       margin-right: 8px;
-      background: var(--user-bubble-bg, color-mix(in srgb, var(--fg) 8%, var(--bg)));
-      border: 1px solid var(--bubble-border, var(--border));
-      border-radius: 18px 18px 0 18px;
       align-self: flex-end;
       width: fit-content;
       max-width: 85%;
       min-width: 80px;
       word-wrap: break-word;
       overflow-wrap: break-word;
-      overflow: hidden;
+      /* Bubble chrome lives on .body (see below); .msg is a transparent
+         layout container so the role label and footer sit OUTSIDE the bubble. */
+      background: transparent;
+      border: none;
+      border-radius: 0;
+      padding: 0;
+      overflow: visible;
     }
     .msg-ai {
       align-items: flex-start;
       margin-right: auto;
       margin-left: 8px;
-      background: var(--ai-bubble-bg, var(--panel));
-      border: 1px solid var(--bubble-border, var(--border));
-      border-radius: 18px 18px 18px 0;
       align-self: flex-start;
       width: 85%;
       max-width: 85%;
       min-width: 80px;
       word-wrap: break-word;
       overflow-wrap: break-word;
-      overflow: hidden;
       transition: min-height 0.25s ease-out;
+      background: transparent;
+      border: none;
+      border-radius: 0;
+      padding: 0;
+      overflow: visible;
+    }
+    /* The visible bubble — background, border and rounded corners — is drawn on
+       the message body, so .role (above) and .msg-footer (below) render outside it. */
+    .msg-user .body,
+    .msg-ai .body {
+      padding: 10px 14px;
+      border: 1px solid var(--bubble-border, var(--border));
+      overflow: hidden;
+    }
+    .msg-user .body {
+      background: var(--user-bubble-bg, color-mix(in srgb, var(--fg) 8%, var(--bg)));
+      border-radius: 18px 18px 0 18px;
+    }
+    .msg-ai .body {
+      background: var(--ai-bubble-bg, var(--panel));
+      border-radius: 18px 18px 18px 0;
     }
     .msg .role {
       font-weight: 600;
@@ -2017,7 +2037,15 @@ body.bg-pattern-sparkles {
       color: color-mix(in srgb, var(--fg) 60%, transparent);
     }
     .msg-user .role::before {
-      background: color-mix(in srgb, var(--fg) 40%, transparent);
+      display: none;
+    }
+    /* "You" label removed — collapse the role row's gap when it only carries a
+       timestamp (or nothing) so the user bubble doesn't get a stray empty line. */
+    .msg-user .role:empty {
+      display: none;
+    }
+    .msg-user .role {
+      margin-bottom: 2px;
     }
     .msg .body {
       width: 100%;
