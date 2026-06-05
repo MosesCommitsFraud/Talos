@@ -6,15 +6,31 @@ RUN sed -i 's|http://deb.debian.org|https://deb.debian.org|g' /etc/apt/sources.l
     && apt-get update -o Acquire::Retries=5 \
     && apt-get install -y --no-install-recommends -o Acquire::Retries=5 \
     bash \
+    build-essential \
     curl \
+    default-libmysqlclient-dev \
+    fd-find \
+    gfortran \
     git \
     gosu \
+    jq \
+    libpq-dev \
+    libxml2-dev \
+    libxslt1-dev \
+    pkg-config \
+    postgresql-client \
     python3 \
+    python3-dev \
     python3-pip \
     python3-venv \
     ripgrep \
+    sqlite3 \
     sudo \
     tini \
+    tree \
+    unzip \
+    wget \
+    zip \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /srv/talos-sandbox
