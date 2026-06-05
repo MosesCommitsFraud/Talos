@@ -18,6 +18,7 @@ import presetsModule from './presets.js';
 import fileHandlerModule from './fileHandler.js';
 import searchModule from './search.js';
 import documentModule from './document.js';
+import planWindow from './planWindow.js';
 import * as emailInbox from './emailInbox.js';
 import codeRunnerModule from './codeRunner.js';
 import slashCommands, { initSlashCommands, isCommand, handleSlashCommand, handleSetupInput, handleSetupWizard, typewriterInto } from './slashCommands.js';
@@ -29,6 +30,27 @@ import createResearchSynapse from './researchSynapse.js';
   let API_BASE = '';
   let currentAbort = null;
   let isStreaming = false;
+
+  function _plans() { return Storage.getJSON(Storage.KEYS.PLAN, {}); }
+  function _getPlan(sessionId) { return (_plans() || {})[sessionId] || null; }
+  function _setPlan(sessionId, plan, approved) {
+    if (!sessionId || !plan) return;
+    const all = _plans() || {};
+    all[sessionId] = { plan, approved: !!approved, updated_at: Date.now() };
+    Storage.setJSON(Storage.KEYS.PLAN, all);
+  }
+  function _extractPlanChecklist(text) {
+    const cleaned = String(text || '').replace(/<think[\s\S]*?<\/think>/gi, '').trim();
+    const lines = cleaned.split('\n').map(l => l.trim()).filter(Boolean);
+    const checklist = lines.filter(l => /^[-*]\s+\[[ xX]\]\s+/.test(l));
+    return checklist.length ? checklist.join('\n') : cleaned;
+  }
+  function _approveAndRunPlan(sessionId, plan) {
+    _setPlan(sessionId, plan, true);
+    const mi = uiModule.el('message');
+    if (mi) mi.value = 'Execute the approved plan.';
+    document.querySelector('.send-btn')?.click();
+  }
   // Continuous stall watchdog: while streaming, if the SSE stream produces
   // NOTHING for STALL_THRESHOLD_MS (no deltas, no tool heartbeat — tools beat
   // every 2s, so a full minute of silence means it's genuinely stuck or the
@@ -166,6 +188,23 @@ import createResearchSynapse from './researchSynapse.js';
       const ta = document.getElementById('message');
       if (ta && mod.initSlashAutocomplete) mod.initSlashAutocomplete(ta);
     }).catch(() => {});
+    const planBtn = document.getElementById('plan-toggle-btn');
+    const planChk = document.getElementById('plan-toggle');
+    if (planBtn && planChk && !planBtn.dataset.bound) {
+      planBtn.dataset.bound = '1';
+      planBtn.addEventListener('click', () => {
+        const sid = sessionModule && sessionModule.getCurrentSessionId ? sessionModule.getCurrentSessionId() : Storage.get(Storage.KEYS.CURRENT_SESSION, '');
+        const existing = _getPlan(sid);
+        if (existing && existing.plan && !planChk.checked) {
+          planWindow.openPlanWindow(existing.plan, existing.approved ? null : () => _approveAndRunPlan(sid, existing.plan));
+          return;
+        }
+        planChk.checked = !planChk.checked;
+        planBtn.classList.toggle('active', planChk.checked);
+        planBtn.setAttribute('aria-pressed', planChk.checked ? 'true' : 'false');
+        uiModule.showToast(planChk.checked ? 'Plan mode on for next message' : 'Plan mode off');
+      });
+    }
   }
 
   // addMessage, createMsgFooter, displayMetrics, hideWelcomeScreen, showWelcomeScreen
@@ -753,12 +792,20 @@ import createResearchSynapse from './researchSynapse.js';
       // Web toggle: pre-search in Chat mode, tool permission in Agent mode
       const toggleState = Storage.loadToggleState();
       let isAgentMode = (toggleState.mode || 'chat') === 'agent';
+      const planChk = el('plan-toggle');
+      const _planModeForTurn = !!(planChk && planChk.checked);
+      if (_planModeForTurn) isAgentMode = true;
       // Auto-escalate to agent mode when a document is open — the user expects
       // the AI to see the document and have tools to edit it
       if (!isAgentMode && documentModule && documentModule.isPanelOpen() && documentModule.getCurrentDocId()) {
         isAgentMode = true;
       }
       fd.append('mode', isAgentMode ? 'agent' : 'chat');
+      if (_planModeForTurn) fd.append('plan_mode', 'true');
+      const _storedPlan = _getPlan(streamSessionId);
+      if (!_planModeForTurn && _storedPlan && _storedPlan.approved && _storedPlan.plan) {
+        fd.append('approved_plan', _storedPlan.plan);
+      }
       if (el('web-toggle').checked) {
         if (isAgentMode) {
           fd.append('allow_web_search', 'true');
@@ -1372,6 +1419,19 @@ import createResearchSynapse from './researchSynapse.js';
                   var _replyElDone = document.createElement('div');
                   _replyElDone.className = 'live-reply-content';
                   _streamElDone.appendChild(_replyElDone);
+                }
+              }
+              if (_planModeForTurn && !_isBg) {
+                const plan = _extractPlanChecklist(accumulated);
+                if (plan) {
+                  _setPlan(streamSessionId, plan, false);
+                  if (planChk) planChk.checked = false;
+                  const planBtn = document.getElementById('plan-toggle-btn');
+                  if (planBtn) {
+                    planBtn.classList.remove('active');
+                    planBtn.setAttribute('aria-pressed', 'false');
+                  }
+                  planWindow.openPlanWindow(plan, () => _approveAndRunPlan(streamSessionId, plan));
                 }
               }
               // Normal foreground completion — metrics will be displayed in the final render block below
@@ -2261,6 +2321,14 @@ import createResearchSynapse from './researchSynapse.js';
               } else if (json.type === 'ui_control') {
                 if (_isBg) continue;
                 chatStream.handleUIControl(json.data || {});
+
+              } else if (json.type === 'plan_update') {
+                if (_isBg) continue;
+                const plan = (json.data && json.data.plan) ? String(json.data.plan) : '';
+                if (plan) {
+                  _setPlan(streamSessionId, plan, true);
+                  if (planWindow.isPlanWindowOpen()) planWindow.openPlanWindow(plan, null);
+                }
 
               } else if (json.type === 'ask_user') {
                 if (_isBg) continue;

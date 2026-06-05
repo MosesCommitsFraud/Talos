@@ -357,7 +357,8 @@ def estimate_tokens(messages: List[Dict]) -> int:
 
     Uses chars * 0.3 which is closer to real BPE tokenizer output
     than the commonly-cited chars/4 (which underestimates by ~20-30%).
-    Also adds ~4 tokens per message for role/formatting overhead.
+    Also adds ~4 tokens per message for role/formatting overhead and counts
+    assistant tool_calls, whose arguments may carry large tool payloads.
     """
     total = 0
     for msg in messages:
@@ -369,4 +370,16 @@ def estimate_tokens(messages: List[Dict]) -> int:
             for item in content:
                 if isinstance(item, dict) and item.get("type") == "text":
                     total += int(len(item.get("text", "")) * 0.3)
+        tool_calls = msg.get("tool_calls")
+        if isinstance(tool_calls, list):
+            for tc in tool_calls:
+                if not isinstance(tc, dict):
+                    continue
+                fn = tc.get("function") if isinstance(tc.get("function"), dict) else tc
+                name = fn.get("name", "") or ""
+                args = fn.get("arguments", "") or ""
+                if not isinstance(args, str):
+                    args = str(args)
+                total += 4
+                total += int((len(str(name)) + len(args)) * 0.3)
     return total

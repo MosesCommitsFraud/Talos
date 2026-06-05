@@ -36245,3 +36245,34 @@ body.theme-frosted .modal {
 [data-settings-panel="email"] {
   display: none !important;
 }
+/* Plan mode */
+#plan-toggle-btn.active,
+#plan-toggle-btn[aria-pressed="true"] {
+  background: color-mix(in srgb, var(--accent-primary, var(--red)) 16%, transparent);
+  border-color: var(--accent-primary, var(--red));
+  color: var(--accent-primary, var(--red));
+}
+
+.plan-window-content {
+  width: min(560px, calc(100vw - 32px));
+  max-height: min(720px, calc(100vh - 40px));
+}
+
+.plan-window-body {
+  overflow: auto;
+  padding: 14px 18px;
+}
+
+.plan-window-body ul,
+.plan-window-body ol {
+  padding-left: 1.4rem;
+}
+
+.plan-approve-btn {
+  background: var(--send-btn-bg, var(--accent-primary, var(--red)));
+  color: var(--send-btn-fg, #fff);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 12px;
+  cursor: pointer;
+}

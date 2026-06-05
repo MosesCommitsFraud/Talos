@@ -51,6 +51,63 @@ NON_ADMIN_BLOCKED_TOOLS = {
 }
 
 
+# Plan mode allows investigation only. Mutating tools are blocked by converting
+# this allowlist into the existing disabled-tools denylist.
+PLAN_MODE_READONLY_TOOLS = {
+    "read_file",
+    "grep",
+    "glob",
+    "ls",
+    "web_search",
+    "web_fetch",
+    "search_chats",
+    "list_models",
+    "list_sessions",
+    "list_emails",
+    "read_email",
+    "list_served_models",
+    "list_downloads",
+    "list_cached_models",
+    "search_hf_models",
+    "list_serve_presets",
+    "list_cookbook_servers",
+    "resolve_contact",
+    "chat_with_model",
+    "ask_teacher",
+}
+
+
+_PLAN_MODE_KNOWN_MUTATORS = {
+    "bash", "python", "write_file", "edit_file",
+    "create_document", "edit_document", "update_document", "suggest_document",
+    "manage_documents", "create_session", "manage_session", "send_to_session",
+    "pipeline", "manage_memory", "manage_skills", "manage_tasks", "manage_notes",
+    "manage_endpoints", "manage_mcp", "manage_webhooks", "manage_tokens",
+    "manage_settings", "manage_contact", "manage_calendar", "api_call", "app_api",
+    "ui_control", "send_email", "reply_to_email", "bulk_email", "delete_email",
+    "archive_email", "mark_email_read", "download_model", "serve_model",
+    "stop_served_model", "cancel_download", "adopt_served_model", "serve_preset",
+    "generate_image", "edit_image", "trigger_research", "manage_research",
+}
+
+
+def plan_mode_disabled_tools() -> Set[str]:
+    """Return tool names to disable while proposing a plan.
+
+    Fails closed: if dynamic schema discovery fails, known mutators are still
+    disabled. New unknown tools default to disabled when present in schemas.
+    """
+    try:
+        import src.agent_tools  # noqa: F401
+        from src.tool_schemas import FUNCTION_TOOL_SCHEMAS
+        all_names = {(t.get("function") or {}).get("name") for t in FUNCTION_TOOL_SCHEMAS}
+        all_names.discard(None)
+    except Exception as exc:
+        logger.warning("Unable to load tool schemas for plan-mode gating: %s", exc)
+        all_names = set()
+    return (all_names | _PLAN_MODE_KNOWN_MUTATORS) - PLAN_MODE_READONLY_TOOLS
+
+
 def is_public_blocked_tool(tool_name: Optional[str]) -> bool:
     """Return True when a non-admin/public user must not execute this tool.
 

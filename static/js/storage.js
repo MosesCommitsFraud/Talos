@@ -24,7 +24,8 @@ export const KEYS = {
   SECTION_ORDER: 'sidebar-section-order',
   ADMIN_LAST_TAB: 'admin-last-tab',
   DENSITY: 'talos-density',
-  WORKSPACE: 'talos-workspace'
+  WORKSPACE: 'talos-workspace',
+  PLAN: 'talos-plans'
 };
 
 /**
