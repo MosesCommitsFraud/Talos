@@ -8,30 +8,17 @@ import { hexToRgb } from './color/hex.js';
 import { makeWindowDraggable } from './windowDrag.js';
 import { snapModalToZone } from './tileManager.js';
 
+// Theming is locked to a single GPT palette — the theme picker and all other
+// presets/custom themes were removed. THEMES is kept (one entry) so the few
+// consumers that still reference it keep working.
 export const THEMES = {
-  dark:       { bg:'#282c34', fg:'#9cdef2', panel:'#111111', border:'#355a66', red:'#e06c75' },
-  light:      { bg:'#f0ebe3', fg:'#5a5248', panel:'#faf6f0', border:'#d4cdc2', red:'#c47d5a' },
-  midnight:   { bg:'#0d1117', fg:'#c9d1d9', panel:'#161b22', border:'#30363d', red:'#f85149' },
-  paper:      { bg:'#faf8f5', fg:'#3b3836', panel:'#ffffff', border:'#d5d0c8', red:'#c5ac4a' },
-  // Spicy / fun themes
-  cyberpunk:  { bg:'#0a0a0f', fg:'#0ff0fc', panel:'#12101a', border:'#9b30ff', red:'#e040fb' },
-  retrowave:  { bg:'#1a1a2e', fg:'#e94560', panel:'#16213e', border:'#533483', red:'#e94560' },
-  forest:     { bg:'#1b2a1b', fg:'#a8d5a2', panel:'#142414', border:'#3d6b3d', red:'#7cb871' },
-  ocean:      { bg:'#0b1a2c', fg:'#64d2ff', panel:'#091422', border:'#1e5074', red:'#4facfe' },
-  ume:        { bg:'#2b1b2e', fg:'#f5c2e7', panel:'#1e1420', border:'#6c4675', red:'#f5a0c0' },
-  copper:     { bg:'#1c1410', fg:'#e8c39e', panel:'#140f0a', border:'#7a5533', red:'#d4764e' },
-  terminal:   { bg:'#000000', fg:'#00ff41', panel:'#0a0a0a', border:'#003b00', red:'#00ff41' },
-  organs:     { bg:'#0a0406', fg:'#efe1c8', panel:'#15080a', border:'#3a1519', red:'#c83240' },
-  lavender:   { bg:'#f3eef8', fg:'#3d3551', panel:'#faf7ff', border:'#cec3de', red:'#9b6dcc' },
   gpt:        { bg:'#212121', fg:'#ececec', panel:'#171717', border:'#424242', red:'#949494',
                 advanced: { sendBtnBg: '#949494', sendBtnHover: '#7f7f7f',
                             userBubbleBg: '#2f2f2f', aiBubbleBg: '#171717',
                             inputBg: '#2f2f2f' } },
-  claude:     { bg:'#262624', fg:'#f5f4f0', panel:'#30302e', border:'#4a4a47', red:'#c6613f' },
-  cute:       { bg:'#fff0f5', fg:'#d4608a', panel:'#fff8fa', border:'#f0c0d0', red:'#ff6b9d' },
 };
 
-const DEFAULT_THEME = 'dark';
+const DEFAULT_THEME = 'gpt';
 const LS_KEY = 'talos-theme';
 const CUSTOM_THEMES_KEY = 'talos-custom-themes';
 
@@ -87,35 +74,10 @@ function _loadCustomThemes() {
 function _saveCustomThemes(obj) {
   Storage.setJSON(CUSTOM_THEMES_KEY, obj);
 }
-export function saveCustomTheme(name, colors, opts) {
-  const ct = _loadCustomThemes();
-  // Enforce limit — allow overwriting existing, block new past max
-  if (!ct[name] && Object.keys(ct).length >= MAX_CUSTOM_THEMES) {
-    return 'limit';
-  }
-  const entry = { ...colors };
-  if (opts) {
-    if (opts.font) entry.font = opts.font;
-    if (opts.density) entry.density = opts.density;
-    if (opts.bgPattern) entry.bgPattern = opts.bgPattern;
-    if (opts.bgEffectColor) entry.bgEffectColor = opts.bgEffectColor;
-    if (opts.bgEffectIntensity !== undefined) entry.bgEffectIntensity = opts.bgEffectIntensity;
-    if (opts.bgEffectSize !== undefined) entry.bgEffectSize = opts.bgEffectSize;
-    if (opts.frosted !== undefined) entry.frosted = !!opts.frosted;
-  }
-  ct[name] = entry;
-  _saveCustomThemes(ct);
-  _syncCustomThemesToServer(ct);
-  initThemeUI();
-  return 'ok';
-}
-export function deleteCustomTheme(name) {
-  const ct = _loadCustomThemes();
-  delete ct[name];
-  _saveCustomThemes(ct);
-  _syncCustomThemesToServer(ct);
-  initThemeUI();
-}
+// Custom themes are disabled (theming is locked to GPT). Kept as no-ops so
+// existing callers don't throw.
+export function saveCustomTheme() { return 'ok'; }
+export function deleteCustomTheme() {}
 function _syncCustomThemesToServer(ct) {
   try {
     fetch('/api/prefs/custom-themes', {
@@ -251,7 +213,10 @@ function generateHarmonyColors(accentHex, harmonyType, mode) {
   };
 }
 
-export function applyColors(colors) {
+export function applyColors(_ignored) {
+  // Locked to the GPT palette — the argument is intentionally ignored so no
+  // code path (server sync, slash command, boot) can apply a different theme.
+  const colors = THEMES.gpt;
   const s = document.documentElement.style;
   s.setProperty('--bg', colors.bg);
   s.setProperty('--fg', colors.fg);
@@ -441,28 +406,12 @@ export function applyBgPattern(pattern) {
 }
 
 export function getSaved() {
-  const obj = Storage.getJSON(LS_KEY, null);
-  // Migration: 'chatgpt' preset was renamed to 'gpt'
-  if (obj && obj.name === 'chatgpt') obj.name = 'gpt';
-  // Migration: 'sakura' preset was renamed to 'ume'
-  if (obj && obj.name === 'sakura') obj.name = 'ume';
-  return obj;
+  // Theme is locked to GPT — always report it regardless of any stored value.
+  return { name: 'gpt', colors: THEMES.gpt };
 }
 
-export function save(name, colors, opts) {
-  const obj = { name, colors };
-  if (opts) {
-    if (opts.font && opts.font !== DEFAULT_FONT) obj.font = opts.font;
-    if (opts.density && opts.density !== DEFAULT_DENSITY) obj.density = opts.density;
-    if (opts.bgPattern && opts.bgPattern !== 'none') obj.bgPattern = opts.bgPattern;
-    if (opts.bgEffectColor) obj.bgEffectColor = opts.bgEffectColor;
-    if (opts.bgEffectIntensity !== undefined && opts.bgEffectIntensity !== 1) obj.bgEffectIntensity = opts.bgEffectIntensity;
-    if (opts.bgEffectSize !== undefined && opts.bgEffectSize !== 1) obj.bgEffectSize = opts.bgEffectSize;
-    if (opts.frosted) obj.frosted = true;
-  }
-  Storage.setJSON(LS_KEY, obj);
-  _syncToServer(obj);
-}
+// Persisting a theme is disabled (locked to GPT). No-op.
+export function save() {}
 
 function _syncToServer(obj) {
   try {
@@ -504,6 +453,9 @@ function syncAdvancedPickers(colors) {
 }
 
 export function initThemeUI() {
+  // Theme picker UI was removed — nothing to wire up. Theming is locked to GPT.
+  return;
+  // eslint-disable-next-line no-unreachable
   const themePopup = document.getElementById('theme-popup');
   const themeHeader = document.getElementById('theme-popup-header');
   if (themePopup && themeHeader && !themePopup.dataset.dragWired) {
@@ -1487,7 +1439,7 @@ export function closePopup() {
 }
 
 // Expose for app.js wiring + AI ui_control
-export function getCustomThemes() { return _loadCustomThemes(); }
+export function getCustomThemes() { return {}; }
 
 // ── Synapse background effect ──
 // Uses the CSS grid pattern as base, overlays fast-moving small light pulses on grid lines
@@ -2051,32 +2003,12 @@ const themeModule = { initThemeUI, togglePopup, closePopup, makeDraggable,
 
 export default themeModule;
 
-// Init on DOM ready, with server-side sync fallback
-async function _initWithSync() {
-  // If no local theme, try loading from server (cross-device sync)
-  if (!getSaved()) {
-    const serverTheme = await _loadFromServer();
-    if (serverTheme && serverTheme.colors) {
-      if (serverTheme.name === 'sakura') serverTheme.name = 'ume';
-      Storage.setJSON(LS_KEY, serverTheme);
-      applyColors(serverTheme.colors);
-    }
-  }
-  // Also sync custom themes from server
-  try {
-    const res = await fetch('/api/prefs/custom-themes', { credentials: 'same-origin' });
-    const data = await res.json();
-    if (data.value && typeof data.value === 'object') {
-      const local = _loadCustomThemes();
-      // Merge: server themes fill in missing local ones
-      let changed = false;
-      for (const [name, colors] of Object.entries(data.value)) {
-        if (!local[name]) { local[name] = colors; changed = true; }
-      }
-      if (changed) _saveCustomThemes(local);
-    }
-  } catch (e) { console.warn('Custom theme server sync failed:', e); }
-  initThemeUI();
+// Theming is locked to the GPT palette — just paint it on boot. No server
+// sync, no per-user theme, no picker UI.
+function _initWithSync() {
+  applyColors();
+  applyFontDensity(DEFAULT_FONT, DEFAULT_DENSITY);
+  applyBgPattern('none');
 }
 
 if (document.readyState === 'loading') {
