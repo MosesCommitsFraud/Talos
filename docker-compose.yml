@@ -1,0 +1,51 @@
+services:
+  talos-app:
+    build: .
+    ports:
+      - "${APP_BIND:-127.0.0.1}:${APP_PORT:-7000}:7000"
+    volumes:
+      - ./data:/app/data:z
+      - ./logs:/app/logs:z
+    environment:
+      - APP_BIND=${APP_BIND:-127.0.0.1}
+      - APP_PORT=${APP_PORT:-7000}
+      - AUTH_ENABLED=${AUTH_ENABLED:-true}
+      - LOCALHOST_BYPASS=${LOCALHOST_BYPASS:-false}
+      - SECURE_COOKIES=${SECURE_COOKIES:-false}
+      - TALOS_ADMIN_USER=${TALOS_ADMIN_USER:-admin}
+      - TALOS_ADMIN_PASSWORD=${TALOS_ADMIN_PASSWORD:-}
+      - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-http://localhost,http://127.0.0.1}
+      - DATABASE_URL=${DATABASE_URL:-sqlite:///./data/app.db}
+      - LLM_HOST=${LLM_HOST:-192.168.10.91}
+      - LLM_HOSTS=${LLM_HOSTS:-192.168.10.91}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-not-needed}
+      - EMBEDDING_URL=${EMBEDDING_URL:-http://192.168.10.91:8001/v1/embeddings}
+      - EMBEDDING_MODEL=${EMBEDDING_MODEL:-qwen3-embed}
+      - TALOS_SANDBOX_URL=${TALOS_SANDBOX_URL:-http://talos-sandbox:7800}
+      - PUID=${PUID:-1000}
+      - PGID=${PGID:-1000}
+    depends_on:
+      talos-sandbox:
+        condition: service_started
+    restart: unless-stopped
+
+  talos-sandbox:
+    build:
+      context: ./sandbox
+    volumes:
+      - talos-sandbox-home:/home/talos
+      - talos-sandbox-state:/var/lib/talos-sandbox
+    environment:
+      - TALOS_SANDBOX_HOME_ROOT=/home/talos
+      - TALOS_SANDBOX_STATE=/var/lib/talos-sandbox/state.json
+      - TALOS_OPENCODE_PUBLIC_HOST=talos-sandbox
+      - TALOS_OPENCODE_PORT_BASE=${TALOS_OPENCODE_PORT_BASE:-41000}
+      - TALOS_OPENCODE_IDLE_SECONDS=${TALOS_OPENCODE_IDLE_SECONDS:-3600}
+      - VLLM_BASE_URL=${VLLM_BASE_URL:-http://192.168.10.91:8000/v1}
+      - VLLM_API_KEY=${VLLM_API_KEY:-not-needed}
+      - VLLM_MODEL=${VLLM_MODEL:-qwen3-llm}
+    restart: unless-stopped
+
+volumes:
+  talos-sandbox-home:
+  talos-sandbox-state:
