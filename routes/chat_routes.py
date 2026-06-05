@@ -19,7 +19,6 @@ from src import agent_runs
 from src.talos_opencode import stream_opencode_agent
 from src.model_context import estimate_tokens
 from src.chat_helpers import coerce_message_and_session
-from src.capability_router import route_capabilities
 from src.endpoint_resolver import normalize_base as _normalize_base, build_chat_url
 from src.prompt_security import untrusted_context_message
 from core.exceptions import SessionNotFoundError
@@ -424,6 +423,7 @@ def setup_chat_routes(
                 _tool_intent.reason,
             )
         active_doc_id = form_data.get("active_doc_id", "").strip()
+        logger.info(f"[doc-inject] chat_mode={chat_mode}, active_doc_id={active_doc_id!r}")
 
         try:
             # Attachment-only sends: skip the message-required check when the
@@ -472,22 +472,6 @@ def setup_chat_routes(
         # Ensure session has auth headers
         resolve_session_auth(sess, session, owner=get_current_user(request))
 
-        att_ids = []
-        if body and isinstance(body.get("attachments"), list):
-            att_ids = [str(x) for x in body["attachments"]]
-        elif attachments:
-            try:
-                att_ids = [str(x) for x in json.loads(attachments)]
-            except Exception:
-                pass
-
-        sandbox_decision = route_capabilities(message, att_ids)
-        if chat_mode in ("", "chat") and sandbox_decision.use_sandbox:
-            chat_mode = "agent"
-            logger.info("chat→sandbox auto-routing: %s", sandbox_decision.reason)
-
-        logger.info(f"[doc-inject] chat_mode={chat_mode}, active_doc_id={active_doc_id!r}")
-
         # Check for research_pending BEFORE mode persist overwrites it
         do_research = str(use_research).lower() == "true"
         if not do_research:
@@ -499,6 +483,15 @@ def setup_chat_routes(
         _effective_mode = 'research' if do_research else (chat_mode or 'chat')
         if _effective_mode in ('agent', 'research', 'chat'):
             set_session_mode(session, _effective_mode)
+
+        att_ids = []
+        if body and isinstance(body.get("attachments"), list):
+            att_ids = [str(x) for x in body["attachments"]]
+        elif attachments:
+            try:
+                att_ids = [str(x) for x in json.loads(attachments)]
+            except Exception:
+                pass
 
         no_memory = str(form_data.get("no_memory", "")).lower() == "true"
 
