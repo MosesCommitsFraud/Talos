@@ -1266,7 +1266,6 @@ async function _cmdOpen(args, ctx) {
       memory: ['tool-memory-btn', 'rail-memory'],
       memories: ['tool-memory-btn', 'rail-memory'],
       research: ['tool-research-btn', 'rail-research'],
-      compare: ['tool-compare-btn', 'rail-compare'],
     };
     const ids = targets[target];
     if (ids && clickFirst(...ids)) return true;
@@ -5303,13 +5302,6 @@ const COMMANDS = {
     handler: _cmdDemo,
     usage: '/demo'
   },
-  'tour-compare': {
-    alias: ['compare-tour'],
-    category: 'Tours',
-    help: 'Model comparison tour',
-    handler: _cmdTourCompare,
-    usage: '/tour-compare'
-  },
   'tour-cookbook': {
     alias: ['cookbook-tour'],
     category: 'Tours',
@@ -5457,13 +5449,6 @@ const COMMANDS = {
     help: 'Open Deep Research',
     handler: (args, ctx) => _cmdToolPanel('research', args, ctx),
     usage: '/research'
-  },
-  compare: {
-    alias: [],
-    category: 'Tools',
-    help: 'Open Compare',
-    handler: (args, ctx) => _cmdToolPanel('compare', args, ctx),
-    usage: '/compare'
   },
   models: {
     alias: ['model'],

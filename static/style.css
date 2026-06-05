@@ -4927,14 +4927,16 @@ body.bg-pattern-sparkles {
       letter-spacing:-0.03em;
       color:var(--red);
     }
+    /* Sleek, borderless window controls — muted ghost icons that only pick up
+       a subtle background + full-contrast glyph on hover. */
     .close-btn,
     .modal-close {
-      background:var(--bg);
-      color:var(--fg);
-      border:1px solid var(--fg);
-      font-size:12px;
-      width:24px;
-      height:24px;
+      background:transparent;
+      color:color-mix(in srgb, var(--fg) 50%, transparent);
+      border:none;
+      font-size:13px;
+      width:26px;
+      height:26px;
       padding:0;
       display:inline-flex;
       align-items:center;
@@ -4942,38 +4944,39 @@ body.bg-pattern-sparkles {
       line-height:1;
       text-indent:0;
       cursor:pointer;
-      border-radius:4px;
-      line-height:1;
+      border-radius:7px;
       flex-shrink:0;
+      transition:background .12s ease, color .12s ease;
     }
     .close-btn:hover,
     .modal-close:hover {
-      background:var(--fg);
-      color:var(--bg);
+      background:color-mix(in srgb, var(--fg) 10%, transparent);
+      color:var(--fg);
     }
     /* Minimize button — sits beside the close button on every modal */
     .minimize-btn {
-      background:var(--bg);
-      color:var(--fg);
-      border:1px solid var(--fg);
+      background:transparent;
+      color:color-mix(in srgb, var(--fg) 50%, transparent);
+      border:none;
       font-size:14px;
-      font-weight:700;
-      width:24px;
-      height:24px;
+      font-weight:600;
+      width:26px;
+      height:26px;
       padding:0 0 6px 0; /* nudge the underscore visually toward the middle */
       display:inline-flex;
       align-items:center;
       justify-content:center;
       line-height:1;
       cursor:pointer;
-      border-radius:4px;
+      border-radius:7px;
       flex-shrink:0;
       margin-left:auto; /* push to the right so it docks next to .close-btn */
-      margin-right:4px;
+      margin-right:2px;
+      transition:background .12s ease, color .12s ease;
     }
     .minimize-btn:hover {
-      background:var(--fg);
-      color:var(--bg);
+      background:color-mix(in srgb, var(--fg) 10%, transparent);
+      color:var(--fg);
     }
     @media (max-width: 768px) {
       .minimize-btn { display: none !important; }
