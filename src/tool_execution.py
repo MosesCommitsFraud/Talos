@@ -578,11 +578,34 @@ async def _call_mcp_tool(
     content: str,
     progress_cb: Optional[Callable[[Dict], Awaitable[None]]] = None,
     workspace: Optional[str] = None,
+    session_id: Optional[str] = None,
+    owner: Optional[str] = None,
 ) -> Dict:
     """Route a legacy tool call through the MCP manager, with direct fallbacks."""
+    if tool in {"bash", "python"}:
+        sandbox = await _try_sandbox_exec(
+            tool=tool,
+            content=content,
+            session_id=session_id,
+            owner=owner,
+            timeout=DEFAULT_BASH_TIMEOUT if tool == "bash" else DEFAULT_PYTHON_TIMEOUT,
+        )
+        if sandbox is not None:
+            return sandbox
+
+    if tool in {"read_file", "write_file"}:
+        sandbox_file = await _try_sandbox_file_tool(
+            tool=tool,
+            content=content,
+            session_id=session_id,
+            owner=owner,
+        )
+        if sandbox_file is not None:
+            return sandbox_file
+
     mcp = get_mcp_manager()
     if not mcp:
-        return await _direct_fallback(tool, content, progress_cb=progress_cb, workspace=workspace) or {"error": f"MCP manager not available for tool '{tool}'", "exit_code": 1}
+        return await _direct_fallback(tool, content, progress_cb=progress_cb, workspace=workspace, session_id=session_id, owner=owner) or {"error": f"MCP manager not available for tool '{tool}'", "exit_code": 1}
 
     server_id, tool_name = _MCP_TOOL_MAP[tool]
     qualified = f"mcp__{server_id}__{tool_name}"
@@ -591,7 +614,7 @@ async def _call_mcp_tool(
 
     # If MCP server not connected, try direct fallback
     if isinstance(result, dict) and result.get("exit_code") == 1 and "not connected" in result.get("error", ""):
-        fallback = await _direct_fallback(tool, content, progress_cb=progress_cb, workspace=workspace)
+        fallback = await _direct_fallback(tool, content, progress_cb=progress_cb, workspace=workspace, session_id=session_id, owner=owner)
         if fallback:
             return fallback
 
@@ -645,11 +668,136 @@ def _split_bg_marker(content: str):
     return False, content
 
 
+async def _try_sandbox_exec(
+    *,
+    tool: str,
+    content: str,
+    session_id: Optional[str],
+    owner: Optional[str],
+    timeout: int,
+) -> Optional[Dict]:
+    if tool not in {"bash", "python"} or not session_id:
+        return None
+    try:
+        from src.sandbox_client import exec_in_sandbox, sandbox_enabled
+        if not sandbox_enabled():
+            return None
+        data = await exec_in_sandbox(
+            owner=owner,
+            session_id=session_id,
+            kind=tool,
+            command=content if tool == "bash" else "",
+            code=content if tool == "python" else "",
+            timeout=timeout,
+        )
+    except Exception as exc:
+        logger.warning("Sandbox %s execution failed: %s", tool, exc)
+        return {
+            "error": f"{tool}: sandbox execution failed: {exc}",
+            "exit_code": 1,
+            "sandboxed": True,
+        }
+
+    stdout = str(data.get("stdout") or "").rstrip()
+    stderr = str(data.get("stderr") or "").rstrip()
+    rc = int(data.get("exit_code") or 0)
+    if data.get("timed_out"):
+        return {
+            "error": f"{tool}: timed out after {timeout}s — process killed",
+            "exit_code": 124,
+            "stdout": _truncate(stdout, MAX_OUTPUT_CHARS),
+            "stderr": _truncate(stderr, MAX_OUTPUT_CHARS),
+        }
+    output = stdout
+    if stderr:
+        output = (output + "\nSTDERR: " + stderr).strip() if output else "STDERR: " + stderr
+    output = _truncate(output, MAX_OUTPUT_CHARS)
+    return {
+        "output": output or "(no output)",
+        "exit_code": rc,
+        "workspace": data.get("workspace"),
+        "sandboxed": True,
+    }
+
+
+def _parse_sandbox_file_payload(tool: str, content: str) -> tuple[str, dict[str, Any]]:
+    raw = (content or "").strip()
+    if tool == "read_file":
+        path, offset, limit = content.split("\n", 1)[0].strip(), 0, 0
+        if raw.startswith("{"):
+            try:
+                args = json.loads(raw)
+                path = str(args.get("path", "")).strip()
+                offset = int(args.get("offset") or 0)
+                limit = int(args.get("limit") or 0)
+            except (json.JSONDecodeError, TypeError, ValueError):
+                pass
+        return "read", {"path": path, "offset": offset, "limit": limit}
+    if tool == "write_file":
+        lines = content.split("\n", 1)
+        return "write", {"path": lines[0].strip(), "content": lines[1] if len(lines) > 1 else ""}
+    if tool == "edit_file":
+        try:
+            args = json.loads(raw) if raw.startswith("{") else {}
+        except (json.JSONDecodeError, TypeError):
+            args = {}
+        return "edit", {
+            "path": str(args.get("path", "")).strip(),
+            "old_string": args.get("old_string", ""),
+            "new_string": args.get("new_string", ""),
+            "replace_all": bool(args.get("replace_all", False)),
+        }
+    if tool == "grep":
+        try:
+            args = json.loads(raw) if raw.startswith("{") else {"pattern": raw}
+        except json.JSONDecodeError:
+            args = {"pattern": raw}
+        return "grep", args
+    if tool == "glob":
+        try:
+            args = json.loads(raw) if raw.startswith("{") else {"pattern": raw}
+        except json.JSONDecodeError:
+            args = {"pattern": raw}
+        return "glob", args
+    if tool == "ls":
+        if raw.startswith("{"):
+            try:
+                return "ls", {"path": str(json.loads(raw).get("path", "")).strip()}
+            except json.JSONDecodeError:
+                pass
+        return "ls", {"path": raw.split("\n", 1)[0].strip()}
+    raise ValueError(f"unsupported sandbox file tool: {tool}")
+
+
+async def _try_sandbox_file_tool(
+    *,
+    tool: str,
+    content: str,
+    session_id: Optional[str],
+    owner: Optional[str],
+) -> Optional[Dict]:
+    if tool not in {"read_file", "write_file", "edit_file", "grep", "glob", "ls"} or not session_id:
+        return None
+    try:
+        from src.sandbox_client import file_tool_in_sandbox, sandbox_enabled
+        if not sandbox_enabled():
+            return None
+        operation, payload = _parse_sandbox_file_payload(tool, content)
+        data = await file_tool_in_sandbox(owner=owner, session_id=session_id, operation=operation, payload=payload)
+    except Exception as exc:
+        logger.warning("Sandbox %s operation failed: %s", tool, exc)
+        return {"error": f"{tool}: sandbox operation failed: {exc}", "exit_code": 1, "sandboxed": True}
+    data["sandboxed"] = True
+    return data
+
+
 async def _direct_fallback(
     tool: str,
     content: str,
     progress_cb: Optional[Callable[[Dict], Awaitable[None]]] = None,
     workspace: Optional[str] = None,
+    session_id: Optional[str] = None,
+    owner: Optional[str] = None,
 ) -> Optional[Dict]:
     """In-process execution path for the eight tools that used to live as
     stdio MCP servers under mcp_servers/. Those servers were deleted in
@@ -680,6 +828,15 @@ async def _direct_fallback(
 
     try:
         if tool == "bash":
+            sandbox_result = await _try_sandbox_exec(
+                tool="bash",
+                content=content,
+                session_id=session_id,
+                owner=owner,
+                timeout=DEFAULT_BASH_TIMEOUT,
+            )
+            if sandbox_result is not None:
+                return sandbox_result
             proc = await asyncio.create_subprocess_shell(
                 content,
                 stdout=asyncio.subprocess.PIPE,
@@ -702,6 +859,15 @@ async def _direct_fallback(
             return {"output": output or "(no output)", "exit_code": rc or 0}
 
         if tool == "python":
+            sandbox_result = await _try_sandbox_exec(
+                tool="python",
+                content=content,
+                session_id=session_id,
+                owner=owner,
+                timeout=DEFAULT_PYTHON_TIMEOUT,
+            )
+            if sandbox_result is not None:
+                return sandbox_result
             # Run user code in a subprocess so an infinite loop or crash
             # can't take the whole server down. -I = isolated mode (skip
             # user site, no PYTHONPATH inheritance) for hygiene.
@@ -727,6 +893,16 @@ async def _direct_fallback(
                 output = (output + "\nSTDERR: " + err).strip() if output else "STDERR: " + err
             output = _truncate(output, MAX_OUTPUT_CHARS)
             return {"output": output or "(no output)", "exit_code": rc or 0}
+
+        if tool in {"read_file", "write_file", "grep", "glob", "ls"}:
+            sandbox_result = await _try_sandbox_file_tool(
+                tool=tool,
+                content=content,
+                session_id=session_id,
+                owner=owner,
+            )
+            if sandbox_result is not None:
+                return sandbox_result
 
         if tool == "read_file":
             # Args: plain path on line 1 (back-compat) OR JSON
@@ -1293,13 +1469,13 @@ async def execute_tool_block(
     if tool in _MCP_TOOL_MAP:
         first_line = content.split(chr(10))[0][:80]
         desc = f"{tool}: {first_line}"
-        result = await _call_mcp_tool(tool, content, progress_cb=progress_cb, workspace=workspace)
+        result = await _call_mcp_tool(tool, content, progress_cb=progress_cb, workspace=workspace, session_id=session_id, owner=owner)
     elif tool in ("grep", "glob", "ls"):
         # Code-navigation tools — no MCP server; run the direct implementation.
         # Confined to the workspace when one is set (same policy as read_file).
         first_line = content.split(chr(10))[0][:80]
         desc = f"{tool}: {first_line}"
-        result = await _direct_fallback(tool, content, progress_cb=progress_cb, workspace=workspace) \
+        result = await _direct_fallback(tool, content, progress_cb=progress_cb, workspace=workspace, session_id=session_id, owner=owner) \
             or {"error": f"{tool}: execution failed", "exit_code": 1}
     elif tool == "create_document":
         title = content.split("\n")[0].strip()[:60]
@@ -1404,7 +1580,9 @@ async def execute_tool_block(
         desc = "edit_image"
         result = await do_edit_image(content, owner=owner)
     elif tool == "edit_file":
-        result = await _do_edit_file(content, workspace=workspace)
+        result = await _try_sandbox_file_tool(tool=tool, content=content, session_id=session_id, owner=owner)
+        if result is None:
+            result = await _do_edit_file(content, workspace=workspace)
         desc = result.get("output") or result.get("error") or "edit_file"
     elif tool == "trigger_research":
         desc = "trigger_research"
