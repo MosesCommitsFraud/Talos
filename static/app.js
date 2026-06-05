@@ -2891,15 +2891,6 @@ function initializeEventListeners() {
   })();
 
   // Preset button (in overflow menu)
-  const overflowPresetBtn = el('overflow-preset-btn');
-  if (overflowPresetBtn) {
-    overflowPresetBtn.addEventListener('click', () => {
-      if (presetsModule && presetsModule.openCustomPresetModal) {
-        presetsModule.openCustomPresetModal();
-      }
-    });
-  }
-
   // RAG directory
   const addDirBtn = el('add-directory-btn');
   if (addDirBtn) {

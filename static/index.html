@@ -781,72 +781,29 @@
       <div id="pinned-tools-bar"></div>
       <div class="chat-input-bottom" style="visibility:hidden">
         <div class="chat-input-left">
-          <!-- Overflow menu (+) — always first/left -->
-          <div class="overflow-wrapper">
-            <button type="button" class="input-icon-btn overflow-plus-btn" id="overflow-plus-btn" title="More tools" aria-label="More tools" aria-haspopup="true">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-                <polyline points="6 15 12 9 18 15"/>
-              </svg>
-              <span class="plus-active-dot"></span>
-            </button>
-            <div id="overflow-menu" class="overflow-menu hidden">
-              <button type="button" class="overflow-menu-item" id="overflow-attach-btn">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
-                <span>Attach files</span>
-              </button>
-              <button type="button" class="overflow-menu-item" id="overflow-doc-btn">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/>
-                </svg>
-                <span>Documents</span>
-              </button>
-              <button type="button" class="overflow-menu-item" id="overflow-rag-btn">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/>
-                </svg>
-                <span>RAG</span>
-                <span class="overflow-active-dot"></span>
-              </button>
-              <button type="button" class="overflow-menu-item" id="overflow-workspace-btn">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                  <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
-                </svg>
-                <span>Workspace</span>
-                <span class="overflow-active-dot"></span>
-              </button>
-              <!-- Inline "deep research mode" toggle removed (superseded by the
-                   Deep Research sidebar / trigger_research). The hidden
-                   #research-toggle checkbox is kept inert so existing JS refs
-                   don't break; without this entry point it can't be enabled. -->
-              <!-- Group Chat moved to Characters modal Group tab -->
-              <!-- TTS Mode hidden — read-aloud feature is off in this build. -->
-              <button type="button" class="overflow-menu-item" id="overflow-tts-btn" hidden style="display:none">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>
-                <span>TTS Mode</span>
-                <span class="overflow-active-dot"></span>
-              </button>
-              <button type="button" class="overflow-menu-item" id="overflow-preset-btn">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                  <path d="m18 2 4 4"/><path d="m17 7 3-3"/><path d="M19 9 8.7 19.3c-1 1-2.5 1-3.4 0l-.6-.6c-1-1-1-2.5 0-3.4L15 5"/><path d="m9 11 4 4"/><path d="m5 19-3 3"/><path d="m14 4 6 6"/>
-                </svg>
-                <span>Prompt</span>
-              </button>
-            </div>
-          </div>
+          <!-- Plan mode — switch toggle (leftmost) -->
+          <button type="button" class="plan-switch" id="plan-toggle-btn" data-mode-tool="true" role="switch" aria-label="Plan mode" aria-pressed="false" title="Plan mode">
+            <span class="plan-switch-track"><span class="plan-switch-knob"></span></span>
+            <span class="plan-switch-label">Plan</span>
+          </button>
+          <!-- Toolbar tools -->
+          <button type="button" class="input-icon-btn" id="overflow-attach-btn" title="Attach files" aria-label="Attach files">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
+          </button>
+          <button type="button" class="input-icon-btn" id="overflow-doc-btn" title="Documents" aria-label="Documents">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+          </button>
+          <button type="button" class="input-icon-btn" id="overflow-rag-btn" title="RAG" aria-label="RAG">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
+          </button>
+          <button type="button" class="input-icon-btn" id="overflow-workspace-btn" title="Workspace" aria-label="Workspace">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
+          </button>
           <!-- Web search (magnifying glass) -->
           <button type="button" class="input-icon-btn" title="Web search" id="web-toggle-btn" data-mode-tool="true" aria-label="Web search" aria-pressed="false">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
             </svg>
-          </button>
-          <!-- Shell commands (terminal) -->
-          <button type="button" class="input-icon-btn" title="Shell Access" id="bash-toggle-btn" data-mode-tool="true" aria-label="Shell access" aria-pressed="false">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/>
-            </svg>
-          </button>
-          <button type="button" class="input-icon-btn" title="Plan mode" id="plan-toggle-btn" data-mode-tool="true" aria-label="Plan mode" aria-pressed="false">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
           </button>
           <!-- Workspace indicator (hidden until a folder is set) -->
           <button type="button" class="input-icon-btn tool-indicator" title="Workspace — click to clear" id="workspace-indicator-btn" aria-label="Clear workspace" style="display:none;">
@@ -1574,16 +1531,6 @@
                 <span class="vis-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg></span>
                 <span class="vis-label">Document Editor</span>
                 <input type="checkbox" checked data-ui-key="doc-toggle-btn"><span class="vis-switch"></span>
-              </label>
-              <label class="vis-row">
-                <span class="vis-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg></span>
-                <span class="vis-label">Shell</span>
-                <input type="checkbox" checked data-ui-key="bash-toggle-btn"><span class="vis-switch"></span>
-              </label>
-              <label class="vis-row">
-                <span class="vis-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="18 15 12 9 6 15"/></svg></span>
-                <span class="vis-label">More Tools <span class="vis-hint">Overflow menu</span></span>
-                <input type="checkbox" checked data-ui-key="overflow-plus-btn"><span class="vis-switch"></span>
               </label>
               <label class="vis-row">
                 <span class="vis-icon vis-icon-text">A|C</span>
