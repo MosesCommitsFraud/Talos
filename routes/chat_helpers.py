@@ -545,26 +545,53 @@ async def build_chat_context(
     # Build messages
     messages = preface + sess.get_context_messages()
 
-    # Keep retrieved RAG context adjacent to the current user message, OpenWebUI-style.
-    # If it stays at the very front of the preface, long history trimming and some
-    # models treat it as stale background instead of evidence for the current turn.
+    # OpenWebUI-style RAG injection: merge retrieved source context into the
+    # current user turn instead of leaving it as a separate earlier message.
+    # Many models treat a standalone prior user message as chat history, while
+    # source context embedded in the current turn is reliably used as evidence.
     if rag_sources:
         rag_msgs = [m for m in messages if isinstance(m, dict) and (m.get("metadata") or {}).get("source") == "retrieved documents"]
         if rag_msgs:
             messages = [m for m in messages if not (isinstance(m, dict) and (m.get("metadata") or {}).get("source") == "retrieved documents")]
-            insert_at = len(messages)
+            target_idx = None
             for i in range(len(messages) - 1, -1, -1):
                 if messages[i].get("role") == "user":
-                    insert_at = i
+                    target_idx = i
                     break
-            messages[insert_at:insert_at] = rag_msgs
-            logger.info("Injected %d RAG context message(s) before current user turn (%d sources)", len(rag_msgs), len(rag_sources))
+            rag_text = "\n\n".join(str(m.get("content") or "") for m in rag_msgs).strip()
+            if target_idx is not None and rag_text:
+                current = messages[target_idx].get("content", "")
+                prefix = (
+                    f"{rag_text}\n\n"
+                    "Use the retrieved knowledge above to answer the user question below. "
+                    "If the retrieved knowledge contains the answer, use it and do not ignore it.\n\n"
+                    "USER QUESTION:\n"
+                )
+                if isinstance(current, str):
+                    messages[target_idx]["content"] = prefix + current
+                elif isinstance(current, list):
+                    messages[target_idx]["content"] = [{"type": "text", "text": prefix}] + current
+                else:
+                    messages[target_idx]["content"] = prefix + str(current)
+                logger.info("Merged RAG context into current user turn (%d sources)", len(rag_sources))
+            else:
+                messages.extend(rag_msgs)
+                logger.info("Appended RAG context as fallback (%d sources)", len(rag_sources))
 
     # Auto-compact
     messages, context_length, was_compacted = await maybe_compact(
         sess, sess.endpoint_url, sess.model, messages, sess.headers,
     )
     messages = trim_for_context(messages, context_length)
+
+    if rag_sources:
+        final_text = "\n".join(
+            str(m.get("content") or "")
+            for m in messages
+            if isinstance(m, dict)
+        )
+        if "retrieved documents" not in final_text and "UNTRUSTED SOURCE DATA" not in final_text:
+            logger.warning("RAG sources were retrieved but no RAG context marker remained in final LLM messages")
 
     return ChatContext(
         preface=preface,

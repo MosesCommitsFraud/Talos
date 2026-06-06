@@ -375,12 +375,10 @@ async def maybe_compact(
 
     compacted = system_msgs + [summary_msg] + recent
 
-    # Update session history to match. Pass len(system_msgs) so the
-    # recent_history slice in _update_session_history uses the correct
-    # offset — session.history INCLUDES the system messages, but
-    # split_point is indexed against convo_msgs which does NOT. Without
-    # this, the slice drops the leading system message(s).
-    _update_session_history(session, split_point, summary, system_msg_count=len(system_msgs))
+    # Update persisted history using the conversation split point. Runtime
+    # messages may include transient preface system messages that are not in
+    # session.history, so _update_session_history maps by non-system messages.
+    _update_session_history(session, split_point, summary)
 
     new_used = estimate_tokens(compacted)
     logger.info(
@@ -391,28 +389,43 @@ async def maybe_compact(
     return compacted, context_length, True
 
 
-def _update_session_history(session, split_point: int, summary: str,
-                            system_msg_count: int = 0):
+def _update_session_history(session, split_point: int, summary: str):
     """Update the in-memory session history after compaction.
 
-    `split_point` is the index in `convo_msgs` (system-stripped). The
-    in-memory `session.history` includes leading system messages, so the
-    actual recent-history slice starts at `system_msg_count + split_point`.
-    Prepending `session.history[:system_msg_count]` to the new history
-    preserves persona, preset, and RAG system messages that would
-    otherwise be dropped.
+    `split_point` is indexed against runtime `convo_msgs`, which excludes
+    system messages. Runtime messages can include transient system preface
+    entries that are not persisted in session.history, so locate the matching
+    history offset by counting non-system history messages instead of adding a
+    runtime system-message count.
     """
     if not session or not hasattr(session, "history"):
         return
 
-    effective_split = system_msg_count + split_point
-    if effective_split >= len(session.history):
+    history = list(session.history)
+    non_system_seen = 0
+    effective_split = None
+    for idx, msg in enumerate(history):
+        role = getattr(msg, "role", None)
+        if role is None and isinstance(msg, dict):
+            role = msg.get("role")
+        if role == "system":
+            continue
+        if non_system_seen == split_point:
+            effective_split = idx
+            break
+        non_system_seen += 1
+
+    if effective_split is None or effective_split >= len(history):
         return
 
-    # Keep the recent messages, prepend summary AND the leading system
-    # messages so the system prompt survives compaction.
-    system_prefix = list(session.history[:system_msg_count])
-    recent_history = session.history[effective_split:]
+    system_prefix = []
+    for msg in history[:effective_split]:
+        role = getattr(msg, "role", None)
+        if role is None and isinstance(msg, dict):
+            role = msg.get("role")
+        if role == "system":
+            system_prefix.append(msg)
+    recent_history = history[effective_split:]
     summary_msg = ChatMessage(
         role="system",
         content=f"[Conversation summary]\n{summary}",
