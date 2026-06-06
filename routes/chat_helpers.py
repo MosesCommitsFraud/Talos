@@ -493,7 +493,10 @@ async def build_chat_context(
     # attempted for chat context (except incognito). This mirrors OpenWebUI's
     # model where uploaded knowledge is retrieved automatically rather than
     # requiring users to pick a tool.
-    use_rag_val = (str(use_rag).lower() != "false") if use_rag is not None else True
+    # RAG is global/admin-managed. The frontend may still send a legacy
+    # per-user use_rag=false when its old toggle is off; ignore that so the
+    # admin knowledge base is always used in chat unless globally disabled.
+    use_rag_val = True
     rag_pipeline = get_setting("rag_pipeline", {})
     if isinstance(rag_pipeline, dict) and rag_pipeline.get("enabled") is False:
         use_rag_val = False
@@ -501,6 +504,13 @@ async def build_chat_context(
         use_rag_val = True
     if incognito:
         use_rag_val = False
+    logger.info(
+        "Chat RAG effective=%s (admin_enabled=%s, request_use_rag=%r, incognito=%s)",
+        use_rag_val,
+        rag_pipeline.get("enabled") if isinstance(rag_pipeline, dict) else None,
+        use_rag,
+        incognito,
+    )
 
     # If pre-fetched search context was provided (compare mode), skip live web search
     skip_web = bool(search_context)
