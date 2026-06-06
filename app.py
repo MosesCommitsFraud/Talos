@@ -560,6 +560,9 @@ app.include_router(setup_personal_routes(personal_docs_mgr, rag_manager, rag_ava
 from routes.embedding_routes import setup_embedding_routes
 app.include_router(setup_embedding_routes())
 
+from routes.rag_routes import setup_rag_routes
+app.include_router(setup_rag_routes())
+
 # Models
 from routes.model_routes import setup_model_routes
 app.include_router(setup_model_routes(model_discovery))

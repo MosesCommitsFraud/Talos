@@ -28,6 +28,30 @@ KEYWORD_WEIGHT = 0.3
 COLLECTION_NAME = "talos_rag"
 
 
+def _apply_saved_rag_config():
+    try:
+        from src.settings import get_setting
+
+        cfg = get_setting("rag_pipeline", {})
+    except Exception:
+        cfg = {}
+    if not isinstance(cfg, dict):
+        return
+    mapping = {
+        "embedding_url": "EMBEDDING_URL",
+        "embedding_model": "EMBEDDING_MODEL",
+        "qdrant_url": "QDRANT_URL",
+        "qdrant_api_key": "QDRANT_API_KEY",
+        "rerank_url": "RERANK_URL",
+        "rerank_model": "RERANK_MODEL",
+        "rerank_api_key": "RERANK_API_KEY",
+    }
+    for key, env_name in mapping.items():
+        value = str(cfg.get(key) or "").strip()
+        if value:
+            os.environ[env_name] = value
+
+
 def _qdrant_point_id(doc_id: str) -> str:
     return str(uuid.UUID(hashlib.sha256(doc_id.encode("utf-8")).hexdigest()[:32]))
 
@@ -70,6 +94,7 @@ class VectorRAG:
 
     def _initialize_system(self) -> bool:
         try:
+            _apply_saved_rag_config()
             from src.embeddings import get_embedding_client
 
             self._model = get_embedding_client()

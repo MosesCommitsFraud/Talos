@@ -1778,6 +1778,17 @@ function initMcpForm() {
 /* ── RAG ── */
 async function loadRag() {
   try {
+    const cfgRes = await fetch('/api/rag/config', { credentials: 'same-origin' });
+    if (cfgRes.ok) {
+      const cfg = await cfgRes.json();
+      if (el('adm-ragEmbeddingUrl')) el('adm-ragEmbeddingUrl').value = cfg.embedding_url || '';
+      if (el('adm-ragEmbeddingModel')) el('adm-ragEmbeddingModel').value = cfg.embedding_model || '';
+      if (el('adm-ragQdrantUrl')) el('adm-ragQdrantUrl').value = cfg.qdrant_url || '';
+      if (el('adm-ragRerankUrl')) el('adm-ragRerankUrl').value = cfg.rerank_url || '';
+      if (el('adm-ragRerankModel')) el('adm-ragRerankModel').value = cfg.rerank_model || '';
+      if (el('adm-ragQdrantKey')) el('adm-ragQdrantKey').placeholder = cfg.qdrant_api_key_set ? 'Saved - leave blank to keep' : 'Qdrant API key (optional)';
+      if (el('adm-ragRerankKey')) el('adm-ragRerankKey').placeholder = cfg.rerank_api_key_set ? 'Saved - leave blank to keep' : 'Rerank API key (optional)';
+    }
     const res = await fetch('/api/personal');
     const data = await res.json();
     const dirList = el('adm-ragDirList');
@@ -1847,6 +1858,9 @@ async function ragUpload(files) {
 function initRag() {
   const dropZone = el('adm-ragDropZone');
   const fileInput = el('adm-ragFileInput');
+  if (!dropZone || !fileInput) return;
+  el('adm-ragConfigSaveBtn')?.addEventListener('click', () => saveRagConfig(false));
+  el('adm-ragConfigTestBtn')?.addEventListener('click', () => saveRagConfig(true));
   dropZone.addEventListener('click', () => fileInput.click());
   fileInput.addEventListener('change', () => ragUpload(fileInput.files));
   dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('dragover'); });
@@ -1876,6 +1890,41 @@ function initRag() {
     } catch (e) { ragMsg('Reload failed: ' + e.message, true); }
     btn.disabled = false; btn.textContent = 'Reload Index';
   });
+}
+
+async function saveRagConfig(testAfter) {
+  const payload = {
+    embedding_url: el('adm-ragEmbeddingUrl')?.value || '',
+    embedding_model: el('adm-ragEmbeddingModel')?.value || '',
+    qdrant_url: el('adm-ragQdrantUrl')?.value || '',
+    qdrant_api_key: el('adm-ragQdrantKey')?.value || '',
+    rerank_url: el('adm-ragRerankUrl')?.value || '',
+    rerank_model: el('adm-ragRerankModel')?.value || '',
+    rerank_api_key: el('adm-ragRerankKey')?.value || '',
+  };
+  try {
+    ragMsg('Saving RAG config...', false, true);
+    const res = await fetch('/api/rag/config', {
+      method: 'PUT',
+      credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.detail || 'Save failed');
+    if (el('adm-ragQdrantKey')) el('adm-ragQdrantKey').value = '';
+    if (el('adm-ragRerankKey')) el('adm-ragRerankKey').value = '';
+    if (!testAfter) { ragMsg('RAG config saved'); loadRag(); return; }
+    ragMsg('Testing RAG config...', false, true);
+    const tr = await fetch('/api/rag/test', { method: 'POST', credentials: 'same-origin' });
+    const td = await tr.json().catch(() => ({}));
+    if (!tr.ok) throw new Error(td.detail || 'RAG test failed');
+    const stats = td.stats || {};
+    ragMsg(`RAG OK (${stats.vector_backend || 'vector'}, ${stats.document_count || 0} chunks)`);
+    loadRag();
+  } catch (e) {
+    ragMsg('RAG config error: ' + e.message, true, true);
+  }
 }
 
 /* ═══════════════════════════════════════════

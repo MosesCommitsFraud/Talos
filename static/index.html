@@ -1862,6 +1862,19 @@
           <div class="admin-card">
             <h2><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:5px;opacity:0.6"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>RAG Documents</h2>
             <div class="admin-toggle-sub" style="margin-bottom:8px">Upload files or index directories for retrieval-augmented chat. Uses the configured embedding endpoint and vector database.</div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px;">
+              <input id="adm-ragEmbeddingUrl" class="settings-input" type="text" placeholder="Embedding URL, e.g. http://host:port/v1/embeddings">
+              <input id="adm-ragEmbeddingModel" class="settings-input" type="text" placeholder="Embedding model name">
+              <input id="adm-ragQdrantUrl" class="settings-input" type="text" placeholder="Qdrant URL, e.g. http://host:6333">
+              <input id="adm-ragQdrantKey" class="settings-input" type="password" autocomplete="new-password" placeholder="Qdrant API key (optional)">
+              <input id="adm-ragRerankUrl" class="settings-input" type="text" placeholder="Rerank URL, e.g. http://host:port/v1/rerank">
+              <input id="adm-ragRerankModel" class="settings-input" type="text" placeholder="Rerank model name">
+            </div>
+            <div style="display:flex;gap:8px;align-items:center;margin-bottom:10px;">
+              <input id="adm-ragRerankKey" class="settings-input" type="password" autocomplete="new-password" placeholder="Rerank API key (optional)" style="flex:1;min-width:0;">
+              <button class="admin-btn-add" id="adm-ragConfigSaveBtn">Save RAG Config</button>
+              <button class="admin-btn-sm" id="adm-ragConfigTestBtn">Test</button>
+            </div>
             <div id="adm-ragDropZone" class="admin-rag-drop" style="border:1px dashed var(--border);border-radius:8px;padding:18px;text-align:center;cursor:pointer;background:color-mix(in srgb, var(--fg) 3%, transparent);margin-bottom:10px;">
               <div style="font-size:13px;font-weight:600;margin-bottom:3px;">Drop files here</div>
               <div style="font-size:11px;opacity:0.58;">or click to select documents for indexing</div>

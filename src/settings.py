@@ -117,6 +117,7 @@ DEFAULT_SETTINGS = {
     # rc files, SSH key files) are always blocked regardless of roots.
     "tool_path_extra_roots": [],
     "sql_database": {"enabled": False},
+    "rag_pipeline": {},
     "disabled_tools": [
         "web_search",
         "web_fetch",
