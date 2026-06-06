@@ -273,7 +273,10 @@ class ChatProcessor:
                             }
                             for r in relevant
                         ]
-                        rag_content = "Relevant documents:\n\n" + "\n\n---\n\n".join(
+                        rag_content = (
+                            "Retrieved knowledge base context. Use this context to answer the user's current question. "
+                            "If the answer is present here, prefer it over general knowledge.\n\n"
+                        ) + "\n\n---\n\n".join(
                             f"[{s['filename']}]\n{r['document']}" for s, r in zip(rag_sources, relevant)
                         )
                         if len(rag_content) > 10000:

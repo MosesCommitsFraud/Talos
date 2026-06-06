@@ -545,6 +545,21 @@ async def build_chat_context(
     # Build messages
     messages = preface + sess.get_context_messages()
 
+    # Keep retrieved RAG context adjacent to the current user message, OpenWebUI-style.
+    # If it stays at the very front of the preface, long history trimming and some
+    # models treat it as stale background instead of evidence for the current turn.
+    if rag_sources:
+        rag_msgs = [m for m in messages if isinstance(m, dict) and (m.get("metadata") or {}).get("source") == "retrieved documents"]
+        if rag_msgs:
+            messages = [m for m in messages if not (isinstance(m, dict) and (m.get("metadata") or {}).get("source") == "retrieved documents")]
+            insert_at = len(messages)
+            for i in range(len(messages) - 1, -1, -1):
+                if messages[i].get("role") == "user":
+                    insert_at = i
+                    break
+            messages[insert_at:insert_at] = rag_msgs
+            logger.info("Injected %d RAG context message(s) before current user turn (%d sources)", len(rag_msgs), len(rag_sources))
+
     # Auto-compact
     messages, context_length, was_compacted = await maybe_compact(
         sess, sess.endpoint_url, sess.model, messages, sess.headers,
