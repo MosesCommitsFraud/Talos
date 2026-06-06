@@ -279,12 +279,13 @@ class VectorRAG:
             return []
         if not query or not isinstance(query, str):
             return []
-        if self._collection.count() == 0:
-            return []
 
         try:
             if self._backend == "qdrant":
                 return self._search_qdrant(query, k, owner=owner)
+
+            if self._collection.count() == 0:
+                return []
 
             # Fetch extra candidates when owner-filtering
             fetch_k = min(k * 3, max(k, 20), self._collection.count())

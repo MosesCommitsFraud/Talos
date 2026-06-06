@@ -1889,6 +1889,11 @@
               <input id="adm-ragFileInput" type="file" multiple style="display:none;">
             </div>
             <div style="display:flex;gap:8px;align-items:center;margin-bottom:10px;">
+              <input id="adm-ragSearchInput" class="settings-input" type="text" placeholder="Test retrieval query" style="flex:1;min-width:0;">
+              <button class="admin-btn-sm" id="adm-ragSearchBtn">Search RAG</button>
+            </div>
+            <div id="adm-ragSearchResults" class="admin-user-list" style="margin-bottom:10px;display:none;"></div>
+            <div style="display:flex;gap:8px;align-items:center;margin-bottom:10px;">
               <input id="adm-ragDirInput" class="settings-input" type="text" placeholder="Directory under personal documents" style="flex:1;min-width:0;">
               <button class="admin-btn-add" id="adm-ragAddDirBtn">Add Directory</button>
               <button class="admin-btn-sm" id="adm-ragReloadBtn">Reload Index</button>

@@ -48,8 +48,10 @@ class ChatProcessor:
         self.memory_vector = memory_vector
         self.skills_manager = skills_manager
 
-    # Minimum similarity score for RAG results to be injected
-    RAG_SIMILARITY_THRESHOLD = 0.35
+    # OpenWebUI-style RAG: inject the top retrieved/reranked chunks instead of
+    # dropping everything behind a hard similarity gate. Embedding/reranker
+    # scales differ between providers, so a fixed threshold is brittle.
+    RAG_SIMILARITY_THRESHOLD = 0.0
 
     def _hybrid_retrieve(self, message: str, mem_entries: list, k: int = 5) -> list:
         """Retrieve memories relevant to the message.
@@ -258,8 +260,9 @@ class ChatProcessor:
                     # RAG is a global admin-managed knowledge base. Do not owner-filter here:
                     # when enabled, indexed knowledge is available to every user.
                     results = rag_manager.search(message, k=5, owner=None)
-                    # Filter by similarity threshold
-                    relevant = [r for r in results if r.get("similarity", 0) >= self.RAG_SIMILARITY_THRESHOLD]
+                    # Keep top retrieved/reranked chunks. Do not require keyword overlap:
+                    # vector-only matches often have keyword_score=0 but are still correct.
+                    relevant = [r for r in results if r.get("similarity", 0) >= self.RAG_SIMILARITY_THRESHOLD] or results[:5]
                     if relevant:
                         logger.info(f"RAG: {len(relevant)}/{len(results)} results above threshold {self.RAG_SIMILARITY_THRESHOLD}")
                         rag_sources = [

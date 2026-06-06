@@ -1862,6 +1862,8 @@ function initRag() {
   if (!dropZone || !fileInput) return;
   el('adm-ragConfigSaveBtn')?.addEventListener('click', () => saveRagConfig(false));
   el('adm-ragConfigTestBtn')?.addEventListener('click', () => saveRagConfig(true));
+  el('adm-ragSearchBtn')?.addEventListener('click', testRagSearch);
+  el('adm-ragSearchInput')?.addEventListener('keydown', e => { if (e.key === 'Enter') testRagSearch(); });
   dropZone.addEventListener('click', () => fileInput.click());
   fileInput.addEventListener('change', () => ragUpload(fileInput.files));
   dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('dragover'); });
@@ -1891,6 +1893,34 @@ function initRag() {
     } catch (e) { ragMsg('Reload failed: ' + e.message, true); }
     btn.disabled = false; btn.textContent = 'Reload Index';
   });
+}
+
+async function testRagSearch() {
+  const q = (el('adm-ragSearchInput')?.value || '').trim();
+  const box = el('adm-ragSearchResults');
+  if (!q || !box) return;
+  box.style.display = '';
+  box.innerHTML = '<div class="admin-empty">Searching...</div>';
+  try {
+    const res = await fetch('/api/rag/search?q=' + encodeURIComponent(q), { credentials: 'same-origin' });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.detail || 'Search failed');
+    const results = data.results || [];
+    if (!results.length) {
+      box.innerHTML = '<div class="admin-empty">No RAG matches</div>';
+      return;
+    }
+    box.innerHTML = results.map(r => `
+      <div class="admin-rag-item" style="align-items:flex-start;">
+        <div style="min-width:0;flex:1;">
+          <div class="admin-rag-item-name" title="${esc(r.filename || 'unknown')}">${esc(r.filename || 'unknown')}</div>
+          <div style="font-size:11px;opacity:0.65;white-space:normal;overflow-wrap:anywhere;margin-top:3px;">${esc(r.snippet || '')}</div>
+        </div>
+        <span class="admin-rag-item-meta">${esc(String(r.rerank_score ?? r.similarity ?? ''))}</span>
+      </div>`).join('');
+  } catch (e) {
+    box.innerHTML = '<div class="admin-error">' + esc(e.message || 'Search failed') + '</div>';
+  }
 }
 
 async function saveRagConfig(testAfter) {

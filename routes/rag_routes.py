@@ -90,4 +90,26 @@ def setup_rag_routes():
         stats = rag.get_stats()
         return {"ok": True, "stats": stats}
 
+    @router.get("/search")
+    def test_search(q: str, k: int = 5):
+        from src.rag_singleton import get_rag_manager
+
+        rag = get_rag_manager()
+        if not rag or not getattr(rag, "healthy", False):
+            raise HTTPException(503, "RAG is not available. Check embedding, Qdrant, and dependencies.")
+        results = rag.search(q, k=max(1, min(k, 20)), owner=None)
+        return {
+            "ok": True,
+            "count": len(results),
+            "results": [
+                {
+                    "filename": (r.get("metadata") or {}).get("filename") or (r.get("metadata") or {}).get("source") or "unknown",
+                    "similarity": r.get("similarity"),
+                    "rerank_score": r.get("rerank_score"),
+                    "snippet": (r.get("document") or "")[:500],
+                }
+                for r in results
+            ],
+        }
+
     return router
