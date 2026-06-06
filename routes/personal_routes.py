@@ -126,7 +126,7 @@ def setup_personal_routes(personal_docs_manager, rag_manager, rag_available):
             # Use the RAGManager to index the directory
             rag = _rag()
             if rag:
-                result = rag.index_personal_documents(directory, owner=owner)
+                result = rag.index_personal_documents(directory, owner=None)
                 
                 if result["success"]:
                     # Also update the personal_docs_manager to track this directory

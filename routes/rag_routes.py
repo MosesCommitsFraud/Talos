@@ -63,6 +63,11 @@ def setup_rag_routes():
             "rerank_model": body.rerank_model.strip(),
             "rerank_api_key": body.rerank_api_key or current.get("rerank_api_key", ""),
         }
+        if not cfg["enabled"]:
+            settings["rag_pipeline"] = cfg
+            save_settings(settings)
+            _reset_rag()
+            return _public(cfg)
         if not cfg["embedding_url"]:
             raise HTTPException(400, "Embedding URL is required")
         if not cfg["embedding_model"]:

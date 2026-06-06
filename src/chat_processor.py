@@ -249,6 +249,11 @@ class ChatProcessor:
         if use_rag:
             try:
                 rag_manager = getattr(self.personal_docs_manager, 'rag_manager', None)
+                if not rag_manager:
+                    from src.rag_singleton import get_rag_manager
+                    rag_manager = get_rag_manager()
+                    if rag_manager and self.personal_docs_manager is not None:
+                        self.personal_docs_manager.rag_manager = rag_manager
                 if rag_manager:
                     # RAG is a global admin-managed knowledge base. Do not owner-filter here:
                     # when enabled, indexed knowledge is available to every user.

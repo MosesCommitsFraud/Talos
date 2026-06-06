@@ -517,8 +517,7 @@ async def build_chat_context(
         incognito=incognito,
         use_skills=skills_enabled,
     )
-    if use_rag is not None:
-        _preface_kwargs["use_rag"] = use_rag_val
+    _preface_kwargs["use_rag"] = use_rag_val
     preface, rag_sources, web_sources = chat_processor.build_context_preface(**_preface_kwargs)
 
     # Capture used memories immediately
