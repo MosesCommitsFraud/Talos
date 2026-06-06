@@ -21307,6 +21307,24 @@ body.gallery-selecting .gallery-dl-btn,
 }
 
 .settings-sidebar-divider { height: 1px; background: var(--border); margin: 8px 12px; }
+.settings-admin-section {
+  margin-top: 12px;
+  padding: 10px 6px 8px;
+  border: 1px solid color-mix(in srgb, var(--accent, var(--red)) 28%, var(--border));
+  border-radius: 12px;
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--accent, var(--red)) 9%, transparent), transparent 42%),
+    color-mix(in srgb, var(--fg) 3%, transparent);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--fg) 7%, transparent);
+}
+.settings-admin-section .settings-sidebar-label {
+  color: var(--accent, var(--red));
+  opacity: 0.78;
+  padding-top: 0;
+}
+.settings-admin-section .settings-nav-item {
+  margin: 1px 0;
+}
 .settings-sidebar-label {
   font-size: 9px;
   font-weight: 600;

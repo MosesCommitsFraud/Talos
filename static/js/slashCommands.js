@@ -2956,18 +2956,12 @@ async function _cmdTourSettings(args, ctx) {
     { sel: '#settings-modal .settings-nav-item[data-settings-tab="integrations"]',
       text: '<b>Integrations</b> — wire up email, calendar, contacts here (per-account).',
       before: () => _clickNav('integrations') },
-    { sel: '#settings-modal .settings-nav-item[data-settings-tab="search"]',
-      text: '<b>Search</b> — plug in your own search provider, or use the bundled <b>SearXNG</b> out of the box.',
-      before: () => _clickNav('search') },
     { sel: '#settings-modal .settings-nav-item[data-settings-tab="appearance"]',
       text: '<b>Appearance</b> — too many tools you don\'t need? Adjust them here! Toggle sidebar buttons, tool icons, and section visibility.',
       before: () => _clickNav('appearance') },
     { sel: '#settings-modal .settings-nav-item[data-settings-tab="email"]',
       text: '<b>Email</b> — sync schedule, drafts, snooze defaults — everything email-flow related.',
       before: () => _clickNav('email') },
-    { sel: '#settings-modal .settings-nav-item[data-settings-tab="reminders"]',
-      text: '<b>Reminders</b> — quiet hours and how Talos nudges you about calendar + urgent email.',
-      before: () => _clickNav('reminders') },
   ];
 
   for (let i = 0; i < steps.length; i++) {
