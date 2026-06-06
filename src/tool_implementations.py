@@ -28,6 +28,223 @@ def _truncate(text: str, limit: int = MAX_OUTPUT_CHARS) -> str:
 
 logger = logging.getLogger(__name__)
 
+
+# ---------------------------------------------------------------------------
+# Read-only external SQL tool
+# ---------------------------------------------------------------------------
+
+_SQL_MAX_ROWS_DEFAULT = 100
+_SQL_ALLOWED_START = {"select", "with", "show", "describe", "desc", "explain", "pragma"}
+_SQL_FORBIDDEN_WORDS = re.compile(
+    r"\b(insert|update|delete|merge|replace|upsert|drop|alter|create|truncate|grant|revoke|vacuum|attach|detach|copy|load|call|exec|execute)\b",
+    re.IGNORECASE,
+)
+
+
+def _sql_env(*names: str) -> str:
+    for name in names:
+        value = (os.getenv(name) or "").strip()
+        if value:
+            return value
+    return ""
+
+
+def _build_external_sql_url() -> tuple[Optional[str], Optional[str]]:
+    """Return (url, error). Credentials stay in process env and are never returned."""
+    explicit = _sql_env(
+        "TALOS_SQL_DATABASE_URL",
+        "SQL_DATABASE_URL",
+        "READONLY_DATABASE_URL",
+        "EXTERNAL_DATABASE_URL",
+    )
+    if explicit:
+        return explicit, None
+
+    db_type = _sql_env("TALOS_SQL_DB_TYPE", "SQL_DB_TYPE", "DB_TYPE", "DATABASE_TYPE").lower()
+    sqlite_path = _sql_env("TALOS_SQLITE_PATH", "SQLITE_PATH", "SQL_DATABASE_PATH")
+    if db_type == "sqlite" or sqlite_path:
+        path = sqlite_path or _sql_env("TALOS_SQL_DB_NAME", "SQL_DB_NAME", "DB_NAME")
+        if not path:
+            return None, "SQLite is selected but no SQLITE_PATH/SQL_DATABASE_PATH/DB_NAME is set."
+        return f"sqlite:///{path}", None
+
+    host = _sql_env("TALOS_SQL_DB_HOST", "SQL_DB_HOST", "DB_HOST", "DATABASE_HOST")
+    name = _sql_env("TALOS_SQL_DB_NAME", "SQL_DB_NAME", "DB_NAME", "DB_DATABASE", "DATABASE_NAME")
+    user = _sql_env("TALOS_SQL_DB_USER", "SQL_DB_USER", "DB_USER", "DB_USERNAME", "DATABASE_USER")
+    password = _sql_env("TALOS_SQL_DB_PASSWORD", "SQL_DB_PASSWORD", "DB_PASSWORD", "DATABASE_PASSWORD")
+    port = _sql_env("TALOS_SQL_DB_PORT", "SQL_DB_PORT", "DB_PORT", "DATABASE_PORT")
+    if not host or not name or not user:
+        return None, (
+            "No external SQL database is configured. Set TALOS_SQL_DATABASE_URL or "
+            "DB_HOST, DB_NAME, DB_USER, DB_PASSWORD (optionally DB_PORT, DB_TYPE) in the backend environment/.env."
+        )
+
+    from urllib.parse import quote_plus
+
+    if not db_type:
+        if port == "3306":
+            db_type = "mysql"
+        elif port == "1433":
+            db_type = "mssql"
+        else:
+            db_type = "postgresql"
+
+    if db_type in {"postgres", "postgresql", "pg"}:
+        driver = "postgresql+psycopg"
+        port_part = f":{port}" if port else ""
+        return f"{driver}://{quote_plus(user)}:{quote_plus(password)}@{host}{port_part}/{quote_plus(name)}", None
+    if db_type in {"mysql", "mariadb"}:
+        driver = "mysql+pymysql"
+        port_part = f":{port}" if port else ""
+        return f"{driver}://{quote_plus(user)}:{quote_plus(password)}@{host}{port_part}/{quote_plus(name)}", None
+    if db_type in {"mssql", "sqlserver", "sql_server"}:
+        driver_name = quote_plus(_sql_env("TALOS_SQL_ODBC_DRIVER", "SQL_ODBC_DRIVER") or "ODBC Driver 18 for SQL Server")
+        port_part = f":{port}" if port else ""
+        return (
+            f"mssql+pyodbc://{quote_plus(user)}:{quote_plus(password)}@{host}{port_part}/{quote_plus(name)}"
+            f"?driver={driver_name}&TrustServerCertificate=yes"
+        ), None
+    if "+" in db_type:
+        port_part = f":{port}" if port else ""
+        return f"{db_type}://{quote_plus(user)}:{quote_plus(password)}@{host}{port_part}/{quote_plus(name)}", None
+
+    return None, f"Unsupported DB_TYPE '{db_type}'. Use postgresql, mysql, mariadb, mssql, sqlite, or TALOS_SQL_DATABASE_URL."
+
+
+def _clean_sql_for_validation(query: str) -> str:
+    query = re.sub(r"/\*.*?\*/", " ", query or "", flags=re.DOTALL)
+    query = re.sub(r"--[^\n\r]*", " ", query)
+    return query.strip()
+
+
+def _validate_readonly_sql(query: str) -> Optional[str]:
+    cleaned = _clean_sql_for_validation(query)
+    if not cleaned:
+        return "Query is empty."
+    if ";" in cleaned.rstrip(";"):
+        return "Multiple SQL statements are not allowed."
+    cleaned = cleaned.rstrip(";").strip()
+    first = re.match(r"^([a-zA-Z_]+)", cleaned)
+    if not first or first.group(1).lower() not in _SQL_ALLOWED_START:
+        return "Only read-only SQL statements are allowed (SELECT/WITH/SHOW/DESCRIBE/EXPLAIN/PRAGMA)."
+    if _SQL_FORBIDDEN_WORDS.search(cleaned):
+        return "Write/admin SQL keywords are not allowed."
+    return None
+
+
+def _format_sql_rows(rows: List[Dict[str, Any]], max_chars: int = MAX_OUTPUT_CHARS) -> str:
+    if not rows:
+        return "No rows returned."
+    columns = list(rows[0].keys())
+    lines = ["| " + " | ".join(columns) + " |", "| " + " | ".join("---" for _ in columns) + " |"]
+    for row in rows:
+        vals = []
+        for col in columns:
+            val = row.get(col)
+            text = "" if val is None else str(val)
+            text = text.replace("|", "\\|").replace("\r", " ").replace("\n", " ")
+            vals.append(text[:300])
+        lines.append("| " + " | ".join(vals) + " |")
+    return _truncate("\n".join(lines), max_chars)
+
+
+def _sql_json_value(value: Any) -> Any:
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    iso = getattr(value, "isoformat", None)
+    if callable(iso):
+        return iso()
+    return str(value)
+
+
+async def do_query_sql(content: str, owner: Optional[str] = None) -> Dict:
+    """Read-only SQL access using backend environment credentials."""
+    del owner
+    try:
+        args = _parse_tool_args(content) if content.strip() else {}
+    except ValueError as e:
+        return {"error": f"Invalid JSON: {e}", "exit_code": 1}
+    if not isinstance(args, dict):
+        return {"error": "query_sql expects JSON arguments.", "exit_code": 1}
+
+    action = str(args.get("action") or "query").strip().lower()
+    max_rows = None
+    if "max_rows" in args and args.get("max_rows") not in (None, "", 0, "0", "all", "ALL"):
+        try:
+            max_rows = max(1, int(args.get("max_rows")))
+        except (TypeError, ValueError):
+            max_rows = _SQL_MAX_ROWS_DEFAULT
+
+    url, err = _build_external_sql_url()
+    if err or not url:
+        return {"error": err or "No SQL database URL could be built.", "exit_code": 1}
+
+    def _run() -> Dict:
+        try:
+            from sqlalchemy import create_engine, inspect, text
+            from sqlalchemy.exc import SQLAlchemyError
+        except Exception as exc:
+            return {"error": f"SQLAlchemy is required for query_sql ({exc}).", "exit_code": 1}
+
+        try:
+            engine = create_engine(url, pool_pre_ping=True, connect_args={})
+            if action == "list_tables":
+                inspector = inspect(engine)
+                names = []
+                for schema in inspector.get_schema_names():
+                    if schema.lower() in {"information_schema", "pg_catalog", "sys"}:
+                        continue
+                    try:
+                        for table in inspector.get_table_names(schema=schema):
+                            names.append(f"{schema}.{table}" if schema else table)
+                        for view in inspector.get_view_names(schema=schema):
+                            names.append(f"{schema}.{view}" if schema else view)
+                    except Exception:
+                        continue
+                names = sorted(dict.fromkeys(names))
+                if max_rows is not None:
+                    names = names[:max_rows]
+                return {"output": "\n".join(names) if names else "No tables found.", "exit_code": 0}
+
+            if action == "describe":
+                table = str(args.get("table") or "").strip()
+                if not table or not re.match(r"^[A-Za-z0-9_.]+$", table):
+                    return {"error": "describe requires a safe table name like schema.table.", "exit_code": 1}
+                schema, table_name = table.rsplit(".", 1) if "." in table else (None, table)
+                inspector = inspect(engine)
+                cols = inspector.get_columns(table_name, schema=schema)
+                rows = [{"name": c.get("name"), "type": str(c.get("type")), "nullable": c.get("nullable")} for c in cols]
+                return {"output": _format_sql_rows(rows), "rows": rows, "exit_code": 0}
+
+            if action != "query":
+                return {"error": "Unknown action. Use list_tables, describe, or query.", "exit_code": 1}
+
+            query = str(args.get("query") or "").strip()
+            validation_error = _validate_readonly_sql(query)
+            if validation_error:
+                return {"error": validation_error, "exit_code": 1}
+            query = _clean_sql_for_validation(query).rstrip(";").strip()
+            with engine.connect() as conn:
+                result = conn.execute(text(query))
+                columns = list(result.keys())
+                rows = []
+                row_count = 0
+                for row in result:
+                    row_count += 1
+                    if max_rows is None or len(rows) < max_rows:
+                        rows.append({col: _sql_json_value(val) for col, val in zip(columns, row)})
+                truncated = max_rows is not None and row_count > max_rows
+                output = _format_sql_rows(rows)
+                if truncated:
+                    output += f"\n\nReturned first {max_rows} of {row_count} rows."
+                return {"output": output, "rows": rows, "row_count": row_count, "truncated": truncated, "exit_code": 0}
+        except SQLAlchemyError as exc:
+            return {"error": f"SQL query failed: {exc.__class__.__name__}: {str(exc)[:500]}", "exit_code": 1}
+        except Exception as exc:
+            return {"error": f"SQL tool failed: {exc.__class__.__name__}: {str(exc)[:500]}", "exit_code": 1}
+
+    return await asyncio.to_thread(_run)
+
 # ---------------------------------------------------------------------------
 # Argument parsing
 # ---------------------------------------------------------------------------

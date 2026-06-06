@@ -52,6 +52,23 @@ FUNCTION_TOOL_SCHEMAS = [
     {
         "type": "function",
         "function": {
+            "name": "query_sql",
+            "description": "Read-only access to the configured external SQL database. Use for database questions, schema/table inspection, metrics, reports, and SELECT queries. Credentials are loaded by the backend from environment variables and are never needed in the prompt.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {"type": "string", "enum": ["list_tables", "describe", "query"], "description": "Operation to perform"},
+                    "table": {"type": "string", "description": "Table name for describe"},
+                    "query": {"type": "string", "description": "Read-only SQL statement for action=query"},
+                    "max_rows": {"type": "integer", "description": "Optional maximum result rows to return. Omit or pass 0 for no row limit."}
+                },
+                "required": ["action"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "web_search",
             "description": "Quick single web lookup for a fact or current event mid-task. NOT for 'research X' / 'do research on X' — those are deep-research jobs; use trigger_research instead.",
             "parameters": {

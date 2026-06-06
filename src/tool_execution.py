@@ -1325,7 +1325,7 @@ async def execute_tool_block(
         do_manage_skills, do_api_call, do_manage_endpoints,
         do_manage_mcp, do_manage_webhooks, do_manage_tokens,
         do_manage_documents, do_manage_settings, do_manage_notes,
-        do_manage_calendar,
+        do_manage_calendar, do_query_sql,
         do_download_model, do_serve_model, do_list_served_models, do_stop_served_model,
         do_tail_serve_output,
         do_list_downloads, do_cancel_download, do_search_hf_models, do_list_cached_models,
@@ -1563,6 +1563,9 @@ async def execute_tool_block(
     elif tool == "manage_calendar":
         desc = "manage_calendar"
         result = await do_manage_calendar(content, owner=owner)
+    elif tool == "query_sql":
+        desc = "query_sql"
+        result = await do_query_sql(content, owner=owner)
     elif tool == "download_model":
         desc = "download_model"
         result = await do_download_model(content, owner=owner)

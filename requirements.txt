@@ -6,6 +6,8 @@ httpx
 pydantic>=2.0
 pydantic-settings>=2.0
 SQLAlchemy
+psycopg[binary]
+pymysql
 pypdf
 beautifulsoup4
 charset-normalizer
