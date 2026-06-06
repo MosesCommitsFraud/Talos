@@ -1781,6 +1781,7 @@ async function loadRag() {
     const cfgRes = await fetch('/api/rag/config', { credentials: 'same-origin' });
     if (cfgRes.ok) {
       const cfg = await cfgRes.json();
+      if (el('adm-ragEnabled')) el('adm-ragEnabled').checked = cfg.enabled !== false;
       if (el('adm-ragEmbeddingUrl')) el('adm-ragEmbeddingUrl').value = cfg.embedding_url || '';
       if (el('adm-ragEmbeddingModel')) el('adm-ragEmbeddingModel').value = cfg.embedding_model || '';
       if (el('adm-ragQdrantUrl')) el('adm-ragQdrantUrl').value = cfg.qdrant_url || '';
@@ -1894,6 +1895,7 @@ function initRag() {
 
 async function saveRagConfig(testAfter) {
   const payload = {
+    enabled: !!el('adm-ragEnabled')?.checked,
     embedding_url: el('adm-ragEmbeddingUrl')?.value || '',
     embedding_model: el('adm-ragEmbeddingModel')?.value || '',
     qdrant_url: el('adm-ragQdrantUrl')?.value || '',

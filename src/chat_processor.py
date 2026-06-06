@@ -250,7 +250,9 @@ class ChatProcessor:
             try:
                 rag_manager = getattr(self.personal_docs_manager, 'rag_manager', None)
                 if rag_manager:
-                    results = rag_manager.search(message, k=5, owner=owner)
+                    # RAG is a global admin-managed knowledge base. Do not owner-filter here:
+                    # when enabled, indexed knowledge is available to every user.
+                    results = rag_manager.search(message, k=5, owner=None)
                     # Filter by similarity threshold
                     relevant = [r for r in results if r.get("similarity", 0) >= self.RAG_SIMILARITY_THRESHOLD]
                     if relevant:

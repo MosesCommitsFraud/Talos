@@ -192,14 +192,13 @@ def setup_personal_routes(personal_docs_manager, rag_manager, rag_available):
             raise HTTPException(500, f"Failed to remove directory: {str(e)}")
     
     @router.post("/upload")
-    async def upload_files_to_rag(request: Request, files: List[UploadFile] = File(...)):
-        """Upload files directly into RAG. Supports text and PDF."""
-        user = get_current_user(request)
+    async def upload_files_to_rag(request: Request, files: List[UploadFile] = File(...), _admin: None = Depends(require_admin)):
+        """Admin-only upload into the global RAG knowledge base. Supports text and PDF."""
         rag = _rag()
         if not rag:
             raise HTTPException(503, "RAG system is not available — is the embedding service running?")
 
-        upload_dir = _personal_upload_dir_for_owner(user)
+        upload_dir = _personal_upload_dir_for_owner("global")
 
         total_indexed = 0
         total_failed = 0
@@ -238,8 +237,6 @@ def setup_personal_routes(personal_docs_manager, rag_manager, rag_available):
                         "type": ext,
                         "chunk_id": i,
                     }
-                    if user:
-                        metadata["owner"] = user
                     if rag.add_document(chunk, metadata):
                         total_indexed += 1
                     else:

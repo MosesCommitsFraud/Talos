@@ -16,6 +16,7 @@ from src.endpoint_resolver import normalize_base
 from src.context_compactor import maybe_compact, trim_for_context
 from src.auth_helpers import get_current_user
 from src.prompt_security import untrusted_context_message
+from src.settings import get_setting
 from routes.prefs_routes import _load_for_user as load_prefs_for_user
 
 from fastapi import HTTPException
@@ -490,6 +491,9 @@ async def build_chat_context(
 
     # Use RAG?
     use_rag_val = (str(use_rag).lower() != "false") if use_rag is not None else True
+    rag_pipeline = get_setting("rag_pipeline", {})
+    if isinstance(rag_pipeline, dict) and rag_pipeline.get("enabled") is False:
+        use_rag_val = False
     if incognito:
         use_rag_val = False
 

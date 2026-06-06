@@ -14264,10 +14264,17 @@ body:has(.doc-version-panel:not(.hidden)) .hamburger-btn {
   letter-spacing: 0.05em;
   margin: 8px 0 4px;
 }
+.admin-rag-lists {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 10px;
+}
 .admin-rag-item {
   display: flex;
+  min-width: 0;
   justify-content: space-between;
   align-items: center;
+  gap: 8px;
   padding: 6px 8px;
   background: var(--bg);
   border-radius: 6px;
@@ -14276,6 +14283,7 @@ body:has(.doc-version-panel:not(.hidden)) .hamburger-btn {
 }
 .admin-rag-item-name {
   flex: 1;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -14288,6 +14296,9 @@ body:has(.doc-version-panel:not(.hidden)) .hamburger-btn {
   flex-shrink: 0;
 }
 .admin-rag-item .admin-btn-delete { font-size: 10px; padding: 2px 6px; }
+@media (max-width: 760px) {
+  .admin-rag-lists { grid-template-columns: 1fr; }
+}
 .admin-rag-status {
   font-size: 11px;
   color: color-mix(in srgb, var(--fg) 50%, transparent);

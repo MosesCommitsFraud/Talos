@@ -6,6 +6,7 @@ from src.settings import load_settings, save_settings
 
 
 class RagPipelineConfig(BaseModel):
+    enabled: bool = True
     embedding_url: str = ""
     embedding_model: str = ""
     qdrant_url: str = ""
@@ -17,6 +18,7 @@ class RagPipelineConfig(BaseModel):
 
 def _public(cfg: dict) -> dict:
     return {
+        "enabled": bool(cfg.get("enabled", True)),
         "embedding_url": cfg.get("embedding_url", ""),
         "embedding_model": cfg.get("embedding_model", ""),
         "qdrant_url": cfg.get("qdrant_url", ""),
@@ -52,6 +54,7 @@ def setup_rag_routes():
         settings = load_settings()
         current = settings.get("rag_pipeline", {}) if isinstance(settings.get("rag_pipeline"), dict) else {}
         cfg = {
+            "enabled": bool(body.enabled),
             "embedding_url": body.embedding_url.strip(),
             "embedding_model": body.embedding_model.strip(),
             "qdrant_url": body.qdrant_url.strip(),

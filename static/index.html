@@ -1091,6 +1091,10 @@
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
             <span>Agent Tools</span>
           </button>
+          <button class="settings-nav-item admin-only" data-settings-tab="rag">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v14c0 1.66 3.58 3 8 3s8-1.34 8-3V5"/><path d="M4 12c0 1.66 3.58 3 8 3s8-1.34 8-3"/></svg>
+            <span>RAG</span>
+          </button>
           <button class="settings-nav-item admin-only" data-settings-tab="users">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
             <span>Users</span>
@@ -1856,12 +1860,16 @@
           </div>
         </div>
 
-        <!-- ═══ SYSTEM TAB ═══ -->
-        <div data-settings-panel="system" class="hidden">
+        <!-- ═══ RAG TAB ═══ -->
+        <div data-settings-panel="rag" class="hidden">
 
           <div class="admin-card">
             <h2><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:5px;opacity:0.6"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>RAG Documents</h2>
-            <div class="admin-toggle-sub" style="margin-bottom:8px">Upload files or index directories for retrieval-augmented chat. Uses the configured embedding endpoint and vector database.</div>
+            <div class="admin-toggle-sub" style="margin-bottom:8px">Admin-managed global knowledge base. When enabled, uploaded/indexed RAG knowledge is retrieved for all users' chats.</div>
+            <label class="settings-row" style="align-items:center;margin-bottom:10px;">
+              <span class="settings-label" style="width:auto;flex:1;">Use RAG in chat</span>
+              <label class="admin-switch"><input id="adm-ragEnabled" type="checkbox"><span class="admin-slider"></span></label>
+            </label>
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px;">
               <input id="adm-ragEmbeddingUrl" class="settings-input" type="text" placeholder="Embedding URL, e.g. http://host:port/v1/embeddings">
               <input id="adm-ragEmbeddingModel" class="settings-input" type="text" placeholder="Embedding model name">
@@ -1886,7 +1894,7 @@
               <button class="admin-btn-sm" id="adm-ragReloadBtn">Reload Index</button>
             </div>
             <div id="adm-ragStatus" style="font-size:11px;min-height:16px;margin-bottom:8px;"></div>
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+            <div class="admin-rag-lists">
               <div>
                 <div class="admin-toggle-label" style="margin-bottom:5px;">Indexed directories</div>
                 <div id="adm-ragDirList" class="admin-user-list"><div class="admin-empty">Loading...</div></div>
@@ -1897,6 +1905,10 @@
               </div>
             </div>
           </div>
+        </div>
+
+        <!-- ═══ SYSTEM TAB ═══ -->
+        <div data-settings-panel="system" class="hidden">
 
           <div class="admin-card">
             <h2><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:5px;opacity:0.6"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>Data Backup</h2>
