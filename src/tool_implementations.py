@@ -51,6 +51,40 @@ def _sql_env(*names: str) -> str:
 
 def _build_external_sql_url() -> tuple[Optional[str], Optional[str]]:
     """Return (url, error). Credentials stay in process env and are never returned."""
+    try:
+        from src.settings import get_setting
+
+        cfg = get_setting("sql_database", {})
+    except Exception:
+        cfg = {}
+    if isinstance(cfg, dict) and cfg.get("enabled"):
+        from urllib.parse import quote_plus
+
+        db_type = str(cfg.get("db_type") or "mssql").strip().lower()
+        host = str(cfg.get("host") or "").strip()
+        port = str(cfg.get("port") or "").strip()
+        name = str(cfg.get("database") or "").strip()
+        user = str(cfg.get("username") or "").strip()
+        password = str(cfg.get("password") or "")
+        if db_type == "sqlite":
+            if not name:
+                return None, "Configured SQLite database path is empty."
+            return f"sqlite:///{name}", None
+        if not host or not name or not user:
+            return None, "Saved SQL configuration is incomplete."
+        port_part = f":{port}" if port else ""
+        if db_type in {"postgres", "postgresql", "pg"}:
+            return f"postgresql+psycopg://{quote_plus(user)}:{quote_plus(password)}@{host}{port_part}/{quote_plus(name)}", None
+        if db_type in {"mysql", "mariadb"}:
+            return f"mysql+pymysql://{quote_plus(user)}:{quote_plus(password)}@{host}{port_part}/{quote_plus(name)}", None
+        if db_type in {"mssql", "sqlserver", "sql_server"}:
+            driver_name = quote_plus(str(cfg.get("odbc_driver") or "ODBC Driver 18 for SQL Server"))
+            return (
+                f"mssql+pyodbc://{quote_plus(user)}:{quote_plus(password)}@{host}{port_part}/{quote_plus(name)}"
+                f"?driver={driver_name}&TrustServerCertificate=yes"
+            ), None
+        return None, f"Unsupported saved SQL database type '{db_type}'."
+
     explicit = _sql_env(
         "TALOS_SQL_DATABASE_URL",
         "SQL_DATABASE_URL",

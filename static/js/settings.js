@@ -3116,6 +3116,7 @@ const INTG_TYPES = {
   contacts: { label: 'Contacts', icon: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>' },
   carddav: { label: 'CardDAV', icon: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>' },
   email:   { label: 'Email',   icon: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/></svg>' },
+  sql:     { label: 'SQL',     icon: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v14c0 1.66 3.58 3 8 3s8-1.34 8-3V5"/><path d="M4 12c0 1.66 3.58 3 8 3s8-1.34 8-3"/></svg>' },
   mcp:     { label: 'MCP',     icon: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>' },
   codex:   { label: 'Codex',   icon: '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M22.282 9.821a5.985 5.985 0 0 0-.516-4.91 6.046 6.046 0 0 0-6.51-2.9A6.065 6.065 0 0 0 10.696.453a6.023 6.023 0 0 0-5.75 4.172 6.061 6.061 0 0 0-3.946 2.945 6.024 6.024 0 0 0 .742 7.099 5.98 5.98 0 0 0 .516 4.911 6.046 6.046 0 0 0 6.51 2.9A5.996 5.996 0 0 0 13.26 23.547a6.023 6.023 0 0 0 5.75-4.172 6.061 6.061 0 0 0 3.946-2.945 6.024 6.024 0 0 0-.674-6.609zM13.26 21.047a4.508 4.508 0 0 1-2.886-1.041l.143-.082 4.793-2.769a.777.777 0 0 0 .391-.676V10.34l2.026 1.17a.072.072 0 0 1 .039.061v5.596a4.532 4.532 0 0 1-4.506 4.48zM3.968 17.64a4.473 4.473 0 0 1-.537-3.018l.143.086 4.793 2.769a.79.79 0 0 0 .782 0l5.852-3.379v2.34a.072.072 0 0 1-.029.062l-4.845 2.796a4.532 4.532 0 0 1-6.159-1.656zM2.804 7.922a4.49 4.49 0 0 1 2.348-1.973V11.6a.778.778 0 0 0 .391.676l5.852 3.378-2.026 1.17a.072.072 0 0 1-.068 0L4.456 14.03a4.532 4.532 0 0 1-1.652-6.108zm16.423 3.823L13.375 8.367l2.026-1.17a.072.072 0 0 1 .068 0l4.845 2.796a4.525 4.525 0 0 1-.7 8.08V12.42a.778.778 0 0 0-.387-.676zm2.015-3.025l-.143-.086-4.793-2.769a.79.79 0 0 0-.782 0L9.672 9.243V6.903a.072.072 0 0 1 .029-.062l4.845-2.796a4.525 4.525 0 0 1 6.696 4.675zM8.598 12.66L6.57 11.49a.072.072 0 0 1-.039-.061V5.833a4.525 4.525 0 0 1 7.413-3.48l-.143.082-4.793 2.769a.777.777 0 0 0-.391.676l-.019 6.78zm1.1-2.379l2.607-1.505 2.607 1.505v3.01l-2.607 1.505-2.607-1.505z"/></svg>' },
   claude:  { label: 'Claude',  icon: '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M17.3041 3.541h-3.6718l6.696 16.918H24Zm-10.6082 0L0 20.459h3.7442l1.3693-3.5527h7.0052l1.3693 3.5528h3.7442L10.5363 3.5409Zm-.3712 10.2232 2.2914-5.9456 2.2914 5.9456Z"/></svg>' },
@@ -3197,7 +3198,7 @@ async function initUnifiedIntegrations() {
   }
 
   async function fetchAll() {
-    const [apiRes, calRes, cardRes, contactsRes, emailAccountsRes, mcpRes, vaultRes, tokenRes] = await Promise.all([
+    const [apiRes, calRes, cardRes, contactsRes, emailAccountsRes, mcpRes, vaultRes, tokenRes, sqlRes] = await Promise.all([
       fetch('/api/auth/integrations', { credentials: 'same-origin' }).then(r => r.ok ? r.json() : { integrations: [] }).catch(() => ({ integrations: [] })),
       fetch('/api/calendar/config', { credentials: 'same-origin' }).then(r => r.ok ? r.json() : {}).catch(() => ({})),
       fetch('/api/contacts/config', { credentials: 'same-origin' }).then(r => r.ok ? r.json() : {}).catch(() => ({})),
@@ -3206,6 +3207,7 @@ async function initUnifiedIntegrations() {
       fetch('/api/mcp/servers', { credentials: 'same-origin' }).then(r => r.ok ? r.json() : []).catch(() => []),
       fetch('/api/vault/config', { credentials: 'same-origin' }).then(r => r.ok ? r.json() : {}).catch(() => ({})),
       fetch('/api/tokens', { credentials: 'same-origin' }).then(r => r.ok ? r.json() : []).catch(() => []),
+      fetch('/api/sql/config', { credentials: 'same-origin' }).then(r => r.ok ? r.json() : {}).catch(() => ({})),
     ]);
     const items = [];
     // API integrations
@@ -3249,6 +3251,10 @@ async function initUnifiedIntegrations() {
     for (const srv of mcpList) {
       const statusText = srv.needs_oauth ? 'needs auth' : srv.status === 'connected' ? `${srv.enabled_tool_count}/${srv.tool_count} tools` : srv.status === 'error' ? 'error' : 'disconnected';
       items.push({ type: 'mcp', id: srv.id || srv.name, name: srv.name || 'MCP Server', detail: statusText, enabled: srv.is_enabled !== false, data: srv });
+    }
+    if (sqlRes && (sqlRes.enabled || sqlRes.host || sqlRes.database)) {
+      const detail = [sqlRes.db_type || 'sql', sqlRes.host, sqlRes.database].filter(Boolean).join(' - ');
+      items.push({ type: 'sql', id: '__sql__', name: 'SQL Database', detail, enabled: !!sqlRes.enabled, data: sqlRes });
     }
     for (const tok of (Array.isArray(tokenRes) ? tokenRes : [])) {
       const scopes = tok.scopes || [];
@@ -3334,6 +3340,7 @@ async function initUnifiedIntegrations() {
             await fetch('/api/contacts/config', { method: 'PUT', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ carddav_url: '', carddav_username: '', carddav_password: '' }) });
           }
           else if (type === 'email') await fetch(`/api/email/accounts/${id}`, { method: 'DELETE', credentials: 'same-origin' });
+          else if (type === 'sql') await fetch('/api/sql/config', { method: 'DELETE', credentials: 'same-origin' });
           else if (type === 'mcp') await fetch(`/api/mcp/servers/${id}`, { method: 'DELETE', credentials: 'same-origin' });
           else if (type === 'codex' || type === 'claude') await fetch(`/api/tokens/${id}`, { method: 'DELETE', credentials: 'same-origin' });
           else if (type === 'vault') await fetch('/api/vault/logout', { method: 'POST', credentials: 'same-origin' });
@@ -3351,6 +3358,7 @@ async function initUnifiedIntegrations() {
     else if (type === 'caldav') showCalDavForm();
     else if (type === 'contacts' || type === 'carddav') showCardDavForm();
     else if (type === 'email') showEmailForm(editId);
+    else if (type === 'sql') showSqlForm();
     else if (type === 'mcp') showMcpForm(editId);
     else if (type === 'codex') showAgentForm('codex', editId);
     else if (type === 'claude') showAgentForm('claude', editId);
@@ -4447,6 +4455,77 @@ async function initUnifiedIntegrations() {
   }
 
   // ── MCP form — full management view ──
+  async function showSqlForm() {
+    let cfg = {};
+    try {
+      const r = await fetch('/api/sql/config', { credentials: 'same-origin' });
+      if (r.ok) cfg = await r.json();
+    } catch (_) {}
+    formEl.innerHTML = `
+      <div class="admin-card" style="margin-top:8px">
+        <h2 style="font-size:13px">SQL Database</h2>
+        <div style="font-size:11px;opacity:0.65;line-height:1.45;margin:-2px 0 8px;">Configure the read-only SQL database used by the <code>query_sql</code> tool. The password is stored server-side and never shown to the model.</div>
+        <div class="settings-col">
+          <label class="settings-row" style="align-items:center"><span class="settings-label">Enabled</span><label class="admin-switch"><input id="uf-sql-enabled" type="checkbox" ${cfg.enabled ? 'checked' : ''}><span class="admin-slider"></span></label></label>
+          <div class="settings-row"><label class="settings-label">Type</label><select id="uf-sql-type" class="settings-input"><option value="mssql">MSSQL</option><option value="postgresql">PostgreSQL</option><option value="mysql">MySQL/MariaDB</option><option value="sqlite">SQLite</option></select></div>
+          <div class="settings-row"><label class="settings-label">Host</label><input id="uf-sql-host" class="settings-input" value="${esc(cfg.host || '')}" placeholder="db.example.local"></div>
+          <div class="settings-row"><label class="settings-label">Port</label><input id="uf-sql-port" class="settings-input" value="${esc(cfg.port || '')}" placeholder="1433"></div>
+          <div class="settings-row"><label class="settings-label">Database</label><input id="uf-sql-db" class="settings-input" value="${esc(cfg.database || '')}" placeholder="Database name or SQLite path"></div>
+          <div class="settings-row"><label class="settings-label">Read-only user</label><input id="uf-sql-user" class="settings-input" value="${esc(cfg.username || '')}" autocomplete="off"></div>
+          <div class="settings-row"><label class="settings-label">Password</label><input id="uf-sql-pass" class="settings-input" type="password" autocomplete="new-password" placeholder="${cfg.password_set ? 'Saved - leave blank to keep' : ''}"></div>
+          <div class="settings-row"><label class="settings-label">ODBC driver</label><input id="uf-sql-driver" class="settings-input" value="${esc(cfg.odbc_driver || '')}" placeholder="ODBC Driver 18 for SQL Server"></div>
+          <div class="settings-row" style="margin-top:4px"><button class="admin-btn-sm" id="uf-sql-save">Save</button><button class="admin-btn-sm" id="uf-sql-test">Test</button><button class="admin-btn-sm" id="uf-sql-cancel" style="opacity:0.7">Cancel</button><span id="uf-sql-msg" style="font-size:11px"></span></div>
+        </div>
+      </div>`;
+    const typeEl = el('uf-sql-type');
+    if (typeEl) typeEl.value = cfg.db_type || 'mssql';
+    const defaultPort = () => {
+      const type = el('uf-sql-type')?.value || 'mssql';
+      const port = el('uf-sql-port');
+      if (!port || port.value) return;
+      port.placeholder = type === 'postgresql' ? '5432' : type === 'mysql' ? '3306' : type === 'mssql' ? '1433' : '';
+    };
+    defaultPort();
+    typeEl?.addEventListener('change', defaultPort);
+    el('uf-sql-cancel')?.addEventListener('click', () => { formEl.style.display = 'none'; });
+    const payload = () => ({
+      enabled: !!el('uf-sql-enabled')?.checked,
+      db_type: el('uf-sql-type')?.value || 'mssql',
+      host: el('uf-sql-host')?.value || '',
+      port: el('uf-sql-port')?.value || '',
+      database: el('uf-sql-db')?.value || '',
+      username: el('uf-sql-user')?.value || '',
+      password: el('uf-sql-pass')?.value || '',
+      odbc_driver: el('uf-sql-driver')?.value || '',
+    });
+    const save = async () => {
+      const msg = el('uf-sql-msg');
+      if (msg) msg.textContent = 'Saving...';
+      const r = await fetch('/api/sql/config', { method: 'PUT', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload()) });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.detail || 'Save failed');
+      if (msg) { msg.textContent = 'Saved'; msg.style.color = 'var(--green, #50fa7b)'; }
+      notifyIntegrationsChanged();
+      await renderList();
+    };
+    el('uf-sql-save')?.addEventListener('click', async () => {
+      try { await save(); } catch (err) { const msg = el('uf-sql-msg'); if (msg) { msg.textContent = err?.message || 'Failed'; msg.style.color = 'var(--red)'; } }
+    });
+    el('uf-sql-test')?.addEventListener('click', async () => {
+      const msg = el('uf-sql-msg');
+      try {
+        await save();
+        if (msg) { msg.textContent = 'Testing...'; msg.style.color = ''; }
+        const r = await fetch('/api/sql/test', { method: 'POST', credentials: 'same-origin' });
+        const d = await r.json().catch(() => ({}));
+        if (!d.ok) throw new Error(d.error || 'Connection failed');
+        if (msg) { msg.textContent = 'Connection OK'; msg.style.color = 'var(--green, #50fa7b)'; }
+      } catch (err) {
+        if (msg) { msg.textContent = err?.message || 'Failed'; msg.style.color = 'var(--red)'; }
+      }
+    });
+  }
+
   async function showMcpForm(editId) {
     // Toggle an in-flight loading state on a button (disabled + dimmed + label).
     function _setBtnLoading(btn, loading, label) {
@@ -4975,6 +5054,7 @@ async function initUnifiedIntegrations() {
         ['carddav', 'Contacts (CardDAV)'],
         ['contacts', 'Contacts Import'],
         ['email', 'Email (IMAP/SMTP)'],
+        ['sql', 'SQL Database'],
         ['mcp', 'MCP Tool Server'],
       ];
       const _iconFor = (k) => (INTG_TYPES[k]?.icon || '').replace(/width="14"/, 'width="16"').replace(/height="14"/, 'height="16"');

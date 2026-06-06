@@ -116,6 +116,7 @@ DEFAULT_SETTINGS = {
     # entry is an absolute path. Sensitive subpaths (.ssh, .gnupg, shell
     # rc files, SSH key files) are always blocked regardless of roots.
     "tool_path_extra_roots": [],
+    "sql_database": {"enabled": False},
     "disabled_tools": [
         "web_search",
         "web_fetch",

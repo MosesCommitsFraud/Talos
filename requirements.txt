@@ -8,6 +8,7 @@ pydantic-settings>=2.0
 SQLAlchemy
 psycopg[binary]
 pymysql
+pyodbc
 pypdf
 beautifulsoup4
 charset-normalizer

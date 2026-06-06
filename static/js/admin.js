@@ -1304,6 +1304,7 @@ const TOOL_META = {
   manage_webhooks:   { name: 'Webhooks',         desc: 'Configure webhook events',        cat: 'System',     ctx: '~100' },
   manage_tokens:     { name: 'API Tokens',       desc: 'Manage API access tokens',        cat: 'System',     ctx: '~100' },
   manage_settings:   { name: 'Settings',         desc: 'Change app settings',             cat: 'System',     ctx: '~100' },
+  query_sql:         { name: 'SQL Database',     desc: 'Read configured SQL database',    cat: 'Knowledge',  ctx: '~200' },
 };
 
 async function loadBuiltinTools() {
