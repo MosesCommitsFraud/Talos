@@ -9,6 +9,7 @@ SQLAlchemy
 psycopg[binary]
 pymysql
 pyodbc
+pymssql
 pypdf
 beautifulsoup4
 charset-normalizer

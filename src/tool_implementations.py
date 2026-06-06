@@ -78,11 +78,7 @@ def _build_external_sql_url() -> tuple[Optional[str], Optional[str]]:
         if db_type in {"mysql", "mariadb"}:
             return f"mysql+pymysql://{quote_plus(user)}:{quote_plus(password)}@{host}{port_part}/{quote_plus(name)}", None
         if db_type in {"mssql", "sqlserver", "sql_server"}:
-            driver_name = quote_plus(str(cfg.get("odbc_driver") or "ODBC Driver 18 for SQL Server"))
-            return (
-                f"mssql+pyodbc://{quote_plus(user)}:{quote_plus(password)}@{host}{port_part}/{quote_plus(name)}"
-                f"?driver={driver_name}&TrustServerCertificate=yes"
-            ), None
+            return f"mssql+pymssql://{quote_plus(user)}:{quote_plus(password)}@{host}{port_part}/{quote_plus(name)}", None
         return None, f"Unsupported saved SQL database type '{db_type}'."
 
     explicit = _sql_env(
@@ -134,12 +130,8 @@ def _build_external_sql_url() -> tuple[Optional[str], Optional[str]]:
         port_part = f":{port}" if port else ""
         return f"{driver}://{quote_plus(user)}:{quote_plus(password)}@{host}{port_part}/{quote_plus(name)}", None
     if db_type in {"mssql", "sqlserver", "sql_server"}:
-        driver_name = quote_plus(_sql_env("TALOS_SQL_ODBC_DRIVER", "SQL_ODBC_DRIVER") or "ODBC Driver 18 for SQL Server")
         port_part = f":{port}" if port else ""
-        return (
-            f"mssql+pyodbc://{quote_plus(user)}:{quote_plus(password)}@{host}{port_part}/{quote_plus(name)}"
-            f"?driver={driver_name}&TrustServerCertificate=yes"
-        ), None
+        return f"mssql+pymssql://{quote_plus(user)}:{quote_plus(password)}@{host}{port_part}/{quote_plus(name)}", None
     if "+" in db_type:
         port_part = f":{port}" if port else ""
         return f"{db_type}://{quote_plus(user)}:{quote_plus(password)}@{host}{port_part}/{quote_plus(name)}", None
