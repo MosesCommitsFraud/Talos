@@ -5216,14 +5216,6 @@ const COMMANDS = {
       '_show':     { handler: _cmdToggleShow,      alias: [],     help: 'Show all toggle states',  usage: '/toggle' }
     }
   },
-  workspace: {
-    alias: ['ws'],
-    category: 'Agent',
-    help: 'Set the folder the agent works in',
-    handler: _cmdWorkspace,
-    noUserBubble: true,
-    usage: '/workspace [set <path> | clear | pick]',
-  },
   memory: {
     alias: ['m'],
     category: 'Memory',

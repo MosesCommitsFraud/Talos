@@ -81,7 +81,7 @@ window.addEventListener('pageshow', clearFreshComposerRestore);
 {
   const KEY = Storage.KEYS.SIDEBAR_COLLAPSED;
   const saved = Storage.getJSON(KEY, {});
-  const _defaultCollapsed = { 'sessions-section': true };
+  const _defaultCollapsed = { 'sessions-section': false };
   document.querySelectorAll('.sidebar .section').forEach((section) => {
     const id = section.id;
     if (!id) return;
