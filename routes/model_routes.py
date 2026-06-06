@@ -567,7 +567,7 @@ def _probe_single_model(base: str, api_key: str, model_id: str, timeout: int = 1
 
 
 # Hostnames / IP prefixes that indicate a local endpoint
-_LOCAL_HOSTS = {"localhost", "127.0.0.1", "0.0.0.0", "::1"}
+_LOCAL_HOSTS = {"localhost", "127.0.0.1", "0.0.0.0", "::1", "host.docker.internal"}
 _PRIVATE_PREFIXES = ("10.", "172.16.", "172.17.", "172.18.", "172.19.",
                      "172.20.", "172.21.", "172.22.", "172.23.", "172.24.",
                      "172.25.", "172.26.", "172.27.", "172.28.", "172.29.",
@@ -595,6 +595,28 @@ def _classify_endpoint(base_url: str, endpoint_kind: str = "auto") -> str:
     except Exception:
         pass
     return "api"
+
+
+def _is_local_endpoint_url(base_url: str) -> bool:
+    try:
+        host = (urlparse(base_url).hostname or "").lower()
+        if host in _LOCAL_HOSTS or host.startswith(_PRIVATE_PREFIXES):
+            return True
+        if _TAILSCALE_RE.match(host):
+            return True
+        # Docker/container networks commonly expose services as single-label
+        # names such as "ollama" or "vllm". Public API hosts use DNS names
+        # with dots, so single-label hosts are treated as local network names.
+        if host and "." not in host and ":" not in host:
+            return True
+    except Exception:
+        pass
+    return False
+
+
+def _require_local_endpoint(base_url: str, endpoint_kind: str = "auto") -> None:
+    if not _is_local_endpoint_url(base_url):
+        raise HTTPException(400, "Only local/private model endpoints can be added")
 
 
 def _effective_endpoint_kind(ep: Any, base_url: str) -> str:
@@ -1040,6 +1062,8 @@ def setup_model_routes(model_discovery):
             chat_url = build_chat_url(base)
             kind = _effective_endpoint_kind(ep, base)
             category = _classify_endpoint(base, kind)
+            if not _is_local_endpoint_url(base):
+                continue
 
             if model_ids:
                 curated_key = _match_provider_curated(base, None)
@@ -1392,6 +1416,9 @@ def setup_model_routes(model_discovery):
                         status = "empty"
                 base = _normalize_base(r.base_url)
                 kind = _effective_endpoint_kind(r, base)
+                category = _classify_endpoint(base, kind)
+                if not _is_local_endpoint_url(base):
+                    continue
                 results.append({
                     "id": r.id,
                     "name": r.name,
@@ -1407,7 +1434,7 @@ def setup_model_routes(model_discovery):
                     "model_type": getattr(r, "model_type", None) or "llm",
                     "supports_tools": getattr(r, "supports_tools", None),
                     "endpoint_kind": kind,
-                    "category": _classify_endpoint(base, kind),
+                    "category": category,
                     "model_refresh_mode": _endpoint_refresh_mode(r, kind),
                     "model_refresh_interval": getattr(r, "model_refresh_interval", None),
                     "model_refresh_timeout": getattr(r, "model_refresh_timeout", None),
@@ -1454,6 +1481,7 @@ def setup_model_routes(model_discovery):
             name = base_url.replace("http://", "").replace("https://", "").split("/")[0]
 
         requested_kind = _normalize_endpoint_kind(endpoint_kind)
+        _require_local_endpoint(base_url, requested_kind)
         refresh_mode = _normalize_refresh_mode(model_refresh_mode, requested_kind)
         refresh_interval = _parse_positive_int(model_refresh_interval, minimum=30, maximum=86400)
         refresh_timeout = _parse_positive_int(model_refresh_timeout, minimum=1, maximum=60)
@@ -1624,6 +1652,7 @@ def setup_model_routes(model_discovery):
         base_url = resolve_url(base_url)
         base_url = _rewrite_loopback_for_docker(base_url)
         requested_kind = _normalize_endpoint_kind(endpoint_kind)
+        _require_local_endpoint(base_url, requested_kind)
         configured_timeout = _parse_positive_int(model_refresh_timeout, minimum=1, maximum=60)
         probe_timeout = _explicit_model_list_timeout(base_url, requested_kind, configured_timeout)
         models = _probe_endpoint(base_url, api_key.strip() or None, timeout=probe_timeout)

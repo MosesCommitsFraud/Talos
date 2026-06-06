@@ -19,7 +19,7 @@ function safeRasterDataUrl(raw) {
 }
 
 /* ── Tab switching ── */
-const ADMIN_TABS = new Set(['services', 'integrations', 'tools', 'rag', 'users', 'system']);
+const ADMIN_TABS = new Set(['services', 'ai', 'search', 'integrations', 'email', 'reminders', 'tools', 'rag', 'users', 'system']);
 
 function initTabs() {
   modalEl.querySelectorAll('[data-settings-tab]').forEach(btn => {
@@ -5130,6 +5130,7 @@ function syncAdminVisibility() {
    ═══════════════════════════════════════════ */
 export function open(tab) {
   if (!initialized) initAll();
+  if (tab && ADMIN_TABS.has(tab) && !window._isAdmin) tab = 'appearance';
   syncAppearanceCheckboxes();
   resetWindowPlacement();
   modalEl.classList.remove('hidden');

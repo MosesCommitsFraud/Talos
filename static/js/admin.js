@@ -684,6 +684,7 @@ function initEndpointForm() {
   const pickerMenu = el('adm-provider-menu');
   const pickerCurrent = picker ? picker.querySelector('.adm-provider-current') : null;
   function _renderPickerMenu() {
+    if (!provider) return;
     if (!pickerMenu) return;
     pickerMenu.innerHTML = Array.from(provider.options).map(o => {
       const logo = o.dataset.logo ? (providerLogo(o.dataset.logo) || '') : '';
@@ -695,13 +696,14 @@ function initEndpointForm() {
     }).join('');
   }
   function _syncPickerCurrent() {
+    if (!provider) return;
     if (!pickerCurrent) return;
     const opt = provider.selectedOptions[0] || provider.options[0];
     const logo = opt.dataset.logo ? (providerLogo(opt.dataset.logo) || '') : '';
     pickerCurrent.querySelector('.adm-provider-logo').innerHTML = logo;
     pickerCurrent.querySelector('.adm-provider-name').textContent = opt.textContent;
   }
-  if (picker && pickerBtn && pickerMenu && pickerCurrent) {
+  if (provider && urlInput && picker && pickerBtn && pickerMenu && pickerCurrent) {
     _renderPickerMenu();
     _syncPickerCurrent();
     if (provider.value && !urlInput.value) urlInput.value = provider.value;
@@ -723,19 +725,21 @@ function initEndpointForm() {
     });
   }
 
-  provider.addEventListener('change', () => {
-    if (provider.value) urlInput.value = provider.value;
-    else urlInput.value = '';
-    if (kindSel) kindSel.value = provider.value ? 'api' : 'proxy';
-  });
-  urlInput.addEventListener('input', () => {
-    if (provider.value && urlInput.value.trim() !== provider.value) {
-      provider.value = '';
-      if (kindSel) kindSel.value = 'api';
-      _renderPickerMenu();
-      _syncPickerCurrent();
-    }
-  });
+  if (provider && urlInput) {
+    provider.addEventListener('change', () => {
+      if (provider.value) urlInput.value = provider.value;
+      else urlInput.value = '';
+      if (kindSel) kindSel.value = provider.value ? 'api' : 'proxy';
+    });
+    urlInput.addEventListener('input', () => {
+      if (provider.value && urlInput.value.trim() !== provider.value) {
+        provider.value = '';
+        if (kindSel) kindSel.value = 'api';
+        _renderPickerMenu();
+        _syncPickerCurrent();
+      }
+    });
+  }
   if (kindSel) kindSel.value = kindSel.value || 'api';
   function _apiEndpointKind() {
     return (kindSel && kindSel.value) ? kindSel.value : 'api';
@@ -812,7 +816,7 @@ function initEndpointForm() {
   let apiTestController = null;
   const apiTestBtn = el('adm-epApiTestBtn');
   const apiCancelTestBtn = el('adm-epApiCancelTestBtn');
-  if (apiTestBtn) {
+  if (provider && urlInput && apiTestBtn) {
     apiTestBtn.addEventListener('click', async () => {
       const msg = _endpointMsg('api');
       msg.textContent = ''; msg.className = '';
@@ -860,7 +864,8 @@ function initEndpointForm() {
     });
   }
 
-  el('adm-epAddBtn').addEventListener('click', async () => {
+  const apiAddBtn = el('adm-epAddBtn');
+  if (provider && urlInput && apiAddBtn) apiAddBtn.addEventListener('click', async () => {
     const msg = _endpointMsg('api');
     msg.textContent = ''; msg.className = '';
     const rawUrl = (urlInput.value || provider.value).trim();

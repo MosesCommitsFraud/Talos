@@ -771,7 +771,7 @@
           <div class="model-picker-menu hidden" id="model-picker-menu">
             <div class="model-picker-search-row">
               <input type="text" id="model-picker-search" placeholder="Search models..." autocomplete="off" aria-label="Search models">
-              <button type="button" class="model-picker-action-btn primary" id="model-picker-add-models-btn" title="Add model endpoints" aria-label="Add model endpoints">
+              <button type="button" class="model-picker-action-btn primary admin-only" id="model-picker-add-models-btn" title="Add model endpoints" aria-label="Add model endpoints">
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
               </button>
             </div>
@@ -1040,38 +1040,8 @@
       <div class="admin-toggle-sub" style="padding:0 12px 8px;opacity:0.6;font-size:11px;">Toggle on/off visibility of tools and modules across the interface.</div>
       <div class="settings-layout">
         <div class="settings-sidebar">
-          <!-- Section 1: AI plumbing (Add Models → AI Defaults → Search) -->
-          <button class="settings-nav-item active" data-settings-tab="services">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/><circle cx="6" cy="6" r="1"/><circle cx="6" cy="18" r="1"/></svg>
-            <span>Add Models</span>
-          </button>
-          <button class="settings-nav-item" data-settings-tab="ai">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a4 4 0 0 0-4 4v2H6a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V10a2 2 0 0 0-2-2h-2V6a4 4 0 0 0-4-4z"/></svg>
-            <span>AI Defaults</span>
-          </button>
-          <button class="settings-nav-item" data-settings-tab="search">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-            <span>Search</span>
-          </button>
-          <div class="settings-sidebar-divider"></div>
-          <!-- Section 2: Comms (Integrations → Email → Reminders).
-               Integrations leads here because it's where the underlying
-               accounts the other two tabs depend on actually live. -->
-          <button class="settings-nav-item" data-settings-tab="integrations">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
-            <span>Integrations</span>
-          </button>
-          <button class="settings-nav-item" data-settings-tab="email">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/></svg>
-            <span>Email</span>
-          </button>
-          <button class="settings-nav-item" data-settings-tab="reminders">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
-            <span>Reminders</span>
-          </button>
-          <div class="settings-sidebar-divider"></div>
-          <!-- Section 3: UX (Appearance → Shortcuts) -->
-          <button class="settings-nav-item" data-settings-tab="appearance">
+          <!-- User settings -->
+          <button class="settings-nav-item active" data-settings-tab="appearance">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 2a7 7 0 0 0 0 20 4 4 0 0 1 0-8 4 4 0 0 0 0-8"/></svg>
             <span>Appearance</span>
           </button>
@@ -1087,6 +1057,30 @@
           </button>
           <div class="settings-sidebar-divider admin-only"></div>
           <div class="settings-sidebar-label admin-only">Admin</div>
+          <button class="settings-nav-item admin-only" data-settings-tab="services">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/><circle cx="6" cy="6" r="1"/><circle cx="6" cy="18" r="1"/></svg>
+            <span>Add Models</span>
+          </button>
+          <button class="settings-nav-item admin-only" data-settings-tab="ai">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a4 4 0 0 0-4 4v2H6a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V10a2 2 0 0 0-2-2h-2V6a4 4 0 0 0-4-4z"/></svg>
+            <span>AI Defaults</span>
+          </button>
+          <button class="settings-nav-item admin-only" data-settings-tab="search">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+            <span>Search</span>
+          </button>
+          <button class="settings-nav-item admin-only" data-settings-tab="integrations">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+            <span>Integrations</span>
+          </button>
+          <button class="settings-nav-item admin-only" data-settings-tab="email">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/></svg>
+            <span>Email</span>
+          </button>
+          <button class="settings-nav-item admin-only" data-settings-tab="reminders">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+            <span>Reminders</span>
+          </button>
           <button class="settings-nav-item admin-only" data-settings-tab="tools">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
             <span>Agent Tools</span>
@@ -1377,7 +1371,7 @@
         </div>
 
         <!-- ═══ APPEARANCE TAB ═══ -->
-        <div data-settings-panel="appearance" class="settings-appearance-panel hidden">
+        <div data-settings-panel="appearance" class="settings-appearance-panel">
           <div class="admin-card" style="padding-bottom:6px;">
             <h2><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:5px;opacity:0.6"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="9" y1="3" x2="9" y2="21"/></svg>Sidebar</h2>
             <div class="vis-toggles">
@@ -1720,10 +1714,10 @@
         </div>
 
         <!-- ═══ SERVICES TAB ═══ -->
-        <div data-settings-panel="services">
+        <div data-settings-panel="services" class="hidden">
           <div class="admin-card">
             <h2><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:5px;opacity:0.6"><rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/><circle cx="6" cy="6" r="1"/><circle cx="6" cy="18" r="1"/></svg>Add Models <span style="opacity:0.45;font-weight:normal;font-size:0.82em">(Endpoints)</span></h2>
-            <div class="admin-toggle-sub" style="margin-bottom:10px">Connect local models first, or add a cloud API.</div>
+            <div class="admin-toggle-sub" style="margin-bottom:10px">Connect local model servers. Only admins can add or manage models.</div>
 
             <!-- Local subsection -->
             <div class="adm-add-section collapsible collapsed" id="adm-add-local">
@@ -1764,58 +1758,6 @@
               </div>
             </div>
 
-            <!-- API subsection -->
-            <div class="adm-add-section collapsible collapsed" id="adm-add-api" style="margin-top:14px">
-              <div class="adm-ep-section-head adm-section-toggle" role="button" tabindex="0" aria-expanded="false">
-                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-1px;margin-right:4px;"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
-                <span>API</span>
-                <svg class="adm-section-caret" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
-              </div>
-              <div class="admin-model-form">
-                <!-- Custom picker (with logos). Hidden native <select> mirrors
-                     its value so the existing JS that reads adm-epProvider
-                     keeps working unchanged. -->
-                <div class="adm-provider-picker adm-provider-combo" id="adm-provider-picker">
-                  <input id="adm-epUrl" type="text" placeholder="Base URL or pick provider" autocomplete="off">
-                  <button type="button" class="adm-provider-btn" id="adm-provider-btn" title="Pick provider">
-                    <span class="adm-provider-current"><span class="adm-provider-logo"></span><span class="adm-provider-name">Provider</span></span>
-                    <svg class="adm-provider-caret" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
-                  </button>
-                  <div class="adm-provider-menu hidden" id="adm-provider-menu"></div>
-                </div>
-                <select id="adm-epProvider" style="display:none">
-                  <option value="">Custom URL</option>
-                  <option value="https://api.anthropic.com" data-logo="anthropic">Anthropic</option>
-                  <option value="https://api.deepseek.com/v1" data-logo="deepseek" selected>DeepSeek</option>
-                  <option value="https://api.openai.com/v1" data-logo="openai">OpenAI</option>
-                  <option value="https://openrouter.ai/api/v1" data-logo="openrouter">OpenRouter</option>
-                  <option value="https://ollama.com/api" data-logo="ollama">Ollama Cloud</option>
-                  <option value="https://api.groq.com/openai/v1" data-logo="groq">Groq</option>
-                  <option value="https://api.mistral.ai/v1" data-logo="mistral">Mistral</option>
-                  <option value="https://api.together.xyz/v1" data-logo="together">Together AI</option>
-                  <option value="https://api.fireworks.ai/inference/v1" data-logo="fireworks">Fireworks AI</option>
-                  <option value="https://generativelanguage.googleapis.com/v1beta/openai" data-logo="gemini">Google Gemini</option>
-                  <option value="https://api.x.ai/v1" data-logo="grok">xAI Grok</option>
-                  <option value="https://api.z.ai/api/paas/v4" data-logo="zhipu">Z.AI (Zhipu)</option>
-                  <option value="https://api.z.ai/api/coding/paas/v4" data-logo="zhipu">Z.AI Coding Plan</option>
-                </select>
-                <div class="admin-model-form-row">
-                  <input id="adm-epApiKey" type="password" placeholder="API key">
-                  <select id="adm-epKind" style="padding:5px;width:82px;">
-                    <option value="proxy">Proxy</option>
-                    <option value="api">API</option>
-                  </select>
-                  <select id="adm-epType" style="padding:5px;width:80px;">
-                    <option value="llm">LLM</option>
-                    <option value="image">Image</option>
-                  </select>
-                  <button class="admin-btn-sm" id="adm-epApiTestBtn" style="width:55px;text-align:center;">Test</button>
-                  <button class="admin-btn-sm hidden" id="adm-epApiCancelTestBtn" style="width:62px;text-align:center;">Cancel</button>
-                  <button class="admin-btn-add" id="adm-epAddBtn" style="width:55px;text-align:center;">Add</button>
-                </div>
-                <div id="adm-epApiMsg" class="adm-ep-inline-msg"></div>
-              </div>
-            </div>
           </div>
           <div class="admin-card">
             <h2><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:5px;opacity:0.6"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>Added Models <span style="opacity:0.45;font-weight:normal;font-size:0.82em">(Endpoints)</span></h2>
@@ -1826,13 +1768,6 @@
                 <span>Local</span>
               </div>
               <div id="adm-epList-local"><div class="admin-empty">Loading...</div></div>
-            </div>
-            <div class="adm-ep-section" style="margin-top:14px">
-              <div class="adm-ep-section-head">
-                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-1px;margin-right:4px;"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
-                <span>API</span>
-              </div>
-              <div id="adm-epList-api"></div>
             </div>
           </div>
         </div>
