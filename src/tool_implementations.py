@@ -68,11 +68,11 @@ def _build_external_sql_url() -> tuple[Optional[str], Optional[str]]:
             return None, "SQLite is selected but no SQLITE_PATH/SQL_DATABASE_PATH/DB_NAME is set."
         return f"sqlite:///{path}", None
 
-    host = _sql_env("TALOS_SQL_DB_HOST", "SQL_DB_HOST", "DB_HOST", "DATABASE_HOST")
-    name = _sql_env("TALOS_SQL_DB_NAME", "SQL_DB_NAME", "DB_NAME", "DB_DATABASE", "DATABASE_NAME")
-    user = _sql_env("TALOS_SQL_DB_USER", "SQL_DB_USER", "DB_USER", "DB_USERNAME", "DATABASE_USER")
-    password = _sql_env("TALOS_SQL_DB_PASSWORD", "SQL_DB_PASSWORD", "DB_PASSWORD", "DATABASE_PASSWORD")
-    port = _sql_env("TALOS_SQL_DB_PORT", "SQL_DB_PORT", "DB_PORT", "DATABASE_PORT")
+    host = _sql_env("TALOS_SQL_DB_HOST", "SQL_DB_HOST", "DB_HOST", "DATABASE_HOST", "MSSQL_HOST")
+    name = _sql_env("TALOS_SQL_DB_NAME", "SQL_DB_NAME", "DB_NAME", "DB_DATABASE", "DATABASE_NAME", "MSSQL_DB")
+    user = _sql_env("TALOS_SQL_DB_USER", "SQL_DB_USER", "DB_USER", "DB_USERNAME", "DATABASE_USER", "MSSQL_READONLY_USER")
+    password = _sql_env("TALOS_SQL_DB_PASSWORD", "SQL_DB_PASSWORD", "DB_PASSWORD", "DATABASE_PASSWORD", "MSSQL_READONLY_PASSWORD")
+    port = _sql_env("TALOS_SQL_DB_PORT", "SQL_DB_PORT", "DB_PORT", "DATABASE_PORT", "MSSQL_PORT")
     if not host or not name or not user:
         return None, (
             "No external SQL database is configured. Set TALOS_SQL_DATABASE_URL or "
@@ -82,7 +82,9 @@ def _build_external_sql_url() -> tuple[Optional[str], Optional[str]]:
     from urllib.parse import quote_plus
 
     if not db_type:
-        if port == "3306":
+        if _sql_env("MSSQL_HOST") or _sql_env("MSSQL_DB"):
+            db_type = "mssql"
+        elif port == "3306":
             db_type = "mysql"
         elif port == "1433":
             db_type = "mssql"
