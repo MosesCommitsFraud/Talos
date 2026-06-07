@@ -1,0 +1,4 @@
+# Optional document/PDF dependencies.
+# PyMuPDF is AGPL-3.0; install only when those PDF features are needed.
+PyMuPDF
+markitdown
