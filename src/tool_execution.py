@@ -663,12 +663,21 @@ async def _try_sandbox_exec(
     owner: Optional[str],
     timeout: int,
 ) -> Optional[Dict]:
-    if tool not in {"bash", "python"} or not session_id:
+    if tool not in {"bash", "python"}:
         return None
+    from src.sandbox_client import exec_in_sandbox, sandbox_enabled
+    # When the sandbox is OFF (dev/no-container), return None so the caller may
+    # run locally. When it's ON, the sandbox is mandatory: never execute on the
+    # app/host container. If there's no session to scope it to, refuse.
+    if not sandbox_enabled():
+        return None
+    if not session_id:
+        return {
+            "error": f"{tool}: no sandbox session available — refusing to run outside the sandbox.",
+            "exit_code": 1,
+            "sandboxed": True,
+        }
     try:
-        from src.sandbox_client import exec_in_sandbox, sandbox_enabled
-        if not sandbox_enabled():
-            return None
         data = await exec_in_sandbox(
             owner=owner,
             session_id=session_id,
@@ -777,12 +786,20 @@ async def _try_sandbox_file_tool(
     session_id: Optional[str],
     owner: Optional[str],
 ) -> Optional[Dict]:
-    if tool not in {"read_file", "write_file", "edit_file", "grep", "glob", "ls"} or not session_id:
+    if tool not in {"read_file", "write_file", "edit_file", "grep", "glob", "ls"}:
         return None
+    from src.sandbox_client import file_tool_in_sandbox, sandbox_enabled
+    # Same containment policy as _try_sandbox_exec: sandbox off → allow local;
+    # sandbox on → mandatory, refuse to touch the app/host filesystem.
+    if not sandbox_enabled():
+        return None
+    if not session_id:
+        return {
+            "error": f"{tool}: no sandbox session available — refusing to run outside the sandbox.",
+            "exit_code": 1,
+            "sandboxed": True,
+        }
     try:
-        from src.sandbox_client import file_tool_in_sandbox, sandbox_enabled
-        if not sandbox_enabled():
-            return None
         operation, payload = _parse_sandbox_file_payload(tool, content)
         data = await file_tool_in_sandbox(owner=owner, session_id=session_id, operation=operation, payload=payload)
     except Exception as exc:
@@ -1362,9 +1379,24 @@ async def execute_tool_block(
     if tool == "bash" and session_id:
         _is_bg, _bg_cmd = _split_bg_marker(content)
         if _is_bg and _bg_cmd:
+            from src.sandbox_client import sandbox_enabled
+            short = _bg_cmd.strip().split(chr(10))[0][:80]
+            if sandbox_enabled():
+                # Containment: the local detached path (bg_jobs) runs on the
+                # app/host container, which would escape the sandbox. Since
+                # sandbox exec now has NO timeout, run the command in the
+                # sandbox in the foreground instead — nothing executes outside
+                # the sandbox. The chat waits for it (progress still streams).
+                desc = f"bash (sandbox): {short}"
+                result = await _try_sandbox_exec(
+                    tool="bash", content=_bg_cmd, session_id=session_id,
+                    owner=owner, timeout=DEFAULT_BASH_TIMEOUT,
+                ) or {"error": "bash: sandbox unavailable", "exit_code": 1, "sandboxed": True}
+                logger.info("Tool executed: %s (in-sandbox, bg marker ignored)", desc)
+                return desc, result
+            # Sandbox OFF (dev only): keep the legacy local detached job.
             from src import bg_jobs
             rec = bg_jobs.launch(_bg_cmd, session_id=session_id, cwd=workspace or _AGENT_WORKDIR)
-            short = _bg_cmd.strip().split(chr(10))[0][:80]
             desc = f"bash (background): {short}"
             result = {
                 "output": (
