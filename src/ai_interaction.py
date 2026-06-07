@@ -1290,11 +1290,6 @@ async def do_ui_control(content: str, session_id: Optional[str] = None, owner: O
         _toggle_aliases = {
             "shell": "bash",
             "terminal": "bash",
-            "search": "web",
-            "websearch": "web",
-            "web_search": "web",
-            "deepresearch": "research",
-            "deep_research": "research",
             "documents": "document_editor",
             "doc": "document_editor",
             "docs": "document_editor",
@@ -1499,15 +1494,10 @@ async def do_ui_control(content: str, session_id: Optional[str] = None, owner: O
             "skills": "skills",
             "settings": "settings",
             "preferences": "settings",
-            "cookbook": "cookbook",
-            "models": "cookbook",
-            "llm": "cookbook",
-            "serve": "cookbook",
-            "serving": "cookbook",
         }
         target = _panel_aliases.get(panel)
         if not target:
-            return {"error": f"Unknown panel '{panel}'. Valid: documents, gallery, email, sessions, notes, memories, skills, settings, cookbook."}
+            return {"error": f"Unknown panel '{panel}'. Valid: documents, gallery, email, sessions, notes, memories, skills, settings."}
         return {
             "ui_event": "open_panel",
             "panel": target,

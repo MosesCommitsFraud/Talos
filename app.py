@@ -414,10 +414,6 @@ async def serve_generated_image(filename: str, request: Request):
         headers=GENERATED_IMAGE_HEADERS,
     )
 
-# ========= YOUTUBE INIT =========
-from services.youtube import init_youtube
-init_youtube()
-
 # ========= RAG (vector document RAG) =========
 # VectorRAG (ChromaDB-backed personal-document semantic search). Initialized
 # lazily via get_rag_manager() — returns None if ChromaDB isn't reachable
@@ -457,16 +453,9 @@ personal_docs_mgr = components["personal_docs_manager"]
 api_key_manager   = components["api_key_manager"]
 preset_manager    = components["preset_manager"]
 chat_processor    = components["chat_processor"]
-research_handler  = components["research_handler"]
 chat_handler      = components["chat_handler"]
 model_discovery   = components["model_discovery"]
 skills_manager    = components["skills_manager"]
-
-# TTS
-from services.tts import get_tts_service
-
-tts_service = get_tts_service()
-logger.info("TTS service initialized (provider managed via admin settings)")
 
 # ========= EXCEPTION HANDLERS =========
 @app.exception_handler(SessionNotFoundError)
@@ -530,7 +519,7 @@ app.include_router(setup_skills_routes(skills_manager))
 from routes.chat_routes import setup_chat_routes
 app.include_router(setup_chat_routes(
     session_manager, chat_handler, chat_processor,
-    memory_manager, research_handler, upload_handler,
+    memory_manager, upload_handler,
     memory_vector=memory_vector,
     webhook_manager=webhook_manager,
     skills_manager=skills_manager,
@@ -546,7 +535,7 @@ app.include_router(setup_preset_routes(preset_manager))
 
 # Diagnostics
 from routes.diagnostics_routes import setup_diagnostics_routes
-app.include_router(setup_diagnostics_routes(rag_manager, rag_available, research_handler))
+app.include_router(setup_diagnostics_routes(rag_manager, rag_available))
 
 # Cleanup
 from routes.cleanup_routes import setup_cleanup_routes

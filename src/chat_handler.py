@@ -14,17 +14,8 @@ from src.constants import (
     UPLOAD_DIR,
 )
 from core.models import ChatMessage
-from src.chat_helpers import extract_urls, model_supports_vision
+from src.chat_helpers import model_supports_vision
 from src.document_processor import build_user_content, analyze_image_with_vl_result
-from src.youtube_handler import (
-    is_youtube_url,
-    extract_youtube_id,
-    extract_transcript_async,
-    format_transcript_for_context,
-    fetch_youtube_comments,
-    format_comments_for_context,
-    YOUTUBE_INSTRUCTION_PROMPT,
-)
 
 logger = logging.getLogger(__name__)
 
@@ -37,14 +28,12 @@ class ChatHandler:
         session_manager,
         memory_manager,
         chat_processor,
-        research_handler,
         preset_manager,
         upload_handler,
     ):
         self.session_manager = session_manager
         self.memory_manager = memory_manager
         self.chat_processor = chat_processor
-        self.research_handler = research_handler
         self.preset_manager = preset_manager
         self.upload_handler = upload_handler
 
@@ -111,37 +100,8 @@ class ChatHandler:
         enhanced_message = message
         attachment_meta: List[Dict[str, Any]] = []
 
-        # Extract URLs and process YouTube transcripts
-        urls = extract_urls(enhanced_message)
+        # YouTube transcript ingestion removed (no outbound web access).
         youtube_transcripts: List[str] = []
-
-        has_youtube = False
-        for url in urls:
-            if is_youtube_url(url):
-                video_id = extract_youtube_id(url)
-                if not video_id:
-                    continue
-                has_youtube = True
-                logger.info(f"Processing YouTube URL: {url}")
-                # Fetch transcript and comments in parallel
-                transcript_task = extract_transcript_async(url, video_id)
-                comments_task = fetch_youtube_comments(video_id)
-                transcript_data, comments_data = await asyncio.gather(
-                    transcript_task, comments_task
-                )
-                # Extract title/channel from comments metadata
-                title = comments_data.get("title", "")
-                channel = comments_data.get("channel", "")
-                youtube_transcripts.append(
-                    format_transcript_for_context(transcript_data, url, title, channel)
-                )
-                comments_ctx = format_comments_for_context(comments_data, url)
-                if comments_ctx:
-                    youtube_transcripts.append(comments_ctx)
-
-        # Inject instruction prompt so the LLM gives a structured breakdown
-        if has_youtube:
-            youtube_transcripts.insert(0, YOUTUBE_INSTRUCTION_PROMPT)
 
         # Analyze images — skip if vision disabled, or if main model is vision-capable
         from src.settings import get_setting

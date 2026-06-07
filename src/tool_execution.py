@@ -492,11 +492,6 @@ _ADMIN_TOOLS = {
     "manage_webhooks",
     "manage_tokens",
     "manage_settings",
-    "download_model",
-    "serve_model",
-    "serve_preset",
-    "stop_served_model",
-    "cancel_download",
 }
 
 
@@ -514,8 +509,6 @@ _MCP_TOOL_MAP = {
     "python":         ("python",     "python"),
     "read_file":      ("filesystem", "read_file"),
     "write_file":     ("filesystem", "write_file"),
-    "web_search":     ("web_search", "web_search"),
-    "web_fetch":      ("web_fetch",  "web_fetch"),
     "generate_image": ("image_gen",  "generate_image"),
 }
 
@@ -558,8 +551,6 @@ def _parse_write_file(content: str) -> Dict:
 _MCP_ARG_PARSERS: Dict[str, callable] = {
     "bash":           lambda c: {"command": c},
     "python":         lambda c: {"code": c},
-    "web_search":     lambda c: {"query": c.split("\n")[0].strip()},
-    "web_fetch":      lambda c: {"url": c.split("\n")[0].strip()},
     "read_file":      lambda c: {"path": c.split("\n")[0].strip()},
     "write_file":     _parse_write_file,
     "generate_image": _parse_generate_image,
@@ -1183,115 +1174,6 @@ async def _direct_fallback(
                 return {"error": err, "exit_code": 1}
             return {"output": _truncate(out), "exit_code": 0}
 
-        if tool == "web_search":
-            from src.search import comprehensive_web_search
-            raw = content.strip()
-            query = raw
-            time_filter = None
-            max_pages = 5
-            # Allow JSON-shaped args: {"query": "...", "time_filter": "day", "max_pages": 7}
-            if raw.startswith("{"):
-                try:
-                    parsed = _json.loads(raw)
-                    if isinstance(parsed, dict) and "query" in parsed:
-                        query = str(parsed.get("query", "")).strip()
-                        tf = parsed.get("time_filter") or parsed.get("freshness")
-                        if isinstance(tf, str) and tf.lower() in ("day", "week", "month", "year"):
-                            time_filter = tf.lower()
-                        mp = parsed.get("max_pages")
-                        if isinstance(mp, int) and 1 <= mp <= 10:
-                            max_pages = mp
-                except _json.JSONDecodeError:
-                    pass
-            if not query:
-                query = raw.split("\n")[0].strip()
-            # Auto-detect freshness from query phrasing when not explicit
-            if time_filter is None:
-                q_lc = query.lower()
-                if any(kw in q_lc for kw in ("today", "latest", "breaking", "this morning", "right now", "currently")):
-                    time_filter = "day"
-                elif any(kw in q_lc for kw in ("this week", "past week", "recent news", "last few days")):
-                    time_filter = "week"
-                elif any(kw in q_lc for kw in ("this month", "past month")):
-                    time_filter = "month"
-                elif " news" in q_lc or q_lc.startswith("news ") or q_lc.endswith(" news"):
-                    time_filter = "week"
-            loop = asyncio.get_running_loop()
-            text, sources = await asyncio.wait_for(
-                loop.run_in_executor(
-                    None,
-                    lambda: comprehensive_web_search(
-                        query,
-                        max_pages=max_pages,
-                        time_filter=time_filter,
-                        return_sources=True,
-                    ),
-                ),
-                timeout=30,
-            )
-            output = text[:MAX_OUTPUT_CHARS] if len(text) > MAX_OUTPUT_CHARS else text
-            if sources:
-                output += "\n\n<!-- SOURCES:" + _json.dumps(sources) + " -->"
-            return {"output": output, "exit_code": 0}
-
-        if tool == "web_fetch":
-            # Lightweight single-URL fetch. Wraps the SSRF-safe fetcher used
-            # by deep research, so private/loopback/metadata addresses are
-            # already blocked there.
-            from src.search.content import fetch_webpage_content
-            raw = content.strip()
-            url = ""
-            # Accept either a JSON arg ({"url": "..."}) or a plain URL/domain.
-            if raw.startswith("{"):
-                try:
-                    parsed = _json.loads(raw)
-                    if isinstance(parsed, dict):
-                        url = str(parsed.get("url") or "").strip()
-                except _json.JSONDecodeError:
-                    url = ""
-            if not url:
-                # Non-JSON (or JSON without a usable url): take the first line
-                # only, so a URL followed by commentary still parses.
-                url = raw.split("\n")[0].strip()
-            # Reject anything that isn't a single bare URL/domain token.
-            if not url or url.startswith("{") or any(c in url for c in (" ", "\t", "\n")):
-                return {"error": "web_fetch: provide a single URL or domain, e.g. example.com", "exit_code": 1}
-            low = url.lower()
-            if "://" in low and not low.startswith(("http://", "https://")):
-                return {"error": f"web_fetch: unsupported URL scheme (only http/https): {url[:80]}", "exit_code": 1}
-            # Accept bare domains like "example.com" by defaulting to https.
-            if not low.startswith(("http://", "https://")):
-                url = "https://" + url
-            loop = asyncio.get_running_loop()
-            try:
-                result = await asyncio.wait_for(
-                    loop.run_in_executor(None, lambda: fetch_webpage_content(url, timeout=10)),
-                    timeout=30,
-                )
-            except asyncio.TimeoutError:
-                return {"error": f"web_fetch: timed out fetching {url}", "exit_code": 1}
-            except Exception as e:
-                # Direct URL fetches can hit bot protection / auth walls
-                # (e.g. eBay 403). Treat that as a tool failure the model can
-                # reason around, not an uncaught chat-stream 500.
-                return {"error": f"web_fetch: {url}: {e}", "exit_code": 1}
-            err = result.get("error")
-            text = (result.get("content") or "").strip()
-            title = result.get("title") or ""
-
-            if not text:
-                if err:
-                    return {"error": f"web_fetch: {url}: {err}", "exit_code": 1}
-                # No extractable text: non-HTML body, or a pure client-rendered
-                # shell. The agent can fall back to the builtin_browser tool.
-                return {"error": f"web_fetch: {url}: no readable text content (not HTML, or the page needs JS/login)", "exit_code": 1}
-
-            header = (f"# {title}\n" if title else "") + f"Source: {url}\n\n"
-            output = header + text
-            if len(output) > MAX_OUTPUT_CHARS:
-                output = output[:MAX_OUTPUT_CHARS] + "\n\n[...truncated]"
-            return {"output": output, "exit_code": 0}
-
         # manage_memory / generate_image still live as MCP servers
         # (mcp_servers/{memory,image_gen}_server.py); the MCP path above
         # handles them.
@@ -1326,12 +1208,7 @@ async def execute_tool_block(
         do_manage_mcp, do_manage_webhooks, do_manage_tokens,
         do_manage_documents, do_manage_settings, do_manage_notes,
         do_manage_calendar, do_query_sql,
-        do_download_model, do_serve_model, do_list_served_models, do_stop_served_model,
-        do_tail_serve_output,
-        do_list_downloads, do_cancel_download, do_search_hf_models, do_list_cached_models,
-        do_list_serve_presets, do_serve_preset, do_adopt_served_model,
-        do_list_cookbook_servers,
-        do_edit_image, do_trigger_research, do_manage_research, do_resolve_contact,
+        do_edit_image, do_resolve_contact,
         do_manage_contact,
         do_vault_search, do_vault_get, do_vault_unlock,
         do_app_api,
@@ -1566,48 +1443,9 @@ async def execute_tool_block(
     elif tool == "query_sql":
         desc = "query_sql"
         result = await do_query_sql(content, owner=owner)
-    elif tool == "download_model":
-        desc = "download_model"
-        result = await do_download_model(content, owner=owner)
-    elif tool == "serve_model":
-        desc = "serve_model"
-        result = await do_serve_model(content, owner=owner)
-    elif tool == "list_served_models":
-        desc = "list_served_models"
-        result = await do_list_served_models(content, owner=owner)
-    elif tool == "stop_served_model":
-        desc = "stop_served_model"
-        result = await do_stop_served_model(content, owner=owner)
-    elif tool == "tail_serve_output":
-        desc = "tail_serve_output"
-        result = await do_tail_serve_output(content, owner=owner)
-    elif tool == "list_downloads":
-        desc = "list_downloads"
-        result = await do_list_downloads(content, owner=owner)
-    elif tool == "cancel_download":
-        desc = "cancel_download"
-        result = await do_cancel_download(content, owner=owner)
-    elif tool == "search_hf_models":
-        desc = "search_hf_models"
-        result = await do_search_hf_models(content, owner=owner)
-    elif tool == "list_cached_models":
-        desc = "list_cached_models"
-        result = await do_list_cached_models(content, owner=owner)
     elif tool == "app_api":
         desc = "app_api"
         result = await do_app_api(content, owner=owner)
-    elif tool == "list_serve_presets":
-        desc = "list_serve_presets"
-        result = await do_list_serve_presets(content, owner=owner)
-    elif tool == "serve_preset":
-        desc = "serve_preset"
-        result = await do_serve_preset(content, owner=owner)
-    elif tool == "adopt_served_model":
-        desc = "adopt_served_model"
-        result = await do_adopt_served_model(content, owner=owner)
-    elif tool == "list_cookbook_servers":
-        desc = "list_cookbook_servers"
-        result = await do_list_cookbook_servers(content, owner=owner)
     elif tool == "edit_image":
         desc = "edit_image"
         result = await do_edit_image(content, owner=owner)
@@ -1616,12 +1454,6 @@ async def execute_tool_block(
         if result is None:
             result = await _do_edit_file(content, workspace=workspace)
         desc = result.get("output") or result.get("error") or "edit_file"
-    elif tool == "trigger_research":
-        desc = "trigger_research"
-        result = await do_trigger_research(content, owner=owner)
-    elif tool == "manage_research":
-        desc = "manage_research"
-        result = await do_manage_research(content, owner=owner)
     elif tool == "resolve_contact":
         desc = "resolve_contact"
         result = await do_resolve_contact(content, owner=owner)

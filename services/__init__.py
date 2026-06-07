@@ -2,36 +2,14 @@
 """
 Service layer — plug-in capabilities for the chat core.
 
-Each service:
-- Does one thing well
-- Exposes a clean async interface
-- Can run in-process or as a standalone HTTP service
+Only the memory service remains; this build runs internally where web search
+and other external-facing services are not available.
 """
 
-from .search import SearchService, SearchResult, SearchResponse
-from .docs import DocsService, DocChunk, IndexResult
-from .research import ResearchService, ResearchResult, ResearchSource
 from .memory import MemoryService, Memory, MemorySearchResult
-from .shell import ShellService, ShellResult
 
 __all__ = [
-    # Search
-    "SearchService",
-    "SearchResult",
-    "SearchResponse",
-    # Docs
-    "DocsService",
-    "DocChunk",
-    "IndexResult",
-    # Research
-    "ResearchService",
-    "ResearchResult",
-    "ResearchSource",
-    # Memory
     "MemoryService",
     "Memory",
     "MemorySearchResult",
-    # Shell
-    "ShellService",
-    "ShellResult",
 ]

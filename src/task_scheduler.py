@@ -206,7 +206,6 @@ HOUSEKEEPING_DEFAULTS = {
     "tidy_sessions":        {"name": "Chat Sessions Tidy",       "trigger_type": "event", "trigger_event": "session_created", "trigger_count": 5, "schedule": None, "scheduled_time": None, "cron_expression": None, "legacy_names": ["Tidy Chat Sessions"]},
     "tidy_documents":       {"name": "Documents Tidy",           "trigger_type": "event", "trigger_event": "document_created", "trigger_count": 5, "schedule": None, "scheduled_time": None, "cron_expression": None, "legacy_names": ["Tidy Documents"]},
     "consolidate_memory":   {"name": "Memory Tidy",              "trigger_type": "event", "trigger_event": "memory_added", "trigger_count": 5, "schedule": None, "scheduled_time": None, "cron_expression": None, "legacy_names": ["Tidy Memory"]},
-    "tidy_research":        {"name": "Research Tidy",            "trigger_type": "event", "trigger_event": "research_completed", "trigger_count": 5, "schedule": None, "scheduled_time": None, "cron_expression": None, "legacy_names": ["Tidy Research"]},
     "summarize_emails":     {"name": "Email (Summary)",          "schedule": "cron",  "scheduled_time": None,    "cron_expression": "0 */2 * * *", "ship_paused": True, "legacy_names": ["Tidy Email (Summary)"]},
     "draft_email_replies":  {"name": "Email AI Auto Reply",      "schedule": "cron",  "scheduled_time": None,    "cron_expression": "0 */2 * * *", "ship_paused": True, "legacy_names": ["Tidy Email (Replies)", "AI Auto Reply"]},
     "extract_email_events": {"name": "Email Calendar Events",    "schedule": "cron",  "scheduled_time": None,    "cron_expression": "0 */1 * * *", "ship_paused": True, "legacy_names": ["Email → Calendar Events"]},
@@ -717,10 +716,6 @@ class TaskScheduler:
                     run.result = result
                     if not success:
                         run.error = result
-                elif task_type == "research":
-                    result = await self._execute_research_task(task, db)
-                    run.status = "success"
-                    run.result = result
                 else:
                     # LLM task — use agent loop for tool access
                     result = await self._execute_llm_task(task, db)
@@ -952,7 +947,6 @@ class TaskScheduler:
         "tidy_sessions",
         "tidy_documents",
         "consolidate_memory",
-        "tidy_research",
         "test_skills",
         "audit_skills",
     })
@@ -1018,10 +1012,6 @@ class TaskScheduler:
             kwargs = {"owner": task.owner, "task_name": task.name, "progress_cb": _progress}
             if task.action in ("run_script", "run_local", "ssh_command") and task.prompt:
                 kwargs["script" if task.action in ("run_script", "run_local") else "command"] = task.prompt
-            # cookbook_serve carries its JSON config in task.prompt — feed it
-            # through as `command` so action_cookbook_serve can json.loads it.
-            elif task.action == "cookbook_serve" and task.prompt:
-                kwargs["command"] = task.prompt
             result, success = await action_fn(**kwargs)
             return result, success
         except TaskNoop:
@@ -1657,130 +1647,6 @@ class TaskScheduler:
 
         return full_text or "(no output)"
 
-    async def _execute_research_task(self, task, db) -> str:
-        """Execute a deep research task using DeepResearcher."""
-        from core.database import Session as DbSession, ChatMessage
-        from src.deep_research import DeepResearcher
-        from src.research_handler import RESEARCH_DATA_DIR, ResearchHandler
-        from src.research_utils import strip_thinking
-        from src.settings import get_setting
-
-        # Resolve endpoint/model: research settings > task settings > session defaults
-        endpoint_url = task.endpoint_url
-        model = task.model
-
-        if not endpoint_url or not model:
-            try:
-                from src.endpoint_resolver import resolve_endpoint
-                ep_url, ep_model, ep_headers = resolve_endpoint(
-                    "research",
-                    endpoint_url or None,
-                    model or None,
-                    None,
-                )
-                endpoint_url = ep_url or endpoint_url
-                model = ep_model or model
-            except Exception:
-                pass
-
-        if not endpoint_url or not model:
-            endpoint_url, model = self._resolve_defaults(db, task.owner)
-        if not endpoint_url or not model:
-            raise RuntimeError("No model/endpoint configured for research")
-        # Record the resolved model for the run record (see _execute_task_locked).
-        self._last_run_model = model
-
-        # Resolve headers
-        headers = {}
-        try:
-            from core.database import ModelEndpoint
-            from src.endpoint_resolver import normalize_base, build_headers
-            db2 = db
-            eps = db2.query(ModelEndpoint).filter(ModelEndpoint.is_enabled == True).all()
-            for ep in eps:
-                if normalize_base(ep.base_url) in endpoint_url or endpoint_url in normalize_base(ep.base_url):
-                    headers = build_headers(ep.api_key, normalize_base(ep.base_url))
-                    break
-        except Exception:
-            pass
-
-        max_tokens = int(get_setting("research_max_tokens", 8192))
-        extraction_timeout = int(get_setting("research_extraction_timeout_seconds", 90) or 90)
-        extraction_concurrency = int(get_setting("research_extraction_concurrency", 3) or 3)
-
-        researcher = DeepResearcher(
-            llm_endpoint=endpoint_url,
-            llm_model=model,
-            llm_headers=headers,
-            max_rounds=8,
-            max_time=600,  # 10 min for scheduled research
-            max_report_tokens=max_tokens,
-            extraction_timeout=extraction_timeout,
-            extraction_concurrency=extraction_concurrency,
-        )
-
-        started_ts = time.time()
-        report = await researcher.research(task.prompt)
-        completed_ts = time.time()
-        try:
-            stats = researcher.get_stats() or {}
-        except Exception:
-            stats = {}
-
-        # Ensure a session exists for output
-        session_id = task.session_id
-        if not session_id:
-            session_id = str(uuid.uuid4())
-            sess = DbSession(
-                id=session_id,
-                name=f"[Research] {task.name}",
-                endpoint_url=endpoint_url,
-                model=model,
-                owner=task.owner,
-                created_at=_utcnow(),
-                updated_at=_utcnow(),
-            )
-            db.add(sess)
-            task.session_id = session_id
-            db.commit()
-            if self._session_manager:
-                try:
-                    self._session_manager.sessions[session_id] = self._session_manager._db_to_session(sess)
-                except Exception:
-                    pass
-
-        # Persist scheduled research in the same on-disk shape used by the
-        # Research panel. Without this, task research had Markdown output but
-        # no Library entry and no visual report route to open.
-        try:
-            RESEARCH_DATA_DIR.mkdir(parents=True, exist_ok=True)
-            findings = getattr(researcher, "findings", []) or []
-            payload = {
-                "query": task.prompt or task.name or "Scheduled research",
-                "status": "done",
-                "result": report,
-                "raw_report": strip_thinking(report or ""),
-                "sources": ResearchHandler._extract_sources(findings),
-                "raw_findings": ResearchHandler._extract_raw_findings(findings),
-                "stats": stats,
-                "category": "scheduled",
-                "started_at": started_ts,
-                "completed_at": completed_ts,
-                "owner": task.owner or "",
-                "task_id": task.id,
-                "task_name": task.name,
-            }
-            (RESEARCH_DATA_DIR / f"{session_id}.json").write_text(json.dumps(payload), encoding="utf-8")
-            try:
-                from src.event_bus import fire_event
-                fire_event("research_completed", task.owner or None)
-            except Exception:
-                logger.debug("research_completed event dispatch failed", exc_info=True)
-        except Exception as e:
-            logger.warning("Failed to persist task research report %s: %s", session_id, e)
-
-        return report
-
     async def _run_chained(self, task_id: str):
         """Run a chained task. Acquires _executing membership the same way
         run_task_now does so an overlapping scheduler tick can't double-dispatch
@@ -2168,7 +2034,7 @@ class TaskScheduler:
 
                 "CORE RULE: You MUST use your tools to take action — do not describe what you would do. "
                 "Never say 'I would check your calendar' — actually call manage_calendar. "
-                "Never say 'I can look that up' — actually call web_search or search_chats. "
+                "Never say 'I can look that up' — actually call search_chats. "
                 "If you have a tool for it, use it. No hypotheticals, no promises, only actions and results.\n\n"
 
                 "DECISION FRAMEWORK — follow these rules, not just tool descriptions:\n\n"
@@ -2190,8 +2056,6 @@ class TaskScheduler:
                 "ESCALATION LADDER (when you need info you don't have):\n"
                 "1. search_chats (fast, free)\n"
                 "2. manage_memory (fast, free)\n"
-                "3. web_search (medium cost)\n"
-                "4. trigger_research (expensive, async — only for complex multi-source questions)\n"
                 "Stop as soon as you have a sufficient answer.\n\n"
 
                 "'SEND TO [NAME]' FLOW:\n"
@@ -2251,10 +2115,9 @@ class TaskScheduler:
                     "manage_calendar", "manage_notes", "manage_tasks", "manage_memory",
                     "list_email_accounts", "list_emails", "read_email", "send_email", "reply_to_email", "archive_email",
                     "mark_email_read", "delete_email", "resolve_contact",
-                    "search_chats", "web_search", "web_fetch", "read_file",
+                    "search_chats", "read_file",
                     "create_document", "update_document", "edit_document",
-                    "generate_image", "trigger_research",
-                    "download_model", "serve_model", "list_served_models", "stop_served_model",
+                    "generate_image",
                     "edit_image",
                 ]),
                 session_id=session_id,

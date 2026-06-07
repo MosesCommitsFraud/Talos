@@ -28,7 +28,6 @@ from routes.document_helpers import _owner_session_filter
 from core.database import SessionLocal, get_session_mode, set_session_mode
 from core.database import Session as DBSession, ChatMessage as DBChatMessage
 from core.database import Document as DBDocument, ModelEndpoint
-from routes.research_routes import _resolve_research_endpoint
 from routes.model_routes import _visible_models
 from routes.chat_helpers import (
     resolve_session_auth,
@@ -255,7 +254,6 @@ def setup_chat_routes(
     chat_handler,
     chat_processor,
     memory_manager,
-    research_handler,
     upload_handler,
     memory_vector=None,
     webhook_manager=None,
@@ -320,20 +318,6 @@ def setup_chat_routes(
             time_filter=time_filter,
             webhook_manager=webhook_manager,
         )
-
-        # Research injection
-        if use_research:
-            try:
-                _r_ep, _r_model, _r_headers = _resolve_research_endpoint(sess)
-                research_ctx = await research_handler.call_research_service(
-                    message, _r_ep, _r_model, llm_headers=_r_headers
-                )
-                ctx.messages.insert(
-                    len(ctx.preface),
-                    untrusted_context_message("research context", research_ctx),
-                )
-            except Exception as e:
-                logger.error(f"Research failed: {e}")
 
         reply = await llm_call_async(
             sess.endpoint_url,
@@ -478,15 +462,11 @@ def setup_chat_routes(
         # Ensure session has auth headers
         resolve_session_auth(sess, session, owner=get_current_user(request))
 
-        # Check for research_pending BEFORE mode persist overwrites it
-        do_research = str(use_research).lower() == "true"
-        if not do_research:
-            if get_session_mode(session) == 'research_pending':
-                do_research = True
-                logger.info(f"Session {session} in research_pending — auto-triggering research")
+        # Deep research feature removed (no outbound web access in this build).
+        do_research = False
 
-        # Persist session mode (research > agent > chat)
-        _effective_mode = 'research' if do_research else (chat_mode or 'chat')
+        # Persist session mode (agent > chat)
+        _effective_mode = chat_mode or 'chat'
         if _effective_mode in ('agent', 'research', 'chat'):
             set_session_mode(session, _effective_mode)
 
@@ -698,127 +678,6 @@ def setup_chat_routes(
             # Emit which memories were injected into context (captured before stream)
             if ctx.used_memories:
                 yield f"data: {json.dumps({'type': 'memories_used', 'data': ctx.used_memories})}\n\n"
-
-            # Run research as a background task (survives page refresh)
-            if do_research and _research_flags["do"]:
-                _r_ep, _r_model, _r_headers = _resolve_research_endpoint(sess)
-                _auth_keys = list(_r_headers.keys()) if _r_headers else []
-                logger.info(f"Research endpoint resolved: model={_r_model}, endpoint={_r_ep}, auth_keys={_auth_keys}, sess_headers_keys={list(sess.headers.keys()) if isinstance(sess.headers, dict) else type(sess.headers)}")
-
-                # Clarification round: only for very short/vague queries on first research message.
-                # Skip in compare mode — each pane is a fresh session, so every one would
-                # ask clarifying questions and the user would have to answer each pane
-                # separately, breaking the parallel comparison.
-                _prior_json = research_handler._get_session_json(session)
-                _history_len = len(sess.history) if hasattr(sess, 'history') else 0
-                _is_first_research = not _prior_json and _history_len <= 2 and not compare_mode
-
-                if _is_first_research:
-                    logger.info(f"First research message — asking clarifying questions for: {message[:60]}")
-                    yield f'data: {json.dumps({"type": "model_info", "model": sess.model, "suffix": "Research"})}\n\n'
-                    # Set DB mode to research_pending so the NEXT message auto-triggers research
-                    set_session_mode(session, "research_pending")
-                    ctx.messages.insert(0, {"role": "system", "content":
-                        "The user wants to start deep web research. Before searching, ask 2-3 brief "
-                        "clarifying questions to understand exactly what they want to know. For example: "
-                        "what aspects matter most, are they comparing to something, what's their context "
-                        "(moving, traveling, curiosity). Be conversational. Keep it short."
-                    })
-                    _skip_research = True
-                else:
-                    _skip_research = False
-
-                if not _skip_research:
-                    # Phase 2: Start actual research
-                    def _on_research_done(_sid, _result, _sources, _findings):
-                        """Persist research to DB when background task finishes."""
-                        if incognito:
-                            return
-                        try:
-                            _s = session_manager.get_session(_sid)
-                            if not _s:
-                                logger.warning(f"Session {_sid} expired before research completed")
-                                return
-                            _md = {"research": True, "model": _s.model}
-                            if _sources:
-                                _md["research_sources"] = _sources
-                            if _findings:
-                                _md["research_findings"] = _findings
-                            _clean_res, _md = clean_thinking_for_save(_result, _md)
-                            _s.add_message(ChatMessage("assistant", _clean_res, metadata=_md))
-                            session_manager.save_sessions()
-                            logger.info(f"Research result persisted to DB for session {_sid}")
-                        except Exception as _e:
-                            logger.error(f"Failed to persist research to DB: {_e}")
-
-                    # Check for prior research to continue from
-                    _prior_report = ""
-                    _prior_findings = None
-                    _prior_urls = None
-                    _prior_json = research_handler._get_session_json(session)
-                    if _prior_json:
-                        _prior_report = _prior_json.get("raw_report", "")
-                        _prior_findings = _prior_json.get("raw_findings")
-                        _src_urls = {s.get("url", "") for s in (_prior_json.get("sources") or []) if s.get("url")}
-                        _prior_urls = _src_urls if _src_urls else None
-                        if _prior_report:
-                            logger.info(f"Continuing research for session {session} with {len(_src_urls)} prior URLs")
-
-                    # Synthesize conversation into a focused research query
-                    _research_query = await research_handler.synthesize_query(
-                        sess, message, _r_ep, _r_model, _r_headers,
-                    )
-                    logger.info(f"Research query: {_research_query[:120]}")
-
-                    research_handler.start_research(
-                        session, _research_query, _r_ep, _r_model,
-                        llm_headers=_r_headers,
-                        prior_report=_prior_report,
-                        prior_findings=_prior_findings,
-                        prior_urls=_prior_urls,
-                        on_complete=_on_research_done,
-                        owner=_user,
-                    )
-
-                    _heartbeat_counter = 0
-                    _last_progress = {}
-                    _sent_avg = False
-                    while True:
-                        status = research_handler.get_status(session)
-                        if not status or status["status"] != "running":
-                            break
-                        progress = status.get("progress", {})
-                        if progress and progress != _last_progress:
-                            _last_progress = progress
-                            if not _sent_avg:
-                                _sent_avg = True
-                                progress = dict(progress)
-                                progress["started_at"] = status.get("started_at")
-                                avg = status.get("avg_duration")
-                                if avg:
-                                    progress["avg_duration"] = avg
-                            yield f"data: {json.dumps({'type': 'research_progress', 'data': progress})}\n\n"
-                            _heartbeat_counter = 0
-                        else:
-                            _heartbeat_counter += 1
-                            yield f": heartbeat {_heartbeat_counter}\n\n"
-                        await asyncio.sleep(1.0)
-
-                    research_sources = research_handler.get_sources(session)
-                    if research_sources:
-                        yield f"data: {json.dumps({'type': 'research_sources', 'data': research_sources})}\n\n"
-
-                    research_findings = research_handler.get_raw_findings(session)
-                    if research_findings:
-                        yield f"data: {json.dumps({'type': 'research_findings', 'data': research_findings})}\n\n"
-
-                    # Signal frontend to fetch and render the research result
-                    yield f"data: {json.dumps({'type': 'research_done', 'data': {'session_id': session}})}\n\n"
-                    yield "data: [DONE]\n\n"
-                    research_handler.clear_result(session)
-                    _stream_set(session, status="done")
-                    _active_streams.pop(session, None)
-                    return
 
             messages = ctx.messages
 
@@ -1315,7 +1174,7 @@ def setup_chat_routes(
                         # Update the last assistant message in session history.
                         # Strip reasoning-model <think> blocks so the persisted
                         # rewrite is just the rewritten text, not its scratchpad.
-                        from src.research_utils import strip_thinking
+                        from src.text_helpers import strip_thinking
                         full_response = strip_thinking(full_response).strip() or full_response
                         if full_response:
                             for msg in reversed(sess.history):

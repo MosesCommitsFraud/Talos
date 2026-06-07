@@ -42,12 +42,6 @@ NON_ADMIN_BLOCKED_TOOLS = {
     "vault_search",
     "vault_get",
     "vault_unlock",
-    "download_model",
-    "serve_model",
-    "serve_preset",
-    "stop_served_model",
-    "cancel_download",
-    "adopt_served_model",
 }
 
 
@@ -58,19 +52,11 @@ PLAN_MODE_READONLY_TOOLS = {
     "grep",
     "glob",
     "ls",
-    "web_search",
-    "web_fetch",
     "search_chats",
     "list_models",
     "list_sessions",
     "list_emails",
     "read_email",
-    "list_served_models",
-    "list_downloads",
-    "list_cached_models",
-    "search_hf_models",
-    "list_serve_presets",
-    "list_cookbook_servers",
     "resolve_contact",
     "chat_with_model",
     "ask_teacher",
@@ -85,9 +71,8 @@ _PLAN_MODE_KNOWN_MUTATORS = {
     "manage_endpoints", "manage_mcp", "manage_webhooks", "manage_tokens",
     "manage_settings", "manage_contact", "manage_calendar", "api_call", "app_api",
     "ui_control", "send_email", "reply_to_email", "bulk_email", "delete_email",
-    "archive_email", "mark_email_read", "download_model", "serve_model",
-    "stop_served_model", "cancel_download", "adopt_served_model", "serve_preset",
-    "generate_image", "edit_image", "trigger_research", "manage_research",
+    "archive_email", "mark_email_read",
+    "generate_image", "edit_image",
 }
 
 

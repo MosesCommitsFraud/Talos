@@ -5,9 +5,6 @@ import re
 import time
 from collections import Counter
 from typing import List, Dict, Any, Optional, Tuple
-from src.chat_helpers import extract_urls
-from src.youtube_handler import is_youtube_url
-from src.search import comprehensive_web_search, fetch_webpage_content
 from src.prompt_security import UNTRUSTED_CONTEXT_POLICY, untrusted_context_message
 
 logger = logging.getLogger(__name__)
@@ -285,36 +282,9 @@ class ChatProcessor:
             except Exception as e:
                 logger.warning(f"RAG retrieval failed: {e}")
 
-        # Add web search if enabled
+        # Web search and URL auto-fetch removed — this build runs internally
+        # with no outbound web access.
         web_sources = []
-        if use_web:
-            try:
-                web_context, web_sources = comprehensive_web_search(
-                    message, time_filter=time_filter, return_sources=True
-                )
-                preface.append(untrusted_context_message("web search results", web_context))
-            except Exception as e:
-                logger.error(f"Web search failed: {e}")
-                preface.append({"role": "system", "content": "Web search encountered an error and could not retrieve results."})
-
-        # Process non-YouTube URLs in message (YouTube handled by preprocess_message)
-        # Skip auto-fetch for long pastes (the user already pasted the content —
-        # fetching every embedded link buries the actual question under
-        # hundreds of KB of duplicate page HTML and confuses the model) or for
-        # link-heavy pastes (>3 URLs typically means it's a boilerplate-laden
-        # blog post, not a "summarize this URL" request).
-        urls = extract_urls(message)
-        non_yt_urls = [u for u in urls if not is_youtube_url(u)]
-        skip_url_fetch = len(message) > 2000 or len(non_yt_urls) > 3
-        if not skip_url_fetch:
-            for url in non_yt_urls:
-                result = fetch_webpage_content(url)
-                if result.get('success'):
-                    content = result.get('content', '')[:10000]
-                    preface.append(untrusted_context_message(
-                        f"web page: {url}",
-                        f"Content from {url}:\n\n{content}",
-                    ))
 
         # Skills index — progressive disclosure. Only injected when the
         # model has the `manage_skills` tool available (agent_mode), and

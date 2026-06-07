@@ -19,9 +19,7 @@ from src.preset_manager import PresetManager
 from src.chat_processor import ChatProcessor
 from src.model_discovery import ModelDiscovery
 from src.chat_handler import ChatHandler
-from src.research_handler import ResearchHandler
 from src.upload_handler import UploadHandler
-from src.search import update_search_config
 
 logger = logging.getLogger(__name__)
 
@@ -80,26 +78,18 @@ def initialize_managers(base_dir: str, rag_manager=None) -> Dict[str, Any]:
 
     # Initialize processors
     chat_processor = ChatProcessor(memory_manager, personal_docs_manager, memory_vector=memory_vector, skills_manager=skills_manager)
-    research_handler = ResearchHandler()
-    
+
     # Initialize chat handler with all dependencies
     chat_handler = ChatHandler(
         session_manager=session_manager,
         memory_manager=memory_manager,
         chat_processor=chat_processor,
-        research_handler=research_handler,
         preset_manager=preset_manager,
         upload_handler=upload_handler,
     )
     
     # Initialize model discovery
     model_discovery = ModelDiscovery(DEFAULT_HOST, OPENAI_API_KEY)
-    
-    # Load and apply saved API keys
-    saved_keys = api_key_manager.load()
-    if "brave" in saved_keys:
-        update_search_config(api_key=saved_keys["brave"])
-        logger.info("Loaded Brave API key from saved configuration")
     
     return {
         "memory_manager": memory_manager,
@@ -112,7 +102,6 @@ def initialize_managers(base_dir: str, rag_manager=None) -> Dict[str, Any]:
         "api_key_manager": api_key_manager,
         "preset_manager": preset_manager,
         "chat_processor": chat_processor,
-        "research_handler": research_handler,
         "chat_handler": chat_handler,
         "model_discovery": model_discovery,
         "current_presets": preset_manager.presets,

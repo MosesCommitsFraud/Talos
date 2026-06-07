@@ -119,10 +119,6 @@ DEFAULT_SETTINGS = {
     "sql_database": {"enabled": False},
     "rag_pipeline": {},
     "disabled_tools": [
-        "web_search",
-        "web_fetch",
-        "trigger_research",
-        "manage_research",
         "generate_image",
         "manage_notes",
         "manage_tasks",
@@ -137,10 +133,6 @@ DEFAULT_SETTINGS = {
         "archive_email",
         "mark_email_read",
         "manage_contact",
-        "list_served_models",
-        "serve_model",
-        "download_model",
-        "stop_served_model",
     ],
     "task_endpoint_id": "",
     "task_model": "",
@@ -194,9 +186,6 @@ DEFAULT_SETTINGS = {
 }
 
 DEFAULT_FEATURES = {
-    "web_search": False,
-    "web_fetch": False,
-    "deep_research": False,
     "memory": True,
     "document_editor": True,
     "rag": True,

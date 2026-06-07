@@ -26,7 +26,7 @@ MAX_OUTPUT_CHARS = 10_000
 MAX_READ_CHARS = 20_000
 
 # Tool types that trigger execution
-TOOL_TAGS = {"bash", "python", "web_search", "web_fetch", "read_file", "write_file", "edit_file",
+TOOL_TAGS = {"bash", "python", "read_file", "write_file", "edit_file",
              "grep", "glob", "ls",
              "create_document", "update_document", "edit_document",
              "search_chats",
@@ -43,22 +43,10 @@ TOOL_TAGS = {"bash", "python", "web_search", "web_fetch", "read_file", "write_fi
              "resolve_contact", "manage_contact", "list_email_accounts", "send_email", "list_emails",
              "read_email", "reply_to_email", "bulk_email", "archive_email",
              "delete_email", "mark_email_read",
-             # Cookbook tools (LLM serving + downloads). Without these
-             # entries, native function calls to e.g. list_served_models
-             # are rejected as "Unknown function call" before reaching
-             # the dispatcher — silent failure for the whole cookbook
-             # surface.
-             "download_model", "serve_model",
-             "list_served_models", "stop_served_model",
-             "list_downloads", "cancel_download",
-             "search_hf_models", "list_cached_models",
-             "list_serve_presets", "serve_preset", "adopt_served_model",
-             "list_cookbook_servers",
-             # Other tools the agent reaches for that were also missing.
-             "edit_image", "trigger_research", "manage_research",
-             # Generic loopback to any UI-button endpoint (cookbook,
-             # gallery, email folders, etc.) — agent uses this when
-             # there's no named tool wrapper for the action.
+             "edit_image",
+             # Generic loopback to any UI-button endpoint (gallery, email
+             # folders, etc.) — agent uses this when there's no named tool
+             # wrapper for the action.
              "app_api"}
 
 ToolBlock = namedtuple("ToolBlock", ["tool_type", "content"])
