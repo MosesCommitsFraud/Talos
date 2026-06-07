@@ -81,5 +81,5 @@ async def upload_file_to_sandbox(
             )
         resp.raise_for_status()
         data = resp.json()
-    data["sandbox_path"] = filename
+    data["sandbox_path"] = data.get("filename") or filename
     return data

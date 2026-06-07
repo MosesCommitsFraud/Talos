@@ -1,16 +1,20 @@
+import asyncio
 import hashlib
 import json
 import os
+import shlex
 import shutil
 import signal
 import subprocess
 import time
+import uuid
 import fnmatch
 import re
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi import FastAPI, File, HTTPException, Request, UploadFile
 from pydantic import BaseModel
 
 
@@ -35,6 +39,8 @@ class WorkspaceResponse(BaseModel):
     chat_id: str
     linux_user: str
     workspace: str
+    filename: str | None = None
+    path: str | None = None
 
 
 class OpencodeResponse(BaseModel):
@@ -61,6 +67,20 @@ class ExecResponse(BaseModel):
     stderr: str
     exit_code: int
     timed_out: bool = False
+
+
+class ExecuteRequest(BaseModel):
+    command: str
+    cwd: str | None = None
+    env: dict[str, str] | None = None
+
+
+class InputRequest(BaseModel):
+    input: str
+
+
+class CwdRequest(BaseModel):
+    path: str
 
 
 class FileReadRequest(BaseModel):
@@ -97,6 +117,28 @@ MAX_READ_CHARS = 20_000
 MAX_OUTPUT_CHARS = 10_000
 MAX_DIFF_LINES = 400
 SKIP_DIRS = {".git", "node_modules", "__pycache__", ".venv", "venv", "dist", "build", ".pytest_cache", ".mypy_cache"}
+PROCESS_LOG_ROOT = STATE_PATH.parent / "processes"
+PROCESS_RETENTION_SECONDS = 3600
+SESSION_CWD_TTL_SECONDS = int(os.getenv("TALOS_SANDBOX_SESSION_CWD_TTL", "604800"))
+
+
+@dataclass
+class BackgroundProcess:
+    id: str
+    user_id: str
+    chat_id: str
+    command: str
+    runner: "PtyRunner"
+    log_path: Path
+    status: str = "running"
+    exit_code: int | None = None
+    started_at: float = field(default_factory=time.time)
+    finished_at: float | None = None
+    log_task: asyncio.Task | None = field(default=None, repr=False)
+
+
+_processes: dict[str, BackgroundProcess] = {}
+_session_cwds: dict[str, tuple[str, float]] = {}
 
 
 def _state() -> dict[str, Any]:
@@ -129,11 +171,17 @@ def workspace_path(user_id: str, chat_id: str) -> Path:
     return user_home(user_id) / "workspaces" / safe_chat
 
 
+def _session_key(user_id: str, chat_id: str) -> str:
+    return f"{user_id}:{chat_id}"
+
+
 def _workspace(user_id: str, chat_id: str) -> tuple[str, Path]:
     name, _home = ensure_user(user_id)
     workspace = workspace_path(user_id, chat_id)
+    created = not workspace.exists()
     workspace.mkdir(parents=True, exist_ok=True)
-    _run(["chown", "-R", f"{name}:{name}", str(workspace)])
+    if created:
+        _run(["chown", f"{name}:{name}", str(workspace)])
     return name, workspace
 
 
@@ -151,8 +199,142 @@ def _safe_path(workspace: Path, raw_path: str) -> Path:
     return resolved
 
 
+def _expire_session_cwds() -> None:
+    now = time.time()
+    for key, (_cwd, ts) in list(_session_cwds.items()):
+        if now - ts > SESSION_CWD_TTL_SECONDS:
+            _session_cwds.pop(key, None)
+
+
+def _get_session_cwd(user_id: str, chat_id: str, workspace: Path) -> Path:
+    _expire_session_cwds()
+    key = _session_key(user_id, chat_id)
+    cwd, _ts = _session_cwds.get(key, (str(workspace), 0))
+    try:
+        resolved = _safe_path(workspace, cwd)
+    except HTTPException:
+        resolved = workspace.resolve()
+    _session_cwds[key] = (str(resolved), time.time())
+    return resolved
+
+
+def _set_session_cwd(user_id: str, chat_id: str, workspace: Path, raw_path: str) -> Path:
+    target = _safe_path(workspace, raw_path)
+    if not target.is_dir():
+        raise HTTPException(404, "Directory not found")
+    _session_cwds[_session_key(user_id, chat_id)] = (str(target), time.time())
+    return target
+
+
 def _truncate(text: str, limit: int = MAX_OUTPUT_CHARS) -> str:
     return text if len(text) <= limit else text[:limit] + f"\n... [truncated at {limit} chars]"
+
+
+class PtyRunner:
+    def __init__(self, *, linux_user: str, command: str, cwd: Path, env: dict[str, str] | None = None):
+        import fcntl
+        import pty
+        import struct
+        import termios
+
+        master_fd, slave_fd = pty.openpty()
+        try:
+            fcntl.ioctl(slave_fd, termios.TIOCSWINSZ, struct.pack("HHHH", 24, 120, 0, 0))
+            proc_env = os.environ.copy()
+            if env:
+                proc_env.update({str(k): str(v) for k, v in env.items()})
+            proc_env["HOME"] = str(HOME_ROOT / linux_user)
+            proc_env["TERM"] = "xterm-256color"
+            proc_env["COLUMNS"] = "120"
+            proc_env["LINES"] = "40"
+            proc_env["PATH"] = f"/opt/talos-sandbox-venv/bin:{proc_env.get('PATH', '')}"
+            self.process = subprocess.Popen(
+                ["gosu", linux_user, "bash", "-lc", command],
+                stdin=slave_fd,
+                stdout=slave_fd,
+                stderr=slave_fd,
+                cwd=str(cwd),
+                env=proc_env,
+                start_new_session=True,
+            )
+        except Exception:
+            os.close(slave_fd)
+            os.close(master_fd)
+            raise
+        os.close(slave_fd)
+        self.master_fd = master_fd
+
+    async def log_output(self, proc: BackgroundProcess) -> None:
+        loop = asyncio.get_event_loop()
+        proc.log_path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            with proc.log_path.open("a", encoding="utf-8") as log:
+                while True:
+                    try:
+                        data = await loop.run_in_executor(None, os.read, self.master_fd, 4096)
+                    except OSError:
+                        break
+                    if not data:
+                        break
+                    log.write(json.dumps({"type": "output", "data": data.decode(errors="replace"), "ts": time.time()}) + "\n")
+                    log.flush()
+        finally:
+            proc.exit_code = await asyncio.to_thread(self.process.wait)
+            proc.status = "done"
+            proc.finished_at = time.time()
+            self.close()
+
+    def write_input(self, text: str) -> None:
+        os.write(self.master_fd, text.encode())
+
+    def kill(self, force: bool = False) -> None:
+        sig = signal.SIGKILL if force else signal.SIGTERM
+        try:
+            os.killpg(self.process.pid, sig)
+        except (ProcessLookupError, PermissionError):
+            pass
+
+    def close(self) -> None:
+        try:
+            os.close(self.master_fd)
+        except OSError:
+            pass
+
+
+def _read_process_log(path: Path, offset: int = 0, tail: int | None = None) -> tuple[str, int, bool]:
+    if not path.exists():
+        return "", 0, False
+    lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+    total = len(lines)
+    selected = lines[max(offset, 0):]
+    if tail and tail > 0:
+        selected = selected[-tail:]
+    chunks: list[str] = []
+    truncated = False
+    budget = MAX_OUTPUT_CHARS
+    for line in selected:
+        try:
+            item = json.loads(line)
+            text = str(item.get("data") or "")
+        except Exception:
+            text = line
+        if len(text) > budget:
+            chunks.append(text[:budget])
+            truncated = True
+            break
+        chunks.append(text)
+        budget -= len(text)
+        if budget <= 0:
+            truncated = True
+            break
+    return "".join(chunks), total, truncated
+
+
+def _cleanup_processes() -> None:
+    now = time.time()
+    for pid, proc in list(_processes.items()):
+        if proc.finished_at and now - proc.finished_at > PROCESS_RETENTION_SECONDS:
+            _processes.pop(pid, None)
 
 
 def _diff(old: str, new: str, path: str) -> dict[str, Any] | None:
@@ -177,10 +359,15 @@ def ensure_user(user_id: str) -> tuple[str, Path]:
     name = linux_user(user_id)
     home = user_home(user_id)
     HOME_ROOT.mkdir(parents=True, exist_ok=True)
+    created = False
     if subprocess.run(["id", "-u", name], capture_output=True).returncode != 0:
         _run(["useradd", "--create-home", "--home-dir", str(home), "--shell", "/bin/bash", name])
-    home.mkdir(parents=True, exist_ok=True)
-    _run(["chown", "-R", f"{name}:{name}", str(home)])
+        created = True
+    if not home.exists():
+        home.mkdir(parents=True, exist_ok=True)
+        created = True
+    if created:
+        _run(["chown", "-R", f"{name}:{name}", str(home)])
     return name, home
 
 
@@ -227,55 +414,244 @@ async def upload_file_route(user_id: str, chat_id: str, file: UploadFile = File(
     with target.open("wb") as out:
         shutil.copyfileobj(file.file, out)
     _run(["chown", f"{name}:{name}", str(target)])
-    return WorkspaceResponse(user_id=user_id, chat_id=chat_id, linux_user=name, workspace=str(workspace))
+    return WorkspaceResponse(user_id=user_id, chat_id=chat_id, linux_user=name, workspace=str(workspace), filename=filename, path=str(target))
+
+
+@app.get("/users/{user_id}/workspaces/{chat_id}/cwd")
+def get_cwd_route(user_id: str, chat_id: str) -> dict[str, Any]:
+    _name, workspace = _workspace(user_id, chat_id)
+    cwd = _get_session_cwd(user_id, chat_id, workspace)
+    return {"cwd": str(cwd), "workspace": str(workspace)}
+
+
+@app.post("/users/{user_id}/workspaces/{chat_id}/cwd")
+def set_cwd_route(user_id: str, chat_id: str, req: CwdRequest) -> dict[str, Any]:
+    _name, workspace = _workspace(user_id, chat_id)
+    cwd = _set_session_cwd(user_id, chat_id, workspace, req.path)
+    return {"cwd": str(cwd), "workspace": str(workspace)}
+
+
+async def _start_process(user_id: str, chat_id: str, req: ExecuteRequest) -> BackgroundProcess:
+    name, workspace = _workspace(user_id, chat_id)
+    base_cwd = _get_session_cwd(user_id, chat_id, workspace)
+    cwd = _safe_path(workspace, req.cwd) if req.cwd else base_cwd
+    if not cwd.is_dir():
+        raise HTTPException(404, "Working directory not found")
+    process_id = time.strftime("%Y%m%d-%H%M%S-") + uuid.uuid4().hex[:6]
+    log_path = PROCESS_LOG_ROOT / f"{process_id}.jsonl"
+    runner = PtyRunner(linux_user=name, command=req.command, cwd=cwd, env=req.env)
+    proc = BackgroundProcess(
+        id=process_id,
+        user_id=user_id,
+        chat_id=chat_id,
+        command=req.command,
+        runner=runner,
+        log_path=log_path,
+    )
+    proc.log_task = asyncio.create_task(runner.log_output(proc))
+    _processes[process_id] = proc
+    return proc
+
+
+@app.get("/users/{user_id}/workspaces/{chat_id}/execute")
+def list_processes_route(user_id: str, chat_id: str) -> list[dict[str, Any]]:
+    _cleanup_processes()
+    return [
+        {
+            "id": p.id,
+            "command": p.command,
+            "status": p.status,
+            "exit_code": p.exit_code,
+            "log_path": str(p.log_path),
+        }
+        for p in _processes.values()
+        if p.user_id == user_id and p.chat_id == chat_id
+    ]
+
+
+@app.post("/users/{user_id}/workspaces/{chat_id}/execute")
+async def execute_route(
+    user_id: str,
+    chat_id: str,
+    req: ExecuteRequest,
+    wait: float | None = None,
+    tail: int | None = None,
+) -> dict[str, Any]:
+    proc = await _start_process(user_id, chat_id, req)
+    if wait is not None:
+        try:
+            await asyncio.wait_for(asyncio.shield(proc.log_task), timeout=max(0, min(float(wait), 300)))
+        except asyncio.TimeoutError:
+            pass
+    output, next_offset, truncated = _read_process_log(proc.log_path, offset=0, tail=tail)
+    return {
+        "id": proc.id,
+        "command": proc.command,
+        "status": proc.status,
+        "exit_code": proc.exit_code,
+        "output": output,
+        "truncated": truncated,
+        "next_offset": next_offset,
+        "log_path": str(proc.log_path),
+    }
+
+
+def _get_process(user_id: str, chat_id: str, process_id: str) -> BackgroundProcess:
+    _cleanup_processes()
+    proc = _processes.get(process_id)
+    if not proc or proc.user_id != user_id or proc.chat_id != chat_id:
+        raise HTTPException(404, "Process not found")
+    return proc
+
+
+@app.get("/users/{user_id}/workspaces/{chat_id}/execute/{process_id}/status")
+async def process_status_route(
+    user_id: str,
+    chat_id: str,
+    process_id: str,
+    wait: float | None = None,
+    offset: int = 0,
+    tail: int | None = None,
+) -> dict[str, Any]:
+    proc = _get_process(user_id, chat_id, process_id)
+    if wait is not None and proc.status == "running":
+        try:
+            await asyncio.wait_for(asyncio.shield(proc.log_task), timeout=max(0, min(float(wait), 300)))
+        except asyncio.TimeoutError:
+            pass
+    output, next_offset, truncated = _read_process_log(proc.log_path, offset=offset, tail=tail)
+    return {
+        "id": proc.id,
+        "command": proc.command,
+        "status": proc.status,
+        "exit_code": proc.exit_code,
+        "output": output,
+        "truncated": truncated,
+        "next_offset": next_offset,
+        "log_path": str(proc.log_path),
+    }
+
+
+@app.post("/users/{user_id}/workspaces/{chat_id}/execute/{process_id}/input")
+def process_input_route(user_id: str, chat_id: str, process_id: str, req: InputRequest) -> dict[str, Any]:
+    proc = _get_process(user_id, chat_id, process_id)
+    if proc.status != "running":
+        raise HTTPException(400, "Process has already exited")
+    proc.runner.write_input(req.input.encode("raw_unicode_escape").decode("unicode_escape"))
+    return {"status": "ok"}
+
+
+@app.delete("/users/{user_id}/workspaces/{chat_id}/execute/{process_id}")
+def kill_process_route(user_id: str, chat_id: str, process_id: str, force: bool = False) -> dict[str, Any]:
+    proc = _get_process(user_id, chat_id, process_id)
+    if proc.status == "running":
+        proc.runner.kill(force=force)
+        proc.status = "killed"
+        proc.finished_at = time.time()
+    return {"status": proc.status}
+
+
+@app.post("/users/{user_id}/workspaces/{chat_id}/terminals")
+async def create_terminal_route(user_id: str, chat_id: str) -> dict[str, Any]:
+    proc = await _start_process(user_id, chat_id, ExecuteRequest(command="bash"))
+    return {"id": proc.id, "status": proc.status, "log_path": str(proc.log_path)}
+
+
+@app.get("/users/{user_id}/workspaces/{chat_id}/terminals/{terminal_id}")
+async def terminal_status_route(
+    user_id: str,
+    chat_id: str,
+    terminal_id: str,
+    offset: int = 0,
+    tail: int | None = None,
+) -> dict[str, Any]:
+    return await process_status_route(user_id, chat_id, terminal_id, wait=None, offset=offset, tail=tail)
+
+
+@app.post("/users/{user_id}/workspaces/{chat_id}/terminals/{terminal_id}/input")
+def terminal_input_route(user_id: str, chat_id: str, terminal_id: str, req: InputRequest) -> dict[str, Any]:
+    return process_input_route(user_id, chat_id, terminal_id, req)
+
+
+@app.delete("/users/{user_id}/workspaces/{chat_id}/terminals/{terminal_id}")
+def delete_terminal_route(user_id: str, chat_id: str, terminal_id: str, force: bool = False) -> dict[str, Any]:
+    return kill_process_route(user_id, chat_id, terminal_id, force=force)
+
+
+@app.get("/users/{user_id}/workspaces/{chat_id}/ports")
+def list_ports_route(user_id: str, chat_id: str) -> dict[str, Any]:
+    name, _workspace = _workspace(user_id, chat_id)
+    try:
+        result = subprocess.run(
+            ["lsof", "-Pan", "-u", name, "-iTCP", "-sTCP:LISTEN"],
+            text=True,
+            capture_output=True,
+            timeout=5,
+        )
+    except Exception as exc:
+        return {"ports": [], "error": str(exc)}
+    ports: list[dict[str, Any]] = []
+    for line in (result.stdout or "").splitlines()[1:]:
+        parts = line.split()
+        if len(parts) < 9:
+            continue
+        name_part = parts[-2] if parts[-1] == "(LISTEN)" else parts[-1]
+        match = re.search(r":(\d+)$", name_part)
+        if not match:
+            continue
+        try:
+            port = int(match.group(1))
+        except ValueError:
+            continue
+        ports.append({"command": parts[0], "pid": parts[1], "port": port, "address": name_part})
+    unique = {p["port"]: p for p in ports}
+    return {"ports": list(unique.values())}
+
+
+@app.api_route("/users/{user_id}/workspaces/{chat_id}/proxy/{port}/{path:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"])
+async def proxy_port_route(user_id: str, chat_id: str, port: int, path: str, request: Request):
+    import httpx
+    from fastapi.responses import Response
+
+    if port < 1 or port > 65535:
+        raise HTTPException(422, "Port must be between 1 and 65535")
+    listed = list_ports_route(user_id, chat_id).get("ports", [])
+    if port not in {int(p.get("port")) for p in listed}:
+        raise HTTPException(404, "Port is not listening for this sandbox user")
+    target = f"http://127.0.0.1:{port}/{path}"
+    if request.query_params:
+        target += f"?{request.query_params}"
+    headers = dict(request.headers)
+    for header in ("host", "authorization", "connection", "transfer-encoding"):
+        headers.pop(header, None)
+    async with httpx.AsyncClient(timeout=httpx.Timeout(120.0, connect=5.0), follow_redirects=False) as client:
+        upstream = await client.request(request.method, target, headers=headers, content=await request.body() or None)
+    response_headers = dict(upstream.headers)
+    for header in ("transfer-encoding", "connection", "content-encoding", "content-length"):
+        response_headers.pop(header, None)
+    return Response(content=upstream.content, status_code=upstream.status_code, headers=response_headers)
 
 
 @app.post("/users/{user_id}/workspaces/{chat_id}/exec", response_model=ExecResponse)
-def exec_route(user_id: str, chat_id: str, req: ExecRequest) -> ExecResponse:
+async def exec_route(user_id: str, chat_id: str, req: ExecRequest) -> ExecResponse:
     name, workspace = _workspace(user_id, chat_id)
-
     timeout = max(1, min(int(req.timeout or 120), 900))
-    env = os.environ.copy()
-    env["HOME"] = str(user_home(user_id))
-    env["TERM"] = "xterm-256color"
-    env["COLUMNS"] = "120"
-    env["LINES"] = "40"
-    env["PATH"] = f"/opt/talos-sandbox-venv/bin:{env.get('PATH', '')}"
-
     if req.kind == "python":
-        cmd = ["gosu", name, "/opt/talos-sandbox-venv/bin/python", "-c", req.code or req.command]
+        command = f"/opt/talos-sandbox-venv/bin/python -c {shlex.quote(req.code or req.command)}"
     else:
-        cmd = ["gosu", name, "bash", "-lc", req.command]
-
+        command = req.command
+    proc = await _start_process(user_id, chat_id, ExecuteRequest(command=command))
     try:
-        result = subprocess.run(
-            cmd,
-            cwd=str(workspace),
-            env=env,
-            text=True,
-            capture_output=True,
-            timeout=timeout,
-        )
-        return ExecResponse(
-            user_id=user_id,
-            chat_id=chat_id,
-            linux_user=name,
-            workspace=str(workspace),
-            stdout=result.stdout,
-            stderr=result.stderr,
-            exit_code=result.returncode,
-        )
-    except subprocess.TimeoutExpired as exc:
-        return ExecResponse(
-            user_id=user_id,
-            chat_id=chat_id,
-            linux_user=name,
-            workspace=str(workspace),
-            stdout=exc.stdout or "",
-            stderr=exc.stderr or "",
-            exit_code=124,
-            timed_out=True,
-        )
+        await asyncio.wait_for(asyncio.shield(proc.log_task), timeout=timeout)
+    except asyncio.TimeoutError:
+        proc.runner.kill(force=True)
+        proc.status = "killed"
+        proc.exit_code = 124
+        proc.finished_at = time.time()
+        output, _next, _truncated = _read_process_log(proc.log_path, offset=0)
+        return ExecResponse(user_id=user_id, chat_id=chat_id, linux_user=name, workspace=str(workspace), stdout=output, stderr="", exit_code=124, timed_out=True)
+    output, _next, _truncated = _read_process_log(proc.log_path, offset=0)
+    return ExecResponse(user_id=user_id, chat_id=chat_id, linux_user=name, workspace=str(workspace), stdout=output, stderr="", exit_code=proc.exit_code or 0)
 
 
 @app.post("/users/{user_id}/workspaces/{chat_id}/files/read")

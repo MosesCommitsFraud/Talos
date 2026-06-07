@@ -6,29 +6,55 @@ RUN sed -i 's|http://deb.debian.org|https://deb.debian.org|g' /etc/apt/sources.l
     && apt-get update -o Acquire::Retries=5 \
     && apt-get install -y --no-install-recommends -o Acquire::Retries=5 \
     bash \
+    bc \
     build-essential \
+    bzip2 \
+    cmake \
     curl \
     default-libmysqlclient-dev \
+    diffutils \
+    dnsutils \
     fd-find \
     freetds-bin \
     freetds-dev \
+    ffmpeg \
+    file \
     gfortran \
     git \
     gosu \
+    htop \
+    imagemagick \
+    iputils-ping \
     jq \
+    less \
+    lsof \
+    make \
+    netcat-openbsd \
+    net-tools \
+    openssh-client \
+    pandoc \
+    patch \
     libpq-dev \
     libxml2-dev \
     libxslt1-dev \
     pkg-config \
     postgresql-client \
+    procps \
     python3 \
     python3-dev \
     python3-pip \
     python3-venv \
     ripgrep \
+    rsync \
+    screen \
+    socat \
     sqlite3 \
+    strace \
+    sysstat \
     sudo \
+    telnet \
     tini \
+    tmux \
     tree \
     tdsodbc \
     unixodbc \
@@ -50,10 +76,12 @@ ARG OPENCODE_NPM_PACKAGE=opencode-ai
 RUN npm install -g ${OPENCODE_NPM_PACKAGE}
 
 COPY sandboxd.py ./sandboxd.py
+COPY entrypoint.sh ./entrypoint.sh
 
 RUN mkdir -p /home/talos /var/lib/talos-sandbox
+RUN chmod +x ./entrypoint.sh
 
 EXPOSE 7800
 
 ENTRYPOINT ["/usr/bin/tini", "--"]
-CMD ["/opt/talos-sandbox-venv/bin/uvicorn", "sandboxd:app", "--host", "0.0.0.0", "--port", "7800"]
+CMD ["./entrypoint.sh"]
