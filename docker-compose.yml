@@ -38,9 +38,6 @@ services:
     environment:
       - TALOS_SANDBOX_HOME_ROOT=/home/talos
       - TALOS_SANDBOX_STATE=/var/lib/talos-sandbox/state.json
-      - TALOS_OPENCODE_PUBLIC_HOST=talos-sandbox
-      - TALOS_OPENCODE_PORT_BASE=${TALOS_OPENCODE_PORT_BASE:-41000}
-      - TALOS_OPENCODE_IDLE_SECONDS=${TALOS_OPENCODE_IDLE_SECONDS:-3600}
       - VLLM_BASE_URL=${VLLM_BASE_URL:-http://192.168.10.91:8000/v1}
       - VLLM_API_KEY=${VLLM_API_KEY:-not-needed}
       - VLLM_MODEL=${VLLM_MODEL:-qwen3-llm}

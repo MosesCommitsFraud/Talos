@@ -33,14 +33,4 @@ def setup_sandbox_routes() -> APIRouter:
         require_admin(request)
         return await call("POST", f"/users/{user_id}/ensure")
 
-    @router.post("/users/{user_id}/opencode/start")
-    async def start_opencode(request: Request, user_id: str):
-        require_admin(request)
-        return await call("POST", f"/users/{user_id}/opencode/start")
-
-    @router.post("/users/{user_id}/opencode/stop")
-    async def stop_opencode(request: Request, user_id: str):
-        require_admin(request)
-        return await call("POST", f"/users/{user_id}/opencode/stop")
-
     return router

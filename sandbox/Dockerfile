@@ -70,11 +70,6 @@ COPY requirements.txt ./requirements.txt
 RUN python3 -m venv /opt/talos-sandbox-venv \
     && /opt/talos-sandbox-venv/bin/pip install --no-cache-dir -r requirements.txt
 
-# The npm package name is intentionally configurable because opencode packaging
-# has changed across releases. Override OPENCODE_NPM_PACKAGE at build time if needed.
-ARG OPENCODE_NPM_PACKAGE=opencode-ai
-RUN npm install -g ${OPENCODE_NPM_PACKAGE}
-
 COPY sandboxd.py ./sandboxd.py
 COPY entrypoint.sh ./entrypoint.sh
 

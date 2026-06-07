@@ -80,7 +80,7 @@ logger = logging.getLogger(__name__)
 # instead of the deprecated @app.on_event("startup"/"shutdown") decorators.
 app = FastAPI(
     title="Talos",
-    description="Self-hosted multi-user AI workspace with isolated opencode sandboxes",
+    description="Self-hosted multi-user AI workspace with isolated per-user sandboxes",
     version="1.0.0",
 )
 
