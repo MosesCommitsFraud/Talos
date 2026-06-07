@@ -118,6 +118,21 @@ class ChatHandler:
             for att_id in att_ids:
                 fi = self.upload_handler.resolve_upload(att_id, owner=owner)
                 if fi:
+                    try:
+                        from src.sandbox_client import sandbox_enabled, upload_file_to_sandbox
+
+                        if sandbox_enabled() and getattr(sess, "id", None):
+                            display_name = fi.get("name") or fi.get("original_name") or fi["id"]
+                            sb = await upload_file_to_sandbox(
+                                owner=owner,
+                                session_id=getattr(sess, "id", None),
+                                path=fi["path"],
+                                display_name=display_name,
+                            )
+                            fi["sandbox_path"] = sb.get("sandbox_path")
+                            fi["sandbox_workspace"] = sb.get("workspace")
+                    except Exception as e:
+                        logger.warning("Failed to mirror upload %s into sandbox: %s", att_id, e)
                     files_by_id[att_id] = fi
 
             for att_id in att_ids:

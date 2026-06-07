@@ -386,13 +386,20 @@ def build_user_content(
         _, ext = os.path.splitext(path.lower())
         mime = upload_info.get("mime") or mimetypes.guess_type(path)[0] or "application/octet-stream"
         display_name = upload_info.get("name") or upload_info.get("original_name") or path
+        tool_path = upload_info.get("sandbox_path") or path
+        tool_where = "sandbox" if upload_info.get("sandbox_path") else "server"
         path_hint = (
             f"\n\n[Attachment file available to tools: {display_name}]\n"
-            f"Path: {path}\n"
-            "If the user asks to analyze, transform, chart, forecast, or inspect this file, use this exact path."
+            f"Path ({tool_where}): {tool_path}\n"
+            "If the user asks to analyze, transform, chart, forecast, or inspect this file, use this exact path. "
+            "For Python/bash in the sandbox, relative sandbox paths are readable from the current working directory."
         )
 
         if upload_handler.is_image_file(display_name, mime):
+            if content and content[0]["type"] == "text":
+                content[0]["text"] += path_hint
+            else:
+                content.insert(0, {"type": "text", "text": path_hint.lstrip()})
             try:
                 with open(path, "rb") as image_file:
                     encoded_string = base64.b64encode(image_file.read()).decode("utf-8")
@@ -409,6 +416,10 @@ def build_user_content(
                     content.insert(0, {"type": "text", "text": "[Image attached but could not be processed]"})
 
         elif upload_handler.is_audio_file(display_name, mime):
+            if content and content[0]["type"] == "text":
+                content[0]["text"] += path_hint
+            else:
+                content.insert(0, {"type": "text", "text": path_hint.lstrip()})
             try:
                 with open(path, "rb") as audio_file:
                     encoded_string = base64.b64encode(audio_file.read()).decode("utf-8")
