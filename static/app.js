@@ -8,7 +8,6 @@ import fileHandlerModule from './js/fileHandler.js';
 import modelsModule from './js/models.js';
 import ragModule from './js/rag.js';
 import presetsModule from './js/presets.js';
-import searchModule from './js/search.js';
 import chatModule from './js/chat.js';
 import compareModule from './js/compare/index.js';
 import documentModule from './js/document.js';
@@ -18,7 +17,6 @@ import markdownModule from './js/markdown.js';
 import chatRenderer from './js/chatRenderer.js';
 import sessionModule from './js/sessions.js';
 import memoryModule from './js/memory.js';
-import voiceRecorderModule from './js/voiceRecorder.js';
 import censorModule from './js/censor.js';
 import galleryModule from './js/gallery.js';
 import tasksModule from './js/tasks.js';
@@ -31,15 +29,7 @@ import './js/modalManager.js';
 // Desktop window tiling — drag a modal near an edge/corner to snap.
 import './js/tileManager.js';
 import themeModule from './js/theme.js';
-// IMPORTANT: import cookbook.js with NO ?v= query — the same plain specifier
-// every other importer (cookbook-hwfit.js / cookbook-diagnosis.js) uses. A query
-// mismatch makes the browser load cookbook.js twice as separate modules (two
-// _envState objects), which broke server selection. Keep all cookbook imports
-// unversioned so this can't recur.
-import cookbookModule from './js/cookbook.js';
 import groupModule from './js/group.js';
-import * as researchPanelModule from './js/research/panel.js';
-import ttsModule from './js/tts-ai.js';
 import spinnerModule from './js/spinner.js';
 import { initKeyboardShortcuts } from './js/keyboard-shortcuts.js';
 import { initSidebarLayout, syncRailSide } from './js/sidebar-layout.js';
@@ -50,7 +40,6 @@ window.themeModule = themeModule;
 window.sessionModule = sessionModule;
 window.uiModule = uiModule;
 window.adminModule = adminModule;
-window.cookbookModule = cookbookModule;
 
 // Redirect to login on 401 from any fetch
 const _origFetch = window.fetch;
@@ -669,7 +658,6 @@ function initializeEventListeners() {
     }
     // Close document panel if open
     if (documentModule && documentModule.closePanel) documentModule.closePanel();
-    if (researchPanelModule && researchPanelModule.isOpen()) researchPanelModule.closePanel();
     // Reset research overflow dot (but don't touch research state — caller manages that)
     const _overflowRes = el('overflow-research-btn');
     if (_overflowRes) _overflowRes.classList.remove('active');
@@ -822,27 +810,6 @@ function initializeEventListeners() {
         }
         _startFreshChat();
         compareModule.toggleMode();
-      }
-    });
-  }
-
-  const toolResearchBtn = el('tool-research-btn');
-  if (toolResearchBtn) {
-    toolResearchBtn.addEventListener('click', () => {
-      researchPanelModule.toggle();
-    });
-  }
-
-  // ── Cookbook modal toggle ──
-  const toolCookbookBtn = el('tool-cookbook-btn');
-  if (toolCookbookBtn) {
-    toolCookbookBtn.addEventListener('click', async () => {
-      if (!cookbookModule) return;
-      // Try minimized→restore or open→minimize via the manager first
-      const Modals = await import('./js/modalManager.js');
-      if (!Modals.toggle('cookbook-modal')) {
-        // Not registered yet → fresh open
-        cookbookModule.open();
       }
     });
   }
@@ -3362,7 +3329,6 @@ function startTalosApp() {
   modelsModule.init(API_BASE);
   ragModule.init(API_BASE);
   presetsModule.init(API_BASE);
-  searchModule.init(API_BASE);
   chatModule.init(API_BASE);
   chatModule.initListeners();
   groupModule.init(API_BASE);
@@ -3370,7 +3336,6 @@ function startTalosApp() {
   if (compareModule) {
     compareModule.init(API_BASE);
   }
-  researchPanelModule.init(API_BASE, markdownModule, sessionModule);
   // Initialize document editor module
   if (documentModule) {
     documentModule.init(API_BASE);
@@ -3542,7 +3507,7 @@ function startTalosApp() {
   window._talosBtnIcons = { send: _sendIcon, mic: _micIcon, stop: _stopIcon, newChat: _newChatIcon };
 
   function _isSttEnabled() {
-    return voiceRecorderModule._sttProvider && voiceRecorderModule._sttProvider !== 'disabled';
+    return false;  // STT removed from this build
   }
 
   function _hasAttachments() {
@@ -3639,12 +3604,6 @@ function startTalosApp() {
     sendBtn.addEventListener('click', (e) => {
       e.preventDefault();
 
-      // If recording, stop recording
-      if (sendBtn.dataset.mode === 'recording' || voiceRecorderModule.getIsRecording()) {
-        voiceRecorderModule.stopRecording();
-        return;
-      }
-
       const hasText = messageInput && messageInput.value.trim().length > 0;
       const hasFiles = _hasAttachments();
 
@@ -3662,20 +3621,6 @@ function startTalosApp() {
             if (railNew) railNew.click();
           }
         }
-        return;
-      }
-
-      // If input is empty and STT is enabled, start recording
-      if (!hasText && !hasFiles && _isSttEnabled()) {
-        sendBtn.innerHTML = _stopIcon;
-        sendBtn.title = 'Stop recording';
-        sendBtn.dataset.mode = 'recording';
-        sendBtn.classList.add('recording');
-        voiceRecorderModule.startRecording(
-          (audioFile) => fileHandlerModule.addFiles([audioFile]),
-          uiModule.showToast,
-          uiModule.showError
-        );
         return;
       }
 
@@ -3930,7 +3875,6 @@ function startTalosApp() {
   }, 1000);
   
   // Ensure proper initial state
-  voiceRecorderModule.init();
   if (censorModule) censorModule.init();
 
   // Auto-focus message input on load
