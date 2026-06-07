@@ -805,24 +805,10 @@ import slashCommands, { initSlashCommands, isCommand, handleSlashCommand, handle
       abortCtrl._reason = '';
       currentAbort = abortCtrl;
 
-      // Every turn is agentic now (tool loops can be long), so always use the
-      // generous timeout.
-      const timeoutMs = RESEARCH_TIMEOUT_MS;
-      timeoutId = setTimeout(() => {
-        if (!abortCtrl.signal.aborted) {
-          timedOut = true;
-          abortCtrl._reason = 'timeout';
-          try {
-            if (streamSessionId) {
-              fetch(`/api/chat/stop/${encodeURIComponent(streamSessionId)}`, {
-                method: 'POST',
-                credentials: 'same-origin',
-              }).catch(() => {});
-            }
-          } catch (_) {}
-          abortCtrl.abort();
-        }
-      }, timeoutMs);
+      // No client-side timeout: agent runs (long tool loops, big computations)
+      // can take arbitrarily long. The user can always stop manually via the
+      // stop button, which aborts the request and calls /api/chat/stop.
+      timeoutId = null;
       clearResponseTimeout = () => {
         if (responseTimeoutCleared) return;
         responseTimeoutCleared = true;

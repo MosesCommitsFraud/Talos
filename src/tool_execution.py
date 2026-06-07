@@ -306,18 +306,13 @@ def _resolve_tool_path_in_workspace(workspace: str, raw_path: str) -> str:
             raise ValueError(f"path '{raw_path}' is outside the workspace ({workspace})")
     return resolved
 
-# Bash + python tools used to share a single 60s timeout. That's
-# enough for one-shot commands but starves real workloads (pip
-# install, ffmpeg conversions, etc.) — and worse, the agent saw the
-# 60s timeout and went silent because it had nothing to report.
-# The new default is intentionally generous: long enough that real
-# work isn't killed mid-flight, but bounded so a runaway process
-# (infinite loop, hung connect, etc.) eventually frees the worker.
-# The user can cancel sooner via the chat stop button — when the
-# SSE stream is torn down, the asyncio task running the subprocess
-# gets cancelled and the subprocess is killed by the finally block.
-DEFAULT_BASH_TIMEOUT = 60 * 60     # 1 hour
-DEFAULT_PYTHON_TIMEOUT = 60 * 60
+# Bash + python tools run with NO time limit (0 = unlimited): real workloads
+# (model training, big data crunches, long installs) must not be killed
+# mid-flight. The user can always cancel via the chat stop button — when the
+# SSE stream is torn down, the asyncio task running the subprocess gets
+# cancelled and the subprocess is killed by the finally block.
+DEFAULT_BASH_TIMEOUT = 0     # 0 = unlimited
+DEFAULT_PYTHON_TIMEOUT = 0
 
 # How often to push a progress event while a long-running subprocess
 # is still in flight. The frontend cares about "alive" more than
@@ -435,7 +430,8 @@ async def _run_subprocess_streaming(
 
     timed_out = False
     try:
-        await asyncio.wait_for(proc.wait(), timeout=timeout)
+        # timeout <= 0 means no limit (wait_for(None) waits indefinitely).
+        await asyncio.wait_for(proc.wait(), timeout=(timeout if timeout and timeout > 0 else None))
     except asyncio.TimeoutError:
         timed_out = True
         try:

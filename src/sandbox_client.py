@@ -6,6 +6,9 @@ import httpx
 
 
 SANDBOX_URL = os.getenv("TALOS_SANDBOX_URL", "http://talos-sandbox:7800").rstrip("/")
+# Timeout for quick control-plane calls (file ops, ensure, etc.). Code execution
+# is NOT bounded by this — see exec_in_sandbox, which uses no read timeout so a
+# long-running bash/python job is never cut off client-side.
 SANDBOX_TIMEOUT = float(os.getenv("TALOS_SANDBOX_EXEC_TIMEOUT_SECONDS", "180"))
 
 
@@ -29,7 +32,10 @@ async def exec_in_sandbox(
     if not session_id:
         raise RuntimeError("sandbox execution requires a session_id")
     user_id = safe_user_id(owner)
-    async with httpx.AsyncClient(timeout=httpx.Timeout(SANDBOX_TIMEOUT, connect=15.0)) as client:
+    # No read/write/pool timeout: a long compute or install must not be cut off.
+    # Only the connect phase is bounded. The sandbox enforces its own limit via
+    # the `timeout` field (0 = unlimited there too).
+    async with httpx.AsyncClient(timeout=httpx.Timeout(None, connect=15.0)) as client:
         resp = await client.post(
             f"{SANDBOX_URL}/users/{user_id}/workspaces/{session_id}/exec",
             json={"kind": kind, "command": command, "code": code, "timeout": timeout},

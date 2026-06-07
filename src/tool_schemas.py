@@ -25,7 +25,7 @@ FUNCTION_TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "bash",
-            "description": "Run a shell command (full access)",
+            "description": "Run a shell command (full access). Runs with NO time limit, so long jobs (installs, builds, data processing) won't be cut off. To show an image to the user, write it into an `output/` directory in the workspace; files saved there are displayed inline in the chat.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -39,7 +39,7 @@ FUNCTION_TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "python",
-            "description": "Execute Python code to compute a result or test something",
+            "description": "Execute Python code to compute a result or test something. Runs with NO time limit, so heavy/long work is fine. For charts and plots, prefer modern libraries — seaborn (preferred) or plotly over raw matplotlib. To SHOW an image to the user (a finished chart or visual result), save it into an `output/` directory, e.g. `import os; os.makedirs('output', exist_ok=True); fig.savefig('output/chart.png', dpi=150, bbox_inches='tight')`. Only images saved under `output/` are shown in the chat — write scratch/intermediate images elsewhere and they stay hidden. Don't save WIP renders to output/.",
             "parameters": {
                 "type": "object",
                 "properties": {
