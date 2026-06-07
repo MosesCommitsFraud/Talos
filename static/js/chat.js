@@ -774,17 +774,12 @@ import slashCommands, { initSlashCommands, isCommand, handleSlashCommand, handle
         try { await documentModule.saveDocument({ silent: true }); } catch (_e) { /* best-effort */ }
         fd.append('active_doc_id', documentModule.getCurrentDocId());
       }
-      // Web toggle: pre-search in Chat mode, tool permission in Agent mode
-      let isAgentMode = false;
+      // Single unified mode: every turn runs the full agent loop with all
+      // tools. The backend ignores `mode`, but we still send "agent" so any
+      // older client/server mix behaves consistently.
       const planChk = el('plan-toggle');
       const _planModeForTurn = !!(planChk && planChk.checked);
-      if (_planModeForTurn) isAgentMode = true;
-      // Auto-escalate to agent mode when a document is open — the user expects
-      // the AI to see the document and have tools to edit it
-      if (!isAgentMode && documentModule && documentModule.isPanelOpen() && documentModule.getCurrentDocId()) {
-        isAgentMode = true;
-      }
-      fd.append('mode', isAgentMode ? 'agent' : 'chat');
+      fd.append('mode', 'agent');
       if (_planModeForTurn) fd.append('plan_mode', 'true');
       const _storedPlan = _getPlan(streamSessionId);
       if (!_planModeForTurn && _storedPlan && _storedPlan.approved && _storedPlan.plan) {
@@ -810,11 +805,9 @@ import slashCommands, { initSlashCommands, isCommand, handleSlashCommand, handle
       abortCtrl._reason = '';
       currentAbort = abortCtrl;
 
-      const _tState = Storage.loadToggleState();
-      const _isAgent = (_tState.mode || 'chat') === 'agent';
-
-      // Timeout: 6 min for agent mode, 3 min otherwise
-      const timeoutMs = _isAgent ? RESEARCH_TIMEOUT_MS : DEFAULT_TIMEOUT_MS;
+      // Every turn is agentic now (tool loops can be long), so always use the
+      // generous timeout.
+      const timeoutMs = RESEARCH_TIMEOUT_MS;
       timeoutId = setTimeout(() => {
         if (!abortCtrl.signal.aborted) {
           timedOut = true;
@@ -950,22 +943,10 @@ import slashCommands, { initSlashCommands, isCommand, handleSlashCommand, handle
           if (m) errText = m[1].replace(/\\"/g, '"');
           else if (errBody.length < 200) errText = errBody;
         } catch {}
-        // Auto-switch to chat mode for tool-related errors
+        // Tools are always available now (no chat fallback). If the model
+        // can't tool-call, surface that plainly instead of silently degrading.
         if (errText.includes('tool') || errText.includes('auto')) {
-          errText = 'This model doesn\'t support agent tools — switched to Chat mode. Try again.';
-          const _ab = document.getElementById('mode-agent-btn');
-          const _cb = document.getElementById('mode-chat-btn');
-          if (_ab && _cb) {
-            _ab.classList.remove('active');
-            _cb.classList.add('active');
-            const _toggle = _ab.closest('.mode-toggle');
-            if (_toggle) _toggle.classList.add('mode-chat');
-          }
-          if (typeof Storage !== 'undefined' && Storage.KEYS) {
-            const _st = Storage.getJSON(Storage.KEYS.TOGGLES, {});
-            _st.mode = 'chat';
-            Storage.setJSON(Storage.KEYS.TOGGLES, _st);
-          }
+          errText = 'This model doesn\'t support tool calling. Pick a tool-capable model and try again.';
         }
         typewriterInto(holder.querySelector('.body'), errText);
         return;
@@ -2679,9 +2660,7 @@ import slashCommands, { initSlashCommands, isCommand, handleSlashCommand, handle
           const abortReason = currentAbort._reason || '';
           // Timeout-triggered aborts should remain visible instead of disappearing.
           if (timedOut || abortReason === 'timeout') {
-            const timeoutMsg = _isAgent
-              ? 'Agent response timed out. Try again, switch to a faster model, or reduce tool usage.'
-              : 'Response timed out. Try again.';
+            const timeoutMsg = 'Agent response timed out. Try again, switch to a faster model, or reduce tool usage.';
 
             if (holder && !accumulated) {
               holder.querySelector('.body').innerHTML =

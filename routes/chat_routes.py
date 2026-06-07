@@ -14,10 +14,9 @@ from pydantic import ValidationError
 
 from core.models import ChatMessage
 from src.request_models import ChatRequest
-from src.llm_core import llm_call_async, stream_llm, stream_llm_with_fallback
+from src.llm_core import llm_call_async, stream_llm
 from src.agent_loop import stream_agent_loop
 from src import agent_runs
-from src.model_context import estimate_tokens
 from src.chat_helpers import coerce_message_and_session
 from src.endpoint_resolver import normalize_base as _normalize_base, build_chat_url
 from src.prompt_security import untrusted_context_message
@@ -37,7 +36,6 @@ from routes.chat_helpers import (
     clean_thinking_for_save,
     _enforce_chat_privileges,
 )
-from src.action_intents import classify_tool_intent as _classify_tool_intent
 
 logger = logging.getLogger(__name__)
 
@@ -379,44 +377,22 @@ def setup_chat_routes(
         compare_mode = str(form_data.get("compare_mode", "")).lower() == "true"
         incognito = str(form_data.get("incognito", "")).lower() == "true"
         plan_mode = str(form_data.get("plan_mode", "")).lower() == "true"
-        requested_chat_mode = str(form_data.get("mode", "")).lower()  # legacy hint only
-        chat_mode = "agent" if requested_chat_mode == "agent" else "chat"
+        # Single unified mode. Every request runs the full agent loop with all
+        # tools available — there is no longer a chat/agent split or any intent
+        # detection. `chat_mode` is kept as a constant so the few downstream
+        # references (session mode persistence, build_chat_context) stay valid.
+        chat_mode = "agent"
         # Workspace: confine the agent's file/shell tools to this folder. Validate
         # it's a real directory; ignore (no confinement) otherwise.
         workspace = (form_data.get("workspace") or "").strip()
         if workspace:
             _ws_real = os.path.realpath(os.path.expanduser(workspace))
             workspace = _ws_real if os.path.isdir(_ws_real) else ""
-        if plan_mode:
-            chat_mode = "agent"
         approved_plan = ""
         if not plan_mode:
             approved_plan = (form_data.get("approved_plan") or "").strip()[:8192]
-        # Did the USER explicitly pick agent mode? (vs. us auto-escalating
-        # below). Skill extraction should only learn from real agent sessions,
-        # not chats we quietly promoted for a notes/calendar intent.
-        user_requested_agent = (chat_mode == "agent")
-        # Intent auto-escalation: if the user is clearly asking the assistant
-        # to create a todo, reminder, or calendar event, promote chat → agent
-        # for this turn so the LLM has access to manage_notes / manage_calendar.
-        # This is a LIGHT promotion — see the disabled_tools block below, which
-        # withholds shell/code/file tools so the model doesn't try to `bash`
-        # its way through a plain chat request (and fail, especially with the
-        # shell disabled).
-        auto_escalated = False
-        auto_escalation_category = ""
-        _tool_intent = _classify_tool_intent(message) if isinstance(message, str) else None
-        if chat_mode == "chat" and _tool_intent and _tool_intent.needs_tools:
-            chat_mode = "agent"
-            auto_escalated = True
-            auto_escalation_category = _tool_intent.category
-            logger.info(
-                "chat→agent auto-escalation: category=%s reason=%s",
-                _tool_intent.category,
-                _tool_intent.reason,
-            )
         active_doc_id = form_data.get("active_doc_id", "").strip()
-        logger.info(f"[doc-inject] chat_mode={chat_mode}, active_doc_id={active_doc_id!r}")
+        logger.info(f"[doc-inject] active_doc_id={active_doc_id!r}")
 
         try:
             # Attachment-only sends: skip the message-required check when the
@@ -482,25 +458,6 @@ def setup_chat_routes(
             except Exception:
                 pass
 
-        if chat_mode == "chat" and att_ids:
-            tool_attachment_exts = {
-                ".xls", ".xlsx", ".xlsm", ".ods", ".csv", ".tsv",
-                ".pdf", ".docx", ".pptx", ".txt", ".md", ".json", ".xml",
-                ".py", ".js", ".ts", ".html", ".css", ".sql", ".log",
-            }
-            for att_id in att_ids:
-                try:
-                    fi = upload_handler.resolve_upload(att_id, owner=get_current_user(request))
-                except Exception:
-                    fi = None
-                name = (fi or {}).get("name") or (fi or {}).get("original_name") or att_id
-                if os.path.splitext(str(name).lower())[1] in tool_attachment_exts:
-                    chat_mode = "agent"
-                    auto_escalated = True
-                    auto_escalation_category = "attachment"
-                    logger.info("chat→agent auto-escalation: attachment=%s", name)
-                    break
-
         no_memory = str(form_data.get("no_memory", "")).lower() == "true"
 
         # Build shared context (stream path uses enhanced_message for context preface)
@@ -522,7 +479,7 @@ def setup_chat_routes(
             # Skills index only ships when the model can actually call
             # manage_skills (agent mode). In plain chat or incognito the
             # index would be useless / unwanted noise.
-            agent_mode=(chat_mode == "agent"),
+            agent_mode=True,
         )
 
         _research_flags = {"do": do_research}  # Mutable container for generator scope
@@ -631,23 +588,19 @@ def setup_chat_routes(
             if not _privs.get("can_use_research", True):
                 _research_flags["do"] = False
             if not _privs.get("can_use_agent", True):
-                _effective_mode = 'chat'
-                chat_mode = 'chat'
+                # No chat/agent split anymore — this admin restriction now means
+                # "withhold the heavy compute/file/browser tools" rather than
+                # flipping the request into a tool-less chat mode.
+                disabled_tools.update({
+                    "bash", "python", "read_file", "write_file", "edit_file",
+                    "builtin_browser", "create_document", "edit_document",
+                    "update_document", "suggest_document", "manage_skills",
+                })
         # Global admin disabled tools
         from src.settings import get_setting
         _global_disabled = get_setting("disabled_tools", [])
         if _global_disabled and isinstance(_global_disabled, list):
             disabled_tools.update(_global_disabled)
-
-        # Light auto-escalation: the user is in chat mode and just expressed a
-        # notes/calendar/email intent. Grant the relevant managers but withhold
-        # the heavy "do things on the computer" tools — otherwise the model
-        # tries to shell out for a request that never needed it, then fails
-        # (and looks broken when the shell is disabled).
-        if auto_escalated and auto_escalation_category in {"calendar", "notes", "email", "ui"}:
-            disabled_tools.update({
-                "bash", "python", "read_file", "write_file", "builtin_browser",
-            })
 
         # Disable document tools in compare sessions — they break the pane UI
         if sess.name and sess.name.startswith("[CMP]"):
@@ -663,9 +616,16 @@ def setup_chat_routes(
                 "generate_image", "ui_control",
             }
             disabled_tools.update(_compare_strip)
-            # In chat mode compare, disable ALL agent tools (no bash, python, file ops)
-            if chat_mode == 'chat':
-                disabled_tools.update({"bash", "python", "read_file", "write_file", "web_search", "web_fetch", "search_chats", "manage_tasks"})
+            # Compare has a "pure chat" sub-type (the Chat/Image columns) whose
+            # whole point is raw model output with no tools. The main chat no
+            # longer has a mode, but Compare still distinguishes its columns via
+            # the `mode` form field: anything other than "agent" gets the full
+            # compute/file/search toolset stripped so models don't run Python.
+            if str(form_data.get("mode", "")).lower() != "agent":
+                disabled_tools.update({
+                    "bash", "python", "read_file", "write_file", "edit_file",
+                    "web_search", "web_fetch", "search_chats", "manage_tasks",
+                })
 
         if plan_mode:
             from src.tool_security import plan_mode_disabled_tools
@@ -761,119 +721,8 @@ def setup_chat_routes(
                 yield "data: [DONE]\n\n"
                 _active_streams.pop(session, None)
                 return
-            elif chat_mode == "chat":
-                _chat_start = time.time()
-                _answered_by = None  # set if the selected model failed and a fallback answered
-                # ── Chat mode: call stream_llm directly, NO tools, NO document access ──
-                try:
-                    _chat_candidates = [(sess.endpoint_url, sess.model, sess.headers)] + _fallback_candidates
-                    async for chunk in stream_llm_with_fallback(
-                        _chat_candidates,
-                        messages,
-                        temperature=ctx.preset.temperature,
-                        # Respect the preset; 0/unset = let the server decide (no
-                        # cap), matching agent mode. The old hard 4096 fallback
-                        # truncated reasoning models mid-<think> — they'd burn the
-                        # whole budget thinking and never emit the answer (seen in
-                        # Compare on heavy generation prompts).
-                        max_tokens=ctx.preset.max_tokens,
-                        prompt_type=preset_id,
-                        tools=None,
-                    ):
-                        if chunk.startswith("data: ") and not chunk.startswith("data: [DONE]"):
-                            try:
-                                data = json.loads(chunk[6:])
-                                if "delta" in data:
-                                    # Reasoning tokens arrive flagged thinking:true.
-                                    # Forward them so the client can show a thinking
-                                    # indicator, but don't fold them into the saved
-                                    # reply (mirrors the rewrite path below).
-                                    if not data.get("thinking"):
-                                        full_response += data["delta"]
-                                        _stream_set(session, partial=full_response)
-                                    yield chunk
-                                elif data.get("type") == "fallback":
-                                    # Selected model failed; a fallback answered.
-                                    # Forward the notice and remember the real model.
-                                    _answered_by = data.get("answered_by") or _answered_by
-                                    yield chunk
-                                elif data.get("type") == "usage":
-                                    last_metrics = data.get("data", {})
-                                    last_metrics["model"] = _answered_by or sess.model
-                                    if ctx.context_length and last_metrics.get("input_tokens"):
-                                        pct = min(round((last_metrics["input_tokens"] / ctx.context_length) * 100, 1), 100.0)
-                                        last_metrics["context_percent"] = pct
-                                        last_metrics["context_length"] = ctx.context_length
-                                    # The frontend reads `tokens_per_second`; the raw usage event
-                                    # carries the backend's true gen speed as `gen_tps` (llama.cpp
-                                    # timings). Map it through so this direct-chat path shows real
-                                    # t/s instead of "n/a" → falling back to a bare token count.
-                                    if last_metrics.get("gen_tps") and not last_metrics.get("tokens_per_second"):
-                                        last_metrics["tokens_per_second"] = last_metrics["gen_tps"]
-                                        last_metrics["tps_source"] = "backend"
-                                    # Wall-clock response time for the stats popup ("Time").
-                                    last_metrics.setdefault("response_time", round(time.time() - _chat_start, 2))
-                                    yield f'data: {json.dumps({"type": "metrics", "data": last_metrics})}\n\n'
-                            except json.JSONDecodeError:
-                                yield chunk
-                        elif chunk.startswith("event: error"):
-                            logger.warning(f"Stream error for {sess.model} on {sess.endpoint_url}: {chunk!r}")
-                            yield chunk
-                        elif chunk.startswith("event: "):
-                            yield chunk
-                        elif chunk == "data: [DONE]\n\n":
-                            # Generate fallback metrics if LLM didn't send usage
-                            if not last_metrics and full_response:
-                                _elapsed = time.time() - _chat_start
-                                _est_in = estimate_tokens(messages)
-                                _est_out = len(full_response) // 4
-                                _tps = round(_est_out / _elapsed, 2) if _elapsed > 0 else 0
-                                _ctx_pct = min(round((_est_in / ctx.context_length) * 100, 1), 100.0) if ctx.context_length else 0
-                                last_metrics = {
-                                    "response_time": round(_elapsed, 2),
-                                    "input_tokens": _est_in,
-                                    "output_tokens": _est_out,
-                                    "tokens_per_second": _tps,
-                                    "context_percent": _ctx_pct,
-                                    "context_length": ctx.context_length,
-                                    "model": sess.model,
-                                    "usage_source": "estimated",
-                                }
-                                yield f'data: {json.dumps({"type": "metrics", "data": last_metrics})}\n\n'
-                            if full_response:
-                                _saved_id = save_assistant_response(
-                                    sess, session_manager, session, full_response, last_metrics,
-                                    character_name=ctx.preset.character_name,
-                                    web_sources=web_sources,
-                                    rag_sources=ctx.rag_sources,
-                                    research_sources=research_sources,
-                                    used_memories=ctx.used_memories,
-                                    do_research=do_research,
-                                    incognito=incognito,
-                                )
-                                if _saved_id:
-                                    yield f'data: {json.dumps({"type": "message_saved", "id": _saved_id})}\n\n'
-                                run_post_response_tasks(
-                                    sess, session_manager, session, message, full_response,
-                                    last_metrics, ctx.uprefs, memory_manager, memory_vector, webhook_manager,
-                                    incognito=incognito, compare_mode=compare_mode,
-                                    character_name=ctx.preset.character_name,
-                                                            owner=_user,
-                                )
-                            _stream_set(session, status="done")
-                            yield chunk
-                except (asyncio.CancelledError, GeneratorExit):
-                    if full_response:
-                        logger.info("Client disconnected mid-stream (chat mode) for session %s, saving partial (%d chars)", session, len(full_response))
-                        _stopped_content, _stopped_md = clean_thinking_for_save(full_response, {"stopped": True, "model": sess.model})
-                        sess.add_message(ChatMessage("assistant", _stopped_content, metadata=_stopped_md))
-                        if not incognito:
-                            session_manager.save_sessions()
-                    raise
-                finally:
-                    _active_streams.pop(session, None)
             else:
-                # ── Agent mode: full agent loop with tools ──
+                # ── Unified path: full agent loop with all tools ──
                 _agent_rounds = 0
                 _agent_tool_calls = 0
                 _answered_by = None  # set if the selected model failed and a fallback answered
@@ -971,7 +820,7 @@ def setup_chat_routes(
                                     agent_tool_calls=_agent_tool_calls,
                                     skills_manager=skills_manager,
                                     owner=_user,
-                                    extract_skills=user_requested_agent,
+                                    extract_skills=(not incognito and not compare_mode),
                                 )
                             _stream_set(session, status="done")
                             yield chunk

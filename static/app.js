@@ -1529,7 +1529,10 @@ function initializeEventListeners() {
     const state = loadToggleState();
     const key = _modeKey(stateKey, mode);
     if (Object.prototype.hasOwnProperty.call(state, key)) return !!state[key];
-    return mode === 'agent'; // default: ON in agent, OFF in chat
+    // No chat/agent split anymore — tools default ON for everyone. A saved
+    // per-tool preference (checked above) still wins, so anyone who turned a
+    // tool off keeps it off.
+    return true;
   }
 
   function saveToolPref(stateKey, mode, value) {
