@@ -703,12 +703,26 @@ async def _try_sandbox_exec(
     if stderr:
         output = (output + "\nSTDERR: " + stderr).strip() if output else "STDERR: " + stderr
     output = _truncate(output, MAX_OUTPUT_CHARS)
-    return {
+    result: Dict = {
         "output": output or "(no output)",
         "exit_code": rc,
         "workspace": data.get("workspace"),
         "sandboxed": True,
     }
+    # Images the run created (matplotlib plots, etc.) — forwarded so the chat can
+    # show them inline. Kept under a distinct key so it isn't confused with the
+    # browser tools' `images` (screenshot) shape.
+    created_images = data.get("images") or []
+    if created_images:
+        result["created_images"] = created_images
+        if data.get("image_note"):
+            result["image_note"] = data["image_note"]
+        # Let the model know the images were already shown to the user inline, so
+        # it describes/uses them rather than trying to re-render or re-read them.
+        names = ", ".join(str(im.get("name") or "image") for im in created_images)
+        note_line = f"[Displayed {len(created_images)} image(s) to the user inline: {names}]"
+        result["output"] = note_line if result["output"] == "(no output)" else f"{result['output'].rstrip()}\n{note_line}"
+    return result
 
 
 def _parse_sandbox_file_payload(tool: str, content: str) -> tuple[str, dict[str, Any]]:

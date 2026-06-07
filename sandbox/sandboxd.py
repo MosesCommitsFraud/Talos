@@ -1,4 +1,5 @@
 import asyncio
+import base64
 import hashlib
 import json
 import os
@@ -55,6 +56,10 @@ class ExecResponse(BaseModel):
     stderr: str
     exit_code: int
     timed_out: bool = False
+    # Image files created/modified by the run (matplotlib plots, etc.), returned
+    # as base64 data URLs so the chat can display them inline.
+    images: list[dict[str, str]] = []
+    image_note: str = ""
 
 
 class ExecuteRequest(BaseModel):
@@ -108,6 +113,18 @@ SKIP_DIRS = {".git", "node_modules", "__pycache__", ".venv", "venv", "dist", "bu
 PROCESS_LOG_ROOT = STATE_PATH.parent / "processes"
 PROCESS_RETENTION_SECONDS = 3600
 SESSION_CWD_TTL_SECONDS = int(os.getenv("TALOS_SANDBOX_SESSION_CWD_TTL", "604800"))
+
+# Image files created by a run (e.g. matplotlib `savefig`) are returned to the
+# chat inline as base64 data URLs. Caps keep session history from bloating —
+# typical plots are tens of KB, so these limits only trip on pathological output.
+IMAGE_MIME_BY_EXT = {
+    ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+    ".gif": "image/gif", ".webp": "image/webp", ".bmp": "image/bmp",
+    ".svg": "image/svg+xml",
+}
+MAX_IMAGE_BYTES = 3_000_000        # per file
+MAX_IMAGES = 6                     # per run
+MAX_IMAGES_TOTAL_BYTES = 9_000_000  # combined
 
 
 @dataclass
@@ -591,6 +608,55 @@ async def proxy_port_route(user_id: str, chat_id: str, port: int, path: str, req
     return Response(content=upstream.content, status_code=upstream.status_code, headers=response_headers)
 
 
+def _collect_new_images(workspace: Path, since: float) -> tuple[list[dict[str, str]], str]:
+    """Scan the workspace for image files written during the run (mtime >= since)
+    and return them as base64 data URLs, oldest-first so display order matches
+    creation order. Returns (images, note) where note flags anything skipped."""
+    candidates: list[tuple[float, int, Path, str]] = []
+    try:
+        for p in workspace.rglob("*"):
+            ext = p.suffix.lower()
+            if ext not in IMAGE_MIME_BY_EXT or not p.is_file():
+                continue
+            if set(p.relative_to(workspace).parts) & SKIP_DIRS:
+                continue
+            try:
+                st = p.stat()
+            except OSError:
+                continue
+            # Small skew tolerance so a savefig flushed at run start still counts.
+            if st.st_mtime + 0.5 < since:
+                continue
+            candidates.append((st.st_mtime, st.st_size, p, ext))
+    except OSError:
+        return [], ""
+    candidates.sort(key=lambda c: c[0])
+    images: list[dict[str, str]] = []
+    total = 0
+    note = ""
+    for _mtime, size, p, ext in candidates:
+        if len(images) >= MAX_IMAGES:
+            note = f"{len(candidates) - len(images)} more image(s) not shown (limit {MAX_IMAGES})"
+            break
+        if size > MAX_IMAGE_BYTES:
+            note = f"{p.name} too large to preview (>{MAX_IMAGE_BYTES // 1_000_000}MB)"
+            continue
+        if total + size > MAX_IMAGES_TOTAL_BYTES:
+            note = "image preview size budget reached; some images not shown"
+            break
+        try:
+            raw = p.read_bytes()
+        except OSError:
+            continue
+        total += len(raw)
+        b64 = base64.b64encode(raw).decode("ascii")
+        images.append({
+            "name": str(p.relative_to(workspace)),
+            "data_url": f"data:{IMAGE_MIME_BY_EXT[ext]};base64,{b64}",
+        })
+    return images, note
+
+
 @app.post("/users/{user_id}/workspaces/{chat_id}/exec", response_model=ExecResponse)
 async def exec_route(user_id: str, chat_id: str, req: ExecRequest) -> ExecResponse:
     name, workspace = _workspace(user_id, chat_id)
@@ -599,6 +665,7 @@ async def exec_route(user_id: str, chat_id: str, req: ExecRequest) -> ExecRespon
         command = f"/opt/talos-sandbox-venv/bin/python -c {shlex.quote(req.code or req.command)}"
     else:
         command = req.command
+    started_at = time.time()
     proc = await _start_process(user_id, chat_id, ExecuteRequest(command=command))
     try:
         await asyncio.wait_for(asyncio.shield(proc.log_task), timeout=timeout)
@@ -610,7 +677,8 @@ async def exec_route(user_id: str, chat_id: str, req: ExecRequest) -> ExecRespon
         output, _next, _truncated = _read_process_log(proc.log_path, offset=0)
         return ExecResponse(user_id=user_id, chat_id=chat_id, linux_user=name, workspace=str(workspace), stdout=output, stderr="", exit_code=124, timed_out=True)
     output, _next, _truncated = _read_process_log(proc.log_path, offset=0)
-    return ExecResponse(user_id=user_id, chat_id=chat_id, linux_user=name, workspace=str(workspace), stdout=output, stderr="", exit_code=proc.exit_code or 0)
+    images, image_note = _collect_new_images(workspace, started_at)
+    return ExecResponse(user_id=user_id, chat_id=chat_id, linux_user=name, workspace=str(workspace), stdout=output, stderr="", exit_code=proc.exit_code or 0, images=images, image_note=image_note)
 
 
 @app.post("/users/{user_id}/workspaces/{chat_id}/files/read")

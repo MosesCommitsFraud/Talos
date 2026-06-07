@@ -17167,6 +17167,87 @@ body.gallery-selecting .gallery-dl-btn,
   to   { opacity: 1; }
 }
 
+/* Images produced by bash/python runs (matplotlib plots, etc.), shown inline
+   in chat under the tool that made them. */
+.tool-created-images {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 8px 0 6px;
+  max-width: 760px;
+}
+.tool-created-img-card {
+  position: relative;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--fg) 4%, transparent);
+  max-width: 360px;
+}
+.tool-created-img {
+  display: block;
+  max-width: 100%;
+  max-height: 360px;
+  cursor: zoom-in;
+  object-fit: contain;
+}
+.tool-created-img-dl {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 26px;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--bg) 70%, transparent);
+  border: 1px solid var(--border);
+  color: var(--fg);
+  text-decoration: none;
+  font-size: 15px;
+  line-height: 1;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+.tool-created-img-card:hover .tool-created-img-dl { opacity: 1; }
+.tool-created-img-dl:hover { background: var(--bg); }
+.tool-created-img-name {
+  padding: 4px 8px;
+  font-size: 0.75em;
+  color: var(--fg);
+  opacity: 0.65;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tool-created-img-note {
+  flex-basis: 100%;
+  font-size: 0.75em;
+  opacity: 0.6;
+  font-style: italic;
+}
+/* Download bar inside the created-image lightbox (overlay reuses .attach-lightbox). */
+.created-img-lightbox-bar {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 9999;
+  cursor: default;
+}
+.created-img-lightbox-btn {
+  display: inline-block;
+  padding: 8px 16px;
+  border-radius: 8px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--fg);
+  text-decoration: none;
+  font-size: 0.9em;
+}
+.created-img-lightbox-btn:hover { background: color-mix(in srgb, var(--fg) 10%, var(--bg)); }
+
 .gallery-card-upload:hover {
   opacity: 1;
   border-color: var(--red);

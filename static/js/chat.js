@@ -2021,6 +2021,14 @@ import slashCommands, { initSlashCommands, isCommand, handleSlashCommand, handle
                     }
                   }
                 }
+                // --- Render images created by bash/python runs (matplotlib, etc.) ---
+                if (json.created_images && json.created_images.length) {
+                  const chatBox = document.getElementById('chat-history');
+                  if (chatBox) {
+                    chatRenderer.appendToolImages(chatBox, json.created_images, json.image_note);
+                    uiModule.scrollHistory();
+                  }
+                }
                 // --- Reload sessions after manage_session tool (delete, rename, etc.) ---
                 // Debounce so bulk deletes don't fire loadSessions per call
                 if (json.tool === 'manage_session' && sessionModule) {

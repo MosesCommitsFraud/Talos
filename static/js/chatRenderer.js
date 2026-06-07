@@ -48,6 +48,101 @@ export function safeDisplayImageSrc(raw) {
   return '';
 }
 
+// Validate a base64 data URL for an image the agent created (matplotlib plots,
+// etc.). Broader than safeToolScreenshotSrc — also allows svg+xml and bmp.
+export function safeCreatedImageSrc(raw) {
+  const src = String(raw || '').trim();
+  if (/^data:image\/(?:png|jpe?g|gif|webp|bmp|svg\+xml);base64,[a-z0-9+/=\s]+$/i.test(src)) {
+    return src;
+  }
+  return '';
+}
+
+// Full-size preview for an inline data-URL image, with a download button.
+// Closes on Escape, backdrop click, or the × button.
+export function openCreatedImageLightbox(src, name) {
+  const safe = safeCreatedImageSrc(src);
+  if (!safe) return;
+  const overlay = document.createElement('div');
+  overlay.className = 'attach-lightbox';
+
+  const img = document.createElement('img');
+  img.alt = name || '';
+  img.src = safe;
+  overlay.appendChild(img);
+
+  const bar = document.createElement('div');
+  bar.className = 'created-img-lightbox-bar';
+
+  const dl = document.createElement('a');
+  dl.className = 'created-img-lightbox-btn';
+  dl.href = safe;
+  dl.download = (name || 'image').split('/').pop() || 'image';
+  dl.title = 'Download';
+  dl.textContent = '⤓ Download';
+  dl.addEventListener('click', (e) => e.stopPropagation());
+  bar.appendChild(dl);
+
+  overlay.appendChild(bar);
+
+  const _onKey = (e) => { if (e.key === 'Escape') _close(); };
+  const _close = () => {
+    document.removeEventListener('keydown', _onKey);
+    overlay.remove();
+  };
+  overlay.addEventListener('click', (e) => { if (e.target === overlay || e.target === img) _close(); });
+  document.addEventListener('keydown', _onKey);
+  document.body.appendChild(overlay);
+}
+
+// Render the images a bash/python run produced into a tool node's content area.
+// Shared by the live stream (chat.js) and history reload (below). Each image is
+// a clickable thumbnail (→ lightbox) with a hover download button.
+export function appendToolImages(contentEl, images, note) {
+  if (!contentEl || !Array.isArray(images) || !images.length) return;
+  const wrap = document.createElement('div');
+  wrap.className = 'tool-created-images';
+  for (const im of images) {
+    const safe = safeCreatedImageSrc(im && im.data_url);
+    if (!safe) continue;
+    const name = (im && im.name) || 'image';
+    const card = document.createElement('div');
+    card.className = 'tool-created-img-card';
+
+    const img = document.createElement('img');
+    img.className = 'tool-created-img';
+    img.src = safe;
+    img.alt = name;
+    img.title = name + ' — click to enlarge';
+    img.addEventListener('click', () => openCreatedImageLightbox(safe, name));
+    card.appendChild(img);
+
+    const dl = document.createElement('a');
+    dl.className = 'tool-created-img-dl';
+    dl.href = safe;
+    dl.download = name.split('/').pop() || 'image';
+    dl.title = 'Download ' + name;
+    dl.textContent = '⤓';
+    dl.addEventListener('click', (e) => e.stopPropagation());
+    card.appendChild(dl);
+
+    const label = document.createElement('div');
+    label.className = 'tool-created-img-name';
+    label.textContent = name;
+    card.appendChild(label);
+
+    wrap.appendChild(card);
+  }
+  if (!wrap.children.length) return;
+  if (note) {
+    const n = document.createElement('div');
+    n.className = 'tool-created-img-note';
+    n.textContent = note;
+    wrap.appendChild(n);
+  }
+  contentEl.appendChild(wrap);
+}
+
 function _makeActionBtn(className, title, text, handler) {
   const btn = document.createElement('button');
   btn.className = className;
@@ -2024,6 +2119,11 @@ export function addMessage(role, content, modelName, metadata) {
           for (const ev of roundTools) {
             if (ev.image_url) {
               box.appendChild(buildImageBubble(ev.image_url, ev.image_prompt, ev.image_model, ev.image_size, ev.image_quality, ev.image_id));
+            }
+            // Images a bash/python run produced (matplotlib plots, etc.) —
+            // re-rendered from the persisted tool event so they survive reload.
+            if (ev.created_images && ev.created_images.length) {
+              appendToolImages(box, ev.created_images, ev.image_note);
             }
           }
         }

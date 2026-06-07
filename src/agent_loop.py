@@ -2324,6 +2324,11 @@ async def stream_agent_loop(
             if result.get("images"):
                 img = result["images"][0]
                 tool_output_data["screenshot"] = f"data:{img['mimeType']};base64,{img['data']}"
+            # Forward images created by bash/python runs (matplotlib plots, etc.)
+            if result.get("created_images"):
+                tool_output_data["created_images"] = result["created_images"]
+                if result.get("image_note"):
+                    tool_output_data["image_note"] = result["image_note"]
             # Forward a file-write diff for inline before/after rendering
             if "diff" in result:
                 tool_output_data["diff"] = result["diff"]
@@ -2379,6 +2384,10 @@ async def stream_agent_loop(
                 for ik in ("image_url", "image_prompt", "image_model", "image_size", "image_quality"):
                     if result.get(ik):
                         tool_event[ik] = result[ik]
+            if result.get("created_images"):
+                tool_event["created_images"] = result["created_images"]
+                if result.get("image_note"):
+                    tool_event["image_note"] = result["image_note"]
             if result.get("doc_id"):
                 tool_event["doc_id"] = result["doc_id"]
                 tool_event["doc_title"] = result.get("title", "")
