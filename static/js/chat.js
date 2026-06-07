@@ -10,16 +10,19 @@ import uiModule from './ui.js';
 import sessionModule from './sessions.js';
 import chatRenderer from './chatRenderer.js';
 import chatStream from './chatStream.js';
+import { addAITTSButton } from './tts-ai.js';
 import markdownModule from './markdown.js';
 import { svgifyEmoji } from './markdown.js';
 import spinnerModule from './spinner.js';
 import presetsModule from './presets.js';
 import fileHandlerModule from './fileHandler.js';
+import searchModule from './search.js';
 import documentModule from './document.js';
 import planWindow from './planWindow.js';
 import * as emailInbox from './emailInbox.js';
 import codeRunnerModule from './codeRunner.js';
 import slashCommands, { initSlashCommands, isCommand, handleSlashCommand, handleSetupInput, handleSetupWizard, typewriterInto } from './slashCommands.js';
+import createResearchSynapse from './researchSynapse.js';
   const RESEARCH_TIMEOUT_MS = 360000;
   const DEFAULT_TIMEOUT_MS = 120000;
   const RESEARCH_SVG = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>';
@@ -274,6 +277,11 @@ import slashCommands, { initSlashCommands, isCommand, handleSlashCommand, handle
    */
   export async function handleChatSubmit(e) {
     e.preventDefault();
+    // Cancel research clarification timeout if active
+    if (window._researchTimeoutTimer) {
+      clearTimeout(window._researchTimeoutTimer);
+      window._researchTimeoutTimer = null;
+    }
     // Get current session
     const sessionId = sessionModule.getCurrentSessionId();
     const session = sessionModule.getSessions().find(s => s.id === sessionId);
@@ -288,6 +296,13 @@ import slashCommands, { initSlashCommands, isCommand, handleSlashCommand, handle
 
     // If currently streaming, stop it
     if (isStreaming) {
+      // Cancel server-side research if in progress
+      const _cancelSid = sessionModule.getCurrentSessionId();
+      if (_cancelSid && _researchingStreamIds.has(_cancelSid)) {
+        fetch(`${API_BASE}/api/research/cancel/${_cancelSid}`, { method: 'POST' }).catch(e => console.warn('Research cancel failed:', e));
+        _researchingStreamIds.delete(_cancelSid);
+        _clearResearchTimer();
+      }
       abortCurrentRequest(true);  // explicit user Stop → also cancel the detached server run
 
       // Clean up any running agent thread nodes (stop wave animation, remove "running" state)
@@ -791,6 +806,18 @@ import slashCommands, { initSlashCommands, isCommand, handleSlashCommand, handle
       if (!_planModeForTurn && _storedPlan && _storedPlan.approved && _storedPlan.plan) {
         fd.append('approved_plan', _storedPlan.plan);
       }
+      if (el('web-toggle').checked) {
+        if (isAgentMode) {
+          fd.append('allow_web_search', 'true');
+        } else {
+          fd.append('use_web', 'true');
+        }
+      }
+      if (el('research-toggle').checked) {
+        fd.append('use_research', 'true');
+        // Research always runs in chat mode — override agent if set
+        fd.set('mode', 'chat');
+      }
       if (el('bash-toggle').checked) {
         fd.append('allow_bash', 'true');
       }
@@ -814,8 +841,8 @@ import slashCommands, { initSlashCommands, isCommand, handleSlashCommand, handle
       const _tState = Storage.loadToggleState();
       const _isAgent = (_tState.mode || 'chat') === 'agent';
 
-      // Timeout: 6 min for agent mode, 3 min otherwise
-      const timeoutMs = _isAgent ? RESEARCH_TIMEOUT_MS : DEFAULT_TIMEOUT_MS;
+      // Timeout: 6 min for research and agent mode, 3 min otherwise
+      const timeoutMs = el('research-toggle').checked || _isAgent ? RESEARCH_TIMEOUT_MS : DEFAULT_TIMEOUT_MS;
       timeoutId = setTimeout(() => {
         if (!abortCtrl.signal.aborted) {
           timedOut = true;
@@ -847,7 +874,19 @@ import slashCommands, { initSlashCommands, isCommand, handleSlashCommand, handle
       
       const modelName = sessionModule.getCurrentModel() || null;
 
-      let loadingText = 'Processing request...';
+      let loadingText = 'Initializing...';
+
+      if (el('web-toggle').checked && !_isAgent) {
+        const _searchLabel = searchModule ? searchModule.getProviderLabel() : 'web';
+        loadingText = `Searching via ${_searchLabel}...<br>
+                       <span style="font-size: 0.9em; opacity: 0.8;">
+                       Query: "${msg.substring(0, 50)}${msg.length > 50 ? '...' : ''}"<br>
+                       Fetching top results...</span>`;
+      } else if (el('research-toggle').checked) {
+        loadingText = 'Deep research mode active...';
+      } else {
+        loadingText = 'Processing request...';
+      }
 
       var roleLabel = _shortModel(modelName);
       var _charNameInit = presetsModule.getCharacterName ? presetsModule.getCharacterName() : '';
@@ -865,60 +904,85 @@ import slashCommands, { initSlashCommands, isCommand, handleSlashCommand, handle
       spinner.start();
       
       // Update spinner message based on mode
-      spinner.updateMessage('Processing request');
-      const endpointUrlForProbe = sessionModule.getCurrentEndpointUrl ? sessionModule.getCurrentEndpointUrl() : null;
-      if (endpointUrlForProbe && modelName) {
-        processingProbeTimer = setTimeout(async () => {
-          processingProbeTimer = null;
-          if (accumulated || !spinner || !spinner.element || (currentAbort && currentAbort.signal.aborted)) return;
-          processingProbeAbort = new AbortController();
-          try {
-            spinner.updateMessage('Checking model endpoint');
-            const status = await _probeCurrentEndpointStatus(endpointUrlForProbe, processingProbeAbort.signal);
+      if (el('web-toggle').checked && !_isAgent) {
+        spinner.updateMessage('Searching web with ' + (searchModule ? searchModule.getProviderLabel() : 'SearXNG'));
+        setTimeout(() => spinner.updateMessage('Processing results'), 1500);
+      } else if (el('research-toggle').checked) {
+        spinner.updateMessage('Researching');
+        setTimeout(() => spinner.updateMessage('Analyzing sources'), 1500);
+      } else {
+        spinner.updateMessage('Processing request');
+        const endpointUrlForProbe = sessionModule.getCurrentEndpointUrl ? sessionModule.getCurrentEndpointUrl() : null;
+        if (endpointUrlForProbe && modelName) {
+          processingProbeTimer = setTimeout(async () => {
+            processingProbeTimer = null;
             if (accumulated || !spinner || !spinner.element || (currentAbort && currentAbort.signal.aborted)) return;
-            if (!status) {
-              spinner.updateMessage('Still waiting for model');
-            } else if (status.alive) {
-              const latency = status.latency_ms ? ` (${status.latency_ms}ms)` : '';
-              spinner.updateMessage(`Endpoint online${latency}; waiting for first token`);
-            } else {
-              // Probe confirms the endpoint isn't responding. Don't
-              // sit on a hung fetch — give the user 5s to read the
-              // status, then auto-abort with reason='offline' so the
-              // catch handler shows a clean "switch model" message
-              // instead of leaving the spinner spinning forever.
-              if (status.error) console.warn('Model endpoint probe failed:', status.error);
-              let _countdown = 5;
-              spinner.updateMessage(`Endpoint offline — cancelling in ${_countdown}s`);
-              const _tick = setInterval(() => {
-                _countdown--;
-                if (!spinner || !spinner.element || (currentAbort && currentAbort.signal.aborted) || accumulated) {
-                  clearInterval(_tick);
-                  return;
-                }
-                if (_countdown > 0) {
-                  spinner.updateMessage(`Endpoint offline — cancelling in ${_countdown}s`);
-                } else {
-                  clearInterval(_tick);
-                  if (currentAbort && !currentAbort.signal.aborted) {
-                    currentAbort._reason = 'offline';
-                    currentAbort.abort();
+            processingProbeAbort = new AbortController();
+            try {
+              spinner.updateMessage('Checking model endpoint');
+              const status = await _probeCurrentEndpointStatus(endpointUrlForProbe, processingProbeAbort.signal);
+              if (accumulated || !spinner || !spinner.element || (currentAbort && currentAbort.signal.aborted)) return;
+              if (!status) {
+                spinner.updateMessage('Still waiting for model');
+              } else if (status.alive) {
+                const latency = status.latency_ms ? ` (${status.latency_ms}ms)` : '';
+                spinner.updateMessage(`Endpoint online${latency}; waiting for first token`);
+              } else {
+                // Probe confirms the endpoint isn't responding. Don't
+                // sit on a hung fetch — give the user 5s to read the
+                // status, then auto-abort with reason='offline' so the
+                // catch handler shows a clean "switch model" message
+                // instead of leaving the spinner spinning forever.
+                if (status.error) console.warn('Model endpoint probe failed:', status.error);
+                let _countdown = 5;
+                spinner.updateMessage(`Endpoint offline — cancelling in ${_countdown}s`);
+                const _tick = setInterval(() => {
+                  _countdown--;
+                  if (!spinner || !spinner.element || (currentAbort && currentAbort.signal.aborted) || accumulated) {
+                    clearInterval(_tick);
+                    return;
                   }
-                }
-              }, 1000);
+                  if (_countdown > 0) {
+                    spinner.updateMessage(`Endpoint offline — cancelling in ${_countdown}s`);
+                  } else {
+                    clearInterval(_tick);
+                    if (currentAbort && !currentAbort.signal.aborted) {
+                      currentAbort._reason = 'offline';
+                      currentAbort.abort();
+                    }
+                  }
+                }, 1000);
+              }
+            } catch (e) {
+              if (e && e.name !== 'AbortError' && spinner && spinner.element && !accumulated) {
+                spinner.updateMessage('Still waiting for model');
+              }
+            } finally {
+              processingProbeAbort = null;
             }
-          } catch (e) {
-            if (e && e.name !== 'AbortError' && spinner && spinner.element && !accumulated) {
-              spinner.updateMessage('Still waiting for model');
-            }
-          } finally {
-            processingProbeAbort = null;
-          }
-        }, 10000);
+          }, 10000);
+        }
       }
-
+      
+      const researchBtn = el('research-toggle-btn');
+      if (el('research-toggle').checked && researchBtn) {
+        researchBtn.disabled = true;
+        researchBtn.classList.remove('active');
+      }
       box.appendChild(holder);
       uiModule.scrollHistory();
+
+      const enableResearchBtn = () => {
+        if (!researchBtn) return;
+        researchBtn.disabled = false;
+        researchBtn.classList.toggle('active', el('research-toggle').checked);
+      };
+
+      if (el('research-toggle').checked && researchBtn) {
+        researchBtn.style.display = 'none';
+        // Uncheck research toggle so follow-up messages don't trigger another research
+        el('research-toggle').checked = false;
+      }
 
       // User's current UTC offset in minutes (east of UTC). Threaded into
       // the agent so natural-language times like "today at 9pm" are
@@ -969,6 +1033,7 @@ import slashCommands, { initSlashCommands, isCommand, handleSlashCommand, handle
           }
         }
         typewriterInto(holder.querySelector('.body'), errText);
+        enableResearchBtn();
         return;
       }
 
@@ -1637,6 +1702,146 @@ import slashCommands, { initSlashCommands, isCommand, handleSlashCommand, handle
                   _scheduleThinkingSpinner();
                   // Feed streaming TTS with accumulated text
                   if (streamingTTS) window.aiTTSManager.streamingUpdate(roundText);
+                }
+              } else if (json.type === 'research_progress') {
+                if (_isBg) continue; // Skip DOM updates in background
+                _researchingStreamIds.add(streamSessionId);
+                // Highlight research button while running
+                var _rToggle = document.getElementById('research-toggle-btn');
+                if (_rToggle) _rToggle.classList.add('research-running');
+                // Request notification permission on first research event
+                if ('Notification' in window && Notification.permission === 'default') {
+                  Notification.requestPermission();
+                }
+                // Mark session as researching in sidebar
+                var _rSid = sessionModule && sessionModule.getCurrentSessionId();
+                if (_rSid && sessionModule.markResearching) sessionModule.markResearching(_rSid);
+                const rp = json.data;
+                // Start research timer + synapse on first progress event
+                if (!_researchTimerEl && spinner && spinner.element) {
+                  _researchStartTime = rp.started_at ? rp.started_at * 1000 : Date.now();
+                  _researchAvgDuration = rp.avg_duration || null;
+                  _researchTimerEl = document.createElement('div');
+                  _researchTimerEl.className = 'research-timer';
+                  // Styles in .research-timer CSS class
+                  spinner.element.parentNode.insertBefore(_researchTimerEl, spinner.element.nextSibling);
+                  _researchTimerInterval = setInterval(() => {
+                    if (!_researchTimerEl) return;
+                    var elapsed = Math.floor((Date.now() - _researchStartTime) / 1000);
+                    var mm = String(Math.floor(elapsed / 60)).padStart(2, '0');
+                    var ss = String(elapsed % 60).padStart(2, '0');
+                    var txt = mm + ':' + ss;
+                    if (_researchAvgDuration) {
+                      var avgM = String(Math.floor(_researchAvgDuration / 60)).padStart(2, '0');
+                      var avgS = String(Math.round(_researchAvgDuration % 60)).padStart(2, '0');
+                      txt += ' / avg ' + avgM + ':' + avgS;
+                    }
+                    _researchTimerEl.textContent = txt;
+                  }, 1000);
+                  // Synapse visualization — insert right above the timer so
+                  // it sits between the spinner message and the timer line.
+                  try {
+                    _researchSynapse = createResearchSynapse(spinner.element.parentNode, {
+                      query: holder._researchQuery || rp.query || '',
+                      startedAt: _researchStartTime,
+                    });
+                    // Move it to live between spinner and timer
+                    if (_researchSynapse.element && _researchTimerEl) {
+                      spinner.element.parentNode.insertBefore(_researchSynapse.element, _researchTimerEl);
+                    }
+                  } catch (e) { console.warn('synapse init failed', e); }
+                }
+                if (_researchSynapse) {
+                  _researchSynapse.setPhase(rp.phase, rp);
+                  if (typeof rp.round === 'number') _researchSynapse.setRound(rp.round);
+                  if (typeof rp.total_sources === 'number') _researchSynapse.setSourceCount(rp.total_sources);
+                  if (rp.phase === 'error') _researchSynapse.complete();
+                }
+                if (spinner && spinner.element) {
+                  if (rp.phase === 'probing') {
+                    spinner.updateMessage(`Verifying model: ${rp.model || '?'}`);
+                  } else if (rp.phase === 'planning') {
+                    spinner.updateMessage('Analyzing question & planning research strategy');
+                  } else if (rp.phase === 'searching') {
+                    const q = rp.queries ? `${rp.queries} queries` : '';
+                    const s = rp.total_sources ? ` · ${rp.total_sources} sources` : '';
+                    spinner.updateMessage(`Round ${rp.round || '?'}: Searching${q ? ' (' + q + ')' : ''}${s}`);
+                  } else if (rp.phase === 'reading') {
+                    spinner.updateMessage(rp.title ? `Reading: ${rp.title}` : `Round ${rp.round || '?'}: Reading ${rp.new_sources || ''} pages · ${rp.total_sources || 0} sources total`);
+                  } else if (rp.phase === 'analyzing') {
+                    spinner.updateMessage(`Round ${rp.round || '?'}: Analyzing ${rp.total_findings || 0} findings`);
+                  } else if (rp.phase === 'writing') {
+                    spinner.updateMessage(`Writing report · ${rp.total_sources || 0} sources`);
+                  } else if (rp.phase === 'error') {
+                    spinner.updateMessage(rp.message || 'Search error');
+                  }
+                }
+              } else if (json.type === 'research_sources') {
+                if (_isBg) {
+                  // Store sources HTML in background map
+                  if (json.data && json.data.length > 0) {
+                    _sourcesHtml = _buildSourcesBox(json.data, 'research');
+                    var bgE = _backgroundStreams.get(streamSessionId);
+                    if (bgE) bgE.sourcesHtml = _sourcesHtml;
+                  }
+                  // Clear researching indicator for this background session
+                  if (sessionModule && sessionModule.clearResearching) sessionModule.clearResearching(streamSessionId);
+                  continue;
+                }
+                // Research done — clean up timer, show sources box, then spinner for LLM response
+                _clearResearchTimer();
+                holder._researchSources = json.data;
+                var _rSid2 = sessionModule && sessionModule.getCurrentSessionId();
+                if (_rSid2 && sessionModule.clearResearching) sessionModule.clearResearching(_rSid2);
+                if (json.data && json.data.length > 0) {
+                  _sourcesData = json.data; _sourcesType = 'research';
+                  _sourcesHtml = _buildSourcesBox(json.data, 'research');
+                }
+                if (document.hidden) {
+                  _notifyResearchComplete(_rSid2 || '', holder._researchQuery || '');
+                }
+              } else if (json.type === 'research_findings') {
+                if (_isBg) {
+                  var bgEf = _backgroundStreams.get(streamSessionId);
+                  if (bgEf) bgEf.findingsData = json.data;
+                  continue;
+                }
+                if (json.data && json.data.length > 0) {
+                  _findingsData = json.data;
+                }
+              } else if (json.type === 'research_done') {
+                // Research complete — reload session to show the persisted report
+                _clearResearchTimer();
+                if (sessionModule && sessionModule.clearResearching) {
+                  sessionModule.clearResearching(streamSessionId);
+                }
+                _researchingStreamIds.delete(streamSessionId);
+                // Small delay then reload session history which includes the full report
+                setTimeout(async () => {
+                  // Don't yank the user back to this chat if they've navigated
+                  // away (e.g. started a new chat) while research finished —
+                  // just refresh the sidebar so the report shows when they return.
+                  if (sessionModule.getCurrentSessionId && sessionModule.getCurrentSessionId() === streamSessionId) {
+                    await sessionModule.selectSession(streamSessionId);
+                  } else {
+                    await sessionModule.loadSessions();
+                  }
+                }, 500);
+                continue;
+              } else if (json.type === 'web_sources') {
+                if (_isBg) {
+                  if (json.data && json.data.length > 0) {
+                    _sourcesHtml = _buildSourcesBox(json.data, 'web');
+                    var bgE2 = _backgroundStreams.get(streamSessionId);
+                    if (bgE2) bgE2.sourcesHtml = _sourcesHtml;
+                  }
+                  continue;
+                }
+                // Web search done — store sources for final render (don't render mid-stream)
+                holder._webSources = json.data;
+                if (json.data && json.data.length > 0) {
+                  _sourcesData = json.data; _sourcesType = 'web';
+                  _sourcesHtml = _buildSourcesBox(json.data, 'web');
                 }
               } else if (json.type === 'model_fallback') {
                 // Model went offline — switched to fallback
@@ -2573,6 +2778,9 @@ import slashCommands, { initSlashCommands, isCommand, handleSlashCommand, handle
         }
         // Also store raw on the footer target so copy/TTS work
         if (footerTarget !== holder) footerTarget.dataset.raw = accumulated;
+        if (addAITTSButton && accumulated && window.aiTTSManager?._provider !== 'disabled' && window.aiTTSManager?.available) {
+          addAITTSButton(footerTarget, accumulated);
+        }
         // TTS auto-play: streaming mode flushes remaining text, non-streaming enqueues full message
         if (accumulated && window.aiTTSManager && window.aiTTSManager.autoPlay) {
           const ttsBtn = holder.querySelector('.ai-tts-button');
@@ -4051,6 +4259,228 @@ import slashCommands, { initSlashCommands, isCommand, handleSlashCommand, handle
     }
   }
 
+  /**
+   * Check for pending/completed research after page refresh or session switch.
+   * If research is still running, show a spinner and poll until done.
+   * If research is done, fetch result and render it.
+   */
+  export async function checkPendingResearch(sessionId) {
+    if (!sessionId) return;
+    try {
+      const res = await fetch(`${API_BASE}/api/research/status/${sessionId}`);
+      if (!res.ok) return; // 404 = no research for this session
+      const data = await res.json();
+
+      if (data.status === 'done') {
+        // Fetch and render the completed result
+        _notifyResearchComplete(sessionId, data.query || '');
+        if (sessionModule && sessionModule.clearResearching) sessionModule.clearResearching(sessionId);
+        const resultRes = await fetch(`${API_BASE}/api/research/result/${sessionId}`, { method: 'POST' });
+        if (resultRes.ok) {
+          const resultData = await resultRes.json();
+          if (resultData.result) {
+            // Skip if history already has a research message for this session
+            if (document.querySelector(`#chat-history .msg-ai[data-research-session="${sessionId}"]`)) return;
+
+            var srcBox = '';
+            if (resultData.sources && resultData.sources.length > 0) {
+              srcBox = _buildSourcesBox(resultData.sources, 'research');
+            }
+            var findingsBox = chatRenderer.buildFindingsBox(resultData.raw_findings);
+            var cleanResult = resultData.result;
+            // Build DOM directly to avoid double-processing through addMessage
+            chatRenderer.hideWelcomeScreen();
+            var _box = document.getElementById('chat-history');
+            if (_box) {
+              var _wrap = document.createElement('div');
+              _wrap.className = 'msg msg-ai';
+              _wrap.dataset.researchSession = sessionId;
+              var _role = document.createElement('div');
+              _role.className = 'role';
+              var _meta = sessionModule.getSessions().find(function(s) { return s.id === sessionId; });
+              _role.textContent = _shortModel(_meta?.model);
+              _applyModelColor(_role, _meta?.model);
+              _role.appendChild(chatRenderer.roleTimestamp());
+              var _body = document.createElement('div');
+              _body.className = 'body';
+              _body.innerHTML = srcBox + markdownModule.processWithThinking(
+                markdownModule.squashOutsideCode(cleanResult)
+              ) + findingsBox;
+              _wrap.dataset.raw = cleanResult;
+              _wrap.appendChild(_role);
+              _wrap.appendChild(_body);
+              _wrap.appendChild(chatRenderer.createMsgFooter(_wrap));
+              _appendViewReportLink(_wrap, sessionId);
+              _box.appendChild(_wrap);
+              if (window.hljs) _wrap.querySelectorAll('pre code').forEach(function(b) { window.hljs.highlightElement(b); });
+              uiModule.scrollHistory();
+            }
+          }
+        }
+        return;
+      }
+
+      if (data.status !== 'running') return;
+
+      // Don't show reconnect UI if we've already switched away
+      if (sessionModule.getCurrentSessionId() !== sessionId) return;
+
+      // Research is still running — show reconnect UI with spinner
+      const box = document.getElementById('chat-history');
+      if (!box) return;
+
+      const holder = document.createElement('div');
+      holder.className = 'msg msg-ai research-reconnect';
+      holder.dataset.researchSession = sessionId;
+      const roleTs = new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+      const agentMeta = sessionModule.getSessions().find(s => s.id === sessionModule.getCurrentSessionId());
+      const agentModelLabel = _shortModel(agentMeta?.model);
+      holder.innerHTML = `<div class="role">${uiModule.esc(agentModelLabel)} <span class="role-timestamp">${roleTs}</span></div><div class="body"></div>`;
+      _applyModelColor(holder.querySelector('.role'), agentMeta?.model);
+      box.appendChild(holder);
+
+      const bodyDiv = holder.querySelector('.body');
+      const spinner = spinnerModule.create('Reconnecting to research...', 'right');
+      bodyDiv.appendChild(spinner.createElement());
+      spinner.start();
+
+      // Update spinner with current progress if available
+      function updateSpinnerFromProgress(progress) {
+        if (!progress || !progress.phase) return;
+        const rp = progress;
+        if (rp.phase === 'probing') {
+          spinner.updateMessage(`Verifying model: ${rp.model || '?'}`);
+        } else if (rp.phase === 'planning') {
+          spinner.updateMessage('Analyzing question & planning research strategy');
+        } else if (rp.phase === 'searching') {
+          const q = rp.queries ? `${rp.queries} queries` : '';
+          const s = rp.total_sources ? ` · ${rp.total_sources} sources` : '';
+          spinner.updateMessage(`Round ${rp.round || '?'}: Searching${q ? ' (' + q + ')' : ''}${s}`);
+        } else if (rp.phase === 'reading') {
+          spinner.updateMessage(rp.title ? `Reading: ${rp.title}` : `Round ${rp.round || '?'}: Reading ${rp.new_sources || ''} pages · ${rp.total_sources || 0} sources total`);
+        } else if (rp.phase === 'analyzing') {
+          spinner.updateMessage(`Round ${rp.round || '?'}: Analyzing ${rp.total_findings || 0} findings`);
+        } else if (rp.phase === 'writing') {
+          spinner.updateMessage(`Writing report · ${rp.total_sources || 0} sources`);
+        }
+      }
+
+      updateSpinnerFromProgress(data.progress);
+      _researchingStreamIds.add(sessionId);
+      if (sessionModule && sessionModule.markResearching) sessionModule.markResearching(sessionId);
+
+      // Restore research timer from started_at
+      if (data.started_at && spinner && spinner.element) {
+        _researchStartTime = data.started_at * 1000;
+        _researchAvgDuration = data.avg_duration || null;
+        _researchTimerEl = document.createElement('div');
+        _researchTimerEl.className = 'research-timer';
+        _researchTimerEl.style.cssText = 'font-size:0.8em; opacity:0.6; margin-top:4px; font-family:monospace;';
+        spinner.element.parentNode.insertBefore(_researchTimerEl, spinner.element.nextSibling);
+        _researchTimerInterval = setInterval(() => {
+          if (!_researchTimerEl) return;
+          var elapsed = Math.floor((Date.now() - _researchStartTime) / 1000);
+          var mm = String(Math.floor(elapsed / 60)).padStart(2, '0');
+          var ss = String(elapsed % 60).padStart(2, '0');
+          var txt = mm + ':' + ss;
+          if (_researchAvgDuration) {
+            var avgM = String(Math.floor(_researchAvgDuration / 60)).padStart(2, '0');
+            var avgS = String(Math.round(_researchAvgDuration % 60)).padStart(2, '0');
+            txt += ' / avg ' + avgM + ':' + avgS;
+          }
+          _researchTimerEl.textContent = txt;
+        }, 1000);
+        // Reconnect synapse — seed it with whatever progress is already known
+        try {
+          _researchSynapse = createResearchSynapse(spinner.element.parentNode, {
+            query: data.query || '',
+            startedAt: _researchStartTime,
+          });
+          if (_researchSynapse.element && _researchTimerEl) {
+            spinner.element.parentNode.insertBefore(_researchSynapse.element, _researchTimerEl);
+          }
+          if (data.progress) {
+            _researchSynapse.setPhase(data.progress.phase, data.progress);
+            if (typeof data.progress.round === 'number') _researchSynapse.setRound(data.progress.round);
+            if (typeof data.progress.total_sources === 'number') _researchSynapse.setSourceCount(data.progress.total_sources);
+          }
+        } catch (e) { console.warn('synapse reconnect failed', e); }
+      }
+
+      // Poll for completion
+      const pollInterval = setInterval(async () => {
+        // Stop polling if user switched to a different session
+        if (sessionModule.getCurrentSessionId() !== sessionId) {
+          clearInterval(pollInterval);
+          spinner.destroy();
+          _clearResearchTimer();
+          if (holder.parentNode) holder.remove();
+          _researchingStreamIds.delete(sessionId);
+          if (_researchingStreamIds.size === 0) {
+            var _rToggleP = document.getElementById('research-toggle-btn');
+            if (_rToggleP) _rToggleP.classList.remove('research-running');
+          }
+          return;
+        }
+        try {
+          const pollRes = await fetch(`${API_BASE}/api/research/status/${sessionId}`);
+          if (!pollRes.ok) {
+            clearInterval(pollInterval);
+            spinner.destroy();
+            _clearResearchTimer();
+            _researchingStreamIds.delete(sessionId);
+            if (sessionModule && sessionModule.clearResearching) sessionModule.clearResearching(sessionId);
+            return;
+          }
+          const pollData = await pollRes.json();
+          updateSpinnerFromProgress(pollData.progress);
+          if (_researchSynapse && pollData.progress) {
+            _researchSynapse.setPhase(pollData.progress.phase, pollData.progress);
+            if (typeof pollData.progress.round === 'number') _researchSynapse.setRound(pollData.progress.round);
+            if (typeof pollData.progress.total_sources === 'number') _researchSynapse.setSourceCount(pollData.progress.total_sources);
+          }
+
+          if (pollData.status !== 'running') {
+            clearInterval(pollInterval);
+            spinner.destroy();
+            _clearResearchTimer();
+            _researchingStreamIds.delete(sessionId);
+            if (sessionModule && sessionModule.clearResearching) sessionModule.clearResearching(sessionId);
+
+            if (pollData.status === 'done') {
+              _notifyResearchComplete(sessionId, data.query || '');
+              const rRes = await fetch(`${API_BASE}/api/research/result/${sessionId}`, { method: 'POST' });
+              if (rRes.ok) {
+                const rData = await rRes.json();
+                if (rData.result) {
+                  var srcHtml = '';
+                  if (rData.sources && rData.sources.length > 0) {
+                    srcHtml = _buildSourcesBox(rData.sources, 'research');
+                  }
+                  var findingsHtml = chatRenderer.buildFindingsBox(rData.raw_findings);
+                  bodyDiv.innerHTML = srcHtml + markdownModule.processWithThinking(
+                    markdownModule.squashOutsideCode(rData.result)
+                  ) + findingsHtml;
+                  holder.dataset.raw = rData.result;
+                  _appendViewReportLink(holder, sessionId);
+                  if (window.hljs) {
+                    holder.querySelectorAll('pre code').forEach(b => window.hljs.highlightElement(b));
+                  }
+                }
+              }
+            } else {
+              bodyDiv.innerHTML = '<i style="color: var(--color-error);">[Research ' + pollData.status + ']</i>';
+            }
+          }
+        } catch (e) {
+          console.error('Research poll error:', e);
+        }
+      }, 2000);
+    } catch (e) {
+      // No research pending, that's fine
+    }
+  }
+
   /** Set a display override for the next user message bubble */
   export function setDisplayOverride(text) {
     _displayOverride = text;
@@ -4545,6 +4975,7 @@ import slashCommands, { initSlashCommands, isCommand, handleSlashCommand, handle
     resumeStream,
     hideWelcomeScreen: chatRenderer.hideWelcomeScreen,
     showWelcomeScreen: chatRenderer.showWelcomeScreen,
+    checkPendingResearch,
     getImageCost: chatRenderer.getImageCost,
     setDisplayOverride,
     setHideUserBubble,

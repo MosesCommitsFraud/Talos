@@ -1689,6 +1689,10 @@ export async function selectSession(id, { keepSidebar = false } = {}) {
     if (_rBtn) _rBtn.style.display = 'none';
     if (_rChk) _rChk.checked = false;
 
+    // Check for pending/completed research that survived a page refresh
+    if (window.chatModule && window.chatModule.checkPendingResearch) {
+      window.chatModule.checkPendingResearch(id);
+    }
     // Restore group chat state if this is a group session
     if (window.groupModule && window.groupModule.restoreState && window.groupModule.restoreState(id)) {
       if (window._syncGroupIndicator) window._syncGroupIndicator(true);

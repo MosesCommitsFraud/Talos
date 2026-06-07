@@ -125,6 +125,23 @@ export function handleUIControl(uiData) {
       document.querySelectorAll('.talos-highlight').forEach(function(e) { e.classList.remove('talos-highlight'); });
       document.querySelectorAll('.talos-hl-label').forEach(function(e) { e.remove(); });
 
+    } else if (uiEvent === 'research_started' || uiData.ui_event === 'research_started') {
+      // Agent kicked off deep research — adopt the session into the
+      // sidebar immediately so the user sees it without waiting for
+      // the 12s active-poll.
+      var rsid = uiData.research_session_id || uiData.session_id;
+      if (rsid) {
+        import('./research/jobs.js').then(function(mod) {
+          var fn = mod.adoptSession || (mod.default && mod.default.adoptSession);
+          if (fn) fn(rsid);
+        }).catch(function(){});
+        // The clickable "Open in Deep Research" link is now emitted by the
+        // agent loop as a `#research-<id>` markdown anchor in the assistant's
+        // response text — it renders as a regular clickable chat link AND
+        // persists across refresh (saved with the message). No ephemeral
+        // chip injection needed here anymore.
+      }
+
     } else if (uiEvent === 'open_panel' || uiData.ui_event === 'open_panel') {
       var panel = uiData.panel;
       if (panel === 'documents') {
@@ -145,6 +162,11 @@ export function handleUIControl(uiData) {
       } else if (panel === 'sessions') {
         import('./sessions.js').then(function(mod) {
           var fn = mod.openLibrary || (mod.default && mod.default.openLibrary);
+          if (fn) fn();
+        }).catch(function(){});
+      } else if (panel === 'cookbook') {
+        import('./cookbook.js').then(function(mod) {
+          var fn = mod.open || (mod.default && mod.default.open);
           if (fn) fn();
         }).catch(function(){});
       } else if (panel === 'notes') {
