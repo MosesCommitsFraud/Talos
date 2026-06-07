@@ -141,7 +141,7 @@ def _safe_path(workspace: Path, raw_path: str) -> Path:
     raw = (raw_path or ".").strip() or "."
     candidate = Path(raw)
     if candidate.is_absolute():
-        candidate = workspace / str(candidate).lstrip("/")
+        candidate = candidate
     else:
         candidate = workspace / candidate
     resolved = candidate.resolve()

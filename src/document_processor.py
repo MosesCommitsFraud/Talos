@@ -387,12 +387,17 @@ def build_user_content(
         mime = upload_info.get("mime") or mimetypes.guess_type(path)[0] or "application/octet-stream"
         display_name = upload_info.get("name") or upload_info.get("original_name") or path
         tool_path = upload_info.get("sandbox_path") or path
+        sandbox_abs = None
+        if upload_info.get("sandbox_workspace") and upload_info.get("sandbox_path"):
+            sandbox_abs = f"{str(upload_info['sandbox_workspace']).rstrip('/')}/{upload_info['sandbox_path']}"
+        sandbox_abs_line = f"Absolute sandbox path: {sandbox_abs}\n" if sandbox_abs else ""
         tool_where = "sandbox" if upload_info.get("sandbox_path") else "server"
         path_hint = (
             f"\n\n[Attachment file available to tools: {display_name}]\n"
             f"Path ({tool_where}): {tool_path}\n"
+            f"{sandbox_abs_line}"
             "If the user asks to analyze, transform, chart, forecast, or inspect this file, use this exact path. "
-            "For Python/bash in the sandbox, relative sandbox paths are readable from the current working directory."
+            "In the sandbox, Python and bash start in the workspace, so the relative path above should work directly."
         )
 
         if upload_handler.is_image_file(display_name, mime):

@@ -59,10 +59,7 @@ async def file_tool_in_sandbox(
 
 def _sandbox_filename(path: str, display_name: str | None = None) -> str:
     stored_name = Path(path).name
-    name = Path(display_name or stored_name).name.replace("/", "_").replace("\\", "_") or stored_name
-    # Prefix with the stored upload id to avoid collisions when users attach two
-    # files with the same original name in one chat workspace.
-    return f"{stored_name}_{name}" if not name.startswith(stored_name) else name
+    return Path(display_name or stored_name).name.replace("/", "_").replace("\\", "_") or stored_name
 
 
 async def upload_file_to_sandbox(
