@@ -14,6 +14,23 @@ class RagPipelineConfig(BaseModel):
     rerank_url: str = ""
     rerank_model: str = ""
     rerank_api_key: str = ""
+    chat_top_k: int = 5
+    search_top_k: int = 5
+    candidate_top_k: int = 40
+
+
+def _clamp_k(value: int, default: int = 5) -> int:
+    try:
+        return max(1, min(int(value), 20))
+    except Exception:
+        return default
+
+
+def _clamp_candidate_k(value: int, default: int = 40) -> int:
+    try:
+        return max(1, min(int(value), 100))
+    except Exception:
+        return default
 
 
 def _public(cfg: dict) -> dict:
@@ -26,6 +43,9 @@ def _public(cfg: dict) -> dict:
         "rerank_url": cfg.get("rerank_url", ""),
         "rerank_model": cfg.get("rerank_model", ""),
         "rerank_api_key_set": bool(cfg.get("rerank_api_key")),
+        "chat_top_k": _clamp_k(cfg.get("chat_top_k", 5)),
+        "search_top_k": _clamp_k(cfg.get("search_top_k", 5)),
+        "candidate_top_k": _clamp_candidate_k(cfg.get("candidate_top_k", 40)),
     }
 
 
@@ -42,6 +62,12 @@ def _reset_rag():
 
 def setup_rag_routes():
     router = APIRouter(prefix="/api/rag", tags=["rag"], dependencies=[Depends(require_admin)])
+    try:
+        from src import rag_jobs
+
+        rag_jobs.start_worker()
+    except Exception:
+        pass
 
     @router.get("/config")
     def get_config():
@@ -62,6 +88,9 @@ def setup_rag_routes():
             "rerank_url": body.rerank_url.strip(),
             "rerank_model": body.rerank_model.strip(),
             "rerank_api_key": body.rerank_api_key or current.get("rerank_api_key", ""),
+            "chat_top_k": _clamp_k(body.chat_top_k),
+            "search_top_k": _clamp_k(body.search_top_k),
+            "candidate_top_k": _clamp_candidate_k(body.candidate_top_k),
         }
         if not cfg["enabled"]:
             settings["rag_pipeline"] = cfg
@@ -88,16 +117,21 @@ def setup_rag_routes():
         if not rag or not getattr(rag, "healthy", False):
             raise HTTPException(503, "RAG is not available. Check embedding, Qdrant, and dependencies.")
         stats = rag.get_stats()
-        return {"ok": True, "stats": stats}
+        reranker = rag.test_reranker() if hasattr(rag, "test_reranker") else {"configured": False, "ok": False}
+        return {"ok": True, "stats": stats, "reranker": reranker}
 
     @router.get("/search")
-    def test_search(q: str, k: int = 5):
+    def test_search(q: str, k: int | None = None):
         from src.rag_singleton import get_rag_manager
 
         rag = get_rag_manager()
         if not rag or not getattr(rag, "healthy", False):
             raise HTTPException(503, "RAG is not available. Check embedding, Qdrant, and dependencies.")
-        results = rag.search(q, k=max(1, min(k, 20)), owner=None)
+        settings = load_settings()
+        cfg = settings.get("rag_pipeline", {}) if isinstance(settings.get("rag_pipeline"), dict) else {}
+        final_k = _clamp_k(k if k is not None else cfg.get("search_top_k", 5))
+        candidate_k = max(final_k, _clamp_candidate_k(cfg.get("candidate_top_k", 40)))
+        results = rag.search(q, k=final_k, owner=None, candidate_k=candidate_k)
         return {
             "ok": True,
             "count": len(results),
@@ -111,5 +145,35 @@ def setup_rag_routes():
                 for r in results
             ],
         }
+
+    @router.get("/jobs")
+    def list_rag_jobs():
+        from src import rag_jobs
+
+        return {"jobs": rag_jobs.list_jobs()}
+
+    @router.get("/jobs/diagnostics")
+    def rag_jobs_diagnostics():
+        from src import rag_jobs
+
+        return rag_jobs.diagnostics()
+
+    @router.get("/jobs/{job_id}")
+    def get_rag_job(job_id: str):
+        from src import rag_jobs
+
+        job = rag_jobs.get_job(job_id)
+        if not job:
+            raise HTTPException(404, "RAG job not found")
+        return job
+
+    @router.post("/jobs/{job_id}/cancel")
+    def cancel_rag_job(job_id: str):
+        from src import rag_jobs
+
+        job = rag_jobs.cancel_job(job_id)
+        if not job:
+            raise HTTPException(404, "RAG job not found")
+        return job
 
     return router

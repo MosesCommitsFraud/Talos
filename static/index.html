@@ -1629,6 +1629,9 @@
               <input id="adm-ragQdrantKey" class="settings-input" type="password" autocomplete="new-password" placeholder="Qdrant API key (optional)">
               <input id="adm-ragRerankUrl" class="settings-input" type="text" placeholder="Rerank URL, e.g. http://host:port/v1/rerank">
               <input id="adm-ragRerankModel" class="settings-input" type="text" placeholder="Rerank model name">
+              <input id="adm-ragChatTopK" class="settings-input" type="number" min="1" max="20" step="1" placeholder="Chat top K (default 5)">
+              <input id="adm-ragSearchTopK" class="settings-input" type="number" min="1" max="20" step="1" placeholder="Test search top K (default 5)">
+              <input id="adm-ragCandidateTopK" class="settings-input" type="number" min="1" max="100" step="1" placeholder="Candidate K for rerank (default 40)">
             </div>
             <div style="display:flex;gap:8px;align-items:center;margin-bottom:10px;">
               <input id="adm-ragRerankKey" class="settings-input" type="password" autocomplete="new-password" placeholder="Rerank API key (optional)" style="flex:1;min-width:0;">
@@ -1642,6 +1645,7 @@
             </div>
             <div style="display:flex;gap:8px;align-items:center;margin-bottom:10px;">
               <input id="adm-ragSearchInput" class="settings-input" type="text" placeholder="Test retrieval query" style="flex:1;min-width:0;">
+              <input id="adm-ragSearchK" class="settings-input" type="number" min="1" max="20" step="1" placeholder="K" style="width:72px;">
               <button class="admin-btn-sm" id="adm-ragSearchBtn">Search RAG</button>
             </div>
             <div id="adm-ragSearchResults" class="admin-user-list" style="margin-bottom:10px;display:none;"></div>
@@ -1651,6 +1655,7 @@
               <button class="admin-btn-sm" id="adm-ragReloadBtn">Reload Index</button>
             </div>
             <div id="adm-ragStatus" style="font-size:11px;min-height:16px;margin-bottom:8px;"></div>
+            <div id="adm-ragWorkers" class="admin-user-list" style="margin-bottom:10px;display:none;"></div>
             <div class="admin-rag-lists">
               <div>
                 <div class="admin-toggle-label" style="margin-bottom:5px;">Indexed directories</div>

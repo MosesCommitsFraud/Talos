@@ -123,24 +123,21 @@ def setup_personal_routes(personal_docs_manager, rag_manager, rag_available):
             
             logger.info(f"Adding directory to RAG: {directory}")
             
-            # Use the RAGManager to index the directory
             rag = _rag()
             if rag:
-                result = rag.index_personal_documents(directory, owner=None)
-                
-                if result["success"]:
-                    # Also update the personal_docs_manager to track this directory
-                    personal_docs_manager.add_directory(directory, index=False)
-                    
-                    return {
-                        "success": True,
-                        "message": f"Successfully indexed {result['indexed_count']} chunks from {directory}",
-                        "indexed_count": result["indexed_count"],
-                        "failed_count": result.get("failed_count", 0),
-                        "directory": directory
-                    }
-                else:
-                    raise HTTPException(500, result.get("message", "Failed to index directory"))
+                from src import rag_jobs
+
+                personal_docs_manager.add_directory(directory, index=False)
+                job = rag_jobs.start_index_directory(directory, owner=None)
+                return {
+                    "success": True,
+                    "message": f"Started RAG indexing job for {directory}",
+                    "job_id": job["id"],
+                    "status": job["status"],
+                    "indexed_count": 0,
+                    "failed_count": 0,
+                    "directory": directory,
+                }
             else:
                 raise HTTPException(503, "RAG system is not available")
                 
@@ -227,7 +224,7 @@ def setup_personal_routes(personal_docs_manager, rag_manager, rag_available):
                     continue
 
                 # Chunk and index
-                chunks = rag._split_into_chunks(text, chunk_size=500)
+                chunks = rag._split_into_chunks(text)
                 for i, chunk in enumerate(chunks):
                     metadata = {
                         "source": file_path,

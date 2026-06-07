@@ -1781,6 +1781,44 @@ function initMcpForm() {
    EMBEDDING_URL env vars if you really need to override it. */
 
 /* ── RAG ── */
+let _ragJobsPoll = null;
+
+async function refreshRagJobs() {
+  try {
+    const diagRes = await fetch('/api/rag/jobs/diagnostics', { credentials: 'same-origin' });
+    const diag = diagRes.ok ? await diagRes.json() : {};
+    const workersBox = el('adm-ragWorkers');
+    if (workersBox) {
+      const workers = diag.active_workers || [];
+      workersBox.style.display = workers.length ? '' : 'none';
+      if (workers.length) {
+        const now = Date.now() / 1000;
+        workersBox.innerHTML = `
+          <div class="admin-toggle-label" style="margin-bottom:5px;">RAG workers</div>
+          ${workers.map(w => {
+            const age = Math.max(0, Math.round(now - (Number(w.last_seen) || now)));
+            return `<div class="admin-rag-item">
+              <span class="admin-rag-item-name" title="${esc(w.id || '')}">${esc(w.hostname || 'host')} pid ${esc(String(w.pid || ''))}</span>
+              <span class="admin-rag-item-meta">${esc(w.status || 'unknown')}${w.job_id ? ' · ' + esc(w.job_id) : ''} · ${age}s ago</span>
+            </div>`;
+          }).join('')}`;
+      }
+    }
+    if (diag.multi_worker_warning) {
+      ragMsg(`Warning: ${diag.active_worker_count} active RAG workers detected. Use one app worker for indexing safety.`, true, true);
+      return;
+    }
+    const res = await fetch('/api/rag/jobs', { credentials: 'same-origin' });
+    if (!res.ok) return;
+    const data = await res.json();
+    const jobs = data.jobs || [];
+    const active = jobs.filter(j => ['queued', 'running', 'cancelling'].includes(j.status));
+    if (!active.length) return;
+    const j = active[0];
+    ragMsg(`RAG job ${j.status}: ${j.indexed_count || 0} chunks, ${j.failed_count || 0} failed${j.current_file ? ' - ' + j.current_file.split(/[\\/]/).pop() : ''}`, false, true);
+  } catch (_) {}
+}
+
 async function loadRag() {
   try {
     const cfgRes = await fetch('/api/rag/config', { credentials: 'same-origin' });
@@ -1792,6 +1830,10 @@ async function loadRag() {
       if (el('adm-ragQdrantUrl')) el('adm-ragQdrantUrl').value = cfg.qdrant_url || '';
       if (el('adm-ragRerankUrl')) el('adm-ragRerankUrl').value = cfg.rerank_url || '';
       if (el('adm-ragRerankModel')) el('adm-ragRerankModel').value = cfg.rerank_model || '';
+      if (el('adm-ragChatTopK')) el('adm-ragChatTopK').value = cfg.chat_top_k || 5;
+      if (el('adm-ragSearchTopK')) el('adm-ragSearchTopK').value = cfg.search_top_k || 5;
+      if (el('adm-ragCandidateTopK')) el('adm-ragCandidateTopK').value = cfg.candidate_top_k || 40;
+      if (el('adm-ragSearchK')) el('adm-ragSearchK').value = cfg.search_top_k || 5;
       if (el('adm-ragQdrantKey')) el('adm-ragQdrantKey').placeholder = cfg.qdrant_api_key_set ? 'Saved - leave blank to keep' : 'Qdrant API key (optional)';
       if (el('adm-ragRerankKey')) el('adm-ragRerankKey').placeholder = cfg.rerank_api_key_set ? 'Saved - leave blank to keep' : 'Rerank API key (optional)';
     }
@@ -1834,6 +1876,7 @@ async function loadRag() {
         });
       });
     }
+    await refreshRagJobs();
   } catch (e) {
     el('adm-ragDirList').innerHTML = '<div class="admin-error">Failed to load</div>';
     el('adm-ragFileList').innerHTML = '';
@@ -1869,6 +1912,7 @@ function initRag() {
   el('adm-ragConfigTestBtn')?.addEventListener('click', () => saveRagConfig(true));
   el('adm-ragSearchBtn')?.addEventListener('click', testRagSearch);
   el('adm-ragSearchInput')?.addEventListener('keydown', e => { if (e.key === 'Enter') testRagSearch(); });
+  if (!_ragJobsPoll) _ragJobsPoll = setInterval(refreshRagJobs, 3000);
   dropZone.addEventListener('click', () => fileInput.click());
   fileInput.addEventListener('change', () => ragUpload(fileInput.files));
   dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('dragover'); });
@@ -1882,7 +1926,7 @@ function initRag() {
     try {
       const res = await fetch('/api/personal/add_directory', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ directory: dir }) });
       const data = await res.json();
-      if (data.success) { ragMsg(`Indexed ${data.indexed_count} chunks from directory`); el('adm-ragDirInput').value = ''; loadRag(); }
+      if (data.success) { ragMsg(data.job_id ? `Started RAG indexing job ${data.job_id}` : `Indexed ${data.indexed_count} chunks from directory`, false, true); el('adm-ragDirInput').value = ''; loadRag(); }
       else ragMsg(data.detail || data.message || 'Failed', true);
     } catch (e) { ragMsg('Error: ' + e.message, true); }
     btn.disabled = false; btn.textContent = 'Add Directory';
@@ -1907,7 +1951,8 @@ async function testRagSearch() {
   box.style.display = '';
   box.innerHTML = '<div class="admin-empty">Searching...</div>';
   try {
-    const res = await fetch('/api/rag/search?q=' + encodeURIComponent(q), { credentials: 'same-origin' });
+    const k = Math.max(1, Math.min(parseInt(el('adm-ragSearchK')?.value || el('adm-ragSearchTopK')?.value || '5', 10) || 5, 20));
+    const res = await fetch('/api/rag/search?q=' + encodeURIComponent(q) + '&k=' + encodeURIComponent(k), { credentials: 'same-origin' });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(data.detail || 'Search failed');
     const results = data.results || [];
@@ -1938,6 +1983,9 @@ async function saveRagConfig(testAfter) {
     rerank_url: el('adm-ragRerankUrl')?.value || '',
     rerank_model: el('adm-ragRerankModel')?.value || '',
     rerank_api_key: el('adm-ragRerankKey')?.value || '',
+    chat_top_k: Math.max(1, Math.min(parseInt(el('adm-ragChatTopK')?.value || '5', 10) || 5, 20)),
+    search_top_k: Math.max(1, Math.min(parseInt(el('adm-ragSearchTopK')?.value || '5', 10) || 5, 20)),
+    candidate_top_k: Math.max(1, Math.min(parseInt(el('adm-ragCandidateTopK')?.value || '40', 10) || 40, 100)),
   };
   try {
     ragMsg('Saving RAG config...', false, true);
@@ -1957,7 +2005,9 @@ async function saveRagConfig(testAfter) {
     const td = await tr.json().catch(() => ({}));
     if (!tr.ok) throw new Error(td.detail || 'RAG test failed');
     const stats = td.stats || {};
-    ragMsg(`RAG OK (${stats.vector_backend || 'vector'}, ${stats.document_count || 0} chunks)`);
+    const rr = td.reranker || {};
+    const rerank = rr.configured ? `, rerank ${rr.ok ? 'OK' : 'FAILED'}` : ', rerank off';
+    ragMsg(`RAG OK (${stats.vector_backend || 'vector'}, ${stats.document_count || 0} chunks${rerank})`);
     loadRag();
   } catch (e) {
     ragMsg('RAG config error: ' + e.message, true, true);

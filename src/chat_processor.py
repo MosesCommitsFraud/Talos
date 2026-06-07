@@ -50,6 +50,17 @@ class ChatProcessor:
     # scales differ between providers, so a fixed threshold is brittle.
     RAG_SIMILARITY_THRESHOLD = 0.0
 
+    def _rag_k_setting(self, key: str, default: int) -> int:
+        try:
+            from src.settings import get_setting
+
+            cfg = get_setting("rag_pipeline", {})
+            if isinstance(cfg, dict):
+                return max(1, min(int(cfg.get(key) or default), 100))
+        except Exception:
+            pass
+        return default
+
     def _hybrid_retrieve(self, message: str, mem_entries: list, k: int = 5) -> list:
         """Retrieve memories relevant to the message.
 
@@ -256,10 +267,12 @@ class ChatProcessor:
                 if rag_manager:
                     # RAG is a global admin-managed knowledge base. Do not owner-filter here:
                     # when enabled, indexed knowledge is available to every user.
-                    results = rag_manager.search(message, k=5, owner=None)
+                    rag_k = min(self._rag_k_setting("chat_top_k", 5), 20)
+                    candidate_k = max(rag_k, min(self._rag_k_setting("candidate_top_k", 40), 100))
+                    results = rag_manager.search(message, k=rag_k, owner=None, candidate_k=candidate_k)
                     # Keep top retrieved/reranked chunks. Do not require keyword overlap:
                     # vector-only matches often have keyword_score=0 but are still correct.
-                    relevant = [r for r in results if r.get("similarity", 0) >= self.RAG_SIMILARITY_THRESHOLD] or results[:5]
+                    relevant = [r for r in results if r.get("similarity", 0) >= self.RAG_SIMILARITY_THRESHOLD] or results[:rag_k]
                     if relevant:
                         logger.info(f"RAG: {len(relevant)}/{len(results)} results above threshold {self.RAG_SIMILARITY_THRESHOLD}")
                         rag_sources = [

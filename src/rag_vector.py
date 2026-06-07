@@ -8,9 +8,11 @@ configurable embedding endpoint via EMBEDDING_URL env var.
 
 import os
 import hashlib
+import json
 import re
 import logging
 import numpy as np
+import sqlite3
 import uuid
 from typing import List, Dict, Any, Optional, Set
 from pathlib import Path
@@ -26,6 +28,8 @@ VECTOR_WEIGHT = 0.7
 KEYWORD_WEIGHT = 0.3
 
 COLLECTION_NAME = "talos_rag"
+MAX_KEYWORD_FALLBACK_SCAN = int(os.getenv("RAG_MAX_KEYWORD_FALLBACK_SCAN", "5000"))
+RRF_K = 60
 
 
 def _apply_saved_rag_config():
@@ -74,6 +78,36 @@ def _generate_doc_id(text: str, owner: str = "") -> str:
     return f"doc_{hashlib.sha256(key.encode('utf-8')).hexdigest()[:16]}"
 
 
+def _fts_query(query: str) -> str:
+    terms = re.findall(r"[\w][\w.-]*", query.lower())
+    return " OR ".join(f'"{t.replace(chr(34), chr(34) + chr(34))}"' for t in terms[:12])
+
+
+def _rrf_fuse(groups: List[List[Dict[str, Any]]], k: int) -> List[Dict[str, Any]]:
+    by_id: Dict[str, Dict[str, Any]] = {}
+    scores: Dict[str, float] = {}
+    sources: Dict[str, set] = {}
+    for group in groups:
+        for rank, item in enumerate(group, start=1):
+            item_id = str(item.get("id") or "")
+            if not item_id:
+                continue
+            by_id.setdefault(item_id, item)
+            scores[item_id] = scores.get(item_id, 0.0) + (1.0 / (RRF_K + rank))
+            src = item.get("search_type") or "vector"
+            sources.setdefault(item_id, set()).add(src)
+    fused = []
+    for item_id, item in by_id.items():
+        row = dict(item)
+        row["rrf_score"] = round(scores.get(item_id, 0.0), 6)
+        row["search_type"] = "+".join(sorted(sources.get(item_id, {"vector"})))
+        # Use RRF for pre-rerank ordering. Rerank score replaces similarity later.
+        row["similarity"] = row["rrf_score"]
+        fused.append(row)
+    fused.sort(key=lambda c: c.get("rrf_score", 0.0), reverse=True)
+    return fused[:k]
+
+
 class VectorRAG:
     """RAG system using ChromaDB vector storage with hybrid search."""
 
@@ -84,6 +118,8 @@ class VectorRAG:
         self._model = None
         self._healthy = False
         self._backend = "chroma"
+        self._last_rerank_error = ""
+        self._fts_path = os.path.join(self.persist_directory, "rag_fts.sqlite3")
 
         Path(self.persist_directory).mkdir(parents=True, exist_ok=True)
         self._initialize_system()
@@ -101,6 +137,7 @@ class VectorRAG:
             if self._model is None:
                 raise RuntimeError("No embedding backend available")
             logger.info(f"Embedding: {self._model.url} model={self._model.model}")
+            self._init_fts()
 
             qdrant_url = os.getenv("QDRANT_URL", "").strip()
             if qdrant_url:
@@ -137,6 +174,92 @@ class VectorRAG:
             logger.error(f"VectorRAG init failed: {e}")
             self._healthy = False
             return False
+
+    def _fts_conn(self):
+        conn = sqlite3.connect(self._fts_path, timeout=30)
+        conn.row_factory = sqlite3.Row
+        return conn
+
+    def _init_fts(self) -> None:
+        Path(self.persist_directory).mkdir(parents=True, exist_ok=True)
+        with self._fts_conn() as conn:
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.execute(
+                "CREATE VIRTUAL TABLE IF NOT EXISTS rag_fts USING fts5("
+                "id UNINDEXED, document, filename, title, section, source UNINDEXED, owner UNINDEXED, metadata_json UNINDEXED)"
+            )
+
+    def _fts_upsert(self, doc_id: str, text: str, metadata: Dict[str, Any]) -> None:
+        try:
+            with self._fts_conn() as conn:
+                conn.execute("DELETE FROM rag_fts WHERE id = ?", (doc_id,))
+                conn.execute(
+                    "INSERT INTO rag_fts(id, document, filename, title, section, source, owner, metadata_json) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        doc_id,
+                        text,
+                        str(metadata.get("filename") or ""),
+                        str(metadata.get("title") or ""),
+                        str(metadata.get("section") or ""),
+                        str(metadata.get("source") or ""),
+                        str(metadata.get("owner") or ""),
+                        json.dumps(metadata, ensure_ascii=False),
+                    ),
+                )
+        except Exception as e:
+            logger.warning("FTS upsert failed for %s: %s", doc_id, e)
+
+    def _fts_delete_ids(self, ids: List[str]) -> None:
+        if not ids:
+            return
+        try:
+            with self._fts_conn() as conn:
+                conn.executemany("DELETE FROM rag_fts WHERE id = ?", [(str(i),) for i in ids])
+        except Exception as e:
+            logger.warning("FTS delete failed: %s", e)
+
+    def _fts_clear(self) -> None:
+        try:
+            with self._fts_conn() as conn:
+                conn.execute("DELETE FROM rag_fts")
+        except Exception as e:
+            logger.warning("FTS clear failed: %s", e)
+
+    def _fts_search(self, query: str, k: int, owner: Optional[str] = None) -> List[Dict[str, Any]]:
+        match = _fts_query(query)
+        if not match:
+            return []
+        try:
+            where_owner = " AND owner = ?" if owner else ""
+            params: List[Any] = [match]
+            if owner:
+                params.append(owner)
+            params.append(k)
+            with self._fts_conn() as conn:
+                rows = conn.execute(
+                    "SELECT id, document, filename, title, section, source, owner, metadata_json, bm25(rag_fts) AS bm25_score "
+                    f"FROM rag_fts WHERE rag_fts MATCH ?{where_owner} ORDER BY bm25_score LIMIT ?",
+                    params,
+                ).fetchall()
+            out = []
+            for row in rows:
+                try:
+                    meta = json.loads(row["metadata_json"] or "{}")
+                except Exception:
+                    meta = {}
+                out.append({
+                    "id": row["id"],
+                    "document": row["document"],
+                    "metadata": meta,
+                    "bm25_score": round(float(row["bm25_score"]), 6),
+                    "similarity": round(1.0 / (1.0 + abs(float(row["bm25_score"]))), 6),
+                    "search_type": "bm25",
+                })
+            return out
+        except Exception as e:
+            logger.warning("FTS search failed: %s", e)
+            return []
 
     def _embed(self, texts: List[str]) -> List[List[float]]:
         vecs = self._model.encode(texts, normalize_embeddings=True)
@@ -178,17 +301,20 @@ class VectorRAG:
                 point_id = _qdrant_point_id(doc_id)
                 existing = self._qdrant.retrieve(collection_name=COLLECTION_NAME, ids=[point_id])
                 if existing:
+                    self._fts_upsert(doc_id, text, metadata)
                     return True
                 payload = {**metadata, "document": text, "doc_id": doc_id}
                 self._qdrant.upsert(
                     collection_name=COLLECTION_NAME,
                     points=[PointStruct(id=point_id, vector=self._embed([text])[0], payload=payload)],
                 )
+                self._fts_upsert(doc_id, text, metadata)
                 return True
 
             # Check if already exists
             existing = self._collection.get(ids=[doc_id])
             if existing["ids"]:
+                self._fts_upsert(doc_id, text, metadata)
                 return True  # already exists
             embeddings = self._embed([text])
             self._collection.add(
@@ -197,6 +323,7 @@ class VectorRAG:
                 documents=[text],
                 metadatas=[metadata],
             )
+            self._fts_upsert(doc_id, text, metadata)
             return True
         except Exception as e:
             logger.error(f"add_document failed: {e}")
@@ -252,6 +379,8 @@ class VectorRAG:
                             for doc_id, emb, meta, text in zip(batch_ids, embeddings, batch_metas, batch_texts)
                         ]
                         self._qdrant.upsert(collection_name=COLLECTION_NAME, points=points)
+                        for doc_id, text, meta in zip(batch_ids, batch_texts, batch_metas):
+                            self._fts_upsert(doc_id, text, meta)
                         continue
                     self._collection.add(
                         ids=batch_ids,
@@ -259,6 +388,8 @@ class VectorRAG:
                         documents=batch_texts,
                         metadatas=batch_metas,
                     )
+                    for doc_id, text, meta in zip(batch_ids, batch_texts, batch_metas):
+                        self._fts_upsert(doc_id, text, meta)
 
             return {
                 "success": True,
@@ -274,21 +405,34 @@ class VectorRAG:
     # Search — hybrid: vector similarity + keyword overlap
     # ------------------------------------------------------------------
 
-    def search(self, query: str, k: int = 5, owner: Optional[str] = None) -> List[Dict[str, Any]]:
+    def search(
+        self,
+        query: str,
+        k: int = 5,
+        owner: Optional[str] = None,
+        candidate_k: Optional[int] = None,
+    ) -> List[Dict[str, Any]]:
         if not self.healthy:
             return []
         if not query or not isinstance(query, str):
             return []
 
         try:
+            fetch_k = max(int(candidate_k or k * 5), k)
             if self._backend == "qdrant":
-                return self._search_qdrant(query, k, owner=owner)
+                vector_candidates = self._search_qdrant_candidates(query, owner=owner, candidate_k=fetch_k)
+                bm25_candidates = self._fts_search(query, fetch_k, owner=owner)
+                fused = _rrf_fuse([vector_candidates, bm25_candidates], fetch_k)
+                top = self._rerank(query, fused, k)
+                logger.info(f"Qdrant hybrid search for '{query[:60]}': {len(top)} results")
+                return top
 
             if self._collection.count() == 0:
                 return []
 
-            # Fetch extra candidates when owner-filtering
-            fetch_k = min(k * 3, max(k, 20), self._collection.count())
+            # Fetch a broad candidate pool, then rerank down to final k. Keeping
+            # these separate is critical for cross-encoder rerankers to help.
+            fetch_k = min(fetch_k, self._collection.count())
             if owner:
                 fetch_k = min(fetch_k * 2, self._collection.count())
 
@@ -331,7 +475,9 @@ class VectorRAG:
                 })
 
             candidates.sort(key=lambda c: c["similarity"], reverse=True)
-            top = self._rerank(query, candidates, k)
+            bm25_candidates = self._fts_search(query, fetch_k, owner=owner)
+            fused = _rrf_fuse([candidates, bm25_candidates], fetch_k)
+            top = self._rerank(query, fused, k)
             logger.info(f"Hybrid search for '{query[:60]}': {len(top)} results")
             return top
 
@@ -339,13 +485,18 @@ class VectorRAG:
             logger.error(f"search failed: {e}")
             return self._keyword_search_fallback(query, k, owner=owner)
 
-    def _search_qdrant(self, query: str, k: int = 5, owner: Optional[str] = None) -> List[Dict[str, Any]]:
+    def _search_qdrant_candidates(
+        self,
+        query: str,
+        owner: Optional[str] = None,
+        candidate_k: int = 40,
+    ) -> List[Dict[str, Any]]:
         count = self._qdrant.count(collection_name=COLLECTION_NAME, exact=True).count
         if count == 0:
             return []
         from qdrant_client.models import FieldCondition, Filter, MatchValue
 
-        fetch_k = min(max(k * 5, 20), count)
+        fetch_k = min(max(int(candidate_k), 1), count)
         query_filter = Filter(must=[FieldCondition(key="owner", match=MatchValue(value=owner))]) if owner else None
         query_vector = self._embed([query])[0]
         if hasattr(self._qdrant, "query_points"):
@@ -384,9 +535,7 @@ class VectorRAG:
                 "keyword_score": round(keyword_score, 4),
             })
         candidates.sort(key=lambda c: c["similarity"], reverse=True)
-        top = self._rerank(query, candidates, k)
-        logger.info(f"Qdrant hybrid search for '{query[:60]}': {len(top)} results")
-        return top
+        return candidates
 
     def _rerank(self, query: str, candidates: List[Dict[str, Any]], k: int) -> List[Dict[str, Any]]:
         url = os.getenv("RERANK_URL", "").strip()
@@ -416,10 +565,39 @@ class VectorRAG:
                         c["similarity"] = round(float(score), 4)
                     ranked.append(c)
             if ranked:
+                self._last_rerank_error = ""
                 return ranked[:k]
+            self._last_rerank_error = "Rerank response contained no ranked results"
         except Exception as e:
+            self._last_rerank_error = str(e)
             logger.warning("Rerank failed, using vector ranking: %s", e)
         return candidates[:k]
+
+    def test_reranker(self) -> Dict[str, Any]:
+        url = os.getenv("RERANK_URL", "").strip()
+        if not url:
+            return {"configured": False, "ok": False, "message": "RERANK_URL is not configured"}
+        try:
+            import httpx
+
+            model = os.getenv("RERANK_MODEL", "")
+            payload = {"query": "alpha", "documents": ["alpha beta", "unrelated gamma"]}
+            if model:
+                payload["model"] = model
+            headers = {"Authorization": f"Bearer {os.getenv('RERANK_API_KEY')}"} if os.getenv("RERANK_API_KEY") else {}
+            resp = httpx.post(url, json=payload, headers=headers, timeout=20)
+            resp.raise_for_status()
+            data = resp.json()
+            raw = data.get("results") or data.get("data") or []
+            ok = any(isinstance(item, dict) and isinstance(item.get("index"), int) for item in raw)
+            return {
+                "configured": True,
+                "ok": bool(ok),
+                "model": model,
+                "message": "Reranker reachable" if ok else "Reranker response did not include indexed results",
+            }
+        except Exception as e:
+            return {"configured": True, "ok": False, "model": os.getenv("RERANK_MODEL", ""), "message": str(e)}
 
     def _keyword_search_fallback(self, query: str, k: int = 5, owner: Optional[str] = None) -> List[Dict[str, Any]]:
         try:
@@ -427,6 +605,15 @@ class VectorRAG:
                 return []
 
             if self._collection.count() == 0:
+                return []
+
+            count = self._collection.count()
+            if count > MAX_KEYWORD_FALLBACK_SCAN:
+                logger.warning(
+                    "Skipping keyword fallback full scan: collection has %s docs; limit is %s",
+                    count,
+                    MAX_KEYWORD_FALLBACK_SCAN,
+                )
                 return []
 
             # Fetch all documents for keyword search fallback
@@ -479,6 +666,7 @@ class VectorRAG:
                     collection_name=COLLECTION_NAME,
                     vectors_config=VectorParams(size=dim, distance=Distance.COSINE),
                 )
+                self._fts_clear()
                 self._healthy = True
                 return True
 
@@ -492,6 +680,7 @@ class VectorRAG:
                 name=COLLECTION_NAME,
                 metadata={"hnsw:space": "cosine"},
             )
+            self._fts_clear()
             self._healthy = True
             return True
         except Exception as e:
@@ -514,6 +703,10 @@ class VectorRAG:
                 "persist_directory": self.persist_directory,
                 "collection_name": COLLECTION_NAME,
                 "vector_backend": self._backend,
+                "rerank_enabled": bool(os.getenv("RERANK_URL", "").strip()),
+                "rerank_model": os.getenv("RERANK_MODEL", ""),
+                "last_rerank_error": self._last_rerank_error,
+                "fts_enabled": True,
                 "healthy": True,
             }
         except Exception as e:
@@ -525,7 +718,12 @@ class VectorRAG:
     # ------------------------------------------------------------------
 
     def index_personal_documents(
-        self, directory: str, file_extensions: Optional[set] = None, owner: Optional[str] = None
+        self,
+        directory: str,
+        file_extensions: Optional[set] = None,
+        owner: Optional[str] = None,
+        progress_cb=None,
+        cancel_cb=None,
     ) -> Dict[str, Any]:
         if file_extensions is None:
             file_extensions = DEFAULT_FILE_EXTENSIONS
@@ -536,6 +734,14 @@ class VectorRAG:
         try:
             for root, _, files in os.walk(directory):
                 for fname in files:
+                    if cancel_cb and cancel_cb():
+                        return {
+                            'success': False,
+                            'cancelled': True,
+                            'indexed_count': indexed,
+                            'failed_count': failed,
+                            'message': f'Cancelled after indexing {indexed} chunks from {directory}',
+                        }
                     fpath = os.path.join(root, fname)
                     ext = Path(fname).suffix.lower()
                     if ext not in file_extensions:
@@ -562,13 +768,25 @@ class VectorRAG:
                             meta['owner'] = owner
 
                         for i, chunk in enumerate(self._split_into_chunks(content)):
+                            if cancel_cb and cancel_cb():
+                                return {
+                                    'success': False,
+                                    'cancelled': True,
+                                    'indexed_count': indexed,
+                                    'failed_count': failed,
+                                    'message': f'Cancelled after indexing {indexed} chunks from {directory}',
+                                }
                             if self.add_document(chunk, {**meta, 'chunk_id': i}):
                                 indexed += 1
                             else:
                                 failed += 1
+                        if progress_cb:
+                            progress_cb({"file": fpath, "indexed_count": indexed, "failed_count": failed})
                     except Exception as e:
                         logger.error(f"index {fpath}: {e}")
                         failed += 1
+                        if progress_cb:
+                            progress_cb({"file": fpath, "indexed_count": indexed, "failed_count": failed})
 
             return {
                 'success': True,
@@ -608,6 +826,8 @@ class VectorRAG:
                         point_ids.append(point.id)
                 if point_ids:
                     self._qdrant.delete(collection_name=COLLECTION_NAME, points_selector=point_ids)
+                    doc_ids = [str((p.payload or {}).get("doc_id") or p.id) for p in ids if p.id in point_ids]
+                    self._fts_delete_ids(doc_ids)
                 return {"success": True, "removed_count": len(point_ids), "message": f"Removed {len(point_ids)} chunks"}
 
             results = self._collection.get(include=["metadatas"])
@@ -622,6 +842,7 @@ class VectorRAG:
                 return {"success": True, "removed_count": 0, "message": "No docs found"}
 
             self._collection.delete(ids=ids)
+            self._fts_delete_ids(ids)
             n = len(ids)
             logger.info(f"Removed {n} chunks from {directory}")
             return {"success": True, "removed_count": n, "message": f"Removed {n} chunks"}
@@ -720,6 +941,8 @@ class VectorRAG:
                 flt = Filter(must=[FieldCondition(key="source", match=MatchValue(value=source))])
                 count = self._qdrant.count(collection_name=COLLECTION_NAME, count_filter=flt, exact=True).count
                 if count:
+                    hits = self._qdrant.scroll(collection_name=COLLECTION_NAME, scroll_filter=flt, limit=10000, with_payload=True)[0]
+                    self._fts_delete_ids([str((p.payload or {}).get("doc_id") or p.id) for p in hits])
                     self._qdrant.delete(collection_name=COLLECTION_NAME, points_selector=FilterSelector(filter=flt))
                 return int(count)
 
@@ -731,6 +954,7 @@ class VectorRAG:
             if not ids:
                 return 0
             self._collection.delete(ids=ids)
+            self._fts_delete_ids(ids)
             logger.info(f"Deleted {len(ids)} chunks for source={source}")
             return len(ids)
         except Exception as e:

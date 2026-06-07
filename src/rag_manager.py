@@ -30,9 +30,15 @@ class RAGManager:
         logger.info("RAGManager initialized as wrapper for VectorRAG")
     
     # Delegate all methods to VectorRAG
-    def search(self, query: str, k: int = 5) -> List[Dict[str, Any]]:
+    def search(
+        self,
+        query: str,
+        k: int = 5,
+        owner: str | None = None,
+        candidate_k: int | None = None,
+    ) -> List[Dict[str, Any]]:
         """Search for documents - delegates to VectorRAG."""
-        return self.vector_rag.search(query, k)
+        return self.vector_rag.search(query, k, owner=owner, candidate_k=candidate_k)
     
     def index_personal_documents(self, directory: str) -> Dict[str, Any]:
         """Index documents - delegates to VectorRAG."""
