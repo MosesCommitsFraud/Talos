@@ -775,8 +775,7 @@ import slashCommands, { initSlashCommands, isCommand, handleSlashCommand, handle
         fd.append('active_doc_id', documentModule.getCurrentDocId());
       }
       // Web toggle: pre-search in Chat mode, tool permission in Agent mode
-      const toggleState = Storage.loadToggleState();
-      let isAgentMode = (toggleState.mode || 'chat') === 'agent';
+      let isAgentMode = false;
       const planChk = el('plan-toggle');
       const _planModeForTurn = !!(planChk && planChk.checked);
       if (_planModeForTurn) isAgentMode = true;

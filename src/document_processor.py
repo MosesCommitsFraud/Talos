@@ -386,6 +386,11 @@ def build_user_content(
         _, ext = os.path.splitext(path.lower())
         mime = upload_info.get("mime") or mimetypes.guess_type(path)[0] or "application/octet-stream"
         display_name = upload_info.get("name") or upload_info.get("original_name") or path
+        path_hint = (
+            f"\n\n[Attachment file available to tools: {display_name}]\n"
+            f"Path: {path}\n"
+            "If the user asks to analyze, transform, chart, forecast, or inspect this file, use this exact path."
+        )
 
         if upload_handler.is_image_file(display_name, mime):
             try:
@@ -528,15 +533,16 @@ def build_user_content(
                 inline_attachment_remaining,
                 display_name,
             )
+            extracted_text = path_hint + extracted_text
             if content and content[0]["type"] == "text":
                 content[0]["text"] += extracted_text
             else:
                 content.insert(0, {"type": "text", "text": extracted_text.lstrip()})
         else:
             if content and content[0]["type"] == "text":
-                content[0]["text"] += "\n\n[Attached non-text file]"
+                content[0]["text"] += path_hint + "\n\n[Attached non-text file]"
             else:
-                content.insert(0, {"type": "text", "text": "[Attached non-text file]"})
+                content.insert(0, {"type": "text", "text": (path_hint + "\n\n[Attached non-text file]").lstrip()})
 
     has_media = any(item.get("type") in ["image_url", "audio"] for item in content if isinstance(item, dict))
     if not has_media and content:

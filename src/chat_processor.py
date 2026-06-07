@@ -49,6 +49,7 @@ class ChatProcessor:
     # dropping everything behind a hard similarity gate. Embedding/reranker
     # scales differ between providers, so a fixed threshold is brittle.
     RAG_SIMILARITY_THRESHOLD = 0.0
+    RAG_RERANK_MIN_SCORE = 0.10
 
     def _rag_k_setting(self, key: str, default: int) -> int:
         try:
@@ -272,7 +273,15 @@ class ChatProcessor:
                     results = rag_manager.search(message, k=rag_k, owner=None, candidate_k=candidate_k)
                     # Keep top retrieved/reranked chunks. Do not require keyword overlap:
                     # vector-only matches often have keyword_score=0 but are still correct.
-                    relevant = [r for r in results if r.get("similarity", 0) >= self.RAG_SIMILARITY_THRESHOLD] or results[:rag_k]
+                    has_rerank_scores = any(r.get("rerank_score") is not None for r in results)
+                    if has_rerank_scores:
+                        relevant = [
+                            r for r in results
+                            if r.get("rerank_score") is not None
+                            and float(r.get("rerank_score") or 0) >= self.RAG_RERANK_MIN_SCORE
+                        ]
+                    else:
+                        relevant = [r for r in results if r.get("similarity", 0) >= self.RAG_SIMILARITY_THRESHOLD] or results[:rag_k]
                     if relevant:
                         logger.info(f"RAG: {len(relevant)}/{len(results)} results above threshold {self.RAG_SIMILARITY_THRESHOLD}")
                         rag_sources = [

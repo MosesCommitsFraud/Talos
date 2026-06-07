@@ -106,6 +106,29 @@ _ROUTING_PATTERNS: tuple[tuple[str, str, Pattern[str]], ...] = tuple(
         ("shell", "imperative shell command request", rf"{_PLEASE}(deploy|build|install|restart|reboot|kill|tail|grep|cat|ls|cd|cp|mv|rm)\b\s+\S+"),
         ("shell", "assistant shell command request", rf"{_ACTION_QUESTION}(deploy|build|install|restart|reboot|kill|tail|grep|cat|ls|cd|cp|mv|rm)\b\s+\S+"),
         ("shell", "system/file check request", r"\b(check|see)\s+(if|whether|what)\s+.{1,40}\b(running|process|service|port|file|exists?)\b"),
+
+        # Files, uploads, and local/project context. These need read/list/search
+        # tools; plain chat can only guess.
+        ("file", "read/open attached file request", r"\b(?:read|open|inspect|look\s+at|check|analy[sz]e|summari[sz]e)\b.{0,80}\b(?:file|attachment|upload|spreadsheet|excel|csv|pdf|document|doc|workbook)\b"),
+        ("file", "attached file reference", r"\b(?:attached|uploaded|dropped)\b.{0,80}\b(?:file|spreadsheet|excel|csv|pdf|document|workbook)\b"),
+        ("file", "file path reference", r"(?:^|\s)(?:[A-Za-z]:\\|/|~[/\\]|\.\.?[/\\])[^\s]+"),
+        ("file", "find/list/search files request", r"\b(?:find|locate|list|search|grep|scan)\b.{0,80}\b(?:files?|folders?|directories|repo|project|codebase|workspace)\b"),
+
+        # Data analysis / charts / predictions. These generally need Python,
+        # pandas, plotting, or reading an attached dataset.
+        ("data", "data analysis request", r"\b(?:analy[sz]e|forecast|predict|model|correlat(?:e|ion)|trend|regression|cluster|classif(?:y|ication))\b.{0,120}\b(?:data|dataset|spreadsheet|excel|csv|table|rows?|columns?|sales|numbers?|metrics?)\b"),
+        ("data", "chart or graph request", r"\b(?:graph|plot|chart|visuali[sz]e|dashboard)\b.{0,120}\b(?:data|dataset|spreadsheet|excel|csv|table|trend|forecast|prediction|values?)\b"),
+        ("data", "spreadsheet calculation request", r"\b(?:calculate|compute|summari[sz]e|aggregate|pivot)\b.{0,120}\b(?:spreadsheet|excel|csv|table|rows?|columns?|sheet|workbook)\b"),
+
+        # Code creation/editing/execution. Informational questions like "how do
+        # I write a loop" are excluded by the explanatory prefix above.
+        ("code", "code creation request", rf"{_PLEASE}(?:write|create|build|implement|generate|make|fix|debug|refactor|edit|modify|update)\b.{{0,120}}\b(?:code|script|program|app|function|component|class|api|test|bug|repo|project|file)\b"),
+        ("code", "assistant code action request", rf"{_ACTION_QUESTION}(?:write|create|build|implement|generate|make|fix|debug|refactor|edit|modify|update|run|test)\b.{{0,120}}\b(?:code|script|program|app|function|component|class|api|test|bug|repo|project|file)\b"),
+        ("code", "run/test code request", r"\b(?:run|execute|test|lint|format|compile)\b.{0,80}\b(?:code|script|tests?|project|repo|program|notebook)\b"),
+
+        # Anything explicitly asking Talos to use a tool/capability rather than
+        # answer from general knowledge.
+        ("tool", "explicit tool use request", r"\b(?:use|call)\s+(?:the\s+)?(?:tool|python|bash|shell|terminal|file|browser|search|rag|calendar|email|notes?)\b"),
     )
 )
 

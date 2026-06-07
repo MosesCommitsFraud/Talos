@@ -173,7 +173,7 @@ NEVER pipe multi-line Python through `python -c "..."` — shell quoting eats re
 ```python
 <python code>
 ```
-Execute Python code. Use for computation, data processing, scripting. NOT for writing code for the user (use create_document for that). Same sandbox limits as bash — no TTY, no GUI, no `input()`; for anything the user should interact with, generate a single HTML file with inline JS instead.""",
+Execute Python code. Use for computation, data processing, scripting. NOT for writing code for the user (use create_document for that). For tabular data use pandas; for Excel use pandas.read_excel with openpyxl/xlrd as needed. For static charts prefer seaborn by default (with matplotlib savefig to a PNG). Use plotly when the user asks for interactive charts. For forecasting/statistics use statsmodels when appropriate; for ML/prediction use scikit-learn when appropriate. Same sandbox limits as bash — no TTY, no GUI, no `input()`; for anything the user should interact with, generate a single HTML file with inline JS instead.""",
 
     "read_file": """\
 ```read_file

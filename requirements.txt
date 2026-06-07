@@ -14,6 +14,14 @@ pypdf
 beautifulsoup4
 charset-normalizer
 numpy
+pandas
+openpyxl
+xlrd
+matplotlib
+seaborn
+plotly
+scikit-learn
+statsmodels
 chromadb-client
 qdrant-client
 fastembed

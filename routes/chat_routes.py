@@ -379,7 +379,8 @@ def setup_chat_routes(
         compare_mode = str(form_data.get("compare_mode", "")).lower() == "true"
         incognito = str(form_data.get("incognito", "")).lower() == "true"
         plan_mode = str(form_data.get("plan_mode", "")).lower() == "true"
-        chat_mode = str(form_data.get("mode", "")).lower()  # 'chat' or 'agent'
+        requested_chat_mode = str(form_data.get("mode", "")).lower()  # legacy hint only
+        chat_mode = "agent" if requested_chat_mode == "agent" else "chat"
         # Workspace: confine the agent's file/shell tools to this folder. Validate
         # it's a real directory; ignore (no confinement) otherwise.
         workspace = (form_data.get("workspace") or "").strip()
@@ -403,10 +404,12 @@ def setup_chat_routes(
         # its way through a plain chat request (and fail, especially with the
         # shell disabled).
         auto_escalated = False
+        auto_escalation_category = ""
         _tool_intent = _classify_tool_intent(message) if isinstance(message, str) else None
         if chat_mode == "chat" and _tool_intent and _tool_intent.needs_tools:
             chat_mode = "agent"
             auto_escalated = True
+            auto_escalation_category = _tool_intent.category
             logger.info(
                 "chat→agent auto-escalation: category=%s reason=%s",
                 _tool_intent.category,
@@ -478,6 +481,25 @@ def setup_chat_routes(
                 att_ids = [str(x) for x in json.loads(attachments)]
             except Exception:
                 pass
+
+        if chat_mode == "chat" and att_ids:
+            tool_attachment_exts = {
+                ".xls", ".xlsx", ".xlsm", ".ods", ".csv", ".tsv",
+                ".pdf", ".docx", ".pptx", ".txt", ".md", ".json", ".xml",
+                ".py", ".js", ".ts", ".html", ".css", ".sql", ".log",
+            }
+            for att_id in att_ids:
+                try:
+                    fi = upload_handler.resolve_upload(att_id, owner=get_current_user(request))
+                except Exception:
+                    fi = None
+                name = (fi or {}).get("name") or (fi or {}).get("original_name") or att_id
+                if os.path.splitext(str(name).lower())[1] in tool_attachment_exts:
+                    chat_mode = "agent"
+                    auto_escalated = True
+                    auto_escalation_category = "attachment"
+                    logger.info("chat→agent auto-escalation: attachment=%s", name)
+                    break
 
         no_memory = str(form_data.get("no_memory", "")).lower() == "true"
 
@@ -622,7 +644,7 @@ def setup_chat_routes(
         # the heavy "do things on the computer" tools — otherwise the model
         # tries to shell out for a request that never needed it, then fails
         # (and looks broken when the shell is disabled).
-        if auto_escalated:
+        if auto_escalated and auto_escalation_category in {"calendar", "notes", "email", "ui"}:
             disabled_tools.update({
                 "bash", "python", "read_file", "write_file", "builtin_browser",
             })
