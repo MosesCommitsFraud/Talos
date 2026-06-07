@@ -19,7 +19,6 @@ import themeModule from './theme.js';
 import documentModule from './document.js';
 import workspaceModule from './workspace.js';
 import settingsModule from './settings.js';
-import cookbookModule from './cookbook.js';
 import { EVAL_PROMPTS } from './compare/index.js';
 
 // ── Module state ──────────────────────────────────────────────────────
@@ -1244,11 +1243,6 @@ async function _cmdOpen(args, ctx) {
     return false;
   };
   try {
-    if (target === 'cookbook' || target === 'cook') {
-      if (cookbookModule && typeof cookbookModule.open === 'function') await cookbookModule.open({ tab: 'Download' });
-      else clickFirst('tool-cookbook-btn', 'rail-cookbook');
-      return true;
-    }
     if (target === 'settings' || target === 'setting' || target === 'config') {
       if (settingsModule && typeof settingsModule.open === 'function') settingsModule.open();
       else clickFirst('user-bar-settings', 'rail-settings');
@@ -1265,7 +1259,6 @@ async function _cmdOpen(args, ctx) {
       brain: ['tool-memory-btn', 'rail-memory'],
       memory: ['tool-memory-btn', 'rail-memory'],
       memories: ['tool-memory-btn', 'rail-memory'],
-      research: ['tool-research-btn', 'rail-research'],
     };
     const ids = targets[target];
     if (ids && clickFirst(...ids)) return true;
@@ -1279,36 +1272,6 @@ async function _cmdOpen(args, ctx) {
 async function _cmdToolPanel(tool, args, ctx) {
   const target = String(tool || '').toLowerCase();
   const rest = (args || []).join(' ').trim();
-  if (target === 'cookbook') {
-    const sub = (args[0] || '').toLowerCase();
-    if (sub === 'serve') {
-      const query = args.slice(1).join(' ').trim();
-      try {
-        if (cookbookModule && typeof cookbookModule.open === 'function') {
-          await cookbookModule.open({ tab: 'Serve', serveSearch: query });
-          if (query) {
-            try {
-              const mod = await import('./cookbookServe.js');
-              if (mod && typeof mod.openServePanelForRepo === 'function') {
-                setTimeout(() => { mod.openServePanelForRepo(query).catch(() => {}); }, 80);
-              }
-            } catch (_) {}
-          }
-        } else {
-          document.getElementById('tool-cookbook-btn')?.click();
-        }
-      } catch (e) {
-        slashReply(`Could not open Cookbook Serve${e?.message ? `: ${ctx.esc(e.message)}` : ''}`);
-      }
-      return true;
-    }
-    if (sub === 'download' || sub === 'scan') {
-      await cookbookModule?.open?.({ tab: 'Download', usecase: args.slice(1).join(' ').trim() || undefined });
-      return true;
-    }
-    await cookbookModule?.open?.({ tab: 'Download', usecase: rest || undefined });
-    return true;
-  }
   if (target === 'email') {
     const btn = document.getElementById('rail-email') || document.getElementById('email-section-title');
     if (btn) btn.click();
@@ -5201,10 +5164,8 @@ const COMMANDS = {
     help: 'Toggle features on/off',
     default: '_show',
     subs: {
-      'web':       { handler: _cmdToggleWeb,       alias: ['search','s','w'],  help: 'Toggle web search',       usage: '/toggle web' },
       'bash':      { handler: _cmdToggleBash,      alias: ['b','shell'],       help: 'Toggle bash/shell',       usage: '/toggle bash' },
       'plan':      { handler: _cmdTogglePlan,      alias: ['p'],               help: 'Toggle plan mode',        usage: '/toggle plan' },
-      'research':  { handler: _cmdToggleResearch,  alias: ['r'],               help: 'Toggle deep research',    usage: '/toggle research' },
       'doc':       { handler: _cmdToggleDoc,       alias: [],     help: 'Toggle document editor',  usage: '/toggle doc' },
       'sidebar':   { handler: _cmdToggleSidebar,   alias: ['sb'], help: 'Cycle sidebar (full/mini/off)', usage: '/toggle sidebar [1|2|3]' },
       '_show':     { handler: _cmdToggleShow,      alias: [],     help: 'Show all toggle states',  usage: '/toggle' }
@@ -5288,20 +5249,6 @@ const COMMANDS = {
     handler: _cmdDemo,
     usage: '/demo'
   },
-  'tour-cookbook': {
-    alias: ['cookbook-tour'],
-    category: 'Tours',
-    help: 'Cookbook tour: hardware, downloads, serving',
-    handler: _cmdTourCookbook,
-    usage: '/tour-cookbook'
-  },
-  'tour-research': {
-    alias: ['research-tour'],
-    category: 'Tours',
-    help: 'Deep Research tour',
-    handler: _cmdTourResearch,
-    usage: '/tour-research'
-  },
   'tour-library': {
     alias: ['library-tour', 'tour-doc', 'tour-document', 'doc-tour', 'document-tour'],
     category: 'Tours',
@@ -5380,13 +5327,6 @@ const COMMANDS = {
     handler: _cmdOpen,
     usage: '/open Cookbook'
   },
-  cookbook: {
-    alias: ['cook'],
-    category: 'Tools',
-    help: 'Open Cookbook; use "serve" to jump to model serving',
-    handler: (args, ctx) => _cmdToolPanel('cookbook', args, ctx),
-    usage: '/cookbook  ·  /cookbook serve qwen'
-  },
   email: {
     alias: ['mail', 'inbox'],
     category: 'Tools',
@@ -5428,13 +5368,6 @@ const COMMANDS = {
     help: 'Open Gallery',
     handler: (args, ctx) => _cmdToolPanel('gallery', args, ctx),
     usage: '/gallery'
-  },
-  research: {
-    alias: [],
-    category: 'Tools',
-    help: 'Open Deep Research',
-    handler: (args, ctx) => _cmdToolPanel('research', args, ctx),
-    usage: '/research'
   },
   models: {
     alias: ['model'],
@@ -5548,9 +5481,7 @@ export const LEGACY_ALIASES = {
   'info':        { parent: 'chats', sub: 'info' },
   'clear':       { parent: 'chats', sub: 'clear' },
   'export':      { parent: 'chats', sub: 'export' },
-  'web':         { parent: 'toggle', sub: 'web' },
   'bash':        { parent: 'toggle', sub: 'bash' },
-  'research':    { parent: 'toggle', sub: 'research' },
   'plan':        { parent: 'toggle', sub: 'plan' },
   'doc':         { parent: 'toggle', sub: 'doc' },
   'sidebar':     { parent: 'toggle', sub: 'sidebar' },
