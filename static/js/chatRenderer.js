@@ -3,7 +3,6 @@
 
 import uiModule from './ui.js';
 import markdownModule from './markdown.js';
-import { addAITTSButton } from './tts-ai.js';
 import { providerLogo, providerLabel } from './providers.js';
 import settingsModule from './settings.js';
 import spinnerModule from './spinner.js';
@@ -1060,11 +1059,6 @@ document.addEventListener('click', function(e) {
   } else if (kind === 'skill') {
     import('./skills.js').then(mod => {
       const open = mod.openSkill || (mod.default && mod.default.openSkill);
-      if (open) open(id);
-    }).catch(() => {});
-  } else if (kind === 'research') {
-    import('./research/panel.js').then(mod => {
-      const open = mod.openPanel || (mod.default && mod.default.openPanel);
       if (open) open(id);
     }).catch(() => {});
   }
