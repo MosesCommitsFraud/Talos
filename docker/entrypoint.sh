@@ -37,7 +37,12 @@ fi
 # to mkdir them. Chown the whole /app tree — fast (<1s on this size)
 # and idempotent via the `-not -uid` filter so we only touch files
 # that need fixing.
-for dir in /app /app/data /app/logs; do
+# Uploads live in a named volume (TALOS_UPLOAD_DIR, default /srv/uploads in
+# Docker) that's also mounted into the sandbox. A FRESH named volume is created
+# root-owned, so the non-root app can't write to it — every upload fails with
+# EPERM ("all file uploads failed") until we chown it here too.
+UPLOAD_DIR_PATH="${TALOS_UPLOAD_DIR:-/srv/uploads}"
+for dir in /app /app/data /app/logs "$UPLOAD_DIR_PATH"; do
     if [ -d "$dir" ]; then
         # `find ... -not -uid` keeps this O(touched-files), not
         # O(everything), so terabyte-sized maildirs don't slow startup.
