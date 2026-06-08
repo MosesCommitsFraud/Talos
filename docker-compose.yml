@@ -26,8 +26,17 @@ services:
       - EMBEDDING_URL=${EMBEDDING_URL:-http://192.168.10.91:8001/v1/embeddings}
       - EMBEDDING_MODEL=${EMBEDDING_MODEL:-qwen3-embed}
       - TALOS_SANDBOX_URL=${TALOS_SANDBOX_URL:-http://talos-sandbox:7800}
+      # Shared secret the app sends on every sandbox API call. Set this in your
+      # .env to a long random string to require auth on the sandbox daemon.
+      - TALOS_SANDBOX_KEY=${TALOS_SANDBOX_KEY:-}
       - PUID=${PUID:-1000}
       - PGID=${PGID:-1000}
+    networks:
+      # `default` gives the app internet/LAN access (vLLM, embeddings, SQL).
+      # `sandbox-net` is the private, internet-less network it shares with the
+      # sandbox so it can reach talos-sandbox:7800.
+      - default
+      - sandbox-net
     depends_on:
       talos-sandbox:
         condition: service_started
@@ -45,13 +54,26 @@ services:
     environment:
       - TALOS_SANDBOX_HOME_ROOT=/home/talos
       - TALOS_SANDBOX_STATE=/var/lib/talos-sandbox/state.json
-      - VLLM_BASE_URL=${VLLM_BASE_URL:-http://192.168.10.91:8000/v1}
-      - VLLM_API_KEY=${VLLM_API_KEY:-not-needed}
-      - VLLM_MODEL=${VLLM_MODEL:-qwen3-llm}
+      # Same shared secret as the app — when set, the daemon rejects unauthenticated calls.
+      - TALOS_SANDBOX_KEY=${TALOS_SANDBOX_KEY:-}
       - TALOS_SANDBOX_APT_PACKAGES=${TALOS_SANDBOX_APT_PACKAGES:-}
       - TALOS_SANDBOX_PIP_PACKAGES=${TALOS_SANDBOX_PIP_PACKAGES:-}
       - TALOS_SANDBOX_NPM_PACKAGES=${TALOS_SANDBOX_NPM_PACKAGES:-}
+    # Resource caps (OpenTerminal-style) so runaway code can't exhaust the host.
+    # No wall-clock/timeout limit — long runs are allowed by design.
+    mem_limit: ${TALOS_SANDBOX_MEM:-6g}
+    cpus: ${TALOS_SANDBOX_CPUS:-4}
+    pids_limit: ${TALOS_SANDBOX_PIDS:-1024}
+    networks:
+      # ONLY the private internal network → the sandbox has NO internet/LAN
+      # access. The app reaches it here; it can't initiate outbound connections.
+      - sandbox-net
     restart: unless-stopped
+
+networks:
+  default: {}
+  sandbox-net:
+    internal: true
 
 volumes:
   talos-sandbox-home:

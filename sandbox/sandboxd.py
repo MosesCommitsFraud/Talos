@@ -25,6 +25,27 @@ STATE_PATH = Path(os.getenv("TALOS_SANDBOX_STATE", "/var/lib/talos-sandbox/state
 
 app = FastAPI(title="Talos Sandbox", version="0.1.0")
 
+# Shared-secret auth: when TALOS_SANDBOX_KEY is set, every request (except the
+# health probe) must carry it in the X-Talos-Sandbox-Key header. The app sends it
+# on every call. Unset = auth disabled (dev/local only) — a warning is logged.
+SANDBOX_KEY = os.getenv("TALOS_SANDBOX_KEY", "").strip()
+
+
+@app.middleware("http")
+async def _require_sandbox_key(request: Request, call_next):
+    if SANDBOX_KEY and request.url.path != "/health":
+        if request.headers.get("x-talos-sandbox-key", "") != SANDBOX_KEY:
+            from fastapi.responses import JSONResponse
+            return JSONResponse({"detail": "unauthorized"}, status_code=401)
+    return await call_next(request)
+
+
+if not SANDBOX_KEY:
+    import logging as _logging
+    _logging.getLogger("uvicorn.error").warning(
+        "TALOS_SANDBOX_KEY is not set — sandbox API is UNAUTHENTICATED. Set it in .env to require auth."
+    )
+
 
 class EnsureUserResponse(BaseModel):
     user_id: str
@@ -491,6 +512,12 @@ def ensure_user(user_id: str) -> tuple[str, Path]:
         created = True
     if created:
         _run(["chown", "-R", f"{name}:{name}", str(home)])
+    # Private home (0700): users can't traverse into each other's home/workspaces.
+    # Idempotent — applied every call so pre-existing 0755 homes get tightened.
+    try:
+        home.chmod(0o700)
+    except OSError:
+        pass
     return name, home
 
 
