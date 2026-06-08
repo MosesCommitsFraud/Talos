@@ -504,8 +504,10 @@ function _openVisionEditor(att, userMsgEl) {
 const TOOL_CALL_RE = /\[TOOL_CALL\][\s\S]*?\[\/TOOL_CALL\]/gi;
 // Only strip fenced tool-call blocks that look like structured invocations, not regular code examples
 const EXEC_FENCE_RE = /```(?:web_search|read_file|write_file|create_document|edit_document|update_document)\s*\n[\s\S]*?```/gi;
-// XML-style tool calls: <minimax:tool_call>, <tool_call>, <function_call>, bare <invoke>
-const XML_TOOL_CALL_RE = /<(?:[\w]+:)?(?:tool_call|function_call)>[\s\S]*?<\/(?:[\w]+:)?(?:tool_call|function_call)>/gi;
+// XML-style tool calls: <minimax:tool_call>, <tool_call>, <toolcall>,
+// <function_call> with optional attributes. The closing tag may not have
+// arrived yet while streaming, so strip to end as a partial block.
+const XML_TOOL_CALL_RE = /<(?:[\w]+:)?(?:tool_?call|function_?call)(?:\s+[^>]*)?>[\s\S]*?(?:<\/(?:[\w]+:)?(?:tool_?call|function_?call)>|$)/gi;
 const XML_INVOKE_RE = /<invoke\s+name=['"][^'"]*['"]>[\s\S]*?<\/invoke>/gi;
 // DeepSeek "DSML" tool-call markup (fullwidth-pipe ｜ or ascii | delimited) that
 // leaks into content when the model emits a text tool call instead of a native

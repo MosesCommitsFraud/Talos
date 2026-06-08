@@ -3079,6 +3079,7 @@ import slashCommands, { initSlashCommands, isCommand, handleSlashCommand, handle
       return;
     }
     const chatHistory = document.getElementById('chat-history');
+    if (currentHolder) currentHolder.dataset.backgroundStreamSession = sessionId;
     // Store background stream state
     _backgroundStreams.set(sessionId, {
       status: 'running',
@@ -3298,8 +3299,12 @@ import slashCommands, { initSlashCommands, isCommand, handleSlashCommand, handle
         }
       }
 
-      var aiHolders = entry.historyHtml ? box.querySelectorAll('.msg-ai') : [];
-      var holder = aiHolders.length ? aiHolders[aiHolders.length - 1] : null;
+      var holder = null;
+      if (entry.historyHtml) {
+        box.querySelectorAll('[data-background-stream-session]').forEach(function(el) {
+          if (!holder && el.dataset.backgroundStreamSession === String(sessionId)) holder = el;
+        });
+      }
       if (!holder) {
         holder = document.createElement('div');
         holder.className = 'msg msg-ai';
@@ -3322,10 +3327,22 @@ import slashCommands, { initSlashCommands, isCommand, handleSlashCommand, handle
       var renderBackgroundText = function(text) {
         if (!contentDiv) return;
         var display = stripToolBlocks(text || '');
-        contentDiv.innerHTML = markdownModule.mdToHtml(markdownModule.squashOutsideCode(display));
+        if (markdownModule.hasUnclosedThinkTag && markdownModule.hasUnclosedThinkTag(display)) {
+          var thinkStart = display.search(/<(?:think(?:ing)?|thought)(?:\s+[^>]*)?>|<\|channel>thought/i);
+          var thinkContent = display.substring(Math.max(thinkStart, 0))
+            .replace(/<(?:think(?:ing)?|thought)(?:\s+[^>]*)?>|<\|channel>thought\s*\n?/i, '')
+            .replace(/<channel\|>/gi, '')
+            .trim();
+          var lines = thinkContent.split('\n').length;
+          contentDiv.innerHTML = '<div class="thinking-section"><div class="thinking-header"><div class="thinking-header-left">Thinking' +
+            (lines > 1 ? ' (' + lines + ' lines)' : '') + '</div></div></div>';
+        } else {
+          contentDiv.innerHTML = markdownModule.processWithThinking(markdownModule.squashOutsideCode(display));
+        }
+        if (window.hljs) contentDiv.querySelectorAll('pre code:not(.hljs)').forEach(function(block) { window.hljs.highlightElement(block); });
       };
       renderBackgroundText(entry.accumulated || '');
-      var spinner = spinnerModule.create('Response streaming in background', 'right');
+      var spinner = spinnerModule.create('Generating response', 'right');
       bodyDiv.appendChild(spinner.createElement());
       spinner.start();
 
