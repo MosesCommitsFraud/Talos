@@ -393,8 +393,13 @@ function initializeEventListeners() {
       const sid = sessionModule.getCurrentSessionId();
       if (!sid) { uiModule.showToast('Open a chat first'); return; }
       try {
-        const mod = await import('./js/document.js');
-        await mod.default.showArtifactsGrid(sid);
+        const mod = (await import('./js/document.js')).default;
+        // Toggle: if the doc panel is already open, close it; else open + show files.
+        if (mod.isPanelOpen && mod.isPanelOpen()) {
+          if (mod.closePanel) mod.closePanel();
+        } else {
+          await mod.showArtifactsGrid(sid);
+        }
       } catch (err) {
         console.error('Chat files failed:', err);
         uiModule.showError('Failed to open chat files');

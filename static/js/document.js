@@ -3988,11 +3988,11 @@ import * as Modals from './modalManager.js';
         <div id="doc-version-list" class="doc-version-list"></div>
       </div>
       <div id="doc-artifacts-panel" class="doc-artifacts-panel hidden">
-        <div class="doc-version-header">
-          <span>Chat files</span>
+        <div class="doc-artifacts-header">
+          <span class="doc-artifacts-title">Chat files</span>
           <span style="flex:1"></span>
-          <button id="doc-artifacts-new" class="doc-action-icon-btn" title="New document"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg></button>
-          <button id="doc-artifacts-close" class="doc-action-icon-btn" title="Close"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+          <button id="doc-artifacts-new" class="doc-artifacts-hbtn" title="New document"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg></button>
+          <button id="doc-artifacts-close" class="doc-artifacts-hbtn doc-artifacts-hbtn-close" title="Close"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg> Close</button>
         </div>
         <div id="doc-artifacts-grid" class="doc-artifacts-grid"></div>
       </div>
@@ -6177,10 +6177,14 @@ import * as Modals from './modalManager.js';
     const panel = document.getElementById('doc-artifacts-panel');
     const grid = document.getElementById('doc-artifacts-grid');
     if (!panel || !grid) return;
+    const _hide = () => { panel.classList.add('hidden'); document.removeEventListener('keydown', _onEsc); };
+    const _onEsc = (e) => { if (e.key === 'Escape') _hide(); };
     const closeBtn = document.getElementById('doc-artifacts-close');
-    if (closeBtn) closeBtn.onclick = () => panel.classList.add('hidden');
+    if (closeBtn) closeBtn.onclick = _hide;
     const newBtn = document.getElementById('doc-artifacts-new');
-    if (newBtn) newBtn.onclick = () => { panel.classList.add('hidden'); createDocument(sessionId); };
+    if (newBtn) newBtn.onclick = () => { _hide(); createDocument(sessionId); };
+    document.removeEventListener('keydown', _onEsc);
+    document.addEventListener('keydown', _onEsc);
     panel.classList.remove('hidden');
     grid.innerHTML = '<div class="doc-artifacts-empty">Loading…</div>';
     let items = [];

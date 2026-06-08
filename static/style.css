@@ -197,7 +197,7 @@ body.bg-pattern-sparkles {
       position: relative;
       z-index: 2;
       padding: 5px 0 0;
-      min-height: 25px;
+      min-height: 38px;
       box-sizing: border-box;
     }
     .chat-top-bar::after {
@@ -212,17 +212,18 @@ body.bg-pattern-sparkles {
       display: inline-flex;
       align-items: center;
       justify-content: center;
-      width: 38px;
-      height: 34px;
+      width: 36px;
+      height: 30px;
       border: 1px solid var(--border);
       border-radius: 9px;
-      background: none;
+      background: var(--bg);
       color: var(--fg);
-      opacity: 0.8;
+      opacity: 0.85;
       cursor: pointer;
-      z-index: 3;
+      z-index: 4;
     }
-    .chat-top-files-btn svg { width: 19px; height: 19px; }
+    .chat-top-files-btn:hover { opacity: 1; background: color-mix(in srgb, var(--fg) 8%, var(--bg)); }
+    .chat-top-files-btn svg { width: 18px; height: 18px; }
     .chat-top-files-btn:hover {
       opacity: 1;
       background: color-mix(in srgb, var(--fg) 8%, var(--bg));
@@ -13014,6 +13015,31 @@ mark.doc-find-mark.current {
   flex-direction: column;
 }
 .doc-artifacts-panel.hidden { display: none; }
+.doc-artifacts-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+  font-weight: 600;
+  color: var(--fg);
+  flex: 0 0 auto;
+}
+.doc-artifacts-title { font-size: 13px; }
+.doc-artifacts-hbtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--fg);
+  border-radius: 7px;
+  padding: 5px 9px;
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1;
+}
+.doc-artifacts-hbtn:hover { background: color-mix(in srgb, var(--fg) 8%, var(--bg)); }
 .doc-artifacts-grid {
   flex: 1;
   min-height: 0;
@@ -13045,6 +13071,8 @@ mark.doc-find-mark.current {
 .doc-artifact-prev {
   width: 100%;
   height: 96px;
+  flex: 0 0 96px;
+  min-height: 96px;
   border-radius: 6px;
   overflow: hidden;
   background: color-mix(in srgb, var(--fg) 6%, var(--bg));
