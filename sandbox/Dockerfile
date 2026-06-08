@@ -70,6 +70,17 @@ COPY requirements.txt ./requirements.txt
 RUN python3 -m venv /opt/talos-sandbox-venv \
     && /opt/talos-sandbox-venv/bin/pip install --no-cache-dir -r requirements.txt
 
+# Make the venv (with pandas/numpy/matplotlib/openpyxl/etc. pre-installed) the
+# default Python EVERYWHERE — including login shells (`bash -lc`), which re-source
+# /etc/profile and would otherwise reset PATH and lose the venv. Without this the
+# agent's bash sees only the bare system python3 (no data libs) and wastes turns
+# trying to pip-install things that are already installed.
+RUN printf 'export PATH=/opt/talos-sandbox-venv/bin:$PATH\n' > /etc/profile.d/zz-talos-venv.sh \
+    && ln -sf /opt/talos-sandbox-venv/bin/python  /usr/local/bin/python \
+    && ln -sf /opt/talos-sandbox-venv/bin/python  /usr/local/bin/python3 \
+    && ln -sf /opt/talos-sandbox-venv/bin/pip     /usr/local/bin/pip \
+    && ln -sf /opt/talos-sandbox-venv/bin/pip     /usr/local/bin/pip3
+
 COPY sandboxd.py ./sandboxd.py
 COPY entrypoint.sh ./entrypoint.sh
 
