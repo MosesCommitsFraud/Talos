@@ -873,18 +873,57 @@ def ls_route(user_id: str, chat_id: str, req: ListRequest) -> dict[str, Any]:
     return {"output": _truncate("\n".join(lines)), "exit_code": 0}
 
 
+def _resolve_show_image_path(name: str, workspace: Path, raw: str) -> Path | None:
+    """Resolve the image path for show_image. Prefer a workspace-relative file.
+    If the model saved to an absolute path outside the workspace (e.g. /tmp or its
+    home — a common habit), import a copy into the workspace's output/ dir so the
+    image both displays AND appears in the artifacts list. Returns the readable
+    path inside the workspace, or None if it can't be found/imported."""
+    # 1) Normal case: a workspace-relative (or in-workspace absolute) path.
+    try:
+        target = _safe_path(workspace, raw)
+        if target.is_file():
+            return target
+    except HTTPException:
+        pass
+    # 2) Out-of-workspace absolute path: import it if it lives somewhere the user
+    #    legitimately writes (their home subtree or /tmp) and is an image.
+    cand = Path(raw)
+    if not cand.is_absolute() or cand.suffix.lower() not in IMAGE_MIME_BY_EXT:
+        return None
+    try:
+        resolved = cand.resolve()
+        if not resolved.is_file():
+            return None
+    except OSError:
+        return None
+    allowed_roots = [(HOME_ROOT / name).resolve(), Path("/tmp").resolve()]
+    if not any(resolved == r or r in resolved.parents for r in allowed_roots):
+        return None
+    dest_dir = workspace / OUTPUT_DIR_NAME
+    try:
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        dest = dest_dir / resolved.name
+        shutil.copyfile(resolved, dest)
+        subprocess.run(["chown", "-R", f"{name}:{name}", str(dest_dir)], capture_output=True)
+    except OSError:
+        return None
+    return dest
+
+
 @app.post("/users/{user_id}/workspaces/{chat_id}/files/image")
 def read_image_route(user_id: str, chat_id: str, req: FileReadRequest) -> dict[str, Any]:
-    """Read an image file from the workspace and return it as a base64 data URL,
-    for the `show_image` tool. Confined to the workspace by _safe_path."""
-    _name, workspace = _workspace(user_id, chat_id)
-    path = _safe_path(workspace, req.path)
+    """Read an image and return it as a base64 data URL for the `show_image` tool.
+    Workspace-relative paths are read directly; absolute paths the model used (e.g.
+    /tmp) are imported into the workspace's output/ dir first."""
+    name, workspace = _workspace(user_id, chat_id)
+    path = _resolve_show_image_path(name, workspace, (req.path or "").strip())
+    if path is None:
+        return {"error": f"show_image: {req.path}: not found (save the image inside your workspace, e.g. output/chart.png)", "exit_code": 1}
     ext = path.suffix.lower()
     if ext not in IMAGE_MIME_BY_EXT:
         return {"error": f"show_image: {req.path}: not a supported image type ({', '.join(sorted(IMAGE_MIME_BY_EXT))})", "exit_code": 1}
     try:
-        if not path.is_file():
-            return {"error": f"show_image: {req.path}: not found", "exit_code": 1}
         size = path.stat().st_size
         if size > MAX_IMAGE_BYTES:
             return {"error": f"show_image: {req.path}: too large ({size // 1_000_000}MB > {MAX_IMAGE_BYTES // 1_000_000}MB limit)", "exit_code": 1}
@@ -892,11 +931,11 @@ def read_image_route(user_id: str, chat_id: str, req: FileReadRequest) -> dict[s
     except OSError as exc:
         return {"error": f"show_image: {req.path}: {exc}", "exit_code": 1}
     try:
-        name = str(path.relative_to(workspace.resolve()))
+        display_name = str(path.relative_to(workspace.resolve()))
     except ValueError:
-        name = path.name
+        display_name = path.name
     b64 = base64.b64encode(raw).decode("ascii")
-    return {"output": f"Displaying {name}", "name": name, "data_url": f"data:{IMAGE_MIME_BY_EXT[ext]};base64,{b64}", "exit_code": 0}
+    return {"output": f"Displaying {display_name}", "name": display_name, "data_url": f"data:{IMAGE_MIME_BY_EXT[ext]};base64,{b64}", "exit_code": 0}
 
 
 @app.get("/users/{user_id}/workspaces/{chat_id}/artifacts")
