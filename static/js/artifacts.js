@@ -83,7 +83,18 @@ export async function showChatFiles(sessionId) {
     const row = document.createElement('div');
     row.className = 'chat-files-row';
 
-    const open = () => {
+    const open = async () => {
+      if (!a.is_image && TEXT_EXTS.has(ext)) {
+        // Open editable text/code in the document editor — edits save back to the file.
+        try {
+          const dm = (await import('./document.js')).default;
+          if (dm && dm.openArtifact) {
+            dm.openArtifact(sessionId, a.path);
+            document.querySelectorAll('.chat-files-overlay').forEach((o) => o.remove());
+            return;
+          }
+        } catch (_) { /* fall through to preview */ }
+      }
       if (!a.is_image && TEXT_EXTS.has(ext)) { _previewText(url, a.path); return; }
       window.open(url, '_blank', 'noopener,noreferrer');
     };

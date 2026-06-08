@@ -294,6 +294,7 @@ import * as Modals from './modalManager.js';
       html += `<div class="doc-tab active doc-tab-ghost" title="New document — start typing"><span class="doc-tab-title">Untitled</span></div>`;
     }
     html += `<button class="doc-tab-new" id="doc-tab-new-btn" title="New document"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg></button>`;
+    html += `<button class="doc-tab-new" id="doc-tab-files-btn" title="Chat files (images, scripts, results)"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg></button>`;
     html += '</div>';
     html += '<button class="doc-tab-arrow doc-tab-arrow-right" id="doc-tab-right" title="Scroll right">&#x203A;</button>';
     tabBar.innerHTML = html;
@@ -413,6 +414,20 @@ import * as Modals from './modalManager.js';
           }
         }
         createDocument(sessionId);
+      });
+    }
+
+    const filesBtn = document.getElementById('doc-tab-files-btn');
+    if (filesBtn) {
+      filesBtn.addEventListener('click', async () => {
+        const sessionId = docs.get(activeDocId)?.sessionId
+          || _lastSessionId
+          || (sessionModule && sessionModule.getCurrentSessionId());
+        if (!sessionId) return;
+        try {
+          const af = (await import('./artifacts.js')).default;
+          af.showChatFiles(sessionId);
+        } catch (e) { console.error('Failed to open chat files:', e); }
       });
     }
 
@@ -5961,6 +5976,48 @@ import * as Modals from './modalManager.js';
     }
   }
 
+  function _langFromExt(path) {
+    const ext = (String(path).split('.').pop() || '').toLowerCase();
+    const map = {
+      py: 'python', js: 'javascript', mjs: 'javascript', cjs: 'javascript', ts: 'typescript',
+      json: 'json', md: 'markdown', markdown: 'markdown', html: 'html', htm: 'html', css: 'css',
+      sh: 'bash', bash: 'bash', sql: 'sql', yaml: 'yaml', yml: 'yaml', toml: 'ini', ini: 'ini',
+      xml: 'xml', csv: 'text', tsv: 'text', txt: 'text', log: 'text', c: 'c', cpp: 'cpp',
+      h: 'cpp', java: 'java', go: 'go', rs: 'rust', rb: 'ruby', php: 'php', r: 'r',
+    };
+    return map[ext] || 'text';
+  }
+
+  /** Open a sandbox workspace artifact (text file) in the editor. Edits save
+   *  back to the file (see saveDocument's sandbox-backed branch). */
+  export async function openArtifact(sessionId, path) {
+    if (!sessionId || !path) return;
+    const synthId = 'artifact:' + sessionId + ':' + path;
+    if (docs.has(synthId)) {
+      _ensureDocPaneMounted();
+      if (!isOpen) openPanel();
+      switchToDoc(synthId);
+      return;
+    }
+    let content = '';
+    try {
+      const r = await fetch(`${API_BASE}/api/artifacts/${encodeURIComponent(sessionId)}/download?path=${encodeURIComponent(path)}`, { credentials: 'same-origin' });
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      content = await r.text();
+    } catch (e) {
+      console.error('Failed to open artifact:', e);
+      if (uiModule) uiModule.showError('Could not open file');
+      return;
+    }
+    addDocToTabs({
+      id: synthId, title: path, language: _langFromExt(path),
+      current_content: content, version_count: 1, session_id: sessionId, sandboxPath: path,
+    }, sessionId);
+    if (!isOpen) openPanel();
+    _ensureDocPaneMounted();
+    switchToDoc(synthId);
+  }
+
   // Deep-link: #document-<id> opens that document on load / URL-bar nav.
   // Clicks on in-chat document anchors are handled separately (they call
   // preventDefault, so they don't change the hash); this covers refresh
@@ -6078,11 +6135,16 @@ import * as Modals from './modalManager.js';
         if (Modals.isRegistered('doc-panel')) Modals.unregister('doc-panel');
         return;
       }
-      // Always open when there are docs — the minimised branch above
-      // already returned for users who explicitly docked the panel.
-      // The previous `if (!restoreMode || shouldRestoreOpen)` gate left
-      // the panel closed on first entry to a chat with docs, which
-      // hides the doc unless the user manually opens the panel.
+      // Don't FORCE the panel open just because a chat has docs. If the user
+      // closed it for this chat (restoreMode load and not marked open), keep it
+      // closed and just show the indicator/chip — they can reopen it, and it
+      // auto-opens when something NEW is added (see streamDocOpen / handleDocUpdate).
+      if (restoreMode && !shouldRestoreOpen) {
+        activeDocId = null;
+        _ensureDocChipRegistered();
+        _syncDocIndicator();
+        return;
+      }
       _markDocVisibleState(sessionId, 'open');
       if (!isOpen) openPanel();
       switchToDoc(target.id);
@@ -6105,6 +6167,9 @@ import * as Modals from './modalManager.js';
       content: doc.current_content || '',
       version: doc.version_count || 1,
       sessionId: sessionId || doc.session_id,
+      // When set, this "document" is actually a sandbox workspace file; saves
+      // write back to that file instead of a DB document.
+      sandboxPath: doc.sandboxPath || null,
       userSetLanguage: !!doc.language,
       _composeAtts: existing?._composeAtts,
       // Provenance for the "Send signed reply" flow
@@ -8115,6 +8180,26 @@ import * as Modals from './modalManager.js';
     const textarea = document.getElementById('doc-editor-textarea');
     if (!textarea) return;
 
+    // Sandbox-backed artifact: write the edited content straight back to the
+    // workspace file instead of saving a DB document.
+    const _sbDoc = docs.get(activeDocId);
+    if (_sbDoc && _sbDoc.sandboxPath) {
+      try {
+        const r = await fetch(`${API_BASE}/api/artifacts/${encodeURIComponent(_sbDoc.sessionId)}/save`, {
+          method: 'POST', credentials: 'same-origin',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ path: _sbDoc.sandboxPath, content: textarea.value }),
+        });
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        _sbDoc.content = textarea.value;
+        if (!silent && uiModule) uiModule.showToast('Saved to file');
+      } catch (e) {
+        console.error('Failed to save artifact:', e);
+        if (!silent && uiModule) uiModule.showError('Failed to save file');
+      }
+      return;
+    }
+
     try {
       const res = await fetch(`${API_BASE}/api/document/${activeDocId}`, {
         method: 'PUT',
@@ -9708,6 +9793,7 @@ const documentModule = {
   createDocument,
   newDocument,
   loadDocument,
+  openArtifact,
   injectFreshDoc,
   ensurePaneMounted: _ensureDocPaneMounted,
   loadSessionDocs,

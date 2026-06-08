@@ -1105,6 +1105,57 @@ def write_file_route(user_id: str, chat_id: str, req: FileWriteRequest) -> dict[
     return result
 
 
+def _leading_ws(s: str) -> str:
+    return s[: len(s) - len(s.lstrip())]
+
+
+def _reindent(replacement: str, tgt_indent: str, match_indent: str) -> str:
+    """Shift the replacement's indentation by the difference between the matched
+    block's indent and the target's indent, so a flexibly-matched edit keeps
+    correct indentation."""
+    if tgt_indent == match_indent:
+        return replacement
+    out = []
+    for line in replacement.split("\n"):
+        if not line.strip():
+            out.append(line)
+        elif line.startswith(tgt_indent):
+            out.append(match_indent + line[len(tgt_indent):])
+        else:
+            out.append(line)
+    return "\n".join(out)
+
+
+def _flexible_line_match(text: str, target: str) -> tuple[int, int] | None:
+    """Find a UNIQUE whitespace-tolerant match of `target` against whole lines of
+    `text` (comparing each line stripped of leading/trailing whitespace). Returns
+    (start, end) char offsets, or None if not found or ambiguous. Skips CRLF text
+    to avoid offset issues. This lets edit_file succeed when the model's
+    indentation is slightly off, instead of failing and forcing a full rewrite."""
+    if "\r" in text:
+        return None
+    tgt_lines = target.split("\n")
+    if tgt_lines and tgt_lines[-1] == "":
+        tgt_lines = tgt_lines[:-1]
+    if not tgt_lines:
+        return None
+    tgt_stripped = [l.strip() for l in tgt_lines]
+    lines = text.split("\n")
+    offsets: list[int] = []
+    pos = 0
+    for ln in lines:
+        offsets.append(pos)
+        pos += len(ln) + 1
+    n = len(tgt_lines)
+    found: list[tuple[int, int]] = []
+    for i in range(0, len(lines) - n + 1):
+        if [w.strip() for w in lines[i:i + n]] == tgt_stripped:
+            found.append((offsets[i], offsets[i + n - 1] + len(lines[i + n - 1])))
+            if len(found) > 1:
+                return None
+    return found[0] if len(found) == 1 else None
+
+
 def _apply_edit_chunk(text: str, chunk: dict[str, Any], idx: int) -> tuple[str | None, str | None]:
     """Apply one find/replace chunk. Returns (new_text, None) or (None, error).
     Supports optional 1-indexed inclusive line-range scoping and allow_multiple."""
@@ -1131,7 +1182,15 @@ def _apply_edit_chunk(text: str, chunk: dict[str, Any], idx: int) -> tuple[str |
         return "".join(lines[:s]) + new_window + "".join(lines[e:]), None
     cnt = text.count(target)
     if cnt == 0:
-        return None, f"edit #{idx + 1}: target not found"
+        # Exact match failed — try a whitespace-tolerant match so a slightly-off
+        # indentation doesn't force the model to rewrite the whole file.
+        span = _flexible_line_match(text, target)
+        if span is None:
+            return None, f"edit #{idx + 1}: target not found"
+        start, end = span
+        match_indent = _leading_ws(text[start:end].split("\n", 1)[0])
+        tgt_indent = _leading_ws(target.split("\n", 1)[0])
+        return text[:start] + _reindent(replacement, tgt_indent, match_indent) + text[end:], None
     if cnt > 1 and not allow_multiple:
         return None, f"edit #{idx + 1}: target not unique ({cnt} matches); add surrounding context or set allow_multiple"
     return (text.replace(target, replacement) if allow_multiple else text.replace(target, replacement, 1)), None

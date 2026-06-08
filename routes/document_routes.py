@@ -507,6 +507,37 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
             out = (out + "\n" + stderr).strip() if out else stderr
         return {"output": out or "(no output)", "exit_code": int(data.get("exit_code") or 0)}
 
+    # ---- POST /api/artifacts/{session_id}/save — write edited content back to the file ----
+    @router.post("/api/artifacts/{session_id}/save")
+    async def save_artifact_route(request: Request, session_id: str):
+        db = SessionLocal()
+        try:
+            owner = _verify_session_access(db, request, session_id)
+        finally:
+            db.close()
+        try:
+            body = await request.json()
+        except Exception:
+            raise HTTPException(400, "Invalid body")
+        path = str((body or {}).get("path") or "").strip()
+        content = str((body or {}).get("content") or "")
+        if not path:
+            raise HTTPException(400, "path is required")
+        from src.sandbox_client import file_tool_in_sandbox, sandbox_enabled
+        if not sandbox_enabled():
+            raise HTTPException(404, "Sandbox not available")
+        try:
+            res = await file_tool_in_sandbox(
+                owner=owner, session_id=session_id, operation="write",
+                payload={"path": path, "content": content},
+            )
+        except Exception as e:
+            logger.warning("artifact save failed for %s (%s): %s", session_id, path, e)
+            raise HTTPException(500, "Save failed")
+        if isinstance(res, dict) and res.get("exit_code", 0) not in (0, None):
+            raise HTTPException(400, res.get("error", "Save failed"))
+        return {"status": "saved", "path": path}
+
     # ---- GET /api/document/{doc_id} ----
     @router.get("/api/document/{doc_id}")
     async def get_document(request: Request, doc_id: str) -> Dict[str, Any]:
