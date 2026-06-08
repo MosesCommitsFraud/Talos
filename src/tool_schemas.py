@@ -25,7 +25,7 @@ FUNCTION_TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "bash",
-            "description": "Run a shell command (full access). Runs with NO time limit, so long jobs (installs, builds, data processing) won't be cut off. To show an image to the user, write it into an `output/` directory in the workspace; files saved there are displayed inline in the chat.",
+            "description": "Run a shell command for SHELL tasks: installing packages, inspecting files (ls/cat/grep), git, builds, system info. To run Python code use the `python` tool (not `bash python ...`). To create or edit files use write_file/edit_file (not bash redirects/heredocs).",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -53,7 +53,7 @@ FUNCTION_TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "run_cell",
-            "description": "Run Python in a PERSISTENT session (like a Jupyter notebook): variables, imports, and loaded data PERSIST between calls. Ideal for iterative data analysis — load a dataset ONCE, then run more cells to explore/transform/plot it without reloading or re-running earlier work. Use this (not the inline `python` tool) whenever you'll iterate on the same data/state. State persists until the chat ends or you reset it. For charts, save to an `output/` path or call show_image.",
+            "description": "Run Python in a PERSISTENT session (like a Jupyter notebook): variables, imports, and loaded data PERSIST between calls. For one-off computations use the `python` tool; reach for run_cell only for MULTI-STEP data analysis where keeping data in memory between steps saves real work (load a dataset once, then explore/transform/plot it across cells without reloading). State persists until the chat ends or you reset it. For charts, save to an `output/` path or call show_image.",
             "parameters": {
                 "type": "object",
                 "properties": {
