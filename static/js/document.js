@@ -424,10 +424,7 @@ import * as Modals from './modalManager.js';
           || _lastSessionId
           || (sessionModule && sessionModule.getCurrentSessionId());
         if (!sessionId) return;
-        try {
-          const af = (await import('./artifacts.js')).default;
-          af.showChatFiles(sessionId);
-        } catch (e) { console.error('Failed to open chat files:', e); }
+        showArtifactsGrid(sessionId);
       });
     }
 
@@ -552,6 +549,11 @@ import * as Modals from './modalManager.js';
     _hideLoadingOverlay();
     syncHighlighting();
     renderTabs();
+    // Default landing for an open, empty panel is the artifact collection
+    // (cards), not a blank "Untitled" editor. Closing the grid reveals the empty
+    // editor; the + button / typing still creates a new document. Only when the
+    // panel is already open — don't force it open here.
+    if (!activeDocId && isOpen) { try { showArtifactsGrid(); } catch (_) {} }
   }
 
   let _loadingSpinner = null;
@@ -3460,17 +3462,20 @@ import * as Modals from './modalManager.js';
 
   function switchToDoc(docId) {
     if (!docs.has(docId)) return;
+    // Opening a real document leaves the artifact-collection landing view.
+    document.getElementById('doc-artifacts-panel')?.classList.add('hidden');
     _hideLoadingOverlay();
     if (_diffModeActive) exitDiffMode(true);
 
     // Save current doc state before switching
     saveCurrentToMap();
 
-    // Auto-delete the doc we're leaving if it's completely empty
+    // Auto-delete the doc we're leaving if it's completely empty (but never a
+    // sandbox-backed artifact — that's a real file, not a throwaway draft).
     const prevId = activeDocId;
     if (prevId && prevId !== docId && docs.has(prevId)) {
       const prev = docs.get(prevId);
-      if (!(prev.content || '').trim() && !(prev.title || '').trim()) {
+      if (!prev.sandboxPath && !(prev.content || '').trim() && !(prev.title || '').trim()) {
         fetch(`${API_BASE}/api/document/${prevId}`, { method: 'DELETE' }).catch(() => {});
         docs.delete(prevId);
         _syncDocIndicator();
@@ -3981,6 +3986,15 @@ import * as Modals from './modalManager.js';
           <button id="doc-version-close" class="doc-action-icon-btn" title="Close"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
         </div>
         <div id="doc-version-list" class="doc-version-list"></div>
+      </div>
+      <div id="doc-artifacts-panel" class="doc-artifacts-panel hidden">
+        <div class="doc-version-header">
+          <span>Chat files</span>
+          <span style="flex:1"></span>
+          <button id="doc-artifacts-new" class="doc-action-icon-btn" title="New document"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg></button>
+          <button id="doc-artifacts-close" class="doc-action-icon-btn" title="Close"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+        </div>
+        <div id="doc-artifacts-grid" class="doc-artifacts-grid"></div>
       </div>
       <div id="doc-mobile-footer" class="doc-mobile-footer">
         <button id="doc-mobile-close" class="doc-mobile-footer-btn" type="button">Unlink</button>
@@ -6016,6 +6030,73 @@ import * as Modals from './modalManager.js';
     if (!isOpen) openPanel();
     _ensureDocPaneMounted();
     switchToDoc(synthId);
+  }
+
+  function _artifactCard(sessionId, a) {
+    const ext = (String(a.name).split('.').pop() || '').toLowerCase();
+    const url = `${API_BASE}/api/artifacts/${encodeURIComponent(sessionId)}/download?path=${encodeURIComponent(a.path)}`;
+    const card = document.createElement('button');
+    card.type = 'button';
+    card.className = 'doc-artifact-card';
+    card.title = a.path;
+
+    const prev = document.createElement('div');
+    prev.className = 'doc-artifact-prev';
+    if (a.is_image) {
+      const img = document.createElement('img');
+      img.src = url; img.loading = 'lazy'; img.alt = a.name || '';
+      prev.appendChild(img);
+    } else {
+      prev.classList.add('doc-artifact-prev-ext');
+      prev.textContent = (ext || 'file').slice(0, 5).toUpperCase();
+    }
+    card.appendChild(prev);
+
+    const name = document.createElement('div');
+    name.className = 'doc-artifact-name';
+    name.textContent = a.name || a.path;
+    card.appendChild(name);
+
+    card.addEventListener('click', () => {
+      if (a.is_image) { window.open(url, '_blank', 'noopener,noreferrer'); return; }
+      openArtifact(sessionId, a.path);  // text/code → editor
+      const panel = document.getElementById('doc-artifacts-panel');
+      if (panel) panel.classList.add('hidden');
+    });
+    return card;
+  }
+
+  /** Show the chat's artifacts as a grid of cards INSIDE the doc panel
+   *  (not a modal). Clicking a text/code card opens it in the editor. */
+  export async function showArtifactsGrid(sessionId) {
+    sessionId = sessionId || _lastSessionId || (sessionModule && sessionModule.getCurrentSessionId());
+    if (!sessionId) return;
+    if (!isOpen) openPanel();
+    _ensureDocPaneMounted();
+    const panel = document.getElementById('doc-artifacts-panel');
+    const grid = document.getElementById('doc-artifacts-grid');
+    if (!panel || !grid) return;
+    const closeBtn = document.getElementById('doc-artifacts-close');
+    if (closeBtn) closeBtn.onclick = () => panel.classList.add('hidden');
+    const newBtn = document.getElementById('doc-artifacts-new');
+    if (newBtn) newBtn.onclick = () => { panel.classList.add('hidden'); createDocument(sessionId); };
+    panel.classList.remove('hidden');
+    grid.innerHTML = '<div class="doc-artifacts-empty">Loading…</div>';
+    let items = [];
+    try {
+      const r = await fetch(`${API_BASE}/api/artifacts/${encodeURIComponent(sessionId)}`, { credentials: 'same-origin' });
+      const data = await r.json();
+      items = Array.isArray(data.artifacts) ? data.artifacts : [];
+    } catch (e) {
+      grid.innerHTML = '<div class="doc-artifacts-empty">Couldn’t load files (sandbox unavailable).</div>';
+      return;
+    }
+    if (!items.length) {
+      grid.innerHTML = '<div class="doc-artifacts-empty">No files in this chat yet.<br><span style="opacity:.7">Uploads and results the assistant creates show up here.</span></div>';
+      return;
+    }
+    grid.innerHTML = '';
+    for (const a of items) grid.appendChild(_artifactCard(sessionId, a));
   }
 
   // Deep-link: #document-<id> opens that document on load / URL-bar nav.
@@ -9794,6 +9875,7 @@ const documentModule = {
   newDocument,
   loadDocument,
   openArtifact,
+  showArtifactsGrid,
   injectFreshDoc,
   ensurePaneMounted: _ensureDocPaneMounted,
   loadSessionDocs,

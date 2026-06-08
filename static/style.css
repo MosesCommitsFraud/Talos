@@ -203,6 +203,29 @@ body.bg-pattern-sparkles {
     .chat-top-bar::after {
       content: none;
     }
+    /* Dedicated artifacts/files button, pinned top-right of the chat. */
+    .chat-top-files-btn {
+      position: absolute;
+      right: 10px;
+      top: 50%;
+      transform: translateY(-50%);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 28px;
+      height: 26px;
+      border: 1px solid var(--border);
+      border-radius: 7px;
+      background: none;
+      color: var(--fg);
+      opacity: 0.7;
+      cursor: pointer;
+      z-index: 3;
+    }
+    .chat-top-files-btn:hover {
+      opacity: 1;
+      background: color-mix(in srgb, var(--fg) 8%, var(--bg));
+    }
     body.sidebar-collapsed.hamburger-left .chat-top-bar {
       padding-left: 38px;
     }
@@ -12979,6 +13002,67 @@ mark.doc-find-mark.current {
 .doc-version-panel.hidden {
   display: none;
 }
+
+/* Chat-files artifacts shown as cards INSIDE the document panel (Claude-style). */
+.doc-artifacts-panel {
+  position: absolute;
+  inset: 0;
+  z-index: 50;
+  background: var(--bg);
+  display: flex;
+  flex-direction: column;
+}
+.doc-artifacts-panel.hidden { display: none; }
+.doc-artifacts-grid {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+  gap: 12px;
+  padding: 14px;
+  align-content: start;
+}
+.doc-artifact-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: var(--panel, var(--bg));
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px;
+  cursor: pointer;
+  text-align: left;
+  color: var(--fg);
+  font: inherit;
+  transition: border-color .12s ease, transform .12s ease;
+}
+.doc-artifact-card:hover {
+  border-color: var(--accent, #3b82f6);
+  transform: translateY(-1px);
+}
+.doc-artifact-prev {
+  width: 100%;
+  aspect-ratio: 16 / 10;
+  border-radius: 6px;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--fg) 6%, var(--bg));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.doc-artifact-prev img { width: 100%; height: 100%; object-fit: cover; }
+.doc-artifact-prev-ext { font-weight: 700; font-size: 13px; letter-spacing: .05em; opacity: .65; }
+.doc-artifact-name {
+  font-size: 12px;
+  line-height: 1.3;
+  word-break: break-word;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+.doc-artifacts-empty { padding: 24px; text-align: center; opacity: .7; font-size: 13px; }
 @media (max-width: 768px) {
   .doc-version-panel {
     left: 0;

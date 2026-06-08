@@ -385,6 +385,23 @@ function initializeEventListeners() {
   }
 
   // Chat files: list this chat's sandbox artifacts (uploads + generated results)
+  // Dedicated top-right chat button → open the artifact collection in the doc panel.
+  const chatTopFilesBtn = el('chat-top-files-btn');
+  if (chatTopFilesBtn) {
+    chatTopFilesBtn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const sid = sessionModule.getCurrentSessionId();
+      if (!sid) { uiModule.showToast('Open a chat first'); return; }
+      try {
+        const mod = await import('./js/document.js');
+        await mod.default.showArtifactsGrid(sid);
+      } catch (err) {
+        console.error('Chat files failed:', err);
+        uiModule.showError('Failed to open chat files');
+      }
+    });
+  }
+
   const exportFilesBtn = el('export-files-btn');
   if (exportFilesBtn) {
     exportFilesBtn.addEventListener('click', async (e) => {
@@ -393,8 +410,9 @@ function initializeEventListeners() {
       const sid = sessionModule.getCurrentSessionId();
       if (!sid) { uiModule.showToast('Open a chat first'); return; }
       try {
-        const mod = await import('./js/artifacts.js');
-        await mod.showChatFiles(sid);
+        // Show the chat files as cards inside the document panel (not a modal).
+        const mod = await import('./js/document.js');
+        await mod.default.showArtifactsGrid(sid);
       } catch (err) {
         console.error('Chat files failed:', err);
         uiModule.showError('Failed to open chat files');
