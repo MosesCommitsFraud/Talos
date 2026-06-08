@@ -1553,6 +1553,12 @@ async def stream_agent_loop(
     # the fenced-block path is used instead of native function calling.
     _is_ollama_native = _is_ollama_native_url(endpoint_url or "")
     _ollama_openai_compat = _is_ollama_openai_compat_url(endpoint_url or "")
+    # Global override: when TALOS_ASSUME_NATIVE_TOOLS is set, treat every endpoint
+    # as natively tool-capable (like Open WebUI does) — for self-hosted vLLM /
+    # llama.cpp / LM Studio servers launched with native tool calling. A
+    # per-endpoint supports_tools=False still wins, and known-bad models
+    # (deepseek-r1) / native-Ollama paths are still excluded.
+    _assume_native = os.getenv("TALOS_ASSUME_NATIVE_TOOLS", "").strip().lower() in {"1", "true", "yes", "on"}
     if _endpoint_supports is True:
         _is_api_model = True
     elif (
@@ -1562,6 +1568,8 @@ async def stream_agent_loop(
         or _ollama_openai_compat
     ):
         _is_api_model = False
+    elif _assume_native:
+        _is_api_model = True
     else:
         _is_api_model = any(h in endpoint_url for h in _API_HOSTS) or _model_supports_tools
     messages, mcp_schemas = _build_system_prompt(

@@ -22,6 +22,10 @@ services:
       - DATABASE_URL=${DATABASE_URL:-sqlite:///./data/app.db}
       - LLM_HOST=${LLM_HOST:-192.168.10.91}
       - LLM_HOSTS=${LLM_HOSTS:-192.168.10.91}
+      # Force native (OpenAI-style) tool calling on for all endpoints, like Open
+      # WebUI. Set true for self-hosted vLLM/llama.cpp launched with
+      # --enable-auto-tool-choice. Hugely improves tool/edit reliability.
+      - TALOS_ASSUME_NATIVE_TOOLS=${TALOS_ASSUME_NATIVE_TOOLS:-true}
       - OPENAI_API_KEY=${OPENAI_API_KEY:-not-needed}
       - EMBEDDING_URL=${EMBEDDING_URL:-http://192.168.10.91:8001/v1/embeddings}
       - EMBEDDING_MODEL=${EMBEDDING_MODEL:-qwen3-embed}
