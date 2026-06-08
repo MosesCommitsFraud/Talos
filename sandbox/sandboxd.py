@@ -171,11 +171,32 @@ def _session_key(user_id: str, chat_id: str) -> str:
 def _workspace(user_id: str, chat_id: str) -> tuple[str, Path]:
     name, _home = ensure_user(user_id)
     workspace = workspace_path(user_id, chat_id)
-    created = not workspace.exists()
     workspace.mkdir(parents=True, exist_ok=True)
-    if created:
-        _run(["chown", f"{name}:{name}", str(workspace)])
+    # Always ensure the workspace dir is owned by the sandbox user, so code
+    # running as that user (gosu) can create files in it. Without this, a
+    # workspace first created by a root-run path (e.g. an upload) stays
+    # root-owned and the agent can't write anything into it.
+    _run(["chown", f"{name}:{name}", str(workspace)])
     return name, workspace
+
+
+def _chown_user_chain(name: str, workspace: Path, path: Path) -> None:
+    """chown `path` and each ancestor directory up to the workspace root to the
+    sandbox user. The daemon runs as root, so dirs it creates via mkdir would be
+    root-owned and lock the user (gosu) out of writing into them later."""
+    try:
+        root = workspace.resolve()
+        node = path.resolve()
+    except OSError:
+        return
+    targets: list[Path] = []
+    while True:
+        targets.append(node)
+        if node == root or root not in node.parents:
+            break
+        node = node.parent
+    for t in targets:
+        subprocess.run(["chown", f"{name}:{name}", str(t)], capture_output=True)
 
 
 def _safe_path(workspace: Path, raw_path: str) -> Path:
@@ -386,9 +407,9 @@ def ensure_workspace_route(user_id: str, chat_id: str) -> WorkspaceResponse:
 
 @app.post("/users/{user_id}/workspaces/{chat_id}/upload", response_model=WorkspaceResponse)
 async def upload_file_route(user_id: str, chat_id: str, file: UploadFile = File(...)) -> WorkspaceResponse:
-    name, _home = ensure_user(user_id)
-    workspace = workspace_path(user_id, chat_id)
-    workspace.mkdir(parents=True, exist_ok=True)
+    # Use _workspace so the workspace dir is owned by the sandbox user — otherwise
+    # an upload would leave it root-owned and the agent couldn't write files later.
+    name, workspace = _workspace(user_id, chat_id)
     filename = Path(file.filename or "upload.bin").name.replace("/", "_").replace("\\", "_")
     target = workspace / filename
     with target.open("wb") as out:
@@ -742,7 +763,9 @@ def write_file_route(user_id: str, chat_id: str, req: FileWriteRequest) -> dict[
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(req.content, encoding="utf-8")
-        _run(["chown", f"{name}:{name}", str(path)])
+        # chown the file AND any parent dirs we just created up to the workspace,
+        # so the agent (running as the user) can write alongside them afterwards.
+        _chown_user_chain(name, workspace, path)
     except OSError as exc:
         return {"error": f"write_file: {req.path}: {exc}", "exit_code": 1, "path": str(path)}
     result: dict[str, Any] = {"output": f"Wrote {len(req.content)} bytes to {path}", "exit_code": 0, "path": str(path)}
