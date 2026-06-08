@@ -212,10 +212,10 @@ body.bg-pattern-sparkles {
       display: inline-flex;
       align-items: center;
       justify-content: center;
-      width: 36px;
-      height: 30px;
+      width: 32px;
+      height: 32px;
       border: 1px solid var(--border);
-      border-radius: 9px;
+      border-radius: 10px;
       background: var(--bg);
       color: var(--fg);
       opacity: 0.85;
@@ -13045,7 +13045,9 @@ mark.doc-find-mark.current {
   min-height: 0;
   overflow: auto;
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  grid-auto-rows: max-content;
+  align-items: start;
   gap: 12px;
   padding: 14px;
   align-content: start;
@@ -13054,6 +13056,7 @@ mark.doc-find-mark.current {
   display: flex;
   flex-direction: column;
   gap: 8px;
+  height: auto;
   background: var(--panel, var(--bg));
   border: 1px solid var(--border);
   border-radius: 10px;
@@ -13062,6 +13065,7 @@ mark.doc-find-mark.current {
   text-align: left;
   color: var(--fg);
   font: inherit;
+  box-sizing: border-box;
   transition: border-color .12s ease, transform .12s ease;
 }
 .doc-artifact-card:hover {
