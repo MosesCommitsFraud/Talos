@@ -4216,8 +4216,12 @@ import slashCommands, { initSlashCommands, isCommand, handleSlashCommand, handle
         });
         if (!res.ok) throw new Error('Server error ' + res.status);
 
-        // Re-render body with markdown
+        // Re-render body with markdown and restore attachment cards. Editing
+        // changes the text only; files remain attached to the message.
         body.innerHTML = markdownModule.processWithThinking(markdownModule.squashOutsideCode(newContent));
+        if (msgElement._attachments?.length) {
+          chatRenderer.updateMessageAttachments(msgElement, msgElement._attachments);
+        }
         msgElement.dataset.raw = newContent;
 
         // Add edited indicator if not already present

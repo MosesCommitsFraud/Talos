@@ -318,6 +318,7 @@ function buildAttachCards(attachments) {
 // refresh, because the bubble is rendered before the upload assigns ids.
 export function updateMessageAttachments(msgWrap, attachments) {
   if (!msgWrap || !attachments?.length) return;
+  msgWrap._attachments = attachments;
   const body = msgWrap.querySelector('.body') || msgWrap;
   const existing = body.querySelector('.attach-cards');
   const fresh = buildAttachCards(attachments);
@@ -514,6 +515,8 @@ const DSML_TOOL_RE = /<\s*[｜|]+\s*DSML\s*[｜|]+\s*tool_calls\s*>[\s\S]*?(?:<\
 const DSML_STRAY_RE = /<\s*\/?\s*[｜|]+\s*DSML\s*[｜|]+[^>]*>/gi;
 // Self-narration about tool results (model echoing stdout/exit_code)
 const TOOL_NARRATION_RE = /(?:The (?:result|output) shows?:?\s*)?-?\s*(?:stdout|stderr|exit_code):\s*.+/gi;
+const ATTACHMENT_TOOL_HINT_RE = /\n*\[Attachment file available to tools:[\s\S]*?(?=\n\n\[Attached document:|\n\n\[Attached (?:document|non-text) file\]|\n\n\[Image attached:|\n\n=== File:|\n\n\[PDF content\]:|$)/gi;
+const ATTACHED_DOC_NOTICE_RE = /\n*\[Attached document: [^\]]+\]/gi;
 
 
 // Model pricing table — per million tokens
@@ -1999,7 +2002,7 @@ export function addMessage(role, content, modelName, metadata) {
 
     // --- Agent multi-bubble reconstruction from saved metadata ---
     if (role === 'assistant' && metadata && metadata.tool_events && metadata.tool_events.length > 0) {
-      const roundTexts = metadata.round_texts || [];
+      const roundTexts = Array.isArray(metadata.round_texts) ? metadata.round_texts.slice() : [];
       const toolEvents = metadata.tool_events;
       let lastWrap = null;
       let firstMsgAi = null;
@@ -2010,6 +2013,13 @@ export function addMessage(role, content, modelName, metadata) {
         const r = ev.round || 1;
         if (!toolsByRound[r]) toolsByRound[r] = [];
         toolsByRound[r].push(ev);
+      }
+
+      const savedText = stripToolBlocks(textRaw || '').trim();
+      if (savedText) {
+        const hasSavedText = roundTexts.some(t => (t || '').trim());
+        const lastIdx = Math.max(0, ...Object.keys(toolsByRound).map(Number)) - 1;
+        if (!hasSavedText) roundTexts[lastIdx] = savedText;
       }
 
       const maxRound = Math.max(...Object.keys(toolsByRound).map(Number), roundTexts.length);
@@ -2178,8 +2188,13 @@ export function addMessage(role, content, modelName, metadata) {
     // ALL user messages (not just ones with attachment metadata) so it rebuilds
     // from the stored text even after a browser restart drops the cached attachments.
     const attachments = metadata?.attachments;
+    if (role === 'user' && attachments?.length) wrap._attachments = attachments;
     const _visionBlocks = [];
     if (role === 'user') {
+      text = text
+        .replace(ATTACHMENT_TOOL_HINT_RE, '')
+        .replace(ATTACHED_DOC_NOTICE_RE, '')
+        .trim();
       text = text.replace(
         /\n*\[Image: ([^\]]+)\]\n([\s\S]*?)(?=\n*\[Image: |\n*\[Image attached: |\n*=== File: |\n*\[PDF content\]:|$)/g,
         (_m, name, desc) => { const d = desc.trim(); if (d) _visionBlocks.push({ name: name, desc: d }); return ''; }
@@ -2193,6 +2208,7 @@ export function addMessage(role, content, modelName, metadata) {
         .replace(/\n*=== File: .+? ===\n\[Type: .+?\]\n+[\s\S]*?(?=\n*=== File:|$)/g, '')
         .replace(/\n*\[PDF content\]:[\s\S]*?(?=\n*\[PDF content\]|\n*=== File:|$)/g, '')
         .replace(/\n*\[Image attached: [^\]]+\]/g, '')
+        .replace(ATTACHED_DOC_NOTICE_RE, '')
         .replace(/\n*\[Attached (?:document|non-text) file\]/g, '')
         .trim();
     }

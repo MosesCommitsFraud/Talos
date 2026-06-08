@@ -20,6 +20,43 @@ from routes.session_routes import (
 logger = logging.getLogger(__name__)
 
 
+def _attachment_suffix(text: str) -> str:
+    """Return hidden attachment context from an existing user message."""
+    if not isinstance(text, str) or not text:
+        return ""
+    markers = (
+        "\n\n[Attachment file available to tools:",
+        "\n\n[Image:",
+        "\n\n[Image attached:",
+        "\n\n=== File:",
+        "\n\n[PDF content]:",
+        "\n\n[Attached document:",
+        "\n\n[Attached non-text file]",
+    )
+    positions = [text.find(marker) for marker in markers if text.find(marker) >= 0]
+    return text[min(positions):] if positions else ""
+
+
+def _merge_edited_attachment_content(existing, edited_text: str):
+    """Edit only the user-visible text while preserving attachment payloads."""
+    if isinstance(existing, list):
+        merged = []
+        replaced_text = False
+        for part in existing:
+            if isinstance(part, dict) and part.get("type") == "text" and not replaced_text:
+                old_text = part.get("text") or ""
+                new_part = dict(part)
+                new_part["text"] = edited_text + _attachment_suffix(old_text)
+                merged.append(new_part)
+                replaced_text = True
+            else:
+                merged.append(part)
+        if not replaced_text:
+            merged.insert(0, {"type": "text", "text": edited_text})
+        return merged
+    return edited_text + _attachment_suffix(existing if isinstance(existing, str) else "")
+
+
 def _merge_continue_rows_to_delete(db_messages, db1, db2):
     """DB rows to delete when merging the last two assistant messages.
 
@@ -235,7 +272,14 @@ def setup_history_routes(session_manager) -> APIRouter:
                 if not db_msg:
                     raise HTTPException(404, "Message not found")
 
-                db_msg.content = content
+                existing_content = db_msg.content
+                try:
+                    if isinstance(existing_content, str) and existing_content.startswith('[{') and '"type"' in existing_content:
+                        existing_content = json.loads(existing_content)
+                except (json.JSONDecodeError, ValueError):
+                    existing_content = db_msg.content
+                updated_content = _merge_edited_attachment_content(existing_content, content)
+                db_msg.content = json.dumps(updated_content) if isinstance(updated_content, list) else updated_content
                 meta = {}
                 if db_msg.meta_data:
                     try: meta = json.loads(db_msg.meta_data)
@@ -248,10 +292,10 @@ def setup_history_routes(session_manager) -> APIRouter:
                     hmeta = hmsg.metadata if isinstance(hmsg, ChatMessage) else hmsg.get('metadata')
                     if isinstance(hmeta, dict) and hmeta.get('_db_id') == msg_id:
                         if isinstance(hmsg, ChatMessage):
-                            hmsg.content = content
+                            hmsg.content = _merge_edited_attachment_content(hmsg.content, content)
                             hmsg.metadata['edited'] = True
                         elif isinstance(hmsg, dict):
-                            hmsg['content'] = content
+                            hmsg['content'] = _merge_edited_attachment_content(hmsg.get('content'), content)
                             hmsg['metadata']['edited'] = True
                         break
 
