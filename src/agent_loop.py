@@ -169,13 +169,19 @@ NEVER pipe multi-line Python through `python -c "..."` — shell quoting eats re
 ```python
 <python code>
 ```
-Execute Python code. Use for computation, data processing, scripting. NOT for writing code for the user (use create_document for that). For tabular data use pandas; for Excel use pandas.read_excel with openpyxl/xlrd as needed. For static charts prefer seaborn by default (with matplotlib savefig to a PNG). Use plotly when the user asks for interactive charts. For forecasting/statistics use statsmodels when appropriate; for ML/prediction use scikit-learn when appropriate. Runs with NO time limit — long/heavy work is fine. SHOWING AN IMAGE TO THE USER: your working directory is a private workspace. To display a finished chart/image, save it with a RELATIVE path under `output/`, e.g. `import os; os.makedirs('output', exist_ok=True); fig.savefig('output/chart.png', dpi=150, bbox_inches='tight')`. Images saved under `output/` are shown inline automatically — you do NOT need to upload them anywhere (never use api_call for images). Do NOT save to `/tmp` or other absolute paths; those are NOT shown. Keep scratch/WIP renders out of `output/` so only finished results appear. Same sandbox limits as bash — no TTY, no GUI, no `input()`; for anything the user should interact with, generate a single HTML file with inline JS instead.""",
+Execute Python code. Use for computation, data processing, scripting. NOT for writing code for the user (use create_document for that). For tabular data use pandas; for Excel use pandas.read_excel with openpyxl/xlrd as needed. For static charts prefer seaborn by default (with matplotlib savefig to a PNG). Use plotly when the user asks for interactive charts. For forecasting/statistics use statsmodels when appropriate; for ML/prediction use scikit-learn when appropriate. Runs with NO time limit — long/heavy work is fine. SHOWING AN IMAGE TO THE USER: your working directory is a private workspace. To display a finished chart/image: save it with a RELATIVE path in your workspace (e.g. `fig.savefig('chart.png', dpi=150, bbox_inches='tight')`), then call the `show_image` tool with that path. (Images you save under an `output/` directory are also shown automatically.) Never upload images via api_call, and do NOT save to `/tmp` or absolute paths — those won't show. Same sandbox limits as bash — no TTY, no GUI, no `input()`; for anything the user should interact with, generate a single HTML file with inline JS instead.""",
 
     "read_file": """\
 ```read_file
 <file path>
 ```
 Read a file and return its contents.""",
+
+    "show_image": """\
+```show_image
+<workspace-relative image path>
+```
+Display an image from your workspace to the user — rendered inline in the chat with click-to-enlarge and a download button. Use this to PRESENT a finished chart/plot/diagram/visual. First create the image (e.g. with python + seaborn: `fig.savefig('chart.png')`), then call show_image with that path. The path must be inside your workspace (relative, e.g. `chart.png` or `output/chart.png`) — never `/tmp` or an absolute path. One image per call.""",
 
     "write_file": """\
 ```write_file

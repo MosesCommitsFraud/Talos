@@ -15,7 +15,11 @@ MEMORY_FILE = os.path.join(DATA_DIR, "memory.json")
 MEMORY_DOC = os.path.join(DATA_DIR, "memory_doc.md")
 PERSONAL_DIR = os.path.join(DATA_DIR, "personal_docs")
 RUNBOOK_DIR = os.path.join(PERSONAL_DIR, "runbook")
-UPLOAD_DIR = os.path.join(DATA_DIR, "uploads")
+# Uploaded files live here. In Docker this is overridden to a named volume that is
+# ALSO mounted into the sandbox container (TALOS_UPLOAD_DIR=/srv/uploads), so
+# uploads sit in the sandbox and never clutter the host-bind-mounted ./data.
+# Falls back to data/uploads for local (non-Docker) dev.
+UPLOAD_DIR = os.getenv("TALOS_UPLOAD_DIR") or os.path.join(DATA_DIR, "uploads")
 FEATURES_FILE = os.path.join(DATA_DIR, "features.json")
 SETTINGS_FILE = os.path.join(DATA_DIR, "settings.json")
 

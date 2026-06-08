@@ -128,7 +128,8 @@ export function appendToolImages(contentEl, images, note) {
 
     const label = document.createElement('div');
     label.className = 'tool-created-img-name';
-    label.textContent = name;
+    label.textContent = (im && im.caption) || name;
+    if (im && im.caption) label.title = name;
     card.appendChild(label);
 
     wrap.appendChild(card);

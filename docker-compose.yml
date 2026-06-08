@@ -6,7 +6,11 @@ services:
     volumes:
       - ./data:/app/data:z
       - ./logs:/app/logs:z
+      # Uploads live in a named volume shared with the sandbox — not the host
+      # bind-mounted ./data — so they sit in the sandbox and don't clutter the repo.
+      - talos-uploads:/srv/uploads
     environment:
+      - TALOS_UPLOAD_DIR=/srv/uploads
       - APP_BIND=${APP_BIND:-127.0.0.1}
       - APP_PORT=${APP_PORT:-7000}
       - AUTH_ENABLED=${AUTH_ENABLED:-true}
@@ -35,6 +39,9 @@ services:
     volumes:
       - talos-sandbox-home:/home/talos
       - talos-sandbox-state:/var/lib/talos-sandbox
+      # Same uploads volume the app writes to — so uploaded files are physically
+      # present inside the sandbox and can be copied into chat workspaces.
+      - talos-uploads:/srv/uploads
     environment:
       - TALOS_SANDBOX_HOME_ROOT=/home/talos
       - TALOS_SANDBOX_STATE=/var/lib/talos-sandbox/state.json
@@ -49,3 +56,4 @@ services:
 volumes:
   talos-sandbox-home:
   talos-sandbox-state:
+  talos-uploads:

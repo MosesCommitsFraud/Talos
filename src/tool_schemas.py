@@ -39,13 +39,28 @@ FUNCTION_TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "python",
-            "description": "Execute Python code to compute a result or test something. Runs with NO time limit, so heavy/long work is fine. For charts and plots, prefer modern libraries — seaborn (preferred) or plotly over raw matplotlib. To SHOW an image to the user (a finished chart or visual result), save it with a RELATIVE path into an `output/` directory, e.g. `import os; os.makedirs('output', exist_ok=True); fig.savefig('output/chart.png', dpi=150, bbox_inches='tight')`. Images under `output/` are displayed inline automatically — do NOT upload them via api_call, and do NOT save to /tmp or absolute paths (those won't show). Keep scratch/intermediate renders out of output/.",
+            "description": "Execute Python code to compute a result or test something. Runs with NO time limit, so heavy/long work is fine. For charts and plots, prefer modern libraries — seaborn (preferred) or plotly over raw matplotlib. To SHOW an image to the user (a finished chart or visual result), save it with a RELATIVE path in your workspace (e.g. `fig.savefig('chart.png', dpi=150, bbox_inches='tight')`) and then call the `show_image` tool with that path. (Images saved under an `output/` directory are also shown automatically.) Do NOT upload via api_call, and do NOT save to /tmp or absolute paths (those won't show).",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "code": {"type": "string", "description": "Python code to execute"}
                 },
                 "required": ["code"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "show_image",
+            "description": "Display an image from your workspace to the user in the chat (rendered inline, click-to-enlarge, with a download button). Use this to PRESENT a finished chart/plot/diagram/visual result. Workflow: first save the image with python (e.g. seaborn/matplotlib `fig.savefig('chart.png')`), then call show_image with that path. The path must be INSIDE your workspace — use a relative path like 'chart.png' or 'output/chart.png', never /tmp or absolute paths. Supports png/jpg/gif/webp/bmp/svg. Call once per image.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "Workspace-relative path to the image file to display"},
+                    "caption": {"type": "string", "description": "Optional short caption shown beneath the image"}
+                },
+                "required": ["path"]
             }
         }
     },

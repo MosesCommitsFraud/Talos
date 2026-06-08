@@ -809,6 +809,53 @@ async def _try_sandbox_file_tool(
     return data
 
 
+async def _do_show_image(
+    content: str,
+    *,
+    session_id: Optional[str],
+    owner: Optional[str],
+) -> Dict:
+    """Display a workspace image to the user. Reads the file from the sandbox as
+    a base64 data URL and returns it under `created_images`, which the agent loop
+    forwards to the chat (inline render + lightbox + download)."""
+    raw = (content or "").strip()
+    path = ""
+    caption = ""
+    if raw.startswith("{"):
+        try:
+            args = json.loads(raw)
+            path = str(args.get("path", "")).strip()
+            caption = str(args.get("caption", "")).strip()
+        except (json.JSONDecodeError, TypeError):
+            path = raw.split("\n", 1)[0].strip()
+    else:
+        path = raw.split("\n", 1)[0].strip()
+    if not path:
+        return {"error": "show_image: a workspace-relative image path is required", "exit_code": 1}
+
+    from src.sandbox_client import file_tool_in_sandbox, sandbox_enabled
+    if not sandbox_enabled() or not session_id:
+        return {"error": "show_image: requires the sandbox (no session available)", "exit_code": 1}
+    try:
+        data = await file_tool_in_sandbox(
+            owner=owner, session_id=session_id, operation="image", payload={"path": path},
+        )
+    except Exception as exc:
+        logger.warning("show_image sandbox read failed: %s", exc)
+        return {"error": f"show_image: {exc}", "exit_code": 1}
+    if not isinstance(data, dict) or data.get("exit_code") not in (0, None) or not data.get("data_url"):
+        return {"error": data.get("error") if isinstance(data, dict) else "show_image: failed to read image", "exit_code": 1}
+    name = data.get("name") or path
+    image = {"name": name, "data_url": data["data_url"]}
+    if caption:
+        image["caption"] = caption
+    return {
+        "created_images": [image],
+        "output": f"Displayed image to the user: {name}" + (f" — {caption}" if caption else ""),
+        "exit_code": 0,
+    }
+
+
 async def _direct_fallback(
     tool: str,
     content: str,
@@ -1496,6 +1543,9 @@ async def execute_tool_block(
         if result is None:
             result = await _do_edit_file(content, workspace=workspace)
         desc = result.get("output") or result.get("error") or "edit_file"
+    elif tool == "show_image":
+        result = await _do_show_image(content, session_id=session_id, owner=owner)
+        desc = result.get("output") or result.get("error") or "show_image"
     elif tool == "resolve_contact":
         desc = "resolve_contact"
         result = await do_resolve_contact(content, owner=owner)

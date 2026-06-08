@@ -384,6 +384,24 @@ function initializeEventListeners() {
     });
   }
 
+  // Chat files: list this chat's sandbox artifacts (uploads + generated results)
+  const exportFilesBtn = el('export-files-btn');
+  if (exportFilesBtn) {
+    exportFilesBtn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      exportMenu.classList.remove('open');
+      const sid = sessionModule.getCurrentSessionId();
+      if (!sid) { uiModule.showToast('Open a chat first'); return; }
+      try {
+        const mod = await import('./js/artifacts.js');
+        await mod.showChatFiles(sid);
+      } catch (err) {
+        console.error('Chat files failed:', err);
+        uiModule.showError('Failed to open chat files');
+      }
+    });
+  }
+
   // Rename session from top bar
   const exportRenameBtn = el('export-rename-btn');
   if (exportRenameBtn) {

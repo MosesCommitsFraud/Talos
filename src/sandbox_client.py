@@ -89,3 +89,32 @@ async def upload_file_to_sandbox(
         data = resp.json()
     data["sandbox_path"] = data.get("filename") or filename
     return data
+
+
+async def list_artifacts(*, owner: str | None, session_id: str | None) -> list[dict[str, Any]]:
+    """List files in a chat's sandbox workspace (uploads + generated results)."""
+    if not session_id:
+        return []
+    user_id = safe_user_id(owner)
+    async with httpx.AsyncClient(timeout=httpx.Timeout(SANDBOX_TIMEOUT, connect=15.0)) as client:
+        resp = await client.get(
+            f"{SANDBOX_URL}/users/{user_id}/workspaces/{session_id}/artifacts",
+        )
+        resp.raise_for_status()
+        return resp.json().get("artifacts", [])
+
+
+async def download_artifact(*, owner: str | None, session_id: str | None, path: str) -> tuple[bytes, str, str]:
+    """Fetch a workspace file's raw bytes. Returns (content, content_type, filename)."""
+    if not session_id:
+        raise RuntimeError("sandbox download requires a session_id")
+    user_id = safe_user_id(owner)
+    async with httpx.AsyncClient(timeout=httpx.Timeout(None, connect=15.0)) as client:
+        resp = await client.get(
+            f"{SANDBOX_URL}/users/{user_id}/workspaces/{session_id}/files/download",
+            params={"path": path},
+        )
+        resp.raise_for_status()
+        ctype = resp.headers.get("content-type", "application/octet-stream")
+        fname = Path(path).name
+        return resp.content, ctype, fname

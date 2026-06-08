@@ -375,6 +375,61 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
         finally:
             db.close()
 
+    def _verify_session_access(db, request, session_id: str) -> str:
+        """Return the owner for a session the caller may access, else raise."""
+        user = get_current_user(request)
+        if not user:
+            raise HTTPException(403, "Authentication required")
+        session = db.query(DbSession).filter(DbSession.id == session_id).first()
+        if not session:
+            raise HTTPException(404, "Session not found")
+        if session.owner and session.owner != user:
+            raise HTTPException(403, "Access denied")
+        return session.owner or user
+
+    # ---- GET /api/artifacts/{session_id} — files in the chat's sandbox workspace ----
+    @router.get("/api/artifacts/{session_id}")
+    async def list_artifacts_route(request: Request, session_id: str) -> Dict[str, Any]:
+        db = SessionLocal()
+        try:
+            owner = _verify_session_access(db, request, session_id)
+        finally:
+            db.close()
+        from src.sandbox_client import list_artifacts, sandbox_enabled
+        if not sandbox_enabled():
+            return {"artifacts": []}
+        try:
+            artifacts = await list_artifacts(owner=owner, session_id=session_id)
+        except Exception as e:
+            logger.warning("artifacts list failed for %s: %s", session_id, e)
+            return {"artifacts": [], "error": "sandbox unavailable"}
+        return {"artifacts": artifacts}
+
+    # ---- GET /api/artifacts/{session_id}/download?path= — stream a workspace file ----
+    @router.get("/api/artifacts/{session_id}/download")
+    async def download_artifact_route(request: Request, session_id: str, path: str = Query(...)):
+        from fastapi.responses import Response
+        db = SessionLocal()
+        try:
+            owner = _verify_session_access(db, request, session_id)
+        finally:
+            db.close()
+        from src.sandbox_client import download_artifact, sandbox_enabled
+        if not sandbox_enabled():
+            raise HTTPException(404, "Sandbox not available")
+        try:
+            content, ctype, fname = await download_artifact(owner=owner, session_id=session_id, path=path)
+        except Exception as e:
+            logger.warning("artifact download failed for %s (%s): %s", session_id, path, e)
+            raise HTTPException(404, "File not found")
+        # Inline for images (preview), attachment for everything else (download).
+        disp = "inline" if ctype.startswith("image/") else "attachment"
+        return Response(
+            content=content,
+            media_type=ctype,
+            headers={"Content-Disposition": f'{disp}; filename="{fname}"'},
+        )
+
     # ---- GET /api/document/{doc_id} ----
     @router.get("/api/document/{doc_id}")
     async def get_document(request: Request, doc_id: str) -> Dict[str, Any]:

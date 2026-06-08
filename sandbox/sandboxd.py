@@ -2,6 +2,7 @@ import asyncio
 import base64
 import hashlib
 import json
+import mimetypes
 import os
 import shlex
 import shutil
@@ -870,4 +871,76 @@ def ls_route(user_id: str, chat_id: str, req: ListRequest) -> dict[str, Any]:
     if not rows:
         lines.append("  (empty)")
     return {"output": _truncate("\n".join(lines)), "exit_code": 0}
+
+
+@app.post("/users/{user_id}/workspaces/{chat_id}/files/image")
+def read_image_route(user_id: str, chat_id: str, req: FileReadRequest) -> dict[str, Any]:
+    """Read an image file from the workspace and return it as a base64 data URL,
+    for the `show_image` tool. Confined to the workspace by _safe_path."""
+    _name, workspace = _workspace(user_id, chat_id)
+    path = _safe_path(workspace, req.path)
+    ext = path.suffix.lower()
+    if ext not in IMAGE_MIME_BY_EXT:
+        return {"error": f"show_image: {req.path}: not a supported image type ({', '.join(sorted(IMAGE_MIME_BY_EXT))})", "exit_code": 1}
+    try:
+        if not path.is_file():
+            return {"error": f"show_image: {req.path}: not found", "exit_code": 1}
+        size = path.stat().st_size
+        if size > MAX_IMAGE_BYTES:
+            return {"error": f"show_image: {req.path}: too large ({size // 1_000_000}MB > {MAX_IMAGE_BYTES // 1_000_000}MB limit)", "exit_code": 1}
+        raw = path.read_bytes()
+    except OSError as exc:
+        return {"error": f"show_image: {req.path}: {exc}", "exit_code": 1}
+    try:
+        name = str(path.relative_to(workspace.resolve()))
+    except ValueError:
+        name = path.name
+    b64 = base64.b64encode(raw).decode("ascii")
+    return {"output": f"Displaying {name}", "name": name, "data_url": f"data:{IMAGE_MIME_BY_EXT[ext]};base64,{b64}", "exit_code": 0}
+
+
+@app.get("/users/{user_id}/workspaces/{chat_id}/artifacts")
+def list_artifacts_route(user_id: str, chat_id: str) -> dict[str, Any]:
+    """List files in a chat's workspace (uploads, generated results, etc.) so the
+    UI can show + download them. Recursive, skipping noise dirs; newest first."""
+    _name, workspace = _workspace(user_id, chat_id)
+    root = workspace.resolve()
+    items: list[dict[str, Any]] = []
+    try:
+        for p in root.rglob("*"):
+            if not p.is_file():
+                continue
+            rel = p.relative_to(root)
+            if set(rel.parts) & SKIP_DIRS:
+                continue
+            try:
+                st = p.stat()
+            except OSError:
+                continue
+            ext = p.suffix.lower()
+            items.append({
+                "path": str(rel),
+                "name": p.name,
+                "size": st.st_size,
+                "mtime": st.st_mtime,
+                "mime": mimetypes.guess_type(p.name)[0] or "application/octet-stream",
+                "is_image": ext in IMAGE_MIME_BY_EXT,
+            })
+    except OSError as exc:
+        return {"artifacts": [], "error": str(exc)}
+    items.sort(key=lambda it: it["mtime"], reverse=True)
+    return {"artifacts": items[:500]}
+
+
+@app.get("/users/{user_id}/workspaces/{chat_id}/files/download")
+def download_file_route(user_id: str, chat_id: str, path: str):
+    """Stream a workspace file's raw bytes (for the UI's download/preview)."""
+    from fastapi.responses import FileResponse
+
+    _name, workspace = _workspace(user_id, chat_id)
+    target = _safe_path(workspace, path)
+    if not target.is_file():
+        raise HTTPException(404, "File not found")
+    mime = mimetypes.guess_type(target.name)[0] or "application/octet-stream"
+    return FileResponse(str(target), media_type=mime, filename=target.name)
 
