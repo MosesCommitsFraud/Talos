@@ -261,6 +261,27 @@ import slashCommands, { initSlashCommands, isCommand, handleSlashCommand, handle
     }
   }
 
+  function _showSubmitButtonStreaming(submitBtn) {
+    if (!submitBtn) return;
+    submitBtn.classList.remove('anim-launch', 'anim-land', 'anim-spin', 'anim-spin-swap', 'mic-mode', 'newchat-mode', 'newchat-expanded', 'recording');
+    submitBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>';
+    submitBtn.title = 'Stop generation';
+    submitBtn.dataset.mode = 'streaming';
+    submitBtn.dataset.phase = 'receiving';
+    isStreaming = true;
+  }
+
+  function syncSubmitButtonForSession(sessionId) {
+    const submitBtn = document.querySelector('.send-btn');
+    if (!submitBtn) return;
+    const entry = sessionId ? _backgroundStreams.get(sessionId) : null;
+    if (entry && entry.status === 'running') {
+      _showSubmitButtonStreaming(submitBtn);
+    } else {
+      updateSubmitButton('idle', submitBtn);
+    }
+  }
+
   // -----------------------------------------------------------------------
   // Slash commands — now in slashCommands.js
   // -----------------------------------------------------------------------
@@ -1273,6 +1294,9 @@ import slashCommands, { initSlashCommands, isCommand, handleSlashCommand, handle
                   }
                 } catch (dotErr) {
                   console.warn('[bg-stream] markStreamComplete error:', dotErr);
+                }
+                if (sessionModule.getCurrentSessionId && sessionModule.getCurrentSessionId() === streamSessionId) {
+                  syncSubmitButtonForSession(streamSessionId);
                 }
                 // Don't do foreground final render — the checkBackgroundStream poll
                 // will detect 'completed' and reload history cleanly
@@ -2906,8 +2930,15 @@ import slashCommands, { initSlashCommands, isCommand, handleSlashCommand, handle
     }
     if (stopServer) {
       try {
-        const _sid = _streamSessionId
-          || (window.sessionModule && window.sessionModule.getCurrentSessionId && window.sessionModule.getCurrentSessionId());
+        const selectedSid = window.sessionModule && window.sessionModule.getCurrentSessionId && window.sessionModule.getCurrentSessionId();
+        const _sid = (selectedSid && _backgroundStreams.has(selectedSid)) ? selectedSid : (_streamSessionId || selectedSid);
+        const bgEntry = _sid ? _backgroundStreams.get(_sid) : null;
+        if (bgEntry && bgEntry.status === 'running') {
+          if (bgEntry.abortCtrl) {
+            try { bgEntry.abortCtrl.abort(); } catch (_) {}
+          }
+          bgEntry.status = 'stopped';
+        }
         if (_sid) {
           fetch(`/api/chat/stop/${encodeURIComponent(_sid)}`, { method: 'POST', credentials: 'same-origin' }).catch(() => {});
         }
@@ -3262,6 +3293,7 @@ import slashCommands, { initSlashCommands, isCommand, handleSlashCommand, handle
   export function checkBackgroundStream(sessionId) {
     if (!sessionId || !_backgroundStreams.has(sessionId)) return;
     var entry = _backgroundStreams.get(sessionId);
+    syncSubmitButtonForSession(sessionId);
 
     if (entry.status === 'completed') {
       // Response is already saved to DB and will appear in history — just clean up
@@ -3372,6 +3404,7 @@ import slashCommands, { initSlashCommands, isCommand, handleSlashCommand, handle
           // Reload session to show the completed response — but only if the user
           // is still on it; don't yank them back from a new chat they opened.
           if (sessionModule.getCurrentSessionId && sessionModule.getCurrentSessionId() === sessionId) {
+            syncSubmitButtonForSession(sessionId);
             sessionModule.selectSession(sessionId);
           } else {
             sessionModule.loadSessions();
