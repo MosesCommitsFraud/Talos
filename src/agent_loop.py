@@ -1067,7 +1067,7 @@ def _build_base_prompt(
 
 
 
-def _resolve_tool_blocks(round_response: str, native_tool_calls: list, round_num: int):
+def _resolve_tool_blocks(round_response: str, native_tool_calls: list, round_num: int, round_reasoning: str = ""):
     """Choose native function calls or fenced code block parsing. Returns (tool_blocks, used_native)."""
     used_native = False
     if native_tool_calls:
@@ -1085,6 +1085,16 @@ def _resolve_tool_blocks(round_response: str, native_tool_calls: list, round_num
             used_native = True
     if not used_native:
         tool_blocks = parse_tool_blocks(round_response)
+        # Thinking-model recovery: some reasoning models route the ENTIRE turn —
+        # including the fenced tool call — into reasoning_content, leaving the
+        # visible content empty. Without this we'd find no tool block, surface the
+        # reasoning as the answer, and stall. When content has no tool call, look
+        # for one in the reasoning instead so the tool actually runs.
+        if not tool_blocks and not (round_response or "").strip() and (round_reasoning or "").strip():
+            recovered = parse_tool_blocks(round_reasoning)
+            if recovered:
+                tool_blocks = recovered
+                logger.info(f"Agent round {round_num}: recovered {len(recovered)} tool block(s) from reasoning_content")
         if tool_blocks:
             logger.info(f"Agent round {round_num}: {len(tool_blocks)} fenced tool block(s) detected")
 
@@ -1927,7 +1937,7 @@ async def stream_agent_loop(
                 yield chunk
             # Intercept [DONE] — don't forward until all rounds finish
 
-        tool_blocks, used_native = _resolve_tool_blocks(round_response, native_tool_calls, round_num)
+        tool_blocks, used_native = _resolve_tool_blocks(round_response, native_tool_calls, round_num, round_reasoning)
 
         # Force-answer round: we told the model to STOP calling tools and
         # answer. If it ignored that and emitted a (possibly DSML) tool

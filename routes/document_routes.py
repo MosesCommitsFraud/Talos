@@ -473,6 +473,40 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
             headers={"Content-Disposition": 'attachment; filename="chat-files.zip"'},
         )
 
+    # ---- POST /api/artifacts/{session_id}/run?path= — run a code file in the sandbox ----
+    @router.post("/api/artifacts/{session_id}/run")
+    async def run_artifact_route(request: Request, session_id: str, path: str = Query(...)):
+        import shlex
+        db = SessionLocal()
+        try:
+            owner = _verify_session_access(db, request, session_id)
+        finally:
+            db.close()
+        from src.sandbox_client import exec_in_sandbox, sandbox_enabled
+        if not sandbox_enabled():
+            raise HTTPException(404, "Sandbox not available")
+        ext = path.rsplit(".", 1)[-1].lower() if "." in path else ""
+        q = shlex.quote(path)
+        if ext == "py":
+            cmd = f"python {q}"
+        elif ext in ("js", "mjs", "cjs"):
+            cmd = f"node {q}"
+        elif ext in ("sh", "bash"):
+            cmd = f"bash {q}"
+        else:
+            raise HTTPException(400, f"Don't know how to run .{ext or '?'} files")
+        try:
+            data = await exec_in_sandbox(owner=owner, session_id=session_id, kind="bash", command=cmd, timeout=0)
+        except Exception as e:
+            logger.warning("artifact run failed for %s (%s): %s", session_id, path, e)
+            raise HTTPException(500, "Run failed")
+        stdout = str(data.get("stdout") or "").rstrip()
+        stderr = str(data.get("stderr") or "").rstrip()
+        out = stdout
+        if stderr:
+            out = (out + "\n" + stderr).strip() if out else stderr
+        return {"output": out or "(no output)", "exit_code": int(data.get("exit_code") or 0)}
+
     # ---- GET /api/document/{doc_id} ----
     @router.get("/api/document/{doc_id}")
     async def get_document(request: Request, doc_id: str) -> Dict[str, Any]:

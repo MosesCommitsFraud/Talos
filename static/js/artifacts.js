@@ -111,6 +111,19 @@ export async function showChatFiles(sessionId) {
     meta.addEventListener('click', open);
     row.appendChild(meta);
 
+    if (RUNNABLE_EXTS.has(ext)) {
+      const run = document.createElement('button');
+      run.className = 'chat-files-run';
+      run.type = 'button';
+      run.title = 'Run in sandbox';
+      run.textContent = '▶';
+      run.addEventListener('click', (e) => {
+        e.stopPropagation();
+        _runFile(sessionId, a.path, run);
+      });
+      row.appendChild(run);
+    }
+
     const dl = document.createElement('a');
     dl.className = 'chat-files-dl';
     dl.href = url;
@@ -154,6 +167,48 @@ const TEXT_EXTS = new Set([
   'xml', 'yaml', 'yml', 'toml', 'ini', 'sh', 'sql', 'c', 'cpp', 'h', 'java',
   'go', 'rs', 'rb', 'php', 'r',
 ]);
+
+const RUNNABLE_EXTS = new Set(['py', 'js', 'mjs', 'cjs', 'sh', 'bash']);
+
+async function _runFile(sessionId, path, btn) {
+  const overlay = document.createElement('div');
+  overlay.className = 'chat-files-overlay';
+  const modal = document.createElement('div');
+  modal.className = 'chat-files-modal';
+  modal.innerHTML = `
+    <div class="chat-files-header">
+      <span class="chat-files-title" title="${_esc(path)}">▶ ${_esc(path)}</span>
+      <button type="button" class="chat-files-close" title="Close">&times;</button>
+    </div>
+    <pre class="chat-files-preview chat-files-run-output">Running…</pre>
+  `;
+  overlay.appendChild(modal);
+  const onKey = (e) => { if (e.key === 'Escape') _close(overlay, onKey); };
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) _close(overlay, onKey); });
+  modal.querySelector('.chat-files-close').addEventListener('click', () => _close(overlay, onKey));
+  document.addEventListener('keydown', onKey);
+  document.body.appendChild(overlay);
+  const pre = modal.querySelector('.chat-files-preview');
+  if (btn) btn.disabled = true;
+  try {
+    const r = await fetch(`${API_BASE}/api/artifacts/${encodeURIComponent(sessionId)}/run?path=${encodeURIComponent(path)}`, {
+      method: 'POST', credentials: 'same-origin',
+    });
+    if (!r.ok) {
+      let msg = 'HTTP ' + r.status;
+      try { const j = await r.json(); if (j && j.detail) msg = j.detail; } catch (_) {}
+      pre.textContent = 'Run failed: ' + msg;
+      return;
+    }
+    const j = await r.json();
+    pre.textContent = j.output || '(no output)';
+    pre.classList.toggle('chat-files-run-error', (j.exit_code || 0) !== 0);
+  } catch (_) {
+    pre.textContent = 'Run failed (network error).';
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
 
 async function _previewText(url, name) {
   const overlay = document.createElement('div');

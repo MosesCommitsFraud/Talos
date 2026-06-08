@@ -180,7 +180,7 @@ _kernels: dict[str, dict[str, Any]] = {}
 # persistent namespace between calls. Talks length-prefixed JSON over a Unix
 # socket in the workspace. argv: [sock_path, workdir].
 _KERNEL_SERVER_SRC = r'''
-import socket, sys, json, struct, io, contextlib, traceback, os
+import socket, sys, json, struct, io, contextlib, traceback, os, ast
 sock_path, workdir = sys.argv[1], sys.argv[2]
 try:
     os.chdir(workdir)
@@ -231,7 +231,21 @@ while True:
         out, err, error = io.StringIO(), io.StringIO(), ""
         try:
             with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
-                exec(compile(code, "<cell>", "exec"), ns)
+                try:
+                    tree = ast.parse(code, "<cell>", "exec")
+                except SyntaxError:
+                    exec(compile(code, "<cell>", "exec"), ns)
+                else:
+                    if tree.body and isinstance(tree.body[-1], ast.Expr):
+                        last = ast.Expression(tree.body.pop().value)
+                        ast.fix_missing_locations(last)
+                        if tree.body:
+                            exec(compile(tree, "<cell>", "exec"), ns)
+                        val = eval(compile(last, "<cell>", "eval"), ns)
+                        if val is not None:
+                            print(repr(val))
+                    else:
+                        exec(compile(tree, "<cell>", "exec"), ns)
         except Exception:
             error = traceback.format_exc()
         _send(conn, {"stdout": out.getvalue(), "stderr": err.getvalue(), "error": error})

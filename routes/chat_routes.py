@@ -554,8 +554,10 @@ def setup_chat_routes(
 
         # Build disabled-tools set from frontend toggles + user privileges
         disabled_tools = set()
-        if str(allow_bash).lower() != "true":
-            disabled_tools.add("bash")
+        # bash is NOT gated by a UI toggle: code runs in an isolated per-chat
+        # sandbox, so the shell is always available (the file-based coding loop
+        # depends on `bash python script.py`). Admins can still withhold it via
+        # the can_use_bash privilege below, and globally via disabled_tools.
         if str(allow_web_search).lower() != "true":
             disabled_tools.add("web_search")
             disabled_tools.add("web_fetch")

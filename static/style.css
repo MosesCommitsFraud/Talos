@@ -17310,6 +17310,14 @@ body.gallery-selecting .gallery-dl-btn,
   border-radius: 6px; padding: 4px 9px; font-size: 0.9em; cursor: pointer; opacity: 0.5;
 }
 .chat-files-del:hover { opacity: 1; border-color: var(--red, #e5534b); color: var(--red, #e5534b); }
+.chat-files-run {
+  flex: 0 0 auto; background: none; border: 1px solid var(--border); color: var(--accent, #3b82f6);
+  border-radius: 6px; padding: 4px 9px; font-size: 0.8em; cursor: pointer; opacity: 0.8;
+}
+.chat-files-run:hover { opacity: 1; border-color: var(--accent, #3b82f6); background: color-mix(in srgb, var(--accent, #3b82f6) 10%, var(--bg)); }
+.chat-files-run:disabled { opacity: 0.4; cursor: default; }
+.chat-files-run-output { white-space: pre-wrap; }
+.chat-files-run-error { color: var(--red, #e5534b); }
 .chat-files-thumb-ext { cursor: pointer; }
 .chat-files-name, .chat-files-meta { cursor: pointer; }
 .chat-files-preview {
