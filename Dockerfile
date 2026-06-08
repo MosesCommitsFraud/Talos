@@ -13,20 +13,15 @@ RUN sed -i 's|http://deb.debian.org|https://deb.debian.org|g' /etc/apt/sources.l
     build-essential \
     curl \
     git \
-    gnupg \
     nodejs \
     npm \
     gosu \
-    unixodbc \
-    unixodbc-dev \
-    && . /etc/os-release \
-    && MS_DEBIAN_VERSION="$VERSION_ID" \
-    && if [ "$MS_DEBIAN_VERSION" != "11" ] && [ "$MS_DEBIAN_VERSION" != "12" ]; then MS_DEBIAN_VERSION=12; fi \
-    && curl -fsSL https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor -o /usr/share/keyrings/microsoft-prod.gpg \
-    && curl -fsSL "https://packages.microsoft.com/config/debian/${MS_DEBIAN_VERSION}/prod.list" -o /etc/apt/sources.list.d/mssql-release.list \
-    && apt-get update -o Acquire::Retries=5 \
-    && ACCEPT_EULA=Y apt-get install -y --no-install-recommends -o Acquire::Retries=5 msodbcsql18 \
     && rm -rf /var/lib/apt/lists/*
+
+# MSSQL connectivity uses the pymssql / FreeTDS stack (see _build_external_sql_url:
+# `mssql+pymssql://`). The pinned pymssql wheel bundles FreeTDS statically, so no
+# unixodbc / msodbcsql / FreeTDS system packages are needed here. This matches the
+# sandbox image (freetds-dev + pymssql). pyodbc / Microsoft ODBC are NOT used.
 
 WORKDIR /app
 
