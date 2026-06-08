@@ -169,7 +169,7 @@ NEVER pipe multi-line Python through `python -c "..."` — shell quoting eats re
 ```python
 <python code>
 ```
-Execute Python code. Use for computation, data processing, scripting. NOT for writing code for the user (use create_document for that). For tabular data use pandas; for Excel use pandas.read_excel with openpyxl/xlrd as needed. For static charts prefer seaborn by default (with matplotlib savefig to a PNG). Use plotly when the user asks for interactive charts. For forecasting/statistics use statsmodels when appropriate; for ML/prediction use scikit-learn when appropriate. Runs with NO time limit — long/heavy work is fine. SHOWING AN IMAGE TO THE USER: your working directory is a private workspace. To display a finished chart/image: save it with a RELATIVE path in your workspace (e.g. `fig.savefig('chart.png', dpi=150, bbox_inches='tight')`), then call the `show_image` tool with that path. (Images you save under an `output/` directory are also shown automatically.) Never upload images via api_call, and do NOT save to `/tmp` or absolute paths — those won't show. Same sandbox limits as bash — no TTY, no GUI, no `input()`; for anything the user should interact with, generate a single HTML file with inline JS instead.""",
+Execute Python code INLINE — use ONLY for short, throwaway computations (a quick calculation, a one-off check, a few lines). Each call is stateless and the code can't be edited, so do NOT write long scripts here: if it's more than ~15 lines or you'll likely need to fix/iterate on it, instead `write_file` it to a `.py` file ONCE, run it with `bash` (`python script.py`), and when it fails FIX the broken lines with `edit_file` (targeted edits) — never resend the whole script. That loop is far faster than regenerating inline code. NOT for writing code for the user (use create_document for that). For tabular data use pandas; for Excel use pandas.read_excel with openpyxl/xlrd as needed. For static charts prefer seaborn by default (with matplotlib savefig to a PNG). Use plotly when the user asks for interactive charts. For forecasting/statistics use statsmodels when appropriate; for ML/prediction use scikit-learn when appropriate. Runs with NO time limit — long/heavy work is fine. SHOWING AN IMAGE TO THE USER: your working directory is a private workspace. To display a finished chart/image: save it with a RELATIVE path in your workspace (e.g. `fig.savefig('chart.png', dpi=150, bbox_inches='tight')`), then call the `show_image` tool with that path. (Images you save under an `output/` directory are also shown automatically.) Never upload images via api_call, and do NOT save to `/tmp` or absolute paths — those won't show. Same sandbox limits as bash — no TTY, no GUI, no `input()`; for anything the user should interact with, generate a single HTML file with inline JS instead.""",
 
     "read_file": """\
 ```read_file
@@ -194,7 +194,12 @@ Write content to a file. First line is the path, rest is the content.""",
 ```edit_file
 {"path": "<file path>", "old_string": "<exact text to replace>", "new_string": "<replacement>", "replace_all": false}
 ```
-Edit an EXISTING file by exact string replacement. PREFER this over bash (sed/echo/redirects) for changing files — it shows a before/after diff. `old_string` must match the file exactly and be unique unless `replace_all` is true. Use write_file to create a new file.""",
+Edit an EXISTING file by exact string replacement — the FAST way to FIX code without rewriting it. ALWAYS prefer this over re-running write_file with the whole file when fixing a bug. Shows a before/after diff. `old_string` must match the file exactly and be unique unless `replace_all` is true.
+To fix several places at once, use the multi-edit form (one call, applied in order):
+```edit_file
+{"path": "<file path>", "edits": [{"target": "<exact text>", "replacement": "<new text>"}, {"target": "<exact text 2>", "replacement": "<new text 2>"}]}
+```
+Each `target` must match exactly and be unique (set "allow_multiple": true to replace every match, or "start_line"/"end_line" to scope the search). Use write_file only to CREATE a file.""",
 
     "create_document": """\
 ```create_document

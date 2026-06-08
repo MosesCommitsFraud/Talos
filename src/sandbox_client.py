@@ -91,6 +91,37 @@ async def upload_file_to_sandbox(
     return data
 
 
+async def delete_workspace(*, owner: str | None, session_id: str | None) -> bool:
+    """Delete a chat's sandbox workspace (files + dir). Best-effort: never raise,
+    so a down/disabled sandbox can't block chat deletion. Returns True on success."""
+    if not session_id or not sandbox_enabled():
+        return False
+    user_id = safe_user_id(owner)
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(30.0, connect=10.0)) as client:
+            resp = await client.delete(
+                f"{SANDBOX_URL}/users/{user_id}/workspaces/{session_id}",
+            )
+            resp.raise_for_status()
+        return True
+    except Exception:
+        return False
+
+
+def delete_workspace_sync(owner: str | None, session_id: str | None) -> bool:
+    """Sync wrapper for delete_workspace, for use from non-async delete routes."""
+    if not session_id or not sandbox_enabled():
+        return False
+    user_id = safe_user_id(owner)
+    try:
+        with httpx.Client(timeout=httpx.Timeout(30.0, connect=10.0)) as client:
+            resp = client.delete(f"{SANDBOX_URL}/users/{user_id}/workspaces/{session_id}")
+            resp.raise_for_status()
+        return True
+    except Exception:
+        return False
+
+
 async def list_artifacts(*, owner: str | None, session_id: str | None) -> list[dict[str, Any]]:
     """List files in a chat's sandbox workspace (uploads + generated results)."""
     if not session_id:

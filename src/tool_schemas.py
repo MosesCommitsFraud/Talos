@@ -163,16 +163,31 @@ FUNCTION_TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "edit_file",
-            "description": "Edit a file ON DISK by exact string replacement (home folder, project files, any real path like ~/sweden.txt or /path/to/file). This is the right tool for files on disk — NOT edit_document (that's for editor-panel documents). PREFER this over bash (sed/echo) — it shows a diff. old_string must match the file exactly and be unique (or set replace_all). Use write_file to create a new file.",
+            "description": "Edit a file ON DISK by exact string replacement — the right way to FIX or change code/files without rewriting them (PREFER this over write_file for any change to an existing file; it's faster and shows a diff). NOT edit_document (that's for editor-panel docs). Two modes: (1) single edit via old_string/new_string, or (2) MULTIPLE edits in one call via `edits` (an array of {target, replacement}) — use this to fix several spots at once. Each target must match the file exactly and be unique unless you set replace_all/allow_multiple. Use write_file only to CREATE a new file.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "path": {"type": "string", "description": "File path to edit"},
-                    "old_string": {"type": "string", "description": "Exact text to replace (must match the file, including indentation)"},
-                    "new_string": {"type": "string", "description": "Replacement text"},
-                    "replace_all": {"type": "boolean", "description": "Replace all occurrences instead of requiring a unique match"}
+                    "old_string": {"type": "string", "description": "Single-edit mode: exact text to replace (must match the file, including indentation)"},
+                    "new_string": {"type": "string", "description": "Single-edit mode: replacement text"},
+                    "replace_all": {"type": "boolean", "description": "Replace all occurrences of old_string instead of requiring a unique match"},
+                    "edits": {
+                        "type": "array",
+                        "description": "Multi-edit mode: list of independent find/replace edits applied in order. Use to fix several places in one call.",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "target": {"type": "string", "description": "Exact text to find (match the file exactly, including indentation)"},
+                                "replacement": {"type": "string", "description": "Replacement text"},
+                                "start_line": {"type": "integer", "description": "Optional 1-indexed line to start the search (scopes the match)"},
+                                "end_line": {"type": "integer", "description": "Optional 1-indexed inclusive line to end the search"},
+                                "allow_multiple": {"type": "boolean", "description": "Allow replacing multiple matches of this target"}
+                            },
+                            "required": ["target", "replacement"]
+                        }
+                    }
                 },
-                "required": ["path", "old_string", "new_string"]
+                "required": ["path"]
             }
         }
     },

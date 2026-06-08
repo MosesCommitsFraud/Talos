@@ -236,6 +236,7 @@ def setup_session_routes(session_manager: SessionManager, config: dict, webhook_
                     DbSession.name.in_(("Nobody", "Incognito")),
                     DbSession.created_at < _cutoff,
                 ).all()
+                _ghost_owners = [(g.id, g.owner) for g in _ghosts]
                 for _g in _ghosts:
                     _purge_db.query(_DbMsg).filter(_DbMsg.session_id == _g.id).delete()
                     _purge_db.delete(_g)
@@ -246,6 +247,13 @@ def setup_session_routes(session_manager: SessionManager, config: dict, webhook_
                             pass
                 if _ghosts:
                     _purge_db.commit()
+                # Drop the sandbox workspaces of the purged incognito ghosts too.
+                try:
+                    from src.sandbox_client import delete_workspace_sync
+                    for _gid, _gowner in _ghost_owners:
+                        delete_workspace_sync(_gowner, _gid)
+                except Exception:
+                    pass
             finally:
                 _purge_db.close()
         except Exception:
@@ -547,8 +555,11 @@ def setup_session_routes(session_manager: SessionManager, config: dict, webhook_
             try:
                 _verify_session_owner(request, sid, session_manager)
                 session_manager.delete_session(sid)
+                _owner = None
                 db = SessionLocal()
                 try:
+                    _row = db.query(DbSession).filter(DbSession.id == sid).first()
+                    _owner = _row.owner if _row else None
                     db.query(_CM).filter(_CM.session_id == sid).delete()
                     db.query(DbSession).filter(DbSession.id == sid).delete()
                     db.commit()
@@ -556,6 +567,11 @@ def setup_session_routes(session_manager: SessionManager, config: dict, webhook_
                     db.rollback()
                 finally:
                     db.close()
+                try:
+                    from src.sandbox_client import delete_workspace_sync
+                    delete_workspace_sync(_owner, sid)
+                except Exception:
+                    pass
             except Exception:
                 pass
         return {"deleted": len(ids)}
@@ -566,6 +582,7 @@ def setup_session_routes(session_manager: SessionManager, config: dict, webhook_
         _verify_session_owner(request, sid, session_manager)
         try:
             # Block deletion of starred/favorited sessions
+            _owner = None
             db = SessionLocal()
             try:
                 db_sess = db.query(DbSession).filter(DbSession.id == sid).first()
@@ -574,11 +591,18 @@ def setup_session_routes(session_manager: SessionManager, config: dict, webhook_
                         status_code=403,
                         detail={"error": "SESSION_STARRED", "message": "Unstar the session before deleting it"}
                     )
+                _owner = db_sess.owner if db_sess else None
             finally:
                 db.close()
 
             # Delete the session and all its messages
             if session_manager.delete_session(sid):
+                # Drop the chat's sandbox workspace so its files don't outlive it.
+                try:
+                    from src.sandbox_client import delete_workspace_sync
+                    delete_workspace_sync(_owner, sid)
+                except Exception:
+                    pass
                 return {"status": "deleted"}
             else:
                 raise HTTPException(404, "Session not found")

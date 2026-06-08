@@ -90,9 +90,13 @@ class FileWriteRequest(BaseModel):
 
 class FileEditRequest(BaseModel):
     path: str
-    old_string: str
-    new_string: str
+    old_string: str = ""
+    new_string: str = ""
     replace_all: bool = False
+    # OpenTerminal-style multi-chunk edit. Each item: {target, replacement,
+    # start_line?, end_line?, allow_multiple?}. Applied in order; takes
+    # precedence over old_string/new_string when non-empty.
+    edits: list[dict[str, Any]] = []
 
 
 class SearchRequest(BaseModel):
@@ -129,6 +133,10 @@ IMAGE_MIME_BY_EXT = {
 MAX_IMAGE_BYTES = 3_000_000        # per file
 MAX_IMAGES = 6                     # per run
 MAX_IMAGES_TOTAL_BYTES = 9_000_000  # combined
+
+# Files that are build/runtime noise, not deliverables — hidden from the artifacts list.
+ARTIFACT_JUNK_EXTS = {".pyc", ".pyo", ".pyd", ".class", ".o", ".obj"}
+ARTIFACT_JUNK_NAMES = {".DS_Store", "Thumbs.db", ".gitignore", ".python-version"}
 
 
 @dataclass
@@ -403,6 +411,20 @@ def ensure_workspace_route(user_id: str, chat_id: str) -> WorkspaceResponse:
     workspace.mkdir(parents=True, exist_ok=True)
     _run(["chown", "-R", f"{name}:{name}", str(workspace)])
     return WorkspaceResponse(user_id=user_id, chat_id=chat_id, linux_user=name, workspace=str(workspace))
+
+
+@app.delete("/users/{user_id}/workspaces/{chat_id}")
+def delete_workspace_route(user_id: str, chat_id: str) -> dict[str, Any]:
+    """Remove a chat's workspace and everything in it. Called when the chat is
+    deleted so files don't outlive the conversation. Idempotent — a missing
+    workspace is a no-op."""
+    workspace = workspace_path(user_id, chat_id)
+    existed = workspace.exists()
+    if existed:
+        shutil.rmtree(workspace, ignore_errors=True)
+    # Drop any cached session cwd for this chat so a recreated workspace starts clean.
+    _session_cwds.pop(_session_key(user_id, chat_id), None)
+    return {"ok": True, "deleted": existed, "workspace": str(workspace)}
 
 
 @app.post("/users/{user_id}/workspaces/{chat_id}/upload", response_model=WorkspaceResponse)
@@ -775,29 +797,65 @@ def write_file_route(user_id: str, chat_id: str, req: FileWriteRequest) -> dict[
     return result
 
 
+def _apply_edit_chunk(text: str, chunk: dict[str, Any], idx: int) -> tuple[str | None, str | None]:
+    """Apply one find/replace chunk. Returns (new_text, None) or (None, error).
+    Supports optional 1-indexed inclusive line-range scoping and allow_multiple."""
+    target = str(chunk.get("target", chunk.get("old_string", "")) or "")
+    replacement = str(chunk.get("replacement", chunk.get("new_string", "")) or "")
+    allow_multiple = bool(chunk.get("allow_multiple", chunk.get("replace_all", False)))
+    if not target:
+        return None, f"edit #{idx + 1}: 'target' is required"
+    start_line = chunk.get("start_line")
+    end_line = chunk.get("end_line")
+    if start_line or end_line:
+        lines = text.splitlines(keepends=True)
+        s = max(int(start_line or 1), 1) - 1
+        e = min(int(end_line) if end_line else len(lines), len(lines))
+        if s >= e:
+            return None, f"edit #{idx + 1}: invalid line range {start_line}-{end_line}"
+        window = "".join(lines[s:e])
+        cnt = window.count(target)
+        if cnt == 0:
+            return None, f"edit #{idx + 1}: target not found in lines {s + 1}-{e}"
+        if cnt > 1 and not allow_multiple:
+            return None, f"edit #{idx + 1}: target not unique ({cnt}) in lines {s + 1}-{e}; add context or set allow_multiple"
+        new_window = window.replace(target, replacement) if allow_multiple else window.replace(target, replacement, 1)
+        return "".join(lines[:s]) + new_window + "".join(lines[e:]), None
+    cnt = text.count(target)
+    if cnt == 0:
+        return None, f"edit #{idx + 1}: target not found"
+    if cnt > 1 and not allow_multiple:
+        return None, f"edit #{idx + 1}: target not unique ({cnt} matches); add surrounding context or set allow_multiple"
+    return (text.replace(target, replacement) if allow_multiple else text.replace(target, replacement, 1)), None
+
+
 @app.post("/users/{user_id}/workspaces/{chat_id}/files/edit")
 def edit_file_route(user_id: str, chat_id: str, req: FileEditRequest) -> dict[str, Any]:
     name, workspace = _workspace(user_id, chat_id)
     path = _safe_path(workspace, req.path)
-    if not req.old_string:
-        return {"error": "edit_file: old_string required", "exit_code": 1, "path": str(path)}
-    if req.old_string == req.new_string:
-        return {"error": "edit_file: old_string and new_string are identical", "exit_code": 1, "path": str(path)}
     try:
         old = path.read_text(encoding="utf-8")
     except FileNotFoundError:
         return {"error": f"edit_file: {req.path}: not found (use write_file to create it)", "exit_code": 1, "path": str(path)}
     except (IsADirectoryError, UnicodeDecodeError, OSError) as exc:
         return {"error": f"edit_file: {req.path}: {exc}", "exit_code": 1, "path": str(path)}
-    count = old.count(req.old_string)
-    if count == 0:
-        return {"error": f"edit_file: old_string not found in {req.path}. Read the file and match it exactly.", "exit_code": 1, "path": str(path)}
-    if count > 1 and not req.replace_all:
-        return {"error": f"edit_file: old_string is not unique in {req.path} ({count} matches). Add surrounding context or set replace_all=true.", "exit_code": 1, "path": str(path)}
-    new = old.replace(req.old_string, req.new_string) if req.replace_all else old.replace(req.old_string, req.new_string, 1)
+    # Prefer the multi-chunk `edits` array; fall back to single old_string/new_string.
+    edits = list(req.edits or [])
+    if not edits:
+        if not req.old_string:
+            return {"error": "edit_file: provide `edits` (list of {target, replacement}) or old_string/new_string", "exit_code": 1, "path": str(path)}
+        edits = [{"target": req.old_string, "replacement": req.new_string, "allow_multiple": req.replace_all}]
+    new = old
+    for i, chunk in enumerate(edits):
+        new, err = _apply_edit_chunk(new, chunk, i)
+        if err is not None:
+            return {"error": f"edit_file: {req.path}: {err}. Read the file and match it exactly.", "exit_code": 1, "path": str(path)}
+    if new == old:
+        return {"error": f"edit_file: {req.path}: edits produced no change", "exit_code": 1, "path": str(path)}
     path.write_text(new, encoding="utf-8")
     _run(["chown", f"{name}:{name}", str(path)])
-    result: dict[str, Any] = {"output": f"Edited {path} ({count if req.replace_all else 1} replacement{'s' if (count if req.replace_all else 1) != 1 else ''})", "exit_code": 0, "path": str(path)}
+    n = len(edits)
+    result: dict[str, Any] = {"output": f"Edited {path} ({n} edit{'s' if n != 1 else ''})", "exit_code": 0, "path": str(path)}
     diff = _diff(old, new, req.path)
     if diff:
         result["diff"] = diff
@@ -975,11 +1033,14 @@ def list_artifacts_route(user_id: str, chat_id: str) -> dict[str, Any]:
             rel = p.relative_to(root)
             if set(rel.parts) & SKIP_DIRS:
                 continue
+            ext = p.suffix.lower()
+            # Skip obvious junk that isn't a real deliverable.
+            if ext in ARTIFACT_JUNK_EXTS or p.name in ARTIFACT_JUNK_NAMES:
+                continue
             try:
                 st = p.stat()
             except OSError:
                 continue
-            ext = p.suffix.lower()
             items.append({
                 "path": str(rel),
                 "name": p.name,
@@ -990,7 +1051,8 @@ def list_artifacts_route(user_id: str, chat_id: str) -> dict[str, Any]:
             })
     except OSError as exc:
         return {"artifacts": [], "error": str(exc)}
-    items.sort(key=lambda it: it["mtime"], reverse=True)
+    # Sort intentional outputs (the output/ dir) first, then newest first.
+    items.sort(key=lambda it: (0 if it["path"].split("/", 1)[0] == OUTPUT_DIR_NAME else 1, -it["mtime"]))
     return {"artifacts": items[:500]}
 
 

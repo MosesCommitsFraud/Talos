@@ -751,11 +751,13 @@ def _parse_sandbox_file_payload(tool: str, content: str) -> tuple[str, dict[str,
             args = json.loads(raw) if raw.startswith("{") else {}
         except (json.JSONDecodeError, TypeError):
             args = {}
+        _edits = args.get("edits")
         return "edit", {
             "path": str(args.get("path", "")).strip(),
             "old_string": args.get("old_string", ""),
             "new_string": args.get("new_string", ""),
             "replace_all": bool(args.get("replace_all", False)),
+            "edits": _edits if isinstance(_edits, list) else [],
         }
     if tool == "grep":
         try:
