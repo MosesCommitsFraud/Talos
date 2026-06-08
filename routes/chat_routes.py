@@ -576,7 +576,7 @@ def setup_chat_routes(
             _privs = request.app.state.auth_manager.get_privileges(_user)
         if _privs:
             if not _privs.get("can_use_bash", True):
-                disabled_tools.update({"bash", "python", "read_file", "write_file"})
+                disabled_tools.update({"bash", "python", "run_cell", "read_file", "write_file"})
             if not _privs.get("can_use_browser", True):
                 disabled_tools.add("builtin_browser")
             if not _privs.get("can_use_documents", True):
@@ -592,7 +592,7 @@ def setup_chat_routes(
                 # "withhold the heavy compute/file/browser tools" rather than
                 # flipping the request into a tool-less chat mode.
                 disabled_tools.update({
-                    "bash", "python", "read_file", "write_file", "edit_file",
+                    "bash", "python", "run_cell", "read_file", "write_file", "edit_file",
                     "builtin_browser", "create_document", "edit_document",
                     "update_document", "suggest_document", "manage_skills",
                 })
@@ -623,7 +623,7 @@ def setup_chat_routes(
             # compute/file/search toolset stripped so models don't run Python.
             if str(form_data.get("mode", "")).lower() != "agent":
                 disabled_tools.update({
-                    "bash", "python", "read_file", "write_file", "edit_file",
+                    "bash", "python", "run_cell", "read_file", "write_file", "edit_file",
                     "web_search", "web_fetch", "search_chats", "manage_tasks",
                 })
 

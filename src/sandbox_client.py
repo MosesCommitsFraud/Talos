@@ -91,6 +91,20 @@ async def upload_file_to_sandbox(
     return data
 
 
+async def run_cell_in_sandbox(*, owner: str | None, session_id: str | None, code: str, timeout: int = 0) -> dict[str, Any]:
+    """Run code in the chat's PERSISTENT Python kernel (state survives between calls)."""
+    if not session_id:
+        raise RuntimeError("run_cell requires a session_id")
+    user_id = safe_user_id(owner)
+    async with httpx.AsyncClient(timeout=httpx.Timeout(None, connect=15.0)) as client:
+        resp = await client.post(
+            f"{SANDBOX_URL}/users/{user_id}/workspaces/{session_id}/kernel/execute",
+            json={"code": code, "timeout": timeout},
+        )
+        resp.raise_for_status()
+        return resp.json()
+
+
 async def delete_workspace(*, owner: str | None, session_id: str | None) -> bool:
     """Delete a chat's sandbox workspace (files + dir). Best-effort: never raise,
     so a down/disabled sandbox can't block chat deletion. Returns True on success."""
@@ -133,6 +147,34 @@ async def list_artifacts(*, owner: str | None, session_id: str | None) -> list[d
         )
         resp.raise_for_status()
         return resp.json().get("artifacts", [])
+
+
+async def delete_artifact(*, owner: str | None, session_id: str | None, path: str) -> bool:
+    """Delete a file or directory in a chat's workspace. Returns True on success."""
+    if not session_id:
+        return False
+    user_id = safe_user_id(owner)
+    async with httpx.AsyncClient(timeout=httpx.Timeout(30.0, connect=10.0)) as client:
+        resp = await client.post(
+            f"{SANDBOX_URL}/users/{user_id}/workspaces/{session_id}/files/delete",
+            json={"path": path},
+        )
+        resp.raise_for_status()
+        data = resp.json()
+    return data.get("exit_code", 1) == 0
+
+
+async def download_workspace_zip(*, owner: str | None, session_id: str | None) -> bytes:
+    """Fetch the whole workspace as a zip archive."""
+    if not session_id:
+        raise RuntimeError("zip requires a session_id")
+    user_id = safe_user_id(owner)
+    async with httpx.AsyncClient(timeout=httpx.Timeout(None, connect=15.0)) as client:
+        resp = await client.get(
+            f"{SANDBOX_URL}/users/{user_id}/workspaces/{session_id}/files/zip",
+        )
+        resp.raise_for_status()
+        return resp.content
 
 
 async def download_artifact(*, owner: str | None, session_id: str | None, path: str) -> tuple[bytes, str, str]:

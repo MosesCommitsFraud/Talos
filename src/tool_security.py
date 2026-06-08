@@ -14,6 +14,7 @@ logger = logging.getLogger(__name__)
 NON_ADMIN_BLOCKED_TOOLS = {
     "bash",
     "python",
+    "run_cell",
     "read_file",
     "write_file",
     "edit_file",
@@ -64,7 +65,7 @@ PLAN_MODE_READONLY_TOOLS = {
 
 
 _PLAN_MODE_KNOWN_MUTATORS = {
-    "bash", "python", "write_file", "edit_file",
+    "bash", "python", "run_cell", "write_file", "edit_file",
     "create_document", "edit_document", "update_document", "suggest_document",
     "manage_documents", "create_session", "manage_session", "send_to_session",
     "pipeline", "manage_memory", "manage_skills", "manage_tasks", "manage_notes",

@@ -39,11 +39,18 @@ export async function showChatFiles(sessionId) {
   modal.innerHTML = `
     <div class="chat-files-header">
       <span class="chat-files-title">Chat files</span>
-      <button type="button" class="chat-files-close" title="Close">&times;</button>
+      <span class="chat-files-actions">
+        <button type="button" class="chat-files-zip" title="Download all as .zip">⤓ All</button>
+        <button type="button" class="chat-files-close" title="Close">&times;</button>
+      </span>
     </div>
     <div class="chat-files-body"><div class="chat-files-loading">Loading…</div></div>
   `;
   overlay.appendChild(modal);
+  const zipBtn = modal.querySelector('.chat-files-zip');
+  if (zipBtn) zipBtn.addEventListener('click', () => {
+    window.open(`${API_BASE}/api/artifacts/${encodeURIComponent(sessionId)}/zip`, '_blank');
+  });
 
   const onKey = (e) => { if (e.key === 'Escape') _close(overlay, onKey); };
   overlay.addEventListener('click', (e) => { if (e.target === overlay) _close(overlay, onKey); });
@@ -72,8 +79,14 @@ export async function showChatFiles(sessionId) {
   list.className = 'chat-files-list';
   for (const a of artifacts) {
     const url = _downloadUrl(sessionId, a.path);
+    const ext = (a.name.split('.').pop() || '').toLowerCase();
     const row = document.createElement('div');
     row.className = 'chat-files-row';
+
+    const open = () => {
+      if (!a.is_image && TEXT_EXTS.has(ext)) { _previewText(url, a.path); return; }
+      window.open(url, '_blank', 'noopener,noreferrer');
+    };
 
     const thumb = document.createElement('div');
     thumb.className = 'chat-files-thumb';
@@ -82,11 +95,12 @@ export async function showChatFiles(sessionId) {
       img.src = url;
       img.alt = a.name;
       img.loading = 'lazy';
-      img.addEventListener('click', () => window.open(url, '_blank', 'noopener,noreferrer'));
+      img.addEventListener('click', open);
       thumb.appendChild(img);
     } else {
-      thumb.textContent = (a.name.split('.').pop() || 'file').slice(0, 4).toUpperCase();
+      thumb.textContent = (ext || 'file').slice(0, 4).toUpperCase();
       thumb.classList.add('chat-files-thumb-ext');
+      thumb.addEventListener('click', open);
     }
     row.appendChild(thumb);
 
@@ -94,6 +108,7 @@ export async function showChatFiles(sessionId) {
     meta.className = 'chat-files-meta';
     meta.innerHTML = `<div class="chat-files-name" title="${_esc(a.path)}">${_esc(a.path)}</div>` +
                      `<div class="chat-files-sub">${_fmtSize(a.size)}</div>`;
+    meta.addEventListener('click', open);
     row.appendChild(meta);
 
     const dl = document.createElement('a');
@@ -102,12 +117,70 @@ export async function showChatFiles(sessionId) {
     dl.download = a.name;
     dl.title = 'Download';
     dl.textContent = '⤓';
+    dl.addEventListener('click', (e) => e.stopPropagation());
     row.appendChild(dl);
+
+    const del = document.createElement('button');
+    del.className = 'chat-files-del';
+    del.type = 'button';
+    del.title = 'Delete';
+    del.textContent = '✕';
+    del.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      del.disabled = true;
+      try {
+        const r = await fetch(`${API_BASE}/api/artifacts/${encodeURIComponent(sessionId)}?path=${encodeURIComponent(a.path)}`, {
+          method: 'DELETE', credentials: 'same-origin',
+        });
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        row.remove();
+        if (!list.children.length) body.innerHTML = `<div class="chat-files-empty">No files in this chat yet.</div>`;
+      } catch (_) {
+        del.disabled = false;
+        del.textContent = '!';
+        setTimeout(() => { del.textContent = '✕'; }, 1500);
+      }
+    });
+    row.appendChild(del);
 
     list.appendChild(row);
   }
   body.innerHTML = '';
   body.appendChild(list);
+}
+
+const TEXT_EXTS = new Set([
+  'txt', 'md', 'csv', 'tsv', 'json', 'log', 'py', 'js', 'ts', 'html', 'css',
+  'xml', 'yaml', 'yml', 'toml', 'ini', 'sh', 'sql', 'c', 'cpp', 'h', 'java',
+  'go', 'rs', 'rb', 'php', 'r',
+]);
+
+async function _previewText(url, name) {
+  const overlay = document.createElement('div');
+  overlay.className = 'chat-files-overlay';
+  const modal = document.createElement('div');
+  modal.className = 'chat-files-modal';
+  modal.innerHTML = `
+    <div class="chat-files-header">
+      <span class="chat-files-title" title="${_esc(name)}">${_esc(name)}</span>
+      <button type="button" class="chat-files-close" title="Close">&times;</button>
+    </div>
+    <pre class="chat-files-preview">Loading…</pre>
+  `;
+  overlay.appendChild(modal);
+  const onKey = (e) => { if (e.key === 'Escape') _close(overlay, onKey); };
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) _close(overlay, onKey); });
+  modal.querySelector('.chat-files-close').addEventListener('click', () => _close(overlay, onKey));
+  document.addEventListener('keydown', onKey);
+  document.body.appendChild(overlay);
+  const pre = modal.querySelector('.chat-files-preview');
+  try {
+    const r = await fetch(url, { credentials: 'same-origin' });
+    const text = await r.text();
+    pre.textContent = text.length > 200000 ? text.slice(0, 200000) + '\n… [truncated]' : text;
+  } catch (_) {
+    pre.textContent = 'Could not load file.';
+  }
 }
 
 export default { showChatFiles };

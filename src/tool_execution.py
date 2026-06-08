@@ -858,6 +858,48 @@ async def _do_show_image(
     }
 
 
+async def _do_run_cell(
+    content: str,
+    *,
+    session_id: Optional[str],
+    owner: Optional[str],
+) -> Dict:
+    """Run code in the chat's persistent Python kernel (state survives between
+    calls). Output + any created images are forwarded like the python tool."""
+    raw = (content or "").strip()
+    code = raw
+    if raw.startswith("{"):
+        try:
+            args = json.loads(raw)
+            if isinstance(args, dict) and "code" in args:
+                code = str(args.get("code") or "")
+        except (json.JSONDecodeError, TypeError):
+            code = raw
+    if not code.strip():
+        return {"error": "run_cell: code is required", "exit_code": 1}
+    from src.sandbox_client import run_cell_in_sandbox, sandbox_enabled
+    if not sandbox_enabled() or not session_id:
+        return {"error": "run_cell: requires the sandbox (no session available)", "exit_code": 1}
+    try:
+        data = await run_cell_in_sandbox(owner=owner, session_id=session_id, code=code, timeout=0)
+    except Exception as exc:
+        logger.warning("run_cell failed: %s", exc)
+        return {"error": f"run_cell: {exc}", "exit_code": 1}
+    stdout = str(data.get("stdout") or "").rstrip()
+    stderr = str(data.get("stderr") or "").rstrip()
+    rc = int(data.get("exit_code") or 0)
+    output = stdout
+    if stderr:
+        output = (output + "\nSTDERR: " + stderr).strip() if output else "STDERR: " + stderr
+    result: Dict = {"output": _truncate(output or "(no output)", MAX_OUTPUT_CHARS), "exit_code": rc, "sandboxed": True}
+    imgs = data.get("images") or []
+    if imgs:
+        result["created_images"] = imgs
+        if data.get("image_note"):
+            result["image_note"] = data["image_note"]
+    return result
+
+
 async def _direct_fallback(
     tool: str,
     content: str,
@@ -1548,6 +1590,9 @@ async def execute_tool_block(
     elif tool == "show_image":
         result = await _do_show_image(content, session_id=session_id, owner=owner)
         desc = result.get("output") or result.get("error") or "show_image"
+    elif tool == "run_cell":
+        result = await _do_run_cell(content, session_id=session_id, owner=owner)
+        desc = "run_cell"
     elif tool == "resolve_contact":
         desc = "resolve_contact"
         result = await do_resolve_contact(content, owner=owner)

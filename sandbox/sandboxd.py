@@ -99,6 +99,20 @@ class FileEditRequest(BaseModel):
     edits: list[dict[str, Any]] = []
 
 
+class PathRequest(BaseModel):
+    path: str
+
+
+class MoveRequest(BaseModel):
+    src: str
+    dst: str
+
+
+class CellRequest(BaseModel):
+    code: str = ""
+    timeout: int = 0
+
+
 class SearchRequest(BaseModel):
     pattern: str = ""
     path: str = ""
@@ -138,6 +152,9 @@ MAX_IMAGES_TOTAL_BYTES = 9_000_000  # combined
 ARTIFACT_JUNK_EXTS = {".pyc", ".pyo", ".pyd", ".class", ".o", ".obj"}
 ARTIFACT_JUNK_NAMES = {".DS_Store", "Thumbs.db", ".gitignore", ".python-version"}
 
+# Binary document formats that read_file extracts to text instead of returning raw bytes.
+DOC_EXTRACT_EXTS = {".pdf", ".docx", ".xlsx", ".xlsm", ".pptx"}
+
 
 @dataclass
 class BackgroundProcess:
@@ -156,6 +173,76 @@ class BackgroundProcess:
 
 _processes: dict[str, BackgroundProcess] = {}
 _session_cwds: dict[str, tuple[str, float]] = {}
+# Persistent per-workspace Python kernels: session_key -> {"proc", "sock"}.
+_kernels: dict[str, dict[str, Any]] = {}
+
+# Embedded "kernel server": runs AS THE SANDBOX USER (via gosu) and keeps a
+# persistent namespace between calls. Talks length-prefixed JSON over a Unix
+# socket in the workspace. argv: [sock_path, workdir].
+_KERNEL_SERVER_SRC = r'''
+import socket, sys, json, struct, io, contextlib, traceback, os
+sock_path, workdir = sys.argv[1], sys.argv[2]
+try:
+    os.chdir(workdir)
+except Exception:
+    pass
+ns = {"__name__": "__main__"}
+try:
+    if os.path.exists(sock_path):
+        os.unlink(sock_path)
+except OSError:
+    pass
+srv = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+srv.bind(sock_path)
+try:
+    os.chmod(sock_path, 0o666)
+except OSError:
+    pass
+srv.listen(1)
+def _recvall(c, n):
+    buf = b""
+    while len(buf) < n:
+        d = c.recv(n - len(buf))
+        if not d:
+            return None
+        buf += d
+    return buf
+def _read(c):
+    h = _recvall(c, 4)
+    if not h:
+        return None
+    (ln,) = struct.unpack(">I", h)
+    b = _recvall(c, ln)
+    return json.loads(b.decode("utf-8")) if b is not None else None
+def _send(c, obj):
+    data = json.dumps(obj).encode("utf-8")
+    c.sendall(struct.pack(">I", len(data)) + data)
+while True:
+    try:
+        conn, _ = srv.accept()
+    except Exception:
+        break
+    try:
+        msg = _read(conn)
+        if msg is None:
+            conn.close()
+            continue
+        code = msg.get("code", "")
+        out, err, error = io.StringIO(), io.StringIO(), ""
+        try:
+            with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+                exec(compile(code, "<cell>", "exec"), ns)
+        except Exception:
+            error = traceback.format_exc()
+        _send(conn, {"stdout": out.getvalue(), "stderr": err.getvalue(), "error": error})
+    except Exception:
+        pass
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+'''
 
 
 def linux_user(user_id: str) -> str:
@@ -418,6 +505,8 @@ def delete_workspace_route(user_id: str, chat_id: str) -> dict[str, Any]:
     """Remove a chat's workspace and everything in it. Called when the chat is
     deleted so files don't outlive the conversation. Idempotent — a missing
     workspace is a no-op."""
+    # Kill any persistent kernel for this chat before removing its files.
+    _stop_kernel(user_id, chat_id)
     workspace = workspace_path(user_id, chat_id)
     existed = workspace.exists()
     if existed:
@@ -736,10 +825,188 @@ async def exec_route(user_id: str, chat_id: str, req: ExecRequest) -> ExecRespon
     return ExecResponse(user_id=user_id, chat_id=chat_id, linux_user=name, workspace=str(workspace), stdout=output, stderr="", exit_code=proc.exit_code or 0, images=images, image_note=image_note)
 
 
+def _kernel_sock_path(workspace: Path) -> Path:
+    return workspace / ".talos_kernel.sock"
+
+
+def _stop_kernel(user_id: str, chat_id: str) -> None:
+    rec = _kernels.pop(_session_key(user_id, chat_id), None)
+    if not rec:
+        return
+    proc = rec.get("proc")
+    if proc is not None:
+        try:
+            os.killpg(proc.pid, signal.SIGTERM)
+        except (ProcessLookupError, PermissionError, OSError):
+            try:
+                proc.terminate()
+            except Exception:
+                pass
+
+
+async def _ensure_kernel(user_id: str, chat_id: str) -> dict[str, Any]:
+    key = _session_key(user_id, chat_id)
+    name, workspace = _workspace(user_id, chat_id)
+    rec = _kernels.get(key)
+    if rec and rec.get("proc") is not None and rec["proc"].poll() is None:
+        return rec
+    sock = _kernel_sock_path(workspace)
+    try:
+        if sock.exists():
+            sock.unlink()
+    except OSError:
+        pass
+    env = os.environ.copy()
+    env["HOME"] = str(HOME_ROOT / name)
+    env["PATH"] = f"/opt/talos-sandbox-venv/bin:{env.get('PATH', '')}"
+    proc = subprocess.Popen(
+        ["gosu", name, "/opt/talos-sandbox-venv/bin/python", "-c", _KERNEL_SERVER_SRC, str(sock), str(workspace)],
+        cwd=str(workspace),
+        env=env,
+        start_new_session=True,
+    )
+    # Wait briefly for the socket to come up.
+    for _ in range(50):
+        if sock.exists():
+            break
+        await asyncio.sleep(0.1)
+    rec = {"proc": proc, "sock": str(sock)}
+    _kernels[key] = rec
+    return rec
+
+
+def _kernel_exec_sync(sock_path: str, code: str, timeout: int) -> dict[str, Any]:
+    import socket as _socket
+    import struct as _struct
+
+    c = _socket.socket(_socket.AF_UNIX, _socket.SOCK_STREAM)
+    c.settimeout(timeout if timeout and timeout > 0 else None)
+    try:
+        c.connect(sock_path)
+        payload = json.dumps({"code": code}).encode("utf-8")
+        c.sendall(_struct.pack(">I", len(payload)) + payload)
+
+        def _recvall(n: int) -> bytes | None:
+            buf = b""
+            while len(buf) < n:
+                d = c.recv(n - len(buf))
+                if not d:
+                    return None
+                buf += d
+            return buf
+
+        hdr = _recvall(4)
+        if not hdr:
+            return {"error": "kernel: no response"}
+        (ln,) = _struct.unpack(">I", hdr)
+        body = _recvall(ln)
+        if body is None:
+            return {"error": "kernel: truncated response"}
+        return json.loads(body.decode("utf-8"))
+    finally:
+        try:
+            c.close()
+        except OSError:
+            pass
+
+
+@app.post("/users/{user_id}/workspaces/{chat_id}/kernel/execute", response_model=ExecResponse)
+async def kernel_execute_route(user_id: str, chat_id: str, req: CellRequest) -> ExecResponse:
+    name, workspace = _workspace(user_id, chat_id)
+    rec = await _ensure_kernel(user_id, chat_id)
+    if not Path(rec["sock"]).exists():
+        return ExecResponse(user_id=user_id, chat_id=chat_id, linux_user=name, workspace=str(workspace), stdout="", stderr="kernel: failed to start", exit_code=1)
+    started_at = time.time()
+    timeout = int(req.timeout or 0)
+    try:
+        result = await asyncio.to_thread(_kernel_exec_sync, rec["sock"], req.code, timeout)
+    except Exception as exc:
+        # Socket dead/stuck — drop the kernel so the next call respawns it.
+        _stop_kernel(user_id, chat_id)
+        return ExecResponse(user_id=user_id, chat_id=chat_id, linux_user=name, workspace=str(workspace), stdout="", stderr=f"kernel: {exc}", exit_code=1)
+    stdout = str(result.get("stdout") or "")
+    stderr = str(result.get("stderr") or "")
+    error = str(result.get("error") or "")
+    if error:
+        stderr = (stderr + "\n" + error).strip() if stderr else error
+    images, image_note = _collect_new_images(workspace, started_at)
+    return ExecResponse(
+        user_id=user_id, chat_id=chat_id, linux_user=name, workspace=str(workspace),
+        stdout=_truncate(stdout, MAX_OUTPUT_CHARS), stderr=_truncate(stderr, MAX_OUTPUT_CHARS),
+        exit_code=1 if error else 0, images=images, image_note=image_note,
+    )
+
+
+@app.post("/users/{user_id}/workspaces/{chat_id}/kernel/reset")
+def kernel_reset_route(user_id: str, chat_id: str) -> dict[str, Any]:
+    """Restart the persistent kernel (clears all in-memory state)."""
+    _stop_kernel(user_id, chat_id)
+    return {"ok": True}
+
+
+def _extract_document_text(path: Path, ext: str) -> str:
+    """Extract readable text from a binary document (PDF/Word/Excel/PowerPoint)."""
+    if ext == ".pdf":
+        from pypdf import PdfReader
+        reader = PdfReader(str(path))
+        pages = []
+        for i, page in enumerate(reader.pages, 1):
+            try:
+                t = page.extract_text() or ""
+            except Exception:
+                t = ""
+            if t.strip():
+                pages.append(f"--- page {i} ---\n{t}")
+        return "\n\n".join(pages)
+    if ext == ".docx":
+        import docx
+        d = docx.Document(str(path))
+        lines = [p.text for p in d.paragraphs]
+        for tbl in d.tables:
+            for row in tbl.rows:
+                lines.append("\t".join(c.text for c in row.cells))
+        return "\n".join(lines)
+    if ext in {".xlsx", ".xlsm"}:
+        import openpyxl
+        wb = openpyxl.load_workbook(str(path), read_only=True, data_only=True)
+        out = []
+        try:
+            for ws in wb.worksheets:
+                out.append(f"# Sheet: {ws.title}")
+                for row in ws.iter_rows(values_only=True):
+                    out.append("\t".join("" if c is None else str(c) for c in row))
+        finally:
+            wb.close()
+        return "\n".join(out)
+    if ext == ".pptx":
+        from pptx import Presentation
+        prs = Presentation(str(path))
+        out = []
+        for i, slide in enumerate(prs.slides, 1):
+            out.append(f"--- slide {i} ---")
+            for shape in slide.shapes:
+                if getattr(shape, "has_text_frame", False):
+                    for para in shape.text_frame.paragraphs:
+                        out.append("".join(run.text for run in para.runs))
+        return "\n".join(out)
+    return ""
+
+
 @app.post("/users/{user_id}/workspaces/{chat_id}/files/read")
 def read_file_route(user_id: str, chat_id: str, req: FileReadRequest) -> dict[str, Any]:
     _name, workspace = _workspace(user_id, chat_id)
     path = _safe_path(workspace, req.path)
+    # Binary documents (PDF/Office) → extract text instead of returning raw bytes.
+    _ext = path.suffix.lower()
+    if _ext in DOC_EXTRACT_EXTS:
+        if not path.is_file():
+            return {"error": f"read_file: {req.path}: not found", "exit_code": 1, "path": str(path)}
+        try:
+            text = _extract_document_text(path, _ext)
+        except Exception as exc:
+            return {"error": f"read_file: {req.path}: could not extract {_ext} ({exc})", "exit_code": 1, "path": str(path)}
+        text = _truncate(text.strip() or f"[{_ext} file: no extractable text]", MAX_READ_CHARS)
+        return {"output": text, "exit_code": 0, "path": str(path), "extracted": True}
     try:
         if req.offset > 0 or req.limit > 0:
             start = max(int(req.offset), 1)
@@ -1067,4 +1334,84 @@ def download_file_route(user_id: str, chat_id: str, path: str):
         raise HTTPException(404, "File not found")
     mime = mimetypes.guess_type(target.name)[0] or "application/octet-stream"
     return FileResponse(str(target), media_type=mime, filename=target.name)
+
+
+@app.post("/users/{user_id}/workspaces/{chat_id}/files/delete")
+def delete_path_route(user_id: str, chat_id: str, req: PathRequest) -> dict[str, Any]:
+    _name, workspace = _workspace(user_id, chat_id)
+    target = _safe_path(workspace, req.path)
+    if target.resolve() == workspace.resolve():
+        return {"error": "delete: refusing to delete the workspace root", "exit_code": 1}
+    if not target.exists():
+        return {"error": f"delete: {req.path}: not found", "exit_code": 1}
+    try:
+        if target.is_dir():
+            shutil.rmtree(target, ignore_errors=True)
+        else:
+            target.unlink()
+    except OSError as exc:
+        return {"error": f"delete: {req.path}: {exc}", "exit_code": 1}
+    return {"output": f"Deleted {req.path}", "exit_code": 0}
+
+
+@app.post("/users/{user_id}/workspaces/{chat_id}/files/move")
+def move_path_route(user_id: str, chat_id: str, req: MoveRequest) -> dict[str, Any]:
+    name, workspace = _workspace(user_id, chat_id)
+    src = _safe_path(workspace, req.src)
+    dst = _safe_path(workspace, req.dst)
+    if not src.exists():
+        return {"error": f"move: {req.src}: not found", "exit_code": 1}
+    try:
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(src), str(dst))
+        _chown_user_chain(name, workspace, dst)
+    except OSError as exc:
+        return {"error": f"move: {exc}", "exit_code": 1}
+    return {"output": f"Moved {req.src} -> {req.dst}", "exit_code": 0}
+
+
+@app.post("/users/{user_id}/workspaces/{chat_id}/files/mkdir")
+def mkdir_route(user_id: str, chat_id: str, req: PathRequest) -> dict[str, Any]:
+    name, workspace = _workspace(user_id, chat_id)
+    target = _safe_path(workspace, req.path)
+    try:
+        target.mkdir(parents=True, exist_ok=True)
+        _chown_user_chain(name, workspace, target)
+    except OSError as exc:
+        return {"error": f"mkdir: {exc}", "exit_code": 1}
+    return {"output": f"Created {req.path}", "exit_code": 0}
+
+
+@app.get("/users/{user_id}/workspaces/{chat_id}/files/zip")
+def zip_workspace_route(user_id: str, chat_id: str):
+    """Stream the whole workspace as a .zip (for the UI's 'download all')."""
+    import io
+    import zipfile
+    from fastapi.responses import Response
+
+    _name, workspace = _workspace(user_id, chat_id)
+    root = workspace.resolve()
+    buf = io.BytesIO()
+    total = 0
+    max_bytes = 200_000_000
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for p in root.rglob("*"):
+            if not p.is_file():
+                continue
+            rel = p.relative_to(root)
+            if set(rel.parts) & SKIP_DIRS:
+                continue
+            try:
+                total += p.stat().st_size
+                if total > max_bytes:
+                    break
+                zf.write(str(p), str(rel))
+            except OSError:
+                continue
+    buf.seek(0)
+    return Response(
+        content=buf.read(),
+        media_type="application/zip",
+        headers={"Content-Disposition": 'attachment; filename="workspace.zip"'},
+    )
 

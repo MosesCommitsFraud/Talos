@@ -430,6 +430,49 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
             headers={"Content-Disposition": f'{disp}; filename="{fname}"'},
         )
 
+    # ---- DELETE /api/artifacts/{session_id}?path= — remove a workspace file ----
+    @router.delete("/api/artifacts/{session_id}")
+    async def delete_artifact_route(request: Request, session_id: str, path: str = Query(...)):
+        db = SessionLocal()
+        try:
+            owner = _verify_session_access(db, request, session_id)
+        finally:
+            db.close()
+        from src.sandbox_client import delete_artifact, sandbox_enabled
+        if not sandbox_enabled():
+            raise HTTPException(404, "Sandbox not available")
+        try:
+            ok = await delete_artifact(owner=owner, session_id=session_id, path=path)
+        except Exception as e:
+            logger.warning("artifact delete failed for %s (%s): %s", session_id, path, e)
+            raise HTTPException(500, "Delete failed")
+        if not ok:
+            raise HTTPException(404, "File not found")
+        return {"status": "deleted", "path": path}
+
+    # ---- GET /api/artifacts/{session_id}/zip — download the whole workspace ----
+    @router.get("/api/artifacts/{session_id}/zip")
+    async def zip_artifacts_route(request: Request, session_id: str):
+        from fastapi.responses import Response
+        db = SessionLocal()
+        try:
+            owner = _verify_session_access(db, request, session_id)
+        finally:
+            db.close()
+        from src.sandbox_client import download_workspace_zip, sandbox_enabled
+        if not sandbox_enabled():
+            raise HTTPException(404, "Sandbox not available")
+        try:
+            content = await download_workspace_zip(owner=owner, session_id=session_id)
+        except Exception as e:
+            logger.warning("artifact zip failed for %s: %s", session_id, e)
+            raise HTTPException(500, "Zip failed")
+        return Response(
+            content=content,
+            media_type="application/zip",
+            headers={"Content-Disposition": 'attachment; filename="chat-files.zip"'},
+        )
+
     # ---- GET /api/document/{doc_id} ----
     @router.get("/api/document/{doc_id}")
     async def get_document(request: Request, doc_id: str) -> Dict[str, Any]:

@@ -17299,6 +17299,24 @@ body.gallery-selecting .gallery-dl-btn,
   border: 1px solid var(--border); opacity: 0.75;
 }
 .chat-files-dl:hover { opacity: 1; background: color-mix(in srgb, var(--fg) 8%, var(--bg)); }
+.chat-files-actions { display: flex; align-items: center; gap: 8px; }
+.chat-files-zip {
+  background: none; border: 1px solid var(--border); color: var(--fg);
+  border-radius: 6px; padding: 3px 10px; font-size: 0.8em; cursor: pointer; opacity: 0.85;
+}
+.chat-files-zip:hover { opacity: 1; background: color-mix(in srgb, var(--fg) 8%, var(--bg)); }
+.chat-files-del {
+  flex: 0 0 auto; background: none; border: 1px solid var(--border); color: var(--fg);
+  border-radius: 6px; padding: 4px 9px; font-size: 0.9em; cursor: pointer; opacity: 0.5;
+}
+.chat-files-del:hover { opacity: 1; border-color: var(--red, #e5534b); color: var(--red, #e5534b); }
+.chat-files-thumb-ext { cursor: pointer; }
+.chat-files-name, .chat-files-meta { cursor: pointer; }
+.chat-files-preview {
+  margin: 0; padding: 12px 14px; overflow: auto; max-height: calc(80vh - 52px);
+  font-family: var(--mono, monospace); font-size: 0.8em; white-space: pre-wrap;
+  word-break: break-word; background: var(--bg); color: var(--fg);
+}
 
 .gallery-card-upload:hover {
   opacity: 1;

@@ -171,6 +171,12 @@ NEVER pipe multi-line Python through `python -c "..."` — shell quoting eats re
 ```
 Execute Python code INLINE — use ONLY for short, throwaway computations (a quick calculation, a one-off check, a few lines). Each call is stateless and the code can't be edited, so do NOT write long scripts here: if it's more than ~15 lines or you'll likely need to fix/iterate on it, instead `write_file` it to a `.py` file ONCE, run it with `bash` (`python script.py`), and when it fails FIX the broken lines with `edit_file` (targeted edits) — never resend the whole script. That loop is far faster than regenerating inline code. NOT for writing code for the user (use create_document for that). For tabular data use pandas; for Excel use pandas.read_excel with openpyxl/xlrd as needed. For static charts prefer seaborn by default (with matplotlib savefig to a PNG). Use plotly when the user asks for interactive charts. For forecasting/statistics use statsmodels when appropriate; for ML/prediction use scikit-learn when appropriate. Runs with NO time limit — long/heavy work is fine. SHOWING AN IMAGE TO THE USER: your working directory is a private workspace. To display a finished chart/image: save it with a RELATIVE path in your workspace (e.g. `fig.savefig('chart.png', dpi=150, bbox_inches='tight')`), then call the `show_image` tool with that path. (Images you save under an `output/` directory are also shown automatically.) Never upload images via api_call, and do NOT save to `/tmp` or absolute paths — those won't show. Same sandbox limits as bash — no TTY, no GUI, no `input()`; for anything the user should interact with, generate a single HTML file with inline JS instead.""",
 
+    "run_cell": """\
+```run_cell
+<python code>
+```
+Run Python in a PERSISTENT kernel — variables, imports, and loaded data STAY in memory between calls (like a Jupyter notebook). Use this instead of the inline `python` tool whenever you'll iterate on the same data/state: load a dataset ONCE, then run more cells to explore, transform, and plot it without reloading or re-running earlier steps. Far faster than re-running a whole script each time. State persists until the chat ends. Charts: save to an `output/` path or call show_image.""",
+
     "read_file": """\
 ```read_file
 <file path>

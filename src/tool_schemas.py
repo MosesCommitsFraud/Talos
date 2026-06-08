@@ -52,6 +52,20 @@ FUNCTION_TOOL_SCHEMAS = [
     {
         "type": "function",
         "function": {
+            "name": "run_cell",
+            "description": "Run Python in a PERSISTENT session (like a Jupyter notebook): variables, imports, and loaded data PERSIST between calls. Ideal for iterative data analysis — load a dataset ONCE, then run more cells to explore/transform/plot it without reloading or re-running earlier work. Use this (not the inline `python` tool) whenever you'll iterate on the same data/state. State persists until the chat ends or you reset it. For charts, save to an `output/` path or call show_image.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "code": {"type": "string", "description": "Python code to run in the persistent kernel"}
+                },
+                "required": ["code"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "show_image",
             "description": "Display an image from your workspace to the user in the chat (rendered inline, click-to-enlarge, with a download button). Use this to PRESENT a finished chart/plot/diagram/visual result. Workflow: first save the image with python (e.g. seaborn/matplotlib `fig.savefig('chart.png')`), then call show_image with that path. The path must be INSIDE your workspace — use a relative path like 'chart.png' or 'output/chart.png', never /tmp or absolute paths. Supports png/jpg/gif/webp/bmp/svg. Call once per image.",
             "parameters": {
