@@ -206,22 +206,23 @@ body.bg-pattern-sparkles {
     /* Dedicated artifacts/files button, pinned top-right of the chat. */
     .chat-top-files-btn {
       position: absolute;
-      right: 10px;
+      right: 12px;
       top: 50%;
       transform: translateY(-50%);
       display: inline-flex;
       align-items: center;
       justify-content: center;
-      width: 28px;
-      height: 26px;
+      width: 38px;
+      height: 34px;
       border: 1px solid var(--border);
-      border-radius: 7px;
+      border-radius: 9px;
       background: none;
       color: var(--fg);
-      opacity: 0.7;
+      opacity: 0.8;
       cursor: pointer;
       z-index: 3;
     }
+    .chat-top-files-btn svg { width: 19px; height: 19px; }
     .chat-top-files-btn:hover {
       opacity: 1;
       background: color-mix(in srgb, var(--fg) 8%, var(--bg));
@@ -13043,16 +13044,97 @@ mark.doc-find-mark.current {
 }
 .doc-artifact-prev {
   width: 100%;
-  aspect-ratio: 16 / 10;
+  height: 96px;
   border-radius: 6px;
   overflow: hidden;
   background: color-mix(in srgb, var(--fg) 6%, var(--bg));
   display: flex;
   align-items: center;
   justify-content: center;
+  position: relative;
 }
-.doc-artifact-prev img { width: 100%; height: 100%; object-fit: cover; }
-.doc-artifact-prev-ext { font-weight: 700; font-size: 13px; letter-spacing: .05em; opacity: .65; }
+.doc-artifact-prev-img img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.doc-artifact-prev-ext { font-weight: 700; font-size: 14px; letter-spacing: .05em; opacity: .6; }
+.doc-artifact-prev-code { align-items: stretch; justify-content: flex-start; }
+.doc-artifact-code {
+  margin: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  padding: 8px 9px;
+  box-sizing: border-box;
+  font-family: var(--mono, ui-monospace, 'SF Mono', Menlo, monospace);
+  font-size: 9.5px;
+  line-height: 1.35;
+  white-space: pre;
+  text-align: left;
+  color: var(--fg);
+  opacity: .82;
+  -webkit-mask-image: linear-gradient(to bottom, #000 62%, transparent 100%);
+  mask-image: linear-gradient(to bottom, #000 62%, transparent 100%);
+}
+
+/* In-app image viewer with zoom */
+.doc-img-viewer {
+  position: fixed;
+  inset: 0;
+  z-index: 4000;
+  background: rgba(0, 0, 0, 0.85);
+  display: flex;
+  flex-direction: column;
+}
+.doc-img-viewer-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: rgba(0, 0, 0, 0.5);
+  color: #fff;
+  font-size: 13px;
+}
+.doc-img-viewer-name {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 45vw;
+}
+.doc-img-viewer-btn {
+  background: rgba(255, 255, 255, 0.12);
+  border: none;
+  color: #fff;
+  border-radius: 6px;
+  padding: 5px 11px;
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 1;
+  text-decoration: none;
+}
+.doc-img-viewer-btn:hover { background: rgba(255, 255, 255, 0.25); }
+.doc-img-viewer-stage {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: grab;
+  touch-action: none;
+}
+.doc-img-viewer-stage:active { cursor: grabbing; }
+.doc-img-viewer-stage img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  transform-origin: center center;
+  will-change: transform;
+  user-select: none;
+  -webkit-user-drag: none;
+}
 .doc-artifact-name {
   font-size: 12px;
   line-height: 1.3;

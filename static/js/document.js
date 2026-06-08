@@ -6032,9 +6032,16 @@ import * as Modals from './modalManager.js';
     switchToDoc(synthId);
   }
 
+  const _TEXT_PREVIEW_EXTS = new Set([
+    'py', 'js', 'mjs', 'cjs', 'ts', 'json', 'md', 'markdown', 'html', 'htm', 'css',
+    'sh', 'bash', 'sql', 'yaml', 'yml', 'toml', 'ini', 'xml', 'csv', 'tsv', 'txt',
+    'log', 'c', 'cpp', 'h', 'java', 'go', 'rs', 'rb', 'php', 'r',
+  ]);
+
   function _artifactCard(sessionId, a) {
     const ext = (String(a.name).split('.').pop() || '').toLowerCase();
     const url = `${API_BASE}/api/artifacts/${encodeURIComponent(sessionId)}/download?path=${encodeURIComponent(a.path)}`;
+    const isText = !a.is_image && _TEXT_PREVIEW_EXTS.has(ext);
     const card = document.createElement('button');
     card.type = 'button';
     card.className = 'doc-artifact-card';
@@ -6043,9 +6050,18 @@ import * as Modals from './modalManager.js';
     const prev = document.createElement('div');
     prev.className = 'doc-artifact-prev';
     if (a.is_image) {
+      prev.classList.add('doc-artifact-prev-img');
       const img = document.createElement('img');
       img.src = url; img.loading = 'lazy'; img.alt = a.name || '';
       prev.appendChild(img);
+    } else if (isText) {
+      // Claude-style: show a snippet of the actual file content as raw text.
+      prev.classList.add('doc-artifact-prev-code');
+      const code = document.createElement('pre');
+      code.className = 'doc-artifact-code';
+      code.textContent = '…';
+      prev.appendChild(code);
+      _fillCodePreview(code, url);
     } else {
       prev.classList.add('doc-artifact-prev-ext');
       prev.textContent = (ext || 'file').slice(0, 5).toUpperCase();
@@ -6058,12 +6074,97 @@ import * as Modals from './modalManager.js';
     card.appendChild(name);
 
     card.addEventListener('click', () => {
-      if (a.is_image) { window.open(url, '_blank', 'noopener,noreferrer'); return; }
-      openArtifact(sessionId, a.path);  // text/code → editor
-      const panel = document.getElementById('doc-artifacts-panel');
-      if (panel) panel.classList.add('hidden');
+      if (a.is_image) { _openImageViewer(url, a.name || a.path); return; }
+      if (isText) {
+        openArtifact(sessionId, a.path);  // text/code → editor
+        const panel = document.getElementById('doc-artifacts-panel');
+        if (panel) panel.classList.add('hidden');
+        return;
+      }
+      window.open(url, '_blank', 'noopener,noreferrer');  // other binary → download
     });
     return card;
+  }
+
+  async function _fillCodePreview(codeEl, url) {
+    try {
+      const r = await fetch(url, { credentials: 'same-origin' });
+      const text = await r.text();
+      codeEl.textContent = text.slice(0, 600);
+    } catch (_) {
+      codeEl.textContent = '';
+    }
+  }
+
+  /** In-app image viewer with zoom (scroll / +/− buttons) and drag-to-pan. */
+  function _openImageViewer(url, name) {
+    const ov = document.createElement('div');
+    ov.className = 'doc-img-viewer';
+
+    const bar = document.createElement('div');
+    bar.className = 'doc-img-viewer-bar';
+    const title = document.createElement('span');
+    title.className = 'doc-img-viewer-name';
+    title.textContent = name || '';
+    const spacer = document.createElement('span');
+    spacer.style.flex = '1';
+    bar.appendChild(title);
+    bar.appendChild(spacer);
+
+    let scale = 1, tx = 0, ty = 0;
+    const stage = document.createElement('div');
+    stage.className = 'doc-img-viewer-stage';
+    const img = document.createElement('img');
+    img.src = url; img.alt = name || '';
+    stage.appendChild(img);
+
+    const apply = () => { img.style.transform = `translate(${tx}px, ${ty}px) scale(${scale})`; };
+    const setScale = (s) => { scale = Math.min(8, Math.max(0.2, s)); apply(); };
+
+    const mkBtn = (label, fn) => {
+      const b = document.createElement('button');
+      b.className = 'doc-img-viewer-btn';
+      b.textContent = label;
+      b.addEventListener('click', (e) => { e.stopPropagation(); fn(); });
+      return b;
+    };
+    bar.appendChild(mkBtn('−', () => setScale(scale / 1.25)));
+    bar.appendChild(mkBtn('Reset', () => { scale = 1; tx = 0; ty = 0; apply(); }));
+    bar.appendChild(mkBtn('+', () => setScale(scale * 1.25)));
+    const dl = document.createElement('a');
+    dl.className = 'doc-img-viewer-btn';
+    dl.href = url; dl.download = (name || 'image').split('/').pop();
+    dl.textContent = '⤓'; dl.title = 'Download';
+    dl.addEventListener('click', (e) => e.stopPropagation());
+    bar.appendChild(dl);
+    bar.appendChild(mkBtn('×', () => close()));
+
+    ov.appendChild(bar);
+    ov.appendChild(stage);
+
+    // Wheel zoom
+    stage.addEventListener('wheel', (e) => {
+      e.preventDefault();
+      setScale(scale * (e.deltaY < 0 ? 1.12 : 1 / 1.12));
+    }, { passive: false });
+    // Drag to pan
+    let dragging = false, sx = 0, sy = 0;
+    stage.addEventListener('pointerdown', (e) => { dragging = true; sx = e.clientX - tx; sy = e.clientY - ty; stage.setPointerCapture(e.pointerId); });
+    stage.addEventListener('pointermove', (e) => { if (!dragging) return; tx = e.clientX - sx; ty = e.clientY - sy; apply(); });
+    stage.addEventListener('pointerup', () => { dragging = false; });
+
+    const onKey = (e) => {
+      if (e.key === 'Escape') close();
+      else if (e.key === '+' || e.key === '=') setScale(scale * 1.25);
+      else if (e.key === '-') setScale(scale / 1.25);
+    };
+    function close() {
+      document.removeEventListener('keydown', onKey);
+      ov.remove();
+    }
+    ov.addEventListener('click', (e) => { if (e.target === ov) close(); });
+    document.addEventListener('keydown', onKey);
+    document.body.appendChild(ov);
   }
 
   /** Show the chat's artifacts as a grid of cards INSIDE the doc panel
