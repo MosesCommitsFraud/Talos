@@ -9,6 +9,7 @@ The LLM decides when to use tools by writing fenced code blocks.
 import asyncio
 import collections
 import json
+import os
 import re
 import time
 import logging
