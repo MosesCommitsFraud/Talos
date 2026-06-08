@@ -1376,12 +1376,12 @@ import slashCommands, { initSlashCommands, isCommand, handleSlashCommand, handle
                   submitBtn.dataset.phase = 'receiving';
                 }
 
-                // Update background map if running in background
-                if (_isBg) {
-                  var bgEntry = _backgroundStreams.get(streamSessionId);
-                  if (bgEntry) bgEntry.accumulated = accumulated;
-                  continue; // Skip all DOM writes
-                }
+                // Keep detached-session state fresh even after the user switches
+                // back; the original holder may have been removed by history
+                // reload, so checkBackgroundStream renders from this snapshot.
+                var bgEntry = _backgroundStreams.get(streamSessionId);
+                if (bgEntry) bgEntry.accumulated = accumulated;
+                if (_isBg) continue; // Skip all DOM writes while off-session
 
                 // --- Text-fence doc streaming (for models that don't use native tool calls) ---
                 if (!_docFenceOpened && documentModule && roundText.includes('```create_document\n')) {
@@ -3078,6 +3078,7 @@ import slashCommands, { initSlashCommands, isCommand, handleSlashCommand, handle
       abortCurrentRequest();
       return;
     }
+    const chatHistory = document.getElementById('chat-history');
     // Store background stream state
     _backgroundStreams.set(sessionId, {
       status: 'running',
@@ -3087,6 +3088,7 @@ import slashCommands, { initSlashCommands, isCommand, handleSlashCommand, handle
       abortCtrl: currentAbort,
       query: currentHolder ? (currentHolder._researchQuery || '') : '',
       metrics: null,
+      historyHtml: chatHistory ? chatHistory.innerHTML : '',
     });
     // Mark session with pulsing dot in sidebar
     if (sessionModule && sessionModule.markStreaming) {
@@ -3284,6 +3286,10 @@ import slashCommands, { initSlashCommands, isCommand, handleSlashCommand, handle
       var box = document.getElementById('chat-history');
       if (!box) return;
 
+      if (entry.historyHtml) {
+        box.innerHTML = entry.historyHtml;
+      }
+
       // Replay any doc content that was streamed in the background
       if (entry._docTitle != null && documentModule) {
         documentModule.streamDocOpen(entry._docTitle, entry._docLang || '');
@@ -3292,20 +3298,37 @@ import slashCommands, { initSlashCommands, isCommand, handleSlashCommand, handle
         }
       }
 
-      var holder = document.createElement('div');
-      holder.className = 'msg msg-ai';
-      var meta = sessionModule.getSessions().find(function(s) { return s.id === sessionId; });
-      var roleLabel = _shortModel(meta && meta.model);
-      var roleTs = new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
-      holder.innerHTML = '<div class="role">' + uiModule.esc(roleLabel) + ' <span class="role-timestamp">' + roleTs + '</span></div><div class="body"></div>';
-      _applyModelColor(holder.querySelector('.role'), meta && meta.model);
+      var aiHolders = entry.historyHtml ? box.querySelectorAll('.msg-ai') : [];
+      var holder = aiHolders.length ? aiHolders[aiHolders.length - 1] : null;
+      if (!holder) {
+        holder = document.createElement('div');
+        holder.className = 'msg msg-ai';
+        var meta = sessionModule.getSessions().find(function(s) { return s.id === sessionId; });
+        var roleLabel = _shortModel(meta && meta.model);
+        var roleTs = new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+        holder.innerHTML = '<div class="role">' + uiModule.esc(roleLabel) + ' <span class="role-timestamp">' + roleTs + '</span></div><div class="body"></div>';
+        _applyModelColor(holder.querySelector('.role'), meta && meta.model);
+        box.appendChild(holder);
+      }
 
       var bodyDiv = holder.querySelector('.body');
+      if (!bodyDiv) {
+        bodyDiv = document.createElement('div');
+        bodyDiv.className = 'body';
+        holder.appendChild(bodyDiv);
+      }
+      bodyDiv.innerHTML = '<div class="stream-content"></div>';
+      var contentDiv = bodyDiv.querySelector('.stream-content');
+      var renderBackgroundText = function(text) {
+        if (!contentDiv) return;
+        var display = stripToolBlocks(text || '');
+        contentDiv.innerHTML = markdownModule.mdToHtml(markdownModule.squashOutsideCode(display));
+      };
+      renderBackgroundText(entry.accumulated || '');
       var spinner = spinnerModule.create('Response streaming in background', 'right');
       bodyDiv.appendChild(spinner.createElement());
       spinner.start();
 
-      box.appendChild(holder);
       uiModule.scrollHistory();
 
       // Poll map until stream finishes, then reload history
@@ -3320,6 +3343,9 @@ import slashCommands, { initSlashCommands, isCommand, handleSlashCommand, handle
         var curPoll = _backgroundStreams.get(sessionId);
         if (curPoll && curPoll._docContent && documentModule) {
           documentModule.streamDocDelta(curPoll._docContent);
+        }
+        if (curPoll && curPoll.status === 'running') {
+          renderBackgroundText(curPoll.accumulated || '');
         }
         if (!curPoll || curPoll.status !== 'running') {
           clearInterval(pollId);
