@@ -3117,6 +3117,18 @@ import slashCommands, { initSlashCommands, isCommand, handleSlashCommand, handle
     }
     const chatHistory = document.getElementById('chat-history');
     if (currentHolder) currentHolder.dataset.backgroundStreamSession = sessionId;
+    // Snapshot the in-progress DOM so switch-back can restore the tool threads /
+    // thinking that already rendered — but strip any live spinner first. A frozen
+    // ".ai-spinner" baked into the snapshot would re-appear pinned to the old
+    // message on return (looking like it's "generating" the first message) while
+    // the real stream continues below; the running-branch adds its own fresh
+    // bottom spinner, so the snapshot must not carry one.
+    let historyHtml = '';
+    if (chatHistory) {
+      const snap = chatHistory.cloneNode(true);
+      snap.querySelectorAll('.ai-spinner').forEach(el => el.remove());
+      historyHtml = snap.innerHTML;
+    }
     // Store background stream state
     _backgroundStreams.set(sessionId, {
       status: 'running',
@@ -3126,7 +3138,7 @@ import slashCommands, { initSlashCommands, isCommand, handleSlashCommand, handle
       abortCtrl: currentAbort,
       query: currentHolder ? (currentHolder._researchQuery || '') : '',
       metrics: null,
-      historyHtml: chatHistory ? chatHistory.innerHTML : '',
+      historyHtml,
     });
     // Mark session with pulsing dot in sidebar
     if (sessionModule && sessionModule.markStreaming) {
