@@ -10,7 +10,7 @@ import threading
 import time
 import logging
 from pathlib import Path
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, Tuple
 
 import bcrypt
 import pyotp
@@ -333,6 +333,44 @@ class AuthManager:
             self._save()
         logger.info(f"Updated privileges for '{username}': {current}")
         return True
+
+    def set_admin(self, username: str, make_admin: bool, requesting_user: str) -> Tuple[bool, str]:
+        """Promote a user to admin or demote an admin back to a regular user.
+
+        Returns (ok, reason). Only admins may call this. Guards:
+          * can't change your own admin status (mirrors delete_user's self-guard
+            and avoids an admin accidentally locking themselves out)
+          * can't demote the last remaining admin (would lock everyone out of
+            the admin panel with no way back)
+        On demote the user's privileges are reset to the default set, since
+        get_privileges only synthesizes ADMIN_PRIVILEGES while is_admin is true.
+        """
+        username = (username or "").strip().lower()
+        requesting_user = (requesting_user or "").strip().lower()
+        with self._config_lock:
+            if username not in self.users:
+                return False, "User not found"
+            if not self.users.get(requesting_user, {}).get("is_admin"):
+                return False, "Admin only"
+            if username == requesting_user:
+                return False, "Cannot change your own admin status"
+            currently_admin = bool(self.users[username].get("is_admin"))
+            if currently_admin == make_admin:
+                return True, "No change"
+            if not make_admin:
+                admin_count = sum(1 for d in self.users.values() if d.get("is_admin"))
+                if admin_count <= 1:
+                    return False, "Cannot demote the last admin"
+            self._config["users"][username]["is_admin"] = make_admin
+            self._config["users"][username]["privileges"] = dict(
+                ADMIN_PRIVILEGES if make_admin else DEFAULT_PRIVILEGES
+            )
+            self._save()
+        logger.info(
+            "%s user '%s' (by %s)",
+            "Promoted" if make_admin else "Demoted", username, requesting_user,
+        )
+        return True, "ok"
 
     def change_password(self, username: str, current_password: str, new_password: str) -> bool:
         username = username.strip().lower()

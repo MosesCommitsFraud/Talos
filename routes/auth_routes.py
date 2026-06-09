@@ -277,6 +277,29 @@ def setup_auth_routes(auth_manager: AuthManager) -> APIRouter:
             raise HTTPException(404, "User not found or is admin")
         return {"ok": True, "privileges": auth_manager.get_privileges(username)}
 
+    @router.put("/users/{username}/admin")
+    async def set_user_admin(username: str, request: Request):
+        """Promote a user to admin or demote an admin. Admin only."""
+        user = _get_current_user(request)
+        if not user or not auth_manager.is_admin(user):
+            raise HTTPException(403, "Admin only")
+        body = await request.json()
+        make_admin = bool(body.get("is_admin"))
+        ok, reason = auth_manager.set_admin(username, make_admin, user)
+        if not ok:
+            raise HTTPException(400, reason)
+        # A demoted admin keeps their session, but it now resolves to reduced
+        # privileges; an existing API token likewise. Invalidate the bearer
+        # cache so the change takes effect immediately rather than on next
+        # cache miss, mirroring delete_user / rename_user.
+        try:
+            invalidator = getattr(request.app.state, "invalidate_token_cache", None)
+            if callable(invalidator):
+                invalidator()
+        except Exception:
+            pass
+        return {"ok": True, "username": username.strip().lower(), "is_admin": make_admin}
+
     @router.put("/users/{username}/rename")
     async def rename_user(username: str, body: RenameUserRequest, request: Request):
         user = _get_current_user(request)

@@ -36,6 +36,14 @@ async function loadUsers() {
     if (res.status === 401 || res.status === 403) { list.innerHTML = '<div class="admin-empty">Access denied</div>'; return; }
     const data = await res.json();
     if (!data.users || data.users.length === 0) { list.innerHTML = '<div class="admin-empty">No users found</div>'; return; }
+    // Identify the current admin so we don't offer "Demote" on their own row
+    // (the server blocks self-demote anyway, but hiding it is clearer).
+    let _me = '';
+    try {
+      const meRes = await fetch('/api/auth/status', { credentials: 'same-origin' });
+      if (meRes.ok) _me = ((await meRes.json()).username || '').toLowerCase();
+    } catch (e) { /* fall back to server-side guard */ }
+    const _adminCount = data.users.filter(x => x.is_admin).length;
     list.innerHTML = '';
     data.users.forEach(u => {
       const row = document.createElement('div');
@@ -55,6 +63,11 @@ async function loadUsers() {
         </div>
         <div style="display:flex;gap:8px;align-items:center;">
           <button class="admin-btn-sm" data-adm-rename-user="${esc(u.username)}" style="font-size:11px;">Rename</button>
+          ${u.is_admin
+            ? ((u.username.toLowerCase() === _me || _adminCount <= 1)
+                ? ''
+                : `<button class="admin-btn-sm" data-adm-demote-user="${esc(u.username)}" style="font-size:11px;">Demote</button>`)
+            : `<button class="admin-btn-sm" data-adm-promote-user="${esc(u.username)}" style="font-size:11px;">Make admin</button>`}
           ${u.is_admin ? '' : `<button class="admin-btn-delete" data-adm-del-user="${esc(u.username)}" style="font-size:11px;">Remove</button>`}
           ${u.is_admin ? '' : '<svg class="admin-user-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="opacity:0.3;transition:transform 0.2s,opacity 0.2s;"><polyline points="6 9 12 15 18 9"/></svg>'}
         </div>
@@ -108,7 +121,7 @@ async function loadUsers() {
         // Toggle panel visibility + rotate chevron + load models
         let _modelsLoaded = false;
         header.addEventListener('click', (e) => {
-          if (e.target.closest('.admin-btn-delete, [data-adm-rename-user]')) return;
+          if (e.target.closest('.admin-btn-delete, [data-adm-rename-user], [data-adm-demote-user], [data-adm-promote-user]')) return;
           privPanel.classList.toggle('hidden');
           const chevron = header.querySelector('.admin-user-chevron');
           if (chevron) {
@@ -191,6 +204,39 @@ async function loadUsers() {
           const res = await fetch('/api/auth/users', { method: 'DELETE', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username }) });
           if (res.ok) loadUsers();
           else uiModule.showError('Failed to delete user');
+        });
+      }
+
+      // Demote / promote (admin status) button
+      const setAdmin = async (username, makeAdmin, confirmMsg) => {
+        if (confirmMsg && !await uiModule.styledConfirm(confirmMsg, {
+          confirmText: makeAdmin ? 'Make admin' : 'Demote', danger: !makeAdmin,
+        })) return;
+        try {
+          const res = await fetch(`/api/auth/users/${encodeURIComponent(username)}/admin`, {
+            method: 'PUT', credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ is_admin: makeAdmin }),
+          });
+          const data = await res.json().catch(() => ({}));
+          if (!res.ok) { uiModule.showError(data.detail || 'Failed to update admin status'); return; }
+          loadUsers();
+        } catch (err) { uiModule.showError('Failed to update admin status'); }
+      };
+      const demoteBtn = row.querySelector('[data-adm-demote-user]');
+      if (demoteBtn) {
+        demoteBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const username = demoteBtn.dataset.admDemoteUser;
+          setAdmin(username, false, `Demote "${username}" to a regular user?`);
+        });
+      }
+      const promoteBtn = row.querySelector('[data-adm-promote-user]');
+      if (promoteBtn) {
+        promoteBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const username = promoteBtn.dataset.admPromoteUser;
+          setAdmin(username, true, `Make "${username}" an admin? Admins have full, unrestricted access.`);
         });
       }
 
