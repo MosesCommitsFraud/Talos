@@ -688,21 +688,32 @@ export function updateModelPicker() {
       }
     }
   }
+  // Auto-preselect ONLY when exactly one model is available right now. With a
+  // single model there's no ambiguity and nothing to leak across users on a
+  // shared browser, so it's safe to pick it for everyone instead of making them
+  // open the picker. With zero or multiple models we deliberately fall through
+  // to the "Select model" placeholder (see the security note above) so the user
+  // consciously chooses.
   if (!modelId && !_autoSelectingDefault && window.modelsModule && window.modelsModule.getCachedItems) {
     const items = window.modelsModule.getCachedItems();
-    const first = items.find(item => !item.offline && ((item.models || []).length || (item.models_extra || []).length));
-    if (first) {
-      const models = (first.models || []).concat(first.models_extra || []);
-      modelId = models[0];
+    const available = [];
+    items.forEach(item => {
+      if (item.offline) return;
+      (item.models || []).concat(item.models_extra || []).forEach(m =>
+        available.push({ modelId: m, url: item.url, endpointId: item.endpoint_id }));
+    });
+    if (available.length === 1) {
+      const only = available[0];
+      modelId = only.modelId;
       if (!currentSessionId) {
-        _deps.setPendingChat({ url: first.url, modelId, endpointId: first.endpoint_id });
+        _deps.setPendingChat({ url: only.url, modelId, endpointId: only.endpointId });
       } else {
-        if (s) { s.model = modelId; s.endpoint_url = first.url; }
+        if (s) { s.model = modelId; s.endpoint_url = only.url; }
         _autoSelectingDefault = true;
         const fd = new FormData();
         fd.append('model', modelId);
-        fd.append('endpoint_url', first.url || '');
-        if (first.endpoint_id) fd.append('endpoint_id', first.endpoint_id);
+        fd.append('endpoint_url', only.url || '');
+        if (only.endpointId) fd.append('endpoint_id', only.endpointId);
         fetch(`${API_BASE}/api/session/${currentSessionId}`, { method: 'PATCH', body: fd })
           .catch(() => {})
           .finally(() => { _autoSelectingDefault = false; });

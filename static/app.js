@@ -3908,6 +3908,10 @@ function startTalosApp() {
       const tip = document.getElementById('welcome-tip');
       if (tip) tip.textContent = 'Add an AI endpoint from Settings in the sidebar, or paste an endpoint/API key into the chat.';
     }
+    // Now that the model cache is populated, refresh the picker so a
+    // single available model gets auto-preselected on first load (instead of
+    // waiting for the user to open the picker or switch sessions).
+    if (sessionModule && sessionModule.updateModelPicker) sessionModule.updateModelPicker();
   }).catch(() => {});
   modelsModule.refreshProviders();
   ragModule.loadPersonalDocs();
