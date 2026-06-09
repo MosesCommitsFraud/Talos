@@ -2026,6 +2026,16 @@ async def stream_agent_loop(
         # Save cleaned round text for history persistence
         # Keep <think> blocks so they render in the thinking section on reload
         cleaned_round = strip_tool_blocks(round_response).strip()
+        # Reasoning that arrived via reasoning_content (DeepSeek / vLLM
+        # --reasoning-parser) is streamed live as {thinking:true} deltas but is
+        # NOT part of round_response, so without this it's lost on reload —
+        # leaving a round (or the whole turn) showing only tool calls. Fold it
+        # into the same <think> form inline thinking uses so it persists via
+        # round_texts and re-renders through processWithThinking. round_texts is
+        # only read on reload, so this can't double-render the live stream.
+        if round_reasoning.strip() and '<think' not in cleaned_round.lower():
+            cleaned_round = (f"<think>{round_reasoning.strip()}</think>\n\n"
+                             + cleaned_round).strip()
         round_texts.append(cleaned_round)
 
         if not tool_blocks:
@@ -2480,6 +2490,20 @@ async def stream_agent_loop(
     )
     if _fallback_chunk:
         yield _fallback_chunk
+
+    # Single-round / no-tool replies don't persist round_texts (it's only added
+    # to metrics when tool_events exist), so reasoning_content for those would
+    # still be lost on reload. Fold the final round's reasoning into full_response
+    # as a leading <think> block — save_assistant_response's _extract_thinking_meta
+    # then splits it into metadata.thinking and it renders as a normal thinking bar.
+    if (not tool_events and round_reasoning.strip()
+            and '<think' not in full_response.lower()
+            # Don't wrap when the fallback above already promoted the reasoning
+            # to be the visible reply (content was empty) — that would bury the
+            # only text in a collapsed thinking bar.
+            and full_response.strip() != round_reasoning.strip()):
+        full_response = (f"<think>{round_reasoning.strip()}</think>\n\n"
+                         + full_response).strip()
 
     # --- Final metrics ---
     total_duration = time.time() - total_start

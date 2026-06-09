@@ -3190,7 +3190,6 @@ import slashCommands, { initSlashCommands, isCommand, handleSlashCommand, handle
     const reader = res.body.getReader();
     const decoder = new TextDecoder();
     let buffer = '';
-    let roundText = '';
     let gotDelta = false;
     let leftSession = false;
     let metricsData = null;
@@ -3199,15 +3198,84 @@ import slashCommands, { initSlashCommands, isCommand, handleSlashCommand, handle
     // Plain text replies can be finalized in place without a reload.
     let rich = false;
 
+    // --- Live agent reconstruction state ---------------------------------
+    // The server replays the run's WHOLE event buffer on reconnect, so we can
+    // rebuild the same multi-round tool-thread structure the reload renderer
+    // produces (chatRenderer.addMessage agent path) instead of mashing every
+    // round into one text blob. Once a tool completes we switch from the plain
+    // bubble to incremental rebuilds via addMessage with synthetic metadata.
+    const roundTexts = [];          // finalized per-round text (reasoning folded)
+    const toolEvents = [];          // {round, tool, command, output, exit_code, ...}
+    let curRound = 1;
+    let curText = '';               // current round's prose
+    let curReasoning = '';          // current round's reasoning_content
+    let pendingTool = null;         // from tool_start, completed by tool_output
+    let webSources = null, ragSources = null;
+    let agentMode = false;          // true once we have tool_events to thread
+    let rebuildBase = -1;           // #chat-history child count where rebuild starts
+
     const cleanup = () => {
       try { spinner.destroy(); } catch (_) {}
       _resumingStreams.delete(sessionId);
     };
 
-    const renderDelta = () => {
-      const dt = stripToolBlocks(roundText);
-      contentDiv.innerHTML = markdownModule.mdToHtml(markdownModule.squashOutsideCode(dt));
+    // Fold reasoning_content into the same <think> form inline thinking uses so
+    // it renders through processWithThinking — mirrors the backend persistence.
+    const foldReason = (txt, reason) =>
+      (reason && reason.trim() && !/<think/i.test(txt || ''))
+        ? (`<think>${reason.trim()}</think>\n\n` + (txt || '')).trim()
+        : (txt || '');
+
+    // Plain-text (pre-tool / no-tool) live render into the holder bubble.
+    const renderPlain = () => {
+      const dt = stripToolBlocks(foldReason(curText, curReasoning));
+      contentDiv.innerHTML = markdownModule.processWithThinking(markdownModule.squashOutsideCode(dt));
+      if (window.hljs) contentDiv.querySelectorAll('pre code:not(.hljs)').forEach(b => window.hljs.highlightElement(b));
       uiModule.scrollHistory();
+    };
+
+    const removeReconstruction = () => {
+      if (rebuildBase >= 0) {
+        while (box.childElementCount > rebuildBase) box.removeChild(box.lastElementChild);
+      }
+    };
+
+    // Rebuild the agent thread structure from accumulated state, reusing the
+    // canonical reload renderer so the resumed view matches the persisted one.
+    const rebuildAgent = () => {
+      removeReconstruction();
+      const rts = roundTexts.slice();
+      rts[curRound - 1] = foldReason(curText.trim(), curReasoning);
+      const model = meta && meta.model;
+      const synthMeta = Object.assign({ model }, metricsData || {}, {
+        tool_events: toolEvents,
+        round_texts: rts,
+      });
+      if (webSources) synthMeta.web_sources = webSources;
+      if (ragSources) synthMeta.rag_sources = ragSources;
+      chatRenderer.addMessage('assistant', '', model, synthMeta);
+      uiModule.scrollHistory();
+    };
+
+    // Throttle rebuilds during fast token streams; structural events force one.
+    let _lastRebuild = 0, _rebuildTimer = null;
+    const rebuildThrottled = () => {
+      if (!agentMode) return;
+      const now = Date.now();
+      if (now - _lastRebuild > 120) { _lastRebuild = now; rebuildAgent(); return; }
+      if (_rebuildTimer) return;
+      _rebuildTimer = setTimeout(() => {
+        _rebuildTimer = null; _lastRebuild = Date.now(); rebuildAgent();
+      }, 120);
+    };
+
+    // First tool completion: drop the plain bubble and switch to thread rebuilds.
+    const enterAgentMode = () => {
+      if (agentMode) return;
+      agentMode = true;
+      try { spinner.destroy(); } catch (_) {}
+      if (holder.parentNode) holder.remove();
+      rebuildBase = box.childElementCount;
     };
 
     try {
@@ -3236,9 +3304,40 @@ import slashCommands, { initSlashCommands, isCommand, handleSlashCommand, handle
           let json;
           try { json = JSON.parse(payload); } catch (_) { continue; }
           if (json.delta) {
-            roundText += json.delta;
+            // Separate reasoning_content from prose so reasoning renders as a
+            // thinking bar, not raw text mixed into the reply.
+            if (json.thinking) curReasoning += json.delta;
+            else curText += json.delta;
             if (!gotDelta) { gotDelta = true; try { spinner.destroy(); } catch (_) {} }
-            renderDelta();
+            if (agentMode) rebuildThrottled();
+            else renderPlain();
+          } else if (json.type === 'agent_step') {
+            // Finalize the round that just ended, advance to the next.
+            roundTexts[curRound - 1] = foldReason(curText.trim(), curReasoning);
+            curText = ''; curReasoning = '';
+            curRound = json.round || (curRound + 1);
+            if (agentMode) rebuildAgent();
+          } else if (json.type === 'tool_start') {
+            rich = true;
+            pendingTool = {
+              round: json.round || curRound,
+              tool: json.tool,
+              command: json.command || '',
+            };
+          } else if (json.type === 'tool_output') {
+            rich = true;
+            const ev = pendingTool || { round: curRound, tool: json.tool, command: json.command || '' };
+            pendingTool = null;
+            ev.output = json.output || '';
+            ev.exit_code = json.exit_code;
+            for (const k of ['diff', 'image_url', 'image_prompt', 'image_model',
+                             'image_size', 'image_quality', 'image_id',
+                             'created_images', 'image_note', 'screenshot']) {
+              if (json[k] != null) ev[k] = json[k];
+            }
+            toolEvents.push(ev);
+            enterAgentMode();
+            rebuildAgent();
           } else if (json.type === 'doc_stream_open') {
             rich = true;
             if (documentModule) documentModule.streamDocOpen(json.title || '', json.lang || '');
@@ -3247,9 +3346,11 @@ import slashCommands, { initSlashCommands, isCommand, handleSlashCommand, handle
             if (documentModule && json.delta) documentModule.streamDocDelta(json.delta);
           } else if (json.type === 'metrics') {
             metricsData = json.data || metricsData;
-          } else if (json.type === 'tool_start' || json.type === 'tool_output' ||
-                     json.type === 'tool_progress' || json.type === 'agent_step' ||
-                     json.type === 'web_sources' || json.type === 'rag_sources' ||
+          } else if (json.type === 'web_sources') {
+            rich = true; webSources = json.data || webSources;
+          } else if (json.type === 'rag_sources') {
+            rich = true; ragSources = json.data || ragSources;
+          } else if (json.type === 'tool_progress' ||
                      json.type === 'research_progress' || json.type === 'research_sources' ||
                      json.type === 'research_findings' || json.type === 'research_done') {
             rich = true;
@@ -3260,8 +3361,9 @@ import slashCommands, { initSlashCommands, isCommand, handleSlashCommand, handle
       // Network drop or parse failure: fall through to the reload below.
     }
 
+    if (_rebuildTimer) { clearTimeout(_rebuildTimer); _rebuildTimer = null; }
     cleanup();
-    if (leftSession) { if (holder.parentNode) holder.remove(); return true; }
+    if (leftSession) { if (holder.parentNode) holder.remove(); removeReconstruction(); return true; }
 
     const onThisSession = sessionModule.getCurrentSessionId &&
                           sessionModule.getCurrentSessionId() === sessionId;
@@ -3269,18 +3371,19 @@ import slashCommands, { initSlashCommands, isCommand, handleSlashCommand, handle
     // Plain text reply: finalize in place. Replace the live bubble with a
     // canonical single message (markdown + footer actions + metrics) using the
     // same renderer history does. No history refetch, no end-of-stream flicker.
-    if (onThisSession && !rich && roundText.trim()) {
+    if (onThisSession && !rich && curText.trim()) {
       if (holder.parentNode) holder.remove();
       const model = meta && meta.model;
       const meta_ = metricsData ? Object.assign({ model }, metricsData) : { model };
-      chatRenderer.addMessage('assistant', roundText, model, meta_);
+      chatRenderer.addMessage('assistant', foldReason(curText, curReasoning), model, meta_);
       uiModule.scrollHistory();
       return true;
     }
 
     // Rich response (tools, sources, docs, multi-round) or user moved on:
-    // reload from the DB for the full canonical render.
+    // reload from the DB for the full canonical render (now correct on reload).
     if (holder.parentNode) holder.remove();
+    removeReconstruction();
     if (onThisSession) sessionModule.selectSession(sessionId);
     else sessionModule.loadSessions();
     return true;
