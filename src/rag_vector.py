@@ -20,8 +20,13 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 DEFAULT_FILE_EXTENSIONS: Set[str] = {
-    '.txt', '.md', '.py', '.json', '.yaml', '.yml',
-    '.csv', '.html', '.css', '.js', '.pdf'
+    # Plain text / code (read directly)
+    '.txt', '.md', '.py', '.json', '.yaml', '.yml', '.css', '.js', '.ts',
+    # Rich documents (Docling / pypdf / markitdown)
+    '.csv', '.html', '.xhtml', '.adoc', '.pdf',
+    '.docx', '.pptx', '.xlsx', '.xls', '.epub',
+    # Images (Docling OCR + layout)
+    '.png', '.jpg', '.jpeg', '.tif', '.tiff', '.bmp', '.webp', '.gif',
 }
 
 VECTOR_WEIGHT = 0.7
@@ -748,12 +753,10 @@ class VectorRAG:
                         continue
 
                     try:
-                        if ext == '.pdf':
-                            from src.personal_docs import extract_pdf_text
-                            content = extract_pdf_text(fpath)
-                        else:
-                            with open(fpath, 'r', encoding='utf-8') as f:
-                                content = f.read()
+                        # Unified extractor: Docling (PDF/Office/HTML/images,
+                        # incl. OCR) with pypdf/markitdown/raw-text fallbacks.
+                        from src.personal_docs import extract_file_content
+                        content = extract_file_content(fpath)
 
                         if not content or not content.strip():
                             continue

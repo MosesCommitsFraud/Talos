@@ -2,3 +2,7 @@
 # PyMuPDF is AGPL-3.0; install only when those PDF features are needed.
 PyMuPDF
 markitdown
+# Docling (MIT, IBM): "ingest anything" extractor for the RAG pipeline —
+# PDF (incl. scanned/OCR), Office, HTML, and images → structured Markdown.
+# Pulls in torch + OCR models; install only when rich ingestion is wanted.
+docling

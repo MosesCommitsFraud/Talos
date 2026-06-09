@@ -36,6 +36,48 @@ def extract_office_text(file_path: str) -> str:
     return convert_to_markdown(file_path) or ""
 
 
+# Extensions whose content is best read as raw UTF-8 text/code rather than run
+# through a document converter (Docling would only add overhead and lose exact
+# formatting). Everything else routes to the rich extractor below.
+PLAINTEXT_EXTS: Set[str] = {
+    ".txt", ".py", ".json", ".yaml", ".yml", ".css", ".js", ".ts",
+    ".toml", ".ini", ".cfg", ".sh", ".sql", ".xml", ".log",
+}
+
+
+def extract_file_content(file_path: str) -> str:
+    """Extract text from any supported file, preferring Docling.
+
+    Resolution order, each step degrading gracefully to the next:
+      1. Docling (PDF incl. scanned/OCR, Office, HTML, images, tables) — the
+         "ingest anything" path, when the optional dep is installed.
+      2. pypdf for PDFs / markitdown for Office — legacy fallbacks.
+      3. raw UTF-8 read for plain text and code.
+
+    Returns "" when nothing can extract content, so the indexer simply skips the
+    file rather than erroring.
+    """
+    ext = os.path.splitext(file_path)[1].lower()
+
+    # Plain text / code: skip the document converter entirely.
+    if ext in PLAINTEXT_EXTS:
+        return read_text_file(file_path)
+
+    from src.docling_runtime import is_docling_format, convert_to_markdown as docling_md
+
+    if is_docling_format(file_path):
+        text = docling_md(file_path)
+        if text and text.strip():
+            return text
+        # Docling missing or failed — fall through to legacy extractors.
+
+    if ext == ".pdf":
+        return extract_pdf_text(file_path)
+    if ext in MARKITDOWN_EXTS:
+        return extract_office_text(file_path)
+    return read_text_file(file_path)
+
+
 @dataclass
 class PersonalDocsConfig:
     """Configuration for personal documents management."""
@@ -43,6 +85,8 @@ class PersonalDocsConfig:
     CHUNK_OVERLAP: int = 200
     DEFAULT_EXTENSIONS: Tuple[str, ...] = (
         ".txt", ".md", ".json", ".pdf", ".docx", ".pptx", ".xlsx", ".xls", ".epub",
+        ".html", ".xhtml", ".csv", ".adoc",
+        ".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp", ".webp", ".gif",
     )
     DEFAULT_K: int = 5
     STOP_WORDS: Set[str] = None
@@ -104,13 +148,7 @@ def load_personal_index(
             if not any(name.lower().endswith(ext) for ext in extensions):
                 continue
             size = os.path.getsize(p)
-            ext = os.path.splitext(name)[1].lower()
-            if ext == ".pdf":
-                text = extract_pdf_text(p)
-            elif ext in MARKITDOWN_EXTS:
-                text = extract_office_text(p)
-            else:
-                text = read_text_file(p)
+            text = extract_file_content(p)
             chunks = split_chunks(text)
             display = os.path.relpath(p, personal_dir)
             files.append({"name": display, "path": p, "size": size, "chunks": chunks})
