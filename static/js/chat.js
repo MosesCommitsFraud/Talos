@@ -2906,12 +2906,18 @@ import slashCommands, { initSlashCommands, isCommand, handleSlashCommand, handle
         _webLockRelease = null;
       }
 
-      // Refresh session list after a delay (picks up auto-generated names)
-      setTimeout(() => {
-        if (sessionModule && sessionModule.loadSessions) {
-          sessionModule.loadSessions();
-        }
-      }, 3000);
+      // Refresh session list to pick up the LLM auto-generated name. The name
+      // is produced by a detached backend task whose latency varies (a local
+      // reasoning model can take well over 3s), so a single timer used to lose
+      // the race and leave the "Chat: …" placeholder showing. Stagger a few
+      // reloads instead so a slow title still appears without a manual reload.
+      [3000, 9000, 20000].forEach((delay) => {
+        setTimeout(() => {
+          if (sessionModule && sessionModule.loadSessions) {
+            sessionModule.loadSessions();
+          }
+        }, delay);
+      });
     }
   }
 

@@ -157,6 +157,15 @@ async def auto_name_session(session_manager, sess):
             logger.debug("[auto-name] No model provided, skipping")
             return
 
+        # Qwen3 (and other soft-switchable reasoners) burn the whole token
+        # budget on <think>, which makes auto-naming slow (it loses the 3s
+        # frontend refresh race) and sometimes yields an empty title. The
+        # `/no_think` soft switch disables reasoning for this single call, so
+        # it returns a clean title in ~1s. Harmless on models that ignore it.
+        user_prompt = first_msg
+        if "qwen" in (t_model or "").lower():
+            user_prompt = first_msg + " /no_think"
+
         # max_tokens big enough that reasoning models (Minimax M2,
         # DeepSeek R1, QwQ, etc.) have headroom for <think>…</think>
         # plus the actual title — 200 used to clip them mid-reasoning
@@ -167,7 +176,7 @@ async def auto_name_session(session_manager, sess):
             t_model,
             [
                 {"role": "system", "content": "Generate a short title (3-6 words, no quotes) for a conversation that starts with this message. Reply with ONLY the title, nothing else. Do NOT include any thinking, reasoning, or explanation — just the title."},
-                {"role": "user", "content": first_msg},
+                {"role": "user", "content": user_prompt},
             ],
             temperature=0.3,
             max_tokens=4096,
@@ -180,7 +189,16 @@ async def auto_name_session(session_manager, sess):
         # via the central helper.
         from src.text_helpers import strip_think
         title = strip_think(title, prose=False, prompt_echo=False)
-        if title and len(title) < 80:
+
+        # Always rename off the "Chat: …" placeholder. If the model returned
+        # nothing usable (empty after stripping, or too long), fall back to a
+        # trimmed version of the first message rather than leaving the
+        # placeholder — that is the "partially works" case users notice.
+        if not title or len(title) >= 80:
+            words = first_msg.split()[:6]
+            title = " ".join(words).strip()[:60] if words else ""
+
+        if title:
             session_manager.update_session_name(sess.id, title)
             logger.info(f"Auto-named session {sess.id}: {title}")
 
