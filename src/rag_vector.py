@@ -348,22 +348,37 @@ class VectorRAG:
             return {"success": False, "message": "No valid documents"}
 
         try:
-            # Get existing IDs to avoid duplicates
+            # Resolve which docs already exist in ONE round trip rather than one
+            # lookup per chunk. _generate_doc_id is deterministic, so we can
+            # compute every id up front and ask the backend for all of them at
+            # once (Qdrant.retrieve and Chroma.get both take an id list).
+            doc_ids = [_generate_doc_id(t, m.get("owner") or "") for t, m in valid]
+            if self._backend == "qdrant":
+                point_ids = [_qdrant_point_id(d) for d in doc_ids]
+                found = self._qdrant.retrieve(collection_name=COLLECTION_NAME, ids=point_ids)
+                existing_point_ids = {str(p.id) for p in found}
+                existing_doc_ids = {
+                    d for d, pid in zip(doc_ids, point_ids)
+                    if str(pid) in existing_point_ids
+                }
+            else:
+                found = self._collection.get(ids=doc_ids)
+                existing_doc_ids = set(found.get("ids") or [])
+
             new_texts = []
             new_metas = []
             new_ids = []
-            for t, m in valid:
-                doc_id = _generate_doc_id(t, m.get("owner") or "")
-                if self._backend == "qdrant":
-                    existing = self._qdrant.retrieve(collection_name=COLLECTION_NAME, ids=[_qdrant_point_id(doc_id)])
-                    exists = bool(existing)
-                else:
-                    existing = self._collection.get(ids=[doc_id])
-                    exists = bool(existing["ids"])
-                if not exists:
-                    new_texts.append(t)
-                    new_metas.append(m)
-                    new_ids.append(doc_id)
+            # Dedup within this batch too: a file can produce byte-identical
+            # chunks, which collide on doc_id and would otherwise be embedded
+            # and upserted twice.
+            seen_in_batch: Set[str] = set()
+            for (t, m), doc_id in zip(valid, doc_ids):
+                if doc_id in existing_doc_ids or doc_id in seen_in_batch:
+                    continue
+                seen_in_batch.add(doc_id)
+                new_texts.append(t)
+                new_metas.append(m)
+                new_ids.append(doc_id)
 
             if new_texts:
                 # Batch in chunks of 100
@@ -770,19 +785,31 @@ class VectorRAG:
                         if owner:
                             meta['owner'] = owner
 
-                        for i, chunk in enumerate(self._split_into_chunks(content)):
-                            if cancel_cb and cancel_cb():
-                                return {
-                                    'success': False,
-                                    'cancelled': True,
-                                    'indexed_count': indexed,
-                                    'failed_count': failed,
-                                    'message': f'Cancelled after indexing {indexed} chunks from {directory}',
-                                }
-                            if self.add_document(chunk, {**meta, 'chunk_id': i}):
-                                indexed += 1
+                        if cancel_cb and cancel_cb():
+                            return {
+                                'success': False,
+                                'cancelled': True,
+                                'indexed_count': indexed,
+                                'failed_count': failed,
+                                'message': f'Cancelled after indexing {indexed} chunks from {directory}',
+                            }
+                        # Batch all of this file's chunks into a single
+                        # add_documents_batch call. That embeds in groups (one
+                        # HTTP request per ~100 chunks) and batches the Qdrant
+                        # existence check + upsert, instead of one embedding
+                        # request and two round trips *per chunk*. For large
+                        # files this is the difference between seconds and
+                        # minutes (#perf).
+                        file_docs = [
+                            (chunk, {**meta, 'chunk_id': i})
+                            for i, chunk in enumerate(self._split_into_chunks(content))
+                        ]
+                        if file_docs:
+                            result = self.add_documents_batch(file_docs)
+                            if result.get("success"):
+                                indexed += len(file_docs)
                             else:
-                                failed += 1
+                                failed += len(file_docs)
                         if progress_cb:
                             progress_cb({"file": fpath, "indexed_count": indexed, "failed_count": failed})
                     except Exception as e:

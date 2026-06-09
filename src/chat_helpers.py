@@ -38,6 +38,12 @@ _VISION_MODEL_KEYWORDS = (
     # open / local
     "vision", "multimodal", "llava", "bakllava", "moondream", "pixtral", "minicpm",
     "internvl", "cogvlm", "qwen-vl", "qwen2-vl", "qwen3-vl", "qwen3vl",
+    # Qwen3.5 / Qwen3.6 are natively multimodal (vision encoder baked in) even
+    # though their tags carry no "vl"/"vision" marker, e.g. qwen3.6-35b-a3b.
+    # The one caveat is a vLLM endpoint started with `--language-model-only`,
+    # which drops the encoder — but per the err-toward-True policy (#124),
+    # sending an image to a model that ignores it beats silently dropping it.
+    "qwen3.6", "qwen3-6", "qwen3.5", "qwen3-5",
     # multimodal families whose names don't contain "vision"/"vl" but DO accept
     # images — without these the image is silently dropped for common Ollama tags
     # like gemma3:4b or gemma4:12b (issue #1274). Gemma 3/4 (4b+), Llama 4 (all),
