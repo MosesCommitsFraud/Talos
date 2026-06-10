@@ -1503,6 +1503,19 @@ async def stream_agent_loop(
     if _relevant_tools is not None and active_document is not None:
         _relevant_tools.update({"edit_document", "update_document", "suggest_document"})
 
+    # If an external SQL database is configured, always expose query_sql.
+    # Selection keys off the LAST user message, so a follow-up that doesn't
+    # repeat a DB keyword ("and how many in May?") would otherwise drop the
+    # tool and the model improvises with python+pymssql in the sandbox.
+    if _relevant_tools is not None:
+        try:
+            from src.tool_implementations import _build_external_sql_url
+            _sql_url, _ = _build_external_sql_url()
+            if _sql_url:
+                _relevant_tools.add("query_sql")
+        except Exception:
+            pass
+
     prep_timings["tool_selection"] = time.time() - _t1
 
     _t2 = time.time()
