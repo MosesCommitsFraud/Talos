@@ -1570,6 +1570,9 @@ function initializeEventListeners() {
     const state = loadToggleState();
     const key = _modeKey(stateKey, mode);
     if (Object.prototype.hasOwnProperty.call(state, key)) return !!state[key];
+    // DB mode is an explicit per-query escalation ("answer this from the SQL
+    // database") — it must never be on unless the user pressed the button.
+    if (stateKey === 'db') return false;
     // No chat/agent split anymore — tools default ON for everyone. A saved
     // per-tool preference (checked above) still wins, so anyone who turned a
     // tool off keeps it off.
@@ -1585,6 +1588,7 @@ function initializeEventListeners() {
   const TOOL_TOGGLE_TOAST_LABELS = {
     web: 'Web search',
     bash: 'Shell',
+    db: 'Database mode',
   };
 
   function showToolToggleToast(stateKey, active) {
@@ -1644,6 +1648,7 @@ function initializeEventListeners() {
     bash: { role: 'Shell Access', text: 'Gives the AI access to a sandboxed shell for running commands, installing packages, and executing scripts. Use with caution.' },
     builder: { role: 'Tool Builder', text: 'Create custom mini-apps and tools the AI can use. Describe what you need and the AI will build a tool you can reuse across conversations.' },
     research: { role: 'Deep Research', text: 'Multi-round web search with source analysis. Takes longer but produces comprehensive, well-sourced answers. Your next message will trigger a deep research cycle.' },
+    db: { role: 'Database Mode', text: 'Your messages will be answered from the configured SQL database. The AI will inspect the schema and run read-only queries to find the answer.' },
   };
   function _showToolSplash(key) {
     const splash = _toolSplashes[key];
@@ -1698,6 +1703,27 @@ function initializeEventListeners() {
   }
   setupToggle('web-toggle-btn', 'web-toggle', 'web');
   setupToggle('bash-toggle-btn', 'bash-toggle', 'bash');
+  setupToggle('db-toggle-btn', 'db-toggle', 'db');
+
+  // The DB toggle only exists when an external SQL database is configured
+  // (settings-panel integration or backend env vars). Hidden until the
+  // status probe confirms one, so non-DB setups never see the button.
+  (async () => {
+    const dbBtn = el('db-toggle-btn');
+    if (!dbBtn) return;
+    try {
+      const r = await fetch('/api/sql/status', { credentials: 'same-origin' });
+      const j = r.ok ? await r.json() : {};
+      if (j.configured) {
+        dbBtn.style.display = '';
+      } else {
+        // Stale persisted "on" state must not silently force DB mode
+        // while the button is invisible.
+        const chk = el('db-toggle');
+        if (chk) chk.checked = false;
+      }
+    } catch (_e) { /* unreachable backend — keep the button hidden */ }
+  })();
 
   // Document editor toggle (special: uses module panel, not a checkbox)
   const overflowDocBtn = el('overflow-doc-btn');

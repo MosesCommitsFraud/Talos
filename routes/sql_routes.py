@@ -38,6 +38,16 @@ def setup_sql_routes():
         settings = load_settings()
         return _public_config(settings.get("sql_database", {}))
 
+    @router.get("/status")
+    def sql_status(request: Request):
+        # Non-admin on purpose: the chat UI calls this to decide whether to
+        # show the DB toggle. Exposes a single boolean, never the config —
+        # covers both the settings-panel config and env-var setups.
+        from src.tool_implementations import _build_external_sql_url
+
+        url, _ = _build_external_sql_url()
+        return {"configured": bool(url)}
+
     @router.put("/config")
     def set_sql_config(body: SqlConfigIn, request: Request):
         require_admin(request)

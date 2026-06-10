@@ -809,6 +809,10 @@ import slashCommands, { initSlashCommands, isCommand, handleSlashCommand, handle
       if (el('bash-toggle').checked) {
         fd.append('allow_bash', 'true');
       }
+      const dbChk = el('db-toggle');
+      if (dbChk && dbChk.checked) {
+        fd.append('use_db', 'true');
+      }
       const ragChk = el('rag-toggle');
       if (ragChk && !ragChk.checked) {
         fd.append('use_rag', 'false');

@@ -376,6 +376,7 @@ def setup_chat_routes(
         search_context = form_data.get("search_context")  # pre-fetched web search results (compare mode)
         compare_mode = str(form_data.get("compare_mode", "")).lower() == "true"
         incognito = str(form_data.get("incognito", "")).lower() == "true"
+        use_db = str(form_data.get("use_db", "")).lower() == "true"
         plan_mode = str(form_data.get("plan_mode", "")).lower() == "true"
         # Single unified mode. Every request runs the full agent loop with all
         # tools available — there is no longer a chat/agent split or any intent
@@ -759,6 +760,7 @@ def setup_chat_routes(
                         workspace=workspace or None,
                         plan_mode=plan_mode,
                         approved_plan=approved_plan or None,
+                        force_db=use_db,
                     ):
                         if chunk.startswith("data: ") and not chunk.startswith("data: [DONE]"):
                             try:

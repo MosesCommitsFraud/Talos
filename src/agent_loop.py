@@ -1410,6 +1410,7 @@ async def stream_agent_loop(
     workspace: Optional[str] = None,
     plan_mode: bool = False,
     approved_plan: Optional[str] = None,
+    force_db: bool = False,
     _is_teacher_run: bool = False,
 ) -> AsyncGenerator[str, None]:
     """Streaming agent loop generator.
@@ -1516,6 +1517,14 @@ async def stream_agent_loop(
         except Exception:
             pass
 
+    # DB button in the chat input: the user explicitly asked this query to be
+    # answered from the external SQL database — guarantee the tool is present
+    # no matter what selection or toggles did.
+    if force_db:
+        if _relevant_tools is not None:
+            _relevant_tools.add("query_sql")
+        disabled_tools.discard("query_sql")
+
     prep_timings["tool_selection"] = time.time() - _t1
 
     _t2 = time.time()
@@ -1621,6 +1630,25 @@ async def stream_agent_loop(
         else:
             messages.insert(0, {"role": "system", "content": _ws_note})
         logger.info("[workspace] active for this turn: %s", workspace)
+    if force_db:
+        # The DB toggle is an explicit instruction, not a hint: answer THIS
+        # message from the external SQL database. Prepended like the workspace
+        # note so small models can't miss it.
+        _db_note = (
+            "## DATABASE MODE — READ FIRST\n"
+            "The user activated the database button for this message: they want "
+            "it answered FROM the configured external SQL database. You MUST "
+            "call the `query_sql` tool before answering — do not answer from "
+            "general knowledge and do not use python/bash to reach the database. "
+            "If you don't know the schema yet, start with `query_sql` "
+            "action=list_tables, then action=describe on the relevant tables, "
+            "then run the SELECT that answers the question."
+        )
+        if messages and messages[0].get("role") == "system":
+            messages[0]["content"] = _db_note + "\n\n" + (messages[0].get("content") or "")
+        else:
+            messages.insert(0, {"role": "system", "content": _db_note})
+        logger.info("[db-mode] forced query_sql for this turn")
     if plan_mode:
         if messages and messages[0].get("role") == "system":
             messages[0]["content"] = PLAN_MODE_DIRECTIVE + "\n\n" + (messages[0].get("content") or "")
