@@ -36815,3 +36815,264 @@ body.theme-frosted .modal {
   outline: 2px solid var(--red);
   outline-offset: 2px;
 }
+
+/* ── GPT Modernization Layer, pass 2 ──
+   Sidebar, composer, tool-call timeline, slash menu, dropdowns and
+   modals/settings — brought in line with the ChatGPT visual language:
+   larger readable nav text, neutral (non-accent) hovers, pill/rounded
+   surfaces, quiet tool rows. */
+
+/* ── Sidebar ── */
+.sidebar {
+  border: none;
+  border-right: 1px solid color-mix(in srgb, var(--fg) 7%, transparent);
+  box-shadow: none;
+  backdrop-filter: none;
+}
+.sidebar.right-side {
+  border-right: none;
+  border-left: 1px solid color-mix(in srgb, var(--fg) 7%, transparent);
+}
+.sidebar-brand-title { font-size: 17px; font-weight: 600; }
+.list-item,
+.models-row {
+  gap: 10px;
+  padding: 8px 10px;
+  min-height: 36px;
+  border-radius: 8px;
+  font-size: 14px;
+  line-height: 1.35;
+}
+/* Beat the ID-scoped padding rules so every nav row is the same height */
+#sidebar-search-btn, #sidebar-new-chat-btn { padding: 8px 10px; }
+#tools-section .list-item { padding: 8px 10px; }
+/* Leading icons: one consistent GPT-ish size regardless of the per-SVG
+   width/height attributes in the markup */
+.list-item > svg:first-child,
+.list-item > .sidebar-action-icon {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  opacity: 0.75;
+}
+/* Neutral hover/active — no accent tint, no border flash */
+.list-item:hover,
+.models-row:hover {
+  background: color-mix(in srgb, var(--fg) 7%, transparent);
+  border-color: transparent;
+}
+.list-item.active,
+.list-item.active-session {
+  background: color-mix(in srgb, var(--fg) 10%, transparent);
+  border-color: transparent;
+  border-left-color: transparent;
+}
+/* Section labels: small muted caps-free captions */
+.section-header-flex h4,
+.section-header-flex .section-title {
+  font-size: 12px;
+  font-weight: 500;
+  color: color-mix(in srgb, var(--fg) 55%, transparent);
+}
+.section-header-flex { padding: 10px 10px 2px; }
+.section-header-flex:hover { background: transparent; color: var(--fg); }
+.section-header-flex:hover h4,
+.section-header-flex:hover .section-title { color: var(--fg); }
+
+/* ── Composer ── */
+.chat-input-bar {
+  border: none;
+  background: var(--input-bg, #2f2f2f);
+  border-radius: 28px;
+  padding: 14px 18px 10px;
+  box-shadow: 0 2px 16px rgba(0, 0, 0, 0.18);
+}
+.chat-input-bar:focus-within {
+  border: none;
+  box-shadow: 0 2px 16px rgba(0, 0, 0, 0.28);
+}
+.chat-input-bar textarea#message {
+  font-size: 16px;
+  line-height: 1.5;
+  min-height: 26px;
+}
+.ghost-text-overlay { font-size: 16px; }
+.chat-input-bar textarea#message::placeholder {
+  color: color-mix(in srgb, var(--fg) 45%, transparent);
+}
+/* Composer icon buttons — round 36px ghost targets, GPT-sized icons */
+.input-icon-btn {
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border-radius: 50%;
+  opacity: 0.7;
+}
+.input-icon-btn:hover {
+  opacity: 1;
+  background: color-mix(in srgb, var(--fg) 8%, transparent);
+}
+.input-icon-btn > svg { width: 18px; height: 18px; }
+/* Tool indicators (RAG/Group/Persona chips) stay pills, not circles */
+.input-icon-btn.tool-indicator { width: auto; padding: 0 10px; border-radius: 18px; }
+/* Plan toggle — full pill */
+.plan-toggle {
+  height: 36px;
+  border-radius: 18px;
+  border-color: color-mix(in srgb, var(--fg) 18%, transparent);
+}
+/* Send button — GPT-style high-contrast circle (light on dark) */
+.send-btn,
+.send-btn.mic-mode,
+.send-btn.newchat-mode {
+  background: var(--fg);
+  color: var(--bg);
+  min-width: 36px;
+  width: 36px;
+  height: 36px !important;
+}
+.send-btn:hover,
+.send-btn.mic-mode:hover,
+.send-btn.newchat-mode:hover {
+  background: color-mix(in srgb, var(--fg) 85%, var(--bg));
+  color: var(--bg);
+}
+.send-btn.newchat-expanded { width: 70px; }
+/* Model picker chip in the composer — quiet ghost pill */
+.model-picker-btn {
+  border: none;
+  background: transparent;
+  border-radius: 18px;
+  padding: 6px 10px;
+  font-size: 13px;
+  color: color-mix(in srgb, var(--fg) 70%, transparent);
+}
+.model-picker-btn:hover {
+  background: color-mix(in srgb, var(--fg) 8%, transparent);
+  color: var(--fg);
+}
+
+/* ── Tool calls (agent thread timeline) — quiet, neutral, GPT-like ── */
+.agent-thread::before {
+  background: color-mix(in srgb, var(--fg) 12%, transparent);
+}
+.agent-thread::after { background: color-mix(in srgb, var(--fg) 55%, transparent); box-shadow: none; }
+.agent-thread-dot {
+  background: color-mix(in srgb, var(--fg) 35%, transparent);
+  width: 7px;
+  height: 7px;
+}
+.agent-thread-node.running .agent-thread-dot {
+  background: color-mix(in srgb, var(--fg) 60%, transparent);
+  box-shadow: none;
+}
+@keyframes thread-pulse {
+  0%, 100% { box-shadow: 0 0 0 2px color-mix(in srgb, var(--fg) 12%, transparent); }
+  50% { box-shadow: 0 0 0 5px color-mix(in srgb, var(--fg) 6%, transparent); }
+}
+.agent-thread:not(.has-bottom) .agent-thread-node.open:last-child::after {
+  background: color-mix(in srgb, var(--fg) 35%, transparent);
+  box-shadow: none;
+}
+.agent-thread-icon { display: none; }
+.agent-thread-tool {
+  text-transform: none;
+  letter-spacing: 0;
+  font-weight: 500;
+  font-size: 1em;
+  color: color-mix(in srgb, var(--fg) 60%, transparent);
+}
+.agent-thread-header:hover .agent-thread-tool { color: var(--fg); }
+.agent-thread-wave { display: none; }
+.agent-thread-elapsed {
+  font-weight: 500;
+  color: color-mix(in srgb, var(--fg) 50%, transparent);
+}
+.agent-thread-cmd {
+  border: none;
+  background: color-mix(in srgb, var(--fg) 6%, transparent);
+  border-radius: 8px;
+}
+
+/* ── Slash command menu ── */
+.slash-autocomplete-popup {
+  border-radius: 14px;
+  border: 1px solid color-mix(in srgb, var(--fg) 10%, transparent);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
+  padding: 6px;
+  font-size: 14px;
+}
+.slash-ac-row {
+  border-radius: 8px;
+  padding: 8px 10px;
+}
+.slash-ac-row:hover { background-color: color-mix(in srgb, var(--fg) 7%, transparent); }
+.slash-ac-row-sel { background-color: color-mix(in srgb, var(--fg) 10%, transparent); }
+.slash-ac-token { color: var(--fg); font-weight: 500; }
+.slash-ac-cat { text-transform: none; letter-spacing: 0; font-size: 11px; }
+
+/* ── Dropdown menus ── */
+.dropdown {
+  border-radius: 12px;
+  border: 1px solid color-mix(in srgb, var(--fg) 10%, transparent);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
+}
+.dropdown-item { border-radius: 8px; }
+.dropdown-item:hover { background: color-mix(in srgb, var(--fg) 7%, transparent); }
+
+/* ── Modals & settings ── */
+.modal-content {
+  border-radius: 16px;
+  border-color: color-mix(in srgb, var(--fg) 10%, transparent);
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.5);
+  padding: 16px;
+}
+.modal-header h4 { font-size: 16px; font-weight: 600; }
+/* Toggle switches — GPT proportions (36×20, 16px knob) */
+.toggle { width: 36px; height: 20px; }
+.toggle .slider {
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--fg) 20%, transparent);
+}
+.toggle .slider:before {
+  height: 16px;
+  width: 16px;
+  left: 2px;
+  top: 2px;
+  background: #fff;
+}
+.toggle input:checked + .slider { background: var(--red); }
+.toggle input:checked + .slider:before { transform: translateX(16px); }
+/* Sidebar action icons (New Chat, Search) — neutral like the rest of the
+   nav, not accent-tinted */
+.sidebar-action-icon {
+  stroke: currentColor;
+  color: inherit;
+}
+/* Modal titles — plain text, not accent-tinted */
+.modal-header h4 { color: var(--fg); }
+/* Settings/admin cards — softer corners and a quieter border */
+.admin-card {
+  border-radius: 12px;
+  border-color: color-mix(in srgb, var(--fg) 8%, transparent);
+  padding: 14px;
+}
+/* Tool output expander — neutral, quiet (was accent-tinted) */
+.agent-tool-output {
+  background: color-mix(in srgb, var(--fg) 4%, transparent);
+  border: 1px solid color-mix(in srgb, var(--fg) 10%, transparent);
+}
+.agent-tool-output summary {
+  color: color-mix(in srgb, var(--fg) 65%, transparent);
+  background: transparent;
+  border-bottom: none;
+}
+.agent-tool-output summary:hover {
+  color: var(--fg);
+  background: color-mix(in srgb, var(--fg) 6%, transparent);
+}
+.agent-tool-output summary::after { color: color-mix(in srgb, var(--fg) 50%, transparent); }
+.agent-tool-output[open] { background: color-mix(in srgb, var(--fg) 4%, transparent); }
+.agent-tool-output[open] > summary {
+  border-bottom: 1px solid color-mix(in srgb, var(--fg) 8%, transparent);
+}
