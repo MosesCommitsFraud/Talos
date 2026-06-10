@@ -1324,10 +1324,8 @@ async def execute_tool_block(
         do_suggest_document, do_search_chats, do_manage_tasks,
         do_manage_skills, do_api_call, do_manage_endpoints,
         do_manage_mcp, do_manage_webhooks, do_manage_tokens,
-        do_manage_documents, do_manage_settings, do_manage_notes,
-        do_manage_calendar, do_query_sql,
-        do_edit_image, do_resolve_contact,
-        do_manage_contact,
+        do_manage_documents, do_manage_settings, do_query_sql,
+        do_edit_image,
         do_vault_search, do_vault_get, do_vault_unlock,
         do_app_api,
     )
@@ -1348,12 +1346,12 @@ async def execute_tool_block(
                     "error": (
                         f"You wrote a JSON object inside a ```{tool}``` block, but that's not a tool call.\n"
                         "To call a tool, use the tool name as the fence tag, e.g.\n"
-                        "```resolve_contact\n"
-                        "{\"name\": \"...\"}\n"
+                        "```edit_file\n"
+                        "{\"path\": \"...\", \"old_string\": \"...\", \"new_string\": \"...\"}\n"
                         "```\n"
                         "or\n"
-                        "```send_email\n"
-                        "{\"to\": \"...\", \"subject\": \"...\", \"body\": \"...\"}\n"
+                        "```grep\n"
+                        "{\"pattern\": \"...\"}\n"
                         "```"
                     ),
                     "exit_code": 1,
@@ -1567,12 +1565,6 @@ async def execute_tool_block(
     elif tool == "manage_settings":
         desc = "manage_settings"
         result = await do_manage_settings(content, owner=owner)
-    elif tool == "manage_notes":
-        desc = "manage_notes"
-        result = await do_manage_notes(content, owner=owner)
-    elif tool == "manage_calendar":
-        desc = "manage_calendar"
-        result = await do_manage_calendar(content, owner=owner)
     elif tool == "query_sql":
         desc = "query_sql"
         result = await do_query_sql(content, owner=owner)
@@ -1593,12 +1585,6 @@ async def execute_tool_block(
     elif tool == "run_cell":
         result = await _do_run_cell(content, session_id=session_id, owner=owner)
         desc = "run_cell"
-    elif tool == "resolve_contact":
-        desc = "resolve_contact"
-        result = await do_resolve_contact(content, owner=owner)
-    elif tool == "manage_contact":
-        desc = "manage_contact"
-        result = await do_manage_contact(content, owner=owner)
     elif tool == "vault_search":
         desc = "vault_search"
         result = await do_vault_search(content, owner=owner)

@@ -39,14 +39,10 @@ TOOL_TAGS = {"bash", "python", "read_file", "write_file", "edit_file",
              "suggest_document",
              "manage_endpoints", "manage_mcp", "manage_webhooks",
              "manage_tokens", "manage_documents", "manage_settings",
-             "manage_notes", "manage_calendar", "query_sql",
-             "resolve_contact", "manage_contact", "list_email_accounts", "send_email", "list_emails",
-             "read_email", "reply_to_email", "bulk_email", "archive_email",
-             "delete_email", "mark_email_read",
+             "query_sql",
              "edit_image",
-             # Generic loopback to any UI-button endpoint (gallery, email
-             # folders, etc.) — agent uses this when there's no named tool
-             # wrapper for the action.
+             # Generic loopback to any UI-button endpoint — agent uses this
+             # when there's no named tool wrapper for the action.
              "app_api"}
 
 ToolBlock = namedtuple("ToolBlock", ["tool_type", "content"])

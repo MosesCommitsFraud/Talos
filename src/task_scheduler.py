@@ -206,11 +206,6 @@ HOUSEKEEPING_DEFAULTS = {
     "tidy_sessions":        {"name": "Chat Sessions Tidy",       "trigger_type": "event", "trigger_event": "session_created", "trigger_count": 5, "schedule": None, "scheduled_time": None, "cron_expression": None, "legacy_names": ["Tidy Chat Sessions"]},
     "tidy_documents":       {"name": "Documents Tidy",           "trigger_type": "event", "trigger_event": "document_created", "trigger_count": 5, "schedule": None, "scheduled_time": None, "cron_expression": None, "legacy_names": ["Tidy Documents"]},
     "consolidate_memory":   {"name": "Memory Tidy",              "trigger_type": "event", "trigger_event": "memory_added", "trigger_count": 5, "schedule": None, "scheduled_time": None, "cron_expression": None, "legacy_names": ["Tidy Memory"]},
-    "summarize_emails":     {"name": "Email (Summary)",          "schedule": "cron",  "scheduled_time": None,    "cron_expression": "0 */2 * * *", "ship_paused": True, "legacy_names": ["Tidy Email (Summary)"]},
-    "draft_email_replies":  {"name": "Email AI Auto Reply",      "schedule": "cron",  "scheduled_time": None,    "cron_expression": "0 */2 * * *", "ship_paused": True, "legacy_names": ["Tidy Email (Replies)", "AI Auto Reply"]},
-    "extract_email_events": {"name": "Email Calendar Events",    "schedule": "cron",  "scheduled_time": None,    "cron_expression": "0 */1 * * *", "ship_paused": True, "legacy_names": ["Email → Calendar Events"]},
-    "classify_events":      {"name": "Calendar Classify Events", "schedule": "cron",  "scheduled_time": None,    "cron_expression": "0 6,18 * * *", "ship_paused": True, "legacy_names": ["Classify Calendar Events"]},
-    "check_email_urgency":   {"name": "Email Tags",               "schedule": "cron",  "scheduled_time": None,    "cron_expression": "0 * * * *", "ship_paused": True, "old_cron_expressions": ["*/15 * * * *"], "legacy_names": ["Email Triage", "Urgent Email"]},
     "audit_skills":          {"name": "Skills Audit",             "trigger_type": "event", "trigger_event": "skill_added", "trigger_count": 5, "schedule": None, "scheduled_time": None, "cron_expression": None, "legacy_names": ["Audit Skills"]},
 }
 
@@ -218,21 +213,16 @@ RETIRED_HOUSEKEEPING_ACTIONS = frozenset({
     "tidy_calendar",
     "tidy_email_inbox",
     "mark_email_boundaries",
+    # Email/calendar/notes features removed from this build — retire any
+    # previously seeded rows on startup.
+    "summarize_emails",
+    "draft_email_replies",
+    "extract_email_events",
+    "classify_events",
+    "check_email_urgency",
+    "daily_brief",
+    "learn_sender_signatures",
 })
-
-
-def _digest_windows(now):
-    """(label, start, end) buckets for the calendar check-in digest.
-
-    The windows are contiguous so no event is dropped between buckets — an
-    earlier version started the 30-day window at now+8d while the week window
-    ended at now+7d, so events ~7-8 days out fell into no bucket.
-    """
-    return [
-        ("today_tomorrow", now, now + timedelta(days=2)),
-        ("this_week", now + timedelta(days=2), now + timedelta(days=7)),
-        ("next_30_days", now + timedelta(days=7), now + timedelta(days=30)),
-    ]
 
 
 class TaskScheduler:
@@ -442,14 +432,6 @@ class TaskScheduler:
         self._running = True
         self._task = asyncio.create_task(self._loop())
         # Internal background scanner that isn't a user-facing "task" — pure
-        # infra (no LLM), shouldn't clutter the Tasks UI, fires on its own
-        # cadence inside the scheduler process.
-        #
-        # Calendar event reminders are represented as Notes by the calendar UI,
-        # so the Notes scanner is the single reminder dispatch path. Running the
-        # old event scanner too caused duplicate emails/notifications for the
-        # same calendar event.
-        self._note_pings_task = asyncio.create_task(self._note_pings_loop())
         logger.info(f"Task scheduler started (concurrency cap: {self._concurrency_cap})")
         # Audit clusters: show any minute-of-day where >1 active scheduled
         # tasks land. Helps spot "all my tasks fire at 9am" patterns the user
@@ -486,82 +468,7 @@ class TaskScheduler:
                 await self._task
             except asyncio.CancelledError:
                 pass
-        for attr in ("_note_pings_task", "_event_pings_task"):
-            t = getattr(self, attr, None)
-            if t:
-                t.cancel()
-                try: await t
-                except asyncio.CancelledError: pass
         logger.info("Task scheduler stopped")
-
-    async def _note_pings_loop(self):
-        """Built-in note-due scanner — ticks every 60s inside the scheduler.
-        Pure infra (no LLM), doesn't surface in the Tasks UI. Iterates
-        per-owner so cache pruning in `action_ping_notes` (which removes
-        cache entries for notes not in the current scan's seen_ids) doesn't
-        cross-delete other users' entries (review C4).
-        """
-        await asyncio.sleep(30)
-        from src.builtin_actions import action_ping_notes, TaskNoop
-        while self._running:
-            owners = self._known_task_owners()
-            for ow in (owners or [""]):
-                try:
-                    await action_ping_notes(owner=ow)
-                except TaskNoop:
-                    pass
-                except Exception as e:
-                    logger.warning(f"ping_notes background scanner errored for owner={ow!r}: {e}")
-            await asyncio.sleep(60)  # 1 min
-
-    async def _event_pings_loop(self):
-        """Built-in calendar-event scanner — same recipe as note pings. Runs
-        every 10 min, fires reminders via dispatch_reminder. Not a user task.
-        Iterates per-owner so each user only gets their own calendar pings
-        (passing owner="" globally would email User B's events to User A's
-        configured SMTP "from" address — see review C3).
-        """
-        await asyncio.sleep(90)
-        from src.builtin_actions import action_ping_events, TaskNoop
-        while self._running:
-            owners = self._known_task_owners()
-            for ow in (owners or [""]):
-                try:
-                    await action_ping_events(owner=ow)
-                except TaskNoop:
-                    pass
-                except Exception as e:
-                    logger.warning(f"ping_events background scanner errored for owner={ow!r}: {e}")
-            await asyncio.sleep(600)  # 10 min
-
-    def _known_task_owners(self) -> list:
-        """Distinct non-empty owners that background scanners should visit.
-
-        Scheduled tasks used to be the only owner source. Calendar reminders
-        are stored as Notes, though, so an account with due notes but no task
-        rows could get the browser reminder while the backend email/ntfy
-        scanner never ran for that owner.
-        """
-        from core.database import SessionLocal, ScheduledTask, Note
-        db = SessionLocal()
-        try:
-            owners = set()
-            for r in db.query(ScheduledTask.owner).distinct().all():
-                if r[0]:
-                    owners.add(r[0])
-            note_q = db.query(Note.owner).filter(
-                Note.due_date.isnot(None),
-                Note.due_date != "",
-                Note.archived == False,  # noqa: E712
-            ).distinct()
-            for r in note_q.all():
-                if r[0]:
-                    owners.add(r[0])
-            return sorted(owners)
-        except Exception:
-            return []
-        finally:
-            db.close()
 
     async def _loop(self):
         await asyncio.sleep(10)
@@ -936,14 +843,8 @@ class TaskScheduler:
 
     # Built-in housekeeping actions whose output is pure infra (no user-facing
     # content) — don't pollute the assistant chat session with their summaries.
-    # Activity log + reminder email already carry everything the user needs.
+    # Activity log already carries everything the user needs.
     _SILENT_ACTIONS = frozenset({
-        "check_email_urgency",
-        "learn_sender_signatures",
-        "summarize_emails",
-        "draft_email_replies",
-        "extract_email_events",
-        "classify_events",
         "tidy_sessions",
         "tidy_documents",
         "consolidate_memory",
@@ -952,12 +853,6 @@ class TaskScheduler:
     })
 
     _MODEL_BACKED_ACTIONS = frozenset({
-        "summarize_emails",
-        "draft_email_replies",
-        "extract_email_events",
-        "classify_events",
-        "learn_sender_signatures",
-        "check_email_urgency",
         "test_skills",
         "audit_skills",
         "consolidate_memory",
@@ -1081,7 +976,6 @@ class TaskScheduler:
     async def _execute_checkin(self, task, crew, db, session_id: str,
                                endpoint_url: str, model: str) -> str:
         """Gather raw data from all integrations, hand it to the LLM to write the check-in."""
-        from src.tool_implementations import do_manage_notes
         from src.agent_tools import get_mcp_manager
 
         tz_name = _resolve_task_timezone(db, task)
@@ -1100,53 +994,6 @@ class TaskScheduler:
             time_str = now.strftime("%H:%M UTC")
 
         raw = {}
-
-        # Calendar: today+tomorrow, this week, month ahead
-        # Pull directly from DB so we can include event_type and importance.
-        try:
-            from core.database import SessionLocal as _SL, CalendarEvent as _CE
-            _db = _SL()
-            try:
-                for label, start, end in _digest_windows(now):
-                    # Strip timezone for naive DB comparison
-                    _s = start.replace(tzinfo=None) if start.tzinfo else start
-                    _e = end.replace(tzinfo=None) if end.tzinfo else end
-                    evs = _db.query(_CE).filter(
-                        _CE.dtstart >= _s,
-                        _CE.dtstart <= _e,
-                        _CE.status != "cancelled",
-                    ).order_by(_CE.dtstart).all()
-                    if not evs:
-                        continue
-                    # Group by importance for richer output
-                    by_imp = {"critical": [], "high": [], "normal": [], "low": []}
-                    for ev in evs:
-                        imp = (ev.importance or "normal").lower()
-                        by_imp.setdefault(imp, []).append(ev)
-                    lines = []
-                    for tier in ("critical", "high", "normal", "low"):
-                        items = by_imp.get(tier, [])
-                        if not items:
-                            continue
-                        marker = {"critical": "[!!]", "high": "[!]", "normal": "  ", "low": " ·"}[tier]
-                        for ev in items:
-                            t = ev.dtstart.strftime("%a %b %d %H:%M")
-                            tag = f" ({ev.event_type})" if ev.event_type else ""
-                            loc = f" @ {ev.location}" if ev.location else ""
-                            lines.append(f"{marker} {t} — {ev.summary}{tag}{loc}")
-                    if lines:
-                        raw[f"calendar_{label}"] = "\n".join(lines)
-            finally:
-                _db.close()
-        except Exception as e:
-            raw["calendar"] = f"Error: {e}"
-
-        # Notes/Tasks
-        try:
-            r = await do_manage_notes(json.dumps({"action": "list"}), owner=task.owner)
-            raw["notes_tasks"] = r.get("results") or r.get("response") or "No notes"
-        except Exception as e:
-            raw["notes_tasks"] = f"Error: {e}"
 
         # Auto-discover API integrations (Miniflux RSS, etc.).
         try:
@@ -1412,10 +1259,6 @@ class TaskScheduler:
             await self._deliver_via_mcp(output, task, result)
             return
 
-        if self._is_email_output_target(output):
-            await self._deliver_via_email(output, task, result)
-            return
-
         if output != "session":
             return
 
@@ -1494,55 +1337,6 @@ class TaskScheduler:
                 sess_obj.history.append(MemMsg(role="assistant", content=assistant_msg.content, metadata=meta))
             except Exception:
                 pass
-
-    @staticmethod
-    def _is_email_output_target(output: str) -> bool:
-        target = (output or "").strip()
-        if target in {"email", "email:self"}:
-            return True
-        if target.startswith("email:"):
-            return True
-        return bool(re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", target))
-
-    async def _deliver_via_email(self, output: str, task, result: str):
-        """Send task output through the app's configured SMTP account.
-
-        Supported output_target values:
-        - email / email:self: send to the account's From address
-        - email:name@example.com or raw name@example.com: send there
-        """
-        from email.message import EmailMessage
-
-        target = (output or "").strip()
-        explicit = ""
-        if target.startswith("email:"):
-            explicit = target.split(":", 1)[1].strip()
-        elif "@" in target:
-            explicit = target
-
-        try:
-            from routes.email_routes import _resolve_send_config
-            from routes.email_helpers import _send_smtp_message
-
-            cfg = _resolve_send_config(owner=task.owner or "")
-            to_addr = explicit or cfg.get("from_address") or cfg.get("smtp_user") or ""
-            if not to_addr:
-                raise RuntimeError("No email recipient resolved for task output")
-
-            from_addr = cfg.get("from_address") or cfg.get("smtp_user") or to_addr
-            msg = EmailMessage()
-            msg["From"] = from_addr
-            msg["To"] = to_addr
-            msg["Subject"] = f"[Task] {task.name}"
-            msg["X-Talos-Origin"] = "talos-ui"
-            msg["X-Talos-Kind"] = "task"
-            msg["X-Talos-Ref"] = str(task.id)
-            msg.set_content(result or "")
-            _send_smtp_message(cfg, from_addr, [to_addr], msg.as_string(), timeout=30)
-            logger.info("Task %s emailed result to %s (%sb)", task.id, to_addr, len(result or ""))
-        except Exception as e:
-            logger.error("Task %s email delivery failed: %s", task.id, e, exc_info=True)
-            raise
 
     async def _run_agent_loop(self, endpoint_url: str, model: str, task, session_id: str,
                               system_prompt: str | None = None,
@@ -1703,18 +1497,9 @@ class TaskScheduler:
             logger.warning(f"Task {task.id}: MCP manager not available for delivery")
             return
 
-        # Resolve recipient — prefer the configured email From (the established
-        # "email yourself" pattern from daily_brief), fall back to task.owner.
-        # `_get_email_config()` is the single source of truth that handles both
-        # the legacy `email_from` setting and the per-account DB rows.
+        # Resolve recipient: the task owner when it looks like an address.
         recipient = None
-        try:
-            from routes.email_helpers import _get_email_config
-            cfg = _get_email_config() or {}
-            recipient = cfg.get("from_address") or None
-        except Exception as _e:
-            logger.debug(f"_deliver_via_mcp: email config lookup failed: {_e}")
-        if not recipient and task.owner and "@" in str(task.owner):
+        if task.owner and "@" in str(task.owner):
             recipient = task.owner
 
         args = {
@@ -2033,36 +1818,20 @@ class TaskScheduler:
                 "Never waste time with fluff. Default to English. Only match the other language when replying to a non-English email.\n\n"
 
                 "CORE RULE: You MUST use your tools to take action — do not describe what you would do. "
-                "Never say 'I would check your calendar' — actually call manage_calendar. "
                 "Never say 'I can look that up' — actually call search_chats. "
                 "If you have a tool for it, use it. No hypotheticals, no promises, only actions and results.\n\n"
 
                 "DECISION FRAMEWORK — follow these rules, not just tool descriptions:\n\n"
 
                 "CONTEXT GATHERING (before any response involving a specific person):\n"
-                "1. resolve_contact if you only have a name and need their email\n"
-                "2. search_chats for recent conversations mentioning them or their topic\n"
-                "3. manage_memory to check stored facts about them\n"
+                "1. search_chats for recent conversations mentioning them or their topic\n"
+                "2. manage_memory to check stored facts about them\n"
                 "Skip steps you already have answers for. Don't search for the user themselves.\n\n"
-
-                "EMAIL HANDLING:\n"
-                "- If a document is open in the editor, that IS the email. Use update_document to write the reply.\n"
-                "- BEFORE drafting any reply: gather context (steps above) about the sender and topic.\n"
-                "- When an email mentions a date/meeting: check calendar for conflicts, add if clear.\n"
-                "- When an email asks a question you can't answer from context: say so honestly. Never fabricate.\n"
-                "- Skip automated/marketing emails in check-ins. Only surface human-sent, actionable ones.\n"
-                "- Never duplicate information the user already saw in a previous check-in.\n\n"
 
                 "ESCALATION LADDER (when you need info you don't have):\n"
                 "1. search_chats (fast, free)\n"
                 "2. manage_memory (fast, free)\n"
                 "Stop as soon as you have a sufficient answer.\n\n"
-
-                "'SEND TO [NAME]' FLOW:\n"
-                "1. resolve_contact to find their email\n"
-                "2. If a document is open, use its content as the body\n"
-                "3. Draft the email in a document (create_document with language='email')\n"
-                "4. Tell the user to review — NEVER auto-send\n\n"
 
                 "SELF-IMPROVEMENT — use manage_memory constantly:\n"
                 "- When the user corrects you, IMMEDIATELY store the correction as a memory.\n"
@@ -2075,9 +1844,6 @@ class TaskScheduler:
                 "- Before starting a complex task, check manage_skills for an existing procedure.\n\n"
 
                 "AUTONOMY RULES:\n"
-                "- Auto-add calendar events from clear meeting invitations (mention what you added)\n"
-                "- Auto-draft email replies (cached for when user clicks Reply)\n"
-                "- NEVER send emails without explicit user instruction\n"
                 "- NEVER delete anything without explicit instruction\n"
                 "- If uncertain, ask rather than guess"
             )
@@ -2112,9 +1878,7 @@ class TaskScheduler:
                 endpoint_url=endpoint_url,
                 greeting=None,
                 enabled_tools=json.dumps([
-                    "manage_calendar", "manage_notes", "manage_tasks", "manage_memory",
-                    "list_email_accounts", "list_emails", "read_email", "send_email", "reply_to_email", "archive_email",
-                    "mark_email_read", "delete_email", "resolve_contact",
+                    "manage_tasks", "manage_memory",
                     "search_chats", "read_file",
                     "create_document", "update_document", "edit_document",
                     "generate_image",

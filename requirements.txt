@@ -27,9 +27,7 @@ fastembed
 youtube-transcript-api
 markdown
 nh3
-icalendar
 python-dateutil
-caldav
 cryptography
 bcrypt
 mcp

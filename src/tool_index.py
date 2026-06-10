@@ -46,12 +46,10 @@ ALWAYS_AVAILABLE = frozenset({
 # Tools that the Personal Assistant always has access to during scheduled
 # check-ins and proactive tasks, in addition to RAG-selected tools.
 ASSISTANT_ALWAYS_AVAILABLE = frozenset({
-    "list_email_accounts", "list_emails", "read_email", "send_email", "reply_to_email",
-    "bulk_email", "archive_email", "delete_email", "mark_email_read",
-    "manage_calendar", "manage_notes", "manage_tasks",
+    "manage_tasks",
     "manage_memory", "read_file",
     "create_document", "update_document",
-    "resolve_contact", "search_chats",
+    "search_chats",
     "api_call",  # For Miniflux/Gitea/Linkding/etc. integrations
     # Core UI control (toggles, open panels, switch model/mode, themes).
     # Always available so vague follow-ups ("now make it playful", "make it
@@ -101,22 +99,9 @@ BUILTIN_TOOL_DESCRIPTIONS: Dict[str, str] = {
     "send_to_session": "Send a message to another chat. Cross-chat communication.",
     "search_chats": "Search through chat history across all sessions.",
     "ask_user": "Ask the user a multiple-choice question to get a decision or clarification. Use this when the task is genuinely ambiguous and the answer changes what you do next — pick between approaches, confirm an assumption, choose among options — instead of guessing. Provide a clear `question` and 2-6 `options` (each with a short `label`, optional `description`). Calling this ENDS your turn: the user sees clickable buttons and their choice arrives as your next message. Don't use it for things you can decide from context or sensible defaults, or for irreversible-action confirmation if a dedicated flow exists.",
-    "ui_control": "Control the UI and toggle tools on/off. Use this to turn off / turn on / disable / enable individual tools and features: shell (bash), search (web), research, browser, documents, incognito. Open panels (documents library, gallery, email inbox, sessions, notes, memories/brain, skills, settings, cookbook) via `open_panel <name>`. Use `open_email_reply <uid> <folder> reply` to open an email reply draft document without sending. Also switches between chat/agent modes, changes the current model, and applies/creates themes.",
-    "list_email_accounts": "List configured email accounts and default status. Use before reading or sending mail when the user mentions Gmail, work mail, custom domain mail, another mailbox, or asks to compare/check multiple inboxes.",
-    "list_emails": "List emails for a folder/account, newest first, including read messages by default. Shows subject, sender, date, UID, account, and AI summary. Check inbox, find emails needing replies. Supports account from list_email_accounts for Gmail/work/custom mailboxes. For last/latest/newest email, use max_results=1 and unread_only=false.",
-    "read_email": "Read the full content of a specific email by UID or Message-ID. View email body, check details. Supports account from list_email_accounts when the UID belongs to a non-default mailbox.",
-    "send_email": "Send a new email via SMTP. Provide recipient, subject, body, and optional account from list_email_accounts. For replying to a thread use reply_to_email instead.",
-    "reply_to_email": "SEND a reply email immediately by UID. Do not use for open/start reply draft requests; use ui_control open_email_reply for those. For follow-up 'reply ...' send requests, use the exact UID and account from latest read_email/list_emails output; never invent UID 1. Threads automatically with In-Reply-To/References, prefixes Re:, marks original as Answered.",
-    "archive_email": "Move an email out of the inbox into the Archive folder. Use after handling messages you want to keep but get out of the way.",
-    "delete_email": "Delete an email — moves to Trash by default, or expunges permanently with permanent=true.",
-    "mark_email_read": "Mark an email as read or unread by toggling the \\Seen flag.",
-    "bulk_email": "Perform one action on many emails at once. Use for delete all those, archive these, mark all read, move spam to junk. Takes explicit UIDs from list_emails or all_unread=true. Always pass account for Gmail/work/custom mailbox results.",
-    "resolve_contact": "Look up a contact's email address by name. Searches CardDAV address book and sent email history. Use when the user says 'message [name]', 'email [name]', or 'send to [name]' without an email address.",
-    "manage_contact": "Create, update, delete, or list CardDAV contacts. Use to save a new contact, change an existing one's email/phone, or remove one. Action=list returns uids needed for update/delete. Use when the user says 'save this contact', 'add [name] to contacts', 'update [name]'s email', 'delete [name] from contacts'. Do not use for user identity facts like 'my name is <name>'; those are memory.",
-    "manage_notes": "Create and manage notes and checklists (Google Keep-style). ALWAYS use this for note/todo/checklist/reminder creation — NEVER hit /api/notes via app_api. Accepts natural-language `due_date` like 'tomorrow at 9am' or '11pm today' (parsed in the USER'S timezone). The due_date IS the reminder — it fires a notification at that time, so do NOT also create a calendar event for the same reminder. Set colors, labels, pin, archive. Do NOT use manage_memory for note content.",
-    "manage_calendar": "Calendar event management: list, create, update, delete. Each event can carry a tag/category (event_type — work/personal/health/travel/meal/social/admin/other) and importance (low/normal/high/critical). Resolve today/tomorrow using the Current date and time context, then use ISO datetimes in the user's local wall time; supports all-day events. For event reminders/alarms, pass reminder_minutes; this creates the Notes reminder, so do not also call manage_notes for the same reminder.",
+    "ui_control": "Control the UI and toggle tools on/off. Use this to turn off / turn on / disable / enable individual tools and features: shell (bash), search (web), research, browser, documents, incognito. Open panels (documents library, gallery, sessions, memories/brain, skills, settings, cookbook) via `open_panel <name>`. Also switches between chat/agent modes, changes the current model, and applies/creates themes.",
     "query_sql": "Read-only SQL access to the configured external database using backend .env credentials. Use when the user asks for database data, SQL, tables, schema, rows, metrics, reports, counts, customers, orders, products, invoices, or anything stored in the DB. Supports list_tables, describe table, and read-only SELECT/WITH/SHOW/DESCRIBE/EXPLAIN/PRAGMA queries with optional max_rows; omit max_rows or pass 0 for no row limit. The model never needs DB passwords.",
-    "app_api": "Generic loopback to ANY Talos internal endpoint. Use this when the user wants something the UI can do but there's no named tool for it. Covers calendar, gallery, library/documents, memory, notes, tasks, settings, research, compare, cookbook GPUs/state — every UI button hits some /api/* endpoint and you can hit it too. action='endpoints' with filter=<keyword> lists available endpoints. action='call' takes method+path+body. Hits same routes the UI uses — auth flows free. NOTE: themes are NOT an API endpoint — use the ui_control tool (create_theme / set_theme), not app_api. SESSIONS/CHATS: do NOT use app_api for these — GET /api/sessions returns EMPTY for tool calls (it's owner-filtered and tool calls authenticate as a different identity). EMAIL ACCOUNTS: do NOT use /api/email/accounts via app_api; use list_email_accounts, list_emails, and read_email instead. To list/rename/archive/delete/fork chats use the list_sessions and manage_session tools instead.",
+    "app_api": "Generic loopback to ANY Talos internal endpoint. Use this when the user wants something the UI can do but there's no named tool for it. Covers gallery, library/documents, memory, tasks, settings, research, compare, cookbook GPUs/state — every UI button hits some /api/* endpoint and you can hit it too. action='endpoints' with filter=<keyword> lists available endpoints. action='call' takes method+path+body. Hits same routes the UI uses — auth flows free. NOTE: themes are NOT an API endpoint — use the ui_control tool (create_theme / set_theme), not app_api. SESSIONS/CHATS: do NOT use app_api for these — GET /api/sessions returns EMPTY for tool calls (it's owner-filtered and tool calls authenticate as a different identity). To list/rename/archive/delete/fork chats use the list_sessions and manage_session tools instead.",
     "edit_image": "Edit an image in the gallery: upscale (increase resolution), remove background (rembg), inpaint (fill selected area), or harmonize (blend edits). Specify image ID and action.",
 }
 
@@ -297,12 +282,6 @@ class ToolIndex:
         # request (e.g. "visit <url> and tell me the title"), force-including the
         # whole email toolset and crowding out the relevant tools — the model then
         # believed it had only email tools and refused web/other tasks (#1707).
-        frozenset({"email", "mail", "gmail", "googlemail", "message", "send", "reply", "inbox", "unread"}):
-            {"list_email_accounts", "list_emails", "read_email", "send_email", "reply_to_email", "bulk_email", "delete_email", "archive_email", "mark_email_read", "resolve_contact", "ui_control"},
-        frozenset({"calendar", "event", "meeting", "schedule", "appointment"}):
-            {"manage_calendar"},
-        frozenset({"note", "todo", "reminder", "remind", "checklist", "remember to"}):
-            {"manage_notes"},
         frozenset({"sql", "database", "db", "table", "tables", "schema", "rows", "query", "select"}):
             {"query_sql"},
         # Chat/session management. "rename" alone maps to documents below, so a
@@ -323,12 +302,6 @@ class ToolIndex:
                    "cron", "periodically", "on a schedule", "set up a task",
                    "create a task", "summarize my inbox every", "remind me every"}):
             {"manage_tasks"},
-        frozenset({"contact", "address", "phone", "who is"}):
-            {"resolve_contact", "manage_contact"},
-        frozenset({"save contact", "add contact", "new contact", "update contact",
-                   "edit contact", "delete contact", "remove contact",
-                   "save this person", "add to contacts", "save to contacts"}):
-            {"manage_contact"},
         # "Ask another model" intent → chat_with_model relays to a
         # different model and returns its answer. ask_teacher escalates
         # to the configured teacher. (second_opinion was removed.)
@@ -375,11 +348,11 @@ class ToolIndex:
                    "shell off", "shell on", "search off", "search on",
                    "research off", "research on", "incognito",
                    "switch model", "change model", "set mode", "agent mode", "chat mode",
-                   "open library", "open documents", "open gallery", "open email",
-                   "open inbox", "open settings", "open memories", "open memory",
-                   "open skills", "open notes", "open chats", "open sessions",
-                   "show library", "show gallery", "show inbox", "show settings",
-                   "show memory", "show memories", "show skills", "show notes",
+                   "open library", "open documents", "open gallery",
+                   "open settings", "open memories", "open memory",
+                   "open skills", "open chats", "open sessions",
+                   "show library", "show gallery", "show settings",
+                   "show memory", "show memories", "show skills",
                    "show chats", "show sessions", "show documents"}):
             {"ui_control"},
         # Document creation intent

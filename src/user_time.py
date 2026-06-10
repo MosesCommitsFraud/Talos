@@ -131,8 +131,6 @@ def current_datetime_prompt(now_utc: Optional[datetime] = None) -> str:
         "Use this for any 'today', 'tomorrow', 'tonight', 'this week', or other "
         "relative-date reasoning. Do not ask for an exact date just because the "
         "user used a relative date.\n"
-        "When scheduling calendar events with manage_calendar, pass local ISO "
-        "datetimes resolved against this user-local date/time.\n"
         "When scheduling a task with manage_tasks, scheduled_time is in UTC: "
         "convert the user's stated local time using the UTC offset above.\n\n"
     )

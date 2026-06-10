@@ -155,10 +155,6 @@ _TOOL_NAME_MAP = {
     "manage_settings": "manage_settings",
     "settings": "manage_settings",
     "preferences": "manage_settings",
-    "manage_notes": "manage_notes",
-    "notes": "manage_notes",
-    "todo": "manage_notes",
-    "todos": "manage_notes",
 }
 
 
@@ -180,7 +176,7 @@ def _parse_tool_call_block(raw: str) -> Optional[ToolBlock]:
 
     tool_name = tool_match.group(1).lower()
     # Fall back to the raw name when it's a real tool but not in the alias
-    # map, so known tools (e.g. manage_calendar) aren't silently dropped.
+    # map, so known tools (e.g. manage_documents) aren't silently dropped.
     mapped = _TOOL_NAME_MAP.get(tool_name) or (tool_name if tool_name in TOOL_TAGS else None)
     if not mapped:
         return None
@@ -236,10 +232,10 @@ def _parse_xml_invoke(inv_match) -> Optional[ToolBlock]:
 
     Delegates content-shaping to function_call_to_tool_block — the SAME
     converter used for native function calls — so the full tool set (every
-    name in TOOL_TAGS, plus email + MCP tools) and the correct per-tool
+    name in TOOL_TAGS, plus MCP tools) and the correct per-tool
     content format are handled in ONE place. The previous version duplicated
     a partial, hand-maintained tool-name map plus a `key: value` serializer:
-    any tool missing from that map (e.g. `manage_calendar`) was silently
+    any tool missing from that map was silently
     dropped, and JSON-arg tools got an unparseable `k: v` blob. Both bugs
     made deepseek's DSML `create_event` calls vanish with no execution.
     """

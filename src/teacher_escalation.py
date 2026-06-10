@@ -153,8 +153,7 @@ time.
 The student's tools include (non-exhaustive): bash, python, web_search, \
 read_file, write_file, create_document, edit_document, manage_session \
 (list/switch/rename/archive/delete/important/truncate/fork), \
-list_sessions, manage_memory, manage_notes, manage_calendar, \
-send_email, list_emails, manage_settings, manage_skills, \
+list_sessions, manage_memory, manage_settings, manage_skills, \
 manage_tasks, ui_control. The student also understands the markdown \
 anchor convention [Name](#session-<id>) / [Title](#document-<id>) for \
 clickable jump links.

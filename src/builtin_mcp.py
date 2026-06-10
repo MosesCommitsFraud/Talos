@@ -63,14 +63,13 @@ def _find_npx() -> str:
 # execution (src/tool_execution.py:_direct_fallback). Those trivial subprocess
 # wrappers are gone.
 #
-# image_gen / memory / rag / email still run as stdio MCP servers — each
-# carries hundreds of LOC of unique IMAP / HTTP / manager logic not worth
-# duplicating into the native path right now.
+# image_gen / memory / rag still run as stdio MCP servers — each carries
+# hundreds of LOC of unique HTTP / manager logic not worth duplicating into
+# the native path right now.
 _BUILTIN_SERVERS = {
     "image_gen":  ("mcp_servers/image_gen_server.py",  "Built-in: Image Generation"),
     "memory":     ("mcp_servers/memory_server.py",     "Built-in: Memory"),
     "rag":        ("mcp_servers/rag_server.py",        "Built-in: RAG"),
-    "email":      ("mcp_servers/email_server.py",      "Built-in: Email"),
 }
 
 # NPX-based built-in servers (run via npx, not Python)
