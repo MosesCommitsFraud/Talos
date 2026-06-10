@@ -289,6 +289,21 @@ FUNCTION_TOOL_SCHEMAS = [
     {
         "type": "function",
         "function": {
+            "name": "expand_output",
+            "description": "Retrieve the FULL original of a compressed tool output. Large tool outputs are automatically compressed before reaching you, with a marker like [Output compressed ... id `out_xxxxxxxx`]. Call this with that id to read the omitted details — optionally pass a search term to find specific lines, or a page number to page through it.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "id": {"type": "string", "description": "Stored output id from the compression marker, e.g. out_3fa9c2ab"},
+                    "query": {"type": "string", "description": "Optional: a search term to return only matching lines (with context), or a page number to page through the full text"}
+                },
+                "required": ["id"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "search_chats",
             "description": "Search the user's past chat conversations by keyword. Use when the user asks about previous chats, past conversations, or wants to find a discussion they had before. Returns matching sessions with clickable links.",
             "parameters": {
@@ -846,6 +861,10 @@ def function_call_to_tool_block(name: str, arguments: str) -> Optional[ToolBlock
         content = args.get("content", "")
     elif tool_type == "search_chats":
         content = args.get("query", "")
+    elif tool_type == "expand_output":
+        content = args.get("id", "")
+        if args.get("query"):
+            content += "\n" + str(args["query"])
     elif tool_type == "chat_with_model":
         content = args.get("model", "") + "\n" + args.get("message", "")
     elif tool_type == "create_session":

@@ -565,6 +565,48 @@ async function initUtilityModel() {
   });
 }
 
+/* ── Context Management ── */
+// Auto-compact threshold (% of context window) + headroom-style tool
+// output compression toggle. Both are app-level settings; the backend
+// clamps the threshold to [30, 95] and treats >1 values as percent.
+async function initContextManagement() {
+  var thresholdInput = el('set-compactThreshold');
+  var compressionToggle = el('set-contextCompression');
+  var msg = el('set-contextMgmtMsg');
+  if (!thresholdInput || !compressionToggle) return;
+
+  try {
+    var res = await fetch('/api/auth/settings', { credentials: 'same-origin' });
+    var settings = await res.json();
+    var t = parseFloat(settings.compact_threshold);
+    if (!isFinite(t)) t = 0.85;
+    if (t <= 1) t = t * 100;
+    thresholdInput.value = Math.round(t);
+    compressionToggle.checked = settings.context_compression !== false;
+  } catch (e) { console.warn('Failed to load context management settings', e); }
+
+  async function save() {
+    try {
+      var pct = parseInt(thresholdInput.value, 10);
+      if (!isFinite(pct)) pct = 85;
+      pct = Math.min(95, Math.max(30, pct));
+      thresholdInput.value = pct;
+      await fetch('/api/auth/settings', { method: 'POST', credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          compact_threshold: pct / 100,
+          context_compression: compressionToggle.checked
+        })
+      });
+      msg.textContent = 'Saved'; msg.style.color = 'var(--fg)';
+      setTimeout(function() { msg.textContent = ''; }, 1500);
+    } catch (e) { msg.textContent = 'Failed to save'; msg.style.color = 'var(--red)'; }
+  }
+
+  thresholdInput.addEventListener('change', save);
+  compressionToggle.addEventListener('change', save);
+}
+
 /* ── Teacher Model ── */
 // SOTA model called automatically when a self-hosted student model
 // fails an agent-mode task. Stored as a single `teacher_model` string
@@ -1834,6 +1876,7 @@ function initAll() {
   initDefaultChat();
   initTeacherModel();
   initUtilityModel();
+  initContextManagement();
   initImageSettings();
   initVisionSettings();
   initTtsSettings();

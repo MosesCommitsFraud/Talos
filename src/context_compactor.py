@@ -36,8 +36,25 @@ def _content_as_text(content: Any) -> str:
     return ""
 
 
-COMPACT_THRESHOLD = 0.85  # Trigger compaction at 85% of context window
+COMPACT_THRESHOLD = 0.85  # Default: trigger compaction at 85% of context window
 SUMMARY_MAX_TOKENS = 1024
+
+
+def get_compact_threshold() -> float:
+    """Read the auto-compact trigger from settings (`compact_threshold`).
+
+    Accepts a fraction (0.7) or a percent (70). Clamped to [0.3, 0.95] so a
+    typo can't disable compaction or make it fire on every message.
+    """
+    try:
+        from src.settings import load_settings
+        val = float(load_settings().get("compact_threshold", COMPACT_THRESHOLD))
+        if val > 1:
+            val /= 100.0
+        return min(0.95, max(0.3, val))
+    except Exception:
+        return COMPACT_THRESHOLD
+
 SMALL_CONTEXT_LIMIT = 8192  # Models with context <= this get aggressive trimming
 
 # Cursor-style self-summarization prompt — produces structured, dense summaries
@@ -302,7 +319,7 @@ async def maybe_compact(
     used = estimate_tokens(messages)
     pct = (used / context_length) * 100 if context_length else 0
 
-    if pct < COMPACT_THRESHOLD * 100:
+    if pct < get_compact_threshold() * 100:
         return messages, context_length, False
 
     logger.info(

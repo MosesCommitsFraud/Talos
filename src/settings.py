@@ -29,6 +29,13 @@ def _invalidate_caches():
 # ── Default values ──
 
 DEFAULT_SETTINGS = {
+    # Auto-compaction triggers when context usage crosses this fraction of the
+    # model's window (0.3–0.95; values >1 are read as percent, e.g. 70 → 0.70).
+    "compact_threshold": 0.85,
+    # Headroom-style compression of large tool outputs (JSON crushing, log
+    # collapsing, head/tail trimming) with reversible retrieval via the
+    # expand_output tool. See src/context_optimizer.py.
+    "context_compression": True,
     "image_gen_enabled": False,
     "image_model": "",
     "image_quality": "medium",

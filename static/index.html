@@ -998,6 +998,24 @@
             </div>
           </div>
           <div class="admin-card">
+            <h2 style="display:flex;align-items:center;gap:6px;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right:1px;opacity:0.6;flex-shrink:0"><polyline points="4 14 10 14 10 20"/><polyline points="20 10 14 10 14 4"/><line x1="14" y1="10" x2="21" y2="3"/><line x1="3" y1="21" x2="10" y2="14"/></svg>Context Management</h2>
+            <div class="admin-toggle-sub" style="margin-bottom:8px">Old messages are automatically summarized ("compacted") when a chat approaches the model's context limit. Compression shrinks huge tool outputs (logs, JSON) before they reach the model — the AI can still retrieve the full original on demand.</div>
+            <div class="settings-col">
+              <div class="settings-row">
+                <label class="settings-label">Auto-compact at</label>
+                <div style="display:flex;align-items:center;gap:6px;">
+                  <input id="set-compactThreshold" type="number" min="30" max="95" step="5" class="settings-select" style="width:70px;">
+                  <span style="font-size:12px;opacity:0.6;">% of context window</span>
+                </div>
+              </div>
+              <div class="settings-row" style="align-items:center;">
+                <label class="settings-label">Tool output compression</label>
+                <label class="admin-switch" title="Compress large tool outputs before they reach the model"><input type="checkbox" id="set-contextCompression" checked><span class="admin-slider"></span></label>
+              </div>
+              <div id="set-contextMgmtMsg" style="font-size:11px;color:color-mix(in srgb, var(--fg) 45%, transparent);"></div>
+            </div>
+          </div>
+          <div class="admin-card">
             <h2 style="display:flex;align-items:center;gap:6px;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right:1px;opacity:0.6;flex-shrink:0"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>Vision<span style="flex:1"></span><label class="admin-switch" title="Analyze images with a vision-capable model"><input type="checkbox" id="set-visionEnabledToggle" checked><span class="admin-slider"></span></label></h2>
             <div class="admin-toggle-sub" style="margin-bottom:8px">Analyze images with a vision-capable model.</div>
             <div style="display:flex;flex-direction:column;gap:0.5rem;">

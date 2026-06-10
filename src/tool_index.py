@@ -41,6 +41,10 @@ ALWAYS_AVAILABLE = frozenset({
     # Ask the user a multiple-choice question for a decision/clarification.
     # Always reachable so the agent can pause and ask at any point.
     "ask_user", "update_plan",
+    # Retrieve the full original of a compressed tool output. Compression
+    # markers can appear after ANY tool runs, so the retrieval tool must
+    # always be in reach (RAG would never select it from the user's message).
+    "expand_output",
 })
 
 # Tools that the Personal Assistant always has access to during scheduled
@@ -82,6 +86,7 @@ BUILTIN_TOOL_DESCRIPTIONS: Dict[str, str] = {
     "chat_with_model": "Send a message to a different AI model. Compare responses, get specialized help, delegate tasks.",
     "ask_teacher": "Ask a more capable model for help with a difficult problem. Escalate complex tasks.",
     "update_plan": "Update the approved plan checklist while executing it. Mark completed steps with - [x] and keep unchecked steps as - [ ]. Use after finishing each plan step.",
+    "expand_output": "Retrieve the full original of a compressed tool output by its stored id (out_xxxxxxxx). Supports searching for specific lines or paging through large outputs.",
     "pipeline": "Run a multi-step AI pipeline with multiple models. Chain tasks together in sequence.",
     "list_models": "List all available AI models and their endpoints.",
     "manage_session": "Chat management: rename, archive, delete, or fork chats (the UI calls these 'chats'; internally 'sessions'). Use for 'rename my chats', 'rename this chat', 'archive/delete a chat'.",

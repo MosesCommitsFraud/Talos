@@ -41,6 +41,9 @@ TOOL_TAGS = {"bash", "python", "read_file", "write_file", "edit_file",
              "manage_tokens", "manage_documents", "manage_settings",
              "query_sql",
              "edit_image",
+             # Retrieve the full original of a compressed tool output
+             # (see src/context_optimizer.py)
+             "expand_output",
              # Generic loopback to any UI-button endpoint — agent uses this
              # when there's no named tool wrapper for the action.
              "app_api"}

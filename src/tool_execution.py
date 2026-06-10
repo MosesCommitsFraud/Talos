@@ -1574,6 +1574,10 @@ async def execute_tool_block(
     elif tool == "edit_image":
         desc = "edit_image"
         result = await do_edit_image(content, owner=owner)
+    elif tool == "expand_output":
+        desc = "expand_output"
+        from src.context_optimizer import do_expand_output
+        result = do_expand_output(content)
     elif tool == "edit_file":
         result = await _try_sandbox_file_tool(tool=tool, content=content, session_id=session_id, owner=owner)
         if result is None:
