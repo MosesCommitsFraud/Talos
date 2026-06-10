@@ -2214,55 +2214,6 @@ async function loadFeatures() {
 }
 
 /* ── CalDAV Config ── */
-function initCalDAV() {
-  const urlIn = el('caldav-url');
-  const userIn = el('caldav-user');
-  const passIn = el('caldav-pass');
-  const saveBtn = el('caldav-save-btn');
-  const testBtn = el('caldav-test-btn');
-  const status = el('caldav-status');
-  if (!urlIn || !saveBtn) return;
-
-  // Load current config
-  fetch(`${API_BASE}/api/calendar/config`, { credentials: 'same-origin' })
-    .then(r => r.json()).then(d => {
-      urlIn.value = d.caldav_url || '';
-      userIn.value = d.caldav_username || '';
-      passIn.value = d.caldav_password || '';
-    }).catch(() => {});
-
-  saveBtn.addEventListener('click', async () => {
-    status.textContent = 'Saving...';
-    try {
-      const res = await fetch(`${API_BASE}/api/calendar/config`, {
-        method: 'POST', credentials: 'same-origin',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ caldav_url: urlIn.value, caldav_username: userIn.value, caldav_password: passIn.value }),
-      });
-      const d = await res.json();
-      status.textContent = d.ok ? 'Saved' : 'Error';
-      status.style.color = d.ok ? 'var(--green)' : 'var(--red)';
-    } catch (e) { status.textContent = 'Error'; status.style.color = 'var(--red)'; }
-    setTimeout(() => { status.textContent = ''; status.style.color = ''; }, 3000);
-  });
-
-  testBtn.addEventListener('click', async () => {
-    status.textContent = 'Testing...';
-    try {
-      // Save first
-      await fetch(`${API_BASE}/api/calendar/config`, {
-        method: 'POST', credentials: 'same-origin',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ caldav_url: urlIn.value, caldav_username: userIn.value, caldav_password: passIn.value }),
-      });
-      const res = await fetch(`${API_BASE}/api/calendar/test`, { method: 'POST', credentials: 'same-origin' });
-      const d = await res.json();
-      status.textContent = d.ok ? `Connected (${d.calendars} calendars)` : `Failed: ${d.error}`;
-      status.style.color = d.ok ? 'var(--green)' : 'var(--red)';
-    } catch (e) { status.textContent = 'Error'; status.style.color = 'var(--red)'; }
-    setTimeout(() => { status.textContent = ''; status.style.color = ''; }, 5000);
-  });
-}
 
 /* ── Data Backup (export/import) ── */
 function initBackup() {
@@ -2354,7 +2305,7 @@ function initDangerZone() {
    ═══════════════════════════════════════════ */
 function initAll() {
   modalEl = el('settings-modal');
-  const inits = [initSignupToggle, initAddUser, initEndpointForm, initMcpForm, initCalDAV, initRag, initBackup, initDangerZone, () => settingsModule.initIntegrations()];
+  const inits = [initSignupToggle, initAddUser, initEndpointForm, initMcpForm, initRag, initBackup, initDangerZone, () => settingsModule.initIntegrations()];
   for (const fn of inits) {
     try { fn(); } catch (e) { console.error('Admin init error in', fn.name || 'anonymous', e); }
   }

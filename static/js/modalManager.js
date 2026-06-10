@@ -1395,15 +1395,8 @@ export function injectMinimizeButton(modal, modalId) {
 // can still register explicitly with custom restoreFn/closeFn.
 const _AUTO_WIRE = {
   'cookbook-modal':       { rail: 'rail-cookbook',  sidebar: 'tool-cookbook-btn' },
-  'calendar-modal':       { rail: 'rail-calendar',  sidebar: 'tool-calendar-btn' },
-  'gallery-modal':        { rail: 'rail-gallery',   sidebar: 'tool-gallery-btn' },
-  'tasks-modal':          { rail: 'rail-tasks',     sidebar: 'tool-tasks-btn' },
   'doclib-modal':         { rail: 'rail-archive',   sidebar: 'tool-library-btn' },
   'memory-modal':         { rail: null,             sidebar: 'tool-memory-btn' },
-  'notes-panel':          { rail: 'rail-notes',     sidebar: 'tool-notes-btn' },
-  // Email already has its own #email-unread-dot inline next to the title —
-  // don't add a second modalManager badge that lands at the right edge.
-  'email-lib-modal':      { rail: null,             sidebar: null },
   'research-overlay':     { rail: 'rail-research',  sidebar: 'tool-research-btn' },
   'theme-modal':          { rail: null,             sidebar: 'tool-theme-btn' },
   'settings-modal':       { rail: null,             sidebar: 'tool-settings-btn' },

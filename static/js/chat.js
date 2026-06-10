@@ -17,7 +17,6 @@ import presetsModule from './presets.js';
 import fileHandlerModule from './fileHandler.js';
 import documentModule from './document.js';
 import planWindow from './planWindow.js';
-import * as emailInbox from './emailInbox.js';
 import codeRunnerModule from './codeRunner.js';
 import slashCommands, { initSlashCommands, isCommand, handleSlashCommand, handleSetupInput, handleSetupWizard, typewriterInto } from './slashCommands.js';
   const RESEARCH_TIMEOUT_MS = 360000;
@@ -176,8 +175,6 @@ import slashCommands, { initSlashCommands, isCommand, handleSlashCommand, handle
   export function init(apiBase) {
     API_BASE = apiBase;
     initSlashCommands({ apiBase, isStreaming: () => isStreaming });
-    // Initialize email inbox
-    emailInbox.init(documentModule);
     // Wire the slash-command autocomplete popup on the chat composer. The
     // dispatcher already handles the typed command — this just surfaces the
     // registry as a discoverable menu when the user starts a message with /.
@@ -4637,12 +4634,8 @@ import slashCommands, { initSlashCommands, isCommand, handleSlashCommand, handle
     const id = att.id, name = att.name || '', mime = att.mime || '';
     const url = `${API_BASE}/api/upload/${id}`;
 
-    // Images → Gallery editor.
+    // Images → open raw in a new tab (gallery editor removed).
     if (isImage) {
-      try {
-        const gx = await import('./galleryEditor.js');
-        if (gx.openEditor) { gx.openEditor(url, id, null, name); return; }
-      } catch (e) { console.warn('gallery open failed', e); }
       window.open(url, '_blank');
       return;
     }

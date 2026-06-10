@@ -132,24 +132,9 @@ export function handleUIControl(uiData) {
           var fn = mod.openLibrary || (mod.default && mod.default.openLibrary);
           if (fn) fn();
         }).catch(function(){});
-      } else if (panel === 'gallery') {
-        import('./gallery.js').then(function(mod) {
-          var fn = mod.openGallery || (mod.default && mod.default.openGallery);
-          if (fn) fn();
-        }).catch(function(){});
-      } else if (panel === 'email') {
-        import('./emailLibrary.js').then(function(mod) {
-          var fn = mod.openEmailLibrary || (mod.default && mod.default.openEmailLibrary);
-          if (fn) fn();
-        }).catch(function(){});
       } else if (panel === 'sessions') {
         import('./sessions.js').then(function(mod) {
           var fn = mod.openLibrary || (mod.default && mod.default.openLibrary);
-          if (fn) fn();
-        }).catch(function(){});
-      } else if (panel === 'notes') {
-        import('./notes.js').then(function(mod) {
-          var fn = mod.openPanel || mod.openNotes || (mod.default && (mod.default.openPanel || mod.default.openNotes));
           if (fn) fn();
         }).catch(function(){});
       } else if (panel === 'memories' || panel === 'skills' || panel === 'settings') {
@@ -160,13 +145,6 @@ export function handleUIControl(uiData) {
         if (btn) btn.click();
       }
 
-    } else if (uiEvent === 'open_email_reply' || uiData.ui_event === 'open_email_reply') {
-      import('./emailInbox.js').then(function(mod) {
-        var fn = mod.openReplyDraft || (mod.default && mod.default.openReplyDraft);
-        if (fn) fn(uiData.uid, uiData.folder || 'INBOX', uiData.mode || 'reply');
-      }).catch(function(e) {
-        console.warn('open_email_reply failed:', e);
-      });
     }
   } catch(e) {
     console.warn('ui_control handler error:', e);

@@ -3031,17 +3031,6 @@ import * as Modals from './modalManager.js';
           uiModule.showToast('Message sent', {
             duration: 7000,
             leadingIcon: 'check',
-            action: 'View Message',
-            onAction: () => {
-              import('./emailLibrary.js').then(mod => {
-                const open = mod.openEmailLibrary || (mod.default && mod.default.openEmailLibrary);
-                if (open) open({
-                  account_id: data.account_id || activeAccountId || null,
-                  folder: data.sent_folder || 'Sent',
-                  uid: data.sent_uid || null,
-                });
-              }).catch(() => {});
-            },
           });
         }
         // Auto-save recipients to the configured contacts backend (CardDAV).

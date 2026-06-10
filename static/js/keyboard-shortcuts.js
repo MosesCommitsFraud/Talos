@@ -94,20 +94,15 @@ export function initKeyboardShortcuts(modules) {
 
   // ── "Toggle Window" — close whatever tool window is open, or reopen the
   // last one. Maps each window's modal element to the button/title that
-  // opens it (mirrors modalManager's _AUTO_WIRE, plus email's section title).
+  // opens it (mirrors modalManager's _AUTO_WIRE).
   const _WINDOW_TRIGGERS = {
     'settings-modal':         'user-bar-settings',
     'theme-modal':            'tool-theme-btn',
-    'tasks-modal':            'tool-tasks-btn',
-    'notes-panel':            'tool-notes-btn',
     'memory-modal':           'tool-memory-btn',
     'doclib-modal':           'tool-library-btn',
-    'gallery-modal':          'tool-gallery-btn',
     'research-overlay':       'tool-research-btn',
     'cookbook-modal':         'tool-cookbook-btn',
     'compare-model-overlay':  'tool-compare-btn',
-    'calendar-modal':         'tool-calendar-btn',
-    'email-lib-modal':        'email-section-title',
   };
   let _lastWindow = 'settings-modal';
 
@@ -267,11 +262,8 @@ export function initKeyboardShortcuts(modules) {
       open_compare:  'tool-compare-btn',
       open_cookbook: 'tool-cookbook-btn',
       open_research: 'tool-research-btn',
-      open_gallery:  'tool-gallery-btn',
       open_library:  'tool-library-btn',
       open_memory:   'tool-memory-btn',
-      open_notes:    'tool-notes-btn',
-      open_tasks:    'tool-tasks-btn',
       open_theme:    'tool-theme-btn',
     };
     for (const action in _toolBtns) {
