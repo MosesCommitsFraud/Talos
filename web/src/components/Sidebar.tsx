@@ -26,7 +26,7 @@ import {
 import type { Session } from '@/api/types';
 import { useChat } from '@/state/chat';
 import { usePrefs, type SortMode } from '@/state/prefs';
-import { cn, formatRelativeTime } from '@/lib/utils';
+import { cn, formatRelativeTime, timestampMs } from '@/lib/utils';
 import { Kbd, Tooltip } from './ui/misc';
 import {
   ContextMenu,
@@ -46,15 +46,6 @@ const SORT_LABELS: Record<SortMode, string> = {
   newest: 'Newest first',
   name: 'Name A–Z',
 };
-
-function timeValue(value: number | string | null | undefined): number {
-  if (typeof value === 'number') return value;
-  if (typeof value === 'string') {
-    const parsed = Date.parse(value);
-    return Number.isFinite(parsed) ? parsed : 0;
-  }
-  return 0;
-}
 
 function SessionRow({ session }: { session: Session }) {
   const activeId = useChat((s) => s.sessionId);
@@ -182,9 +173,9 @@ export function Sidebar({
   const visible = (sessions ?? [])
     .filter((s) => !s.archived)
     .sort((a, b) => {
-      if (sortMode === 'newest') return timeValue(b.created_at) - timeValue(a.created_at);
+      if (sortMode === 'newest') return timestampMs(b.created_at) - timestampMs(a.created_at);
       if (sortMode === 'name') return (a.name || '').localeCompare(b.name || '');
-      return timeValue(b.last_message_at ?? b.updated_at) - timeValue(a.last_message_at ?? a.updated_at);
+      return timestampMs(b.last_message_at ?? b.updated_at) - timestampMs(a.last_message_at ?? a.updated_at);
     });
   const isMac = /Mac|iPhone/.test(navigator.platform);
 
