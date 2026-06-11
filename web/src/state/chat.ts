@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { createSession, deleteMessages, editMessage, fetchSession, streamChat } from '@/api/client';
-import type { Metrics, ToolCall } from '@/api/types';
+import type { Attachment, Metrics, ToolCall } from '@/api/types';
 import { usePrefs } from './prefs';
 
 export interface UiMessage {
@@ -11,6 +11,7 @@ export interface UiMessage {
   content: string;
   thinking?: string;
   tools?: ToolCall[];
+  attachments?: Attachment[];
   metrics?: Metrics;
   streaming?: boolean;
   error?: boolean;
@@ -27,7 +28,7 @@ interface ChatState {
   setPendingModel: (m: ChatState['pendingModel']) => void;
   newChat: () => void;
   openSession: (id: string) => Promise<void>;
-  send: (text: string, opts?: { attachments?: string[]; onSessionCreated?: (id: string) => void }) => Promise<void>;
+  send: (text: string, opts?: { attachments?: Attachment[]; onSessionCreated?: (id: string) => void }) => Promise<void>;
   stop: () => void;
   edit: (msgId: string, content: string) => Promise<void>;
   remove: (msgId: string) => Promise<void>;
@@ -52,6 +53,22 @@ function metricsFromMetadata(metadata: Record<string, unknown> | undefined): Met
     if (value != null) (metrics as Record<string, unknown>)[key] = value;
   }
   return Object.keys(metrics).length > 0 ? metrics : undefined;
+}
+
+function attachmentsFromMetadata(metadata: Record<string, unknown> | undefined): Attachment[] | undefined {
+  const raw = metadata?.attachments;
+  if (!Array.isArray(raw)) return undefined;
+  const attachments = raw
+    .filter((item): item is Record<string, unknown> => !!item && typeof item === 'object')
+    .map((item) => ({
+      ...item,
+      id: String(item.id ?? item.file_id ?? ''),
+      name: item.name != null ? String(item.name) : item.original_name != null ? String(item.original_name) : undefined,
+      mime: item.mime != null ? String(item.mime) : undefined,
+      size: typeof item.size === 'number' ? item.size : undefined,
+    }))
+    .filter((item) => item.id);
+  return attachments.length > 0 ? attachments : undefined;
 }
 
 declare global {
@@ -86,6 +103,7 @@ export const useChat = create<ChatState>((set, get) => ({
           dbId: m.metadata?._db_id,
           role: m.role as 'user' | 'assistant',
           content: m.content,
+          attachments: m.role === 'user' ? attachmentsFromMetadata(m.metadata) : undefined,
           metrics: m.role === 'assistant' ? metricsFromMetadata(m.metadata) : undefined,
         })),
     });
@@ -105,7 +123,8 @@ export const useChat = create<ChatState>((set, get) => ({
       opts?.onSessionCreated?.(sessionId);
     }
 
-    const userMsg: UiMessage = { id: uid(), role: 'user', content: text };
+    const attachments = opts?.attachments ?? [];
+    const userMsg: UiMessage = { id: uid(), role: 'user', content: text, attachments };
     const aiMsg: UiMessage = { id: uid(), role: 'assistant', content: '', streaming: true };
     const abort = new AbortController();
     set({ messages: [...get().messages, userMsg, aiMsg], streaming: true, abort });
@@ -129,7 +148,7 @@ export const useChat = create<ChatState>((set, get) => ({
           useDb: prefs.useDb,
           useWeb: prefs.useWeb,
           incognito: prefs.incognito,
-          attachments: opts?.attachments,
+          attachments: attachments.map((file) => file.id),
         },
         signal: abort.signal,
         onEvent: (ev) => {

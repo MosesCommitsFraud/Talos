@@ -1,4 +1,4 @@
-import type { ChatEvent, ModelEndpoint, Session, SessionDetail } from './types';
+import type { Attachment, ChatEvent, ModelEndpoint, Session, SessionDetail } from './types';
 
 async function getJSON<T>(url: string): Promise<T> {
   const res = await fetch(url, { credentials: 'same-origin' });
@@ -69,7 +69,7 @@ export async function markImportant(id: string, important: boolean): Promise<voi
   await fetch(`/api/session/${id}/important`, { method: 'POST', body: fd, credentials: 'same-origin' });
 }
 
-export interface UploadedFile { id: string; name?: string; [key: string]: unknown }
+export interface UploadedFile extends Attachment {}
 
 export async function uploadFiles(files: File[]): Promise<UploadedFile[]> {
   const fd = new FormData();
@@ -131,6 +131,8 @@ export const artifactDownloadUrl = (sessionId: string, path: string) =>
   `/api/artifacts/${sessionId}/download?path=${encodeURIComponent(path)}`;
 
 export const artifactsZipUrl = (sessionId: string) => `/api/artifacts/${sessionId}/zip`;
+
+export const uploadDownloadUrl = (id: string) => `/api/upload/${encodeURIComponent(id)}`;
 
 /** Admin: register a model endpoint (matches legacy "Add Models"). */
 export async function addModelEndpoint(opts: { name: string; baseUrl: string; apiKey?: string }): Promise<void> {

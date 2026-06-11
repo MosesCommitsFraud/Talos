@@ -1,7 +1,12 @@
-bash tut nicht
-python tut nur semi und kann nicht ausgeführt werden im artefakt tab
-pipeline für excel dateien ins RAG fehlt
-haupt admin kann nicht admins demoten oder ändern
-chat is weird history zeigt gedanken und messages nicht an nur tool calls and final output
-model needs to be selected by default
-wie werden chats benannt?
+bash wird immer noch zu oft benutzt
+thinking wird in der ersten erstellten bubble fortgeführt und nicht ein neues erstellt. 
+besseres labeling im code was input output ist
+no animation that shows its still running
+users dont work in new frontend
+we need i18 for languages
+checkmarks green for correctly run code
+crossreference with MIDA what needs work and what not
+system prompt eingabe nötig
+titles have attachments in their name
+reasoning and message not clear distinct
+images are not shown

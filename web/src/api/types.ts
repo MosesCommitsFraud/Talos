@@ -23,7 +23,17 @@ export interface HistoryMessage {
   role: 'user' | 'assistant' | 'system';
   content: string;
   /** Backend message metadata; `_db_id` keys edit/delete operations. */
-  metadata?: { _db_id?: string; [key: string]: unknown };
+  metadata?: { _db_id?: string; attachments?: Attachment[]; [key: string]: unknown };
+}
+
+export interface Attachment {
+  id: string;
+  name?: string;
+  mime?: string;
+  size?: number;
+  width?: number;
+  height?: number;
+  [key: string]: unknown;
 }
 
 export interface Artifact {

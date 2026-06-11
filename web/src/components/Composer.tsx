@@ -87,7 +87,7 @@ export function Composer() {
   const submit = async () => {
     const value = text.trim();
     if ((!value && pending.length === 0) || streaming) return;
-    const attachments = pending.map((f) => f.id);
+    const attachments = pending;
     setText('');
     setPending([]);
     requestAnimationFrame(autoresize);

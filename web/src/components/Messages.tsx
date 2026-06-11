@@ -1,5 +1,6 @@
-import { CheckIcon, CopyIcon, PencilIcon, Trash2Icon } from 'lucide-react';
+import { CheckIcon, CopyIcon, FileIcon, PencilIcon, Trash2Icon } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
+import { uploadDownloadUrl } from '@/api/client';
 import { useChat, type UiMessage } from '@/state/chat';
 import { Markdown } from './Markdown';
 import { Thinking } from './Thinking';
@@ -57,6 +58,33 @@ function CopyAction({ text }: { text: string }) {
     >
       {copied ? <CheckIcon className="size-3.5" /> : <CopyIcon className="size-3.5" />}
     </ActionIcon>
+  );
+}
+
+function formatSize(bytes?: number): string {
+  if (bytes == null) return '';
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+}
+
+function AttachmentList({ msg }: { msg: UiMessage }) {
+  if (!msg.attachments?.length) return null;
+  return (
+    <div className="mt-1 flex max-w-full flex-wrap justify-end gap-1.5">
+      {msg.attachments.map((file) => (
+        <a
+          key={file.id}
+          href={uploadDownloadUrl(file.id)}
+          download
+          className="inline-flex max-w-full items-center gap-1.5 rounded-lg border bg-card px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+        >
+          <FileIcon className="size-3.5 shrink-0" />
+          <span className="max-w-48 truncate">{file.name || file.id}</span>
+          {file.size != null && <span className="shrink-0 opacity-70">{formatSize(file.size)}</span>}
+        </a>
+      ))}
+    </div>
   );
 }
 
@@ -149,6 +177,7 @@ export function Messages() {
                   <div className="rounded-2xl rounded-br-md bg-secondary px-4 py-2.5 text-[15px] leading-relaxed whitespace-pre-wrap">
                     {m.content}
                   </div>
+                  <AttachmentList msg={m} />
                   <div className="flex">
                     <MessageActions msg={m} onEdit={() => setEditing(m.id)} />
                   </div>
