@@ -36,6 +36,24 @@ interface ChatState {
 let nextId = 0;
 const uid = () => `m${Date.now()}-${nextId++}`;
 
+function metricsFromMetadata(metadata: Record<string, unknown> | undefined): Metrics | undefined {
+  if (!metadata) return undefined;
+  const keys: Array<keyof Metrics> = [
+    'model',
+    'response_time',
+    'tokens_per_second',
+    'output_tokens',
+    'context_percent',
+    'context_length',
+  ];
+  const metrics: Metrics = {};
+  for (const key of keys) {
+    const value = metadata[key];
+    if (value != null) (metrics as Record<string, unknown>)[key] = value;
+  }
+  return Object.keys(metrics).length > 0 ? metrics : undefined;
+}
+
 declare global {
   interface Window { __talosChat?: typeof useChat }
 }
@@ -68,6 +86,7 @@ export const useChat = create<ChatState>((set, get) => ({
           dbId: m.metadata?._db_id,
           role: m.role as 'user' | 'assistant',
           content: m.content,
+          metrics: m.role === 'assistant' ? metricsFromMetadata(m.metadata) : undefined,
         })),
     });
   },

@@ -131,6 +131,7 @@ def setup_history_routes(session_manager) -> APIRouter:
                             meta = {}
                     if m.timestamp and "timestamp" not in meta:
                         meta["timestamp"] = m.timestamp.isoformat() + "Z"
+                    meta.setdefault("_db_id", m.id)
                     if meta:
                         entry["metadata"] = meta
                     db_history.append(entry)
