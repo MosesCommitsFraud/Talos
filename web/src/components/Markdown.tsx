@@ -7,7 +7,7 @@ import rehypeHighlight from 'rehype-highlight';
  *  which matters while sibling messages stream. */
 export const Markdown = memo(function Markdown({ text }: { text: string }) {
   return (
-    <div className="md-body text-[15px]">
+    <div className="chat-markdown text-[15px]">
       <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeHighlight]}>
         {text}
       </ReactMarkdown>

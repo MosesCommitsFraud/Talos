@@ -1,106 +1,216 @@
 @import "tailwindcss";
 
-/* ── Talos design tokens ──
-   Mirrors the GPT-style palette used by the legacy UI (static/style.css
-   "GPT Modernization Layer") so both UIs look identical during the
-   strangler migration. Accent is the Talos blue — keep it. */
-@theme {
-  --color-base: #212121;      /* chat background */
-  --color-panel: #171717;     /* sidebar / modals */
-  --color-surface: #2f2f2f;   /* composer, user bubble */
-  --color-edge: #424242;      /* borders */
-  --color-ink: #ececec;       /* primary text */
-  --color-ink-muted: #9b9b9b; /* secondary text */
-  --color-accent: #3d87cb;    /* Talos blue */
+@custom-variant dark (&:is(.dark, .dark *));
 
-  --font-sans: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+/* ── Semantic token bridge (MIDA-style) ──
+   Visual system adapted from MIDA (~/DEV/MIDA apps/web): semantic
+   surface/foreground pairs, alpha-based borders, radius scale derived from
+   one base radius. Primary/ring swapped to the Talos blue. */
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-info: var(--info);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --radius-2xl: calc(var(--radius) + 8px);
+  --radius-3xl: calc(var(--radius) + 12px);
+  --font-sans: "DM Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
   --font-mono: "Fira Code", ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
-/* Self-hosted fonts, served by the backend from the legacy static dir */
-@font-face { font-family: "Inter"; font-weight: 400; font-style: normal; font-display: swap; src: url("/static/fonts/Inter-Regular.woff2") format("woff2"); }
-@font-face { font-family: "Inter"; font-weight: 500; font-style: normal; font-display: swap; src: url("/static/fonts/Inter-Medium.woff2") format("woff2"); }
-@font-face { font-family: "Inter"; font-weight: 600; font-style: normal; font-display: swap; src: url("/static/fonts/Inter-SemiBold.woff2") format("woff2"); }
+:root {
+  color-scheme: light;
+  --radius: 0.625rem;
+  --background: var(--color-white);
+  --foreground: var(--color-neutral-800);
+  --card: var(--color-white);
+  --card-foreground: var(--color-neutral-800);
+  --popover: var(--color-white);
+  --popover-foreground: var(--color-neutral-800);
+  /* Talos blue (#3d87cb) as oklch so hover shades derive cleanly */
+  --primary: oklch(0.6 0.118 251);
+  --primary-foreground: var(--color-white);
+  --secondary: --alpha(var(--color-black) / 4%);
+  --secondary-foreground: var(--color-neutral-800);
+  --muted: --alpha(var(--color-black) / 4%);
+  --muted-foreground: color-mix(in srgb, var(--color-neutral-500) 90%, var(--color-black));
+  --accent: --alpha(var(--color-black) / 4%);
+  --accent-foreground: var(--color-neutral-800);
+  --destructive: var(--color-red-500);
+  --destructive-foreground: var(--color-red-700);
+  --border: --alpha(var(--color-black) / 8%);
+  --input: --alpha(var(--color-black) / 10%);
+  --ring: oklch(0.6 0.118 251);
+  --info: var(--color-blue-500);
+  --success: var(--color-emerald-500);
+  --warning: var(--color-amber-500);
+}
+
+.dark {
+  color-scheme: dark;
+  --background: color-mix(in srgb, var(--color-neutral-950) 95%, var(--color-white));
+  --foreground: var(--color-neutral-100);
+  --card: color-mix(in srgb, var(--background) 98%, var(--color-white));
+  --card-foreground: var(--color-neutral-100);
+  --popover: color-mix(in srgb, var(--background) 98%, var(--color-white));
+  --popover-foreground: var(--color-neutral-100);
+  --primary: oklch(0.64 0.118 251);
+  --primary-foreground: var(--color-white);
+  --secondary: --alpha(var(--color-white) / 4%);
+  --secondary-foreground: var(--color-neutral-100);
+  --muted: --alpha(var(--color-white) / 4%);
+  --muted-foreground: color-mix(in srgb, var(--color-neutral-500) 90%, var(--color-white));
+  --accent: --alpha(var(--color-white) / 4%);
+  --accent-foreground: var(--color-neutral-100);
+  --destructive: color-mix(in srgb, var(--color-red-500) 90%, var(--color-white));
+  --destructive-foreground: var(--color-red-400);
+  --border: --alpha(var(--color-white) / 6%);
+  --input: --alpha(var(--color-white) / 8%);
+  --ring: oklch(0.64 0.118 251);
+  --info: var(--color-blue-500);
+  --success: var(--color-emerald-500);
+  --warning: var(--color-amber-500);
+}
+
+/* Self-hosted DM Sans (variable, 300–800) + Fira Code for code */
+@font-face {
+  font-family: "DM Sans";
+  font-style: normal;
+  font-weight: 300 800;
+  font-display: swap;
+  src: url("/fonts/DMSans-Variable.woff2") format("woff2");
+}
 @font-face { font-family: "Fira Code"; font-weight: 400; font-style: normal; font-display: swap; src: url("/static/fonts/FiraCode-Regular.woff2") format("woff2"); }
 @font-face { font-family: "Fira Code"; font-weight: 600; font-style: normal; font-display: swap; src: url("/static/fonts/FiraCode-SemiBold.woff2") format("woff2"); }
 
-html, body, #root {
-  height: 100%;
+@layer base {
+  * {
+    border-color: var(--border);
+  }
+  html, body, #root {
+    height: 100%;
+    width: 100%;
+    overflow: hidden;
+    overscroll-behavior-y: none;
+  }
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+  }
 }
 
-body {
-  @apply bg-base text-ink font-sans antialiased;
-  overscroll-behavior: none;
+/* Film-grain overlay — the MIDA texture that keeps large flat surfaces alive */
+body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.035;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  background-repeat: repeat;
+  background-size: 256px 256px;
 }
 
-/* Neutral thin scrollbars */
-* {
-  scrollbar-width: thin;
-  scrollbar-color: color-mix(in srgb, var(--color-ink) 25%, transparent) transparent;
-}
-*::-webkit-scrollbar { width: 8px; height: 8px; }
-*::-webkit-scrollbar-track { background: transparent; }
-*::-webkit-scrollbar-thumb {
-  background: color-mix(in srgb, var(--color-ink) 25%, transparent);
-  border-radius: 4px;
+/* 6px MIDA scrollbars */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(0, 0, 0, 0.15); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(0, 0, 0, 0.25); }
+.dark ::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.1); }
+.dark ::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.18); }
+* { scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--foreground) 15%, transparent) transparent; }
+
+@layer base {
+  :where(:focus-visible) {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+  }
 }
 
-/* Keyboard focus ring. :where() keeps specificity at zero so per-element
-   utilities (e.g. the composer textarea's outline-none) can override it. */
-:where(:focus-visible) {
-  outline: 2px solid var(--color-accent);
-  outline-offset: 2px;
-}
-
-/* ── Markdown body (assistant messages) ── */
-.md-body {
-  line-height: 1.65;
+/* ── Chat markdown (MIDA chat-markdown, hue-bridged) ── */
+.chat-markdown {
+  min-width: 0;
+  overflow-wrap: anywhere;
   word-break: break-word;
+  line-height: 1.65;
 }
-.md-body > * + * { margin-top: 0.65em; }
-.md-body h1, .md-body h2, .md-body h3, .md-body h4 {
-  font-weight: 600;
-  margin-top: 1.1em;
+.chat-markdown > :first-child { margin-top: 0; }
+.chat-markdown > :last-child { margin-bottom: 0; }
+.chat-markdown p, .chat-markdown ul, .chat-markdown ol,
+.chat-markdown blockquote, .chat-markdown pre, .chat-markdown table { margin: 0.65rem 0; }
+.chat-markdown h1, .chat-markdown h2, .chat-markdown h3, .chat-markdown h4 { font-weight: 600; margin: 1.1em 0 0.4em; }
+.chat-markdown h1 { font-size: 1.35em; }
+.chat-markdown h2 { font-size: 1.2em; }
+.chat-markdown h3 { font-size: 1.05em; }
+.chat-markdown ul { padding-left: 1.25rem; list-style-type: disc; }
+.chat-markdown ol { padding-left: 1.25rem; list-style-type: decimal; }
+.chat-markdown ul ul { list-style-type: circle; }
+.chat-markdown li + li { margin-top: 0.25rem; }
+.chat-markdown a {
+  color: var(--primary);
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, var(--primary) 40%, transparent);
 }
-.md-body h1 { font-size: 1.35em; }
-.md-body h2 { font-size: 1.2em; }
-.md-body h3 { font-size: 1.05em; }
-.md-body ul { list-style: disc; padding-left: 1.4em; }
-.md-body ol { list-style: decimal; padding-left: 1.4em; }
-.md-body li { margin: 0.25em 0; }
-.md-body a { color: var(--color-accent); text-decoration: underline; text-underline-offset: 2px; }
-.md-body blockquote {
-  border-left: 2px solid var(--color-edge);
-  padding-left: 0.9em;
-  color: var(--color-ink-muted);
+.chat-markdown a:hover { opacity: 0.8; }
+.chat-markdown blockquote {
+  border-left: 2px solid var(--border);
+  padding-left: 0.8rem;
+  color: var(--muted-foreground);
 }
-.md-body table { border-collapse: collapse; font-size: 0.925em; }
-.md-body th, .md-body td { border: 1px solid var(--color-edge); padding: 5px 10px; }
-.md-body th { background: color-mix(in srgb, var(--color-ink) 5%, transparent); }
-.md-body code:not(pre code) {
+.chat-markdown :not(pre) > code {
+  border: 1px solid var(--border);
+  border-radius: 0.375rem;
+  background: var(--muted);
+  padding: 0.1rem 0.35rem;
+  color: var(--foreground);
   font-family: var(--font-mono);
-  font-size: 0.875em;
-  background: color-mix(in srgb, var(--color-ink) 9%, transparent);
-  border-radius: 5px;
-  padding: 0.12em 0.35em;
+  font-size: 0.8em;
 }
-.md-body pre {
-  background: #1a1a1a;
-  border: 1px solid color-mix(in srgb, var(--color-ink) 8%, transparent);
-  border-radius: 10px;
-  padding: 12px 14px;
+.chat-markdown pre {
+  max-width: 100%;
   overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: 0.75rem;
+  background: var(--muted);
+  padding: 0.8rem 0.9rem;
   font-family: var(--font-mono);
-  font-size: 0.85em;
-  line-height: 1.5;
+  font-size: 0.8rem;
+  line-height: 1.55;
 }
+.chat-markdown pre code { border: none; background: transparent; padding: 0; }
+.chat-markdown table { width: 100%; border-collapse: collapse; font-size: 0.9em; }
+.chat-markdown th, .chat-markdown td { border: 1px solid var(--border); padding: 0.35rem 0.45rem; text-align: left; }
 
-/* highlight.js token colors — same hues as the legacy dark theme */
-.hljs-keyword, .hljs-selector-tag { color: #c678dd; }
-.hljs-string, .hljs-attr { color: #e5c07b; }
-.hljs-comment, .hljs-quote { color: #828997; font-style: italic; }
-.hljs-title, .hljs-title.function_ { color: #61afef; }
-.hljs-number, .hljs-literal { color: #d19a66; }
-.hljs-built_in, .hljs-type { color: #56b6c2; }
-.hljs-variable, .hljs-template-variable { color: #abb2bf; }
-.hljs-params { color: #a8c0d4; }
+/* highlight.js — one set per scheme */
+.hljs-keyword, .hljs-selector-tag { color: #a626a4; }
+.hljs-string, .hljs-attr { color: #986801; }
+.hljs-comment, .hljs-quote { color: #a0a1a7; font-style: italic; }
+.hljs-title, .hljs-title.function_ { color: #4078f2; }
+.hljs-number, .hljs-literal { color: #b76b01; }
+.hljs-built_in, .hljs-type { color: #0184bc; }
+.dark .hljs-keyword, .dark .hljs-selector-tag { color: #c678dd; }
+.dark .hljs-string, .dark .hljs-attr { color: #e5c07b; }
+.dark .hljs-comment, .dark .hljs-quote { color: #828997; }
+.dark .hljs-title, .dark .hljs-title.function_ { color: #61afef; }
+.dark .hljs-number, .dark .hljs-literal { color: #d19a66; }
+.dark .hljs-built_in, .dark .hljs-type { color: #56b6c2; }

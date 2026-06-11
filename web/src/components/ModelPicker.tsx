@@ -1,11 +1,11 @@
-import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import { useQuery } from '@tanstack/react-query';
-import { ChevronDown } from 'lucide-react';
+import { ChevronDownIcon } from 'lucide-react';
 import { useEffect } from 'react';
 import { fetchModels } from '@/api/client';
 import { useChat } from '@/state/chat';
+import { Menu, MenuItem, MenuPopup, MenuTrigger } from './ui/menu';
 
-/** Quiet ghost-pill model selector for the composer (Radix dropdown). */
+/** Quiet ghost-pill model selector for the composer. */
 export function ModelPicker() {
   const { data: endpoints } = useQuery({ queryKey: ['models'], queryFn: fetchModels });
   const pendingModel = useChat((s) => s.pendingModel);
@@ -25,38 +25,32 @@ export function ModelPicker() {
   const label = pendingModel?.model ?? 'Select model';
 
   return (
-    <DropdownMenu.Root>
-      <DropdownMenu.Trigger asChild>
+    <Menu>
+      <MenuTrigger asChild>
         <button
           type="button"
-          className="flex shrink-0 items-center gap-1 whitespace-nowrap rounded-full px-2.5 py-1.5 text-[13px] text-ink-muted hover:bg-ink/8 hover:text-ink transition-colors"
           aria-label="Switch model"
+          className="flex shrink-0 items-center gap-1 rounded-full px-2.5 py-1.5 text-[13px] whitespace-nowrap text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
         >
           {label}
-          <ChevronDown size={13} />
+          <ChevronDownIcon className="size-3.5" />
         </button>
-      </DropdownMenu.Trigger>
-      <DropdownMenu.Portal>
-        <DropdownMenu.Content
-          align="end"
-          sideOffset={6}
-          className="z-50 min-w-52 rounded-xl border border-ink/10 bg-panel p-1.5 shadow-[0_12px_40px_rgba(0,0,0,0.45)]"
-        >
-          {options.length === 0 && (
-            <div className="px-3 py-2 text-[13px] text-ink-muted">No model endpoints configured</div>
-          )}
-          {options.map((o) => (
-            <DropdownMenu.Item
-              key={`${o.endpointId}:${o.model}`}
-              onSelect={() => setPendingModel({ endpointId: o.endpointId, model: o.model })}
-              className="cursor-pointer rounded-lg px-3 py-2 text-[14px] outline-none data-[highlighted]:bg-ink/8"
-            >
-              <div>{o.model}</div>
-              <div className="text-xs text-ink-muted">{o.endpointName}</div>
-            </DropdownMenu.Item>
-          ))}
-        </DropdownMenu.Content>
-      </DropdownMenu.Portal>
-    </DropdownMenu.Root>
+      </MenuTrigger>
+      <MenuPopup align="end">
+        {options.length === 0 && (
+          <div className="px-3 py-2 text-[13px] text-muted-foreground">No model endpoints configured</div>
+        )}
+        {options.map((o) => (
+          <MenuItem
+            key={`${o.endpointId}:${o.model}`}
+            onSelect={() => setPendingModel({ endpointId: o.endpointId, model: o.model })}
+            className="flex-col items-start gap-0"
+          >
+            <div>{o.model}</div>
+            <div className="text-xs text-muted-foreground">{o.endpointName}</div>
+          </MenuItem>
+        ))}
+      </MenuPopup>
+    </Menu>
   );
 }

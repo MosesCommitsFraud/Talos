@@ -26,6 +26,68 @@ export async function createSession(opts: { endpointId: string; model: string; n
   return res.json();
 }
 
+export async function renameSession(id: string, name: string): Promise<void> {
+  const fd = new FormData();
+  fd.set('name', name);
+  await fetch(`/api/session/${id}`, { method: 'PATCH', body: fd, credentials: 'same-origin' });
+}
+
+export async function deleteSession(id: string): Promise<void> {
+  await fetch(`/api/session/${id}`, { method: 'DELETE', credentials: 'same-origin' });
+}
+
+export async function archiveSession(id: string): Promise<void> {
+  await fetch(`/api/session/${id}/archive`, { method: 'POST', credentials: 'same-origin' });
+}
+
+export async function markImportant(id: string, important: boolean): Promise<void> {
+  const fd = new FormData();
+  fd.set('important', String(important));
+  await fetch(`/api/session/${id}/important`, { method: 'POST', body: fd, credentials: 'same-origin' });
+}
+
+export interface UploadedFile { id: string; name?: string; [key: string]: unknown }
+
+export async function uploadFiles(files: File[]): Promise<UploadedFile[]> {
+  const fd = new FormData();
+  for (const f of files) fd.append('files', f, f.name || 'paste.png');
+  const res = await fetch('/api/upload', { method: 'POST', body: fd, credentials: 'same-origin' });
+  if (!res.ok) {
+    let detail = `HTTP ${res.status}`;
+    try { const e = await res.json(); detail = e.detail || e.error || detail; } catch { /* noop */ }
+    throw new Error(`Upload failed: ${detail}`);
+  }
+  const data = await res.json();
+  return data.files ?? [];
+}
+
+export interface MemoryItem { id: string; content?: string; text?: string; created_at?: number; [key: string]: unknown }
+export const fetchMemories = () => getJSON<MemoryItem[]>('/api/memory');
+
+export interface LibraryDoc { id: string; title?: string; name?: string; updated_at?: number; [key: string]: unknown }
+export async function fetchLibrary(): Promise<LibraryDoc[]> {
+  const data = await getJSON<LibraryDoc[] | { documents?: LibraryDoc[]; library?: LibraryDoc[] }>('/api/documents/library');
+  if (Array.isArray(data)) return data;
+  return data.documents ?? data.library ?? [];
+}
+
+export interface AuthInfo { auth_enabled: boolean; user?: string; is_admin?: boolean }
+export const fetchAuthInfo = () => getJSON<AuthInfo>('/api/auth/settings');
+
+export async function logout(): Promise<void> {
+  await fetch('/api/auth/logout', { method: 'POST', credentials: 'same-origin' });
+  window.location.href = '/login';
+}
+
+export interface StreamFlags {
+  planMode?: boolean;
+  useRag?: boolean;
+  useDb?: boolean;
+  useWeb?: boolean;
+  incognito?: boolean;
+  attachments?: string[];
+}
+
 /**
  * Stream a chat turn. Parses the backend's SSE framing
  * (`data: {json}\n\n`, terminated by `data: [DONE]`) and invokes
@@ -34,12 +96,20 @@ export async function createSession(opts: { endpointId: string; model: string; n
 export async function streamChat(opts: {
   message: string;
   sessionId: string;
+  flags?: StreamFlags;
   signal?: AbortSignal;
   onEvent: (ev: ChatEvent) => void;
 }): Promise<void> {
   const fd = new FormData();
   fd.set('message', opts.message);
   fd.set('session', opts.sessionId);
+  const f = opts.flags ?? {};
+  if (f.planMode) fd.set('plan_mode', 'true');
+  if (f.useRag) fd.set('use_rag', 'true');
+  if (f.useDb) fd.set('use_db', 'true');
+  if (f.useWeb) fd.set('use_web', 'true');
+  if (f.incognito) fd.set('incognito', 'true');
+  if (f.attachments?.length) fd.set('attachments', JSON.stringify(f.attachments));
 
   const tzOffsetMin = -new Date().getTimezoneOffset();
   let tzName = '';

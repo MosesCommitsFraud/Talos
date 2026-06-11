@@ -212,7 +212,20 @@ class PreviewHandler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         path = parsed.path
         body = self._read_body()
-        fields = parse_qs(body.decode("utf-8", errors="ignore")) if body else {}
+        ctype = self.headers.get("Content-Type", "")
+        if "multipart/form-data" in ctype and "boundary=" in ctype:
+            # Minimal multipart parse — enough to extract simple text fields
+            # (the React UI posts FormData, matching the real backend).
+            boundary = ctype.split("boundary=")[1].split(";")[0].strip()
+            fields: dict[str, list[str]] = {}
+            for part in body.split(b"--" + boundary.encode()):
+                if b'name="' not in part:
+                    continue
+                header_blob, _, value = part.partition(b"\r\n\r\n")
+                name = header_blob.split(b'name="')[1].split(b'"')[0].decode()
+                fields.setdefault(name, []).append(value.rstrip(b"\r\n-").decode("utf-8", errors="ignore"))
+        else:
+            fields = parse_qs(body.decode("utf-8", errors="ignore")) if body else {}
 
         if path == "/api/session":
             self._send_json(_sessions()[0])

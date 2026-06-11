@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { createSession, fetchSession, streamChat } from '@/api/client';
 import type { Metrics, ToolCall } from '@/api/types';
+import { usePrefs } from './prefs';
 
 export interface UiMessage {
   id: string;
@@ -24,7 +25,7 @@ interface ChatState {
   setPendingModel: (m: ChatState['pendingModel']) => void;
   newChat: () => void;
   openSession: (id: string) => Promise<void>;
-  send: (text: string, onSessionCreated?: (id: string) => void) => Promise<void>;
+  send: (text: string, opts?: { attachments?: string[]; onSessionCreated?: (id: string) => void }) => Promise<void>;
   stop: () => void;
 }
 
@@ -58,9 +59,9 @@ export const useChat = create<ChatState>((set, get) => ({
     });
   },
 
-  send: async (text, onSessionCreated) => {
+  send: async (text, opts) => {
     const state = get();
-    if (state.streaming || !text.trim()) return;
+    if (state.streaming || (!text.trim() && !opts?.attachments?.length)) return;
 
     let sessionId = state.sessionId;
     if (!sessionId) {
@@ -69,7 +70,7 @@ export const useChat = create<ChatState>((set, get) => ({
       const session = await createSession({ endpointId: pm.endpointId, model: pm.model });
       sessionId = session.id;
       set({ sessionId });
-      onSessionCreated?.(sessionId);
+      opts?.onSessionCreated?.(sessionId);
     }
 
     const userMsg: UiMessage = { id: uid(), role: 'user', content: text };
@@ -85,10 +86,19 @@ export const useChat = create<ChatState>((set, get) => ({
       });
     };
 
+    const prefs = usePrefs.getState();
     try {
       await streamChat({
         message: text,
         sessionId,
+        flags: {
+          planMode: prefs.planMode,
+          useRag: prefs.useRag,
+          useDb: prefs.useDb,
+          useWeb: prefs.useWeb,
+          incognito: prefs.incognito,
+          attachments: opts?.attachments,
+        },
         signal: abort.signal,
         onEvent: (ev) => {
           if ('delta' in ev && typeof ev.delta === 'string') {
