@@ -10,21 +10,37 @@ export type SortMode = 'active' | 'newest' | 'name';
 export interface Visibility {
   sidebarBrain: boolean;
   sidebarLibrary: boolean;
+  sidebarUserBar: boolean;
+  sidebarSettingsBtn: boolean;
+  chatHeader: boolean;
+  welcomeText: boolean;
+  showThinking: boolean;
+  incognitoBtn: boolean;
+  messageMetrics: boolean;
+  composerAttach: boolean;
   composerPlan: boolean;
   composerDocs: boolean;
   composerDb: boolean;
+  composerModelPicker: boolean;
   contextMeter: boolean;
-  messageMetrics: boolean;
 }
 
 export const DEFAULT_VISIBILITY: Visibility = {
   sidebarBrain: true,
   sidebarLibrary: true,
+  sidebarUserBar: true,
+  sidebarSettingsBtn: true,
+  chatHeader: true,
+  welcomeText: true,
+  showThinking: true,
+  incognitoBtn: true,
+  messageMetrics: true,
+  composerAttach: true,
   composerPlan: true,
   composerDocs: true,
   composerDb: true,
+  composerModelPicker: true,
   contextMeter: true,
-  messageMetrics: true,
 };
 
 interface PrefsState {

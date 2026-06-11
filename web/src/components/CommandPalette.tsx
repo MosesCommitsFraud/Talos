@@ -1,6 +1,6 @@
 import * as DialogPrimitive from '@radix-ui/react-dialog';
 import { useQuery } from '@tanstack/react-query';
-import { ExternalLinkIcon, MessageSquareIcon, MoonIcon, SearchIcon, SquarePenIcon, SunIcon } from 'lucide-react';
+import { ExternalLinkIcon, MessageSquareIcon, MoonIcon, SearchIcon, SettingsIcon, SquarePenIcon, SunIcon } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { fetchSessions } from '@/api/client';
 import { useChat } from '@/state/chat';
@@ -16,7 +16,7 @@ interface PaletteEntry {
   run: () => void;
 }
 
-export function CommandPalette({ open, onClose }: { open: boolean; onClose: () => void }) {
+export function CommandPalette({ open, onClose, onOpenSettings }: { open: boolean; onClose: () => void; onOpenSettings?: () => void }) {
   const [query, setQuery] = useState('');
   const [selected, setSelected] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -48,6 +48,7 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
           onClose();
         },
       },
+      { id: 'settings', label: 'Open settings', icon: <SettingsIcon />, run: () => { onOpenSettings?.(); onClose(); } },
       { id: 'legacy', label: 'Open legacy UI', icon: <ExternalLinkIcon />, run: () => { window.location.href = '/legacy'; } },
     ].filter((a) => !q || a.label.toLowerCase().includes(q));
 
@@ -63,7 +64,7 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
       }));
 
     return [...actions, ...chats];
-  }, [query, sessions, theme, newChat, onClose, openSession, setTheme]);
+  }, [query, sessions, theme, newChat, onClose, onOpenSettings, openSession, setTheme]);
 
   const clampedSelected = Math.min(selected, Math.max(0, entries.length - 1));
 

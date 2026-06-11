@@ -319,6 +319,29 @@ export async function personalUpload(files: File[]): Promise<Record<string, unkn
   return res.json();
 }
 
+/* ── SQL database (query_sql tool, MSSQL etc.) ── */
+export interface SqlConfig {
+  enabled: boolean;
+  db_type: string;
+  host: string;
+  port: string;
+  database: string;
+  username: string;
+  password?: string;
+  password_set?: boolean;
+  odbc_driver: string;
+}
+export const fetchSqlConfig = () => getJSON<SqlConfig>('/api/sql/config');
+export const saveSqlConfig = (cfg: SqlConfig) => postJSON('/api/sql/config', cfg, 'PUT');
+export const deleteSqlConfig = () => postJSON('/api/sql/config', undefined, 'DELETE');
+export const testSqlConfig = () => postJSON<{ ok?: boolean; detail?: string;[key: string]: unknown }>('/api/sql/test');
+
+/* ── Built-in agent tools ── */
+export interface BuiltinTool { id: string; enabled: boolean }
+export const fetchBuiltinTools = async () =>
+  (await getJSON<{ tools?: BuiltinTool[] }>('/api/tools')).tools ?? [];
+export const saveDisabledTools = (disabled: string[]) => postJSON('/api/tools', { disabled });
+
 /* ── System: backup + danger zone ── */
 export const importData = (data: unknown) => postJSON<{ ok?: boolean; message?: string }>('/api/import', data);
 export const wipeData = (kind: string) => postJSON<{ ok?: boolean;[key: string]: unknown }>(`/api/admin/wipe/${kind}`, undefined, 'DELETE');

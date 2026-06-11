@@ -55,7 +55,7 @@ export default function App() {
           </main>
           <ArtifactsPanel open={files} onClose={() => setFiles(false)} />
         </div>
-        <CommandPalette open={palette} onClose={() => setPalette(false)} />
+        <CommandPalette open={palette} onClose={() => setPalette(false)} onOpenSettings={() => setSettings(true)} />
         <SettingsDialog open={settings} onClose={() => setSettings(false)} />
         <BrainDialog open={brain} onClose={() => setBrain(false)} />
         <LibraryDialog open={library} onClose={() => setLibrary(false)} />

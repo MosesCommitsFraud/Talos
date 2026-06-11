@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   BotIcon,
+  ChevronRightIcon,
   DatabaseIcon,
   KeyboardIcon,
   Link2Icon,
@@ -27,12 +28,12 @@ import {
   fetchAppSettings,
   fetchAuthInfo,
   fetchAuthStatus,
-  fetchFeatures,
+  fetchBuiltinTools,
   fetchIntegrationPresets,
   fetchIntegrations,
   fetchModels,
   fetchRagConfig,
-  fetchRuntime,
+  fetchSqlConfig,
   fetchTotpStatus,
   fetchUsers,
   importData,
@@ -42,8 +43,11 @@ import {
   personalUpload,
   ragSearch,
   saveAppSettings,
-  saveFeatures,
+  saveDisabledTools,
   saveRagConfig,
+  saveSqlConfig,
+  deleteSqlConfig,
+  testSqlConfig,
   setUserAdmin,
   testModelEndpoint,
   testRagConfig,
@@ -55,6 +59,7 @@ import {
   wipeData,
   type AppSettings,
   type RagConfig,
+  type SqlConfig,
 } from '@/api/client';
 import { applyDensity, applyTheme, usePrefs, type Density, type Theme, type Visibility } from '@/state/prefs';
 import { cn } from '@/lib/utils';
@@ -151,15 +156,7 @@ function TextRow({ s, k, label, hint, placeholder, type, width }: { s: Draft; k:
   );
 }
 
-function SelectRow({ s, k, label, options, hint }: { s: Draft; k: string; label: string; options: string[]; hint?: string }) {
-  return (
-    <Row label={label} hint={hint}>
-      <Select className="w-56" value={String(s.value(k) ?? '')} onChange={(v) => s.setValue(k, v)} options={options.map((o) => ({ value: o }))} />
-    </Row>
-  );
-}
-
-/* ── Endpoint + model pickers (Default/Utility/Research models) ── */
+/* ── Endpoint + model pickers (Default/Utility models) ── */
 
 function useEndpoints() {
   const { data } = useQuery({ queryKey: ['models'], queryFn: fetchModels });
@@ -189,6 +186,22 @@ function EndpointModelRows({ s, epKey, modelKey, label }: { s: Draft; epKey: str
         />
       </Row>
     </>
+  );
+}
+
+/** Vision model — legacy offers "Auto-detect" ('' value) plus every model. */
+function VisionModelRow({ s }: { s: Draft }) {
+  const endpoints = useEndpoints();
+  const models = endpoints.flatMap((e) => e.models);
+  return (
+    <Row label="Vision model">
+      <Select
+        className="w-56"
+        value={String(s.value('vision_model') ?? '')}
+        onChange={(v) => s.setValue('vision_model', v)}
+        options={[{ value: '', label: 'Auto-detect' }, ...models.map((m) => ({ value: m }))]}
+      />
+    </Row>
   );
 }
 
@@ -254,16 +267,35 @@ function SegmentPicker<T extends string>({ options, current, onPick }: { options
   );
 }
 
-const VISIBILITY_SECTIONS: Array<{ title: string; items: Array<{ key: keyof Visibility; label: string }> }> = [
-  { title: 'Sidebar', items: [{ key: 'sidebarBrain', label: 'Brain' }, { key: 'sidebarLibrary', label: 'Library' }] },
-  { title: 'Chat Area', items: [{ key: 'messageMetrics', label: 'Response metrics (tok/s, time)' }] },
+const VISIBILITY_SECTIONS: Array<{ title: string; items: Array<{ key: keyof Visibility; label: string; hint?: string }> }> = [
+  {
+    title: 'Sidebar',
+    items: [
+      { key: 'sidebarBrain', label: 'Brain' },
+      { key: 'sidebarLibrary', label: 'Library' },
+      { key: 'sidebarUserBar', label: 'User', hint: 'Avatar & name' },
+      { key: 'sidebarSettingsBtn', label: 'Settings Button', hint: 'Cog next to user' },
+    ],
+  },
+  {
+    title: 'Chat Area',
+    items: [
+      { key: 'chatHeader', label: 'Session Header', hint: 'Title, export & files above chat' },
+      { key: 'welcomeText', label: 'Welcome Message', hint: 'Logo & greeting on empty chat' },
+      { key: 'showThinking', label: 'Thinking Process', hint: 'Collapsible reasoning rows' },
+      { key: 'incognitoBtn', label: 'Incognito Mode', hint: 'No memory, no history saved' },
+      { key: 'messageMetrics', label: 'Response Metrics', hint: 'tok/s & time under replies' },
+    ],
+  },
   {
     title: 'Chat Bar',
     items: [
-      { key: 'composerPlan', label: 'Plan toggle' },
-      { key: 'composerDocs', label: 'Docs (RAG) toggle' },
-      { key: 'composerDb', label: 'Database toggle' },
-      { key: 'contextMeter', label: 'Context window meter' },
+      { key: 'composerAttach', label: 'Attach Files' },
+      { key: 'composerPlan', label: 'Plan Toggle' },
+      { key: 'composerDocs', label: 'Docs (RAG) Toggle' },
+      { key: 'composerDb', label: 'Database Toggle' },
+      { key: 'composerModelPicker', label: 'Model Picker' },
+      { key: 'contextMeter', label: 'Context Window Meter' },
     ],
   },
 ];
@@ -288,7 +320,7 @@ function AppearancePanel() {
         <div key={sec.title}>
           <SectionTitle>{sec.title}</SectionTitle>
           {sec.items.map((it) => (
-            <Row key={it.key} label={it.label}>
+            <Row key={it.key} label={it.label} hint={it.hint}>
               <Switch checked={prefs.visibility[it.key]} onCheckedChange={(v) => prefs.setVisibility(it.key, v)} />
             </Row>
           ))}
@@ -510,7 +542,9 @@ function AiDefaultsPanel() {
       <FallbacksEditor s={s} k="default_model_fallbacks" />
 
       <SectionTitle>Utility Model</SectionTitle>
-      <p className="pb-1 text-xs text-muted-foreground">Small fast model for titles, summaries and background jobs.</p>
+      <p className="pb-1 text-xs text-muted-foreground">
+        Small fast model for titles, summaries and background jobs. Recommended: local endpoint.
+      </p>
       <EndpointModelRows s={s} epKey="utility_endpoint_id" modelKey="utility_model" label="Utility" />
       <FallbacksEditor s={s} k="utility_model_fallbacks" />
 
@@ -520,42 +554,12 @@ function AiDefaultsPanel() {
 
       <SectionTitle>Vision</SectionTitle>
       <BoolRow s={s} k="vision_enabled" label="Vision enabled" />
-      <TextRow s={s} k="vision_model" label="Vision model" />
+      <VisionModelRow s={s} />
       <FallbacksEditor s={s} k="vision_model_fallbacks" />
-
-      <SectionTitle>Research Model</SectionTitle>
-      <EndpointModelRows s={s} epKey="research_endpoint_id" modelKey="research_model" label="Research" />
-      <SelectRow s={s} k="research_search_provider" label="Search" options={['', 'searxng', 'duckduckgo', 'tavily', 'brave', 'google', 'serper']} />
-      <TextRow s={s} k="research_max_tokens" label="Max tokens" type="number" width="w-24" />
-      <TextRow s={s} k="research_extraction_timeout_seconds" label="Extract timeout (s)" type="number" width="w-24" />
-      <TextRow s={s} k="research_extraction_concurrency" label="Extract parallel" type="number" width="w-24" />
-      <TextRow s={s} k="research_run_timeout_seconds" label="Max time (s)" type="number" width="w-24" />
 
       <SectionTitle>Agent</SectionTitle>
       <TextRow s={s} k="agent_max_tool_calls" label="Tool call limit" hint="0 = unlimited" type="number" width="w-24" />
       <TextRow s={s} k="agent_max_rounds" label="Max steps per message" type="number" width="w-24" />
-
-      <SectionTitle>Image Generation</SectionTitle>
-      <BoolRow s={s} k="image_gen_enabled" label="Image generation" />
-      <TextRow s={s} k="image_model" label="Model" />
-      <SelectRow s={s} k="image_quality" label="Quality" options={['low', 'medium', 'high']} />
-
-      <SectionTitle>Text-to-Speech</SectionTitle>
-      <BoolRow s={s} k="tts_enabled" label="TTS enabled" />
-      <SelectRow s={s} k="tts_provider" label="Provider" options={['disabled', 'browser', 'local']} />
-      <TextRow s={s} k="tts_model" label="Model" />
-      <TextRow s={s} k="tts_voice" label="Voice" />
-      <SelectRow s={s} k="tts_speed" label="Speed" options={['0.5', '0.75', '1', '1.25', '1.5', '2']} />
-
-      <SectionTitle>Speech-to-Text</SectionTitle>
-      <BoolRow s={s} k="stt_enabled" label="STT enabled" />
-      <SelectRow s={s} k="stt_provider" label="Provider" options={['disabled', 'browser', 'local']} />
-      <TextRow s={s} k="stt_model" label="Model" />
-      <TextRow s={s} k="stt_language" label="Language" placeholder="auto" width="w-24" />
-
-      <SectionTitle>Teacher</SectionTitle>
-      <BoolRow s={s} k="teacher_enabled" label="Teacher escalation" hint="Escalate hard problems to a stronger model" />
-      <TextRow s={s} k="teacher_model" label="Teacher model" />
 
       <SaveBar dirty={s.dirty} saving={s.save.isPending} error={s.save.isError ? (s.save.error as Error).message : undefined} onSave={() => s.save.mutate()} />
     </DialogSection>
@@ -565,7 +569,6 @@ function AiDefaultsPanel() {
 /* ── Integrations (web search + integration CRUD) ── */
 
 function IntegrationsPanel() {
-  const s = useSettingsDraft();
   const { data: integrations } = useQuery({ queryKey: ['integrations'], queryFn: fetchIntegrations });
   const { data: presets } = useQuery({ queryKey: ['intg-presets'], queryFn: fetchIntegrationPresets });
   const [preset, setPreset] = useState('');
@@ -588,22 +591,8 @@ function IntegrationsPanel() {
 
   return (
     <DialogSection>
-      <SectionTitle>Web Search</SectionTitle>
-      {s.ready && (
-        <>
-          <SelectRow s={s} k="search_provider" label="Provider" options={['searxng', 'duckduckgo', 'tavily', 'brave', 'google_pse', 'serper']} />
-          <TextRow s={s} k="search_url" label="Provider URL" placeholder="http://searxng:8080" />
-          <TextRow s={s} k="search_result_count" label="Result count" type="number" width="w-24" />
-          <SelectRow s={s} k="search_safesearch" label="SafeSearch" options={['strict', 'moderate', 'off']} />
-          <TextRow s={s} k="brave_api_key" label="Brave API key" type="password" />
-          <TextRow s={s} k="google_pse_key" label="Google PSE key" type="password" />
-          <TextRow s={s} k="google_pse_cx" label="Google PSE cx" />
-          <TextRow s={s} k="tavily_api_key" label="Tavily API key" type="password" />
-          <TextRow s={s} k="serper_api_key" label="Serper API key" type="password" />
-        </>
-      )}
-
       <SectionTitle>Integrations</SectionTitle>
+      <p className="pb-1 text-xs text-muted-foreground">All external service connections in one place.</p>
       <div className="space-y-1.5">
         {(integrations ?? []).map((it, i) => {
           const id = String(it.id ?? i);
@@ -651,47 +640,183 @@ function IntegrationsPanel() {
         <Button size="sm" disabled={!form.name.trim()} onClick={() => void add()}><PlusIcon /> Add</Button>
         {msg && <p className="text-xs text-destructive-foreground">{msg}</p>}
       </div>
-      <SaveBar dirty={s.dirty} saving={s.save.isPending} error={s.save.isError ? (s.save.error as Error).message : undefined} onSave={() => s.save.mutate()} />
+
+      <SectionTitle>SQL Database</SectionTitle>
+      <SqlDatabaseSection />
     </DialogSection>
   );
 }
 
-/* ── Agent Tools (features + disabled built-in tools) ── */
+const SQL_DEFAULT_PORTS: Record<string, string> = { mssql: '1433', postgresql: '5432', mysql: '3306', sqlite: '' };
 
-const FEATURE_LABELS: Record<string, { label: string; hint: string }> = {
-  memory: { label: 'Memory (Brain)', hint: 'Long-term memory tools and the Brain UI' },
-  document_editor: { label: 'Document editor', hint: 'Library documents and artifacts' },
-  rag: { label: 'RAG', hint: 'Document retrieval for chat' },
-  sensitive_filter: { label: 'Sensitive filter', hint: 'Censor module for sensitive output' },
-  gallery: { label: 'Gallery', hint: 'Generated-image gallery' },
+function SqlDatabaseSection() {
+  const { data } = useQuery({ queryKey: ['sql-config'], queryFn: fetchSqlConfig });
+  const [draft, setDraft] = useState<SqlConfig | null>(null);
+  const [msg, setMsg] = useState('');
+  const queryClient = useQueryClient();
+  useEffect(() => {
+    if (data && !draft) setDraft({ ...data, db_type: data.db_type || 'mssql', password: '' });
+  }, [data, draft]);
+  if (!draft) return <p className="text-sm text-muted-foreground">Loading…</p>;
+  const set = (k: keyof SqlConfig, v: unknown) => setDraft({ ...draft, [k]: v } as SqlConfig);
+  const run = (fn: () => Promise<unknown>, ok: string) => {
+    setMsg('');
+    fn()
+      .then(() => { setMsg(ok); void queryClient.invalidateQueries({ queryKey: ['sql-config'] }); })
+      .catch((e) => setMsg((e as Error).message));
+  };
+  return (
+    <div>
+      <p className="pb-1 text-xs text-muted-foreground">
+        Read-only SQL database used by the <code className="font-mono">query_sql</code> tool. The password is stored
+        server-side and never shown to the model.
+      </p>
+      <Row label="Enabled"><Switch checked={draft.enabled} onCheckedChange={(v) => set('enabled', v)} /></Row>
+      <Row label="Type">
+        <Select
+          className="w-56"
+          value={draft.db_type}
+          onChange={(v) => set('db_type', v)}
+          options={[
+            { value: 'mssql', label: 'MSSQL' },
+            { value: 'postgresql', label: 'PostgreSQL' },
+            { value: 'mysql', label: 'MySQL/MariaDB' },
+            { value: 'sqlite', label: 'SQLite' },
+          ]}
+        />
+      </Row>
+      <Row label="Host"><Input className="w-56" placeholder="db.example.local" value={draft.host} onChange={(e) => set('host', e.target.value)} /></Row>
+      <Row label="Port"><Input className="w-56" placeholder={SQL_DEFAULT_PORTS[draft.db_type] ?? ''} value={draft.port} onChange={(e) => set('port', e.target.value)} /></Row>
+      <Row label="Database"><Input className="w-56" placeholder="Database name or SQLite path" value={draft.database} onChange={(e) => set('database', e.target.value)} /></Row>
+      <Row label="Read-only user"><Input className="w-56" autoComplete="off" value={draft.username} onChange={(e) => set('username', e.target.value)} /></Row>
+      <Row label="Password">
+        <Input
+          className="w-56" type="password" autoComplete="new-password"
+          placeholder={data?.password_set ? 'Saved — leave blank to keep' : ''}
+          value={draft.password ?? ''}
+          onChange={(e) => set('password', e.target.value)}
+        />
+      </Row>
+      <Row label="ODBC driver"><Input className="w-56" placeholder="ODBC Driver 18 for SQL Server" value={draft.odbc_driver} onChange={(e) => set('odbc_driver', e.target.value)} /></Row>
+      <div className="flex items-center gap-2 pt-2">
+        <Button size="sm" onClick={() => run(() => saveSqlConfig(draft), 'Saved')}>Save</Button>
+        <Button size="sm" variant="outline" onClick={() => run(testSqlConfig, 'Connection OK')}>Test</Button>
+        <Button size="sm" variant="destructive-outline" onClick={() => {
+          if (window.confirm('Remove the SQL database configuration?')) run(() => deleteSqlConfig().then(() => setDraft(null)), 'Removed');
+        }}>Remove</Button>
+        {msg && <span className={cn('text-xs', /Saved|OK|Removed/.test(msg) ? 'text-success' : 'text-destructive-foreground')}>{msg}</span>}
+      </div>
+    </div>
+  );
+}
+
+/* ── Agent Tools (built-in tool toggles, grouped by category like legacy) ── */
+
+const TOOL_META: Record<string, { name: string; desc: string; cat: string; ctx: string }> = {
+  bash: { name: 'Shell', desc: 'Execute bash commands', cat: 'Code', ctx: '~200' },
+  python: { name: 'Python', desc: 'Run Python scripts', cat: 'Code', ctx: '~200' },
+  read_file: { name: 'Read File', desc: 'Read files from disk', cat: 'Code', ctx: '~150' },
+  write_file: { name: 'Write File', desc: 'Write/create files', cat: 'Code', ctx: '~150' },
+  web_search: { name: 'Web Search', desc: 'Search the web via SearXNG', cat: 'Search', ctx: '~300' },
+  search_chats: { name: 'Search Chats', desc: 'Search conversation history', cat: 'Search', ctx: '~150' },
+  create_document: { name: 'Create Document', desc: 'Create new documents', cat: 'Documents', ctx: '~200' },
+  update_document: { name: 'Update Document', desc: 'Modify existing documents', cat: 'Documents', ctx: '~200' },
+  edit_document: { name: 'Edit Document', desc: 'Find & replace in documents', cat: 'Documents', ctx: '~200' },
+  suggest_document: { name: 'Suggest Changes', desc: 'Propose document edits', cat: 'Documents', ctx: '~200' },
+  manage_documents: { name: 'Manage Documents', desc: 'List, delete, organize docs', cat: 'Documents', ctx: '~150' },
+  generate_image: { name: 'Generate Image', desc: 'Create images via AI', cat: 'Media', ctx: '~150' },
+  manage_memory: { name: 'Memory', desc: 'Save and recall memories', cat: 'Knowledge', ctx: '~200' },
+  manage_skills: { name: 'Skills', desc: 'Learn and use procedures', cat: 'Knowledge', ctx: '~200' },
+  manage_rag: { name: 'RAG / Docs', desc: 'Query indexed documents', cat: 'Knowledge', ctx: '~150' },
+  query_sql: { name: 'SQL Database', desc: 'Read configured SQL database', cat: 'Knowledge', ctx: '~200' },
+  chat_with_model: { name: 'Chat with Model', desc: 'Talk to another AI model', cat: 'Multi-Agent', ctx: '~200' },
+  second_opinion: { name: 'Second Opinion', desc: "Get another model's take", cat: 'Multi-Agent', ctx: '~150' },
+  pipeline: { name: 'Pipeline', desc: 'Multi-step AI workflows', cat: 'Multi-Agent', ctx: '~200' },
+  ask_teacher: { name: 'Ask Teacher', desc: 'Query a more capable model', cat: 'Multi-Agent', ctx: '~150' },
+  send_to_session: { name: 'Send to Session', desc: 'Send message to another chat', cat: 'Sessions', ctx: '~100' },
+  create_session: { name: 'Create Session', desc: 'Start a new chat session', cat: 'Sessions', ctx: '~100' },
+  list_sessions: { name: 'List Sessions', desc: 'Browse existing sessions', cat: 'Sessions', ctx: '~100' },
+  manage_session: { name: 'Manage Session', desc: 'Rename, archive, configure', cat: 'Sessions', ctx: '~100' },
+  list_models: { name: 'List Models', desc: 'Show available models', cat: 'System', ctx: '~100' },
+  ui_control: { name: 'UI Control', desc: 'Change theme, layout, settings', cat: 'System', ctx: '~150' },
+  manage_tasks: { name: 'Tasks', desc: 'Schedule automated tasks', cat: 'System', ctx: '~150' },
+  api_call: { name: 'API Call', desc: 'Make HTTP requests', cat: 'System', ctx: '~200' },
+  manage_endpoints: { name: 'Endpoints', desc: 'Add/remove model endpoints', cat: 'System', ctx: '~100' },
+  manage_mcp: { name: 'MCP Servers', desc: 'Manage MCP connections', cat: 'System', ctx: '~100' },
+  manage_webhooks: { name: 'Webhooks', desc: 'Configure webhook events', cat: 'System', ctx: '~100' },
+  manage_tokens: { name: 'API Tokens', desc: 'Manage API access tokens', cat: 'System', ctx: '~100' },
+  manage_settings: { name: 'Settings', desc: 'Change app settings', cat: 'System', ctx: '~100' },
 };
+const TOOL_CAT_ORDER = ['Code', 'Search', 'Documents', 'Media', 'Knowledge', 'Multi-Agent', 'Sessions', 'System', 'Other'];
 
 function ToolsPanel() {
-  const { data } = useQuery({ queryKey: ['features'], queryFn: fetchFeatures });
-  const s = useSettingsDraft();
+  const { data: tools } = useQuery({ queryKey: ['builtin-tools'], queryFn: fetchBuiltinTools });
+  const [openCats, setOpenCats] = useState<Record<string, boolean>>({});
   const queryClient = useQueryClient();
-  const toggleFeature = useMutation({
-    mutationFn: (next: Record<string, boolean>) => saveFeatures(next),
-    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ['features'] }),
+  const save = useMutation({
+    mutationFn: saveDisabledTools,
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ['builtin-tools'] }),
   });
-  const disabled: string[] = Array.isArray(s.value('disabled_tools')) ? (s.value('disabled_tools') as string[]) : [];
+
+  if (!tools) return <DialogSection className="text-sm text-muted-foreground">Loading…</DialogSection>;
+  if (tools.length === 0) return <DialogSection className="text-sm text-muted-foreground">No tools found.</DialogSection>;
+
+  const setEnabled = (changes: Record<string, boolean>) => {
+    const disabled = tools
+      .filter((t) => !(changes[t.id] ?? t.enabled))
+      .map((t) => t.id);
+    save.mutate(disabled);
+  };
+
+  const groups = new Map<string, Array<{ id: string; enabled: boolean; name: string; desc: string; ctx: string }>>();
+  for (const t of tools) {
+    const meta = TOOL_META[t.id] ?? { name: t.id, desc: '', cat: 'Other', ctx: '?' };
+    if (!groups.has(meta.cat)) groups.set(meta.cat, []);
+    groups.get(meta.cat)!.push({ ...t, ...meta });
+  }
+
   return (
-    <DialogSection>
+    <DialogSection className="space-y-2">
       <SectionTitle>Built-in Tools</SectionTitle>
-      <p className="pb-1 text-xs text-muted-foreground">Toggle features on/off across the interface for all users.</p>
-      {data && Object.entries(data).map(([key, enabled]) => (
-        <Row key={key} label={FEATURE_LABELS[key]?.label ?? key} hint={FEATURE_LABELS[key]?.hint}>
-          <Switch checked={enabled} onCheckedChange={(v) => toggleFeature.mutate({ ...data, [key]: v })} />
-        </Row>
-      ))}
-      <SectionTitle>Disabled agent tools</SectionTitle>
-      <p className="pb-1 text-xs text-muted-foreground">Comma-separated tool names the agent must not use (e.g. run_bash, web_search).</p>
-      <Input
-        value={disabled.join(', ')}
-        placeholder="none"
-        onChange={(e) => s.setValue('disabled_tools', e.target.value.split(',').map((t) => t.trim()).filter(Boolean))}
-      />
-      <SaveBar dirty={s.dirty} saving={s.save.isPending} error={s.save.isError ? (s.save.error as Error).message : undefined} onSave={() => s.save.mutate()} />
+      <p className="pb-1 text-xs text-muted-foreground">Enable or disable tools available to the AI agent.</p>
+      {TOOL_CAT_ORDER.filter((c) => groups.has(c)).map((cat) => {
+        const items = groups.get(cat)!;
+        const enabledCount = items.filter((i) => i.enabled).length;
+        const open = !!openCats[cat];
+        return (
+          <div key={cat} className="overflow-hidden rounded-xl border bg-card">
+            <div className="flex w-full items-center gap-2 px-3 py-2">
+              <button
+                type="button"
+                onClick={() => setOpenCats((o) => ({ ...o, [cat]: !o[cat] }))}
+                className="flex min-w-0 flex-1 items-center gap-2 text-left text-sm font-medium"
+              >
+                <ChevronRightIcon className={cn('size-3.5 text-muted-foreground transition-transform', open && 'rotate-90')} />
+                {cat}
+                <span className="text-[11px] text-muted-foreground">{enabledCount}/{items.length}</span>
+              </button>
+              <Switch
+                checked={enabledCount === items.length}
+                onCheckedChange={(v) => setEnabled(Object.fromEntries(items.map((i) => [i.id, v])))}
+              />
+            </div>
+            {open && (
+              <div className="border-t">
+                {items.map((t) => (
+                  <div key={t.id} className="flex items-center gap-3 px-3 py-2 not-last:border-b">
+                    <div className="min-w-0 flex-1">
+                      <div className="text-sm">{t.name}</div>
+                      <div className="truncate text-xs text-muted-foreground">{t.desc}</div>
+                    </div>
+                    <span className="shrink-0 font-mono text-[10px] text-muted-foreground" title="Approximate context tokens used">{t.ctx}</span>
+                    <Switch checked={t.enabled} onCheckedChange={(v) => setEnabled({ [t.id]: v })} />
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        );
+      })}
     </DialogSection>
   );
 }
@@ -850,29 +975,30 @@ function UsersPanel({ currentUser }: { currentUser?: string }) {
 
 /* ── System (backup + danger zone) ── */
 
-const WIPE_KINDS = ['chats', 'memory', 'skills', 'notes', 'tasks', 'documents', 'gallery', 'calendar'];
+const WIPE_ROWS: Array<{ kind: string; label: string; sub: string }> = [
+  { kind: 'chats', label: 'Wipe all chats', sub: 'Every session, message, and chat history. Documents/notes/etc. stay.' },
+  { kind: 'memory', label: 'Wipe all memory', sub: 'Clears memory.json, the Memory table, and the vector store. Skills not affected.' },
+  { kind: 'skills', label: 'Wipe all skills', sub: 'Drops data/skills/ (all SKILL.md files). Memory not affected.' },
+  { kind: 'notes', label: 'Wipe all notes', sub: 'Every note, todo, and checklist.' },
+  { kind: 'tasks', label: 'Wipe all tasks', sub: 'All scheduled tasks and their run history.' },
+  { kind: 'documents', label: 'Wipe all documents', sub: 'Every library document and artifact.' },
+  { kind: 'gallery', label: 'Wipe all gallery images', sub: 'All generated images in the gallery.' },
+  { kind: 'calendar', label: 'Wipe all calendar entries', sub: 'Every calendar event and reminder.' },
+];
 
 function SystemPanel() {
-  const { data: runtime } = useQuery({ queryKey: ['runtime'], queryFn: fetchRuntime });
   const [msg, setMsg] = useState('');
   return (
     <DialogSection>
-      <SectionTitle>Runtime</SectionTitle>
-      <div className="space-y-1 rounded-lg border bg-card px-3 py-2">
-        {Object.entries(runtime ?? {}).map(([k, v]) => (
-          <div key={k} className="flex justify-between gap-4 text-xs">
-            <span className="text-muted-foreground">{k}</span>
-            <span className="truncate font-mono">{typeof v === 'object' ? JSON.stringify(v) : String(v)}</span>
-          </div>
-        ))}
-      </div>
-
       <SectionTitle>Data Backup</SectionTitle>
+      <p className="pb-1 text-xs text-muted-foreground">
+        Export or import your user data (memories, presets, settings, skills, preferences) as a JSON file.
+      </p>
       <div className="flex items-center gap-2">
-        <Button variant="outline" size="sm" onClick={() => { window.location.href = '/api/export'; }}>Export data</Button>
-        <Button variant="outline" size="sm" onClick={() => document.getElementById('sys-import-input')?.click()}>Import data…</Button>
+        <Button variant="outline" size="sm" onClick={() => { window.location.href = '/api/export'; }}>Export Data</Button>
+        <Button variant="outline" size="sm" onClick={() => document.getElementById('sys-import-input')?.click()}>Import Data</Button>
         <input
-          id="sys-import-input" type="file" accept="application/json" hidden
+          id="sys-import-input" type="file" accept=".json" hidden
           onChange={(e) => {
             const file = e.target.files?.[0];
             e.target.value = '';
@@ -885,22 +1011,32 @@ function SystemPanel() {
         />
       </div>
 
-      <SectionTitle>Danger Zone</SectionTitle>
-      <p className="pb-1 text-xs text-muted-foreground">Permanently wipe a data category for all users. This cannot be undone.</p>
-      <div className="flex flex-wrap gap-2">
-        {WIPE_KINDS.map((kind) => (
-          <Button
-            key={kind}
-            variant="destructive-outline"
-            size="sm"
-            onClick={() => {
-              if (window.confirm(`Wipe ALL ${kind}? This cannot be undone.`)) {
-                void wipeData(kind).then(() => setMsg(`Wiped ${kind}`)).catch((e) => setMsg((e as Error).message));
-              }
-            }}
-          >
-            <Trash2Icon /> {kind}
-          </Button>
+      <SectionTitle>
+        <span className="text-destructive-foreground">Danger Zone</span>
+      </SectionTitle>
+      <p className="pb-1 text-xs text-muted-foreground">
+        Irreversible. Each wipe targets one category — pick exactly what you want gone.
+      </p>
+      <div className="space-y-1">
+        {WIPE_ROWS.map((row) => (
+          <div key={row.kind} className="flex items-center justify-between gap-4 py-1.5">
+            <div className="min-w-0">
+              <div className="text-sm">{row.label}</div>
+              <div className="text-xs text-muted-foreground">{row.sub}</div>
+            </div>
+            <Button
+              variant="destructive-outline"
+              size="sm"
+              className="shrink-0"
+              onClick={() => {
+                if (window.confirm(`${row.label}? This cannot be undone.`)) {
+                  void wipeData(row.kind).then(() => setMsg(`Wiped ${row.kind}`)).catch((e) => setMsg((e as Error).message));
+                }
+              }}
+            >
+              Wipe
+            </Button>
+          </div>
         ))}
       </div>
       {msg && <p className="pt-2 text-xs text-muted-foreground">{msg}</p>}
@@ -946,8 +1082,8 @@ export function SettingsDialog({ open, onClose }: { open: boolean; onClose: () =
   return (
     <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
       <DialogContent title="Settings" className="w-[min(800px,94vw)]">
-        <div className="flex min-h-[520px]">
-          <div className="w-44 shrink-0 space-y-0.5 overflow-y-auto border-r p-2">
+        <div className="flex h-[min(640px,78vh)]">
+          <div className="w-44 shrink-0 space-y-0.5 border-r p-2">
             {userNav.map((n) => <NavButton key={n.id} n={n} />)}
             {auth?.is_admin && (
               <>

@@ -5,8 +5,9 @@ import { fetchModels } from '@/api/client';
 import { useChat } from '@/state/chat';
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from './ui/menu';
 
-/** Quiet ghost-pill model selector for the composer. */
-export function ModelPicker() {
+/** Quiet ghost-pill model selector for the composer. Stays mounted even when
+ *  hidden so the default-model effect keeps running. */
+export function ModelPicker({ visible = true }: { visible?: boolean }) {
   const { data: endpoints } = useQuery({ queryKey: ['models'], queryFn: fetchModels });
   const pendingModel = useChat((s) => s.pendingModel);
   const setPendingModel = useChat((s) => s.setPendingModel);
@@ -23,6 +24,8 @@ export function ModelPicker() {
   }, [options.length, pendingModel, setPendingModel]);
 
   const label = pendingModel?.model ?? 'Select model';
+
+  if (!visible) return null;
 
   return (
     <Menu>

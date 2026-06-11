@@ -141,6 +141,8 @@ function EditBox({ msg, onDone }: { msg: UiMessage; onDone: () => void }) {
 export function Messages() {
   const messages = useChat((s) => s.messages);
   const showMetrics = usePrefs((s) => s.visibility.messageMetrics);
+  const showWelcome = usePrefs((s) => s.visibility.welcomeText);
+  const showThinking = usePrefs((s) => s.visibility.showThinking);
   const [editing, setEditing] = useState<string | null>(null);
   const scroller = useRef<HTMLDivElement>(null);
   const pinned = useRef(true);
@@ -160,8 +162,12 @@ export function Messages() {
   if (messages.length === 0) {
     return (
       <div className="flex flex-1 flex-col items-center justify-center gap-3 select-none">
-        <Logo />
-        <h1 className="text-2xl font-semibold tracking-tight">What can I help with?</h1>
+        {showWelcome && (
+          <>
+            <Logo />
+            <h1 className="text-2xl font-semibold tracking-tight">What can I help with?</h1>
+          </>
+        )}
       </div>
     );
   }
@@ -188,7 +194,7 @@ export function Messages() {
             </div>
           ) : (
             <div key={m.id} className="group w-full">
-              {m.thinking && <Thinking text={m.thinking} streaming={!!m.streaming && !m.content} />}
+              {m.thinking && showThinking && <Thinking text={m.thinking} streaming={!!m.streaming && !m.content} />}
               {m.tools?.map((t, i) => <ToolRow key={i} call={t} />)}
               {m.content ? (
                 <div className={m.error ? 'text-destructive-foreground' : ''}>

@@ -147,7 +147,7 @@ export function Composer() {
             }}
             className="max-h-[200px] min-h-[26px] w-full resize-none bg-transparent text-[15px] leading-relaxed outline-none placeholder:text-muted-foreground"
           />
-          <ModelPicker />
+          <ModelPicker visible={prefs.visibility.composerModelPicker} />
         </div>
 
         <div className="flex items-center gap-1 px-2.5 pt-1.5 pb-2.5">
@@ -158,12 +158,14 @@ export function Composer() {
             hidden
             onChange={(e) => { if (e.target.files) void attach(e.target.files); e.target.value = ''; }}
           />
-          <ToggleIcon
-            active={false}
-            onClick={() => fileInput.current?.click()}
-            icon={<PaperclipIcon className={uploading ? 'animate-pulse' : undefined} />}
-            tooltip="Attach files"
-          />
+          {prefs.visibility.composerAttach && (
+            <ToggleIcon
+              active={false}
+              onClick={() => fileInput.current?.click()}
+              icon={<PaperclipIcon className={uploading ? 'animate-pulse' : undefined} />}
+              tooltip="Attach files"
+            />
+          )}
           {prefs.visibility.composerPlan && (
             <ToggleIcon active={prefs.planMode} onClick={() => prefs.toggle('planMode')} icon={<ListTodoIcon />} tooltip="Plan before acting" />
           )}

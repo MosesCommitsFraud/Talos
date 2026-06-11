@@ -35,8 +35,11 @@ export function ChatHeader({ onToggleFiles, filesOpen }: { onToggleFiles: () => 
   const [draft, setDraft] = useState('');
   const [copied, setCopied] = useState(false);
 
+  const visibility = usePrefs((s) => s.visibility);
   const session = sessions?.find((s) => s.id === sessionId);
   const title = session?.name ?? '';
+
+  if (!visibility.chatHeader) return null;
 
   const commitRename = async () => {
     setRenaming(false);
@@ -151,6 +154,7 @@ export function ChatHeader({ onToggleFiles, filesOpen }: { onToggleFiles: () => 
         </Menu>
       )}
 
+      {visibility.incognitoBtn && (
       <Tooltip label={incognito ? 'Incognito on — chat not saved' : 'Incognito off'}>
         <button
           type="button"
@@ -167,6 +171,7 @@ export function ChatHeader({ onToggleFiles, filesOpen }: { onToggleFiles: () => 
           <GhostIcon className="size-4" />
         </button>
       </Tooltip>
+      )}
     </header>
   );
 }

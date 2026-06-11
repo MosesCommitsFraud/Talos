@@ -181,6 +181,15 @@ class PreviewHandler(BaseHTTPRequestHandler):
         if path in ("/api/models", "/api/model-endpoints"):
             self._send_json(_models())
             return
+        if path == "/api/tools":
+            self._send_json({"tools": [
+                {"id": t, "enabled": t != "generate_image"}
+                for t in ("bash", "python", "read_file", "write_file", "web_search",
+                          "search_chats", "create_document", "generate_image",
+                          "manage_memory", "manage_skills", "query_sql",
+                          "chat_with_model", "list_models", "manage_tasks")
+            ]})
+            return
         if path == "/api/prefs/theme":
             self._send_json({})
             return

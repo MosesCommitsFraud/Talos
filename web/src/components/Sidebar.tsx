@@ -255,22 +255,31 @@ export function Sidebar({
           <ExternalLinkIcon />
           <span className="flex-1 text-left">Legacy UI</span>
         </a>
-        <div className="flex items-center gap-2 rounded-lg px-2 py-1.5">
-          <div className="flex size-6 items-center justify-center rounded-full bg-primary/15 text-[11px] font-semibold text-primary">
-            {(auth?.user ?? 'U').slice(0, 1).toUpperCase()}
+        {(visibility.sidebarUserBar || visibility.sidebarSettingsBtn) && (
+          <div className="flex items-center gap-2 rounded-lg px-2 py-1.5">
+            {visibility.sidebarUserBar && (
+              <>
+                <div className="flex size-6 items-center justify-center rounded-full bg-primary/15 text-[11px] font-semibold text-primary">
+                  {(auth?.user ?? 'U').slice(0, 1).toUpperCase()}
+                </div>
+                <span className="min-w-0 flex-1 truncate text-sm">{auth?.user ?? 'User'}</span>
+              </>
+            )}
+            {!visibility.sidebarUserBar && <span className="flex-1" />}
+            {visibility.sidebarSettingsBtn && (
+              <Tooltip label="Settings — re-open via ⌘K if hidden">
+                <button
+                  type="button"
+                  onClick={onOpenSettings}
+                  aria-label="Settings"
+                  className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                >
+                  <SettingsIcon className="size-4" />
+                </button>
+              </Tooltip>
+            )}
           </div>
-          <span className="min-w-0 flex-1 truncate text-sm">{auth?.user ?? 'User'}</span>
-          <Tooltip label="Settings">
-            <button
-              type="button"
-              onClick={onOpenSettings}
-              aria-label="Settings"
-              className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-            >
-              <SettingsIcon className="size-4" />
-            </button>
-          </Tooltip>
-        </div>
+        )}
       </div>
     </nav>
   );
