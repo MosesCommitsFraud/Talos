@@ -171,7 +171,7 @@ if AUTH_ENABLED:
     # /assets are the hashed Vite bundles of the new React UI (web/dist) —
     # same sensitivity as /static (code, no data), and the login page redirect
     # flow needs them loadable before a cookie exists.
-    AUTH_EXEMPT_PREFIXES = ["/static", "/assets"]
+    AUTH_EXEMPT_PREFIXES = ["/static", "/assets", "/fonts"]
     import re as _re
     AUTH_EXEMPT_PATTERNS = []
 
@@ -390,6 +390,8 @@ class _ImmutableStatic(StaticFiles):
 
 if os.path.isdir(os.path.join(WEB_DIST, "assets")):
     app.mount("/assets", _ImmutableStatic(directory=os.path.join(WEB_DIST, "assets")), name="webassets")
+    if os.path.isdir(os.path.join(WEB_DIST, "fonts")):
+        app.mount("/fonts", _ImmutableStatic(directory=os.path.join(WEB_DIST, "fonts")), name="webfonts")
     logger.info("New web UI mounted (web/dist) — serving at /, legacy UI at /legacy")
 else:
     logger.info("web/dist not found — serving legacy UI at / (run `npm run build` in web/)")

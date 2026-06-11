@@ -14,7 +14,27 @@ export const fetchSessions = () => getJSON<Session[]>('/api/sessions');
 
 export const fetchSession = (id: string) => getJSON<SessionDetail>(`/api/session/${id}`);
 
-export const fetchModels = () => getJSON<ModelEndpoint[]>('/api/models');
+interface ApiModelItem {
+  endpoint_id?: string;
+  endpoint_name?: string;
+  url?: string;
+  models?: unknown;
+  model_type?: string;
+  offline?: boolean;
+}
+
+export async function fetchModels(): Promise<ModelEndpoint[]> {
+  const data = await getJSON<ModelEndpoint[] | { items?: ApiModelItem[] }>('/api/models');
+  if (Array.isArray(data)) return data;
+  return (Array.isArray(data.items) ? data.items : []).map((item) => ({
+    id: String(item.endpoint_id ?? item.url ?? ''),
+    name: String(item.endpoint_name ?? item.url ?? 'Model endpoint'),
+    base_url: String(item.url ?? ''),
+    models: Array.isArray(item.models) ? item.models.map(String) : [],
+    model_type: String(item.model_type ?? 'llm'),
+    is_enabled: !item.offline,
+  }));
+}
 
 export async function createSession(opts: { endpointId: string; model: string; name?: string }): Promise<Session> {
   const fd = new FormData();
