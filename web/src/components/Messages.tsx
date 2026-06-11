@@ -2,6 +2,7 @@ import { CheckIcon, CopyIcon, FileIcon, PencilIcon, Trash2Icon } from 'lucide-re
 import { useEffect, useRef, useState } from 'react';
 import { uploadDownloadUrl } from '@/api/client';
 import { useChat, type UiMessage } from '@/state/chat';
+import { usePrefs } from '@/state/prefs';
 import { Markdown } from './Markdown';
 import { Thinking } from './Thinking';
 import { ToolRow } from './ToolRow';
@@ -139,6 +140,7 @@ function EditBox({ msg, onDone }: { msg: UiMessage; onDone: () => void }) {
 
 export function Messages() {
   const messages = useChat((s) => s.messages);
+  const showMetrics = usePrefs((s) => s.visibility.messageMetrics);
   const [editing, setEditing] = useState<string | null>(null);
   const scroller = useRef<HTMLDivElement>(null);
   const pinned = useRef(true);
@@ -204,7 +206,7 @@ export function Messages() {
               {!m.streaming && m.content && (
                 <div className="mt-1 flex items-center gap-1">
                   <MessageActions msg={m} />
-                  {m.metrics && (
+                  {showMetrics && m.metrics && (
                     <span className="text-xs text-muted-foreground/80 opacity-0 transition-opacity group-hover:opacity-100">
                       {m.metrics.tokens_per_second != null && `${m.metrics.tokens_per_second} tok/s`}
                       {m.metrics.response_time != null && ` · ${m.metrics.response_time}s`}

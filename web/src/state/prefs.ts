@@ -5,20 +5,44 @@ export type Theme = 'dark' | 'light' | 'system';
 export type Density = 'compact' | 'comfortable' | 'spacious';
 export type SortMode = 'active' | 'newest' | 'name';
 
+/** Per-surface visibility toggles — the new-UI equivalent of legacy's
+ *  Appearance tab (show/hide modules across sidebar, chat area, chat bar). */
+export interface Visibility {
+  sidebarBrain: boolean;
+  sidebarLibrary: boolean;
+  composerPlan: boolean;
+  composerDocs: boolean;
+  composerDb: boolean;
+  contextMeter: boolean;
+  messageMetrics: boolean;
+}
+
+export const DEFAULT_VISIBILITY: Visibility = {
+  sidebarBrain: true,
+  sidebarLibrary: true,
+  composerPlan: true,
+  composerDocs: true,
+  composerDb: true,
+  contextMeter: true,
+  messageMetrics: true,
+};
+
 interface PrefsState {
   theme: Theme;
   density: Density;
   sortMode: SortMode;
+  visibility: Visibility;
   /** Composer toggles — mirror the legacy chat-bar switches. */
   planMode: boolean;
   useRag: boolean;
   useDb: boolean;
-  useWeb: boolean;
   incognito: boolean;
   setTheme: (t: Theme) => void;
   setDensity: (d: Density) => void;
   setSortMode: (m: SortMode) => void;
-  toggle: (key: 'planMode' | 'useRag' | 'useDb' | 'useWeb' | 'incognito') => void;
+  setVisibility: (key: keyof Visibility, value: boolean) => void;
+  resetVisibility: () => void;
+  toggle: (key: 'planMode' | 'useRag' | 'useDb' | 'incognito') => void;
 }
 
 export const usePrefs = create<PrefsState>()(
@@ -27,17 +51,26 @@ export const usePrefs = create<PrefsState>()(
       theme: 'dark',
       density: 'comfortable',
       sortMode: 'active',
+      visibility: DEFAULT_VISIBILITY,
       planMode: false,
       useRag: false,
       useDb: false,
-      useWeb: false,
       incognito: false,
       setTheme: (theme) => set({ theme }),
       setDensity: (density) => set({ density }),
       setSortMode: (sortMode) => set({ sortMode }),
+      setVisibility: (key, value) => set((s) => ({ visibility: { ...s.visibility, [key]: value } })),
+      resetVisibility: () => set({ visibility: DEFAULT_VISIBILITY }),
       toggle: (key) => set((s) => ({ [key]: !s[key] }) as Partial<PrefsState>),
     }),
-    { name: 'talos-prefs' },
+    {
+      name: 'talos-prefs',
+      // Old persisted states predate `visibility`; merge so new keys exist.
+      merge: (persisted, current) => {
+        const p = (persisted ?? {}) as Partial<PrefsState>;
+        return { ...current, ...p, visibility: { ...DEFAULT_VISIBILITY, ...(p.visibility ?? {}) } };
+      },
+    },
   ),
 );
 

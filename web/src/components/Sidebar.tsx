@@ -169,6 +169,7 @@ export function Sidebar({
 
   const sortMode = usePrefs((s) => s.sortMode);
   const setSortMode = usePrefs((s) => s.setSortMode);
+  const visibility = usePrefs((s) => s.visibility);
 
   const visible = (sessions ?? [])
     .filter((s) => !s.archived)
@@ -195,11 +196,15 @@ export function Sidebar({
         />
       </div>
 
-      <div className="px-4 pt-4 pb-1 text-xs font-medium text-muted-foreground">Tools</div>
-      <div className="space-y-0.5 px-2">
-        <NavButton icon={<BrainIcon />} label="Brain" onClick={onOpenBrain} />
-        <NavButton icon={<BookOpenIcon />} label="Library" onClick={onOpenLibrary} />
-      </div>
+      {(visibility.sidebarBrain || visibility.sidebarLibrary) && (
+        <>
+          <div className="px-4 pt-4 pb-1 text-xs font-medium text-muted-foreground">Tools</div>
+          <div className="space-y-0.5 px-2">
+            {visibility.sidebarBrain && <NavButton icon={<BrainIcon />} label="Brain" onClick={onOpenBrain} />}
+            {visibility.sidebarLibrary && <NavButton icon={<BookOpenIcon />} label="Library" onClick={onOpenLibrary} />}
+          </div>
+        </>
+      )}
 
       <div className="flex items-center justify-between px-4 pt-4 pb-1">
         <span className="text-xs font-medium text-muted-foreground">Chats</span>

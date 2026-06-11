@@ -3,7 +3,6 @@ import {
   ArrowUpIcon,
   DatabaseIcon,
   FileTextIcon,
-  GlobeIcon,
   ListTodoIcon,
   PaperclipIcon,
   SquareIcon,
@@ -165,14 +164,19 @@ export function Composer() {
             icon={<PaperclipIcon className={uploading ? 'animate-pulse' : undefined} />}
             tooltip="Attach files"
           />
-          <ToggleIcon active={prefs.planMode} onClick={() => prefs.toggle('planMode')} icon={<ListTodoIcon />} tooltip="Plan before acting" />
-          <ToggleIcon active={prefs.useWeb} onClick={() => prefs.toggle('useWeb')} icon={<GlobeIcon />} tooltip="Search the web" />
-          <ToggleIcon active={prefs.useRag} onClick={() => prefs.toggle('useRag')} icon={<FileTextIcon />} tooltip="Use document RAG" />
-          <ToggleIcon active={prefs.useDb} onClick={() => prefs.toggle('useDb')} icon={<DatabaseIcon />} tooltip="Query connected databases" />
+          {prefs.visibility.composerPlan && (
+            <ToggleIcon active={prefs.planMode} onClick={() => prefs.toggle('planMode')} icon={<ListTodoIcon />} tooltip="Plan before acting" />
+          )}
+          {prefs.visibility.composerDocs && (
+            <ToggleIcon active={prefs.useRag} onClick={() => prefs.toggle('useRag')} icon={<FileTextIcon />} tooltip="Use document RAG" />
+          )}
+          {prefs.visibility.composerDb && (
+            <ToggleIcon active={prefs.useDb} onClick={() => prefs.toggle('useDb')} icon={<DatabaseIcon />} tooltip="Query connected databases" />
+          )}
 
           <div className="flex-1" />
 
-          <ContextMeter />
+          {prefs.visibility.contextMeter && <ContextMeter />}
 
           {streaming ? (
             <button

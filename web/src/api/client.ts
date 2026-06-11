@@ -135,11 +135,12 @@ export const artifactsZipUrl = (sessionId: string) => `/api/artifacts/${sessionI
 export const uploadDownloadUrl = (id: string) => `/api/upload/${encodeURIComponent(id)}`;
 
 /** Admin: register a model endpoint (matches legacy "Add Models"). */
-export async function addModelEndpoint(opts: { name: string; baseUrl: string; apiKey?: string }): Promise<void> {
+export async function addModelEndpoint(opts: { name?: string; baseUrl: string; apiKey?: string; modelType?: string }): Promise<void> {
   const fd = new FormData();
-  fd.set('name', opts.name);
+  fd.set('name', opts.name ?? '');
   fd.set('base_url', opts.baseUrl);
   if (opts.apiKey) fd.set('api_key', opts.apiKey);
+  if (opts.modelType) fd.set('model_type', opts.modelType);
   const res = await fetch('/api/model-endpoints', { method: 'POST', body: fd, credentials: 'same-origin' });
   if (!res.ok) {
     let detail = `HTTP ${res.status}`;
@@ -248,6 +249,79 @@ export const fetchIntegrations = async () =>
   (await getJSON<{ integrations?: Integration[] }>('/api/auth/integrations')).integrations ?? [];
 
 export const fetchRuntime = () => getJSON<Record<string, unknown>>('/api/runtime');
+
+/* ── Account: password + 2FA ── */
+async function postJSON<T = Record<string, unknown>>(url: string, body?: unknown, method = 'POST'): Promise<T> {
+  const res = await fetch(url, {
+    method,
+    headers: { 'Content-Type': 'application/json' },
+    body: body === undefined ? undefined : JSON.stringify(body),
+    credentials: 'same-origin',
+  });
+  if (!res.ok) {
+    let detail = `HTTP ${res.status}`;
+    try { const e = await res.json(); detail = e.detail || e.error || detail; } catch { /* noop */ }
+    throw new Error(detail);
+  }
+  return res.json().catch(() => ({}) as T);
+}
+
+export const changePassword = (currentPassword: string, newPassword: string) =>
+  postJSON('/api/auth/change-password', { current_password: currentPassword, new_password: newPassword });
+
+export interface TotpStatus { enabled: boolean }
+export const fetchTotpStatus = () => getJSON<TotpStatus>('/api/auth/2fa/status');
+export const totpSetup = () => postJSON<{ secret: string; uri: string; qr_code: string }>('/api/auth/2fa/setup');
+export const totpConfirm = (code: string) => postJSON<{ ok: boolean; backup_codes: string[] }>('/api/auth/2fa/confirm', { code });
+export const totpDisable = (password: string) => postJSON('/api/auth/2fa/disable', { password });
+
+/* ── Users extras ── */
+export interface AuthStatus { signup_enabled?: boolean; [key: string]: unknown }
+export const fetchAuthStatus = () => getJSON<AuthStatus>('/api/auth/status');
+export const toggleSignup = () => postJSON<{ signup_enabled: boolean }>('/api/auth/signup-toggle');
+
+/* ── Model endpoints extras ── */
+export async function testModelEndpoint(baseUrl: string, apiKey?: string): Promise<Record<string, unknown>> {
+  const fd = new FormData();
+  fd.set('base_url', baseUrl);
+  if (apiKey) fd.set('api_key', apiKey);
+  const res = await fetch('/api/model-endpoints/test', { method: 'POST', body: fd, credentials: 'same-origin' });
+  if (!res.ok) {
+    let detail = `HTTP ${res.status}`;
+    try { const e = await res.json(); detail = e.detail || detail; } catch { /* noop */ }
+    throw new Error(detail);
+  }
+  return res.json();
+}
+
+export const discoverEndpoints = () => getJSON<Record<string, unknown>>('/api/discover');
+
+/* ── Integrations CRUD ── */
+export const fetchIntegrationPresets = () =>
+  getJSON<Record<string, { name?: string; base_url?: string;[key: string]: unknown }>>('/api/auth/integrations/presets');
+export const createIntegration = (body: Record<string, unknown>) => postJSON('/api/auth/integrations', body);
+export const updateIntegration = (id: string, patch: Record<string, unknown>) =>
+  postJSON(`/api/auth/integrations/${encodeURIComponent(id)}`, patch, 'PUT');
+export const deleteIntegration = (id: string) =>
+  postJSON(`/api/auth/integrations/${encodeURIComponent(id)}`, undefined, 'DELETE');
+
+/* ── RAG documents ── */
+export const ragSearch = (q: string, k: number) =>
+  getJSON<Record<string, unknown>>(`/api/rag/search?q=${encodeURIComponent(q)}&k=${k}`);
+export const personalAddDirectory = (directory: string) => postJSON('/api/personal/add_directory', { directory });
+export const personalReload = () => postJSON('/api/personal/reload');
+
+export async function personalUpload(files: File[]): Promise<Record<string, unknown>> {
+  const fd = new FormData();
+  for (const f of files) fd.append('files', f, f.name);
+  const res = await fetch('/api/personal/upload', { method: 'POST', body: fd, credentials: 'same-origin' });
+  if (!res.ok) throw new Error(`Upload failed (HTTP ${res.status})`);
+  return res.json();
+}
+
+/* ── System: backup + danger zone ── */
+export const importData = (data: unknown) => postJSON<{ ok?: boolean; message?: string }>('/api/import', data);
+export const wipeData = (kind: string) => postJSON<{ ok?: boolean;[key: string]: unknown }>(`/api/admin/wipe/${kind}`, undefined, 'DELETE');
 
 export interface StreamFlags {
   planMode?: boolean;
