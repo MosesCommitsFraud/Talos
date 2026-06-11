@@ -12,7 +12,10 @@ async function getJSON<T>(url: string): Promise<T> {
 
 export const fetchSessions = () => getJSON<Session[]>('/api/sessions');
 
-export const fetchSession = (id: string) => getJSON<SessionDetail>(`/api/session/${id}`);
+export async function fetchSession(id: string): Promise<SessionDetail> {
+  const data = await getJSON<Omit<SessionDetail, 'id'> & { id?: string }>(`/api/history/${id}`);
+  return { id: data.id ?? id, name: data.name ?? '', history: Array.isArray(data.history) ? data.history : [] };
+}
 
 interface ApiModelItem {
   endpoint_id?: string;
