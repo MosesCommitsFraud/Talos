@@ -1,0 +1,145 @@
+import { create } from 'zustand';
+import { createSession, fetchSession, streamChat } from '@/api/client';
+import type { Metrics, ToolCall } from '@/api/types';
+
+export interface UiMessage {
+  id: string;
+  role: 'user' | 'assistant';
+  content: string;
+  thinking?: string;
+  tools?: ToolCall[];
+  metrics?: Metrics;
+  streaming?: boolean;
+  error?: boolean;
+}
+
+interface ChatState {
+  sessionId: string | null;
+  messages: UiMessage[];
+  streaming: boolean;
+  /** Model used when the next send has to create a session first. */
+  pendingModel: { endpointId: string; model: string } | null;
+  abort: AbortController | null;
+
+  setPendingModel: (m: ChatState['pendingModel']) => void;
+  newChat: () => void;
+  openSession: (id: string) => Promise<void>;
+  send: (text: string, onSessionCreated?: (id: string) => void) => Promise<void>;
+  stop: () => void;
+}
+
+let nextId = 0;
+const uid = () => `m${Date.now()}-${nextId++}`;
+
+export const useChat = create<ChatState>((set, get) => ({
+  sessionId: null,
+  messages: [],
+  streaming: false,
+  pendingModel: null,
+  abort: null,
+
+  setPendingModel: (pendingModel) => set({ pendingModel }),
+
+  newChat: () => {
+    get().abort?.abort();
+    set({ sessionId: null, messages: [], streaming: false, abort: null });
+  },
+
+  openSession: async (id) => {
+    get().abort?.abort();
+    set({ sessionId: id, messages: [], streaming: false, abort: null });
+    const detail = await fetchSession(id);
+    // A later click may have switched sessions while we were fetching.
+    if (get().sessionId !== id) return;
+    set({
+      messages: (detail.history ?? [])
+        .filter((m) => m.role === 'user' || m.role === 'assistant')
+        .map((m) => ({ id: uid(), role: m.role as 'user' | 'assistant', content: m.content })),
+    });
+  },
+
+  send: async (text, onSessionCreated) => {
+    const state = get();
+    if (state.streaming || !text.trim()) return;
+
+    let sessionId = state.sessionId;
+    if (!sessionId) {
+      const pm = state.pendingModel;
+      if (!pm) throw new Error('No model selected');
+      const session = await createSession({ endpointId: pm.endpointId, model: pm.model });
+      sessionId = session.id;
+      set({ sessionId });
+      onSessionCreated?.(sessionId);
+    }
+
+    const userMsg: UiMessage = { id: uid(), role: 'user', content: text };
+    const aiMsg: UiMessage = { id: uid(), role: 'assistant', content: '', streaming: true };
+    const abort = new AbortController();
+    set({ messages: [...get().messages, userMsg, aiMsg], streaming: true, abort });
+
+    const patchAi = (patch: Partial<UiMessage> | ((m: UiMessage) => Partial<UiMessage>)) => {
+      set({
+        messages: get().messages.map((m) =>
+          m.id === aiMsg.id ? { ...m, ...(typeof patch === 'function' ? patch(m) : patch) } : m,
+        ),
+      });
+    };
+
+    try {
+      await streamChat({
+        message: text,
+        sessionId,
+        signal: abort.signal,
+        onEvent: (ev) => {
+          if ('delta' in ev && typeof ev.delta === 'string') {
+            if (ev.thinking) patchAi((m) => ({ thinking: (m.thinking ?? '') + ev.delta }));
+            else patchAi((m) => ({ content: m.content + ev.delta }));
+            return;
+          }
+          switch (ev.type) {
+            case 'tool_start':
+              patchAi((m) => ({
+                tools: [...(m.tools ?? []), { tool: String(ev.tool), command: ev.command as string | undefined, status: 'running' }],
+              }));
+              break;
+            case 'tool_output':
+              patchAi((m) => ({
+                tools: (m.tools ?? []).map((t, i, arr) =>
+                  i === arr.length - 1 && t.status === 'running'
+                    ? {
+                        ...t,
+                        output: ev.output as string | undefined,
+                        exitCode: ev.exit_code as number | undefined,
+                        status: (ev.exit_code ?? 0) === 0 ? 'done' : 'error',
+                      }
+                    : t,
+                ),
+              }));
+              break;
+            case 'metrics':
+              patchAi({ metrics: ev.data as Metrics });
+              break;
+          }
+        },
+      });
+    } catch (err) {
+      if (!abort.signal.aborted) {
+        patchAi((m) => ({
+          content: m.content || (err instanceof Error ? err.message : 'Request failed'),
+          error: true,
+        }));
+      }
+    } finally {
+      patchAi({ streaming: false });
+      set({ streaming: false, abort: null });
+    }
+  },
+
+  stop: () => {
+    const { abort, sessionId } = get();
+    abort?.abort();
+    if (sessionId) {
+      fetch(`/api/chat/stop/${sessionId}`, { method: 'POST', credentials: 'same-origin' }).catch(() => {});
+    }
+  },
+}));

@@ -1,0 +1,106 @@
+@import "tailwindcss";
+
+/* ── Talos design tokens ──
+   Mirrors the GPT-style palette used by the legacy UI (static/style.css
+   "GPT Modernization Layer") so both UIs look identical during the
+   strangler migration. Accent is the Talos blue — keep it. */
+@theme {
+  --color-base: #212121;      /* chat background */
+  --color-panel: #171717;     /* sidebar / modals */
+  --color-surface: #2f2f2f;   /* composer, user bubble */
+  --color-edge: #424242;      /* borders */
+  --color-ink: #ececec;       /* primary text */
+  --color-ink-muted: #9b9b9b; /* secondary text */
+  --color-accent: #3d87cb;    /* Talos blue */
+
+  --font-sans: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "Fira Code", ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+/* Self-hosted fonts, served by the backend from the legacy static dir */
+@font-face { font-family: "Inter"; font-weight: 400; font-style: normal; font-display: swap; src: url("/static/fonts/Inter-Regular.woff2") format("woff2"); }
+@font-face { font-family: "Inter"; font-weight: 500; font-style: normal; font-display: swap; src: url("/static/fonts/Inter-Medium.woff2") format("woff2"); }
+@font-face { font-family: "Inter"; font-weight: 600; font-style: normal; font-display: swap; src: url("/static/fonts/Inter-SemiBold.woff2") format("woff2"); }
+@font-face { font-family: "Fira Code"; font-weight: 400; font-style: normal; font-display: swap; src: url("/static/fonts/FiraCode-Regular.woff2") format("woff2"); }
+@font-face { font-family: "Fira Code"; font-weight: 600; font-style: normal; font-display: swap; src: url("/static/fonts/FiraCode-SemiBold.woff2") format("woff2"); }
+
+html, body, #root {
+  height: 100%;
+}
+
+body {
+  @apply bg-base text-ink font-sans antialiased;
+  overscroll-behavior: none;
+}
+
+/* Neutral thin scrollbars */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--color-ink) 25%, transparent) transparent;
+}
+*::-webkit-scrollbar { width: 8px; height: 8px; }
+*::-webkit-scrollbar-track { background: transparent; }
+*::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--color-ink) 25%, transparent);
+  border-radius: 4px;
+}
+
+/* Keyboard focus ring. :where() keeps specificity at zero so per-element
+   utilities (e.g. the composer textarea's outline-none) can override it. */
+:where(:focus-visible) {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+/* ── Markdown body (assistant messages) ── */
+.md-body {
+  line-height: 1.65;
+  word-break: break-word;
+}
+.md-body > * + * { margin-top: 0.65em; }
+.md-body h1, .md-body h2, .md-body h3, .md-body h4 {
+  font-weight: 600;
+  margin-top: 1.1em;
+}
+.md-body h1 { font-size: 1.35em; }
+.md-body h2 { font-size: 1.2em; }
+.md-body h3 { font-size: 1.05em; }
+.md-body ul { list-style: disc; padding-left: 1.4em; }
+.md-body ol { list-style: decimal; padding-left: 1.4em; }
+.md-body li { margin: 0.25em 0; }
+.md-body a { color: var(--color-accent); text-decoration: underline; text-underline-offset: 2px; }
+.md-body blockquote {
+  border-left: 2px solid var(--color-edge);
+  padding-left: 0.9em;
+  color: var(--color-ink-muted);
+}
+.md-body table { border-collapse: collapse; font-size: 0.925em; }
+.md-body th, .md-body td { border: 1px solid var(--color-edge); padding: 5px 10px; }
+.md-body th { background: color-mix(in srgb, var(--color-ink) 5%, transparent); }
+.md-body code:not(pre code) {
+  font-family: var(--font-mono);
+  font-size: 0.875em;
+  background: color-mix(in srgb, var(--color-ink) 9%, transparent);
+  border-radius: 5px;
+  padding: 0.12em 0.35em;
+}
+.md-body pre {
+  background: #1a1a1a;
+  border: 1px solid color-mix(in srgb, var(--color-ink) 8%, transparent);
+  border-radius: 10px;
+  padding: 12px 14px;
+  overflow-x: auto;
+  font-family: var(--font-mono);
+  font-size: 0.85em;
+  line-height: 1.5;
+}
+
+/* highlight.js token colors — same hues as the legacy dark theme */
+.hljs-keyword, .hljs-selector-tag { color: #c678dd; }
+.hljs-string, .hljs-attr { color: #e5c07b; }
+.hljs-comment, .hljs-quote { color: #828997; font-style: italic; }
+.hljs-title, .hljs-title.function_ { color: #61afef; }
+.hljs-number, .hljs-literal { color: #d19a66; }
+.hljs-built_in, .hljs-type { color: #56b6c2; }
+.hljs-variable, .hljs-template-variable { color: #abb2bf; }
+.hljs-params { color: #a8c0d4; }

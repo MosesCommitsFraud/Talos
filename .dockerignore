@@ -2,6 +2,9 @@ venv/
 .venv/
 node_modules/
 services/node_modules/
+web/node_modules/
+# web/dist is built inside the image (webbuild stage) — never from the host
+web/dist/
 __pycache__/
 *.pyc
 *.pyo

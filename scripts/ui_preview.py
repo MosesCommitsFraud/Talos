@@ -20,6 +20,9 @@ from urllib.parse import parse_qs, urlparse
 
 ROOT = Path(__file__).resolve().parents[1]
 STATIC = ROOT / "static"
+# New React UI bundle — served at "/" when built (mirrors app.py's strangler
+# routing: new UI at /, legacy at /legacy).
+WEB_DIST = ROOT / "web" / "dist"
 
 
 def _json_bytes(data) -> bytes:
@@ -126,10 +129,10 @@ class PreviewHandler(BaseHTTPRequestHandler):
         length = int(self.headers.get("Content-Length") or 0)
         return self.rfile.read(length) if length else b""
 
-    def _serve_file(self, path: Path):
+    def _serve_file(self, path: Path, root: Path = STATIC):
         try:
             resolved = path.resolve()
-            if not str(resolved).startswith(str(STATIC.resolve())) or not resolved.is_file():
+            if not str(resolved).startswith(str(root.resolve())) or not resolved.is_file():
                 self._send_json({"error": "not found"}, 404)
                 return
             ctype = mimetypes.guess_type(str(resolved))[0] or "application/octet-stream"
@@ -145,7 +148,16 @@ class PreviewHandler(BaseHTTPRequestHandler):
         path = parsed.path
 
         if path in ("/", "/index.html"):
+            if (WEB_DIST / "index.html").is_file():
+                self._serve_file(WEB_DIST / "index.html", root=WEB_DIST)
+            else:
+                self._serve_file(STATIC / "index.html")
+            return
+        if path == "/legacy":
             self._serve_file(STATIC / "index.html")
+            return
+        if path.startswith("/assets/"):
+            self._serve_file(WEB_DIST / path.lstrip("/"), root=WEB_DIST)
             return
         if path == "/login":
             self._serve_file(STATIC / "login.html")

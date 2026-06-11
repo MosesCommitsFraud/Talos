@@ -1,3 +1,14 @@
+# ---- Stage 1: build the new React UI (web/ → web/dist) ----
+FROM node:22-alpine AS webbuild
+WORKDIR /web
+# corepack picks the pnpm version pinned in package.json ("packageManager")
+RUN corepack enable
+COPY web/package.json web/pnpm-lock.yaml ./
+RUN pnpm install --frozen-lockfile
+COPY web/ ./
+RUN pnpm run build
+
+# ---- Stage 2: the Talos app ----
 FROM python:3.12-slim
 
 # System deps for the Talos web/API container. Agent code execution happens in
@@ -34,6 +45,9 @@ RUN pip install --no-cache-dir -r requirements.txt \
 
 # Copy app code
 COPY . .
+
+# New React UI bundle (served at /; legacy UI stays at /legacy)
+COPY --from=webbuild /web/dist ./web/dist
 
 # Create data directory (mount a volume here for persistence)
 RUN mkdir -p data logs services/cache/search

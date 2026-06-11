@@ -168,7 +168,10 @@ if AUTH_ENABLED:
         "/api/version",
         "/login",
     }
-    AUTH_EXEMPT_PREFIXES = ["/static"]
+    # /assets are the hashed Vite bundles of the new React UI (web/dist) —
+    # same sensitivity as /static (code, no data), and the login page redirect
+    # flow needs them loadable before a cookie exists.
+    AUTH_EXEMPT_PREFIXES = ["/static", "/assets"]
     import re as _re
     AUTH_EXEMPT_PATTERNS = []
 
@@ -369,6 +372,27 @@ class _RevalidatingStatic(StaticFiles):
 
 
 app.mount("/static", _RevalidatingStatic(directory="static"), name="static")
+
+# ========= NEW REACT UI (web/dist) =========
+# Strangler migration: the Vite/React app in web/ is served at "/" when built;
+# the legacy vanilla-JS UI stays fully functional at /legacy. Vite emits
+# content-hashed filenames under assets/, so those can be cached forever.
+WEB_DIST = os.path.join(BASE_DIR, "web", "dist")
+_WEB_INDEX = os.path.join(WEB_DIST, "index.html")
+
+
+class _ImmutableStatic(StaticFiles):
+    async def get_response(self, path, scope):
+        resp = await super().get_response(path, scope)
+        resp.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+        return resp
+
+
+if os.path.isdir(os.path.join(WEB_DIST, "assets")):
+    app.mount("/assets", _ImmutableStatic(directory=os.path.join(WEB_DIST, "assets")), name="webassets")
+    logger.info("New web UI mounted (web/dist) — serving at /, legacy UI at /legacy")
+else:
+    logger.info("web/dist not found — serving legacy UI at / (run `npm run build` in web/)")
 
 # ========= GENERATED IMAGES =========
 @app.get("/api/generated-image/{filename}")
@@ -618,8 +642,7 @@ def _serve_html_with_nonce(request: Request, file_path: str) -> HTMLResponse:
     html = html.replace("{{CSP_NONCE}}", nonce)
     return HTMLResponse(html)
 
-@app.get("/")
-async def serve_index(request: Request):
+def _serve_legacy_index(request: Request):
     static_path = abs_join(BASE_DIR, "static/index.html")
     if os.path.exists(static_path):
         return _serve_html_with_nonce(request, static_path)
@@ -628,13 +651,27 @@ async def serve_index(request: Request):
         return _serve_html_with_nonce(request, root_path)
     raise HTTPException(404, "index.html not found")
 
+@app.get("/")
+async def serve_index(request: Request):
+    # New React UI when built; legacy otherwise. The new index has no inline
+    # scripts, so no CSP nonce injection is needed (script-src includes 'self').
+    if os.path.exists(_WEB_INDEX):
+        return FileResponse(_WEB_INDEX, headers={"Cache-Control": "no-cache"})
+    return _serve_legacy_index(request)
+
+@app.get("/legacy")
+async def serve_legacy(request: Request):
+    return _serve_legacy_index(request)
+
+# Legacy deep links (features not yet ported to the new UI) keep opening the
+# legacy app rather than the new shell.
 @app.get("/memory")
 async def serve_memory(request: Request):
-    return await serve_index(request)
+    return _serve_legacy_index(request)
 
 @app.get("/library")
 async def serve_library(request: Request):
-    return await serve_index(request)
+    return _serve_legacy_index(request)
 
 @app.get("/backgrounds")
 async def serve_backgrounds(request: Request):
