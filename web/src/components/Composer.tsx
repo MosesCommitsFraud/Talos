@@ -93,9 +93,11 @@ export function Composer() {
     requestAnimationFrame(autoresize);
     await send(value, {
       attachments,
-      onSessionCreated: () => queryClient.invalidateQueries({ queryKey: ['sessions'] }),
+      onSessionCreated: () => {
+        void queryClient.refetchQueries({ queryKey: ['sessions'], type: 'active' });
+      },
     });
-    void queryClient.invalidateQueries({ queryKey: ['sessions'] });
+    void queryClient.refetchQueries({ queryKey: ['sessions'], type: 'active' });
   };
 
   const canSend = (text.trim().length > 0 || pending.length > 0) && !uploading;

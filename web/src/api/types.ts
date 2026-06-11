@@ -3,8 +3,9 @@ export interface Session {
   name: string;
   model: string;
   endpoint_url: string;
-  created_at: number;
-  updated_at: number;
+  created_at: number | string | null;
+  updated_at: number | string | null;
+  last_message_at?: number | string | null;
   message_count: number;
   archived: boolean;
 }

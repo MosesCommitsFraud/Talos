@@ -47,6 +47,15 @@ const SORT_LABELS: Record<SortMode, string> = {
   name: 'Name A–Z',
 };
 
+function timeValue(value: number | string | null | undefined): number {
+  if (typeof value === 'number') return value;
+  if (typeof value === 'string') {
+    const parsed = Date.parse(value);
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+  return 0;
+}
+
 function SessionRow({ session }: { session: Session }) {
   const activeId = useChat((s) => s.sessionId);
   const openSession = useChat((s) => s.openSession);
@@ -173,9 +182,9 @@ export function Sidebar({
   const visible = (sessions ?? [])
     .filter((s) => !s.archived)
     .sort((a, b) => {
-      if (sortMode === 'newest') return (b.created_at ?? 0) - (a.created_at ?? 0);
+      if (sortMode === 'newest') return timeValue(b.created_at) - timeValue(a.created_at);
       if (sortMode === 'name') return (a.name || '').localeCompare(b.name || '');
-      return (b.updated_at ?? 0) - (a.updated_at ?? 0);
+      return timeValue(b.last_message_at ?? b.updated_at) - timeValue(a.last_message_at ?? a.updated_at);
     });
   const isMac = /Mac|iPhone/.test(navigator.platform);
 

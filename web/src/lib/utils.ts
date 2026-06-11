@@ -5,7 +5,13 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
-export function formatRelativeTime(epochSeconds: number): string {
+export function formatRelativeTime(value: number | string | null | undefined): string {
+  const epochSeconds = typeof value === 'string'
+    ? Date.parse(value) / 1000
+    : typeof value === 'number'
+      ? value
+      : 0;
+  if (!Number.isFinite(epochSeconds) || epochSeconds <= 0) return '';
   const diff = Date.now() / 1000 - epochSeconds;
   if (diff < 60) return 'now';
   if (diff < 3600) return `${Math.floor(diff / 60)}m`;
