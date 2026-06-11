@@ -7,8 +7,9 @@ import { Composer } from './components/Composer';
 import { CommandPalette } from './components/CommandPalette';
 import { SettingsDialog } from './components/SettingsDialog';
 import { BrainDialog, LibraryDialog } from './components/ToolDialogs';
+import { ArtifactsPanel } from './components/ArtifactsPanel';
 import { TooltipProvider } from './components/ui/misc';
-import { applyTheme, usePrefs } from './state/prefs';
+import { applyDensity, applyTheme, usePrefs } from './state/prefs';
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { staleTime: 10_000, retry: 1 } },
@@ -19,9 +20,12 @@ export default function App() {
   const [settings, setSettings] = useState(false);
   const [brain, setBrain] = useState(false);
   const [library, setLibrary] = useState(false);
+  const [files, setFiles] = useState(false);
   const theme = usePrefs((s) => s.theme);
+  const density = usePrefs((s) => s.density);
 
   useEffect(() => applyTheme(theme), [theme]);
+  useEffect(() => applyDensity(density), [density]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -45,10 +49,11 @@ export default function App() {
             onOpenLibrary={() => setLibrary(true)}
           />
           <main className="flex min-w-0 flex-1 flex-col">
-            <ChatHeader />
+            <ChatHeader onToggleFiles={() => setFiles((v) => !v)} filesOpen={files} />
             <Messages />
             <Composer />
           </main>
+          <ArtifactsPanel open={files} onClose={() => setFiles(false)} />
         </div>
         <CommandPalette open={palette} onClose={() => setPalette(false)} />
         <SettingsDialog open={settings} onClose={() => setSettings(false)} />

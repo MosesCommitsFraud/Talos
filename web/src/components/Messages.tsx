@@ -1,10 +1,11 @@
-import { CheckIcon, CopyIcon } from 'lucide-react';
+import { CheckIcon, CopyIcon, PencilIcon, Trash2Icon } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
-import { useChat } from '@/state/chat';
+import { useChat, type UiMessage } from '@/state/chat';
 import { Markdown } from './Markdown';
 import { Thinking } from './Thinking';
 import { ToolRow } from './ToolRow';
 import { Tooltip } from './ui/misc';
+import { Button } from './ui/button';
 
 function Logo() {
   return (
@@ -16,28 +17,101 @@ function Logo() {
   );
 }
 
-function CopyButton({ text }: { text: string }) {
-  const [copied, setCopied] = useState(false);
+function ActionIcon({
+  label,
+  onClick,
+  children,
+  destructive,
+}: {
+  label: string;
+  onClick: () => void;
+  children: React.ReactNode;
+  destructive?: boolean;
+}) {
   return (
-    <Tooltip label={copied ? 'Copied' : 'Copy'} side="top">
+    <Tooltip label={label} side="top">
       <button
         type="button"
-        aria-label="Copy message"
-        onClick={() => {
-          void navigator.clipboard.writeText(text);
-          setCopied(true);
-          setTimeout(() => setCopied(false), 1500);
-        }}
-        className="flex size-7 items-center justify-center rounded-md text-muted-foreground opacity-0 transition-all group-hover:opacity-100 hover:bg-accent hover:text-foreground"
+        aria-label={label}
+        onClick={onClick}
+        className={`flex size-7 items-center justify-center rounded-md text-muted-foreground opacity-0 transition-all group-hover:opacity-100 hover:bg-accent ${
+          destructive ? 'hover:text-destructive-foreground' : 'hover:text-foreground'
+        }`}
       >
-        {copied ? <CheckIcon className="size-3.5" /> : <CopyIcon className="size-3.5" />}
+        {children}
       </button>
     </Tooltip>
   );
 }
 
+function CopyAction({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <ActionIcon
+      label={copied ? 'Copied' : 'Copy'}
+      onClick={() => {
+        void navigator.clipboard.writeText(text);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 1500);
+      }}
+    >
+      {copied ? <CheckIcon className="size-3.5" /> : <CopyIcon className="size-3.5" />}
+    </ActionIcon>
+  );
+}
+
+function MessageActions({ msg, onEdit }: { msg: UiMessage; onEdit?: () => void }) {
+  const remove = useChat((s) => s.remove);
+  const canMutate = !!msg.dbId;
+  return (
+    <>
+      <CopyAction text={msg.content} />
+      {onEdit && canMutate && (
+        <ActionIcon label="Edit message" onClick={onEdit}>
+          <PencilIcon className="size-3.5" />
+        </ActionIcon>
+      )}
+      {canMutate && (
+        <ActionIcon label="Delete message" destructive onClick={() => void remove(msg.id).catch(console.error)}>
+          <Trash2Icon className="size-3.5" />
+        </ActionIcon>
+      )}
+    </>
+  );
+}
+
+function EditBox({ msg, onDone }: { msg: UiMessage; onDone: () => void }) {
+  const [draft, setDraft] = useState(msg.content);
+  const edit = useChat((s) => s.edit);
+  const save = async () => {
+    const value = draft.trim();
+    if (value && value !== msg.content) await edit(msg.id, value).catch(console.error);
+    onDone();
+  };
+  return (
+    <div className="w-full rounded-2xl border border-ring bg-card p-3">
+      <textarea
+        autoFocus
+        value={draft}
+        rows={Math.min(8, Math.max(2, draft.split('\n').length))}
+        onChange={(e) => setDraft(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) void save();
+          if (e.key === 'Escape') onDone();
+        }}
+        className="w-full resize-y bg-transparent text-[15px] leading-relaxed outline-none"
+      />
+      <div className="mt-2 flex justify-end gap-2">
+        <Button variant="ghost" size="sm" onClick={onDone}>Cancel</Button>
+        <Button size="sm" onClick={() => void save()}>Save</Button>
+      </div>
+    </div>
+  );
+}
+
 export function Messages() {
   const messages = useChat((s) => s.messages);
+  const [editing, setEditing] = useState<string | null>(null);
   const scroller = useRef<HTMLDivElement>(null);
   const pinned = useRef(true);
 
@@ -67,11 +141,19 @@ export function Messages() {
       <div className="mx-auto flex w-full max-w-[800px] flex-col gap-5 px-4 py-6">
         {messages.map((m) =>
           m.role === 'user' ? (
-            <div key={m.id} className="group ml-auto flex max-w-[75%] flex-col items-end gap-0.5">
-              <div className="rounded-2xl rounded-br-md bg-secondary px-4 py-2.5 text-[15px] leading-relaxed whitespace-pre-wrap">
-                {m.content}
-              </div>
-              <CopyButton text={m.content} />
+            <div key={m.id} className="group ml-auto flex w-full max-w-[75%] flex-col items-end gap-0.5">
+              {editing === m.id ? (
+                <EditBox msg={m} onDone={() => setEditing(null)} />
+              ) : (
+                <>
+                  <div className="rounded-2xl rounded-br-md bg-secondary px-4 py-2.5 text-[15px] leading-relaxed whitespace-pre-wrap">
+                    {m.content}
+                  </div>
+                  <div className="flex">
+                    <MessageActions msg={m} onEdit={() => setEditing(m.id)} />
+                  </div>
+                </>
+              )}
             </div>
           ) : (
             <div key={m.id} className="group w-full">
@@ -91,13 +173,12 @@ export function Messages() {
                 )
               )}
               {!m.streaming && m.content && (
-                <div className="mt-1 flex items-center gap-2">
-                  <CopyButton text={m.content} />
+                <div className="mt-1 flex items-center gap-1">
+                  <MessageActions msg={m} />
                   {m.metrics && (
                     <span className="text-xs text-muted-foreground/80 opacity-0 transition-opacity group-hover:opacity-100">
                       {m.metrics.tokens_per_second != null && `${m.metrics.tokens_per_second} tok/s`}
                       {m.metrics.response_time != null && ` · ${m.metrics.response_time}s`}
-                      {m.metrics.context_percent != null && ` · ${m.metrics.context_percent}% ctx`}
                     </span>
                   )}
                 </div>

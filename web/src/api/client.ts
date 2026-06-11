@@ -79,6 +79,151 @@ export async function logout(): Promise<void> {
   window.location.href = '/login';
 }
 
+export async function editMessage(sessionId: string, msgId: string, content: string): Promise<void> {
+  const res = await fetch(`/api/session/${sessionId}/edit-message`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ msg_id: msgId, content }),
+    credentials: 'same-origin',
+  });
+  if (!res.ok) throw new Error(`Edit failed (HTTP ${res.status})`);
+}
+
+export async function deleteMessages(sessionId: string, msgIds: string[]): Promise<void> {
+  const res = await fetch(`/api/session/${sessionId}/delete-messages`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ msg_ids: msgIds }),
+    credentials: 'same-origin',
+  });
+  if (!res.ok) throw new Error(`Delete failed (HTTP ${res.status})`);
+}
+
+export async function fetchArtifacts(sessionId: string): Promise<import('./types').Artifact[]> {
+  const data = await getJSON<{ artifacts?: import('./types').Artifact[] }>(`/api/artifacts/${sessionId}`);
+  return data.artifacts ?? [];
+}
+
+export const artifactDownloadUrl = (sessionId: string, path: string) =>
+  `/api/artifacts/${sessionId}/download?path=${encodeURIComponent(path)}`;
+
+export const artifactsZipUrl = (sessionId: string) => `/api/artifacts/${sessionId}/zip`;
+
+/** Admin: register a model endpoint (matches legacy "Add Models"). */
+export async function addModelEndpoint(opts: { name: string; baseUrl: string; apiKey?: string }): Promise<void> {
+  const fd = new FormData();
+  fd.set('name', opts.name);
+  fd.set('base_url', opts.baseUrl);
+  if (opts.apiKey) fd.set('api_key', opts.apiKey);
+  const res = await fetch('/api/model-endpoints', { method: 'POST', body: fd, credentials: 'same-origin' });
+  if (!res.ok) {
+    let detail = `HTTP ${res.status}`;
+    try { const e = await res.json(); detail = e.detail || detail; } catch { /* noop */ }
+    throw new Error(detail);
+  }
+}
+
+/* ── Admin settings (flat dict at /api/auth/settings) ── */
+export type AppSettings = Record<string, unknown>;
+export const fetchAppSettings = () => getJSON<AppSettings>('/api/auth/settings');
+
+export async function saveAppSettings(patch: AppSettings): Promise<void> {
+  const res = await fetch('/api/auth/settings', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(patch),
+    credentials: 'same-origin',
+  });
+  if (!res.ok) throw new Error(`Save failed (HTTP ${res.status})`);
+}
+
+export type Features = Record<string, boolean>;
+export const fetchFeatures = () => getJSON<Features>('/api/auth/features');
+
+export async function saveFeatures(features: Features): Promise<void> {
+  const res = await fetch('/api/auth/features', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(features),
+    credentials: 'same-origin',
+  });
+  if (!res.ok) throw new Error(`Save failed (HTTP ${res.status})`);
+}
+
+export interface AppUser { username: string; is_admin: boolean }
+export const fetchUsers = async () =>
+  (await getJSON<{ users?: AppUser[] }>('/api/auth/users')).users ?? [];
+
+export async function createUser(username: string, password: string): Promise<void> {
+  const res = await fetch('/api/auth/users', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username, password }),
+    credentials: 'same-origin',
+  });
+  if (!res.ok) {
+    let detail = `HTTP ${res.status}`;
+    try { const e = await res.json(); detail = e.detail || detail; } catch { /* noop */ }
+    throw new Error(detail);
+  }
+}
+
+export async function deleteUser(username: string): Promise<void> {
+  const res = await fetch('/api/auth/users', {
+    method: 'DELETE',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username }),
+    credentials: 'same-origin',
+  });
+  if (!res.ok) throw new Error(`Delete failed (HTTP ${res.status})`);
+}
+
+export async function setUserAdmin(username: string, isAdmin: boolean): Promise<void> {
+  const res = await fetch(`/api/auth/users/${encodeURIComponent(username)}/admin`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ is_admin: isAdmin }),
+    credentials: 'same-origin',
+  });
+  if (!res.ok) throw new Error(`Update failed (HTTP ${res.status})`);
+}
+
+export interface RagConfig {
+  enabled: boolean;
+  embedding_url: string;
+  embedding_model: string;
+  qdrant_url: string;
+  qdrant_api_key: string;
+  rerank_url: string;
+  rerank_model: string;
+  rerank_api_key: string;
+  chat_top_k: number;
+  search_top_k: number;
+  candidate_top_k: number;
+}
+export const fetchRagConfig = () => getJSON<RagConfig>('/api/rag/config');
+
+export async function saveRagConfig(cfg: RagConfig): Promise<void> {
+  const res = await fetch('/api/rag/config', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(cfg),
+    credentials: 'same-origin',
+  });
+  if (!res.ok) throw new Error(`Save failed (HTTP ${res.status})`);
+}
+
+export const testRagConfig = async (): Promise<{ ok?: boolean; [key: string]: unknown }> => {
+  const res = await fetch('/api/rag/test', { method: 'POST', credentials: 'same-origin' });
+  return res.json();
+};
+
+export interface Integration { id?: string; name?: string; enabled?: boolean; [key: string]: unknown }
+export const fetchIntegrations = async () =>
+  (await getJSON<{ integrations?: Integration[] }>('/api/auth/integrations')).integrations ?? [];
+
+export const fetchRuntime = () => getJSON<Record<string, unknown>>('/api/runtime');
+
 export interface StreamFlags {
   planMode?: boolean;
   useRag?: boolean;

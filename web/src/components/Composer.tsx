@@ -14,20 +14,21 @@ import { uploadFiles, type UploadedFile } from '@/api/client';
 import { useChat } from '@/state/chat';
 import { usePrefs } from '@/state/prefs';
 import { cn } from '@/lib/utils';
+import { ContextMeter } from './ContextMeter';
 import { ModelPicker } from './ModelPicker';
 import { Tooltip } from './ui/misc';
 
-function TogglePill({
+/** Icon-only MIDA ghost button; active state = primary tint, label lives in
+ *  the tooltip (legacy chat-bar had labeled pills — feedback was icons only). */
+function ToggleIcon({
   active,
   onClick,
   icon,
-  label,
   tooltip,
 }: {
   active: boolean;
   onClick: () => void;
   icon: React.ReactNode;
-  label: string;
   tooltip: string;
 }) {
   return (
@@ -36,15 +37,15 @@ function TogglePill({
         type="button"
         onClick={onClick}
         aria-pressed={active}
+        aria-label={tooltip}
         className={cn(
-          'flex h-8 items-center gap-1.5 rounded-full border px-3 text-[13px] font-medium transition-colors [&_svg]:size-3.5',
+          'flex size-8 items-center justify-center rounded-lg border border-transparent transition-colors [&_svg]:size-4',
           active
-            ? 'border-primary/40 bg-primary/12 text-primary'
-            : 'border-transparent text-muted-foreground hover:bg-accent hover:text-foreground',
+            ? 'bg-primary/12 text-primary'
+            : 'text-muted-foreground hover:bg-accent hover:text-foreground',
         )}
       >
         {icon}
-        {label}
       </button>
     </Tooltip>
   );
@@ -156,26 +157,20 @@ export function Composer() {
             hidden
             onChange={(e) => { if (e.target.files) void attach(e.target.files); e.target.value = ''; }}
           />
-          <Tooltip label="Attach files" side="top">
-            <button
-              type="button"
-              aria-label="Attach files"
-              onClick={() => fileInput.current?.click()}
-              className={cn(
-                'flex size-8 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-accent hover:text-foreground',
-                uploading && 'animate-pulse',
-              )}
-            >
-              <PaperclipIcon className="size-4" />
-            </button>
-          </Tooltip>
-
-          <TogglePill active={prefs.planMode} onClick={() => prefs.toggle('planMode')} icon={<ListTodoIcon />} label="Plan" tooltip="Plan before acting" />
-          <TogglePill active={prefs.useWeb} onClick={() => prefs.toggle('useWeb')} icon={<GlobeIcon />} label="Web" tooltip="Search the web" />
-          <TogglePill active={prefs.useRag} onClick={() => prefs.toggle('useRag')} icon={<FileTextIcon />} label="Docs" tooltip="Use document RAG" />
-          <TogglePill active={prefs.useDb} onClick={() => prefs.toggle('useDb')} icon={<DatabaseIcon />} label="DB" tooltip="Query connected databases" />
+          <ToggleIcon
+            active={false}
+            onClick={() => fileInput.current?.click()}
+            icon={<PaperclipIcon className={uploading ? 'animate-pulse' : undefined} />}
+            tooltip="Attach files"
+          />
+          <ToggleIcon active={prefs.planMode} onClick={() => prefs.toggle('planMode')} icon={<ListTodoIcon />} tooltip="Plan before acting" />
+          <ToggleIcon active={prefs.useWeb} onClick={() => prefs.toggle('useWeb')} icon={<GlobeIcon />} tooltip="Search the web" />
+          <ToggleIcon active={prefs.useRag} onClick={() => prefs.toggle('useRag')} icon={<FileTextIcon />} tooltip="Use document RAG" />
+          <ToggleIcon active={prefs.useDb} onClick={() => prefs.toggle('useDb')} icon={<DatabaseIcon />} tooltip="Query connected databases" />
 
           <div className="flex-1" />
+
+          <ContextMeter />
 
           {streaming ? (
             <button

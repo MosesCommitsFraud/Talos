@@ -1,11 +1,21 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { CheckIcon, CopyIcon, DownloadIcon, GhostIcon, PencilIcon, Share2Icon } from 'lucide-react';
+import {
+  CheckIcon,
+  CopyIcon,
+  DownloadIcon,
+  ExternalLinkIcon,
+  FileTextIcon,
+  FolderIcon,
+  GhostIcon,
+  PencilIcon,
+  Share2Icon,
+} from 'lucide-react';
 import { useState } from 'react';
 import { fetchSessions, renameSession } from '@/api/client';
 import { useChat } from '@/state/chat';
 import { usePrefs } from '@/state/prefs';
 import { cn } from '@/lib/utils';
-import { Menu, MenuItem, MenuPopup, MenuTrigger } from './ui/menu';
+import { Menu, MenuItem, MenuPopup, MenuSeparator, MenuTrigger } from './ui/menu';
 import { Tooltip } from './ui/misc';
 
 function messagesToMarkdown(messages: ReturnType<typeof useChat.getState>['messages']): string {
@@ -14,7 +24,7 @@ function messagesToMarkdown(messages: ReturnType<typeof useChat.getState>['messa
     .join('\n\n---\n\n');
 }
 
-export function ChatHeader() {
+export function ChatHeader({ onToggleFiles, filesOpen }: { onToggleFiles: () => void; filesOpen: boolean }) {
   const sessionId = useChat((s) => s.sessionId);
   const messages = useChat((s) => s.messages);
   const { data: sessions } = useQuery({ queryKey: ['sessions'], queryFn: fetchSessions });
@@ -86,6 +96,23 @@ export function ChatHeader() {
         )}
       </div>
 
+      {sessionId && (
+        <Tooltip label={filesOpen ? 'Hide session files' : 'Session files & artifacts'}>
+          <button
+            type="button"
+            aria-label="Session files"
+            aria-pressed={filesOpen}
+            onClick={onToggleFiles}
+            className={cn(
+              'flex size-8 items-center justify-center rounded-lg transition-colors',
+              filesOpen ? 'bg-primary/12 text-primary' : 'text-muted-foreground hover:bg-accent hover:text-foreground',
+            )}
+          >
+            <FolderIcon className="size-4" />
+          </button>
+        </Tooltip>
+      )}
+
       {messages.length > 0 && (
         <Menu>
           <Tooltip label="Export chat">
@@ -100,11 +127,25 @@ export function ChatHeader() {
             </MenuTrigger>
           </Tooltip>
           <MenuPopup align="end">
+            <MenuItem onSelect={() => { setDraft(title); setRenaming(true); }}>
+              <PencilIcon /> Rename
+            </MenuItem>
+            <MenuSeparator />
             <MenuItem onSelect={() => void copyChat()}>
               {copied ? <CheckIcon /> : <CopyIcon />} Copy as Markdown
             </MenuItem>
             <MenuItem onSelect={downloadChat}>
               <DownloadIcon /> Download .md
+            </MenuItem>
+            <MenuItem onSelect={onToggleFiles}>
+              <FolderIcon /> Session files…
+            </MenuItem>
+            <MenuSeparator />
+            <MenuItem onSelect={() => { window.location.href = '/legacy'; }}>
+              <FileTextIcon /> Export PDF <span className="ml-auto text-xs text-muted-foreground">legacy</span>
+            </MenuItem>
+            <MenuItem onSelect={() => { window.location.href = '/legacy'; }}>
+              <ExternalLinkIcon /> Export DOCX <span className="ml-auto text-xs text-muted-foreground">legacy</span>
             </MenuItem>
           </MenuPopup>
         </Menu>

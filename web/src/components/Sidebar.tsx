@@ -1,8 +1,10 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   ArchiveIcon,
+  ArrowUpDownIcon,
   BookOpenIcon,
   BrainIcon,
+  CheckIcon,
   ExternalLinkIcon,
   MessageSquareIcon,
   PencilIcon,
@@ -23,6 +25,7 @@ import {
 } from '@/api/client';
 import type { Session } from '@/api/types';
 import { useChat } from '@/state/chat';
+import { usePrefs, type SortMode } from '@/state/prefs';
 import { cn, formatRelativeTime } from '@/lib/utils';
 import { Kbd, Tooltip } from './ui/misc';
 import {
@@ -31,7 +34,18 @@ import {
   ContextMenuPopup,
   ContextMenuSeparator,
   ContextMenuTrigger,
+  Menu,
+  MenuItem,
+  MenuPopup,
+  MenuSeparator,
+  MenuTrigger,
 } from './ui/menu';
+
+const SORT_LABELS: Record<SortMode, string> = {
+  active: 'Last active',
+  newest: 'Newest first',
+  name: 'Name A–Z',
+};
 
 function SessionRow({ session }: { session: Session }) {
   const activeId = useChat((s) => s.sessionId);
@@ -153,7 +167,16 @@ export function Sidebar({
   const { data: auth } = useQuery({ queryKey: ['auth'], queryFn: fetchAuthInfo, staleTime: Infinity });
   const newChat = useChat((s) => s.newChat);
 
-  const visible = (sessions ?? []).filter((s) => !s.archived);
+  const sortMode = usePrefs((s) => s.sortMode);
+  const setSortMode = usePrefs((s) => s.setSortMode);
+
+  const visible = (sessions ?? [])
+    .filter((s) => !s.archived)
+    .sort((a, b) => {
+      if (sortMode === 'newest') return (b.created_at ?? 0) - (a.created_at ?? 0);
+      if (sortMode === 'name') return (a.name || '').localeCompare(b.name || '');
+      return (b.updated_at ?? 0) - (a.updated_at ?? 0);
+    });
   const isMac = /Mac|iPhone/.test(navigator.platform);
 
   return (
@@ -178,7 +201,35 @@ export function Sidebar({
         <NavButton icon={<BookOpenIcon />} label="Library" onClick={onOpenLibrary} />
       </div>
 
-      <div className="px-4 pt-4 pb-1 text-xs font-medium text-muted-foreground">Chats</div>
+      <div className="flex items-center justify-between px-4 pt-4 pb-1">
+        <span className="text-xs font-medium text-muted-foreground">Chats</span>
+        <Menu>
+          <Tooltip label={`Sort: ${SORT_LABELS[sortMode]}`}>
+            <MenuTrigger asChild>
+              <button
+                type="button"
+                aria-label="Sort chats"
+                className="-mr-1.5 flex size-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+              >
+                <ArrowUpDownIcon className="size-3.5" />
+              </button>
+            </MenuTrigger>
+          </Tooltip>
+          <MenuPopup align="start">
+            {(Object.keys(SORT_LABELS) as SortMode[]).map((mode) => (
+              <MenuItem key={mode} onSelect={() => setSortMode(mode)}>
+                <CheckIcon className={mode === sortMode ? '' : 'invisible'} />
+                {SORT_LABELS[mode]}
+              </MenuItem>
+            ))}
+            <MenuSeparator />
+            <MenuItem onSelect={() => { window.location.href = '/legacy'; }}>
+              <ExternalLinkIcon /> Folders & bulk manage
+              <span className="ml-auto text-xs text-muted-foreground">legacy</span>
+            </MenuItem>
+          </MenuPopup>
+        </Menu>
+      </div>
       <div className="min-h-0 flex-1 space-y-px overflow-y-auto px-2 pb-2">
         {visible.map((s) => (
           <SessionRow key={s.id} session={s} />

@@ -1,10 +1,12 @@
 import { create } from 'zustand';
-import { createSession, fetchSession, streamChat } from '@/api/client';
+import { createSession, deleteMessages, editMessage, fetchSession, streamChat } from '@/api/client';
 import type { Metrics, ToolCall } from '@/api/types';
 import { usePrefs } from './prefs';
 
 export interface UiMessage {
   id: string;
+  /** Backend row id (metadata._db_id / message_saved) — needed for edit/delete. */
+  dbId?: string;
   role: 'user' | 'assistant';
   content: string;
   thinking?: string;
@@ -27,10 +29,16 @@ interface ChatState {
   openSession: (id: string) => Promise<void>;
   send: (text: string, opts?: { attachments?: string[]; onSessionCreated?: (id: string) => void }) => Promise<void>;
   stop: () => void;
+  edit: (msgId: string, content: string) => Promise<void>;
+  remove: (msgId: string) => Promise<void>;
 }
 
 let nextId = 0;
 const uid = () => `m${Date.now()}-${nextId++}`;
+
+declare global {
+  interface Window { __talosChat?: typeof useChat }
+}
 
 export const useChat = create<ChatState>((set, get) => ({
   sessionId: null,
@@ -55,7 +63,12 @@ export const useChat = create<ChatState>((set, get) => ({
     set({
       messages: (detail.history ?? [])
         .filter((m) => m.role === 'user' || m.role === 'assistant')
-        .map((m) => ({ id: uid(), role: m.role as 'user' | 'assistant', content: m.content })),
+        .map((m) => ({
+          id: uid(),
+          dbId: m.metadata?._db_id,
+          role: m.role as 'user' | 'assistant',
+          content: m.content,
+        })),
     });
   },
 
@@ -129,9 +142,23 @@ export const useChat = create<ChatState>((set, get) => ({
             case 'metrics':
               patchAi({ metrics: ev.data as Metrics });
               break;
+            case 'message_saved':
+              if (typeof ev.id === 'string') patchAi({ dbId: ev.id });
+              break;
           }
         },
       });
+      // Quiet re-sync: the stream only reports the assistant row id; pull
+      // history once so the user message gets its db id too (enables
+      // edit/delete without a manual reload).
+      try {
+        const detail = await fetchSession(sessionId);
+        const hist = (detail.history ?? []).filter((m) => m.role === 'user' || m.role === 'assistant');
+        const msgs = get().messages;
+        if (get().sessionId === sessionId && hist.length === msgs.length) {
+          set({ messages: msgs.map((m, i) => ({ ...m, dbId: hist[i]?.metadata?._db_id ?? m.dbId })) });
+        }
+      } catch { /* best-effort */ }
     } catch (err) {
       if (!abort.signal.aborted) {
         patchAi((m) => ({
@@ -152,4 +179,24 @@ export const useChat = create<ChatState>((set, get) => ({
       fetch(`/api/chat/stop/${sessionId}`, { method: 'POST', credentials: 'same-origin' }).catch(() => {});
     }
   },
+
+  edit: async (msgId, content) => {
+    const { sessionId, messages } = get();
+    const msg = messages.find((m) => m.id === msgId);
+    if (!sessionId || !msg?.dbId) throw new Error('Message not editable yet');
+    await editMessage(sessionId, msg.dbId, content);
+    set({ messages: get().messages.map((m) => (m.id === msgId ? { ...m, content } : m)) });
+  },
+
+  remove: async (msgId) => {
+    const { sessionId, messages } = get();
+    const msg = messages.find((m) => m.id === msgId);
+    if (!sessionId || !msg?.dbId) throw new Error('Message not deletable yet');
+    await deleteMessages(sessionId, [msg.dbId]);
+    set({ messages: get().messages.filter((m) => m.id !== msgId) });
+  },
 }));
+
+// Dev-only handle so the store can be driven from the console / preview evals
+// (dynamic import() in DevTools resolves a second module instance under HMR).
+if (import.meta.env.DEV) window.__talosChat = useChat;

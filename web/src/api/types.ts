@@ -21,6 +21,15 @@ export interface ModelEndpoint {
 export interface HistoryMessage {
   role: 'user' | 'assistant' | 'system';
   content: string;
+  /** Backend message metadata; `_db_id` keys edit/delete operations. */
+  metadata?: { _db_id?: string; [key: string]: unknown };
+}
+
+export interface Artifact {
+  path?: string;
+  name?: string;
+  size?: number;
+  [key: string]: unknown;
 }
 
 export interface SessionDetail {
@@ -44,6 +53,7 @@ export interface Metrics {
   tokens_per_second?: number;
   output_tokens?: number;
   context_percent?: number;
+  context_length?: number;
 }
 
 /** Server-sent event emitted by POST /api/chat_stream. The stream mixes
