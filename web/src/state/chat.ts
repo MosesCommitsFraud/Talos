@@ -71,6 +71,13 @@ function attachmentsFromMetadata(metadata: Record<string, unknown> | undefined):
   return attachments.length > 0 ? attachments : undefined;
 }
 
+function displayUserContent(content: string): string {
+  return content
+    .split(/\n\s*\[Attachment file available to tools:/)[0]
+    .split(/\n\s*\[Attached document:/)[0]
+    .trimEnd();
+}
+
 declare global {
   interface Window { __talosChat?: typeof useChat }
 }
@@ -102,7 +109,7 @@ export const useChat = create<ChatState>((set, get) => ({
           id: uid(),
           dbId: m.metadata?._db_id,
           role: m.role as 'user' | 'assistant',
-          content: m.content,
+          content: m.role === 'user' ? displayUserContent(m.content) : m.content,
           attachments: m.role === 'user' ? attachmentsFromMetadata(m.metadata) : undefined,
           metrics: m.role === 'assistant' ? metricsFromMetadata(m.metadata) : undefined,
         })),
