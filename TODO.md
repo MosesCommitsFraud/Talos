@@ -10,3 +10,4 @@ system prompt eingabe nötig
 titles have attachments in their name
 reasoning and message not clear distinct
 images are not shown
+editing a message should resend the query from the state where it was there including attachments
