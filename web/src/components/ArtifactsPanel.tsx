@@ -15,7 +15,7 @@ function formatSize(bytes?: number): string {
  *  (legacy "Files/Artifacts" button) with per-file download + zip-all. */
 export function ArtifactsPanel({ open, onClose }: { open: boolean; onClose: () => void }) {
   const sessionId = useChat((s) => s.sessionId);
-  const inputs = useChat((s) => s.messages.flatMap((m) => m.role === 'user' ? (m.attachments ?? []) : []));
+  const messages = useChat((s) => s.messages);
   const { data, isLoading } = useQuery({
     queryKey: ['artifacts', sessionId],
     queryFn: () => fetchArtifacts(sessionId!),
@@ -25,6 +25,7 @@ export function ArtifactsPanel({ open, onClose }: { open: boolean; onClose: () =
 
   if (!open) return null;
   const files = data ?? [];
+  const inputs = messages.flatMap((m) => m.role === 'user' ? (m.attachments ?? []) : []);
 
   return (
     <aside className="flex w-72 shrink-0 flex-col border-l bg-card" aria-label="Session files">
