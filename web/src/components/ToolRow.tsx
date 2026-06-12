@@ -14,7 +14,7 @@ export function ToolRow({ call }: { call: ToolCall }) {
         className="flex items-center gap-1.5 text-[13px] font-medium text-muted-foreground transition-colors hover:text-foreground"
       >
         <Icon
-          className={`size-3.5 ${call.status === 'running' ? 'animate-spin' : call.status === 'error' ? 'text-destructive-foreground' : ''}`}
+          className={`size-3.5 ${call.status === 'running' ? 'animate-spin' : call.status === 'error' ? 'text-destructive-foreground' : 'text-success'}`}
         />
         <span>{call.tool}</span>
         <span className="font-normal opacity-70">{call.status === 'running' ? 'running' : call.status}</span>

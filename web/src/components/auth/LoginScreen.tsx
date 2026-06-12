@@ -71,9 +71,11 @@ export function LoginScreen({
     <div className="flex h-full items-center justify-center bg-background">
       <div className="w-[340px]">
         <div className="mb-6 text-center">
-          <div className="mx-auto mb-3 flex size-11 items-center justify-center rounded-xl bg-primary font-semibold text-lg text-primary-foreground">
-            T
-          </div>
+          <svg viewBox="0 0 32 32" aria-hidden="true" className="mx-auto mb-3 size-11 text-primary">
+            <path d="M16 4L16 22L6 22Z" fill="currentColor" />
+            <path d="M16 8L16 22L24 22Z" fill="currentColor" opacity="0.6" />
+            <path d="M4 24Q10 20 16 24Q22 28 28 24" stroke="currentColor" strokeWidth="2.5" fill="none" strokeLinecap="round" />
+          </svg>
           <h1 className="font-semibold text-foreground text-xl">{t.heading}</h1>
           <p className="mt-1 text-muted-foreground text-sm">{t.sub}</p>
         </div>
