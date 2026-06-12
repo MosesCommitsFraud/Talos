@@ -1,6 +1,7 @@
 import { CheckIcon, CopyIcon, FileIcon, PencilIcon, Trash2Icon } from 'lucide-react';
+import { useQuery } from '@tanstack/react-query';
 import { useEffect, useRef, useState } from 'react';
-import { uploadDownloadUrl } from '@/api/client';
+import { artifactDownloadUrl, fetchArtifacts, uploadDownloadUrl } from '@/api/client';
 import { useChat, type UiMessage } from '@/state/chat';
 import { usePrefs } from '@/state/prefs';
 import { Markdown } from './Markdown';
@@ -159,6 +160,7 @@ function FinalImageGrid({ images }: { images: ToolImage[] }) {
 }
 
 export function Messages() {
+  const sessionId = useChat((s) => s.sessionId);
   const messages = useChat((s) => s.messages);
   const showMetrics = usePrefs((s) => s.visibility.messageMetrics);
   const showWelcome = usePrefs((s) => s.visibility.welcomeText);
@@ -166,6 +168,12 @@ export function Messages() {
   const [editing, setEditing] = useState<string | null>(null);
   const scroller = useRef<HTMLDivElement>(null);
   const pinned = useRef(true);
+  const { data: artifacts } = useQuery({
+    queryKey: ['artifacts', sessionId],
+    queryFn: () => fetchArtifacts(sessionId!),
+    enabled: !!sessionId,
+    refetchInterval: 10_000,
+  });
 
   // Stick to the bottom while streaming unless the user scrolled up.
   useEffect(() => {
@@ -191,6 +199,23 @@ export function Messages() {
       </div>
     );
   }
+
+  const lastAssistantId = [...messages].reverse().find((m) => m.role === 'assistant')?.id;
+  const inputPaths = new Set(
+    messages.flatMap((m) => m.role === 'user'
+      ? (m.attachments ?? []).flatMap((f) => [f.sandbox_path, f.name].filter((v): v is string => !!v))
+      : []),
+  );
+  const artifactImages: ToolImage[] = sessionId
+    ? (artifacts ?? []).flatMap((f) => {
+        const path = String(f.path ?? f.name ?? '');
+        const mime = String(f.mime ?? '');
+        const isImage = f.is_image || mime.startsWith('image/') || /\.(png|jpe?g|gif|webp|svg)$/i.test(path);
+        return path && isImage && !inputPaths.has(path)
+          ? [{ src: artifactDownloadUrl(sessionId, path), label: path }]
+          : [];
+      })
+    : [];
 
   return (
     <div ref={scroller} onScroll={onScroll} className="flex-1 overflow-y-auto" role="log" aria-live="polite">
@@ -230,7 +255,8 @@ export function Messages() {
                 )
               )}
               {!m.streaming && (() => {
-                const finalImages = (m.tools ?? []).flatMap(toolImages);
+                const toolFinalImages = (m.tools ?? []).flatMap(toolImages);
+                const finalImages = toolFinalImages.length > 0 || m.id !== lastAssistantId ? toolFinalImages : artifactImages;
                 return (
                   <>
                     <FinalImageGrid images={finalImages} />

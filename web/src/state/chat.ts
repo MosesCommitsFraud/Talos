@@ -55,6 +55,11 @@ function metricsFromMetadata(metadata: Record<string, unknown> | undefined): Met
   return Object.keys(metrics).length > 0 ? metrics : undefined;
 }
 
+function thinkingFromMetadata(metadata: Record<string, unknown> | undefined): string | undefined {
+  const thinking = metadata?.thinking;
+  return typeof thinking === 'string' && thinking.trim() ? thinking : undefined;
+}
+
 function attachmentsFromMetadata(metadata: Record<string, unknown> | undefined): Attachment[] | undefined {
   const raw = metadata?.attachments;
   if (!Array.isArray(raw)) return undefined;
@@ -131,6 +136,7 @@ export const useChat = create<ChatState>((set, get) => ({
           role: m.role as 'user' | 'assistant',
           content: m.role === 'user' ? displayUserContent(m.content) : m.content,
           attachments: m.role === 'user' ? attachmentsFromMetadata(m.metadata) : undefined,
+          thinking: m.role === 'assistant' ? thinkingFromMetadata(m.metadata) : undefined,
           metrics: m.role === 'assistant' ? metricsFromMetadata(m.metadata) : undefined,
           tools: m.role === 'assistant' ? toolCallsFromMetadata(m.metadata) : undefined,
         })),

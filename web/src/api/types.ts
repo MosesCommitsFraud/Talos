@@ -41,6 +41,8 @@ export interface Artifact {
   path?: string;
   name?: string;
   size?: number;
+  mime?: string;
+  is_image?: boolean;
   [key: string]: unknown;
 }
 

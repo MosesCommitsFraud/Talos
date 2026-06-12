@@ -671,6 +671,7 @@ def setup_chat_routes(
                 yield f"data: {json.dumps({'type': 'compacted', 'context_length': ctx.context_length})}\n\n"
 
             full_response = ""
+            thinking_response = ""
             last_metrics = None
 
             # Configured fallback chain for the default chat model. Tried in
@@ -769,7 +770,9 @@ def setup_chat_routes(
                                     # Reasoning tokens arrive flagged thinking:true.
                                     # Forward them for the live indicator, but keep
                                     # them out of the saved reply (same as chat mode).
-                                    if not data.get("thinking"):
+                                    if data.get("thinking"):
+                                        thinking_response += data["delta"]
+                                    else:
                                         full_response += data["delta"]
                                         _stream_set(session, partial=full_response)
                                     yield chunk
@@ -804,7 +807,10 @@ def setup_chat_routes(
                         elif chunk.startswith("event: "):
                             yield chunk
                         elif chunk == "data: [DONE]\n\n":
-                            if full_response:
+                            if full_response or thinking_response or (last_metrics and last_metrics.get("tool_events")):
+                                if thinking_response.strip():
+                                    last_metrics = dict(last_metrics or {})
+                                    last_metrics["thinking"] = thinking_response.strip()
                                 _saved_id = save_assistant_response(
                                     sess, session_manager, session, full_response, last_metrics,
                                     character_name=ctx.preset.character_name,
@@ -836,9 +842,12 @@ def setup_chat_routes(
                     # outer finally from running and left _active_streams
                     # with a stale entry).
                     try:
-                        if full_response:
+                        if full_response or thinking_response:
                             logger.info("Client disconnected mid-stream for session %s, saving partial response (%d chars)", session, len(full_response))
-                            _stopped_content2, _stopped_md2 = clean_thinking_for_save(full_response, {"stopped": True, "model": sess.model})
+                            _stopped_md_base = {"stopped": True, "model": sess.model}
+                            if thinking_response.strip():
+                                _stopped_md_base["thinking"] = thinking_response.strip()
+                            _stopped_content2, _stopped_md2 = clean_thinking_for_save(full_response, _stopped_md_base)
                             sess.add_message(ChatMessage("assistant", _stopped_content2, metadata=_stopped_md2))
                             if not incognito:
                                 session_manager.save_sessions()
