@@ -242,11 +242,26 @@ export const useChat = create<ChatState>((set, get) => ({
   },
 
   edit: async (msgId, content) => {
-    const { sessionId, messages } = get();
-    const msg = messages.find((m) => m.id === msgId);
+    const { sessionId, messages, streaming } = get();
+    if (streaming) return;
+    const idx = messages.findIndex((m) => m.id === msgId);
+    const msg = messages[idx];
     if (!sessionId || !msg?.dbId) throw new Error('Message not editable yet');
-    await editMessage(sessionId, msg.dbId, content);
-    set({ messages: get().messages.map((m) => (m.id === msgId ? { ...m, content } : m)) });
+
+    if (msg.role !== 'user') {
+      // Assistant rows are edited in place (no resend semantics).
+      await editMessage(sessionId, msg.dbId, content);
+      set({ messages: get().messages.map((m) => (m.id === msgId ? { ...m, content } : m)) });
+      return;
+    }
+
+    // Editing a user message resends the conversation from that point:
+    // drop the old turn and every later message, then send the edited text
+    // through the normal stream path with the original attachments.
+    const dropIds = messages.slice(idx).map((m) => m.dbId).filter((id): id is string => !!id);
+    await deleteMessages(sessionId, dropIds);
+    set({ messages: messages.slice(0, idx) });
+    await get().send(content, { attachments: msg.attachments });
   },
 
   remove: async (msgId) => {
