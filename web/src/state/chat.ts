@@ -136,12 +136,26 @@ export const useChat = create<ChatState>((set, get) => ({
     const abort = new AbortController();
     set({ messages: [...get().messages, userMsg, aiMsg], streaming: true, abort });
 
+    // The agent loop emits multiple assistant rounds per turn, delimited by
+    // agent_step events. Each round gets its own message bubble (with its own
+    // thinking block and tool rows), so this tracks the bubble currently
+    // receiving deltas rather than closing over aiMsg.
+    let aiId = aiMsg.id;
     const patchAi = (patch: Partial<UiMessage> | ((m: UiMessage) => Partial<UiMessage>)) => {
       set({
         messages: get().messages.map((m) =>
-          m.id === aiMsg.id ? { ...m, ...(typeof patch === 'function' ? patch(m) : patch) } : m,
+          m.id === aiId ? { ...m, ...(typeof patch === 'function' ? patch(m) : patch) } : m,
         ),
       });
+    };
+    const startNewRound = () => {
+      const current = get().messages.find((m) => m.id === aiId);
+      // Nothing rendered yet — reuse the empty bubble instead of stacking one.
+      if (current && !current.content && !current.thinking && !current.tools?.length) return;
+      patchAi({ streaming: false });
+      const next: UiMessage = { id: uid(), role: 'assistant', content: '', streaming: true };
+      aiId = next.id;
+      set({ messages: [...get().messages, next] });
     };
 
     const prefs = usePrefs.getState();
@@ -164,6 +178,9 @@ export const useChat = create<ChatState>((set, get) => ({
             return;
           }
           switch (ev.type) {
+            case 'agent_step':
+              startNewRound();
+              break;
             case 'tool_start':
               patchAi((m) => ({
                 tools: [...(m.tools ?? []), { tool: String(ev.tool), command: ev.command as string | undefined, status: 'running' }],

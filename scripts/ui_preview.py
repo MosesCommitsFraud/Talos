@@ -56,6 +56,12 @@ print(result)
         {"delta": f"Your message was: `{message or '(empty)'}`\n\n"},
         {"delta": "```python\n" + code + "```\n\n"},
         {"delta": "The computed highest gross value is **22.61** for item **B**."},
+        # Second agent round: must render as a NEW bubble with its own
+        # reasoning block (agent_step delimits rounds in the real stream).
+        {"type": "agent_step", "round": 2},
+        {"delta": "Round two: I should double-check the result before summarizing.\n", "thinking": True},
+        {"delta": "Looks right — gross = value × 1.19 and B has the largest value.\n", "thinking": True},
+        {"delta": "Second-round reply: the calculation checks out, **B** stays on top."},
         {"type": "metrics", "data": {
             "model": "mock-ui-preview",
             "response_time": 1.42,
@@ -168,6 +174,13 @@ class PreviewHandler(BaseHTTPRequestHandler):
 
         if path == "/api/auth/settings":
             self._send_json({"auth_enabled": False, "user": "preview", "is_admin": True})
+            return
+        if path == "/api/auth/status":
+            # auth_enabled False ⇒ the React AuthGate renders the app directly.
+            self._send_json({
+                "configured": True, "authenticated": True, "username": "preview",
+                "is_admin": True, "signup_enabled": False, "auth_enabled": False,
+            })
             return
         if path == "/api/sessions":
             self._send_json(_sessions())
