@@ -15,11 +15,11 @@ export function toolImages(call: ToolCall): ToolImage[] {
     const src = image.data_url || image.url;
     if (src) images.push({ src, label: image.caption || image.name });
   }
-  return images;
+  return images.filter((image, i, all) => all.findIndex((other) => other.src === image.src) === i);
 }
 
 /** One quiet tool-call row: "python · done", expandable to command + output. */
-export function ToolRow({ call }: { call: ToolCall }) {
+export function ToolRow({ call, showImages = true }: { call: ToolCall; showImages?: boolean }) {
   const [open, setOpen] = useState(false);
   const Icon = call.status === 'running' ? LoaderCircleIcon : call.status === 'error' ? CircleAlertIcon : CheckIcon;
   const images = toolImages(call);
@@ -47,21 +47,21 @@ export function ToolRow({ call }: { call: ToolCall }) {
           )}
         </div>
       )}
-      {(call.image_note || images.length > 0) && (
+      {showImages && (call.image_note || images.length > 0) && (
         <div className="mt-2 ml-1 space-y-1.5">
           {call.image_note && <div className="text-xs text-muted-foreground">{call.image_note}</div>}
           {images.length > 0 && (
-            <div className="grid gap-2 sm:grid-cols-2">
+            <div className="grid grid-cols-[repeat(auto-fit,minmax(140px,1fr))] gap-2">
               {images.map((image, i) => (
                 <a
                   key={`${image.src.slice(0, 48)}-${i}`}
                   href={image.src}
                   target="_blank"
                   rel="noreferrer"
-                  className="group/image overflow-hidden rounded-xl border bg-card"
+                  className="min-w-0"
                 >
-                  <img src={image.src} alt={image.label || `Tool image ${i + 1}`} className="max-h-80 w-full object-contain" />
-                  {image.label && <div className="truncate border-t px-2 py-1 text-xs text-muted-foreground">{image.label}</div>}
+                  <img src={image.src} alt={image.label || `Tool image ${i + 1}`} className="max-h-80 w-full rounded-lg object-contain" />
+                  {image.label && <div className="mt-1 truncate text-xs text-muted-foreground">{image.label}</div>}
                 </a>
               ))}
             </div>

@@ -152,19 +152,20 @@ function EditBox({ msg, onDone }: { msg: UiMessage; onDone: () => void }) {
 }
 
 function FinalImageGrid({ images }: { images: ToolImage[] }) {
-  if (images.length === 0) return null;
+  const uniqueImages = images.filter((image, i, all) => all.findIndex((other) => other.src === image.src) === i);
+  if (uniqueImages.length === 0) return null;
   return (
-    <div className="mt-3 grid gap-2 sm:grid-cols-2">
-      {images.map((image, i) => (
+    <div className="mt-3 grid grid-cols-[repeat(auto-fit,minmax(150px,1fr))] gap-2">
+      {uniqueImages.map((image, i) => (
         <a
           key={`${image.src.slice(0, 48)}-${i}`}
           href={image.src}
           target="_blank"
           rel="noreferrer"
-          className="overflow-hidden rounded-xl border bg-card"
+          className="min-w-0"
         >
-          <img src={image.src} alt={image.label || `Generated image ${i + 1}`} className="max-h-96 w-full object-contain" />
-          {image.label && <div className="truncate border-t px-2 py-1 text-xs text-muted-foreground">{image.label}</div>}
+          <img src={image.src} alt={image.label || `Generated image ${i + 1}`} className="max-h-96 w-full rounded-lg object-contain" />
+          {image.label && <div className="mt-1 truncate text-xs text-muted-foreground">{image.label}</div>}
         </a>
       ))}
     </div>
@@ -266,7 +267,7 @@ export function Messages() {
           ) : (
             <div key={m.id} className={`group w-full ${index === 0 ? '' : messages[index - 1].role === 'assistant' ? 'mt-1' : 'mt-3'}`}>
               {m.thinking && showThinking && <Thinking text={m.thinking} streaming={!!m.streaming && !m.content} />}
-              {m.tools?.map((t, i) => <ToolRow key={i} call={t} />)}
+              {m.tools?.map((t, i) => <ToolRow key={i} call={t} showImages={!!m.streaming} />)}
               {m.content ? (
                 <div className={m.error ? 'text-destructive-foreground' : ''}>
                   <Markdown text={m.content} />
