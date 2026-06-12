@@ -5,7 +5,7 @@ import { useState } from 'react';
 export function Thinking({ text, streaming }: { text: string; streaming: boolean }) {
   const [open, setOpen] = useState(false);
   return (
-    <div className="my-1">
+    <div className="my-0.5">
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}

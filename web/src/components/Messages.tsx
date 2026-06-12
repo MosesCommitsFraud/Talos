@@ -49,14 +49,26 @@ function ActionIcon({
 
 function CopyAction({ text }: { text: string }) {
   const [copied, setCopied] = useState(false);
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      const area = document.createElement('textarea');
+      area.value = text;
+      area.style.position = 'fixed';
+      area.style.left = '-9999px';
+      document.body.appendChild(area);
+      area.select();
+      document.execCommand('copy');
+      area.remove();
+    }
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+  };
   return (
     <ActionIcon
       label={copied ? 'Copied' : 'Copy'}
-      onClick={() => {
-        void navigator.clipboard.writeText(text);
-        setCopied(true);
-        setTimeout(() => setCopied(false), 1500);
-      }}
+      onClick={() => void copy()}
     >
       {copied ? <CheckIcon className="size-3.5" /> : <CopyIcon className="size-3.5" />}
     </ActionIcon>
@@ -90,12 +102,12 @@ function AttachmentList({ msg }: { msg: UiMessage }) {
   );
 }
 
-function MessageActions({ msg, onEdit }: { msg: UiMessage; onEdit?: () => void }) {
+function MessageActions({ msg, onEdit, copyText }: { msg: UiMessage; onEdit?: () => void; copyText?: string }) {
   const remove = useChat((s) => s.remove);
   const canMutate = !!msg.dbId;
   return (
     <>
-      <CopyAction text={msg.content} />
+      <CopyAction text={copyText ?? msg.content} />
       {onEdit && canMutate && (
         <ActionIcon label="Edit message" onClick={onEdit}>
           <PencilIcon className="size-3.5" />
@@ -216,13 +228,27 @@ export function Messages() {
           : [];
       })
     : [];
+  const isAssistantTurnEnd = (index: number) => messages[index].role === 'assistant' && messages[index + 1]?.role !== 'assistant';
+  const assistantTurnStart = (index: number) => {
+    let start = index;
+    while (start > 0 && messages[start - 1].role === 'assistant') start -= 1;
+    return start;
+  };
+  const assistantTurnText = (index: number) => {
+    const start = assistantTurnStart(index);
+    return messages.slice(start, index + 1).map((msg) => msg.content.trim()).filter(Boolean).join('\n\n');
+  };
+  const assistantTurnImages = (index: number) => {
+    const start = assistantTurnStart(index);
+    return messages.slice(start, index + 1).flatMap((msg) => (msg.tools ?? []).flatMap(toolImages));
+  };
 
   return (
     <div ref={scroller} onScroll={onScroll} className="flex-1 overflow-y-auto" role="log" aria-live="polite">
-      <div className="mx-auto flex w-full max-w-[800px] flex-col gap-3 px-4 py-6">
-        {messages.map((m) =>
+      <div className="mx-auto flex w-full max-w-[800px] flex-col px-4 py-6">
+        {messages.map((m, index) =>
           m.role === 'user' ? (
-            <div key={m.id} className="group ml-auto flex w-full max-w-[75%] flex-col items-end gap-0.5">
+            <div key={m.id} className={`group ml-auto flex w-full max-w-[75%] flex-col items-end gap-0.5 ${index === 0 ? '' : 'mt-3'}`}>
               {editing === m.id ? (
                 <EditBox msg={m} onDone={() => setEditing(null)} />
               ) : (
@@ -238,7 +264,7 @@ export function Messages() {
               )}
             </div>
           ) : (
-            <div key={m.id} className="group w-full">
+            <div key={m.id} className={`group w-full ${index === 0 ? '' : messages[index - 1].role === 'assistant' ? 'mt-1' : 'mt-3'}`}>
               {m.thinking && showThinking && <Thinking text={m.thinking} streaming={!!m.streaming && !m.content} />}
               {m.tools?.map((t, i) => <ToolRow key={i} call={t} />)}
               {m.content ? (
@@ -254,15 +280,16 @@ export function Messages() {
                   </div>
                 )
               )}
-              {!m.streaming && (() => {
-                const toolFinalImages = (m.tools ?? []).flatMap(toolImages);
+              {!m.streaming && isAssistantTurnEnd(index) && (() => {
+                const toolFinalImages = assistantTurnImages(index);
                 const finalImages = toolFinalImages.length > 0 || m.id !== lastAssistantId ? toolFinalImages : artifactImages;
+                const copyText = assistantTurnText(index);
                 return (
                   <>
                     <FinalImageGrid images={finalImages} />
-                    {m.content.trim() && (
-                      <div className="flex h-0 items-center gap-1 overflow-visible pt-1 opacity-0 transition-opacity group-hover:opacity-100">
-                        <MessageActions msg={m} />
+                    {copyText && (
+                      <div className="mt-2 flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100">
+                        <MessageActions msg={m} copyText={copyText} />
                         {showMetrics && m.metrics && (
                           <span className="text-xs text-muted-foreground/80">
                             {m.metrics.tokens_per_second != null && `${m.metrics.tokens_per_second} tok/s`}
