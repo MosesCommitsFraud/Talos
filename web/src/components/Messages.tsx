@@ -5,7 +5,7 @@ import { useChat, type UiMessage } from '@/state/chat';
 import { usePrefs } from '@/state/prefs';
 import { Markdown } from './Markdown';
 import { Thinking } from './Thinking';
-import { ToolRow } from './ToolRow';
+import { ToolRow, toolImages, type ToolImage } from './ToolRow';
 import { Tooltip } from './ui/misc';
 import { Button } from './ui/button';
 
@@ -138,6 +138,26 @@ function EditBox({ msg, onDone }: { msg: UiMessage; onDone: () => void }) {
   );
 }
 
+function FinalImageGrid({ images }: { images: ToolImage[] }) {
+  if (images.length === 0) return null;
+  return (
+    <div className="mt-3 grid gap-2 sm:grid-cols-2">
+      {images.map((image, i) => (
+        <a
+          key={`${image.src.slice(0, 48)}-${i}`}
+          href={image.src}
+          target="_blank"
+          rel="noreferrer"
+          className="overflow-hidden rounded-xl border bg-card"
+        >
+          <img src={image.src} alt={image.label || `Generated image ${i + 1}`} className="max-h-96 w-full object-contain" />
+          {image.label && <div className="truncate border-t px-2 py-1 text-xs text-muted-foreground">{image.label}</div>}
+        </a>
+      ))}
+    </div>
+  );
+}
+
 export function Messages() {
   const messages = useChat((s) => s.messages);
   const showMetrics = usePrefs((s) => s.visibility.messageMetrics);
@@ -209,17 +229,25 @@ export function Messages() {
                   </div>
                 )
               )}
-              {!m.streaming && m.content.trim() && (
-                <div className="flex h-0 items-center gap-1 overflow-visible pt-1 opacity-0 transition-opacity group-hover:opacity-100">
-                  <MessageActions msg={m} />
-                  {showMetrics && m.metrics && (
-                    <span className="text-xs text-muted-foreground/80">
-                      {m.metrics.tokens_per_second != null && `${m.metrics.tokens_per_second} tok/s`}
-                      {m.metrics.response_time != null && ` · ${m.metrics.response_time}s`}
-                    </span>
-                  )}
-                </div>
-              )}
+              {!m.streaming && (() => {
+                const finalImages = (m.tools ?? []).flatMap(toolImages);
+                return (
+                  <>
+                    <FinalImageGrid images={finalImages} />
+                    {m.content.trim() && (
+                      <div className="flex h-0 items-center gap-1 overflow-visible pt-1 opacity-0 transition-opacity group-hover:opacity-100">
+                        <MessageActions msg={m} />
+                        {showMetrics && m.metrics && (
+                          <span className="text-xs text-muted-foreground/80">
+                            {m.metrics.tokens_per_second != null && `${m.metrics.tokens_per_second} tok/s`}
+                            {m.metrics.response_time != null && ` · ${m.metrics.response_time}s`}
+                          </span>
+                        )}
+                      </div>
+                    )}
+                  </>
+                );
+              })()}
             </div>
           ),
         )}

@@ -2,10 +2,27 @@ import { CheckIcon, ChevronRightIcon, CircleAlertIcon, LoaderCircleIcon } from '
 import { useState } from 'react';
 import type { ToolCall } from '@/api/types';
 
+export interface ToolImage {
+  src: string;
+  label?: string;
+}
+
+export function toolImages(call: ToolCall): ToolImage[] {
+  const images: ToolImage[] = [];
+  if (call.image_url) images.push({ src: call.image_url, label: call.image_prompt || 'Generated image' });
+  if (call.screenshot) images.push({ src: call.screenshot, label: 'Screenshot' });
+  for (const image of call.created_images ?? []) {
+    const src = image.data_url || image.url;
+    if (src) images.push({ src, label: image.caption || image.name });
+  }
+  return images;
+}
+
 /** One quiet tool-call row: "python · done", expandable to command + output. */
 export function ToolRow({ call }: { call: ToolCall }) {
   const [open, setOpen] = useState(false);
   const Icon = call.status === 'running' ? LoaderCircleIcon : call.status === 'error' ? CircleAlertIcon : CheckIcon;
+  const images = toolImages(call);
   return (
     <div className="my-0.5">
       <button
@@ -27,6 +44,27 @@ export function ToolRow({ call }: { call: ToolCall }) {
           )}
           {call.output && (
             <pre className="max-h-72 overflow-y-auto rounded-lg border bg-muted px-3 py-2 font-mono text-[12.5px] leading-snug whitespace-pre-wrap">{call.output}</pre>
+          )}
+        </div>
+      )}
+      {(call.image_note || images.length > 0) && (
+        <div className="mt-2 ml-1 space-y-1.5">
+          {call.image_note && <div className="text-xs text-muted-foreground">{call.image_note}</div>}
+          {images.length > 0 && (
+            <div className="grid gap-2 sm:grid-cols-2">
+              {images.map((image, i) => (
+                <a
+                  key={`${image.src.slice(0, 48)}-${i}`}
+                  href={image.src}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="group/image overflow-hidden rounded-xl border bg-card"
+                >
+                  <img src={image.src} alt={image.label || `Tool image ${i + 1}`} className="max-h-80 w-full object-contain" />
+                  {image.label && <div className="truncate border-t px-2 py-1 text-xs text-muted-foreground">{image.label}</div>}
+                </a>
+              ))}
+            </div>
           )}
         </div>
       )}

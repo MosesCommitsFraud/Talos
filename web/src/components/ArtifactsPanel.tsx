@@ -24,8 +24,14 @@ export function ArtifactsPanel({ open, onClose }: { open: boolean; onClose: () =
   });
 
   if (!open) return null;
-  const files = data ?? [];
   const inputs = messages.flatMap((m) => m.role === 'user' ? (m.attachments ?? []) : []);
+  const inputPaths = new Set(
+    inputs.flatMap((f) => [f.sandbox_path, f.name].filter((v): v is string => !!v)),
+  );
+  const files = (data ?? []).filter((f) => {
+    const path = String(f.path ?? f.name ?? '');
+    return path && !inputPaths.has(path);
+  });
 
   return (
     <aside className="flex w-72 shrink-0 flex-col border-l bg-card" aria-label="Session files">

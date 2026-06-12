@@ -23,7 +23,7 @@ export interface HistoryMessage {
   role: 'user' | 'assistant' | 'system';
   content: string;
   /** Backend message metadata; `_db_id` keys edit/delete operations. */
-  metadata?: { _db_id?: string; attachments?: Attachment[]; [key: string]: unknown };
+  metadata?: { _db_id?: string; attachments?: Attachment[]; tool_events?: ToolCall[]; [key: string]: unknown };
 }
 
 export interface Attachment {
@@ -33,6 +33,7 @@ export interface Attachment {
   size?: number;
   width?: number;
   height?: number;
+  sandbox_path?: string;
   [key: string]: unknown;
 }
 
@@ -56,6 +57,20 @@ export interface ToolCall {
   output?: string;
   exitCode?: number;
   status: 'running' | 'done' | 'error';
+  image_url?: string;
+  image_prompt?: string;
+  image_model?: string;
+  image_size?: string;
+  image_quality?: string;
+  image_note?: string;
+  screenshot?: string;
+  created_images?: Array<{
+    name?: string;
+    caption?: string;
+    data_url?: string;
+    url?: string;
+    [key: string]: unknown;
+  }>;
 }
 
 export interface Metrics {

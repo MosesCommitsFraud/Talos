@@ -66,9 +66,29 @@ function attachmentsFromMetadata(metadata: Record<string, unknown> | undefined):
       name: item.name != null ? String(item.name) : item.original_name != null ? String(item.original_name) : undefined,
       mime: item.mime != null ? String(item.mime) : undefined,
       size: typeof item.size === 'number' ? item.size : undefined,
+      sandbox_path: item.sandbox_path != null ? String(item.sandbox_path) : undefined,
     }))
     .filter((item) => item.id);
   return attachments.length > 0 ? attachments : undefined;
+}
+
+function toolCallsFromMetadata(metadata: Record<string, unknown> | undefined): ToolCall[] | undefined {
+  const raw = metadata?.tool_events;
+  if (!Array.isArray(raw)) return undefined;
+  const tools = raw
+    .filter((item): item is Record<string, unknown> => !!item && typeof item === 'object')
+    .map((item) => {
+      const exitCode = typeof item.exit_code === 'number' ? item.exit_code : typeof item.exitCode === 'number' ? item.exitCode : undefined;
+      return {
+        ...item,
+        tool: String(item.tool ?? 'tool'),
+        command: item.command != null ? String(item.command) : undefined,
+        output: item.output != null ? String(item.output) : undefined,
+        exitCode,
+        status: exitCode == null || exitCode === 0 ? 'done' as const : 'error' as const,
+      };
+    });
+  return tools.length > 0 ? tools : undefined;
 }
 
 function displayUserContent(content: string): string {
@@ -112,6 +132,7 @@ export const useChat = create<ChatState>((set, get) => ({
           content: m.role === 'user' ? displayUserContent(m.content) : m.content,
           attachments: m.role === 'user' ? attachmentsFromMetadata(m.metadata) : undefined,
           metrics: m.role === 'assistant' ? metricsFromMetadata(m.metadata) : undefined,
+          tools: m.role === 'assistant' ? toolCallsFromMetadata(m.metadata) : undefined,
         })),
     });
   },
@@ -195,6 +216,14 @@ export const useChat = create<ChatState>((set, get) => ({
                         output: ev.output as string | undefined,
                         exitCode: ev.exit_code as number | undefined,
                         status: (ev.exit_code ?? 0) === 0 ? 'done' : 'error',
+                        image_url: ev.image_url as string | undefined,
+                        image_prompt: ev.image_prompt as string | undefined,
+                        image_model: ev.image_model as string | undefined,
+                        image_size: ev.image_size as string | undefined,
+                        image_quality: ev.image_quality as string | undefined,
+                        image_note: ev.image_note as string | undefined,
+                        screenshot: ev.screenshot as string | undefined,
+                        created_images: Array.isArray(ev.created_images) ? ev.created_images as ToolCall['created_images'] : undefined,
                       }
                     : t,
                 ),

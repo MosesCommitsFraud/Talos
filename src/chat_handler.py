@@ -145,6 +145,7 @@ class ChatHandler:
                         "size": fi.get("size", 0),
                         "width": fi.get("width"),
                         "height": fi.get("height"),
+                        "sandbox_path": fi.get("sandbox_path"),
                     })
 
         if att_ids and vision_enabled:
