@@ -135,17 +135,19 @@ def setup_auth_routes(auth_manager: AuthManager) -> APIRouter:
         token = await asyncio.to_thread(auth_manager.create_session, username, body.password)
         if not token:
             raise HTTPException(401, "Invalid credentials")
-        cookie_kwargs = dict(
+        # Sessions are in-memory and process-bound: the server forgets every
+        # token on restart, so the cookie can be long-lived — the in-memory
+        # store is what actually ends a session. `remember` is still accepted
+        # in the request body for legacy-login compat but no longer matters.
+        response.set_cookie(
             key=SESSION_COOKIE,
             value=token,
             httponly=True,
             samesite="lax",
             secure=os.getenv("SECURE_COOKIES", "false").lower() == "true",
             path="/",
+            max_age=60 * 60 * 24 * 30,  # 30 days
         )
-        if body.remember:
-            cookie_kwargs["max_age"] = 60 * 60 * 24 * 7  # 7 days
-        response.set_cookie(**cookie_kwargs)
         return {"ok": True, "username": username}
 
     @router.post("/logout")
@@ -161,6 +163,9 @@ def setup_auth_routes(auth_manager: AuthManager) -> APIRouter:
         token = request.cookies.get(SESSION_COOKIE)
         result = auth_manager.status(token)
         result["signup_enabled"] = auth_manager.signup_enabled
+        # The React shell gates itself on this endpoint; when auth is globally
+        # disabled it must render the app even though no session exists.
+        result["auth_enabled"] = os.getenv("AUTH_ENABLED", "true").lower() != "false"
         # Include the caller's effective privileges so the frontend can
         # hide / dim UI controls the user isn't allowed to use. Admins get
         # ADMIN_PRIVILEGES (everything on), regular users get their stored

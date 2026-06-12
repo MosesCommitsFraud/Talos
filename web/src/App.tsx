@@ -8,6 +8,7 @@ import { CommandPalette } from './components/CommandPalette';
 import { SettingsDialog } from './components/SettingsDialog';
 import { BrainDialog, LibraryDialog } from './components/ToolDialogs';
 import { ArtifactsPanel } from './components/ArtifactsPanel';
+import { AuthGate } from './components/auth/AuthGate';
 import { TooltipProvider } from './components/ui/misc';
 import { applyDensity, applyTheme, usePrefs } from './state/prefs';
 
@@ -41,24 +42,26 @@ export default function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <TooltipProvider>
-        <div className="flex h-full">
-          <Sidebar
-            onOpenPalette={() => setPalette(true)}
-            onOpenSettings={() => setSettings(true)}
-            onOpenBrain={() => setBrain(true)}
-            onOpenLibrary={() => setLibrary(true)}
-          />
-          <main className="flex min-w-0 flex-1 flex-col">
-            <ChatHeader onToggleFiles={() => setFiles((v) => !v)} filesOpen={files} />
-            <Messages />
-            <Composer />
-          </main>
-          <ArtifactsPanel open={files} onClose={() => setFiles(false)} />
-        </div>
-        <CommandPalette open={palette} onClose={() => setPalette(false)} onOpenSettings={() => setSettings(true)} />
-        <SettingsDialog open={settings} onClose={() => setSettings(false)} />
-        <BrainDialog open={brain} onClose={() => setBrain(false)} />
-        <LibraryDialog open={library} onClose={() => setLibrary(false)} />
+        <AuthGate>
+          <div className="flex h-full">
+            <Sidebar
+              onOpenPalette={() => setPalette(true)}
+              onOpenSettings={() => setSettings(true)}
+              onOpenBrain={() => setBrain(true)}
+              onOpenLibrary={() => setLibrary(true)}
+            />
+            <main className="flex min-w-0 flex-1 flex-col">
+              <ChatHeader onToggleFiles={() => setFiles((v) => !v)} filesOpen={files} />
+              <Messages />
+              <Composer />
+            </main>
+            <ArtifactsPanel open={files} onClose={() => setFiles(false)} />
+          </div>
+          <CommandPalette open={palette} onClose={() => setPalette(false)} onOpenSettings={() => setSettings(true)} />
+          <SettingsDialog open={settings} onClose={() => setSettings(false)} />
+          <BrainDialog open={brain} onClose={() => setBrain(false)} />
+          <LibraryDialog open={library} onClose={() => setLibrary(false)} />
+        </AuthGate>
       </TooltipProvider>
     </QueryClientProvider>
   );

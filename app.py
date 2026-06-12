@@ -178,6 +178,13 @@ if AUTH_ENABLED:
     def _is_auth_exempt(path: str) -> bool:
         if path in AUTH_EXEMPT_EXACT:
             return True
+        # The React shell at "/" gates itself: it renders its own login/setup
+        # screens from /api/auth/status, so the HTML (code only, no data) must
+        # be loadable without a cookie. All /api/* routes stay protected.
+        # Legacy-only deployments (no web/dist build) keep the old behavior
+        # of redirecting unauthenticated visitors to /login.
+        if path == "/" and os.path.exists(_WEB_INDEX):
+            return True
         if any(path.startswith(p) for p in AUTH_EXEMPT_PREFIXES):
             return True
         return any(p.match(path) for p in AUTH_EXEMPT_PATTERNS)

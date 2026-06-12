@@ -21,13 +21,9 @@ import {
   addModelEndpoint,
   changePassword,
   createIntegration,
-  createUser,
   deleteIntegration,
-  deleteUser,
   discoverEndpoints,
   fetchAppSettings,
-  fetchAuthInfo,
-  fetchAuthStatus,
   fetchBuiltinTools,
   fetchIntegrationPresets,
   fetchIntegrations,
@@ -35,7 +31,6 @@ import {
   fetchRagConfig,
   fetchSqlConfig,
   fetchTotpStatus,
-  fetchUsers,
   importData,
   logout,
   personalAddDirectory,
@@ -48,10 +43,8 @@ import {
   saveSqlConfig,
   deleteSqlConfig,
   testSqlConfig,
-  setUserAdmin,
   testModelEndpoint,
   testRagConfig,
-  toggleSignup,
   totpConfirm,
   totpDisable,
   totpSetup,
@@ -66,6 +59,8 @@ import { cn } from '@/lib/utils';
 import { Button } from './ui/button';
 import { Dialog, DialogContent, DialogSection } from './ui/dialog';
 import { Input, Switch } from './ui/misc';
+import { useAuth } from './auth/AuthGate';
+import { UsersPanel } from './settings/UsersPanel';
 
 type Panel =
   | 'appearance' | 'shortcuts' | 'account'
@@ -380,7 +375,7 @@ function ShortcutsPanel() {
 /* ── Account: password change + 2FA + logout ── */
 
 function AccountPanel() {
-  const { data: auth } = useQuery({ queryKey: ['auth'], queryFn: fetchAuthInfo, staleTime: Infinity });
+  const auth = useAuth();
   const { data: totp, refetch: refetchTotp } = useQuery({ queryKey: ['totp'], queryFn: fetchTotpStatus });
   const [pw, setPw] = useState({ current: '', next: '', confirm: '' });
   const [pwMsg, setPwMsg] = useState('');
@@ -405,10 +400,10 @@ function AccountPanel() {
       <SectionTitle>Account</SectionTitle>
       <div className="flex items-center gap-3 py-1">
         <div className="flex size-10 items-center justify-center rounded-full bg-primary/15 text-sm font-semibold text-primary">
-          {(auth?.user ?? 'U').slice(0, 1).toUpperCase()}
+          {(auth?.username ?? 'U').slice(0, 1).toUpperCase()}
         </div>
         <div className="flex-1">
-          <div className="text-sm font-medium">{auth?.user ?? 'User'}</div>
+          <div className="text-sm font-medium">{auth?.username ?? 'User'}</div>
           <div className="text-xs text-muted-foreground">
             {auth?.is_admin ? 'Administrator' : 'Member'}
             {auth?.auth_enabled === false && ' · auth disabled'}
@@ -902,77 +897,6 @@ function RagPanel() {
   );
 }
 
-/* ── Users (registration + list + add) ── */
-
-function UsersPanel({ currentUser }: { currentUser?: string }) {
-  const { data: users } = useQuery({ queryKey: ['users'], queryFn: fetchUsers });
-  const { data: status, refetch: refetchStatus } = useQuery({ queryKey: ['auth-status'], queryFn: fetchAuthStatus });
-  const [username, setUsername] = useState('');
-  const [password, setPassword] = useState('');
-  const [isAdmin, setIsAdmin] = useState(false);
-  const queryClient = useQueryClient();
-  const refresh = () => void queryClient.invalidateQueries({ queryKey: ['users'] });
-  const create = useMutation({
-    mutationFn: async () => {
-      await createUser(username, password);
-      if (isAdmin) await setUserAdmin(username, true);
-    },
-    onSuccess: () => { setUsername(''); setPassword(''); setIsAdmin(false); refresh(); },
-  });
-  return (
-    <DialogSection>
-      <SectionTitle>Registration</SectionTitle>
-      <Row label="Open signup" hint="Allow new users to register themselves">
-        <Switch checked={!!status?.signup_enabled} onCheckedChange={() => void toggleSignup().then(() => refetchStatus())} />
-      </Row>
-
-      <SectionTitle>Users</SectionTitle>
-      <div className="space-y-1.5">
-        {(users ?? []).map((u) => (
-          <div key={u.username} className="flex items-center gap-3 rounded-lg border bg-card px-3 py-2">
-            <div className="flex size-7 items-center justify-center rounded-full bg-primary/15 text-xs font-semibold text-primary">
-              {u.username.slice(0, 1).toUpperCase()}
-            </div>
-            <span className="min-w-0 flex-1 truncate text-sm">{u.username}</span>
-            <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
-              admin
-              <Switch
-                checked={u.is_admin}
-                disabled={u.username === currentUser}
-                onCheckedChange={(v) => void setUserAdmin(u.username, v).then(refresh).catch(console.error)}
-              />
-            </label>
-            <button
-              type="button"
-              aria-label={`Delete ${u.username}`}
-              disabled={u.username === currentUser}
-              onClick={() => { if (window.confirm(`Delete user ${u.username}?`)) void deleteUser(u.username).then(refresh).catch(console.error); }}
-              className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-destructive-foreground disabled:opacity-30"
-            >
-              <Trash2Icon className="size-3.5" />
-            </button>
-          </div>
-        ))}
-      </div>
-
-      <SectionTitle>Add User</SectionTitle>
-      <div className="space-y-2">
-        <div className="flex gap-2">
-          <Input placeholder="Username" value={username} onChange={(e) => setUsername(e.target.value)} />
-          <Input placeholder="Password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} />
-        </div>
-        <label className="flex items-center gap-2 text-sm text-muted-foreground">
-          <Switch checked={isAdmin} onCheckedChange={setIsAdmin} /> Administrator
-        </label>
-        <Button size="sm" disabled={!username.trim() || !password || create.isPending} onClick={() => create.mutate()}>
-          <PlusIcon /> Create user
-        </Button>
-        {create.isError && <p className="text-xs text-destructive-foreground">{(create.error as Error).message}</p>}
-      </div>
-    </DialogSection>
-  );
-}
-
 /* ── System (backup + danger zone) ── */
 
 const WIPE_ROWS: Array<{ kind: string; label: string; sub: string }> = [
@@ -1048,7 +972,7 @@ function SystemPanel() {
 
 export function SettingsDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
   const [panel, setPanel] = useState<Panel>('appearance');
-  const { data: auth } = useQuery({ queryKey: ['auth'], queryFn: fetchAuthInfo, staleTime: Infinity });
+  const auth = useAuth();
 
   const userNav: Array<{ id: Panel; label: string; icon: React.ReactNode }> = [
     { id: 'appearance', label: 'Appearance', icon: <PaletteIcon /> },
@@ -1101,7 +1025,7 @@ export function SettingsDialog({ open, onClose }: { open: boolean; onClose: () =
             {panel === 'integrations' && <IntegrationsPanel />}
             {panel === 'tools' && <ToolsPanel />}
             {panel === 'rag' && <RagPanel />}
-            {panel === 'users' && <UsersPanel currentUser={auth?.user} />}
+            {panel === 'users' && <UsersPanel currentUser={auth?.username} />}
             {panel === 'system' && <SystemPanel />}
           </div>
         </div>

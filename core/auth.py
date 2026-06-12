@@ -38,7 +38,6 @@ ADMIN_PRIVILEGES = {k: (True if isinstance(v, bool) else (0 if isinstance(v, int
 DEFAULT_AUTH_PATH = os.path.join(
     Path(__file__).parent.parent, "data", "auth.json"
 )
-TOKEN_TTL = 60 * 60 * 24 * 7  # 7 days
 
 # Usernames the auth + middleware layer reserve as internal "synthetic owner"
 # sentinels; they must never belong to a real account. The most dangerous is
@@ -72,8 +71,11 @@ class AuthManager:
         self.auth_path = auth_path
         self._sessions_path = os.path.join(os.path.dirname(auth_path), "sessions.json")
         self._config: Dict[str, Any] = {}
-        self._sessions: Dict[str, Dict[str, Any]] = {}  # token -> {username, expiry}
-        # Guards mutations of self._sessions and the on-disk sessions.json.
+        # Sessions are in-memory only and never expire: a login is valid for
+        # the lifetime of the process, and a restart logs everyone out. This
+        # is intentional — the process boundary *is* the session boundary.
+        self._sessions: Dict[str, Dict[str, Any]] = {}  # token -> {username, created}
+        # Guards mutations of self._sessions.
         # Validate/create/revoke run concurrently from the FastAPI threadpool.
         self._sessions_lock = threading.RLock()
         # Guards all mutations of self._config and the on-disk auth.json so
@@ -84,7 +86,7 @@ class AuthManager:
         # cannot both observe is_configured==False and both create admin accounts.
         self._setup_lock = threading.Lock()
         self._load()
-        self._load_sessions()
+        self._cleanup_legacy_sessions_file()
         self._migrate_single_user()
         self._migrate_legacy_admin_role()
 
@@ -110,30 +112,14 @@ class AuthManager:
             logger.error(f"Failed to load auth config: {e}")
             self._config = {}
 
-    def _load_sessions(self):
-        """Load persisted session tokens from disk, pruning expired ones."""
+    def _cleanup_legacy_sessions_file(self):
+        """Remove the old persisted session store; sessions are in-memory now."""
         try:
             if os.path.exists(self._sessions_path):
-                with open(self._sessions_path, "r", encoding="utf-8") as f:
-                    data = json.load(f)
-                now = time.time()
-                self._sessions = {k: v for k, v in data.items() if v.get("expiry", 0) > now}
-                pruned = len(data) - len(self._sessions)
-                if pruned > 0:
-                    self._save_sessions()
-                logger.info(f"Loaded {len(self._sessions)} session(s) from disk")
+                os.remove(self._sessions_path)
+                logger.info("Removed legacy sessions.json — sessions are in-memory only")
         except Exception as e:
-            logger.error(f"Failed to load sessions: {e}")
-            self._sessions = {}
-
-    def _save_sessions(self):
-        """Persist session tokens to disk (atomic, lock-guarded)."""
-        try:
-            with self._sessions_lock:
-                snapshot = dict(self._sessions)
-            _atomic_write_json(self._sessions_path, snapshot)
-        except Exception as e:
-            logger.error(f"Failed to save sessions: {e}")
+            logger.warning(f"Failed to remove legacy sessions file: {e}")
 
     def _migrate_single_user(self):
         """Migrate old single-user format to multi-user format."""
@@ -224,7 +210,7 @@ class AuthManager:
         SECURITY: also revoke every active session token belonging to this
         user so any open browser tab they have gets kicked back to /login
         on the next request. Without this the user kept full access until
-        their cookie expired naturally (default ~30 days).
+        the next process restart.
         """
         username = username.strip().lower()
         with self._config_lock:
@@ -246,8 +232,6 @@ class AuthManager:
             for tok in to_drop:
                 self._sessions.pop(tok, None)
                 revoked += 1
-        if revoked:
-            self._save_sessions()
         # Also revoke API bearer tokens owned by this user. The bearer auth
         # path authenticates straight against ApiToken rows and never
         # re-checks that the owner still exists, so leaving the rows behind
@@ -290,8 +274,6 @@ class AuthManager:
                 if sess_user == old_username:
                     sess["username"] = new_username
                     renamed_sessions += 1
-        if renamed_sessions:
-            self._save_sessions()
         logger.info(
             "Renamed user '%s' -> '%s' (by %s); updated %d active session(s)",
             old_username, new_username, requesting_user, renamed_sessions,
@@ -487,65 +469,34 @@ class AuthManager:
         with self._sessions_lock:
             self._sessions[token] = {
                 "username": username,
-                "expiry": time.time() + TOKEN_TTL,
+                "created": time.time(),
             }
-        self._save_sessions()
         return token
 
     def validate_token(self, token: Optional[str]) -> bool:
-        if not token:
-            return False
-        expired = False
-        deleted_user = False
-        with self._sessions_lock:
-            session = self._sessions.get(token)
-            if session is None:
-                return False
-            if time.time() > session["expiry"]:
-                self._sessions.pop(token, None)
-                expired = True
-            else:
-                # SECURITY: if the user record has since been removed (admin
-                # deleted them while their cookie was still valid), drop the
-                # session so the next request kicks them out instead of
-                # silently authenticating against a non-existent account.
-                if session.get("username") not in self.users:
-                    self._sessions.pop(token, None)
-                    deleted_user = True
-        if expired or deleted_user:
-            self._save_sessions()
-            return False
-        return True
+        return self.get_username_for_token(token) is not None
 
     def get_username_for_token(self, token: Optional[str]) -> Optional[str]:
         """Return the username associated with a valid token."""
         if not token:
             return None
-        expired = False
-        deleted_user = False
         with self._sessions_lock:
             session = self._sessions.get(token)
             if session is None:
                 return None
-            if time.time() > session["expiry"]:
+            _u = session["username"]
+            # SECURITY: if the user record has since been removed (admin
+            # deleted them while their cookie was still valid), drop the
+            # session so the next request kicks them out instead of
+            # silently authenticating against a non-existent account.
+            if _u not in self.users:
                 self._sessions.pop(token, None)
-                expired = True
-            else:
-                _u = session["username"]
-                # SECURITY: orphan check — same rationale as validate_token.
-                if _u not in self.users:
-                    self._sessions.pop(token, None)
-                    deleted_user = True
-                else:
-                    return _u
-        if expired or deleted_user:
-            self._save_sessions()
-        return None
+                return None
+            return _u
 
     def revoke_token(self, token: str):
         with self._sessions_lock:
             self._sessions.pop(token, None)
-        self._save_sessions()
 
     def revoke_user_sessions(self, username: str, except_token: Optional[str] = None) -> int:
         """Revoke active browser sessions for a user, optionally preserving one."""
@@ -559,8 +510,6 @@ class AuthManager:
             for token in to_drop:
                 self._sessions.pop(token, None)
                 revoked += 1
-            if revoked:
-                self._save_sessions()
         return revoked
 
     def status(self, token: Optional[str]) -> Dict[str, Any]:

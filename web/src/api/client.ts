@@ -1,9 +1,18 @@
 import type { Attachment, ChatEvent, ModelEndpoint, Session, SessionDetail } from './types';
 
+/** Fired when any API call hits a 401 — the AuthGate listens and flips to the
+ *  in-app login screen (e.g. after the server restarted and forgot all
+ *  sessions). Never navigates to the legacy /login page. */
+export const UNAUTHENTICATED_EVENT = 'talos:unauthenticated';
+
+function notifyUnauthenticated() {
+  window.dispatchEvent(new CustomEvent(UNAUTHENTICATED_EVENT));
+}
+
 async function getJSON<T>(url: string): Promise<T> {
   const res = await fetch(url, { credentials: 'same-origin' });
-  if (res.status === 401 || res.redirected && res.url.endsWith('/login')) {
-    window.location.href = '/login';
+  if (res.status === 401 || (res.redirected && res.url.endsWith('/login'))) {
+    notifyUnauthenticated();
     throw new Error('Not authenticated');
   }
   if (!res.ok) throw new Error(`${url}: ${res.status}`);
@@ -99,7 +108,7 @@ export const fetchAuthInfo = () => getJSON<AuthInfo>('/api/auth/settings');
 
 export async function logout(): Promise<void> {
   await fetch('/api/auth/logout', { method: 'POST', credentials: 'same-origin' });
-  window.location.href = '/login';
+  notifyUnauthenticated();
 }
 
 export async function editMessage(sessionId: string, msgId: string, content: string): Promise<void> {
@@ -176,15 +185,27 @@ export async function saveFeatures(features: Features): Promise<void> {
   if (!res.ok) throw new Error(`Save failed (HTTP ${res.status})`);
 }
 
-export interface AppUser { username: string; is_admin: boolean }
+export interface UserPrivileges {
+  can_use_agent?: boolean;
+  can_use_browser?: boolean;
+  can_use_bash?: boolean;
+  can_use_documents?: boolean;
+  can_use_research?: boolean;
+  can_generate_images?: boolean;
+  can_manage_memory?: boolean;
+  max_messages_per_day?: number;
+  allowed_models?: string[];
+}
+
+export interface AppUser { username: string; is_admin: boolean; privileges?: UserPrivileges }
 export const fetchUsers = async () =>
   (await getJSON<{ users?: AppUser[] }>('/api/auth/users')).users ?? [];
 
-export async function createUser(username: string, password: string): Promise<void> {
+export async function createUser(username: string, password: string, isAdmin = false): Promise<void> {
   const res = await fetch('/api/auth/users', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ username, password }),
+    body: JSON.stringify({ username, password, is_admin: isAdmin }),
     credentials: 'same-origin',
   });
   if (!res.ok) {
@@ -193,6 +214,13 @@ export async function createUser(username: string, password: string): Promise<vo
     throw new Error(detail);
   }
 }
+
+export const renameUser = (username: string, next: string) =>
+  postJSON<{ ok?: boolean; renamed_self?: boolean }>(
+    `/api/auth/users/${encodeURIComponent(username)}/rename`, { username: next }, 'PUT');
+
+export const setUserPrivileges = (username: string, patch: UserPrivileges) =>
+  postJSON(`/api/auth/users/${encodeURIComponent(username)}/privileges`, patch, 'PUT');
 
 export async function deleteUser(username: string): Promise<void> {
   const res = await fetch('/api/auth/users', {
@@ -258,6 +286,7 @@ async function postJSON<T = Record<string, unknown>>(url: string, body?: unknown
     body: body === undefined ? undefined : JSON.stringify(body),
     credentials: 'same-origin',
   });
+  if (res.status === 401 && !url.startsWith('/api/auth/login')) notifyUnauthenticated();
   if (!res.ok) {
     let detail = `HTTP ${res.status}`;
     try { const e = await res.json(); detail = e.detail || e.error || detail; } catch { /* noop */ }
@@ -275,10 +304,33 @@ export const totpSetup = () => postJSON<{ secret: string; uri: string; qr_code: 
 export const totpConfirm = (code: string) => postJSON<{ ok: boolean; backup_codes: string[] }>('/api/auth/2fa/confirm', { code });
 export const totpDisable = (password: string) => postJSON('/api/auth/2fa/disable', { password });
 
-/* ── Users extras ── */
-export interface AuthStatus { signup_enabled?: boolean; [key: string]: unknown }
+/* ── Auth: status + login/setup/signup ── */
+export interface AuthStatus {
+  configured?: boolean;
+  authenticated?: boolean;
+  username?: string;
+  is_admin?: boolean;
+  privileges?: UserPrivileges;
+  signup_enabled?: boolean;
+  auth_enabled?: boolean;
+  [key: string]: unknown;
+}
 export const fetchAuthStatus = () => getJSON<AuthStatus>('/api/auth/status');
 export const toggleSignup = () => postJSON<{ signup_enabled: boolean }>('/api/auth/signup-toggle');
+
+export interface LoginResult { ok: boolean; requires_totp?: boolean; username?: string }
+export const login = (username: string, password: string, totpCode?: string) =>
+  postJSON<LoginResult>('/api/auth/login', {
+    username,
+    password,
+    ...(totpCode ? { totp_code: totpCode } : {}),
+  });
+
+export const setupAdmin = (username: string, password: string) =>
+  postJSON<{ ok: boolean }>('/api/auth/setup', { username, password });
+
+export const signup = (username: string, password: string) =>
+  postJSON<{ ok: boolean }>('/api/auth/signup', { username, password });
 
 /* ── Model endpoints extras ── */
 export async function testModelEndpoint(baseUrl: string, apiKey?: string): Promise<Record<string, unknown>> {

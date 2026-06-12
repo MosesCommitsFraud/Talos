@@ -18,11 +18,11 @@ import { useState } from 'react';
 import {
   archiveSession,
   deleteSession,
-  fetchAuthInfo,
   fetchSessions,
   markImportant,
   renameSession,
 } from '@/api/client';
+import { useAuth } from './auth/AuthGate';
 import type { Session } from '@/api/types';
 import { useChat } from '@/state/chat';
 import { usePrefs, type SortMode } from '@/state/prefs';
@@ -164,7 +164,7 @@ export function Sidebar({
   onOpenLibrary: () => void;
 }) {
   const { data: sessions } = useQuery({ queryKey: ['sessions'], queryFn: fetchSessions, refetchInterval: 30_000 });
-  const { data: auth } = useQuery({ queryKey: ['auth'], queryFn: fetchAuthInfo, staleTime: Infinity });
+  const auth = useAuth();
   const newChat = useChat((s) => s.newChat);
 
   const sortMode = usePrefs((s) => s.sortMode);
@@ -260,9 +260,9 @@ export function Sidebar({
             {visibility.sidebarUserBar && (
               <>
                 <div className="flex size-6 items-center justify-center rounded-full bg-primary/15 text-[11px] font-semibold text-primary">
-                  {(auth?.user ?? 'U').slice(0, 1).toUpperCase()}
+                  {(auth?.username ?? 'U').slice(0, 1).toUpperCase()}
                 </div>
-                <span className="min-w-0 flex-1 truncate text-sm">{auth?.user ?? 'User'}</span>
+                <span className="min-w-0 flex-1 truncate text-sm">{auth?.username ?? 'User'}</span>
               </>
             )}
             {!visibility.sidebarUserBar && <span className="flex-1" />}
