@@ -174,7 +174,7 @@ export function Messages() {
 
   return (
     <div ref={scroller} onScroll={onScroll} className="flex-1 overflow-y-auto" role="log" aria-live="polite">
-      <div className="mx-auto flex w-full max-w-[800px] flex-col gap-5 px-4 py-6">
+      <div className="mx-auto flex w-full max-w-[800px] flex-col gap-3 px-4 py-6">
         {messages.map((m) =>
           m.role === 'user' ? (
             <div key={m.id} className="group ml-auto flex w-full max-w-[75%] flex-col items-end gap-0.5">
@@ -209,11 +209,11 @@ export function Messages() {
                   </div>
                 )
               )}
-              {!m.streaming && m.content && (
-                <div className="mt-1 flex items-center gap-1">
+              {!m.streaming && m.content.trim() && (
+                <div className="flex h-0 items-center gap-1 overflow-visible pt-1 opacity-0 transition-opacity group-hover:opacity-100">
                   <MessageActions msg={m} />
                   {showMetrics && m.metrics && (
-                    <span className="text-xs text-muted-foreground/80 opacity-0 transition-opacity group-hover:opacity-100">
+                    <span className="text-xs text-muted-foreground/80">
                       {m.metrics.tokens_per_second != null && `${m.metrics.tokens_per_second} tok/s`}
                       {m.metrics.response_time != null && ` · ${m.metrics.response_time}s`}
                     </span>
