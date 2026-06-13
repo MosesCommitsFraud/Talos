@@ -52,7 +52,7 @@ export function ContextMeter() {
       <span
         role="img"
         aria-label={`Context window ${Math.round(percent)}% used`}
-        className="relative flex size-7 shrink-0 cursor-default items-center justify-center"
+        className="relative mr-1 flex size-6 shrink-0 cursor-default items-center justify-center"
       >
         <svg viewBox="0 0 24 24" className="absolute inset-0 size-full -rotate-90 transform-gpu" aria-hidden="true">
           <circle
