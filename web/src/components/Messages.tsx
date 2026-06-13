@@ -21,6 +21,47 @@ function Logo() {
   );
 }
 
+/** Compact elapsed label: "12s", "3m 5s", "1h 4m". */
+function formatWorkingElapsed(startMs: number, nowMs: number): string {
+  const elapsed = Math.max(0, Math.floor((nowMs - startMs) / 1000));
+  if (elapsed < 60) return `${elapsed}s`;
+  const hours = Math.floor(elapsed / 3600);
+  const minutes = Math.floor((elapsed % 3600) / 60);
+  const seconds = elapsed % 60;
+  if (hours > 0) return minutes > 0 ? `${hours}h ${minutes}m` : `${hours}h`;
+  return seconds > 0 ? `${minutes}m ${seconds}s` : `${minutes}m`;
+}
+
+/** Self-ticking "Working for Xs" label — updates its own text node each second
+ *  so the streaming message tree isn't re-committed every tick (t3code style). */
+function WorkingTimer({ startedAt }: { startedAt: number }) {
+  const ref = useRef<HTMLSpanElement>(null);
+  useEffect(() => {
+    const tick = () => {
+      if (ref.current) ref.current.textContent = formatWorkingElapsed(startedAt, Date.now());
+    };
+    tick();
+    const id = setInterval(tick, 1000);
+    return () => clearInterval(id);
+  }, [startedAt]);
+  return <span ref={ref} className="tabular-nums">{formatWorkingElapsed(startedAt, Date.now())}</span>;
+}
+
+/** Persistent "still running" indicator shown for the whole assistant turn —
+ *  pulsing dots plus an elapsed timer, ported from t3code's WorkingTimelineRow. */
+function Working({ startedAt }: { startedAt?: number }) {
+  return (
+    <div className="flex items-center gap-2 py-1 text-[11px] text-muted-foreground/70 tabular-nums" aria-label="Generating">
+      <span className="inline-flex items-center gap-[3px]">
+        <span className="size-1 animate-pulse rounded-full bg-muted-foreground/40" />
+        <span className="size-1 animate-pulse rounded-full bg-muted-foreground/40 [animation-delay:200ms]" />
+        <span className="size-1 animate-pulse rounded-full bg-muted-foreground/40 [animation-delay:400ms]" />
+      </span>
+      <span>{startedAt ? <>Working for <WorkingTimer startedAt={startedAt} /></> : 'Working…'}</span>
+    </div>
+  );
+}
+
 function ActionIcon({
   label,
   onClick,
@@ -165,6 +206,7 @@ function FinalImageGrid({ images }: { images: ToolImage[] }) {
 export function Messages() {
   const sessionId = useChat((s) => s.sessionId);
   const messages = useChat((s) => s.messages);
+  const turnStartedAt = useChat((s) => s.turnStartedAt);
   const showMetrics = usePrefs((s) => s.visibility.messageMetrics);
   const showWelcome = usePrefs((s) => s.visibility.welcomeText);
   const showThinking = usePrefs((s) => s.visibility.showThinking);
@@ -258,19 +300,15 @@ export function Messages() {
             <div key={m.id} className={`group w-full ${index === 0 ? '' : messages[index - 1].role === 'assistant' ? 'mt-0.5' : 'mt-3'}`}>
               {m.thinking && showThinking && <Thinking text={m.thinking} streaming={!!m.streaming && !m.content} />}
               {m.tools?.map((t, i) => <ToolRow key={i} call={t} />)}
-              {m.content ? (
+              {m.content && (
                 <div className={m.error ? 'text-destructive-foreground' : ''}>
                   <Markdown text={m.content} />
                 </div>
-              ) : (
-                m.streaming && !m.thinking && (
-                  <div className="flex gap-1 py-2" aria-label="Generating">
-                    <span className="size-1.5 animate-bounce rounded-full bg-muted-foreground [animation-delay:0ms]" />
-                    <span className="size-1.5 animate-bounce rounded-full bg-muted-foreground [animation-delay:120ms]" />
-                    <span className="size-1.5 animate-bounce rounded-full bg-muted-foreground [animation-delay:240ms]" />
-                  </div>
-                )
               )}
+              {/* Persistent "still running" indicator: shown for the entire
+                  streaming turn — through thinking, tool calls, and text deltas —
+                  so it never silently disappears mid-response. */}
+              {m.streaming && <Working startedAt={turnStartedAt ?? undefined} />}
               {!m.streaming && isAssistantTurnEnd(index) && (() => {
                 // Tool images already render inline at their tool row — the
                 // bottom grid is only a fallback for artifacts no tool showed.

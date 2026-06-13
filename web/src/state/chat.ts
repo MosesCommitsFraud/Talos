@@ -21,6 +21,10 @@ interface ChatState {
   sessionId: string | null;
   messages: UiMessage[];
   streaming: boolean;
+  /** ms epoch when the current turn began (set on send, cleared when it ends).
+   *  Drives the "Working for Xs" timer so it counts from send through every
+   *  agent round, t3code-style, instead of resetting per assistant bubble. */
+  turnStartedAt: number | null;
   /** Model used when the next send has to create a session first. */
   pendingModel: { endpointId: string; model: string } | null;
   abort: AbortController | null;
@@ -111,6 +115,7 @@ export const useChat = create<ChatState>((set, get) => ({
   sessionId: null,
   messages: [],
   streaming: false,
+  turnStartedAt: null,
   pendingModel: null,
   abort: null,
 
@@ -118,12 +123,12 @@ export const useChat = create<ChatState>((set, get) => ({
 
   newChat: () => {
     get().abort?.abort();
-    set({ sessionId: null, messages: [], streaming: false, abort: null });
+    set({ sessionId: null, messages: [], streaming: false, turnStartedAt: null, abort: null });
   },
 
   openSession: async (id) => {
     get().abort?.abort();
-    set({ sessionId: id, messages: [], streaming: false, abort: null });
+    set({ sessionId: id, messages: [], streaming: false, turnStartedAt: null, abort: null });
     const detail = await fetchSession(id);
     // A later click may have switched sessions while we were fetching.
     if (get().sessionId !== id) return;
@@ -161,7 +166,7 @@ export const useChat = create<ChatState>((set, get) => ({
     const userMsg: UiMessage = { id: uid(), role: 'user', content: text, attachments };
     const aiMsg: UiMessage = { id: uid(), role: 'assistant', content: '', streaming: true };
     const abort = new AbortController();
-    set({ messages: [...get().messages, userMsg, aiMsg], streaming: true, abort });
+    set({ messages: [...get().messages, userMsg, aiMsg], streaming: true, turnStartedAt: Date.now(), abort });
 
     // The agent loop emits multiple assistant rounds per turn, delimited by
     // agent_step events. Each round gets its own message bubble (with its own
@@ -264,7 +269,7 @@ export const useChat = create<ChatState>((set, get) => ({
       }
     } finally {
       patchAi({ streaming: false });
-      set({ streaming: false, abort: null });
+      set({ streaming: false, turnStartedAt: null, abort: null });
     }
   },
 
