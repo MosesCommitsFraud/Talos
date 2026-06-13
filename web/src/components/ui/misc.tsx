@@ -6,9 +6,9 @@ import { cn } from '@/lib/utils';
 /* ── Tooltip ── */
 export const TooltipProvider = TooltipPrimitive.Provider;
 
-export function Tooltip({ label, children, side = 'bottom' }: { label: React.ReactNode; children: React.ReactNode; side?: 'top' | 'bottom' | 'left' | 'right' }) {
+export function Tooltip({ label, children, side = 'bottom', open, onOpenChange }: { label: React.ReactNode; children: React.ReactNode; side?: 'top' | 'bottom' | 'left' | 'right'; open?: boolean; onOpenChange?: (open: boolean) => void }) {
   return (
-    <TooltipPrimitive.Root delayDuration={400}>
+    <TooltipPrimitive.Root delayDuration={400} open={open} onOpenChange={onOpenChange}>
       <TooltipPrimitive.Trigger asChild>{children}</TooltipPrimitive.Trigger>
       <TooltipPrimitive.Portal>
         <TooltipPrimitive.Content

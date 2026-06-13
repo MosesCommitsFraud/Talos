@@ -1,11 +1,9 @@
 import { useQueryClient } from '@tanstack/react-query';
 import {
-  ArrowUpIcon,
   DatabaseIcon,
   FileTextIcon,
-  ListTodoIcon,
   PaperclipIcon,
-  SquareIcon,
+  PencilRulerIcon,
   XIcon,
 } from 'lucide-react';
 import { useRef, useState } from 'react';
@@ -17,17 +15,23 @@ import { ContextMeter } from './ContextMeter';
 import { ModelPicker } from './ModelPicker';
 import { Tooltip } from './ui/misc';
 
-/** Icon-only MIDA ghost button; active state = primary tint, label lives in
- *  the tooltip (legacy chat-bar had labeled pills — feedback was icons only). */
-function ToggleIcon({
+/** Thin vertical divider between footer mode controls (t3code separator). */
+function FooterSeparator() {
+  return <div aria-hidden="true" className="mx-0.5 hidden h-4 w-px shrink-0 bg-border sm:block" />;
+}
+
+/** t3code plan-toggle style: labeled ghost button, blue tint when active. */
+function ModeToggle({
   active,
   onClick,
   icon,
+  label,
   tooltip,
 }: {
   active: boolean;
   onClick: () => void;
   icon: React.ReactNode;
+  label: string;
   tooltip: string;
 }) {
   return (
@@ -38,13 +42,14 @@ function ToggleIcon({
         aria-pressed={active}
         aria-label={tooltip}
         className={cn(
-          'flex size-8 items-center justify-center rounded-lg border border-transparent transition-colors [&_svg]:size-4',
+          'flex h-8 shrink-0 items-center gap-1.5 rounded-lg border border-transparent px-2 text-[13px] font-medium whitespace-nowrap transition-colors sm:px-3 [&_svg]:size-4 [&_svg]:shrink-0',
           active
-            ? 'bg-primary/12 text-primary'
-            : 'text-muted-foreground hover:bg-accent hover:text-foreground',
+            ? 'bg-blue-500/10 text-blue-400 hover:bg-blue-500/15 hover:text-blue-300'
+            : 'text-muted-foreground/70 hover:bg-accent hover:text-foreground/80',
         )}
       >
         {icon}
+        <span className="sr-only sm:not-sr-only">{label}</span>
       </button>
     </Tooltip>
   );
@@ -54,6 +59,8 @@ export function Composer() {
   const [text, setText] = useState('');
   const [pending, setPending] = useState<UploadedFile[]>([]);
   const [uploading, setUploading] = useState(false);
+  const [dragging, setDragging] = useState(false);
+  const dragDepth = useRef(0);
   const textarea = useRef<HTMLTextAreaElement>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const streaming = useChat((s) => s.streaming);
@@ -83,6 +90,38 @@ export function Composer() {
     }
   };
 
+  const hasFiles = (e: React.DragEvent) => Array.from(e.dataTransfer.types).includes('Files');
+
+  const onDragEnter = (e: React.DragEvent) => {
+    if (!hasFiles(e)) return;
+    e.preventDefault();
+    dragDepth.current += 1;
+    setDragging(true);
+  };
+
+  const onDragOver = (e: React.DragEvent) => {
+    if (!hasFiles(e)) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'copy';
+  };
+
+  const onDragLeave = (e: React.DragEvent) => {
+    if (!hasFiles(e)) return;
+    dragDepth.current -= 1;
+    if (dragDepth.current <= 0) {
+      dragDepth.current = 0;
+      setDragging(false);
+    }
+  };
+
+  const onDrop = (e: React.DragEvent) => {
+    if (!hasFiles(e)) return;
+    e.preventDefault();
+    dragDepth.current = 0;
+    setDragging(false);
+    void attach(e.dataTransfer.files);
+  };
+
   const submit = async () => {
     const value = text.trim();
     if ((!value && pending.length === 0) || streaming) return;
@@ -103,7 +142,24 @@ export function Composer() {
 
   return (
     <div className="mx-auto w-full max-w-[800px] px-4 pb-4">
-      <div className="rounded-3xl border bg-card shadow-[0_2px_16px_rgb(0_0_0/0.08)] dark:shadow-[0_2px_16px_rgb(0_0_0/0.3)]">
+      <div
+        onDragEnter={onDragEnter}
+        onDragOver={onDragOver}
+        onDragLeave={onDragLeave}
+        onDrop={onDrop}
+        className={cn(
+          'relative rounded-[20px] border border-border bg-card transition-colors duration-200 focus-within:border-ring/45',
+          dragging && 'border-primary/60 ring-2 ring-primary/30',
+        )}
+      >
+        {dragging && (
+          <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center rounded-[20px] bg-card/85 backdrop-blur-[1px]">
+            <div className="flex items-center gap-2 text-sm font-medium text-foreground">
+              <PaperclipIcon className="size-4" />
+              Drop files to attach
+            </div>
+          </div>
+        )}
         {pending.length > 0 && (
           <div className="flex flex-wrap gap-1.5 px-4 pt-3">
             {pending.map((f) => (
@@ -147,10 +203,9 @@ export function Composer() {
             }}
             className="max-h-[200px] min-h-[26px] w-full resize-none bg-transparent text-[15px] leading-relaxed outline-none placeholder:text-muted-foreground"
           />
-          <ModelPicker visible={prefs.visibility.composerModelPicker} />
         </div>
 
-        <div className="flex items-center gap-1 px-2.5 pt-1.5 pb-2.5">
+        <div className="flex min-w-0 flex-nowrap items-center justify-between gap-2 px-2.5 pt-1.5 pb-2.5 sm:px-3 sm:pb-3">
           <input
             ref={fileInput}
             type="file"
@@ -158,48 +213,95 @@ export function Composer() {
             hidden
             onChange={(e) => { if (e.target.files) void attach(e.target.files); e.target.value = ''; }}
           />
+
           {prefs.visibility.composerAttach && (
-            <ToggleIcon
-              active={false}
-              onClick={() => fileInput.current?.click()}
-              icon={<PaperclipIcon className={uploading ? 'animate-pulse' : undefined} />}
-              tooltip="Attach files"
-            />
-          )}
-          {prefs.visibility.composerPlan && (
-            <ToggleIcon active={prefs.planMode} onClick={() => prefs.toggle('planMode')} icon={<ListTodoIcon />} tooltip="Plan before acting" />
-          )}
-          {prefs.visibility.composerDocs && (
-            <ToggleIcon active={prefs.useRag} onClick={() => prefs.toggle('useRag')} icon={<FileTextIcon />} tooltip="Use document RAG" />
-          )}
-          {prefs.visibility.composerDb && (
-            <ToggleIcon active={prefs.useDb} onClick={() => prefs.toggle('useDb')} icon={<DatabaseIcon />} tooltip="Query connected databases" />
+            <Tooltip label="Attach files" side="top">
+              <button
+                type="button"
+                onClick={() => fileInput.current?.click()}
+                aria-label="Attach files"
+                className="flex size-8 shrink-0 items-center justify-center rounded-full border border-border text-muted-foreground transition-colors hover:bg-accent hover:text-foreground [&_svg]:size-[18px]"
+              >
+                <PaperclipIcon className={uploading ? 'animate-pulse' : undefined} />
+              </button>
+            </Tooltip>
           )}
 
-          <div className="flex-1" />
+          <div className="-m-1 flex min-w-0 flex-1 items-center gap-1 overflow-x-auto p-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+            <ModelPicker visible={prefs.visibility.composerModelPicker} />
 
-          {prefs.visibility.contextMeter && <ContextMeter />}
+            {prefs.visibility.composerPlan && (
+              <>
+                <FooterSeparator />
+                <ModeToggle
+                  active={prefs.planMode}
+                  onClick={() => prefs.toggle('planMode')}
+                  icon={<PencilRulerIcon />}
+                  label="Plan"
+                  tooltip={prefs.planMode ? 'Plan mode — click to return to normal mode' : 'Plan before acting'}
+                />
+              </>
+            )}
+            {prefs.visibility.composerDocs && (
+              <>
+                <FooterSeparator />
+                <ModeToggle
+                  active={prefs.useRag}
+                  onClick={() => prefs.toggle('useRag')}
+                  icon={<FileTextIcon />}
+                  label="RAG"
+                  tooltip="Use document RAG"
+                />
+              </>
+            )}
+            {prefs.visibility.composerDb && (
+              <>
+                <FooterSeparator />
+                <ModeToggle
+                  active={prefs.useDb}
+                  onClick={() => prefs.toggle('useDb')}
+                  icon={<DatabaseIcon />}
+                  label="SQL"
+                  tooltip="Query connected databases"
+                />
+              </>
+            )}
+          </div>
 
-          {streaming ? (
-            <button
-              type="button"
-              onClick={stop}
-              aria-label="Stop generating"
-              className="flex size-9 items-center justify-center rounded-full bg-foreground text-background transition-opacity hover:opacity-85"
-            >
-              <SquareIcon className="size-3.5 fill-current" />
-            </button>
-          ) : (
-            <button
-              type="button"
-              onClick={() => void submit()}
-              disabled={!canSend}
-              aria-label="Send message"
-              className="flex size-9 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-xs transition-all hover:bg-primary/90 disabled:opacity-30"
-            >
-              <ArrowUpIcon className="size-4.5" strokeWidth={2.5} />
-            </button>
-          )}
+          <div className="flex shrink-0 flex-nowrap items-center justify-end gap-2">
+            {prefs.visibility.contextMeter && <ContextMeter />}
+
+            {streaming ? (
+              <button
+                type="button"
+                onClick={stop}
+                aria-label="Stop generating"
+                className="flex h-9 w-9 cursor-pointer items-center justify-center rounded-full bg-destructive/90 text-white shadow-xs shadow-destructive/24 inset-shadow-[0_1px_rgb(255_255_255/16%)] transition-all duration-150 hover:scale-105 hover:bg-destructive active:shadow-none active:inset-shadow-[0_1px_rgb(0_0_0/8%)] sm:h-8 sm:w-8"
+              >
+                <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor" aria-hidden="true">
+                  <rect x="2" y="2" width="8" height="8" rx="1.5" />
+                </svg>
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => void submit()}
+                disabled={!canSend}
+                aria-label="Send message"
+                className="flex h-9 w-9 items-center justify-center rounded-full bg-primary/90 text-primary-foreground shadow-xs transition-all duration-150 enabled:cursor-pointer enabled:shadow-primary/24 enabled:inset-shadow-[0_1px_rgb(255_255_255/16%)] hover:scale-105 hover:bg-primary active:shadow-none active:inset-shadow-[0_1px_rgb(0_0_0/8%)] disabled:pointer-events-none disabled:opacity-30 disabled:shadow-none disabled:hover:scale-100 sm:h-8 sm:w-8"
+              >
+                <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+                  <path
+                    d="M7 11.5V2.5M7 2.5L3 6.5M7 2.5L11 6.5"
+                    stroke="currentColor"
+                    strokeWidth="1.8"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+              </button>
+            )}
+          </div>
         </div>
       </div>
     </div>

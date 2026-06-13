@@ -1,12 +1,23 @@
 import { useQuery } from '@tanstack/react-query';
-import { ChevronDownIcon } from 'lucide-react';
+import { CheckIcon, ChevronDownIcon } from 'lucide-react';
 import { useEffect } from 'react';
 import { fetchModels } from '@/api/client';
 import { useChat } from '@/state/chat';
+import { cn } from '@/lib/utils';
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from './ui/menu';
 
-/** Quiet ghost-pill model selector for the composer. Stays mounted even when
- *  hidden so the default-model effect keeps running. */
+/** Qwen brand mark (simple-icons), fill follows currentColor. */
+export function QwenIcon({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="currentColor" className={className} aria-hidden="true">
+      <path d="M23.919 14.545 20.817 9.17l1.47-2.544a.56.56 0 0 0 0-.566l-1.633-2.83a.57.57 0 0 0-.49-.283h-6.207L12.487.402a.57.57 0 0 0-.49-.284H8.732a.56.56 0 0 0-.49.284L5.139 5.775h-2.94a.56.56 0 0 0-.49.284L.077 8.887a.56.56 0 0 0 0 .567L3.18 14.83l-1.47 2.545a.56.56 0 0 0 0 .566l1.634 2.83a.57.57 0 0 0 .49.283h6.205l1.47 2.545a.57.57 0 0 0 .49.284h3.266a.57.57 0 0 0 .49-.284l3.104-5.375h2.94a.57.57 0 0 0 .49-.283l1.634-2.828a.55.55 0 0 0-.004-.568M8.733.686l1.634 2.828-1.634 2.828H21.8L20.164 9.17H7.425L5.63 6.06Zm1.306 19.801-6.205-.002 1.634-2.83h3.265L2.201 6.344h3.267q3.182 5.517 6.367 11.032zm10.124-5.66L18.53 12l-6.532 11.315-1.634-2.83c2.129-3.673 4.25-7.351 6.373-11.028h3.592l3.102 5.374z" />
+    </svg>
+  );
+}
+
+/** t3code-style model picker trigger: provider logo + model name + chevron,
+ *  quiet ghost styling. Stays mounted even when hidden so the default-model
+ *  effect keeps running. */
 export function ModelPicker({ visible = true }: { visible?: boolean }) {
   const { data: endpoints } = useQuery({ queryKey: ['models'], queryFn: fetchModels });
   const pendingModel = useChat((s) => s.pendingModel);
@@ -33,26 +44,37 @@ export function ModelPicker({ visible = true }: { visible?: boolean }) {
         <button
           type="button"
           aria-label="Switch model"
-          className="flex shrink-0 items-center gap-1 rounded-full px-2.5 py-1.5 text-[13px] whitespace-nowrap text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+          className="flex h-8 max-w-48 shrink-0 items-center justify-between gap-2 whitespace-nowrap rounded-lg border border-transparent px-2 text-[13px] font-medium text-muted-foreground/70 transition-colors hover:bg-accent hover:text-foreground/80 sm:max-w-56 sm:px-3"
         >
-          {label}
-          <ChevronDownIcon className="size-3.5" />
+          <span className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden">
+            <QwenIcon className="size-4 shrink-0" />
+            <span className="min-w-0 flex-1 truncate text-left">{label}</span>
+          </span>
+          <ChevronDownIcon className="size-3 shrink-0 opacity-60" aria-hidden="true" />
         </button>
       </MenuTrigger>
-      <MenuPopup align="end">
+      <MenuPopup align="start">
         {options.length === 0 && (
           <div className="px-3 py-2 text-[13px] text-muted-foreground">No model endpoints configured</div>
         )}
-        {options.map((o) => (
-          <MenuItem
-            key={`${o.endpointId}:${o.model}`}
-            onSelect={() => setPendingModel({ endpointId: o.endpointId, model: o.model })}
-            className="flex-col items-start gap-0"
-          >
-            <div>{o.model}</div>
-            <div className="text-xs text-muted-foreground">{o.endpointName}</div>
-          </MenuItem>
-        ))}
+        {options.map((o) => {
+          const selected =
+            pendingModel?.endpointId === o.endpointId && pendingModel.model === o.model;
+          return (
+            <MenuItem
+              key={`${o.endpointId}:${o.model}`}
+              onSelect={() => setPendingModel({ endpointId: o.endpointId, model: o.model })}
+              className="gap-2"
+            >
+              <QwenIcon className="size-4 shrink-0 text-muted-foreground" />
+              <div className="min-w-0 flex-1">
+                <div className="truncate">{o.model}</div>
+                <div className="truncate text-xs text-muted-foreground">{o.endpointName}</div>
+              </div>
+              <CheckIcon className={cn('size-4 shrink-0', selected ? 'opacity-100' : 'opacity-0')} />
+            </MenuItem>
+          );
+        })}
       </MenuPopup>
     </Menu>
   );

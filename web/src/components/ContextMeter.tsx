@@ -1,9 +1,10 @@
+import { useState } from 'react';
 import { useChat } from '@/state/chat';
 import { Tooltip } from './ui/misc';
 
-/* MIDA's ContextWindowMeter, bridged to Talos metrics: a small ring in the
+/* t3code's ContextWindowMeter, bridged to Talos metrics: a small ring in the
  * composer showing how full the model's context window is, with the detail
- * (percent · used/max tokens) in the tooltip. Replaces the old "ctx%" text. */
+ * panel (percent · used/max tokens, progress bar) on hover. */
 
 function formatTokens(value: number | null): string {
   if (value === null || !Number.isFinite(value)) return '0';
@@ -13,8 +14,13 @@ function formatTokens(value: number | null): string {
   return `${(value / 1_000_000).toFixed(1).replace(/\.0$/, '')}m`;
 }
 
+function formatPercent(value: number): string {
+  return value < 10 ? `${value.toFixed(1).replace(/\.0$/, '')}%` : `${Math.round(value)}%`;
+}
+
 export function ContextMeter() {
   const messages = useChat((s) => s.messages);
+  const [open, setOpen] = useState(false);
 
   // Latest assistant metrics carry the running context state of the session.
   const metrics = [...messages].reverse().find((m) => m.metrics?.context_percent != null)?.metrics;
@@ -27,50 +33,76 @@ export function ContextMeter() {
   const radius = 9.75;
   const circumference = 2 * Math.PI * radius;
   const dashOffset = circumference - (percent / 100) * circumference;
-  const high = percent >= 85;
+  const isOverloaded = percent > 90;
+  const usageColor = isOverloaded ? 'var(--color-red-500)' : 'var(--color-blue-500)';
 
   return (
     <Tooltip
       side="top"
+      open={open}
+      onOpenChange={setOpen}
       label={
-        <div className="space-y-1 px-0.5 py-0.5 leading-tight">
-          <div className="text-[10px] font-medium tracking-[0.08em] text-muted-foreground uppercase">
-            Context window
+        <div className="flex w-56 flex-col gap-2 p-1.5">
+          <div className="flex items-center justify-between gap-3">
+            <div className="text-xs font-medium text-muted-foreground">Context Window</div>
+            <div className="text-[11px] text-muted-foreground/70 tabular-nums">
+              <span>{formatPercent(percent)}</span>
+              {usedTokens != null && maxTokens != null && (
+                <>
+                  <span className="mx-1">·</span>
+                  <span>
+                    {formatTokens(usedTokens)}/{formatTokens(maxTokens)}
+                  </span>
+                </>
+              )}
+            </div>
           </div>
-          <div className="text-xs font-medium whitespace-nowrap">
-            {percent < 10 ? percent.toFixed(1).replace(/\.0$/, '') : Math.round(percent)}%
-            {usedTokens != null && maxTokens != null && (
-              <>
-                <span className="mx-1">·</span>
-                {formatTokens(usedTokens)}/{formatTokens(maxTokens)} used
-              </>
-            )}
+          <div
+            className="h-1.5 w-full overflow-hidden rounded-full bg-muted/60"
+            role="progressbar"
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuenow={Math.round(percent)}
+            aria-label="Context window usage"
+          >
+            <div
+              className="h-full rounded-full transition-[width,background-color] duration-500 ease-out motion-reduce:transition-none"
+              style={{ width: `${percent}%`, backgroundColor: usageColor }}
+            />
           </div>
+          <p className="text-[11px] leading-snug text-muted-foreground/70">
+            The chat compacts automatically when it fills up, but you'll get better
+            results if you start a new chat.
+          </p>
         </div>
       }
     >
-      <span
-        role="img"
-        aria-label={`Context window ${Math.round(percent)}% used`}
-        className="relative mr-1 flex size-6 shrink-0 cursor-default items-center justify-center"
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        aria-label={`Context window ${formatPercent(percent)} used`}
+        className="inline-flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-full border border-transparent text-muted-foreground outline-none transition-colors hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
       >
-        <svg viewBox="0 0 24 24" className="absolute inset-0 size-full -rotate-90 transform-gpu" aria-hidden="true">
-          <circle
-            cx="12" cy="12" r={radius} fill="none" strokeWidth="3"
-            stroke="color-mix(in oklab, var(--muted) 70%, transparent)"
-          />
-          <circle
-            cx="12" cy="12" r={radius} fill="none" strokeWidth="3" strokeLinecap="round"
-            stroke={high ? 'var(--warning)' : 'var(--muted-foreground)'}
-            strokeDasharray={circumference}
-            strokeDashoffset={dashOffset}
-            className="transition-[stroke-dashoffset] duration-500 ease-out motion-reduce:transition-none"
-          />
-        </svg>
-        <span className="relative flex size-4 items-center justify-center rounded-full text-[8px] font-medium text-muted-foreground">
-          {Math.round(percent)}
+        <span className="relative flex size-4 items-center justify-center">
+          <svg
+            viewBox="0 0 24 24"
+            className="absolute inset-0 size-full -rotate-90 transform-gpu"
+            aria-hidden="true"
+          >
+            <circle
+              cx="12" cy="12" r={radius} fill="none" strokeWidth="3"
+              stroke="color-mix(in oklab, var(--muted-foreground) 35%, transparent)"
+            />
+            <circle
+              cx="12" cy="12" r={radius} fill="none" strokeWidth="3" strokeLinecap="round"
+              stroke={usageColor}
+              strokeDasharray={circumference}
+              strokeDashoffset={dashOffset}
+              className="transition-[stroke-dashoffset] duration-500 ease-out motion-reduce:transition-none"
+            />
+          </svg>
         </span>
-      </span>
+      </button>
     </Tooltip>
   );
 }
