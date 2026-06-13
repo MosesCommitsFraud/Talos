@@ -257,7 +257,7 @@ export function Messages() {
           ) : (
             <div key={m.id} className={`group w-full ${index === 0 ? '' : messages[index - 1].role === 'assistant' ? 'mt-0.5' : 'mt-3'}`}>
               {m.thinking && showThinking && <Thinking text={m.thinking} streaming={!!m.streaming && !m.content} />}
-              {m.tools?.map((t, i) => <ToolRow key={i} call={t} showImages={!!m.streaming} />)}
+              {m.tools?.map((t, i) => <ToolRow key={i} call={t} />)}
               {m.content ? (
                 <div className={m.error ? 'text-destructive-foreground' : ''}>
                   <Markdown text={m.content} />
@@ -272,8 +272,10 @@ export function Messages() {
                 )
               )}
               {!m.streaming && isAssistantTurnEnd(index) && (() => {
+                // Tool images already render inline at their tool row — the
+                // bottom grid is only a fallback for artifacts no tool showed.
                 const toolFinalImages = assistantTurnImages(index);
-                const finalImages = toolFinalImages.length > 0 || m.id !== lastAssistantId ? toolFinalImages : artifactImages;
+                const finalImages = toolFinalImages.length === 0 && m.id === lastAssistantId ? artifactImages : [];
                 const copyText = assistantTurnText(index);
                 return (
                   <>

@@ -19,7 +19,7 @@ export function toolImages(call: ToolCall): ToolImage[] {
 }
 
 /** One quiet tool-call row: "python · done", expandable to command + output. */
-export function ToolRow({ call, showImages = true }: { call: ToolCall; showImages?: boolean }) {
+export function ToolRow({ call }: { call: ToolCall }) {
   const [open, setOpen] = useState(false);
   const Icon = call.status === 'running' ? LoaderCircleIcon : call.status === 'error' ? CircleAlertIcon : CheckIcon;
   const images = toolImages(call);
@@ -47,7 +47,7 @@ export function ToolRow({ call, showImages = true }: { call: ToolCall; showImage
           )}
         </div>
       )}
-      {showImages && (call.image_note || images.length > 0) && (
+      {(call.image_note || images.length > 0) && (
         <div className="mt-2 ml-1 space-y-1.5">
           {call.image_note && <div className="text-xs text-muted-foreground">{call.image_note}</div>}
           {images.length > 0 && (

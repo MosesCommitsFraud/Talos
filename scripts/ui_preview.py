@@ -61,6 +61,14 @@ print(result)
         {"type": "agent_step", "round": 2},
         {"delta": "Round two: I should double-check the result before summarizing.\n", "thinking": True},
         {"delta": "Looks right — gross = value × 1.19 and B has the largest value.\n", "thinking": True},
+        # show_image flow: the image must render exactly once (inline at the
+        # tool row), not again in a grid at the end of the message.
+        {"type": "tool_start", "tool": "show_image", "command": "chart.png"},
+        {"type": "tool_output", "tool": "show_image", "command": "chart.png",
+         "output": "[Displayed 1 image(s) to the user inline: chart.png]", "exit_code": 0,
+         "created_images": [{"name": "chart.png", "data_url": (
+             "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAYAAADED76LAAAAFklEQVR4nGP8z8Dw"
+             "n4GBgYGJAQowMQAAOQYDB1G7K2IAAAAASUVORK5CYII=")}]},
         {"delta": "Second-round reply: the calculation checks out, **B** stays on top."},
         {"type": "metrics", "data": {
             "model": "mock-ui-preview",
