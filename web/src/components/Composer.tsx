@@ -4,6 +4,7 @@ import {
   FileTextIcon,
   PaperclipIcon,
   PencilRulerIcon,
+  WrenchIcon,
   XIcon,
 } from 'lucide-react';
 import { useRef, useState } from 'react';
@@ -20,20 +21,27 @@ function FooterSeparator() {
   return <div aria-hidden="true" className="mx-0.5 hidden h-4 w-px shrink-0 bg-border sm:block" />;
 }
 
-/** t3code plan-toggle style: labeled ghost button, blue tint when active. */
+/** t3code plan-toggle style: labeled ghost button, blue tint when active.
+ *  Pass inactiveIcon/inactiveLabel to swap the face by state (Plan ↔ Work). */
 function ModeToggle({
   active,
   onClick,
   icon,
   label,
   tooltip,
+  inactiveIcon,
+  inactiveLabel,
 }: {
   active: boolean;
   onClick: () => void;
   icon: React.ReactNode;
   label: string;
   tooltip: string;
+  inactiveIcon?: React.ReactNode;
+  inactiveLabel?: string;
 }) {
+  const face = active ? icon : (inactiveIcon ?? icon);
+  const text = active ? label : (inactiveLabel ?? label);
   return (
     <Tooltip label={tooltip} side="top">
       <button
@@ -42,14 +50,14 @@ function ModeToggle({
         aria-pressed={active}
         aria-label={tooltip}
         className={cn(
-          'flex h-8 shrink-0 items-center gap-1.5 rounded-lg border border-transparent px-2 text-[13px] font-medium whitespace-nowrap transition-colors sm:px-3 [&_svg]:size-4 [&_svg]:shrink-0',
+          'flex h-8 shrink-0 items-center gap-1.5 rounded-lg border border-transparent px-2 text-[13px] font-medium whitespace-nowrap transition-colors sm:h-7 sm:px-2.5 [&_svg]:size-4 [&_svg]:shrink-0',
           active
             ? 'bg-blue-500/10 text-blue-400 hover:bg-blue-500/15 hover:text-blue-300'
             : 'text-muted-foreground/70 hover:bg-accent hover:text-foreground/80',
         )}
       >
-        {icon}
-        <span className="sr-only sm:not-sr-only">{label}</span>
+        {face}
+        <span className="sr-only sm:not-sr-only">{text}</span>
       </button>
     </Tooltip>
   );
@@ -238,7 +246,9 @@ export function Composer() {
                   onClick={() => prefs.toggle('planMode')}
                   icon={<PencilRulerIcon />}
                   label="Plan"
-                  tooltip={prefs.planMode ? 'Plan mode — click to return to normal mode' : 'Plan before acting'}
+                  inactiveIcon={<WrenchIcon />}
+                  inactiveLabel="Work"
+                  tooltip={prefs.planMode ? 'Plan mode — click to return to work mode' : 'Work mode — click to enter plan mode'}
                 />
               </>
             )}
