@@ -3,6 +3,7 @@ import { memo, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeHighlight from 'rehype-highlight';
+import { copyTextToClipboard } from '@/lib/utils';
 
 /* ── hast helpers: extract plain text/structure from the syntax tree the
       renderers receive, so copy/download get the raw content even after
@@ -94,7 +95,7 @@ function CopyBlockButton({ text }: { text: string }) {
     <BlockButton
       label={copied ? 'Copied' : 'Copy'}
       onClick={() => {
-        void navigator.clipboard.writeText(text);
+        void copyTextToClipboard(text);
         setCopied(true);
         setTimeout(() => setCopied(false), 1500);
       }}

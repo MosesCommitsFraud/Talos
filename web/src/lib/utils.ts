@@ -15,6 +15,23 @@ export function timestampMs(value: number | string | null | undefined): number {
   return 0;
 }
 
+/** Clipboard write that also works in insecure contexts (plain-HTTP LAN
+ *  hosts), where navigator.clipboard is undefined. */
+export async function copyTextToClipboard(text: string): Promise<void> {
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch {
+    const area = document.createElement('textarea');
+    area.value = text;
+    area.style.position = 'fixed';
+    area.style.left = '-9999px';
+    document.body.appendChild(area);
+    area.select();
+    document.execCommand('copy');
+    area.remove();
+  }
+}
+
 export function formatRelativeTime(value: number | string | null | undefined): string {
   const ms = timestampMs(value);
   if (ms <= 0) return '';

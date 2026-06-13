@@ -2,6 +2,7 @@ import { CheckIcon, CopyIcon, FileIcon, PencilIcon, Trash2Icon } from 'lucide-re
 import { useQuery } from '@tanstack/react-query';
 import { useEffect, useRef, useState } from 'react';
 import { artifactDownloadUrl, fetchArtifacts, uploadDownloadUrl } from '@/api/client';
+import { copyTextToClipboard } from '@/lib/utils';
 import { useChat, type UiMessage } from '@/state/chat';
 import { usePrefs } from '@/state/prefs';
 import { Markdown } from './Markdown';
@@ -50,18 +51,7 @@ function ActionIcon({
 function CopyAction({ text }: { text: string }) {
   const [copied, setCopied] = useState(false);
   const copy = async () => {
-    try {
-      await navigator.clipboard.writeText(text);
-    } catch {
-      const area = document.createElement('textarea');
-      area.value = text;
-      area.style.position = 'fixed';
-      area.style.left = '-9999px';
-      document.body.appendChild(area);
-      area.select();
-      document.execCommand('copy');
-      area.remove();
-    }
+    await copyTextToClipboard(text);
     setCopied(true);
     setTimeout(() => setCopied(false), 1500);
   };
@@ -265,7 +255,7 @@ export function Messages() {
               )}
             </div>
           ) : (
-            <div key={m.id} className={`group w-full ${index === 0 ? '' : messages[index - 1].role === 'assistant' ? 'mt-1' : 'mt-3'}`}>
+            <div key={m.id} className={`group w-full ${index === 0 ? '' : messages[index - 1].role === 'assistant' ? 'mt-0.5' : 'mt-3'}`}>
               {m.thinking && showThinking && <Thinking text={m.thinking} streaming={!!m.streaming && !m.content} />}
               {m.tools?.map((t, i) => <ToolRow key={i} call={t} showImages={!!m.streaming} />)}
               {m.content ? (
