@@ -1,6 +1,7 @@
 import * as DialogPrimitive from '@radix-ui/react-dialog';
 import { XIcon } from 'lucide-react';
 import type * as React from 'react';
+import { useTranslation } from 'react-i18next';
 import { cn } from '@/lib/utils';
 
 export const Dialog = DialogPrimitive.Root;
@@ -14,6 +15,7 @@ export function DialogContent({
   description,
   ...props
 }: DialogPrimitive.DialogContentProps & { title: string; description?: string }) {
+  const { t } = useTranslation();
   return (
     <DialogPrimitive.Portal>
       <DialogPrimitive.Overlay className="fixed inset-0 z-50 bg-black/40 backdrop-blur-[2px] data-[state=open]:animate-in data-[state=open]:fade-in" />
@@ -27,7 +29,7 @@ export function DialogContent({
         <div className="flex items-center justify-between border-b px-5 py-3.5">
           <DialogPrimitive.Title className="text-[15px] font-semibold">{title}</DialogPrimitive.Title>
           <DialogPrimitive.Close
-            aria-label="Close"
+            aria-label={t('common.close')}
             className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
           >
             <XIcon className="size-4" />

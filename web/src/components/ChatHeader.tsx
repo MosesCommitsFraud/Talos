@@ -11,6 +11,7 @@ import {
   Share2Icon,
 } from 'lucide-react';
 import { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { fetchSessions, renameSession } from '@/api/client';
 import { useChat } from '@/state/chat';
 import { usePrefs } from '@/state/prefs';
@@ -25,6 +26,7 @@ function messagesToMarkdown(messages: ReturnType<typeof useChat.getState>['messa
 }
 
 export function ChatHeader({ onToggleFiles, filesOpen }: { onToggleFiles: () => void; filesOpen: boolean }) {
+  const { t } = useTranslation();
   const sessionId = useChat((s) => s.sessionId);
   const messages = useChat((s) => s.messages);
   const { data: sessions } = useQuery({ queryKey: ['sessions'], queryFn: fetchSessions });
@@ -82,12 +84,12 @@ export function ChatHeader({ onToggleFiles, filesOpen }: { onToggleFiles: () => 
           />
         ) : (
           <>
-            <span className="truncate text-sm font-medium">{title || 'New chat'}</span>
+            <span className="truncate text-sm font-medium">{title || t('chatHeader.newChat')}</span>
             {sessionId && (
-              <Tooltip label="Rename chat">
+              <Tooltip label={t('chatHeader.renameChat')}>
                 <button
                   type="button"
-                  aria-label="Rename chat"
+                  aria-label={t('chatHeader.renameChat')}
                   onClick={() => { setDraft(title); setRenaming(true); }}
                   className="flex size-6 items-center justify-center rounded-md text-muted-foreground opacity-60 transition-all hover:bg-accent hover:opacity-100"
                 >
@@ -100,10 +102,10 @@ export function ChatHeader({ onToggleFiles, filesOpen }: { onToggleFiles: () => 
       </div>
 
       {sessionId && (
-        <Tooltip label={filesOpen ? 'Hide session files' : 'Session files & artifacts'}>
+        <Tooltip label={filesOpen ? t('chatHeader.hideFiles') : t('chatHeader.sessionFiles')}>
           <button
             type="button"
-            aria-label="Session files"
+            aria-label={t('chatHeader.sessionFilesAria')}
             aria-pressed={filesOpen}
             onClick={onToggleFiles}
             className={cn(
@@ -118,11 +120,11 @@ export function ChatHeader({ onToggleFiles, filesOpen }: { onToggleFiles: () => 
 
       {messages.length > 0 && (
         <Menu>
-          <Tooltip label="Export chat">
+          <Tooltip label={t('chatHeader.exportChat')}>
             <MenuTrigger asChild>
               <button
                 type="button"
-                aria-label="Export chat"
+                aria-label={t('chatHeader.exportChat')}
                 className="flex size-8 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
               >
                 <Share2Icon className="size-4" />
@@ -131,34 +133,34 @@ export function ChatHeader({ onToggleFiles, filesOpen }: { onToggleFiles: () => 
           </Tooltip>
           <MenuPopup align="end">
             <MenuItem onSelect={() => { setDraft(title); setRenaming(true); }}>
-              <PencilIcon /> Rename
+              <PencilIcon /> {t('chatHeader.rename')}
             </MenuItem>
             <MenuSeparator />
             <MenuItem onSelect={() => void copyChat()}>
-              {copied ? <CheckIcon /> : <CopyIcon />} Copy as Markdown
+              {copied ? <CheckIcon /> : <CopyIcon />} {t('chatHeader.copyMarkdown')}
             </MenuItem>
             <MenuItem onSelect={downloadChat}>
-              <DownloadIcon /> Download .md
+              <DownloadIcon /> {t('chatHeader.downloadMd')}
             </MenuItem>
             <MenuItem onSelect={onToggleFiles}>
-              <FolderIcon /> Session files…
+              <FolderIcon /> {t('chatHeader.sessionFilesItem')}
             </MenuItem>
             <MenuSeparator />
             <MenuItem onSelect={() => { window.location.href = '/legacy'; }}>
-              <FileTextIcon /> Export PDF <span className="ml-auto text-xs text-muted-foreground">legacy</span>
+              <FileTextIcon /> {t('chatHeader.exportPdf')} <span className="ml-auto text-xs text-muted-foreground">{t('common.legacy')}</span>
             </MenuItem>
             <MenuItem onSelect={() => { window.location.href = '/legacy'; }}>
-              <ExternalLinkIcon /> Export DOCX <span className="ml-auto text-xs text-muted-foreground">legacy</span>
+              <ExternalLinkIcon /> {t('chatHeader.exportDocx')} <span className="ml-auto text-xs text-muted-foreground">{t('common.legacy')}</span>
             </MenuItem>
           </MenuPopup>
         </Menu>
       )}
 
       {visibility.incognitoBtn && (
-      <Tooltip label={incognito ? 'Incognito on — chat not saved' : 'Incognito off'}>
+      <Tooltip label={incognito ? t('chatHeader.incognitoOn') : t('chatHeader.incognitoOff')}>
         <button
           type="button"
-          aria-label="Toggle incognito"
+          aria-label={t('chatHeader.toggleIncognito')}
           aria-pressed={incognito}
           onClick={() => toggle('incognito')}
           className={cn(

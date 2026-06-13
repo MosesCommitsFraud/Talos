@@ -10,7 +10,7 @@ import { BrainDialog, LibraryDialog } from './components/ToolDialogs';
 import { ArtifactsPanel } from './components/ArtifactsPanel';
 import { AuthGate } from './components/auth/AuthGate';
 import { TooltipProvider } from './components/ui/misc';
-import { applyDensity, applyTheme, usePrefs } from './state/prefs';
+import { applyDensity, applyLang, applyTheme, usePrefs } from './state/prefs';
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { staleTime: 10_000, retry: 1 } },
@@ -24,9 +24,11 @@ export default function App() {
   const [files, setFiles] = useState(false);
   const theme = usePrefs((s) => s.theme);
   const density = usePrefs((s) => s.density);
+  const lang = usePrefs((s) => s.lang);
 
   useEffect(() => applyTheme(theme), [theme]);
   useEffect(() => applyDensity(density), [density]);
+  useEffect(() => applyLang(lang), [lang]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {

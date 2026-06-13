@@ -15,6 +15,7 @@ import {
   Trash2Icon,
 } from 'lucide-react';
 import { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   archiveSession,
   deleteSession,
@@ -41,13 +42,14 @@ import {
   MenuTrigger,
 } from './ui/menu';
 
-const SORT_LABELS: Record<SortMode, string> = {
-  active: 'Last active',
-  newest: 'Newest first',
-  name: 'Name A–Z',
+const SORT_KEYS: Record<SortMode, string> = {
+  active: 'sidebar.sortActive',
+  newest: 'sidebar.sortNewest',
+  name: 'sidebar.sortName',
 };
 
 function SessionRow({ session }: { session: Session }) {
+  const { t } = useTranslation();
   const activeId = useChat((s) => s.sessionId);
   const openSession = useChat((s) => s.openSession);
   const newChat = useChat((s) => s.newChat);
@@ -95,7 +97,7 @@ function SessionRow({ session }: { session: Session }) {
             session.id === activeId ? 'bg-accent text-accent-foreground' : 'hover:bg-accent/70',
           )}
         >
-          <span className="min-w-0 flex-1 truncate">{session.name || 'Untitled'}</span>
+          <span className="min-w-0 flex-1 truncate">{session.name || t('common.untitled')}</span>
           <span className="shrink-0 text-[11px] text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100">
             {formatRelativeTime(session.updated_at)}
           </span>
@@ -103,13 +105,13 @@ function SessionRow({ session }: { session: Session }) {
       </ContextMenuTrigger>
       <ContextMenuPopup>
         <ContextMenuItem onSelect={() => { setDraft(session.name); setRenaming(true); }}>
-          <PencilIcon /> Rename
+          <PencilIcon /> {t('sidebar.rename')}
         </ContextMenuItem>
         <ContextMenuItem onSelect={() => void markImportant(session.id, true).then(refresh)}>
-          <StarIcon /> Mark important
+          <StarIcon /> {t('sidebar.markImportant')}
         </ContextMenuItem>
         <ContextMenuItem onSelect={() => void archiveSession(session.id).then(refresh)}>
-          <ArchiveIcon /> Archive
+          <ArchiveIcon /> {t('sidebar.archive')}
         </ContextMenuItem>
         <ContextMenuSeparator />
         <ContextMenuItem
@@ -121,7 +123,7 @@ function SessionRow({ session }: { session: Session }) {
             });
           }}
         >
-          <Trash2Icon /> Delete
+          <Trash2Icon /> {t('common.delete')}
         </ContextMenuItem>
       </ContextMenuPopup>
     </ContextMenu>
@@ -163,6 +165,7 @@ export function Sidebar({
   onOpenBrain: () => void;
   onOpenLibrary: () => void;
 }) {
+  const { t } = useTranslation();
   const { data: sessions } = useQuery({ queryKey: ['sessions'], queryFn: fetchSessions, refetchInterval: 30_000 });
   const auth = useAuth();
   const newChat = useChat((s) => s.newChat);
@@ -181,16 +184,16 @@ export function Sidebar({
   const isMac = /Mac|iPhone/.test(navigator.platform);
 
   return (
-    <nav className="flex w-64 shrink-0 flex-col border-r bg-card" aria-label="Sidebar">
+    <nav className="flex w-64 shrink-0 flex-col border-r bg-card" aria-label={t('sidebar.navLabel')}>
       <div className="flex items-center justify-between px-4 pt-4 pb-1">
         <span className="text-[15px] font-semibold tracking-tight text-primary">Talos</span>
       </div>
 
       <div className="space-y-0.5 px-2 pt-2">
-        <NavButton icon={<SquarePenIcon />} label="New chat" onClick={newChat} />
+        <NavButton icon={<SquarePenIcon />} label={t('sidebar.newChat')} onClick={newChat} />
         <NavButton
           icon={<SearchIcon />}
-          label="Search"
+          label={t('sidebar.search')}
           onClick={onOpenPalette}
           trailing={<Kbd>{isMac ? '⌘K' : 'Ctrl K'}</Kbd>}
         />
@@ -198,22 +201,22 @@ export function Sidebar({
 
       {(visibility.sidebarBrain || visibility.sidebarLibrary) && (
         <>
-          <div className="px-4 pt-4 pb-1 text-xs font-medium text-muted-foreground">Tools</div>
+          <div className="px-4 pt-4 pb-1 text-xs font-medium text-muted-foreground">{t('sidebar.tools')}</div>
           <div className="space-y-0.5 px-2">
-            {visibility.sidebarBrain && <NavButton icon={<BrainIcon />} label="Brain" onClick={onOpenBrain} />}
-            {visibility.sidebarLibrary && <NavButton icon={<BookOpenIcon />} label="Library" onClick={onOpenLibrary} />}
+            {visibility.sidebarBrain && <NavButton icon={<BrainIcon />} label={t('sidebar.brain')} onClick={onOpenBrain} />}
+            {visibility.sidebarLibrary && <NavButton icon={<BookOpenIcon />} label={t('sidebar.library')} onClick={onOpenLibrary} />}
           </div>
         </>
       )}
 
       <div className="flex items-center justify-between px-4 pt-4 pb-1">
-        <span className="text-xs font-medium text-muted-foreground">Chats</span>
+        <span className="text-xs font-medium text-muted-foreground">{t('sidebar.chats')}</span>
         <Menu>
-          <Tooltip label={`Sort: ${SORT_LABELS[sortMode]}`}>
+          <Tooltip label={t('sidebar.sortLabel', { mode: t(SORT_KEYS[sortMode]) })}>
             <MenuTrigger asChild>
               <button
                 type="button"
-                aria-label="Sort chats"
+                aria-label={t('sidebar.sortChats')}
                 className="-mr-1.5 flex size-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
               >
                 <ArrowUpDownIcon className="size-3.5" />
@@ -221,16 +224,16 @@ export function Sidebar({
             </MenuTrigger>
           </Tooltip>
           <MenuPopup align="start">
-            {(Object.keys(SORT_LABELS) as SortMode[]).map((mode) => (
+            {(Object.keys(SORT_KEYS) as SortMode[]).map((mode) => (
               <MenuItem key={mode} onSelect={() => setSortMode(mode)}>
                 <CheckIcon className={mode === sortMode ? '' : 'invisible'} />
-                {SORT_LABELS[mode]}
+                {t(SORT_KEYS[mode])}
               </MenuItem>
             ))}
             <MenuSeparator />
             <MenuItem onSelect={() => { window.location.href = '/legacy'; }}>
-              <ExternalLinkIcon /> Folders & bulk manage
-              <span className="ml-auto text-xs text-muted-foreground">legacy</span>
+              <ExternalLinkIcon /> {t('sidebar.foldersBulk')}
+              <span className="ml-auto text-xs text-muted-foreground">{t('common.legacy')}</span>
             </MenuItem>
           </MenuPopup>
         </Menu>
@@ -242,7 +245,7 @@ export function Sidebar({
         {visible.length === 0 && (
           <div className="flex flex-col items-center gap-1.5 px-2 py-6 text-center text-xs text-muted-foreground">
             <MessageSquareIcon className="size-4 opacity-60" />
-            No chats yet
+            {t('sidebar.noChats')}
           </div>
         )}
       </div>
@@ -253,7 +256,7 @@ export function Sidebar({
           className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-accent/70 hover:text-foreground [&_svg]:size-4"
         >
           <ExternalLinkIcon />
-          <span className="flex-1 text-left">Legacy UI</span>
+          <span className="flex-1 text-left">{t('sidebar.legacyUi')}</span>
         </a>
         {(visibility.sidebarUserBar || visibility.sidebarSettingsBtn) && (
           <div className="flex items-center gap-2 rounded-lg px-2 py-1.5">
@@ -262,16 +265,16 @@ export function Sidebar({
                 <div className="flex size-6 items-center justify-center rounded-full bg-primary/15 text-[11px] font-semibold text-primary">
                   {(auth?.username ?? 'U').slice(0, 1).toUpperCase()}
                 </div>
-                <span className="min-w-0 flex-1 truncate text-sm">{auth?.username ?? 'User'}</span>
+                <span className="min-w-0 flex-1 truncate text-sm">{auth?.username ?? t('sidebar.user')}</span>
               </>
             )}
             {!visibility.sidebarUserBar && <span className="flex-1" />}
             {visibility.sidebarSettingsBtn && (
-              <Tooltip label="Settings — re-open via ⌘K if hidden">
+              <Tooltip label={t('sidebar.settingsHidden')}>
                 <button
                   type="button"
                   onClick={onOpenSettings}
-                  aria-label="Settings"
+                  aria-label={t('sidebar.settings')}
                   className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
                 >
                   <SettingsIcon className="size-4" />

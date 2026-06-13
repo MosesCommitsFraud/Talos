@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { CheckIcon, ChevronDownIcon } from 'lucide-react';
 import { useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import { fetchAppSettings, fetchModels } from '@/api/client';
 import { useChat } from '@/state/chat';
 import { cn } from '@/lib/utils';
@@ -19,6 +20,7 @@ export function QwenIcon({ className }: { className?: string }) {
  *  quiet ghost styling. Stays mounted even when hidden so the default-model
  *  effect keeps running. */
 export function ModelPicker({ visible = true }: { visible?: boolean }) {
+  const { t } = useTranslation();
   const { data: endpoints } = useQuery({ queryKey: ['models'], queryFn: fetchModels });
   const pendingModel = useChat((s) => s.pendingModel);
   const setPendingModel = useChat((s) => s.setPendingModel);
@@ -37,7 +39,7 @@ export function ModelPicker({ visible = true }: { visible?: boolean }) {
     }
   }, [options.length, pendingModel, setPendingModel]);
 
-  const label = pendingModel ? displayName(pendingModel.model) : 'Select model';
+  const label = pendingModel ? displayName(pendingModel.model) : t('modelPicker.selectModel');
 
   if (!visible) return null;
 
@@ -46,7 +48,7 @@ export function ModelPicker({ visible = true }: { visible?: boolean }) {
       <MenuTrigger asChild>
         <button
           type="button"
-          aria-label="Switch model"
+          aria-label={t('modelPicker.switchModel')}
           className="flex h-8 max-w-48 shrink-0 items-center justify-between gap-2 whitespace-nowrap rounded-lg border border-transparent px-2 text-[13px] font-medium text-muted-foreground/70 transition-colors hover:bg-accent hover:text-foreground/80 sm:max-w-56 sm:px-3"
         >
           <span className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden">
@@ -58,7 +60,7 @@ export function ModelPicker({ visible = true }: { visible?: boolean }) {
       </MenuTrigger>
       <MenuPopup align="start">
         {options.length === 0 && (
-          <div className="px-3 py-2 text-[13px] text-muted-foreground">No model endpoints configured</div>
+          <div className="px-3 py-2 text-[13px] text-muted-foreground">{t('modelPicker.noEndpoints')}</div>
         )}
         {options.map((o) => {
           const selected =

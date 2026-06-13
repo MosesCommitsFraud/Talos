@@ -13,6 +13,7 @@ import {
   SunIcon,
 } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { fetchSessions } from '@/api/client';
 import { useChat } from '@/state/chat';
 import { applyTheme, usePrefs } from '@/state/prefs';
@@ -33,6 +34,7 @@ interface PaletteGroup {
 }
 
 export function CommandPalette({ open, onClose, onOpenSettings }: { open: boolean; onClose: () => void; onOpenSettings?: () => void }) {
+  const { t } = useTranslation();
   const [query, setQuery] = useState('');
   const [selected, setSelected] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -52,10 +54,10 @@ export function CommandPalette({ open, onClose, onOpenSettings }: { open: boolea
   const groups = useMemo<PaletteGroup[]>(() => {
     const q = query.toLowerCase().trim();
     const actions: PaletteEntry[] = [
-      { id: 'new', label: 'New chat', icon: <SquarePenIcon />, run: () => { newChat(); onClose(); } },
+      { id: 'new', label: t('palette.newChat'), icon: <SquarePenIcon />, run: () => { newChat(); onClose(); } },
       {
         id: 'theme',
-        label: theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme',
+        label: theme === 'dark' ? t('palette.switchLight') : t('palette.switchDark'),
         icon: theme === 'dark' ? <SunIcon /> : <MoonIcon />,
         run: () => {
           const next = theme === 'dark' ? 'light' : 'dark';
@@ -64,8 +66,8 @@ export function CommandPalette({ open, onClose, onOpenSettings }: { open: boolea
           onClose();
         },
       },
-      { id: 'settings', label: 'Open settings', icon: <SettingsIcon />, run: () => { onOpenSettings?.(); onClose(); } },
-      { id: 'legacy', label: 'Open legacy UI', icon: <ExternalLinkIcon />, run: () => { window.location.href = '/legacy'; } },
+      { id: 'settings', label: t('palette.openSettings'), icon: <SettingsIcon />, run: () => { onOpenSettings?.(); onClose(); } },
+      { id: 'legacy', label: t('palette.openLegacy'), icon: <ExternalLinkIcon />, run: () => { window.location.href = '/legacy'; } },
     ].filter((a) => !q || a.label.toLowerCase().includes(q));
 
     const chats: PaletteEntry[] = (sessions ?? [])
@@ -73,17 +75,17 @@ export function CommandPalette({ open, onClose, onOpenSettings }: { open: boolea
       .slice(0, 12)
       .map((s) => ({
         id: s.id,
-        label: s.name || 'Untitled',
+        label: s.name || t('common.untitled'),
         hint: s.model,
         icon: <MessageSquareIcon />,
         run: () => { void openSession(s.id); onClose(); },
       }));
 
     const next: PaletteGroup[] = [];
-    if (actions.length) next.push({ label: 'Actions', items: actions });
-    if (chats.length) next.push({ label: 'Recent chats', items: chats });
+    if (actions.length) next.push({ label: t('palette.actions'), items: actions });
+    if (chats.length) next.push({ label: t('palette.recentChats'), items: chats });
     return next;
-  }, [query, sessions, theme, newChat, onClose, onOpenSettings, openSession, setTheme]);
+  }, [query, sessions, theme, newChat, onClose, onOpenSettings, openSession, setTheme, t]);
 
   // Flatten for keyboard navigation; track a running index across groups.
   const flat = useMemo(() => groups.flatMap((g) => g.items), [groups]);
@@ -98,7 +100,7 @@ export function CommandPalette({ open, onClose, onOpenSettings }: { open: boolea
             className="pointer-events-auto flex max-h-[26.25rem] w-full max-w-xl flex-col overflow-hidden rounded-2xl border bg-popover text-popover-foreground shadow-[0_24px_64px_rgb(0_0_0/0.45)] outline-none data-[state=closed]:scale-[0.98] data-[state=closed]:opacity-0"
             onOpenAutoFocus={(e) => { e.preventDefault(); inputRef.current?.focus(); }}
           >
-            <DialogPrimitive.Title className="sr-only">Search</DialogPrimitive.Title>
+            <DialogPrimitive.Title className="sr-only">{t('palette.searchTitle')}</DialogPrimitive.Title>
             <div className="flex items-center gap-2.5 px-3.5 py-3">
               <SearchIcon className="size-[18px] shrink-0 text-muted-foreground" />
               <input
@@ -110,7 +112,7 @@ export function CommandPalette({ open, onClose, onOpenSettings }: { open: boolea
                   if (e.key === 'ArrowUp') { e.preventDefault(); setSelected((v) => Math.max(v - 1, 0)); }
                   if (e.key === 'Enter') { e.preventDefault(); flat[clampedSelected]?.run(); }
                 }}
-                placeholder="Search chats and actions…"
+                placeholder={t('palette.searchPlaceholder')}
                 className="h-6 w-full bg-transparent text-[15px] outline-none placeholder:text-muted-foreground"
               />
             </div>
@@ -144,7 +146,7 @@ export function CommandPalette({ open, onClose, onOpenSettings }: { open: boolea
                 );
               })}
               {flat.length === 0 && (
-                <div className="px-3 py-8 text-center text-sm text-muted-foreground">No matches</div>
+                <div className="px-3 py-8 text-center text-sm text-muted-foreground">{t('palette.noMatches')}</div>
               )}
             </div>
 
@@ -153,16 +155,16 @@ export function CommandPalette({ open, onClose, onOpenSettings }: { open: boolea
                 <span className="flex items-center gap-1.5">
                   <Kbd className="[&_svg]:size-3"><ArrowUpIcon /></Kbd>
                   <Kbd className="[&_svg]:size-3"><ArrowDownIcon /></Kbd>
-                  <span className="text-muted-foreground/80">Navigate</span>
+                  <span className="text-muted-foreground/80">{t('palette.navigate')}</span>
                 </span>
                 <span className="flex items-center gap-1.5">
                   <Kbd className="[&_svg]:size-3"><CornerDownLeftIcon /></Kbd>
-                  <span className="text-muted-foreground/80">Select</span>
+                  <span className="text-muted-foreground/80">{t('palette.select')}</span>
                 </span>
               </div>
               <span className="flex items-center gap-1.5">
                 <Kbd>Esc</Kbd>
-                <span className="text-muted-foreground/80">Close</span>
+                <span className="text-muted-foreground/80">{t('palette.close')}</span>
               </span>
             </div>
           </DialogPrimitive.Content>

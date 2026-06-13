@@ -1,9 +1,11 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
+import i18n, { type Lang } from '@/i18n';
 
 export type Theme = 'dark' | 'light' | 'system';
 export type Density = 'compact' | 'comfortable' | 'spacious';
 export type SortMode = 'active' | 'newest' | 'name';
+export type { Lang };
 
 /** Per-surface visibility toggles — the new-UI equivalent of legacy's
  *  Appearance tab (show/hide modules across sidebar, chat area, chat bar). */
@@ -47,6 +49,7 @@ interface PrefsState {
   theme: Theme;
   density: Density;
   sortMode: SortMode;
+  lang: Lang;
   visibility: Visibility;
   /** Composer toggles — mirror the legacy chat-bar switches. */
   planMode: boolean;
@@ -56,6 +59,7 @@ interface PrefsState {
   setTheme: (t: Theme) => void;
   setDensity: (d: Density) => void;
   setSortMode: (m: SortMode) => void;
+  setLang: (l: Lang) => void;
   setVisibility: (key: keyof Visibility, value: boolean) => void;
   resetVisibility: () => void;
   toggle: (key: 'planMode' | 'useRag' | 'useDb' | 'incognito') => void;
@@ -67,6 +71,7 @@ export const usePrefs = create<PrefsState>()(
       theme: 'dark',
       density: 'comfortable',
       sortMode: 'active',
+      lang: 'en',
       visibility: DEFAULT_VISIBILITY,
       planMode: false,
       useRag: false,
@@ -75,6 +80,7 @@ export const usePrefs = create<PrefsState>()(
       setTheme: (theme) => set({ theme }),
       setDensity: (density) => set({ density }),
       setSortMode: (sortMode) => set({ sortMode }),
+      setLang: (lang) => { void i18n.changeLanguage(lang); set({ lang }); },
       setVisibility: (key, value) => set((s) => ({ visibility: { ...s.visibility, [key]: value } })),
       resetVisibility: () => set({ visibility: DEFAULT_VISIBILITY }),
       toggle: (key) => set((s) => ({ [key]: !s[key] }) as Partial<PrefsState>),
@@ -98,4 +104,10 @@ export function applyTheme(theme: Theme) {
 /** Everything is rem-based, so density is one root font-size. */
 export function applyDensity(density: Density) {
   document.documentElement.style.fontSize = { compact: '14px', comfortable: '16px', spacious: '17px' }[density];
+}
+
+/** Sync i18next + <html lang> with the stored language. */
+export function applyLang(lang: Lang) {
+  if (i18n.language !== lang) void i18n.changeLanguage(lang);
+  document.documentElement.lang = lang;
 }

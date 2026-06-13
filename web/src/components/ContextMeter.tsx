@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useChat } from '@/state/chat';
 import { Tooltip } from './ui/misc';
 
@@ -19,6 +20,7 @@ function formatPercent(value: number): string {
 }
 
 export function ContextMeter() {
+  const { t } = useTranslation();
   const messages = useChat((s) => s.messages);
   const [open, setOpen] = useState(false);
 
@@ -44,7 +46,7 @@ export function ContextMeter() {
       label={
         <div className="flex w-56 flex-col gap-2 p-1.5">
           <div className="flex items-center justify-between gap-3">
-            <div className="text-xs font-medium text-muted-foreground">Context Window</div>
+            <div className="text-xs font-medium text-muted-foreground">{t('contextMeter.title')}</div>
             <div className="text-[11px] text-muted-foreground/70 tabular-nums">
               <span>{formatPercent(percent)}</span>
               {usedTokens != null && maxTokens != null && (
@@ -63,7 +65,7 @@ export function ContextMeter() {
             aria-valuemin={0}
             aria-valuemax={100}
             aria-valuenow={Math.round(percent)}
-            aria-label="Context window usage"
+            aria-label={t('contextMeter.usage')}
           >
             <div
               className="h-full rounded-full transition-[width,background-color] duration-500 ease-out motion-reduce:transition-none"
@@ -71,8 +73,7 @@ export function ContextMeter() {
             />
           </div>
           <p className="text-[11px] leading-snug text-muted-foreground/70">
-            The chat compacts automatically when it fills up, but you'll get better
-            results if you start a new chat.
+            {t('contextMeter.hint')}
           </p>
         </div>
       }
@@ -80,7 +81,7 @@ export function ContextMeter() {
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
-        aria-label={`Context window ${formatPercent(percent)} used`}
+        aria-label={t('contextMeter.used', { percent: formatPercent(percent) })}
         className="inline-flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-full border border-transparent text-muted-foreground outline-none transition-colors hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
       >
         <span className="relative flex size-4 items-center justify-center">

@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ChevronDownIcon, PlusIcon, Trash2Icon } from 'lucide-react';
 import { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   createUser,
   deleteUser,
@@ -19,15 +20,16 @@ import { Button } from '../ui/button';
 import { Page, Row, Section } from '../SettingsDialog';
 import { Input, Switch } from '../ui/misc';
 
-/* Mirrors the legacy admin panel's privilege labels (static/js/admin.js). */
-const PRIV_LABELS: Array<{ key: keyof UserPrivileges; label: string }> = [
-  { key: 'can_use_agent', label: 'Agent mode' },
-  { key: 'can_use_browser', label: 'Browser automation' },
-  { key: 'can_use_bash', label: 'Shell / Python / Files' },
-  { key: 'can_use_documents', label: 'Document editor' },
-  { key: 'can_use_research', label: 'Deep research' },
-  { key: 'can_generate_images', label: 'Image generation' },
-  { key: 'can_manage_memory', label: 'Memory & skills' },
+/* Mirrors the legacy admin panel's privilege keys (static/js/admin.js);
+   labels come from i18n at settings.users.priv.<key>. */
+const PRIV_KEYS: Array<keyof UserPrivileges> = [
+  'can_use_agent',
+  'can_use_browser',
+  'can_use_bash',
+  'can_use_documents',
+  'can_use_research',
+  'can_generate_images',
+  'can_manage_memory',
 ];
 
 /** Compact row used inside an expanded user card's privileges sub-panel. */
@@ -58,6 +60,7 @@ function useAllModels(enabled: boolean) {
 }
 
 function AllowedModels({ user, onSaved }: { user: AppUser; onSaved: () => void }) {
+  const { t } = useTranslation();
   const allModels = useAllModels(true);
   const stored = user.privileges?.allowed_models ?? [];
   // Empty stored list = no restrictions = everything checked.
@@ -84,17 +87,17 @@ function AllowedModels({ user, onSaved }: { user: AppUser; onSaved: () => void }
   return (
     <div className="pt-2">
       <div className="flex items-center justify-between">
-        <span className="text-sm">Allowed models</span>
+        <span className="text-sm">{t('settings.users.allowedModels')}</span>
         <div className="flex gap-3 text-xs">
-          <button type="button" className="text-muted-foreground hover:text-foreground" onClick={() => save(new Set(allModels.map((m) => m.mid)))}>All</button>
-          <button type="button" className="text-muted-foreground hover:text-foreground" onClick={() => save(new Set())}>None</button>
+          <button type="button" className="text-muted-foreground hover:text-foreground" onClick={() => save(new Set(allModels.map((m) => m.mid)))}>{t('settings.users.all')}</button>
+          <button type="button" className="text-muted-foreground hover:text-foreground" onClick={() => save(new Set())}>{t('settings.users.none')}</button>
         </div>
       </div>
       <div className="pb-1 text-xs text-muted-foreground">
-        {unrestricted ? 'All models allowed (no restrictions)' : `${stored.length} model(s) allowed`}
+        {unrestricted ? t('settings.users.unrestricted') : t('settings.users.restricted', { count: stored.length })}
       </div>
       {allModels.length === 0 ? (
-        <div className="text-xs text-muted-foreground">No models available</div>
+        <div className="text-xs text-muted-foreground">{t('settings.users.noModels')}</div>
       ) : (
         <div className="max-h-44 space-y-0.5 overflow-y-auto rounded-lg border bg-background p-1.5">
           {allModels.map((m) => (
@@ -111,22 +114,23 @@ function AllowedModels({ user, onSaved }: { user: AppUser; onSaved: () => void }
 }
 
 function PrivilegesPanel({ user, onSaved }: { user: AppUser; onSaved: () => void }) {
+  const { t } = useTranslation();
   const [limit, setLimit] = useState(String(user.privileges?.max_messages_per_day ?? 0));
   const savePriv = (patch: UserPrivileges) =>
     void setUserPrivileges(user.username, patch).then(onSaved).catch(() => {});
   return (
     <div className="border-t px-3 pt-2 pb-3">
-      <div className="pt-1 pb-0.5 text-[11px] font-medium tracking-wide text-muted-foreground uppercase">Features</div>
-      {PRIV_LABELS.map(({ key, label }) => (
-        <MiniRow key={key} label={label}>
+      <div className="pt-1 pb-0.5 text-[11px] font-medium tracking-wide text-muted-foreground uppercase">{t('settings.users.features')}</div>
+      {PRIV_KEYS.map((key) => (
+        <MiniRow key={key} label={t(`settings.users.priv.${key}`)}>
           <Switch
             checked={!!user.privileges?.[key]}
             onCheckedChange={(v) => savePriv({ [key]: v })}
           />
         </MiniRow>
       ))}
-      <div className="pt-2 pb-0.5 text-[11px] font-medium tracking-wide text-muted-foreground uppercase">Limits</div>
-      <MiniRow label="Daily message limit" hint="0 = no limit">
+      <div className="pt-2 pb-0.5 text-[11px] font-medium tracking-wide text-muted-foreground uppercase">{t('settings.users.limits')}</div>
+      <MiniRow label={t('settings.users.dailyLimit')} hint={t('settings.users.dailyLimitHint')}>
         <Input
           type="number"
           min={0}
@@ -147,13 +151,14 @@ function UserRow({ user, currentUser, adminCount, onChanged }: {
   adminCount: number;
   onChanged: () => void;
 }) {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const isSelf = user.username === (currentUser ?? '').toLowerCase();
   // Server blocks self-demote and last-admin demote; hiding the button is clearer.
   const canDemote = user.is_admin && !isSelf && adminCount > 1;
 
   const rename = () => {
-    const next = (window.prompt(`Rename "${user.username}"`, user.username) ?? '').trim();
+    const next = (window.prompt(t('settings.users.renamePrompt', { name: user.username }), user.username) ?? '').trim();
     if (!next || next === user.username) return;
     void renameUser(user.username, next)
       .then((r) => { if (r.renamed_self) window.location.reload(); else onChanged(); })
@@ -161,13 +166,13 @@ function UserRow({ user, currentUser, adminCount, onChanged }: {
   };
   const setAdmin = (makeAdmin: boolean) => {
     const msg = makeAdmin
-      ? `Make "${user.username}" an admin? Admins have full, unrestricted access.`
-      : `Demote "${user.username}" to a regular user?`;
+      ? t('settings.users.makeAdminConfirm', { name: user.username })
+      : t('settings.users.demoteConfirm', { name: user.username });
     if (!window.confirm(msg)) return;
     void setUserAdmin(user.username, makeAdmin).then(onChanged).catch((e) => window.alert((e as Error).message));
   };
   const remove = () => {
-    if (!window.confirm(`Remove user "${user.username}"?`)) return;
+    if (!window.confirm(t('settings.users.removeConfirm', { name: user.username }))) return;
     void deleteUser(user.username).then(onChanged).catch((e) => window.alert((e as Error).message));
   };
 
@@ -183,18 +188,18 @@ function UserRow({ user, currentUser, adminCount, onChanged }: {
         <div className="min-w-0 flex-1">
           <span className="truncate text-sm">{user.username}</span>
           {user.is_admin
-            ? <span className="ml-2 rounded bg-primary/15 px-1.5 py-0.5 text-[10px] font-semibold tracking-wide text-primary">ADMIN</span>
-            : <div className="text-[10px] text-muted-foreground">Click to manage privileges</div>}
+            ? <span className="ml-2 rounded bg-primary/15 px-1.5 py-0.5 text-[10px] font-semibold tracking-wide text-primary">{t('settings.users.admin')}</span>
+            : <div className="text-[10px] text-muted-foreground">{t('settings.users.manageHint')}</div>}
         </div>
         <div className="flex shrink-0 items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
-          <Button variant="outline" size="sm" onClick={rename}>Rename</Button>
+          <Button variant="outline" size="sm" onClick={rename}>{t('settings.users.rename')}</Button>
           {user.is_admin
-            ? canDemote && <Button variant="outline" size="sm" onClick={() => setAdmin(false)}>Demote</Button>
-            : <Button variant="outline" size="sm" onClick={() => setAdmin(true)}>Make admin</Button>}
+            ? canDemote && <Button variant="outline" size="sm" onClick={() => setAdmin(false)}>{t('settings.users.demote')}</Button>
+            : <Button variant="outline" size="sm" onClick={() => setAdmin(true)}>{t('settings.users.makeAdmin')}</Button>}
           {!user.is_admin && (
             <button
               type="button"
-              aria-label={`Delete ${user.username}`}
+              aria-label={t('settings.users.deleteUser', { name: user.username })}
               onClick={remove}
               className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-destructive-foreground"
             >
@@ -212,6 +217,7 @@ function UserRow({ user, currentUser, adminCount, onChanged }: {
 }
 
 export function UsersPanel({ currentUser }: { currentUser?: string }) {
+  const { t } = useTranslation();
   const { data: users } = useQuery({ queryKey: ['users'], queryFn: fetchUsers });
   const { data: status, refetch: refetchStatus } = useQuery({ queryKey: ['auth-status'], queryFn: fetchAuthStatus });
   const [username, setUsername] = useState('');
@@ -227,13 +233,13 @@ export function UsersPanel({ currentUser }: { currentUser?: string }) {
 
   return (
     <Page>
-      <Section title="Registration">
-        <Row label="Open signup" hint="Allow new users to register themselves">
+      <Section title={t('settings.users.registration')}>
+        <Row label={t('settings.users.openSignup')} hint={t('settings.users.openSignupHint')}>
           <Switch checked={!!status?.signup_enabled} onCheckedChange={() => void toggleSignup().then(() => refetchStatus())} />
         </Row>
       </Section>
 
-      <Section title="Users" padded>
+      <Section title={t('settings.users.usersTitle')} padded>
         <div className="space-y-1.5">
           {(users ?? []).map((u) => (
             <UserRow key={u.username} user={u} currentUser={currentUser} adminCount={adminCount} onChanged={refresh} />
@@ -241,17 +247,17 @@ export function UsersPanel({ currentUser }: { currentUser?: string }) {
         </div>
       </Section>
 
-      <Section title="Add User" padded>
+      <Section title={t('settings.users.addUser')} padded>
         <div className="space-y-2">
           <div className="flex gap-2">
-            <Input placeholder="Username" value={username} onChange={(e) => setUsername(e.target.value)} />
-            <Input placeholder="Password (min. 8 characters)" type="password" value={password} onChange={(e) => setPassword(e.target.value)} />
+            <Input placeholder={t('settings.users.username')} value={username} onChange={(e) => setUsername(e.target.value)} />
+            <Input placeholder={t('settings.users.passwordMin')} type="password" value={password} onChange={(e) => setPassword(e.target.value)} />
           </div>
           <label className="flex items-center gap-2 text-sm text-muted-foreground">
-            <Switch checked={isAdmin} onCheckedChange={setIsAdmin} /> Administrator
+            <Switch checked={isAdmin} onCheckedChange={setIsAdmin} /> {t('settings.users.administrator')}
           </label>
           <Button size="sm" disabled={!username.trim() || password.length < 8 || create.isPending} onClick={() => create.mutate()}>
-            <PlusIcon /> Create user
+            <PlusIcon /> {t('settings.users.createUser')}
           </Button>
           {create.isError && <p className="text-xs text-destructive-foreground">{(create.error as Error).message}</p>}
         </div>

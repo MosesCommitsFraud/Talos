@@ -8,6 +8,7 @@ import {
   XIcon,
 } from 'lucide-react';
 import { useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { uploadFiles, type UploadedFile } from '@/api/client';
 import { useChat } from '@/state/chat';
 import { usePrefs } from '@/state/prefs';
@@ -64,6 +65,7 @@ function ModeToggle({
 }
 
 export function Composer() {
+  const { t } = useTranslation();
   const [text, setText] = useState('');
   const [pending, setPending] = useState<UploadedFile[]>([]);
   const [uploading, setUploading] = useState(false);
@@ -164,7 +166,7 @@ export function Composer() {
           <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center rounded-[20px] bg-card/85 backdrop-blur-[1px]">
             <div className="flex items-center gap-2 text-sm font-medium text-foreground">
               <PaperclipIcon className="size-4" />
-              Drop files to attach
+              {t('composer.dropFiles')}
             </div>
           </div>
         )}
@@ -179,7 +181,7 @@ export function Composer() {
                 <span className="max-w-40 truncate">{String(f.name ?? f.id)}</span>
                 <button
                   type="button"
-                  aria-label={`Remove ${String(f.name ?? f.id)}`}
+                  aria-label={t('composer.removeFile', { name: String(f.name ?? f.id) })}
                   onClick={() => setPending((p) => p.filter((x) => x.id !== f.id))}
                   className="text-muted-foreground hover:text-foreground"
                 >
@@ -196,8 +198,8 @@ export function Composer() {
             value={text}
             rows={1}
             autoFocus
-            placeholder="Message Talos…"
-            aria-label="Message input"
+            placeholder={t('composer.placeholder')}
+            aria-label={t('composer.messageInput')}
             onChange={(e) => { setText(e.target.value); autoresize(); }}
             onKeyDown={(e) => {
               if (e.key === 'Enter' && !e.shiftKey) {
@@ -223,11 +225,11 @@ export function Composer() {
           />
 
           {prefs.visibility.composerAttach && (
-            <Tooltip label="Attach files" side="top">
+            <Tooltip label={t('composer.attachFiles')} side="top">
               <button
                 type="button"
                 onClick={() => fileInput.current?.click()}
-                aria-label="Attach files"
+                aria-label={t('composer.attachFiles')}
                 className="flex size-8 shrink-0 items-center justify-center rounded-full border border-border text-muted-foreground transition-colors hover:bg-accent hover:text-foreground [&_svg]:size-[18px]"
               >
                 <PaperclipIcon className={uploading ? 'animate-pulse' : undefined} />
@@ -245,10 +247,10 @@ export function Composer() {
                   active={prefs.planMode}
                   onClick={() => prefs.toggle('planMode')}
                   icon={<PencilRulerIcon />}
-                  label="Plan"
+                  label={t('composer.plan')}
                   inactiveIcon={<WrenchIcon />}
-                  inactiveLabel="Work"
-                  tooltip={prefs.planMode ? 'Plan mode — click to return to work mode' : 'Work mode — click to enter plan mode'}
+                  inactiveLabel={t('composer.work')}
+                  tooltip={prefs.planMode ? t('composer.planTooltipActive') : t('composer.planTooltipInactive')}
                 />
               </>
             )}
@@ -259,8 +261,8 @@ export function Composer() {
                   active={prefs.useRag}
                   onClick={() => prefs.toggle('useRag')}
                   icon={<FileTextIcon />}
-                  label="RAG"
-                  tooltip="Use document RAG"
+                  label={t('composer.rag')}
+                  tooltip={t('composer.ragTooltip')}
                 />
               </>
             )}
@@ -271,8 +273,8 @@ export function Composer() {
                   active={prefs.useDb}
                   onClick={() => prefs.toggle('useDb')}
                   icon={<DatabaseIcon />}
-                  label="SQL"
-                  tooltip="Query connected databases"
+                  label={t('composer.sql')}
+                  tooltip={t('composer.sqlTooltip')}
                 />
               </>
             )}
@@ -285,7 +287,7 @@ export function Composer() {
               <button
                 type="button"
                 onClick={stop}
-                aria-label="Stop generating"
+                aria-label={t('composer.stop')}
                 className="flex h-9 w-9 cursor-pointer items-center justify-center rounded-full bg-destructive/90 text-white shadow-xs shadow-destructive/24 inset-shadow-[0_1px_rgb(255_255_255/16%)] transition-all duration-150 hover:scale-105 hover:bg-destructive active:shadow-none active:inset-shadow-[0_1px_rgb(0_0_0/8%)] sm:h-8 sm:w-8"
               >
                 <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor" aria-hidden="true">
@@ -297,7 +299,7 @@ export function Composer() {
                 type="button"
                 onClick={() => void submit()}
                 disabled={!canSend}
-                aria-label="Send message"
+                aria-label={t('composer.send')}
                 className="flex h-9 w-9 items-center justify-center rounded-full bg-primary/90 text-primary-foreground shadow-xs transition-all duration-150 enabled:cursor-pointer enabled:shadow-primary/24 enabled:inset-shadow-[0_1px_rgb(255_255_255/16%)] hover:scale-105 hover:bg-primary active:shadow-none active:inset-shadow-[0_1px_rgb(0_0_0/8%)] disabled:pointer-events-none disabled:opacity-30 disabled:shadow-none disabled:hover:scale-100 sm:h-8 sm:w-8"
               >
                 <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">

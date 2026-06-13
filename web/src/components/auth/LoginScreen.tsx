@@ -1,16 +1,10 @@
 import { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { login, setupAdmin, signup } from '@/api/client';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/misc';
 
 type Mode = 'login' | 'signup' | 'setup' | 'totp';
-
-const TITLES: Record<Mode, { heading: string; sub: string; cta: string }> = {
-  login: { heading: 'Welcome back', sub: 'Sign in to continue', cta: 'Sign in' },
-  signup: { heading: 'Create account', sub: 'Register a new account', cta: 'Sign up' },
-  setup: { heading: 'Welcome to Talos', sub: 'Create the first admin account', cta: 'Create admin' },
-  totp: { heading: 'Two-factor code', sub: 'Enter the 6-digit code from your authenticator app, or a backup code', cta: 'Verify' },
-};
 
 export function LoginScreen({
   initialMode,
@@ -21,6 +15,7 @@ export function LoginScreen({
   signupEnabled: boolean;
   onAuthenticated: () => void;
 }) {
+  const { t } = useTranslation();
   const [mode, setMode] = useState<Mode>(initialMode);
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -29,20 +24,24 @@ export function LoginScreen({
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
 
-  const t = TITLES[mode];
+  const copy = {
+    heading: t(`login.${mode}Heading`),
+    sub: t(`login.${mode}Sub`),
+    cta: t(`login.${mode}Cta`),
+  };
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     setError('');
     const name = username.trim();
-    if (!name) { setError('Username is required'); return; }
+    if (!name) { setError(t('login.usernameRequired')); return; }
     if (mode !== 'totp') {
       if ((mode === 'setup' || mode === 'signup') && password.length < 8) {
-        setError('Password must be at least 8 characters');
+        setError(t('login.passwordTooShort'));
         return;
       }
       if ((mode === 'setup' || mode === 'signup') && password !== confirm) {
-        setError('Passwords do not match');
+        setError(t('login.passwordMismatch'));
         return;
       }
     }
@@ -60,9 +59,9 @@ export function LoginScreen({
         onAuthenticated();
         return;
       }
-      setError('Sign in failed');
+      setError(t('login.signInFailed'));
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Request failed');
+      setError(err instanceof Error ? err.message : t('login.requestFailed'));
     }
     setBusy(false);
   }
@@ -76,8 +75,8 @@ export function LoginScreen({
             <path d="M16 8L16 22L24 22Z" fill="currentColor" opacity="0.6" />
             <path d="M4 24Q10 20 16 24Q22 28 28 24" stroke="currentColor" strokeWidth="2.5" fill="none" strokeLinecap="round" />
           </svg>
-          <h1 className="font-semibold text-foreground text-xl">{t.heading}</h1>
-          <p className="mt-1 text-muted-foreground text-sm">{t.sub}</p>
+          <h1 className="font-semibold text-foreground text-xl">{copy.heading}</h1>
+          <p className="mt-1 text-muted-foreground text-sm">{copy.sub}</p>
         </div>
 
         <form onSubmit={submit} className="rounded-xl border bg-popover p-5 shadow-xs/5">
@@ -90,13 +89,13 @@ export function LoginScreen({
                 placeholder="123456"
                 inputMode="numeric"
                 autoComplete="one-time-code"
-                aria-label="Two-factor code"
+                aria-label={t('login.twoFactorCode')}
                 className="text-center tracking-widest"
               />
             ) : (
               <>
                 <label className="flex flex-col gap-1 text-muted-foreground text-xs">
-                  Username
+                  {t('login.username')}
                   <Input
                     autoFocus
                     value={username}
@@ -106,7 +105,7 @@ export function LoginScreen({
                   />
                 </label>
                 <label className="flex flex-col gap-1 text-muted-foreground text-xs">
-                  Password
+                  {t('login.password')}
                   <Input
                     type="password"
                     value={password}
@@ -116,7 +115,7 @@ export function LoginScreen({
                 </label>
                 {(mode === 'setup' || mode === 'signup') && (
                   <label className="flex flex-col gap-1 text-muted-foreground text-xs">
-                    Confirm password
+                    {t('login.confirmPassword')}
                     <Input
                       type="password"
                       value={confirm}
@@ -131,7 +130,7 @@ export function LoginScreen({
             {error && <p className="text-destructive-foreground text-xs">{error}</p>}
 
             <Button type="submit" disabled={busy} className="mt-1 w-full">
-              {busy ? 'Please wait…' : t.cta}
+              {busy ? t('login.pleaseWait') : copy.cta}
             </Button>
           </div>
         </form>
@@ -142,7 +141,7 @@ export function LoginScreen({
             className="mt-4 block w-full text-center text-muted-foreground text-xs hover:text-foreground"
             onClick={() => { setMode('login'); setTotpCode(''); setError(''); }}
           >
-            Back to sign in
+            {t('login.backToSignIn')}
           </button>
         )}
         {mode === 'login' && signupEnabled && (
@@ -151,7 +150,7 @@ export function LoginScreen({
             className="mt-4 block w-full text-center text-muted-foreground text-xs hover:text-foreground"
             onClick={() => { setMode('signup'); setError(''); }}
           >
-            No account? Sign up
+            {t('login.noAccount')}
           </button>
         )}
         {mode === 'signup' && (
@@ -160,7 +159,7 @@ export function LoginScreen({
             className="mt-4 block w-full text-center text-muted-foreground text-xs hover:text-foreground"
             onClick={() => { setMode('login'); setError(''); }}
           >
-            Already have an account? Sign in
+            {t('login.haveAccount')}
           </button>
         )}
       </div>

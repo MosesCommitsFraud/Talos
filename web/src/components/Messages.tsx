@@ -1,6 +1,7 @@
 import { CheckIcon, CopyIcon, FileIcon, PencilIcon, Trash2Icon } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { useEffect, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { artifactDownloadUrl, fetchArtifacts, uploadDownloadUrl } from '@/api/client';
 import { copyTextToClipboard } from '@/lib/utils';
 import { useChat, type UiMessage } from '@/state/chat';
@@ -50,14 +51,15 @@ function WorkingTimer({ startedAt }: { startedAt: number }) {
 /** Persistent "still running" indicator shown for the whole assistant turn —
  *  pulsing dots plus an elapsed timer, ported from t3code's WorkingTimelineRow. */
 function Working({ startedAt }: { startedAt?: number }) {
+  const { t } = useTranslation();
   return (
-    <div className="flex items-center gap-2 py-1 text-[11px] text-muted-foreground/70 tabular-nums" aria-label="Generating">
+    <div className="flex items-center gap-2 py-1 text-[11px] text-muted-foreground/70 tabular-nums" aria-label={t('messages.generating')}>
       <span className="inline-flex items-center gap-[3px]">
         <span className="size-1 animate-pulse rounded-full bg-muted-foreground/40" />
         <span className="size-1 animate-pulse rounded-full bg-muted-foreground/40 [animation-delay:200ms]" />
         <span className="size-1 animate-pulse rounded-full bg-muted-foreground/40 [animation-delay:400ms]" />
       </span>
-      <span>{startedAt ? <>Working for <WorkingTimer startedAt={startedAt} /></> : 'Working…'}</span>
+      <span>{startedAt ? <>{t('messages.workingFor')} <WorkingTimer startedAt={startedAt} /></> : t('messages.working')}</span>
     </div>
   );
 }
@@ -90,6 +92,7 @@ function ActionIcon({
 }
 
 function CopyAction({ text }: { text: string }) {
+  const { t } = useTranslation();
   const [copied, setCopied] = useState(false);
   const copy = async () => {
     await copyTextToClipboard(text);
@@ -98,7 +101,7 @@ function CopyAction({ text }: { text: string }) {
   };
   return (
     <ActionIcon
-      label={copied ? 'Copied' : 'Copy'}
+      label={copied ? t('messages.copied') : t('messages.copy')}
       onClick={() => void copy()}
     >
       {copied ? <CheckIcon className="size-3.5" /> : <CopyIcon className="size-3.5" />}
@@ -134,18 +137,19 @@ function AttachmentList({ msg }: { msg: UiMessage }) {
 }
 
 function MessageActions({ msg, onEdit, copyText }: { msg: UiMessage; onEdit?: () => void; copyText?: string }) {
+  const { t } = useTranslation();
   const remove = useChat((s) => s.remove);
   const canMutate = !!msg.dbId;
   return (
     <>
       <CopyAction text={copyText ?? msg.content} />
       {onEdit && canMutate && (
-        <ActionIcon label="Edit message" onClick={onEdit}>
+        <ActionIcon label={t('messages.editMessage')} onClick={onEdit}>
           <PencilIcon className="size-3.5" />
         </ActionIcon>
       )}
       {canMutate && (
-        <ActionIcon label="Delete message" destructive onClick={() => void remove(msg.id).catch(console.error)}>
+        <ActionIcon label={t('messages.deleteMessage')} destructive onClick={() => void remove(msg.id).catch(console.error)}>
           <Trash2Icon className="size-3.5" />
         </ActionIcon>
       )}
@@ -154,6 +158,7 @@ function MessageActions({ msg, onEdit, copyText }: { msg: UiMessage; onEdit?: ()
 }
 
 function EditBox({ msg, onDone }: { msg: UiMessage; onDone: () => void }) {
+  const { t } = useTranslation();
   const [draft, setDraft] = useState(msg.content);
   const edit = useChat((s) => s.edit);
   const save = async () => {
@@ -175,14 +180,15 @@ function EditBox({ msg, onDone }: { msg: UiMessage; onDone: () => void }) {
         className="w-full resize-y bg-transparent text-[15px] leading-relaxed outline-none"
       />
       <div className="mt-2 flex justify-end gap-2">
-        <Button variant="ghost" size="sm" onClick={onDone}>Cancel</Button>
-        <Button size="sm" onClick={() => void save()}>Save</Button>
+        <Button variant="ghost" size="sm" onClick={onDone}>{t('messages.cancel')}</Button>
+        <Button size="sm" onClick={() => void save()}>{t('messages.save')}</Button>
       </div>
     </div>
   );
 }
 
 function FinalImageGrid({ images }: { images: ToolImage[] }) {
+  const { t } = useTranslation();
   const uniqueImages = images.filter((image, i, all) => all.findIndex((other) => other.src === image.src) === i);
   if (uniqueImages.length === 0) return null;
   return (
@@ -195,7 +201,7 @@ function FinalImageGrid({ images }: { images: ToolImage[] }) {
           rel="noreferrer"
           className="min-w-0"
         >
-          <img src={image.src} alt={image.label || `Generated image ${i + 1}`} className="max-h-96 w-full rounded-lg object-contain" />
+          <img src={image.src} alt={image.label || t('messages.generatedImage', { n: i + 1 })} className="max-h-96 w-full rounded-lg object-contain" />
           {image.label && <div className="mt-1 truncate text-xs text-muted-foreground">{image.label}</div>}
         </a>
       ))}
@@ -204,6 +210,7 @@ function FinalImageGrid({ images }: { images: ToolImage[] }) {
 }
 
 export function Messages() {
+  const { t } = useTranslation();
   const sessionId = useChat((s) => s.sessionId);
   const messages = useChat((s) => s.messages);
   const turnStartedAt = useChat((s) => s.turnStartedAt);
@@ -238,7 +245,7 @@ export function Messages() {
         {showWelcome && (
           <>
             <Logo />
-            <h1 className="text-2xl font-semibold tracking-tight">What can I help with?</h1>
+            <h1 className="text-2xl font-semibold tracking-tight">{t('messages.welcome')}</h1>
           </>
         )}
       </div>

@@ -1,5 +1,6 @@
 import { CheckIcon, ChevronRightIcon, CircleAlertIcon, LoaderCircleIcon } from 'lucide-react';
 import { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import type { ToolCall } from '@/api/types';
 
 export interface ToolImage {
@@ -20,6 +21,7 @@ export function toolImages(call: ToolCall): ToolImage[] {
 
 /** One quiet tool-call row: "python · done", expandable to command + output. */
 export function ToolRow({ call }: { call: ToolCall }) {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const Icon = call.status === 'running' ? LoaderCircleIcon : call.status === 'error' ? CircleAlertIcon : CheckIcon;
   const images = toolImages(call);
@@ -34,7 +36,7 @@ export function ToolRow({ call }: { call: ToolCall }) {
           className={`size-3.5 ${call.status === 'running' ? 'animate-spin' : call.status === 'error' ? 'text-destructive-foreground' : 'text-success'}`}
         />
         <span>{call.tool}</span>
-        <span className="font-normal opacity-70">{call.status === 'running' ? 'running' : call.status}</span>
+        <span className="font-normal opacity-70">{call.status === 'running' ? t('toolRow.running') : call.status}</span>
         <ChevronRightIcon className={`size-3.5 opacity-60 transition-transform ${open ? 'rotate-90' : ''}`} />
       </button>
       {open && (
@@ -60,7 +62,7 @@ export function ToolRow({ call }: { call: ToolCall }) {
                   rel="noreferrer"
                   className="min-w-0"
                 >
-                  <img src={image.src} alt={image.label || `Tool image ${i + 1}`} className="max-h-80 w-full rounded-lg object-contain" />
+                  <img src={image.src} alt={image.label || t('messages.toolImage', { n: i + 1 })} className="max-h-80 w-full rounded-lg object-contain" />
                   {image.label && <div className="mt-1 truncate text-xs text-muted-foreground">{image.label}</div>}
                 </a>
               ))}

@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { ExternalLinkIcon } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import { fetchLibrary, fetchMemories } from '@/api/client';
 import { formatRelativeTime } from '@/lib/utils';
 import { Dialog, DialogContent, DialogSection } from './ui/dialog';
@@ -21,16 +22,17 @@ function LegacyLink({ label }: { label: string }) {
 }
 
 export function BrainDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const { t } = useTranslation();
   const { data, isLoading, isError } = useQuery({ queryKey: ['memory'], queryFn: fetchMemories, enabled: open });
   const items = data ?? [];
   return (
     <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
-      <DialogContent title="Brain — Memory">
+      <DialogContent title={t('toolDialogs.brainTitle')}>
         <DialogSection className="space-y-2">
-          {isLoading && <div className="py-6 text-center text-sm text-muted-foreground">Loading…</div>}
-          {isError && <div className="py-6 text-center text-sm text-muted-foreground">Couldn't load memories.</div>}
+          {isLoading && <div className="py-6 text-center text-sm text-muted-foreground">{t('common.loading')}</div>}
+          {isError && <div className="py-6 text-center text-sm text-muted-foreground">{t('toolDialogs.errorMemories')}</div>}
           {!isLoading && !isError && items.length === 0 && (
-            <div className="py-6 text-center text-sm text-muted-foreground">No memories saved yet.</div>
+            <div className="py-6 text-center text-sm text-muted-foreground">{t('toolDialogs.noMemories')}</div>
           )}
           {items.map((m) => (
             <div key={m.id} className="rounded-xl border bg-card px-3.5 py-2.5">
@@ -41,7 +43,7 @@ export function BrainDialog({ open, onClose }: { open: boolean; onClose: () => v
             </div>
           ))}
           <div className="pt-2">
-            <LegacyLink label="Tidy, import/export and edit in the legacy Brain" />
+            <LegacyLink label={t('toolDialogs.tidyBrain')} />
           </div>
         </DialogSection>
       </DialogContent>
@@ -50,27 +52,28 @@ export function BrainDialog({ open, onClose }: { open: boolean; onClose: () => v
 }
 
 export function LibraryDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const { t } = useTranslation();
   const { data, isLoading, isError } = useQuery({ queryKey: ['library'], queryFn: fetchLibrary, enabled: open });
   const docs = data ?? [];
   return (
     <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
-      <DialogContent title="Library">
+      <DialogContent title={t('toolDialogs.libraryTitle')}>
         <DialogSection className="space-y-2">
-          {isLoading && <div className="py-6 text-center text-sm text-muted-foreground">Loading…</div>}
-          {isError && <div className="py-6 text-center text-sm text-muted-foreground">Couldn't load documents.</div>}
+          {isLoading && <div className="py-6 text-center text-sm text-muted-foreground">{t('common.loading')}</div>}
+          {isError && <div className="py-6 text-center text-sm text-muted-foreground">{t('toolDialogs.errorDocs')}</div>}
           {!isLoading && !isError && docs.length === 0 && (
-            <div className="py-6 text-center text-sm text-muted-foreground">No documents yet.</div>
+            <div className="py-6 text-center text-sm text-muted-foreground">{t('toolDialogs.noDocs')}</div>
           )}
           {docs.map((d) => (
             <div key={d.id} className="flex items-center justify-between rounded-xl border bg-card px-3.5 py-2.5">
-              <span className="min-w-0 flex-1 truncate text-sm">{d.title ?? d.name ?? 'Untitled'}</span>
+              <span className="min-w-0 flex-1 truncate text-sm">{d.title ?? d.name ?? t('common.untitled')}</span>
               {d.updated_at != null && (
                 <span className="shrink-0 text-[11px] text-muted-foreground">{formatRelativeTime(d.updated_at)}</span>
               )}
             </div>
           ))}
           <div className="pt-2">
-            <LegacyLink label="Create and edit documents in the legacy Library" />
+            <LegacyLink label={t('toolDialogs.editLibrary')} />
           </div>
         </DialogSection>
       </DialogContent>
