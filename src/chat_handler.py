@@ -1,6 +1,7 @@
 # src/chat_handler.py
 """Handler for chat endpoint operations."""
 import os
+import re
 import asyncio
 import logging
 from typing import Dict, List, Optional, Any
@@ -18,6 +19,29 @@ from src.chat_helpers import model_supports_vision
 from src.document_processor import build_user_content, analyze_image_with_vl_result
 
 logger = logging.getLogger(__name__)
+
+
+def _placeholder_title(message: str) -> str:
+    """Derive a clean, temporary session title from the first user message.
+
+    Strips the bracketed attachment/image markers the preprocessor appends
+    (e.g. "[Image attached: foo.png]", "[Attachment file available to tools: …]")
+    so titles read like "Chat: I did sth" instead of "Chat: i did sth[attachment]".
+    The "Chat: " prefix is kept so needs_auto_name() still treats this as a
+    placeholder and the LLM replaces it once the first response lands.
+    """
+    text = message or ""
+    # Drop bracketed marker blocks (attachments, images, omitted content, …).
+    text = re.sub(r"\[[^\]]*\]", " ", text)
+    # Collapse whitespace/newlines into single spaces.
+    text = " ".join(text.split())
+    words = text.split()[:6]
+    derived = " ".join(words).strip()
+    if not derived:
+        return "Chat"
+    # Capitalize the first character for a tidier look without touching the rest.
+    derived = derived[0].upper() + derived[1:]
+    return f"Chat: {derived}"
 
 
 class ChatHandler:
@@ -253,8 +277,7 @@ class ChatHandler:
 
     def update_session_name_if_needed(self, session, message: str):
         if not session.name:
-            derived = " ".join(message.split()[:5])
-            session.name = "Chat: " + derived if derived else "Chat"
+            session.name = _placeholder_title(message)
 
     def trim_history_if_needed(self, session):
         if len(session.history) > MAX_CONTEXT_MESSAGES:

@@ -58,7 +58,7 @@ import { applyDensity, applyTheme, usePrefs, type Density, type Theme, type Visi
 import { cn } from '@/lib/utils';
 import { Button } from './ui/button';
 import { Dialog, DialogContent } from './ui/dialog';
-import { Input, Switch } from './ui/misc';
+import { Input, Switch, Textarea } from './ui/misc';
 import { useAuth } from './auth/AuthGate';
 import { UsersPanel } from './settings/UsersPanel';
 
@@ -619,6 +619,18 @@ function AiDefaultsPanel() {
   if (!s.ready) return <Page><p className="text-sm text-muted-foreground">Loading…</p></Page>;
   return (
     <Page>
+      <Section title="System Prompt" padded>
+        <p className="mb-2.5 text-xs text-muted-foreground/80">
+          Always sent to the AI as a system message, before every conversation. Never shown in the chat.
+        </p>
+        <Textarea
+          className="min-h-[140px] font-mono text-[13px]"
+          placeholder="e.g. You are a concise assistant. Prefer bullet points and never apologize."
+          value={String(s.value('custom_system_prompt') ?? '')}
+          onChange={(e) => s.setValue('custom_system_prompt', e.target.value)}
+        />
+      </Section>
+
       <Section title="Default Chat Model">
         <EndpointModelRows s={s} epKey="default_endpoint_id" modelKey="default_model" label="Default" />
         <FallbacksEditor s={s} k="default_model_fallbacks" />

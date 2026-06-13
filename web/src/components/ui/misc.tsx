@@ -64,3 +64,16 @@ export function Input({ className, ...props }: React.InputHTMLAttributes<HTMLInp
     />
   );
 }
+
+/* ── Textarea ── */
+export function Textarea({ className, ...props }: React.TextareaHTMLAttributes<HTMLTextAreaElement>) {
+  return (
+    <textarea
+      className={cn(
+        'min-h-[88px] w-full resize-y rounded-lg border border-input bg-transparent px-2.5 py-2 text-sm leading-relaxed outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30 dark:bg-input/20',
+        className,
+      )}
+      {...props}
+    />
+  );
+}

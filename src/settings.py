@@ -149,6 +149,10 @@ DEFAULT_SETTINGS = {
     "utility_model_fallbacks": [],
     "teacher_model": "",
     "teacher_enabled": False,
+    # Always-on custom system prompt. Prepended to every chat's system context
+    # (before any preset prompt) and never shown in the chat transcript. Empty
+    # string disables it. See routes/chat_helpers.py build_chat_context.
+    "custom_system_prompt": "",
     # Skills: minimum self-reported confidence for an auto-written (LLM-authored)
     # DRAFT skill to be injected into the agent prompt. Published skills always
     # qualify. Keeps low-confidence auto-skills out of context until they're

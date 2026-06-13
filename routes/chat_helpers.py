@@ -537,13 +537,18 @@ async def build_chat_context(
     # The stream path uses enhanced_message (with CoT/preprocessing applied),
     # the sync path uses text_for_context.
     _ctx_msg = preprocessed.enhanced_message if use_enhanced_message else preprocessed.text_for_context
+    # Always-on custom system prompt (admin setting). Prepended to any preset
+    # prompt so it leads the system context; sent every turn, never shown in chat.
+    _custom_sys = (get_setting("custom_system_prompt", "") or "").strip()
+    _preset_sys = preset.system_prompt or ""
+    _effective_sys = "\n\n".join(p for p in (_custom_sys, _preset_sys) if p) or None
     _preface_kwargs = dict(
         message=_ctx_msg,
         session=sess,
         use_web=use_web and not skip_web,
         use_memory=mem_enabled,
         time_filter=time_filter,
-        preset_system_prompt=preset.system_prompt,
+        preset_system_prompt=_effective_sys,
         owner=user,
         character_name=preset.character_name,
         agent_mode=agent_mode,
