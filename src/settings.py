@@ -131,6 +131,10 @@ DEFAULT_SETTINGS = {
     ],
     "task_endpoint_id": "",
     "task_model": "",
+    # Admin-set custom display names for models, keyed by raw model id
+    # (e.g. {"qwen3-llm": "Qwen 3"}). Applies for every user — only changes
+    # how the model is labelled in the UI, never what's sent to the backend.
+    "model_display_names": {},
     "default_endpoint_id": "",
     "default_model": "",
     # Ordered fallback chain for the default chat model. Each entry is

@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { CheckIcon, ChevronDownIcon } from 'lucide-react';
 import { useEffect } from 'react';
-import { fetchModels } from '@/api/client';
+import { fetchAppSettings, fetchModels } from '@/api/client';
 import { useChat } from '@/state/chat';
 import { cn } from '@/lib/utils';
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from './ui/menu';
@@ -22,6 +22,9 @@ export function ModelPicker({ visible = true }: { visible?: boolean }) {
   const { data: endpoints } = useQuery({ queryKey: ['models'], queryFn: fetchModels });
   const pendingModel = useChat((s) => s.pendingModel);
   const setPendingModel = useChat((s) => s.setPendingModel);
+  const { data: appSettings } = useQuery({ queryKey: ['app-settings'], queryFn: fetchAppSettings });
+  const modelNames = (appSettings?.model_display_names ?? {}) as Record<string, string>;
+  const displayName = (model: string) => modelNames[model]?.trim() || model;
 
   const options = (endpoints ?? [])
     .filter((e) => e.is_enabled && e.model_type !== 'embedding')
@@ -34,7 +37,7 @@ export function ModelPicker({ visible = true }: { visible?: boolean }) {
     }
   }, [options.length, pendingModel, setPendingModel]);
 
-  const label = pendingModel?.model ?? 'Select model';
+  const label = pendingModel ? displayName(pendingModel.model) : 'Select model';
 
   if (!visible) return null;
 
@@ -68,8 +71,10 @@ export function ModelPicker({ visible = true }: { visible?: boolean }) {
             >
               <QwenIcon className="size-4 shrink-0 text-muted-foreground" />
               <div className="min-w-0 flex-1">
-                <div className="truncate">{o.model}</div>
-                <div className="truncate text-xs text-muted-foreground">{o.endpointName}</div>
+                <div className="truncate">{displayName(o.model)}</div>
+                <div className="truncate text-xs text-muted-foreground">
+                  {displayName(o.model) !== o.model ? `${o.model} · ${o.endpointName}` : o.endpointName}
+                </div>
               </div>
               <CheckIcon className={cn('size-4 shrink-0', selected ? 'opacity-100' : 'opacity-0')} />
             </MenuItem>

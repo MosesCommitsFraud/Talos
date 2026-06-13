@@ -57,7 +57,7 @@ import {
 import { applyDensity, applyTheme, usePrefs, type Density, type Theme, type Visibility } from '@/state/prefs';
 import { cn } from '@/lib/utils';
 import { Button } from './ui/button';
-import { Dialog, DialogContent, DialogSection } from './ui/dialog';
+import { Dialog, DialogContent } from './ui/dialog';
 import { Input, Switch } from './ui/misc';
 import { useAuth } from './auth/AuthGate';
 import { UsersPanel } from './settings/UsersPanel';
@@ -66,22 +66,55 @@ type Panel =
   | 'appearance' | 'shortcuts' | 'account'
   | 'models' | 'ai' | 'integrations' | 'tools' | 'rag' | 'users' | 'system';
 
-/* ── Shared rows ── */
+/* ── Shared layout (t3code settings design) ── */
 
-function Row({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
+/** Scrollable page body: stacks sections with generous spacing. */
+export function Page({ children, className }: { children: React.ReactNode; className?: string }) {
+  return <div className={cn('flex flex-col gap-7 p-5 sm:p-6', className)}>{children}</div>;
+}
+
+/** A titled card group. Rows go inside as direct children (self-bordered);
+ *  free-form content can opt into padding with `padded`. */
+export function Section({ title, action, padded, children }: { title: string; action?: React.ReactNode; padded?: boolean; children: React.ReactNode }) {
   return (
-    <div className="flex items-center justify-between gap-4 py-1.5">
-      <div className="min-w-0">
-        <div className="text-sm">{label}</div>
-        {hint && <div className="text-xs text-muted-foreground">{hint}</div>}
+    <section className="space-y-2.5">
+      <header className="flex min-h-5 items-center justify-between px-1">
+        <h2 className="flex items-center gap-2 text-[11px] font-semibold tracking-[0.08em] text-foreground/50 uppercase">
+          <span className="inline-block h-px w-3 bg-border" aria-hidden="true" />
+          {title}
+        </h2>
+        {action && <div className="flex items-center">{action}</div>}
+      </header>
+      <div className={cn('overflow-hidden rounded-2xl border bg-card text-card-foreground', padded && 'p-4 sm:p-5')}>
+        {children}
       </div>
-      <div className="shrink-0">{children}</div>
-    </div>
+    </section>
   );
 }
 
-function SectionTitle({ children }: { children: React.ReactNode }) {
-  return <div className="pt-4 pb-1 text-sm font-semibold first:pt-0">{children}</div>;
+/** Just the section header (uppercase tracked label), for panels that render
+ *  their own cards instead of using a Section wrapper. */
+function SectionHeader({ children }: { children: React.ReactNode }) {
+  return (
+    <h2 className="flex items-center gap-2 px-1 text-[11px] font-semibold tracking-[0.08em] text-foreground/50 uppercase">
+      <span className="inline-block h-px w-3 bg-border" aria-hidden="true" />
+      {children}
+    </h2>
+  );
+}
+
+/** A single setting row: title + description on the left, control on the right.
+ *  Rows separate themselves with a top border so they read as a grouped list. */
+export function Row({ label, hint, children }: { label: React.ReactNode; hint?: React.ReactNode; children?: React.ReactNode }) {
+  return (
+    <div className="flex flex-col gap-3 border-t border-border/60 px-4 py-3.5 first:border-t-0 sm:flex-row sm:items-center sm:justify-between sm:px-5">
+      <div className="min-w-0 flex-1 space-y-0.5">
+        <div className="text-[13px] font-semibold tracking-[-0.01em] text-foreground">{label}</div>
+        {hint && <p className="text-xs text-muted-foreground/80">{hint}</p>}
+      </div>
+      {children && <div className="flex w-full shrink-0 items-center gap-2 sm:w-auto sm:justify-end">{children}</div>}
+    </div>
+  );
 }
 
 function Select({ value, onChange, options, className }: { value: string; onChange: (v: string) => void; options: Array<{ value: string; label?: string }>; className?: string }) {
@@ -101,7 +134,7 @@ function Select({ value, onChange, options, className }: { value: string; onChan
 function SaveBar({ dirty, saving, error, onSave }: { dirty: boolean; saving: boolean; error?: string; onSave: () => void }) {
   if (!dirty && !error) return null;
   return (
-    <div className="sticky bottom-0 -mx-5 mt-3 flex items-center justify-end gap-3 border-t bg-popover px-5 py-2.5">
+    <div className="sticky bottom-0 -mx-5 -mb-5 mt-1 flex items-center justify-end gap-3 border-t bg-popover/95 px-5 py-3 backdrop-blur-sm sm:-mx-6 sm:-mb-6 sm:px-6">
       {error && <span className="min-w-0 flex-1 truncate text-xs text-destructive-foreground">{error}</span>}
       <Button size="sm" disabled={saving || !dirty} onClick={onSave}>
         {saving ? 'Saving…' : 'Save changes'}
@@ -207,7 +240,7 @@ function FallbacksEditor({ s, k }: { s: Draft; k: string }) {
   const list: Fallback[] = Array.isArray(s.value(k)) ? (s.value(k) as Fallback[]) : [];
   const allModels = endpoints.flatMap((e) => e.models.map((model) => ({ endpoint_id: e.id, model, name: e.name })));
   return (
-    <div className="space-y-1.5 py-1">
+    <div className="space-y-1.5 border-t border-border/60 px-4 py-3.5 first:border-t-0 sm:px-5">
       <div className="text-xs text-muted-foreground">Fallbacks (tried in order when the primary fails)</div>
       {list.map((f, i) => (
         <div key={`${f.endpoint_id}:${f.model}:${i}`} className="flex items-center gap-2">
@@ -298,33 +331,34 @@ const VISIBILITY_SECTIONS: Array<{ title: string; items: Array<{ key: keyof Visi
 function AppearancePanel() {
   const prefs = usePrefs();
   return (
-    <DialogSection>
-      <SectionTitle>Theme</SectionTitle>
-      <SegmentPicker<Theme>
-        options={[{ value: 'dark', label: 'Dark' }, { value: 'light', label: 'Light' }, { value: 'system', label: 'System' }]}
-        current={prefs.theme}
-        onPick={(t) => { prefs.setTheme(t); applyTheme(t); }}
-      />
-      <SectionTitle>Density</SectionTitle>
-      <SegmentPicker<Density>
-        options={[{ value: 'compact', label: 'Compact' }, { value: 'comfortable', label: 'Comfortable' }, { value: 'spacious', label: 'Spacious' }]}
-        current={prefs.density}
-        onPick={(d) => { prefs.setDensity(d); applyDensity(d); }}
-      />
+    <Page>
+      <Section title="Theme" padded>
+        <SegmentPicker<Theme>
+          options={[{ value: 'dark', label: 'Dark' }, { value: 'light', label: 'Light' }, { value: 'system', label: 'System' }]}
+          current={prefs.theme}
+          onPick={(t) => { prefs.setTheme(t); applyTheme(t); }}
+        />
+      </Section>
+      <Section title="Density" padded>
+        <SegmentPicker<Density>
+          options={[{ value: 'compact', label: 'Compact' }, { value: 'comfortable', label: 'Comfortable' }, { value: 'spacious', label: 'Spacious' }]}
+          current={prefs.density}
+          onPick={(d) => { prefs.setDensity(d); applyDensity(d); }}
+        />
+      </Section>
       {VISIBILITY_SECTIONS.map((sec) => (
-        <div key={sec.title}>
-          <SectionTitle>{sec.title}</SectionTitle>
+        <Section key={sec.title} title={sec.title}>
           {sec.items.map((it) => (
             <Row key={it.key} label={it.label} hint={it.hint}>
               <Switch checked={prefs.visibility[it.key]} onCheckedChange={(v) => prefs.setVisibility(it.key, v)} />
             </Row>
           ))}
-        </div>
+        </Section>
       ))}
-      <div className="pt-3">
+      <div>
         <Button variant="outline" size="sm" onClick={prefs.resetVisibility}>Reset visibility</Button>
       </div>
-    </DialogSection>
+    </Page>
   );
 }
 
@@ -343,32 +377,34 @@ const KEYBIND_LABELS: Record<string, string> = {
 function ShortcutsPanel() {
   const s = useSettingsDraft();
   const binds = (s.value('keybinds') ?? {}) as Record<string, string>;
-  if (!s.ready) return <DialogSection className="text-sm text-muted-foreground">Loading…</DialogSection>;
+  if (!s.ready) return <Page><p className="text-sm text-muted-foreground">Loading…</p></Page>;
   return (
-    <DialogSection>
-      {Object.entries(KEYBIND_LABELS).map(([key, label]) => (
-        <Row key={key} label={label}>
-          <Input
-            className="w-44 text-center font-mono text-xs"
-            value={binds[key] ?? ''}
-            placeholder="unset"
-            onKeyDown={(e) => {
-              e.preventDefault();
-              if (e.key === 'Tab') return;
-              const parts = [
-                e.ctrlKey && 'ctrl', e.metaKey && 'meta', e.altKey && 'alt', e.shiftKey && 'shift',
-              ].filter(Boolean) as string[];
-              const k = e.key.toLowerCase();
-              if (!['control', 'meta', 'alt', 'shift'].includes(k)) parts.push(k);
-              s.setValue('keybinds', { ...binds, [key]: parts.join('+') });
-            }}
-            onChange={() => { /* set via onKeyDown capture */ }}
-          />
-        </Row>
-      ))}
-      <p className="pt-2 text-xs text-muted-foreground">Click a field and press the new key combination.</p>
+    <Page>
+      <Section title="Keyboard Shortcuts">
+        {Object.entries(KEYBIND_LABELS).map(([key, label]) => (
+          <Row key={key} label={label}>
+            <Input
+              className="w-44 text-center font-mono text-xs"
+              value={binds[key] ?? ''}
+              placeholder="unset"
+              onKeyDown={(e) => {
+                e.preventDefault();
+                if (e.key === 'Tab') return;
+                const parts = [
+                  e.ctrlKey && 'ctrl', e.metaKey && 'meta', e.altKey && 'alt', e.shiftKey && 'shift',
+                ].filter(Boolean) as string[];
+                const k = e.key.toLowerCase();
+                if (!['control', 'meta', 'alt', 'shift'].includes(k)) parts.push(k);
+                s.setValue('keybinds', { ...binds, [key]: parts.join('+') });
+              }}
+              onChange={() => { /* set via onKeyDown capture */ }}
+            />
+          </Row>
+        ))}
+      </Section>
+      <p className="-mt-3 px-1 text-xs text-muted-foreground">Click a field and press the new key combination.</p>
       <SaveBar dirty={s.dirty} saving={s.save.isPending} error={s.save.isError ? (s.save.error as Error).message : undefined} onSave={() => s.save.mutate()} />
-    </DialogSection>
+    </Page>
   );
 }
 
@@ -396,9 +432,9 @@ function AccountPanel() {
   };
 
   return (
-    <DialogSection>
-      <SectionTitle>Account</SectionTitle>
-      <div className="flex items-center gap-3 py-1">
+    <Page>
+      <Section title="Account" padded>
+      <div className="flex items-center gap-3">
         <div className="flex size-10 items-center justify-center rounded-full bg-primary/15 text-sm font-semibold text-primary">
           {(auth?.username ?? 'U').slice(0, 1).toUpperCase()}
         </div>
@@ -415,8 +451,9 @@ function AccountPanel() {
           </Button>
         )}
       </div>
+      </Section>
 
-      <SectionTitle>Change Password</SectionTitle>
+      <Section title="Change Password" padded>
       <div className="space-y-2">
         <Input type="password" placeholder="Current password" value={pw.current} onChange={(e) => setPw({ ...pw, current: e.target.value })} />
         <Input type="password" placeholder="New password" value={pw.next} onChange={(e) => setPw({ ...pw, next: e.target.value })} />
@@ -426,8 +463,9 @@ function AccountPanel() {
           {pwMsg && <span className={cn('text-xs', pwMsg === 'Password changed' ? 'text-success' : 'text-destructive-foreground')}>{pwMsg}</span>}
         </div>
       </div>
+      </Section>
 
-      <SectionTitle>Two-Factor Authentication</SectionTitle>
+      <Section title="Two-Factor Authentication" padded>
       {totp?.enabled ? (
         <div className="space-y-2">
           <p className="text-xs text-success">2FA is enabled.</p>
@@ -461,7 +499,8 @@ function AccountPanel() {
         </Button>
       )}
       {totpMsg && <p className="pt-1 text-xs text-destructive-foreground">{totpMsg}</p>}
-    </DialogSection>
+      </Section>
+    </Page>
   );
 }
 
@@ -482,46 +521,94 @@ function AddModelsPanel() {
   };
 
   return (
-    <DialogSection className="space-y-4">
-      <div className="space-y-2.5">
-        <div className="text-sm font-medium">Add endpoint</div>
-        <div className="flex gap-2">
-          <Input placeholder="Base URL, e.g. http://192.168.10.91:8000/v1" value={url} onChange={(e) => setUrl(e.target.value)} />
-          <Select value={kind} onChange={setKind} options={[{ value: 'llm', label: 'LLM' }, { value: 'image', label: 'Image' }]} />
-        </div>
-        <Input placeholder="API key (optional)" type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} />
-        <div className="flex flex-wrap items-center gap-2">
-          <Button size="sm" disabled={!url.trim()} onClick={() => void run(() => addModelEndpoint({ baseUrl: url, apiKey: apiKey || undefined, modelType: kind }), 'Endpoint added')}>
-            <PlusIcon /> Add
-          </Button>
-          <Button size="sm" variant="outline" disabled={!url.trim()} onClick={() => void run(() => testModelEndpoint(url, apiKey || undefined), 'Connection OK')}>
-            Test
-          </Button>
-          <Button size="sm" variant="outline" onClick={() => void run(() => discoverEndpoints(), 'Discovery finished')}>
-            Discover local
-          </Button>
-          <Button size="sm" variant="outline" onClick={() => { setUrl('http://localhost:11434'); setKind('llm'); }}>
-            Ollama preset
-          </Button>
-        </div>
-        {msg && <p className={cn('text-xs', /OK|added|finished/i.test(msg) ? 'text-success' : 'text-destructive-foreground')}>{msg}</p>}
-      </div>
-      <div className="space-y-1.5">
-        <div className="text-sm font-medium">Configured endpoints</div>
-        {(endpoints ?? []).map((e) => (
-          <div key={e.id} className="flex items-center justify-between rounded-lg border bg-card px-3 py-2">
-            <div className="min-w-0">
-              <div className="truncate text-sm">{e.name}</div>
-              <div className="truncate text-xs text-muted-foreground">{e.base_url} · {e.models.length} model{e.models.length === 1 ? '' : 's'}</div>
-            </div>
-            <span className={cn('text-xs', e.is_enabled ? 'text-success' : 'text-muted-foreground')}>
-              {e.is_enabled ? 'enabled' : 'disabled'}
-            </span>
+    <Page>
+      <Section title="Add endpoint" padded>
+        <div className="space-y-2.5">
+          <div className="flex gap-2">
+            <Input placeholder="Base URL, e.g. http://192.168.10.91:8000/v1" value={url} onChange={(e) => setUrl(e.target.value)} />
+            <Select value={kind} onChange={setKind} options={[{ value: 'llm', label: 'LLM' }, { value: 'image', label: 'Image' }]} />
           </div>
+          <Input placeholder="API key (optional)" type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} />
+          <div className="flex flex-wrap items-center gap-2">
+            <Button size="sm" disabled={!url.trim()} onClick={() => void run(() => addModelEndpoint({ baseUrl: url, apiKey: apiKey || undefined, modelType: kind }), 'Endpoint added')}>
+              <PlusIcon /> Add
+            </Button>
+            <Button size="sm" variant="outline" disabled={!url.trim()} onClick={() => void run(() => testModelEndpoint(url, apiKey || undefined), 'Connection OK')}>
+              Test
+            </Button>
+            <Button size="sm" variant="outline" onClick={() => void run(() => discoverEndpoints(), 'Discovery finished')}>
+              Discover local
+            </Button>
+            <Button size="sm" variant="outline" onClick={() => { setUrl('http://localhost:11434'); setKind('llm'); }}>
+              Ollama preset
+            </Button>
+          </div>
+          {msg && <p className={cn('text-xs', /OK|added|finished/i.test(msg) ? 'text-success' : 'text-destructive-foreground')}>{msg}</p>}
+        </div>
+      </Section>
+
+      <Section title="Configured endpoints" padded>
+        <div className="space-y-1.5">
+          {(endpoints ?? []).map((e) => (
+            <div key={e.id} className="flex items-center justify-between rounded-lg border bg-background px-3 py-2">
+              <div className="min-w-0">
+                <div className="truncate text-sm">{e.name}</div>
+                <div className="truncate text-xs text-muted-foreground">{e.base_url} · {e.models.length} model{e.models.length === 1 ? '' : 's'}</div>
+              </div>
+              <span className={cn('text-xs', e.is_enabled ? 'text-success' : 'text-muted-foreground')}>
+                {e.is_enabled ? 'enabled' : 'disabled'}
+              </span>
+            </div>
+          ))}
+          {(endpoints ?? []).length === 0 && <p className="text-xs text-muted-foreground">No endpoints yet.</p>}
+        </div>
+      </Section>
+
+      <ModelDisplayNamesSection />
+    </Page>
+  );
+}
+
+/** Admin-set, global custom display names for models. Persisted in app
+ *  settings (model_display_names), so it applies for every user. */
+function ModelDisplayNamesSection() {
+  const s = useSettingsDraft();
+  const { data: endpoints } = useQuery({ queryKey: ['models'], queryFn: fetchModels });
+  const names = (s.value('model_display_names') ?? {}) as Record<string, string>;
+  const models = Array.from(
+    new Set(
+      (endpoints ?? [])
+        .filter((e) => e.is_enabled && e.model_type !== 'embedding')
+        .flatMap((e) => e.models),
+    ),
+  );
+  const setName = (model: string, v: string) => {
+    const next = { ...names };
+    if (v.trim()) next[model] = v;
+    else delete next[model];
+    s.setValue('model_display_names', next);
+  };
+
+  return (
+    <>
+      <Section title="Model Display Names">
+        {models.length === 0 && <Row label={<span className="font-normal text-muted-foreground">No models available</span>} />}
+        {models.map((model) => (
+          <Row key={model} label={model}>
+            <Input
+              className="w-56"
+              placeholder={model}
+              value={names[model] ?? ''}
+              onChange={(e) => setName(model, e.target.value)}
+            />
+          </Row>
         ))}
-        {(endpoints ?? []).length === 0 && <p className="text-xs text-muted-foreground">No endpoints yet.</p>}
-      </div>
-    </DialogSection>
+      </Section>
+      <p className="-mt-3 px-1 text-xs text-muted-foreground">
+        Sets the label shown to <span className="font-medium text-foreground/80">every user</span> in the model picker. Leave blank to use the raw model id.
+      </p>
+      <SaveBar dirty={s.dirty} saving={s.save.isPending} error={s.save.isError ? (s.save.error as Error).message : undefined} onSave={() => s.save.mutate()} />
+    </>
   );
 }
 
@@ -529,35 +616,38 @@ function AddModelsPanel() {
 
 function AiDefaultsPanel() {
   const s = useSettingsDraft();
-  if (!s.ready) return <DialogSection className="text-sm text-muted-foreground">Loading…</DialogSection>;
+  if (!s.ready) return <Page><p className="text-sm text-muted-foreground">Loading…</p></Page>;
   return (
-    <DialogSection>
-      <SectionTitle>Default Chat Model</SectionTitle>
-      <EndpointModelRows s={s} epKey="default_endpoint_id" modelKey="default_model" label="Default" />
-      <FallbacksEditor s={s} k="default_model_fallbacks" />
+    <Page>
+      <Section title="Default Chat Model">
+        <EndpointModelRows s={s} epKey="default_endpoint_id" modelKey="default_model" label="Default" />
+        <FallbacksEditor s={s} k="default_model_fallbacks" />
+      </Section>
 
-      <SectionTitle>Utility Model</SectionTitle>
-      <p className="pb-1 text-xs text-muted-foreground">
-        Small fast model for titles, summaries and background jobs. Recommended: local endpoint.
-      </p>
-      <EndpointModelRows s={s} epKey="utility_endpoint_id" modelKey="utility_model" label="Utility" />
-      <FallbacksEditor s={s} k="utility_model_fallbacks" />
+      <Section title="Utility Model">
+        <Row label="Utility model" hint="Small fast model for titles, summaries and background jobs. Recommended: local endpoint." />
+        <EndpointModelRows s={s} epKey="utility_endpoint_id" modelKey="utility_model" label="Utility" />
+        <FallbacksEditor s={s} k="utility_model_fallbacks" />
+      </Section>
 
-      <SectionTitle>Context Management</SectionTitle>
-      <TextRow s={s} k="compact_threshold" label="Auto-compact at" hint="Fraction of the context window (0.3–0.95)" width="w-24" />
-      <BoolRow s={s} k="context_compression" label="Tool output compression" hint="Headroom-style compression of large tool outputs" />
+      <Section title="Context Management">
+        <TextRow s={s} k="compact_threshold" label="Auto-compact at" hint="Fraction of the context window (0.3–0.95)" width="w-24" />
+        <BoolRow s={s} k="context_compression" label="Tool output compression" hint="Headroom-style compression of large tool outputs" />
+      </Section>
 
-      <SectionTitle>Vision</SectionTitle>
-      <BoolRow s={s} k="vision_enabled" label="Vision enabled" />
-      <VisionModelRow s={s} />
-      <FallbacksEditor s={s} k="vision_model_fallbacks" />
+      <Section title="Vision">
+        <BoolRow s={s} k="vision_enabled" label="Vision enabled" />
+        <VisionModelRow s={s} />
+        <FallbacksEditor s={s} k="vision_model_fallbacks" />
+      </Section>
 
-      <SectionTitle>Agent</SectionTitle>
-      <TextRow s={s} k="agent_max_tool_calls" label="Tool call limit" hint="0 = unlimited" type="number" width="w-24" />
-      <TextRow s={s} k="agent_max_rounds" label="Max steps per message" type="number" width="w-24" />
+      <Section title="Agent">
+        <TextRow s={s} k="agent_max_tool_calls" label="Tool call limit" hint="0 = unlimited" type="number" width="w-24" />
+        <TextRow s={s} k="agent_max_rounds" label="Max steps per message" type="number" width="w-24" />
+      </Section>
 
       <SaveBar dirty={s.dirty} saving={s.save.isPending} error={s.save.isError ? (s.save.error as Error).message : undefined} onSave={() => s.save.mutate()} />
-    </DialogSection>
+    </Page>
   );
 }
 
@@ -585,60 +675,60 @@ function IntegrationsPanel() {
   };
 
   return (
-    <DialogSection>
-      <SectionTitle>Integrations</SectionTitle>
-      <p className="pb-1 text-xs text-muted-foreground">All external service connections in one place.</p>
-      <div className="space-y-1.5">
-        {(integrations ?? []).map((it, i) => {
-          const id = String(it.id ?? i);
-          return (
-            <div key={id} className="flex items-center gap-3 rounded-lg border bg-card px-3 py-2">
-              <div className="min-w-0 flex-1">
-                <div className="truncate text-sm">{String(it.name ?? id)}</div>
-                {typeof it.base_url === 'string' && it.base_url && <div className="truncate text-xs text-muted-foreground">{it.base_url}</div>}
+    <Page>
+      <Section title="Integrations" padded>
+        <p className="pb-2 text-xs text-muted-foreground">All external service connections in one place.</p>
+        <div className="space-y-1.5">
+          {(integrations ?? []).map((it, i) => {
+            const id = String(it.id ?? i);
+            return (
+              <div key={id} className="flex items-center gap-3 rounded-lg border bg-background px-3 py-2">
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-sm">{String(it.name ?? id)}</div>
+                  {typeof it.base_url === 'string' && it.base_url && <div className="truncate text-xs text-muted-foreground">{it.base_url}</div>}
+                </div>
+                <Switch
+                  checked={!!it.enabled}
+                  onCheckedChange={(v) => void updateIntegration(id, { enabled: v }).then(refresh).catch((e) => setMsg((e as Error).message))}
+                />
+                <button
+                  type="button"
+                  aria-label={`Delete ${String(it.name ?? id)}`}
+                  onClick={() => void deleteIntegration(id).then(refresh).catch((e) => setMsg((e as Error).message))}
+                  className="flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-destructive-foreground"
+                >
+                  <Trash2Icon className="size-3.5" />
+                </button>
               </div>
-              <Switch
-                checked={!!it.enabled}
-                onCheckedChange={(v) => void updateIntegration(id, { enabled: v }).then(refresh).catch((e) => setMsg((e as Error).message))}
-              />
-              <button
-                type="button"
-                aria-label={`Delete ${String(it.name ?? id)}`}
-                onClick={() => void deleteIntegration(id).then(refresh).catch((e) => setMsg((e as Error).message))}
-                className="flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-destructive-foreground"
-              >
-                <Trash2Icon className="size-3.5" />
-              </button>
-            </div>
-          );
-        })}
-        {(integrations ?? []).length === 0 && <p className="text-xs text-muted-foreground">No integrations configured.</p>}
-      </div>
+            );
+          })}
+          {(integrations ?? []).length === 0 && <p className="text-xs text-muted-foreground">No integrations configured.</p>}
+        </div>
 
-      <div className="space-y-2 pt-3">
-        <div className="text-sm font-medium">Add integration</div>
-        {presetEntries.length > 0 && (
-          <Select
-            className="w-full"
-            value={preset}
-            onChange={(v) => {
-              setPreset(v);
-              const p = (presets ?? {})[v];
-              if (p) setForm((f) => ({ ...f, name: String(p.name ?? v), base_url: String(p.base_url ?? '') }));
-            }}
-            options={[{ value: '', label: 'Custom…' }, ...presetEntries.map(([k, p]) => ({ value: k, label: String(p.name ?? k) }))]}
-          />
-        )}
-        <Input placeholder="Name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
-        <Input placeholder="Base URL" value={form.base_url} onChange={(e) => setForm({ ...form, base_url: e.target.value })} />
-        <Input placeholder="API key" type="password" value={form.api_key} onChange={(e) => setForm({ ...form, api_key: e.target.value })} />
-        <Button size="sm" disabled={!form.name.trim()} onClick={() => void add()}><PlusIcon /> Add</Button>
-        {msg && <p className="text-xs text-destructive-foreground">{msg}</p>}
-      </div>
+        <div className="space-y-2 border-t border-border/60 pt-3 mt-3">
+          <div className="text-sm font-medium">Add integration</div>
+          {presetEntries.length > 0 && (
+            <Select
+              className="w-full"
+              value={preset}
+              onChange={(v) => {
+                setPreset(v);
+                const p = (presets ?? {})[v];
+                if (p) setForm((f) => ({ ...f, name: String(p.name ?? v), base_url: String(p.base_url ?? '') }));
+              }}
+              options={[{ value: '', label: 'Custom…' }, ...presetEntries.map(([k, p]) => ({ value: k, label: String(p.name ?? k) }))]}
+            />
+          )}
+          <Input placeholder="Name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
+          <Input placeholder="Base URL" value={form.base_url} onChange={(e) => setForm({ ...form, base_url: e.target.value })} />
+          <Input placeholder="API key" type="password" value={form.api_key} onChange={(e) => setForm({ ...form, api_key: e.target.value })} />
+          <Button size="sm" disabled={!form.name.trim()} onClick={() => void add()}><PlusIcon /> Add</Button>
+          {msg && <p className="text-xs text-destructive-foreground">{msg}</p>}
+        </div>
+      </Section>
 
-      <SectionTitle>SQL Database</SectionTitle>
       <SqlDatabaseSection />
-    </DialogSection>
+    </Page>
   );
 }
 
@@ -652,7 +742,7 @@ function SqlDatabaseSection() {
   useEffect(() => {
     if (data && !draft) setDraft({ ...data, db_type: data.db_type || 'mssql', password: '' });
   }, [data, draft]);
-  if (!draft) return <p className="text-sm text-muted-foreground">Loading…</p>;
+  if (!draft) return <Section title="SQL Database" padded><p className="text-sm text-muted-foreground">Loading…</p></Section>;
   const set = (k: keyof SqlConfig, v: unknown) => setDraft({ ...draft, [k]: v } as SqlConfig);
   const run = (fn: () => Promise<unknown>, ok: string) => {
     setMsg('');
@@ -661,11 +751,11 @@ function SqlDatabaseSection() {
       .catch((e) => setMsg((e as Error).message));
   };
   return (
-    <div>
-      <p className="pb-1 text-xs text-muted-foreground">
+    <Section title="SQL Database">
+      <div className="px-4 pt-3.5 text-xs text-muted-foreground sm:px-5">
         Read-only SQL database used by the <code className="font-mono">query_sql</code> tool. The password is stored
         server-side and never shown to the model.
-      </p>
+      </div>
       <Row label="Enabled"><Switch checked={draft.enabled} onCheckedChange={(v) => set('enabled', v)} /></Row>
       <Row label="Type">
         <Select
@@ -693,7 +783,7 @@ function SqlDatabaseSection() {
         />
       </Row>
       <Row label="ODBC driver"><Input className="w-56" placeholder="ODBC Driver 18 for SQL Server" value={draft.odbc_driver} onChange={(e) => set('odbc_driver', e.target.value)} /></Row>
-      <div className="flex items-center gap-2 pt-2">
+      <div className="flex items-center gap-2 border-t border-border/60 px-4 py-3.5 sm:px-5">
         <Button size="sm" onClick={() => run(() => saveSqlConfig(draft), 'Saved')}>Save</Button>
         <Button size="sm" variant="outline" onClick={() => run(
           // /api/sql/test reports failures as HTTP 200 + {ok:false, error} —
@@ -706,7 +796,7 @@ function SqlDatabaseSection() {
         }}>Remove</Button>
         {msg && <span className={cn('text-xs', /Saved|OK|Removed/.test(msg) ? 'text-success' : 'text-destructive-foreground')}>{msg}</span>}
       </div>
-    </div>
+    </Section>
   );
 }
 
@@ -758,8 +848,8 @@ function ToolsPanel() {
     onSuccess: () => void queryClient.invalidateQueries({ queryKey: ['builtin-tools'] }),
   });
 
-  if (!tools) return <DialogSection className="text-sm text-muted-foreground">Loading…</DialogSection>;
-  if (tools.length === 0) return <DialogSection className="text-sm text-muted-foreground">No tools found.</DialogSection>;
+  if (!tools) return <Page><p className="text-sm text-muted-foreground">Loading…</p></Page>;
+  if (tools.length === 0) return <Page><p className="text-sm text-muted-foreground">No tools found.</p></Page>;
 
   const setEnabled = (changes: Record<string, boolean>) => {
     const disabled = tools
@@ -776,9 +866,9 @@ function ToolsPanel() {
   }
 
   return (
-    <DialogSection className="space-y-2">
-      <SectionTitle>Built-in Tools</SectionTitle>
-      <p className="pb-1 text-xs text-muted-foreground">Enable or disable tools available to the AI agent.</p>
+    <Page className="gap-2.5">
+      <SectionHeader>Built-in Tools</SectionHeader>
+      <p className="-mt-1.5 px-1 text-xs text-muted-foreground">Enable or disable tools available to the AI agent.</p>
       {TOOL_CAT_ORDER.filter((c) => groups.has(c)).map((cat) => {
         const items = groups.get(cat)!;
         const enabledCount = items.filter((i) => i.enabled).length;
@@ -817,7 +907,7 @@ function ToolsPanel() {
           </div>
         );
       })}
-    </DialogSection>
+    </Page>
   );
 }
 
@@ -838,7 +928,7 @@ function RagPanel() {
     onSuccess: () => void queryClient.invalidateQueries({ queryKey: ['rag-config'] }),
   });
   const test = useMutation({ mutationFn: testRagConfig });
-  if (!draft) return <DialogSection className="text-sm text-muted-foreground">Loading…</DialogSection>;
+  if (!draft) return <Page><p className="text-sm text-muted-foreground">Loading…</p></Page>;
   const set = (k: keyof RagConfig, v: unknown) => setDraft({ ...draft, [k]: v } as RagConfig);
   const text = (k: keyof RagConfig, label: string, type = 'text') => (
     <Row label={label}>
@@ -851,30 +941,31 @@ function RagPanel() {
     fn().then(() => setDocMsg(ok)).catch((e) => setDocMsg((e as Error).message));
   };
   return (
-    <DialogSection>
-      <SectionTitle>Pipeline</SectionTitle>
-      <Row label="RAG enabled"><Switch checked={draft.enabled} onCheckedChange={(v) => set('enabled', v)} /></Row>
-      {text('embedding_url', 'Embedding URL')}
-      {text('embedding_model', 'Embedding model')}
-      {text('qdrant_url', 'Qdrant URL')}
-      {text('qdrant_api_key', 'Qdrant API key', 'password')}
-      {text('rerank_url', 'Rerank URL')}
-      {text('rerank_model', 'Rerank model')}
-      {text('rerank_api_key', 'Rerank API key', 'password')}
-      {text('chat_top_k', 'Chat top-k', 'number')}
-      {text('search_top_k', 'Search top-k', 'number')}
-      {text('candidate_top_k', 'Candidate top-k', 'number')}
-      <div className="flex items-center gap-3 pt-2">
-        <Button size="sm" disabled={save.isPending} onClick={() => save.mutate(draft)}>{save.isPending ? 'Saving…' : 'Save'}</Button>
-        <Button size="sm" variant="outline" disabled={test.isPending} onClick={() => test.mutate()}>{test.isPending ? 'Testing…' : 'Test connection'}</Button>
-        {test.isSuccess && (
-          <span className={cn('text-xs', test.data?.ok === false ? 'text-destructive-foreground' : 'text-success')}>
-            {test.data?.ok === false ? 'Test failed' : 'OK'}
-          </span>
-        )}
-      </div>
+    <Page>
+      <Section title="Pipeline">
+        <Row label="RAG enabled"><Switch checked={draft.enabled} onCheckedChange={(v) => set('enabled', v)} /></Row>
+        {text('embedding_url', 'Embedding URL')}
+        {text('embedding_model', 'Embedding model')}
+        {text('qdrant_url', 'Qdrant URL')}
+        {text('qdrant_api_key', 'Qdrant API key', 'password')}
+        {text('rerank_url', 'Rerank URL')}
+        {text('rerank_model', 'Rerank model')}
+        {text('rerank_api_key', 'Rerank API key', 'password')}
+        {text('chat_top_k', 'Chat top-k', 'number')}
+        {text('search_top_k', 'Search top-k', 'number')}
+        {text('candidate_top_k', 'Candidate top-k', 'number')}
+        <div className="flex items-center gap-3 border-t border-border/60 px-4 py-3.5 sm:px-5">
+          <Button size="sm" disabled={save.isPending} onClick={() => save.mutate(draft)}>{save.isPending ? 'Saving…' : 'Save'}</Button>
+          <Button size="sm" variant="outline" disabled={test.isPending} onClick={() => test.mutate()}>{test.isPending ? 'Testing…' : 'Test connection'}</Button>
+          {test.isSuccess && (
+            <span className={cn('text-xs', test.data?.ok === false ? 'text-destructive-foreground' : 'text-success')}>
+              {test.data?.ok === false ? 'Test failed' : 'OK'}
+            </span>
+          )}
+        </div>
+      </Section>
 
-      <SectionTitle>Documents</SectionTitle>
+      <Section title="Documents" padded>
       <div className="space-y-2">
         <label className="flex items-center gap-2">
           <Button size="sm" variant="outline" onClick={() => document.getElementById('rag-upload-input')?.click()}>Upload files…</Button>
@@ -898,7 +989,8 @@ function RagPanel() {
         </div>
         {searchOut && <pre className="max-h-48 overflow-y-auto rounded-lg border bg-muted px-3 py-2 font-mono text-[11px] whitespace-pre-wrap">{searchOut}</pre>}
       </div>
-    </DialogSection>
+      </Section>
+    </Page>
   );
 }
 
@@ -918,41 +1010,35 @@ const WIPE_ROWS: Array<{ kind: string; label: string; sub: string }> = [
 function SystemPanel() {
   const [msg, setMsg] = useState('');
   return (
-    <DialogSection>
-      <SectionTitle>Data Backup</SectionTitle>
-      <p className="pb-1 text-xs text-muted-foreground">
-        Export or import your user data (memories, presets, settings, skills, preferences) as a JSON file.
-      </p>
-      <div className="flex items-center gap-2">
-        <Button variant="outline" size="sm" onClick={() => { window.location.href = '/api/export'; }}>Export Data</Button>
-        <Button variant="outline" size="sm" onClick={() => document.getElementById('sys-import-input')?.click()}>Import Data</Button>
-        <input
-          id="sys-import-input" type="file" accept=".json" hidden
-          onChange={(e) => {
-            const file = e.target.files?.[0];
-            e.target.value = '';
-            if (!file) return;
-            void file.text()
-              .then((t) => importData(JSON.parse(t)))
-              .then((r) => setMsg(r.message ?? 'Import successful'))
-              .catch((err) => setMsg((err as Error).message));
-          }}
-        />
-      </div>
+    <Page>
+      <Section title="Data Backup" padded>
+        <p className="pb-2 text-xs text-muted-foreground">
+          Export or import your user data (memories, presets, settings, skills, preferences) as a JSON file.
+        </p>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" size="sm" onClick={() => { window.location.href = '/api/export'; }}>Export Data</Button>
+          <Button variant="outline" size="sm" onClick={() => document.getElementById('sys-import-input')?.click()}>Import Data</Button>
+          <input
+            id="sys-import-input" type="file" accept=".json" hidden
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              e.target.value = '';
+              if (!file) return;
+              void file.text()
+                .then((t) => importData(JSON.parse(t)))
+                .then((r) => setMsg(r.message ?? 'Import successful'))
+                .catch((err) => setMsg((err as Error).message));
+            }}
+          />
+        </div>
+      </Section>
 
-      <SectionTitle>
-        <span className="text-destructive-foreground">Danger Zone</span>
-      </SectionTitle>
-      <p className="pb-1 text-xs text-muted-foreground">
-        Irreversible. Each wipe targets one category — pick exactly what you want gone.
-      </p>
-      <div className="space-y-1">
+      <Section title="Danger Zone">
+        <div className="px-4 pt-3.5 text-xs text-muted-foreground sm:px-5">
+          Irreversible. Each wipe targets one category — pick exactly what you want gone.
+        </div>
         {WIPE_ROWS.map((row) => (
-          <div key={row.kind} className="flex items-center justify-between gap-4 py-1.5">
-            <div className="min-w-0">
-              <div className="text-sm">{row.label}</div>
-              <div className="text-xs text-muted-foreground">{row.sub}</div>
-            </div>
+          <Row key={row.kind} label={row.label} hint={row.sub}>
             <Button
               variant="destructive-outline"
               size="sm"
@@ -965,11 +1051,11 @@ function SystemPanel() {
             >
               Wipe
             </Button>
-          </div>
+          </Row>
         ))}
-      </div>
-      {msg && <p className="pt-2 text-xs text-muted-foreground">{msg}</p>}
-    </DialogSection>
+      </Section>
+      {msg && <p className="px-1 text-xs text-muted-foreground">{msg}</p>}
+    </Page>
   );
 }
 

@@ -16,7 +16,7 @@ import {
 } from '@/api/client';
 import { cn } from '@/lib/utils';
 import { Button } from '../ui/button';
-import { DialogSection } from '../ui/dialog';
+import { Page, Row, Section } from '../SettingsDialog';
 import { Input, Switch } from '../ui/misc';
 
 /* Mirrors the legacy admin panel's privilege labels (static/js/admin.js). */
@@ -30,11 +30,8 @@ const PRIV_LABELS: Array<{ key: keyof UserPrivileges; label: string }> = [
   { key: 'can_manage_memory', label: 'Memory & skills' },
 ];
 
-function SectionTitle({ children }: { children: React.ReactNode }) {
-  return <div className="pt-4 pb-1 text-sm font-semibold first:pt-0">{children}</div>;
-}
-
-function Row({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
+/** Compact row used inside an expanded user card's privileges sub-panel. */
+function MiniRow({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
   return (
     <div className="flex items-center justify-between gap-4 py-1.5">
       <div className="min-w-0">
@@ -99,7 +96,7 @@ function AllowedModels({ user, onSaved }: { user: AppUser; onSaved: () => void }
       {allModels.length === 0 ? (
         <div className="text-xs text-muted-foreground">No models available</div>
       ) : (
-        <div className="max-h-44 space-y-0.5 overflow-y-auto rounded-lg border bg-card p-1.5">
+        <div className="max-h-44 space-y-0.5 overflow-y-auto rounded-lg border bg-background p-1.5">
           {allModels.map((m) => (
             <label key={m.mid} className="flex cursor-pointer items-center gap-2 rounded-md px-1.5 py-1 text-sm hover:bg-accent/60" title={m.mid}>
               <input type="checkbox" checked={effectiveChecked.has(m.mid)} onChange={() => toggle(m.mid)} className="accent-primary" />
@@ -121,15 +118,15 @@ function PrivilegesPanel({ user, onSaved }: { user: AppUser; onSaved: () => void
     <div className="border-t px-3 pt-2 pb-3">
       <div className="pt-1 pb-0.5 text-[11px] font-medium tracking-wide text-muted-foreground uppercase">Features</div>
       {PRIV_LABELS.map(({ key, label }) => (
-        <Row key={key} label={label}>
+        <MiniRow key={key} label={label}>
           <Switch
             checked={!!user.privileges?.[key]}
             onCheckedChange={(v) => savePriv({ [key]: v })}
           />
-        </Row>
+        </MiniRow>
       ))}
       <div className="pt-2 pb-0.5 text-[11px] font-medium tracking-wide text-muted-foreground uppercase">Limits</div>
-      <Row label="Daily message limit" hint="0 = no limit">
+      <MiniRow label="Daily message limit" hint="0 = no limit">
         <Input
           type="number"
           min={0}
@@ -138,7 +135,7 @@ function PrivilegesPanel({ user, onSaved }: { user: AppUser; onSaved: () => void
           onBlur={() => savePriv({ max_messages_per_day: Math.max(0, parseInt(limit, 10) || 0) })}
           className="w-20 text-center"
         />
-      </Row>
+      </MiniRow>
       <AllowedModels user={user} onSaved={onSaved} />
     </div>
   );
@@ -175,7 +172,7 @@ function UserRow({ user, currentUser, adminCount, onChanged }: {
   };
 
   return (
-    <div className="rounded-lg border bg-card">
+    <div className="rounded-lg border bg-background">
       <div
         className={cn('flex items-center gap-3 px-3 py-2', !user.is_admin && 'cursor-pointer')}
         onClick={() => !user.is_admin && setOpen((v) => !v)}
@@ -229,33 +226,36 @@ export function UsersPanel({ currentUser }: { currentUser?: string }) {
   });
 
   return (
-    <DialogSection>
-      <SectionTitle>Registration</SectionTitle>
-      <Row label="Open signup" hint="Allow new users to register themselves">
-        <Switch checked={!!status?.signup_enabled} onCheckedChange={() => void toggleSignup().then(() => refetchStatus())} />
-      </Row>
+    <Page>
+      <Section title="Registration">
+        <Row label="Open signup" hint="Allow new users to register themselves">
+          <Switch checked={!!status?.signup_enabled} onCheckedChange={() => void toggleSignup().then(() => refetchStatus())} />
+        </Row>
+      </Section>
 
-      <SectionTitle>Users</SectionTitle>
-      <div className="space-y-1.5">
-        {(users ?? []).map((u) => (
-          <UserRow key={u.username} user={u} currentUser={currentUser} adminCount={adminCount} onChanged={refresh} />
-        ))}
-      </div>
-
-      <SectionTitle>Add User</SectionTitle>
-      <div className="space-y-2">
-        <div className="flex gap-2">
-          <Input placeholder="Username" value={username} onChange={(e) => setUsername(e.target.value)} />
-          <Input placeholder="Password (min. 8 characters)" type="password" value={password} onChange={(e) => setPassword(e.target.value)} />
+      <Section title="Users" padded>
+        <div className="space-y-1.5">
+          {(users ?? []).map((u) => (
+            <UserRow key={u.username} user={u} currentUser={currentUser} adminCount={adminCount} onChanged={refresh} />
+          ))}
         </div>
-        <label className="flex items-center gap-2 text-sm text-muted-foreground">
-          <Switch checked={isAdmin} onCheckedChange={setIsAdmin} /> Administrator
-        </label>
-        <Button size="sm" disabled={!username.trim() || password.length < 8 || create.isPending} onClick={() => create.mutate()}>
-          <PlusIcon /> Create user
-        </Button>
-        {create.isError && <p className="text-xs text-destructive-foreground">{(create.error as Error).message}</p>}
-      </div>
-    </DialogSection>
+      </Section>
+
+      <Section title="Add User" padded>
+        <div className="space-y-2">
+          <div className="flex gap-2">
+            <Input placeholder="Username" value={username} onChange={(e) => setUsername(e.target.value)} />
+            <Input placeholder="Password (min. 8 characters)" type="password" value={password} onChange={(e) => setPassword(e.target.value)} />
+          </div>
+          <label className="flex items-center gap-2 text-sm text-muted-foreground">
+            <Switch checked={isAdmin} onCheckedChange={setIsAdmin} /> Administrator
+          </label>
+          <Button size="sm" disabled={!username.trim() || password.length < 8 || create.isPending} onClick={() => create.mutate()}>
+            <PlusIcon /> Create user
+          </Button>
+          {create.isError && <p className="text-xs text-destructive-foreground">{(create.error as Error).message}</p>}
+        </div>
+      </Section>
+    </Page>
   );
 }
