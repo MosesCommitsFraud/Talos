@@ -267,6 +267,11 @@ class PreviewHandler(BaseHTTPRequestHandler):
         if path == "/api/chat":
             self._send_json({"response": "This is a local UI preview response."})
             return
+        if path == "/api/sql/test":
+            # Failure shape: HTTP 200 + ok:false — the settings Test button
+            # must surface the error, not report "Connection OK".
+            self._send(200, _json_bytes({"ok": False, "error": "Login failed for user 'talos_ro' (preview mock)"}))
+            return
         if path.startswith("/api/upload"):
             self._send_json({"files": []})
             return

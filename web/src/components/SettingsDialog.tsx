@@ -695,7 +695,12 @@ function SqlDatabaseSection() {
       <Row label="ODBC driver"><Input className="w-56" placeholder="ODBC Driver 18 for SQL Server" value={draft.odbc_driver} onChange={(e) => set('odbc_driver', e.target.value)} /></Row>
       <div className="flex items-center gap-2 pt-2">
         <Button size="sm" onClick={() => run(() => saveSqlConfig(draft), 'Saved')}>Save</Button>
-        <Button size="sm" variant="outline" onClick={() => run(testSqlConfig, 'Connection OK')}>Test</Button>
+        <Button size="sm" variant="outline" onClick={() => run(
+          // /api/sql/test reports failures as HTTP 200 + {ok:false, error} —
+          // surface them instead of showing "Connection OK" unconditionally.
+          () => testSqlConfig().then((r) => { if (!r.ok) throw new Error(r.error || 'Connection failed'); }),
+          'Connection OK',
+        )}>Test</Button>
         <Button size="sm" variant="destructive-outline" onClick={() => {
           if (window.confirm('Remove the SQL database configuration?')) run(() => deleteSqlConfig().then(() => setDraft(null)), 'Removed');
         }}>Remove</Button>

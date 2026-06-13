@@ -386,7 +386,7 @@ export interface SqlConfig {
 export const fetchSqlConfig = () => getJSON<SqlConfig>('/api/sql/config');
 export const saveSqlConfig = (cfg: SqlConfig) => postJSON('/api/sql/config', cfg, 'PUT');
 export const deleteSqlConfig = () => postJSON('/api/sql/config', undefined, 'DELETE');
-export const testSqlConfig = () => postJSON<{ ok?: boolean; detail?: string;[key: string]: unknown }>('/api/sql/test');
+export const testSqlConfig = () => postJSON<{ ok?: boolean; error?: string; output?: string }>('/api/sql/test');
 
 /* ── Built-in agent tools ── */
 export interface BuiltinTool { id: string; enabled: boolean }
