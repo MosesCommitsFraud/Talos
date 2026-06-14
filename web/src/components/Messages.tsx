@@ -1,4 +1,4 @@
-import { CheckIcon, CopyIcon, FileIcon, PencilIcon, Trash2Icon } from 'lucide-react';
+import { CheckIcon, ChevronDownIcon, CopyIcon, FileIcon, PencilIcon, Trash2Icon } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -218,6 +218,7 @@ export function Messages() {
   const showWelcome = usePrefs((s) => s.visibility.welcomeText);
   const showThinking = usePrefs((s) => s.visibility.showThinking);
   const [editing, setEditing] = useState<string | null>(null);
+  const [showScrollToBottom, setShowScrollToBottom] = useState(false);
   const scroller = useRef<HTMLDivElement>(null);
   const pinned = useRef(true);
   const { data: artifacts } = useQuery({
@@ -236,7 +237,17 @@ export function Messages() {
   const onScroll = () => {
     const el = scroller.current;
     if (!el) return;
-    pinned.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+    pinned.current = atBottom;
+    setShowScrollToBottom(!atBottom);
+  };
+
+  const scrollToBottom = () => {
+    const el = scroller.current;
+    if (!el) return;
+    el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
+    pinned.current = true;
+    setShowScrollToBottom(false);
   };
 
   if (messages.length === 0) {
@@ -284,6 +295,7 @@ export function Messages() {
   };
 
   return (
+   <div className="relative flex min-h-0 flex-1 flex-col">
     <div ref={scroller} onScroll={onScroll} className="flex-1 overflow-y-auto" role="log" aria-live="polite">
       <div className="mx-auto flex w-full max-w-[800px] flex-col px-4 py-6">
         {messages.map((m, index) =>
@@ -344,5 +356,20 @@ export function Messages() {
         )}
       </div>
     </div>
+    {/* Scroll-to-bottom pill — shown when scrolled away from the bottom (t3code style). */}
+    {showScrollToBottom && (
+      <div className="pointer-events-none absolute bottom-2 left-1/2 z-30 flex -translate-x-1/2 justify-center">
+        <button
+          type="button"
+          onClick={scrollToBottom}
+          aria-label={t('messages.scrollToBottom')}
+          className="pointer-events-auto flex items-center gap-1.5 rounded-full border border-border/60 bg-card px-3 py-1 text-xs text-muted-foreground shadow-sm transition-colors hover:cursor-pointer hover:border-border hover:text-foreground"
+        >
+          <ChevronDownIcon className="size-3.5" />
+          {t('messages.scrollToBottom')}
+        </button>
+      </div>
+    )}
+   </div>
   );
 }

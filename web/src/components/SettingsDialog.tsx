@@ -16,7 +16,7 @@ import {
   WrenchIcon,
   XIcon,
 } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   addModelEndpoint,
@@ -61,6 +61,7 @@ import { cn } from '@/lib/utils';
 import { Button } from './ui/button';
 import { Dialog, DialogContent } from './ui/dialog';
 import { Input, Switch, Textarea } from './ui/misc';
+import { KeybindingPill } from './ui/kbd';
 import { useAuth } from './auth/AuthGate';
 import { UsersPanel } from './settings/UsersPanel';
 
@@ -398,6 +399,67 @@ const KEYBIND_KEYS = [
   'delete_session', 'admin_panel', 'cancel',
 ];
 
+/** Build a "ctrl+meta+alt+shift+key" binding string from a keyboard event. */
+function bindingFromEvent(e: React.KeyboardEvent): string | null {
+  const k = e.key.toLowerCase();
+  if (['control', 'meta', 'alt', 'shift'].includes(k)) return null;
+  const parts = [
+    e.ctrlKey && 'ctrl', e.metaKey && 'meta', e.altKey && 'alt', e.shiftKey && 'shift',
+  ].filter(Boolean) as string[];
+  parts.push(k === ' ' ? 'space' : k);
+  return parts.join('+');
+}
+
+/** t3code-style keybind control: shows the binding as keycap pills; click to
+ *  re-record, then capture the next combination pressed. */
+function KeybindRecorder({ value, onChange }: { value?: string; onChange: (next: string) => void }) {
+  const { t } = useTranslation();
+  const [recording, setRecording] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  if (recording) {
+    return (
+      <input
+        ref={inputRef}
+        autoFocus
+        readOnly
+        value=""
+        placeholder={t('settings.shortcuts.recording')}
+        aria-label={t('settings.shortcuts.recording')}
+        className="h-7 w-44 rounded-md border border-primary/70 bg-primary/5 px-2 text-center font-mono text-xs text-foreground outline-none placeholder:text-muted-foreground"
+        onBlur={() => setRecording(false)}
+        onKeyDown={(e) => {
+          if (e.key === 'Tab') return;
+          e.preventDefault();
+          // Stop the combo from reaching window-level shortcut handlers (e.g. ⌘K).
+          e.stopPropagation();
+          if (e.key === 'Escape') { setRecording(false); return; }
+          const next = bindingFromEvent(e);
+          if (!next) return;
+          onChange(next);
+          setRecording(false);
+        }}
+      />
+    );
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={() => setRecording(true)}
+      aria-label={t('settings.shortcuts.edit')}
+      className="group inline-flex h-7 min-w-44 items-center justify-center gap-2 rounded-md border border-transparent px-2 outline-none transition-colors hover:border-border hover:bg-accent focus-visible:border-ring"
+    >
+      {value
+        ? <KeybindingPill value={value} />
+        : <span className="font-mono text-xs text-muted-foreground">{t('settings.shortcuts.unset')}</span>}
+      <span className="text-[10px] uppercase tracking-[0.08em] text-muted-foreground/0 transition-colors group-hover:text-muted-foreground/70">
+        {t('settings.shortcuts.edit')}
+      </span>
+    </button>
+  );
+}
+
 function ShortcutsPanel() {
   const { t } = useTranslation();
   const s = useSettingsDraft();
@@ -408,21 +470,9 @@ function ShortcutsPanel() {
       <Section title={t('settings.shortcuts.title')}>
         {KEYBIND_KEYS.map((key) => (
           <Row key={key} label={t(`settings.shortcuts.labels.${key}`)}>
-            <Input
-              className="w-44 text-center font-mono text-xs"
-              value={binds[key] ?? ''}
-              placeholder={t('settings.shortcuts.unset')}
-              onKeyDown={(e) => {
-                e.preventDefault();
-                if (e.key === 'Tab') return;
-                const parts = [
-                  e.ctrlKey && 'ctrl', e.metaKey && 'meta', e.altKey && 'alt', e.shiftKey && 'shift',
-                ].filter(Boolean) as string[];
-                const k = e.key.toLowerCase();
-                if (!['control', 'meta', 'alt', 'shift'].includes(k)) parts.push(k);
-                s.setValue('keybinds', { ...binds, [key]: parts.join('+') });
-              }}
-              onChange={() => { /* set via onKeyDown capture */ }}
+            <KeybindRecorder
+              value={binds[key]}
+              onChange={(next) => s.setValue('keybinds', { ...binds, [key]: next })}
             />
           </Row>
         ))}

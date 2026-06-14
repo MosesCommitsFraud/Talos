@@ -96,6 +96,7 @@ const de: typeof en = {
     workingFor: 'Arbeitet seit',
     working: 'Arbeitet…',
     generating: 'Wird generiert',
+    scrollToBottom: 'Nach unten scrollen',
   },
   thinking: {
     thinking: 'Denkt nach…',
@@ -237,8 +238,10 @@ const de: typeof en = {
     },
     shortcuts: {
       title: 'Tastenkürzel',
-      hint: 'Klicke ein Feld an und drücke die neue Tastenkombination.',
-      unset: 'nicht gesetzt',
+      hint: 'Klicke ein Kürzel an und drücke die neue Tastenkombination.',
+      unset: 'Nicht zugewiesen',
+      recording: 'Kürzel drücken',
+      edit: 'Ändern',
       labels: {
         search: 'Chats & Aktionen durchsuchen',
         toggle_sidebar: 'Seitenleiste umschalten',

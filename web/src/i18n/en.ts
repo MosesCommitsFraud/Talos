@@ -94,6 +94,7 @@ const en = {
     workingFor: 'Working for',
     working: 'Working…',
     generating: 'Generating',
+    scrollToBottom: 'Scroll to bottom',
   },
   thinking: {
     thinking: 'Thinking…',
@@ -235,8 +236,10 @@ const en = {
     },
     shortcuts: {
       title: 'Keyboard Shortcuts',
-      hint: 'Click a field and press the new key combination.',
-      unset: 'unset',
+      hint: 'Click a shortcut and press the new key combination.',
+      unset: 'Unassigned',
+      recording: 'Press shortcut',
+      edit: 'Edit',
       labels: {
         search: 'Search chats & actions',
         toggle_sidebar: 'Toggle sidebar',
