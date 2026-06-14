@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { Sidebar } from './components/Sidebar';
 import { IncognitoToggle } from './components/IncognitoToggle';
 import { Messages } from './components/Messages';
+import { Welcome } from './components/Welcome';
 import { Composer } from './components/Composer';
 import { CommandPalette } from './components/CommandPalette';
 import { SettingsDialog } from './components/SettingsDialog';
@@ -11,6 +12,8 @@ import { ArtifactsPanel } from './components/ArtifactsPanel';
 import { AuthGate } from './components/auth/AuthGate';
 import { TooltipProvider } from './components/ui/misc';
 import { applyDensity, applyLang, applyTheme, usePrefs } from './state/prefs';
+import { useChat } from './state/chat';
+import { cn } from './lib/utils';
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { staleTime: 10_000, retry: 1 } },
@@ -25,6 +28,7 @@ export default function App() {
   const theme = usePrefs((s) => s.theme);
   const density = usePrefs((s) => s.density);
   const lang = usePrefs((s) => s.lang);
+  const hasMessages = useChat((s) => s.messages.length > 0);
 
   useEffect(() => applyTheme(theme), [theme]);
   useEffect(() => applyDensity(density), [density]);
@@ -55,7 +59,19 @@ export default function App() {
             <main className="relative flex min-w-0 flex-1 flex-col">
               <IncognitoToggle />
               <Messages />
-              <Composer />
+              {/* On an empty chat the composer (with the greeting above it) is
+                  lifted to the vertical center; sending the first message drops
+                  `hasMessages` → the transform releases and it slides to the
+                  bottom. transform-only, so no layout reflow during the slide. */}
+              <div
+                className={cn(
+                  'shrink-0 transition-transform duration-500 ease-out',
+                  !hasMessages && '-translate-y-[calc(50dvh-50%)]',
+                )}
+              >
+                {!hasMessages && <Welcome />}
+                <Composer />
+              </div>
             </main>
             <ArtifactsPanel open={files} onClose={() => setFiles(false)} />
           </div>

@@ -12,16 +12,6 @@ import { ToolRow, toolImages, type ToolImage } from './ToolRow';
 import { Tooltip } from './ui/misc';
 import { Button } from './ui/button';
 
-function Logo() {
-  return (
-    <svg viewBox="0 0 32 32" width="40" height="40" aria-hidden>
-      <path d="M16 4L16 22L6 22Z" fill="var(--primary)" />
-      <path d="M16 8L16 22L24 22Z" fill="var(--primary)" opacity="0.6" />
-      <path d="M4 24Q10 20 16 24Q22 28 28 24" stroke="var(--primary)" strokeWidth="2.5" fill="none" strokeLinecap="round" />
-    </svg>
-  );
-}
-
 /** Compact elapsed label: "12s", "3m 5s", "1h 4m". */
 function formatWorkingElapsed(startMs: number, nowMs: number): string {
   const elapsed = Math.max(0, Math.floor((nowMs - startMs) / 1000));
@@ -215,7 +205,6 @@ export function Messages() {
   const messages = useChat((s) => s.messages);
   const turnStartedAt = useChat((s) => s.turnStartedAt);
   const showMetrics = usePrefs((s) => s.visibility.messageMetrics);
-  const showWelcome = usePrefs((s) => s.visibility.welcomeText);
   const showThinking = usePrefs((s) => s.visibility.showThinking);
   const [editing, setEditing] = useState<string | null>(null);
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
@@ -250,18 +239,9 @@ export function Messages() {
     setShowScrollToBottom(false);
   };
 
-  if (messages.length === 0) {
-    return (
-      <div className="flex flex-1 flex-col items-center justify-center gap-3 select-none">
-        {showWelcome && (
-          <>
-            <Logo />
-            <h1 className="text-2xl font-semibold tracking-tight">{t('messages.welcome')}</h1>
-          </>
-        )}
-      </div>
-    );
-  }
+  // Empty chat: the greeting + composer are centered together by App; this just
+  // holds the space above so the composer can animate down on the first message.
+  if (messages.length === 0) return <div className="min-h-0 flex-1" />;
 
   const lastAssistantId = [...messages].reverse().find((m) => m.role === 'assistant')?.id;
   const inputPaths = new Set(
