@@ -6,7 +6,6 @@ import {
   BrainIcon,
   CheckIcon,
   ChevronRightIcon,
-  ExternalLinkIcon,
   FolderIcon,
   FolderPlusIcon,
   HistoryIcon,
@@ -48,7 +47,6 @@ import {
   Menu,
   MenuItem,
   MenuPopup,
-  MenuSeparator,
   MenuTrigger,
 } from './ui/menu';
 
@@ -432,11 +430,6 @@ export function Sidebar({
                     {t(SORT_KEYS[mode])}
                   </MenuItem>
                 ))}
-                <MenuSeparator />
-                <MenuItem onSelect={() => { window.location.href = '/legacy'; }}>
-                  <ExternalLinkIcon /> {t('sidebar.foldersBulk')}
-                  <span className="ml-auto text-xs text-muted-foreground">{t('common.legacy')}</span>
-                </MenuItem>
               </MenuPopup>
             </Menu>
           </div>
@@ -475,13 +468,6 @@ export function Sidebar({
         </div>
       ) : (
         <div className="space-y-0.5 border-t p-2">
-          <a
-            href="/legacy"
-            className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-accent/70 hover:text-foreground [&_svg]:size-4"
-          >
-            <ExternalLinkIcon />
-            <span className="flex-1 text-left">{t('sidebar.legacyUi')}</span>
-          </a>
           {(visibility.sidebarUserBar || visibility.sidebarSettingsBtn) && (
             <div className="flex items-center gap-2 rounded-lg px-2 py-1.5">
               {visibility.sidebarUserBar && (

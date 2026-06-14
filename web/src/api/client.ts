@@ -2,7 +2,7 @@ import type { Attachment, ChatEvent, ModelEndpoint, Session, SessionDetail } fro
 
 /** Fired when any API call hits a 401 — the AuthGate listens and flips to the
  *  in-app login screen (e.g. after the server restarted and forgot all
- *  sessions). Never navigates to the legacy /login page. */
+ *  sessions). */
 export const UNAUTHENTICATED_EVENT = 'talos:unauthenticated';
 
 function notifyUnauthenticated() {
@@ -11,7 +11,7 @@ function notifyUnauthenticated() {
 
 async function getJSON<T>(url: string): Promise<T> {
   const res = await fetch(url, { credentials: 'same-origin' });
-  if (res.status === 401 || (res.redirected && res.url.endsWith('/login'))) {
+  if (res.status === 401) {
     notifyUnauthenticated();
     throw new Error('Not authenticated');
   }

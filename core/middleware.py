@@ -82,10 +82,8 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         else:
             response.headers["X-Frame-Options"] = "DENY"
             # NOTE: `style-src 'unsafe-inline'` is intentionally retained.
-            # `static/index.html` and `static/login.html` ship inline <style>
-            # blocks, and several JS modules build runtime `style=""` attrs.
-            # Migrating to nonce-only requires templating the HTML files +
-            # auditing every JS-set style attribute. Since inline styles
+            # The React UI sets runtime `style=""` attributes (inline styles via
+            # style={{…}}), which nonce-only CSP would block. Since inline styles
             # don't execute script, the residual risk is visual-only.
             response.headers["Content-Security-Policy"] = (
                 "default-src 'self'; "

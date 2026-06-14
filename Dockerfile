@@ -46,7 +46,7 @@ RUN pip install --no-cache-dir -r requirements.txt \
 # Copy app code
 COPY . .
 
-# New React UI bundle (served at /; legacy UI stays at /legacy)
+# React UI bundle (served at /)
 COPY --from=webbuild /web/dist ./web/dist
 
 # Create data directory (mount a volume here for persistence)

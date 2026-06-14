@@ -4,7 +4,6 @@ import {
   ArrowDownIcon,
   ArrowUpIcon,
   CornerDownLeftIcon,
-  ExternalLinkIcon,
   MessageSquareIcon,
   MoonIcon,
   SearchIcon,
@@ -67,7 +66,6 @@ export function CommandPalette({ open, onClose, onOpenSettings }: { open: boolea
         },
       },
       { id: 'settings', label: t('palette.openSettings'), icon: <SettingsIcon />, run: () => { onOpenSettings?.(); onClose(); } },
-      { id: 'legacy', label: t('palette.openLegacy'), icon: <ExternalLinkIcon />, run: () => { window.location.href = '/legacy'; } },
     ].filter((a) => !q || a.label.toLowerCase().includes(q));
 
     const chats: PaletteEntry[] = (sessions ?? [])

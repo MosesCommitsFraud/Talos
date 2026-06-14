@@ -43,7 +43,7 @@ from typing import Dict
 
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, HTTPException
-from fastapi.responses import JSONResponse, FileResponse, HTMLResponse
+from fastapi.responses import JSONResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -63,7 +63,6 @@ from core.exceptions import (
 
 import bcrypt as _bcrypt
 
-from src.app_helpers import abs_join
 from src.generated_images import GENERATED_IMAGE_HEADERS, resolve_generated_image_path
 from starlette.responses import RedirectResponse
 
@@ -166,11 +165,10 @@ if AUTH_ENABLED:
         "/api/auth/integrations/presets",
         "/api/health",
         "/api/version",
-        "/login",
     }
-    # /assets are the hashed Vite bundles of the new React UI (web/dist) —
-    # same sensitivity as /static (code, no data), and the login page redirect
-    # flow needs them loadable before a cookie exists.
+    # /assets are the hashed Vite bundles of the React UI (web/dist); /static
+    # now serves only fonts. All are code/assets (no data) and must be loadable
+    # before a cookie exists so the login screen can render.
     AUTH_EXEMPT_PREFIXES = ["/static", "/assets", "/fonts"]
     import re as _re
     AUTH_EXEMPT_PATTERNS = []
@@ -181,9 +179,7 @@ if AUTH_ENABLED:
         # The React shell at "/" gates itself: it renders its own login/setup
         # screens from /api/auth/status, so the HTML (code only, no data) must
         # be loadable without a cookie. All /api/* routes stay protected.
-        # Legacy-only deployments (no web/dist build) keep the old behavior
-        # of redirecting unauthenticated visitors to /login.
-        if path == "/" and os.path.exists(_WEB_INDEX):
+        if path == "/":
             return True
         if any(path.startswith(p) for p in AUTH_EXEMPT_PREFIXES):
             return True
@@ -281,9 +277,10 @@ if AUTH_ENABLED:
             if LOCALHOST_BYPASS and _is_trusted_loopback(request):
                 return await call_next(request)
             if not auth_manager.is_configured:
-                # No users yet — redirect to login for first-time setup
+                # No users yet — send browsers to the React shell, which renders
+                # the first-time setup screen from /api/auth/status.
                 if not path.startswith("/api/"):
-                    return RedirectResponse(url="/login", status_code=302)
+                    return RedirectResponse(url="/", status_code=302)
                 return JSONResponse(status_code=401, content={"error": "Setup required"})
 
             # --- Bearer token auth (API tokens for external integrations) ---
@@ -346,7 +343,7 @@ if AUTH_ENABLED:
             if not auth_manager.validate_token(token):
                 if path.startswith("/api/"):
                     return JSONResponse(status_code=401, content={"error": "Not authenticated"})
-                return RedirectResponse(url="/login", status_code=302)
+                return RedirectResponse(url="/", status_code=302)
 
             # Attach current username to request state for downstream routes
             request.state.current_user = auth_manager.get_username_for_token(token)
@@ -363,13 +360,12 @@ os.makedirs(STATIC_DIR, exist_ok=True)
 
 
 class _RevalidatingStatic(StaticFiles):
-    """Serve static assets normally, but force the browser to REVALIDATE
-    source files (.js/.css/.html) on every load instead of serving a stale
-    copy from disk cache. The app ships raw ES modules with no build step or
-    versioned URLs, so browsers were caching modules across deploys — a code
-    change wouldn't appear without a manual hard-refresh. `no-cache` keeps the
-    cached bytes but requires a conditional request; unchanged files still
-    return a cheap 304 (ETag/Last-Modified are preserved)."""
+    """Serve static assets, forcing the browser to REVALIDATE source files
+    (.js/.css/.html) on every load rather than serving a stale disk-cached copy.
+    `no-cache` keeps the cached bytes but requires a conditional request;
+    unchanged files still return a cheap 304 (ETag/Last-Modified preserved).
+    `/static` now serves fonts (incl. user-uploaded custom fonts at
+    /static/fonts/custom) — see routes/font_routes.py."""
 
     async def get_response(self, path, scope):
         resp = await super().get_response(path, scope)
@@ -380,9 +376,8 @@ class _RevalidatingStatic(StaticFiles):
 
 app.mount("/static", _RevalidatingStatic(directory="static"), name="static")
 
-# ========= NEW REACT UI (web/dist) =========
-# Strangler migration: the Vite/React app in web/ is served at "/" when built;
-# the legacy vanilla-JS UI stays fully functional at /legacy. Vite emits
+# ========= REACT UI (web/dist) =========
+# The Vite/React app in web/ is the only frontend, served at "/". Vite emits
 # content-hashed filenames under assets/, so those can be cached forever.
 WEB_DIST = os.path.join(BASE_DIR, "web", "dist")
 _WEB_INDEX = os.path.join(WEB_DIST, "index.html")
@@ -399,9 +394,9 @@ if os.path.isdir(os.path.join(WEB_DIST, "assets")):
     app.mount("/assets", _ImmutableStatic(directory=os.path.join(WEB_DIST, "assets")), name="webassets")
     if os.path.isdir(os.path.join(WEB_DIST, "fonts")):
         app.mount("/fonts", _ImmutableStatic(directory=os.path.join(WEB_DIST, "fonts")), name="webfonts")
-    logger.info("New web UI mounted (web/dist) — serving at /, legacy UI at /legacy")
+    logger.info("Web UI mounted (web/dist) — serving at /")
 else:
-    logger.info("web/dist not found — serving legacy UI at / (run `npm run build` in web/)")
+    logger.warning("web/dist not found — run `npm run build` in web/ (\"/\" will 503 until built)")
 
 # ========= GENERATED IMAGES =========
 @app.get("/api/generated-image/{filename}")
@@ -643,53 +638,14 @@ logger.info("Talos feature profile loaded: chat, auth/RBAC, uploads, memory, doc
 
 # ========= ROUTES (kept in app.py) =========
 
-def _serve_html_with_nonce(request: Request, file_path: str) -> HTMLResponse:
-    """Read an HTML file and inject the CSP nonce into inline <script> tags."""
-    with open(file_path, "r", encoding="utf-8") as f:
-        html = f.read()
-    nonce = getattr(request.state, "csp_nonce", "")
-    html = html.replace("{{CSP_NONCE}}", nonce)
-    return HTMLResponse(html)
-
-def _serve_legacy_index(request: Request):
-    static_path = abs_join(BASE_DIR, "static/index.html")
-    if os.path.exists(static_path):
-        return _serve_html_with_nonce(request, static_path)
-    root_path = abs_join(BASE_DIR, "index.html")
-    if os.path.exists(root_path):
-        return _serve_html_with_nonce(request, root_path)
-    raise HTTPException(404, "index.html not found")
-
 @app.get("/")
 async def serve_index(request: Request):
-    # New React UI when built; legacy otherwise. The new index has no inline
+    # The React UI (web/dist) is the only frontend. Its index has no inline
     # scripts, so no CSP nonce injection is needed (script-src includes 'self').
+    # It gates itself, rendering login/setup screens from /api/auth/status.
     if os.path.exists(_WEB_INDEX):
         return FileResponse(_WEB_INDEX, headers={"Cache-Control": "no-cache"})
-    return _serve_legacy_index(request)
-
-@app.get("/legacy")
-async def serve_legacy(request: Request):
-    return _serve_legacy_index(request)
-
-# Legacy deep links (features not yet ported to the new UI) keep opening the
-# legacy app rather than the new shell.
-@app.get("/memory")
-async def serve_memory(request: Request):
-    return _serve_legacy_index(request)
-
-@app.get("/library")
-async def serve_library(request: Request):
-    return _serve_legacy_index(request)
-
-@app.get("/backgrounds")
-async def serve_backgrounds(request: Request):
-    """Sandbox page for prototyping background effects. No auth required."""
-    return _serve_html_with_nonce(request, abs_join(BASE_DIR, "static/backgrounds.html"))
-
-@app.get("/login")
-async def serve_login(request: Request):
-    return _serve_html_with_nonce(request, abs_join(BASE_DIR, "static/login.html"))
+    raise HTTPException(503, "web UI not built — run `npm run build` in web/")
 
 @app.get("/api/version")
 async def get_version():

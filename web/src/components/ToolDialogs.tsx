@@ -1,25 +1,10 @@
 import { useQuery } from '@tanstack/react-query';
-import { ExternalLinkIcon } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { fetchLibrary, fetchMemories } from '@/api/client';
 import { formatRelativeTime } from '@/lib/utils';
 import { Dialog, DialogContent, DialogSection } from './ui/dialog';
 
-/* Native read views for Brain (memory) and Library. Management actions
-   (tidy, import/export, editing) still live in the legacy UI — linked
-   below the list until they're ported. */
-
-function LegacyLink({ label }: { label: string }) {
-  return (
-    <a
-      href="/legacy"
-      className="inline-flex items-center gap-1.5 text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
-    >
-      <ExternalLinkIcon className="size-3.5" />
-      {label}
-    </a>
-  );
-}
+/* Native read views for Brain (memory) and Library. */
 
 export function BrainDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
   const { t } = useTranslation();
@@ -42,9 +27,6 @@ export function BrainDialog({ open, onClose }: { open: boolean; onClose: () => v
               )}
             </div>
           ))}
-          <div className="pt-2">
-            <LegacyLink label={t('toolDialogs.tidyBrain')} />
-          </div>
         </DialogSection>
       </DialogContent>
     </Dialog>
@@ -72,9 +54,6 @@ export function LibraryDialog({ open, onClose }: { open: boolean; onClose: () =>
               )}
             </div>
           ))}
-          <div className="pt-2">
-            <LegacyLink label={t('toolDialogs.editLibrary')} />
-          </div>
         </DialogSection>
       </DialogContent>
     </Dialog>
