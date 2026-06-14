@@ -136,7 +136,7 @@ function AttachmentList({ msg }: { msg: UiMessage }) {
   );
 }
 
-function MessageActions({ msg, onEdit, copyText }: { msg: UiMessage; onEdit?: () => void; copyText?: string }) {
+function MessageActions({ msg, onEdit, copyText, canDelete = true }: { msg: UiMessage; onEdit?: () => void; copyText?: string; canDelete?: boolean }) {
   const { t } = useTranslation();
   const remove = useChat((s) => s.remove);
   const canMutate = !!msg.dbId;
@@ -148,7 +148,7 @@ function MessageActions({ msg, onEdit, copyText }: { msg: UiMessage; onEdit?: ()
           <PencilIcon className="size-3.5" />
         </ActionIcon>
       )}
-      {canMutate && (
+      {canDelete && canMutate && (
         <ActionIcon label={t('messages.deleteMessage')} destructive onClick={() => void remove(msg.id).catch(console.error)}>
           <Trash2Icon className="size-3.5" />
         </ActionIcon>
@@ -327,7 +327,7 @@ export function Messages() {
                     <FinalImageGrid images={finalImages} />
                     {copyText && (
                       <div className="mt-2 flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100">
-                        <MessageActions msg={m} copyText={copyText} />
+                        <MessageActions msg={m} copyText={copyText} canDelete={false} />
                         {showMetrics && m.metrics && (
                           <span className="text-xs text-muted-foreground/80">
                             {m.metrics.tokens_per_second != null && `${m.metrics.tokens_per_second} tok/s`}
