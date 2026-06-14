@@ -54,3 +54,17 @@ export function ContextMenuItem({ className, ...props }: ContextMenuPrimitive.Co
 export function ContextMenuSeparator({ className, ...props }: ContextMenuPrimitive.ContextMenuSeparatorProps) {
   return <ContextMenuPrimitive.Separator className={cn(separatorClass, className)} {...props} />;
 }
+
+export const ContextMenuSub = ContextMenuPrimitive.Sub;
+
+export function ContextMenuSubTrigger({ className, ...props }: ContextMenuPrimitive.ContextMenuSubTriggerProps) {
+  return <ContextMenuPrimitive.SubTrigger className={cn(itemClass, 'data-[state=open]:bg-accent', className)} {...props} />;
+}
+
+export function ContextMenuSubPopup({ className, ...props }: ContextMenuPrimitive.ContextMenuSubContentProps) {
+  return (
+    <ContextMenuPrimitive.Portal>
+      <ContextMenuPrimitive.SubContent className={cn(popupClass, className)} {...props} />
+    </ContextMenuPrimitive.Portal>
+  );
+}

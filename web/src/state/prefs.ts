@@ -56,6 +56,8 @@ interface PrefsState {
   useRag: boolean;
   useDb: boolean;
   incognito: boolean;
+  /** Names of sidebar folders the user has collapsed. */
+  collapsedFolders: string[];
   setTheme: (t: Theme) => void;
   setDensity: (d: Density) => void;
   setSortMode: (m: SortMode) => void;
@@ -63,6 +65,7 @@ interface PrefsState {
   setVisibility: (key: keyof Visibility, value: boolean) => void;
   resetVisibility: () => void;
   toggle: (key: 'planMode' | 'useRag' | 'useDb' | 'incognito') => void;
+  toggleFolder: (name: string) => void;
 }
 
 export const usePrefs = create<PrefsState>()(
@@ -77,6 +80,7 @@ export const usePrefs = create<PrefsState>()(
       useRag: false,
       useDb: false,
       incognito: false,
+      collapsedFolders: [],
       setTheme: (theme) => set({ theme }),
       setDensity: (density) => set({ density }),
       setSortMode: (sortMode) => set({ sortMode }),
@@ -84,6 +88,11 @@ export const usePrefs = create<PrefsState>()(
       setVisibility: (key, value) => set((s) => ({ visibility: { ...s.visibility, [key]: value } })),
       resetVisibility: () => set({ visibility: DEFAULT_VISIBILITY }),
       toggle: (key) => set((s) => ({ [key]: !s[key] }) as Partial<PrefsState>),
+      toggleFolder: (name) => set((s) => ({
+        collapsedFolders: s.collapsedFolders.includes(name)
+          ? s.collapsedFolders.filter((n) => n !== name)
+          : [...s.collapsedFolders, name],
+      })),
     }),
     {
       name: 'talos-prefs',

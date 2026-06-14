@@ -64,6 +64,12 @@ export async function renameSession(id: string, name: string): Promise<void> {
   await fetch(`/api/session/${id}`, { method: 'PATCH', body: fd, credentials: 'same-origin' });
 }
 
+export async function setSessionFolder(id: string, folder: string | null): Promise<void> {
+  const fd = new FormData();
+  fd.set('folder', folder ?? '');
+  await fetch(`/api/session/${id}`, { method: 'PATCH', body: fd, credentials: 'same-origin' });
+}
+
 export async function deleteSession(id: string): Promise<void> {
   await fetch(`/api/session/${id}`, { method: 'DELETE', credentials: 'same-origin' });
 }

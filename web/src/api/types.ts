@@ -8,6 +8,10 @@ export interface Session {
   last_message_at?: number | string | null;
   message_count: number;
   archived: boolean;
+  /** Starred/pinned — surfaced as "Pinned" in the sidebar. */
+  is_important?: boolean;
+  /** Flat folder/workspace name, or null/empty when ungrouped. */
+  folder?: string | null;
 }
 
 export interface ModelEndpoint {

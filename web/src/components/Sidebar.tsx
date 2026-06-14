@@ -5,13 +5,17 @@ import {
   BookOpenIcon,
   BrainIcon,
   CheckIcon,
+  ChevronRightIcon,
   ExternalLinkIcon,
+  FolderIcon,
+  FolderPlusIcon,
   MessageSquareIcon,
   PencilIcon,
+  PinIcon,
+  PinOffIcon,
   SearchIcon,
   SettingsIcon,
   SquarePenIcon,
-  StarIcon,
   Trash2Icon,
 } from 'lucide-react';
 import { useState } from 'react';
@@ -22,6 +26,7 @@ import {
   fetchSessions,
   markImportant,
   renameSession,
+  setSessionFolder,
 } from '@/api/client';
 import { useAuth } from './auth/AuthGate';
 import type { Session } from '@/api/types';
@@ -34,6 +39,9 @@ import {
   ContextMenuItem,
   ContextMenuPopup,
   ContextMenuSeparator,
+  ContextMenuSub,
+  ContextMenuSubPopup,
+  ContextMenuSubTrigger,
   ContextMenuTrigger,
   Menu,
   MenuItem,
@@ -48,36 +56,46 @@ const SORT_KEYS: Record<SortMode, string> = {
   name: 'sidebar.sortName',
 };
 
-function SessionRow({ session }: { session: Session }) {
+function SessionRow({ session, folders }: { session: Session; folders: string[] }) {
   const { t } = useTranslation();
   const activeId = useChat((s) => s.sessionId);
   const openSession = useChat((s) => s.openSession);
   const newChat = useChat((s) => s.newChat);
   const queryClient = useQueryClient();
-  const [renaming, setRenaming] = useState(false);
-  const [draft, setDraft] = useState(session.name);
+  // 'rename' edits the chat name; 'folder' types a new folder to move into.
+  const [mode, setMode] = useState<'idle' | 'rename' | 'folder'>('idle');
+  const [draft, setDraft] = useState('');
+  const pinned = !!session.is_important;
 
   const refresh = () => queryClient.invalidateQueries({ queryKey: ['sessions'] });
 
-  const commitRename = async () => {
-    setRenaming(false);
-    const name = draft.trim();
-    if (name && name !== session.name) {
-      await renameSession(session.id, name);
-      refresh();
+  const beginRename = () => { setDraft(session.name); setMode('rename'); };
+  const beginNewFolder = () => { setDraft(''); setMode('folder'); };
+
+  const moveToFolder = (folder: string | null) =>
+    void setSessionFolder(session.id, folder).then(refresh);
+
+  const commit = async () => {
+    const value = draft.trim();
+    setMode('idle');
+    if (mode === 'rename') {
+      if (value && value !== session.name) { await renameSession(session.id, value); refresh(); }
+    } else if (mode === 'folder') {
+      if (value && value !== (session.folder ?? '')) { await setSessionFolder(session.id, value); refresh(); }
     }
   };
 
-  if (renaming) {
+  if (mode !== 'idle') {
     return (
       <input
         autoFocus
         value={draft}
+        placeholder={mode === 'folder' ? t('sidebar.folderPlaceholder') : undefined}
         onChange={(e) => setDraft(e.target.value)}
-        onBlur={() => void commitRename()}
+        onBlur={() => void commit()}
         onKeyDown={(e) => {
-          if (e.key === 'Enter') void commitRename();
-          if (e.key === 'Escape') setRenaming(false);
+          if (e.key === 'Enter') void commit();
+          if (e.key === 'Escape') setMode('idle');
         }}
         className="mx-0.5 my-px w-[calc(100%-4px)] rounded-lg border border-ring bg-transparent px-2 py-1.5 text-sm outline-none"
       />
@@ -90,13 +108,14 @@ function SessionRow({ session }: { session: Session }) {
         <button
           type="button"
           onClick={() => void openSession(session.id)}
-          onDoubleClick={() => { setDraft(session.name); setRenaming(true); }}
+          onDoubleClick={beginRename}
           title={session.name}
           className={cn(
             'group flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm transition-colors',
             session.id === activeId ? 'bg-accent text-accent-foreground' : 'hover:bg-accent/70',
           )}
         >
+          {pinned && <PinIcon className="size-3 shrink-0 -rotate-45 text-muted-foreground" />}
           <span className="min-w-0 flex-1 truncate">{session.name || t('common.untitled')}</span>
           <span className="shrink-0 text-[11px] text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100">
             {formatRelativeTime(session.updated_at)}
@@ -104,12 +123,35 @@ function SessionRow({ session }: { session: Session }) {
         </button>
       </ContextMenuTrigger>
       <ContextMenuPopup>
-        <ContextMenuItem onSelect={() => { setDraft(session.name); setRenaming(true); }}>
+        <ContextMenuItem onSelect={beginRename}>
           <PencilIcon /> {t('sidebar.rename')}
         </ContextMenuItem>
-        <ContextMenuItem onSelect={() => void markImportant(session.id, true).then(refresh)}>
-          <StarIcon /> {t('sidebar.markImportant')}
+        <ContextMenuItem onSelect={() => void markImportant(session.id, !pinned).then(refresh)}>
+          {pinned ? <PinOffIcon /> : <PinIcon />} {t(pinned ? 'sidebar.unpin' : 'sidebar.pin')}
         </ContextMenuItem>
+        <ContextMenuSub>
+          <ContextMenuSubTrigger>
+            <FolderIcon /> {t('sidebar.moveToFolder')}
+            <ChevronRightIcon className="ml-auto" />
+          </ContextMenuSubTrigger>
+          <ContextMenuSubPopup>
+            {folders.map((name) => (
+              <ContextMenuItem key={name} onSelect={() => moveToFolder(name)}>
+                <CheckIcon className={name === session.folder ? '' : 'invisible'} />
+                <span className="truncate">{name}</span>
+              </ContextMenuItem>
+            ))}
+            {session.folder && (
+              <ContextMenuItem onSelect={() => moveToFolder(null)}>
+                <CheckIcon className="invisible" /> {t('sidebar.noFolder')}
+              </ContextMenuItem>
+            )}
+            {folders.length > 0 && <ContextMenuSeparator />}
+            <ContextMenuItem onSelect={beginNewFolder}>
+              <FolderPlusIcon /> {t('sidebar.newFolder')}
+            </ContextMenuItem>
+          </ContextMenuSubPopup>
+        </ContextMenuSub>
         <ContextMenuItem onSelect={() => void archiveSession(session.id).then(refresh)}>
           <ArchiveIcon /> {t('sidebar.archive')}
         </ContextMenuItem>
@@ -127,6 +169,32 @@ function SessionRow({ session }: { session: Session }) {
         </ContextMenuItem>
       </ContextMenuPopup>
     </ContextMenu>
+  );
+}
+
+function FolderGroup({ name, sessions, folders }: { name: string; sessions: Session[]; folders: string[] }) {
+  const collapsed = usePrefs((s) => s.collapsedFolders.includes(name));
+  const toggleFolder = usePrefs((s) => s.toggleFolder);
+  return (
+    <div>
+      <button
+        type="button"
+        onClick={() => toggleFolder(name)}
+        className="group flex w-full items-center gap-1.5 rounded-lg px-2 py-1.5 text-left text-xs font-medium text-muted-foreground transition-colors hover:bg-accent/70"
+      >
+        <ChevronRightIcon className={cn('size-3.5 shrink-0 transition-transform', !collapsed && 'rotate-90')} />
+        <FolderIcon className="size-3.5 shrink-0" />
+        <span className="min-w-0 flex-1 truncate">{name}</span>
+        <span className="shrink-0 tabular-nums opacity-70">{sessions.length}</span>
+      </button>
+      {!collapsed && (
+        <div className="space-y-px pl-2">
+          {sessions.map((s) => (
+            <SessionRow key={s.id} session={s} folders={folders} />
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -174,13 +242,23 @@ export function Sidebar({
   const setSortMode = usePrefs((s) => s.setSortMode);
   const visibility = usePrefs((s) => s.visibility);
 
-  const visible = (sessions ?? [])
-    .filter((s) => !s.archived)
-    .sort((a, b) => {
-      if (sortMode === 'newest') return timestampMs(b.created_at) - timestampMs(a.created_at);
-      if (sortMode === 'name') return (a.name || '').localeCompare(b.name || '');
-      return timestampMs(b.last_message_at ?? b.updated_at) - timestampMs(a.last_message_at ?? a.updated_at);
-    });
+  const sorter = (a: Session, b: Session) => {
+    if (sortMode === 'newest') return timestampMs(b.created_at) - timestampMs(a.created_at);
+    if (sortMode === 'name') return (a.name || '').localeCompare(b.name || '');
+    return timestampMs(b.last_message_at ?? b.updated_at) - timestampMs(a.last_message_at ?? a.updated_at);
+  };
+
+  const active = (sessions ?? []).filter((s) => !s.archived);
+  // Every folder that exists anywhere — drives the "Move to folder" submenu.
+  const folderNames = [...new Set(active.map((s) => s.folder).filter((f): f is string => !!f))]
+    .sort((a, b) => a.localeCompare(b));
+  // Pinned chats float to their own section, independent of folder.
+  const pinned = active.filter((s) => s.is_important).sort(sorter);
+  const rest = active.filter((s) => !s.is_important);
+  const grouped = folderNames
+    .map((name) => ({ name, items: rest.filter((s) => s.folder === name).sort(sorter) }))
+    .filter((g) => g.items.length > 0);
+  const ungrouped = rest.filter((s) => !s.folder).sort(sorter);
   const isMac = /Mac|iPhone/.test(navigator.platform);
 
   return (
@@ -239,10 +317,26 @@ export function Sidebar({
         </Menu>
       </div>
       <div className="min-h-0 flex-1 space-y-px overflow-y-auto px-2 pb-2">
-        {visible.map((s) => (
-          <SessionRow key={s.id} session={s} />
+        {pinned.length > 0 && (
+          <>
+            <div className="flex items-center gap-1.5 px-2 pt-1 pb-0.5 text-xs font-medium text-muted-foreground">
+              <PinIcon className="size-3 -rotate-45" /> {t('sidebar.pinned')}
+            </div>
+            {pinned.map((s) => (
+              <SessionRow key={s.id} session={s} folders={folderNames} />
+            ))}
+          </>
+        )}
+        {grouped.map((g) => (
+          <FolderGroup key={g.name} name={g.name} sessions={g.items} folders={folderNames} />
         ))}
-        {visible.length === 0 && (
+        {(pinned.length > 0 || grouped.length > 0) && ungrouped.length > 0 && (
+          <div className="px-2 pt-2 pb-0.5 text-xs font-medium text-muted-foreground">{t('sidebar.chats')}</div>
+        )}
+        {ungrouped.map((s) => (
+          <SessionRow key={s.id} session={s} folders={folderNames} />
+        ))}
+        {active.length === 0 && (
           <div className="flex flex-col items-center gap-1.5 px-2 py-6 text-center text-xs text-muted-foreground">
             <MessageSquareIcon className="size-4 opacity-60" />
             {t('sidebar.noChats')}
