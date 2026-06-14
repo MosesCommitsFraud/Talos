@@ -56,6 +56,8 @@ interface PrefsState {
   useRag: boolean;
   useDb: boolean;
   incognito: boolean;
+  /** Compact (icon-only) sidebar mode. */
+  sidebarCollapsed: boolean;
   /** Names of sidebar folders the user has collapsed. */
   collapsedFolders: string[];
   setTheme: (t: Theme) => void;
@@ -65,6 +67,7 @@ interface PrefsState {
   setVisibility: (key: keyof Visibility, value: boolean) => void;
   resetVisibility: () => void;
   toggle: (key: 'planMode' | 'useRag' | 'useDb' | 'incognito') => void;
+  toggleSidebar: () => void;
   toggleFolder: (name: string) => void;
 }
 
@@ -80,6 +83,7 @@ export const usePrefs = create<PrefsState>()(
       useRag: false,
       useDb: false,
       incognito: false,
+      sidebarCollapsed: false,
       collapsedFolders: [],
       setTheme: (theme) => set({ theme }),
       setDensity: (density) => set({ density }),
@@ -88,6 +92,7 @@ export const usePrefs = create<PrefsState>()(
       setVisibility: (key, value) => set((s) => ({ visibility: { ...s.visibility, [key]: value } })),
       resetVisibility: () => set({ visibility: DEFAULT_VISIBILITY }),
       toggle: (key) => set((s) => ({ [key]: !s[key] }) as Partial<PrefsState>),
+      toggleSidebar: () => set((s) => ({ sidebarCollapsed: !s.sidebarCollapsed })),
       toggleFolder: (name) => set((s) => ({
         collapsedFolders: s.collapsedFolders.includes(name)
           ? s.collapsedFolders.filter((n) => n !== name)
