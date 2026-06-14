@@ -457,18 +457,21 @@ export function Sidebar({
       {/* Footer */}
       {collapsed ? (
         <div className="p-2">
-          <Tooltip label={auth?.username ?? t('sidebar.account')} side="right">
-            <button
-              type="button"
-              onClick={onOpenSettings}
-              aria-label={t('sidebar.account')}
-              className="flex h-9 w-full items-center justify-center rounded-lg transition-colors hover:bg-accent/70"
-            >
-              <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-primary/15 text-[11px] font-semibold text-primary">
+          {/* Same row geometry as the expanded user bar — min-h-10 matches the
+              height the size-7 settings cog gives that row — so the bottom-anchored
+              avatar holds its exact position across the open/close animation. */}
+          <div className="flex min-h-10 items-center px-2">
+            <Tooltip label={auth?.username ?? t('sidebar.account')} side="right">
+              <button
+                type="button"
+                onClick={onOpenSettings}
+                aria-label={t('sidebar.account')}
+                className="flex size-6 shrink-0 items-center justify-center rounded-full bg-primary/15 text-[11px] font-semibold text-primary"
+              >
                 {initial}
-              </span>
-            </button>
-          </Tooltip>
+              </button>
+            </Tooltip>
+          </div>
         </div>
       ) : (
         <div className="space-y-0.5 border-t p-2">

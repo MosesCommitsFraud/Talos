@@ -1,7 +1,7 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
 import { Sidebar } from './components/Sidebar';
-import { ChatHeader } from './components/ChatHeader';
+import { IncognitoToggle } from './components/IncognitoToggle';
 import { Messages } from './components/Messages';
 import { Composer } from './components/Composer';
 import { CommandPalette } from './components/CommandPalette';
@@ -52,8 +52,8 @@ export default function App() {
               onOpenBrain={() => setBrain(true)}
               onOpenLibrary={() => setLibrary(true)}
             />
-            <main className="flex min-w-0 flex-1 flex-col">
-              <ChatHeader onToggleFiles={() => setFiles((v) => !v)} filesOpen={files} />
+            <main className="relative flex min-w-0 flex-1 flex-col">
+              <IncognitoToggle />
               <Messages />
               <Composer />
             </main>
