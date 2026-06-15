@@ -1051,6 +1051,7 @@ function RagPanel() {
         {field('rerank_url', t('settings.rag.rerankUrl'))}
         {field('rerank_model', t('settings.rag.rerankModel'))}
         {field('rerank_api_key', t('settings.rag.rerankApiKey'), 'password')}
+        {field('sparse_model', t('settings.rag.sparseModel'))}
         {field('chat_top_k', t('settings.rag.chatTopK'), 'number')}
         {field('search_top_k', t('settings.rag.searchTopK'), 'number')}
         {field('candidate_top_k', t('settings.rag.candidateTopK'), 'number')}

@@ -125,10 +125,10 @@ def setup_personal_routes(personal_docs_manager, rag_manager, rag_available):
             
             rag = _rag()
             if rag:
-                from src import rag_jobs
+                from src import rag_worker
 
                 personal_docs_manager.add_directory(directory, index=False)
-                job = rag_jobs.start_index_directory(directory, owner=None)
+                job = rag_worker.start_index_directory(directory, owner=None)
                 return {
                     "success": True,
                     "message": f"Started RAG indexing job for {directory}",
@@ -197,9 +197,12 @@ def setup_personal_routes(personal_docs_manager, rag_manager, rag_available):
 
         upload_dir = _personal_upload_dir_for_owner("global")
 
-        total_indexed = 0
         total_failed = 0
         uploaded_files = []
+        # Collect (path, metadata) and hand the whole batch to the RQ worker,
+        # which runs Docling parse + HybridChunk + embed + Qdrant upsert off the
+        # request thread. No per-chunk work here any more.
+        to_index = []
 
         for upload in files:
             try:
@@ -213,46 +216,34 @@ def setup_personal_routes(personal_docs_manager, rag_manager, rag_available):
                     f.write(content_bytes)
 
                 ext = os.path.splitext(safe_name)[1].lower()
-                if ext == ".pdf":
-                    from src.personal_docs import extract_pdf_text
-                    text = extract_pdf_text(file_path)
-                else:
-                    text = content_bytes.decode("utf-8", errors="replace")
-
-                if not text or not text.strip():
-                    total_failed += 1
-                    continue
-
-                # Chunk and index
-                chunks = rag._split_into_chunks(text)
-                for i, chunk in enumerate(chunks):
-                    metadata = {
-                        "source": file_path,
-                        "filename": safe_name,
-                        "stored_filename": stored_name,
-                        "directory": upload_dir,
-                        "type": ext,
-                        "chunk_id": i,
-                    }
-                    if rag.add_document(chunk, metadata):
-                        total_indexed += 1
-                    else:
-                        total_failed += 1
-
+                to_index.append((file_path, {
+                    "source": file_path,
+                    "filename": safe_name,
+                    "stored_filename": stored_name,
+                    "directory": upload_dir,
+                    "type": ext,
+                }))
                 uploaded_files.append(safe_name)
             except Exception as e:
-                logger.error(f"Failed to upload/index {upload.filename}: {e}")
+                logger.error(f"Failed to store upload {upload.filename}: {e}")
                 total_failed += 1
 
         # Track uploads directory
         if uploaded_files and hasattr(personal_docs_manager, "add_directory"):
             personal_docs_manager.add_directory(upload_dir, index=False)
 
+        job = None
+        if to_index:
+            from src import rag_worker
+
+            job = rag_worker.start_index_files(to_index, owner=None)
+
         return {
             "success": True,
             "uploaded": uploaded_files,
-            "indexed_count": total_indexed,
             "failed_count": total_failed,
+            "job_id": (job or {}).get("id"),
+            "status": (job or {}).get("status", "queued" if to_index else "idle"),
         }
 
     @router.delete("/file")

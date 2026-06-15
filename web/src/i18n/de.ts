@@ -383,6 +383,7 @@ const de: typeof en = {
       rerankUrl: 'Rerank-URL',
       rerankModel: 'Rerank-Modell',
       rerankApiKey: 'Rerank-API-Schlüssel',
+      sparseModel: 'Sparse-Modell (BM25)',
       chatTopK: 'Chat Top-k',
       searchTopK: 'Suche Top-k',
       candidateTopK: 'Kandidaten Top-k',

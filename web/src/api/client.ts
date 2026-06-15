@@ -257,6 +257,7 @@ export interface RagConfig {
   rerank_url: string;
   rerank_model: string;
   rerank_api_key: string;
+  sparse_model: string;
   chat_top_k: number;
   search_top_k: number;
   candidate_top_k: number;

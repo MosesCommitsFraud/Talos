@@ -24,6 +24,15 @@ statsmodels
 chromadb-client
 qdrant-client
 fastembed
+# Haystack-orchestrated RAG: Qdrant hybrid (dense+sparse/IDF) + Docling
+# HybridChunker + FastEmbed sparse. Pure-Python/ONNX, ARM64-friendly.
+haystack-ai
+qdrant-haystack
+docling-haystack
+fastembed-haystack
+# Async ingest queue (separate rag-ingest-worker container).
+rq
+redis
 youtube-transcript-api
 markdown
 nh3

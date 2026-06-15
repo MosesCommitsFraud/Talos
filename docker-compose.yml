@@ -29,6 +29,12 @@ services:
       - OPENAI_API_KEY=${OPENAI_API_KEY:-not-needed}
       - EMBEDDING_URL=${EMBEDDING_URL:-http://192.168.10.91:8001/v1/embeddings}
       - EMBEDDING_MODEL=${EMBEDDING_MODEL:-qwen3-embed}
+      # RAG: Qdrant (hybrid dense+sparse) + Redis-backed async ingest. These are
+      # only fallback defaults — the admin sets the real endpoints/models per UI
+      # field (Settings → RAG); the worker receives them as a job snapshot.
+      - QDRANT_URL=${QDRANT_URL:-http://qdrant:6333}
+      - RAG_SPARSE_MODEL=${RAG_SPARSE_MODEL:-Qdrant/bm25}
+      - REDIS_URL=${REDIS_URL:-redis://:${RAG_REDIS_PASSWORD:-AI42@macs}@rag-redis:6379/0}
       - TALOS_SANDBOX_URL=${TALOS_SANDBOX_URL:-http://talos-sandbox:7800}
       # Shared secret the app sends on every sandbox API call. Set this in your
       # .env to a long random string to require auth on the sandbox daemon.
@@ -44,7 +50,65 @@ services:
     depends_on:
       talos-sandbox:
         condition: service_started
+      qdrant:
+        condition: service_started
+      rag-redis:
+        condition: service_started
     restart: unless-stopped
+
+  # Vector store for RAG: dense + sparse (BM25/IDF) named vectors, server-side
+  # RRF hybrid fusion. Multi-arch image (runs on the DGX Spark ARM64).
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: qdrant
+    restart: unless-stopped
+    volumes:
+      - qdrant-data:/qdrant/storage
+    # Internal-only by default; rag-api/worker reach it by service name. Expose
+    # 6333 here if you want the Qdrant dashboard from the host.
+    # ports:
+    #   - "6333:6333"
+    networks:
+      - default
+
+  # Broker for the async ingest queue (RQ).
+  rag-redis:
+    image: valkey/valkey:8
+    container_name: rag-redis
+    restart: unless-stopped
+    command: ["valkey-server", "--requirepass", "${RAG_REDIS_PASSWORD:-AI42@macs}"]
+    volumes:
+      - rag-redis-data:/data
+    networks:
+      - default
+
+  # Pulls ingest jobs off Redis and runs the heavy Docling parse + HybridChunk +
+  # embed + Qdrant upsert, so the web process never blocks on uploads. Same image
+  # as talos-app; shares the uploads volume so files are physically present.
+  rag-ingest-worker:
+    build: .
+    container_name: rag-ingest-worker
+    restart: unless-stopped
+    command: ["rq", "worker", "ingest", "--url", "${REDIS_URL:-redis://:${RAG_REDIS_PASSWORD:-AI42@macs}@rag-redis:6379/0}"]
+    environment:
+      - REDIS_URL=${REDIS_URL:-redis://:${RAG_REDIS_PASSWORD:-AI42@macs}@rag-redis:6379/0}
+      - QDRANT_URL=${QDRANT_URL:-http://qdrant:6333}
+      - EMBEDDING_URL=${EMBEDDING_URL:-http://192.168.10.91:8001/v1/embeddings}
+      - EMBEDDING_MODEL=${EMBEDDING_MODEL:-qwen3-embed}
+      - RAG_SPARSE_MODEL=${RAG_SPARSE_MODEL:-Qdrant/bm25}
+      - PUID=${PUID:-1000}
+      - PGID=${PGID:-1000}
+    volumes:
+      - ./data:/app/data:z
+      - ./logs:/app/logs:z
+      - talos-uploads:/srv/uploads
+    networks:
+      - default
+    depends_on:
+      qdrant:
+        condition: service_started
+      rag-redis:
+        condition: service_started
 
   talos-sandbox:
     build:
@@ -83,3 +147,5 @@ volumes:
   talos-sandbox-home:
   talos-sandbox-state:
   talos-uploads:
+  qdrant-data:
+  rag-redis-data:

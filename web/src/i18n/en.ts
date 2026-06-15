@@ -381,6 +381,7 @@ const en = {
       rerankUrl: 'Rerank URL',
       rerankModel: 'Rerank model',
       rerankApiKey: 'Rerank API key',
+      sparseModel: 'Sparse model (BM25)',
       chatTopK: 'Chat top-k',
       searchTopK: 'Search top-k',
       candidateTopK: 'Candidate top-k',

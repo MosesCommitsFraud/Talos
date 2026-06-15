@@ -14,6 +14,7 @@ class RagPipelineConfig(BaseModel):
     rerank_url: str = ""
     rerank_model: str = ""
     rerank_api_key: str = ""
+    sparse_model: str = ""
     chat_top_k: int = 5
     search_top_k: int = 5
     candidate_top_k: int = 40
@@ -43,6 +44,7 @@ def _public(cfg: dict) -> dict:
         "rerank_url": cfg.get("rerank_url", ""),
         "rerank_model": cfg.get("rerank_model", ""),
         "rerank_api_key_set": bool(cfg.get("rerank_api_key")),
+        "sparse_model": cfg.get("sparse_model", ""),
         "chat_top_k": _clamp_k(cfg.get("chat_top_k", 5)),
         "search_top_k": _clamp_k(cfg.get("search_top_k", 5)),
         "candidate_top_k": _clamp_candidate_k(cfg.get("candidate_top_k", 40)),
@@ -62,12 +64,8 @@ def _reset_rag():
 
 def setup_rag_routes():
     router = APIRouter(prefix="/api/rag", tags=["rag"], dependencies=[Depends(require_admin)])
-    try:
-        from src import rag_jobs
-
-        rag_jobs.start_worker()
-    except Exception:
-        pass
+    # Ingest runs in the separate rag-ingest-worker container (RQ). No in-process
+    # worker to start here — the app only enqueues and reads job status.
 
     @router.get("/config")
     def get_config():
@@ -88,6 +86,7 @@ def setup_rag_routes():
             "rerank_url": body.rerank_url.strip(),
             "rerank_model": body.rerank_model.strip(),
             "rerank_api_key": body.rerank_api_key or current.get("rerank_api_key", ""),
+            "sparse_model": body.sparse_model.strip(),
             "chat_top_k": _clamp_k(body.chat_top_k),
             "search_top_k": _clamp_k(body.search_top_k),
             "candidate_top_k": _clamp_candidate_k(body.candidate_top_k),
@@ -148,30 +147,30 @@ def setup_rag_routes():
 
     @router.get("/jobs")
     def list_rag_jobs():
-        from src import rag_jobs
+        from src import rag_worker
 
-        return {"jobs": rag_jobs.list_jobs()}
+        return {"jobs": rag_worker.list_jobs()}
 
     @router.get("/jobs/diagnostics")
     def rag_jobs_diagnostics():
-        from src import rag_jobs
+        from src import rag_worker
 
-        return rag_jobs.diagnostics()
+        return rag_worker.diagnostics()
 
     @router.get("/jobs/{job_id}")
     def get_rag_job(job_id: str):
-        from src import rag_jobs
+        from src import rag_worker
 
-        job = rag_jobs.get_job(job_id)
+        job = rag_worker.get_job(job_id)
         if not job:
             raise HTTPException(404, "RAG job not found")
         return job
 
     @router.post("/jobs/{job_id}/cancel")
     def cancel_rag_job(job_id: str):
-        from src import rag_jobs
+        from src import rag_worker
 
-        job = rag_jobs.cancel_job(job_id)
+        job = rag_worker.cancel_job(job_id)
         if not job:
             raise HTTPException(404, "RAG job not found")
         return job

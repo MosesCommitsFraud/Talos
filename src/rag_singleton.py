@@ -14,18 +14,13 @@ _RETRY_INTERVAL = 30  # seconds between re-init attempts
 
 
 def get_rag_manager():
-    """Lazy ChromaDB-backed VectorRAG initializer.
+    """Lazy Qdrant/Haystack-backed VectorRAG initializer.
 
-    Returns the VectorRAG instance on first successful init, None if ChromaDB
-    isn't reachable / available. Failed init attempts are throttled to once
-    per _RETRY_INTERVAL seconds so a missing ChromaDB doesn't busy-retry on
-    every request — callers (personal-doc routes etc.) get None back and
-    return a clean 503 to the user instead.
-
-    Historical note: this used to be hardcoded to ``return None`` with a
-    comment about chromadb 1.4.1 / pydantic 2.12 being mutually incompatible.
-    That compat issue is resolved in current pinned versions
-    (chromadb 1.5.x + pydantic 2.13.x), so the real initializer is back.
+    Returns the VectorRAG instance on first successful init, None if Qdrant /
+    the Haystack RAG dependencies aren't reachable or installed. Failed init
+    attempts are throttled to once per _RETRY_INTERVAL seconds so a missing
+    Qdrant doesn't busy-retry on every request — callers (personal-doc routes
+    etc.) get None back and return a clean 503 to the user instead.
     """
     global rag_instance, _last_attempt
 
@@ -49,7 +44,7 @@ def get_rag_manager():
             logger.warning("VectorRAG created but not healthy, will retry later")
             rag_instance = None
         else:
-            logger.info("Initialized VectorRAG with ChromaDB")
+            logger.info("Initialized VectorRAG (Qdrant hybrid + Haystack)")
 
     except ImportError as e:
         logger.warning(f"VectorRAG not available: {e}")
