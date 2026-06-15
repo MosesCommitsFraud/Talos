@@ -34,6 +34,7 @@ const de: typeof en = {
     sortNewest: 'Neueste zuerst',
     sortName: 'Name A–Z',
     noChats: 'Noch keine Chats',
+    running: 'Generiert…',
     settings: 'Einstellungen',
     settingsHidden: 'Einstellungen — bei ausgeblendet über ⌘K erneut öffnen',
     rename: 'Umbenennen',

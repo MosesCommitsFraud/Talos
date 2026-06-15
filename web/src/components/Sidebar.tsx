@@ -31,7 +31,7 @@ import {
 } from '@/api/client';
 import { useAuth } from './auth/AuthGate';
 import type { Session } from '@/api/types';
-import { useChat } from '@/state/chat';
+import { selectIsStreaming, useChat } from '@/state/chat';
 import { usePrefs, type SortMode } from '@/state/prefs';
 import { cn, formatRelativeTime, timestampMs } from '@/lib/utils';
 import { Kbd, Tooltip } from './ui/misc';
@@ -70,6 +70,7 @@ const SORT_KEYS: Record<SortMode, string> = {
 function SessionRow({ session, folders }: { session: Session; folders: string[] }) {
   const { t } = useTranslation();
   const activeId = useChat((s) => s.sessionId);
+  const streaming = useChat(selectIsStreaming(session.id));
   const openSession = useChat((s) => s.openSession);
   const newChat = useChat((s) => s.newChat);
   const queryClient = useQueryClient();
@@ -128,9 +129,20 @@ function SessionRow({ session, folders }: { session: Session; folders: string[] 
         >
           {pinned && <PinIcon className="size-3 shrink-0 -rotate-45 text-muted-foreground" />}
           <span className="min-w-0 flex-1 truncate">{session.name || t('common.untitled')}</span>
-          <span className="shrink-0 text-[11px] text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100">
-            {formatRelativeTime(session.updated_at)}
-          </span>
+          {streaming ? (
+            // Running turn — a pulsing accent dot, shown even when this chat
+            // isn't the one on screen so background turns are visible.
+            <Tooltip label={t('sidebar.running')} side="right">
+              <span className="relative flex size-2 shrink-0" aria-label={t('sidebar.running')}>
+                <span className="absolute inline-flex size-full animate-ping rounded-full bg-primary opacity-75" />
+                <span className="relative inline-flex size-2 rounded-full bg-primary" />
+              </span>
+            </Tooltip>
+          ) : (
+            <span className="shrink-0 text-[11px] text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100">
+              {formatRelativeTime(session.updated_at)}
+            </span>
+          )}
         </button>
       </ContextMenuTrigger>
       <ContextMenuPopup>

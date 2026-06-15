@@ -32,6 +32,7 @@ const en = {
     sortNewest: 'Newest first',
     sortName: 'Name A–Z',
     noChats: 'No chats yet',
+    running: 'Generating…',
     settings: 'Settings',
     settingsHidden: 'Settings — re-open via ⌘K if hidden',
     rename: 'Rename',

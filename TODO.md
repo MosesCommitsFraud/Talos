@@ -1,5 +1,8 @@
-testing needed
-header in chat needs to go or displayed differently
-base chat where nothing is open -> chat input in middle
 themes
-remove legacy UI
+sql sometimes not accepted???
+parallel chats not running
+endpunkt für externes RAG
+mehrere SQL verbindungen
+besseres kontextmenu
+time not in seconds but in h m s
+settings fehlen paar scrollbars

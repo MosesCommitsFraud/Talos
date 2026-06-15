@@ -17,8 +17,28 @@ export interface UiMessage {
   error?: boolean;
 }
 
+/** Live runtime for one session, kept in the store keyed by session id so it
+ *  survives switching chats. A turn that is mid-flight keeps streaming into its
+ *  own runtime even while a different session (or a fresh draft) is on screen —
+ *  the top-level mirror fields below only ever reflect the *active* session. */
+interface SessionRuntime {
+  messages: UiMessage[];
+  streaming: boolean;
+  turnStartedAt: number | null;
+  abort: AbortController | null;
+}
+
+const emptyRuntime = (): SessionRuntime => ({ messages: [], streaming: false, turnStartedAt: null, abort: null });
+
 interface ChatState {
+  /** Per-session live state. Outlives chat switches so background turns keep
+   *  accumulating thinking/tool/delta events into the right session. */
+  runtimes: Record<string, SessionRuntime>;
+
   sessionId: string | null;
+  // ── Mirror of runtimes[sessionId] for the active session ──────────────────
+  // These exist so every view selector (s.messages, s.streaming, …) keeps
+  // working unchanged; they are recomputed on every runtime write.
   messages: UiMessage[];
   streaming: boolean;
   /** ms epoch when the current turn began (set on send, cleared when it ends).
@@ -27,7 +47,6 @@ interface ChatState {
   turnStartedAt: number | null;
   /** Model used when the next send has to create a session first. */
   pendingModel: { endpointId: string; model: string } | null;
-  abort: AbortController | null;
 
   setPendingModel: (m: ChatState['pendingModel']) => void;
   newChat: () => void;
@@ -37,6 +56,11 @@ interface ChatState {
   edit: (msgId: string, content: string) => Promise<void>;
   remove: (msgId: string) => Promise<void>;
 }
+
+/** True iff a turn is currently streaming for `id`. Used by the sidebar to
+ *  render a running indicator on chats other than the one on screen. */
+export const selectIsStreaming = (id: string | null | undefined) => (s: ChatState) =>
+  !!id && !!s.runtimes[id]?.streaming;
 
 let nextId = 0;
 const uid = () => `m${Date.now()}-${nextId++}`;
@@ -111,46 +135,82 @@ declare global {
   interface Window { __talosChat?: typeof useChat }
 }
 
-export const useChat = create<ChatState>((set, get) => ({
+export const useChat = create<ChatState>((set, get) => {
+  /** Write into one session's runtime, keyed by id rather than "the active
+   *  session", and mirror to the top-level fields when that session is the one
+   *  on screen. This is the single mutation path so a background turn and the
+   *  visible view never fight over the same `messages` array. */
+  const writeRuntime = (id: string, updater: (rt: SessionRuntime) => Partial<SessionRuntime>) => {
+    set((s) => {
+      const prev = s.runtimes[id] ?? emptyRuntime();
+      const next: SessionRuntime = { ...prev, ...updater(prev) };
+      const runtimes = { ...s.runtimes, [id]: next };
+      return s.sessionId === id
+        ? { runtimes, messages: next.messages, streaming: next.streaming, turnStartedAt: next.turnStartedAt }
+        : { runtimes };
+    });
+  };
+
+  /** Point the view at a session and mirror its runtime (or a blank draft for
+   *  the null/new-chat case). Never tears down a runtime, so the previous
+   *  session keeps streaming in the background. */
+  const activate = (id: string | null) => {
+    const rt = (id && get().runtimes[id]) || emptyRuntime();
+    set({ sessionId: id, messages: rt.messages, streaming: rt.streaming, turnStartedAt: rt.turnStartedAt });
+  };
+
+  return {
+  runtimes: {},
   sessionId: null,
   messages: [],
   streaming: false,
   turnStartedAt: null,
   pendingModel: null,
-  abort: null,
 
   setPendingModel: (pendingModel) => set({ pendingModel }),
 
   newChat: () => {
-    get().abort?.abort();
-    set({ sessionId: null, messages: [], streaming: false, turnStartedAt: null, abort: null });
+    // Switch to a fresh draft without aborting any in-flight turn — that turn
+    // keeps streaming into its own runtime and can be returned to.
+    activate(null);
   },
 
   openSession: async (id) => {
-    get().abort?.abort();
-    set({ sessionId: id, messages: [], streaming: false, turnStartedAt: null, abort: null });
+    // Instant switch to whatever we already have in memory (no blank flash).
+    activate(id);
+    // A runtime we built this page session — whether mid-stream or finished —
+    // is authoritative and richer than a refetch (it holds the live-streamed
+    // thinking/tool detail). Only cold-load from the server when we have none;
+    // a full reload (runtimes empty) is what re-syncs from the backend.
+    if (get().runtimes[id]) return;
+
     const detail = await fetchSession(id);
     // A later click may have switched sessions while we were fetching.
     if (get().sessionId !== id) return;
-    set({
-      messages: (detail.history ?? [])
-        .filter((m) => m.role === 'user' || m.role === 'assistant')
-        .map((m) => ({
-          id: uid(),
-          dbId: m.metadata?._db_id,
-          role: m.role as 'user' | 'assistant',
-          content: m.role === 'user' ? displayUserContent(m.content) : m.content,
-          attachments: m.role === 'user' ? attachmentsFromMetadata(m.metadata) : undefined,
-          thinking: m.role === 'assistant' ? thinkingFromMetadata(m.metadata) : undefined,
-          metrics: m.role === 'assistant' ? metricsFromMetadata(m.metadata) : undefined,
-          tools: m.role === 'assistant' ? toolCallsFromMetadata(m.metadata) : undefined,
-        })),
-    });
+    // Guard against a turn that started streaming into this id meanwhile.
+    if (get().runtimes[id]?.streaming) return;
+
+    const messages = (detail.history ?? [])
+      .filter((m) => m.role === 'user' || m.role === 'assistant')
+      .map((m) => ({
+        id: uid(),
+        dbId: m.metadata?._db_id,
+        role: m.role as 'user' | 'assistant',
+        content: m.role === 'user' ? displayUserContent(m.content) : m.content,
+        attachments: m.role === 'user' ? attachmentsFromMetadata(m.metadata) : undefined,
+        thinking: m.role === 'assistant' ? thinkingFromMetadata(m.metadata) : undefined,
+        metrics: m.role === 'assistant' ? metricsFromMetadata(m.metadata) : undefined,
+        tools: m.role === 'assistant' ? toolCallsFromMetadata(m.metadata) : undefined,
+      }));
+    writeRuntime(id, () => ({ ...emptyRuntime(), messages }));
   },
 
   send: async (text, opts) => {
     const state = get();
-    if (state.streaming || (!text.trim() && !opts?.attachments?.length)) return;
+    // Block re-entry only for the session we'd send into, not globally — a
+    // different chat may legitimately be streaming.
+    const activeRt = state.sessionId ? state.runtimes[state.sessionId] : undefined;
+    if (activeRt?.streaming || (!text.trim() && !opts?.attachments?.length)) return;
 
     let sessionId = state.sessionId;
     if (!sessionId) {
@@ -158,15 +218,23 @@ export const useChat = create<ChatState>((set, get) => ({
       if (!pm) throw new Error('No model selected');
       const session = await createSession({ endpointId: pm.endpointId, model: pm.model });
       sessionId = session.id;
-      set({ sessionId });
+      // Seed an empty runtime and activate it before the user message lands.
+      writeRuntime(sessionId, () => emptyRuntime());
+      activate(sessionId);
       opts?.onSessionCreated?.(sessionId);
     }
+    const sid = sessionId;
 
     const attachments = opts?.attachments ?? [];
     const userMsg: UiMessage = { id: uid(), role: 'user', content: text, attachments };
     const aiMsg: UiMessage = { id: uid(), role: 'assistant', content: '', streaming: true };
     const abort = new AbortController();
-    set({ messages: [...get().messages, userMsg, aiMsg], streaming: true, turnStartedAt: Date.now(), abort });
+    writeRuntime(sid, (rt) => ({
+      messages: [...rt.messages, userMsg, aiMsg],
+      streaming: true,
+      turnStartedAt: Date.now(),
+      abort,
+    }));
 
     // The agent loop emits multiple assistant rounds per turn, delimited by
     // agent_step events. Each round gets its own message bubble (with its own
@@ -174,27 +242,27 @@ export const useChat = create<ChatState>((set, get) => ({
     // receiving deltas rather than closing over aiMsg.
     let aiId = aiMsg.id;
     const patchAi = (patch: Partial<UiMessage> | ((m: UiMessage) => Partial<UiMessage>)) => {
-      set({
-        messages: get().messages.map((m) =>
+      writeRuntime(sid, (rt) => ({
+        messages: rt.messages.map((m) =>
           m.id === aiId ? { ...m, ...(typeof patch === 'function' ? patch(m) : patch) } : m,
         ),
-      });
+      }));
     };
     const startNewRound = () => {
-      const current = get().messages.find((m) => m.id === aiId);
+      const current = get().runtimes[sid]?.messages.find((m) => m.id === aiId);
       // Nothing rendered yet — reuse the empty bubble instead of stacking one.
       if (current && !current.content && !current.thinking && !current.tools?.length) return;
       patchAi({ streaming: false });
       const next: UiMessage = { id: uid(), role: 'assistant', content: '', streaming: true };
       aiId = next.id;
-      set({ messages: [...get().messages, next] });
+      writeRuntime(sid, (rt) => ({ messages: [...rt.messages, next] }));
     };
 
     const prefs = usePrefs.getState();
     try {
       await streamChat({
         message: text,
-        sessionId,
+        sessionId: sid,
         flags: {
           planMode: prefs.planMode,
           useRag: prefs.useRag,
@@ -253,11 +321,11 @@ export const useChat = create<ChatState>((set, get) => ({
       // history once so the user message gets its db id too (enables
       // edit/delete without a manual reload).
       try {
-        const detail = await fetchSession(sessionId);
+        const detail = await fetchSession(sid);
         const hist = (detail.history ?? []).filter((m) => m.role === 'user' || m.role === 'assistant');
-        const msgs = get().messages;
-        if (get().sessionId === sessionId && hist.length === msgs.length) {
-          set({ messages: msgs.map((m, i) => ({ ...m, dbId: hist[i]?.metadata?._db_id ?? m.dbId })) });
+        const msgs = get().runtimes[sid]?.messages ?? [];
+        if (hist.length === msgs.length) {
+          writeRuntime(sid, () => ({ messages: msgs.map((m, i) => ({ ...m, dbId: hist[i]?.metadata?._db_id ?? m.dbId })) }));
         }
       } catch { /* best-effort */ }
     } catch (err) {
@@ -269,16 +337,16 @@ export const useChat = create<ChatState>((set, get) => ({
       }
     } finally {
       patchAi({ streaming: false });
-      set({ streaming: false, turnStartedAt: null, abort: null });
+      // Clear only this session's turn flags — a different chat may be active.
+      writeRuntime(sid, () => ({ streaming: false, turnStartedAt: null, abort: null }));
     }
   },
 
   stop: () => {
-    const { abort, sessionId } = get();
-    abort?.abort();
-    if (sessionId) {
-      fetch(`/api/chat/stop/${sessionId}`, { method: 'POST', credentials: 'same-origin' }).catch(() => {});
-    }
+    const { sessionId, runtimes } = get();
+    if (!sessionId) return;
+    runtimes[sessionId]?.abort?.abort();
+    fetch(`/api/chat/stop/${sessionId}`, { method: 'POST', credentials: 'same-origin' }).catch(() => {});
   },
 
   edit: async (msgId, content) => {
@@ -291,7 +359,7 @@ export const useChat = create<ChatState>((set, get) => ({
     if (msg.role !== 'user') {
       // Assistant rows are edited in place (no resend semantics).
       await editMessage(sessionId, msg.dbId, content);
-      set({ messages: get().messages.map((m) => (m.id === msgId ? { ...m, content } : m)) });
+      writeRuntime(sessionId, (rt) => ({ messages: rt.messages.map((m) => (m.id === msgId ? { ...m, content } : m)) }));
       return;
     }
 
@@ -300,7 +368,7 @@ export const useChat = create<ChatState>((set, get) => ({
     // through the normal stream path with the original attachments.
     const dropIds = messages.slice(idx).map((m) => m.dbId).filter((id): id is string => !!id);
     await deleteMessages(sessionId, dropIds);
-    set({ messages: messages.slice(0, idx) });
+    writeRuntime(sessionId, () => ({ messages: messages.slice(0, idx) }));
     await get().send(content, { attachments: msg.attachments });
   },
 
@@ -309,9 +377,10 @@ export const useChat = create<ChatState>((set, get) => ({
     const msg = messages.find((m) => m.id === msgId);
     if (!sessionId || !msg?.dbId) throw new Error('Message not deletable yet');
     await deleteMessages(sessionId, [msg.dbId]);
-    set({ messages: get().messages.filter((m) => m.id !== msgId) });
+    writeRuntime(sessionId, (rt) => ({ messages: rt.messages.filter((m) => m.id !== msgId) }));
   },
-}));
+  };
+});
 
 // Dev-only handle so the store can be driven from the console / preview evals
 // (dynamic import() in DevTools resolves a second module instance under HMR).
