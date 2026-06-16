@@ -395,7 +395,7 @@ const en = {
       contextPrompt: 'Context prompt',
       hint: {
         enabled: 'Globally turns knowledge-base retrieval in chat on/off.',
-        embeddingUrl: 'OpenAI-compatible /v1 endpoint of the embedding model (vLLM). "/embeddings" is appended automatically.',
+        embeddingUrl: 'OpenAI-compatible embeddings endpoint (vLLM). Both "…/v1" and "…/v1/embeddings" work — the code normalizes.',
         embeddingModel: 'Model name at the embedding endpoint. Determines the collection vector dimension.',
         qdrantUrl: 'Qdrant address. In Docker Compose use the service name, not localhost/host IP.',
         qdrantApiKey: 'Only needed for secured/cloud Qdrant. Leave empty for local Qdrant.',

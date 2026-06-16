@@ -398,7 +398,7 @@ const de: typeof en = {
       contextPrompt: 'Kontext-Prompt',
       hint: {
         enabled: 'Schaltet die Wissensbasis-Suche im Chat global ein/aus.',
-        embeddingUrl: 'OpenAI-kompatibler /v1-Endpoint des Embedding-Modells (vLLM). „/embeddings" wird automatisch angehängt.',
+        embeddingUrl: 'OpenAI-kompatibler Embeddings-Endpoint (vLLM). Sowohl „…/v1" als auch „…/v1/embeddings" funktionieren — der Code normalisiert.',
         embeddingModel: 'Modellname am Embedding-Endpoint. Bestimmt die Vektor-Dimension der Collection.',
         qdrantUrl: 'Qdrant-Adresse. Im Docker-Compose der Service-Name, nicht localhost/Host-IP.',
         qdrantApiKey: 'Nur bei abgesichertem/Cloud-Qdrant nötig. Leer lassen für lokales Qdrant.',
