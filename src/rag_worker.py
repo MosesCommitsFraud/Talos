@@ -90,12 +90,20 @@ def _apply_snapshot(snap: Optional[Dict[str, Any]]) -> None:
 
 
 def _fresh_rag():
-    """Reset and rebuild the RAG singleton inside the worker process."""
+    """Reset and rebuild the RAG singleton inside the worker process.
+
+    Raises with the *actual* init failure (missing deps / Qdrant unreachable /
+    embedding endpoint down) so the reason shows up in the job's error instead
+    of a generic "RAG not available".
+    """
     import src.rag_singleton as rs
 
     rs.rag_instance = None
     rs._last_attempt = 0
-    return rs.get_rag_manager()
+    rag = rs.get_rag_manager()
+    if rag is None:
+        raise RuntimeError(rs.last_init_error() or "RAG system is not available (check Qdrant / embedding config)")
+    return rag
 
 
 # ---------------------------------------------------------------------------

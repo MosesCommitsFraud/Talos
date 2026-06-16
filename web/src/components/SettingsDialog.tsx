@@ -1145,7 +1145,7 @@ function RagPanel() {
 
       <Section title={t('settings.rag.indexedDocs')} padded>
         {docs.data && docs.data.available === false ? (
-          <p className="text-xs text-muted-foreground">{t('settings.rag.ragUnavailable')}</p>
+          <p className="text-xs text-destructive-foreground">{docs.data.error || t('settings.rag.ragUnavailable')}</p>
         ) : !docs.data || docs.data.documents.length === 0 ? (
           <p className="text-xs text-muted-foreground">{t('settings.rag.noDocs')}</p>
         ) : (

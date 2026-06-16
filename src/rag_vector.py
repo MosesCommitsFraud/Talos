@@ -102,6 +102,7 @@ class VectorRAG:
         self._healthy = False
         self._backend = "qdrant"
         self._last_rerank_error = ""
+        self._last_error = ""
         self._sparse_model = _DEFAULT_SPARSE_MODEL
         # Lazily built, cached Haystack components.
         self._retriever = None
@@ -125,7 +126,8 @@ class VectorRAG:
 
             qdrant_url = os.getenv("QDRANT_URL", "").strip()
             if not qdrant_url:
-                logger.warning("RAG disabled: QDRANT_URL is not configured")
+                self._last_error = "QDRANT_URL is not configured (Settings → RAG → Qdrant URL)"
+                logger.warning("RAG disabled: %s", self._last_error)
                 self._healthy = False
                 return False
 
@@ -133,25 +135,49 @@ class VectorRAG:
                 os.getenv("RAG_SPARSE_MODEL", "").strip() or _DEFAULT_SPARSE_MODEL
             )
 
-            from src.embeddings import get_embedding_client
+            try:
+                from src.embeddings import get_embedding_client
+            except Exception as e:
+                raise RuntimeError(f"embedding client import failed: {e}") from e
 
             client = get_embedding_client()
             if client is None:
                 raise RuntimeError("No embedding backend available")
-            self._dim = int(client.get_sentence_embedding_dimension())
+            try:
+                self._dim = int(client.get_sentence_embedding_dimension())
+            except Exception as e:
+                raise RuntimeError(
+                    f"embedding endpoint unreachable at {_embed_base_url()} "
+                    f"(model={os.getenv('EMBEDDING_MODEL', '')}): {e}"
+                ) from e
 
-            self._store = self._build_store(recreate=False)
-            count = self._store.count_documents()
+            try:
+                self._store = self._build_store(recreate=False)
+                count = self._store.count_documents()
+            except ImportError as e:
+                raise RuntimeError(
+                    "Haystack/Qdrant RAG dependencies are not installed in this "
+                    f"image — rebuild it (docker compose build). Detail: {e}"
+                ) from e
+            except Exception as e:
+                raise RuntimeError(f"Qdrant connection failed at {qdrant_url}: {e}") from e
+
             logger.info(
                 "VectorRAG ready (Qdrant hybrid, %s docs, dim=%s, sparse=%s) url=%s",
                 count, self._dim, self._sparse_model, qdrant_url,
             )
+            self._last_error = ""
             self._healthy = True
             return True
         except Exception as e:
-            logger.error(f"VectorRAG init failed: {e}")
+            self._last_error = f"{type(e).__name__}: {e}"
+            logger.error(f"VectorRAG init failed: {self._last_error}")
             self._healthy = False
             return False
+
+    @property
+    def last_error(self) -> str:
+        return self._last_error
 
     def _build_store(self, recreate: bool = False):
         from haystack_integrations.document_stores.qdrant import QdrantDocumentStore

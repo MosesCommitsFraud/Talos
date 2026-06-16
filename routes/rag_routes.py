@@ -177,12 +177,12 @@ def setup_rag_routes():
 
     @router.get("/documents")
     def list_documents():
-        from src.rag_singleton import get_rag_manager
+        from src.rag_singleton import get_rag_manager, last_init_error
 
         rag = get_rag_manager()
         if not rag or not getattr(rag, "healthy", False):
-            # Don't 503 — the UI shows a friendly "RAG not available" state.
-            return {"available": False, "documents": []}
+            # Don't 503 — the UI shows a friendly state with the real reason.
+            return {"available": False, "documents": [], "error": last_init_error()}
         return {"available": True, "documents": rag.list_documents()}
 
     @router.delete("/documents")
