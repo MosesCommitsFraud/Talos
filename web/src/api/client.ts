@@ -261,6 +261,11 @@ export interface RagConfig {
   chat_top_k: number;
   search_top_k: number;
   candidate_top_k: number;
+  similarity_threshold: number;
+  rerank_min_score: number;
+  max_context_chars: number;
+  query_prefix: string;
+  context_prompt: string;
 }
 export const fetchRagConfig = () => getJSON<RagConfig>('/api/rag/config');
 

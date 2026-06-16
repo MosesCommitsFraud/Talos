@@ -62,6 +62,22 @@ class ChatProcessor:
             pass
         return default
 
+    def _rag_cfg(self) -> dict:
+        try:
+            from src.settings import get_setting
+
+            cfg = get_setting("rag_pipeline", {})
+            return cfg if isinstance(cfg, dict) else {}
+        except Exception:
+            return {}
+
+    def _rag_float_setting(self, key: str, default: float) -> float:
+        val = self._rag_cfg().get(key)
+        try:
+            return float(val) if val is not None and val != "" else default
+        except Exception:
+            return default
+
     def _hybrid_retrieve(self, message: str, mem_entries: list, k: int = 5) -> list:
         """Retrieve memories relevant to the message.
 
@@ -270,6 +286,8 @@ class ChatProcessor:
                     # when enabled, indexed knowledge is available to every user.
                     rag_k = min(self._rag_k_setting("chat_top_k", 5), 20)
                     candidate_k = max(rag_k, min(self._rag_k_setting("candidate_top_k", 40), 100))
+                    rerank_min = self._rag_float_setting("rerank_min_score", self.RAG_RERANK_MIN_SCORE)
+                    sim_threshold = self._rag_float_setting("similarity_threshold", self.RAG_SIMILARITY_THRESHOLD)
                     results = rag_manager.search(message, k=rag_k, owner=None, candidate_k=candidate_k)
                     # Keep top retrieved/reranked chunks. Do not require keyword overlap:
                     # vector-only matches often have keyword_score=0 but are still correct.
@@ -278,12 +296,12 @@ class ChatProcessor:
                         relevant = [
                             r for r in results
                             if r.get("rerank_score") is not None
-                            and float(r.get("rerank_score") or 0) >= self.RAG_RERANK_MIN_SCORE
+                            and float(r.get("rerank_score") or 0) >= rerank_min
                         ]
                     else:
-                        relevant = [r for r in results if r.get("similarity", 0) >= self.RAG_SIMILARITY_THRESHOLD] or results[:rag_k]
+                        relevant = [r for r in results if r.get("similarity", 0) >= sim_threshold] or results[:rag_k]
                     if relevant:
-                        logger.info(f"RAG: {len(relevant)}/{len(results)} results above threshold {self.RAG_SIMILARITY_THRESHOLD}")
+                        logger.info(f"RAG: {len(relevant)}/{len(results)} results above threshold {sim_threshold}")
                         rag_sources = [
                             {
                                 "filename": r["metadata"].get("filename", r["metadata"].get("source", "unknown")),
@@ -292,14 +310,21 @@ class ChatProcessor:
                             }
                             for r in relevant
                         ]
-                        rag_content = (
+                        # Admin-overridable instruction prefacing the retrieved context.
+                        context_prompt = (self._rag_cfg().get("context_prompt") or "").strip() or (
                             "Retrieved knowledge base context. Use this context to answer the user's current question. "
-                            "If the answer is present here, prefer it over general knowledge.\n\n"
-                        ) + "\n\n---\n\n".join(
+                            "If the answer is present here, prefer it over general knowledge."
+                        )
+                        rag_content = (context_prompt + "\n\n") + "\n\n---\n\n".join(
                             f"[{s['filename']}]\n{r['document']}" for s, r in zip(rag_sources, relevant)
                         )
-                        if len(rag_content) > 10000:
-                            rag_content = rag_content[:10000] + "\n[Truncated]"
+                        try:
+                            max_chars = int(self._rag_cfg().get("max_context_chars") or 10000)
+                        except Exception:
+                            max_chars = 10000
+                        max_chars = max(500, min(max_chars, 100000))
+                        if len(rag_content) > max_chars:
+                            rag_content = rag_content[:max_chars] + "\n[Truncated]"
                         preface.append(untrusted_context_message("retrieved documents", rag_content))
             except Exception as e:
                 logger.warning(f"RAG retrieval failed: {e}")

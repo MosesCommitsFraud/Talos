@@ -73,6 +73,7 @@ def _apply_saved_rag_config() -> None:
         "rerank_model": "RERANK_MODEL",
         "rerank_api_key": "RERANK_API_KEY",
         "sparse_model": "RAG_SPARSE_MODEL",
+        "query_prefix": "RAG_QUERY_PREFIX",
     }
     for key, env_name in mapping.items():
         value = str(cfg.get(key) or "").strip()
@@ -322,7 +323,12 @@ class VectorRAG:
             return []
         try:
             fetch_k = max(int(candidate_k or k * 5), k)
-            dense = self._dense_text_embedder().run(text=query)["embedding"]
+            # Qwen3-Embedding recommends an instruction prefix on the *query*
+            # (e.g. "Instruct: Given a query, retrieve relevant passages\nQuery: ")
+            # while documents are embedded without one. Applied to the dense
+            # query only; the sparse/BM25 side stays on the raw query terms.
+            prefix = os.getenv("RAG_QUERY_PREFIX", "")
+            dense = self._dense_text_embedder().run(text=(prefix + query) if prefix else query)["embedding"]
             sparse = self._sparse_text_embedder().run(text=query)["sparse_embedding"]
             response = self._hybrid_retriever().run(
                 query_embedding=dense,

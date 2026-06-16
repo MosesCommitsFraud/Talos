@@ -1049,12 +1049,34 @@ function RagPanel() {
     deleteRagDocument(source).then(() => queryClient.invalidateQueries({ queryKey: ['rag-documents'] }));
   if (!draft) return <Page><p className="text-sm text-muted-foreground">{t('common.loading')}</p></Page>;
   const set = (k: keyof RagConfig, v: unknown) => setDraft({ ...draft, [k]: v } as RagConfig);
-  const field = (k: keyof RagConfig, label: string, type = 'text') => (
-    <Row label={label}>
-      <Input className="w-56" type={type} value={String(draft[k] ?? '')}
-        onChange={(e) => set(k, type === 'number' ? Number(e.target.value) : e.target.value)} />
-    </Row>
-  );
+  const field = (
+    k: keyof RagConfig,
+    label: string,
+    opts: { type?: string; hint?: string; def?: string | number } = {},
+  ) => {
+    const type = opts.type ?? 'text';
+    const hint = (opts.hint || opts.def !== undefined) ? (
+      <>
+        {opts.hint}
+        {opts.def !== undefined && (
+          <>
+            {opts.hint ? ' · ' : ''}
+            {t('settings.rag.defaultLabel')}: <code className="rounded bg-muted px-1 font-mono text-[11px]">{String(opts.def) || '—'}</code>
+          </>
+        )}
+      </>
+    ) : undefined;
+    return (
+      <Row label={label} hint={hint}>
+        {type === 'textarea' ? (
+          <Textarea className="min-h-[64px] w-full sm:w-80" value={String(draft[k] ?? '')} onChange={(e) => set(k, e.target.value)} />
+        ) : (
+          <Input className="w-56" type={type} step={type === 'number' ? 'any' : undefined} value={String(draft[k] ?? '')}
+            onChange={(e) => set(k, type === 'number' ? Number(e.target.value) : e.target.value)} />
+        )}
+      </Row>
+    );
+  };
   const doc = (fn: () => Promise<unknown>, ok: string) => {
     setDocMsg(null);
     fn().then(() => setDocMsg({ text: ok, ok: true })).catch((e) => setDocMsg({ text: (e as Error).message, ok: false }));
@@ -1062,18 +1084,29 @@ function RagPanel() {
   return (
     <Page>
       <Section title={t('settings.rag.pipeline')}>
-        <Row label={t('settings.rag.ragEnabled')}><Switch checked={draft.enabled} onCheckedChange={(v) => set('enabled', v)} /></Row>
-        {field('embedding_url', t('settings.rag.embeddingUrl'))}
-        {field('embedding_model', t('settings.rag.embeddingModel'))}
-        {field('qdrant_url', t('settings.rag.qdrantUrl'))}
-        {field('qdrant_api_key', t('settings.rag.qdrantApiKey'), 'password')}
-        {field('rerank_url', t('settings.rag.rerankUrl'))}
-        {field('rerank_model', t('settings.rag.rerankModel'))}
-        {field('rerank_api_key', t('settings.rag.rerankApiKey'), 'password')}
-        {field('sparse_model', t('settings.rag.sparseModel'))}
-        {field('chat_top_k', t('settings.rag.chatTopK'), 'number')}
-        {field('search_top_k', t('settings.rag.searchTopK'), 'number')}
-        {field('candidate_top_k', t('settings.rag.candidateTopK'), 'number')}
+        <Row label={t('settings.rag.ragEnabled')} hint={t('settings.rag.hint.enabled')}><Switch checked={draft.enabled} onCheckedChange={(v) => set('enabled', v)} /></Row>
+        {field('embedding_url', t('settings.rag.embeddingUrl'), { hint: t('settings.rag.hint.embeddingUrl'), def: 'http://host:8001/v1' })}
+        {field('embedding_model', t('settings.rag.embeddingModel'), { hint: t('settings.rag.hint.embeddingModel'), def: 'qwen3-embed' })}
+        {field('qdrant_url', t('settings.rag.qdrantUrl'), { hint: t('settings.rag.hint.qdrantUrl'), def: 'http://qdrant:6333' })}
+        {field('qdrant_api_key', t('settings.rag.qdrantApiKey'), { type: 'password', hint: t('settings.rag.hint.qdrantApiKey') })}
+        {field('rerank_url', t('settings.rag.rerankUrl'), { hint: t('settings.rag.hint.rerankUrl'), def: 'http://host:8002/v1/rerank' })}
+        {field('rerank_model', t('settings.rag.rerankModel'), { hint: t('settings.rag.hint.rerankModel'), def: 'qwen3-reranker' })}
+        {field('rerank_api_key', t('settings.rag.rerankApiKey'), { type: 'password', hint: t('settings.rag.hint.rerankApiKey') })}
+        {field('sparse_model', t('settings.rag.sparseModel'), { hint: t('settings.rag.hint.sparseModel'), def: 'Qdrant/bm25' })}
+      </Section>
+
+      <Section title={t('settings.rag.retrieval')}>
+        {field('chat_top_k', t('settings.rag.chatTopK'), { type: 'number', hint: t('settings.rag.hint.chatTopK'), def: 5 })}
+        {field('search_top_k', t('settings.rag.searchTopK'), { type: 'number', hint: t('settings.rag.hint.searchTopK'), def: 5 })}
+        {field('candidate_top_k', t('settings.rag.candidateTopK'), { type: 'number', hint: t('settings.rag.hint.candidateTopK'), def: 40 })}
+        {field('rerank_min_score', t('settings.rag.rerankMinScore'), { type: 'number', hint: t('settings.rag.hint.rerankMinScore'), def: 0.1 })}
+        {field('similarity_threshold', t('settings.rag.similarityThreshold'), { type: 'number', hint: t('settings.rag.hint.similarityThreshold'), def: 0 })}
+      </Section>
+
+      <Section title={t('settings.rag.context')}>
+        {field('max_context_chars', t('settings.rag.maxContextChars'), { type: 'number', hint: t('settings.rag.hint.maxContextChars'), def: 10000 })}
+        {field('query_prefix', t('settings.rag.queryPrefix'), { type: 'textarea', hint: t('settings.rag.hint.queryPrefix'), def: '' })}
+        {field('context_prompt', t('settings.rag.contextPrompt'), { type: 'textarea', hint: t('settings.rag.hint.contextPrompt'), def: '' })}
         <div className="flex items-center gap-3 border-t border-border/60 px-4 py-3.5 sm:px-5">
           <Button size="sm" disabled={save.isPending} onClick={() => save.mutate(draft)}>{save.isPending ? t('common.saving') : t('common.save')}</Button>
           <Button size="sm" variant="outline" disabled={test.isPending} onClick={() => test.mutate()}>{test.isPending ? t('settings.rag.testing') : t('settings.rag.testConnection')}</Button>
