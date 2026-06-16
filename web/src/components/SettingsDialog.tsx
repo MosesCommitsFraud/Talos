@@ -41,6 +41,8 @@ import {
   fetchRagJobs,
   fetchRagWorkerDiag,
   cancelRagJob,
+  clearRagJobs,
+  deleteRagJob,
   fetchRagDocuments,
   deleteRagDocument,
   saveAppSettings,
@@ -1109,7 +1111,11 @@ function RagPanel() {
       </div>
       </Section>
 
-      <Section title={t('settings.rag.queue')} padded>
+      <Section title={t('settings.rag.queue')} padded
+        action={jobs.data && jobs.data.jobs.some((j) => ['completed', 'failed', 'cancelled'].includes(j.status))
+          ? <button className="text-xs text-muted-foreground hover:text-foreground"
+              onClick={() => void clearRagJobs().then(refreshIngest)}>{t('settings.rag.clearJobs')}</button>
+          : undefined}>
         {diag.data && diag.data.active_worker_count === 0 && (
           <p className="pb-2 text-xs text-destructive-foreground">{t('settings.rag.noWorker')}</p>
         )}
@@ -1117,7 +1123,9 @@ function RagPanel() {
           <p className="text-xs text-muted-foreground">{t('settings.rag.queueEmpty')}</p>
         ) : (
           <div className="space-y-1.5">
-            {jobs.data.jobs.map((j: RagJob) => (
+            {jobs.data.jobs.map((j: RagJob) => {
+              const terminal = ['completed', 'failed', 'cancelled'].includes(j.status);
+              return (
               <div key={j.id} className="flex items-center gap-2 rounded-lg border border-border/60 px-3 py-2 text-xs">
                 <span className={cn('inline-block w-2 h-2 rounded-full shrink-0',
                   j.status === 'completed' ? 'bg-success'
@@ -1125,20 +1133,25 @@ function RagPanel() {
                   : j.status === 'running' ? 'bg-accent animate-pulse'
                   : j.status === 'cancelled' ? 'bg-muted-foreground'
                   : 'bg-muted-foreground/60')} />
-                <span className="font-medium">{t(`settings.rag.status.${j.status}`, j.status)}</span>
-                <span className="truncate text-muted-foreground">
-                  {j.current_file ? j.current_file.split('/').pop() : (j.directory || j.message)}
+                <span className="font-medium shrink-0">{t(`settings.rag.status.${j.status}`, j.status)}</span>
+                <span className={cn('truncate', j.status === 'failed' ? 'text-destructive-foreground' : 'text-muted-foreground')}
+                  title={j.message}>
+                  {j.status === 'failed' ? j.message : (j.current_file ? j.current_file.split('/').pop() : (j.directory || j.message))}
                 </span>
                 <span className="ml-auto shrink-0 tabular-nums text-muted-foreground">
                   {j.indexed_count > 0 ? t('settings.rag.chunksIndexed', { n: j.indexed_count }) : ''}
                   {j.failed_count > 0 ? ` · ${t('settings.rag.failedN', { n: j.failed_count })}` : ''}
                 </span>
-                {(j.status === 'queued' || j.status === 'running') && (
+                {terminal ? (
+                  <button className="shrink-0 text-muted-foreground hover:text-destructive-foreground"
+                    onClick={() => void deleteRagJob(j.id).then(refreshIngest)}>{t('common.delete')}</button>
+                ) : (
                   <button className="shrink-0 text-muted-foreground hover:text-destructive-foreground"
                     onClick={() => void cancelRagJob(j.id).then(refreshIngest)}>{t('common.cancel')}</button>
                 )}
               </div>
-            ))}
+            );
+            })}
           </div>
         )}
       </Section>

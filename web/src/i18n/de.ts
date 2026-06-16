@@ -403,6 +403,7 @@ const de: typeof en = {
       search: 'Suchen',
       queue: 'Indizierungs-Warteschlange',
       queueEmpty: 'Keine Jobs.',
+      clearJobs: 'Erledigte/fehlgeschlagene löschen',
       noWorker: 'Kein Ingest-Worker aktiv — starte den rag-ingest-worker-Container.',
       indexedDocs: 'Indizierte Dokumente',
       noDocs: 'Noch keine Dokumente indiziert.',

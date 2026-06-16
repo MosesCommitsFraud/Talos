@@ -307,6 +307,43 @@ def cancel_job(job_id: str) -> Optional[Dict[str, Any]]:
     return _job_to_dict(job)
 
 
+def delete_job(job_id: str) -> bool:
+    """Remove a single job (any state) from Redis + its registry."""
+    try:
+        from rq.job import Job
+
+        Job.fetch(job_id, connection=_redis()).delete()
+        return True
+    except Exception as e:
+        logger.warning("delete_job %s failed: %s", job_id, e)
+        return False
+
+
+def clear_jobs() -> int:
+    """Drop all finished + failed jobs (keeps queued/running). Returns count."""
+    removed = 0
+    try:
+        from rq.job import Job
+        from rq.registry import FinishedJobRegistry, FailedJobRegistry
+
+        q = _queue()
+        conn = q.connection
+        for reg in (FailedJobRegistry(queue=q), FinishedJobRegistry(queue=q)):
+            for jid in list(reg.get_job_ids()):
+                try:
+                    Job.fetch(jid, connection=conn).delete()
+                    removed += 1
+                except Exception:
+                    try:
+                        reg.remove(jid, delete_job=True)
+                        removed += 1
+                    except Exception:
+                        pass
+    except Exception as e:
+        logger.warning("clear_jobs failed: %s", e)
+    return removed
+
+
 def diagnostics() -> Dict[str, Any]:
     try:
         from rq import Worker

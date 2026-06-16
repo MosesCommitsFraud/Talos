@@ -412,6 +412,11 @@ export interface RagDocument {
 export const fetchRagJobs = () => getJSON<{ jobs: RagJob[] }>('/api/rag/jobs');
 export const fetchRagWorkerDiag = () => getJSON<RagWorkerDiag>('/api/rag/jobs/diagnostics');
 export const cancelRagJob = (id: string) => postJSON(`/api/rag/jobs/${id}/cancel`);
+export const clearRagJobs = () => postJSON('/api/rag/jobs/clear');
+export async function deleteRagJob(id: string): Promise<void> {
+  const res = await fetch(`/api/rag/jobs/${id}`, { method: 'DELETE', credentials: 'same-origin' });
+  if (!res.ok) throw new Error(`Delete failed (HTTP ${res.status})`);
+}
 export const fetchRagDocuments = () =>
   getJSON<{ available: boolean; documents: RagDocument[]; error?: string }>('/api/rag/documents');
 export async function deleteRagDocument(source: string): Promise<void> {

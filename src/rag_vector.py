@@ -27,6 +27,7 @@ the optional RAG dependencies installed.
 """
 
 import os
+import time
 import logging
 from typing import List, Dict, Any, Optional, Set, Tuple
 from pathlib import Path
@@ -151,16 +152,43 @@ class VectorRAG:
                     f"(model={os.getenv('EMBEDDING_MODEL', '')}): {e}"
                 ) from e
 
-            try:
-                self._store = self._build_store(recreate=False)
-                count = self._store.count_documents()
-            except ImportError as e:
+            # Qdrant may still be warming up (container "started" ≠ REST ready),
+            # so retry the initial connect a few times before giving up. This
+            # avoids a spurious "connection refused" when a job fires right after
+            # `docker compose up`.
+            count = None
+            last_exc: Optional[Exception] = None
+            for attempt in range(6):
+                try:
+                    self._store = self._build_store(recreate=False)
+                    count = self._store.count_documents()
+                    last_exc = None
+                    break
+                except ImportError as e:
+                    raise RuntimeError(
+                        "Haystack/Qdrant RAG dependencies are not installed in this "
+                        f"image — rebuild it (docker compose build). Detail: {e}"
+                    ) from e
+                except Exception as e:
+                    msg = str(e).lower()
+                    # Embedding dimension changed vs. the existing collection —
+                    # not a connection issue, retrying won't help. Tell the user
+                    # exactly what to do.
+                    if "vector size" in msg or "already exists" in msg:
+                        raise RuntimeError(
+                            f"Embedding dimension mismatch: the '{COLLECTION_NAME}' collection was "
+                            f"created with a different vector size than the current embedding model "
+                            f"({os.getenv('EMBEDDING_MODEL', '')}, dim={self._dim}) returns. Use "
+                            f"'Rebuild index' (or delete the '{COLLECTION_NAME}' collection in Qdrant) "
+                            f"and re-index. Detail: {e}"
+                        ) from e
+                    last_exc = e
+                    logger.warning("Qdrant connect attempt %s/6 failed: %s", attempt + 1, e)
+                    time.sleep(2)
+            if last_exc is not None:
                 raise RuntimeError(
-                    "Haystack/Qdrant RAG dependencies are not installed in this "
-                    f"image — rebuild it (docker compose build). Detail: {e}"
-                ) from e
-            except Exception as e:
-                raise RuntimeError(f"Qdrant connection failed at {qdrant_url}: {e}") from e
+                    f"Qdrant connection failed at {qdrant_url} after retries: {last_exc}"
+                ) from last_exc
 
             logger.info(
                 "VectorRAG ready (Qdrant hybrid, %s docs, dim=%s, sparse=%s) url=%s",

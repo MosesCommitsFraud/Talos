@@ -401,6 +401,7 @@ const en = {
       search: 'Search',
       queue: 'Indexing queue',
       queueEmpty: 'No jobs.',
+      clearJobs: 'Clear finished/failed',
       noWorker: 'No ingest worker running — start the rag-ingest-worker container.',
       indexedDocs: 'Indexed documents',
       noDocs: 'No documents indexed yet.',

@@ -166,6 +166,12 @@ def setup_rag_routes():
             raise HTTPException(404, "RAG job not found")
         return job
 
+    @router.post("/jobs/clear")
+    def clear_rag_jobs():
+        from src import rag_worker
+
+        return {"removed": rag_worker.clear_jobs()}
+
     @router.post("/jobs/{job_id}/cancel")
     def cancel_rag_job(job_id: str):
         from src import rag_worker
@@ -174,6 +180,12 @@ def setup_rag_routes():
         if not job:
             raise HTTPException(404, "RAG job not found")
         return job
+
+    @router.delete("/jobs/{job_id}")
+    def delete_rag_job(job_id: str):
+        from src import rag_worker
+
+        return {"deleted": rag_worker.delete_job(job_id)}
 
     @router.get("/documents")
     def list_documents():
