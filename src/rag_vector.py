@@ -136,21 +136,23 @@ class VectorRAG:
                 os.getenv("RAG_SPARSE_MODEL", "").strip() or _DEFAULT_SPARSE_MODEL
             )
 
+            # Probe the embedding dimension with the SAME Haystack dense embedder
+            # that ingestion/search use. Using a separate client (src.embeddings)
+            # risks divergence: it took EMBEDDING_URL as a full endpoint and, when
+            # that 404'd, silently fell back to a 384-dim local model while the
+            # real embedder returned a different size — guaranteeing a Qdrant dim
+            # mismatch. Probing through the real embedder also fails loudly if the
+            # endpoint is down instead of degrading to a wrong dimension.
             try:
-                from src.embeddings import get_embedding_client
-            except Exception as e:
-                raise RuntimeError(f"embedding client import failed: {e}") from e
-
-            client = get_embedding_client()
-            if client is None:
-                raise RuntimeError("No embedding backend available")
-            try:
-                self._dim = int(client.get_sentence_embedding_dimension())
+                probe = self._dense_text_embedder().run(text="dimension probe")
+                self._dim = len(probe["embedding"])
             except Exception as e:
                 raise RuntimeError(
                     f"embedding endpoint unreachable at {_embed_base_url()} "
                     f"(model={os.getenv('EMBEDDING_MODEL', '')}): {e}"
                 ) from e
+            if not self._dim:
+                raise RuntimeError("embedding endpoint returned an empty vector")
 
             # Qdrant may still be warming up (container "started" ≠ REST ready),
             # so retry the initial connect a few times before giving up. This
@@ -465,19 +467,25 @@ class VectorRAG:
             return {"success": False, "indexed_count": 0, "failed_count": 0, "message": "RAG not available"}
         indexed = 0
         failed = 0
+        errors: List[Dict[str, str]] = []
         for fpath, meta in files:
             if cancel_cb and cancel_cb():
-                return {"success": False, "cancelled": True, "indexed_count": indexed, "failed_count": failed, "message": f"Cancelled after {indexed} chunks"}
+                return {"success": False, "cancelled": True, "indexed_count": indexed, "failed_count": failed, "errors": errors, "message": f"Cancelled after {indexed} chunks"}
             try:
                 docs = self._documents_for_file(fpath, dict(meta or {}))
                 if docs:
                     indexed += self._write_documents(docs)
+                else:
+                    failed += 1
+                    errors.append({"file": os.path.basename(fpath), "error": "no extractable text (empty/unsupported file)"})
             except Exception as e:
                 logger.error(f"index {fpath}: {e}")
                 failed += 1
+                errors.append({"file": os.path.basename(fpath), "error": f"{type(e).__name__}: {e}"})
             if progress_cb:
-                progress_cb({"file": fpath, "indexed_count": indexed, "failed_count": failed})
-        return {"success": True, "indexed_count": indexed, "failed_count": failed, "message": f"Indexed {indexed} chunks"}
+                progress_cb({"file": fpath, "indexed_count": indexed, "failed_count": failed, "errors": errors})
+        msg = f"Indexed {indexed} chunks" + (f", {failed} file(s) failed" if failed else "")
+        return {"success": True, "indexed_count": indexed, "failed_count": failed, "errors": errors, "message": msg}
 
     def index_personal_documents(
         self,
@@ -492,6 +500,7 @@ class VectorRAG:
 
         indexed = 0
         failed = 0
+        errors: List[Dict[str, str]] = []
         try:
             for root, _, files in os.walk(directory):
                 for fname in files:
@@ -501,6 +510,7 @@ class VectorRAG:
                             'cancelled': True,
                             'indexed_count': indexed,
                             'failed_count': failed,
+                            'errors': errors,
                             'message': f'Cancelled after indexing {indexed} chunks from {directory}',
                         }
                     fpath = os.path.join(root, fname)
@@ -522,18 +532,21 @@ class VectorRAG:
                     except Exception as e:
                         logger.error(f"index {fpath}: {e}")
                         failed += 1
+                        errors.append({"file": fname, "error": f"{type(e).__name__}: {e}"})
                     if progress_cb:
-                        progress_cb({"file": fpath, "indexed_count": indexed, "failed_count": failed})
+                        progress_cb({"file": fpath, "indexed_count": indexed, "failed_count": failed, "errors": errors})
 
+            msg = f'Indexed {indexed} chunks from {directory}' + (f', {failed} file(s) failed' if failed else '')
             return {
                 'success': True,
                 'indexed_count': indexed,
                 'failed_count': failed,
-                'message': f'Indexed {indexed} chunks from {directory}',
+                'errors': errors,
+                'message': msg,
             }
         except Exception as e:
             logger.error(f"index_personal_documents {directory}: {e}")
-            return {'success': False, 'indexed_count': indexed, 'failed_count': failed, 'message': str(e)}
+            return {'success': False, 'indexed_count': indexed, 'failed_count': failed, 'errors': errors, 'message': str(e)}
 
     # ------------------------------------------------------------------
     # Direct text indexing (kept for compatibility)

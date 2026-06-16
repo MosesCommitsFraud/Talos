@@ -95,6 +95,7 @@ const en = {
     welcome: 'What can I help with?',
     workingFor: 'Working for',
     working: 'Working…',
+    sources: 'Sources',
     generating: 'Generating',
     scrollToBottom: 'Scroll to bottom',
   },

@@ -118,6 +118,7 @@ def _progress_saver(job):
             "indexed_count": int(info.get("indexed_count") or 0),
             "failed_count": int(info.get("failed_count") or 0),
             "current_file": info.get("file", ""),
+            "errors": (info.get("errors") or [])[-10:],
             "message": "Indexing",
         })
         try:
@@ -130,11 +131,19 @@ def _progress_saver(job):
 def _finalize(job, result: Dict[str, Any]) -> None:
     if not job:
         return
+    errors = (result.get("errors") or [])[-10:]
+    message = result.get("message") or "Done"
+    # Surface the first file error in the headline message so the queue row
+    # shows *why* something failed without needing the worker logs.
+    if errors:
+        first = errors[0]
+        message = f"{message} — {first.get('file', '')}: {first.get('error', '')}"
     job.meta.update({
         "indexed_count": int(result.get("indexed_count") or 0),
         "failed_count": int(result.get("failed_count") or 0),
         "current_file": "",
-        "message": result.get("message") or "Done",
+        "errors": errors,
+        "message": message,
     })
     try:
         job.save_meta()
@@ -237,6 +246,7 @@ def _job_to_dict(job) -> Dict[str, Any]:
         "failed_count": int(meta.get("failed_count") or 0),
         "current_file": meta.get("current_file", ""),
         "message": message,
+        "errors": meta.get("errors", []),
         "created_at": _ts(job.enqueued_at),
         "started_at": _ts(job.started_at),
         "ended_at": _ts(job.ended_at),

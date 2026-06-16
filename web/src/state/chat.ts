@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { createSession, deleteMessages, editMessage, fetchSession, streamChat } from '@/api/client';
-import type { Attachment, Metrics, ToolCall } from '@/api/types';
+import type { Attachment, Metrics, RagSource, ToolCall } from '@/api/types';
 import { usePrefs } from './prefs';
 
 export interface UiMessage {
@@ -13,6 +13,8 @@ export interface UiMessage {
   tools?: ToolCall[];
   attachments?: Attachment[];
   metrics?: Metrics;
+  /** RAG knowledge-base chunks cited for this answer. */
+  sources?: RagSource[];
   streaming?: boolean;
   error?: boolean;
 }
@@ -86,6 +88,19 @@ function metricsFromMetadata(metadata: Record<string, unknown> | undefined): Met
 function thinkingFromMetadata(metadata: Record<string, unknown> | undefined): string | undefined {
   const thinking = metadata?.thinking;
   return typeof thinking === 'string' && thinking.trim() ? thinking : undefined;
+}
+
+function ragSourcesFromMetadata(metadata: Record<string, unknown> | undefined): RagSource[] | undefined {
+  const raw = metadata?.rag_sources;
+  if (!Array.isArray(raw)) return undefined;
+  const sources = raw
+    .filter((item): item is Record<string, unknown> => !!item && typeof item === 'object')
+    .map((item) => ({
+      filename: String(item.filename ?? item.source ?? 'unknown'),
+      snippet: typeof item.snippet === 'string' ? item.snippet : '',
+      similarity: typeof item.similarity === 'number' ? item.similarity : 0,
+    }));
+  return sources.length > 0 ? sources : undefined;
 }
 
 function attachmentsFromMetadata(metadata: Record<string, unknown> | undefined): Attachment[] | undefined {
@@ -201,6 +216,7 @@ export const useChat = create<ChatState>((set, get) => {
         thinking: m.role === 'assistant' ? thinkingFromMetadata(m.metadata) : undefined,
         metrics: m.role === 'assistant' ? metricsFromMetadata(m.metadata) : undefined,
         tools: m.role === 'assistant' ? toolCallsFromMetadata(m.metadata) : undefined,
+        sources: m.role === 'assistant' ? ragSourcesFromMetadata(m.metadata) : undefined,
       }));
     writeRuntime(id, () => ({ ...emptyRuntime(), messages }));
   },
@@ -310,6 +326,9 @@ export const useChat = create<ChatState>((set, get) => {
               break;
             case 'metrics':
               patchAi({ metrics: ev.data as Metrics });
+              break;
+            case 'rag_sources':
+              if (Array.isArray(ev.data)) patchAi({ sources: ev.data as RagSource[] });
               break;
             case 'message_saved':
               if (typeof ev.id === 'string') patchAi({ dbId: ev.id });

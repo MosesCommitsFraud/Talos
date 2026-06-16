@@ -97,6 +97,7 @@ const de: typeof en = {
     welcome: 'Womit kann ich helfen?',
     workingFor: 'Arbeitet seit',
     working: 'Arbeitet…',
+    sources: 'Quellen',
     generating: 'Wird generiert',
     scrollToBottom: 'Nach unten scrollen',
   },

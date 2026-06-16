@@ -7,6 +7,7 @@ import { copyTextToClipboard } from '@/lib/utils';
 import { useChat, type UiMessage } from '@/state/chat';
 import { usePrefs } from '@/state/prefs';
 import { Markdown } from './Markdown';
+import { RagSources } from './RagSources';
 import { Thinking } from './Thinking';
 import { ToolRow, toolImages, type ToolImage } from './ToolRow';
 import { Tooltip } from './ui/misc';
@@ -304,6 +305,7 @@ export function Messages() {
                   <Markdown text={m.content} />
                 </div>
               )}
+              {!m.streaming && m.sources && m.sources.length > 0 && <RagSources sources={m.sources} />}
               {/* Persistent "still running" indicator: shown for the entire
                   streaming turn — through thinking, tool calls, and text deltas —
                   so it never silently disappears mid-response. */}

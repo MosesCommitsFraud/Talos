@@ -391,6 +391,7 @@ export interface RagJob {
   failed_count: number;
   current_file: string;
   message: string;
+  errors: { file: string; error: string }[];
   created_at: number | null;
   started_at: number | null;
   ended_at: number | null;

@@ -30,6 +30,13 @@ export interface HistoryMessage {
   metadata?: { _db_id?: string; attachments?: Attachment[]; tool_events?: ToolCall[]; [key: string]: unknown };
 }
 
+/** A knowledge-base chunk the RAG retriever fed into the answer (for citations). */
+export interface RagSource {
+  filename: string;
+  snippet: string;
+  similarity: number;
+}
+
 export interface Attachment {
   id: string;
   name?: string;
