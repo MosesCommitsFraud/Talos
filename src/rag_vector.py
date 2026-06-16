@@ -560,6 +560,40 @@ class VectorRAG:
             return {"error": str(e), "healthy": False}
 
     # ------------------------------------------------------------------
+    # Listing
+    # ------------------------------------------------------------------
+
+    def list_documents(self) -> List[Dict[str, Any]]:
+        """Aggregate indexed chunks by source file → one row per document.
+
+        Reads straight from Qdrant (the source of truth) so the UI shows what is
+        actually searchable, including dir-indexed files, not just uploads.
+        """
+        if not self.healthy:
+            return []
+        try:
+            chunks = self._store.filter_documents()
+            agg: Dict[str, Dict[str, Any]] = {}
+            for d in chunks:
+                meta = d.meta or {}
+                source = meta.get("source") or meta.get("filename") or "unknown"
+                row = agg.get(source)
+                if row is None:
+                    row = {
+                        "source": source,
+                        "filename": meta.get("filename") or os.path.basename(str(source)),
+                        "type": meta.get("type") or "",
+                        "directory": meta.get("directory") or "",
+                        "chunks": 0,
+                    }
+                    agg[source] = row
+                row["chunks"] += 1
+            return sorted(agg.values(), key=lambda r: str(r["filename"]).lower())
+        except Exception as e:
+            logger.error(f"list_documents failed: {e}")
+            return []
+
+    # ------------------------------------------------------------------
     # Delete by metadata
     # ------------------------------------------------------------------
 

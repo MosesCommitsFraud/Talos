@@ -374,8 +374,52 @@ export async function personalUpload(files: File[]): Promise<Record<string, unkn
   const fd = new FormData();
   for (const f of files) fd.append('files', f, f.name);
   const res = await fetch('/api/personal/upload', { method: 'POST', body: fd, credentials: 'same-origin' });
-  if (!res.ok) throw new Error(`Upload failed (HTTP ${res.status})`);
+  if (!res.ok) {
+    const detail = await res.json().then((j) => j?.detail).catch(() => null);
+    throw new Error(detail || `Upload failed (HTTP ${res.status})`);
+  }
   return res.json();
+}
+
+/* ── RAG ingest jobs (RQ queue) + indexed documents ── */
+export interface RagJob {
+  id: string;
+  type: string;
+  status: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled' | string;
+  directory: string;
+  indexed_count: number;
+  failed_count: number;
+  current_file: string;
+  message: string;
+  created_at: number | null;
+  started_at: number | null;
+  ended_at: number | null;
+}
+export interface RagWorkerDiag {
+  active_worker_count: number;
+  active_workers: string[];
+  multi_worker_warning: boolean;
+  message: string;
+}
+export interface RagDocument {
+  source: string;
+  filename: string;
+  type: string;
+  directory: string;
+  chunks: number;
+}
+
+export const fetchRagJobs = () => getJSON<{ jobs: RagJob[] }>('/api/rag/jobs');
+export const fetchRagWorkerDiag = () => getJSON<RagWorkerDiag>('/api/rag/jobs/diagnostics');
+export const cancelRagJob = (id: string) => postJSON(`/api/rag/jobs/${id}/cancel`);
+export const fetchRagDocuments = () =>
+  getJSON<{ available: boolean; documents: RagDocument[] }>('/api/rag/documents');
+export async function deleteRagDocument(source: string): Promise<void> {
+  const res = await fetch(`/api/rag/documents?source=${encodeURIComponent(source)}`, {
+    method: 'DELETE',
+    credentials: 'same-origin',
+  });
+  if (!res.ok) throw new Error(`Delete failed (HTTP ${res.status})`);
 }
 
 /* ── SQL database (query_sql tool, MSSQL etc.) ── */

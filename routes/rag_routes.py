@@ -175,4 +175,24 @@ def setup_rag_routes():
             raise HTTPException(404, "RAG job not found")
         return job
 
+    @router.get("/documents")
+    def list_documents():
+        from src.rag_singleton import get_rag_manager
+
+        rag = get_rag_manager()
+        if not rag or not getattr(rag, "healthy", False):
+            # Don't 503 — the UI shows a friendly "RAG not available" state.
+            return {"available": False, "documents": []}
+        return {"available": True, "documents": rag.list_documents()}
+
+    @router.delete("/documents")
+    def delete_document(source: str):
+        from src.rag_singleton import get_rag_manager
+
+        rag = get_rag_manager()
+        if not rag or not getattr(rag, "healthy", False):
+            raise HTTPException(503, "RAG is not available")
+        removed = rag.delete_by_source(source)
+        return {"deleted": removed > 0, "removed_count": removed, "source": source}
+
     return router

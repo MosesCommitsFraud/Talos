@@ -38,6 +38,11 @@ import {
   personalReload,
   personalUpload,
   ragSearch,
+  fetchRagJobs,
+  fetchRagWorkerDiag,
+  cancelRagJob,
+  fetchRagDocuments,
+  deleteRagDocument,
   saveAppSettings,
   saveDisabledTools,
   saveRagConfig,
@@ -53,6 +58,7 @@ import {
   wipeData,
   type AppSettings,
   type RagConfig,
+  type RagJob,
   type SqlConfig,
 } from '@/api/client';
 import { applyDensity, applyLang, applyTheme, usePrefs, type Density, type Lang, type Theme, type Visibility } from '@/state/prefs';
@@ -1028,6 +1034,17 @@ function RagPanel() {
     onSuccess: () => void queryClient.invalidateQueries({ queryKey: ['rag-config'] }),
   });
   const test = useMutation({ mutationFn: testRagConfig });
+  // Live ingest queue + indexed-documents views. Jobs poll while the panel is
+  // open so uploads/dir-indexing progress is visible without a refresh.
+  const jobs = useQuery({ queryKey: ['rag-jobs'], queryFn: fetchRagJobs, refetchInterval: 2000 });
+  const diag = useQuery({ queryKey: ['rag-worker-diag'], queryFn: fetchRagWorkerDiag, refetchInterval: 5000 });
+  const docs = useQuery({ queryKey: ['rag-documents'], queryFn: fetchRagDocuments, refetchInterval: 5000 });
+  const refreshIngest = () => {
+    void queryClient.invalidateQueries({ queryKey: ['rag-jobs'] });
+    void queryClient.invalidateQueries({ queryKey: ['rag-documents'] });
+  };
+  const removeDoc = (source: string) =>
+    deleteRagDocument(source).then(() => queryClient.invalidateQueries({ queryKey: ['rag-documents'] }));
   if (!draft) return <Page><p className="text-sm text-muted-foreground">{t('common.loading')}</p></Page>;
   const set = (k: keyof RagConfig, v: unknown) => setDraft({ ...draft, [k]: v } as RagConfig);
   const field = (k: keyof RagConfig, label: string, type = 'text') => (
@@ -1072,13 +1089,13 @@ function RagPanel() {
           <Button size="sm" variant="outline" onClick={() => document.getElementById('rag-upload-input')?.click()}>{t('settings.rag.uploadFiles')}</Button>
           <input
             id="rag-upload-input" type="file" multiple hidden
-            onChange={(e) => { if (e.target.files?.length) doc(() => personalUpload(Array.from(e.target.files!)), t('settings.rag.uploaded')); e.target.value = ''; }}
+            onChange={(e) => { if (e.target.files?.length) doc(() => personalUpload(Array.from(e.target.files!)).then((r) => { refreshIngest(); return r; }), t('settings.rag.uploadQueued')); e.target.value = ''; }}
           />
-          <Button size="sm" variant="outline" onClick={() => doc(personalReload, t('settings.rag.reindexStarted'))}>{t('settings.rag.reloadIndex')}</Button>
+          <Button size="sm" variant="outline" onClick={() => doc(() => personalReload().then((r) => { refreshIngest(); return r; }), t('settings.rag.reindexStarted'))}>{t('settings.rag.reloadIndex')}</Button>
         </label>
         <div className="flex gap-2">
           <Input placeholder={t('settings.rag.addDirectory')} value={dir} onChange={(e) => setDir(e.target.value)} />
-          <Button size="sm" variant="outline" disabled={!dir.trim()} onClick={() => doc(() => personalAddDirectory(dir), t('settings.rag.directoryAdded'))}>{t('common.add')}</Button>
+          <Button size="sm" variant="outline" disabled={!dir.trim()} onClick={() => doc(() => personalAddDirectory(dir).then((r) => { refreshIngest(); return r; }), t('settings.rag.directoryAdded'))}>{t('common.add')}</Button>
         </div>
         {docMsg && <p className={cn('text-xs', docMsg.ok ? 'text-success' : 'text-destructive-foreground')}>{docMsg.text}</p>}
         <div className="flex gap-2 pt-1">
@@ -1090,6 +1107,60 @@ function RagPanel() {
         </div>
         {searchOut && <pre className="max-h-48 overflow-y-auto rounded-lg border bg-muted px-3 py-2 font-mono text-[11px] whitespace-pre-wrap">{searchOut}</pre>}
       </div>
+      </Section>
+
+      <Section title={t('settings.rag.queue')} padded>
+        {diag.data && diag.data.active_worker_count === 0 && (
+          <p className="pb-2 text-xs text-destructive-foreground">{t('settings.rag.noWorker')}</p>
+        )}
+        {(!jobs.data || jobs.data.jobs.length === 0) ? (
+          <p className="text-xs text-muted-foreground">{t('settings.rag.queueEmpty')}</p>
+        ) : (
+          <div className="space-y-1.5">
+            {jobs.data.jobs.map((j: RagJob) => (
+              <div key={j.id} className="flex items-center gap-2 rounded-lg border border-border/60 px-3 py-2 text-xs">
+                <span className={cn('inline-block w-2 h-2 rounded-full shrink-0',
+                  j.status === 'completed' ? 'bg-success'
+                  : j.status === 'failed' ? 'bg-destructive'
+                  : j.status === 'running' ? 'bg-accent animate-pulse'
+                  : j.status === 'cancelled' ? 'bg-muted-foreground'
+                  : 'bg-muted-foreground/60')} />
+                <span className="font-medium">{t(`settings.rag.status.${j.status}`, j.status)}</span>
+                <span className="truncate text-muted-foreground">
+                  {j.current_file ? j.current_file.split('/').pop() : (j.directory || j.message)}
+                </span>
+                <span className="ml-auto shrink-0 tabular-nums text-muted-foreground">
+                  {j.indexed_count > 0 ? t('settings.rag.chunksIndexed', { n: j.indexed_count }) : ''}
+                  {j.failed_count > 0 ? ` · ${t('settings.rag.failedN', { n: j.failed_count })}` : ''}
+                </span>
+                {(j.status === 'queued' || j.status === 'running') && (
+                  <button className="shrink-0 text-muted-foreground hover:text-destructive-foreground"
+                    onClick={() => void cancelRagJob(j.id).then(refreshIngest)}>{t('common.cancel')}</button>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </Section>
+
+      <Section title={t('settings.rag.indexedDocs')} padded>
+        {docs.data && docs.data.available === false ? (
+          <p className="text-xs text-muted-foreground">{t('settings.rag.ragUnavailable')}</p>
+        ) : !docs.data || docs.data.documents.length === 0 ? (
+          <p className="text-xs text-muted-foreground">{t('settings.rag.noDocs')}</p>
+        ) : (
+          <div className="space-y-1">
+            <p className="pb-1 text-[11px] text-muted-foreground">{t('settings.rag.docCount', { n: docs.data.documents.length })}</p>
+            {docs.data.documents.map((d) => (
+              <div key={d.source} className="flex items-center gap-2 rounded-lg border border-border/60 px-3 py-1.5 text-xs">
+                <span className="truncate" title={d.source}>{d.filename}</span>
+                <span className="ml-auto shrink-0 tabular-nums text-muted-foreground">{t('settings.rag.chunksN', { n: d.chunks })}</span>
+                <button className="shrink-0 text-muted-foreground hover:text-destructive-foreground"
+                  onClick={() => void removeDoc(d.source)}>{t('common.delete')}</button>
+              </div>
+            ))}
+          </div>
+        )}
       </Section>
     </Page>
   );

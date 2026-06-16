@@ -190,11 +190,14 @@ def setup_personal_routes(personal_docs_manager, rag_manager, rag_available):
     
     @router.post("/upload")
     async def upload_files_to_rag(request: Request, files: List[UploadFile] = File(...), _admin: None = Depends(require_admin)):
-        """Admin-only upload into the global RAG knowledge base. Supports text and PDF."""
-        rag = _rag()
-        if not rag:
-            raise HTTPException(503, "RAG system is not available — is the embedding service running?")
+        """Admin-only upload into the global RAG knowledge base.
 
+        Files are stored and an ingest job is enqueued onto the RQ ``ingest``
+        queue — the rag-ingest-worker container does the Docling parse + chunk +
+        embed + Qdrant upsert. The upload therefore does NOT require a healthy
+        in-process RAG manager (that gate caused spurious 503s); progress and any
+        failures surface through the RAG jobs view instead.
+        """
         upload_dir = _personal_upload_dir_for_owner("global")
 
         total_failed = 0
@@ -236,7 +239,15 @@ def setup_personal_routes(personal_docs_manager, rag_manager, rag_available):
         if to_index:
             from src import rag_worker
 
-            job = rag_worker.start_index_files(to_index, owner=None)
+            try:
+                job = rag_worker.start_index_files(to_index, owner=None)
+            except Exception as e:
+                logger.error(f"Failed to enqueue ingest job: {e}")
+                raise HTTPException(
+                    503,
+                    "Files were saved but the ingest queue is unavailable — is "
+                    "Redis (rag-redis) running and REDIS_URL correct?",
+                )
 
         return {
             "success": True,
