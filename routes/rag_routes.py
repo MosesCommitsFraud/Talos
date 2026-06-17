@@ -7,6 +7,11 @@ from src.settings import load_settings, save_settings
 
 class RagPipelineConfig(BaseModel):
     enabled: bool = True
+    provider: str = "internal"
+    external_url: str = ""
+    external_api_key: str = ""
+    external_dataset_id: str = ""
+    external_top_k: int = 5
     embedding_url: str = ""
     embedding_model: str = ""
     qdrant_url: str = ""
@@ -56,6 +61,11 @@ def _clamp_chars(value, default: int = 10000) -> int:
 def _public(cfg: dict) -> dict:
     return {
         "enabled": bool(cfg.get("enabled", True)),
+        "provider": str(cfg.get("provider") or "internal").strip().lower(),
+        "external_url": cfg.get("external_url", ""),
+        "external_api_key_set": bool(cfg.get("external_api_key")),
+        "external_dataset_id": cfg.get("external_dataset_id", ""),
+        "external_top_k": _clamp_k(cfg.get("external_top_k", 5)),
         "embedding_url": cfg.get("embedding_url", ""),
         "embedding_model": cfg.get("embedding_model", ""),
         "qdrant_url": cfg.get("qdrant_url", ""),
@@ -103,6 +113,11 @@ def setup_rag_routes():
         current = settings.get("rag_pipeline", {}) if isinstance(settings.get("rag_pipeline"), dict) else {}
         cfg = {
             "enabled": bool(body.enabled),
+            "provider": (body.provider or "internal").strip().lower(),
+            "external_url": body.external_url.strip(),
+            "external_api_key": body.external_api_key or current.get("external_api_key", ""),
+            "external_dataset_id": body.external_dataset_id.strip(),
+            "external_top_k": _clamp_k(body.external_top_k),
             "embedding_url": body.embedding_url.strip(),
             "embedding_model": body.embedding_model.strip(),
             "qdrant_url": body.qdrant_url.strip(),
@@ -125,12 +140,18 @@ def setup_rag_routes():
             save_settings(settings)
             _reset_rag()
             return _public(cfg)
-        if not cfg["embedding_url"]:
-            raise HTTPException(400, "Embedding URL is required")
-        if not cfg["embedding_model"]:
-            raise HTTPException(400, "Embedding model is required")
-        if not cfg["qdrant_url"]:
-            raise HTTPException(400, "Qdrant URL is required")
+        if cfg["provider"] == "external":
+            if not cfg["external_url"]:
+                raise HTTPException(400, "External retrieval URL is required")
+            if not cfg["external_dataset_id"]:
+                raise HTTPException(400, "External dataset/knowledge-base id is required")
+        else:
+            if not cfg["embedding_url"]:
+                raise HTTPException(400, "Embedding URL is required")
+            if not cfg["embedding_model"]:
+                raise HTTPException(400, "Embedding model is required")
+            if not cfg["qdrant_url"]:
+                raise HTTPException(400, "Qdrant URL is required")
         settings["rag_pipeline"] = cfg
         save_settings(settings)
         _reset_rag()
@@ -138,6 +159,20 @@ def setup_rag_routes():
 
     @router.post("/test")
     def test_config():
+        settings = load_settings()
+        cfg = settings.get("rag_pipeline", {}) if isinstance(settings.get("rag_pipeline"), dict) else {}
+        if str(cfg.get("provider") or "internal").strip().lower() == "external":
+            from src.rag_external import ExternalRagClient
+
+            client = ExternalRagClient(cfg)
+            if not client.configured:
+                raise HTTPException(400, "External retrieval URL and dataset id are required.")
+            try:
+                results = client.search("test", k=1)
+            except Exception as e:
+                raise HTTPException(503, f"External RAG service is not reachable: {e}")
+            return {"ok": True, "provider": "external", "sample_count": len(results)}
+
         _reset_rag()
         from src.rag_singleton import get_rag_manager
 

@@ -257,7 +257,7 @@ Generate an image. Line 1 = description, line 2 = model name, line 3 = WxH (e.g.
 ```query_sql
 {"action": "query", "query": "SELECT ...", "max_rows": 100}
 ```
-Read-only SQL access to the configured external database. Use when the user asks about database data, tables, rows, reports, metrics, or SQL. Actions: `list_tables`, `describe` with `table`, and `query`. Omit `max_rows` or pass `0` when the user wants the full result set. Only read-only SELECT/WITH/SHOW/DESCRIBE/EXPLAIN/PRAGMA statements are allowed; never ask the user for DB credentials and never reveal credentials.""",
+Read-only SQL access to the configured external database(s). Use when the user asks about database data, tables, rows, reports, metrics, or SQL. Actions: `list_databases` (names of the connected databases), `list_tables`, `describe` with `table`, and `query`. When more than one database is configured, pass `"database": "<name>"` to pick which one each call targets (omit it when only one is configured). Omit `max_rows` or pass `0` when the user wants the full result set. Only read-only SELECT/WITH/SHOW/DESCRIBE/EXPLAIN/PRAGMA statements are allowed; never ask the user for DB credentials and never reveal credentials.""",
     "create_session": "- ```create_session``` — Create a new chat. Line 1 = chat name, line 2 = model name. Use for background/parallel work.",
     "list_sessions": "- ```list_sessions``` — List chats sorted MOST-RECENT FIRST (the UI calls them 'chats') with clickable chat-title links. Output includes a relative \"last active\" timestamp per row, so the first row is the user's most recent chat. Content = optional filter keyword (matches chat name). When answering, preserve the `[title](#session-id)` links exactly; do not convert them into plain text.",
     "send_to_session": "- ```send_to_session``` — Send a message to another session. Line 1 = session_id, rest = message. Use for orchestrating work across sessions.",
@@ -1476,6 +1476,21 @@ async def stream_agent_loop(
         # The DB toggle is an explicit instruction, not a hint: answer THIS
         # message from the external SQL database. Prepended like the workspace
         # note so small models can't miss it.
+        _db_names = []
+        try:
+            from src.tool_implementations import _sql_connections
+
+            _db_names = [c["name"] for c in _sql_connections()]
+        except Exception:
+            _db_names = []
+        if len(_db_names) > 1:
+            _db_list_note = (
+                f" Multiple databases are configured: {', '.join(_db_names)}. "
+                "Pass the `database` argument on every `query_sql` call to choose "
+                "one (use action=list_databases if unsure)."
+            )
+        else:
+            _db_list_note = ""
         _db_note = (
             "## DATABASE MODE — READ FIRST\n"
             "The user activated the database button for this message: they want "
@@ -1484,7 +1499,7 @@ async def stream_agent_loop(
             "general knowledge and do not use python/bash to reach the database. "
             "If you don't know the schema yet, start with `query_sql` "
             "action=list_tables, then action=describe on the relevant tables, "
-            "then run the SELECT that answers the question."
+            "then run the SELECT that answers the question." + _db_list_note
         )
         if messages and messages[0].get("role") == "system":
             messages[0]["content"] = _db_note + "\n\n" + (messages[0].get("content") or "")

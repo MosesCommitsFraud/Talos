@@ -18,6 +18,8 @@ def _rag_configured() -> bool:
         cfg = get_setting("rag_pipeline", {})
         if not isinstance(cfg, dict) or cfg.get("enabled") is False:
             return False
+        if str(cfg.get("provider") or "internal").strip().lower() == "external":
+            return bool(str(cfg.get("external_url") or "").strip() and str(cfg.get("external_dataset_id") or "").strip())
         return bool(str(cfg.get("qdrant_url") or "").strip() and str(cfg.get("embedding_url") or "").strip())
     except Exception:
         return False

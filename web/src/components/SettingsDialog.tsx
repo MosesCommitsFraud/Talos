@@ -49,7 +49,6 @@ import {
   saveDisabledTools,
   saveRagConfig,
   saveSqlConfig,
-  deleteSqlConfig,
   testSqlConfig,
   testModelEndpoint,
   testRagConfig,
@@ -832,66 +831,125 @@ function IntegrationsPanel() {
 
 const SQL_DEFAULT_PORTS: Record<string, string> = { mssql: '1433', postgresql: '5432', mysql: '3306', sqlite: '' };
 
+let _sqlRowSeq = 0;
+const newSqlRow = (): SqlConfig => ({
+  id: `new-${++_sqlRowSeq}`,
+  name: '',
+  enabled: true,
+  db_type: 'mssql',
+  host: '',
+  port: '',
+  database: '',
+  username: '',
+  password: '',
+  odbc_driver: '',
+});
+
 function SqlDatabaseSection() {
   const { t } = useTranslation();
   const { data } = useQuery({ queryKey: ['sql-config'], queryFn: fetchSqlConfig });
-  const [draft, setDraft] = useState<SqlConfig | null>(null);
+  const [draft, setDraft] = useState<SqlConfig[] | null>(null);
   const [msg, setMsg] = useState<{ text: string; ok: boolean } | null>(null);
   const queryClient = useQueryClient();
   useEffect(() => {
-    if (data && !draft) setDraft({ ...data, db_type: data.db_type || 'mssql', password: '' });
+    if (data && !draft) setDraft(data.map((c) => ({ ...c, db_type: c.db_type || 'mssql', password: '' })));
   }, [data, draft]);
   if (!draft) return <Section title={t('settings.sql.title')} padded><p className="text-sm text-muted-foreground">{t('common.loading')}</p></Section>;
-  const set = (k: keyof SqlConfig, v: unknown) => setDraft({ ...draft, [k]: v } as SqlConfig);
+
+  const setRow = (i: number, k: keyof SqlConfig, v: unknown) =>
+    setDraft(draft.map((row, idx) => (idx === i ? ({ ...row, [k]: v } as SqlConfig) : row)));
   const run = (fn: () => Promise<unknown>, ok: string) => {
     setMsg(null);
     fn()
       .then(() => { setMsg({ text: ok, ok: true }); void queryClient.invalidateQueries({ queryKey: ['sql-config'] }); })
       .catch((e) => setMsg({ text: (e as Error).message, ok: false }));
   };
+  const save = () => run(async () => {
+    await saveSqlConfig(draft);
+    setDraft(null); // re-seed from the refetched server state (resolves ids, password_set)
+  }, t('settings.sql.saved'));
+
   return (
     <Section title={t('settings.sql.title')}>
       <div className="px-4 pt-3.5 text-xs text-muted-foreground sm:px-5">
         {t('settings.sql.intro')}
       </div>
-      <Row label={t('settings.sql.enabled')}><Switch checked={draft.enabled} onCheckedChange={(v) => set('enabled', v)} /></Row>
-      <Row label={t('settings.sql.type')}>
-        <Select
-          className="w-56"
-          value={draft.db_type}
-          onChange={(v) => set('db_type', v)}
-          options={[
-            { value: 'mssql', label: 'MSSQL' },
-            { value: 'postgresql', label: 'PostgreSQL' },
-            { value: 'mysql', label: 'MySQL/MariaDB' },
-            { value: 'sqlite', label: 'SQLite' },
-          ]}
-        />
-      </Row>
-      <Row label={t('settings.sql.host')}><Input className="w-56" placeholder="db.example.local" value={draft.host} onChange={(e) => set('host', e.target.value)} /></Row>
-      <Row label={t('settings.sql.port')}><Input className="w-56" placeholder={SQL_DEFAULT_PORTS[draft.db_type] ?? ''} value={draft.port} onChange={(e) => set('port', e.target.value)} /></Row>
-      <Row label={t('settings.sql.database')}><Input className="w-56" placeholder={t('settings.sql.databasePlaceholder')} value={draft.database} onChange={(e) => set('database', e.target.value)} /></Row>
-      <Row label={t('settings.sql.readonlyUser')}><Input className="w-56" autoComplete="off" value={draft.username} onChange={(e) => set('username', e.target.value)} /></Row>
-      <Row label={t('settings.sql.password')}>
-        <Input
-          className="w-56" type="password" autoComplete="new-password"
-          placeholder={data?.password_set ? t('settings.sql.passwordSaved') : ''}
-          value={draft.password ?? ''}
-          onChange={(e) => set('password', e.target.value)}
-        />
-      </Row>
-      <Row label={t('settings.sql.odbcDriver')}><Input className="w-56" placeholder="ODBC Driver 18 for SQL Server" value={draft.odbc_driver} onChange={(e) => set('odbc_driver', e.target.value)} /></Row>
+      <div className="flex flex-col gap-3 px-4 py-3.5 sm:px-5">
+        {draft.length === 0 && <p className="text-sm text-muted-foreground">{t('settings.sql.empty')}</p>}
+        {draft.map((row, i) => {
+          const saved = data?.find((d) => d.id === row.id);
+          return (
+            <div key={row.id ?? i} className="rounded-lg border border-border/60 p-3">
+              <div className="flex items-center gap-2">
+                <Input
+                  className="flex-1" placeholder={t('settings.sql.namePlaceholder')}
+                  value={row.name} onChange={(e) => setRow(i, 'name', e.target.value)}
+                />
+                <Switch checked={row.enabled} onCheckedChange={(v) => setRow(i, 'enabled', v)} />
+                <Button
+                  size="sm" variant="outline"
+                  onClick={() => run(
+                    // /api/sql/test reports failures as HTTP 200 + {ok:false, error}.
+                    () => testSqlConfig(row.id).then((r) => { if (!r.ok) throw new Error(r.error || t('settings.sql.connectionFailed')); }),
+                    t('settings.sql.connectionOk'),
+                  )}
+                >{t('common.test')}</Button>
+                <Button
+                  size="sm" variant="destructive-outline"
+                  onClick={() => setDraft(draft.filter((_, idx) => idx !== i))}
+                >{t('common.remove')}</Button>
+              </div>
+              <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                <label className="flex items-center justify-between gap-2 text-sm">
+                  <span className="text-muted-foreground">{t('settings.sql.type')}</span>
+                  <Select
+                    className="w-44" value={row.db_type} onChange={(v) => setRow(i, 'db_type', v)}
+                    options={[
+                      { value: 'mssql', label: 'MSSQL' },
+                      { value: 'postgresql', label: 'PostgreSQL' },
+                      { value: 'mysql', label: 'MySQL/MariaDB' },
+                      { value: 'sqlite', label: 'SQLite' },
+                    ]}
+                  />
+                </label>
+                <label className="flex items-center justify-between gap-2 text-sm">
+                  <span className="text-muted-foreground">{t('settings.sql.host')}</span>
+                  <Input className="w-44" placeholder="db.example.local" value={row.host} onChange={(e) => setRow(i, 'host', e.target.value)} />
+                </label>
+                <label className="flex items-center justify-between gap-2 text-sm">
+                  <span className="text-muted-foreground">{t('settings.sql.port')}</span>
+                  <Input className="w-44" placeholder={SQL_DEFAULT_PORTS[row.db_type] ?? ''} value={row.port} onChange={(e) => setRow(i, 'port', e.target.value)} />
+                </label>
+                <label className="flex items-center justify-between gap-2 text-sm">
+                  <span className="text-muted-foreground">{t('settings.sql.database')}</span>
+                  <Input className="w-44" placeholder={t('settings.sql.databasePlaceholder')} value={row.database} onChange={(e) => setRow(i, 'database', e.target.value)} />
+                </label>
+                <label className="flex items-center justify-between gap-2 text-sm">
+                  <span className="text-muted-foreground">{t('settings.sql.readonlyUser')}</span>
+                  <Input className="w-44" autoComplete="off" value={row.username} onChange={(e) => setRow(i, 'username', e.target.value)} />
+                </label>
+                <label className="flex items-center justify-between gap-2 text-sm">
+                  <span className="text-muted-foreground">{t('settings.sql.password')}</span>
+                  <Input
+                    className="w-44" type="password" autoComplete="new-password"
+                    placeholder={saved?.password_set ? t('settings.sql.passwordSaved') : ''}
+                    value={row.password ?? ''} onChange={(e) => setRow(i, 'password', e.target.value)}
+                  />
+                </label>
+                <label className="flex items-center justify-between gap-2 text-sm sm:col-span-2">
+                  <span className="text-muted-foreground">{t('settings.sql.odbcDriver')}</span>
+                  <Input className="w-44" placeholder="ODBC Driver 18 for SQL Server" value={row.odbc_driver} onChange={(e) => setRow(i, 'odbc_driver', e.target.value)} />
+                </label>
+              </div>
+            </div>
+          );
+        })}
+        <div>
+          <Button size="sm" variant="outline" onClick={() => setDraft([...draft, newSqlRow()])}><PlusIcon /> {t('settings.sql.addDatabase')}</Button>
+        </div>
+      </div>
       <div className="flex items-center gap-2 border-t border-border/60 px-4 py-3.5 sm:px-5">
-        <Button size="sm" onClick={() => run(() => saveSqlConfig(draft), t('settings.sql.saved'))}>{t('common.save')}</Button>
-        <Button size="sm" variant="outline" onClick={() => run(
-          // /api/sql/test reports failures as HTTP 200 + {ok:false, error} —
-          // surface them instead of showing "Connection OK" unconditionally.
-          () => testSqlConfig().then((r) => { if (!r.ok) throw new Error(r.error || t('settings.sql.connectionFailed')); }),
-          t('settings.sql.connectionOk'),
-        )}>{t('common.test')}</Button>
-        <Button size="sm" variant="destructive-outline" onClick={() => {
-          if (window.confirm(t('settings.sql.removeConfirm'))) run(() => deleteSqlConfig().then(() => setDraft(null)), t('settings.sql.removed'));
-        }}>{t('common.remove')}</Button>
+        <Button size="sm" onClick={save}>{t('common.save')}</Button>
         {msg && <span className={cn('text-xs', msg.ok ? 'text-success' : 'text-destructive-foreground')}>{msg.text}</span>}
       </div>
     </Section>
@@ -1083,23 +1141,47 @@ function RagPanel() {
     <Page>
       <Section title={t('settings.rag.pipeline')}>
         <Row label={t('settings.rag.ragEnabled')} hint={t('settings.rag.hint.enabled')}><Switch checked={draft.enabled} onCheckedChange={(v) => set('enabled', v)} /></Row>
-        {field('embedding_url', t('settings.rag.embeddingUrl'), { hint: t('settings.rag.hint.embeddingUrl'), def: 'http://host:8001/v1/embeddings' })}
-        {field('embedding_model', t('settings.rag.embeddingModel'), { hint: t('settings.rag.hint.embeddingModel'), def: 'qwen3-embed' })}
-        {field('qdrant_url', t('settings.rag.qdrantUrl'), { hint: t('settings.rag.hint.qdrantUrl'), def: 'http://qdrant:6333' })}
-        {field('qdrant_api_key', t('settings.rag.qdrantApiKey'), { type: 'password', hint: t('settings.rag.hint.qdrantApiKey') })}
-        {field('rerank_url', t('settings.rag.rerankUrl'), { hint: t('settings.rag.hint.rerankUrl'), def: 'http://host:8002/v1/rerank' })}
-        {field('rerank_model', t('settings.rag.rerankModel'), { hint: t('settings.rag.hint.rerankModel'), def: 'qwen3-reranker' })}
-        {field('rerank_api_key', t('settings.rag.rerankApiKey'), { type: 'password', hint: t('settings.rag.hint.rerankApiKey') })}
-        {field('sparse_model', t('settings.rag.sparseModel'), { hint: t('settings.rag.hint.sparseModel'), def: 'Qdrant/bm25' })}
+        <Row label={t('settings.rag.provider')} hint={t('settings.rag.hint.provider')}>
+          <Select
+            className="w-56"
+            value={(draft.provider || 'internal')}
+            onChange={(v) => set('provider', v)}
+            options={[
+              { value: 'internal', label: t('settings.rag.providerInternal') },
+              { value: 'external', label: t('settings.rag.providerExternal') },
+            ]}
+          />
+        </Row>
+        {(draft.provider || 'internal') === 'external' ? (
+          <>
+            {field('external_url', t('settings.rag.externalUrl'), { hint: t('settings.rag.hint.externalUrl'), def: 'http://ragflow/api/v1/retrieval' })}
+            {field('external_api_key', t('settings.rag.externalApiKey'), { type: 'password', hint: t('settings.rag.hint.externalApiKey') })}
+            {field('external_dataset_id', t('settings.rag.externalDatasetId'), { hint: t('settings.rag.hint.externalDatasetId') })}
+            {field('external_top_k', t('settings.rag.externalTopK'), { type: 'number', hint: t('settings.rag.hint.externalTopK'), def: 5 })}
+          </>
+        ) : (
+          <>
+            {field('embedding_url', t('settings.rag.embeddingUrl'), { hint: t('settings.rag.hint.embeddingUrl'), def: 'http://host:8001/v1/embeddings' })}
+            {field('embedding_model', t('settings.rag.embeddingModel'), { hint: t('settings.rag.hint.embeddingModel'), def: 'qwen3-embed' })}
+            {field('qdrant_url', t('settings.rag.qdrantUrl'), { hint: t('settings.rag.hint.qdrantUrl'), def: 'http://qdrant:6333' })}
+            {field('qdrant_api_key', t('settings.rag.qdrantApiKey'), { type: 'password', hint: t('settings.rag.hint.qdrantApiKey') })}
+            {field('rerank_url', t('settings.rag.rerankUrl'), { hint: t('settings.rag.hint.rerankUrl'), def: 'http://host:8002/v1/rerank' })}
+            {field('rerank_model', t('settings.rag.rerankModel'), { hint: t('settings.rag.hint.rerankModel'), def: 'qwen3-reranker' })}
+            {field('rerank_api_key', t('settings.rag.rerankApiKey'), { type: 'password', hint: t('settings.rag.hint.rerankApiKey') })}
+            {field('sparse_model', t('settings.rag.sparseModel'), { hint: t('settings.rag.hint.sparseModel'), def: 'Qdrant/bm25' })}
+          </>
+        )}
       </Section>
 
-      <Section title={t('settings.rag.retrieval')}>
-        {field('chat_top_k', t('settings.rag.chatTopK'), { type: 'number', hint: t('settings.rag.hint.chatTopK'), def: 5 })}
-        {field('search_top_k', t('settings.rag.searchTopK'), { type: 'number', hint: t('settings.rag.hint.searchTopK'), def: 5 })}
-        {field('candidate_top_k', t('settings.rag.candidateTopK'), { type: 'number', hint: t('settings.rag.hint.candidateTopK'), def: 40 })}
-        {field('rerank_min_score', t('settings.rag.rerankMinScore'), { type: 'number', hint: t('settings.rag.hint.rerankMinScore'), def: 0.1 })}
-        {field('similarity_threshold', t('settings.rag.similarityThreshold'), { type: 'number', hint: t('settings.rag.hint.similarityThreshold'), def: 0 })}
-      </Section>
+      {(draft.provider || 'internal') !== 'external' && (
+        <Section title={t('settings.rag.retrieval')}>
+          {field('chat_top_k', t('settings.rag.chatTopK'), { type: 'number', hint: t('settings.rag.hint.chatTopK'), def: 5 })}
+          {field('search_top_k', t('settings.rag.searchTopK'), { type: 'number', hint: t('settings.rag.hint.searchTopK'), def: 5 })}
+          {field('candidate_top_k', t('settings.rag.candidateTopK'), { type: 'number', hint: t('settings.rag.hint.candidateTopK'), def: 40 })}
+          {field('rerank_min_score', t('settings.rag.rerankMinScore'), { type: 'number', hint: t('settings.rag.hint.rerankMinScore'), def: 0.1 })}
+          {field('similarity_threshold', t('settings.rag.similarityThreshold'), { type: 'number', hint: t('settings.rag.hint.similarityThreshold'), def: 0 })}
+        </Section>
+      )}
 
       <Section title={t('settings.rag.context')}>
         {field('max_context_chars', t('settings.rag.maxContextChars'), { type: 'number', hint: t('settings.rag.hint.maxContextChars'), def: 10000 })}

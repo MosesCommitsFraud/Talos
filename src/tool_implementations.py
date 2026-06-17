@@ -49,38 +49,89 @@ def _sql_env(*names: str) -> str:
     return ""
 
 
-def _build_external_sql_url() -> tuple[Optional[str], Optional[str]]:
-    """Return (url, error). Credentials stay in process env and are never returned."""
+def _build_sql_url_from_cfg(cfg: dict) -> tuple[Optional[str], Optional[str]]:
+    """Build a SQLAlchemy URL from a single saved SQL connection dict.
+
+    Returns (url, error). Credentials stay in process and are never returned.
+    """
+    from urllib.parse import quote_plus
+
+    db_type = str(cfg.get("db_type") or "mssql").strip().lower()
+    host = str(cfg.get("host") or "").strip()
+    port = str(cfg.get("port") or "").strip()
+    name = str(cfg.get("database") or "").strip()
+    user = str(cfg.get("username") or "").strip()
+    password = str(cfg.get("password") or "")
+    if db_type == "sqlite":
+        if not name:
+            return None, "Configured SQLite database path is empty."
+        return f"sqlite:///{name}", None
+    if not host or not name or not user:
+        return None, "Saved SQL configuration is incomplete."
+    port_part = f":{port}" if port else ""
+    if db_type in {"postgres", "postgresql", "pg"}:
+        return f"postgresql+psycopg://{quote_plus(user)}:{quote_plus(password)}@{host}{port_part}/{quote_plus(name)}", None
+    if db_type in {"mysql", "mariadb"}:
+        return f"mysql+pymysql://{quote_plus(user)}:{quote_plus(password)}@{host}{port_part}/{quote_plus(name)}", None
+    if db_type in {"mssql", "sqlserver", "sql_server"}:
+        return f"mssql+pymssql://{quote_plus(user)}:{quote_plus(password)}@{host}{port_part}/{quote_plus(name)}", None
+    return None, f"Unsupported saved SQL database type '{db_type}'."
+
+
+def _sql_connections() -> list[dict]:
+    """Return normalized, enabled SQL connections, each carrying a 'name'.
+
+    Sources, in order: the new ``sql_databases`` list, the legacy single
+    ``sql_database`` dict, then the env-var fallback (name ``default``).
+    """
     try:
         from src.settings import get_setting
 
-        cfg = get_setting("sql_database", {})
+        dbs = get_setting("sql_databases", None)
+        legacy = get_setting("sql_database", {})
     except Exception:
-        cfg = {}
-    if isinstance(cfg, dict) and cfg.get("enabled"):
-        from urllib.parse import quote_plus
+        dbs, legacy = None, {}
 
-        db_type = str(cfg.get("db_type") or "mssql").strip().lower()
-        host = str(cfg.get("host") or "").strip()
-        port = str(cfg.get("port") or "").strip()
-        name = str(cfg.get("database") or "").strip()
-        user = str(cfg.get("username") or "").strip()
-        password = str(cfg.get("password") or "")
-        if db_type == "sqlite":
-            if not name:
-                return None, "Configured SQLite database path is empty."
-            return f"sqlite:///{name}", None
-        if not host or not name or not user:
-            return None, "Saved SQL configuration is incomplete."
-        port_part = f":{port}" if port else ""
-        if db_type in {"postgres", "postgresql", "pg"}:
-            return f"postgresql+psycopg://{quote_plus(user)}:{quote_plus(password)}@{host}{port_part}/{quote_plus(name)}", None
-        if db_type in {"mysql", "mariadb"}:
-            return f"mysql+pymysql://{quote_plus(user)}:{quote_plus(password)}@{host}{port_part}/{quote_plus(name)}", None
-        if db_type in {"mssql", "sqlserver", "sql_server"}:
-            return f"mssql+pymssql://{quote_plus(user)}:{quote_plus(password)}@{host}{port_part}/{quote_plus(name)}", None
-        return None, f"Unsupported saved SQL database type '{db_type}'."
+    conns: list[dict] = []
+    if isinstance(dbs, list) and dbs:
+        for i, cfg in enumerate(dbs):
+            if isinstance(cfg, dict) and cfg.get("enabled"):
+                name = str(cfg.get("name") or "").strip() or f"db{i + 1}"
+                conns.append({**cfg, "name": name})
+    elif isinstance(legacy, dict) and legacy.get("enabled"):
+        name = str(legacy.get("name") or "").strip() or "default"
+        conns.append({**legacy, "name": name})
 
+    if conns:
+        return conns
+
+    url, _ = _build_env_sql_url()
+    if url:
+        return [{"name": "default", "_url": url}]
+    return []
+
+
+def _resolve_conn_url(conn: dict) -> tuple[Optional[str], Optional[str]]:
+    """URL for a connection from ``_sql_connections`` (prebuilt env url or cfg)."""
+    if conn.get("_url"):
+        return conn["_url"], None
+    return _build_sql_url_from_cfg(conn)
+
+
+def _build_external_sql_url() -> tuple[Optional[str], Optional[str]]:
+    """Back-compat: URL for the first configured connection (or env fallback).
+
+    Used by the capability/status checks, which only need to know whether *any*
+    SQL database is reachable.
+    """
+    conns = _sql_connections()
+    if conns:
+        return _resolve_conn_url(conns[0])
+    return _build_env_sql_url()
+
+
+def _build_env_sql_url() -> tuple[Optional[str], Optional[str]]:
+    """Return (url, error) from backend environment variables only."""
     explicit = _sql_env(
         "TALOS_SQL_DATABASE_URL",
         "SQL_DATABASE_URL",
@@ -203,7 +254,36 @@ async def do_query_sql(content: str, owner: Optional[str] = None) -> Dict:
         except (TypeError, ValueError):
             max_rows = _SQL_MAX_ROWS_DEFAULT
 
-    url, err = _build_external_sql_url()
+    if action == "list_databases":
+        conns = _sql_connections()
+        if not conns:
+            return {"error": "No SQL databases are configured.", "exit_code": 1}
+        lines = []
+        for c in conns:
+            dt = str(c.get("db_type") or ("url" if c.get("_url") else "")).strip()
+            host = str(c.get("host") or "").strip()
+            detail = "/".join(p for p in (dt, host) if p)
+            lines.append(f"{c['name']}" + (f" ({detail})" if detail else ""))
+        return {"output": "Available databases:\n" + "\n".join(lines), "exit_code": 0}
+
+    conns = _sql_connections()
+    if not conns:
+        _, err = _build_external_sql_url()
+        return {"error": err or "No SQL database is configured.", "exit_code": 1}
+
+    requested = str(args.get("database") or "").strip()
+    if requested:
+        conn = next((c for c in conns if c["name"].lower() == requested.lower()), None)
+        if conn is None:
+            names = ", ".join(c["name"] for c in conns)
+            return {"error": f"Unknown database '{requested}'. Available: {names}.", "exit_code": 1}
+    elif len(conns) == 1:
+        conn = conns[0]
+    else:
+        names = ", ".join(c["name"] for c in conns)
+        return {"error": f'Multiple databases are configured ({names}). Pass "database" to choose one.', "exit_code": 1}
+
+    url, err = _resolve_conn_url(conn)
     if err or not url:
         return {"error": err or "No SQL database URL could be built.", "exit_code": 1}
 
@@ -245,7 +325,7 @@ async def do_query_sql(content: str, owner: Optional[str] = None) -> Dict:
                 return {"output": _format_sql_rows(rows), "rows": rows, "exit_code": 0}
 
             if action != "query":
-                return {"error": "Unknown action. Use list_tables, describe, or query.", "exit_code": 1}
+                return {"error": "Unknown action. Use list_databases, list_tables, describe, or query.", "exit_code": 1}
 
             query = str(args.get("query") or "").strip()
             validation_error = _validate_readonly_sql(query)

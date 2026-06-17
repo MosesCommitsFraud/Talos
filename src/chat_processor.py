@@ -275,12 +275,22 @@ class ChatProcessor:
         # RAG: search if enabled and rag_manager available, inject only above threshold
         if use_rag:
             try:
-                rag_manager = getattr(self.personal_docs_manager, 'rag_manager', None)
-                if not rag_manager:
-                    from src.rag_singleton import get_rag_manager
-                    rag_manager = get_rag_manager()
-                    if rag_manager and self.personal_docs_manager is not None:
-                        self.personal_docs_manager.rag_manager = rag_manager
+                # External provider (e.g. RagFlow) replaces the internal Qdrant
+                # manager but returns the same result shape, so everything below
+                # the search() call is shared.
+                if str(self._rag_cfg().get("provider") or "internal").strip().lower() == "external":
+                    from src.rag_external import ExternalRagClient
+
+                    rag_manager = ExternalRagClient(self._rag_cfg())
+                    if not rag_manager.configured:
+                        rag_manager = None
+                else:
+                    rag_manager = getattr(self.personal_docs_manager, 'rag_manager', None)
+                    if not rag_manager:
+                        from src.rag_singleton import get_rag_manager
+                        rag_manager = get_rag_manager()
+                        if rag_manager and self.personal_docs_manager is not None:
+                            self.personal_docs_manager.rag_manager = rag_manager
                 if rag_manager:
                     # RAG is a global admin-managed knowledge base. Do not owner-filter here:
                     # when enabled, indexed knowledge is available to every user.

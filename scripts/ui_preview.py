@@ -216,9 +216,24 @@ class PreviewHandler(BaseHTTPRequestHandler):
             # renders the full RAG + SQL mode dropdown in the preview.
             self._send_json({"rag": True, "sql": True})
             return
+        if path == "/api/sql/config":
+            self._send_json({"databases": [
+                {"id": "p1", "name": "sales", "enabled": True, "db_type": "mssql",
+                 "host": "db.example.local", "port": "1433", "database": "Sales",
+                 "username": "ro_user", "password_set": True, "odbc_driver": ""},
+                {"id": "p2", "name": "analytics", "enabled": True, "db_type": "postgresql",
+                 "host": "pg.example.local", "port": "5432", "database": "analytics",
+                 "username": "readonly", "password_set": False, "odbc_driver": ""},
+            ]})
+            return
         if path == "/api/rag/config":
             self._send_json({
                 "enabled": True,
+                "provider": "internal",
+                "external_url": "",
+                "external_api_key_set": False,
+                "external_dataset_id": "",
+                "external_top_k": 5,
                 "embedding_url": "http://192.168.10.91:8001/v1/embeddings",
                 "embedding_model": "qwen3-embed",
                 "qdrant_url": "http://qdrant:6333",

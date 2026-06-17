@@ -250,6 +250,12 @@ export async function setUserAdmin(username: string, isAdmin: boolean): Promise<
 
 export interface RagConfig {
   enabled: boolean;
+  provider?: string;
+  external_url?: string;
+  external_api_key?: string;
+  external_api_key_set?: boolean;
+  external_dataset_id?: string;
+  external_top_k?: number;
   embedding_url: string;
   embedding_model: string;
   qdrant_url: string;
@@ -438,6 +444,8 @@ export async function deleteRagDocument(source: string): Promise<void> {
 
 /* ── SQL database (query_sql tool, MSSQL etc.) ── */
 export interface SqlConfig {
+  id?: string;
+  name: string;
   enabled: boolean;
   db_type: string;
   host: string;
@@ -448,10 +456,13 @@ export interface SqlConfig {
   password_set?: boolean;
   odbc_driver: string;
 }
-export const fetchSqlConfig = () => getJSON<SqlConfig>('/api/sql/config');
-export const saveSqlConfig = (cfg: SqlConfig) => postJSON('/api/sql/config', cfg, 'PUT');
-export const deleteSqlConfig = () => postJSON('/api/sql/config', undefined, 'DELETE');
-export const testSqlConfig = () => postJSON<{ ok?: boolean; error?: string; output?: string }>('/api/sql/test');
+export const fetchSqlConfig = async (): Promise<SqlConfig[]> =>
+  (await getJSON<{ databases?: SqlConfig[] }>('/api/sql/config')).databases ?? [];
+export const saveSqlConfig = (databases: SqlConfig[]) => postJSON('/api/sql/config', { databases }, 'PUT');
+export const deleteSqlConfig = (id?: string) =>
+  postJSON(`/api/sql/config${id ? `?id=${encodeURIComponent(id)}` : ''}`, undefined, 'DELETE');
+export const testSqlConfig = (id?: string) =>
+  postJSON<{ ok?: boolean; error?: string; output?: string }>(`/api/sql/test${id ? `?id=${encodeURIComponent(id)}` : ''}`);
 
 /* ── Built-in agent tools ── */
 export interface BuiltinTool { id: string; enabled: boolean }
