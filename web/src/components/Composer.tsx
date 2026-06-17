@@ -92,7 +92,7 @@ function ChatModeDropdown() {
         <button
           type="button"
           aria-label={t('composer.mode.label')}
-          className="flex h-8 shrink-0 items-center gap-1.5 rounded-lg border border-transparent px-2 text-[13px] font-medium whitespace-nowrap text-muted-foreground/70 transition-colors hover:bg-accent hover:text-foreground/80 sm:h-7 sm:px-2.5 [&_svg]:size-4 [&_svg]:shrink-0"
+          className="flex h-8 shrink-0 items-center gap-1.5 rounded-lg border border-transparent px-2 text-[13px] font-medium whitespace-nowrap text-muted-foreground/70 outline-none transition-colors hover:bg-accent hover:text-foreground/80 focus:outline-none focus-visible:outline-none sm:h-7 sm:px-2.5 [&_svg]:size-4 [&_svg]:shrink-0"
         >
           <active.Icon />
           <span className="sr-only sm:not-sr-only">{active.label}</span>
