@@ -1,6 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   BotIcon,
+  CheckIcon,
+  ChevronDownIcon,
   ChevronRightIcon,
   DatabaseIcon,
   FileTextIcon,
@@ -72,6 +74,7 @@ import { cn } from '@/lib/utils';
 import { Button } from './ui/button';
 import { Dialog, DialogContent } from './ui/dialog';
 import { Input, Switch, Textarea } from './ui/misc';
+import { Menu, MenuItem, MenuPopup, MenuTrigger } from './ui/menu';
 import { KeybindingPill } from './ui/kbd';
 import { useAuth } from './auth/AuthGate';
 import { UsersPanel } from './settings/UsersPanel';
@@ -131,17 +134,39 @@ export function Row({ label, hint, children }: { label: React.ReactNode; hint?: 
   );
 }
 
+/** Custom dropdown matching the composer mode picker — a bordered trigger with
+ *  a chevron and a themed popup, instead of the OS-native `<select>` chrome
+ *  (which ignores the app's fonts/colors and looks foreign in the dialog). The
+ *  popup scrolls for long option lists (e.g. model pickers). */
 function Select({ value, onChange, options, className }: { value: string; onChange: (v: string) => void; options: Array<{ value: string; label?: string }>; className?: string }) {
+  const current = options.find((o) => o.value === value);
+  const label = current?.label ?? (current?.value || value || '—');
   return (
-    <select
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
-      className={cn('h-8 rounded-lg border border-input bg-popover px-2 text-sm outline-none focus-visible:border-ring', className)}
-    >
-      {options.map((o) => (
-        <option key={o.value} value={o.value}>{o.label ?? (o.value || '—')}</option>
-      ))}
-    </select>
+    <Menu>
+      <MenuTrigger asChild>
+        <button
+          type="button"
+          className={cn(
+            'flex h-8 min-w-[7rem] items-center justify-between gap-2 rounded-lg border border-input bg-transparent px-2.5 text-sm outline-none transition-colors hover:border-ring/60 focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30 dark:bg-input/20',
+            className,
+          )}
+        >
+          <span className="truncate">{label}</span>
+          <ChevronDownIcon className="size-3.5 shrink-0 opacity-50" />
+        </button>
+      </MenuTrigger>
+      <MenuPopup
+        align="start"
+        className="max-h-[min(20rem,50vh)] min-w-[var(--radix-dropdown-menu-trigger-width)] overflow-y-auto"
+      >
+        {options.map((o) => (
+          <MenuItem key={o.value} onSelect={() => onChange(o.value)} className="justify-between gap-3">
+            <span className="truncate">{o.label ?? (o.value || '—')}</span>
+            {o.value === value && <CheckIcon className="size-3.5 shrink-0 text-primary" />}
+          </MenuItem>
+        ))}
+      </MenuPopup>
+    </Menu>
   );
 }
 
