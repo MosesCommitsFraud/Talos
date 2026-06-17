@@ -17,6 +17,10 @@ export interface UiMessage {
   sources?: RagSource[];
   streaming?: boolean;
   error?: boolean;
+  /** Wall-clock the whole turn took, stamped on the terminal assistant bubble
+   *  when streaming ends. Drives the settled "Worked for Xs" fold (t3code style);
+   *  turns loaded cold from history fall back to summed metrics.response_time. */
+  turnElapsedMs?: number;
 }
 
 /** Live runtime for one session, kept in the store keyed by session id so it
@@ -355,7 +359,13 @@ export const useChat = create<ChatState>((set, get) => {
         }));
       }
     } finally {
-      patchAi({ streaming: false });
+      // Stamp the turn's wall-clock onto the terminal bubble before the start
+      // time is cleared, so the settled "Worked for Xs" fold has a duration.
+      const startedAt = get().runtimes[sid]?.turnStartedAt;
+      patchAi((m) => ({
+        streaming: false,
+        turnElapsedMs: startedAt != null ? Date.now() - startedAt : m.turnElapsedMs,
+      }));
       // Clear only this session's turn flags — a different chat may be active.
       writeRuntime(sid, () => ({ streaming: false, turnStartedAt: null, abort: null }));
     }

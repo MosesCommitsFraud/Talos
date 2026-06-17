@@ -13,6 +13,7 @@ import { AuthGate } from './components/auth/AuthGate';
 import { TooltipProvider } from './components/ui/misc';
 import { applyDensity, applyLang, applyTheme, usePrefs } from './state/prefs';
 import { useChat } from './state/chat';
+import { useUi } from './state/ui';
 import { cn } from './lib/utils';
 
 const queryClient = new QueryClient({
@@ -24,7 +25,8 @@ export default function App() {
   const [settings, setSettings] = useState(false);
   const [brain, setBrain] = useState(false);
   const [library, setLibrary] = useState(false);
-  const [files, setFiles] = useState(false);
+  const filesOpen = useUi((s) => s.artifactsOpen);
+  const setFilesOpen = useUi((s) => s.setArtifactsOpen);
   const theme = usePrefs((s) => s.theme);
   const density = usePrefs((s) => s.density);
   const lang = usePrefs((s) => s.lang);
@@ -73,7 +75,7 @@ export default function App() {
                 <Composer />
               </div>
             </main>
-            <ArtifactsPanel open={files} onClose={() => setFiles(false)} />
+            <ArtifactsPanel open={filesOpen} onClose={() => setFilesOpen(false)} />
           </div>
           <CommandPalette open={palette} onClose={() => setPalette(false)} onOpenSettings={() => setSettings(true)} />
           <SettingsDialog open={settings} onClose={() => setSettings(false)} />

@@ -19,8 +19,11 @@ export function toolImages(call: ToolCall): ToolImage[] {
   return images.filter((image, i, all) => all.findIndex((other) => other.src === image.src) === i);
 }
 
-/** One quiet tool-call row: "python · done", expandable to command + output. */
-export function ToolRow({ call }: { call: ToolCall }) {
+/** One quiet tool-call row: "python · done", expandable to command + output.
+ *  `compact` (used inside the settled "Worked for" fold) keeps the row tidy by
+ *  suppressing the inline image gallery — those images resurface in the turn's
+ *  end grid instead. */
+export function ToolRow({ call, compact = false }: { call: ToolCall; compact?: boolean }) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const Icon = call.status === 'running' ? LoaderCircleIcon : call.status === 'error' ? CircleAlertIcon : CheckIcon;
@@ -49,10 +52,10 @@ export function ToolRow({ call }: { call: ToolCall }) {
           )}
         </div>
       )}
-      {(call.image_note || images.length > 0) && (
+      {(call.image_note || (!compact && images.length > 0)) && (
         <div className="mt-2 ml-1 space-y-1.5">
           {call.image_note && <div className="text-xs text-muted-foreground">{call.image_note}</div>}
-          {images.length > 0 && (
+          {!compact && images.length > 0 && (
             <div className="grid grid-cols-[repeat(auto-fit,minmax(140px,1fr))] gap-2">
               {images.map((image, i) => (
                 <a

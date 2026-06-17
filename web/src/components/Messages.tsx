@@ -1,11 +1,12 @@
-import { CheckIcon, ChevronDownIcon, CopyIcon, FileIcon, PencilIcon, Trash2Icon } from 'lucide-react';
+import { CheckIcon, ChevronDownIcon, ChevronRightIcon, CopyIcon, FileIcon, ImageIcon, PencilIcon, Trash2Icon } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
-import { useEffect, useRef, useState } from 'react';
+import { Fragment, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { artifactDownloadUrl, fetchArtifacts, uploadDownloadUrl } from '@/api/client';
 import { copyTextToClipboard } from '@/lib/utils';
 import { useChat, type UiMessage } from '@/state/chat';
 import { usePrefs } from '@/state/prefs';
+import { useUi } from '@/state/ui';
 import { Markdown } from './Markdown';
 import { RagSources } from './RagSources';
 import { Thinking } from './Thinking';
@@ -14,8 +15,8 @@ import { Tooltip } from './ui/misc';
 import { Button } from './ui/button';
 
 /** Compact elapsed label: "12s", "3m 5s", "1h 4m". */
-function formatWorkingElapsed(startMs: number, nowMs: number): string {
-  const elapsed = Math.max(0, Math.floor((nowMs - startMs) / 1000));
+function formatDurationMs(ms: number): string {
+  const elapsed = Math.max(0, Math.floor(ms / 1000));
   if (elapsed < 60) return `${elapsed}s`;
   const hours = Math.floor(elapsed / 3600);
   const minutes = Math.floor((elapsed % 3600) / 60);
@@ -23,6 +24,8 @@ function formatWorkingElapsed(startMs: number, nowMs: number): string {
   if (hours > 0) return minutes > 0 ? `${hours}h ${minutes}m` : `${hours}h`;
   return seconds > 0 ? `${minutes}m ${seconds}s` : `${minutes}m`;
 }
+
+const formatWorkingElapsed = (startMs: number, nowMs: number) => formatDurationMs(nowMs - startMs);
 
 /** Self-ticking "Working for Xs" label — updates its own text node each second
  *  so the streaming message tree isn't re-committed every tick (t3code style). */
@@ -51,6 +54,38 @@ function Working({ startedAt }: { startedAt?: number }) {
         <span className="size-1 animate-pulse rounded-full bg-muted-foreground/40 [animation-delay:400ms]" />
       </span>
       <span>{startedAt ? <>{t('messages.workingFor')} <WorkingTimer startedAt={startedAt} /></> : t('messages.working')}</span>
+    </div>
+  );
+}
+
+/** Settled-turn fold: collapses all of a finished assistant turn's thinking and
+ *  tool calls behind a quiet "Worked for Xs" disclosure (t3code style). The
+ *  final answer text renders separately and stays visible; only the work folds. */
+function ActivityFold({ turn, showThinking, durationMs }: { turn: UiMessage[]; showThinking: boolean; durationMs: number | null }) {
+  const { t } = useTranslation();
+  const [open, setOpen] = useState(false);
+  const label = durationMs != null ? t('messages.workedFor', { duration: formatDurationMs(durationMs) }) : t('messages.worked');
+  return (
+    <div className="my-1 border-b border-border/50 pb-1.5">
+      <button
+        type="button"
+        aria-expanded={open}
+        onClick={() => setOpen((v) => !v)}
+        className="flex select-none items-center gap-1 rounded-md text-xs text-muted-foreground tabular-nums transition-colors hover:text-foreground"
+      >
+        <span>{label}</span>
+        <ChevronRightIcon className={`size-3.5 transition-transform ${open ? 'rotate-90' : ''}`} />
+      </button>
+      {open && (
+        <div className="mt-1.5 space-y-0.5">
+          {turn.map((m) => (
+            <Fragment key={m.id}>
+              {m.thinking && showThinking && <Thinking text={m.thinking} streaming={false} />}
+              {m.tools?.map((call, i) => <ToolRow key={i} call={call} compact />)}
+            </Fragment>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -178,25 +213,100 @@ function EditBox({ msg, onDone }: { msg: UiMessage; onDone: () => void }) {
   );
 }
 
-function FinalImageGrid({ images }: { images: ToolImage[] }) {
+/** End-of-turn affordance: a quiet button that opens the artifacts sidebar so
+ *  the user can view (and download) the files/images the query produced. */
+function ArtifactsButton({ count }: { count: number }) {
   const { t } = useTranslation();
-  const uniqueImages = images.filter((image, i, all) => all.findIndex((other) => other.src === image.src) === i);
-  if (uniqueImages.length === 0) return null;
+  const openArtifacts = useUi((s) => s.setArtifactsOpen);
   return (
-    <div className="mt-3 grid grid-cols-[repeat(auto-fit,minmax(150px,1fr))] gap-2">
-      {uniqueImages.map((image, i) => (
-        <a
-          key={`${image.src.slice(0, 48)}-${i}`}
-          href={image.src}
-          target="_blank"
-          rel="noreferrer"
-          className="min-w-0"
-        >
-          <img src={image.src} alt={image.label || t('messages.generatedImage', { n: i + 1 })} className="max-h-96 w-full rounded-lg object-contain" />
-          {image.label && <div className="mt-1 truncate text-xs text-muted-foreground">{image.label}</div>}
-        </a>
-      ))}
-    </div>
+    <button
+      type="button"
+      onClick={() => openArtifacts(true)}
+      className="mt-3 inline-flex items-center gap-1.5 rounded-lg border border-border/60 bg-card px-2.5 py-1.5 text-xs text-muted-foreground transition-colors hover:border-border hover:text-foreground"
+    >
+      <ImageIcon className="size-3.5" />
+      {t('messages.viewArtifacts', { count })}
+    </button>
+  );
+}
+
+/** One assistant turn = the run of consecutive assistant bubbles after a user
+ *  message. While streaming it renders live (thinking → tools → text, in order,
+ *  plus the running indicator). Once settled, the thinking and tool calls fold
+ *  into a single "Worked for Xs" disclosure and only the answer stays visible —
+ *  matching t3code's finished-turn compaction. */
+function AssistantTurn({ turn, containsLast, artifactImages }: { turn: UiMessage[]; containsLast: boolean; artifactImages: ToolImage[] }) {
+  const showThinking = usePrefs((s) => s.visibility.showThinking);
+  const showMetrics = usePrefs((s) => s.visibility.messageMetrics);
+  const turnStartedAt = useChat((s) => s.turnStartedAt);
+
+  const streaming = turn.some((m) => m.streaming);
+  const last = turn[turn.length - 1];
+  const copyText = turn.map((m) => m.content.trim()).filter(Boolean).join('\n\n');
+
+  if (streaming) {
+    return (
+      <>
+        {turn.map((m) => (
+          <Fragment key={m.id}>
+            {m.thinking && showThinking && <Thinking text={m.thinking} streaming={!!m.streaming && !m.content} />}
+            {m.tools?.map((call, i) => <ToolRow key={i} call={call} />)}
+            {m.content && (
+              <div className={m.error ? 'text-destructive-foreground' : ''}>
+                <Markdown text={m.content} />
+              </div>
+            )}
+          </Fragment>
+        ))}
+        {/* Persistent "still running" indicator: shown for the whole streaming
+            turn — through thinking, tool calls, and text deltas. */}
+        <Working startedAt={turnStartedAt ?? undefined} />
+      </>
+    );
+  }
+
+  // Settled turn: fold the work, keep the answer.
+  const hasActivity = turn.some((m) => (m.thinking && showThinking) || (m.tools?.length ?? 0) > 0);
+  const durationMs =
+    last.turnElapsedMs ??
+    (() => {
+      const seconds = turn.reduce((acc, m) => acc + (m.metrics?.response_time ?? 0), 0);
+      return seconds > 0 ? seconds * 1000 : null;
+    })();
+
+  // The tool rows (and any images they produced) fold away once the turn
+  // settles. Rather than re-rendering those images inline, surface a button that
+  // opens the artifacts sidebar — the canonical place for files the query made.
+  const createdImages = turn.flatMap((m) => (m.tools ?? []).flatMap(toolImages));
+  const createdCount = createdImages.length > 0 ? createdImages.length : containsLast ? artifactImages.length : 0;
+  const sources = turn.flatMap((m) => m.sources ?? []);
+
+  return (
+    <>
+      {hasActivity && <ActivityFold turn={turn} showThinking={showThinking} durationMs={durationMs} />}
+      {turn.map((m) =>
+        m.content ? (
+          <div key={m.id} className={m.error ? 'text-destructive-foreground' : ''}>
+            <Markdown text={m.content} />
+          </div>
+        ) : null,
+      )}
+      {createdCount > 0 && <ArtifactsButton count={createdCount} />}
+      {copyText && (
+        <div className="mt-2 flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100">
+          <MessageActions msg={last} copyText={copyText} canDelete={false} />
+          {showMetrics && last.metrics && (
+            <span className="text-xs text-muted-foreground/80">
+              {last.metrics.tokens_per_second != null && `${last.metrics.tokens_per_second} tok/s`}
+              {last.metrics.response_time != null && ` · ${last.metrics.response_time}s`}
+            </span>
+          )}
+        </div>
+      )}
+      {/* RAG citations: last thing in the turn, only when the backend confirmed
+          the knowledge was used. */}
+      {sources.length > 0 && <RagSources sources={sources} />}
+    </>
   );
 }
 
@@ -204,9 +314,6 @@ export function Messages() {
   const { t } = useTranslation();
   const sessionId = useChat((s) => s.sessionId);
   const messages = useChat((s) => s.messages);
-  const turnStartedAt = useChat((s) => s.turnStartedAt);
-  const showMetrics = usePrefs((s) => s.visibility.messageMetrics);
-  const showThinking = usePrefs((s) => s.visibility.showThinking);
   const [editing, setEditing] = useState<string | null>(null);
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
   const scroller = useRef<HTMLDivElement>(null);
@@ -260,91 +367,53 @@ export function Messages() {
           : [];
       })
     : [];
-  const isAssistantTurnEnd = (index: number) => messages[index].role === 'assistant' && messages[index + 1]?.role !== 'assistant';
-  const assistantTurnStart = (index: number) => {
-    let start = index;
-    while (start > 0 && messages[start - 1].role === 'assistant') start -= 1;
-    return start;
-  };
-  const assistantTurnText = (index: number) => {
-    const start = assistantTurnStart(index);
-    return messages.slice(start, index + 1).map((msg) => msg.content.trim()).filter(Boolean).join('\n\n');
-  };
-  const assistantTurnImages = (index: number) => {
-    const start = assistantTurnStart(index);
-    return messages.slice(start, index + 1).flatMap((msg) => (msg.tools ?? []).flatMap(toolImages));
-  };
-  // RAG citations apply to the whole assistant turn, so collect them across all
-  // of the turn's rows and render once, at the very end (RagSources dedupes by
-  // filename). The backend only sends sources it determined the answer used.
-  const assistantTurnSources = (index: number) => {
-    const start = assistantTurnStart(index);
-    return messages.slice(start, index + 1).flatMap((msg) => msg.sources ?? []);
-  };
+  // Group the flat message list into render blocks: a user bubble, or an
+  // assistant turn (the run of consecutive assistant bubbles after it).
+  type Block = { kind: 'user'; msg: UiMessage } | { kind: 'turn'; turn: UiMessage[] };
+  const blocks: Block[] = [];
+  for (let i = 0; i < messages.length; i += 1) {
+    const m = messages[i];
+    if (m.role === 'user') {
+      blocks.push({ kind: 'user', msg: m });
+    } else {
+      const turn: UiMessage[] = [];
+      while (i < messages.length && messages[i].role === 'assistant') {
+        turn.push(messages[i]);
+        i += 1;
+      }
+      i -= 1;
+      blocks.push({ kind: 'turn', turn });
+    }
+  }
 
   return (
    <div className="relative flex min-h-0 flex-1 flex-col">
     <div ref={scroller} onScroll={onScroll} className="flex-1 overflow-y-auto" role="log" aria-live="polite">
       <div className="mx-auto flex w-full max-w-[800px] flex-col px-4 py-6">
-        {messages.map((m, index) =>
-          m.role === 'user' ? (
-            <div key={m.id} className={`group ml-auto flex w-full max-w-[75%] flex-col items-end gap-0.5 ${index === 0 ? '' : 'mt-3'}`}>
-              {editing === m.id ? (
-                <EditBox msg={m} onDone={() => setEditing(null)} />
+        {blocks.map((block, index) =>
+          block.kind === 'user' ? (
+            <div key={block.msg.id} className={`group ml-auto flex w-full max-w-[75%] flex-col items-end gap-0.5 ${index === 0 ? '' : 'mt-3'}`}>
+              {editing === block.msg.id ? (
+                <EditBox msg={block.msg} onDone={() => setEditing(null)} />
               ) : (
                 <>
                   <div className="rounded-2xl rounded-br-md bg-secondary px-4 py-2.5 text-[15px] leading-relaxed whitespace-pre-wrap">
-                    {m.content}
+                    {block.msg.content}
                   </div>
-                  <AttachmentList msg={m} />
+                  <AttachmentList msg={block.msg} />
                   <div className="flex">
-                    <MessageActions msg={m} onEdit={() => setEditing(m.id)} />
+                    <MessageActions msg={block.msg} onEdit={() => setEditing(block.msg.id)} />
                   </div>
                 </>
               )}
             </div>
           ) : (
-            <div key={m.id} className={`group w-full ${index === 0 ? '' : messages[index - 1].role === 'assistant' ? 'mt-0.5' : 'mt-3'}`}>
-              {m.thinking && showThinking && <Thinking text={m.thinking} streaming={!!m.streaming && !m.content} />}
-              {m.tools?.map((t, i) => <ToolRow key={i} call={t} />)}
-              {m.content && (
-                <div className={m.error ? 'text-destructive-foreground' : ''}>
-                  <Markdown text={m.content} />
-                </div>
-              )}
-              {/* Persistent "still running" indicator: shown for the entire
-                  streaming turn — through thinking, tool calls, and text deltas —
-                  so it never silently disappears mid-response. */}
-              {m.streaming && <Working startedAt={turnStartedAt ?? undefined} />}
-              {!m.streaming && isAssistantTurnEnd(index) && (() => {
-                // Tool images already render inline at their tool row — the
-                // bottom grid is only a fallback for artifacts no tool showed.
-                const toolFinalImages = assistantTurnImages(index);
-                const finalImages = toolFinalImages.length === 0 && m.id === lastAssistantId ? artifactImages : [];
-                const copyText = assistantTurnText(index);
-                return (
-                  <>
-                    <FinalImageGrid images={finalImages} />
-                    {copyText && (
-                      <div className="mt-2 flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100">
-                        <MessageActions msg={m} copyText={copyText} canDelete={false} />
-                        {showMetrics && m.metrics && (
-                          <span className="text-xs text-muted-foreground/80">
-                            {m.metrics.tokens_per_second != null && `${m.metrics.tokens_per_second} tok/s`}
-                            {m.metrics.response_time != null && ` · ${m.metrics.response_time}s`}
-                          </span>
-                        )}
-                      </div>
-                    )}
-                  </>
-                );
-              })()}
-              {/* RAG citations: the very last thing in the assistant turn, and
-                  only when the backend confirmed the knowledge was used. */}
-              {!m.streaming && isAssistantTurnEnd(index) && (() => {
-                const sources = assistantTurnSources(index);
-                return sources.length > 0 ? <RagSources sources={sources} /> : null;
-              })()}
+            <div key={block.turn[0].id} className={`group w-full ${index === 0 ? '' : 'mt-3'}`}>
+              <AssistantTurn
+                turn={block.turn}
+                containsLast={block.turn.some((m) => m.id === lastAssistantId)}
+                artifactImages={artifactImages}
+              />
             </div>
           ),
         )}
