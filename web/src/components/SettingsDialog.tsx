@@ -928,6 +928,18 @@ const newSqlRow = (): SqlConfig => ({
   odbc_driver: '',
 });
 
+/** Stacked label-above-control field. Full-width controls below the label
+ *  stay readable when translations (e.g. German) run long, unlike a
+ *  fixed-width control crammed beside the label. */
+function SqlField({ label, className, children }: { label: string; className?: string; children: React.ReactNode }) {
+  return (
+    <label className={cn('flex min-w-0 flex-col gap-1.5', className)}>
+      <span className="text-xs font-medium text-muted-foreground">{label}</span>
+      {children}
+    </label>
+  );
+}
+
 function SqlDatabaseSection() {
   const { t } = useTranslation();
   const { data } = useQuery({ queryKey: ['sql-config'], queryFn: fetchSqlConfig });
@@ -963,9 +975,9 @@ function SqlDatabaseSection() {
           const saved = data?.find((d) => d.id === row.id);
           return (
             <div key={row.id ?? i} className="rounded-lg border border-border/60 p-3">
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <Input
-                  className="flex-1" placeholder={t('settings.sql.namePlaceholder')}
+                  className="min-w-[10rem] flex-1" placeholder={t('settings.sql.namePlaceholder')}
                   value={row.name} onChange={(e) => setRow(i, 'name', e.target.value)}
                 />
                 <Switch checked={row.enabled} onCheckedChange={(v) => setRow(i, 'enabled', v)} />
@@ -982,11 +994,10 @@ function SqlDatabaseSection() {
                   onClick={() => setDraft(draft.filter((_, idx) => idx !== i))}
                 >{t('common.remove')}</Button>
               </div>
-              <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
-                <label className="flex items-center justify-between gap-2 text-sm">
-                  <span className="text-muted-foreground">{t('settings.sql.type')}</span>
+              <div className="mt-3 grid grid-cols-1 gap-x-4 gap-y-3 sm:grid-cols-2">
+                <SqlField label={t('settings.sql.type')}>
                   <Select
-                    className="w-44" value={row.db_type} onChange={(v) => setRow(i, 'db_type', v)}
+                    className="w-full" value={row.db_type} onChange={(v) => setRow(i, 'db_type', v)}
                     options={[
                       { value: 'mssql', label: 'MSSQL' },
                       { value: 'postgresql', label: 'PostgreSQL' },
@@ -994,35 +1005,29 @@ function SqlDatabaseSection() {
                       { value: 'sqlite', label: 'SQLite' },
                     ]}
                   />
-                </label>
-                <label className="flex items-center justify-between gap-2 text-sm">
-                  <span className="text-muted-foreground">{t('settings.sql.host')}</span>
-                  <Input className="w-44" placeholder="db.example.local" value={row.host} onChange={(e) => setRow(i, 'host', e.target.value)} />
-                </label>
-                <label className="flex items-center justify-between gap-2 text-sm">
-                  <span className="text-muted-foreground">{t('settings.sql.port')}</span>
-                  <Input className="w-44" placeholder={SQL_DEFAULT_PORTS[row.db_type] ?? ''} value={row.port} onChange={(e) => setRow(i, 'port', e.target.value)} />
-                </label>
-                <label className="flex items-center justify-between gap-2 text-sm">
-                  <span className="text-muted-foreground">{t('settings.sql.database')}</span>
-                  <Input className="w-44" placeholder={t('settings.sql.databasePlaceholder')} value={row.database} onChange={(e) => setRow(i, 'database', e.target.value)} />
-                </label>
-                <label className="flex items-center justify-between gap-2 text-sm">
-                  <span className="text-muted-foreground">{t('settings.sql.readonlyUser')}</span>
-                  <Input className="w-44" autoComplete="off" value={row.username} onChange={(e) => setRow(i, 'username', e.target.value)} />
-                </label>
-                <label className="flex items-center justify-between gap-2 text-sm">
-                  <span className="text-muted-foreground">{t('settings.sql.password')}</span>
+                </SqlField>
+                <SqlField label={t('settings.sql.host')}>
+                  <Input placeholder="db.example.local" value={row.host} onChange={(e) => setRow(i, 'host', e.target.value)} />
+                </SqlField>
+                <SqlField label={t('settings.sql.port')}>
+                  <Input placeholder={SQL_DEFAULT_PORTS[row.db_type] ?? ''} value={row.port} onChange={(e) => setRow(i, 'port', e.target.value)} />
+                </SqlField>
+                <SqlField label={t('settings.sql.database')}>
+                  <Input placeholder={t('settings.sql.databasePlaceholder')} value={row.database} onChange={(e) => setRow(i, 'database', e.target.value)} />
+                </SqlField>
+                <SqlField label={t('settings.sql.readonlyUser')}>
+                  <Input autoComplete="off" value={row.username} onChange={(e) => setRow(i, 'username', e.target.value)} />
+                </SqlField>
+                <SqlField label={t('settings.sql.password')}>
                   <Input
-                    className="w-44" type="password" autoComplete="new-password"
+                    type="password" autoComplete="new-password"
                     placeholder={saved?.password_set ? t('settings.sql.passwordSaved') : ''}
                     value={row.password ?? ''} onChange={(e) => setRow(i, 'password', e.target.value)}
                   />
-                </label>
-                <label className="flex items-center justify-between gap-2 text-sm sm:col-span-2">
-                  <span className="text-muted-foreground">{t('settings.sql.odbcDriver')}</span>
-                  <Input className="w-44" placeholder="ODBC Driver 18 for SQL Server" value={row.odbc_driver} onChange={(e) => setRow(i, 'odbc_driver', e.target.value)} />
-                </label>
+                </SqlField>
+                <SqlField label={t('settings.sql.odbcDriver')} className="sm:col-span-2">
+                  <Input placeholder="ODBC Driver 18 for SQL Server" value={row.odbc_driver} onChange={(e) => setRow(i, 'odbc_driver', e.target.value)} />
+                </SqlField>
               </div>
             </div>
           );
