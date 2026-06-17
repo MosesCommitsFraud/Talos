@@ -211,6 +211,40 @@ class PreviewHandler(BaseHTTPRequestHandler):
                           "chat_with_model", "list_models", "manage_tasks")
             ]})
             return
+        if path == "/api/capabilities":
+            # Pretend both knowledge sources are configured so the composer
+            # renders the full RAG + SQL mode dropdown in the preview.
+            self._send_json({"rag": True, "sql": True})
+            return
+        if path == "/api/rag/config":
+            self._send_json({
+                "enabled": True,
+                "embedding_url": "http://192.168.10.91:8001/v1/embeddings",
+                "embedding_model": "qwen3-embed",
+                "qdrant_url": "http://qdrant:6333",
+                "qdrant_api_key_set": False,
+                "rerank_url": "http://192.168.10.91:8002/v1/rerank",
+                "rerank_model": "qwen3-reranker",
+                "rerank_api_key_set": False,
+                "sparse_model": "Qdrant/bm25",
+                "chat_top_k": 5, "search_top_k": 5, "candidate_top_k": 40,
+                "similarity_threshold": 0.0, "rerank_min_score": 0.1,
+                "max_context_chars": 10000, "query_prefix": "", "context_prompt": "",
+            })
+            return
+        if path == "/api/rag/jobs/diagnostics":
+            self._send_json({"active_worker_count": 1, "active_workers": ["preview"],
+                             "multi_worker_warning": False, "message": "Single active ingest worker"})
+            return
+        if path == "/api/rag/jobs":
+            self._send_json({"jobs": []})
+            return
+        if path == "/api/rag/documents":
+            self._send_json({"available": True, "documents": [
+                {"source": "/srv/uploads/handbook.pdf", "filename": "handbook.pdf", "type": ".pdf", "directory": "", "chunks": 42},
+                {"source": "/srv/uploads/prices.xlsx", "filename": "prices.xlsx", "type": ".xlsx", "directory": "", "chunks": 17},
+            ]})
+            return
         if path == "/api/prefs/theme":
             self._send_json({})
             return

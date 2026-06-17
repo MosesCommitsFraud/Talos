@@ -592,6 +592,9 @@ app.include_router(document_router)
 from routes.prefs_routes import setup_prefs_routes
 app.include_router(setup_prefs_routes())
 
+from routes.capabilities_routes import setup_capabilities_routes
+app.include_router(setup_capabilities_routes())
+
 # Backup (export/import user data)
 from routes.backup_routes import setup_backup_routes
 app.include_router(setup_backup_routes(memory_manager, preset_manager, skills_manager))

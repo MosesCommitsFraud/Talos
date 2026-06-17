@@ -267,6 +267,9 @@ export interface RagConfig {
   query_prefix: string;
   context_prompt: string;
 }
+/** Which knowledge sources are configured — drives the composer's mode control. */
+export const fetchCapabilities = () => getJSON<{ rag: boolean; sql: boolean }>('/api/capabilities');
+
 export const fetchRagConfig = () => getJSON<RagConfig>('/api/rag/config');
 
 export async function saveRagConfig(cfg: RagConfig): Promise<void> {

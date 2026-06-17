@@ -507,21 +507,14 @@ async def build_chat_context(
         mem_enabled, user, incognito, no_memory, uprefs.get("memory_enabled", "NOT_SET"),
     )
 
-    # Use RAG? The admin RAG switch is global: when enabled, RAG is always
-    # attempted for chat context (except incognito). This mirrors OpenWebUI's
-    # model where uploaded knowledge is retrieved automatically rather than
-    # requiring users to pick a tool.
-    # RAG is global/admin-managed. The frontend may still send a legacy
-    # per-user use_rag=false when its old toggle is off; ignore that so the
-    # admin knowledge base is always used in chat unless globally disabled.
-    use_rag_val = True
+    # Use RAG? Driven by the chat-input mode dropdown (Knowledge / Full both
+    # send use_rag=true; Just Chat sends false). Gated additionally by the global
+    # admin switch (`rag_pipeline.enabled` as a kill-switch; unset = available)
+    # and incognito.
+    request_wants_rag = str(use_rag).lower() == "true"
     rag_pipeline = get_setting("rag_pipeline", {})
-    if isinstance(rag_pipeline, dict) and rag_pipeline.get("enabled") is False:
-        use_rag_val = False
-    elif isinstance(rag_pipeline, dict) and rag_pipeline.get("enabled") is True:
-        use_rag_val = True
-    if incognito:
-        use_rag_val = False
+    admin_disabled = isinstance(rag_pipeline, dict) and rag_pipeline.get("enabled") is False
+    use_rag_val = request_wants_rag and not admin_disabled and not incognito
     logger.info(
         "Chat RAG effective=%s (admin_enabled=%s, request_use_rag=%r, incognito=%s)",
         use_rag_val,

@@ -1,20 +1,25 @@
-import { useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
+  BookOpenIcon,
+  CheckIcon,
+  ChevronDownIcon,
   DatabaseIcon,
   FileTextIcon,
+  MessageSquareIcon,
   PaperclipIcon,
   PencilRulerIcon,
   WrenchIcon,
   XIcon,
 } from 'lucide-react';
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { uploadFiles, type UploadedFile } from '@/api/client';
+import { fetchCapabilities, uploadFiles, type UploadedFile } from '@/api/client';
 import { useChat } from '@/state/chat';
-import { usePrefs } from '@/state/prefs';
+import { usePrefs, type ChatMode } from '@/state/prefs';
 import { cn } from '@/lib/utils';
 import { ContextMeter } from './ContextMeter';
 import { ModelPicker } from './ModelPicker';
+import { Menu, MenuItem, MenuPopup, MenuTrigger } from './ui/menu';
 import { Tooltip } from './ui/misc';
 
 /** Thin vertical divider between footer mode controls (t3code separator). */
@@ -61,6 +66,99 @@ function ModeToggle({
         <span className="sr-only sm:not-sr-only">{text}</span>
       </button>
     </Tooltip>
+  );
+}
+
+type ModeOpt = { key: ChatMode; rag: boolean; db: boolean; Icon: React.ComponentType<{ className?: string }>; label: string; desc: string };
+
+/** Knowledge-mode dropdown styled like t3code's runtime-mode picker (ghost
+ *  trigger, rich items with a description line). Shown only when both RAG and
+ *  SQL are configured; drives use_rag/use_db. */
+function ChatModeDropdown() {
+  const { t } = useTranslation();
+  const useRag = usePrefs((s) => s.useRag);
+  const useDb = usePrefs((s) => s.useDb);
+  const setKnowledge = usePrefs((s) => s.setKnowledge);
+  const mode: ChatMode = useRag ? (useDb ? 'full' : 'knowledge') : 'chat';
+  const modes: ModeOpt[] = [
+    { key: 'chat', rag: false, db: false, Icon: MessageSquareIcon, label: t('composer.mode.chat'), desc: t('composer.mode.chatDesc') },
+    { key: 'knowledge', rag: true, db: false, Icon: BookOpenIcon, label: t('composer.mode.knowledge'), desc: t('composer.mode.knowledgeDesc') },
+    { key: 'full', rag: true, db: true, Icon: DatabaseIcon, label: t('composer.mode.full'), desc: t('composer.mode.fullDesc') },
+  ];
+  const active = modes.find((m) => m.key === mode) ?? modes[2];
+  return (
+    <Menu>
+      <MenuTrigger asChild>
+        <button
+          type="button"
+          aria-label={t('composer.mode.label')}
+          className="flex h-8 shrink-0 items-center gap-1.5 rounded-lg border border-transparent px-2 text-[13px] font-medium whitespace-nowrap text-muted-foreground/70 transition-colors hover:bg-accent hover:text-foreground/80 sm:h-7 sm:px-2.5 [&_svg]:size-4 [&_svg]:shrink-0"
+        >
+          <active.Icon />
+          <span className="sr-only sm:not-sr-only">{active.label}</span>
+          <ChevronDownIcon className="size-3 opacity-50" />
+        </button>
+      </MenuTrigger>
+      <MenuPopup align="start">
+        {modes.map((m) => (
+          <MenuItem key={m.key} onSelect={() => setKnowledge(m.rag, m.db)} className="min-w-64 py-2">
+            <div className="grid min-w-0 gap-0.5">
+              <span className="inline-flex items-center gap-1.5 font-medium text-foreground">
+                <m.Icon />
+                {m.label}
+                {m.key === mode && <CheckIcon className="size-3.5 text-blue-400" />}
+              </span>
+              <span className="text-xs leading-4 text-muted-foreground">{m.desc}</span>
+            </div>
+          </MenuItem>
+        ))}
+      </MenuPopup>
+    </Menu>
+  );
+}
+
+/** Picks the right knowledge control for the chat input based on what's
+ *  configured: the 3-mode dropdown when both RAG and SQL are set up, a single
+ *  toggle when only one is, nothing when neither. Also clamps persisted flags
+ *  so a stale toggle can't enable an unconfigured source. */
+function KnowledgeControl() {
+  const { t } = useTranslation();
+  const { data: caps } = useQuery({ queryKey: ['capabilities'], queryFn: fetchCapabilities, staleTime: 60_000 });
+  const useRag = usePrefs((s) => s.useRag);
+  const useDb = usePrefs((s) => s.useDb);
+  const setKnowledge = usePrefs((s) => s.setKnowledge);
+
+  useEffect(() => {
+    if (!caps) return;
+    const r = caps.rag && useRag;
+    const d = caps.sql && useDb;
+    if (r !== useRag || d !== useDb) setKnowledge(r, d);
+  }, [caps, useRag, useDb, setKnowledge]);
+
+  if (!caps || (!caps.rag && !caps.sql)) return null;
+  return (
+    <>
+      <FooterSeparator />
+      {caps.rag && caps.sql ? (
+        <ChatModeDropdown />
+      ) : caps.rag ? (
+        <ModeToggle
+          active={useRag}
+          onClick={() => setKnowledge(!useRag, false)}
+          icon={<BookOpenIcon />}
+          label={t('composer.rag')}
+          tooltip={t('composer.ragTooltip')}
+        />
+      ) : (
+        <ModeToggle
+          active={useDb}
+          onClick={() => setKnowledge(false, !useDb)}
+          icon={<DatabaseIcon />}
+          label={t('composer.sql')}
+          tooltip={t('composer.sqlTooltip')}
+        />
+      )}
+    </>
   );
 }
 
@@ -240,6 +338,8 @@ export function Composer() {
           <div className="-m-1 flex min-w-0 flex-1 items-center gap-1 overflow-x-auto p-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
             <ModelPicker visible={prefs.visibility.composerModelPicker} />
 
+            <KnowledgeControl />
+
             {prefs.visibility.composerPlan && (
               <>
                 <FooterSeparator />
@@ -251,30 +351,6 @@ export function Composer() {
                   inactiveIcon={<WrenchIcon />}
                   inactiveLabel={t('composer.work')}
                   tooltip={prefs.planMode ? t('composer.planTooltipActive') : t('composer.planTooltipInactive')}
-                />
-              </>
-            )}
-            {prefs.visibility.composerDocs && (
-              <>
-                <FooterSeparator />
-                <ModeToggle
-                  active={prefs.useRag}
-                  onClick={() => prefs.toggle('useRag')}
-                  icon={<FileTextIcon />}
-                  label={t('composer.rag')}
-                  tooltip={t('composer.ragTooltip')}
-                />
-              </>
-            )}
-            {prefs.visibility.composerDb && (
-              <>
-                <FooterSeparator />
-                <ModeToggle
-                  active={prefs.useDb}
-                  onClick={() => prefs.toggle('useDb')}
-                  icon={<DatabaseIcon />}
-                  label={t('composer.sql')}
-                  tooltip={t('composer.sqlTooltip')}
                 />
               </>
             )}

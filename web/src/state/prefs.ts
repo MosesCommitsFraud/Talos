@@ -5,6 +5,7 @@ import i18n, { type Lang } from '@/i18n';
 export type Theme = 'dark' | 'light' | 'system';
 export type Density = 'compact' | 'comfortable' | 'spacious';
 export type SortMode = 'active' | 'newest' | 'name';
+export type ChatMode = 'chat' | 'knowledge' | 'full';
 export type { Lang };
 
 /** Per-surface visibility toggles — the new-UI equivalent of legacy's
@@ -51,7 +52,10 @@ interface PrefsState {
   sortMode: SortMode;
   lang: Lang;
   visibility: Visibility;
-  /** Composer toggles — mirror the legacy chat-bar switches. */
+  /** Composer knowledge sources. The chat-input control (mode dropdown when
+   *  both are configured, single toggle when one is) drives these; they map to
+   *  the use_rag / use_db request flags. Default on so "Full Knowledge" is the
+   *  out-of-the-box mode. */
   planMode: boolean;
   useRag: boolean;
   useDb: boolean;
@@ -67,6 +71,8 @@ interface PrefsState {
   setVisibility: (key: keyof Visibility, value: boolean) => void;
   resetVisibility: () => void;
   toggle: (key: 'planMode' | 'useRag' | 'useDb' | 'incognito') => void;
+  /** Set both knowledge flags at once (used by the mode dropdown). */
+  setKnowledge: (useRag: boolean, useDb: boolean) => void;
   toggleSidebar: () => void;
   toggleFolder: (name: string) => void;
 }
@@ -80,8 +86,8 @@ export const usePrefs = create<PrefsState>()(
       lang: 'en',
       visibility: DEFAULT_VISIBILITY,
       planMode: false,
-      useRag: false,
-      useDb: false,
+      useRag: true,
+      useDb: true,
       incognito: false,
       sidebarCollapsed: false,
       collapsedFolders: [],
@@ -92,6 +98,7 @@ export const usePrefs = create<PrefsState>()(
       setVisibility: (key, value) => set((s) => ({ visibility: { ...s.visibility, [key]: value } })),
       resetVisibility: () => set({ visibility: DEFAULT_VISIBILITY }),
       toggle: (key) => set((s) => ({ [key]: !s[key] }) as Partial<PrefsState>),
+      setKnowledge: (useRag, useDb) => set({ useRag, useDb }),
       toggleSidebar: () => set((s) => ({ sidebarCollapsed: !s.sidebarCollapsed })),
       toggleFolder: (name) => set((s) => ({
         collapsedFolders: s.collapsedFolders.includes(name)

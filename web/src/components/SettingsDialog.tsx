@@ -338,8 +338,6 @@ const VISIBILITY_SECTIONS: Array<{ secKey: string; items: Array<{ key: keyof Vis
     items: [
       { key: 'composerAttach' },
       { key: 'composerPlan' },
-      { key: 'composerDocs' },
-      { key: 'composerDb' },
       { key: 'composerModelPicker' },
       { key: 'contextMeter' },
     ],
@@ -1145,14 +1143,14 @@ function RagPanel() {
       </Section>
 
       <Section title={t('settings.rag.queue')} padded
-        action={jobs.data && jobs.data.jobs.some((j) => ['completed', 'failed', 'cancelled'].includes(j.status))
+        action={jobs.data?.jobs?.some((j) => ['completed', 'failed', 'cancelled'].includes(j.status))
           ? <button className="text-xs text-muted-foreground hover:text-foreground"
               onClick={() => void clearRagJobs().then(refreshIngest)}>{t('settings.rag.clearJobs')}</button>
           : undefined}>
         {diag.data && diag.data.active_worker_count === 0 && (
           <p className="pb-2 text-xs text-destructive-foreground">{t('settings.rag.noWorker')}</p>
         )}
-        {(!jobs.data || jobs.data.jobs.length === 0) ? (
+        {(!jobs.data?.jobs || jobs.data.jobs.length === 0) ? (
           <p className="text-xs text-muted-foreground">{t('settings.rag.queueEmpty')}</p>
         ) : (
           <div className="space-y-1.5">
@@ -1203,7 +1201,7 @@ function RagPanel() {
       <Section title={t('settings.rag.indexedDocs')} padded>
         {docs.data && docs.data.available === false ? (
           <p className="text-xs text-destructive-foreground">{docs.data.error || t('settings.rag.ragUnavailable')}</p>
-        ) : !docs.data || docs.data.documents.length === 0 ? (
+        ) : !docs.data?.documents || docs.data.documents.length === 0 ? (
           <p className="text-xs text-muted-foreground">{t('settings.rag.noDocs')}</p>
         ) : (
           <div className="space-y-1">
