@@ -274,6 +274,13 @@ export function Messages() {
     const start = assistantTurnStart(index);
     return messages.slice(start, index + 1).flatMap((msg) => (msg.tools ?? []).flatMap(toolImages));
   };
+  // RAG citations apply to the whole assistant turn, so collect them across all
+  // of the turn's rows and render once, at the very end (RagSources dedupes by
+  // filename). The backend only sends sources it determined the answer used.
+  const assistantTurnSources = (index: number) => {
+    const start = assistantTurnStart(index);
+    return messages.slice(start, index + 1).flatMap((msg) => msg.sources ?? []);
+  };
 
   return (
    <div className="relative flex min-h-0 flex-1 flex-col">
@@ -305,7 +312,6 @@ export function Messages() {
                   <Markdown text={m.content} />
                 </div>
               )}
-              {!m.streaming && m.sources && m.sources.length > 0 && <RagSources sources={m.sources} />}
               {/* Persistent "still running" indicator: shown for the entire
                   streaming turn — through thinking, tool calls, and text deltas —
                   so it never silently disappears mid-response. */}
@@ -332,6 +338,12 @@ export function Messages() {
                     )}
                   </>
                 );
+              })()}
+              {/* RAG citations: the very last thing in the assistant turn, and
+                  only when the backend confirmed the knowledge was used. */}
+              {!m.streaming && isAssistantTurnEnd(index) && (() => {
+                const sources = assistantTurnSources(index);
+                return sources.length > 0 ? <RagSources sources={sources} /> : null;
               })()}
             </div>
           ),

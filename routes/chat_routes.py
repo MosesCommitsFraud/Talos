@@ -34,6 +34,8 @@ from routes.chat_helpers import (
     save_assistant_response,
     run_post_response_tasks,
     clean_thinking_for_save,
+    filter_used_rag_sources,
+    public_rag_sources,
     _enforce_chat_privileges,
 )
 
@@ -654,8 +656,10 @@ def setup_chat_routes(
                     f'data: {json.dumps({"type": "doc_update", **_opened})}\n\n'
                 )
 
-            if ctx.rag_sources:
-                yield f"data: {json.dumps({'type': 'rag_sources', 'data': ctx.rag_sources})}\n\n"
+            # RAG sources are NOT announced up front any more: they're only
+            # shown once we know the model actually used that knowledge, so the
+            # decision is deferred to after the answer streams (see the [DONE]
+            # branch, which filters by usage and emits at the very end).
 
             if web_sources:
                 yield f"data: {json.dumps({'type': 'web_sources', 'data': web_sources})}\n\n"
@@ -811,11 +815,20 @@ def setup_chat_routes(
                                 if thinking_response.strip():
                                     last_metrics = dict(last_metrics or {})
                                     last_metrics["thinking"] = thinking_response.strip()
+                                # Decide RAG citations now that the answer exists:
+                                # keep only sources the answer actually drew on,
+                                # then announce them at the very end (after the
+                                # text) and persist that same filtered set.
+                                _used_rag = public_rag_sources(
+                                    filter_used_rag_sources(full_response, ctx.rag_sources)
+                                )
+                                if _used_rag:
+                                    yield f"data: {json.dumps({'type': 'rag_sources', 'data': _used_rag})}\n\n"
                                 _saved_id = save_assistant_response(
                                     sess, session_manager, session, full_response, last_metrics,
                                     character_name=ctx.preset.character_name,
                                     web_sources=web_sources,
-                                    rag_sources=ctx.rag_sources,
+                                    rag_sources=_used_rag,
                                     used_memories=ctx.used_memories,
                                     incognito=incognito,
                                 )

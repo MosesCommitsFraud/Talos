@@ -323,7 +323,13 @@ class ChatProcessor:
                             {
                                 "filename": r["metadata"].get("filename", r["metadata"].get("source", "unknown")),
                                 "snippet": r["document"][:200],
-                                "similarity": round(r.get("similarity", 0), 3)
+                                "similarity": round(r.get("similarity", 0), 3),
+                                # Larger slice of the chunk, kept ONLY for the
+                                # post-generation "was this actually used?" check
+                                # (filter_used_rag_sources). Stripped (underscore
+                                # key) before the source is emitted or saved, so
+                                # it never reaches the client or the DB.
+                                "_text": r["document"][:1500],
                             }
                             for r in relevant
                         ]

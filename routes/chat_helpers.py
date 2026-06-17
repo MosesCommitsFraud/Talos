@@ -635,6 +635,71 @@ async def build_chat_context(
     )
 
 
+# Common English + German function words — filtered out before measuring
+# answer↔source overlap so shared stopwords ("the", "und", …) don't make an
+# unrelated source look "used".
+_RAG_STOPWORDS = frozenset("""
+the a an and or but if then else of to in into on at for with without from by as is are was were be been being
+this that these those it its they them their there here what which who whom whose how why when while where also
+do does did done can could should would may might must will shall not no nor yes you your yours we our ours us
+i me my mine he she him her his hers them about over under again more most some any each such only than too very
+der die das den dem des ein eine einen einem einer und oder aber wenn dann sonst von zu im in an auf fuer für mit
+ohne aus durch als ist sind war waren sein seine ich wir unser unsere du dein deine nicht kein keine ja was welche
+welcher wer wie warum wann wo dies diese dieser jene jener es sie ihr ihre auch nur mehr sehr noch schon man
+""".split())
+
+_RAG_WORD_RE = re.compile(r"[0-9A-Za-zÀ-ÿ_]+")
+
+
+def _rag_content_tokens(text: str) -> list:
+    """Lowercased content words (≥3 chars, non-stopword) for overlap scoring."""
+    return [
+        w for w in (m.lower() for m in _RAG_WORD_RE.findall(text or ""))
+        if len(w) >= 3 and w not in _RAG_STOPWORDS
+    ]
+
+
+def _rag_bigrams(tokens: list) -> set:
+    return {(tokens[i], tokens[i + 1]) for i in range(len(tokens) - 1)} if len(tokens) >= 2 else set()
+
+
+def filter_used_rag_sources(answer: str, sources: list, *, min_overlap_frac: float = 0.16) -> list:
+    """Keep only the RAG sources whose content was actually reflected in the answer.
+
+    Retrieval routinely surfaces chunks the model ends up ignoring — it answered
+    from general knowledge, or the retrieved doc was only loosely on-topic.
+    Citing those is misleading, so a source is kept only when the answer shares a
+    distinctive two-word phrase with it, OR a meaningful fraction (and absolute
+    count) of the source's distinctive content words reappear in the answer.
+    Returns the matching source dicts unchanged (internal underscore keys intact;
+    the caller strips them before emit/save)."""
+    if not answer or not sources:
+        return []
+    ans_tokens = _rag_content_tokens(answer)
+    if not ans_tokens:
+        return []
+    ans_words = set(ans_tokens)
+    ans_bigrams = _rag_bigrams(ans_tokens)
+    used = []
+    for s in sources:
+        src_tokens = _rag_content_tokens(s.get("_text") or s.get("snippet") or "")
+        if not src_tokens:
+            continue
+        src_words = set(src_tokens)
+        shared_bigrams = ans_bigrams & _rag_bigrams(src_tokens)
+        overlap = ans_words & src_words
+        frac = len(overlap) / max(1, len(src_words))
+        if shared_bigrams or (len(overlap) >= 4 and frac >= min_overlap_frac):
+            used.append(s)
+    return used
+
+
+def public_rag_sources(sources: list) -> list:
+    """Strip internal (underscore-prefixed) keys so a source is safe to emit to
+    the client / persist to the DB."""
+    return [{k: v for k, v in (s or {}).items() if not str(k).startswith("_")} for s in (sources or [])]
+
+
 def accumulate_token_usage(session_id: str, metrics: dict):
     """Add input/output token counts to the session's running totals."""
     in_t = metrics.get("input_tokens", 0)
