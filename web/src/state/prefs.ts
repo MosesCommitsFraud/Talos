@@ -5,7 +5,7 @@ import i18n, { type Lang } from '@/i18n';
 export type Theme = 'dark' | 'light' | 'system';
 export type Density = 'compact' | 'comfortable' | 'spacious';
 export type SortMode = 'active' | 'newest' | 'name';
-export type ChatMode = 'chat' | 'knowledge' | 'full';
+export type ChatMode = 'chat' | 'knowledge' | 'sql' | 'full';
 export type { Lang };
 
 /** Per-surface visibility toggles — the new-UI equivalent of legacy's

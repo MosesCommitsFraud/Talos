@@ -464,6 +464,27 @@ export const deleteSqlConfig = (id?: string) =>
 export const testSqlConfig = (id?: string) =>
   postJSON<{ ok?: boolean; error?: string; output?: string }>(`/api/sql/test${id ? `?id=${encodeURIComponent(id)}` : ''}`);
 
+/* ── SQL knowledge (scoped mini-RAG over uploaded schema files) ── */
+export const fetchSqlKnowledge = () =>
+  getJSON<{ available: boolean; documents: RagDocument[]; error?: string }>('/api/sql/knowledge');
+export async function uploadSqlKnowledge(files: File[]): Promise<Record<string, unknown>> {
+  const fd = new FormData();
+  for (const f of files) fd.append('files', f, f.name);
+  const res = await fetch('/api/sql/knowledge/upload', { method: 'POST', body: fd, credentials: 'same-origin' });
+  if (!res.ok) {
+    const detail = await res.json().then((j) => j?.detail).catch(() => null);
+    throw new Error(detail || `Upload failed (HTTP ${res.status})`);
+  }
+  return res.json();
+}
+export async function deleteSqlKnowledge(source: string): Promise<void> {
+  const res = await fetch(`/api/sql/knowledge?source=${encodeURIComponent(source)}`, {
+    method: 'DELETE',
+    credentials: 'same-origin',
+  });
+  if (!res.ok) throw new Error(`Delete failed (HTTP ${res.status})`);
+}
+
 /* ── Built-in agent tools ── */
 export interface BuiltinTool { id: string; enabled: boolean }
 export const fetchBuiltinTools = async () =>

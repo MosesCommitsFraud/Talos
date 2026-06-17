@@ -288,10 +288,32 @@ class VectorRAG:
         return self._retriever
 
     @staticmethod
-    def _owner_filter(owner: Optional[str]):
-        if not owner:
+    def _build_filters(
+        owner: Optional[str] = None,
+        scope: Optional[str] = None,
+        exclude_scopes: Optional[List[str]] = None,
+    ):
+        """Combine optional owner/scope constraints into a Haystack-Qdrant filter.
+
+        ``scope`` pins retrieval to one knowledge namespace (e.g. ``"sql"`` for
+        the SQL schema files); ``exclude_scopes`` removes namespaces from the
+        default knowledge base so SQL-only files never leak into ordinary RAG.
+        Documents with no ``scope`` meta are kept by ``exclude_scopes`` (the
+        ``not in`` operator can't match an absent field), so legacy chunks stay
+        searchable.
+        """
+        conds = []
+        if owner:
+            conds.append({"field": "meta.owner", "operator": "==", "value": owner})
+        if scope:
+            conds.append({"field": "meta.scope", "operator": "==", "value": scope})
+        if exclude_scopes:
+            conds.append({"field": "meta.scope", "operator": "not in", "value": list(exclude_scopes)})
+        if not conds:
             return None
-        return {"field": "meta.owner", "operator": "==", "value": owner}
+        if len(conds) == 1:
+            return conds[0]
+        return {"operator": "AND", "conditions": conds}
 
     # ------------------------------------------------------------------
     # Properties
@@ -316,6 +338,8 @@ class VectorRAG:
         k: int = 5,
         owner: Optional[str] = None,
         candidate_k: Optional[int] = None,
+        scope: Optional[str] = None,
+        exclude_scopes: Optional[List[str]] = None,
     ) -> List[Dict[str, Any]]:
         if not self.healthy:
             return []
@@ -334,7 +358,7 @@ class VectorRAG:
                 query_embedding=dense,
                 query_sparse_embedding=sparse,
                 top_k=fetch_k,
-                filters=self._owner_filter(owner),
+                filters=self._build_filters(owner, scope, exclude_scopes),
             )
             docs = response.get("documents", []) or []
             candidates = [
@@ -636,16 +660,23 @@ class VectorRAG:
     # Listing
     # ------------------------------------------------------------------
 
-    def list_documents(self) -> List[Dict[str, Any]]:
+    def list_documents(
+        self,
+        scope: Optional[str] = None,
+        exclude_scopes: Optional[List[str]] = None,
+    ) -> List[Dict[str, Any]]:
         """Aggregate indexed chunks by source file → one row per document.
 
         Reads straight from Qdrant (the source of truth) so the UI shows what is
         actually searchable, including dir-indexed files, not just uploads.
+        ``scope``/``exclude_scopes`` keep the SQL knowledge namespace and the
+        ordinary knowledge base listed separately.
         """
         if not self.healthy:
             return []
         try:
-            chunks = self._store.filter_documents()
+            _filters = self._build_filters(scope=scope, exclude_scopes=exclude_scopes)
+            chunks = self._store.filter_documents(filters=_filters) if _filters else self._store.filter_documents()
             agg: Dict[str, Dict[str, Any]] = {}
             for d in chunks:
                 meta = d.meta or {}

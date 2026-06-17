@@ -1491,6 +1491,31 @@ async def stream_agent_loop(
             )
         else:
             _db_list_note = ""
+        # Admin-uploaded SQL knowledge (Settings → SQL knowledge): schema docs,
+        # column meanings, join hints, etc., indexed as a small scoped RAG.
+        # Retrieve the chunks most relevant to THIS question and inject them so
+        # the model can navigate the schema without first probing it. Scoped to
+        # meta.scope=="sql" so it's separate from the ordinary knowledge base.
+        _sql_kb = ""
+        try:
+            from src.rag_singleton import get_rag_manager
+
+            _rm = get_rag_manager()
+            _q = _extract_last_user_message(messages)
+            _hits = _rm.search(_q, k=5, owner=None, scope="sql") if (_rm and getattr(_rm, "healthy", False) and _q) else []
+            if _hits:
+                _parts = []
+                for _h in _hits:
+                    _fn = (_h.get("metadata") or {}).get("filename") or "doc"
+                    _parts.append(f"[{_fn}]\n{_h.get('document', '')}")
+                _sql_kb = "\n\n---\n\n".join(_parts)[:8000]
+        except Exception as _kb_err:
+            logger.debug("SQL knowledge retrieval skipped: %s", _kb_err)
+        _ctx_note = (
+            f"\n\nReference material for this database (retrieved from the "
+            f"uploaded SQL knowledge files — use it to navigate the schema):\n{_sql_kb}"
+            if _sql_kb else ""
+        )
         _db_note = (
             "## DATABASE MODE — READ FIRST\n"
             "The user activated the database button for this message: they want "
@@ -1499,7 +1524,7 @@ async def stream_agent_loop(
             "general knowledge and do not use python/bash to reach the database. "
             "If you don't know the schema yet, start with `query_sql` "
             "action=list_tables, then action=describe on the relevant tables, "
-            "then run the SELECT that answers the question." + _db_list_note
+            "then run the SELECT that answers the question." + _db_list_note + _ctx_note
         )
         if messages and messages[0].get("role") == "system":
             messages[0]["content"] = _db_note + "\n\n" + (messages[0].get("content") or "")

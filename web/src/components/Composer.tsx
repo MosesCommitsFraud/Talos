@@ -5,6 +5,7 @@ import {
   ChevronDownIcon,
   DatabaseIcon,
   FileTextIcon,
+  LayersIcon,
   MessageSquareIcon,
   PaperclipIcon,
   PencilRulerIcon,
@@ -79,13 +80,14 @@ function ChatModeDropdown() {
   const useRag = usePrefs((s) => s.useRag);
   const useDb = usePrefs((s) => s.useDb);
   const setKnowledge = usePrefs((s) => s.setKnowledge);
-  const mode: ChatMode = useRag ? (useDb ? 'full' : 'knowledge') : 'chat';
+  const mode: ChatMode = useRag ? (useDb ? 'full' : 'knowledge') : (useDb ? 'sql' : 'chat');
   const modes: ModeOpt[] = [
     { key: 'chat', rag: false, db: false, Icon: MessageSquareIcon, label: t('composer.mode.chat'), desc: t('composer.mode.chatDesc') },
     { key: 'knowledge', rag: true, db: false, Icon: BookOpenIcon, label: t('composer.mode.knowledge'), desc: t('composer.mode.knowledgeDesc') },
-    { key: 'full', rag: true, db: true, Icon: DatabaseIcon, label: t('composer.mode.full'), desc: t('composer.mode.fullDesc') },
+    { key: 'sql', rag: false, db: true, Icon: DatabaseIcon, label: t('composer.mode.sql'), desc: t('composer.mode.sqlDesc') },
+    { key: 'full', rag: true, db: true, Icon: LayersIcon, label: t('composer.mode.full'), desc: t('composer.mode.fullDesc') },
   ];
-  const active = modes.find((m) => m.key === mode) ?? modes[2];
+  const active = modes.find((m) => m.key === mode) ?? modes[0];
   return (
     <Menu>
       <MenuTrigger asChild>

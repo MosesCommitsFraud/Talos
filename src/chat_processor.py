@@ -298,7 +298,14 @@ class ChatProcessor:
                     candidate_k = max(rag_k, min(self._rag_k_setting("candidate_top_k", 40), 100))
                     rerank_min = self._rag_float_setting("rerank_min_score", self.RAG_RERANK_MIN_SCORE)
                     sim_threshold = self._rag_float_setting("similarity_threshold", self.RAG_SIMILARITY_THRESHOLD)
-                    results = rag_manager.search(message, k=rag_k, owner=None, candidate_k=candidate_k)
+                    # Keep the SQL-only knowledge namespace out of ordinary RAG;
+                    # those schema files are injected separately when the SQL
+                    # source is active (see agent_loop force_db). The external
+                    # client has no scope concept, so only pass it internally.
+                    if str(self._rag_cfg().get("provider") or "internal").strip().lower() == "external":
+                        results = rag_manager.search(message, k=rag_k, owner=None, candidate_k=candidate_k)
+                    else:
+                        results = rag_manager.search(message, k=rag_k, owner=None, candidate_k=candidate_k, exclude_scopes=["sql"])
                     # Keep top retrieved/reranked chunks. Do not require keyword overlap:
                     # vector-only matches often have keyword_score=0 but are still correct.
                     has_rerank_scores = any(r.get("rerank_score") is not None for r in results)

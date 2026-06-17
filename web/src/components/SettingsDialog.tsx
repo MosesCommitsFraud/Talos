@@ -3,6 +3,7 @@ import {
   BotIcon,
   ChevronRightIcon,
   DatabaseIcon,
+  FileTextIcon,
   KeyboardIcon,
   Link2Icon,
   LogOutIcon,
@@ -45,6 +46,9 @@ import {
   deleteRagJob,
   fetchRagDocuments,
   deleteRagDocument,
+  fetchSqlKnowledge,
+  uploadSqlKnowledge,
+  deleteSqlKnowledge,
   saveAppSettings,
   saveDisabledTools,
   saveRagConfig,
@@ -825,7 +829,86 @@ function IntegrationsPanel() {
       </Section>
 
       <SqlDatabaseSection />
+      <SqlContextSection />
     </Page>
+  );
+}
+
+/** Upload schema/navigation files for the SQL databases. They're indexed as a
+ *  small scoped RAG (meta.scope="sql"); whenever the SQL source is on in chat,
+ *  the chunks most relevant to the question are retrieved and injected so the
+ *  model can navigate the database (see agent_loop force_db note). */
+function SqlContextSection() {
+  const { t } = useTranslation();
+  const queryClient = useQueryClient();
+  const fileInput = useRef<HTMLInputElement>(null);
+  const [msg, setMsg] = useState<{ text: string; ok: boolean } | null>(null);
+  const { data } = useQuery({ queryKey: ['sql-knowledge'], queryFn: fetchSqlKnowledge });
+  const refresh = () => void queryClient.invalidateQueries({ queryKey: ['sql-knowledge'] });
+
+  const upload = useMutation({
+    mutationFn: (files: File[]) => uploadSqlKnowledge(files),
+    onSuccess: (r) => {
+      const names = Array.isArray((r as { uploaded?: unknown }).uploaded) ? (r as { uploaded: string[] }).uploaded : [];
+      setMsg({ text: t('settings.sql.knowledgeQueued', { count: names.length }), ok: true });
+      refresh();
+    },
+    onError: (e) => setMsg({ text: (e as Error).message, ok: false }),
+  });
+  const remove = useMutation({
+    mutationFn: (source: string) => deleteSqlKnowledge(source),
+    onSuccess: refresh,
+    onError: (e) => setMsg({ text: (e as Error).message, ok: false }),
+  });
+
+  const docs = data?.documents ?? [];
+  return (
+    <Section title={t('settings.sql.contextTitle')} padded>
+      <p className="mb-3 text-xs text-muted-foreground/80">{t('settings.sql.contextHint')}</p>
+
+      {data && !data.available ? (
+        <p className="text-xs text-destructive-foreground">{data.error || t('settings.sql.knowledgeUnavailable')}</p>
+      ) : (
+        <>
+          <input
+            ref={fileInput}
+            type="file"
+            multiple
+            hidden
+            onChange={(e) => { if (e.target.files?.length) upload.mutate(Array.from(e.target.files)); e.target.value = ''; }}
+          />
+          <div className="flex flex-wrap items-center gap-2">
+            <Button size="sm" disabled={upload.isPending} onClick={() => fileInput.current?.click()}>
+              <PlusIcon /> {upload.isPending ? t('settings.sql.knowledgeUploading') : t('settings.sql.knowledgeUpload')}
+            </Button>
+            <Button size="sm" variant="outline" onClick={refresh}>{t('common.refresh')}</Button>
+            {msg && <span className={cn('text-xs', msg.ok ? 'text-success' : 'text-destructive-foreground')}>{msg.text}</span>}
+          </div>
+
+          <div className="mt-3 space-y-1.5">
+            {docs.length === 0 && <p className="text-xs text-muted-foreground">{t('settings.sql.knowledgeEmpty')}</p>}
+            {docs.map((d) => (
+              <div key={d.source} className="flex items-center gap-3 rounded-lg border bg-background px-3 py-2">
+                <FileTextIcon className="size-4 shrink-0 text-muted-foreground" />
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-sm">{d.filename}</div>
+                  <div className="truncate text-xs text-muted-foreground">{t('settings.sql.knowledgeChunks', { count: d.chunks })}</div>
+                </div>
+                <button
+                  type="button"
+                  aria-label={t('settings.sql.knowledgeDelete', { name: d.filename })}
+                  disabled={remove.isPending}
+                  onClick={() => remove.mutate(d.source)}
+                  className="flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-destructive-foreground"
+                >
+                  <Trash2Icon className="size-3.5" />
+                </button>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+    </Section>
   );
 }
 
