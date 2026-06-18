@@ -1,6 +1,7 @@
 import { useTranslation } from 'react-i18next';
 import { CheckIcon, ListChecksIcon, PlayIcon } from 'lucide-react';
 import { useChat, type UiMessage } from '@/state/chat';
+import { Markdown } from './Markdown';
 import { Button } from './ui/button';
 import { cn } from '@/lib/utils';
 
@@ -41,9 +42,10 @@ function Checklist({ steps }: { steps: Step[] }) {
 
 /** Renders a plan as a card. Two modes:
  *  - `variant="progress"`: a live checklist from `update_plan` (read-only).
- *  - `variant="approval"`: a plan-mode proposal with Implement / Revise buttons.
- *    Implement re-sends the checklist via the `approved_plan` flow so the next
- *    turn executes it (plan mode forced off). */
+ *  - `variant="approval"`: a plan-mode proposal — the full plan (Context /
+ *    Approach / Plan / Verification) framed as an artifact with Implement /
+ *    Revise buttons. Implement re-sends the plan via the `approved_plan` flow
+ *    so the next turn executes it (plan mode forced off). */
 export function PlanCard({ msg, variant }: { msg: UiMessage; variant: 'progress' | 'approval' }) {
   const { t } = useTranslation();
   const send = useChat((s) => s.send);
@@ -71,29 +73,34 @@ export function PlanCard({ msg, variant }: { msg: UiMessage; variant: 'progress'
   };
 
   return (
-    <div className={cn('mt-3 rounded-xl border border-primary/30 bg-primary/[0.04] p-3', acted && 'opacity-60')}>
-      <div className="mb-2 flex items-center gap-2 text-xs font-medium text-muted-foreground">
-        <ListChecksIcon className="size-3.5" />
+    <div className={cn('mt-3 rounded-xl border border-primary/30 bg-primary/[0.04]', acted && 'opacity-60')}>
+      <div className="flex items-center gap-2 border-b border-primary/15 px-3 py-2 text-xs font-medium text-muted-foreground">
+        <ListChecksIcon className="size-3.5 text-primary" />
         <span>{variant === 'approval' ? t('plan.proposed') : t('plan.progress', { done, total })}</span>
-        {variant === 'approval' && total > 0 && (
-          <span className="ml-auto tabular-nums">{t('plan.progress', { done, total })}</span>
-        )}
+        {total > 0 && <span className="ml-auto tabular-nums">{t('plan.progress', { done, total })}</span>}
       </div>
 
-      {/* The approval variant's checklist is already rendered as markdown in the
-          turn's answer above, so only the progress variant lists steps here. */}
-      {variant === 'progress' && steps.length > 0 && <Checklist steps={steps} />}
+      <div className="p-3">
+        {/* Approval renders the full proposed plan (Context / Approach / Plan /
+            Verification) so it reads as a self-contained artifact; progress just
+            shows the live checklist from update_plan. */}
+        {variant === 'approval' ? (
+          <Markdown text={source} />
+        ) : (
+          steps.length > 0 && <Checklist steps={steps} />
+        )}
 
-      {variant === 'approval' && (
-        <div className="mt-3 flex justify-end gap-2">
-          <Button size="sm" variant="outline" disabled={disabled} onClick={revise}>
-            {t('plan.revise')}
-          </Button>
-          <Button size="sm" disabled={disabled} onClick={implement}>
-            <PlayIcon /> {t('plan.implement')}
-          </Button>
-        </div>
-      )}
+        {variant === 'approval' && (
+          <div className="mt-3 flex justify-end gap-2 border-t border-primary/15 pt-3">
+            <Button size="sm" variant="outline" disabled={disabled} onClick={revise}>
+              {t('plan.revise')}
+            </Button>
+            <Button size="sm" disabled={disabled} onClick={implement}>
+              <PlayIcon /> {t('plan.implement')}
+            </Button>
+          </div>
+        )}
+      </div>
     </div>
   );
 }

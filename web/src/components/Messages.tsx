@@ -304,15 +304,18 @@ function AssistantTurn({ turn, containsLast, artifactImages }: { turn: UiMessage
   const createdImages = turn.flatMap((m) => (m.tools ?? []).flatMap(toolImages));
   const createdCount = createdImages.length > 0 ? createdImages.length : containsLast ? artifactImages.length : 0;
   const sources = turn.flatMap((m) => m.sources ?? []);
-  // A plan-mode turn that actually proposed a checklist gets an approval card —
-  // unless it also asked a question (the question takes precedence).
+  // A plan-mode turn that actually proposed a plan (a checklist is present) gets
+  // the approval card — which frames the whole plan itself. Strictly gated on
+  // planProposed so ordinary turns never get it, and superseded by a question.
   const proposalMsg =
     !questionMsg && terminal?.planProposed && /[-*]\s*\[[ xX]\]/.test(terminal.content) ? terminal : undefined;
 
   return (
     <>
       {hasActivity && <ActivityFold turn={turn} terminalId={terminalId} showThinking={showThinking} durationMs={durationMs} />}
-      {terminal && (
+      {/* A proposed plan is rendered inside its approval card, not as a loose
+          answer bubble, so it reads as one self-contained artifact. */}
+      {terminal && !proposalMsg && (
         <div className={terminal.error ? 'text-destructive-foreground' : ''}>
           <Markdown text={terminal.content} />
         </div>
