@@ -34,7 +34,11 @@ services:
       # field (Settings → RAG); the worker receives them as a job snapshot.
       - QDRANT_URL=${QDRANT_URL:-http://qdrant:6333}
       - RAG_SPARSE_MODEL=${RAG_SPARSE_MODEL:-Qdrant/bm25}
-      - REDIS_URL=${REDIS_URL:-redis://:${RAG_REDIS_PASSWORD:-AI42@macs}@rag-redis:6379/0}
+      # Redis/Valkey runs with NO password by default — it has no published port
+      # and is reachable only by sibling containers on the Docker network, so the
+      # network is the trust boundary. For defense-in-depth, set RAG_REDIS_PASSWORD
+      # in .env; it's then enforced on the server and injected into this URL.
+      - REDIS_URL=${REDIS_URL:-redis://:${RAG_REDIS_PASSWORD:-}@rag-redis:6379/0}
       - TALOS_SANDBOX_URL=${TALOS_SANDBOX_URL:-http://talos-sandbox:7800}
       # Shared secret the app sends on every sandbox API call. Set this in your
       # .env to a long random string to require auth on the sandbox daemon.
@@ -71,12 +75,14 @@ services:
     networks:
       - default
 
-  # Broker for the async ingest queue (RQ).
+  # Broker for the async ingest queue (RQ). No port is published, so it's only
+  # reachable by sibling containers — runs without auth by default. An empty
+  # --requirepass disables password auth; set RAG_REDIS_PASSWORD in .env to enable.
   rag-redis:
     image: valkey/valkey:8
     container_name: rag-redis
     restart: unless-stopped
-    command: ["valkey-server", "--requirepass", "${RAG_REDIS_PASSWORD:-AI42@macs}"]
+    command: ["valkey-server", "--requirepass", "${RAG_REDIS_PASSWORD:-}"]
     volumes:
       - rag-redis-data:/data
     networks:
@@ -89,9 +95,9 @@ services:
     build: .
     container_name: rag-ingest-worker
     restart: unless-stopped
-    command: ["rq", "worker", "ingest", "--url", "${REDIS_URL:-redis://:${RAG_REDIS_PASSWORD:-AI42@macs}@rag-redis:6379/0}"]
+    command: ["rq", "worker", "ingest", "--url", "${REDIS_URL:-redis://:${RAG_REDIS_PASSWORD:-}@rag-redis:6379/0}"]
     environment:
-      - REDIS_URL=${REDIS_URL:-redis://:${RAG_REDIS_PASSWORD:-AI42@macs}@rag-redis:6379/0}
+      - REDIS_URL=${REDIS_URL:-redis://:${RAG_REDIS_PASSWORD:-}@rag-redis:6379/0}
       - QDRANT_URL=${QDRANT_URL:-http://qdrant:6333}
       - EMBEDDING_URL=${EMBEDDING_URL:-http://192.168.10.91:8001/v1/embeddings}
       - EMBEDDING_MODEL=${EMBEDDING_MODEL:-qwen3-embed}
