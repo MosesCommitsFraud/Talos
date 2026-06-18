@@ -21,6 +21,17 @@ export interface UiMessage {
    *  when streaming ends. Drives the settled "Worked for Xs" fold (t3code style);
    *  turns loaded cold from history fall back to summed metrics.response_time. */
   turnElapsedMs?: number;
+  /** An `ask_user` tool call ended the turn with a question — rendered as an
+   *  interactive card. Free-text when `options` is empty, else multiple-choice. */
+  pendingQuestion?: { question: string; options: { label: string; description?: string }[]; multi: boolean };
+  /** Latest `update_plan` checklist (markdown) emitted during this turn. */
+  plan?: string;
+  /** This turn ran in plan mode and proposed a plan — its content gets an
+   *  "Implement plan" / "Revise" approval card. */
+  planProposed?: boolean;
+  /** Set once the user answers a pendingQuestion or acts on a plan card, so the
+   *  card goes inert (a new turn has started from it). */
+  answered?: boolean;
 }
 
 /** Live runtime for one session, kept in the store keyed by session id so it
@@ -32,9 +43,12 @@ interface SessionRuntime {
   streaming: boolean;
   turnStartedAt: number | null;
   abort: AbortController | null;
+  /** True between an `ask_user` turn ending and the user's answer — drives the
+   *  sidebar "Needs you" status and suppresses the "Done" badge. */
+  awaitingInput: boolean;
 }
 
-const emptyRuntime = (): SessionRuntime => ({ messages: [], streaming: false, turnStartedAt: null, abort: null });
+const emptyRuntime = (): SessionRuntime => ({ messages: [], streaming: false, turnStartedAt: null, abort: null, awaitingInput: false });
 
 interface ChatState {
   /** Per-session live state. Outlives chat switches so background turns keep
@@ -62,7 +76,7 @@ interface ChatState {
   setPendingModel: (m: ChatState['pendingModel']) => void;
   newChat: () => void;
   openSession: (id: string) => Promise<void>;
-  send: (text: string, opts?: { attachments?: Attachment[]; onSessionCreated?: (id: string) => void }) => Promise<void>;
+  send: (text: string, opts?: { attachments?: Attachment[]; onSessionCreated?: (id: string) => void; approvedPlan?: string; planMode?: boolean }) => Promise<void>;
   stop: () => void;
   edit: (msgId: string, content: string) => Promise<void>;
   remove: (msgId: string) => Promise<void>;
@@ -73,12 +87,15 @@ interface ChatState {
 export const selectIsStreaming = (id: string | null | undefined) => (s: ChatState) =>
   !!id && !!s.runtimes[id]?.streaming;
 
-/** Sidebar status for a chat row: 'working' while a turn streams, 'completed'
- *  once it finishes in the background until the chat is opened, else null. */
-export type ChatStatus = 'working' | 'completed' | null;
+/** Sidebar status for a chat row: 'working' while a turn streams, 'awaiting'
+ *  when a turn ended on a question and needs the user, 'completed' once it
+ *  finishes in the background until the chat is opened, else null. */
+export type ChatStatus = 'working' | 'awaiting' | 'completed' | null;
 export const selectChatStatus = (id: string | null | undefined) => (s: ChatState): ChatStatus => {
   if (!id) return null;
-  if (s.runtimes[id]?.streaming) return 'working';
+  const rt = s.runtimes[id];
+  if (rt?.streaming) return 'working';
+  if (rt?.awaitingInput) return 'awaiting';
   return s.completed[id] ? 'completed' : null;
 };
 
@@ -269,10 +286,19 @@ export const useChat = create<ChatState>((set, get) => {
     const userMsg: UiMessage = { id: uid(), role: 'user', content: text, attachments };
     const aiMsg: UiMessage = { id: uid(), role: 'assistant', content: '', streaming: true };
     const abort = new AbortController();
+    // A new turn supersedes any open question/plan card: mark them answered so
+    // they go inert, and clear the "needs you" flag.
     writeRuntime(sid, (rt) => ({
-      messages: [...rt.messages, userMsg, aiMsg],
+      messages: [
+        ...rt.messages.map((m) =>
+          m.pendingQuestion || m.planProposed ? { ...m, answered: true } : m,
+        ),
+        userMsg,
+        aiMsg,
+      ],
       streaming: true,
       turnStartedAt: Date.now(),
+      awaitingInput: false,
       abort,
     }));
 
@@ -299,12 +325,16 @@ export const useChat = create<ChatState>((set, get) => {
     };
 
     const prefs = usePrefs.getState();
+    // Plan-mode applies to this turn unless the caller overrides it (e.g. an
+    // "Implement plan" approval forces it off and passes the approved checklist).
+    const planMode = opts?.planMode ?? prefs.planMode;
     try {
       await streamChat({
         message: text,
         sessionId: sid,
         flags: {
-          planMode: prefs.planMode,
+          planMode,
+          approvedPlan: opts?.approvedPlan,
           useRag: prefs.useRag,
           useDb: prefs.useDb,
           incognito: prefs.incognito,
@@ -357,6 +387,27 @@ export const useChat = create<ChatState>((set, get) => {
             case 'message_saved':
               if (typeof ev.id === 'string') patchAi({ dbId: ev.id });
               break;
+            case 'ask_user': {
+              // The agent posed a question and ended the turn — render the card
+              // and flag the session as needing the user.
+              const q = ev.data as UiMessage['pendingQuestion'];
+              if (q && q.question) {
+                patchAi({
+                  pendingQuestion: {
+                    question: q.question,
+                    options: Array.isArray(q.options) ? q.options : [],
+                    multi: !!q.multi,
+                  },
+                });
+                writeRuntime(sid, () => ({ awaitingInput: true }));
+              }
+              break;
+            }
+            case 'plan_update': {
+              const plan = (ev.data as { plan?: string } | undefined)?.plan;
+              if (typeof plan === 'string' && plan.trim()) patchAi({ plan });
+              break;
+            }
           }
         },
       });
@@ -385,11 +436,15 @@ export const useChat = create<ChatState>((set, get) => {
       patchAi((m) => ({
         streaming: false,
         turnElapsedMs: startedAt != null ? Date.now() - startedAt : m.turnElapsedMs,
+        // A plan-mode turn proposes a plan — its terminal bubble gets an approval card.
+        planProposed: planMode || m.planProposed,
       }));
       // Clear only this session's turn flags — a different chat may be active.
       writeRuntime(sid, () => ({ streaming: false, turnStartedAt: null, abort: null }));
-      // Badge it "Done" if it finished in the background (user is elsewhere).
-      if (get().sessionId !== sid) set((s) => ({ completed: { ...s.completed, [sid]: true } }));
+      // Badge it "Done" if it finished in the background (user is elsewhere) — but
+      // not when it ended on a question; that's surfaced as "Needs you" instead.
+      const awaiting = get().runtimes[sid]?.awaitingInput;
+      if (!awaiting && get().sessionId !== sid) set((s) => ({ completed: { ...s.completed, [sid]: true } }));
     }
   },
 

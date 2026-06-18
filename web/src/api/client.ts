@@ -497,6 +497,8 @@ export const wipeData = (kind: string) => postJSON<{ ok?: boolean;[key: string]:
 
 export interface StreamFlags {
   planMode?: boolean;
+  /** A previously proposed plan the user approved — the turn executes it. */
+  approvedPlan?: string;
   useRag?: boolean;
   useDb?: boolean;
   useWeb?: boolean;
@@ -521,6 +523,7 @@ export async function streamChat(opts: {
   fd.set('session', opts.sessionId);
   const f = opts.flags ?? {};
   if (f.planMode) fd.set('plan_mode', 'true');
+  if (f.approvedPlan) fd.set('approved_plan', f.approvedPlan);
   if (f.useRag) fd.set('use_rag', 'true');
   if (f.useDb) fd.set('use_db', 'true');
   if (f.useWeb) fd.set('use_web', 'true');

@@ -295,6 +295,7 @@ export function Composer() {
         <div className="flex items-start px-4 pt-3.5">
           <textarea
             ref={textarea}
+            data-composer-input
             value={text}
             rows={1}
             autoFocus

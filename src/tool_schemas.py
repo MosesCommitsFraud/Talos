@@ -495,14 +495,14 @@ FUNCTION_TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "ask_user",
-            "description": "Ask the user a multiple-choice question to get a decision or clarification when the task is genuinely ambiguous and the answer changes what you do next (e.g. pick between approaches, confirm an assumption, choose a target). The user sees clickable option buttons; calling this ENDS your turn and their selection arrives as your next message. Prefer sensible defaults over asking — only ask when you truly cannot proceed well without the user's input. Do NOT use it to confirm irreversible/destructive actions that have a dedicated confirmation flow.",
+            "description": "Ask the user a question to get a decision, clarification, or input when the task is genuinely ambiguous and the answer changes what you do next (e.g. pick between approaches, confirm an assumption, choose a target, or gather a missing detail). Provide 2-6 `options` for a multiple-choice question (the user sees clickable buttons) OR omit `options` entirely for an open question (the user types a free-text answer). Calling this ENDS your turn and the user's answer arrives as your next message. Prefer sensible defaults over asking — only ask when you truly cannot proceed well without the user's input. Do NOT use it to confirm irreversible/destructive actions that have a dedicated confirmation flow.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "question": {"type": "string", "description": "The question to ask. Be specific and self-contained."},
                     "options": {
                         "type": "array",
-                        "description": "2-6 mutually exclusive choices. Each is an object with a short `label` and an optional `description` explaining the trade-off.",
+                        "description": "Optional. 2-6 mutually exclusive choices for a multiple-choice question. Each is an object with a short `label` and an optional `description` explaining the trade-off. Omit this entirely to ask an open question answered with free text.",
                         "items": {
                             "type": "object",
                             "properties": {
@@ -512,9 +512,9 @@ FUNCTION_TOOL_SCHEMAS = [
                             "required": ["label"]
                         }
                     },
-                    "multi": {"type": "boolean", "description": "Set true to let the user select multiple options instead of one. Default false."}
+                    "multi": {"type": "boolean", "description": "Set true to let the user select multiple options instead of one. Default false. Ignored for open (free-text) questions."}
                 },
-                "required": ["question", "options"]
+                "required": ["question"]
             }
         }
     },

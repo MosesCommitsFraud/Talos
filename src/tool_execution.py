@@ -1413,20 +1413,27 @@ async def execute_tool_block(
                     options.append({"label": label, "description": descr})
         else:
             question = raw
-        if not question or len(options) < 2:
+        # Two valid shapes: an open question (no options -> free-text answer) or
+        # a multiple-choice question (2-6 options). Exactly one option is ambiguous.
+        if not question or len(options) == 1:
             return "ask_user: invalid", {
                 "error": (
-                    "ask_user needs a non-empty `question` and at least 2 `options` "
-                    "(each an object with a `label`, optional `description`)."
+                    "ask_user needs a non-empty `question`. Either omit `options` for an "
+                    "open question (the user types a free-text answer) or provide at least "
+                    "2 `options` (each an object with a `label`, optional `description`)."
                 ),
                 "exit_code": 1,
             }
         options = options[:6]  # keep the choice list sane
         desc = f"ask_user: {question[:80]}"
-        labels = ", ".join(o["label"] for o in options)
+        if options:
+            labels = ", ".join(o["label"] for o in options)
+            output = f"Asked the user: {question}\nOptions: {labels}\nAwaiting their selection."
+        else:
+            output = f"Asked the user: {question}\nAwaiting their typed answer."
         result = {
             "ask_user": {"question": question, "options": options, "multi": multi},
-            "output": f"Asked the user: {question}\nOptions: {labels}\nAwaiting their selection.",
+            "output": output,
             "exit_code": 0,
         }
         logger.info("Tool executed: %s (%d options, multi=%s)", desc, len(options), multi)

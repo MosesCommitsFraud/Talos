@@ -135,6 +135,11 @@ function SessionRow({ session, folders }: { session: Session; folders: string[] 
             <span className="shimmer-text shrink-0 text-[11px] font-medium" aria-label={t('sidebar.running')}>
               {t('sidebar.working')}
             </span>
+          ) : status === 'awaiting' ? (
+            // Turn ended on a question — the chat needs the user's input.
+            <span className="shrink-0 text-[11px] font-medium text-warning">
+              {t('sidebar.awaiting')}
+            </span>
           ) : status === 'completed' ? (
             // Finished in the background — surfaced until the chat is opened.
             <span className="shrink-0 text-[11px] font-medium text-success">

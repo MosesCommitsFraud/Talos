@@ -7,7 +7,9 @@ import { copyTextToClipboard } from '@/lib/utils';
 import { useChat, type UiMessage } from '@/state/chat';
 import { usePrefs } from '@/state/prefs';
 import { useUi } from '@/state/ui';
+import { AskUser } from './AskUser';
 import { Markdown } from './Markdown';
+import { PlanCard } from './PlanCard';
 import { RagSources } from './RagSources';
 import { Thinking } from './Thinking';
 import { ToolRow, toolImages, type ToolImage } from './ToolRow';
@@ -254,6 +256,10 @@ function AssistantTurn({ turn, containsLast, artifactImages }: { turn: UiMessage
   const streaming = turn.some((m) => m.streaming);
   const last = turn[turn.length - 1];
   const copyText = turn.map((m) => m.content.trim()).filter(Boolean).join('\n\n');
+  // Interactive cards: a live/updated plan checklist, and (settled) a question
+  // the agent asked. Stamped onto the bubble that received the turn's deltas.
+  const planMsg = [...turn].reverse().find((m) => m.plan);
+  const questionMsg = [...turn].reverse().find((m) => m.pendingQuestion);
 
   if (streaming) {
     return (
@@ -269,6 +275,8 @@ function AssistantTurn({ turn, containsLast, artifactImages }: { turn: UiMessage
             )}
           </Fragment>
         ))}
+        {/* Live plan checklist as the agent ticks steps off via update_plan. */}
+        {planMsg && <PlanCard msg={planMsg} variant="progress" />}
         {/* Persistent "still running" indicator: shown for the whole streaming
             turn — through thinking, tool calls, and text deltas. */}
         <Working startedAt={turnStartedAt ?? undefined} />
@@ -296,6 +304,10 @@ function AssistantTurn({ turn, containsLast, artifactImages }: { turn: UiMessage
   const createdImages = turn.flatMap((m) => (m.tools ?? []).flatMap(toolImages));
   const createdCount = createdImages.length > 0 ? createdImages.length : containsLast ? artifactImages.length : 0;
   const sources = turn.flatMap((m) => m.sources ?? []);
+  // A plan-mode turn that actually proposed a checklist gets an approval card —
+  // unless it also asked a question (the question takes precedence).
+  const proposalMsg =
+    !questionMsg && terminal?.planProposed && /[-*]\s*\[[ xX]\]/.test(terminal.content) ? terminal : undefined;
 
   return (
     <>
@@ -305,6 +317,9 @@ function AssistantTurn({ turn, containsLast, artifactImages }: { turn: UiMessage
           <Markdown text={terminal.content} />
         </div>
       )}
+      {planMsg && !proposalMsg && <PlanCard msg={planMsg} variant="progress" />}
+      {proposalMsg && <PlanCard msg={proposalMsg} variant="approval" />}
+      {questionMsg && <AskUser msg={questionMsg} />}
       {createdCount > 0 && <ArtifactsButton count={createdCount} />}
       {copyText && (
         <div className="mt-2 flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100">
