@@ -11,7 +11,7 @@ export function PendingQuestion() {
   const question = useChat(selectPendingQuestion);
   if (!question) return null;
   return (
-    <div className="mx-auto mb-2 w-full max-w-[800px] px-4">
+    <div className="mx-auto mb-3 w-full max-w-[800px] px-4">
       <AskUser msg={question} />
     </div>
   );
