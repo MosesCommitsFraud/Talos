@@ -1,6 +1,7 @@
 services:
   talos-app:
     build: .
+    container_name: talos
     ports:
       - "${APP_BIND:-127.0.0.1}:${APP_PORT:-7000}:7000"
     volumes:
@@ -119,6 +120,7 @@ services:
   talos-sandbox:
     build:
       context: ./sandbox
+    container_name: talos-sandbox
     volumes:
       - talos-sandbox-home:/home/talos
       - talos-sandbox-state:/var/lib/talos-sandbox
