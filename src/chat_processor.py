@@ -38,6 +38,26 @@ def _content_tokens(text: str) -> list:
     return [w for w in words if len(w) >= 3 and w not in _STOPWORDS]
 
 
+def _chunk_relevant_to_query(query: str, document: str) -> bool:
+    """Cheap relevance gate used when no reranker is available.
+
+    Raw hybrid (RRF) scores don't reflect true relevance — the top result is
+    "top" even for an unrelated query — so the top-k can't be trusted blindly.
+    A chunk counts as relevant only when it shares distinctive content words with
+    the query. Short queries need one solid shared term; longer queries need two.
+    Precision over recall: better to inject nothing than off-topic knowledge that
+    only confuses the model and produces misleading citations."""
+    q = _content_tokens(query)
+    if not q:
+        return False
+    d = set(_content_tokens(document))
+    if not d:
+        return False
+    shared = set(q) & d
+    need = 1 if len(set(q)) <= 2 else 2
+    return len(shared) >= need
+
+
 class ChatProcessor:
     def __init__(self, memory_manager, personal_docs_manager, memory_vector=None, skills_manager=None):
         self.memory_manager = memory_manager
@@ -306,17 +326,31 @@ class ChatProcessor:
                         results = rag_manager.search(message, k=rag_k, owner=None, candidate_k=candidate_k)
                     else:
                         results = rag_manager.search(message, k=rag_k, owner=None, candidate_k=candidate_k, exclude_scopes=["sql"])
-                    # Keep top retrieved/reranked chunks. Do not require keyword overlap:
-                    # vector-only matches often have keyword_score=0 but are still correct.
+                    # Decide which retrieved chunks are relevant enough to inject.
+                    # When nothing clears the bar we inject NOTHING — no forced
+                    # top-k fallback. Off-topic context confuses the model and
+                    # yields misleading citations, so on a query the index has
+                    # nothing useful for, RAG stays silent.
                     has_rerank_scores = any(r.get("rerank_score") is not None for r in results)
                     if has_rerank_scores:
+                        # The reranker is a reliable relevance oracle, so trust
+                        # its score directly. A vector-only match with no keyword
+                        # overlap is fine here — the reranker already vetted it.
                         relevant = [
                             r for r in results
                             if r.get("rerank_score") is not None
                             and float(r.get("rerank_score") or 0) >= rerank_min
                         ]
                     else:
-                        relevant = [r for r in results if r.get("similarity", 0) >= sim_threshold] or results[:rag_k]
+                        # No reranker: raw hybrid (RRF) scores can't tell a
+                        # relevant query from an unrelated one, so require the
+                        # chunk to actually share distinctive query terms before
+                        # injecting it.
+                        relevant = [
+                            r for r in results
+                            if r.get("similarity", 0) >= sim_threshold
+                            and _chunk_relevant_to_query(message, r.get("document", ""))
+                        ]
                     if relevant:
                         logger.info(f"RAG: {len(relevant)}/{len(results)} results above threshold {sim_threshold}")
                         rag_sources = [
