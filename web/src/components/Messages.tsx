@@ -14,15 +14,17 @@ import { ToolRow, toolImages, type ToolImage } from './ToolRow';
 import { Tooltip } from './ui/misc';
 import { Button } from './ui/button';
 
-/** Compact elapsed label: "12s", "3m 5s", "1h 4m". */
+/** Compact elapsed label in h/m/s: "12s", "3m 5s", "1h 4m 5s". */
 function formatDurationMs(ms: number): string {
   const elapsed = Math.max(0, Math.floor(ms / 1000));
-  if (elapsed < 60) return `${elapsed}s`;
   const hours = Math.floor(elapsed / 3600);
   const minutes = Math.floor((elapsed % 3600) / 60);
   const seconds = elapsed % 60;
-  if (hours > 0) return minutes > 0 ? `${hours}h ${minutes}m` : `${hours}h`;
-  return seconds > 0 ? `${minutes}m ${seconds}s` : `${minutes}m`;
+  const parts: string[] = [];
+  if (hours > 0) parts.push(`${hours}h`);
+  if (minutes > 0) parts.push(`${minutes}m`);
+  if (seconds > 0 || parts.length === 0) parts.push(`${seconds}s`);
+  return parts.join(' ');
 }
 
 const formatWorkingElapsed = (startMs: number, nowMs: number) => formatDurationMs(nowMs - startMs);
@@ -58,10 +60,12 @@ function Working({ startedAt }: { startedAt?: number }) {
   );
 }
 
-/** Settled-turn fold: collapses all of a finished assistant turn's thinking and
- *  tool calls behind a quiet "Worked for Xs" disclosure (t3code style). The
- *  final answer text renders separately and stays visible; only the work folds. */
-function ActivityFold({ turn, showThinking, durationMs }: { turn: UiMessage[]; showThinking: boolean; durationMs: number | null }) {
+/** Settled-turn fold: collapses everything a finished turn did — thinking, tool
+ *  calls, and any interim commentary the model emitted between tool calls —
+ *  behind a quiet "Worked for Xs" disclosure (t3code style). Only the terminal
+ *  message's text renders outside the fold as the final answer; `terminalId`
+ *  marks it so its commentary isn't duplicated here. */
+function ActivityFold({ turn, terminalId, showThinking, durationMs }: { turn: UiMessage[]; terminalId: string; showThinking: boolean; durationMs: number | null }) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const label = durationMs != null ? t('messages.workedFor', { duration: formatDurationMs(durationMs) }) : t('messages.worked');
@@ -77,10 +81,17 @@ function ActivityFold({ turn, showThinking, durationMs }: { turn: UiMessage[]; s
         <ChevronRightIcon className={`size-3.5 transition-transform ${open ? 'rotate-90' : ''}`} />
       </button>
       {open && (
-        <div className="mt-1.5 space-y-0.5">
+        <div className="mt-1.5 space-y-1">
           {turn.map((m) => (
             <Fragment key={m.id}>
               {m.thinking && showThinking && <Thinking text={m.thinking} streaming={false} />}
+              {/* Interim commentary the model said between tool calls — folded
+                  away too; the terminal message's text shows below the fold. */}
+              {m.id !== terminalId && m.content && (
+                <div className="text-sm text-muted-foreground">
+                  <Markdown text={m.content} />
+                </div>
+              )}
               {m.tools?.map((call, i) => <ToolRow key={i} call={call} compact />)}
             </Fragment>
           ))}
@@ -265,8 +276,13 @@ function AssistantTurn({ turn, containsLast, artifactImages }: { turn: UiMessage
     );
   }
 
-  // Settled turn: fold the work, keep the answer.
-  const hasActivity = turn.some((m) => (m.thinking && showThinking) || (m.tools?.length ?? 0) > 0);
+  // Settled turn: fold the work, keep only the final answer. The terminal
+  // message is the last bubble that produced text — everything before it
+  // (thinking, tools, and any interim commentary) folds into the disclosure.
+  const terminal = [...turn].reverse().find((m) => m.content.trim().length > 0);
+  const terminalId = terminal?.id ?? '';
+  const hasFoldedCommentary = turn.some((m) => m.id !== terminalId && m.content.trim().length > 0);
+  const hasActivity = hasFoldedCommentary || turn.some((m) => (m.thinking && showThinking) || (m.tools?.length ?? 0) > 0);
   const durationMs =
     last.turnElapsedMs ??
     (() => {
@@ -283,13 +299,11 @@ function AssistantTurn({ turn, containsLast, artifactImages }: { turn: UiMessage
 
   return (
     <>
-      {hasActivity && <ActivityFold turn={turn} showThinking={showThinking} durationMs={durationMs} />}
-      {turn.map((m) =>
-        m.content ? (
-          <div key={m.id} className={m.error ? 'text-destructive-foreground' : ''}>
-            <Markdown text={m.content} />
-          </div>
-        ) : null,
+      {hasActivity && <ActivityFold turn={turn} terminalId={terminalId} showThinking={showThinking} durationMs={durationMs} />}
+      {terminal && (
+        <div className={terminal.error ? 'text-destructive-foreground' : ''}>
+          <Markdown text={terminal.content} />
+        </div>
       )}
       {createdCount > 0 && <ArtifactsButton count={createdCount} />}
       {copyText && (
