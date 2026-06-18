@@ -7,7 +7,6 @@ import { copyTextToClipboard } from '@/lib/utils';
 import { useChat, type UiMessage } from '@/state/chat';
 import { usePrefs } from '@/state/prefs';
 import { useUi } from '@/state/ui';
-import { AskUser } from './AskUser';
 import { Markdown } from './Markdown';
 import { PlanCard } from './PlanCard';
 import { RagSources } from './RagSources';
@@ -339,7 +338,6 @@ function AssistantTurn({ turn, containsLast, artifactImages }: { turn: UiMessage
       )}
       {proposalMsg && <PlanChip />}
       {planMsg && !proposalMsg && <PlanCard msg={planMsg} />}
-      {questionMsg && <AskUser msg={questionMsg} />}
       {createdCount > 0 && <ArtifactsButton count={createdCount} />}
       {copyText && (
         <div className="mt-2 flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100">

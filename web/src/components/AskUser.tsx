@@ -1,9 +1,21 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { SendIcon } from 'lucide-react';
-import { useChat, type UiMessage } from '@/state/chat';
+import { selectPendingQuestion, useChat, type UiMessage } from '@/state/chat';
 import { Button } from './ui/button';
 import { cn } from '@/lib/utils';
+
+/** The active session's pending question, docked at composer width directly
+ *  above the chat input (rendered by App, not inline in the transcript). */
+export function PendingQuestion() {
+  const question = useChat(selectPendingQuestion);
+  if (!question) return null;
+  return (
+    <div className="mx-auto mb-2 w-full max-w-[800px] px-4">
+      <AskUser msg={question} />
+    </div>
+  );
+}
 
 /** Interactive card rendered when the agent ended a turn with an `ask_user`
  *  question. Three shapes: free-text (no options), single-choice, multi-select.

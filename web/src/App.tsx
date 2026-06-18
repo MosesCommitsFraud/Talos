@@ -10,6 +10,7 @@ import { SettingsDialog } from './components/SettingsDialog';
 import { BrainDialog, LibraryDialog } from './components/ToolDialogs';
 import { ArtifactsPanel } from './components/ArtifactsPanel';
 import { PlanPanel } from './components/PlanPanel';
+import { PendingQuestion } from './components/AskUser';
 import { AuthGate } from './components/auth/AuthGate';
 import { TooltipProvider } from './components/ui/misc';
 import { applyDensity, applyLang, applyTheme, usePrefs } from './state/prefs';
@@ -80,6 +81,7 @@ export default function App() {
                 )}
               >
                 {!hasMessages && <Welcome />}
+                <PendingQuestion />
                 <Composer />
               </div>
             </main>

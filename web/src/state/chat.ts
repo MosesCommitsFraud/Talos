@@ -108,6 +108,16 @@ export const selectPendingPlan = (s: ChatState): UiMessage | null => {
   return p && !p.answered ? p : null;
 };
 
+/** The active session's unanswered `ask_user` question, or null — rendered as a
+ *  card docked above the composer rather than inline in the transcript. */
+export const selectPendingQuestion = (s: ChatState): UiMessage | null => {
+  for (let i = s.messages.length - 1; i >= 0; i -= 1) {
+    const m = s.messages[i];
+    if (m.role === 'assistant' && m.pendingQuestion && !m.answered) return m;
+  }
+  return null;
+};
+
 /** Sidebar status for a chat row: 'working' while a turn streams, 'awaiting'
  *  when a turn ended on a question and needs the user, 'completed' once it
  *  finishes in the background until the chat is opened, else null. */
