@@ -36,6 +36,8 @@ const de: typeof en = {
     sortName: 'Name A–Z',
     noChats: 'Noch keine Chats',
     running: 'Generiert…',
+    working: 'Arbeitet',
+    completed: 'Fertig',
     settings: 'Einstellungen',
     settingsHidden: 'Einstellungen — bei ausgeblendet über ⌘K erneut öffnen',
     rename: 'Umbenennen',

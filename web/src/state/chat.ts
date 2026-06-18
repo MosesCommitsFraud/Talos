@@ -41,6 +41,11 @@ interface ChatState {
    *  accumulating thinking/tool/delta events into the right session. */
   runtimes: Record<string, SessionRuntime>;
 
+  /** Sessions whose last turn finished while the user was looking elsewhere and
+   *  that haven't been opened since — surfaced as "Done" in the sidebar. Cleared
+   *  when the chat is opened. */
+  completed: Record<string, true>;
+
   sessionId: string | null;
   // ── Mirror of runtimes[sessionId] for the active session ──────────────────
   // These exist so every view selector (s.messages, s.streaming, …) keeps
@@ -67,6 +72,15 @@ interface ChatState {
  *  render a running indicator on chats other than the one on screen. */
 export const selectIsStreaming = (id: string | null | undefined) => (s: ChatState) =>
   !!id && !!s.runtimes[id]?.streaming;
+
+/** Sidebar status for a chat row: 'working' while a turn streams, 'completed'
+ *  once it finishes in the background until the chat is opened, else null. */
+export type ChatStatus = 'working' | 'completed' | null;
+export const selectChatStatus = (id: string | null | undefined) => (s: ChatState): ChatStatus => {
+  if (!id) return null;
+  if (s.runtimes[id]?.streaming) return 'working';
+  return s.completed[id] ? 'completed' : null;
+};
 
 let nextId = 0;
 const uid = () => `m${Date.now()}-${nextId++}`;
@@ -175,11 +189,17 @@ export const useChat = create<ChatState>((set, get) => {
    *  session keeps streaming in the background. */
   const activate = (id: string | null) => {
     const rt = (id && get().runtimes[id]) || emptyRuntime();
-    set({ sessionId: id, messages: rt.messages, streaming: rt.streaming, turnStartedAt: rt.turnStartedAt });
+    set((s) => {
+      // Opening a chat clears its "Done" badge.
+      const completed = id && s.completed[id] ? { ...s.completed } : s.completed;
+      if (id && completed !== s.completed) delete completed[id];
+      return { sessionId: id, messages: rt.messages, streaming: rt.streaming, turnStartedAt: rt.turnStartedAt, completed };
+    });
   };
 
   return {
   runtimes: {},
+  completed: {},
   sessionId: null,
   messages: [],
   streaming: false,
@@ -368,6 +388,8 @@ export const useChat = create<ChatState>((set, get) => {
       }));
       // Clear only this session's turn flags — a different chat may be active.
       writeRuntime(sid, () => ({ streaming: false, turnStartedAt: null, abort: null }));
+      // Badge it "Done" if it finished in the background (user is elsewhere).
+      if (get().sessionId !== sid) set((s) => ({ completed: { ...s.completed, [sid]: true } }));
     }
   },
 

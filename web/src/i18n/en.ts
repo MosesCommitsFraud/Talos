@@ -34,6 +34,8 @@ const en = {
     sortName: 'Name A–Z',
     noChats: 'No chats yet',
     running: 'Generating…',
+    working: 'Working',
+    completed: 'Done',
     settings: 'Settings',
     settingsHidden: 'Settings — re-open via ⌘K if hidden',
     rename: 'Rename',
