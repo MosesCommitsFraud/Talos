@@ -746,13 +746,20 @@ def setup_chat_routes(
                         _max_rounds = _DEFAULT_ROUNDS
                     _max_rounds = max(1, min(_max_rounds, 200))
 
+                    # Plan mode produces a detailed design doc (Context/Approach/
+                    # Plan/Verification) and benefits from more reasoning room, so
+                    # give the turn a larger token budget than ordinary replies.
+                    _max_tokens = ctx.preset.max_tokens
+                    if plan_mode:
+                        _max_tokens = max(_max_tokens, 8192)
+
                     async for chunk in stream_agent_loop(
                         sess.endpoint_url,
                         sess.model,
                         messages,
                         headers=sess.headers,
                         temperature=ctx.preset.temperature,
-                        max_tokens=ctx.preset.max_tokens,
+                        max_tokens=_max_tokens,
                         prompt_type=preset_id,
                         max_tool_calls=_tool_budget,
                         max_rounds=_max_rounds,

@@ -1,4 +1,4 @@
-import { CheckIcon, ChevronDownIcon, ChevronRightIcon, CopyIcon, FileIcon, ImageIcon, PencilIcon, Trash2Icon } from 'lucide-react';
+import { CheckIcon, ChevronDownIcon, ChevronRightIcon, CopyIcon, FileIcon, ImageIcon, ListChecksIcon, PencilIcon, Trash2Icon } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { Fragment, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -243,6 +243,23 @@ function ArtifactsButton({ count }: { count: number }) {
   );
 }
 
+/** Compact marker in the message stream for a proposed plan — the full plan
+ *  lives in the side panel, which this reopens if it was collapsed. */
+function PlanChip() {
+  const { t } = useTranslation();
+  const openPlan = useUi((s) => s.setPlanPanelOpen);
+  return (
+    <button
+      type="button"
+      onClick={() => openPlan(true)}
+      className="mt-3 inline-flex items-center gap-1.5 rounded-lg border border-primary/30 bg-primary/[0.06] px-2.5 py-1.5 text-xs font-medium text-primary transition-colors hover:bg-primary/10"
+    >
+      <ListChecksIcon className="size-3.5" />
+      {t('plan.viewPlan')}
+    </button>
+  );
+}
+
 /** One assistant turn = the run of consecutive assistant bubbles after a user
  *  message. While streaming it renders live (thinking → tools → text, in order,
  *  plus the running indicator). Once settled, the thinking and tool calls fold
@@ -276,7 +293,7 @@ function AssistantTurn({ turn, containsLast, artifactImages }: { turn: UiMessage
           </Fragment>
         ))}
         {/* Live plan checklist as the agent ticks steps off via update_plan. */}
-        {planMsg && <PlanCard msg={planMsg} variant="progress" />}
+        {planMsg && <PlanCard msg={planMsg} />}
         {/* Persistent "still running" indicator: shown for the whole streaming
             turn — through thinking, tool calls, and text deltas. */}
         <Working startedAt={turnStartedAt ?? undefined} />
@@ -305,7 +322,7 @@ function AssistantTurn({ turn, containsLast, artifactImages }: { turn: UiMessage
   const createdCount = createdImages.length > 0 ? createdImages.length : containsLast ? artifactImages.length : 0;
   const sources = turn.flatMap((m) => m.sources ?? []);
   // A plan-mode turn that actually proposed a plan (a checklist is present) gets
-  // the approval card — which frames the whole plan itself. Strictly gated on
+  // a compact chip; the full plan lives in the side panel. Strictly gated on
   // planProposed so ordinary turns never get it, and superseded by a question.
   const proposalMsg =
     !questionMsg && terminal?.planProposed && /[-*]\s*\[[ xX]\]/.test(terminal.content) ? terminal : undefined;
@@ -313,15 +330,15 @@ function AssistantTurn({ turn, containsLast, artifactImages }: { turn: UiMessage
   return (
     <>
       {hasActivity && <ActivityFold turn={turn} terminalId={terminalId} showThinking={showThinking} durationMs={durationMs} />}
-      {/* A proposed plan is rendered inside its approval card, not as a loose
-          answer bubble, so it reads as one self-contained artifact. */}
+      {/* A proposed plan opens in the side panel; the message stream shows a
+          compact chip rather than duplicating the whole plan inline. */}
       {terminal && !proposalMsg && (
         <div className={terminal.error ? 'text-destructive-foreground' : ''}>
           <Markdown text={terminal.content} />
         </div>
       )}
-      {planMsg && !proposalMsg && <PlanCard msg={planMsg} variant="progress" />}
-      {proposalMsg && <PlanCard msg={proposalMsg} variant="approval" />}
+      {proposalMsg && <PlanChip />}
+      {planMsg && !proposalMsg && <PlanCard msg={planMsg} />}
       {questionMsg && <AskUser msg={questionMsg} />}
       {createdCount > 0 && <ArtifactsButton count={createdCount} />}
       {copyText && (

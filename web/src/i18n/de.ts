@@ -64,9 +64,14 @@ const de: typeof en = {
   plan: {
     progress: '{{done}}/{{total}} erledigt',
     proposed: 'Vorgeschlagener Plan',
-    implement: 'Plan umsetzen',
-    revise: 'Überarbeiten',
-    implementing: 'Setze den Plan um.',
+    panelLabel: 'Vorgeschlagener Plan',
+    closePanel: 'Plan schließen',
+    answered: 'entschieden',
+    reviewPrompt: 'Plan prüfen, dann zum Starten freigeben',
+    viewPlan: 'Plan ansehen',
+    cancel: 'Abbrechen',
+    accept: 'Plan annehmen',
+    implementing: 'Freigegeben — setze den Plan jetzt um.',
   },
   chatHeader: {
     newChat: 'Neuer Chat',

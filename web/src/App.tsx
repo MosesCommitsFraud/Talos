@@ -9,10 +9,11 @@ import { CommandPalette } from './components/CommandPalette';
 import { SettingsDialog } from './components/SettingsDialog';
 import { BrainDialog, LibraryDialog } from './components/ToolDialogs';
 import { ArtifactsPanel } from './components/ArtifactsPanel';
+import { PlanPanel } from './components/PlanPanel';
 import { AuthGate } from './components/auth/AuthGate';
 import { TooltipProvider } from './components/ui/misc';
 import { applyDensity, applyLang, applyTheme, usePrefs } from './state/prefs';
-import { useChat } from './state/chat';
+import { selectPendingPlan, useChat } from './state/chat';
 import { useUi } from './state/ui';
 import { cn } from './lib/utils';
 
@@ -31,6 +32,13 @@ export default function App() {
   const density = usePrefs((s) => s.density);
   const lang = usePrefs((s) => s.lang);
   const hasMessages = useChat((s) => s.messages.length > 0);
+  const pendingPlanId = useChat((s) => selectPendingPlan(s)?.id ?? null);
+  const setPlanPanelOpen = useUi((s) => s.setPlanPanelOpen);
+
+  // A freshly proposed plan slides the panel open (like opening an artifact).
+  useEffect(() => {
+    if (pendingPlanId) setPlanPanelOpen(true);
+  }, [pendingPlanId, setPlanPanelOpen]);
 
   useEffect(() => applyTheme(theme), [theme]);
   useEffect(() => applyDensity(density), [density]);
@@ -76,6 +84,7 @@ export default function App() {
               </div>
             </main>
             <ArtifactsPanel open={filesOpen} onClose={() => setFilesOpen(false)} />
+            <PlanPanel />
           </div>
           <CommandPalette open={palette} onClose={() => setPalette(false)} onOpenSettings={() => setSettings(true)} />
           <SettingsDialog open={settings} onClose={() => setSettings(false)} />

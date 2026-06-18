@@ -62,9 +62,14 @@ const en = {
   plan: {
     progress: '{{done}}/{{total}} done',
     proposed: 'Proposed plan',
-    implement: 'Implement plan',
-    revise: 'Revise',
-    implementing: 'Implementing the plan.',
+    panelLabel: 'Proposed plan',
+    closePanel: 'Close plan',
+    answered: 'decided',
+    reviewPrompt: 'Review the plan, then approve to start',
+    viewPlan: 'View plan',
+    cancel: 'Cancel',
+    accept: 'Accept plan',
+    implementing: 'Approved — go ahead and implement the plan.',
   },
   chatHeader: {
     newChat: 'New chat',

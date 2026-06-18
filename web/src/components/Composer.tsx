@@ -6,20 +6,24 @@ import {
   DatabaseIcon,
   FileTextIcon,
   LayersIcon,
+  ListChecksIcon,
   MessageSquareIcon,
   PaperclipIcon,
   PencilRulerIcon,
+  PlayIcon,
   WrenchIcon,
   XIcon,
 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { fetchCapabilities, uploadFiles, type UploadedFile } from '@/api/client';
-import { useChat } from '@/state/chat';
+import { selectPendingPlan, useChat } from '@/state/chat';
 import { usePrefs, type ChatMode } from '@/state/prefs';
+import { useUi } from '@/state/ui';
 import { cn } from '@/lib/utils';
 import { ContextMeter } from './ContextMeter';
 import { ModelPicker } from './ModelPicker';
+import { Button } from './ui/button';
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from './ui/menu';
 import { Tooltip } from './ui/misc';
 
@@ -176,6 +180,9 @@ export function Composer() {
   const streaming = useChat((s) => s.streaming);
   const send = useChat((s) => s.send);
   const stop = useChat((s) => s.stop);
+  const cancelPlan = useChat((s) => s.cancelPlan);
+  const pendingPlan = useChat(selectPendingPlan);
+  const setPlanPanelOpen = useUi((s) => s.setPlanPanelOpen);
   const prefs = usePrefs();
   const queryClient = useQueryClient();
 
@@ -249,6 +256,37 @@ export function Composer() {
   };
 
   const canSend = (text.trim().length > 0 || pending.length > 0) && !uploading;
+
+  const acceptPlan = async () => {
+    if (!pendingPlan) return;
+    await send(t('plan.implementing'), { approvedPlan: pendingPlan.content, planMode: false });
+    void queryClient.refetchQueries({ queryKey: ['sessions'], type: 'active' });
+  };
+
+  // A proposed plan replaces the input with an approval bar: Cancel discards it,
+  // Accept executes it via the approved-plan flow. The full plan is in the panel.
+  if (pendingPlan) {
+    return (
+      <div className="mx-auto w-full max-w-[800px] px-4 pb-4">
+        <div className="flex items-center gap-3 rounded-[20px] border border-primary/30 bg-primary/[0.05] px-4 py-3">
+          <button
+            type="button"
+            onClick={() => setPlanPanelOpen(true)}
+            className="flex min-w-0 flex-1 items-center gap-2 text-left text-sm text-foreground"
+          >
+            <ListChecksIcon className="size-4 shrink-0 text-primary" />
+            <span className="truncate">{t('plan.reviewPrompt')}</span>
+          </button>
+          <Button variant="outline" size="sm" onClick={cancelPlan}>
+            {t('plan.cancel')}
+          </Button>
+          <Button size="sm" onClick={() => void acceptPlan()}>
+            <PlayIcon /> {t('plan.accept')}
+          </Button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="mx-auto w-full max-w-[800px] px-4 pb-4">

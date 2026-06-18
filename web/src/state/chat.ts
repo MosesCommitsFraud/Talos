@@ -80,12 +80,33 @@ interface ChatState {
   stop: () => void;
   edit: (msgId: string, content: string) => Promise<void>;
   remove: (msgId: string) => Promise<void>;
+  /** Dismiss the active session's pending proposed plan without executing it
+   *  (the "Cancel" action on the approval bar). */
+  cancelPlan: () => void;
 }
+
+const PLAN_CHECKLIST_RE = /[-*]\s*\[[ xX]\]/;
 
 /** True iff a turn is currently streaming for `id`. Used by the sidebar to
  *  render a running indicator on chats other than the one on screen. */
 export const selectIsStreaming = (id: string | null | undefined) => (s: ChatState) =>
   !!id && !!s.runtimes[id]?.streaming;
+
+/** The active session's proposed plan (a plan-mode turn that produced a
+ *  checklist), or null. Drives the side plan panel and the approval bar. */
+export const selectActivePlan = (s: ChatState): UiMessage | null => {
+  for (let i = s.messages.length - 1; i >= 0; i -= 1) {
+    const m = s.messages[i];
+    if (m.role === 'assistant' && m.planProposed && PLAN_CHECKLIST_RE.test(m.content)) return m;
+  }
+  return null;
+};
+/** The active plan only while it still needs a decision (not yet accepted or
+ *  cancelled) — drives the composer's approval bar. */
+export const selectPendingPlan = (s: ChatState): UiMessage | null => {
+  const p = selectActivePlan(s);
+  return p && !p.answered ? p : null;
+};
 
 /** Sidebar status for a chat row: 'working' while a turn streams, 'awaiting'
  *  when a turn ended on a question and needs the user, 'completed' once it
@@ -484,6 +505,16 @@ export const useChat = create<ChatState>((set, get) => {
     if (!sessionId || !msg?.dbId) throw new Error('Message not deletable yet');
     await deleteMessages(sessionId, [msg.dbId]);
     writeRuntime(sessionId, (rt) => ({ messages: rt.messages.filter((m) => m.id !== msgId) }));
+  },
+
+  cancelPlan: () => {
+    const { sessionId, messages } = get();
+    if (!sessionId) return;
+    const p = [...messages].reverse().find((m) => m.role === 'assistant' && m.planProposed && !m.answered);
+    if (!p) return;
+    writeRuntime(sessionId, (rt) => ({
+      messages: rt.messages.map((m) => (m.id === p.id ? { ...m, answered: true } : m)),
+    }));
   },
   };
 });
