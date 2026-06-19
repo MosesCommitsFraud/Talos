@@ -1,8 +1,8 @@
 import { useTranslation } from 'react-i18next';
-import { ListChecksIcon, XIcon } from 'lucide-react';
+import { DownloadIcon, ListChecksIcon, XIcon } from 'lucide-react';
 import { selectActivePlan, useChat } from '@/state/chat';
 import { useUi } from '@/state/ui';
-import { Markdown } from './Markdown';
+import { Markdown, downloadBlob } from './Markdown';
 import { Checklist, parseChecklist } from './PlanCard';
 
 /** Right-side drawer that holds a proposed plan (Context / Approach / Plan /
@@ -28,14 +28,27 @@ export function PlanPanel() {
           {t('plan.proposed')}
           {plan.answered && <span className="text-xs font-normal text-muted-foreground">· {t('plan.answered')}</span>}
         </span>
-        <button
-          type="button"
-          aria-label={t('plan.closePanel')}
-          onClick={() => setOpen(false)}
-          className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-        >
-          <XIcon className="size-4" />
-        </button>
+        <div className="flex items-center gap-1">
+          <button
+            type="button"
+            aria-label={t('plan.downloadMd')}
+            title={t('plan.downloadMd')}
+            onClick={() =>
+              downloadBlob(plan.content, `plan-${new Date().toISOString().slice(0, 10)}.md`, 'text/markdown;charset=utf-8')
+            }
+            className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+          >
+            <DownloadIcon className="size-4" />
+          </button>
+          <button
+            type="button"
+            aria-label={t('plan.closePanel')}
+            onClick={() => setOpen(false)}
+            className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+          >
+            <XIcon className="size-4" />
+          </button>
+        </div>
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto p-4">
         <Markdown text={plan.content} />

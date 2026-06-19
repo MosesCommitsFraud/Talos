@@ -1,9 +1,7 @@
 themes
-sql sometimes not accepted???
-parallel chats not running
-endpunkt für externes RAG
-mehrere SQL verbindungen
+scrolling während streaming bad
 besseres kontextmenu
-time not in seconds but in h m s
-settings fehlen paar scrollbars
-dropdowns for models in settings bad
+sidebar für plan öffnet sich nicht
+during stream download und copy button flicker. sideway scroll too
+upload drag and drop muss besser
+nicht immer deutsch

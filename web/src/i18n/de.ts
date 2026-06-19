@@ -66,6 +66,7 @@ const de: typeof en = {
     proposed: 'Vorgeschlagener Plan',
     panelLabel: 'Vorgeschlagener Plan',
     closePanel: 'Plan schließen',
+    downloadMd: 'Plan herunterladen (.md)',
     answered: 'entschieden',
     reviewPrompt: 'Plan prüfen, dann zum Starten freigeben',
     viewPlan: 'Plan ansehen',

@@ -60,7 +60,7 @@ const LANG_EXT: Record<string, string> = {
   markdown: 'md', xml: 'xml', toml: 'toml', dockerfile: 'dockerfile',
 };
 
-function downloadBlob(content: string, filename: string, mime: string) {
+export function downloadBlob(content: string, filename: string, mime: string) {
   const url = URL.createObjectURL(new Blob([content], { type: mime }));
   const a = document.createElement('a');
   a.href = url;

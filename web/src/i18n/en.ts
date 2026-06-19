@@ -64,6 +64,7 @@ const en = {
     proposed: 'Proposed plan',
     panelLabel: 'Proposed plan',
     closePanel: 'Close plan',
+    downloadMd: 'Download plan (.md)',
     answered: 'decided',
     reviewPrompt: 'Review the plan, then approve to start',
     viewPlan: 'View plan',
