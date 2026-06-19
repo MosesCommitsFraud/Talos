@@ -99,16 +99,6 @@ export async function uploadFiles(files: File[]): Promise<UploadedFile[]> {
   return data.files ?? [];
 }
 
-export interface MemoryItem { id: string; content?: string; text?: string; created_at?: number; [key: string]: unknown }
-export const fetchMemories = () => getJSON<MemoryItem[]>('/api/memory');
-
-export interface LibraryDoc { id: string; title?: string; name?: string; updated_at?: number; [key: string]: unknown }
-export async function fetchLibrary(): Promise<LibraryDoc[]> {
-  const data = await getJSON<LibraryDoc[] | { documents?: LibraryDoc[]; library?: LibraryDoc[] }>('/api/documents/library');
-  if (Array.isArray(data)) return data;
-  return data.documents ?? data.library ?? [];
-}
-
 export interface AuthInfo { auth_enabled: boolean; user?: string; is_admin?: boolean }
 export const fetchAuthInfo = () => getJSON<AuthInfo>('/api/auth/settings');
 

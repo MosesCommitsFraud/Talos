@@ -7,7 +7,6 @@ import { Welcome } from './components/Welcome';
 import { Composer } from './components/Composer';
 import { CommandPalette } from './components/CommandPalette';
 import { SettingsDialog } from './components/SettingsDialog';
-import { BrainDialog, LibraryDialog } from './components/ToolDialogs';
 import { ArtifactsPanel } from './components/ArtifactsPanel';
 import { PlanPanel } from './components/PlanPanel';
 import { PendingQuestion } from './components/AskUser';
@@ -25,8 +24,6 @@ const queryClient = new QueryClient({
 export default function App() {
   const [palette, setPalette] = useState(false);
   const [settings, setSettings] = useState(false);
-  const [brain, setBrain] = useState(false);
-  const [library, setLibrary] = useState(false);
   const filesOpen = useUi((s) => s.artifactsOpen);
   const setFilesOpen = useUi((s) => s.setArtifactsOpen);
   const theme = usePrefs((s) => s.theme);
@@ -64,8 +61,6 @@ export default function App() {
             <Sidebar
               onOpenPalette={() => setPalette(true)}
               onOpenSettings={() => setSettings(true)}
-              onOpenBrain={() => setBrain(true)}
-              onOpenLibrary={() => setLibrary(true)}
             />
             <main className="relative flex min-w-0 flex-1 flex-col">
               <IncognitoToggle />
@@ -90,8 +85,6 @@ export default function App() {
           </div>
           <CommandPalette open={palette} onClose={() => setPalette(false)} onOpenSettings={() => setSettings(true)} />
           <SettingsDialog open={settings} onClose={() => setSettings(false)} />
-          <BrainDialog open={brain} onClose={() => setBrain(false)} />
-          <LibraryDialog open={library} onClose={() => setLibrary(false)} />
         </AuthGate>
       </TooltipProvider>
     </QueryClientProvider>

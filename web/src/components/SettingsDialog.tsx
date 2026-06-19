@@ -318,35 +318,12 @@ function FallbacksEditor({ s, k }: { s: Draft; k: string }) {
 
 /* ── Appearance (theme/density + UI visibility, mirrors legacy sections) ── */
 
-function SegmentPicker<T extends string>({ options, current, onPick }: { options: Array<{ value: T; label: string }>; current: T; onPick: (v: T) => void }) {
-  return (
-    <div className="flex gap-2">
-      {options.map((o) => (
-        <button
-          key={o.value}
-          type="button"
-          onClick={() => onPick(o.value)}
-          className={cn(
-            'min-w-0 flex-1 truncate whitespace-nowrap rounded-lg border px-2 py-2 text-center text-sm transition-colors',
-            current === o.value ? 'border-ring bg-accent font-medium' : 'hover:bg-accent/60',
-          )}
-          title={o.label}
-        >
-          {o.label}
-        </button>
-      ))}
-    </div>
-  );
-}
-
 /** Visibility toggles keyed for i18n: secKey → settings.appearance.sec.*,
  *  item key → settings.appearance.vis.<key> (+ "<key>Hint" when present). */
 const VISIBILITY_SECTIONS: Array<{ secKey: string; items: Array<{ key: keyof Visibility; hint?: boolean }> }> = [
   {
     secKey: 'sidebar',
     items: [
-      { key: 'sidebarBrain' },
-      { key: 'sidebarLibrary' },
       { key: 'sidebarUserBar', hint: true },
       { key: 'sidebarSettingsBtn', hint: true },
     ],
@@ -377,34 +354,41 @@ function AppearancePanel() {
   const prefs = usePrefs();
   return (
     <Page>
-      <Section title={t('settings.appearance.theme')} padded>
-        <SegmentPicker<Theme>
-          options={[
-            { value: 'dark', label: t('settings.appearance.dark') },
-            { value: 'light', label: t('settings.appearance.light') },
-            { value: 'system', label: t('settings.appearance.system') },
-          ]}
-          current={prefs.theme}
-          onPick={(th) => { prefs.setTheme(th); applyTheme(th); }}
-        />
-      </Section>
-      <Section title={t('settings.appearance.language')} padded>
-        <SegmentPicker<Lang>
-          options={LANGUAGES.map((l) => ({ value: l.value, label: l.label }))}
-          current={prefs.lang}
-          onPick={(l) => { prefs.setLang(l); applyLang(l); }}
-        />
-      </Section>
-      <Section title={t('settings.appearance.density')} padded>
-        <SegmentPicker<Density>
-          options={[
-            { value: 'compact', label: t('settings.appearance.compact') },
-            { value: 'comfortable', label: t('settings.appearance.comfortable') },
-            { value: 'spacious', label: t('settings.appearance.spacious') },
-          ]}
-          current={prefs.density}
-          onPick={(d) => { prefs.setDensity(d); applyDensity(d); }}
-        />
+      {/* Theme / language / density as compact dropdown rows (t3code General
+          settings style) rather than three stacked cards of giant buttons. */}
+      <Section title={t('settings.appearance.title')}>
+        <Row label={t('settings.appearance.theme')} hint={t('settings.appearance.themeHint')}>
+          <Select
+            className="w-44"
+            value={prefs.theme}
+            onChange={(v) => { prefs.setTheme(v as Theme); applyTheme(v as Theme); }}
+            options={[
+              { value: 'system', label: t('settings.appearance.system') },
+              { value: 'light', label: t('settings.appearance.light') },
+              { value: 'dark', label: t('settings.appearance.dark') },
+            ]}
+          />
+        </Row>
+        <Row label={t('settings.appearance.language')} hint={t('settings.appearance.languageHint')}>
+          <Select
+            className="w-44"
+            value={prefs.lang}
+            onChange={(v) => { prefs.setLang(v as Lang); applyLang(v as Lang); }}
+            options={LANGUAGES.map((l) => ({ value: l.value, label: l.label }))}
+          />
+        </Row>
+        <Row label={t('settings.appearance.density')} hint={t('settings.appearance.densityHint')}>
+          <Select
+            className="w-44"
+            value={prefs.density}
+            onChange={(v) => { prefs.setDensity(v as Density); applyDensity(v as Density); }}
+            options={[
+              { value: 'compact', label: t('settings.appearance.compact') },
+              { value: 'comfortable', label: t('settings.appearance.comfortable') },
+              { value: 'spacious', label: t('settings.appearance.spacious') },
+            ]}
+          />
+        </Row>
       </Section>
       {VISIBILITY_SECTIONS.map((sec) => (
         <Section key={sec.secKey} title={t(`settings.appearance.sec.${sec.secKey}`)}>

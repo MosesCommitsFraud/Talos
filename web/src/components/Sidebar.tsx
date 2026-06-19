@@ -2,8 +2,6 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   ArchiveIcon,
   ArrowUpDownIcon,
-  BookOpenIcon,
-  BrainIcon,
   CheckIcon,
   ChevronRightIcon,
   FolderIcon,
@@ -273,13 +271,9 @@ function NavButton({
 export function Sidebar({
   onOpenPalette,
   onOpenSettings,
-  onOpenBrain,
-  onOpenLibrary,
 }: {
   onOpenPalette: () => void;
   onOpenSettings: () => void;
-  onOpenBrain: () => void;
-  onOpenLibrary: () => void;
 }) {
   const { t } = useTranslation();
   const { data: sessions } = useQuery({ queryKey: ['sessions'], queryFn: fetchSessions, refetchInterval: 30_000 });
@@ -415,16 +409,6 @@ export function Sidebar({
           </div>
         )}
       </div>
-
-      {!collapsed && (visibility.sidebarBrain || visibility.sidebarLibrary) && (
-        <>
-          <div className="px-4 pt-4 pb-1 text-xs font-medium text-muted-foreground">{t('sidebar.tools')}</div>
-          <div className="space-y-0.5 px-2">
-            {visibility.sidebarBrain && <NavButton icon={<BrainIcon />} label={t('sidebar.brain')} onClick={onOpenBrain} />}
-            {visibility.sidebarLibrary && <NavButton icon={<BookOpenIcon />} label={t('sidebar.library')} onClick={onOpenLibrary} />}
-          </div>
-        </>
-      )}
 
       {!collapsed && (
         <>

@@ -11,8 +11,6 @@ export type { Lang };
 /** Per-surface visibility toggles — the new-UI equivalent of legacy's
  *  Appearance tab (show/hide modules across sidebar, chat area, chat bar). */
 export interface Visibility {
-  sidebarBrain: boolean;
-  sidebarLibrary: boolean;
   sidebarUserBar: boolean;
   sidebarSettingsBtn: boolean;
   chatHeader: boolean;
@@ -29,8 +27,6 @@ export interface Visibility {
 }
 
 export const DEFAULT_VISIBILITY: Visibility = {
-  sidebarBrain: true,
-  sidebarLibrary: true,
   sidebarUserBar: true,
   sidebarSettingsBtn: true,
   chatHeader: true,
