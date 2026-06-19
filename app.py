@@ -279,7 +279,7 @@ if AUTH_ENABLED:
             if not auth_manager.is_configured:
                 # No users yet — send browsers to the React shell, which renders
                 # the first-time setup screen from /api/auth/status.
-                if not path.startswith("/api/"):
+                if not (path.startswith("/api/") or path.startswith("/v1/")):
                     return RedirectResponse(url="/", status_code=302)
                 return JSONResponse(status_code=401, content={"error": "Setup required"})
 
@@ -341,7 +341,7 @@ if AUTH_ENABLED:
             # --- Cookie-based session auth ---
             token = request.cookies.get(SESSION_COOKIE)
             if not auth_manager.validate_token(token):
-                if path.startswith("/api/"):
+                if path.startswith("/api/") or path.startswith("/v1/"):
                     return JSONResponse(status_code=401, content={"error": "Not authenticated"})
                 return RedirectResponse(url="/", status_code=302)
 
@@ -551,6 +551,10 @@ app.include_router(setup_chat_routes(
     webhook_manager=webhook_manager,
     skills_manager=skills_manager,
 ))
+
+# Named AI endpoints (assistant profiles) + OpenAI-compatible API
+from routes.assistant_routes import setup_assistant_routes
+app.include_router(setup_assistant_routes(chat_processor, session_manager))
 
 # History
 from routes.history_routes import setup_history_routes

@@ -154,6 +154,37 @@ export async function addModelEndpoint(opts: { name?: string; baseUrl: string; a
   }
 }
 
+/* ── Named AI endpoints (assistant profiles) ── */
+import type { AssistantEndpoint } from './types';
+
+export const fetchAssistants = () => getJSON<AssistantEndpoint[]>('/api/assistants');
+
+async function assistantWrite(url: string, method: string, body: Partial<AssistantEndpoint>): Promise<AssistantEndpoint> {
+  const res = await fetch(url, {
+    method,
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+    credentials: 'same-origin',
+  });
+  if (!res.ok) {
+    let detail = `HTTP ${res.status}`;
+    try { const e = await res.json(); detail = e.detail || detail; } catch { /* noop */ }
+    throw new Error(detail);
+  }
+  return res.json();
+}
+
+export const createAssistant = (body: Partial<AssistantEndpoint>) =>
+  assistantWrite('/api/assistants', 'POST', body);
+
+export const updateAssistant = (id: string, body: Partial<AssistantEndpoint>) =>
+  assistantWrite(`/api/assistants/${id}`, 'PATCH', body);
+
+export async function deleteAssistant(id: string): Promise<void> {
+  const res = await fetch(`/api/assistants/${id}`, { method: 'DELETE', credentials: 'same-origin' });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+}
+
 /* ── Admin settings (flat dict at /api/auth/settings) ── */
 export type AppSettings = Record<string, unknown>;
 export const fetchAppSettings = () => getJSON<AppSettings>('/api/auth/settings');

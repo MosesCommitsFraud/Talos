@@ -2,7 +2,7 @@ import os
 import logging
 import sqlite3
 from datetime import datetime, timezone
-from sqlalchemy import event, create_engine, Column, String, Text, Boolean, DateTime, Integer, ForeignKey, JSON, Index, func, text
+from sqlalchemy import event, create_engine, Column, String, Text, Boolean, DateTime, Integer, Float, ForeignKey, JSON, Index, func, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.types import TypeDecorator
 from sqlalchemy.ext.declarative import declarative_base, declared_attr
@@ -437,6 +437,37 @@ class ApiToken(TimestampMixin, Base):
     scopes = Column(String, nullable=False, default="chat")
     is_active = Column(Boolean, default=True)
     last_used_at = Column(DateTime, nullable=True)
+
+
+class AssistantEndpoint(TimestampMixin, Base):
+    """Named, admin-managed AI endpoints exposed on the LAN.
+
+    Each row bundles an upstream model (via a ModelEndpoint) with a capability
+    set — RAG on/off, SQL on/off, reasoning on/off — plus generation params and
+    an optional system prompt. The ``slug`` is the OpenAI-compatible ``model``
+    id clients pass to POST /v1/chat/completions and that appears in GET
+    /v1/models. Invocation is gated by an ``ody_`` API token (chat scope).
+    """
+    __tablename__ = "assistant_endpoints"
+
+    id = Column(String, primary_key=True, index=True)
+    name = Column(String, nullable=False)            # Display label
+    slug = Column(String, nullable=False, unique=True, index=True)  # OpenAI "model" id
+    description = Column(Text, nullable=True)
+
+    endpoint_id = Column(String, nullable=False)     # ModelEndpoint.id (upstream provider)
+    model = Column(String, nullable=True)            # Upstream model id; "" → endpoint's first chat model
+
+    system_prompt = Column(Text, nullable=True)
+    temperature = Column(Float, nullable=False, default=0.3)
+    max_tokens = Column(Integer, nullable=False, default=4096)
+
+    use_rag = Column(Boolean, default=False)         # Inject knowledge-base RAG context
+    use_sql = Column(Boolean, default=False)         # Enable SQL DB tools (force_db)
+    reasoning = Column(Boolean, default=True)        # Model thinking/reasoning on/off
+
+    disabled_tools = Column(Text, nullable=True)     # JSON array of tool names to hide
+    is_enabled = Column(Boolean, default=True)
 
 
 class Webhook(TimestampMixin, Base):

@@ -23,6 +23,26 @@ export interface ModelEndpoint {
   is_enabled: boolean;
 }
 
+/** A named, admin-managed AI endpoint exposed on the LAN (OpenAI-compatible). */
+export interface AssistantEndpoint {
+  id: string;
+  name: string;
+  slug: string;
+  description: string;
+  endpoint_id: string;
+  endpoint_name?: string | null;
+  model: string;
+  system_prompt: string;
+  temperature: number;
+  max_tokens: number;
+  use_rag: boolean;
+  use_sql: boolean;
+  reasoning: boolean;
+  disabled_tools: string[];
+  is_enabled: boolean;
+  created_at?: string | null;
+}
+
 export interface HistoryMessage {
   role: 'user' | 'assistant' | 'system';
   content: string;

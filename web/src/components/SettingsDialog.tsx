@@ -23,6 +23,10 @@ import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   addModelEndpoint,
+  fetchAssistants,
+  createAssistant,
+  updateAssistant,
+  deleteAssistant,
   changePassword,
   createIntegration,
   deleteIntegration,
@@ -68,6 +72,7 @@ import {
   type RagJob,
   type SqlConfig,
 } from '@/api/client';
+import type { AssistantEndpoint } from '@/api/types';
 import { applyDensity, applyLang, applyTheme, usePrefs, type Density, type Lang, type Theme, type Visibility } from '@/state/prefs';
 import { LANGUAGES } from '@/i18n';
 import { cn } from '@/lib/utils';
@@ -81,7 +86,7 @@ import { UsersPanel } from './settings/UsersPanel';
 
 type Panel =
   | 'appearance' | 'shortcuts' | 'account'
-  | 'models' | 'ai' | 'integrations' | 'tools' | 'rag' | 'users' | 'system';
+  | 'models' | 'ai' | 'assistants' | 'integrations' | 'tools' | 'rag' | 'users' | 'system';
 
 /* ── Shared layout (t3code settings design) ── */
 
@@ -1460,6 +1465,136 @@ function SystemPanel() {
   );
 }
 
+/* ── Named AI endpoints (assistant profiles) ── */
+
+const EMPTY_ASSISTANT: Partial<AssistantEndpoint> = {
+  name: '', endpoint_id: '', model: '', system_prompt: '',
+  temperature: 0.3, max_tokens: 4096,
+  use_rag: false, use_sql: false, reasoning: true, is_enabled: true,
+};
+
+/** Create/edit form for a single named endpoint. */
+function AssistantEditor({ initial, onDone, onCancel }: { initial: Partial<AssistantEndpoint>; onDone: () => void; onCancel: () => void }) {
+  const { t } = useTranslation();
+  const endpoints = useEndpoints();
+  const [draft, setDraft] = useState<Partial<AssistantEndpoint>>(initial);
+  const [err, setErr] = useState('');
+  const [saving, setSaving] = useState(false);
+  const set = (k: keyof AssistantEndpoint, v: unknown) => setDraft((d) => ({ ...d, [k]: v }));
+  const models = endpoints.find((e) => e.id === draft.endpoint_id)?.models ?? [];
+
+  const save = async () => {
+    setErr(''); setSaving(true);
+    try {
+      if (initial.id) await updateAssistant(initial.id, draft);
+      else await createAssistant(draft);
+      onDone();
+    } catch (e) { setErr((e as Error).message); } finally { setSaving(false); }
+  };
+
+  return (
+    <div className="space-y-3 rounded-xl border bg-card p-4">
+      <Row label={t('settings.assistants.name')}>
+        <Input className="w-56" value={String(draft.name ?? '')} onChange={(e) => set('name', e.target.value)} placeholder={t('settings.assistants.namePlaceholder')} />
+      </Row>
+      <Row label={t('settings.assistants.endpoint')}>
+        <Select className="w-56" value={String(draft.endpoint_id ?? '')} onChange={(v) => { set('endpoint_id', v); set('model', ''); }}
+          options={[{ value: '', label: '—' }, ...endpoints.map((e) => ({ value: e.id, label: e.name }))]} />
+      </Row>
+      <Row label={t('settings.assistants.model')} hint={t('settings.assistants.modelHint')}>
+        <Select className="w-56" value={String(draft.model ?? '')} onChange={(v) => set('model', v)}
+          options={[{ value: '', label: t('settings.assistants.autoModel') }, ...models.map((m) => ({ value: m }))]} />
+      </Row>
+      <Row label={t('settings.assistants.systemPrompt')}>
+        <Textarea className="w-full" rows={3} value={String(draft.system_prompt ?? '')} onChange={(e) => set('system_prompt', e.target.value)} placeholder={t('settings.assistants.systemPromptPlaceholder')} />
+      </Row>
+      <Row label={t('settings.assistants.temperature')}>
+        <Input type="number" step="0.1" min="0" max="2" className="w-24" value={String(draft.temperature ?? 0.3)} onChange={(e) => set('temperature', Number(e.target.value))} />
+      </Row>
+      <Row label={t('settings.assistants.maxTokens')}>
+        <Input type="number" min="1" className="w-28" value={String(draft.max_tokens ?? 4096)} onChange={(e) => set('max_tokens', Number(e.target.value))} />
+      </Row>
+      <Row label={t('settings.assistants.useRag')} hint={t('settings.assistants.useRagHint')}>
+        <Switch checked={!!draft.use_rag} onCheckedChange={(v) => set('use_rag', v)} />
+      </Row>
+      <Row label={t('settings.assistants.useSql')} hint={t('settings.assistants.useSqlHint')}>
+        <Switch checked={!!draft.use_sql} onCheckedChange={(v) => set('use_sql', v)} />
+      </Row>
+      <Row label={t('settings.assistants.reasoning')} hint={t('settings.assistants.reasoningHint')}>
+        <Switch checked={!!draft.reasoning} onCheckedChange={(v) => set('reasoning', v)} />
+      </Row>
+      <Row label={t('settings.assistants.enabled')}>
+        <Switch checked={draft.is_enabled !== false} onCheckedChange={(v) => set('is_enabled', v)} />
+      </Row>
+      {err && <p className="px-1 text-xs text-destructive-foreground">{err}</p>}
+      <div className="flex justify-end gap-2">
+        <Button size="sm" variant="outline" onClick={onCancel}>{t('common.cancel')}</Button>
+        <Button size="sm" disabled={saving || !draft.name?.trim() || !draft.endpoint_id} onClick={() => void save()}>
+          {saving ? t('common.saving') : t('settings.saveChanges')}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function AssistantsPanel() {
+  const { t } = useTranslation();
+  const queryClient = useQueryClient();
+  const { data: assistants } = useQuery({ queryKey: ['assistants'], queryFn: fetchAssistants });
+  const [editing, setEditing] = useState<Partial<AssistantEndpoint> | null>(null);
+  const refresh = () => void queryClient.invalidateQueries({ queryKey: ['assistants'] });
+  const done = () => { setEditing(null); refresh(); };
+  const origin = typeof window !== 'undefined' ? window.location.origin : 'http://<lan-ip>:7000';
+
+  return (
+    <Page>
+      <Section
+        title={t('settings.assistants.title')}
+        action={!editing && <Button size="sm" onClick={() => setEditing({ ...EMPTY_ASSISTANT })}><PlusIcon /> {t('settings.assistants.new')}</Button>}
+        padded
+      >
+        <p className="mb-3 text-xs text-muted-foreground">{t('settings.assistants.intro')}</p>
+        {editing && <AssistantEditor initial={editing} onDone={done} onCancel={() => setEditing(null)} />}
+        {!editing && (
+          <div className="space-y-1.5">
+            {(assistants ?? []).map((a) => (
+              <div key={a.id} className="flex items-center justify-between gap-2 rounded-lg border bg-background px-3 py-2">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2 truncate text-sm">
+                    {a.name}
+                    <code className="rounded bg-muted px-1 text-[11px] text-muted-foreground">{a.slug}</code>
+                  </div>
+                  <div className="truncate text-xs text-muted-foreground">
+                    {a.endpoint_name ?? a.endpoint_id} · {a.model || t('settings.assistants.autoModel')}
+                    {a.use_rag && ' · RAG'}{a.use_sql && ' · SQL'}{a.reasoning && ' · ' + t('settings.assistants.reasoning')}
+                  </div>
+                </div>
+                <div className="flex shrink-0 items-center gap-1">
+                  <span className={cn('mr-1 text-xs', a.is_enabled ? 'text-success' : 'text-muted-foreground')}>
+                    {a.is_enabled ? t('settings.models.enabled') : t('settings.models.disabled')}
+                  </span>
+                  <Button size="icon-sm" variant="ghost" onClick={() => setEditing(a)} aria-label={t('common.edit')}><WrenchIcon /></Button>
+                  <Button size="icon-sm" variant="ghost" onClick={() => { if (window.confirm(t('settings.assistants.deleteConfirm', { name: a.name }))) void deleteAssistant(a.id).then(refresh); }} aria-label={t('common.delete')}><Trash2Icon /></Button>
+                </div>
+              </div>
+            ))}
+            {(assistants ?? []).length === 0 && <p className="text-xs text-muted-foreground">{t('settings.assistants.empty')}</p>}
+          </div>
+        )}
+      </Section>
+
+      <Section title={t('settings.assistants.usageTitle')} padded>
+        <p className="mb-2 text-xs text-muted-foreground">{t('settings.assistants.usageIntro')}</p>
+        <pre className="overflow-x-auto rounded-lg border bg-muted/40 p-3 text-[11px] leading-relaxed">{`curl ${origin}/v1/chat/completions \\
+  -H "Authorization: Bearer ody_..." \\
+  -H "Content-Type: application/json" \\
+  -d '{"model": "<slug>", "messages": [{"role":"user","content":"hi"}]}'`}</pre>
+        <p className="mt-2 text-xs text-muted-foreground">{t('settings.assistants.usageModels', { origin })}</p>
+      </Section>
+    </Page>
+  );
+}
+
 /* ── Dialog shell ── */
 
 export function SettingsDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
@@ -1475,6 +1610,7 @@ export function SettingsDialog({ open, onClose }: { open: boolean; onClose: () =
   const adminNav: Array<{ id: Panel; label: string; icon: React.ReactNode }> = [
     { id: 'models', label: t('settings.nav.models'), icon: <ServerIcon /> },
     { id: 'ai', label: t('settings.nav.ai'), icon: <BotIcon /> },
+    { id: 'assistants', label: t('settings.nav.assistants'), icon: <ServerIcon /> },
     { id: 'integrations', label: t('settings.nav.integrations'), icon: <Link2Icon /> },
     { id: 'tools', label: t('settings.nav.tools'), icon: <WrenchIcon /> },
     { id: 'rag', label: t('settings.nav.rag'), icon: <DatabaseIcon /> },
@@ -1516,6 +1652,7 @@ export function SettingsDialog({ open, onClose }: { open: boolean; onClose: () =
             {panel === 'account' && <AccountPanel />}
             {panel === 'models' && <AddModelsPanel />}
             {panel === 'ai' && <AiDefaultsPanel />}
+            {panel === 'assistants' && <AssistantsPanel />}
             {panel === 'integrations' && <IntegrationsPanel />}
             {panel === 'tools' && <ToolsPanel />}
             {panel === 'rag' && <RagPanel />}
