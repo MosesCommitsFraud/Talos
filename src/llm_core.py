@@ -1242,7 +1242,7 @@ async def llm_call_async(
 async def stream_llm(url: str, model: str, messages: List[Dict], temperature: float = LLMConfig.DEFAULT_TEMPERATURE,
                      max_tokens: int = LLMConfig.DEFAULT_MAX_TOKENS, headers: Optional[Dict] = None,
                      timeout: int = LLMConfig.STREAM_TIMEOUT, prompt_type: Optional[str] = None,
-                     tools: Optional[List[Dict]] = None):
+                     tools: Optional[List[Dict]] = None, enable_thinking: bool = True):
     """Stream LLM responses with improved error handling.
 
     Yields SSE chunks:
@@ -1298,6 +1298,11 @@ async def stream_llm(url: str, model: str, messages: List[Dict], temperature: fl
             payload[tok_key] = max_tokens
         if tools:
             payload["tools"] = tools
+        # Disable reasoning on Qwen3-style hybrid models served via vLLM. This is
+        # a vLLM/SGLang extension to the OpenAI API; harmless to omit elsewhere,
+        # so we only send it when the user explicitly turned thinking off.
+        if not enable_thinking:
+            payload["chat_template_kwargs"] = {"enable_thinking": False}
         h = _provider_headers(provider, headers)
         if provider == "copilot":
             from src.copilot import apply_request_headers

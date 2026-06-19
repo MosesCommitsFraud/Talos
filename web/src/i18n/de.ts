@@ -118,6 +118,13 @@ const de: typeof en = {
       full: 'Volles Wissen',
       fullDesc: 'RAG-Wissensbasis + SQL-Datenbank.',
     },
+    reasoning: {
+      label: 'Denkmodus',
+      on: 'Denken',
+      onDesc: 'Das Modell denkt vor der Antwort nach.',
+      off: 'Kein Denken',
+      offDesc: 'Direkt antworten, ohne Denkschritt.',
+    },
     stop: 'Generierung stoppen',
     send: 'Nachricht senden',
   },

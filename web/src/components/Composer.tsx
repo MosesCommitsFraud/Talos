@@ -1,9 +1,11 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   BookOpenIcon,
+  BrainIcon,
   CheckIcon,
   ChevronDownIcon,
   DatabaseIcon,
+  LightbulbIcon,
   FileTextIcon,
   LayersIcon,
   ListChecksIcon,
@@ -165,6 +167,50 @@ function KnowledgeControl() {
         />
       )}
     </>
+  );
+}
+
+type ReasoningOpt = { on: boolean; Icon: React.ComponentType<{ className?: string }>; label: string; desc: string };
+
+/** Reasoning on/off dropdown, styled like the knowledge mode picker. Drives
+ *  the `reasoning` flag; when off the backend sends vLLM enable_thinking:false. */
+function ReasoningDropdown() {
+  const { t } = useTranslation();
+  const reasoning = usePrefs((s) => s.reasoning);
+  const toggle = usePrefs((s) => s.toggle);
+  const opts: ReasoningOpt[] = [
+    { on: true, Icon: BrainIcon, label: t('composer.reasoning.on'), desc: t('composer.reasoning.onDesc') },
+    { on: false, Icon: LightbulbIcon, label: t('composer.reasoning.off'), desc: t('composer.reasoning.offDesc') },
+  ];
+  const active = opts.find((o) => o.on === reasoning) ?? opts[0];
+  return (
+    <Menu>
+      <MenuTrigger asChild>
+        <button
+          type="button"
+          aria-label={t('composer.reasoning.label')}
+          className="flex h-8 shrink-0 items-center gap-1.5 rounded-lg border border-transparent px-2 text-[13px] font-medium whitespace-nowrap text-muted-foreground/70 outline-none transition-colors hover:bg-accent hover:text-foreground/80 focus:outline-none focus-visible:outline-none sm:h-7 sm:px-2.5 [&_svg]:size-4 [&_svg]:shrink-0"
+        >
+          <active.Icon />
+          <span className="sr-only sm:not-sr-only">{active.label}</span>
+          <ChevronDownIcon className="size-3 opacity-50" />
+        </button>
+      </MenuTrigger>
+      <MenuPopup align="start">
+        {opts.map((o) => (
+          <MenuItem key={String(o.on)} onSelect={() => { if (o.on !== reasoning) toggle('reasoning'); }} className="min-w-64 py-2">
+            <div className="grid min-w-0 gap-0.5">
+              <span className="inline-flex items-center gap-1.5 font-medium text-foreground">
+                <o.Icon />
+                {o.label}
+                {o.on === reasoning && <CheckIcon className="size-3.5 text-blue-400" />}
+              </span>
+              <span className="text-xs leading-4 text-muted-foreground">{o.desc}</span>
+            </div>
+          </MenuItem>
+        ))}
+      </MenuPopup>
+    </Menu>
   );
 }
 
@@ -380,6 +426,9 @@ export function Composer() {
             <ModelPicker visible={prefs.visibility.composerModelPicker} />
 
             <KnowledgeControl />
+
+            <FooterSeparator />
+            <ReasoningDropdown />
 
             {prefs.visibility.composerPlan && (
               <>

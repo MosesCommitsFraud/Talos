@@ -59,6 +59,9 @@ interface PrefsState {
   planMode: boolean;
   useRag: boolean;
   useDb: boolean;
+  /** Model reasoning/thinking. Maps to the `reasoning` request flag; when off,
+   *  the backend tells vLLM `enable_thinking: false`. Default on. */
+  reasoning: boolean;
   incognito: boolean;
   /** Compact (icon-only) sidebar mode. */
   sidebarCollapsed: boolean;
@@ -70,7 +73,7 @@ interface PrefsState {
   setLang: (l: Lang) => void;
   setVisibility: (key: keyof Visibility, value: boolean) => void;
   resetVisibility: () => void;
-  toggle: (key: 'planMode' | 'useRag' | 'useDb' | 'incognito') => void;
+  toggle: (key: 'planMode' | 'useRag' | 'useDb' | 'reasoning' | 'incognito') => void;
   /** Set both knowledge flags at once (used by the mode dropdown). */
   setKnowledge: (useRag: boolean, useDb: boolean) => void;
   toggleSidebar: () => void;
@@ -88,6 +91,7 @@ export const usePrefs = create<PrefsState>()(
       planMode: false,
       useRag: true,
       useDb: true,
+      reasoning: true,
       incognito: false,
       sidebarCollapsed: false,
       collapsedFolders: [],

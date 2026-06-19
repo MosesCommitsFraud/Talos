@@ -368,6 +368,7 @@ export const useChat = create<ChatState>((set, get) => {
           approvedPlan: opts?.approvedPlan,
           useRag: prefs.useRag,
           useDb: prefs.useDb,
+          reasoning: prefs.reasoning,
           incognito: prefs.incognito,
           attachments: attachments.map((file) => file.id),
         },

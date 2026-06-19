@@ -380,6 +380,9 @@ def setup_chat_routes(
         incognito = str(form_data.get("incognito", "")).lower() == "true"
         use_db = str(form_data.get("use_db", "")).lower() == "true"
         plan_mode = str(form_data.get("plan_mode", "")).lower() == "true"
+        # Model reasoning/thinking. Default on; only an explicit "false" disables
+        # it (tells vLLM enable_thinking:false for Qwen3-style hybrid models).
+        reasoning = str(form_data.get("reasoning", "true")).lower() != "false"
         # Single unified mode. Every request runs the full agent loop with all
         # tools available — there is no longer a chat/agent split or any intent
         # detection. `chat_mode` is kept as a constant so the few downstream
@@ -773,6 +776,7 @@ def setup_chat_routes(
                         plan_mode=plan_mode,
                         approved_plan=approved_plan or None,
                         force_db=use_db,
+                        reasoning=reasoning,
                     ):
                         if chunk.startswith("data: ") and not chunk.startswith("data: [DONE]"):
                             try:

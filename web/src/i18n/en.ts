@@ -116,6 +116,13 @@ const en = {
       full: 'Full Knowledge',
       fullDesc: 'RAG knowledge base + SQL database.',
     },
+    reasoning: {
+      label: 'Reasoning mode',
+      on: 'Reasoning',
+      onDesc: 'Let the model think before answering.',
+      off: 'No Reasoning',
+      offDesc: 'Answer directly, skip the thinking step.',
+    },
     stop: 'Stop generating',
     send: 'Send message',
   },
