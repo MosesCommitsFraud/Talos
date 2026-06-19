@@ -486,6 +486,10 @@ def setup_chat_routes(
             # manage_skills (agent mode). In plain chat or incognito the
             # index would be useless / unwanted noise.
             agent_mode=True,
+            # Reinforce system-prompt adherence (language, no confabulated name)
+            # on the latest user turn when thinking is disabled. See
+            # _append_no_think_reminder.
+            reasoning=reasoning,
         )
 
         _research_flags = {"do": do_research}  # Mutable container for generator scope

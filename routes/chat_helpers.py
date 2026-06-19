@@ -447,6 +447,38 @@ def _normalize_model_id_from_cache(sess) -> Optional[str]:
     return None
 
 
+# Pinned to the latest user turn when thinking is OFF. Language-agnostic on
+# purpose: it reasserts whatever the system prompt already says (e.g. "answer in
+# German") rather than hardcoding a language, and stops the no-think confabulated
+# name. Thinking mode never sees this — it follows the system prompt fine.
+_NO_THINK_REMINDER = (
+    "[Reminder] Follow the system instructions above exactly, including the "
+    "required response language. Do not address the user by a name unless they "
+    "have explicitly told you their name in this conversation."
+)
+
+
+def _append_no_think_reminder(messages: list) -> None:
+    """Append the no-think directive to the end of the latest user message.
+
+    Handles both string content and multimodal list content (the reminder is
+    added as a trailing text part so it stays last). No-ops if there is no user
+    message to attach to.
+    """
+    for i in range(len(messages) - 1, -1, -1):
+        m = messages[i]
+        if not isinstance(m, dict) or m.get("role") != "user":
+            continue
+        content = m.get("content")
+        if isinstance(content, str):
+            m["content"] = f"{content}\n\n{_NO_THINK_REMINDER}"
+        elif isinstance(content, list):
+            m["content"] = content + [{"type": "text", "text": _NO_THINK_REMINDER}]
+        else:
+            m["content"] = f"{content}\n\n{_NO_THINK_REMINDER}" if content else _NO_THINK_REMINDER
+        return
+
+
 async def build_chat_context(
     sess,
     request,
@@ -467,6 +499,7 @@ async def build_chat_context(
     webhook_manager=None,
     use_enhanced_message: bool = False,
     agent_mode: bool = False,
+    reasoning: bool = True,
 ) -> ChatContext:
     """Build the full context (preface + messages) for an LLM call.
 
@@ -618,6 +651,15 @@ async def build_chat_context(
         )
         if "retrieved documents" not in final_text and "UNTRUSTED SOURCE DATA" not in final_text:
             logger.warning("RAG sources were retrieved but no RAG context marker remained in final LLM messages")
+
+    # No-think reinforcement. Qwen3-style hybrid models follow the system prompt
+    # loosely when thinking is disabled (enable_thinking:false) — they drift off
+    # the required response language and confabulate a name to address the user.
+    # Pinning a short directive to the very end of the latest user turn — the last
+    # thing the model reads before generating — restores adherence without
+    # touching thinking-mode behavior, which already obeys the system prompt.
+    if not reasoning:
+        _append_no_think_reminder(messages)
 
     return ChatContext(
         preface=preface,
