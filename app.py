@@ -276,10 +276,20 @@ if AUTH_ENABLED:
             # network-exposed deployments regardless.
             if LOCALHOST_BYPASS and _is_trusted_loopback(request):
                 return await call_next(request)
+            # OpenAI-compatible assistant endpoints (/v1/*) self-gate per
+            # assistant (see routes/assistant_routes.py `require_auth`). The
+            # middleware must NOT hard-reject them: an assistant with
+            # require_auth=False is meant to be open on the LAN with no token.
+            # We still let the Bearer block below run so a supplied token is
+            # validated and stamped; only the *rejection* paths fall through.
+            is_v1 = path.startswith("/v1/")
+
             if not auth_manager.is_configured:
                 # No users yet — send browsers to the React shell, which renders
                 # the first-time setup screen from /api/auth/status.
-                if not (path.startswith("/api/") or path.startswith("/v1/")):
+                if is_v1:
+                    return await call_next(request)
+                if not path.startswith("/api/"):
                     return RedirectResponse(url="/", status_code=302)
                 return JSONResponse(status_code=401, content={"error": "Setup required"})
 
@@ -335,13 +345,21 @@ if AUTH_ENABLED:
                         return await call_next(request)
                 except Exception:
                     logger.warning("API token auth error", exc_info=False)
-                # Invalid bearer token — reject immediately
+                # Invalid bearer token. For /v1 let the route decide (an open
+                # assistant still answers; a protected one returns 403); for
+                # everything else reject immediately.
+                if is_v1:
+                    return await call_next(request)
                 return JSONResponse(status_code=401, content={"error": "Invalid API token"})
 
             # --- Cookie-based session auth ---
             token = request.cookies.get(SESSION_COOKIE)
             if not auth_manager.validate_token(token):
-                if path.startswith("/api/") or path.startswith("/v1/"):
+                # /v1 falls through to per-assistant gating; an open assistant
+                # answers without any cookie or token.
+                if is_v1:
+                    return await call_next(request)
+                if path.startswith("/api/"):
                     return JSONResponse(status_code=401, content={"error": "Not authenticated"})
                 return RedirectResponse(url="/", status_code=302)
 
