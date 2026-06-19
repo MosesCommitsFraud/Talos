@@ -108,6 +108,7 @@ def _public(a: AssistantEndpoint, endpoint_name: str | None = None) -> dict:
         "use_sql": bool(a.use_sql),
         "reasoning": bool(a.reasoning),
         "disabled_tools": json.loads(a.disabled_tools) if a.disabled_tools else [],
+        "require_auth": bool(a.require_auth),
         "is_enabled": bool(a.is_enabled),
         "created_at": a.created_at.isoformat() if a.created_at else None,
     }
@@ -209,6 +210,7 @@ def setup_assistant_routes(chat_processor=None, session_manager=None) -> APIRout
                 use_sql=bool(payload.get("use_sql", False)),
                 reasoning=bool(payload.get("reasoning", True)),
                 disabled_tools=_parse_disabled_tools(payload.get("disabled_tools")),
+                require_auth=bool(payload.get("require_auth", True)),
                 is_enabled=bool(payload.get("is_enabled", True)),
             )
             db.add(a)
@@ -245,7 +247,7 @@ def setup_assistant_routes(chat_processor=None, session_manager=None) -> APIRout
                 a.temperature = _clamp_temperature(payload["temperature"], a.temperature)
             if "max_tokens" in payload:
                 a.max_tokens = _clamp_max_tokens(payload["max_tokens"], a.max_tokens)
-            for flag in ("use_rag", "use_sql", "reasoning", "is_enabled"):
+            for flag in ("use_rag", "use_sql", "reasoning", "require_auth", "is_enabled"):
                 if flag in payload:
                     setattr(a, flag, bool(payload[flag]))
             if "disabled_tools" in payload:
@@ -269,21 +271,38 @@ def setup_assistant_routes(chat_processor=None, session_manager=None) -> APIRout
     # OpenAI-compatible API — /v1/*  (API-token gated)
     # ------------------------------------------------------------------ #
 
-    def _require_chat_token(request: Request):
+    def _chat_token_owner(request: Request):
+        """Return the token owner if a valid chat-scoped token is present, else None.
+
+        Does NOT raise — callers decide whether auth is required (per-assistant
+        ``require_auth``). An invalid/under-scoped token is treated as absent.
+        """
         if not getattr(request.state, "api_token", False):
-            raise HTTPException(403, "This endpoint requires an API token")
+            return None
         scopes = set(getattr(request.state, "api_token_scopes", []) or [])
         if "chat" not in scopes:
-            raise HTTPException(403, "API token is not scoped for chat")
+            return None
         return getattr(request.state, "api_token_owner", None)
+
+    def _is_chat_authed(request: Request) -> bool:
+        return bool(
+            getattr(request.state, "api_token", False)
+            and "chat" in set(getattr(request.state, "api_token_scopes", []) or [])
+        )
 
     @router.get("/v1/models")
     def list_models(request: Request):
-        _require_chat_token(request)
+        # Authed callers see every enabled assistant; unauthenticated callers
+        # see only the open ones (require_auth=False), so an OpenAI client with
+        # no key can still discover the LAN-open models without leaking the rest.
+        authed = _is_chat_authed(request)
         with get_db_session() as db:
-            rows = db.query(AssistantEndpoint).filter(
+            q = db.query(AssistantEndpoint).filter(
                 AssistantEndpoint.is_enabled == True  # noqa: E712
-            ).order_by(AssistantEndpoint.created_at).all()
+            )
+            if not authed:
+                q = q.filter(AssistantEndpoint.require_auth == False)  # noqa: E712
+            rows = q.order_by(AssistantEndpoint.created_at).all()
             created = int(time.time())
             return {
                 "object": "list",
@@ -307,7 +326,6 @@ def setup_assistant_routes(chat_processor=None, session_manager=None) -> APIRout
 
     @router.post("/v1/chat/completions")
     async def chat_completions(request: Request, body: ChatCompletionRequest):
-        owner = _require_chat_token(request)
         if not body.messages:
             raise HTTPException(400, "messages is required")
 
@@ -321,6 +339,15 @@ def setup_assistant_routes(chat_processor=None, session_manager=None) -> APIRout
             if not a.is_enabled:
                 raise HTTPException(400, f"Assistant '{a.slug}' is disabled")
             cfg = _public(a)  # snapshot before the session closes
+
+        # Per-assistant auth gate. When require_auth is on, a valid chat-scoped
+        # token is mandatory; when off, the endpoint is open on the LAN and we
+        # still pick up the owner if a token happens to be supplied.
+        owner = _chat_token_owner(request)
+        if cfg["require_auth"] and not _is_chat_authed(request):
+            if not getattr(request.state, "api_token", False):
+                raise HTTPException(403, "This endpoint requires an API token")
+            raise HTTPException(403, "API token is not scoped for chat")
 
         from src.endpoint_resolver import resolve_endpoint_by_id
 

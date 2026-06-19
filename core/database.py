@@ -467,6 +467,7 @@ class AssistantEndpoint(TimestampMixin, Base):
     reasoning = Column(Boolean, default=True)        # Model thinking/reasoning on/off
 
     disabled_tools = Column(Text, nullable=True)     # JSON array of tool names to hide
+    require_auth = Column(Boolean, default=True)     # If False, /v1 is open on the LAN (no token)
     is_enabled = Column(Boolean, default=True)
 
 
@@ -1448,6 +1449,21 @@ def _migrate_add_assistant_columns():
         logging.getLogger(__name__).warning(f"assistant columns migration: {e}")
 
 
+def _migrate_add_assistant_endpoint_require_auth():
+    """Add require_auth to assistant_endpoints (LAN OpenAI endpoints).
+
+    Existing rows default to True (token required) — the safe default, matching
+    the pre-toggle behaviour where every /v1 call needed an `ody_` token.
+    """
+    try:
+        with engine.connect() as conn:
+            cols = [r[1] for r in conn.execute(text("PRAGMA table_info(assistant_endpoints)"))]
+            if cols and "require_auth" not in cols:
+                conn.execute(text("ALTER TABLE assistant_endpoints ADD COLUMN require_auth BOOLEAN DEFAULT 1"))
+                conn.commit()
+                logging.getLogger(__name__).info("Added require_auth column to assistant_endpoints")
+    except Exception as e:
+        logging.getLogger(__name__).warning(f"assistant_endpoints require_auth migration: {e}")
 
 
 
@@ -1648,6 +1664,7 @@ def init_db():
     _migrate_drop_ping_notes_tasks()
     _migrate_add_crew_member_id()
     _migrate_add_assistant_columns()
+    _migrate_add_assistant_endpoint_require_auth()
     _migrate_add_email_smtp_security()
     _migrate_seed_email_account()
     _migrate_add_calendar_metadata()

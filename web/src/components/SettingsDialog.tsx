@@ -1470,7 +1470,7 @@ function SystemPanel() {
 const EMPTY_ASSISTANT: Partial<AssistantEndpoint> = {
   name: '', endpoint_id: '', model: '', system_prompt: '',
   temperature: 0.3, max_tokens: 4096,
-  use_rag: false, use_sql: false, reasoning: true, is_enabled: true,
+  use_rag: false, use_sql: false, reasoning: true, require_auth: true, is_enabled: true,
 };
 
 /** Create/edit form for a single named endpoint. */
@@ -1523,6 +1523,14 @@ function AssistantEditor({ initial, onDone, onCancel }: { initial: Partial<Assis
       <Row label={t('settings.assistants.reasoning')} hint={t('settings.assistants.reasoningHint')}>
         <Switch checked={!!draft.reasoning} onCheckedChange={(v) => set('reasoning', v)} />
       </Row>
+      <Row label={t('settings.assistants.requireAuth')} hint={t('settings.assistants.requireAuthHint')}>
+        <Switch checked={draft.require_auth !== false} onCheckedChange={(v) => set('require_auth', v)} />
+      </Row>
+      {draft.require_auth === false && (
+        <p className="rounded-md bg-destructive/10 px-2.5 py-1.5 text-xs text-destructive-foreground">
+          {t('settings.assistants.openWarning')}
+        </p>
+      )}
       <Row label={t('settings.assistants.enabled')}>
         <Switch checked={draft.is_enabled !== false} onCheckedChange={(v) => set('is_enabled', v)} />
       </Row>
@@ -1566,7 +1574,7 @@ function AssistantsPanel() {
                   </div>
                   <div className="truncate text-xs text-muted-foreground">
                     {a.endpoint_name ?? a.endpoint_id} · {a.model || t('settings.assistants.autoModel')}
-                    {a.use_rag && ' · RAG'}{a.use_sql && ' · SQL'}{a.reasoning && ' · ' + t('settings.assistants.reasoning')}
+                    {a.use_rag && ' · RAG'}{a.use_sql && ' · SQL'}{a.reasoning && ' · ' + t('settings.assistants.reasoning')}{!a.require_auth && ' · ' + t('settings.assistants.openBadge')}
                   </div>
                 </div>
                 <div className="flex shrink-0 items-center gap-1">

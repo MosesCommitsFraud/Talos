@@ -39,6 +39,7 @@ export interface AssistantEndpoint {
   use_sql: boolean;
   reasoning: boolean;
   disabled_tools: string[];
+  require_auth: boolean;
   is_enabled: boolean;
   created_at?: string | null;
 }
