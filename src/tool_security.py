@@ -51,6 +51,10 @@ PLAN_MODE_READONLY_TOOLS = {
     "list_sessions",
     "chat_with_model",
     "ask_teacher",
+    # Lets the planner resolve a genuine ambiguity by asking the user a
+    # multiple-choice question (it ends the turn and waits) instead of
+    # re-deriving the answer itself. Read-only: it mutates nothing.
+    "ask_user",
 }
 
 
