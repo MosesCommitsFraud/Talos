@@ -36,7 +36,7 @@ export function ArtifactsPanel({ open, onClose }: { open: boolean; onClose: () =
   });
 
   return (
-    <aside className="flex w-72 shrink-0 flex-col border-l bg-card" aria-label={t('artifacts.panelLabel')}>
+    <aside className="m-2 flex w-72 shrink-0 flex-col overflow-hidden rounded-xl border bg-card shadow-lg" aria-label={t('artifacts.panelLabel')}>
       <div className="flex h-12 shrink-0 items-center justify-between border-b px-3">
         <span className="text-sm font-medium">{t('artifacts.files')}</span>
         <div className="flex items-center gap-1">

@@ -21,7 +21,7 @@ export function PlanPanel() {
   const done = progressSteps.filter((s) => s.done).length;
 
   return (
-    <aside className="flex w-[26rem] max-w-[40vw] shrink-0 flex-col border-l bg-card" aria-label={t('plan.panelLabel')}>
+    <aside className="m-2 flex w-[26rem] max-w-[40vw] shrink-0 flex-col overflow-hidden rounded-xl border bg-card shadow-lg" aria-label={t('plan.panelLabel')}>
       <div className="flex h-12 shrink-0 items-center justify-between border-b px-3">
         <span className="flex items-center gap-2 text-sm font-medium">
           <ListChecksIcon className="size-4 text-primary" />
