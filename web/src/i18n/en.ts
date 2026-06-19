@@ -86,6 +86,7 @@ const en = {
     incognitoOn: 'Incognito on — chat not saved',
     incognitoOff: 'Incognito off',
     toggleIncognito: 'Toggle incognito',
+    moreOptions: 'More options',
     you: 'You',
     assistant: 'Talos',
   },

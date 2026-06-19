@@ -88,6 +88,7 @@ const de: typeof en = {
     incognitoOn: 'Inkognito an — Chat wird nicht gespeichert',
     incognitoOff: 'Inkognito aus',
     toggleIncognito: 'Inkognito umschalten',
+    moreOptions: 'Weitere Optionen',
     you: 'Du',
     assistant: 'Talos',
   },
