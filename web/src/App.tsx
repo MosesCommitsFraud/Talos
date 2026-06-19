@@ -63,6 +63,9 @@ export default function App() {
               onOpenSettings={() => setSettings(true)}
             />
             <main className="relative flex min-w-0 flex-1 flex-col">
+              {/* Fade the scrolling chat out before it reaches the floating
+                  top-right controls, so messages don't glitch behind them. */}
+              <div className="pointer-events-none absolute inset-x-0 top-0 z-[5] h-24 bg-gradient-to-b from-background to-transparent" />
               <IncognitoToggle />
               <Messages />
               {/* On an empty chat the composer (with the greeting above it) is
