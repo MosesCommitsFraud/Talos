@@ -17,6 +17,7 @@ import {
   XIcon,
 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 import { fetchCapabilities, uploadFiles, type UploadedFile } from '@/api/client';
 import { selectPendingPlan, useChat } from '@/state/chat';
@@ -253,37 +254,57 @@ export function Composer() {
     }
   };
 
-  const hasFiles = (e: React.DragEvent) => Array.from(e.dataTransfer.types).includes('Files');
-
-  const onDragEnter = (e: React.DragEvent) => {
-    if (!hasFiles(e)) return;
-    e.preventDefault();
-    dragDepth.current += 1;
-    setDragging(true);
-  };
-
-  const onDragOver = (e: React.DragEvent) => {
-    if (!hasFiles(e)) return;
-    e.preventDefault();
-    e.dataTransfer.dropEffect = 'copy';
-  };
-
-  const onDragLeave = (e: React.DragEvent) => {
-    if (!hasFiles(e)) return;
-    dragDepth.current -= 1;
-    if (dragDepth.current <= 0) {
+  // Drag & drop covers the whole chat area — a file dropped anywhere over the
+  // <main> chat column attaches to the composer, not just over the input box.
+  // Scoped to <main> (not window) so the left sidebar and the right-side panels
+  // are NOT drop targets. A depth counter balances the enter/leave events that
+  // fire on every child boundary; `attach` is read through a ref so the listeners
+  // can register once without going stale.
+  const attachRef = useRef(attach);
+  attachRef.current = attach;
+  const [dropZone, setDropZone] = useState<HTMLElement | null>(null);
+  useEffect(() => {
+    const main = textarea.current?.closest('main') ?? document.querySelector('main');
+    if (!main) return;
+    setDropZone(main);
+    const hasFiles = (e: DragEvent) => Array.from(e.dataTransfer?.types ?? []).includes('Files');
+    const onDragEnter = (e: DragEvent) => {
+      if (!hasFiles(e)) return;
+      e.preventDefault();
+      dragDepth.current += 1;
+      setDragging(true);
+    };
+    const onDragOver = (e: DragEvent) => {
+      if (!hasFiles(e)) return;
+      e.preventDefault();
+      if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
+    };
+    const onDragLeave = (e: DragEvent) => {
+      if (!hasFiles(e)) return;
+      dragDepth.current -= 1;
+      if (dragDepth.current <= 0) {
+        dragDepth.current = 0;
+        setDragging(false);
+      }
+    };
+    const onDrop = (e: DragEvent) => {
+      if (!hasFiles(e)) return;
+      e.preventDefault();
       dragDepth.current = 0;
       setDragging(false);
-    }
-  };
-
-  const onDrop = (e: React.DragEvent) => {
-    if (!hasFiles(e)) return;
-    e.preventDefault();
-    dragDepth.current = 0;
-    setDragging(false);
-    void attach(e.dataTransfer.files);
-  };
+      if (e.dataTransfer) void attachRef.current(e.dataTransfer.files);
+    };
+    main.addEventListener('dragenter', onDragEnter);
+    main.addEventListener('dragover', onDragOver);
+    main.addEventListener('dragleave', onDragLeave);
+    main.addEventListener('drop', onDrop);
+    return () => {
+      main.removeEventListener('dragenter', onDragEnter);
+      main.removeEventListener('dragover', onDragOver);
+      main.removeEventListener('dragleave', onDragLeave);
+      main.removeEventListener('drop', onDrop);
+    };
+  }, []);
 
   const submit = async () => {
     const value = text.trim();
@@ -336,24 +357,24 @@ export function Composer() {
 
   return (
     <div className="mx-auto w-full max-w-[800px] px-4 pb-4">
+      {/* Drop overlay — covers only the chat area (portaled into <main>, which is
+          position:relative), so the sidebar and side panels stay clear. Shown
+          while dragging files anywhere over the chat column. */}
+      {dragging && dropZone && createPortal(
+        <div className="pointer-events-none absolute inset-0 z-50 flex items-center justify-center bg-background/70 backdrop-blur-[2px]">
+          <div className="flex flex-col items-center gap-3 rounded-2xl border-2 border-dashed border-primary/50 bg-card/90 px-12 py-9 shadow-lg">
+            <PaperclipIcon className="size-7 text-primary" />
+            <span className="text-base font-medium text-foreground">{t('composer.dropFiles')}</span>
+          </div>
+        </div>,
+        dropZone,
+      )}
       <div
-        onDragEnter={onDragEnter}
-        onDragOver={onDragOver}
-        onDragLeave={onDragLeave}
-        onDrop={onDrop}
         className={cn(
           'relative rounded-[20px] border border-border bg-card transition-colors duration-200 focus-within:border-ring/45',
           dragging && 'border-primary/60 ring-2 ring-primary/30',
         )}
       >
-        {dragging && (
-          <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center rounded-[20px] bg-card/85 backdrop-blur-[1px]">
-            <div className="flex items-center gap-2 text-sm font-medium text-foreground">
-              <PaperclipIcon className="size-4" />
-              {t('composer.dropFiles')}
-            </div>
-          </div>
-        )}
         {pending.length > 0 && (
           <div className="flex flex-wrap gap-1.5 px-4 pt-3">
             {pending.map((f) => (
