@@ -286,7 +286,7 @@ function AssistantTurn({ turn, containsLast, artifactImages }: { turn: UiMessage
             {m.tools?.map((call, i) => <ToolRow key={i} call={call} />)}
             {m.content && (
               <div className={m.error ? 'text-destructive-foreground' : ''}>
-                <Markdown text={m.content} />
+                <Markdown text={m.content} streaming={!!m.streaming} />
               </div>
             )}
           </Fragment>
@@ -435,7 +435,7 @@ export function Messages() {
 
   return (
    <div className="relative flex min-h-0 flex-1 flex-col">
-    <div ref={scroller} onScroll={onScroll} className="flex-1 overflow-y-auto" role="log" aria-live="polite">
+    <div ref={scroller} onScroll={onScroll} className="flex-1 overflow-y-auto [scrollbar-gutter:stable]" role="log" aria-live="polite">
       <div className="mx-auto flex w-full max-w-[800px] flex-col px-4 py-6">
         {blocks.map((block, index) =>
           block.kind === 'user' ? (

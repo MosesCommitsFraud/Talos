@@ -231,6 +231,9 @@ body::after {
 .chat-markdown pre {
   max-width: 100%;
   overflow-x: auto;
+  /* Keep sideways scrolling inside the code box — don't let it bubble up to
+     scroll the page or trigger back/forward navigation. */
+  overscroll-behavior-x: contain;
   border: 1px solid var(--border);
   border-radius: 0.75rem;
   background: var(--muted);

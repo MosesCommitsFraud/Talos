@@ -148,26 +148,39 @@ function TableBlock({ node, children }: { node?: HastNode; children: React.React
   );
 }
 
+/* Stable plugin/component references so react-markdown doesn't see a fresh
+   config object every render while a sibling message streams. */
+const REMARK_PLUGINS = [remarkGfm];
+const HIGHLIGHT_PLUGINS = [rehypeHighlight];
+const NO_PLUGINS: [] = [];
+
+const MD_COMPONENTS = {
+  pre: ({ node, children, ...props }: { node?: unknown; children?: React.ReactNode }) => (
+    <CodeBlock node={node as HastNode}>
+      <pre {...props}>{children}</pre>
+    </CodeBlock>
+  ),
+  table: ({ node, children, ...props }: { node?: unknown; children?: React.ReactNode }) => (
+    <TableBlock node={node as HastNode}>
+      <table {...props}>{children}</table>
+    </TableBlock>
+  ),
+} as const;
+
 /** Assistant message body. Memoized — re-renders only when the text changes,
- *  which matters while sibling messages stream. */
-export const Markdown = memo(function Markdown({ text }: { text: string }) {
+ *  which matters while sibling messages stream.
+ *
+ *  Highlighting is skipped while `streaming`: re-running rehypeHighlight on every
+ *  token re-classifies still-incomplete code (colors flash), thrashes the DOM
+ *  (janky scroll), and pops the horizontal scrollbar in and out (vertical jump).
+ *  Code stays plain while it streams and colorizes once the message settles. */
+export const Markdown = memo(function Markdown({ text, streaming = false }: { text: string; streaming?: boolean }) {
   return (
     <div className="chat-markdown text-[15px]">
       <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
-        rehypePlugins={[rehypeHighlight]}
-        components={{
-          pre: ({ node, children, ...props }) => (
-            <CodeBlock node={node as HastNode}>
-              <pre {...props}>{children}</pre>
-            </CodeBlock>
-          ),
-          table: ({ node, children, ...props }) => (
-            <TableBlock node={node as HastNode}>
-              <table {...props}>{children}</table>
-            </TableBlock>
-          ),
-        }}
+        remarkPlugins={REMARK_PLUGINS}
+        rehypePlugins={streaming ? NO_PLUGINS : HIGHLIGHT_PLUGINS}
+        components={MD_COMPONENTS}
       >
         {text}
       </ReactMarkdown>
