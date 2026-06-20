@@ -436,7 +436,7 @@ export function Messages() {
   return (
    <div className="relative flex min-h-0 flex-1 flex-col">
     <div ref={scroller} onScroll={onScroll} className="flex-1 overflow-y-auto [scrollbar-gutter:stable]" role="log" aria-live="polite">
-      <div className="mx-auto flex w-full max-w-[800px] flex-col px-4 py-6">
+      <div className="mx-auto flex w-full max-w-[800px] flex-col px-4 pb-6 pt-14">
         {blocks.map((block, index) =>
           block.kind === 'user' ? (
             <div key={block.msg.id} className={`group ml-auto flex w-full max-w-[75%] flex-col items-end gap-0.5 ${index === 0 ? '' : 'mt-3'}`}>
