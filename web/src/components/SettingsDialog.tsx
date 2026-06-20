@@ -10,6 +10,7 @@ import {
   Link2Icon,
   LogOutIcon,
   PaletteIcon,
+  PlugIcon,
   PlusIcon,
   ServerIcon,
   SettingsIcon,
@@ -1620,7 +1621,7 @@ export function SettingsDialog({ open, onClose }: { open: boolean; onClose: () =
   const adminNav: Array<{ id: Panel; label: string; icon: React.ReactNode }> = [
     { id: 'models', label: t('settings.nav.models'), icon: <ServerIcon /> },
     { id: 'ai', label: t('settings.nav.ai'), icon: <BotIcon /> },
-    { id: 'assistants', label: t('settings.nav.assistants'), icon: <ServerIcon /> },
+    { id: 'assistants', label: t('settings.nav.assistants'), icon: <PlugIcon /> },
     { id: 'integrations', label: t('settings.nav.integrations'), icon: <Link2Icon /> },
     { id: 'tools', label: t('settings.nav.tools'), icon: <WrenchIcon /> },
     { id: 'rag', label: t('settings.nav.rag'), icon: <DatabaseIcon /> },
