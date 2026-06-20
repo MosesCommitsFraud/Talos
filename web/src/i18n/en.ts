@@ -143,6 +143,9 @@ const en = {
     sources: 'Sources',
     generating: 'Generating',
     scrollToBottom: 'Scroll to bottom',
+    timeJustNow: 'just now',
+    timeMinAgo: '{{count}} min ago',
+    timeHourAgo: '{{count}}h ago',
   },
   thinking: {
     thinking: 'Thinking…',

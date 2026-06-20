@@ -194,9 +194,12 @@ class PreviewHandler(BaseHTTPRequestHandler):
             self._send_json(_sessions())
             return
         if path == "/api/session/preview-session":
+            from datetime import datetime, timezone, timedelta
+            def _ts(seconds_ago: int) -> str:
+                return (datetime.now(timezone.utc) - timedelta(seconds=seconds_ago)).isoformat()
             self._send_json({"id": "preview-session", "name": "UI Preview", "history": [
-                {"role": "user", "content": "Preview the Talos UI"},
-                {"role": "assistant", "content": "This is mock content for local UI work."},
+                {"role": "user", "content": "Preview the Talos UI", "metadata": {"timestamp": _ts(2 * 86400)}},
+                {"role": "assistant", "content": "This is mock content for local UI work.", "metadata": {"timestamp": _ts(2 * 86400 - 12)}},
             ]})
             return
         if path in ("/api/models", "/api/model-endpoints"):

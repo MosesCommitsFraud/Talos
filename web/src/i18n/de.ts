@@ -145,6 +145,9 @@ const de: typeof en = {
     sources: 'Quellen',
     generating: 'Wird generiert',
     scrollToBottom: 'Nach unten scrollen',
+    timeJustNow: 'gerade eben',
+    timeMinAgo: 'vor {{count}} Min.',
+    timeHourAgo: 'vor {{count}} Std.',
   },
   thinking: {
     thinking: 'Denkt nach…',

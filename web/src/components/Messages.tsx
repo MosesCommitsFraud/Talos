@@ -45,6 +45,26 @@ function WorkingTimer({ startedAt }: { startedAt: number }) {
   return <span ref={ref} className="tabular-nums">{formatWorkingElapsed(startedAt, Date.now())}</span>;
 }
 
+/** Relative timestamp shown under a bubble: "just now" under a minute, "{n} min
+ *  ago" under an hour, "{n}h ago" under a day, else the wall-clock time it was
+ *  sent (HH:mm, 24-hour). Re-renders every 30s so the label keeps pace. */
+function MessageTime({ ts }: { ts?: number }) {
+  const { t, i18n } = useTranslation();
+  const [, force] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => force((n) => n + 1), 30_000);
+    return () => clearInterval(id);
+  }, []);
+  if (!ts) return null;
+  const diff = Date.now() - ts;
+  let label: string;
+  if (diff < 60_000) label = t('messages.timeJustNow');
+  else if (diff < 3_600_000) label = t('messages.timeMinAgo', { count: Math.floor(diff / 60_000) });
+  else if (diff < 86_400_000) label = t('messages.timeHourAgo', { count: Math.floor(diff / 3_600_000) });
+  else label = new Date(ts).toLocaleTimeString(i18n.language, { hour: '2-digit', minute: '2-digit', hour12: false });
+  return <span className="text-xs text-muted-foreground/70 tabular-nums">{label}</span>;
+}
+
 /** Persistent "still running" indicator shown for the whole assistant turn —
  *  pulsing dots plus an elapsed timer, ported from t3code's WorkingTimelineRow. */
 function Working({ startedAt }: { startedAt?: number }) {
@@ -342,12 +362,12 @@ function AssistantTurn({ turn, containsLast, artifactImages }: { turn: UiMessage
       {copyText && (
         <div className="mt-2 flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100">
           <MessageActions msg={last} copyText={copyText} canDelete={false} />
-          {showMetrics && last.metrics && (
+          {showMetrics && last.metrics?.tokens_per_second != null && (
             <span className="text-xs text-muted-foreground/80">
-              {last.metrics.tokens_per_second != null && `${last.metrics.tokens_per_second} tok/s`}
-              {last.metrics.response_time != null && ` · ${last.metrics.response_time}s`}
+              {`${last.metrics.tokens_per_second} tok/s`}
             </span>
           )}
+          <MessageTime ts={last.createdAt} />
         </div>
       )}
       {/* RAG citations: last thing in the turn, only when the backend confirmed
@@ -448,7 +468,8 @@ export function Messages() {
                     {block.msg.content}
                   </div>
                   <AttachmentList msg={block.msg} />
-                  <div className="flex">
+                  <div className="flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100">
+                    <MessageTime ts={block.msg.createdAt} />
                     <MessageActions msg={block.msg} onEdit={() => setEditing(block.msg.id)} />
                   </div>
                 </>

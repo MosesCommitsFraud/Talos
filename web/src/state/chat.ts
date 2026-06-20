@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { createSession, deleteMessages, editMessage, fetchSession, streamChat } from '@/api/client';
 import type { Attachment, Metrics, RagSource, ToolCall } from '@/api/types';
+import { timestampMs } from '@/lib/utils';
 import { usePrefs } from './prefs';
 
 export interface UiMessage {
@@ -9,6 +10,10 @@ export interface UiMessage {
   dbId?: string;
   role: 'user' | 'assistant';
   content: string;
+  /** Wall-clock (ms) the message was created — drives the relative timestamp
+   *  shown under the bubble. Stamped live on send; cold-loaded turns read it
+   *  from the backend's metadata.timestamp. */
+  createdAt?: number;
   thinking?: string;
   tools?: ToolCall[];
   attachments?: Attachment[];
@@ -283,6 +288,7 @@ export const useChat = create<ChatState>((set, get) => {
         id: uid(),
         dbId: m.metadata?._db_id,
         role: m.role as 'user' | 'assistant',
+        createdAt: timestampMs(m.metadata?.timestamp as string | undefined) || undefined,
         content: m.role === 'user' ? displayUserContent(m.content) : m.content,
         attachments: m.role === 'user' ? attachmentsFromMetadata(m.metadata) : undefined,
         thinking: m.role === 'assistant' ? thinkingFromMetadata(m.metadata) : undefined,
@@ -314,8 +320,8 @@ export const useChat = create<ChatState>((set, get) => {
     const sid = sessionId;
 
     const attachments = opts?.attachments ?? [];
-    const userMsg: UiMessage = { id: uid(), role: 'user', content: text, attachments };
-    const aiMsg: UiMessage = { id: uid(), role: 'assistant', content: '', streaming: true };
+    const userMsg: UiMessage = { id: uid(), role: 'user', content: text, attachments, createdAt: Date.now() };
+    const aiMsg: UiMessage = { id: uid(), role: 'assistant', content: '', streaming: true, createdAt: Date.now() };
     const abort = new AbortController();
     // A new turn supersedes any open question/plan card: mark them answered so
     // they go inert, and clear the "needs you" flag.
@@ -350,7 +356,7 @@ export const useChat = create<ChatState>((set, get) => {
       // Nothing rendered yet — reuse the empty bubble instead of stacking one.
       if (current && !current.content && !current.thinking && !current.tools?.length) return;
       patchAi({ streaming: false });
-      const next: UiMessage = { id: uid(), role: 'assistant', content: '', streaming: true };
+      const next: UiMessage = { id: uid(), role: 'assistant', content: '', streaming: true, createdAt: Date.now() };
       aiId = next.id;
       writeRuntime(sid, (rt) => ({ messages: [...rt.messages, next] }));
     };
