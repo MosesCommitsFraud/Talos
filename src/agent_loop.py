@@ -507,6 +507,57 @@ def _recent_context_for_retrieval(messages: List[Dict], max_user: int = 3, max_c
             break
     return "\n".join(collected)[:max_chars]
 
+
+def _sql_kb_query(messages: List[Dict], max_msgs: int = 4, max_chars: int = 1200) -> str:
+    """Build the SQL-knowledge retrieval query from the recent turn.
+
+    Unlike the one-shot upfront retrieval (which only saw the original user
+    question), this folds in the model's own recent activity — its latest
+    query_sql attempts and the tool results/errors that came back — so the
+    refreshed knowledge tracks the table/column the model is wrestling with
+    RIGHT NOW, not just the opening wording."""
+    collected = []
+    for msg in reversed(messages):
+        content = msg.get("content", "")
+        if isinstance(content, list):
+            content = " ".join(b.get("text", "") for b in content if isinstance(b, dict))
+        content = (content or "").strip()
+        if not content:
+            # Native tool calls live in tool_calls, not content — pull their args.
+            for tc in (msg.get("tool_calls") or []):
+                fn = (tc.get("function") or {})
+                content += f" {fn.get('name','')} {fn.get('arguments','')}"
+            content = content.strip()
+        if not content:
+            continue
+        collected.append(content)
+        if len(collected) >= max_msgs:
+            break
+    return "\n".join(collected)[:max_chars]
+
+
+def _retrieve_sql_knowledge(query: str, k: int = 6, max_chars: int = 8000) -> str:
+    """Search the sql-scoped RAG for chunks relevant to `query` and format them.
+    Returns "" when nothing is configured/healthy or no query is given."""
+    if not query:
+        return ""
+    try:
+        from src.rag_singleton import get_rag_manager
+        _rm = get_rag_manager()
+        if not (_rm and getattr(_rm, "healthy", False)):
+            return ""
+        hits = _rm.search(query, k=k, owner=None, scope="sql")
+        if not hits:
+            return ""
+        parts = []
+        for h in hits:
+            fn = (h.get("metadata") or {}).get("filename") or "doc"
+            parts.append(f"[{fn}]\n{h.get('document', '')}")
+        return "\n\n---\n\n".join(parts)[:max_chars]
+    except Exception as _kb_err:
+        logger.debug("SQL knowledge retrieval skipped: %s", _kb_err)
+        return ""
+
 def _build_system_prompt(
     messages: List[Dict],
     model: str,
@@ -1515,6 +1566,19 @@ async def stream_agent_loop(
         # The DB toggle is an explicit instruction, not a hint: answer THIS
         # message from the external SQL database. Prepended like the workspace
         # note so small models can't miss it.
+        #
+        # Big schemas need many round-trips just to orient — list_tables,
+        # describe on several tables, then the actual SELECT(s), often with a
+        # few corrective retries. The ordinary round cap (agent_max_rounds,
+        # default 50) can run out mid-exploration, so DB-mode turns get a
+        # higher floor (agent_max_rounds_db). Only ever RAISES the ceiling —
+        # an explicitly higher user setting is preserved.
+        try:
+            _db_rounds = int(get_setting("agent_max_rounds_db", 100) or 100)
+        except (TypeError, ValueError):
+            _db_rounds = 100
+        max_rounds = max(max_rounds, min(_db_rounds, 200))
+        logger.info("[db-mode] round ceiling raised to %d for this turn", max_rounds)
         _db_names = []
         try:
             from src.tool_implementations import _sql_connections
@@ -1532,29 +1596,10 @@ async def stream_agent_loop(
             _db_list_note = ""
         # Admin-uploaded SQL knowledge (Settings → SQL knowledge): schema docs,
         # column meanings, join hints, etc., indexed as a small scoped RAG.
-        # Retrieve the chunks most relevant to THIS question and inject them so
-        # the model can navigate the schema without first probing it. Scoped to
-        # meta.scope=="sql" so it's separate from the ordinary knowledge base.
-        _sql_kb = ""
-        try:
-            from src.rag_singleton import get_rag_manager
-
-            _rm = get_rag_manager()
-            _q = _extract_last_user_message(messages)
-            _hits = _rm.search(_q, k=5, owner=None, scope="sql") if (_rm and getattr(_rm, "healthy", False) and _q) else []
-            if _hits:
-                _parts = []
-                for _h in _hits:
-                    _fn = (_h.get("metadata") or {}).get("filename") or "doc"
-                    _parts.append(f"[{_fn}]\n{_h.get('document', '')}")
-                _sql_kb = "\n\n---\n\n".join(_parts)[:8000]
-        except Exception as _kb_err:
-            logger.debug("SQL knowledge retrieval skipped: %s", _kb_err)
-        _ctx_note = (
-            f"\n\nReference material for this database (retrieved from the "
-            f"uploaded SQL knowledge files — use it to navigate the schema):\n{_sql_kb}"
-            if _sql_kb else ""
-        )
+        # The relevant chunks are injected fresh on EVERY round inside the loop
+        # below (see `force_db` block), re-queried against the model's latest
+        # activity so the knowledge tracks what it's currently probing — not
+        # just the opening question. Scoped to meta.scope=="sql".
         _db_note = (
             "## DATABASE MODE — READ FIRST\n"
             "The user activated the database button for this message: they want "
@@ -1563,7 +1608,7 @@ async def stream_agent_loop(
             "general knowledge and do not use python/bash to reach the database. "
             "If you don't know the schema yet, start with `query_sql` "
             "action=list_tables, then action=describe on the relevant tables, "
-            "then run the SELECT that answers the question." + _db_list_note + _ctx_note
+            "then run the SELECT that answers the question." + _db_list_note
         )
         if messages and messages[0].get("role") == "system":
             messages[0]["content"] = _db_note + "\n\n" + (messages[0].get("content") or "")
@@ -1663,7 +1708,12 @@ async def stream_agent_loop(
     # signatures + consecutive no-text tool rounds to bail early.
     _recent_call_sigs = collections.deque(maxlen=6)
     _stuck_rounds = 0
-    _tool_type_counts: collections.Counter = collections.Counter()
+    # Runaway backstop counts EXACT repeated call signatures (same tool + same
+    # args), not distinct calls of a tool type. Genuine multi-step work — a SQL
+    # session firing many different query_sql calls, a file hunt reading many
+    # files — produces distinct signatures and must never trip this; only a
+    # model re-issuing the *identical* call over and over should.
+    _call_sig_counts: collections.Counter = collections.Counter()
     _THINK_RE = re.compile(r'<think>.*?</think>', re.DOTALL | re.IGNORECASE)
     _force_answer = False  # set by loop-breaker → next round runs with NO tools
     # Supervisor: how many times we've nudged the model after it announced
@@ -1689,6 +1739,11 @@ async def stream_agent_loop(
         re.IGNORECASE,
     )
     _awaiting_user = False  # set by ask_user → end the turn and wait for a choice
+    # DB mode: a single reference-material message holding sql-scoped RAG chunks,
+    # refreshed in place each round against the model's latest activity so the
+    # schema knowledge tracks what it's currently querying. Inserted lazily on
+    # the first round that finds a hit; updated (never duplicated) thereafter.
+    _sql_kb_msg = None
 
     # Document streaming state (persists across rounds)
     _doc_acc = ""          # accumulated tool-call JSON arguments
@@ -1704,6 +1759,24 @@ async def stream_agent_loop(
         round_response = ""
         round_reasoning = ""  # reasoning_content deltas (DeepSeek-thinking, vLLM --reasoning-parser)
         native_tool_calls = []  # populated if model uses function calling
+
+        # DB mode: refresh the SQL knowledge for THIS round against the most
+        # recent activity (latest query_sql args + tool results/errors), so the
+        # reference tracks the table/column the model is now probing rather than
+        # staying frozen on the opening question.
+        if force_db:
+            _kb = _retrieve_sql_knowledge(_sql_kb_query(messages))
+            if _kb:
+                _kb_content = (
+                    "Reference material for this database (uploaded SQL knowledge, "
+                    "refreshed for the current step — use it to navigate the schema):\n"
+                    + _kb
+                )
+                if _sql_kb_msg is None:
+                    _sql_kb_msg = {"role": "system", "content": _kb_content}
+                    messages.append(_sql_kb_msg)
+                else:
+                    _sql_kb_msg["content"] = _kb_content
         # Reset doc streaming state per round
         _doc_acc = ""
         _doc_opened = False
@@ -2108,7 +2181,8 @@ async def stream_agent_loop(
         _is_repeat = _sig in _recent_call_sigs
         _recent_call_sigs.append(_sig)
         for _b in tool_blocks:
-            _tool_type_counts[_b.tool_type] += 1
+            _bsig = f"{_b.tool_type}:{(_b.content or '').strip()[:120]}"
+            _call_sig_counts[_bsig] += 1
         # "Real" answer text = round text minus <think> blocks. Empty-think
         # rounds (just "<think>\n\n</think>" + a tool call) must not read as
         # progress, so strip think before checking.
@@ -2119,7 +2193,11 @@ async def stream_agent_loop(
             _stuck_rounds += 1
         else:
             _stuck_rounds = 0
-        _runaway = next((t for t, n in _tool_type_counts.items() if n >= 15), None)
+        # Same exact call (tool + args) issued 8+ times across the turn = true
+        # spinning. Distinct calls never accumulate under one signature, so
+        # productive multi-step work rides through to max_rounds.
+        _runaway_sig = next((s for s, n in _call_sig_counts.items() if n >= 8), None)
+        _runaway = _runaway_sig.split(":", 1)[0] if _runaway_sig else None
         if _stuck_rounds >= 4 or _runaway:
             reason = (f"calling {_runaway} over and over" if _runaway
                       else "repeating the same tool calls without new progress")

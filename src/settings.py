@@ -108,6 +108,10 @@ DEFAULT_SETTINGS = {
     "research_run_timeout_seconds": 1800,
     "agent_max_tool_calls": 0,
     "agent_max_rounds": 20,  # per-message agent step cap (clamped 1..200)
+    # DB-mode (query_sql button) round ceiling. Big schemas need many
+    # list_tables/describe/SELECT round-trips to navigate, so DB turns raise
+    # the cap to this floor. Only ever raises agent_max_rounds, never lowers it.
+    "agent_max_rounds_db": 100,
     "agent_input_token_budget": 6000,
     # Ceiling on the *auto-derived* input budget that #1230 introduced. Has
     # no effect when `agent_input_token_budget` is explicitly set (the user's
