@@ -341,6 +341,7 @@ def _build_ollama_payload(
     stream: bool = False,
     tools: Optional[List[Dict]] = None,
     num_ctx: Optional[int] = None,
+    think: bool = True,
 ) -> Dict:
     """Build the JSON payload for Ollama's /api/chat endpoint.
 
@@ -369,6 +370,11 @@ def _build_ollama_payload(
         payload["options"] = options
     if tools:
         payload["tools"] = tools
+    # Ollama's native /api/chat accepts a top-level `think` flag to gate
+    # reasoning on hybrid models (Qwen3, DeepSeek-R1, etc.). Only send it
+    # when explicitly disabling thinking; omitting it keeps the model default.
+    if not think:
+        payload["think"] = False
     return payload
 
 
@@ -1131,7 +1137,8 @@ async def llm_call_async(
     headers: Optional[Dict] = None,
     timeout: int = LLMConfig.STREAM_TIMEOUT,
     max_retries: int = LLMConfig.MAX_RETRIES,
-    prompt_type: Optional[str] = None
+    prompt_type: Optional[str] = None,
+    enable_thinking: bool = True
 ) -> str:
     """Asynchronous LLM call using httpx with connection pooling, timeout, retry logic, and performance logging."""
     provider = _detect_provider(url)
@@ -1168,6 +1175,7 @@ async def llm_call_async(
         payload = _build_ollama_payload(
             model, messages_copy, temperature, max_tokens,
             stream=False, num_ctx=get_context_length(url, model),
+            think=enable_thinking,
         )
     else:
         target_url = url
@@ -1185,6 +1193,10 @@ async def llm_call_async(
         if max_tokens and max_tokens > 0:
             tok_key = "max_completion_tokens" if _uses_max_completion_tokens(model) else "max_tokens"
             payload[tok_key] = max_tokens
+        # vLLM/SGLang OpenAI extension to gate reasoning on Qwen3-style hybrid
+        # models; harmless to omit elsewhere, so only send when disabling.
+        if not enable_thinking:
+            payload["chat_template_kwargs"] = {"enable_thinking": False}
 
     if _is_host_dead(target_url):
         raise HTTPException(503, f"Upstream {_host_key(target_url)} marked unreachable (cooldown active)")

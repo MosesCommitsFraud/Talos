@@ -131,7 +131,6 @@ async def auto_name_session(session_manager, sess):
     """Generate a short title for a session from its first user message."""
     try:
         from src.llm_core import llm_call_async
-        from src.task_endpoint import resolve_task_endpoint
 
         # Find first user message
         first_msg = ""
@@ -149,28 +148,26 @@ async def auto_name_session(session_manager, sess):
         if not first_msg:
             return
 
-        owner = getattr(sess, "owner", None)
-        t_url, t_model, t_headers = resolve_task_endpoint(
-            sess.endpoint_url, sess.model, sess.headers, owner=owner,
-        )
+        # Auto-naming uses the session's own chat model (not a separate task
+        # endpoint) so the title matches the model the user is actually
+        # chatting with, and runs it with reasoning disabled — a title needs
+        # no <think> pass, and skipping it returns a clean title in ~1s.
+        t_url, t_model, t_headers = sess.endpoint_url, sess.model, sess.headers
         if not t_model:
             logger.debug("[auto-name] No model provided, skipping")
             return
 
-        # Qwen3 (and other soft-switchable reasoners) burn the whole token
-        # budget on <think>, which makes auto-naming slow (it loses the 3s
-        # frontend refresh race) and sometimes yields an empty title. The
-        # `/no_think` soft switch disables reasoning for this single call, so
-        # it returns a clean title in ~1s. Harmless on models that ignore it.
+        # `/no_think` is a Qwen3 soft switch that disables reasoning; belt-and
+        # suspenders alongside enable_thinking=False for backends that only
+        # honor the in-prompt switch. Harmless on models that ignore it.
         user_prompt = first_msg
         if "qwen" in (t_model or "").lower():
             user_prompt = first_msg + " /no_think"
 
-        # max_tokens big enough that reasoning models (Minimax M2,
-        # DeepSeek R1, QwQ, etc.) have headroom for <think>…</think>
-        # plus the actual title — 200 used to clip them mid-reasoning
-        # so strip_think left an empty string and no rename happened.
-        # Timeout matches: 60s gives slow local reasoners room to finish.
+        # max_tokens kept generous so any model that still emits a stray
+        # <think> block (despite enable_thinking=False) has headroom for it
+        # plus the actual title rather than getting clipped mid-reasoning.
+        # Timeout 60s gives slow local models room to finish.
         title = await llm_call_async(
             t_url,
             t_model,
@@ -182,6 +179,7 @@ async def auto_name_session(session_manager, sess):
             max_tokens=4096,
             headers=t_headers,
             timeout=60,
+            enable_thinking=False,
         )
 
         title = title.strip().strip('"\'').strip()
