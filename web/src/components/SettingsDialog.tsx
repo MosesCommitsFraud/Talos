@@ -1494,6 +1494,9 @@ function AssistantEditor({ initial, onDone, onCancel }: { initial: Partial<Assis
 
   return (
     <div className="space-y-3 rounded-xl border bg-card p-4">
+      <Row label={t('settings.assistants.enabled')}>
+        <Switch checked={draft.is_enabled !== false} onCheckedChange={(v) => set('is_enabled', v)} />
+      </Row>
       <Row label={t('settings.assistants.name')}>
         <Input className="w-56" value={String(draft.name ?? '')} onChange={(e) => set('name', e.target.value)} placeholder={t('settings.assistants.namePlaceholder')} />
       </Row>
@@ -1531,9 +1534,6 @@ function AssistantEditor({ initial, onDone, onCancel }: { initial: Partial<Assis
           {t('settings.assistants.openWarning')}
         </p>
       )}
-      <Row label={t('settings.assistants.enabled')}>
-        <Switch checked={draft.is_enabled !== false} onCheckedChange={(v) => set('is_enabled', v)} />
-      </Row>
       {err && <p className="px-1 text-xs text-destructive-foreground">{err}</p>}
       <div className="flex justify-end gap-2">
         <Button size="sm" variant="outline" onClick={onCancel}>{t('common.cancel')}</Button>
@@ -1577,10 +1577,12 @@ function AssistantsPanel() {
                     {a.use_rag && ' · RAG'}{a.use_sql && ' · SQL'}{a.reasoning && ' · ' + t('settings.assistants.reasoning')}{!a.require_auth && ' · ' + t('settings.assistants.openBadge')}
                   </div>
                 </div>
-                <div className="flex shrink-0 items-center gap-1">
-                  <span className={cn('mr-1 text-xs', a.is_enabled ? 'text-success' : 'text-muted-foreground')}>
-                    {a.is_enabled ? t('settings.models.enabled') : t('settings.models.disabled')}
-                  </span>
+                <div className="flex shrink-0 items-center gap-1.5">
+                  <Switch
+                    checked={!!a.is_enabled}
+                    onCheckedChange={(v) => void updateAssistant(a.id, { is_enabled: v }).then(refresh)}
+                    aria-label={a.is_enabled ? t('settings.models.enabled') : t('settings.models.disabled')}
+                  />
                   <Button size="icon-sm" variant="ghost" onClick={() => setEditing(a)} aria-label={t('common.edit')}><WrenchIcon /></Button>
                   <Button size="icon-sm" variant="ghost" onClick={() => { if (window.confirm(t('settings.assistants.deleteConfirm', { name: a.name }))) void deleteAssistant(a.id).then(refresh); }} aria-label={t('common.delete')}><Trash2Icon /></Button>
                 </div>

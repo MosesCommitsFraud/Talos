@@ -284,6 +284,16 @@ class PreviewHandler(BaseHTTPRequestHandler):
         if path.startswith("/api/artifacts/"):
             self._send_json({"artifacts": [{"path": "result.csv", "size": 2048}]})
             return
+        if path == "/api/assistants":
+            self._send_json([
+                {
+                    "id": "asst-1", "name": "Support Bot", "slug": "support-bot",
+                    "endpoint_id": "preview-endpoint", "endpoint_name": "Local Preview",
+                    "model": "qwen3-llm", "use_rag": True, "use_sql": False,
+                    "reasoning": True, "require_auth": True, "is_enabled": True,
+                },
+            ])
+            return
         if path.startswith("/api/"):
             self._send_json({})
             return
