@@ -281,6 +281,9 @@ class PreviewHandler(BaseHTTPRequestHandler):
         if path.startswith("/api/workspace/browse"):
             self._send_json({"path": "/preview", "entries": []})
             return
+        if path.startswith("/api/artifacts/"):
+            self._send_json({"artifacts": [{"path": "result.csv", "size": 2048}]})
+            return
         if path.startswith("/api/"):
             self._send_json({})
             return

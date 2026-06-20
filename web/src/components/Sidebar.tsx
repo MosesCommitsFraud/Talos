@@ -355,10 +355,10 @@ export function Sidebar({
               type="button"
               onClick={toggleSidebar}
               aria-label={t('sidebar.expandSidebar')}
-              className="group flex size-9 items-center justify-center rounded-lg text-primary transition-colors hover:bg-accent/70"
+              className="group flex size-7 items-center justify-center rounded-md text-primary transition-colors hover:bg-accent/70"
             >
-              <TalosLogo className="size-6 group-hover:hidden" />
-              <PanelLeftIcon className="hidden size-5 text-muted-foreground group-hover:block" />
+              <TalosLogo className="size-5 group-hover:hidden" />
+              <PanelLeftIcon className="hidden size-4 text-muted-foreground group-hover:block" />
             </button>
           </Tooltip>
         ) : (
@@ -369,9 +369,9 @@ export function Sidebar({
                 type="button"
                 onClick={toggleSidebar}
                 aria-label={t('sidebar.collapseSidebar')}
-                className="flex size-9 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                className="flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
               >
-                <PanelLeftIcon className="size-[18px]" />
+                <PanelLeftIcon className="size-4" />
               </button>
             </Tooltip>
           </>
@@ -488,7 +488,7 @@ export function Sidebar({
                     type="button"
                     onClick={onOpenSettings}
                     aria-label={t('sidebar.settings')}
-                    className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                    className="flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
                   >
                     <SettingsIcon className="size-4" />
                   </button>

@@ -1,9 +1,10 @@
-import { ArchiveIcon, GhostIcon, MoreVerticalIcon, PencilIcon, Trash2Icon } from 'lucide-react';
+import { ArchiveIcon, FileTextIcon, GhostIcon, MoreVerticalIcon, PencilIcon, Trash2Icon } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import { useQueryClient } from '@tanstack/react-query';
-import { archiveSession, deleteSession, renameSession } from '@/api/client';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { archiveSession, deleteSession, fetchArtifacts, renameSession } from '@/api/client';
 import { useChat } from '@/state/chat';
 import { usePrefs } from '@/state/prefs';
+import { useUi } from '@/state/ui';
 import { cn } from '@/lib/utils';
 import { Tooltip } from './ui/misc';
 import { Menu, MenuItem, MenuPopup, MenuSeparator, MenuTrigger } from './ui/menu';
@@ -18,7 +19,16 @@ export function IncognitoToggle() {
   const visible = usePrefs((s) => s.visibility.incognitoBtn);
   const sessionId = useChat((s) => s.sessionId);
   const newChat = useChat((s) => s.newChat);
+  const setArtifactsOpen = useUi((s) => s.setArtifactsOpen);
+  const artifactsOpen = useUi((s) => s.artifactsOpen);
   const queryClient = useQueryClient();
+
+  const { data: artifacts } = useQuery({
+    queryKey: ['artifacts', sessionId],
+    queryFn: () => fetchArtifacts(sessionId!),
+    enabled: !!sessionId,
+  });
+  const hasArtifacts = (artifacts?.length ?? 0) > 0;
 
   const refresh = () => queryClient.invalidateQueries({ queryKey: ['sessions'] });
 
@@ -37,11 +47,24 @@ export function IncognitoToggle() {
   };
 
   const btnBase =
-    'flex size-8 items-center justify-center rounded-lg transition-colors';
+    'flex size-7 items-center justify-center rounded-md transition-colors';
   const btnQuiet = 'text-muted-foreground hover:bg-accent hover:text-foreground';
 
   return (
     <div className="absolute right-3 top-2 z-10 flex items-center gap-1">
+      {hasArtifacts && (
+        <Tooltip label={t('chatHeader.sessionFiles')}>
+          <button
+            type="button"
+            aria-label={t('chatHeader.sessionFilesAria')}
+            aria-pressed={artifactsOpen}
+            onClick={() => setArtifactsOpen(!artifactsOpen)}
+            className={cn(btnBase, artifactsOpen ? 'bg-accent text-foreground' : btnQuiet)}
+          >
+            <FileTextIcon className="size-4" />
+          </button>
+        </Tooltip>
+      )}
       {visible && (
         <Tooltip label={incognito ? t('chatHeader.incognitoOn') : t('chatHeader.incognitoOff')}>
           <button
