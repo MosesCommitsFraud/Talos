@@ -1,4 +1,4 @@
-import { CheckIcon, ChevronDownIcon, ChevronRightIcon, CopyIcon, FileIcon, ImageIcon, ListChecksIcon, PencilIcon, Trash2Icon } from 'lucide-react';
+import { CheckIcon, ChevronDownIcon, ChevronRightIcon, CopyIcon, FileIcon, ImageIcon, ListChecksIcon, PencilIcon, Trash2Icon, Undo2Icon } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { Fragment, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -139,7 +139,7 @@ function ActionIcon({
         type="button"
         aria-label={label}
         onClick={onClick}
-        className={`flex size-7 items-center justify-center rounded-md text-muted-foreground opacity-0 transition-all group-hover:opacity-100 hover:bg-accent ${
+        className={`flex size-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent ${
           destructive ? 'hover:text-destructive-foreground' : 'hover:text-foreground'
         }`}
       >
@@ -162,7 +162,7 @@ function CopyAction({ text }: { text: string }) {
       label={copied ? t('messages.copied') : t('messages.copy')}
       onClick={() => void copy()}
     >
-      {copied ? <CheckIcon className="size-3.5" /> : <CopyIcon className="size-3.5" />}
+      {copied ? <CheckIcon className="size-3" /> : <CopyIcon className="size-3" />}
     </ActionIcon>
   );
 }
@@ -194,21 +194,27 @@ function AttachmentList({ msg }: { msg: UiMessage }) {
   );
 }
 
-function MessageActions({ msg, onEdit, copyText, canDelete = true }: { msg: UiMessage; onEdit?: () => void; copyText?: string; canDelete?: boolean }) {
+function MessageActions({ msg, onEdit, copyText, canRevert = false, canDelete = true }: { msg: UiMessage; onEdit?: () => void; copyText?: string; canRevert?: boolean; canDelete?: boolean }) {
   const { t } = useTranslation();
   const remove = useChat((s) => s.remove);
+  const revert = useChat((s) => s.revert);
   const canMutate = !!msg.dbId;
   return (
     <>
       <CopyAction text={copyText ?? msg.content} />
+      {canRevert && canMutate && (
+        <ActionIcon label={t('messages.revertMessage')} onClick={() => void revert(msg.id).catch(console.error)}>
+          <Undo2Icon className="size-3" />
+        </ActionIcon>
+      )}
       {onEdit && canMutate && (
         <ActionIcon label={t('messages.editMessage')} onClick={onEdit}>
-          <PencilIcon className="size-3.5" />
+          <PencilIcon className="size-3" />
         </ActionIcon>
       )}
       {canDelete && canMutate && (
         <ActionIcon label={t('messages.deleteMessage')} destructive onClick={() => void remove(msg.id).catch(console.error)}>
-          <Trash2Icon className="size-3.5" />
+          <Trash2Icon className="size-3" />
         </ActionIcon>
       )}
     </>
@@ -360,7 +366,7 @@ function AssistantTurn({ turn, containsLast, artifactImages }: { turn: UiMessage
       {planMsg && !proposalMsg && <PlanCard msg={planMsg} />}
       {createdCount > 0 && <ArtifactsButton count={createdCount} />}
       {copyText && (
-        <div className="mt-2 flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100">
+        <div className="mt-2 flex items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
           <MessageActions msg={last} copyText={copyText} canDelete={false} />
           {showMetrics && last.metrics?.tokens_per_second != null && (
             <span className="text-xs text-muted-foreground/80">
@@ -468,9 +474,9 @@ export function Messages() {
                     {block.msg.content}
                   </div>
                   <AttachmentList msg={block.msg} />
-                  <div className="flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100">
+                  <div className="flex items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
                     <MessageTime ts={block.msg.createdAt} />
-                    <MessageActions msg={block.msg} onEdit={() => setEditing(block.msg.id)} />
+                    <MessageActions msg={block.msg} onEdit={() => setEditing(block.msg.id)} canRevert />
                   </div>
                 </>
               )}

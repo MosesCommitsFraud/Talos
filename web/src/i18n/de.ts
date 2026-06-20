@@ -130,7 +130,8 @@ const de: typeof en = {
   messages: {
     copy: 'Kopieren',
     copied: 'Kopiert',
-    editMessage: 'Nachricht bearbeiten',
+    editMessage: 'Bearbeiten & senden',
+    revertMessage: 'Zu dieser Nachricht zurück',
     deleteMessage: 'Nachricht löschen',
     cancel: 'Abbrechen',
     save: 'Speichern',

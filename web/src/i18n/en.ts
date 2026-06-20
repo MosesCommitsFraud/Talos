@@ -128,7 +128,8 @@ const en = {
   messages: {
     copy: 'Copy',
     copied: 'Copied',
-    editMessage: 'Edit message',
+    editMessage: 'Edit & resend',
+    revertMessage: 'Revert to this message',
     deleteMessage: 'Delete message',
     cancel: 'Cancel',
     save: 'Save',

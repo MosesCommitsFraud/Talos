@@ -9,9 +9,13 @@ be tested on a laptop.
 from __future__ import annotations
 
 import argparse
+import errno
 import json
 import mimetypes
 import os
+import shutil
+import signal
+import subprocess
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -27,6 +31,59 @@ WEB_DIST = ROOT / "web" / "dist"
 
 def _json_bytes(data) -> bytes:
     return json.dumps(data).encode("utf-8")
+
+
+# --- Mock conversation state -------------------------------------------------
+# Real edit/revert/delete affordances only render once a message has a backend
+# row id (metadata._db_id). The live app gets that from /api/history; we mirror
+# the shape here so the preview shows the full message-action toolbar.
+
+from datetime import datetime, timezone, timedelta  # noqa: E402
+
+_DB_SEQ = 0
+# Per-session history: session_id -> list of {role, content, metadata}.
+_HISTORY: dict[str, list[dict]] = {}
+
+
+def _next_db_id() -> str:
+    global _DB_SEQ
+    _DB_SEQ += 1
+    return f"preview-msg-{_DB_SEQ}"
+
+
+def _iso(offset_seconds: int = 0) -> str:
+    return (datetime.now(timezone.utc) + timedelta(seconds=offset_seconds)).isoformat()
+
+
+def _entry(role: str, content: str, ts_offset: int = 0) -> dict:
+    return {"role": role, "content": content,
+            "metadata": {"timestamp": _iso(ts_offset), "_db_id": _next_db_id()}}
+
+
+def _history_for(session_id: str) -> list[dict]:
+    """History for a session, seeding the canonical preview session on first use."""
+    if session_id not in _HISTORY:
+        if session_id == "preview-session":
+            _HISTORY[session_id] = [
+                _entry("user", "Preview the Talos UI", -2 * 86400),
+                _entry("assistant", "This is mock content for local UI work.", -2 * 86400 + 12),
+            ]
+        else:
+            _HISTORY[session_id] = []
+    return _HISTORY[session_id]
+
+
+def _record_turn(session_id: str, message: str) -> None:
+    """Append a sent turn (user + the two assistant rounds the stream emits) so a
+    post-stream history fetch hands every message a _db_id — matching runtime
+    length so the app reconciles them and shows edit/revert/delete."""
+    # setdefault (not _history_for) so a brand-new chat starts empty and stays
+    # length-matched with the runtime — only an explicitly opened preview session
+    # carries the seeded backlog.
+    hist = _HISTORY.setdefault(session_id, [])
+    hist.append(_entry("user", message or "(empty)"))
+    hist.append(_entry("assistant", "The computed highest gross value is **22.61** for item **B**.", 1))
+    hist.append(_entry("assistant", "Second-round reply: the calculation checks out, **B** stays on top.", 2))
 
 
 def _sse(event: dict | str) -> str:
@@ -193,14 +250,10 @@ class PreviewHandler(BaseHTTPRequestHandler):
         if path == "/api/sessions":
             self._send_json(_sessions())
             return
-        if path == "/api/session/preview-session":
-            from datetime import datetime, timezone, timedelta
-            def _ts(seconds_ago: int) -> str:
-                return (datetime.now(timezone.utc) - timedelta(seconds=seconds_ago)).isoformat()
-            self._send_json({"id": "preview-session", "name": "UI Preview", "history": [
-                {"role": "user", "content": "Preview the Talos UI", "metadata": {"timestamp": _ts(2 * 86400)}},
-                {"role": "assistant", "content": "This is mock content for local UI work.", "metadata": {"timestamp": _ts(2 * 86400 - 12)}},
-            ]})
+        if path.startswith("/api/history/"):
+            session_id = path[len("/api/history/"):]
+            self._send_json({"id": session_id, "name": "UI Preview",
+                             "history": _history_for(session_id)})
             return
         if path in ("/api/models", "/api/model-endpoints"):
             self._send_json(_models())
@@ -327,7 +380,34 @@ class PreviewHandler(BaseHTTPRequestHandler):
             return
         if path == "/api/chat_stream":
             message = fields.get("message", [""])[0]
+            session_id = fields.get("session", ["preview-session"])[0]
+            _record_turn(session_id, message)
             self._send(200, _preview_stream(message), "text/event-stream")
+            return
+        if path.endswith("/delete-messages"):
+            # /api/session/{id}/delete-messages — drop the rows so history stays
+            # in sync with the runtime (edit/revert delete then re-send).
+            session_id = path[len("/api/session/"):-len("/delete-messages")]
+            try:
+                ids = set(json.loads(body or b"{}").get("msg_ids", []))
+            except (ValueError, AttributeError):
+                ids = set()
+            _HISTORY[session_id] = [m for m in _history_for(session_id)
+                                    if m["metadata"].get("_db_id") not in ids]
+            self._send_json({"ok": True})
+            return
+        if path.endswith("/edit-message"):
+            # /api/session/{id}/edit-message — update the stored content in place.
+            session_id = path[len("/api/session/"):-len("/edit-message")]
+            try:
+                payload = json.loads(body or b"{}")
+            except ValueError:
+                payload = {}
+            for m in _history_for(session_id):
+                if m["metadata"].get("_db_id") == payload.get("msg_id"):
+                    m["content"] = payload.get("content", m["content"])
+                    break
+            self._send_json({"ok": True})
             return
         if path == "/api/chat":
             self._send_json({"response": "This is a local UI preview response."})
@@ -357,13 +437,68 @@ class PreviewHandler(BaseHTTPRequestHandler):
         self._send_json({"ok": True})
 
 
+class PreviewServer(ThreadingHTTPServer):
+    # Let a freshly-started server reclaim a port left in TIME_WAIT by a prior run.
+    allow_reuse_address = True
+    daemon_threads = True
+
+
+def _free_port(port: int) -> None:
+    """Kill any process still listening on `port` so a re-run can rebind. Keeps
+    the "every run serves the fresh build" guarantee — otherwise a lingering old
+    instance keeps answering and you see stale UI."""
+    lsof = shutil.which("lsof")
+    if not lsof:
+        return
+    out = subprocess.run([lsof, "-ti", f"tcp:{port}"], capture_output=True, text=True)
+    pids = {int(p) for p in out.stdout.split() if p.strip().isdigit() and int(p) != os.getpid()}
+    for pid in pids:
+        print(f"Freeing port {port}: killing stale process {pid}")
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except ProcessLookupError:
+            pass
+    if pids:
+        time.sleep(1.0)
+
+
+def _build_web() -> None:
+    """Rebuild the React bundle into web/dist so the preview reflects the current
+    source. Skipped when web/ is missing or no pnpm is on PATH."""
+    web_dir = ROOT / "web"
+    if not (web_dir / "package.json").is_file():
+        print("Skipping web build:", web_dir, "has no package.json")
+        return
+    pnpm = shutil.which("pnpm")
+    if not pnpm:
+        print("Skipping web build: pnpm not found on PATH")
+        return
+    print("Building web bundle (pnpm --dir web run build)…")
+    start = time.time()
+    result = subprocess.run([pnpm, "--dir", str(web_dir), "run", "build"], cwd=ROOT)
+    if result.returncode != 0:
+        raise SystemExit(f"web build failed (exit {result.returncode})")
+    print(f"web build done in {time.time() - start:.1f}s")
+
+
 def main():
     parser = argparse.ArgumentParser(description="Run local Talos UI preview server")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=int(os.getenv("TALOS_UI_PREVIEW_PORT", "5177")))
+    parser.add_argument("--no-build", action="store_true", help="Serve the existing web/dist without rebuilding")
     args = parser.parse_args()
 
-    httpd = ThreadingHTTPServer((args.host, args.port), PreviewHandler)
+    if not args.no_build:
+        _build_web()
+
+    try:
+        httpd = PreviewServer((args.host, args.port), PreviewHandler)
+    except OSError as e:
+        if e.errno != errno.EADDRINUSE:
+            raise
+        print(f"Port {args.port} in use — freeing it and retrying…")
+        _free_port(args.port)
+        httpd = PreviewServer((args.host, args.port), PreviewHandler)
     print(f"Talos UI preview: http://{args.host}:{args.port}")
     print("Serving static files from", STATIC)
     httpd.serve_forever()
