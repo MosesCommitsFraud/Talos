@@ -4,9 +4,12 @@ import {
   ArrowUpDownIcon,
   CheckIcon,
   ChevronRightIcon,
+  ChevronsUpDownIcon,
   FolderIcon,
   FolderPlusIcon,
+  HelpCircleIcon,
   HistoryIcon,
+  LogOutIcon,
   MessageSquareIcon,
   PanelLeftIcon,
   PencilIcon,
@@ -14,8 +17,10 @@ import {
   PinOffIcon,
   SearchIcon,
   SettingsIcon,
+  ShieldIcon,
   SquarePenIcon,
   Trash2Icon,
+  UserIcon,
 } from 'lucide-react';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -23,6 +28,7 @@ import {
   archiveSession,
   deleteSession,
   fetchSessions,
+  logout,
   markImportant,
   renameSession,
   setSessionFolder,
@@ -44,7 +50,9 @@ import {
   ContextMenuTrigger,
   Menu,
   MenuItem,
+  MenuLabel,
   MenuPopup,
+  MenuSeparator,
   MenuTrigger,
 } from './ui/menu';
 
@@ -268,12 +276,76 @@ function NavButton({
   );
 }
 
+/** The account dropdown anchored to the footer avatar. Holds the entries that
+ *  used to be a single Settings button: scoped Settings / Admin panel / Help /
+ *  Archive / Account / Log out. `trigger` is the clickable avatar (full or
+ *  compact); the menu opens upward from the bottom of the sidebar. */
+function AccountMenu({
+  trigger,
+  isAdmin,
+  authEnabled,
+  username,
+  actions,
+}: {
+  trigger: React.ReactNode;
+  isAdmin: boolean;
+  authEnabled: boolean;
+  username: string;
+  actions: AccountActions;
+}) {
+  const { t } = useTranslation();
+  return (
+    <Menu>
+      <MenuTrigger asChild>{trigger}</MenuTrigger>
+      <MenuPopup side="top" align="start" sideOffset={8} className="w-56">
+        <MenuLabel className="truncate">{username}</MenuLabel>
+        <MenuItem onSelect={actions.onOpenSettings}>
+          <SettingsIcon /> {t('sidebar.menu.settings')}
+        </MenuItem>
+        {isAdmin && (
+          <MenuItem onSelect={actions.onOpenAdmin}>
+            <ShieldIcon /> {t('sidebar.menu.adminPanel')}
+          </MenuItem>
+        )}
+        <MenuItem onSelect={actions.onOpenHelp}>
+          <HelpCircleIcon /> {t('sidebar.menu.help')}
+        </MenuItem>
+        <MenuItem onSelect={actions.onOpenArchive}>
+          <ArchiveIcon /> {t('sidebar.menu.archive')}
+        </MenuItem>
+        <MenuItem onSelect={actions.onOpenAccount}>
+          <UserIcon /> {t('sidebar.menu.account')}
+        </MenuItem>
+        {authEnabled && (
+          <>
+            <MenuSeparator />
+            <MenuItem
+              className="text-destructive-foreground [&_svg]:text-destructive-foreground"
+              onSelect={() => void logout()}
+            >
+              <LogOutIcon /> {t('sidebar.menu.logOut')}
+            </MenuItem>
+          </>
+        )}
+      </MenuPopup>
+    </Menu>
+  );
+}
+
+interface AccountActions {
+  onOpenSettings: () => void;
+  onOpenAdmin: () => void;
+  onOpenHelp: () => void;
+  onOpenArchive: () => void;
+  onOpenAccount: () => void;
+}
+
 export function Sidebar({
   onOpenPalette,
-  onOpenSettings,
+  account,
 }: {
   onOpenPalette: () => void;
-  onOpenSettings: () => void;
+  account: AccountActions;
 }) {
   const { t } = useTranslation();
   const { data: sessions } = useQuery({ queryKey: ['sessions'], queryFn: fetchSessions, refetchInterval: 30_000 });
@@ -340,7 +412,7 @@ export function Sidebar({
   return (
     <nav
       className={cn(
-        'flex shrink-0 flex-col border-r bg-card transition-[width] duration-200 ease-out',
+        'm-2 flex shrink-0 flex-col overflow-hidden rounded-xl border bg-card shadow-lg transition-[width] duration-200 ease-out',
         collapsed ? 'w-[3.25rem]' : 'w-64',
       )}
       aria-label={t('sidebar.navLabel')}
@@ -450,51 +522,55 @@ export function Sidebar({
         />
       )}
 
-      {/* Footer */}
+      {/* Footer — the account avatar opens a dropdown (Settings / Admin /
+          Help / Archive / Account / Log out) instead of the old settings cog. */}
       {collapsed ? (
         <div className="p-2">
           {/* Same row geometry as the expanded user bar — min-h-10 matches the
-              height the size-7 settings cog gives that row — so the bottom-anchored
+              height the size-7 settings cog gave that row — so the bottom-anchored
               avatar holds its exact position across the open/close animation. */}
           <div className="flex min-h-10 items-center px-2">
-            <Tooltip label={auth?.username ?? t('sidebar.account')} side="right">
-              <button
-                type="button"
-                onClick={onOpenSettings}
-                aria-label={t('sidebar.account')}
-                className="flex size-6 shrink-0 items-center justify-center rounded-full bg-primary/15 text-[11px] font-semibold text-primary"
-              >
-                {initial}
-              </button>
-            </Tooltip>
+            <AccountMenu
+              isAdmin={!!auth?.is_admin}
+              authEnabled={auth?.auth_enabled !== false}
+              username={auth?.username ?? t('sidebar.user')}
+              actions={account}
+              trigger={
+                <Tooltip label={auth?.username ?? t('sidebar.account')} side="right">
+                  <button
+                    type="button"
+                    aria-label={t('sidebar.account')}
+                    className="flex size-6 shrink-0 items-center justify-center rounded-full bg-primary/15 text-[11px] font-semibold text-primary transition-colors hover:bg-primary/25"
+                  >
+                    {initial}
+                  </button>
+                </Tooltip>
+              }
+            />
           </div>
         </div>
       ) : (
-        <div className="space-y-0.5 border-t p-2">
+        <div className="border-t p-2">
           {(visibility.sidebarUserBar || visibility.sidebarSettingsBtn) && (
-            <div className="flex items-center gap-2 rounded-lg px-2 py-1.5">
-              {visibility.sidebarUserBar && (
-                <>
-                  <div className="flex size-6 items-center justify-center rounded-full bg-primary/15 text-[11px] font-semibold text-primary">
+            <AccountMenu
+              isAdmin={!!auth?.is_admin}
+              authEnabled={auth?.auth_enabled !== false}
+              username={auth?.username ?? t('sidebar.user')}
+              actions={account}
+              trigger={
+                <button
+                  type="button"
+                  aria-label={t('sidebar.account')}
+                  className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left transition-colors hover:bg-accent/70"
+                >
+                  <div className="flex size-6 shrink-0 items-center justify-center rounded-full bg-primary/15 text-[11px] font-semibold text-primary">
                     {initial}
                   </div>
                   <span className="min-w-0 flex-1 truncate text-sm">{auth?.username ?? t('sidebar.user')}</span>
-                </>
-              )}
-              {!visibility.sidebarUserBar && <span className="flex-1" />}
-              {visibility.sidebarSettingsBtn && (
-                <Tooltip label={t('sidebar.settingsHidden')}>
-                  <button
-                    type="button"
-                    onClick={onOpenSettings}
-                    aria-label={t('sidebar.settings')}
-                    className="flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-                  >
-                    <SettingsIcon className="size-4" />
-                  </button>
-                </Tooltip>
-              )}
-            </div>
+                  <ChevronsUpDownIcon className="size-4 shrink-0 text-muted-foreground" />
+                </button>
+              }
+            />
           )}
         </div>
       )}

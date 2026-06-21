@@ -6,7 +6,9 @@ import { Messages } from './components/Messages';
 import { Welcome } from './components/Welcome';
 import { Composer } from './components/Composer';
 import { CommandPalette } from './components/CommandPalette';
-import { SettingsDialog } from './components/SettingsDialog';
+import { SettingsDialog, type Panel, type SettingsScope } from './components/SettingsDialog';
+import { ArchiveDialog } from './components/ArchiveDialog';
+import { HelpDialog } from './components/HelpDialog';
 import { ArtifactsPanel } from './components/ArtifactsPanel';
 import { PlanPanel } from './components/PlanPanel';
 import { PendingQuestion } from './components/AskUser';
@@ -23,7 +25,10 @@ const queryClient = new QueryClient({
 
 export default function App() {
   const [palette, setPalette] = useState(false);
-  const [settings, setSettings] = useState(false);
+  // null = closed. When set, the settings dialog opens to the given panel/scope.
+  const [settings, setSettings] = useState<{ panel?: Panel; scope?: SettingsScope } | null>(null);
+  const [archiveOpen, setArchiveOpen] = useState(false);
+  const [helpOpen, setHelpOpen] = useState(false);
   const filesOpen = useUi((s) => s.artifactsOpen);
   const setFilesOpen = useUi((s) => s.setArtifactsOpen);
   const theme = usePrefs((s) => s.theme);
@@ -60,7 +65,13 @@ export default function App() {
           <div className="flex h-full">
             <Sidebar
               onOpenPalette={() => setPalette(true)}
-              onOpenSettings={() => setSettings(true)}
+              account={{
+                onOpenSettings: () => setSettings({ scope: 'user' }),
+                onOpenAdmin: () => setSettings({ scope: 'admin' }),
+                onOpenHelp: () => setHelpOpen(true),
+                onOpenArchive: () => setArchiveOpen(true),
+                onOpenAccount: () => setSettings({ scope: 'user', panel: 'account' }),
+              }}
             />
             <main className="relative flex min-w-0 flex-1 flex-col">
               {/* Fade the scrolling chat out before it reaches the floating
@@ -86,8 +97,15 @@ export default function App() {
             <ArtifactsPanel open={filesOpen} onClose={() => setFilesOpen(false)} />
             <PlanPanel />
           </div>
-          <CommandPalette open={palette} onClose={() => setPalette(false)} onOpenSettings={() => setSettings(true)} />
-          <SettingsDialog open={settings} onClose={() => setSettings(false)} />
+          <CommandPalette open={palette} onClose={() => setPalette(false)} onOpenSettings={() => setSettings({})} />
+          <SettingsDialog
+            open={!!settings}
+            onClose={() => setSettings(null)}
+            initialPanel={settings?.panel}
+            scope={settings?.scope}
+          />
+          <ArchiveDialog open={archiveOpen} onClose={() => setArchiveOpen(false)} />
+          <HelpDialog open={helpOpen} onClose={() => setHelpOpen(false)} />
         </AuthGate>
       </TooltipProvider>
     </QueryClientProvider>

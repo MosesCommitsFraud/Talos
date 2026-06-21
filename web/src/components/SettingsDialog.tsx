@@ -12,6 +12,7 @@ import {
   PaletteIcon,
   PlugIcon,
   PlusIcon,
+  SearchIcon,
   ServerIcon,
   SettingsIcon,
   Trash2Icon,
@@ -85,7 +86,7 @@ import { KeybindingPill } from './ui/kbd';
 import { useAuth } from './auth/AuthGate';
 import { UsersPanel } from './settings/UsersPanel';
 
-type Panel =
+export type Panel =
   | 'appearance' | 'shortcuts' | 'account'
   | 'models' | 'ai' | 'assistants' | 'integrations' | 'tools' | 'rag' | 'users' | 'system';
 
@@ -1608,10 +1609,35 @@ function AssistantsPanel() {
 
 /* ── Dialog shell ── */
 
-export function SettingsDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
+/** Scope controls which settings groups are shown. 'user' hides every admin
+ *  panel (the "Settings" menu entry); 'admin' shows only admin panels (the
+ *  "Admin panel" entry); undefined shows both. */
+export type SettingsScope = 'user' | 'admin';
+
+export function SettingsDialog({
+  open,
+  onClose,
+  initialPanel,
+  scope,
+}: {
+  open: boolean;
+  onClose: () => void;
+  initialPanel?: Panel;
+  scope?: SettingsScope;
+}) {
   const { t } = useTranslation();
-  const [panel, setPanel] = useState<Panel>('appearance');
+  const [panel, setPanel] = useState<Panel>(initialPanel ?? 'appearance');
   const auth = useAuth();
+
+  // Each time the dialog opens, jump to the requested panel (or the first one
+  // available in the active scope) so menu entries land where they should.
+  const [query, setQuery] = useState('');
+  useEffect(() => {
+    if (open) {
+      setPanel(initialPanel ?? (scope === 'admin' ? 'models' : 'appearance'));
+      setQuery('');
+    }
+  }, [open, initialPanel, scope]);
 
   const userNav: Array<{ id: Panel; label: string; icon: React.ReactNode }> = [
     { id: 'appearance', label: t('settings.nav.appearance'), icon: <PaletteIcon /> },
@@ -1635,7 +1661,7 @@ export function SettingsDialog({ open, onClose }: { open: boolean; onClose: () =
       onClick={() => setPanel(n.id)}
       title={n.label}
       className={cn(
-        'flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-sm transition-colors [&_svg]:size-4 [&_svg]:shrink-0 [&_svg]:text-muted-foreground',
+        'flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm transition-colors [&_svg]:size-[18px] [&_svg]:shrink-0 [&_svg]:text-muted-foreground',
         panel === n.id ? 'bg-accent font-medium' : 'hover:bg-accent/60',
       )}
     >
@@ -1643,19 +1669,53 @@ export function SettingsDialog({ open, onClose }: { open: boolean; onClose: () =
       <span className="min-w-0 truncate">{n.label}</span>
     </button>
   );
+  const GroupLabel = ({ children }: { children: React.ReactNode }) => (
+    <div className="px-2.5 pt-3 pb-1 text-[11px] font-medium tracking-wide text-muted-foreground uppercase first:pt-1">
+      {children}
+    </div>
+  );
+
+  // Filter the nav by the search box; group headers hide when their group is empty.
+  const q = query.trim().toLowerCase();
+  const matches = (n: { label: string }) => !q || n.label.toLowerCase().includes(q);
+  const userItems = scope === 'admin' ? [] : userNav.filter(matches);
+  const adminItems = auth?.is_admin && scope !== 'user' ? adminNav.filter(matches) : [];
+  const noResults = userItems.length === 0 && adminItems.length === 0;
 
   return (
     <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
-      <DialogContent title={t('settings.title')} className="w-[min(800px,94vw)]">
-        <div className="flex h-[min(640px,78vh)]">
-          <div className="w-48 shrink-0 space-y-0.5 border-r p-2">
-            {userNav.map((n) => <NavButton key={n.id} n={n} />)}
-            {auth?.is_admin && (
-              <>
-                <div className="px-2.5 pt-3 pb-1 text-[11px] font-medium tracking-wide text-muted-foreground uppercase">{t('settings.admin')}</div>
-                {adminNav.map((n) => <NavButton key={n.id} n={n} />)}
-              </>
-            )}
+      <DialogContent title={t('settings.title')} className="w-[min(1080px,95vw)]">
+        <div className="flex h-[min(760px,86vh)]">
+          <div className="flex w-60 shrink-0 flex-col border-r">
+            <div className="p-2.5">
+              <div className="relative">
+                <SearchIcon className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+                <input
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  placeholder={t('settings.searchPlaceholder')}
+                  aria-label={t('settings.searchPlaceholder')}
+                  className="h-9 w-full rounded-lg border border-input bg-transparent pr-2.5 pl-8 text-sm outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30 dark:bg-input/20"
+                />
+              </div>
+            </div>
+            <div className="min-h-0 flex-1 space-y-0.5 overflow-y-auto px-2 pb-2">
+              {userItems.length > 0 && (
+                <>
+                  <GroupLabel>{t('settings.general')}</GroupLabel>
+                  {userItems.map((n) => <NavButton key={n.id} n={n} />)}
+                </>
+              )}
+              {adminItems.length > 0 && (
+                <>
+                  <GroupLabel>{t('settings.admin')}</GroupLabel>
+                  {adminItems.map((n) => <NavButton key={n.id} n={n} />)}
+                </>
+              )}
+              {noResults && (
+                <div className="px-2.5 py-8 text-center text-xs text-muted-foreground">{t('settings.noResults')}</div>
+              )}
+            </div>
           </div>
           <div className="min-w-0 flex-1 overflow-y-auto">
             {panel === 'appearance' && <AppearancePanel />}

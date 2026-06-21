@@ -321,7 +321,47 @@ def setup_session_routes(session_manager: SessionManager, config: dict, webhook_
                     and (s.name or "").strip() not in _HIDDEN_SYSTEM_SESSION_NAMES]
 
         return sessions
-    
+
+    @router.get("/sessions/archived")
+    def list_archived_sessions(request: Request):
+        """Archived sessions for the current user — drives the Archive view.
+
+        Kept separate from /sessions (which filters archived out) so the
+        active list stays lean; returns only the fields the Archive list needs.
+        """
+        user = effective_user(request)
+        user_sessions = session_manager.get_sessions_for_user(user)
+        db = SessionLocal()
+        try:
+            rows = db.query(
+                DbSession.id, DbSession.created_at, DbSession.updated_at,
+                DbSession.last_message_at, DbSession.message_count,
+            ).filter(DbSession.archived == True).all()
+            meta = {r.id: r for r in rows}
+        finally:
+            db.close()
+        result = []
+        for s in user_sessions.values():
+            if not s.archived:
+                continue
+            name = (s.name or "").strip()
+            if name in ("Nobody", "Incognito") or name in _HIDDEN_SYSTEM_SESSION_NAMES:
+                continue
+            r = meta.get(s.id)
+            updated = (r.updated_at.isoformat() if r and r.updated_at else None)
+            last_msg = (
+                r.last_message_at.isoformat() if r and r.last_message_at
+                else updated
+            ) if r else None
+            result.append({
+                "id": s.id, "name": s.name, "archived": True,
+                "created_at": (r.created_at.isoformat() if r and r.created_at else None),
+                "updated_at": updated,
+                "last_message_at": last_msg,
+                "message_count": (r.message_count if r else 0) or 0,
+            })
+        return result
+
     @router.post("/session", response_model=SessionResponse)
     def create_session(
         request: Request,

@@ -48,6 +48,28 @@ const en = {
     folderPlaceholder: 'Folder name',
     archive: 'Archive',
     user: 'User',
+    menu: {
+      settings: 'Settings',
+      adminPanel: 'Admin panel',
+      help: 'Help',
+      archive: 'Archive',
+      account: 'Account',
+      logOut: 'Log out',
+    },
+  },
+  archiveDialog: {
+    title: 'Archived chats',
+    empty: 'No archived chats',
+    loading: 'Loading…',
+    restore: 'Restore',
+    open: 'Open',
+    delete: 'Delete',
+    countMessages: '{{count}} message',
+    countMessages_other: '{{count}} messages',
+  },
+  help: {
+    title: 'Help',
+    empty: 'Help content is coming soon.',
   },
   askUser: {
     placeholder: 'Type your answer…',
@@ -225,6 +247,9 @@ const en = {
   settings: {
     title: 'Settings',
     admin: 'Admin',
+    general: 'General',
+    searchPlaceholder: 'Search settings…',
+    noResults: 'No settings found',
     nav: {
       appearance: 'Appearance',
       shortcuts: 'Shortcuts',

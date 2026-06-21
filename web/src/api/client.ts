@@ -20,6 +20,7 @@ async function getJSON<T>(url: string): Promise<T> {
 }
 
 export const fetchSessions = () => getJSON<Session[]>('/api/sessions');
+export const fetchArchivedSessions = () => getJSON<Session[]>('/api/sessions/archived');
 
 export async function fetchSession(id: string): Promise<SessionDetail> {
   const data = await getJSON<Omit<SessionDetail, 'id'> & { id?: string }>(`/api/history/${id}`);
@@ -76,6 +77,10 @@ export async function deleteSession(id: string): Promise<void> {
 
 export async function archiveSession(id: string): Promise<void> {
   await fetch(`/api/session/${id}/archive`, { method: 'POST', credentials: 'same-origin' });
+}
+
+export async function unarchiveSession(id: string): Promise<void> {
+  await fetch(`/api/session/${id}/unarchive`, { method: 'POST', credentials: 'same-origin' });
 }
 
 export async function markImportant(id: string, important: boolean): Promise<void> {

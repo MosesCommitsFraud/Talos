@@ -256,6 +256,17 @@ class PreviewHandler(BaseHTTPRequestHandler):
         if path == "/api/sessions":
             self._send_json(_sessions())
             return
+        if path == "/api/sessions/archived":
+            now = int(time.time())
+            self._send_json([
+                {"id": "arch-1", "name": "Old planning notes", "archived": True,
+                 "created_at": now, "updated_at": now, "last_message_at": now,
+                 "message_count": 14},
+                {"id": "arch-2", "name": "Scratch experiment", "archived": True,
+                 "created_at": now, "updated_at": now, "last_message_at": now,
+                 "message_count": 3},
+            ])
+            return
         if path.startswith("/api/history/"):
             session_id = path[len("/api/history/"):]
             self._send_json({"id": session_id, "name": "UI Preview",

@@ -50,6 +50,28 @@ const de: typeof en = {
     folderPlaceholder: 'Ordnername',
     archive: 'Archivieren',
     user: 'Benutzer',
+    menu: {
+      settings: 'Einstellungen',
+      adminPanel: 'Admin-Bereich',
+      help: 'Hilfe',
+      archive: 'Archiv',
+      account: 'Konto',
+      logOut: 'Abmelden',
+    },
+  },
+  archiveDialog: {
+    title: 'Archivierte Chats',
+    empty: 'Keine archivierten Chats',
+    loading: 'Lädt…',
+    restore: 'Wiederherstellen',
+    open: 'Öffnen',
+    delete: 'Löschen',
+    countMessages: '{{count}} Nachricht',
+    countMessages_other: '{{count}} Nachrichten',
+  },
+  help: {
+    title: 'Hilfe',
+    empty: 'Hilfe-Inhalte folgen in Kürze.',
   },
   askUser: {
     placeholder: 'Antwort eingeben…',
@@ -227,6 +249,9 @@ const de: typeof en = {
   settings: {
     title: 'Einstellungen',
     admin: 'Admin',
+    general: 'Allgemein',
+    searchPlaceholder: 'Einstellungen suchen…',
+    noResults: 'Keine Einstellungen gefunden',
     nav: {
       appearance: 'Darstellung',
       shortcuts: 'Tastenkürzel',
