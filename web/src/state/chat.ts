@@ -84,9 +84,6 @@ interface ChatState {
   send: (text: string, opts?: { attachments?: Attachment[]; onSessionCreated?: (id: string) => void; approvedPlan?: string; planMode?: boolean }) => Promise<void>;
   stop: () => void;
   edit: (msgId: string, content: string) => Promise<void>;
-  /** Revert the conversation to a user message: drop that turn and everything
-   *  after it, then resend the same text to regenerate from this point. */
-  revert: (msgId: string) => Promise<void>;
   remove: (msgId: string) => Promise<void>;
   /** Dismiss the active session's pending proposed plan without executing it
    *  (the "Cancel" action on the approval bar). */
@@ -517,16 +514,6 @@ export const useChat = create<ChatState>((set, get) => {
     await deleteMessages(sessionId, dropIds);
     writeRuntime(sessionId, () => ({ messages: messages.slice(0, idx) }));
     await get().send(content, { attachments: msg.attachments });
-  },
-
-  revert: async (msgId) => {
-    const { messages, streaming } = get();
-    if (streaming) return;
-    const msg = messages.find((m) => m.id === msgId);
-    if (!msg || msg.role !== 'user') throw new Error('Only user messages can be reverted to');
-    // Same truncate-and-resend path as edit, but keeps the original text — it
-    // rolls the conversation back to this message and regenerates from here.
-    await get().edit(msgId, msg.content);
   },
 
   remove: async (msgId) => {

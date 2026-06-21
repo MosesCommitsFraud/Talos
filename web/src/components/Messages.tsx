@@ -1,4 +1,4 @@
-import { CheckIcon, ChevronDownIcon, ChevronRightIcon, CopyIcon, FileIcon, ImageIcon, ListChecksIcon, PencilIcon, Trash2Icon, Undo2Icon } from 'lucide-react';
+import { CheckIcon, ChevronDownIcon, ChevronRightIcon, CopyIcon, FileIcon, ImageIcon, ListChecksIcon, PencilIcon, Trash2Icon } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { Fragment, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -194,19 +194,13 @@ function AttachmentList({ msg }: { msg: UiMessage }) {
   );
 }
 
-function MessageActions({ msg, onEdit, copyText, canRevert = false, canDelete = true }: { msg: UiMessage; onEdit?: () => void; copyText?: string; canRevert?: boolean; canDelete?: boolean }) {
+function MessageActions({ msg, onEdit, copyText, canDelete = true }: { msg: UiMessage; onEdit?: () => void; copyText?: string; canDelete?: boolean }) {
   const { t } = useTranslation();
   const remove = useChat((s) => s.remove);
-  const revert = useChat((s) => s.revert);
   const canMutate = !!msg.dbId;
   return (
     <>
       <CopyAction text={copyText ?? msg.content} />
-      {canRevert && canMutate && (
-        <ActionIcon label={t('messages.revertMessage')} onClick={() => void revert(msg.id).catch(console.error)}>
-          <Undo2Icon className="size-3" />
-        </ActionIcon>
-      )}
       {onEdit && canMutate && (
         <ActionIcon label={t('messages.editMessage')} onClick={onEdit}>
           <PencilIcon className="size-3" />
@@ -476,7 +470,7 @@ export function Messages() {
                   <AttachmentList msg={block.msg} />
                   <div className="flex items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
                     <MessageTime ts={block.msg.createdAt} />
-                    <MessageActions msg={block.msg} onEdit={() => setEditing(block.msg.id)} canRevert />
+                    <MessageActions msg={block.msg} onEdit={() => setEditing(block.msg.id)} />
                   </div>
                 </>
               )}

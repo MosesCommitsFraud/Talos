@@ -129,7 +129,6 @@ const en = {
     copy: 'Copy',
     copied: 'Copied',
     editMessage: 'Edit & resend',
-    revertMessage: 'Revert to this message',
     deleteMessage: 'Delete message',
     cancel: 'Cancel',
     save: 'Save',
