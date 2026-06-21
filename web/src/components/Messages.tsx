@@ -1,4 +1,4 @@
-import { CheckIcon, ChevronDownIcon, ChevronRightIcon, CopyIcon, FileIcon, ImageIcon, ListChecksIcon, PencilIcon, Trash2Icon } from 'lucide-react';
+import { CheckIcon, ChevronDownIcon, ChevronRightIcon, CopyIcon, FileIcon, FoldVerticalIcon, ImageIcon, ListChecksIcon, PencilIcon, Trash2Icon } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { Fragment, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -279,6 +279,22 @@ function PlanChip() {
   );
 }
 
+/** Centered divider shown above a turn when auto-compaction ran before it —
+ *  tells the user older messages were summarized to keep the chat in-context. */
+function CompactionMarker() {
+  const { t } = useTranslation();
+  return (
+    <div className="my-2 flex items-center gap-2.5 text-muted-foreground/70" role="status">
+      <span className="h-px flex-1 bg-border" />
+      <span className="inline-flex items-center gap-1.5 text-[11px] font-medium">
+        <FoldVerticalIcon className="size-3.5" />
+        {t('messages.compacted')}
+      </span>
+      <span className="h-px flex-1 bg-border" />
+    </div>
+  );
+}
+
 /** One assistant turn = the run of consecutive assistant bubbles after a user
  *  message. While streaming it renders live (thinking → tools → text, in order,
  *  plus the running indicator). Once settled, the thinking and tool calls fold
@@ -296,10 +312,12 @@ function AssistantTurn({ turn, containsLast, artifactImages }: { turn: UiMessage
   // the agent asked. Stamped onto the bubble that received the turn's deltas.
   const planMsg = [...turn].reverse().find((m) => m.plan);
   const questionMsg = [...turn].reverse().find((m) => m.pendingQuestion);
+  const compacted = turn.some((m) => m.compacted);
 
   if (streaming) {
     return (
       <>
+        {compacted && <CompactionMarker />}
         {turn.map((m) => (
           <Fragment key={m.id}>
             {m.thinking && showThinking && <Thinking text={m.thinking} streaming={!!m.streaming && !m.content} />}
@@ -348,6 +366,7 @@ function AssistantTurn({ turn, containsLast, artifactImages }: { turn: UiMessage
 
   return (
     <>
+      {compacted && <CompactionMarker />}
       {hasActivity && <ActivityFold turn={turn} terminalId={terminalId} showThinking={showThinking} durationMs={durationMs} />}
       {/* A proposed plan opens in the side panel; the message stream shows a
           compact chip rather than duplicating the whole plan inline. */}

@@ -37,6 +37,9 @@ export interface UiMessage {
   /** Set once the user answers a pendingQuestion or acts on a plan card, so the
    *  card goes inert (a new turn has started from it). */
   answered?: boolean;
+  /** Auto-compaction ran before this turn — earlier messages were summarized
+   *  to fit the context window. Renders a marker above the bubble. */
+  compacted?: { contextLength?: number };
 }
 
 /** Live runtime for one session, kept in the store keyed by session id so it
@@ -145,8 +148,10 @@ function metricsFromMetadata(metadata: Record<string, unknown> | undefined): Met
     'response_time',
     'tokens_per_second',
     'output_tokens',
+    'input_tokens',
     'context_percent',
     'context_length',
+    'usage_source',
   ];
   const metrics: Metrics = {};
   for (const key of keys) {
@@ -418,6 +423,11 @@ export const useChat = create<ChatState>((set, get) => {
               break;
             case 'metrics':
               patchAi({ metrics: ev.data as Metrics });
+              break;
+            case 'compacted':
+              // Auto-compaction ran before this turn streamed — surface it so
+              // the user knows older messages were summarized to fit context.
+              patchAi({ compacted: { contextLength: ev.context_length as number | undefined } });
               break;
             case 'rag_sources':
               if (Array.isArray(ev.data)) patchAi({ sources: ev.data as RagSource[] });

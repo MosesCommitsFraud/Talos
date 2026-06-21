@@ -316,14 +316,29 @@ async def maybe_compact(
     Returns (messages, context_length, was_compacted).
     """
     context_length = get_context_length(endpoint_url, model)
-    used = estimate_tokens(messages)
+    threshold = get_compact_threshold()
+    est_used = estimate_tokens(messages)
+
+    # The cheap estimate decides the trigger by default. When it shows we're
+    # near the threshold, confirm with the server's real tokenizer (vLLM/
+    # llama.cpp /tokenize) so compaction fires on the *actual* count, not a
+    # chars*0.3 guess. The 0.8 margin covers the estimate undercounting.
+    used = est_used
+    exact = False
+    if context_length and est_used >= threshold * context_length * 0.8:
+        from src.model_context import count_tokens_exact
+        real = count_tokens_exact(endpoint_url, model, messages, headers=headers)
+        if real:
+            used, exact = real, True
+
     pct = (used / context_length) * 100 if context_length else 0
 
-    if pct < get_compact_threshold() * 100:
+    if pct < threshold * 100:
         return messages, context_length, False
 
     logger.info(
-        f"Context at {pct:.1f}% ({used}/{context_length} tokens) — compacting"
+        f"Context at {pct:.1f}% ({used}/{context_length} tokens, "
+        f"{'exact' if exact else 'estimated'}) — compacting"
     )
 
     # Split into system preface and conversation

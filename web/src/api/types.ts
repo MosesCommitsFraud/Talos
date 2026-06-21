@@ -112,8 +112,12 @@ export interface Metrics {
   response_time?: number;
   tokens_per_second?: number;
   output_tokens?: number;
+  input_tokens?: number;
   context_percent?: number;
   context_length?: number;
+  /** "real" when the count came from the provider's usage/tokenizer,
+   *  "estimated" when it's the chars*0.3 fallback. Drives the meter's badge. */
+  usage_source?: 'real' | 'estimated';
 }
 
 /** Server-sent event emitted by POST /api/chat_stream. The stream mixes

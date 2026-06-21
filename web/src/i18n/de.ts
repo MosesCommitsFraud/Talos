@@ -142,6 +142,7 @@ const de: typeof en = {
     workedFor: '{{duration}} gearbeitet',
     worked: 'Gearbeitet',
     viewArtifacts: 'Artefakte anzeigen ({{count}})',
+    compacted: 'Frühere Nachrichten zusammengefasst, um ins Kontextfenster zu passen',
     sources: 'Quellen',
     generating: 'Wird generiert',
     scrollToBottom: 'Nach unten scrollen',
@@ -176,6 +177,10 @@ const de: typeof en = {
     noEndpoints: 'Keine Modell-Endpunkte konfiguriert',
   },
   contextMeter: {
+    exact: 'exakt',
+    estimated: 'ca.',
+    exactHint: 'Vom Tokenizer des Modells gezählt — exakt.',
+    estimatedHint: 'Näherungswert, bis das Modell die Nutzung meldet.',
     title: 'Kontextfenster',
     usage: 'Auslastung des Kontextfensters',
     used: 'Kontextfenster zu {{percent}} ausgelastet',

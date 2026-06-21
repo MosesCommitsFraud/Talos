@@ -352,6 +352,104 @@ def _query_context_length(endpoint_url: str, model: str) -> int:
     return DEFAULT_CONTEXT
 
 
+def _tokenize_base(endpoint_url: str) -> str:
+    """Strip the OpenAI chat path so we can hit the server's /tokenize sibling."""
+    if "/v1" in endpoint_url:
+        return endpoint_url.split("/v1")[0]
+    return endpoint_url.rsplit("/", 1)[0]
+
+
+def _flatten_for_tokenize(messages: List[Dict]) -> str:
+    """Flatten messages to plain text for completion-style /tokenize fallbacks."""
+    parts = []
+    for msg in messages:
+        role = msg.get("role", "user")
+        content = msg.get("content", "")
+        if isinstance(content, list):
+            content = " ".join(
+                b.get("text", "") for b in content
+                if isinstance(b, dict) and b.get("text")
+            )
+        elif not isinstance(content, str):
+            content = ""
+        parts.append(f"{role}: {content}")
+        # Tool-call arguments carry real prompt weight; include them so the
+        # count doesn't understate turns that invoked tools.
+        for tc in msg.get("tool_calls") or []:
+            fn = tc.get("function") if isinstance(tc, dict) else None
+            if isinstance(fn, dict):
+                parts.append(str(fn.get("name", "")) + str(fn.get("arguments", "")))
+    return "\n".join(parts)
+
+
+def _chat_messages_for_tokenize(messages: List[Dict]) -> List[Dict]:
+    """Reduce messages to the {role, content-as-text} shape vLLM's chat
+    tokenizer accepts. Native tool_calls / multimodal blocks are dropped to
+    plain text so the chat template applies cleanly instead of 400-ing."""
+    out = []
+    for msg in messages:
+        role = msg.get("role", "user")
+        content = msg.get("content", "")
+        if isinstance(content, list):
+            content = " ".join(
+                b.get("text", "") for b in content
+                if isinstance(b, dict) and b.get("text")
+            )
+        elif not isinstance(content, str):
+            content = ""
+        # A bare tool turn with no text would render an empty template node;
+        # give it a placeholder so the role count stays right.
+        out.append({"role": role, "content": content or " "})
+    return out
+
+
+def count_tokens_exact(
+    endpoint_url: str,
+    model: str,
+    messages: List[Dict],
+    headers: Optional[Dict] = None,
+    timeout: int = REQUEST_TIMEOUT,
+) -> Optional[int]:
+    """Exact prompt token count from a local server's tokenizer endpoint.
+
+    vLLM and llama.cpp both expose ``POST /tokenize``. vLLM accepts the OpenAI
+    chat shape and, with the model's chat template applied, returns the true
+    count that will be charged against the context window — far more accurate
+    than the ``chars * 0.3`` heuristic, which drifts most on reasoning/code.
+
+    Only fires for local/self-hosted endpoints. Returns ``None`` for remote
+    endpoints or on any failure, so callers fall back to ``estimate_tokens``.
+    """
+    if not _is_local_endpoint(endpoint_url):
+        return None
+    url = f"{_tokenize_base(endpoint_url)}/tokenize"
+    flat = _flatten_for_tokenize(messages)
+    # Try most-accurate form first, degrade to ones more servers accept.
+    payloads = [
+        {"model": model, "messages": _chat_messages_for_tokenize(messages),
+         "add_generation_prompt": True},   # vLLM chat (applies chat template)
+        {"model": model, "prompt": flat},   # vLLM/OpenAI completion form
+        {"content": flat},                  # llama.cpp form
+    ]
+    for body in payloads:
+        try:
+            r = httpx.post(url, json=body, headers=headers or None, timeout=timeout)
+            if not r.is_success:
+                continue
+            data = r.json()
+            if not isinstance(data, dict):
+                continue
+            count = data.get("count")
+            if isinstance(count, int) and count > 0:
+                return count
+            toks = data.get("tokens")
+            if isinstance(toks, list) and toks:
+                return len(toks)
+        except Exception:
+            continue
+    return None
+
+
 def estimate_tokens(messages: List[Dict]) -> int:
     """Rough token estimate for a list of messages.
 

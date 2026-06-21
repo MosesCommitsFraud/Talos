@@ -30,7 +30,15 @@ export function ContextMeter() {
 
   const percent = Math.max(0, Math.min(100, metrics.context_percent));
   const maxTokens = metrics.context_length ?? null;
-  const usedTokens = maxTokens != null ? Math.round((percent / 100) * maxTokens) : null;
+  // Prefer the provider's real prompt-token count; fall back to deriving it
+  // from the percentage (older turns without input_tokens in metadata).
+  const usedTokens =
+    metrics.input_tokens != null
+      ? metrics.input_tokens
+      : maxTokens != null
+        ? Math.round((percent / 100) * maxTokens)
+        : null;
+  const isExact = metrics.usage_source === 'real';
 
   const radius = 9.75;
   const circumference = 2 * Math.PI * radius;
@@ -46,7 +54,15 @@ export function ContextMeter() {
       label={
         <div className="flex w-56 flex-col gap-2 p-1.5">
           <div className="flex items-center justify-between gap-3">
-            <div className="text-xs font-medium text-muted-foreground">{t('contextMeter.title')}</div>
+            <div className="flex items-center gap-1.5">
+              <span className="text-xs font-medium text-muted-foreground">{t('contextMeter.title')}</span>
+              <span
+                className="rounded px-1 py-px text-[9px] font-medium uppercase tracking-wide text-muted-foreground/60 ring-1 ring-inset ring-border"
+                title={isExact ? t('contextMeter.exactHint') : t('contextMeter.estimatedHint')}
+              >
+                {isExact ? t('contextMeter.exact') : t('contextMeter.estimated')}
+              </span>
+            </div>
             <div className="text-[11px] text-muted-foreground/70 tabular-nums">
               <span>{formatPercent(percent)}</span>
               {usedTokens != null && maxTokens != null && (

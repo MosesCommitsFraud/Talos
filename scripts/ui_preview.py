@@ -101,6 +101,10 @@ result = duckdb.sql("SELECT item, value, value * 1.19 AS gross FROM df ORDER BY 
 print(result)
 """
     events: list[dict | str] = [
+        # Auto-compaction fired before this turn (history crossed the threshold);
+        # the real backend emits this just before streaming. Renders the in-stream
+        # "earlier messages summarized" marker above the assistant turn.
+        {"type": "compacted", "context_length": 40960},
         {"delta": "I need to inspect the request, decide whether a quick calculation is enough, and then show the UI states for reasoning, code, tools, and metrics.\n", "thinking": True},
         {"delta": "The request is a local preview, so I will simulate a Python/DuckDB calculation and stream a small code artifact.\n", "thinking": True},
         {"type": "tool_start", "tool": "python", "command": "python preview_calculation.py"},
@@ -130,12 +134,14 @@ print(result)
         {"type": "metrics", "data": {
             "model": "mock-ui-preview",
             "response_time": 1.42,
-            "input_tokens": 384,
+            # Near-full window with a real tokenizer count, so the context meter
+            # shows the "exact" badge and the post-compaction usage.
+            "input_tokens": 31130,
             "output_tokens": 156,
             "tokens_per_second": 109.9,
-            "context_percent": 4.8,
-            "context_length": 8192,
-            "usage_source": "preview",
+            "context_percent": 76.0,
+            "context_length": 40960,
+            "usage_source": "real",
         }},
         {"type": "message_saved", "id": "preview-message"},
         "[DONE]",

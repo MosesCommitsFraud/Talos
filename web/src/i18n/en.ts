@@ -140,6 +140,7 @@ const en = {
     workedFor: 'Worked for {{duration}}',
     worked: 'Worked',
     viewArtifacts: 'View artifacts ({{count}})',
+    compacted: 'Earlier messages summarized to fit the context window',
     sources: 'Sources',
     generating: 'Generating',
     scrollToBottom: 'Scroll to bottom',
@@ -178,6 +179,10 @@ const en = {
     usage: 'Context window usage',
     used: 'Context window {{percent}} used',
     hint: "The chat compacts automatically when it fills up, but you'll get better results if you start a new chat.",
+    exact: 'exact',
+    estimated: 'est.',
+    exactHint: "Counted by the model's own tokenizer — accurate.",
+    estimatedHint: 'Approximate count until the model reports usage.',
   },
   artifacts: {
     panelLabel: 'Session files',
