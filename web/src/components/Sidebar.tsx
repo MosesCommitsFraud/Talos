@@ -252,27 +252,36 @@ function NavButton({
   collapsed?: boolean;
   muteIcon?: boolean;
 }) {
-  const button = (
+  // Compact rail: a size-7 square icon button that mirrors the header
+  // collapse/logo toggle exactly (same box, radius, muted→foreground hover),
+  // so New chat / Search / Recents line up vertically with the logo + avatar.
+  if (collapsed) {
+    return (
+      <Tooltip label={label} side="right">
+        <button
+          type="button"
+          onClick={onClick}
+          aria-label={label}
+          className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground [&_svg]:size-[18px] [&_svg]:shrink-0"
+        >
+          {icon}
+        </button>
+      </Tooltip>
+    );
+  }
+  return (
     <button
       type="button"
       onClick={onClick}
-      aria-label={collapsed ? label : undefined}
       className={cn(
-        'flex h-9 w-full items-center gap-2 rounded-lg px-2 text-sm transition-colors hover:bg-accent/70 [&_svg]:size-[18px] [&_svg]:shrink-0',
-        muteIcon && '[&_svg]:text-muted-foreground',
+        'flex h-9 w-full items-center gap-2 rounded-lg px-2 text-sm transition-colors hover:bg-accent hover:text-foreground [&_svg]:size-[18px] [&_svg]:shrink-0',
+        muteIcon && '[&_svg]:text-muted-foreground hover:[&_svg]:text-foreground',
       )}
     >
       <span className="flex size-5 shrink-0 items-center justify-center">{icon}</span>
-      {!collapsed && <span className="min-w-0 flex-1 truncate text-left">{label}</span>}
-      {!collapsed && trailing}
+      <span className="min-w-0 flex-1 truncate text-left">{label}</span>
+      {trailing}
     </button>
-  );
-  return collapsed ? (
-    <Tooltip label={label} side="right">
-      {button}
-    </Tooltip>
-  ) : (
-    button
   );
 }
 
@@ -282,45 +291,60 @@ function NavButton({
  *  compact); the menu opens upward from the bottom of the sidebar. */
 function AccountMenu({
   trigger,
+  tooltip,
   isAdmin,
   authEnabled,
   username,
   actions,
 }: {
   trigger: React.ReactNode;
+  /** When set, the trigger gets a tooltip (used in the compact rail). */
+  tooltip?: string;
   isAdmin: boolean;
   authEnabled: boolean;
   username: string;
   actions: AccountActions;
 }) {
   const { t } = useTranslation();
+  // Slightly roomier rows than the default menu item, to match the account
+  // dropdown design (taller hit targets, 18px icons, full-width).
+  const itemCls = 'gap-3 px-3 py-2 text-[13px] [&_svg]:size-[18px]';
+  // Tooltip must wrap MenuTrigger (not the other way around) so the dropdown's
+  // click handler reaches the button — otherwise it won't open in compact mode.
+  const triggerNode = <MenuTrigger asChild>{trigger}</MenuTrigger>;
   return (
     <Menu>
-      <MenuTrigger asChild>{trigger}</MenuTrigger>
-      <MenuPopup side="top" align="start" sideOffset={8} className="w-56">
-        <MenuLabel className="truncate">{username}</MenuLabel>
-        <MenuItem onSelect={actions.onOpenSettings}>
+      {tooltip ? (
+        <Tooltip label={tooltip} side="right">
+          {triggerNode}
+        </Tooltip>
+      ) : (
+        triggerNode
+      )}
+      <MenuPopup side="top" align="start" sideOffset={8} className="w-64 p-1.5">
+        <MenuLabel className="truncate px-3 pt-1.5 pb-1 text-[13px] text-foreground/70">{username}</MenuLabel>
+        <MenuItem className={itemCls} onSelect={actions.onOpenSettings}>
           <SettingsIcon /> {t('sidebar.menu.settings')}
         </MenuItem>
         {isAdmin && (
-          <MenuItem onSelect={actions.onOpenAdmin}>
+          <MenuItem className={itemCls} onSelect={actions.onOpenAdmin}>
             <ShieldIcon /> {t('sidebar.menu.adminPanel')}
           </MenuItem>
         )}
-        <MenuItem onSelect={actions.onOpenHelp}>
+        <MenuItem className={itemCls} onSelect={actions.onOpenHelp}>
           <HelpCircleIcon /> {t('sidebar.menu.help')}
         </MenuItem>
-        <MenuItem onSelect={actions.onOpenArchive}>
+        <MenuItem className={itemCls} onSelect={actions.onOpenArchive}>
           <ArchiveIcon /> {t('sidebar.menu.archive')}
         </MenuItem>
-        <MenuItem onSelect={actions.onOpenAccount}>
+        <MenuItem className={itemCls} onSelect={actions.onOpenAccount}>
           <UserIcon /> {t('sidebar.menu.account')}
         </MenuItem>
         {authEnabled && (
           <>
             <MenuSeparator />
             <MenuItem
-              className="text-destructive-foreground [&_svg]:text-destructive-foreground"
+              className={cn(itemCls, 'text-destructive-foreground [&_svg]:text-destructive-foreground')}
               onSelect={() => void logout()}
             >
               <LogOutIcon /> {t('sidebar.menu.logOut')}
@@ -412,7 +436,7 @@ export function Sidebar({
   return (
     <nav
       className={cn(
-        'm-2 flex shrink-0 flex-col overflow-hidden rounded-xl border bg-card shadow-lg transition-[width] duration-200 ease-out',
+        'm-2 flex shrink-0 flex-col overflow-hidden rounded-xl border bg-background transition-[width] duration-200 ease-out',
         collapsed ? 'w-[3.25rem]' : 'w-64',
       )}
       aria-label={t('sidebar.navLabel')}
@@ -466,11 +490,9 @@ export function Sidebar({
             <button
               type="button"
               aria-label={t('sidebar.recents')}
-              className="flex h-9 w-full items-center rounded-lg px-2 text-sm text-muted-foreground transition-colors hover:bg-accent/70 hover:text-foreground [&_svg]:size-[18px]"
+              className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground [&_svg]:size-[18px] [&_svg]:shrink-0"
             >
-              <span className="flex size-5 shrink-0 items-center justify-center">
-                <HistoryIcon />
-              </span>
+              <HistoryIcon />
             </button>
             <div className="invisible absolute left-full top-0 z-40 pl-2 opacity-0 transition-opacity group-hover/recents:visible group-hover/recents:opacity-100">
               <div className="flex max-h-[70vh] w-64 flex-col overflow-hidden rounded-xl border bg-popover shadow-[0_12px_32px_rgb(0_0_0/0.18)] dark:shadow-[0_12px_32px_rgb(0_0_0/0.5)]">
@@ -525,32 +547,30 @@ export function Sidebar({
       {/* Footer — the account avatar opens a dropdown (Settings / Admin /
           Help / Archive / Account / Log out) instead of the old settings cog. */}
       {collapsed ? (
-        <div className="p-2">
-          {/* Same row geometry as the expanded user bar — min-h-10 matches the
-              height the size-7 settings cog gave that row — so the bottom-anchored
-              avatar holds its exact position across the open/close animation. */}
-          <div className="flex min-h-10 items-center px-2">
-            <AccountMenu
-              isAdmin={!!auth?.is_admin}
-              authEnabled={auth?.auth_enabled !== false}
-              username={auth?.username ?? t('sidebar.user')}
-              actions={account}
-              trigger={
-                <Tooltip label={auth?.username ?? t('sidebar.account')} side="right">
-                  <button
-                    type="button"
-                    aria-label={t('sidebar.account')}
-                    className="flex size-6 shrink-0 items-center justify-center rounded-full bg-primary/15 text-[11px] font-semibold text-primary transition-colors hover:bg-primary/25"
-                  >
-                    {initial}
-                  </button>
-                </Tooltip>
-              }
-            />
-          </div>
+        // Same horizontal geometry as the header logo (px-2 container + size-7
+        // button) so the avatar sits directly under the Talos mark.
+        <div className="px-2 pb-2">
+          <AccountMenu
+            isAdmin={!!auth?.is_admin}
+            authEnabled={auth?.auth_enabled !== false}
+            username={auth?.username ?? t('sidebar.user')}
+            actions={account}
+            tooltip={auth?.username ?? t('sidebar.account')}
+            trigger={
+              <button
+                type="button"
+                aria-label={t('sidebar.account')}
+                className="flex size-7 shrink-0 items-center justify-center rounded-md transition-colors hover:bg-accent"
+              >
+                <span className="flex size-5 items-center justify-center rounded-full bg-primary/15 text-[10px] font-semibold text-primary">
+                  {initial}
+                </span>
+              </button>
+            }
+          />
         </div>
       ) : (
-        <div className="border-t p-2">
+        <div className="border-t px-2 py-1.5">
           {(visibility.sidebarUserBar || visibility.sidebarSettingsBtn) && (
             <AccountMenu
               isAdmin={!!auth?.is_admin}
@@ -561,11 +581,11 @@ export function Sidebar({
                 <button
                   type="button"
                   aria-label={t('sidebar.account')}
-                  className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left transition-colors hover:bg-accent/70"
+                  className="flex w-full items-center gap-2 rounded-lg px-2 py-1 text-left transition-colors hover:bg-accent/70"
                 >
-                  <div className="flex size-6 shrink-0 items-center justify-center rounded-full bg-primary/15 text-[11px] font-semibold text-primary">
+                  <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-primary/15 text-[11px] font-semibold text-primary">
                     {initial}
-                  </div>
+                  </span>
                   <span className="min-w-0 flex-1 truncate text-sm">{auth?.username ?? t('sidebar.user')}</span>
                   <ChevronsUpDownIcon className="size-4 shrink-0 text-muted-foreground" />
                 </button>
