@@ -444,7 +444,7 @@ export function Sidebar({
       {/* Header — fixed height in both modes so the nav rows below never shift.
           Expanded: wordmark + collapse toggle. Compact: logo that turns into the
           toggle icon on hover. */}
-      <div className="flex h-12 shrink-0 items-center px-2">
+      <div className={cn('flex h-12 shrink-0 items-center', collapsed ? 'justify-center' : 'px-2')}>
         {collapsed ? (
           <Tooltip label={t('sidebar.expandSidebar')} side="right">
             <button
@@ -475,7 +475,7 @@ export function Sidebar({
       </div>
 
       {/* Primary nav — identical structure in both modes, so the icons hold their place. */}
-      <div className="space-y-0.5 px-2 pt-1">
+      <div className={cn('space-y-0.5 pt-1', collapsed ? 'flex flex-col items-center px-0' : 'px-2')}>
         <NavButton collapsed={collapsed} icon={<SquarePenIcon />} label={t('sidebar.newChat')} onClick={newChat} />
         <NavButton
           collapsed={collapsed}
@@ -547,9 +547,8 @@ export function Sidebar({
       {/* Footer — the account avatar opens a dropdown (Settings / Admin /
           Help / Archive / Account / Log out) instead of the old settings cog. */}
       {collapsed ? (
-        // Same horizontal geometry as the header logo (px-2 container + size-7
-        // button) so the avatar sits directly under the Talos mark.
-        <div className="px-2 pb-2">
+        // Centered in the rail, matching the header logo + nav icon column.
+        <div className="flex justify-center pb-2">
           <AccountMenu
             isAdmin={!!auth?.is_admin}
             authEnabled={auth?.auth_enabled !== false}
