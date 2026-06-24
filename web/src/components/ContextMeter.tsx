@@ -29,18 +29,18 @@ export function ContextMeter() {
   if (!metrics || metrics.context_percent == null) return null;
 
   const maxTokens = metrics.context_length ?? null;
-  // context_tokens is the true context-window occupancy (last round's prompt);
-  // input_tokens sums every agent round, so it overcounts on tool-using turns.
-  // Fall back to input_tokens, then to deriving from the percentage (older
-  // turns without token counts in metadata).
+  // context_tokens is the true context-window occupancy (the last round's full
+  // prompt). We deliberately do NOT fall back to input_tokens: that figure sums
+  // every agent round, so a tool-using turn inflates it to many times the real
+  // window size (e.g. showing 1m used against a 262k window). When context_tokens
+  // is missing (older/estimated turns), derive the count from the backend
+  // percentage so the number and the ring stay consistent.
   const usedTokens =
     metrics.context_tokens != null
       ? metrics.context_tokens
-      : metrics.input_tokens != null
-        ? metrics.input_tokens
-        : maxTokens != null
-          ? Math.round((metrics.context_percent / 100) * maxTokens)
-          : null;
+      : maxTokens != null && metrics.context_percent != null
+        ? Math.round((metrics.context_percent / 100) * maxTokens)
+        : null;
   // Derive the percentage from the same figure we display so the number and
   // the ring never disagree; fall back to the backend's context_percent.
   const rawPercent =

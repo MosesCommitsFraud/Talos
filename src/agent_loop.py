@@ -1109,15 +1109,21 @@ def _compute_final_metrics(
     backend_prefill_tps: float = 0,
 ) -> dict:
     """Compute token counts, TPS, and build the final metrics dict."""
+    # Estimate the size of the final prompt (the whole message list) — used both
+    # as the estimated-usage figure and, crucially, as the context-occupancy
+    # fallback. This is the true single-prompt size, unlike real_input_tokens
+    # which sums every agent round.
+    input_content = ""
+    for msg in messages:
+        if isinstance(msg.get("content"), str):
+            input_content += msg["content"] + "\n"
+    prompt_estimate = len(input_content) // 4
+
     if has_real_usage:
         input_tokens = real_input_tokens
         output_tokens = real_output_tokens
     else:
-        input_content = ""
-        for msg in messages:
-            if isinstance(msg.get("content"), str):
-                input_content += msg["content"] + "\n"
-        input_tokens = len(input_content) // 4
+        input_tokens = prompt_estimate
         output_tokens = len(full_response) // 4
     # Prefer the backend's true generation speed (llama.cpp
     # timings.predicted_per_second) — pure decode, no prefill/tool/network time.
@@ -1128,8 +1134,12 @@ def _compute_final_metrics(
         tps = backend_gen_tps
     else:
         tps = output_tokens / total_duration if total_duration > 0 else 0
-    # Use last round's input tokens for context % (peak usage) when available
-    ctx_tokens = last_round_input_tokens if last_round_input_tokens > 0 else input_tokens
+    # Context occupancy = the last round's prompt (the full conversation sent on
+    # the final turn). NEVER input_tokens here: with real usage that's the sum of
+    # every agent round, so a tool-heavy turn would report several times the real
+    # window size. When the backend gave no per-round breakdown, fall back to the
+    # single-prompt estimate, not the accumulated sum.
+    ctx_tokens = last_round_input_tokens if last_round_input_tokens > 0 else prompt_estimate
     ctx_pct = min(round((ctx_tokens / context_length) * 100, 1), 100.0) if context_length else 0
 
     metrics = {
