@@ -129,7 +129,10 @@ jobs:
 
       - name: Smoke-test that key libraries import
         # Catches breakage from major bumps (weasyprint, pypdf, ipython, …) that
-        # a successful build alone wouldn't surface. Bypass the entrypoint.
+        # a successful build alone wouldn't surface. Invoke the venv python
+        # DIRECTLY: the /usr/local/bin/python symlink doesn't reliably re-activate
+        # the venv, so `python` via PATH would run the bare system interpreter
+        # (no data libs). The agent's shell uses the venv via /etc/profile.d PATH.
         run: >-
-          docker run --rm --entrypoint python talos-sandbox:ci -c
+          docker run --rm --entrypoint /opt/talos-sandbox-venv/bin/python talos-sandbox:ci -c
           "import numpy, pandas, scipy, sklearn, statsmodels, duckdb, weasyprint, pypdf, IPython, pymssql; print('sandbox imports OK')"
