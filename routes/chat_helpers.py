@@ -559,7 +559,6 @@ async def build_chat_context(
     att_ids: list = None,
     use_web=None,
     use_rag=None,
-    use_research=None,
     time_filter=None,
     incognito: bool = False,
     no_memory: bool = False,

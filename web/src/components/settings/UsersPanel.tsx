@@ -25,7 +25,6 @@ import { Input, Switch } from '../ui/misc';
 const PRIV_KEYS: Array<keyof UserPrivileges> = [
   'can_use_agent',
   'can_use_browser',
-  'can_use_bash',
   'can_use_documents',
   'can_use_research',
   'can_generate_images',

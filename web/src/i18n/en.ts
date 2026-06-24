@@ -636,7 +636,6 @@ const en = {
       priv: {
         can_use_agent: 'Agent mode',
         can_use_browser: 'Browser automation',
-        can_use_bash: 'Shell / Python / Files',
         can_use_documents: 'Document editor',
         can_use_research: 'Deep research',
         can_generate_images: 'Image generation',

@@ -286,9 +286,6 @@ def setup_chat_routes(
         session = chat_request.session
         att_ids = chat_request.attachments or []
         use_web = chat_request.use_web
-        # TODO(bug): parsed but never forwarded to chat_helpers (use_research=None
-        # there) — research mode is currently a no-op via this path. See TODO.md.
-        use_research = chat_request.use_research  # noqa: F841
         time_filter = chat_request.time_filter
         preset_id = chat_request.preset_id
 
@@ -404,14 +401,8 @@ def setup_chat_routes(
         session = form_data.get("session")
         attachments = form_data.get("attachments")
         use_web = form_data.get("use_web")
-        # TODO(bug): parsed but never forwarded to chat_helpers — research mode
-        # is a no-op via this path. See TODO.md.
-        use_research = form_data.get("use_research")  # noqa: F841
         time_filter = form_data.get("time_filter")
         preset_id = form_data.get("preset_id")
-        # TODO(bug): parsed but used nowhere in the codebase — bash gating not
-        # wired up. See TODO.md.
-        allow_bash = form_data.get("allow_bash")  # noqa: F841
         allow_web_search = form_data.get("allow_web_search")
         use_rag = form_data.get("use_rag")
         search_context = form_data.get(
@@ -631,10 +622,11 @@ def setup_chat_routes(
 
         # Build disabled-tools set from frontend toggles + user privileges
         disabled_tools = set()
-        # bash is NOT gated by a UI toggle: code runs in an isolated per-chat
-        # sandbox, so the shell is always available (the file-based coding loop
-        # depends on `bash python script.py`). Admins can still withhold it via
-        # the can_use_bash privilege below, and globally via disabled_tools.
+        # bash/python/file tools are available to EVERYONE: code runs in an
+        # isolated per-chat sandbox, so the shell is always on (the file-based
+        # coding loop depends on `bash python script.py`). There is no per-user
+        # privilege gate for it — only the global `disabled_tools` admin setting
+        # below can withhold it instance-wide.
         if str(allow_web_search).lower() != "true":
             disabled_tools.add("web_search")
             disabled_tools.add("web_fetch")
@@ -656,8 +648,8 @@ def setup_chat_routes(
         if _user and hasattr(request.app.state, "auth_manager") and request.app.state.auth_manager:
             _privs = request.app.state.auth_manager.get_privileges(_user)
         if _privs:
-            if not _privs.get("can_use_bash", True):
-                disabled_tools.update({"bash", "python", "run_cell", "read_file", "write_file"})
+            # Note: bash/python/file tools are intentionally NOT gated per-user
+            # (always available — see comment above).
             if not _privs.get("can_use_browser", True):
                 disabled_tools.add("builtin_browser")
             if not _privs.get("can_use_documents", True):
@@ -672,16 +664,12 @@ def setup_chat_routes(
                 _research_flags["do"] = False
             if not _privs.get("can_use_agent", True):
                 # No chat/agent split anymore — this admin restriction now means
-                # "withhold the heavy compute/file/browser tools" rather than
-                # flipping the request into a tool-less chat mode.
+                # "withhold the heavy browser/document tools" rather than
+                # flipping the request into a tool-less chat mode. bash/python/
+                # file tools are deliberately excluded: the shell is available to
+                # everyone (see comment above).
                 disabled_tools.update(
                     {
-                        "bash",
-                        "python",
-                        "run_cell",
-                        "read_file",
-                        "write_file",
-                        "edit_file",
                         "builtin_browser",
                         "create_document",
                         "edit_document",

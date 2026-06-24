@@ -220,7 +220,6 @@ export async function saveFeatures(features: Features): Promise<void> {
 export interface UserPrivileges {
   can_use_agent?: boolean;
   can_use_browser?: boolean;
-  can_use_bash?: boolean;
   can_use_documents?: boolean;
   can_use_research?: boolean;
   can_generate_images?: boolean;

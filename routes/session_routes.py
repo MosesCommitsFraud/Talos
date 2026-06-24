@@ -843,62 +843,6 @@ def setup_session_routes(session_manager: SessionManager, config: dict, webhook_
         finally:
             db.close()
 
-    # TODO(bug): duplicate route — an earlier @router.get("/sessions/archived")
-    # (def list_archived_sessions, ~line 374) shadows this one; FastAPI matches
-    # the first registered, so this paginated/search version never runs. See TODO.md.
-    @router.get("/sessions/archived")
-    def list_archived_sessions(  # noqa: F811
-        request: Request,
-        search: str = "",
-        offset: int = 0,
-        limit: int = 20,
-        sort: str = "recent",
-        model: str = "",
-    ):
-        """List archived sessions for the archive browser."""
-        user = effective_user(request)
-        db = SessionLocal()
-        try:
-            q = db.query(DbSession).filter(DbSession.archived == True)
-            if not user:
-                raise HTTPException(403, "Authentication required")
-            q = q.filter(DbSession.owner == user)
-            if search:
-                safe_search = search.replace("%", r"\%").replace("_", r"\_")
-                q = q.filter(DbSession.name.ilike(f"%{safe_search}%", escape="\\"))
-            if model:
-                # Contains match (mirrors the name filter above). The old
-                # f"%{model}" was a SUFFIX-only match, so filtering by "gpt-4"
-                # dropped "gpt-4o" and over-matched on shared suffixes; it also
-                # left LIKE wildcards in the user value unescaped.
-                safe_model = model.replace("%", r"\%").replace("_", r"\_")
-                q = q.filter(DbSession.model.ilike(f"%{safe_model}%", escape="\\"))
-            total = q.count()
-            sort_map = {
-                "recent": DbSession.updated_at.desc(),
-                "oldest": DbSession.updated_at.asc(),
-                "most-messages": DbSession.message_count.desc().nulls_last(),
-                "alpha": DbSession.name.asc(),
-            }
-            order = sort_map.get(sort, DbSession.updated_at.desc())
-            rows = q.order_by(order).offset(offset).limit(limit).all()
-            sessions = []
-            for s in rows:
-                sessions.append(
-                    {
-                        "id": s.id,
-                        "name": s.name,
-                        "model": s.model,
-                        "message_count": s.message_count or 0,
-                        "created_at": s.created_at.isoformat() if s.created_at else None,
-                        "updated_at": s.updated_at.isoformat() if s.updated_at else None,
-                        "is_important": s.is_important,
-                    }
-                )
-            return {"sessions": sessions, "total": total}
-        finally:
-            db.close()
-
     @router.get("/history/{sid}")
     def get_history(request: Request, sid: str):
         _verify_session_owner(request, sid)

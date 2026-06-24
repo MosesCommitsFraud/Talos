@@ -638,7 +638,6 @@ const de: typeof en = {
       priv: {
         can_use_agent: 'Agenten-Modus',
         can_use_browser: 'Browser-Automatisierung',
-        can_use_bash: 'Shell / Python / Dateien',
         can_use_documents: 'Dokumenteneditor',
         can_use_research: 'Tiefenrecherche',
         can_generate_images: 'Bildgenerierung',
