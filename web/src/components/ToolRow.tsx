@@ -2,10 +2,44 @@ import { CheckIcon, ChevronRightIcon, CircleAlertIcon, LoaderCircleIcon } from '
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { ToolCall } from '@/api/types';
+import { useUi } from '@/state/ui';
 
 export interface ToolImage {
   src: string;
   label?: string;
+}
+
+/** Responsive grid of clickable image thumbnails. Clicking opens the shared
+ *  full-screen lightbox (zoom + download). Labels render centered under each
+ *  image to match the centered thumbnail; pass `showLabels={false}` for the
+ *  end-of-turn recap where the subtitle would just be noise. */
+export function ImageGallery({ images, showLabels = true }: { images: ToolImage[]; showLabels?: boolean }) {
+  const { t } = useTranslation();
+  const openLightbox = useUi((s) => s.openLightbox);
+  if (images.length === 0) return null;
+  return (
+    <div className="grid grid-cols-[repeat(auto-fit,minmax(140px,1fr))] gap-2">
+      {images.map((image, i) => (
+        <figure key={`${image.src.slice(0, 48)}-${i}`} className="m-0 min-w-0">
+          <button
+            type="button"
+            onClick={() => openLightbox(image)}
+            aria-label={image.label || t('messages.toolImage', { n: i + 1 })}
+            className="block w-full cursor-zoom-in rounded-lg transition-opacity hover:opacity-90 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            <img
+              src={image.src}
+              alt={image.label || t('messages.toolImage', { n: i + 1 })}
+              className="max-h-80 w-full rounded-lg object-contain"
+            />
+          </button>
+          {showLabels && image.label && (
+            <figcaption className="mt-1 break-words text-center text-xs text-muted-foreground">{image.label}</figcaption>
+          )}
+        </figure>
+      ))}
+    </div>
+  );
 }
 
 export function toolImages(call: ToolCall): ToolImage[] {
@@ -55,22 +89,7 @@ export function ToolRow({ call, compact = false }: { call: ToolCall; compact?: b
       {(call.image_note || (!compact && images.length > 0)) && (
         <div className="mt-2 ml-1 space-y-1.5">
           {call.image_note && <div className="text-xs text-muted-foreground">{call.image_note}</div>}
-          {!compact && images.length > 0 && (
-            <div className="grid grid-cols-[repeat(auto-fit,minmax(140px,1fr))] gap-2">
-              {images.map((image, i) => (
-                <a
-                  key={`${image.src.slice(0, 48)}-${i}`}
-                  href={image.src}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="min-w-0"
-                >
-                  <img src={image.src} alt={image.label || t('messages.toolImage', { n: i + 1 })} className="max-h-80 w-full rounded-lg object-contain" />
-                  {image.label && <div className="mt-1 truncate text-xs text-muted-foreground">{image.label}</div>}
-                </a>
-              ))}
-            </div>
-          )}
+          {!compact && <ImageGallery images={images} />}
         </div>
       )}
     </div>

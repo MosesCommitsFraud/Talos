@@ -149,6 +149,12 @@ const de: typeof en = {
     stop: 'Generierung stoppen',
     send: 'Nachricht senden',
   },
+  lightbox: {
+    title: 'Bild',
+    zoomIn: 'Vergrößern',
+    zoomOut: 'Verkleinern',
+    download: 'Bild herunterladen',
+  },
   messages: {
     copy: 'Kopieren',
     copied: 'Kopiert',

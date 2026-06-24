@@ -10,6 +10,7 @@ import { SettingsDialog, type Panel, type SettingsScope } from './components/Set
 import { ArchiveDialog } from './components/ArchiveDialog';
 import { HelpDialog } from './components/HelpDialog';
 import { ArtifactsPanel } from './components/ArtifactsPanel';
+import { Lightbox } from './components/Lightbox';
 import { PlanPanel } from './components/PlanPanel';
 import { PendingQuestion } from './components/AskUser';
 import { AuthGate } from './components/auth/AuthGate';
@@ -103,6 +104,7 @@ export default function App() {
           />
           <ArchiveDialog open={archiveOpen} onClose={() => setArchiveOpen(false)} />
           <HelpDialog open={helpOpen} onClose={() => setHelpOpen(false)} />
+          <Lightbox />
         </AuthGate>
       </TooltipProvider>
     </QueryClientProvider>

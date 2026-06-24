@@ -147,6 +147,12 @@ const en = {
     stop: 'Stop generating',
     send: 'Send message',
   },
+  lightbox: {
+    title: 'Image',
+    zoomIn: 'Zoom in',
+    zoomOut: 'Zoom out',
+    download: 'Download image',
+  },
   messages: {
     copy: 'Copy',
     copied: 'Copied',

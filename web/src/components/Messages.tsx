@@ -11,7 +11,7 @@ import { Markdown } from './Markdown';
 import { PlanCard } from './PlanCard';
 import { RagSources } from './RagSources';
 import { Thinking } from './Thinking';
-import { ToolRow, toolImages, type ToolImage } from './ToolRow';
+import { ImageGallery, ToolRow, toolImages, type ToolImage } from './ToolRow';
 import { Tooltip } from './ui/misc';
 import { Button } from './ui/button';
 
@@ -377,6 +377,14 @@ function AssistantTurn({ turn, containsLast, artifactImages }: { turn: UiMessage
       )}
       {proposalMsg && <PlanChip />}
       {planMsg && !proposalMsg && <PlanCard msg={planMsg} />}
+      {/* The tool rows (with their inline images) fold away once the turn
+          settles, so re-surface the images the turn produced here — between the
+          answer and the artifacts button. No subtitles: this is a recap. */}
+      {createdImages.length > 0 && (
+        <div className="mt-3">
+          <ImageGallery images={createdImages} showLabels={false} />
+        </div>
+      )}
       {createdCount > 0 && <ArtifactsButton count={createdCount} />}
       {copyText && (
         <div className="mt-2 flex items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
