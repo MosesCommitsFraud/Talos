@@ -197,23 +197,45 @@ function attachmentsFromMetadata(metadata: Record<string, unknown> | undefined):
   return attachments.length > 0 ? attachments : undefined;
 }
 
-function toolCallsFromMetadata(metadata: Record<string, unknown> | undefined): ToolCall[] | undefined {
+/** A persisted tool event keeps its 1-based agent `round` so cold-loaded turns
+ *  can be split back into the per-round bubbles the live stream produced. */
+type RoundedToolCall = ToolCall & { round?: number };
+
+function mapToolEvent(item: Record<string, unknown>): RoundedToolCall {
+  const exitCode = typeof item.exit_code === 'number' ? item.exit_code : typeof item.exitCode === 'number' ? item.exitCode : undefined;
+  return {
+    ...item,
+    tool: String(item.tool ?? 'tool'),
+    command: item.command != null ? String(item.command) : undefined,
+    output: item.output != null ? String(item.output) : undefined,
+    exitCode,
+    round: typeof item.round === 'number' ? item.round : undefined,
+    status: exitCode == null || exitCode === 0 ? 'done' as const : 'error' as const,
+  };
+}
+
+function toolCallsFromMetadata(metadata: Record<string, unknown> | undefined): RoundedToolCall[] | undefined {
   const raw = metadata?.tool_events;
   if (!Array.isArray(raw)) return undefined;
   const tools = raw
     .filter((item): item is Record<string, unknown> => !!item && typeof item === 'object')
-    .map((item) => {
-      const exitCode = typeof item.exit_code === 'number' ? item.exit_code : typeof item.exitCode === 'number' ? item.exitCode : undefined;
-      return {
-        ...item,
-        tool: String(item.tool ?? 'tool'),
-        command: item.command != null ? String(item.command) : undefined,
-        output: item.output != null ? String(item.output) : undefined,
-        exitCode,
-        status: exitCode == null || exitCode === 0 ? 'done' as const : 'error' as const,
-      };
-    });
+    .map(mapToolEvent);
   return tools.length > 0 ? tools : undefined;
+}
+
+const THINK_RE = /<think(?:ing)?>([\s\S]*?)<\/think(?:ing)?>/gi;
+
+/** Pull inline `<think>` blocks (persisted in round_texts) out of a round's text
+ *  into a separate thinking string, matching how the live stream routes thinking
+ *  deltas into their own field rather than the message body. */
+function splitThinking(text: string): { thinking?: string; content: string } {
+  const thinks: string[] = [];
+  const content = text.replace(THINK_RE, (_match, inner: string) => {
+    const trimmed = inner.trim();
+    if (trimmed) thinks.push(trimmed);
+    return '';
+  }).trim();
+  return { thinking: thinks.join('\n\n') || undefined, content };
 }
 
 function displayUserContent(content: string): string {
@@ -221,6 +243,78 @@ function displayUserContent(content: string): string {
     .split(/\n\s*\[Attachment file available to tools:/)[0]
     .split(/\n\s*\[Attached document:/)[0]
     .trimEnd();
+}
+
+/** A cold-loaded history message. The backend persists a whole multi-round
+ *  agent turn as one assistant row, but keeps `round_texts` (cleaned text per
+ *  round, with inline `<think>`) and tags each tool event with its `round`. We
+ *  use those to rebuild the per-round bubbles the live stream produced, so a
+ *  reopened chat folds the same way it did right after finishing — one thinking
+ *  block + tool rows per round, the final round's text as the answer — instead
+ *  of collapsing into a single bubble with all thinking and tools merged. */
+interface HistoryMessage {
+  role: string;
+  content: string;
+  metadata?: Record<string, unknown>;
+}
+
+function coldLoadMessage(m: HistoryMessage): UiMessage[] {
+  const createdAt = timestampMs(m.metadata?.timestamp as string | undefined) || undefined;
+  if (m.role !== 'assistant') {
+    return [{
+      id: uid(),
+      dbId: m.metadata?._db_id as string | undefined,
+      role: 'user',
+      createdAt,
+      content: displayUserContent(m.content),
+      attachments: attachmentsFromMetadata(m.metadata),
+    }];
+  }
+
+  const dbId = m.metadata?._db_id as string | undefined;
+  const metrics = metricsFromMetadata(m.metadata);
+  const sources = ragSourcesFromMetadata(m.metadata);
+  const tools = toolCallsFromMetadata(m.metadata);
+  const roundTexts = m.metadata?.round_texts;
+
+  // Single-round / no-tool replies don't persist round_texts — keep the flat
+  // one-bubble shape the live stream also produced for them.
+  if (!Array.isArray(roundTexts) || roundTexts.length <= 1) {
+    return [{
+      id: uid(),
+      dbId,
+      role: 'assistant',
+      createdAt,
+      content: m.content,
+      thinking: thinkingFromMetadata(m.metadata),
+      metrics,
+      tools,
+      sources,
+    }];
+  }
+
+  // Multi-round turn: one bubble per round, mirroring the live agent loop. Each
+  // round carries its own thinking + interim text and the tools it ran; the
+  // terminal fields (db id, metrics, RAG sources) land on the last bubble, which
+  // AssistantTurn treats as the turn's answer.
+  const rounds = roundTexts.map((rt) => splitThinking(String(rt ?? '')));
+  const lastIdx = rounds.length - 1;
+  return rounds.map((round, i) => {
+    const roundNum = i + 1;
+    const roundTools = tools?.filter((t) => t.round === roundNum);
+    const terminal = i === lastIdx;
+    return {
+      id: uid(),
+      dbId: terminal ? dbId : undefined,
+      role: 'assistant' as const,
+      createdAt,
+      content: round.content,
+      thinking: round.thinking,
+      tools: roundTools?.length ? roundTools : undefined,
+      metrics: terminal ? metrics : undefined,
+      sources: terminal ? sources : undefined,
+    };
+  });
 }
 
 declare global {
@@ -290,18 +384,7 @@ export const useChat = create<ChatState>((set, get) => {
 
     const messages = (detail.history ?? [])
       .filter((m) => m.role === 'user' || m.role === 'assistant')
-      .map((m) => ({
-        id: uid(),
-        dbId: m.metadata?._db_id,
-        role: m.role as 'user' | 'assistant',
-        createdAt: timestampMs(m.metadata?.timestamp as string | undefined) || undefined,
-        content: m.role === 'user' ? displayUserContent(m.content) : m.content,
-        attachments: m.role === 'user' ? attachmentsFromMetadata(m.metadata) : undefined,
-        thinking: m.role === 'assistant' ? thinkingFromMetadata(m.metadata) : undefined,
-        metrics: m.role === 'assistant' ? metricsFromMetadata(m.metadata) : undefined,
-        tools: m.role === 'assistant' ? toolCallsFromMetadata(m.metadata) : undefined,
-        sources: m.role === 'assistant' ? ragSourcesFromMetadata(m.metadata) : undefined,
-      }));
+      .flatMap((m) => coldLoadMessage(m as HistoryMessage));
     writeRuntime(id, () => ({ ...emptyRuntime(), messages }));
   },
 
