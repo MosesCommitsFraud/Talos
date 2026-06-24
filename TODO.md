@@ -9,6 +9,6 @@ cicd
 docs
 rag pipeline improvements
 update pipeline cicd und andere die wichtig sind?
-contextmeter doesnt show correct thing
+contextmeter doesnt show correct thing - even more wrong???
 datatypes in artifact bar
 skills like .claude

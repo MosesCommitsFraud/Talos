@@ -308,7 +308,7 @@ function AccountMenu({
   const { t } = useTranslation();
   // Slightly roomier rows than the default menu item, to match the account
   // dropdown design (taller hit targets, 18px icons, full-width).
-  const itemCls = 'gap-2.5 rounded-md! px-2.5 py-1 text-[13px] [&_svg]:size-4';
+  const itemCls = 'gap-2.5 rounded-sm! px-2.5 py-1 text-[13px] [&_svg]:size-4';
   // Tooltip must wrap MenuTrigger (not the other way around) so the dropdown's
   // click handler reaches the button — otherwise it won't open in compact mode.
   const triggerNode = <MenuTrigger asChild>{trigger}</MenuTrigger>;
@@ -321,7 +321,7 @@ function AccountMenu({
       ) : (
         triggerNode
       )}
-      <MenuPopup side="top" align="start" sideOffset={6} className="w-60 rounded-lg! p-1">
+      <MenuPopup side="top" align="start" sideOffset={6} className="w-60 rounded-md! p-1">
         <MenuLabel className="truncate px-2.5 pt-1 pb-0.5 text-xs text-foreground/70">{username}</MenuLabel>
         <MenuItem className={itemCls} onSelect={actions.onOpenSettings}>
           <SettingsIcon /> {t('sidebar.menu.settings')}
@@ -436,7 +436,7 @@ export function Sidebar({
   return (
     <nav
       className={cn(
-        'm-2 flex shrink-0 flex-col overflow-hidden rounded-xl border bg-background transition-[width] duration-200 ease-out',
+        'm-2 flex shrink-0 flex-col overflow-hidden rounded-md border bg-background transition-[width] duration-200 ease-out',
         collapsed ? 'w-[3.25rem]' : 'w-64',
       )}
       aria-label={t('sidebar.navLabel')}
@@ -569,7 +569,8 @@ export function Sidebar({
           />
         </div>
       ) : (
-        <div className="border-t px-2 py-1.5">
+        <div className="px-2 pt-1.5 pb-1.5">
+          <div className="mx-1 mb-1 h-px bg-border" />
           {(visibility.sidebarUserBar || visibility.sidebarSettingsBtn) && (
             <AccountMenu
               isAdmin={!!auth?.is_admin}
@@ -580,7 +581,7 @@ export function Sidebar({
                 <button
                   type="button"
                   aria-label={t('sidebar.account')}
-                  className="flex w-full items-center gap-1.5 rounded-md px-2 py-0.5 text-left transition-colors hover:bg-accent/70"
+                  className="flex w-full items-center gap-1.5 rounded-sm px-2 py-1 text-left transition-colors outline-none hover:bg-accent/70 focus-visible:outline-none data-[state=open]:bg-accent/70"
                 >
                   <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-primary/15 text-[10px] font-semibold text-primary">
                     {initial}
