@@ -23,5 +23,11 @@ repos:
       - id: end-of-file-fixer
       - id: check-merge-conflict
       - id: check-yaml
+        # --unsafe: syntax-only check. mkdocs.yml uses pymdownx's
+        # `!!python/name:...` YAML tags, which standard safe-load can't construct.
+        args: [--unsafe]
       - id: check-added-large-files
         args: [--maxkb=1024]
+        # Mermaid is vendored locally for offline rendering (see mkdocs.yml); the
+        # minified bundle is legitimately >1 MB.
+        exclude: ^docs/javascripts/mermaid\.min\.js$

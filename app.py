@@ -86,6 +86,11 @@ app = FastAPI(
     title="Talos",
     description="Self-hosted multi-user AI workspace with isolated per-user sandboxes",
     version="1.0.0",
+    # `/docs` serves the MkDocs documentation site (mounted below), so FastAPI's
+    # built-in interactive API reference is relocated to `/api/docs` / `/api/redoc`.
+    # The raw schema stays at the conventional `/openapi.json`.
+    docs_url="/api/docs",
+    redoc_url="/api/redoc",
 )
 
 # ========= CORS =========
@@ -443,6 +448,19 @@ else:
     logger.warning('web/dist not found — run `npm run build` in web/ ("/" will 503 until built)')
 
 
+# ========= DOCUMENTATION SITE (MkDocs → /docs) =========
+# The static MkDocs build (see mkdocs.yml `site_dir`) is served at /docs. Built
+# with `mkdocs build` locally or in the Docker docs stage. html=True so /docs and
+# nested paths resolve to the right index.html. Mounted only when present so a
+# dev checkout without a build still boots (the link 404s until `mkdocs build`).
+DOCS_BUILD = os.path.join(BASE_DIR, "docs_build")
+if os.path.isfile(os.path.join(DOCS_BUILD, "index.html")):
+    app.mount("/docs", _RevalidatingStatic(directory=DOCS_BUILD, html=True), name="docs")
+    logger.info("Docs site mounted (docs_build) — serving at /docs")
+else:
+    logger.info("docs_build not found — run `mkdocs build` to serve docs at /docs")
+
+
 # ========= GENERATED IMAGES =========
 @app.get("/api/generated-image/{filename}")
 async def serve_generated_image(filename: str, request: Request):
@@ -496,15 +514,11 @@ async def serve_generated_image(filename: str, request: Request):
 
 
 # ========= RAG (vector document RAG) =========
-# VectorRAG (ChromaDB-backed personal-document semantic search). Initialized
-# lazily via get_rag_manager() — returns None if ChromaDB isn't reachable
-# (no server running on the configured host:port), in which case personal-doc
-# routes return a clean 503 instead of busy-retrying every request.
-#
-# Note: this was previously hardcoded off because chromadb 1.4.1 / pydantic
-# 2.12 were mutually incompatible at the time. With the current pins
-# (chromadb 1.5.x + pydantic 2.13.x) the init works and Personal Docs
-# (POST /api/personal/add_directory etc.) is functional again.
+# VectorRAG (Qdrant-backed hybrid personal-document search — see
+# src/rag_vector.py). Initialized lazily via get_rag_manager() — returns None
+# if the RAG backend isn't reachable (e.g. QDRANT_URL unset or Qdrant down), in
+# which case personal-doc routes return a clean 503 instead of busy-retrying
+# every request.
 from src.rag_singleton import get_rag_manager
 
 rag_manager = get_rag_manager()

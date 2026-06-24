@@ -6,7 +6,7 @@ Copilot exposes an OpenAI-compatible API at ``https://api.githubcopilot.com``
 **device flow**: the user authorises a device code in their browser and we
 receive a long-lived ``access_token`` that is sent directly as
 ``Authorization: Bearer <token>`` — there is no separate Copilot-token
-exchange and no refresh (mirrors how editors / opencode talk to Copilot).
+exchange and no refresh (mirrors how editor integrations talk to Copilot).
 
 The only provider-specific wrinkle beyond the bearer token is a handful of
 required request headers (API version, intent, an editor-style User-Agent,
@@ -213,7 +213,7 @@ _IMAGE_PART_TYPES = ("image_url", "input_image", "image")
 def request_flags(messages) -> tuple:
     """Derive ``(agent, vision)`` from an OpenAI-style message list.
 
-    Mirrors opencode's logic:
+    Logic:
       * ``agent`` — the last message is *not* a plain user message (i.e. it's a
         tool result / assistant follow-up), so Copilot should treat the request
         as agent-initiated for request accounting.

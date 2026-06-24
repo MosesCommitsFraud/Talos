@@ -8,6 +8,15 @@ RUN pnpm install --frozen-lockfile
 COPY web/ ./
 RUN pnpm run build
 
+# ---- Stage 1b: build the documentation site (docs/ → docs_build) ----
+FROM python:3.12-slim AS docsbuild
+WORKDIR /docs
+COPY requirements-docs.txt ./
+RUN pip install --no-cache-dir -r requirements-docs.txt
+COPY mkdocs.yml ./
+COPY docs/ ./docs/
+RUN mkdocs build
+
 # ---- Stage 2: the Talos app ----
 FROM python:3.12-slim
 
@@ -48,6 +57,9 @@ COPY . .
 
 # React UI bundle (served at /)
 COPY --from=webbuild /web/dist ./web/dist
+
+# Documentation site (served at /docs)
+COPY --from=docsbuild /docs/docs_build ./docs_build
 
 # Create data directory (mount a volume here for persistence)
 RUN mkdir -p data logs services/cache/search

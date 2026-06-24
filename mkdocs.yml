@@ -1,0 +1,72 @@
+site_name: Talos Docs
+site_description: Self-hosted multi-user AI workspace — architecture, RAG pipeline, and frontend.
+# Served in-app under /docs (see app.py). No site_url is set on purpose: that
+# makes Material emit relative asset/link paths, which keeps the site working
+# when mounted behind the /docs prefix. use_directory_urls keeps links clean.
+docs_dir: docs
+site_dir: docs_build
+use_directory_urls: true
+
+theme:
+  name: material
+  palette:
+    # Talos accent stays #3d87cb (see project memory). Material's named palettes
+    # don't include it, so the brand colour is applied via docs/overrides.css.
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+  features:
+    - navigation.instant
+    - navigation.tracking
+    - navigation.sections
+    - navigation.top
+    - content.code.copy
+    - search.suggest
+    - toc.follow
+
+extra_css:
+  - overrides.css
+
+# Mermaid is vendored locally (not loaded from a CDN) so diagrams render on an
+# offline / self-hosted Talos. See docs/javascripts/mermaid-init.js.
+extra_javascript:
+  - javascripts/mermaid.min.js
+  - javascripts/mermaid-init.js
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.tabbed:
+      alternate_style: true
+
+nav:
+  - Home: index.md
+  - Architecture:
+      - Overview: architecture/overview.md
+      - RAG pipeline: architecture/rag-pipeline.md
+  - Backend:
+      - API reference: backend/api.md
+      - Modules: backend/modules.md
+  - Frontend:
+      - Overview: frontend/overview.md
+      - Components: frontend/components.md

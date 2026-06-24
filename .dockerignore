@@ -43,3 +43,9 @@ timetree*.png
 *_signin_page.png
 *_calendar_view.png
 .gitignore
+# …but the MkDocs source IS needed by the docsbuild stage (mkdocs build).
+# These negations re-include it in the build context (it's excluded above via
+# `docs/` and `*.md`). mkdocs.yml is not ignored, but listed here for clarity.
+!mkdocs.yml
+!docs/
+!docs/**

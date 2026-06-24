@@ -6,6 +6,9 @@ __pycache__/
 dist/
 build/
 !static/js/editor/build/
+# MkDocs static output (built by `mkdocs build`, served by app.py at /docs)
+docs_build/
+web/storybook-static/
 venv/
 .venv/
 *.egg

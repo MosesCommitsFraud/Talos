@@ -1,0 +1,5 @@
+# Documentation site (MkDocs Material). Build-time only — NOT needed at runtime.
+# Build the static site with:  mkdocs build   (output → site_dir in mkdocs.yml)
+# Live preview while writing:  mkdocs serve   (http://127.0.0.1:8000)
+mkdocs-material>=9.5
+pymdown-extensions>=10.7
