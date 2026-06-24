@@ -37,7 +37,11 @@ jobs:
       - name: Ruff format check
         run: ruff format --check .
 
-      - uses: pnpm/action-setup@v4 # version comes from web/package.json "packageManager"
+      - uses: pnpm/action-setup@v4
+        with:
+          # Use the latest pnpm rather than the "packageManager" pin (which lives
+          # in web/, not the repo root, so the action can't auto-detect it).
+          version: latest
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
