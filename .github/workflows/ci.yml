@@ -75,8 +75,14 @@ jobs:
           cache-to: type=gha,mode=max
 
       - name: Run test suite inside the image
-        # Bypass the privilege-dropping entrypoint and run pytest directly.
-        run: docker run --rm --entrypoint pytest talos:ci -q
+        # tests/ is excluded from the image (.dockerignore) to keep it lean, so
+        # mount the repo's tests into the container at runtime — the image still
+        # supplies the installed runtime deps and pyproject.toml config. Bypass
+        # the privilege-dropping entrypoint and run pytest directly.
+        run: >-
+          docker run --rm
+          -v "${{ github.workspace }}/tests:/app/tests:ro"
+          --entrypoint pytest talos:ci -q
 
       - name: Log in to GHCR
         if: github.event_name == 'push'
