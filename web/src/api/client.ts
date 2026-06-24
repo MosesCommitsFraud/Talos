@@ -533,6 +533,9 @@ export interface StreamFlags {
   reasoning?: boolean;
   incognito?: boolean;
   attachments?: string[];
+  /** UI language ("de"/"en") — the backend writes auto-generated session
+   *  titles in this language. */
+  lang?: string;
 }
 
 /**
@@ -558,6 +561,7 @@ export async function streamChat(opts: {
   if (f.useWeb) fd.set('use_web', 'true');
   if (f.reasoning === false) fd.set('reasoning', 'false');
   if (f.incognito) fd.set('incognito', 'true');
+  if (f.lang) fd.set('lang', f.lang);
   if (f.attachments?.length) fd.set('attachments', JSON.stringify(f.attachments));
 
   const tzOffsetMin = -new Date().getTimezoneOffset();

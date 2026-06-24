@@ -127,8 +127,13 @@ def needs_auto_name(name: str) -> bool:
     return False
 
 
-async def auto_name_session(session_manager, sess):
-    """Generate a short title for a session from its first user message."""
+async def auto_name_session(session_manager, sess, lang: str | None = None):
+    """Generate a short title for a session from its first user message.
+
+    `lang` is the UI language ("de"/"en") the title should be written in, so
+    a German UI gets German titles and English gets English. Falls back to the
+    language of the message when unset/unknown.
+    """
     try:
         from src.llm_core import llm_call_async
 
@@ -164,6 +169,16 @@ async def auto_name_session(session_manager, sess):
         if "qwen" in (t_model or "").lower():
             user_prompt = first_msg + " /no_think"
 
+        # Language flag: a German UI should get German titles, English → English.
+        # Anything other than a known language falls back to "match the message".
+        _lang = (lang or "").strip().lower()
+        if _lang.startswith("de"):
+            lang_instruction = " Write the title in German."
+        elif _lang.startswith("en"):
+            lang_instruction = " Write the title in English."
+        else:
+            lang_instruction = " Write the title in the same language as the message."
+
         # max_tokens kept generous so any model that still emits a stray
         # <think> block (despite enable_thinking=False) has headroom for it
         # plus the actual title rather than getting clipped mid-reasoning.
@@ -172,7 +187,7 @@ async def auto_name_session(session_manager, sess):
             t_url,
             t_model,
             [
-                {"role": "system", "content": "Generate a short title (3-6 words, no quotes) for a conversation that starts with this message. Reply with ONLY the title, nothing else. Do NOT include any thinking, reasoning, or explanation — just the title."},
+                {"role": "system", "content": "Generate a short title (3-6 words, no quotes) for a conversation that starts with this message. Reply with ONLY the title, nothing else. Do NOT include any thinking, reasoning, or explanation — just the title." + lang_instruction},
                 {"role": "user", "content": user_prompt},
             ],
             temperature=0.3,
@@ -1089,6 +1104,7 @@ def run_post_response_tasks(
             "user_message": message, "response": full_response[:2000],
         }))
 
-    # Auto-name
-    if needs_auto_name(sess.name):
-        asyncio.create_task(auto_name_session(session_manager, sess))
+    # Auto-name now fires immediately when the message is sent (see the chat
+    # routes, right after build_chat_context) rather than waiting for the full
+    # response — that made titles inconsistent when a stream was interrupted
+    # before reaching this point.

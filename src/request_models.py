@@ -12,7 +12,8 @@ class ChatRequest(BaseModel):
     use_research: Optional[bool] = Field(default=False, description="Enable deep research")
     time_filter: Optional[str] = Field(default=None, description="Time filter for search")
     preset_id: Optional[str] = Field(default=None, description="Preset identifier")
-    
+    lang: Optional[str] = Field(default=None, description="UI language (e.g. 'de'/'en') for auto-generated titles")
+
     @field_validator('message')
     @classmethod
     def clean_message(cls, v):

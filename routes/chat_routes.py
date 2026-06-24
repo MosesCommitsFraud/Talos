@@ -37,6 +37,8 @@ from routes.chat_helpers import (
     filter_used_rag_sources,
     public_rag_sources,
     _enforce_chat_privileges,
+    needs_auto_name,
+    auto_name_session,
 )
 
 logger = logging.getLogger(__name__)
@@ -319,6 +321,13 @@ def setup_chat_routes(
             webhook_manager=webhook_manager,
         )
 
+        # Auto-name immediately now that the user message is in history, so the
+        # title is set even if the response below fails or is interrupted.
+        if needs_auto_name(sess.name):
+            asyncio.create_task(
+                auto_name_session(session_manager, sess, lang=chat_request.lang)
+            )
+
         reply = await llm_call_async(
             sess.endpoint_url,
             sess.model,
@@ -465,6 +474,7 @@ def setup_chat_routes(
                 pass
 
         no_memory = str(form_data.get("no_memory", "")).lower() == "true"
+        ui_lang = (form_data.get("lang") or "").strip()
 
         # Build shared context (stream path uses enhanced_message for context preface)
         ctx = await build_chat_context(
@@ -491,6 +501,13 @@ def setup_chat_routes(
             # _append_no_think_reminder.
             reasoning=reasoning,
         )
+
+        # Auto-name the session immediately — the user message is now in
+        # history, so fire title generation right away instead of waiting for
+        # the response to finish (which left titles inconsistent on interrupted
+        # streams). Background task so it never blocks streaming.
+        if not incognito and not compare_mode and needs_auto_name(sess.name):
+            asyncio.create_task(auto_name_session(session_manager, sess, lang=ui_lang))
 
         _research_flags = {"do": do_research}  # Mutable container for generator scope
 
