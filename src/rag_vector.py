@@ -26,22 +26,45 @@ working. All Haystack imports are lazy so the MIT core stays importable without
 the optional RAG dependencies installed.
 """
 
+import logging
 import os
 import time
-import logging
-from typing import List, Dict, Any, Optional, Set, Tuple
 from pathlib import Path
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 logger = logging.getLogger(__name__)
 
 DEFAULT_FILE_EXTENSIONS: Set[str] = {
     # Plain text / code (read directly, length-split)
-    '.txt', '.md', '.py', '.json', '.yaml', '.yml', '.css', '.js', '.ts',
+    ".txt",
+    ".md",
+    ".py",
+    ".json",
+    ".yaml",
+    ".yml",
+    ".css",
+    ".js",
+    ".ts",
     # Rich documents (Docling parse + HybridChunk)
-    '.csv', '.html', '.xhtml', '.adoc', '.pdf',
-    '.docx', '.pptx', '.xlsx', '.xls', '.epub',
+    ".csv",
+    ".html",
+    ".xhtml",
+    ".adoc",
+    ".pdf",
+    ".docx",
+    ".pptx",
+    ".xlsx",
+    ".xls",
+    ".epub",
     # Images (Docling OCR + layout)
-    '.png', '.jpg', '.jpeg', '.tif', '.tiff', '.bmp', '.webp', '.gif',
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".tif",
+    ".tiff",
+    ".bmp",
+    ".webp",
+    ".gif",
 }
 
 COLLECTION_NAME = "talos_rag"
@@ -133,9 +156,7 @@ class VectorRAG:
                 self._healthy = False
                 return False
 
-            self._sparse_model = (
-                os.getenv("RAG_SPARSE_MODEL", "").strip() or _DEFAULT_SPARSE_MODEL
-            )
+            self._sparse_model = os.getenv("RAG_SPARSE_MODEL", "").strip() or _DEFAULT_SPARSE_MODEL
 
             # Probe the embedding dimension with the SAME Haystack dense embedder
             # that ingestion/search use. Using a separate client (src.embeddings)
@@ -195,7 +216,10 @@ class VectorRAG:
 
             logger.info(
                 "VectorRAG ready (Qdrant hybrid, %s docs, dim=%s, sparse=%s) url=%s",
-                count, self._dim, self._sparse_model, qdrant_url,
+                count,
+                self._dim,
+                self._sparse_model,
+                qdrant_url,
             )
             self._last_error = ""
             self._healthy = True
@@ -211,8 +235,8 @@ class VectorRAG:
         return self._last_error
 
     def _build_store(self, recreate: bool = False):
-        from haystack_integrations.document_stores.qdrant import QdrantDocumentStore
         from haystack.utils import Secret
+        from haystack_integrations.document_stores.qdrant import QdrantDocumentStore
 
         api_key = os.getenv("QDRANT_API_KEY") or ""
         return QdrantDocumentStore(
@@ -221,7 +245,7 @@ class VectorRAG:
             index=COLLECTION_NAME,
             embedding_dim=self._dim or 1024,
             use_sparse_embeddings=True,
-            sparse_idf=True,            # IDF modifier — required for BM25-style sparse
+            sparse_idf=True,  # IDF modifier — required for BM25-style sparse
             recreate_index=recreate,
             return_embedding=False,
             wait_result_from_api=True,
@@ -308,7 +332,9 @@ class VectorRAG:
         if scope:
             conds.append({"field": "meta.scope", "operator": "==", "value": scope})
         if exclude_scopes:
-            conds.append({"field": "meta.scope", "operator": "not in", "value": list(exclude_scopes)})
+            conds.append(
+                {"field": "meta.scope", "operator": "not in", "value": list(exclude_scopes)}
+            )
         if not conds:
             return None
         if len(conds) == 1:
@@ -352,7 +378,9 @@ class VectorRAG:
             # while documents are embedded without one. Applied to the dense
             # query only; the sparse/BM25 side stays on the raw query terms.
             prefix = os.getenv("RAG_QUERY_PREFIX", "")
-            dense = self._dense_text_embedder().run(text=(prefix + query) if prefix else query)["embedding"]
+            dense = self._dense_text_embedder().run(text=(prefix + query) if prefix else query)[
+                "embedding"
+            ]
             sparse = self._sparse_text_embedder().run(text=query)["sparse_embedding"]
             response = self._hybrid_retriever().run(
                 query_embedding=dense,
@@ -390,7 +418,11 @@ class VectorRAG:
             payload: Dict[str, Any] = {"query": query, "documents": docs}
             if model:
                 payload["model"] = model
-            headers = {"Authorization": f"Bearer {os.getenv('RERANK_API_KEY')}"} if os.getenv("RERANK_API_KEY") else {}
+            headers = (
+                {"Authorization": f"Bearer {os.getenv('RERANK_API_KEY')}"}
+                if os.getenv("RERANK_API_KEY")
+                else {}
+            )
             resp = httpx.post(url, json=payload, headers=headers, timeout=20)
             resp.raise_for_status()
             data = resp.json()
@@ -422,10 +454,17 @@ class VectorRAG:
             import httpx
 
             model = os.getenv("RERANK_MODEL", "")
-            payload: Dict[str, Any] = {"query": "alpha", "documents": ["alpha beta", "unrelated gamma"]}
+            payload: Dict[str, Any] = {
+                "query": "alpha",
+                "documents": ["alpha beta", "unrelated gamma"],
+            }
             if model:
                 payload["model"] = model
-            headers = {"Authorization": f"Bearer {os.getenv('RERANK_API_KEY')}"} if os.getenv("RERANK_API_KEY") else {}
+            headers = (
+                {"Authorization": f"Bearer {os.getenv('RERANK_API_KEY')}"}
+                if os.getenv("RERANK_API_KEY")
+                else {}
+            )
             resp = httpx.post(url, json=payload, headers=headers, timeout=20)
             resp.raise_for_status()
             data = resp.json()
@@ -435,10 +474,17 @@ class VectorRAG:
                 "configured": True,
                 "ok": bool(ok),
                 "model": model,
-                "message": "Reranker reachable" if ok else "Reranker response did not include indexed results",
+                "message": "Reranker reachable"
+                if ok
+                else "Reranker response did not include indexed results",
             }
         except Exception as e:
-            return {"configured": True, "ok": False, "model": os.getenv("RERANK_MODEL", ""), "message": str(e)}
+            return {
+                "configured": True,
+                "ok": False,
+                "model": os.getenv("RERANK_MODEL", ""),
+                "message": str(e),
+            }
 
     # ------------------------------------------------------------------
     # Ingestion — Docling HybridChunker → dense+sparse embed → Qdrant
@@ -457,6 +503,7 @@ class VectorRAG:
     def _documents_for_file(self, path: str, meta: Dict[str, Any]):
         """Parse + chunk a single file into Haystack Documents with metadata."""
         from haystack.dataclasses import Document
+
         from src.docling_runtime import is_docling_format
 
         if is_docling_format(path):
@@ -494,28 +541,60 @@ class VectorRAG:
     ) -> Dict[str, Any]:
         """Index an explicit list of ``(path, metadata)`` pairs (uploads)."""
         if not self.healthy:
-            return {"success": False, "indexed_count": 0, "failed_count": 0, "message": "RAG not available"}
+            return {
+                "success": False,
+                "indexed_count": 0,
+                "failed_count": 0,
+                "message": "RAG not available",
+            }
         indexed = 0
         failed = 0
         errors: List[Dict[str, str]] = []
         for fpath, meta in files:
             if cancel_cb and cancel_cb():
-                return {"success": False, "cancelled": True, "indexed_count": indexed, "failed_count": failed, "errors": errors, "message": f"Cancelled after {indexed} chunks"}
+                return {
+                    "success": False,
+                    "cancelled": True,
+                    "indexed_count": indexed,
+                    "failed_count": failed,
+                    "errors": errors,
+                    "message": f"Cancelled after {indexed} chunks",
+                }
             try:
                 docs = self._documents_for_file(fpath, dict(meta or {}))
                 if docs:
                     indexed += self._write_documents(docs)
                 else:
                     failed += 1
-                    errors.append({"file": os.path.basename(fpath), "error": "no extractable text (empty/unsupported file)"})
+                    errors.append(
+                        {
+                            "file": os.path.basename(fpath),
+                            "error": "no extractable text (empty/unsupported file)",
+                        }
+                    )
             except Exception as e:
                 logger.error(f"index {fpath}: {e}")
                 failed += 1
-                errors.append({"file": os.path.basename(fpath), "error": f"{type(e).__name__}: {e}"})
+                errors.append(
+                    {"file": os.path.basename(fpath), "error": f"{type(e).__name__}: {e}"}
+                )
             if progress_cb:
-                progress_cb({"file": fpath, "indexed_count": indexed, "failed_count": failed, "errors": errors})
+                progress_cb(
+                    {
+                        "file": fpath,
+                        "indexed_count": indexed,
+                        "failed_count": failed,
+                        "errors": errors,
+                    }
+                )
         msg = f"Indexed {indexed} chunks" + (f", {failed} file(s) failed" if failed else "")
-        return {"success": True, "indexed_count": indexed, "failed_count": failed, "errors": errors, "message": msg}
+        return {
+            "success": True,
+            "indexed_count": indexed,
+            "failed_count": failed,
+            "errors": errors,
+            "message": msg,
+        }
 
     def index_personal_documents(
         self,
@@ -536,12 +615,12 @@ class VectorRAG:
                 for fname in files:
                     if cancel_cb and cancel_cb():
                         return {
-                            'success': False,
-                            'cancelled': True,
-                            'indexed_count': indexed,
-                            'failed_count': failed,
-                            'errors': errors,
-                            'message': f'Cancelled after indexing {indexed} chunks from {directory}',
+                            "success": False,
+                            "cancelled": True,
+                            "indexed_count": indexed,
+                            "failed_count": failed,
+                            "errors": errors,
+                            "message": f"Cancelled after indexing {indexed} chunks from {directory}",
                         }
                     fpath = os.path.join(root, fname)
                     ext = Path(fname).suffix.lower()
@@ -549,13 +628,13 @@ class VectorRAG:
                         continue
                     try:
                         meta = {
-                            'source': fpath,
-                            'filename': fname,
-                            'directory': root,
-                            'type': ext,
+                            "source": fpath,
+                            "filename": fname,
+                            "directory": root,
+                            "type": ext,
                         }
                         if owner:
-                            meta['owner'] = owner
+                            meta["owner"] = owner
                         docs = self._documents_for_file(fpath, meta)
                         if docs:
                             indexed += self._write_documents(docs)
@@ -564,19 +643,34 @@ class VectorRAG:
                         failed += 1
                         errors.append({"file": fname, "error": f"{type(e).__name__}: {e}"})
                     if progress_cb:
-                        progress_cb({"file": fpath, "indexed_count": indexed, "failed_count": failed, "errors": errors})
+                        progress_cb(
+                            {
+                                "file": fpath,
+                                "indexed_count": indexed,
+                                "failed_count": failed,
+                                "errors": errors,
+                            }
+                        )
 
-            msg = f'Indexed {indexed} chunks from {directory}' + (f', {failed} file(s) failed' if failed else '')
+            msg = f"Indexed {indexed} chunks from {directory}" + (
+                f", {failed} file(s) failed" if failed else ""
+            )
             return {
-                'success': True,
-                'indexed_count': indexed,
-                'failed_count': failed,
-                'errors': errors,
-                'message': msg,
+                "success": True,
+                "indexed_count": indexed,
+                "failed_count": failed,
+                "errors": errors,
+                "message": msg,
             }
         except Exception as e:
             logger.error(f"index_personal_documents {directory}: {e}")
-            return {'success': False, 'indexed_count': indexed, 'failed_count': failed, 'errors': errors, 'message': str(e)}
+            return {
+                "success": False,
+                "indexed_count": indexed,
+                "failed_count": failed,
+                "errors": errors,
+                "message": str(e),
+            }
 
     # ------------------------------------------------------------------
     # Direct text indexing (kept for compatibility)
@@ -676,7 +770,11 @@ class VectorRAG:
             return []
         try:
             _filters = self._build_filters(scope=scope, exclude_scopes=exclude_scopes)
-            chunks = self._store.filter_documents(filters=_filters) if _filters else self._store.filter_documents()
+            chunks = (
+                self._store.filter_documents(filters=_filters)
+                if _filters
+                else self._store.filter_documents()
+            )
             agg: Dict[str, Dict[str, Any]] = {}
             for d in chunks:
                 meta = d.meta or {}
@@ -714,11 +812,17 @@ class VectorRAG:
                 d.id
                 for d in all_docs
                 if isinstance((d.meta or {}).get("source"), str)
-                and (d.meta["source"] == directory or d.meta["source"].startswith(directory + os.sep))
+                and (
+                    d.meta["source"] == directory or d.meta["source"].startswith(directory + os.sep)
+                )
             ]
             if ids:
                 self._store.delete_documents(ids)
-            return {"success": True, "removed_count": len(ids), "message": f"Removed {len(ids)} chunks"}
+            return {
+                "success": True,
+                "removed_count": len(ids),
+                "message": f"Removed {len(ids)} chunks",
+            }
         except Exception as e:
             logger.error(f"remove_directory {directory}: {e}")
             return {"success": False, "message": str(e)}
@@ -739,7 +843,9 @@ class VectorRAG:
             logger.error(f"delete_by_source failed: {e}")
             return 0
 
-    def reindex_directory(self, directory: str, file_extensions: Optional[set] = None) -> Dict[str, Any]:
+    def reindex_directory(
+        self, directory: str, file_extensions: Optional[set] = None
+    ) -> Dict[str, Any]:
         remove_result = self.remove_directory(directory)
         if not remove_result.get("success"):
             return remove_result
@@ -760,4 +866,4 @@ class VectorRAG:
     # ------------------------------------------------------------------
 
     def retrieve(self, query: str, k: int = 5) -> List[str]:
-        return [r['document'] for r in self.search(query, k)]
+        return [r["document"] for r in self.search(query, k)]

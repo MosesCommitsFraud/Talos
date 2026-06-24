@@ -57,6 +57,7 @@ _STATUS_MAP = {
 # Redis / queue plumbing
 # ---------------------------------------------------------------------------
 
+
 def _redis():
     from redis import Redis
 
@@ -102,7 +103,9 @@ def _fresh_rag():
     rs._last_attempt = 0
     rag = rs.get_rag_manager()
     if rag is None:
-        raise RuntimeError(rs.last_init_error() or "RAG system is not available (check Qdrant / embedding config)")
+        raise RuntimeError(
+            rs.last_init_error() or "RAG system is not available (check Qdrant / embedding config)"
+        )
     return rag
 
 
@@ -110,21 +113,25 @@ def _fresh_rag():
 # RQ tasks (executed inside the rag-ingest-worker container)
 # ---------------------------------------------------------------------------
 
+
 def _progress_saver(job):
     def progress(info: Dict[str, Any]) -> None:
         if not job:
             return
-        job.meta.update({
-            "indexed_count": int(info.get("indexed_count") or 0),
-            "failed_count": int(info.get("failed_count") or 0),
-            "current_file": info.get("file", ""),
-            "errors": (info.get("errors") or [])[-10:],
-            "message": "Indexing",
-        })
+        job.meta.update(
+            {
+                "indexed_count": int(info.get("indexed_count") or 0),
+                "failed_count": int(info.get("failed_count") or 0),
+                "current_file": info.get("file", ""),
+                "errors": (info.get("errors") or [])[-10:],
+                "message": "Indexing",
+            }
+        )
         try:
             job.save_meta()
         except Exception:
             pass
+
     return progress
 
 
@@ -138,20 +145,24 @@ def _finalize(job, result: Dict[str, Any]) -> None:
     if errors:
         first = errors[0]
         message = f"{message} — {first.get('file', '')}: {first.get('error', '')}"
-    job.meta.update({
-        "indexed_count": int(result.get("indexed_count") or 0),
-        "failed_count": int(result.get("failed_count") or 0),
-        "current_file": "",
-        "errors": errors,
-        "message": message,
-    })
+    job.meta.update(
+        {
+            "indexed_count": int(result.get("indexed_count") or 0),
+            "failed_count": int(result.get("failed_count") or 0),
+            "current_file": "",
+            "errors": errors,
+            "message": message,
+        }
+    )
     try:
         job.save_meta()
     except Exception:
         pass
 
 
-def ingest_directory_job(directory: str, owner: Optional[str], config_snapshot: Dict[str, Any]) -> Dict[str, Any]:
+def ingest_directory_job(
+    directory: str, owner: Optional[str], config_snapshot: Dict[str, Any]
+) -> Dict[str, Any]:
     from rq import get_current_job
 
     _apply_snapshot(config_snapshot)
@@ -164,7 +175,9 @@ def ingest_directory_job(directory: str, owner: Optional[str], config_snapshot: 
     return result
 
 
-def ingest_files_job(files: List[Tuple[str, Dict[str, Any]]], config_snapshot: Dict[str, Any]) -> Dict[str, Any]:
+def ingest_files_job(
+    files: List[Tuple[str, Dict[str, Any]]], config_snapshot: Dict[str, Any]
+) -> Dict[str, Any]:
     from rq import get_current_job
 
     _apply_snapshot(config_snapshot)
@@ -181,10 +194,13 @@ def ingest_files_job(files: List[Tuple[str, Dict[str, Any]]], config_snapshot: D
 # Enqueue helpers (called by the FastAPI app)
 # ---------------------------------------------------------------------------
 
+
 def start_index_directory(directory: str, owner: Optional[str] = None) -> Dict[str, Any]:
     job = _queue().enqueue(
         "src.rag_worker.ingest_directory_job",
-        directory, owner, _snapshot(),
+        directory,
+        owner,
+        _snapshot(),
         job_timeout=_JOB_TIMEOUT,
         meta={
             "type": "index_directory",
@@ -199,10 +215,13 @@ def start_index_directory(directory: str, owner: Optional[str] = None) -> Dict[s
     return _job_to_dict(job)
 
 
-def start_index_files(files: List[Tuple[str, Dict[str, Any]]], owner: Optional[str] = None) -> Dict[str, Any]:
+def start_index_files(
+    files: List[Tuple[str, Dict[str, Any]]], owner: Optional[str] = None
+) -> Dict[str, Any]:
     job = _queue().enqueue(
         "src.rag_worker.ingest_files_job",
-        list(files), _snapshot(),
+        list(files),
+        _snapshot(),
         job_timeout=_JOB_TIMEOUT,
         meta={
             "type": "index_files",
@@ -221,6 +240,7 @@ def start_index_files(files: List[Tuple[str, Dict[str, Any]]], owner: Optional[s
 # ---------------------------------------------------------------------------
 # Status / control (read by routes/rag_routes.py)
 # ---------------------------------------------------------------------------
+
 
 def _ts(dt) -> Optional[float]:
     return dt.timestamp() if dt else None
@@ -256,7 +276,7 @@ def _job_to_dict(job) -> Dict[str, Any]:
 def list_jobs(limit: int = 20) -> List[Dict[str, Any]]:
     try:
         from rq.job import Job
-        from rq.registry import StartedJobRegistry, FinishedJobRegistry, FailedJobRegistry
+        from rq.registry import FailedJobRegistry, FinishedJobRegistry, StartedJobRegistry
 
         q = _queue()
         conn = q.connection
@@ -334,7 +354,7 @@ def clear_jobs() -> int:
     removed = 0
     try:
         from rq.job import Job
-        from rq.registry import FinishedJobRegistry, FailedJobRegistry
+        from rq.registry import FailedJobRegistry, FinishedJobRegistry
 
         q = _queue()
         conn = q.connection

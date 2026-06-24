@@ -74,11 +74,11 @@ def _normalize_record(rec: dict) -> Optional[dict]:
         or "external"
     )
     similarity = _as_float(
-        rec.get("similarity")
-        if rec.get("similarity") is not None
-        else rec.get("score")
+        rec.get("similarity") if rec.get("similarity") is not None else rec.get("score")
     )
-    rerank_score = _as_float(rec.get("rerank_score") or rec.get("relevance_score") or rec.get("vector_similarity"))
+    rerank_score = _as_float(
+        rec.get("rerank_score") or rec.get("relevance_score") or rec.get("vector_similarity")
+    )
     return {
         "document": document,
         "metadata": {"filename": str(filename), "source": str(filename)},
@@ -115,7 +115,9 @@ class ExternalRagClient:
             logger.warning("External RAG health check failed: %s", e)
             return False
 
-    def search(self, query: str, k: int = 5, owner=None, candidate_k: Optional[int] = None) -> List[Dict[str, Any]]:
+    def search(
+        self, query: str, k: int = 5, owner=None, candidate_k: Optional[int] = None
+    ) -> List[Dict[str, Any]]:
         del owner  # external KB is global, no owner filter
         if not self.configured or not (query or "").strip():
             return []

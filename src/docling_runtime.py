@@ -25,14 +25,28 @@ DOCLING_MISSING = (
 # formats markitdown/pypdf already handle (so Docling supersedes them when
 # installed) plus images, which the legacy text path dropped entirely. Plain
 # text / code / json stay on the cheaper built-in reader.
-DOCLING_EXTS = frozenset({
-    ".pdf",
-    ".docx", ".pptx", ".xlsx",
-    ".html", ".xhtml",
-    ".md", ".adoc", ".asciidoc",
-    ".csv",
-    ".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp", ".webp", ".gif",
-})
+DOCLING_EXTS = frozenset(
+    {
+        ".pdf",
+        ".docx",
+        ".pptx",
+        ".xlsx",
+        ".html",
+        ".xhtml",
+        ".md",
+        ".adoc",
+        ".asciidoc",
+        ".csv",
+        ".png",
+        ".jpg",
+        ".jpeg",
+        ".tif",
+        ".tiff",
+        ".bmp",
+        ".webp",
+        ".gif",
+    }
+)
 
 # DocumentConverter loads ML models (layout, OCR) on first use and is expensive
 # to construct, so we build it once and reuse it across files.

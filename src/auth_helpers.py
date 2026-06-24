@@ -2,12 +2,13 @@
 
 import os
 from typing import Optional
-from fastapi import Request, HTTPException
+
+from fastapi import HTTPException, Request
 
 
 def get_current_user(request: Request) -> Optional[str]:
     """Get current username from request state (set by auth middleware)."""
-    return getattr(request.state, 'current_user', None)
+    return getattr(request.state, "current_user", None)
 
 
 def effective_user(request: Request):

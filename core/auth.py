@@ -4,13 +4,13 @@ Config stored in data/auth.json. Uses bcrypt directly.
 """
 
 import json
+import logging
 import os
 import secrets
 import threading
 import time
-import logging
 from pathlib import Path
-from typing import Optional, Dict, Any, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import bcrypt
 import pyotp
@@ -33,11 +33,12 @@ DEFAULT_PRIVILEGES = {
 }
 
 # Admins get everything
-ADMIN_PRIVILEGES = {k: (True if isinstance(v, bool) else (0 if isinstance(v, int) else [])) for k, v in DEFAULT_PRIVILEGES.items()}
+ADMIN_PRIVILEGES = {
+    k: (True if isinstance(v, bool) else (0 if isinstance(v, int) else []))
+    for k, v in DEFAULT_PRIVILEGES.items()
+}
 
-DEFAULT_AUTH_PATH = os.path.join(
-    Path(__file__).parent.parent, "data", "auth.json"
-)
+DEFAULT_AUTH_PATH = os.path.join(Path(__file__).parent.parent, "data", "auth.json")
 
 # Usernames the auth + middleware layer reserve as internal "synthetic owner"
 # sentinels; they must never belong to a real account. The most dangerous is
@@ -101,8 +102,7 @@ class AuthManager:
                 # mixed-case keys (e.g. via manual edit or a future migration).
                 if "users" in self._config:
                     self._config["users"] = {
-                        k.strip().lower(): v
-                        for k, v in self._config["users"].items()
+                        k.strip().lower(): v for k, v in self._config["users"].items()
                     }
                 logger.info("Auth config loaded")
             else:
@@ -227,8 +227,11 @@ class AuthManager:
         # cookie keeps authenticating.
         revoked = 0
         with self._sessions_lock:
-            to_drop = [tok for tok, sess in self._sessions.items()
-                       if (sess or {}).get("username") == username]
+            to_drop = [
+                tok
+                for tok, sess in self._sessions.items()
+                if (sess or {}).get("username") == username
+            ]
             for tok in to_drop:
                 self._sessions.pop(tok, None)
                 revoked += 1
@@ -237,14 +240,17 @@ class AuthManager:
         # re-checks that the owner still exists, so leaving the rows behind
         # would let a deleted user keep full API access indefinitely.
         try:
-            from core.database import get_db_session, ApiToken
+            from core.database import ApiToken, get_db_session
+
             with get_db_session() as db:
                 removed = db.query(ApiToken).filter(ApiToken.owner == username).delete()
             if removed:
                 logger.info(f"Revoked {removed} API token(s) owned by deleted user '{username}'")
         except Exception:
             logger.warning(f"Failed to revoke API tokens for deleted user '{username}'")
-        logger.info(f"Deleted user '{username}' (by {requesting_user}); revoked {revoked} active session(s)")
+        logger.info(
+            f"Deleted user '{username}' (by {requesting_user}); revoked {revoked} active session(s)"
+        )
         return True
 
     def rename_user(self, old_username: str, new_username: str, requesting_user: str) -> bool:
@@ -255,7 +261,9 @@ class AuthManager:
         if not old_username or not new_username:
             return False
         if new_username in RESERVED_USERNAMES:
-            logger.warning("Refused to rename '%s' into reserved username '%s'", old_username, new_username)
+            logger.warning(
+                "Refused to rename '%s' into reserved username '%s'", old_username, new_username
+            )
             return False
         with self._config_lock:
             if old_username not in self.users:
@@ -264,7 +272,9 @@ class AuthManager:
                 return False
             if not self.users.get(requesting_user, {}).get("is_admin"):
                 return False
-            self._config.setdefault("users", {})[new_username] = self._config["users"].pop(old_username)
+            self._config.setdefault("users", {})[new_username] = self._config["users"].pop(
+                old_username
+            )
             self._save()
 
         renamed_sessions = 0
@@ -276,7 +286,10 @@ class AuthManager:
                     renamed_sessions += 1
         logger.info(
             "Renamed user '%s' -> '%s' (by %s); updated %d active session(s)",
-            old_username, new_username, requesting_user, renamed_sessions,
+            old_username,
+            new_username,
+            requesting_user,
+            renamed_sessions,
         )
         return True
 
@@ -285,7 +298,11 @@ class AuthManager:
 
     def list_users(self) -> List[Dict[str, Any]]:
         return [
-            {"username": u, "is_admin": d.get("is_admin", False), "privileges": self.get_privileges(u)}
+            {
+                "username": u,
+                "is_admin": d.get("is_admin", False),
+                "privileges": self.get_privileges(u),
+            }
             for u, d in self.users.items()
         ]
 
@@ -350,7 +367,9 @@ class AuthManager:
             self._save()
         logger.info(
             "%s user '%s' (by %s)",
-            "Promoted" if make_admin else "Demoted", username, requesting_user,
+            "Promoted" if make_admin else "Demoted",
+            username,
+            requesting_user,
         )
         return True, "ok"
 
@@ -504,7 +523,8 @@ class AuthManager:
         revoked = 0
         with self._sessions_lock:
             to_drop = [
-                token for token, session in self._sessions.items()
+                token
+                for token, session in self._sessions.items()
                 if token != except_token and (session or {}).get("username") == username
             ]
             for token in to_drop:

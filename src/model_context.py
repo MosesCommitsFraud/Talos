@@ -8,7 +8,6 @@ Provides token estimation for context usage tracking.
 import logging
 import sys
 from typing import Dict, List, Optional, Tuple
-
 from urllib.parse import urlparse
 
 import httpx
@@ -16,10 +15,27 @@ import httpx
 logger = logging.getLogger(__name__)
 
 _LOCAL_HOSTS = {"localhost", "127.0.0.1", "0.0.0.0", "::1", "host.docker.internal"}
-_PRIVATE_PREFIXES = ("10.", "172.16.", "172.17.", "172.18.", "172.19.",
-                     "172.20.", "172.21.", "172.22.", "172.23.", "172.24.",
-                     "172.25.", "172.26.", "172.27.", "172.28.", "172.29.",
-                     "172.30.", "172.31.", "192.168.", "100.")
+_PRIVATE_PREFIXES = (
+    "10.",
+    "172.16.",
+    "172.17.",
+    "172.18.",
+    "172.19.",
+    "172.20.",
+    "172.21.",
+    "172.22.",
+    "172.23.",
+    "172.24.",
+    "172.25.",
+    "172.26.",
+    "172.27.",
+    "172.28.",
+    "172.29.",
+    "172.30.",
+    "172.31.",
+    "192.168.",
+    "100.",
+)
 
 
 def _normalize_base_for_compare(url: str) -> str:
@@ -38,7 +54,8 @@ def _configured_endpoint_kind(url: str) -> Optional[str]:
     if "core.database" not in sys.modules:
         return None
     try:
-        from core.database import SessionLocal, ModelEndpoint
+        from core.database import ModelEndpoint, SessionLocal
+
         db = SessionLocal()
         try:
             rows = db.query(ModelEndpoint).filter(ModelEndpoint.is_enabled == True).all()
@@ -55,7 +72,11 @@ def _configured_endpoint_kind(url: str) -> Optional[str]:
                     parsed = urlparse(base)
                     host = (parsed.hostname or "").lower()
                     path = (parsed.path or "").rstrip("/")
-                    if parsed.port != 11434 and "ollama" not in host and (path.endswith("/v1") or "/openai" in path):
+                    if (
+                        parsed.port != 11434
+                        and "ollama" not in host
+                        and (path.endswith("/v1") or "/openai" in path)
+                    ):
                         return "proxy"
                 return "auto"
         finally:
@@ -77,6 +98,7 @@ def _is_local_endpoint(url: str) -> bool:
     except Exception:
         return False
 
+
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
@@ -88,121 +110,104 @@ REQUEST_TIMEOUT = 5
 # Substring matching — use the shortest unique prefix so variants get caught.
 KNOWN_CONTEXT_WINDOWS = {
     # --- Anthropic ---
-    'claude-sonnet-4-5': 200000,
-    'claude-sonnet-4-6': 200000,
-    'claude-sonnet-4': 200000,
-    'claude-opus-4': 200000,
-    'claude-haiku-4': 200000,
-    'claude-haiku-3-5': 200000,
-    'claude-3-5-sonnet': 200000,
-    'claude-3-5-haiku': 200000,
-    'claude-3-opus': 200000,
-    'claude-3-sonnet': 200000,
-    'claude-3-haiku': 200000,
-
+    "claude-sonnet-4-5": 200000,
+    "claude-sonnet-4-6": 200000,
+    "claude-sonnet-4": 200000,
+    "claude-opus-4": 200000,
+    "claude-haiku-4": 200000,
+    "claude-haiku-3-5": 200000,
+    "claude-3-5-sonnet": 200000,
+    "claude-3-5-haiku": 200000,
+    "claude-3-opus": 200000,
+    "claude-3-sonnet": 200000,
+    "claude-3-haiku": 200000,
     # --- OpenAI ---
-    'gpt-5': 400000,
-    'gpt-4.1': 1047576,
-    'gpt-4.1-mini': 1047576,
-    'gpt-4.1-nano': 1047576,
-    'gpt-4o': 128000,
-    'gpt-4o-mini': 128000,
-    'gpt-4-turbo': 128000,
-    'gpt-4': 8192,
-    'gpt-3.5-turbo': 16385,
-    'o1': 200000,
-    'o1-mini': 128000,
-    'o1-pro': 200000,
-    'o3': 200000,
-    'o3-mini': 200000,
-    'o4-mini': 200000,
-
+    "gpt-5": 400000,
+    "gpt-4.1": 1047576,
+    "gpt-4.1-mini": 1047576,
+    "gpt-4.1-nano": 1047576,
+    "gpt-4o": 128000,
+    "gpt-4o-mini": 128000,
+    "gpt-4-turbo": 128000,
+    "gpt-4": 8192,
+    "gpt-3.5-turbo": 16385,
+    "o1": 200000,
+    "o1-mini": 128000,
+    "o1-pro": 200000,
+    "o3": 200000,
+    "o3-mini": 200000,
+    "o4-mini": 200000,
     # --- DeepSeek ---
-    'deepseek-chat': 64000,
-    'deepseek-coder': 64000,
-    'deepseek-reasoner': 64000,
-    'deepseek-r1': 64000,
-    'deepseek-v3': 64000,
-    'deepseek-v2': 64000,
-
+    "deepseek-chat": 64000,
+    "deepseek-coder": 64000,
+    "deepseek-reasoner": 64000,
+    "deepseek-r1": 64000,
+    "deepseek-v3": 64000,
+    "deepseek-v2": 64000,
     # --- Google ---
-    'gemini-2.5-pro': 1048576,
-    'gemini-2.5-flash': 1048576,
-    'gemini-2.0-flash': 1048576,
-    'gemini-1.5-pro': 1048576,
-    'gemini-1.5-flash': 1048576,
-    'gemma-4': 262144,
-    'gemma-3': 128000,
-    'gemma-2': 8192,
-
+    "gemini-2.5-pro": 1048576,
+    "gemini-2.5-flash": 1048576,
+    "gemini-2.0-flash": 1048576,
+    "gemini-1.5-pro": 1048576,
+    "gemini-1.5-flash": 1048576,
+    "gemma-4": 262144,
+    "gemma-3": 128000,
+    "gemma-2": 8192,
     # --- Mistral ---
-    'mistral-large': 128000,
-    'mistral-medium': 32000,
-    'mistral-small': 32000,
-    'mistral-nemo': 128000,
-    'mistral-7b': 32000,
-    'mixtral': 32000,
-    'codestral': 32000,
-    'pixtral': 128000,
-
+    "mistral-large": 128000,
+    "mistral-medium": 32000,
+    "mistral-small": 32000,
+    "mistral-nemo": 128000,
+    "mistral-7b": 32000,
+    "mixtral": 32000,
+    "codestral": 32000,
+    "pixtral": 128000,
     # --- xAI ---
-    'grok-4': 131072,
-    'grok-3': 131072,
-    'grok-2': 131072,
-
+    "grok-4": 131072,
+    "grok-3": 131072,
+    "grok-2": 131072,
     # --- Meta / Llama ---
-    'llama-4': 1048576,
-    'llama-3.3': 131072,
-    'llama-3.2': 131072,
-    'llama-3.1': 131072,
-    'llama-3': 131072,
-
+    "llama-4": 1048576,
+    "llama-3.3": 131072,
+    "llama-3.2": 131072,
+    "llama-3.1": 131072,
+    "llama-3": 131072,
     # --- Qwen ---
-    'qwen3': 131072,
-    'qwen2.5': 131072,
-    'qwen2': 32768,
-    'qwq': 32768,
-
+    "qwen3": 131072,
+    "qwen2.5": 131072,
+    "qwen2": 32768,
+    "qwq": 32768,
     # --- Cohere ---
-    'command-r-plus': 128000,
-    'command-r': 128000,
-    'command-a': 256000,
-
+    "command-r-plus": 128000,
+    "command-r": 128000,
+    "command-a": 256000,
     # --- Perplexity ---
-    'sonar-pro': 200000,
-    'sonar': 128000,
-
+    "sonar-pro": 200000,
+    "sonar": 128000,
     # --- MiniMax ---
-    'minimax': 1000000,
-
+    "minimax": 1000000,
     # --- Moonshot / Kimi ---
-    'moonshot': 128000,
-    'kimi': 128000,
-
+    "moonshot": 128000,
+    "kimi": 128000,
     # --- Microsoft ---
-    'phi-4': 16000,
-    'phi-3': 128000,
-
+    "phi-4": 16000,
+    "phi-3": 128000,
     # --- Nvidia ---
-    'nemotron': 131072,
-
+    "nemotron": 131072,
     # --- Yi ---
-    'yi-large': 32768,
-    'yi-1.5': 16384,
-
+    "yi-large": 32768,
+    "yi-1.5": 16384,
     # --- 01.ai ---
-    'yi-lightning': 16384,
-
+    "yi-lightning": 16384,
     # --- Nous ---
-    'hermes': 131072,
-    'nous-hermes': 131072,
-
+    "hermes": 131072,
+    "nous-hermes": 131072,
     # --- Open community ---
-    'dolphin': 32768,
-    'mythomax': 4096,
-    'wizard': 32768,
-    'openchat': 8192,
-    'solar': 32768,
+    "dolphin": 32768,
+    "mythomax": 4096,
+    "wizard": 32768,
+    "openchat": 8192,
+    "solar": 32768,
 }
 
 # ---------------------------------------------------------------------------
@@ -275,7 +280,11 @@ def _query_context_length(endpoint_url: str, model: str) -> int:
     # Try llama.cpp /slots endpoint first — reports actual serving context
     if _is_local_endpoint(endpoint_url):
         try:
-            base = endpoint_url.split("/v1")[0] if "/v1" in endpoint_url else endpoint_url.rsplit("/", 1)[0]
+            base = (
+                endpoint_url.split("/v1")[0]
+                if "/v1" in endpoint_url
+                else endpoint_url.rsplit("/", 1)[0]
+            )
             r = httpx.get(f"{base}/slots", timeout=REQUEST_TIMEOUT)
             if r.is_success:
                 slots = r.json()
@@ -292,6 +301,7 @@ def _query_context_length(endpoint_url: str, model: str) -> int:
     # picker models are major API models covered by the known-context table, so
     # rely on that instead of a doomed network call.
     from src.copilot import is_copilot_base
+
     if is_copilot_base(endpoint_url):
         if known:
             logger.info(f"Using known context window for {model}: {known}")
@@ -323,7 +333,12 @@ def _query_context_length(endpoint_url: str, model: str) -> int:
                         meta = m.get("meta") or m.get("model_extra") or {}
                         if isinstance(meta, dict):
                             # n_ctx is the actual serving context (set via -c flag in llama.cpp)
-                            for field in ("n_ctx", "context_length", "context_window", "max_model_len"):
+                            for field in (
+                                "n_ctx",
+                                "context_length",
+                                "context_window",
+                                "max_model_len",
+                            ):
                                 val = meta.get(field)
                                 if val and isinstance(val, (int, float)) and val > 0:
                                     api_ctx = int(val)
@@ -337,7 +352,9 @@ def _query_context_length(endpoint_url: str, model: str) -> int:
     if api_ctx and known:
         _is_local = _is_local_endpoint(endpoint_url)
         if _is_local and api_ctx < known:
-            logger.info(f"Local endpoint reports {api_ctx} for {model} (known max: {known}) — using API value")
+            logger.info(
+                f"Local endpoint reports {api_ctx} for {model} (known max: {known}) — using API value"
+            )
             return api_ctx
         result = max(api_ctx, known)
         if api_ctx < known:
@@ -367,8 +384,7 @@ def _flatten_for_tokenize(messages: List[Dict]) -> str:
         content = msg.get("content", "")
         if isinstance(content, list):
             content = " ".join(
-                b.get("text", "") for b in content
-                if isinstance(b, dict) and b.get("text")
+                b.get("text", "") for b in content if isinstance(b, dict) and b.get("text")
             )
         elif not isinstance(content, str):
             content = ""
@@ -392,8 +408,7 @@ def _chat_messages_for_tokenize(messages: List[Dict]) -> List[Dict]:
         content = msg.get("content", "")
         if isinstance(content, list):
             content = " ".join(
-                b.get("text", "") for b in content
-                if isinstance(b, dict) and b.get("text")
+                b.get("text", "") for b in content if isinstance(b, dict) and b.get("text")
             )
         elif not isinstance(content, str):
             content = ""
@@ -426,10 +441,13 @@ def count_tokens_exact(
     flat = _flatten_for_tokenize(messages)
     # Try most-accurate form first, degrade to ones more servers accept.
     payloads = [
-        {"model": model, "messages": _chat_messages_for_tokenize(messages),
-         "add_generation_prompt": True},   # vLLM chat (applies chat template)
-        {"model": model, "prompt": flat},   # vLLM/OpenAI completion form
-        {"content": flat},                  # llama.cpp form
+        {
+            "model": model,
+            "messages": _chat_messages_for_tokenize(messages),
+            "add_generation_prompt": True,
+        },  # vLLM chat (applies chat template)
+        {"model": model, "prompt": flat},  # vLLM/OpenAI completion form
+        {"content": flat},  # llama.cpp form
     ]
     for body in payloads:
         try:

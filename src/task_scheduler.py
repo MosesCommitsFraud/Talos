@@ -3,7 +3,6 @@
 import asyncio
 import json
 import logging
-import re
 import time
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -64,12 +63,15 @@ async def _cached(key: Tuple, ttl: float, fetch: Callable[[], Awaitable[Any]]) -
         raise
 
 
-def compute_next_run(schedule: str, scheduled_time: str,
-                     scheduled_day: int = None,
-                     scheduled_date: datetime = None,
-                     after: datetime = None,
-                     cron_expression: str = None,
-                     tz_name: str = None) -> datetime | None:
+def compute_next_run(
+    schedule: str,
+    scheduled_time: str,
+    scheduled_day: int = None,
+    scheduled_date: datetime = None,
+    after: datetime = None,
+    cron_expression: str = None,
+    tz_name: str = None,
+) -> datetime | None:
     """Compute the next run datetime (stored as naive UTC) based on schedule type.
 
     If `tz_name` is provided (IANA zone, e.g. "America/New_York"), `scheduled_time` /
@@ -109,6 +111,7 @@ def compute_next_run(schedule: str, scheduled_time: str,
     if schedule == "cron" and cron_expression:
         try:
             from croniter import croniter
+
             cron = croniter(cron_expression, now)
             nxt = cron.get_next(datetime)
             if tz is not None and nxt.tzinfo is None:
@@ -172,10 +175,14 @@ def compute_next_run(schedule: str, scheduled_time: str,
             else:
                 next_month = now.replace(month=now.month + 1, day=1)
             try:
-                candidate = next_month.replace(day=day, hour=hour, minute=minute, second=0, microsecond=0)
+                candidate = next_month.replace(
+                    day=day, hour=hour, minute=minute, second=0, microsecond=0
+                )
             except ValueError:
                 if next_month.month == 12:
-                    last = next_month.replace(year=next_month.year + 1, month=1, day=1) - timedelta(days=1)
+                    last = next_month.replace(year=next_month.year + 1, month=1, day=1) - timedelta(
+                        days=1
+                    )
                 else:
                     last = next_month.replace(month=next_month.month + 1, day=1) - timedelta(days=1)
                 candidate = last.replace(hour=hour, minute=minute, second=0, microsecond=0)
@@ -190,6 +197,7 @@ def _resolve_task_timezone(db, task) -> str | None:
         return None
     try:
         from core.database import CrewMember
+
         cm = db.query(CrewMember).filter(CrewMember.id == task.crew_member_id).first()
         if cm and cm.timezone:
             return cm.timezone
@@ -203,26 +211,64 @@ def _resolve_task_timezone(db, task) -> str | None:
 # built-in task the user has altered. schedule "daily" uses scheduled_time;
 # "cron" uses cron_expression.
 HOUSEKEEPING_DEFAULTS = {
-    "tidy_sessions":        {"name": "Chat Sessions Tidy",       "trigger_type": "event", "trigger_event": "session_created", "trigger_count": 5, "schedule": None, "scheduled_time": None, "cron_expression": None, "legacy_names": ["Tidy Chat Sessions"]},
-    "tidy_documents":       {"name": "Documents Tidy",           "trigger_type": "event", "trigger_event": "document_created", "trigger_count": 5, "schedule": None, "scheduled_time": None, "cron_expression": None, "legacy_names": ["Tidy Documents"]},
-    "consolidate_memory":   {"name": "Memory Tidy",              "trigger_type": "event", "trigger_event": "memory_added", "trigger_count": 5, "schedule": None, "scheduled_time": None, "cron_expression": None, "legacy_names": ["Tidy Memory"]},
-    "audit_skills":          {"name": "Skills Audit",             "trigger_type": "event", "trigger_event": "skill_added", "trigger_count": 5, "schedule": None, "scheduled_time": None, "cron_expression": None, "legacy_names": ["Audit Skills"]},
+    "tidy_sessions": {
+        "name": "Chat Sessions Tidy",
+        "trigger_type": "event",
+        "trigger_event": "session_created",
+        "trigger_count": 5,
+        "schedule": None,
+        "scheduled_time": None,
+        "cron_expression": None,
+        "legacy_names": ["Tidy Chat Sessions"],
+    },
+    "tidy_documents": {
+        "name": "Documents Tidy",
+        "trigger_type": "event",
+        "trigger_event": "document_created",
+        "trigger_count": 5,
+        "schedule": None,
+        "scheduled_time": None,
+        "cron_expression": None,
+        "legacy_names": ["Tidy Documents"],
+    },
+    "consolidate_memory": {
+        "name": "Memory Tidy",
+        "trigger_type": "event",
+        "trigger_event": "memory_added",
+        "trigger_count": 5,
+        "schedule": None,
+        "scheduled_time": None,
+        "cron_expression": None,
+        "legacy_names": ["Tidy Memory"],
+    },
+    "audit_skills": {
+        "name": "Skills Audit",
+        "trigger_type": "event",
+        "trigger_event": "skill_added",
+        "trigger_count": 5,
+        "schedule": None,
+        "scheduled_time": None,
+        "cron_expression": None,
+        "legacy_names": ["Audit Skills"],
+    },
 }
 
-RETIRED_HOUSEKEEPING_ACTIONS = frozenset({
-    "tidy_calendar",
-    "tidy_email_inbox",
-    "mark_email_boundaries",
-    # Email/calendar/notes features removed from this build — retire any
-    # previously seeded rows on startup.
-    "summarize_emails",
-    "draft_email_replies",
-    "extract_email_events",
-    "classify_events",
-    "check_email_urgency",
-    "daily_brief",
-    "learn_sender_signatures",
-})
+RETIRED_HOUSEKEEPING_ACTIONS = frozenset(
+    {
+        "tidy_calendar",
+        "tidy_email_inbox",
+        "mark_email_boundaries",
+        # Email/calendar/notes features removed from this build — retire any
+        # previously seeded rows on startup.
+        "summarize_emails",
+        "draft_email_replies",
+        "extract_email_events",
+        "classify_events",
+        "check_email_urgency",
+        "daily_brief",
+        "learn_sender_signatures",
+    }
+)
 
 
 class TaskScheduler:
@@ -252,6 +298,7 @@ class TaskScheduler:
             return
         try:
             from core.database import SessionLocal, TaskRun
+
             db = SessionLocal()
             try:
                 run = db.query(TaskRun).filter(TaskRun.id == run_id).first()
@@ -263,10 +310,13 @@ class TaskScheduler:
         except Exception:
             logger.debug("Task progress update failed", exc_info=True)
 
-    def _mark_run_aborted(self, task_id: str, run_id: str | None = None, message: str = "Stopped by user") -> bool:
+    def _mark_run_aborted(
+        self, task_id: str, run_id: str | None = None, message: str = "Stopped by user"
+    ) -> bool:
         """Mark an active run as aborted. Used by stop/cancel paths."""
         try:
             from core.database import SessionLocal, TaskRun
+
             db = SessionLocal()
             try:
                 q = db.query(TaskRun)
@@ -292,20 +342,24 @@ class TaskScheduler:
             logger.debug("Task abort marker failed for %s", task_id, exc_info=True)
             return False
 
-    def add_notification(self, task_name: str, status: str, task_id: str = None, owner: str = None, body: str = None):
+    def add_notification(
+        self, task_name: str, status: str, task_id: str = None, owner: str = None, body: str = None
+    ):
         """Store a notification about a completed task run. Tagged with the
         task's owner so `pop_notifications` can return only that user's
         notifications and prevent cross-tenant drain. `body` is the result
         text — populated when output_target='notification' so the client can
         show a rich browser Notification, not just a toast."""
-        self._pending_notifications.append({
-            "task_name": task_name,
-            "status": status,
-            "task_id": task_id,
-            "owner": owner,
-            "body": (body[:500] + "…") if body and len(body) > 500 else body,
-            "timestamp": _utcnow().isoformat() + "Z",
-        })
+        self._pending_notifications.append(
+            {
+                "task_name": task_name,
+                "status": status,
+                "task_id": task_id,
+                "owner": owner,
+                "body": (body[:500] + "…") if body and len(body) > 500 else body,
+                "timestamp": _utcnow().isoformat() + "Z",
+            }
+        )
         # Cap at 50 to avoid unbounded growth
         if len(self._pending_notifications) > 50:
             self._pending_notifications = self._pending_notifications[-50:]
@@ -341,14 +395,13 @@ class TaskScheduler:
         # _executing in-memory set forgets them, so the UI shows phantoms.
         try:
             from core.database import SessionLocal, TaskRun
+
             db = SessionLocal()
             try:
                 # Zombies from a prior server crash. Tagged "aborted" (not
                 # "error") so the Activity view + error-rate stats don't
                 # falsely blame the task for what was an infrastructure event.
-                stale = db.query(TaskRun).filter(
-                    TaskRun.status.in_(("running", "queued"))
-                ).all()
+                stale = db.query(TaskRun).filter(TaskRun.status.in_(("running", "queued"))).all()
                 if stale:
                     now = _utcnow()
                     for r in stale:
@@ -368,15 +421,21 @@ class TaskScheduler:
         # in-process _executing set, and the same overdue task fires once per
         # poll until it completes.
         try:
-            from core.database import SessionLocal as _SL, ScheduledTask as _ST
+            from core.database import ScheduledTask as _ST
+            from core.database import SessionLocal as _SL
+
             db = _SL()
             try:
                 now = _utcnow()
-                overdue = db.query(_ST).filter(
-                    _ST.status == "active",
-                    _ST.next_run.isnot(None),
-                    _ST.next_run < now,
-                ).all()
+                overdue = (
+                    db.query(_ST)
+                    .filter(
+                        _ST.status == "active",
+                        _ST.next_run.isnot(None),
+                        _ST.next_run < now,
+                    )
+                    .all()
+                )
                 if overdue:
                     for t in overdue:
                         t.next_run = now + timedelta(seconds=60)
@@ -396,33 +455,52 @@ class TaskScheduler:
         # the synthetic-owner seeding bug (we cleaned a manual instance of
         # it, but a stale code path or DB import could recreate it).
         try:
-            from core.database import SessionLocal, CrewMember, ScheduledTask
+            from core.database import CrewMember, ScheduledTask, SessionLocal
+
             db = SessionLocal()
             try:
                 from sqlalchemy import func
-                groups = db.query(CrewMember.owner, func.count(CrewMember.id).label("n")).filter(
-                    CrewMember.is_default_assistant == True,  # noqa: E712
-                ).group_by(CrewMember.owner).having(func.count(CrewMember.id) > 1).all()
-                for owner, n in groups:
-                    rows = db.query(CrewMember).filter(
-                        CrewMember.owner == owner,
+
+                groups = (
+                    db.query(CrewMember.owner, func.count(CrewMember.id).label("n"))
+                    .filter(
                         CrewMember.is_default_assistant == True,  # noqa: E712
-                    ).order_by(CrewMember.created_at.asc()).all()
+                    )
+                    .group_by(CrewMember.owner)
+                    .having(func.count(CrewMember.id) > 1)
+                    .all()
+                )
+                for owner, n in groups:
+                    rows = (
+                        db.query(CrewMember)
+                        .filter(
+                            CrewMember.owner == owner,
+                            CrewMember.is_default_assistant == True,  # noqa: E712
+                        )
+                        .order_by(CrewMember.created_at.asc())
+                        .all()
+                    )
                     keep = rows[0]
                     losers = rows[1:]
                     loser_ids = [r.id for r in losers]
                     # Delete the orphaned tasks tied to the loser crews — they
                     # are duplicates of the keeper's check-ins.
-                    n_tasks = db.query(ScheduledTask).filter(
-                        ScheduledTask.crew_member_id.in_(loser_ids)
-                    ).delete(synchronize_session=False)
+                    n_tasks = (
+                        db.query(ScheduledTask)
+                        .filter(ScheduledTask.crew_member_id.in_(loser_ids))
+                        .delete(synchronize_session=False)
+                    )
                     for r in losers:
                         db.delete(r)
                     db.commit()
                     logger.warning(
                         "Default-assistant dedupe: owner=%r had %d rows, kept %s, "
                         "dropped %d crew + %d orphan tasks",
-                        owner, n, keep.id, len(losers), n_tasks,
+                        owner,
+                        n,
+                        keep.id,
+                        len(losers),
+                        n_tasks,
                     )
             finally:
                 db.close()
@@ -437,14 +515,19 @@ class TaskScheduler:
         # tasks land. Helps spot "all my tasks fire at 9am" patterns the user
         # may want to spread out.
         try:
-            from core.database import SessionLocal, ScheduledTask
+            from core.database import ScheduledTask, SessionLocal
+
             db = SessionLocal()
             try:
-                rows = db.query(ScheduledTask).filter(
-                    ScheduledTask.status == "active",
-                    ScheduledTask.trigger_type == "schedule",
-                    ScheduledTask.next_run.isnot(None),
-                ).all()
+                rows = (
+                    db.query(ScheduledTask)
+                    .filter(
+                        ScheduledTask.status == "active",
+                        ScheduledTask.trigger_type == "schedule",
+                        ScheduledTask.next_run.isnot(None),
+                    )
+                    .all()
+                )
                 buckets: Dict[str, list] = {}
                 for r in rows:
                     if not r.next_run:
@@ -482,13 +565,20 @@ class TaskScheduler:
             # slept the full minute; now the loop wakes near the boundary.
             sleep_for = 60.0
             try:
-                from core.database import SessionLocal as _SL, ScheduledTask as _ST
+                from core.database import ScheduledTask as _ST
+                from core.database import SessionLocal as _SL
+
                 _db = _SL()
                 try:
-                    next_run = _db.query(_ST.next_run).filter(
-                        _ST.status == "active",
-                        _ST.next_run.isnot(None),
-                    ).order_by(_ST.next_run.asc()).first()
+                    next_run = (
+                        _db.query(_ST.next_run)
+                        .filter(
+                            _ST.status == "active",
+                            _ST.next_run.isnot(None),
+                        )
+                        .order_by(_ST.next_run.asc())
+                        .first()
+                    )
                     if next_run and next_run[0]:
                         delta = (next_run[0] - _utcnow()).total_seconds()
                         sleep_for = max(1.0, min(60.0, delta))
@@ -499,7 +589,8 @@ class TaskScheduler:
             await asyncio.sleep(sleep_for)
 
     async def _check_due_tasks(self):
-        from core.database import SessionLocal, ScheduledTask
+        from core.database import ScheduledTask, SessionLocal
+
         db = SessionLocal()
         try:
             now = _utcnow()
@@ -507,11 +598,15 @@ class TaskScheduler:
                 # Snapshot under the lock so we don't race with mid-iteration adds.
                 executing_snapshot = set(self._executing)
                 # Scheduled tasks and deferred event tasks both use next_run.
-                due = db.query(ScheduledTask).filter(
-                    ScheduledTask.status == "active",
-                    ScheduledTask.next_run <= now,
-                    ScheduledTask.id.notin_(executing_snapshot) if executing_snapshot else True,
-                ).all()
+                due = (
+                    db.query(ScheduledTask)
+                    .filter(
+                        ScheduledTask.status == "active",
+                        ScheduledTask.next_run <= now,
+                        ScheduledTask.id.notin_(executing_snapshot) if executing_snapshot else True,
+                    )
+                    .all()
+                )
                 to_dispatch = []
                 for task in due:
                     if task.id in self._executing:
@@ -523,12 +618,15 @@ class TaskScheduler:
         finally:
             db.close()
 
-    async def _execute_task(self, task_id: str, *, bypass_model_slot: bool = False, release_executing: bool = True):
+    async def _execute_task(
+        self, task_id: str, *, bypass_model_slot: bool = False, release_executing: bool = True
+    ):
         # Create the run record with status="queued" BEFORE waiting on the
         # semaphore so the UI can show that a manually-triggered task is in
         # line behind another. Once we acquire the slot, flip to "running"
         # and hand off to _execute_task_locked.
         from core.database import SessionLocal, TaskRun
+
         current = asyncio.current_task()
         if current:
             self._task_handles[task_id] = current
@@ -551,11 +649,15 @@ class TaskScheduler:
 
         try:
             if bypass_model_slot or not self._task_needs_model_slot(task_id):
-                await self._execute_task_locked(task_id, run_id, release_executing=release_executing)
+                await self._execute_task_locked(
+                    task_id, run_id, release_executing=release_executing
+                )
                 return
 
             async with self._run_semaphore:
-                await self._execute_task_locked(task_id, run_id, release_executing=release_executing)
+                await self._execute_task_locked(
+                    task_id, run_id, release_executing=release_executing
+                )
         except asyncio.CancelledError:
             # If cancellation happens while queued behind the semaphore,
             # _execute_task_locked never runs and cannot update the Activity row.
@@ -569,8 +671,10 @@ class TaskScheduler:
                 async with self._executing_lock:
                     self._executing.discard(task_id)
 
-    async def _execute_task_locked(self, task_id: str, run_id: str, *, release_executing: bool = True):
-        from core.database import SessionLocal, ScheduledTask, TaskRun
+    async def _execute_task_locked(
+        self, task_id: str, run_id: str, *, release_executing: bool = True
+    ):
+        from core.database import ScheduledTask, SessionLocal, TaskRun
 
         db = SessionLocal()
         try:
@@ -582,7 +686,9 @@ class TaskScheduler:
                 if stale and stale.status == "queued":
                     stale.status = "skipped"
                     stale.finished_at = _utcnow()
-                    stale.error = f"Task no longer active (status={task.status if task else 'deleted'})"
+                    stale.error = (
+                        f"Task no longer active (status={task.status if task else 'deleted'})"
+                    )
                     db.commit()
                 return
 
@@ -632,7 +738,9 @@ class TaskScheduler:
                 if getattr(self, "_last_run_model", None):
                     run.model = self._last_run_model
                 if run.status == "success":
-                    await self._deliver_task_result(task, result, db, model=getattr(self, "_last_run_model", None))
+                    await self._deliver_task_result(
+                        task, result, db, model=getattr(self, "_last_run_model", None)
+                    )
             except TaskDeferred as defer:
                 count = self._task_defer_counts.get(task_id, 0) + 1
                 self._task_defer_counts[task_id] = count
@@ -642,7 +750,10 @@ class TaskScheduler:
                 when = _utcnow() + timedelta(seconds=delay_seconds)
                 logger.info(
                     "Task '%s' deferred for %ss after %s quiet-window hit(s): %s",
-                    task.name, delay_seconds, count, defer,
+                    task.name,
+                    delay_seconds,
+                    count,
+                    defer,
                 )
                 run_obj = db.query(TaskRun).filter(TaskRun.id == run_id).first()
                 if run_obj:
@@ -661,8 +772,10 @@ class TaskScheduler:
                 task.last_run = _utcnow()
                 if (task.trigger_type or "schedule") == "schedule":
                     task.next_run = compute_next_run(
-                        task.schedule, task.scheduled_time,
-                        task.scheduled_day, task.scheduled_date,
+                        task.schedule,
+                        task.scheduled_time,
+                        task.scheduled_day,
+                        task.scheduled_date,
                         after=_utcnow(),
                         cron_expression=task.cron_expression,
                         tz_name=_resolve_task_timezone(db, task),
@@ -684,8 +797,10 @@ class TaskScheduler:
                 task.last_run = _utcnow()
                 if (task.trigger_type or "schedule") == "schedule":
                     task.next_run = compute_next_run(
-                        task.schedule, task.scheduled_time,
-                        task.scheduled_day, task.scheduled_date,
+                        task.schedule,
+                        task.scheduled_time,
+                        task.scheduled_day,
+                        task.scheduled_date,
                         after=_utcnow(),
                         cron_expression=task.cron_expression,
                         tz_name=_resolve_task_timezone(db, task),
@@ -705,8 +820,10 @@ class TaskScheduler:
             # Compute next run only for schedule-triggered tasks
             if (task.trigger_type or "schedule") == "schedule":
                 task.next_run = compute_next_run(
-                    task.schedule, task.scheduled_time,
-                    task.scheduled_day, task.scheduled_date,
+                    task.schedule,
+                    task.scheduled_time,
+                    task.scheduled_day,
+                    task.scheduled_date,
                     after=_utcnow(),
                     cron_expression=task.cron_expression,
                     tz_name=_resolve_task_timezone(db, task),
@@ -723,9 +840,8 @@ class TaskScheduler:
             # defaults to True at column level), but skip when the user has
             # explicitly turned them off for this task — quiets chatty
             # housekeeping cron tasks without disabling them entirely.
-            should_notify = (
-                (task.task_type or "llm") in {"llm", "research"}
-                and getattr(task, "notifications_enabled", True)
+            should_notify = (task.task_type or "llm") in {"llm", "research"} and getattr(
+                task, "notifications_enabled", True
             )
             if should_notify:
                 self.add_notification(
@@ -789,8 +905,10 @@ class TaskScheduler:
                     task_obj.last_run = _utcnow()
                     try:
                         task_obj.next_run = compute_next_run(
-                            task_obj.schedule, task_obj.scheduled_time,
-                            task_obj.scheduled_day, task_obj.scheduled_date,
+                            task_obj.schedule,
+                            task_obj.scheduled_time,
+                            task_obj.scheduled_day,
+                            task_obj.scheduled_date,
                             after=_utcnow(),
                             cron_expression=task_obj.cron_expression,
                             tz_name=_resolve_task_timezone(db, task_obj),
@@ -804,20 +922,29 @@ class TaskScheduler:
                     # "running" forever AND next_run stays in the past, so the
                     # scheduler busy-loops dispatching the same task every tick
                     # until restart. Force the recovery in a fresh session.
-                    logger.warning("Task %s error-path commit failed: %s — falling back", task_id, commit_err)
+                    logger.warning(
+                        "Task %s error-path commit failed: %s — falling back", task_id, commit_err
+                    )
                     try:
                         db.rollback()
                     except Exception:
                         pass
                     from datetime import timedelta as _td
+
                     _recover_db = SessionLocal()
                     try:
                         _r = _recover_db.query(TaskRun).filter(TaskRun.id == run_id).first()
                         if _r and _r.status in ("running", "queued"):
                             _r.status = "aborted"
-                            _r.error = f"commit_failed: {type(commit_err).__name__}: {commit_err}"[:2000]
+                            _r.error = f"commit_failed: {type(commit_err).__name__}: {commit_err}"[
+                                :2000
+                            ]
                             _r.finished_at = _utcnow()
-                        _t = _recover_db.query(ScheduledTask).filter(ScheduledTask.id == task_id).first()
+                        _t = (
+                            _recover_db.query(ScheduledTask)
+                            .filter(ScheduledTask.id == task_id)
+                            .first()
+                        )
                         if _t and (_t.trigger_type or "schedule") == "schedule":
                             # Push next_run forward 5min as a safe stall so the
                             # scheduler doesn't immediately re-dispatch.
@@ -825,7 +952,9 @@ class TaskScheduler:
                             _t.last_run = _utcnow()
                         _recover_db.commit()
                     except Exception as recover_err:
-                        logger.error("Task %s recovery commit ALSO failed: %s", task_id, recover_err)
+                        logger.error(
+                            "Task %s recovery commit ALSO failed: %s", task_id, recover_err
+                        )
                     finally:
                         _recover_db.close()
             except Exception:
@@ -839,29 +968,31 @@ class TaskScheduler:
                 async with self._executing_lock:
                     self._executing.discard(task_id)
 
-
-
     # Built-in housekeeping actions whose output is pure infra (no user-facing
     # content) — don't pollute the assistant chat session with their summaries.
     # Activity log already carries everything the user needs.
-    _SILENT_ACTIONS = frozenset({
-        "tidy_sessions",
-        "tidy_documents",
-        "consolidate_memory",
-        "test_skills",
-        "audit_skills",
-    })
+    _SILENT_ACTIONS = frozenset(
+        {
+            "tidy_sessions",
+            "tidy_documents",
+            "consolidate_memory",
+            "test_skills",
+            "audit_skills",
+        }
+    )
 
-    _MODEL_BACKED_ACTIONS = frozenset({
-        "test_skills",
-        "audit_skills",
-        "consolidate_memory",
-    })
+    _MODEL_BACKED_ACTIONS = frozenset(
+        {
+            "test_skills",
+            "audit_skills",
+            "consolidate_memory",
+        }
+    )
 
     def _task_needs_model_slot(self, task_id: str) -> bool:
         """Only LLM/research/model-backed actions should wait in the model
         queue. Pure housekeeping actions can run immediately."""
-        from core.database import SessionLocal, ScheduledTask
+        from core.database import ScheduledTask, SessionLocal
 
         db = SessionLocal()
         try:
@@ -884,6 +1015,7 @@ class TaskScheduler:
         if (getattr(task, "action", "") or "") in self._SILENT_ACTIONS:
             return
         from src.assistant_log import log_to_assistant
+
         log_to_assistant(
             task.owner,
             result_text[:1000],
@@ -899,6 +1031,7 @@ class TaskScheduler:
             return f"Unknown action: {task.action}", False
 
         from src.builtin_actions import TaskNoop
+
         try:
             # Pass task prompt as script/command for ssh_command/run_script actions.
             def _progress(message: str):
@@ -906,7 +1039,9 @@ class TaskScheduler:
 
             kwargs = {"owner": task.owner, "task_name": task.name, "progress_cb": _progress}
             if task.action in ("run_script", "run_local", "ssh_command") and task.prompt:
-                kwargs["script" if task.action in ("run_script", "run_local") else "command"] = task.prompt
+                kwargs["script" if task.action in ("run_script", "run_local") else "command"] = (
+                    task.prompt
+                )
             result, success = await action_fn(**kwargs)
             return result, success
         except TaskNoop:
@@ -921,29 +1056,50 @@ class TaskScheduler:
     # a check-in source. Add new patterns here to support new integrations —
     # no code changes needed elsewhere.
     CHECKIN_MCP_PATTERNS = [
-        {"detect": "list_emails",   "section": "Email",    "tool": "list_emails",
-         "args": {"mailbox": "INBOX", "limit": 10, "unread_only": True},
-         "label_from_identity": True,
-         "formatter": "_format_email_output"},
-        {"detect": "search_emails", "section": "Email",    "tool": "search_emails",
-         "args": {"query": "is:unread", "limit": 10},
-         "label_from_identity": True,
-         "formatter": "_format_email_output"},
-        {"detect": "get_feed",      "section": "RSS",      "tool": "get_feed",
-         "args": {},
-         "label_from_identity": False},
-        {"detect": "list_feeds",    "section": "RSS",      "tool": "list_feeds",
-         "args": {},
-         "label_from_identity": False},
-        {"detect": "list_messages", "section": "Messages", "tool": "list_messages",
-         "args": {"limit": 10},
-         "label_from_identity": True},
+        {
+            "detect": "list_emails",
+            "section": "Email",
+            "tool": "list_emails",
+            "args": {"mailbox": "INBOX", "limit": 10, "unread_only": True},
+            "label_from_identity": True,
+            "formatter": "_format_email_output",
+        },
+        {
+            "detect": "search_emails",
+            "section": "Email",
+            "tool": "search_emails",
+            "args": {"query": "is:unread", "limit": 10},
+            "label_from_identity": True,
+            "formatter": "_format_email_output",
+        },
+        {
+            "detect": "get_feed",
+            "section": "RSS",
+            "tool": "get_feed",
+            "args": {},
+            "label_from_identity": False,
+        },
+        {
+            "detect": "list_feeds",
+            "section": "RSS",
+            "tool": "list_feeds",
+            "args": {},
+            "label_from_identity": False,
+        },
+        {
+            "detect": "list_messages",
+            "section": "Messages",
+            "tool": "list_messages",
+            "args": {"limit": 10},
+            "label_from_identity": True,
+        },
     ]
 
     @staticmethod
     def _format_email_output(raw: str) -> str:
         """Clean up raw MCP email list output into readable format."""
         import re as _re
+
         lines = []
         for line in raw.split("\n"):
             line = line.strip()
@@ -956,40 +1112,43 @@ class TaskScheduler:
             if "page" in line.lower() and "/" in line:
                 continue
             # Parse: [1778] Re: Subject From: Name | Date
-            m = _re.match(r'\[?\d+\]?\s*(?:↩️\s*|📎\s*|🔵\s*|⭐\s*)?(.+?)(?:\s*From:\s*(.+?))?(?:\s*\|\s*(\S+))?$', line)
+            m = _re.match(
+                r"\[?\d+\]?\s*(?:↩️\s*|📎\s*|🔵\s*|⭐\s*)?(.+?)(?:\s*From:\s*(.+?))?(?:\s*\|\s*(\S+))?$",
+                line,
+            )
             if m:
-                subject = m.group(1).strip().rstrip('|').strip()
-                sender = (m.group(2) or "").strip().rstrip('|').strip()
+                subject = m.group(1).strip().rstrip("|").strip()
+                sender = (m.group(2) or "").strip().rstrip("|").strip()
                 if sender:
                     lines.append(f"- {sender} — {subject}")
                 else:
                     lines.append(f"- {subject}")
             elif line.startswith("[") or line.startswith("-"):
                 # Generic cleanup
-                cleaned = _re.sub(r'^\[?\d+\]?\s*(?:↩️\s*|📎\s*)?', '', line.lstrip('- '))
+                cleaned = _re.sub(r"^\[?\d+\]?\s*(?:↩️\s*|📎\s*)?", "", line.lstrip("- "))
                 if cleaned.strip():
                     lines.append(f"- {cleaned.strip()}")
         if not lines:
             return "No unread emails"
         return "\n".join(lines[:10])
 
-    async def _execute_checkin(self, task, crew, db, session_id: str,
-                               endpoint_url: str, model: str) -> str:
+    async def _execute_checkin(
+        self, task, crew, db, session_id: str, endpoint_url: str, model: str
+    ) -> str:
         """Gather raw data from all integrations, hand it to the LLM to write the check-in."""
         from src.agent_tools import get_mcp_manager
 
         tz_name = _resolve_task_timezone(db, task)
         try:
             if tz_name:
+                from datetime import timezone
                 from zoneinfo import ZoneInfo
-                from datetime import timezone, timedelta
+
                 now = _utcnow().replace(tzinfo=timezone.utc).astimezone(ZoneInfo(tz_name))
             else:
-                from datetime import timedelta
                 now = _utcnow()
             time_str = now.strftime("%A, %B %d %Y, %H:%M")
         except Exception:
-            from datetime import timedelta
             now = _utcnow()
             time_str = now.strftime("%H:%M UTC")
 
@@ -998,7 +1157,9 @@ class TaskScheduler:
         # Auto-discover API integrations (Miniflux RSS, etc.).
         try:
             import httpx
+
             from src.integrations import load_integrations
+
             for integ in load_integrations():
                 if not integ.get("enabled"):
                     continue
@@ -1017,11 +1178,17 @@ class TaskScheduler:
 
                 # Miniflux: fetch unread entries (cached 3 min across tasks)
                 if preset == "miniflux":
+
                     async def _fetch_miniflux(_base=base_url, _headers=dict(headers)):
                         async with httpx.AsyncClient(timeout=10) as client:
                             resp = await client.get(
                                 f"{_base}/v1/entries",
-                                params={"status": "unread", "limit": 15, "order": "published_at", "direction": "desc"},
+                                params={
+                                    "status": "unread",
+                                    "limit": 15,
+                                    "order": "published_at",
+                                    "direction": "desc",
+                                },
                                 headers=_headers,
                             )
                             if resp.status_code != 200:
@@ -1036,6 +1203,7 @@ class TaskScheduler:
                                 url = e.get("url", "")
                                 lines.append(f"- [{feed}] {title} — {url}")
                             return "\n".join(lines)
+
                     try:
                         val = await _cached(("miniflux_unread", base_url), 180, _fetch_miniflux)
                         if val:
@@ -1073,6 +1241,7 @@ class TaskScheduler:
                         # same minute share the same MCP snapshot.
                         async def _call_mcp(_q=qualified, _args=args):
                             return await mcp.call_tool(_q, _args)
+
                         cache_key = ("mcp_snapshot", qualified, json.dumps(args, sort_keys=True))
                         result = await _cached(cache_key, 180, _call_mcp)
                         if result.get("exit_code", 0) != 0:
@@ -1089,8 +1258,7 @@ class TaskScheduler:
             data_dump += f"--- {key} ---\n{val}\n\n"
 
         context = (
-            data_dump +
-            f"---\n\n{task.prompt}\n\n"
+            data_dump + f"---\n\n{task.prompt}\n\n"
             "Write the check-in. YOU decide what matters, what to skip, how to format. "
             "Only show future events. Calendar events are pre-tagged with importance: "
             "[!!] critical, [!] high, plain = normal, ' ·' = low. "
@@ -1102,15 +1270,20 @@ class TaskScheduler:
         )
 
         return await self._run_agent_loop(
-            endpoint_url, model, task, session_id,
+            endpoint_url,
+            model,
+            task,
+            session_id,
             system_prompt=(crew.personality or "").strip() if crew else None,
-            disabled_tools=None, relevant_tools=None,
+            disabled_tools=None,
+            relevant_tools=None,
             override_user_message=context,
         )
 
     async def _execute_llm_task(self, task, db) -> str:
         """Execute an LLM task with full tool access via the agent loop."""
-        from core.database import Session as DbSession, ChatMessage, CrewMember
+        from core.database import CrewMember
+        from core.database import Session as DbSession
 
         # If this task is wired to a CrewMember (personal assistant, custom
         # crew), prefer the crew member's persona/model/endpoint as overrides.
@@ -1154,7 +1327,9 @@ class TaskScheduler:
             db.commit()
             if self._session_manager:
                 try:
-                    self._session_manager.sessions[session_id] = self._session_manager._db_to_session(sess)
+                    self._session_manager.sessions[session_id] = (
+                        self._session_manager._db_to_session(sess)
+                    )
                 except Exception:
                     pass
 
@@ -1174,8 +1349,9 @@ class TaskScheduler:
         tz_name = _resolve_task_timezone(db, task)
         try:
             if tz_name:
-                from zoneinfo import ZoneInfo
                 from datetime import timezone
+                from zoneinfo import ZoneInfo
+
                 now_local = _utcnow().replace(tzinfo=timezone.utc).astimezone(ZoneInfo(tz_name))
                 time_str = now_local.strftime("%A, %B %d %Y, %H:%M %Z")
             else:
@@ -1191,6 +1367,7 @@ class TaskScheduler:
                 enabled = json.loads(crew.enabled_tools)
                 if isinstance(enabled, list) and enabled:
                     from src.tool_index import BUILTIN_TOOL_DESCRIPTIONS
+
                     all_tools = set(BUILTIN_TOOL_DESCRIPTIONS.keys())
                     disabled_tools = all_tools - set(enabled)
             except Exception:
@@ -1200,32 +1377,44 @@ class TaskScheduler:
         # Without this, all 40+ tools get sent and models hit their tool limit.
         relevant_tools = None
         try:
-            from src.tool_index import get_tool_index, ASSISTANT_ALWAYS_AVAILABLE
+            from src.tool_index import ASSISTANT_ALWAYS_AVAILABLE, get_tool_index
+
             tool_idx = get_tool_index()
             if tool_idx:
                 rag_tools = tool_idx.get_tools_for_query(task.prompt or "", k=8)
-                relevant_tools = (rag_tools | ASSISTANT_ALWAYS_AVAILABLE)
+                relevant_tools = rag_tools | ASSISTANT_ALWAYS_AVAILABLE
                 if disabled_tools:
                     relevant_tools -= disabled_tools
-                logger.info(f"[assistant] RAG selected {len(rag_tools)} tools + {len(ASSISTANT_ALWAYS_AVAILABLE)} always-available = {len(relevant_tools)} total for '{task.name}'")
+                logger.info(
+                    f"[assistant] RAG selected {len(rag_tools)} tools + {len(ASSISTANT_ALWAYS_AVAILABLE)} always-available = {len(relevant_tools)} total for '{task.name}'"
+                )
         except Exception as e:
             logger.warning(f"[assistant] RAG tool selection failed, using all: {e}")
 
         # Try using the agent loop for full tool access
         try:
             result = await self._run_agent_loop(
-                endpoint_url, model, task, session_id,
-                system_prompt=system_prompt, disabled_tools=disabled_tools,
+                endpoint_url,
+                model,
+                task,
+                session_id,
+                system_prompt=system_prompt,
+                disabled_tools=disabled_tools,
                 relevant_tools=relevant_tools,
             )
         except Exception as e:
-            logger.warning(f"Agent loop failed for task '{task.name}', falling back to simple call: {e}")
+            logger.warning(
+                f"Agent loop failed for task '{task.name}', falling back to simple call: {e}"
+            )
             from src.llm_core import llm_call_async
+
             messages = [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": task.prompt},
             ]
-            result = await llm_call_async(url=endpoint_url, model=model, messages=messages, timeout=120)
+            result = await llm_call_async(
+                url=endpoint_url, model=model, messages=messages, timeout=120
+            )
 
         # Strip the model's chain-of-thought before saving/delivering. Task
         # output is LLM-only, so prose=True (which also removes untagged
@@ -1233,6 +1422,7 @@ class TaskScheduler:
         # thinking leaked into the saved result.
         try:
             from src.text_helpers import strip_think
+
             result = strip_think(result or "", prose=True, prompt_echo=True).strip() or result
         except Exception:
             pass
@@ -1246,7 +1436,8 @@ class TaskScheduler:
         actions cannot drift into hidden delivery paths that disagree with the
         task's visible output target.
         """
-        from core.database import Session as DbSession, ChatMessage, CrewMember
+        from core.database import ChatMessage, CrewMember
+        from core.database import Session as DbSession
 
         output = task.output_target or "session"
         if (
@@ -1298,7 +1489,9 @@ class TaskScheduler:
             db.commit()
             if self._session_manager:
                 try:
-                    self._session_manager.sessions[session_id] = self._session_manager._db_to_session(sess)
+                    self._session_manager.sessions[session_id] = (
+                        self._session_manager._db_to_session(sess)
+                    )
                 except Exception:
                     pass
 
@@ -1332,21 +1525,35 @@ class TaskScheduler:
         if self._session_manager:
             try:
                 from core.models import ChatMessage as MemMsg
+
                 sess_obj = self._session_manager.get_session(session_id)
-                sess_obj.history.append(MemMsg(role="user", content=user_msg.content, metadata=meta))
-                sess_obj.history.append(MemMsg(role="assistant", content=assistant_msg.content, metadata=meta))
+                sess_obj.history.append(
+                    MemMsg(role="user", content=user_msg.content, metadata=meta)
+                )
+                sess_obj.history.append(
+                    MemMsg(role="assistant", content=assistant_msg.content, metadata=meta)
+                )
             except Exception:
                 pass
 
-    async def _run_agent_loop(self, endpoint_url: str, model: str, task, session_id: str,
-                              system_prompt: str | None = None,
-                              disabled_tools: set | None = None,
-                              relevant_tools: set | None = None,
-                              override_user_message: str | None = None) -> str:
+    async def _run_agent_loop(
+        self,
+        endpoint_url: str,
+        model: str,
+        task,
+        session_id: str,
+        system_prompt: str | None = None,
+        disabled_tools: set | None = None,
+        relevant_tools: set | None = None,
+        override_user_message: str | None = None,
+    ) -> str:
         """Run the full agent loop with tool access, collecting the final text."""
         from src.agent_loop import stream_agent_loop
 
-        system_content = system_prompt or "You are a helpful assistant executing a scheduled task. Use available tools to complete the task thoroughly."
+        system_content = (
+            system_prompt
+            or "You are a helpful assistant executing a scheduled task. Use available tools to complete the task thoroughly."
+        )
         user_content = override_user_message or task.prompt
         messages = [
             {"role": "system", "content": system_content},
@@ -1356,13 +1563,16 @@ class TaskScheduler:
         # Resolve headers from the endpoint's API key
         headers = {}
         try:
-            from core.database import SessionLocal, ModelEndpoint
-            from src.endpoint_resolver import normalize_base, build_headers
+            from core.database import ModelEndpoint, SessionLocal
+            from src.endpoint_resolver import build_headers, normalize_base
+
             db2 = SessionLocal()
             try:
                 eps = db2.query(ModelEndpoint).filter(ModelEndpoint.is_enabled == True).all()
                 for ep in eps:
-                    if normalize_base(ep.base_url) in endpoint_url or endpoint_url in normalize_base(ep.base_url):
+                    if normalize_base(
+                        ep.base_url
+                    ) in endpoint_url or endpoint_url in normalize_base(ep.base_url):
                         headers = build_headers(ep.api_key, normalize_base(ep.base_url))
                         break
             finally:
@@ -1381,6 +1591,7 @@ class TaskScheduler:
         # chat uses but with the utility list (`utility_model_fallbacks`).
         try:
             from src.endpoint_resolver import resolve_utility_fallback_candidates
+
             _task_fallbacks = resolve_utility_fallback_candidates()
         except Exception:
             _task_fallbacks = []
@@ -1405,7 +1616,9 @@ class TaskScheduler:
                     elif data.get("type") == "tool_output":
                         # Tool results — capture summary so we have SOMETHING even
                         # if the model never produces a final text response
-                        tool_summary = data.get("stdout") or data.get("output") or data.get("result") or ""
+                        tool_summary = (
+                            data.get("stdout") or data.get("output") or data.get("result") or ""
+                        )
                         if isinstance(tool_summary, str) and tool_summary.strip():
                             tool_results.append(f"[{data.get('tool', '?')}] {tool_summary[:500]}")
                 except (json.JSONDecodeError, KeyError):
@@ -1416,15 +1629,22 @@ class TaskScheduler:
         # asking it to summarize what it did. Guarantees output.
         if not full_text.strip():
             try:
-                from src.llm_core import llm_call_async_with_fallback
                 from src.endpoint_resolver import resolve_utility_fallback_candidates
+                from src.llm_core import llm_call_async_with_fallback
+
                 grace_context = "You ran out of steps. "
                 if tool_results:
-                    grace_context += "Here's what your tools returned:\n" + "\n".join(tool_results[-5:])
+                    grace_context += "Here's what your tools returned:\n" + "\n".join(
+                        tool_results[-5:]
+                    )
                 else:
                     grace_context += "No tool results were captured."
-                grace_context += "\n\nSummarize what you accomplished and what's still pending. Be concise."
-                _grace_candidates = [(endpoint_url, model, headers)] + resolve_utility_fallback_candidates()
+                grace_context += (
+                    "\n\nSummarize what you accomplished and what's still pending. Be concise."
+                )
+                _grace_candidates = [
+                    (endpoint_url, model, headers)
+                ] + resolve_utility_fallback_candidates()
                 full_text = await llm_call_async_with_fallback(
                     _grace_candidates,
                     messages=[
@@ -1454,6 +1674,7 @@ class TaskScheduler:
     def _has_chain_cycle(self, db, start_id: str, max_depth: int = 10) -> bool:
         """Detect cycles in task chains."""
         from core.database import ScheduledTask
+
         visited = set()
         current = start_id
         for _ in range(max_depth):
@@ -1469,12 +1690,18 @@ class TaskScheduler:
     def _resolve_defaults(self, db, owner):
         """Find the first available endpoint + model from an existing session."""
         from core.database import Session as DbSession
+
         try:
-            recent = db.query(DbSession).filter(
-                DbSession.endpoint_url.isnot(None),
-                DbSession.model.isnot(None),
-                *([DbSession.owner == owner] if owner else []),
-            ).order_by(DbSession.created_at.desc()).first()
+            recent = (
+                db.query(DbSession)
+                .filter(
+                    DbSession.endpoint_url.isnot(None),
+                    DbSession.model.isnot(None),
+                    *([DbSession.owner == owner] if owner else []),
+                )
+                .order_by(DbSession.created_at.desc())
+                .first()
+            )
             if recent:
                 return recent.endpoint_url, recent.model
         except Exception:
@@ -1492,6 +1719,7 @@ class TaskScheduler:
         doesn't recognise.
         """
         from src.agent_tools import get_mcp_manager
+
         mcp = get_mcp_manager()
         if not mcp:
             logger.warning(f"Task {task.id}: MCP manager not available for delivery")
@@ -1548,7 +1776,9 @@ class TaskScheduler:
     async def run_task_now(self, task_id: str, *, force: bool = False):
         """Manually trigger a task execution."""
         if force:
-            asyncio.create_task(self._execute_task(task_id, bypass_model_slot=True, release_executing=False))
+            asyncio.create_task(
+                self._execute_task(task_id, bypass_model_slot=True, release_executing=False)
+            )
             return True
         async with self._executing_lock:
             if task_id in self._executing:
@@ -1574,9 +1804,11 @@ class TaskScheduler:
 
     async def ensure_defaults(self, owner: str):
         """Create default housekeeping tasks for this owner (idempotent per action)."""
-        from core.database import SessionLocal, ScheduledTask
+        from core.database import ScheduledTask, SessionLocal
+
         try:
             from routes.prefs_routes import _load_for_user
+
             _prefs = _load_for_user(owner) or {}
         except Exception:
             _prefs = {}
@@ -1594,10 +1826,14 @@ class TaskScheduler:
                 for legacy in defs.get("legacy_names") or []:
                     name_to_action[legacy] = action
             possible_names = list(name_to_action.keys())
-            legacy_named = db.query(ScheduledTask).filter(
-                ScheduledTask.owner == owner,
-                ScheduledTask.name.in_(possible_names),
-            ).all()
+            legacy_named = (
+                db.query(ScheduledTask)
+                .filter(
+                    ScheduledTask.owner == owner,
+                    ScheduledTask.name.in_(possible_names),
+                )
+                .all()
+            )
             for task in legacy_named:
                 action = name_to_action.get(task.name)
                 if not action:
@@ -1606,41 +1842,61 @@ class TaskScheduler:
                 task.action = action
 
             from core.database import TaskRun
+
             retired_ids = [
-                row[0] for row in db.query(ScheduledTask.id).filter(
+                row[0]
+                for row in db.query(ScheduledTask.id)
+                .filter(
                     ScheduledTask.owner == owner,
                     ScheduledTask.task_type == "action",
                     ScheduledTask.action.in_(list(RETIRED_HOUSEKEEPING_ACTIONS)),
-                ).all()
+                )
+                .all()
             ]
             if retired_ids:
-                db.query(TaskRun).filter(TaskRun.task_id.in_(retired_ids)).delete(synchronize_session=False)
-            retired_count = db.query(ScheduledTask).filter(
-                ScheduledTask.owner == owner,
-                ScheduledTask.task_type == "action",
-                ScheduledTask.action.in_(list(RETIRED_HOUSEKEEPING_ACTIONS)),
-            ).delete(synchronize_session=False)
+                db.query(TaskRun).filter(TaskRun.task_id.in_(retired_ids)).delete(
+                    synchronize_session=False
+                )
+            retired_count = (
+                db.query(ScheduledTask)
+                .filter(
+                    ScheduledTask.owner == owner,
+                    ScheduledTask.task_type == "action",
+                    ScheduledTask.action.in_(list(RETIRED_HOUSEKEEPING_ACTIONS)),
+                )
+                .delete(synchronize_session=False)
+            )
             # Sweep orphan TaskRun rows (parent task deleted previously) so
             # retired actions stop showing in Activity. Only runs when at least
             # one live task exists — avoids wiping run history on a fresh DB.
             try:
                 live_ids = {row[0] for row in db.query(ScheduledTask.id).all()}
                 if live_ids:
-                    db.query(TaskRun).filter(~TaskRun.task_id.in_(list(live_ids))).delete(synchronize_session=False)
+                    db.query(TaskRun).filter(~TaskRun.task_id.in_(list(live_ids))).delete(
+                        synchronize_session=False
+                    )
             except Exception:
                 pass
             existing_actions = {
-                row[0] for row in db.query(ScheduledTask.action).filter(
+                row[0]
+                for row in db.query(ScheduledTask.action)
+                .filter(
                     ScheduledTask.owner == owner,
                     ScheduledTask.task_type == "action",
-                ).all() if row[0]
+                )
+                .all()
+                if row[0]
             }
             renamed = []
-            builtin_tasks = db.query(ScheduledTask).filter(
-                ScheduledTask.owner == owner,
-                ScheduledTask.task_type == "action",
-                ScheduledTask.action.in_(list(HOUSEKEEPING_DEFAULTS.keys())),
-            ).all()
+            builtin_tasks = (
+                db.query(ScheduledTask)
+                .filter(
+                    ScheduledTask.owner == owner,
+                    ScheduledTask.task_type == "action",
+                    ScheduledTask.action.in_(list(HOUSEKEEPING_DEFAULTS.keys())),
+                )
+                .all()
+            )
             by_action = {}
             for task in builtin_tasks:
                 by_action.setdefault(task.action, []).append(task)
@@ -1662,8 +1918,18 @@ class TaskScheduler:
                         and (candidate.cron_expression or None) == defs.get("cron_expression")
                     )
                     created = candidate.created_at or datetime.min
-                    created_key = (created.toordinal(), created.hour, created.minute, created.second, created.microsecond)
-                    return (1 if matches_default else 0, 1 if candidate.status == "active" else 0, created_key)
+                    created_key = (
+                        created.toordinal(),
+                        created.hour,
+                        created.minute,
+                        created.second,
+                        created.microsecond,
+                    )
+                    return (
+                        1 if matches_default else 0,
+                        1 if candidate.status == "active" else 0,
+                        created_key,
+                    )
 
                 keep = sorted(tasks, key=_score, reverse=True)[0]
                 kept_ids.add(keep.id)
@@ -1688,8 +1954,12 @@ class TaskScheduler:
                     if task.schedule == "cron" and (task.cron_expression or "") in old_crons:
                         task.cron_expression = defs["cron_expression"]
                         task.next_run = compute_next_run(
-                            defs["schedule"], defs["scheduled_time"], None, None,
-                            after=_utcnow(), cron_expression=defs["cron_expression"],
+                            defs["schedule"],
+                            defs["scheduled_time"],
+                            None,
+                            None,
+                            after=_utcnow(),
+                            cron_expression=defs["cron_expression"],
                             tz_name=_resolve_task_timezone(db, task),
                         )
                         normalized = True
@@ -1722,9 +1992,12 @@ class TaskScheduler:
                         task.status = "active"
                         if (task.trigger_type or "schedule") == "schedule":
                             task.next_run = compute_next_run(
-                                task.schedule, task.scheduled_time,
-                                task.scheduled_day, task.scheduled_date,
-                                after=_utcnow(), cron_expression=task.cron_expression,
+                                task.schedule,
+                                task.scheduled_time,
+                                task.scheduled_day,
+                                task.scheduled_date,
+                                after=_utcnow(),
+                                cron_expression=task.cron_expression,
                                 tz_name=_resolve_task_timezone(db, task),
                             )
                 # Built-in housekeeping/action jobs should not create browser
@@ -1740,8 +2013,12 @@ class TaskScheduler:
                 next_run = None
                 if trigger_type == "schedule":
                     next_run = compute_next_run(
-                        defs["schedule"], defs["scheduled_time"], None, None,
-                        after=_utcnow(), cron_expression=defs["cron_expression"],
+                        defs["schedule"],
+                        defs["scheduled_time"],
+                        None,
+                        None,
+                        after=_utcnow(),
+                        cron_expression=defs["cron_expression"],
                     )
                 ships_paused = bool(defs.get("ship_paused"))
                 task = ScheduledTask(
@@ -1770,7 +2047,11 @@ class TaskScheduler:
             if seeded or renamed or removed_dupes or retired_count:
                 logger.info(
                     "Housekeeping defaults for %s: seeded=%s renamed=%s deduped=%s retired=%s",
-                    owner, seeded, sorted(set(renamed)), sorted(set(removed_dupes)), retired_count,
+                    owner,
+                    seeded,
+                    sorted(set(renamed)),
+                    sorted(set(removed_dupes)),
+                    retired_count,
                 )
             # Always commit — the orphan-run sweep above may have produced
             # pending deletes even when no defaults changed.
@@ -1797,15 +2078,19 @@ class TaskScheduler:
         if not owner or owner in {"internal-tool", "api", "demo", "system"}:
             logger.info(f"ensure_assistant_defaults: skip synthetic owner {owner!r}")
             return
-        from core.database import SessionLocal, CrewMember, ScheduledTask
+        from core.database import CrewMember, SessionLocal
         from core.database import Session as DbSession
 
         db = SessionLocal()
         try:
-            existing = db.query(CrewMember).filter(
-                CrewMember.owner == owner,
-                CrewMember.is_default_assistant == True,  # noqa: E712
-            ).first()
+            existing = (
+                db.query(CrewMember)
+                .filter(
+                    CrewMember.owner == owner,
+                    CrewMember.is_default_assistant == True,  # noqa: E712
+                )
+                .first()
+            )
             if existing:
                 return  # already seeded
 
@@ -1816,23 +2101,18 @@ class TaskScheduler:
             default_personality = (
                 "You are the user's personal assistant. Concise, warm, a little dry. "
                 "Never waste time with fluff. Default to English. Only match the other language when replying to a non-English email.\n\n"
-
                 "CORE RULE: You MUST use your tools to take action — do not describe what you would do. "
                 "Never say 'I can look that up' — actually call search_chats. "
                 "If you have a tool for it, use it. No hypotheticals, no promises, only actions and results.\n\n"
-
                 "DECISION FRAMEWORK — follow these rules, not just tool descriptions:\n\n"
-
                 "CONTEXT GATHERING (before any response involving a specific person):\n"
                 "1. search_chats for recent conversations mentioning them or their topic\n"
                 "2. manage_memory to check stored facts about them\n"
                 "Skip steps you already have answers for. Don't search for the user themselves.\n\n"
-
                 "ESCALATION LADDER (when you need info you don't have):\n"
                 "1. search_chats (fast, free)\n"
                 "2. manage_memory (fast, free)\n"
                 "Stop as soon as you have a sufficient answer.\n\n"
-
                 "SELF-IMPROVEMENT — use manage_memory constantly:\n"
                 "- When the user corrects you, IMMEDIATELY store the correction as a memory.\n"
                 "- After every check-in or task, store new facts you learned (contacts, preferences, patterns).\n"
@@ -1842,7 +2122,6 @@ class TaskScheduler:
                 "- When you figure out a multi-step workflow that works, save it as a SKILL using manage_skills.\n"
                 "  A skill is a reusable procedure. Next time, recall the skill instead of figuring it out again.\n"
                 "- Before starting a complex task, check manage_skills for an existing procedure.\n\n"
-
                 "AUTONOMY RULES:\n"
                 "- NEVER delete anything without explicit instruction\n"
                 "- If uncertain, ask rather than guess"
@@ -1877,13 +2156,19 @@ class TaskScheduler:
                 model=model,
                 endpoint_url=endpoint_url,
                 greeting=None,
-                enabled_tools=json.dumps([
-                    "manage_tasks", "manage_memory",
-                    "search_chats", "read_file",
-                    "create_document", "update_document", "edit_document",
-                    "generate_image",
-                    "edit_image",
-                ]),
+                enabled_tools=json.dumps(
+                    [
+                        "manage_tasks",
+                        "manage_memory",
+                        "search_chats",
+                        "read_file",
+                        "create_document",
+                        "update_document",
+                        "edit_document",
+                        "generate_image",
+                        "edit_image",
+                    ]
+                ),
                 session_id=session_id,
                 is_active=True,
                 sort_order=0,

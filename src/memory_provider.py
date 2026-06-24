@@ -116,11 +116,7 @@ class NativeMemoryProvider(MemoryProvider):
         self.memory_vector = memory_vector
 
     def _to_record(self, entry: Dict[str, Any]) -> MemoryRecord:
-        metadata = {
-            key: value
-            for key, value in entry.items()
-            if key not in self._CORE_FIELDS
-        }
+        metadata = {key: value for key, value in entry.items() if key not in self._CORE_FIELDS}
         stored_metadata = entry.get("metadata")
         if isinstance(stored_metadata, dict):
             metadata.update(stored_metadata)
@@ -217,10 +213,7 @@ class NativeMemoryProvider(MemoryProvider):
         owner: Optional[str] = None,
         limit: int = 100,
     ) -> List[MemoryRecord]:
-        return [
-            self._to_record(entry)
-            for entry in self.memory_manager.load(owner=owner)[:limit]
-        ]
+        return [self._to_record(entry) for entry in self.memory_manager.load(owner=owner)[:limit]]
 
     async def delete(self, memory_id: str, *, owner: Optional[str] = None) -> bool:
         memories = self.memory_manager.load_all()

@@ -24,7 +24,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
-from core.database import get_db_session, AssistantEndpoint, ModelEndpoint
+from core.database import AssistantEndpoint, ModelEndpoint, get_db_session
 from core.middleware import require_admin
 
 logger = logging.getLogger(__name__)
@@ -125,6 +125,7 @@ def _require_endpoint(db, endpoint_id: str) -> ModelEndpoint:
 # OpenAI invocation helpers
 # ----------------------------------------------------------------------------- #
 
+
 def _last_user_text(messages: list[dict]) -> str:
     """Latest user message as plain text (flattening OpenAI content blocks)."""
     for m in reversed(messages or []):
@@ -171,10 +172,7 @@ def setup_assistant_routes(chat_processor=None, session_manager=None) -> APIRout
         require_admin(request)
         with get_db_session() as db:
             rows = db.query(AssistantEndpoint).order_by(AssistantEndpoint.created_at).all()
-            ep_names = {
-                e.id: e.name
-                for e in db.query(ModelEndpoint.id, ModelEndpoint.name).all()
-            }
+            ep_names = {e.id: e.name for e in db.query(ModelEndpoint.id, ModelEndpoint.name).all()}
             return [_public(a, ep_names.get(a.endpoint_id)) for a in rows]
 
     @router.post("/api/assistants")
@@ -260,9 +258,9 @@ def setup_assistant_routes(chat_processor=None, session_manager=None) -> APIRout
     def delete_assistant(request: Request, assistant_id: str):
         require_admin(request)
         with get_db_session() as db:
-            deleted = db.query(AssistantEndpoint).filter(
-                AssistantEndpoint.id == assistant_id
-            ).delete()
+            deleted = (
+                db.query(AssistantEndpoint).filter(AssistantEndpoint.id == assistant_id).delete()
+            )
             if not deleted:
                 raise HTTPException(404, "Assistant not found")
         return {"status": "deleted"}
@@ -331,9 +329,7 @@ def setup_assistant_routes(chat_processor=None, session_manager=None) -> APIRout
 
         # Resolve the assistant config by slug.
         with get_db_session() as db:
-            a = db.query(AssistantEndpoint).filter(
-                AssistantEndpoint.slug == body.model
-            ).first()
+            a = db.query(AssistantEndpoint).filter(AssistantEndpoint.slug == body.model).first()
             if not a:
                 raise HTTPException(404, f"Unknown model: {body.model}")
             if not a.is_enabled:
@@ -374,17 +370,20 @@ def setup_assistant_routes(chat_processor=None, session_manager=None) -> APIRout
                 logger.warning("Assistant preface build failed: %s", e)
                 preface = (
                     [{"role": "system", "content": cfg["system_prompt"]}]
-                    if cfg["system_prompt"] else []
+                    if cfg["system_prompt"]
+                    else []
                 )
 
         messages = preface + _normalize_messages(body.messages)
         temperature = (
             _clamp_temperature(body.temperature, cfg["temperature"])
-            if body.temperature is not None else cfg["temperature"]
+            if body.temperature is not None
+            else cfg["temperature"]
         )
         max_tokens = (
             _clamp_max_tokens(body.max_tokens, cfg["max_tokens"])
-            if body.max_tokens is not None else cfg["max_tokens"]
+            if body.max_tokens is not None
+            else cfg["max_tokens"]
         )
         # Always strip sandbox code-execution tools (external agent frameworks
         # orchestrate their own tools); merge with any per-assistant blocks.
@@ -412,6 +411,7 @@ def setup_assistant_routes(chat_processor=None, session_manager=None) -> APIRout
 
         # ---- Streaming: re-wrap visible deltas as OpenAI chat.completion.chunks
         if body.stream:
+
             async def event_stream():
                 role_sent = False
                 async for chunk in _run_loop():

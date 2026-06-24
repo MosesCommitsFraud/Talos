@@ -1,0 +1,37 @@
+# Automated dependency-bump PRs. Solo-dev friendly: grouped so you get a few
+# tidy PRs a week instead of a flood, and patch/minor updates are batched.
+version: 2
+updates:
+  # Python runtime deps
+  - package-ecosystem: pip
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      python-deps:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+
+  # Frontend (pnpm) deps
+  - package-ecosystem: npm
+    directory: "/web"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      web-deps:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+
+  # Docker base images (node:22-alpine, python:3.12-slim)
+  - package-ecosystem: docker
+    directory: "/"
+    schedule:
+      interval: weekly
+
+  # The GitHub Actions used in ci.yml below
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly

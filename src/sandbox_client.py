@@ -4,7 +4,6 @@ from typing import Any
 
 import httpx
 
-
 SANDBOX_URL = os.getenv("TALOS_SANDBOX_URL", "http://talos-sandbox:7800").rstrip("/")
 # Timeout for quick control-plane calls (file ops, ensure, etc.). Code execution
 # is NOT bounded by this — see exec_in_sandbox, which uses no read timeout so a
@@ -40,7 +39,9 @@ async def exec_in_sandbox(
     # No read/write/pool timeout: a long compute or install must not be cut off.
     # Only the connect phase is bounded. The sandbox enforces its own limit via
     # the `timeout` field (0 = unlimited there too).
-    async with httpx.AsyncClient(headers=_SANDBOX_HEADERS, timeout=httpx.Timeout(None, connect=15.0)) as client:
+    async with httpx.AsyncClient(
+        headers=_SANDBOX_HEADERS, timeout=httpx.Timeout(None, connect=15.0)
+    ) as client:
         resp = await client.post(
             f"{SANDBOX_URL}/users/{user_id}/workspaces/{session_id}/exec",
             json={"kind": kind, "command": command, "code": code, "timeout": timeout},
@@ -59,7 +60,9 @@ async def file_tool_in_sandbox(
     if not session_id:
         raise RuntimeError("sandbox file operation requires a session_id")
     user_id = safe_user_id(owner)
-    async with httpx.AsyncClient(headers=_SANDBOX_HEADERS, timeout=httpx.Timeout(SANDBOX_TIMEOUT, connect=15.0)) as client:
+    async with httpx.AsyncClient(
+        headers=_SANDBOX_HEADERS, timeout=httpx.Timeout(SANDBOX_TIMEOUT, connect=15.0)
+    ) as client:
         resp = await client.post(
             f"{SANDBOX_URL}/users/{user_id}/workspaces/{session_id}/files/{operation}",
             json=payload,
@@ -70,7 +73,9 @@ async def file_tool_in_sandbox(
 
 def _sandbox_filename(path: str, display_name: str | None = None) -> str:
     stored_name = Path(path).name
-    return Path(display_name or stored_name).name.replace("/", "_").replace("\\", "_") or stored_name
+    return (
+        Path(display_name or stored_name).name.replace("/", "_").replace("\\", "_") or stored_name
+    )
 
 
 async def upload_file_to_sandbox(
@@ -84,7 +89,9 @@ async def upload_file_to_sandbox(
         raise RuntimeError("sandbox upload requires a session_id")
     user_id = safe_user_id(owner)
     filename = _sandbox_filename(path, display_name)
-    async with httpx.AsyncClient(headers=_SANDBOX_HEADERS, timeout=httpx.Timeout(SANDBOX_TIMEOUT, connect=15.0)) as client:
+    async with httpx.AsyncClient(
+        headers=_SANDBOX_HEADERS, timeout=httpx.Timeout(SANDBOX_TIMEOUT, connect=15.0)
+    ) as client:
         with open(path, "rb") as f:
             resp = await client.post(
                 f"{SANDBOX_URL}/users/{user_id}/workspaces/{session_id}/upload",
@@ -96,12 +103,16 @@ async def upload_file_to_sandbox(
     return data
 
 
-async def run_cell_in_sandbox(*, owner: str | None, session_id: str | None, code: str, timeout: int = 0) -> dict[str, Any]:
+async def run_cell_in_sandbox(
+    *, owner: str | None, session_id: str | None, code: str, timeout: int = 0
+) -> dict[str, Any]:
     """Run code in the chat's PERSISTENT Python kernel (state survives between calls)."""
     if not session_id:
         raise RuntimeError("run_cell requires a session_id")
     user_id = safe_user_id(owner)
-    async with httpx.AsyncClient(headers=_SANDBOX_HEADERS, timeout=httpx.Timeout(None, connect=15.0)) as client:
+    async with httpx.AsyncClient(
+        headers=_SANDBOX_HEADERS, timeout=httpx.Timeout(None, connect=15.0)
+    ) as client:
         resp = await client.post(
             f"{SANDBOX_URL}/users/{user_id}/workspaces/{session_id}/kernel/execute",
             json={"code": code, "timeout": timeout},
@@ -117,7 +128,9 @@ async def delete_workspace(*, owner: str | None, session_id: str | None) -> bool
         return False
     user_id = safe_user_id(owner)
     try:
-        async with httpx.AsyncClient(headers=_SANDBOX_HEADERS, timeout=httpx.Timeout(30.0, connect=10.0)) as client:
+        async with httpx.AsyncClient(
+            headers=_SANDBOX_HEADERS, timeout=httpx.Timeout(30.0, connect=10.0)
+        ) as client:
             resp = await client.delete(
                 f"{SANDBOX_URL}/users/{user_id}/workspaces/{session_id}",
             )
@@ -133,7 +146,9 @@ def delete_workspace_sync(owner: str | None, session_id: str | None) -> bool:
         return False
     user_id = safe_user_id(owner)
     try:
-        with httpx.Client(headers=_SANDBOX_HEADERS, timeout=httpx.Timeout(30.0, connect=10.0)) as client:
+        with httpx.Client(
+            headers=_SANDBOX_HEADERS, timeout=httpx.Timeout(30.0, connect=10.0)
+        ) as client:
             resp = client.delete(f"{SANDBOX_URL}/users/{user_id}/workspaces/{session_id}")
             resp.raise_for_status()
         return True
@@ -146,7 +161,9 @@ async def list_artifacts(*, owner: str | None, session_id: str | None) -> list[d
     if not session_id:
         return []
     user_id = safe_user_id(owner)
-    async with httpx.AsyncClient(headers=_SANDBOX_HEADERS, timeout=httpx.Timeout(SANDBOX_TIMEOUT, connect=15.0)) as client:
+    async with httpx.AsyncClient(
+        headers=_SANDBOX_HEADERS, timeout=httpx.Timeout(SANDBOX_TIMEOUT, connect=15.0)
+    ) as client:
         resp = await client.get(
             f"{SANDBOX_URL}/users/{user_id}/workspaces/{session_id}/artifacts",
         )
@@ -159,7 +176,9 @@ async def delete_artifact(*, owner: str | None, session_id: str | None, path: st
     if not session_id:
         return False
     user_id = safe_user_id(owner)
-    async with httpx.AsyncClient(headers=_SANDBOX_HEADERS, timeout=httpx.Timeout(30.0, connect=10.0)) as client:
+    async with httpx.AsyncClient(
+        headers=_SANDBOX_HEADERS, timeout=httpx.Timeout(30.0, connect=10.0)
+    ) as client:
         resp = await client.post(
             f"{SANDBOX_URL}/users/{user_id}/workspaces/{session_id}/files/delete",
             json={"path": path},
@@ -174,7 +193,9 @@ async def download_workspace_zip(*, owner: str | None, session_id: str | None) -
     if not session_id:
         raise RuntimeError("zip requires a session_id")
     user_id = safe_user_id(owner)
-    async with httpx.AsyncClient(headers=_SANDBOX_HEADERS, timeout=httpx.Timeout(None, connect=15.0)) as client:
+    async with httpx.AsyncClient(
+        headers=_SANDBOX_HEADERS, timeout=httpx.Timeout(None, connect=15.0)
+    ) as client:
         resp = await client.get(
             f"{SANDBOX_URL}/users/{user_id}/workspaces/{session_id}/files/zip",
         )
@@ -182,12 +203,16 @@ async def download_workspace_zip(*, owner: str | None, session_id: str | None) -
         return resp.content
 
 
-async def download_artifact(*, owner: str | None, session_id: str | None, path: str) -> tuple[bytes, str, str]:
+async def download_artifact(
+    *, owner: str | None, session_id: str | None, path: str
+) -> tuple[bytes, str, str]:
     """Fetch a workspace file's raw bytes. Returns (content, content_type, filename)."""
     if not session_id:
         raise RuntimeError("sandbox download requires a session_id")
     user_id = safe_user_id(owner)
-    async with httpx.AsyncClient(headers=_SANDBOX_HEADERS, timeout=httpx.Timeout(None, connect=15.0)) as client:
+    async with httpx.AsyncClient(
+        headers=_SANDBOX_HEADERS, timeout=httpx.Timeout(None, connect=15.0)
+    ) as client:
         resp = await client.get(
             f"{SANDBOX_URL}/users/{user_id}/workspaces/{session_id}/files/download",
             params={"path": path},

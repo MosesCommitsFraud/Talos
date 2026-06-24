@@ -6,7 +6,7 @@ Only the memory service remains; this build runs internally where web search
 and other external-facing services are not available.
 """
 
-from .memory import MemoryService, Memory, MemorySearchResult
+from .memory import Memory, MemorySearchResult, MemoryService
 
 __all__ = [
     "MemoryService",

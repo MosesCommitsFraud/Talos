@@ -55,7 +55,9 @@ def _load_connections(settings: dict) -> list[dict]:
     if isinstance(dbs, list):
         return [c for c in dbs if isinstance(c, dict)]
     legacy = settings.get("sql_database")
-    if isinstance(legacy, dict) and (legacy.get("host") or legacy.get("database") or legacy.get("enabled")):
+    if isinstance(legacy, dict) and (
+        legacy.get("host") or legacy.get("database") or legacy.get("enabled")
+    ):
         migrated = {**legacy}
         migrated.setdefault("id", uuid.uuid4().hex[:12])
         migrated.setdefault("name", "default")
@@ -93,7 +95,12 @@ def setup_sql_routes():
         for item in body.databases:
             cid = (item.id or "").strip() or uuid.uuid4().hex[:12]
             prev = existing.get(cid, {})
-            name = item.name.strip() or item.database.strip() or item.host.strip() or f"db{len(out) + 1}"
+            name = (
+                item.name.strip()
+                or item.database.strip()
+                or item.host.strip()
+                or f"db{len(out) + 1}"
+            )
             key = name.lower()
             if key in seen_names:
                 raise HTTPException(400, f"Duplicate database name: {name}")
@@ -114,7 +121,9 @@ def setup_sql_routes():
             if cfg["enabled"] and cfg["db_type"] != "sqlite":
                 missing = [k for k in ("host", "database", "username") if not cfg.get(k)]
                 if missing:
-                    raise HTTPException(400, f"Missing SQL config fields for '{name}': {', '.join(missing)}")
+                    raise HTTPException(
+                        400, f"Missing SQL config fields for '{name}': {', '.join(missing)}"
+                    )
             out.append(cfg)
 
         settings["sql_databases"] = out
@@ -185,7 +194,9 @@ def setup_sql_routes():
         total_failed = 0
         for upload in files:
             try:
-                file_path, stored_name, safe_name = _unique_personal_upload_path(upload_dir, upload.filename)
+                file_path, stored_name, safe_name = _unique_personal_upload_path(
+                    upload_dir, upload.filename
+                )
                 content_bytes = await upload.read(MAX_PERSONAL_UPLOAD_BYTES + 1)
                 if len(content_bytes) > MAX_PERSONAL_UPLOAD_BYTES:
                     logger.warning("Rejected oversized SQL knowledge upload: %r", upload.filename)
@@ -194,14 +205,19 @@ def setup_sql_routes():
                 with open(file_path, "wb") as f:
                     f.write(content_bytes)
                 ext = os.path.splitext(safe_name)[1].lower()
-                to_index.append((file_path, {
-                    "source": file_path,
-                    "filename": safe_name,
-                    "stored_filename": stored_name,
-                    "directory": upload_dir,
-                    "type": ext,
-                    "scope": SQL_KNOWLEDGE_SCOPE,
-                }))
+                to_index.append(
+                    (
+                        file_path,
+                        {
+                            "source": file_path,
+                            "filename": safe_name,
+                            "stored_filename": stored_name,
+                            "directory": upload_dir,
+                            "type": ext,
+                            "scope": SQL_KNOWLEDGE_SCOPE,
+                        },
+                    )
+                )
                 uploaded_files.append(safe_name)
             except Exception as e:
                 logger.error("Failed to store SQL knowledge upload %s: %s", upload.filename, e)
@@ -244,7 +260,9 @@ def setup_sql_routes():
 
             abs_target = os.path.abspath(source)
             base_abs = os.path.abspath(UPLOADS_DIR)
-            if os.path.commonpath([abs_target, base_abs]) == base_abs and os.path.isfile(abs_target):
+            if os.path.commonpath([abs_target, base_abs]) == base_abs and os.path.isfile(
+                abs_target
+            ):
                 os.remove(abs_target)
         except Exception as e:
             logger.debug("SQL knowledge disk cleanup skipped: %s", e)

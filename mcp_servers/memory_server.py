@@ -12,7 +12,7 @@ from pathlib import Path
 
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
-from mcp.types import Tool, TextContent
+from mcp.types import TextContent, Tool
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -33,10 +33,12 @@ def _ensure_init():
 
     from src.constants import DATA_DIR
     from src.memory import MemoryManager
+
     _memory_manager = MemoryManager(DATA_DIR)
 
     try:
         from src.memory_vector import MemoryVectorStore
+
         _memory_vector = MemoryVectorStore(DATA_DIR)
         if not _memory_vector.healthy:
             _memory_vector = None
@@ -58,7 +60,10 @@ async def list_tools() -> list[Tool]:
                         "enum": ["list", "add", "edit", "delete", "search"],
                         "description": "The action to perform",
                     },
-                    "text": {"type": "string", "description": "Memory text (add/edit) or search query (search)"},
+                    "text": {
+                        "type": "string",
+                        "description": "Memory text (add/edit) or search query (search)",
+                    },
                     "memory_id": {"type": "string", "description": "Memory ID (edit/delete)"},
                     "category": {
                         "type": "string",
@@ -87,7 +92,9 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
         category_filter = arguments.get("category", "")
         memories = _memory_manager.load()
         if category_filter:
-            memories = [m for m in memories if m.get("category", "").lower() == category_filter.lower()]
+            memories = [
+                m for m in memories if m.get("category", "").lower() == category_filter.lower()
+            ]
         if not memories:
             msg = "No memories found"
             if category_filter:
@@ -119,7 +126,11 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                 _memory_vector.add(entry["id"], text)
             except Exception:
                 pass
-        return [TextContent(type="text", text=f"Memory added: [{category}] {text} (id: {entry['id'][:8]})")]
+        return [
+            TextContent(
+                type="text", text=f"Memory added: [{category}] {text} (id: {entry['id'][:8]})"
+            )
+        ]
 
     elif action == "edit":
         memory_id = arguments.get("memory_id", "")
@@ -179,8 +190,10 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
         if not query:
             return [TextContent(type="text", text="Error: search needs text (query)")]
         memories = _memory_manager.load()
-        if hasattr(_memory_manager, 'get_relevant_memories'):
-            results = _memory_manager.get_relevant_memories(query, memories, threshold=0.05, max_items=20)
+        if hasattr(_memory_manager, "get_relevant_memories"):
+            results = _memory_manager.get_relevant_memories(
+                query, memories, threshold=0.05, max_items=20
+            )
         else:
             query_lower = query.lower()
             results = [m for m in memories if query_lower in m.get("text", "").lower()][:20]
@@ -195,7 +208,12 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
         return [TextContent(type="text", text="\n".join(lines))]
 
     else:
-        return [TextContent(type="text", text=f"Error: Unknown action '{action}'. Use: list, add, edit, delete, search")]
+        return [
+            TextContent(
+                type="text",
+                text=f"Error: Unknown action '{action}'. Use: list, add, edit, delete, search",
+            )
+        ]
 
 
 async def run():

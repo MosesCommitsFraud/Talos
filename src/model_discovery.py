@@ -1,12 +1,13 @@
-import subprocess
 import json
-import time
-import httpx
 import logging
 import os
+import subprocess
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import List, Dict, Any, Optional
+from typing import Any, Dict, List, Optional
 from urllib.parse import urlparse
+
+import httpx
 
 logger = logging.getLogger(__name__)
 
@@ -44,8 +45,7 @@ def discover_tailscale_hosts() -> List[str]:
     hosts = []
     try:
         result = subprocess.run(
-            ["tailscale", "status", "--json"],
-            capture_output=True, text=True, timeout=5
+            ["tailscale", "status", "--json"], capture_output=True, text=True, timeout=5
         )
         if result.returncode != 0:
             return hosts
@@ -154,9 +154,13 @@ class ModelDiscovery:
             r = httpx.get(f"http://{host}:{port}/api/v1/models", timeout=1.5)
             if r.is_success:
                 models = (r.json() or {}).get("models")
-                if (isinstance(models, list) and models
-                        and isinstance(models[0], dict)
-                        and "key" in models[0] and "architecture" in models[0]):
+                if (
+                    isinstance(models, list)
+                    and models
+                    and isinstance(models[0], dict)
+                    and "key" in models[0]
+                    and "architecture" in models[0]
+                ):
                     return "lmstudio"
         except Exception:
             pass
@@ -223,15 +227,23 @@ class ModelDiscovery:
 
         if self.openai_api_key:
             openai_models = [
-                "gpt-5.2-codex", "gpt-4o-mini", "gpt-image-1.5",
-                "gpt-4o", "gpt-5.2", "gpt-5.2-pro",
+                "gpt-5.2-codex",
+                "gpt-4o-mini",
+                "gpt-image-1.5",
+                "gpt-4o",
+                "gpt-5.2",
+                "gpt-5.2-pro",
             ]
-            providers.append({
-                "provider": "openai",
-                "items": [{
-                    "url": "https://api.openai.com/v1/chat/completions",
-                    "models": openai_models
-                }]
-            })
+            providers.append(
+                {
+                    "provider": "openai",
+                    "items": [
+                        {
+                            "url": "https://api.openai.com/v1/chat/completions",
+                            "models": openai_models,
+                        }
+                    ],
+                }
+            )
 
         return {"providers": providers}

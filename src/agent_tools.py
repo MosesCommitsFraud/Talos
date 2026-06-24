@@ -26,27 +26,53 @@ MAX_OUTPUT_CHARS = 10_000
 MAX_READ_CHARS = 20_000
 
 # Tool types that trigger execution
-TOOL_TAGS = {"bash", "python", "read_file", "write_file", "edit_file",
-             "grep", "glob", "ls", "show_image", "run_cell",
-             "create_document", "update_document", "edit_document",
-             "search_chats",
-             "chat_with_model", "create_session", "list_sessions",
-             "send_to_session",
-             "pipeline",
-             "manage_session", "manage_memory", "list_models",
-              "ui_control", "generate_image", "ask_user", "update_plan",
-             "manage_tasks", "api_call", "ask_teacher", "manage_skills",
-             "suggest_document",
-             "manage_endpoints", "manage_mcp", "manage_webhooks",
-             "manage_tokens", "manage_documents", "manage_settings",
-             "query_sql",
-             "edit_image",
-             # Retrieve the full original of a compressed tool output
-             # (see src/context_optimizer.py)
-             "expand_output",
-             # Generic loopback to any UI-button endpoint — agent uses this
-             # when there's no named tool wrapper for the action.
-             "app_api"}
+TOOL_TAGS = {
+    "bash",
+    "python",
+    "read_file",
+    "write_file",
+    "edit_file",
+    "grep",
+    "glob",
+    "ls",
+    "show_image",
+    "run_cell",
+    "create_document",
+    "update_document",
+    "edit_document",
+    "search_chats",
+    "chat_with_model",
+    "create_session",
+    "list_sessions",
+    "send_to_session",
+    "pipeline",
+    "manage_session",
+    "manage_memory",
+    "list_models",
+    "ui_control",
+    "generate_image",
+    "ask_user",
+    "update_plan",
+    "manage_tasks",
+    "api_call",
+    "ask_teacher",
+    "manage_skills",
+    "suggest_document",
+    "manage_endpoints",
+    "manage_mcp",
+    "manage_webhooks",
+    "manage_tokens",
+    "manage_documents",
+    "manage_settings",
+    "query_sql",
+    "edit_image",
+    # Retrieve the full original of a compressed tool output
+    # (see src/context_optimizer.py)
+    "expand_output",
+    # Generic loopback to any UI-button endpoint — agent uses this
+    # when there's no named tool wrapper for the action.
+    "app_api",
+}
 
 ToolBlock = namedtuple("ToolBlock", ["tool_type", "content"])
 
@@ -55,14 +81,17 @@ ToolBlock = namedtuple("ToolBlock", ["tool_type", "content"])
 # ---------------------------------------------------------------------------
 _mcp_manager = None
 
+
 def set_mcp_manager(manager):
     """Set the global MCP manager instance."""
     global _mcp_manager
     _mcp_manager = manager
 
+
 def get_mcp_manager():
     """Get the global MCP manager instance."""
     return _mcp_manager
+
 
 # ---------------------------------------------------------------------------
 # Helpers (kept here — used by sub-modules)
@@ -77,28 +106,12 @@ def _truncate(text: str, limit: int = MAX_OUTPUT_CHARS) -> str:
         return text[:limit] + f"\n... (truncated, {len(text)} chars total)"
     return text
 
+
 # ---------------------------------------------------------------------------
 # Re-exports from sub-modules
 # ---------------------------------------------------------------------------
 
 # Parsing
-from src.tool_parsing import (  # noqa: E402, F401
-    parse_tool_blocks,
-    strip_tool_blocks,
-    _TOOL_NAME_MAP,
-    _TOOL_BLOCK_RE,
-    _TOOL_CALL_RE,
-    _XML_TOOL_CALL_RE,
-    _XML_INVOKE_RE,
-    _XML_PARAM_RE,
-)
-
-# Schemas
-from src.tool_schemas import (  # noqa: E402, F401
-    FUNCTION_TOOL_SCHEMAS,
-    function_call_to_tool_block,
-)
-
 # Execution
 from src.tool_execution import (  # noqa: E402, F401
     execute_tool_block,
@@ -107,21 +120,37 @@ from src.tool_execution import (  # noqa: E402, F401
 
 # Implementations
 from src.tool_implementations import (  # noqa: E402, F401
-    set_active_document,
-    set_active_model,
-    get_active_document,
+    do_api_call,
     do_create_document,
-    do_update_document,
     do_edit_document,
-    do_suggest_document,
-    do_search_chats,
-    do_manage_skills,
-    do_manage_tasks,
+    do_manage_documents,
     do_manage_endpoints,
     do_manage_mcp,
-    do_manage_webhooks,
-    do_manage_tokens,
-    do_manage_documents,
     do_manage_settings,
-    do_api_call,
+    do_manage_skills,
+    do_manage_tasks,
+    do_manage_tokens,
+    do_manage_webhooks,
+    do_search_chats,
+    do_suggest_document,
+    do_update_document,
+    get_active_document,
+    set_active_document,
+    set_active_model,
+)
+from src.tool_parsing import (  # noqa: E402, F401
+    _TOOL_BLOCK_RE,
+    _TOOL_CALL_RE,
+    _TOOL_NAME_MAP,
+    _XML_INVOKE_RE,
+    _XML_PARAM_RE,
+    _XML_TOOL_CALL_RE,
+    parse_tool_blocks,
+    strip_tool_blocks,
+)
+
+# Schemas
+from src.tool_schemas import (  # noqa: E402, F401
+    FUNCTION_TOOL_SCHEMAS,
+    function_call_to_tool_block,
 )

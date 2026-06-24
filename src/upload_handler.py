@@ -1,20 +1,24 @@
 # src/upload_handler.py
+import hashlib
+import json
+import mimetypes
 import os
 import re
-import json
-import uuid
-import time
-import hashlib
-import mimetypes
 import shutil
 import tempfile
 import threading
+import time
+import uuid
 from datetime import datetime, timedelta
-from typing import Dict, Any, Optional
+from typing import Any, Dict, Optional
+
 from fastapi import HTTPException, UploadFile
+
+
 def secure_filename(filename: str) -> str:
     """Sanitize a filename (replaces werkzeug.utils.secure_filename)."""
     import unicodedata
+
     filename = unicodedata.normalize("NFKD", filename)
     filename = filename.encode("ascii", "ignore").decode("ascii")
     # Replace path separators with underscores
@@ -27,6 +31,8 @@ def secure_filename(filename: str) -> str:
     # Don't allow dotfiles
     filename = filename.lstrip(".")
     return filename or "unnamed"
+
+
 import logging
 
 logger = logging.getLogger(__name__)
@@ -84,7 +90,7 @@ class UploadHandler:
         # batches per minute.
         self.upload_rate_limit = 60  # max 60 file-uploads per minute per IP
         self.upload_rate_window = 60  # 60 seconds
-        
+
         # Track upload rates
         self.upload_rate_log: Dict[str, list] = {}
         self._upload_rate_lock = threading.Lock()
@@ -97,18 +103,19 @@ class UploadHandler:
         # the atomic-rename write below keeps on-disk state consistent
         # on its own but does not serialise writers across processes.
         self._index_lock = threading.Lock()
-        
+
         # Create upload directory
         os.makedirs(self.upload_dir, exist_ok=True)
-        
+
         # Initialize file detector
         try:
             import magic
+
             self.file_detector = magic.Magic(mime=True)
         except Exception:
             self.file_detector = None
             logger.warning("python-magic not available, falling back to basic detection")
-    
+
     def inside_base_dir(self, path: str) -> bool:
         """Check if path is inside base directory"""
         base = os.path.realpath(self.base_dir)
@@ -117,14 +124,16 @@ class UploadHandler:
             return os.path.commonpath([base, p]) == base
         except Exception:
             return False
-    
+
     def get_upload_dir(self):
         """Get date-based upload directory"""
         now = datetime.now()
-        upload_dir = os.path.join(self.upload_dir, now.strftime("%Y"), now.strftime("%m"), now.strftime("%d"))
+        upload_dir = os.path.join(
+            self.upload_dir, now.strftime("%Y"), now.strftime("%m"), now.strftime("%d")
+        )
         os.makedirs(upload_dir, exist_ok=True)
         return upload_dir
-    
+
     def calculate_file_hash(self, file_obj) -> str:
         """Calculate SHA-256 hash of file content."""
         file_obj.seek(0)
@@ -133,7 +142,7 @@ class UploadHandler:
             hash_sha256.update(chunk)
         file_obj.seek(0)
         return hash_sha256.hexdigest()
-    
+
     def detect_content_type(self, file_obj, original_filename: str) -> str:
         """Detect MIME type based on file content, with extension fallback."""
         content_type = "application/octet-stream"
@@ -144,117 +153,156 @@ class UploadHandler:
                 file_obj.seek(0)
             except Exception as e:
                 logger.warning(f"Failed to detect content type: {e}")
-        
+
         if not content_type or content_type == "application/octet-stream":
             _, ext = os.path.splitext(original_filename.lower())
             if ext:
                 content_type = mimetypes.guess_type(original_filename)[0] or content_type
-        
+
         return content_type
-        
+
     def is_image_file(self, filename: str, content_type: str = None) -> bool:
         """Check if a file is an image based on extension or content type."""
-        image_extensions = {'.png', '.jpg', '.jpeg', '.webp', '.gif'}
-        image_mime_types = {
-            'image/png', 'image/jpeg', 'image/jpg', 'image/webp', 'image/gif'
-        }
-        
+        image_extensions = {".png", ".jpg", ".jpeg", ".webp", ".gif"}
+        image_mime_types = {"image/png", "image/jpeg", "image/jpg", "image/webp", "image/gif"}
+
         # Check by extension
         _, ext = os.path.splitext(filename.lower())
         if ext in image_extensions:
             return True
-            
+
         # Check by content type if provided
         if content_type and content_type in image_mime_types:
             return True
-            
+
         return False
-        
+
     def is_document_file(self, filename: str, content_type: str = None) -> bool:
         """Check if a file is a document based on extension or content type."""
         document_extensions = {
-            '.pdf', '.docx', '.xlsx', '.pptx', '.xls', '.epub',
-            '.txt', '.py', '.js', '.html', '.htm',
-            '.css', '.json', '.md', '.csv', '.log', '.xml', '.yml',
-            '.yaml', '.nix', '.sql', '.sh', '.bash', '.c', '.cpp', '.h',
-            '.java', '.go', '.rs', '.php', '.rb', '.ts', '.jsx', '.tsx'
+            ".pdf",
+            ".docx",
+            ".xlsx",
+            ".pptx",
+            ".xls",
+            ".epub",
+            ".txt",
+            ".py",
+            ".js",
+            ".html",
+            ".htm",
+            ".css",
+            ".json",
+            ".md",
+            ".csv",
+            ".log",
+            ".xml",
+            ".yml",
+            ".yaml",
+            ".nix",
+            ".sql",
+            ".sh",
+            ".bash",
+            ".c",
+            ".cpp",
+            ".h",
+            ".java",
+            ".go",
+            ".rs",
+            ".php",
+            ".rb",
+            ".ts",
+            ".jsx",
+            ".tsx",
         }
         document_mime_types = {
-            'application/pdf', 
-            'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-            'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-            'application/vnd.ms-excel',
-            'application/epub+zip',
-            'text/plain'
+            "application/pdf",
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+            "application/vnd.ms-excel",
+            "application/epub+zip",
+            "text/plain",
         }
-        
+
         # Check by extension
         _, ext = os.path.splitext(filename.lower())
         if ext in document_extensions:
             return True
-            
+
         # Check by content type if provided
         if content_type and content_type in document_mime_types:
             return True
-            
+
         return False
-            
+
     def is_audio_file(self, filename: str, content_type: str = None) -> bool:
         """Check if a file is an audio file based on extension or content type."""
-        audio_extensions = {'.webm', '.wav', '.mp3', '.m4a', '.ogg'}
-        audio_mime_types = {
-            'audio/webm', 'audio/wav', 'audio/mpeg', 'audio/mp4', 'audio/ogg'
-        }
-        
+        audio_extensions = {".webm", ".wav", ".mp3", ".m4a", ".ogg"}
+        audio_mime_types = {"audio/webm", "audio/wav", "audio/mpeg", "audio/mp4", "audio/ogg"}
+
         # Check by extension
         _, ext = os.path.splitext(filename.lower())
         if ext in audio_extensions:
             return True
-            
+
         # Check by content type if provided
         if content_type and content_type in audio_mime_types:
             return True
-            
+
         return False
-    
+
     def is_safe_file_type(self, content_type: str, filename: str) -> bool:
         """Check if file type is safe to store and serve."""
         dangerous_types = {
-            'application/x-executable', 'application/x-sharedlib',
-            'application/x-dll', 'application/x-msdownload',
-            'application/x-sh', 'application/x-bat', 'application/x-vbs',
-            'application/javascript', 'application/x-javascript'
+            "application/x-executable",
+            "application/x-sharedlib",
+            "application/x-dll",
+            "application/x-msdownload",
+            "application/x-sh",
+            "application/x-bat",
+            "application/x-vbs",
+            "application/javascript",
+            "application/x-javascript",
         }
-        
+
         dangerous_extensions = {
-            '.exe', '.dll', '.bat', '.cmd', '.vbs', 
-            '.ps1', '.jsp', '.asp', '.aspx'
+            ".exe",
+            ".dll",
+            ".bat",
+            ".cmd",
+            ".vbs",
+            ".ps1",
+            ".jsp",
+            ".asp",
+            ".aspx",
         }
-        
+
         if content_type in dangerous_types:
             return False
-        
+
         _, ext = os.path.splitext(filename.lower())
         if ext in dangerous_extensions:
             return False
-        
+
         return True
-    
+
     def cleanup_old_uploads(self):
         """Remove uploaded files older than CLEANUP_DAYS days."""
         try:
             cutoff_date = datetime.now() - timedelta(days=self.cleanup_days)
             cleaned_count = 0
-            
+
             for root, dirs, files in os.walk(self.upload_dir):
                 if root == self.upload_dir:
                     continue
-                    
+
                 path_parts = root.split(os.sep)
                 if len(path_parts) >= 4:
                     try:
-                        dir_date = datetime(int(path_parts[-3]), int(path_parts[-2]), int(path_parts[-1]))
+                        dir_date = datetime(
+                            int(path_parts[-3]), int(path_parts[-2]), int(path_parts[-1])
+                        )
                         if dir_date < cutoff_date:
                             for file in files:
                                 file_path = os.path.join(root, file)
@@ -264,7 +312,7 @@ class UploadHandler:
                                     logger.info(f"Cleaned up old upload: {file_path}")
                                 except Exception as e:
                                     logger.warning(f"Failed to remove {file_path}: {e}")
-                            
+
                             try:
                                 os.rmdir(root)
                                 logger.info(f"Removed empty upload directory: {root}")
@@ -272,13 +320,13 @@ class UploadHandler:
                                 logger.warning(f"Failed to remove directory {root}: {e}")
                     except (ValueError, IndexError):
                         continue
-            
+
             logger.info(f"Upload cleanup completed: {cleaned_count} files removed")
             return cleaned_count
         except Exception as e:
             logger.error(f"Upload cleanup failed: {e}")
             return 0
-    
+
     def validate_upload_id(self, upload_id: str) -> bool:
         """Validate that the upload ID matches the expected pattern."""
         return is_valid_upload_id(upload_id)
@@ -417,13 +465,13 @@ class UploadHandler:
         resolved.setdefault("original_name", resolved["name"])
         resolved.setdefault("mime", mimetypes.guess_type(path)[0] or "application/octet-stream")
         return resolved
-    
+
     def cleanup_rate_limits(self):
         """Remove stale entries from upload_rate_log."""
         now = time.time()
         removed_ips = 0
         removed_timestamps = 0
-        
+
         with self._upload_rate_lock:
             ips_to_delete = []
             for ip, timestamps in list(self.upload_rate_log.items()):
@@ -434,53 +482,55 @@ class UploadHandler:
                     self.upload_rate_log[ip] = new_ts
                 else:
                     ips_to_delete.append(ip)
-            
+
             for ip in ips_to_delete:
                 del self.upload_rate_log[ip]
                 removed_ips += 1
-            
+
             if len(self.upload_rate_log) > self._upload_rate_max_entries:
                 sorted_ips = sorted(
                     self.upload_rate_log.items(),
                     key=lambda item: max(item[1]) if item[1] else 0,
-                    reverse=True
+                    reverse=True,
                 )
-                keep = dict(sorted_ips[:self._upload_rate_max_entries])
+                keep = dict(sorted_ips[: self._upload_rate_max_entries])
                 dropped = len(self.upload_rate_log) - len(keep)
                 self.upload_rate_log = keep
                 logger.info(f"Rate-limit dict size exceeded. Dropped {dropped} oldest IP entries.")
-        
-        logger.info(f"Rate-limit cleanup: removed {removed_ips} IPs, {removed_timestamps} timestamps.")
-    
+
+        logger.info(
+            f"Rate-limit cleanup: removed {removed_ips} IPs, {removed_timestamps} timestamps."
+        )
+
     def get_upload_stats(self) -> Dict[str, Any]:
         """Get statistics about uploaded files."""
         try:
             total_files = 0
             total_size = 0
             file_types = {}
-            
+
             uploads_db_path = os.path.join(self.upload_dir, "uploads.json")
             if os.path.exists(uploads_db_path):
                 with open(uploads_db_path, "r", encoding="utf-8") as f:
                     files = json.load(f)
-                
+
                 total_files = len(files)
                 for file_info in files.values():
                     total_size += file_info.get("size", 0)
                     mime = file_info.get("mime", "unknown")
                     file_types[mime] = file_types.get(mime, 0) + 1
-            
+
             return {
                 "total_files": total_files,
                 "total_size": total_size,
                 "total_size_mb": round(total_size / (1024 * 1024), 2),
                 "file_types": file_types,
-                "cleanup_days": self.cleanup_days
+                "cleanup_days": self.cleanup_days,
             }
         except Exception as e:
             logger.error(f"Failed to get upload stats: {e}")
             return {"error": str(e)}
-    
+
     def save_upload(self, u: UploadFile, client_ip: str, owner: str = None) -> dict:
         """Save uploaded file with enhanced security and organization."""
         # Rate limiting
@@ -488,56 +538,53 @@ class UploadHandler:
         with self._upload_rate_lock:
             if client_ip not in self.upload_rate_log:
                 self.upload_rate_log[client_ip] = []
-            
+
             self.upload_rate_log[client_ip] = [
-                timestamp for timestamp in self.upload_rate_log[client_ip]
+                timestamp
+                for timestamp in self.upload_rate_log[client_ip]
                 if now - timestamp < self.upload_rate_window
             ]
-            
+
             if len(self.upload_rate_log[client_ip]) >= self.upload_rate_limit:
                 raise HTTPException(
-                    status_code=429,
-                    detail="Upload rate limit exceeded. Please try again later."
+                    status_code=429, detail="Upload rate limit exceeded. Please try again later."
                 )
-            
+
             self.upload_rate_log[client_ip].append(now)
             self._upload_rate_counter += 1
-        
+
         if self._upload_rate_counter % 100 == 0:
             self.cleanup_rate_limits()
-        
+
         # Validate file size
         file_obj = u.file
         file_obj.seek(0, 2)
         file_size = file_obj.tell()
         file_obj.seek(0)
-        
+
         if file_size == 0:
             raise HTTPException(400, "File is empty")
-            
+
         if file_size > self.max_upload_size:
             raise HTTPException(
                 status_code=400,
-                detail=f"File size exceeds {self.max_upload_size/1024/1024}MB limit"
+                detail=f"File size exceeds {self.max_upload_size / 1024 / 1024}MB limit",
             )
-        
+
         # Get original filename and sanitize it
         original_filename = u.filename or f"upload_{int(time.time())}"
         safe_filename = secure_filename(original_filename)
-        
+
         # Detect content type
         content_type = self.detect_content_type(file_obj, safe_filename)
-        
+
         # Check if file type is safe
         if not self.is_safe_file_type(content_type, safe_filename):
-            raise HTTPException(
-                status_code=400,
-                detail=f"File type not allowed: {content_type}"
-            )
-        
+            raise HTTPException(status_code=400, detail=f"File type not allowed: {content_type}")
+
         # Calculate file hash for deduplication
         file_hash = self.calculate_file_hash(file_obj)
-        
+
         # Check for duplicate files.
         # The duplicate-detection lookup AND the write must both happen
         # under _index_lock: a duplicate upload racing with a new-entry
@@ -552,7 +599,11 @@ class UploadHandler:
             for key, info in existing_files.items():
                 if info.get("hash") == file_hash and info.get("owner") == owner:
                     stored_path = info.get("path")
-                    if stored_path and os.path.exists(stored_path) and self._inside_upload_dir(stored_path):
+                    if (
+                        stored_path
+                        and os.path.exists(stored_path)
+                        and self._inside_upload_dir(stored_path)
+                    ):
                         existing_key = key
                         existing_file = info
                         break
@@ -562,11 +613,16 @@ class UploadHandler:
                     existing_files.pop(key, None)
                 try:
                     self._atomic_write_json(uploads_db_path, existing_files)
-                    logger.info("Removed %d stale upload index entries for missing duplicates", len(stale_keys))
+                    logger.info(
+                        "Removed %d stale upload index entries for missing duplicates",
+                        len(stale_keys),
+                    )
                 except Exception as e:
                     logger.warning(f"Failed to remove stale upload index entries: {e}")
         if existing_file:
-            logger.info(f"Duplicate file upload detected: {original_filename} -> {existing_file['id']}")
+            logger.info(
+                f"Duplicate file upload detected: {original_filename} -> {existing_file['id']}"
+            )
 
             existing_file["last_accessed"] = datetime.now().isoformat()
             with self._index_lock:
@@ -606,16 +662,16 @@ class UploadHandler:
                     "owner": existing_file.get("owner"),
                     "width": existing_file.get("width"),
                     "height": existing_file.get("height"),
-                    "is_duplicate": True
+                    "is_duplicate": True,
                 }
-        
+
         # Generate unique ID and determine save location
         file_id = _build_upload_id(safe_filename)
-        
+
         # Create date-based directory structure
         upload_dir = self.get_upload_dir()
         file_path = os.path.join(upload_dir, file_id)
-        
+
         # Save the file
         try:
             with open(file_path, "wb") as f:
@@ -623,7 +679,7 @@ class UploadHandler:
                     f.write(chunk)
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Failed to save file: {str(e)}")
-        
+
         # Create file metadata
         file_metadata = {
             "id": file_id,
@@ -643,13 +699,14 @@ class UploadHandler:
         if content_type.startswith("image/"):
             try:
                 from PIL import Image, ImageOps
+
                 with Image.open(file_path) as _im:
                     _im = ImageOps.exif_transpose(_im)
                     file_metadata["width"] = _im.width
                     file_metadata["height"] = _im.height
             except Exception as e:
                 logger.warning(f"Failed to read image dimensions for {file_id}: {e}")
-        
+
         # Update uploads database
         with self._index_lock:
             try:
@@ -659,6 +716,6 @@ class UploadHandler:
                 self._atomic_write_json(uploads_db_path, current)
             except Exception as e:
                 logger.warning(f"Failed to update uploads database: {e}")
-        
+
         logger.info(f"File uploaded successfully: {original_filename} ({file_size} bytes)")
         return file_metadata

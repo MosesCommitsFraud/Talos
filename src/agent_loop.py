@@ -9,33 +9,33 @@ The LLM decides when to use tools by writing fenced code blocks.
 import asyncio
 import collections
 import json
+import logging
 import os
 import re
 import time
-import logging
-from typing import AsyncGenerator, List, Dict, Optional, Set
+from typing import AsyncGenerator, Dict, List, Optional, Set
 from urllib.parse import urlparse
 
-from src.llm_core import stream_llm, stream_llm_with_fallback, _is_ollama_native_url
-from src.model_context import estimate_tokens
-from src.settings import get_setting
-from src.prompt_security import untrusted_context_message
-from src.tool_security import blocked_tools_for_owner, plan_mode_disabled_tools
 from src.agent_tools import (
-    parse_tool_blocks,
-    strip_tool_blocks,
-    execute_tool_block,
-    format_tool_result,
-    set_active_document,
-    set_active_model,
-    function_call_to_tool_block,
-    get_mcp_manager,
     FUNCTION_TOOL_SCHEMAS,
+    MAX_AGENT_ROUNDS,
     TOOL_TAGS,
     ToolBlock,
-    MAX_AGENT_ROUNDS,
+    execute_tool_block,
+    format_tool_result,
+    function_call_to_tool_block,
+    get_mcp_manager,
+    parse_tool_blocks,
+    set_active_document,
+    set_active_model,
+    strip_tool_blocks,
 )
 from src.context_optimizer import optimize_tool_output
+from src.llm_core import _is_ollama_native_url, stream_llm_with_fallback
+from src.model_context import estimate_tokens
+from src.prompt_security import untrusted_context_message
+from src.settings import get_setting
+from src.tool_security import blocked_tools_for_owner, plan_mode_disabled_tools
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +43,7 @@ logger = logging.getLogger(__name__)
 def _load_mcp_disabled_map() -> Dict[str, set]:
     """Load per-server disabled tool sets from the database."""
     from core.database import McpServer, SessionLocal
+
     disabled_map: Dict[str, set] = {}
     db = SessionLocal()
     try:
@@ -57,6 +58,7 @@ def _load_mcp_disabled_map() -> Dict[str, set]:
     finally:
         db.close()
     return disabled_map
+
 
 # System prompt that tells the LLM about available tools.
 # Always injected — the LLM decides whether to use them.
@@ -151,38 +153,32 @@ Use `bash` for SHELL tasks only: installing packages, inspecting files (`ls`, `c
 LONG-running commands (package installs, pip/npm, ffmpeg, model downloads, training, builds) are fine — there is NO time limit and they run to completion in the sandbox, so just run them directly.
 SANDBOX LIMITS: stdin/stdout are pipes, so there is NO interactive terminal — `input()`, `curses`, `termios`, `pygame`, and `tkinter` will all fail. Don't try to RUN interactive terminal games or GUI apps here — verify syntax (`python -c "import py_compile; py_compile.compile('x.py')"`) and tell the user to run it themselves in their own terminal. For anything the USER should play/use interactively (games, UIs, demos), prefer a single self-contained HTML file with `<canvas>` + inline JS — save it via `create_document` with language="html" and tell the user to hit the Run / Preview button (▶) in the document editor toolbar; it renders inline in a sandboxed iframe so the game is playable right there. Works from any machine that can reach the Talos UI — no need to copy files out.
 NEVER pipe multi-line Python through `python -c "..."` — shell quoting eats real newlines and `\\n` arrives as literal backslash-n, which Python parses as a line-continuation error on line 1. To run multi-line code, either use the dedicated `python` tool block above, or save to a file first with a quoted HEREDOC (`cat > /tmp/x.py << 'EOF' ... EOF`) and then `python /tmp/x.py`.""",
-
     "python": """\
 ```python
 <python code>
 ```
 Execute Python code INLINE — use ONLY for short, throwaway computations (a quick calculation, a one-off check, a few lines). Each call is stateless and the code can't be edited, so do NOT write long scripts here: if it's more than ~15 lines or you'll likely need to fix/iterate on it, instead `write_file` it to a `.py` file ONCE, run it with `bash` (`python script.py`), and when it fails FIX the broken lines with `edit_file` (targeted edits) — never resend the whole script. That loop is far faster than regenerating inline code. NOT for writing code for the user (use create_document for that). For tabular data use pandas; for Excel use pandas.read_excel with openpyxl/xlrd as needed. For static charts prefer seaborn by default (with matplotlib savefig to a PNG). Use plotly when the user asks for interactive charts. For forecasting/statistics use statsmodels when appropriate; for ML/prediction use scikit-learn when appropriate. Runs with NO time limit — long/heavy work is fine. SHOWING AN IMAGE TO THE USER: your working directory is a private workspace. To display a finished chart/image: save it with a RELATIVE path in your workspace (e.g. `fig.savefig('chart.png', dpi=150, bbox_inches='tight')`), then call the `show_image` tool with that path. (Images you save under an `output/` directory are also shown automatically.) Never upload images via api_call, and do NOT save to `/tmp` or absolute paths — those won't show. Same sandbox limits as bash — no TTY, no GUI, no `input()`; for anything the user should interact with, generate a single HTML file with inline JS instead.""",
-
     "run_cell": """\
 ```run_cell
 <python code>
 ```
 Run Python in a PERSISTENT kernel — variables, imports, and loaded data STAY in memory between calls (like a Jupyter notebook). For one-off code, use the `python` tool (simpler). Reach for run_cell only for MULTI-STEP data analysis where keeping state in memory between steps saves real work: load a big dataset ONCE, then run more cells to explore/transform/plot it without reloading. State persists until the chat ends. Charts: save to an `output/` path or call show_image.""",
-
     "read_file": """\
 ```read_file
 <file path>
 ```
 Read a file and return its contents.""",
-
     "show_image": """\
 ```show_image
 <workspace-relative image path>
 ```
 Display an image from your workspace to the user — rendered inline in the chat with click-to-enlarge and a download button. Use this to PRESENT a finished chart/plot/diagram/visual. First create the image (e.g. with python + seaborn: `fig.savefig('chart.png')`), then call show_image with that path. The path must be inside your workspace (relative, e.g. `chart.png` or `output/chart.png`) — never `/tmp` or an absolute path. One image per call.""",
-
     "write_file": """\
 ```write_file
 <file path>
 <file contents>
 ```
 Write content to a file. First line is the path, rest is the content.""",
-
     "edit_file": """\
 ```edit_file
 {"path": "<file path>", "old_string": "<exact text to replace>", "new_string": "<replacement>", "replace_all": false}
@@ -193,7 +189,6 @@ To fix several places at once, use the multi-edit form (one call, applied in ord
 {"path": "<file path>", "edits": [{"target": "<exact text>", "replacement": "<new text>"}, {"target": "<exact text 2>", "replacement": "<new text 2>"}]}
 ```
 Each `target` must match exactly and be unique (set "allow_multiple": true to replace every match, or "start_line"/"end_line" to scope the search). Use write_file only to CREATE a file.""",
-
     "create_document": """\
 ```create_document
 <title>
@@ -201,7 +196,6 @@ Each `target` must match exactly and be unique (set "allow_multiple": true to re
 <content>
 ```
 Create a NEW document in the editor panel. Only use when the user explicitly asks for a new file/document. If a document is already open in the editor, the user's request "fix this", "add X", "change Y", etc. refers to THAT document — use edit_document, never create_document.""",
-
     "edit_document": """\
 ```edit_document
 <<<FIND>>>
@@ -211,13 +205,11 @@ new replacement text
 <<<END>>>
 ```
 Edit a document OPEN IN THE EDITOR PANEL — NOT a file on disk. For files on disk (home folder, project files, any real path like ~/sweden.txt) use `edit_file` instead. Find exact text and replace it. Multiple FIND/REPLACE blocks per call OK. Use for any edit smaller than a full rewrite. **If a document is open in the editor, treat it as the user's current context: don't ask which file they mean, and don't create a new one — just edit_document the active one.** Do NOT re-send the whole file with update_document for small changes.""",
-
     "update_document": """\
 ```update_document
 <entire new content>
 ```
 Replace the ENTIRE active document. ONLY use when you're genuinely rewriting more than half of it from scratch. For any smaller change, use edit_document — echoing back the whole file for a two-line edit wastes tokens and is hard to review.""",
-
     "suggest_document": """\
 ```suggest_document
 <<<FIND>>>
@@ -229,7 +221,6 @@ why this change improves the code
 <<<END>>>
 ```
 Suggest changes with explanations (for review/feedback requests).""",
-
     "generate_image": """\
 ```generate_image
 <prompt>
@@ -238,21 +229,20 @@ Suggest changes with explanations (for review/feedback requests).""",
 <quality>
 ```
 Generate an image. Line 1 = description, line 2 = model name, line 3 = WxH (e.g. 1024x1024), line 4 = quality.""",
-
     "chat_with_model": "- ```chat_with_model``` — Ask a DIFFERENT AI model and relay its answer. Line 1 = model name (or 'model@endpoint'), rest = your message. Use when the user says 'ask <model>', 'what does <model> think', or wants to compare/their answer from another model.",
     "ask_teacher": "- ```ask_teacher``` — Escalate a hard question to a more capable model. Line 1 = model name or 'auto', rest = the question. Use when stuck or need expert knowledge.",
     "list_models": "- ```list_models``` — Show all available AI models across all endpoints. Use when user asks what models are available.",
     "expand_output": "- ```expand_output``` — Retrieve the full original of a compressed tool output. Big tool outputs get compressed before you see them, with a marker like `[Output compressed … id `out_xxxxxxxx`]`. Line 1 = that id, optional line 2 = a search term (returns matching lines) or a page number. Only call when the compressed view is missing details you actually need.",
     "manage_session": "- ```manage_session``` — Rename, archive, delete, fork, switch, or `list` chats (the UI calls them 'chats'; 'session' is internal). Line 1 = action (list/switch/rename/archive/unarchive/delete/important/unimportant/truncate/fork), Line 2 = exact chat id from `list_sessions` (or `current` where supported). For delete/archive/truncate, always list first and reuse the exact id; never invent placeholder ids. `switch`/`open` returns a clickable anchor link the user can tap to open the chat — use for \"open my X chat\".",
     "manage_memory": "- ```manage_memory``` — Manage the user's persistent memory (facts, identity, preferences, context that persists across chats). Line 1 = action (list/add/edit/delete/search), rest = content. Use when user says 'remember this', states identity facts like 'my name is <name>' / 'call me <name>' / 'I live in <place>', or asks about stored memories.",
-    "manage_skills": "- ```manage_skills``` — Skill registry (SKILL.md format). Args (JSON): {\"action\": \"list|view|view_ref|search|add|edit|patch|publish|delete\", ...}. `list` returns the index of available skills (published + teacher-escalation drafts); `view name=foo` fetches the full SKILL.md; `view_ref name=foo path=...` loads a reference file under the skill directory. For `add`, provide an explicit kebab-case `name` and only report the exact returned name, because storage may normalize or dedupe it. Use this BEFORE doing domain work — there may already be a procedure (published or draft) that prescribes the correct steps. Drafts written by the teacher loop are authoritative guidance even though they're not yet published.",
-    "manage_tasks": "- ```manage_tasks``` — Create and manage scheduled background tasks (recurring AI jobs). Args (JSON): {\"action\": \"list|create|edit|delete|pause|resume|run\", ...}",
-    "manage_endpoints": "- ```manage_endpoints``` — Add, remove, or configure AI model API endpoints. Args (JSON): {\"action\": \"list|add|delete|enable|disable\", ...}. Use when user wants to add a new AI provider.",
-    "manage_mcp": "- ```manage_mcp``` — Manage MCP (Model Context Protocol) tool servers — external tools that extend your capabilities. Args (JSON): {\"action\": \"list|add|delete|reconnect|list_tools\", ...}",
-    "manage_webhooks": "- ```manage_webhooks``` — Configure outgoing webhooks (HTTP notifications on events like chat completion). Args (JSON): {\"action\": \"list|add|delete|enable|disable\", ...}",
-    "manage_tokens": "- ```manage_tokens``` — Generate or revoke API access tokens for external integrations. Args (JSON): {\"action\": \"list|create|delete\", ...}",
-    "manage_documents": "- ```manage_documents``` — List, read/open, delete, or tidy documents in the editor panel. Args (JSON): {\"action\": \"list|read|delete|tidy\", ...}. `list` returns rows like `[Title](#document-<id>) — lang, size, updated 5m ago` sorted MOST-RECENT FIRST; the user clicks the anchor to open. `read` (aliases: view/open/get) takes `document_id` and returns the content. When the user asks \"open/show/read my notes\" or \"what documents do I have\", use this — do NOT shell out, do NOT curl.",
-    "manage_settings": "- ```manage_settings``` — View/change the REAL app settings (same ones the Settings panel writes) AND turn tools on/off. Change a setting: `{\"action\":\"set\",\"key\":\"...\",\"value\":\"...\"}` — keys accept friendly aliases, e.g. voice→tts_voice, \"search engine\"→search_provider, \"default model\"→default_model, \"teacher model\"→teacher_model, \"task/background model\"→task_model, \"image quality\"→image_quality, \"reminder channel\"→reminder_channel (browser|email|ntfy), \"agent timeout\"/\"max tool calls\"/\"token budget\". Read: `{\"action\":\"get\",\"key\":\"...\"}`; see all: `{\"action\":\"list\"}`; reset one: `{\"action\":\"reset\",\"key\":\"...\"}`. Use this when the user asks to change ANY preference instead of making them open Settings. Secrets/API keys are read-only (tell them to set those in the panel). Tool toggles: `{\"action\":\"disable_tool|enable_tool\",\"tool\":\"shell\"}` (aliases: shell/search/browser/documents/memory/skills/images/tasks), list disabled: `{\"action\":\"list_tools\"}`.",
+    "manage_skills": '- ```manage_skills``` — Skill registry (SKILL.md format). Args (JSON): {"action": "list|view|view_ref|search|add|edit|patch|publish|delete", ...}. `list` returns the index of available skills (published + teacher-escalation drafts); `view name=foo` fetches the full SKILL.md; `view_ref name=foo path=...` loads a reference file under the skill directory. For `add`, provide an explicit kebab-case `name` and only report the exact returned name, because storage may normalize or dedupe it. Use this BEFORE doing domain work — there may already be a procedure (published or draft) that prescribes the correct steps. Drafts written by the teacher loop are authoritative guidance even though they\'re not yet published.',
+    "manage_tasks": '- ```manage_tasks``` — Create and manage scheduled background tasks (recurring AI jobs). Args (JSON): {"action": "list|create|edit|delete|pause|resume|run", ...}',
+    "manage_endpoints": '- ```manage_endpoints``` — Add, remove, or configure AI model API endpoints. Args (JSON): {"action": "list|add|delete|enable|disable", ...}. Use when user wants to add a new AI provider.',
+    "manage_mcp": '- ```manage_mcp``` — Manage MCP (Model Context Protocol) tool servers — external tools that extend your capabilities. Args (JSON): {"action": "list|add|delete|reconnect|list_tools", ...}',
+    "manage_webhooks": '- ```manage_webhooks``` — Configure outgoing webhooks (HTTP notifications on events like chat completion). Args (JSON): {"action": "list|add|delete|enable|disable", ...}',
+    "manage_tokens": '- ```manage_tokens``` — Generate or revoke API access tokens for external integrations. Args (JSON): {"action": "list|create|delete", ...}',
+    "manage_documents": '- ```manage_documents``` — List, read/open, delete, or tidy documents in the editor panel. Args (JSON): {"action": "list|read|delete|tidy", ...}. `list` returns rows like `[Title](#document-<id>) — lang, size, updated 5m ago` sorted MOST-RECENT FIRST; the user clicks the anchor to open. `read` (aliases: view/open/get) takes `document_id` and returns the content. When the user asks "open/show/read my notes" or "what documents do I have", use this — do NOT shell out, do NOT curl.',
+    "manage_settings": '- ```manage_settings``` — View/change the REAL app settings (same ones the Settings panel writes) AND turn tools on/off. Change a setting: `{"action":"set","key":"...","value":"..."}` — keys accept friendly aliases, e.g. voice→tts_voice, "search engine"→search_provider, "default model"→default_model, "teacher model"→teacher_model, "task/background model"→task_model, "image quality"→image_quality, "reminder channel"→reminder_channel (browser|email|ntfy), "agent timeout"/"max tool calls"/"token budget". Read: `{"action":"get","key":"..."}`; see all: `{"action":"list"}`; reset one: `{"action":"reset","key":"..."}`. Use this when the user asks to change ANY preference instead of making them open Settings. Secrets/API keys are read-only (tell them to set those in the panel). Tool toggles: `{"action":"disable_tool|enable_tool","tool":"shell"}` (aliases: shell/search/browser/documents/memory/skills/images/tasks), list disabled: `{"action":"list_tools"}`.',
     "query_sql": """\
 ```query_sql
 {"action": "query", "query": "SELECT ...", "max_rows": 100}
@@ -263,9 +253,9 @@ Read-only SQL access to the configured external database(s). Use when the user a
     "send_to_session": "- ```send_to_session``` — Send a message to another session. Line 1 = session_id, rest = message. Use for orchestrating work across sessions.",
     "search_chats": "- ```search_chats``` — Search across all chat history. Use when user asks 'did we discuss X?' or 'find the conversation about Y'.",
     "pipeline": "- ```pipeline``` — Run a multi-step AI pipeline. Args (JSON) with ordered steps, each specifying a model and prompt. Use for complex workflows.",
-    "ui_control": "- ```ui_control``` — Control the UI: toggle tools on/off, OPEN PANELS, switch models, change themes. Commands: `toggle <name> on/off` (names: bash/shell, browser, incognito, document_editor/documents), `open_panel <name>` (panels: documents, gallery, sessions, memories/brain, skills, settings), `set_mode agent/chat`, `switch_model <name>`, `set_theme <preset>`, `create_theme <name> <bg> <fg> <panel> <border> <accent>` (optional key=val for advanced colors AND background effects: bgPattern=<none|dots|synapse|rain|constellations|perlin-flow|petals|sparkles|embers>, bgEffectColor=#RRGGBB, bgEffectIntensity=<num>, bgEffectSize=<num>, frosted=true|false). \"open documents\" / \"open library\" / \"show gallery\" all map to `open_panel <name>`. Theme presets: dark, light, midnight, paper, cyberpunk, retrowave, forest, ocean, ume, copper, terminal, organs, lavender, gpt, claude, cute.",
-    "ask_user": "- ```ask_user``` — Ask the user a multiple-choice question when the task is genuinely ambiguous and the answer changes what you do next (pick an approach, confirm an assumption, choose a target). Args (JSON): {\"question\": \"...\", \"options\": [{\"label\": \"...\", \"description\": \"...\"?}, ...], \"multi\": false?}. 2-6 options. The user gets clickable buttons; calling this ENDS your turn and their choice comes back as your next message. Prefer sensible defaults — only ask when you truly can't proceed well without their input.",
-    "update_plan": "- ```update_plan``` — While executing an approved plan, write the full checklist back with completed steps marked `- [x]`. Args (JSON): {\"plan\": \"- [x] done step\\n- [ ] next step\"}. Always pass the COMPLETE checklist, not a diff.",
+    "ui_control": '- ```ui_control``` — Control the UI: toggle tools on/off, OPEN PANELS, switch models, change themes. Commands: `toggle <name> on/off` (names: bash/shell, browser, incognito, document_editor/documents), `open_panel <name>` (panels: documents, gallery, sessions, memories/brain, skills, settings), `set_mode agent/chat`, `switch_model <name>`, `set_theme <preset>`, `create_theme <name> <bg> <fg> <panel> <border> <accent>` (optional key=val for advanced colors AND background effects: bgPattern=<none|dots|synapse|rain|constellations|perlin-flow|petals|sparkles|embers>, bgEffectColor=#RRGGBB, bgEffectIntensity=<num>, bgEffectSize=<num>, frosted=true|false). "open documents" / "open library" / "show gallery" all map to `open_panel <name>`. Theme presets: dark, light, midnight, paper, cyberpunk, retrowave, forest, ocean, ume, copper, terminal, organs, lavender, gpt, claude, cute.',
+    "ask_user": '- ```ask_user``` — Ask the user a multiple-choice question when the task is genuinely ambiguous and the answer changes what you do next (pick an approach, confirm an assumption, choose a target). Args (JSON): {"question": "...", "options": [{"label": "...", "description": "..."?}, ...], "multi": false?}. 2-6 options. The user gets clickable buttons; calling this ENDS your turn and their choice comes back as your next message. Prefer sensible defaults — only ask when you truly can\'t proceed well without their input.',
+    "update_plan": '- ```update_plan``` — While executing an approved plan, write the full checklist back with completed steps marked `- [x]`. Args (JSON): {"plan": "- [x] done step\\n- [ ] next step"}. Always pass the COMPLETE checklist, not a diff.',
     "app_api": """\
 ```app_api
 {"action": "call", "method": "GET", "path": "/api/gallery/list"}
@@ -293,16 +283,18 @@ Body for POST/PUT/PATCH goes in `body` (object). Query params in `query` (object
 Blocked paths (refused for safety): /api/auth/, /api/users/, /api/tokens/, /api/admin/, /api/backup/restore.""",
 }
 
+
 def get_builtin_overrides() -> dict:
     """User overrides for built-in tool descriptions (TOOL_SECTIONS).
     Stored globally in settings.json so the user can preview + edit how
     the assistant is told to use a native tool, with a revert path."""
     try:
         from src.settings import get_setting
+
         ov = get_setting("builtin_tool_overrides", {})
         return ov if isinstance(ov, dict) else {}
     except Exception as e:
-        logger.warning('Failed to load builtin tool overrides: %s', e)
+        logger.warning("Failed to load builtin tool overrides: %s", e)
         return {}
 
 
@@ -379,29 +371,68 @@ _cached_base_prompt_key = None
 # to copy fenced-block examples from prompt text. Smaller models — DeepSeek
 # especially — often fail to follow the fenced-block convention and emit raw
 # JSON, which the agent then can't parse as a tool call.
-_API_HOSTS = frozenset([
-    "api.openai.com", "api.anthropic.com",
-    "openrouter.ai", "api.groq.com",
-    "api.mistral.ai", "api.cohere.com",
-    "api.deepseek.com", "deepseek.com",
-    "api.together.xyz", "api.fireworks.ai",
-    "api.perplexity.ai", "api.x.ai",
-    "ollama.com", "api.venice.ai",
-    "api.githubcopilot.com",
-    # Local OpenAI-compatible endpoints (llama.cpp, vLLM, LM Studio, etc.).
-    # Without these, `_is_api_model` falls back to keyword sniffing on the
-    # model name, so well-behaved local servers don't get native tool
-    # schemas and the agent silently degrades to fenced-block parsing.
-    "localhost", "127.0.0.1", "host.docker.internal",
-])
-_MCP_KEYWORDS = frozenset(["mcp", "browse", "browser", "website", "calendar", "event", "email",
-                           "gmail", "screenshot", "navigate", "click", "miniflux", "rss", "feed"])
-_ADMIN_SCHEMA_NAMES = frozenset([
-    "manage_session", "manage_skills", "manage_tasks",
-    "manage_endpoints", "manage_mcp", "manage_webhooks", "manage_tokens",
-    "create_session", "list_sessions", "send_to_session", "pipeline",
-    "ask_teacher", "list_models", "search_chats",
-])
+_API_HOSTS = frozenset(
+    [
+        "api.openai.com",
+        "api.anthropic.com",
+        "openrouter.ai",
+        "api.groq.com",
+        "api.mistral.ai",
+        "api.cohere.com",
+        "api.deepseek.com",
+        "deepseek.com",
+        "api.together.xyz",
+        "api.fireworks.ai",
+        "api.perplexity.ai",
+        "api.x.ai",
+        "ollama.com",
+        "api.venice.ai",
+        "api.githubcopilot.com",
+        # Local OpenAI-compatible endpoints (llama.cpp, vLLM, LM Studio, etc.).
+        # Without these, `_is_api_model` falls back to keyword sniffing on the
+        # model name, so well-behaved local servers don't get native tool
+        # schemas and the agent silently degrades to fenced-block parsing.
+        "localhost",
+        "127.0.0.1",
+        "host.docker.internal",
+    ]
+)
+_MCP_KEYWORDS = frozenset(
+    [
+        "mcp",
+        "browse",
+        "browser",
+        "website",
+        "calendar",
+        "event",
+        "email",
+        "gmail",
+        "screenshot",
+        "navigate",
+        "click",
+        "miniflux",
+        "rss",
+        "feed",
+    ]
+)
+_ADMIN_SCHEMA_NAMES = frozenset(
+    [
+        "manage_session",
+        "manage_skills",
+        "manage_tasks",
+        "manage_endpoints",
+        "manage_mcp",
+        "manage_webhooks",
+        "manage_tokens",
+        "create_session",
+        "list_sessions",
+        "send_to_session",
+        "pipeline",
+        "ask_teacher",
+        "list_models",
+        "search_chats",
+    ]
+)
 _TOOL_SELECTION_TIMEOUT_SECONDS = 1.5
 
 
@@ -438,25 +469,67 @@ def _endpoint_lookup_keys(endpoint_url: str) -> List[str]:
     add(raw)
     try:
         from src.endpoint_resolver import normalize_base
+
         add(normalize_base(raw))
     except Exception:
         pass
     return keys
 
+
 # Admin tool keywords — if the last user message contains any of these, include admin tools
 _ADMIN_KEYWORDS = [
-    "session", "sessions", "chat", "chats", "conversation", "conversations",
-    "delete", "fork", "truncate",
-    "archive", "rename", "endpoint", "endpoints", "api key",
-    "webhook", "webhooks", "token", "tokens", "mcp", "server", "skill", "skills",
-    "task", "tasks", "schedule", "cron", "setting", "settings", "preference",
-    "configure", "config", "setup", "manage", "admin", "pipeline", "second opinion",
-    "list models", "switch model", "change model", "theme", "create theme",
+    "session",
+    "sessions",
+    "chat",
+    "chats",
+    "conversation",
+    "conversations",
+    "delete",
+    "fork",
+    "truncate",
+    "archive",
+    "rename",
+    "endpoint",
+    "endpoints",
+    "api key",
+    "webhook",
+    "webhooks",
+    "token",
+    "tokens",
+    "mcp",
+    "server",
+    "skill",
+    "skills",
+    "task",
+    "tasks",
+    "schedule",
+    "cron",
+    "setting",
+    "settings",
+    "preference",
+    "configure",
+    "config",
+    "setup",
+    "manage",
+    "admin",
+    "pipeline",
+    "second opinion",
+    "list models",
+    "switch model",
+    "change model",
+    "theme",
+    "create theme",
     # Documents — "show/list/read my docs", "open my notes file", etc.
     # Without these, manage_documents never reaches the prompt and the
     # agent flails (curl, bash) instead of using the right tool.
-    "document", "documents", "doc", "docs", "library", "tidy",
+    "document",
+    "documents",
+    "doc",
+    "docs",
+    "library",
+    "tidy",
 ]
+
 
 def _detect_admin_intent(messages: List[Dict]) -> bool:
     """Check if the last user message suggests admin/management tool usage."""
@@ -481,7 +554,9 @@ def _extract_last_user_message(messages: List[Dict]) -> str:
     return ""
 
 
-def _recent_context_for_retrieval(messages: List[Dict], max_user: int = 3, max_chars: int = 600) -> str:
+def _recent_context_for_retrieval(
+    messages: List[Dict], max_user: int = 3, max_chars: int = 600
+) -> str:
     """Build the tool-retrieval query from the last few USER turns, not just
     the latest one.
 
@@ -524,9 +599,9 @@ def _sql_kb_query(messages: List[Dict], max_msgs: int = 4, max_chars: int = 1200
         content = (content or "").strip()
         if not content:
             # Native tool calls live in tool_calls, not content — pull their args.
-            for tc in (msg.get("tool_calls") or []):
-                fn = (tc.get("function") or {})
-                content += f" {fn.get('name','')} {fn.get('arguments','')}"
+            for tc in msg.get("tool_calls") or []:
+                fn = tc.get("function") or {}
+                content += f" {fn.get('name', '')} {fn.get('arguments', '')}"
             content = content.strip()
         if not content:
             continue
@@ -543,6 +618,7 @@ def _retrieve_sql_knowledge(query: str, k: int = 6, max_chars: int = 8000) -> st
         return ""
     try:
         from src.rag_singleton import get_rag_manager
+
         _rm = get_rag_manager()
         if not (_rm and getattr(_rm, "healthy", False)):
             return ""
@@ -557,6 +633,7 @@ def _retrieve_sql_knowledge(query: str, k: int = 6, max_chars: int = 8000) -> st
     except Exception as _kb_err:
         logger.debug("SQL knowledge retrieval skipped: %s", _kb_err)
         return ""
+
 
 def _build_system_prompt(
     messages: List[Dict],
@@ -579,19 +656,34 @@ def _build_system_prompt(
     # Skills UI takes effect without a restart (busts the prompt cache).
     # Hash the full dict so content edits (not just key add/remove) bust it.
     try:
-        import hashlib as _hl, json as _json
-        _ov_sig = _hl.sha256(_json.dumps(get_builtin_overrides() or {}, sort_keys=True).encode()).hexdigest()
+        import hashlib as _hl
+        import json as _json
+
+        _ov_sig = _hl.sha256(
+            _json.dumps(get_builtin_overrides() or {}, sort_keys=True).encode()
+        ).hexdigest()
     except Exception:
         _ov_sig = ""
-    cache_key = (frozenset(disabled_tools or []), bool(mcp_mgr), needs_admin, _rt_key, compact, _ov_sig)
+    cache_key = (
+        frozenset(disabled_tools or []),
+        bool(mcp_mgr),
+        needs_admin,
+        _rt_key,
+        compact,
+        _ov_sig,
+    )
     if _cached_base_prompt and _cached_base_prompt_key == cache_key and not active_document:
         agent_prompt = _cached_base_prompt
         # Skill index is user-editable (name + description), so it must never
         # live in the trusted system role and is NOT cached. Always recompute
         # when the cache hits.
         _, _skill_index_block = _build_base_prompt(
-            disabled_tools, mcp_mgr, needs_admin, relevant_tools,
-            mcp_disabled_map=mcp_disabled_map, compact=compact,
+            disabled_tools,
+            mcp_mgr,
+            needs_admin,
+            relevant_tools,
+            mcp_disabled_map=mcp_disabled_map,
+            compact=compact,
         )
     else:
         agent_prompt, _skill_index_block = _build_base_prompt(
@@ -617,6 +709,7 @@ def _build_system_prompt(
     # browser provided timezone headers, with a server-local fallback.
     try:
         from src.user_time import current_datetime_prompt
+
         agent_prompt = current_datetime_prompt() + agent_prompt
     except Exception:
         pass
@@ -638,45 +731,46 @@ def _build_system_prompt(
         _is_form_backed = False
         try:
             from src.pdf_form_doc import find_source_upload_id
+
             _is_form_backed = bool(find_source_upload_id(active_document.current_content or ""))
         except Exception:
             pass
 
         if _is_form_backed:
             doc_ctx = (
-                f'ACTIVE PDF FORM (open in editor — the user is looking at this right now)\n'
+                f"ACTIVE PDF FORM (open in editor — the user is looking at this right now)\n"
                 f'Title: "{active_document.title}"\n'
-                f'```\n{active_document.current_content}\n```\n\n'
-                f'The ENTIRE form is in the markdown above. Every field, on every '
-                f'page, is a bullet line you can see now.\n\n'
+                f"```\n{active_document.current_content}\n```\n\n"
+                f"The ENTIRE form is in the markdown above. Every field, on every "
+                f"page, is a bullet line you can see now.\n\n"
                 f'DO NOT try to "read the file", "open the PDF", or call '
-                f'filesystem / read_file / mcp__filesystem__read_file / any '
-                f'file-reading tool. The form IS the document above. Just edit it.\n\n'
-                f'DO NOT ask the user to upload, share, or re-attach. The form is '
-                f'already loaded.\n\n'
-                f'TO EDIT: call `edit_document` with FIND/REPLACE matching whole '
-                f'bullet lines. The trailing HTML comment '
-                f'`<!-- field=NAME type=TYPE -->` is the ground truth anchor — '
-                f'match it to pick the correct bullet.\n\n'
-                f'RULES:\n'
-                f'1. FIND the WHOLE bullet line including the trailing comment. '
-                f'REPLACE keeps the bullet structure and the comment exactly; '
-                f'only the value text after the label changes.\n'
-                f'2. Text bullets — `- **label:** value <!--field=NAME-->` — '
-                f'replace `value`.\n'
-                f'3. Choice bullets — `- **label** [opt1 / opt2 / opt3]: value <!--field=NAME-->` — '
-                f'replace `value` with one of the listed options verbatim.\n'
-                f'4. Checkbox bullets — `- [ ] **label** <!--field=NAME-->` — '
-                f'toggle `[ ]` ↔ `[x]`.\n'
-                f'5. NEVER invent values. If the user gives no value, ASK. Never '
+                f"filesystem / read_file / mcp__filesystem__read_file / any "
+                f"file-reading tool. The form IS the document above. Just edit it.\n\n"
+                f"DO NOT ask the user to upload, share, or re-attach. The form is "
+                f"already loaded.\n\n"
+                f"TO EDIT: call `edit_document` with FIND/REPLACE matching whole "
+                f"bullet lines. The trailing HTML comment "
+                f"`<!-- field=NAME type=TYPE -->` is the ground truth anchor — "
+                f"match it to pick the correct bullet.\n\n"
+                f"RULES:\n"
+                f"1. FIND the WHOLE bullet line including the trailing comment. "
+                f"REPLACE keeps the bullet structure and the comment exactly; "
+                f"only the value text after the label changes.\n"
+                f"2. Text bullets — `- **label:** value <!--field=NAME-->` — "
+                f"replace `value`.\n"
+                f"3. Choice bullets — `- **label** [opt1 / opt2 / opt3]: value <!--field=NAME-->` — "
+                f"replace `value` with one of the listed options verbatim.\n"
+                f"4. Checkbox bullets — `- [ ] **label** <!--field=NAME-->` — "
+                f"toggle `[ ]` ↔ `[x]`.\n"
+                f"5. NEVER invent values. If the user gives no value, ASK. Never "
                 f'write fake names, addresses, emails, or "NaN"/"N/A"/"TBD".\n'
-                f'6. NEVER edit the front-matter `<!-- pdf_form_source ... -->` '
-                f'or the `## Page N` section headers.\n'
-                f'7. NEVER touch signature fields (type=signature) — the user '
-                f'signs those by clicking on the rendered PDF.\n'
+                f"6. NEVER edit the front-matter `<!-- pdf_form_source ... -->` "
+                f"or the `## Page N` section headers.\n"
+                f"7. NEVER touch signature fields (type=signature) — the user "
+                f"signs those by clicking on the rendered PDF.\n"
                 f'8. Bulk requests are scoped by field type. "All included" means '
-                f'every choice field with that option. Do NOT touch text fields.\n'
-                f'9. The user has an Export button — do NOT try to export.'
+                f"every choice field with that option. Do NOT touch text fields.\n"
+                f"9. The user has an Export button — do NOT try to export."
             )
         else:
             _doc_raw = active_document.current_content or ""
@@ -684,21 +778,21 @@ def _build_system_prompt(
                 f"{_i}\t{_ln}" for _i, _ln in enumerate(_doc_raw.split("\n"), 1)
             )
             doc_ctx = (
-                f'ACTIVE DOCUMENT (open in the editor — the user is looking at it right now)\n'
+                f"ACTIVE DOCUMENT (open in the editor — the user is looking at it right now)\n"
                 f'Title: "{active_document.title}" | Language: {active_document.language or "text"}\n'
-                f'Below is the full text. Each line is prefixed with its line number and a TAB, '
+                f"Below is the full text. Each line is prefixed with its line number and a TAB, "
                 f'purely so you can locate references like "[Doc edit: L25]" — the number and tab '
-                f'are NOT part of the document.\n'
-                f'```\n{_doc_numbered}\n```\n'
-                f'You ALREADY HAVE this document — it is right above. Do NOT ask the user to paste '
-                f'it, and do NOT use read_file, bash, cat, or any tool to fetch it: it lives in the '
-                f'editor, NOT on disk, so those attempts will fail. Every request is about THIS '
-                f'document unless the user clearly says otherwise.\n'
+                f"are NOT part of the document.\n"
+                f"```\n{_doc_numbered}\n```\n"
+                f"You ALREADY HAVE this document — it is right above. Do NOT ask the user to paste "
+                f"it, and do NOT use read_file, bash, cat, or any tool to fetch it: it lives in the "
+                f"editor, NOT on disk, so those attempts will fail. Every request is about THIS "
+                f"document unless the user clearly says otherwise.\n"
                 f'A "[Doc edit: L25]" prefix means the user is pointing at that line — use the '
-                f'numbers above to find the text they mean.\n'
-                f'To edit: use edit_document with <<<FIND>>>...<<<REPLACE>>>...<<<END>>>. The FIND '
-                f'text must match the document EXACTLY and must NOT include the leading line-number '
-                f'or tab (those are reference-only). To rewrite entirely: update_document.'
+                f"numbers above to find the text they mean.\n"
+                f"To edit: use edit_document with <<<FIND>>>...<<<REPLACE>>>...<<<END>>>. The FIND "
+                f"text must match the document EXACTLY and must NOT include the leading line-number "
+                f"or tab (those are reference-only). To rewrite entirely: update_document."
             )
         _doc_message = untrusted_context_message("active editor document", doc_ctx)
         _doc_message["_protected"] = True
@@ -712,7 +806,16 @@ def _build_system_prompt(
                     _content = " ".join(b.get("text", "") for b in _content if isinstance(b, dict))
                 _last_user_msg = _content.lower()
                 break
-        _suggest_keywords = ["suggest", "review", "improve", "feedback", "critique", "proofread", "check my", "look over"]
+        _suggest_keywords = [
+            "suggest",
+            "review",
+            "improve",
+            "feedback",
+            "critique",
+            "proofread",
+            "check my",
+            "look over",
+        ]
         if any(kw in _last_user_msg for kw in _suggest_keywords):
             _doc_message["content"] += (
                 "\n\nTrusted instruction for this turn: the user appears to want "
@@ -721,7 +824,6 @@ def _build_system_prompt(
             )
     else:
         set_active_document(None)
-
 
     # Inject relevant skills based on the user's last message. The
     # SkillsManager does a Jaccard token-match over published skills'
@@ -737,6 +839,7 @@ def _build_system_prompt(
         _prefs = {}
         try:
             from routes.prefs_routes import _load_for_user as _load_prefs
+
             _prefs = _load_prefs(owner) or {}
             _skills_on = _prefs.get("skills_enabled", True)
         except Exception:
@@ -744,6 +847,7 @@ def _build_system_prompt(
         if last_user and _skills_on:
             from services.memory.skills import SkillsManager
             from src.constants import DATA_DIR
+
             sm = SkillsManager(DATA_DIR)
             # Brain → Skills settings → "Auto-approve skills" toggle +
             # confidence threshold. Approve OFF → published-only (no draft
@@ -753,25 +857,32 @@ def _build_system_prompt(
                 _skill_min_conf = 2.0  # nothing draft clears it → published only
             else:
                 try:
-                    _skill_min_conf = float(_prefs.get(
-                        "skill_min_confidence",
-                        get_setting("skill_autosave_min_confidence", 0.85)))
+                    _skill_min_conf = float(
+                        _prefs.get(
+                            "skill_min_confidence",
+                            get_setting("skill_autosave_min_confidence", 0.85),
+                        )
+                    )
                 except (TypeError, ValueError):
                     _skill_min_conf = 0.85
             try:
-                _skill_max_injected = int(_prefs.get(
-                    "skill_max_injected",
-                    get_setting("skill_max_injected", 3)))
+                _skill_max_injected = int(
+                    _prefs.get("skill_max_injected", get_setting("skill_max_injected", 3))
+                )
             except (TypeError, ValueError):
                 _skill_max_injected = 3
             _skill_max_injected = max(0, min(12, _skill_max_injected))
-            relevant_skills = sm.get_relevant_skills(
-                last_user,
-                skills=sm.load(owner=owner),
-                threshold=0.25,
-                max_items=_skill_max_injected,
-                min_confidence=_skill_min_conf,
-            ) if _skill_max_injected > 0 else []
+            relevant_skills = (
+                sm.get_relevant_skills(
+                    last_user,
+                    skills=sm.load(owner=owner),
+                    threshold=0.25,
+                    max_items=_skill_max_injected,
+                    min_confidence=_skill_min_conf,
+                )
+                if _skill_max_injected > 0
+                else []
+            )
             lines = [""]
             if relevant_skills:
                 # Bump the "uses" counter on every skill we actually surface
@@ -779,21 +890,23 @@ def _build_system_prompt(
                 # matter how often it's been matched and applied.
                 for _sk in relevant_skills:
                     try:
-                        sm.record_use(_sk.get('name', ''), owner=owner)
+                        sm.record_use(_sk.get("name", ""), owner=owner)
                     except Exception:
                         pass
                 lines.append("## Relevant skills for this request")
-                lines.append("These skills are matched to your current request. Each is a "
-                             "procedure proven to work. Follow them step by step. To see "
-                             "the full SKILL.md (more detail, pitfalls, verification "
-                             "steps), call `manage_skills` with action='view' and the "
-                             "skill name.")
+                lines.append(
+                    "These skills are matched to your current request. Each is a "
+                    "procedure proven to work. Follow them step by step. To see "
+                    "the full SKILL.md (more detail, pitfalls, verification "
+                    "steps), call `manage_skills` with action='view' and the "
+                    "skill name."
+                )
                 for sk in relevant_skills:
                     src_tag = ""
                     if sk.get("source") == "teacher-escalation":
                         tm = sk.get("teacher_model") or "teacher"
                         src_tag = f" _(learned from {tm})_"
-                    lines.append(f"\n### {sk.get('name','?')}{src_tag}")
+                    lines.append(f"\n### {sk.get('name', '?')}{src_tag}")
                     if sk.get("description"):
                         lines.append(sk["description"])
                     if sk.get("when_to_use"):
@@ -844,10 +957,13 @@ def _build_system_prompt(
     # Merge consecutive system messages — but skip _protected doc messages
     merged = []
     for msg in messages:
-        if (msg.get("role") == "system"
+        if (
+            msg.get("role") == "system"
             and not msg.get("_protected")
-            and merged and merged[-1].get("role") == "system"
-            and not merged[-1].get("_protected")):
+            and merged
+            and merged[-1].get("role") == "system"
+            and not merged[-1].get("_protected")
+        ):
             merged[-1] = {
                 "role": "system",
                 "content": merged[-1]["content"] + "\n\n" + msg["content"],
@@ -874,11 +990,23 @@ def _build_system_prompt(
 
 
 _ADMIN_TOOLS = {
-    "manage_session", "manage_skills", "manage_tasks",
-    "manage_endpoints", "manage_mcp", "manage_webhooks", "manage_tokens",
-    "manage_documents", "manage_settings", "create_session", "list_sessions",
-    "send_to_session", "pipeline", "ask_teacher", "list_models",
+    "manage_session",
+    "manage_skills",
+    "manage_tasks",
+    "manage_endpoints",
+    "manage_mcp",
+    "manage_webhooks",
+    "manage_tokens",
+    "manage_documents",
+    "manage_settings",
+    "create_session",
+    "list_sessions",
+    "send_to_session",
+    "pipeline",
+    "ask_teacher",
+    "list_models",
 }
+
 
 def _build_base_prompt(
     disabled_tools,
@@ -910,10 +1038,17 @@ def _build_base_prompt(
         agent_prompt = AGENT_SYSTEM_PROMPT
         if not needs_admin:
             # At least strip the management section
-            mgmt_tools = set(TOOL_SECTIONS.keys()) - set(ALWAYS_AVAILABLE) - {
-                "generate_image", "suggest_document",
-                "chat_with_model", "ask_teacher", "list_models",
-            }
+            mgmt_tools = (
+                set(TOOL_SECTIONS.keys())
+                - set(ALWAYS_AVAILABLE)
+                - {
+                    "generate_image",
+                    "suggest_document",
+                    "chat_with_model",
+                    "ask_teacher",
+                    "list_models",
+                }
+            )
             agent_prompt = _assemble_prompt(
                 set(TOOL_SECTIONS.keys()) - mgmt_tools, disabled, compact=compact
             )
@@ -936,17 +1071,20 @@ def _build_base_prompt(
     try:
         from services.memory.skills import SkillsManager
         from src.constants import DATA_DIR
+
         _sm = SkillsManager(DATA_DIR)
         active_tools = list(set(TOOL_SECTIONS.keys()) - set(disabled or []))
         skill_idx = _sm.index_for(owner=None, active_toolsets=active_tools)
         if skill_idx:
-            lines = ["## Available skills",
-                     "Procedures the assistant should consult before doing domain work. "
-                     "Fetch the full procedure with `manage_skills` action=view name=<name> "
-                     "when one looks relevant. Entries tagged `(draft)` were written by the "
-                     "teacher-escalation loop after a prior failure — treat them as authoritative "
-                     "guidance; if you follow one and it works, that's a good signal the procedure "
-                     "is correct."]
+            lines = [
+                "## Available skills",
+                "Procedures the assistant should consult before doing domain work. "
+                "Fetch the full procedure with `manage_skills` action=view name=<name> "
+                "when one looks relevant. Entries tagged `(draft)` were written by the "
+                "teacher-escalation loop after a prior failure — treat them as authoritative "
+                "guidance; if you follow one and it works, that's a good signal the procedure "
+                "is correct.",
+            ]
             by_cat: dict[str, list] = {}
             for s in skill_idx:
                 by_cat.setdefault(s["category"], []).append(s)
@@ -962,6 +1100,7 @@ def _build_base_prompt(
 
     # Inject integration descriptions
     from src.integrations import get_integrations_prompt
+
     integ_prompt = get_integrations_prompt()
     if integ_prompt:
         agent_prompt += "\n\n" + integ_prompt
@@ -975,8 +1114,9 @@ def _build_base_prompt(
     return agent_prompt, skill_index_block
 
 
-
-def _resolve_tool_blocks(round_response: str, native_tool_calls: list, round_num: int, round_reasoning: str = ""):
+def _resolve_tool_blocks(
+    round_response: str, native_tool_calls: list, round_num: int, round_reasoning: str = ""
+):
     """Choose native function calls or fenced code block parsing. Returns (tool_blocks, used_native)."""
     used_native = False
     if native_tool_calls:
@@ -989,7 +1129,9 @@ def _resolve_tool_blocks(round_response: str, native_tool_calls: list, round_num
                 tool_blocks.append(block)
                 logger.info(f"  -> converted: {tc_name} -> {block.tool_type}")
             else:
-                logger.warning(f"  -> FAILED to convert native call: {tc_name} args={tc_args[:200]}")
+                logger.warning(
+                    f"  -> FAILED to convert native call: {tc_name} args={tc_args[:200]}"
+                )
         if tool_blocks:
             used_native = True
     if not used_native:
@@ -999,18 +1141,28 @@ def _resolve_tool_blocks(round_response: str, native_tool_calls: list, round_num
         # visible content empty. Without this we'd find no tool block, surface the
         # reasoning as the answer, and stall. When content has no tool call, look
         # for one in the reasoning instead so the tool actually runs.
-        if not tool_blocks and not (round_response or "").strip() and (round_reasoning or "").strip():
+        if (
+            not tool_blocks
+            and not (round_response or "").strip()
+            and (round_reasoning or "").strip()
+        ):
             recovered = parse_tool_blocks(round_reasoning)
             if recovered:
                 tool_blocks = recovered
-                logger.info(f"Agent round {round_num}: recovered {len(recovered)} tool block(s) from reasoning_content")
+                logger.info(
+                    f"Agent round {round_num}: recovered {len(recovered)} tool block(s) from reasoning_content"
+                )
         if tool_blocks:
-            logger.info(f"Agent round {round_num}: {len(tool_blocks)} fenced tool block(s) detected")
+            logger.info(
+                f"Agent round {round_num}: {len(tool_blocks)} fenced tool block(s) detected"
+            )
 
-    resp_preview = round_response[:200].replace('\n', '\\n') if round_response else "(empty)"
-    logger.info(f"Agent round {round_num} summary: {len(round_response)} chars, "
-                f"{len(native_tool_calls)} native calls, "
-                f"{len(tool_blocks)} tool blocks. Preview: {resp_preview}")
+    resp_preview = round_response[:200].replace("\n", "\\n") if round_response else "(empty)"
+    logger.info(
+        f"Agent round {round_num} summary: {len(round_response)} chars, "
+        f"{len(native_tool_calls)} native calls, "
+        f"{len(tool_blocks)} tool blocks. Preview: {resp_preview}"
+    )
 
     return tool_blocks, used_native
 
@@ -1075,11 +1227,13 @@ def _append_tool_results(
         messages.append(assistant_msg)
         for j, tc in enumerate(native_tool_calls):
             result_text = tool_result_texts[j] if j < len(tool_result_texts) else ""
-            messages.append({
-                "role": "tool",
-                "tool_call_id": tc.get("id", f"call_{round_num}_{j}"),
-                "content": result_text,
-            })
+            messages.append(
+                {
+                    "role": "tool",
+                    "tool_call_id": tc.get("id", f"call_{round_num}_{j}"),
+                    "content": result_text,
+                }
+            )
     else:
         tool_output_text = "\n\n".join(tool_results)
         msg = {"role": "assistant", "content": round_response}
@@ -1181,8 +1335,12 @@ def _compute_final_metrics(
 # these is "effectful" and worth an independent completion check; pure
 # read-only / Q&A turns are not.
 _VERIFIER_EFFECTFUL_TOOLS = {
-    "create_document", "update_document", "edit_document",
-    "bash", "python", "write_file",
+    "create_document",
+    "update_document",
+    "edit_document",
+    "bash",
+    "python",
+    "write_file",
 }
 _VERIFIER_MAX_ROUNDS = 2  # cap re-verify cycles per turn — never loop forever
 
@@ -1206,8 +1364,12 @@ def _build_actions_snapshot(tool_events: list, limit: int = 8000) -> str:
 
 
 async def _run_verifier_subagent(
-    instruction: str, actions_snapshot: str,
-    *, endpoint_url: str, model: str, headers: dict,
+    instruction: str,
+    actions_snapshot: str,
+    *,
+    endpoint_url: str,
+    model: str,
+    headers: dict,
 ) -> list:
     """Fresh-context completion verifier. A second model instance with NO
     shared history reads the user's request + a record of what the agent did
@@ -1217,6 +1379,7 @@ async def _run_verifier_subagent(
     (empty = pass, or silently empty on any error so it can't block a valid
     completion)."""
     from src.llm_core import llm_call_async
+
     prompt = (
         "You are an independent verifier. Another assistant just claimed the "
         "following task is complete. Using ONLY the request and the record of "
@@ -1237,9 +1400,13 @@ async def _run_verifier_subagent(
     )
     try:
         raw = await llm_call_async(
-            url=endpoint_url, model=model,
+            url=endpoint_url,
+            model=model,
             messages=[{"role": "user", "content": prompt}],
-            headers=headers, temperature=0.0, max_tokens=600, timeout=60,
+            headers=headers,
+            temperature=0.0,
+            max_tokens=600,
+            timeout=60,
         )
     except Exception as e:
         logger.warning(f"[agent] verifier subagent failed: {e}")
@@ -1275,8 +1442,10 @@ def _empty_response_fallback(
         return full_response, None
     if round_reasoning.strip():
         return round_reasoning, None
-    _error_msg = "The model returned an empty response. Please try again or switch to a different model."
-    return _error_msg, f'data: {json.dumps({"delta": _error_msg})}\n\n'
+    _error_msg = (
+        "The model returned an empty response. Please try again or switch to a different model."
+    )
+    return _error_msg, f"data: {json.dumps({'delta': _error_msg})}\n\n"
 
 
 PLAN_MODE_DIRECTIVE = (
@@ -1298,7 +1467,7 @@ PLAN_MODE_DIRECTIVE = (
     "  • If the choice materially changes the plan and you can't pick a sensible "
     "default — call `ask_user` with 2-6 concrete options. It ends your turn; their "
     "answer comes back as your next message and you continue then.\n"
-    "  • Otherwise — state your assumption inline (e.g. \"Assumes X; tell me if not\"), "
+    '  • Otherwise — state your assumption inline (e.g. "Assumes X; tell me if not"), '
     "pick the reasonable default, and keep going. The user reviews the whole plan "
     "before anything runs and will correct you, so a wrong assumption is cheap.\n"
     "Note edge cases and failure modes briefly where they matter; don't exhaustively "
@@ -1405,10 +1574,13 @@ async def stream_agent_loop(
     _relevant_tools = relevant_tools
     _t1 = time.time()
     if _relevant_tools:
-        logger.info(f"[tool-rag] Using caller-provided relevant_tools ({len(_relevant_tools)} tools)")
+        logger.info(
+            f"[tool-rag] Using caller-provided relevant_tools ({len(_relevant_tools)} tools)"
+        )
     if not _relevant_tools:
         try:
-            from src.tool_index import get_tool_index, ALWAYS_AVAILABLE
+            from src.tool_index import ALWAYS_AVAILABLE, get_tool_index
+
             tool_idx = get_tool_index()
             if tool_idx:
                 if mcp_mgr:
@@ -1428,7 +1600,9 @@ async def stream_agent_loop(
                             asyncio.to_thread(tool_idx.get_tools_for_query, _retrieval_query, 8),
                             timeout=_TOOL_SELECTION_TIMEOUT_SECONDS,
                         )
-                        logger.info(f"[tool-rag] Retrieved tools for query: {sorted(_relevant_tools - ALWAYS_AVAILABLE)}")
+                        logger.info(
+                            f"[tool-rag] Retrieved tools for query: {sorted(_relevant_tools - ALWAYS_AVAILABLE)}"
+                        )
                     except asyncio.TimeoutError:
                         logger.warning(
                             "[tool-rag] Retrieval exceeded %.1fs; falling back to always-available tools",
@@ -1443,6 +1617,7 @@ async def stream_agent_loop(
     # instead of sending ALL tools (which overwhelms the model).
     if not _relevant_tools and _retrieval_query:
         from src.tool_index import ALWAYS_AVAILABLE, ToolIndex
+
         _relevant_tools = set(ALWAYS_AVAILABLE)
         ql = _retrieval_query.lower()
         for keywords, tools in ToolIndex._KEYWORD_HINTS.items():
@@ -1450,7 +1625,9 @@ async def stream_agent_loop(
                 _relevant_tools.update(tools)
         # Always include core document/memory tools
         _relevant_tools.update({"create_document", "manage_memory"})
-        logger.info(f"[tool-rag] Keyword fallback selected: {sorted(_relevant_tools - ALWAYS_AVAILABLE)}")
+        logger.info(
+            f"[tool-rag] Keyword fallback selected: {sorted(_relevant_tools - ALWAYS_AVAILABLE)}"
+        )
 
     # If a document is open the model needs the editing tools available
     # regardless of which selection path (RAG, keyword, caller-provided) ran
@@ -1485,7 +1662,9 @@ async def stream_agent_loop(
     # default to fenced tools, otherwise fall through to keyword + host checks.
     _endpoint_supports: Optional[bool] = None
     try:
-        from core.database import SessionLocal as _SL, ModelEndpoint as _ME
+        from core.database import ModelEndpoint as _ME
+        from core.database import SessionLocal as _SL
+
         _db = _SL()
         try:
             _ep = None
@@ -1499,26 +1678,46 @@ async def stream_agent_loop(
             _db.close()
     except Exception as _e:
         logger.debug(f"endpoint supports_tools lookup failed: {_e}")
-    _model_supports_tools = any(kw in _model_lc for kw in (
-        "gpt-4", "gpt-5", "gpt-o", "claude", "gemini", "gemma",
-        "qwen3", "qwen2.5", "mixtral", "mistral", "llama-3.1", "llama-3.2",
-        "llama-3.3", "llama-4",
-        # Local-served models that follow OpenAI-style function calling
-        # via vLLM's `--enable-auto-tool-choice`. Belt-and-suspenders
-        # with the per-endpoint flag above.
-        "minimax", "kimi", "yi-", "phi-3", "phi-4", "command-r",
-        "glm-4", "internlm", "hermes",
-        # deepseek-v2/v3/chat support tools via the cloud API; deepseek-r1
-        # (reasoning model) does not — handled by the blocklist below.
-        "deepseek-v", "deepseek-chat",
-    ))
+    _model_supports_tools = any(
+        kw in _model_lc
+        for kw in (
+            "gpt-4",
+            "gpt-5",
+            "gpt-o",
+            "claude",
+            "gemini",
+            "gemma",
+            "qwen3",
+            "qwen2.5",
+            "mixtral",
+            "mistral",
+            "llama-3.1",
+            "llama-3.2",
+            "llama-3.3",
+            "llama-4",
+            # Local-served models that follow OpenAI-style function calling
+            # via vLLM's `--enable-auto-tool-choice`. Belt-and-suspenders
+            # with the per-endpoint flag above.
+            "minimax",
+            "kimi",
+            "yi-",
+            "phi-3",
+            "phi-4",
+            "command-r",
+            "glm-4",
+            "internlm",
+            "hermes",
+            # deepseek-v2/v3/chat support tools via the cloud API; deepseek-r1
+            # (reasoning model) does not — handled by the blocklist below.
+            "deepseek-v",
+            "deepseek-chat",
+        )
+    )
     # Models known to reject tool schemas at the Ollama/local level even when
     # the endpoint URL would otherwise enable native function calling.
     # The per-endpoint supports_tools flag (True/False) always takes priority
     # and can override this list for users who know their setup.
-    _model_no_tools = any(kw in _model_lc for kw in (
-        "deepseek-r1",
-    ))
+    _model_no_tools = any(kw in _model_lc for kw in ("deepseek-r1",))
     # Native Ollama endpoints (/api/chat) handle tool schemas differently from
     # the OpenAI-compat path. Models like gemma4, qwen3.5, ministral respond to
     # tool schemas by emitting a single native tool_call token then stopping,
@@ -1534,14 +1733,16 @@ async def stream_agent_loop(
     # llama.cpp / LM Studio servers launched with native tool calling. A
     # per-endpoint supports_tools=False still wins, and known-bad models
     # (deepseek-r1) / native-Ollama paths are still excluded.
-    _assume_native = os.getenv("TALOS_ASSUME_NATIVE_TOOLS", "").strip().lower() in {"1", "true", "yes", "on"}
+    _assume_native = os.getenv("TALOS_ASSUME_NATIVE_TOOLS", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
     if _endpoint_supports is True:
         _is_api_model = True
     elif (
-        _endpoint_supports is False
-        or _model_no_tools
-        or _is_ollama_native
-        or _ollama_openai_compat
+        _endpoint_supports is False or _model_no_tools or _is_ollama_native or _ollama_openai_compat
     ):
         _is_api_model = False
     elif _assume_native:
@@ -1549,8 +1750,13 @@ async def stream_agent_loop(
     else:
         _is_api_model = any(h in endpoint_url for h in _API_HOSTS) or _model_supports_tools
     messages, mcp_schemas = _build_system_prompt(
-        messages, model, active_document, mcp_mgr, disabled_tools,
-        needs_admin=_needs_admin, relevant_tools=_relevant_tools,
+        messages,
+        model,
+        active_document,
+        mcp_mgr,
+        disabled_tools,
+        needs_admin=_needs_admin,
+        relevant_tools=_relevant_tools,
         mcp_disabled_map=_mcp_disabled_map,
         compact=_is_api_model,
         owner=owner,
@@ -1564,10 +1770,10 @@ async def stream_agent_loop(
             f"The user is working in this folder: {workspace}\n"
             f"It IS the project. bash/python run with cwd set here and "
             f"read_file/write_file are confined to it (paths outside are rejected).\n"
-            f"When the user says \"the code\" / \"this project\" / \"the workspace\" "
+            f'When the user says "the code" / "this project" / "the workspace" '
             f"or asks to review/find/edit something WITHOUT a path, they mean THIS "
             f"folder. Do NOT ask the user for code or a path, and do NOT read a file "
-            f"literally named \"workspace\". ALWAYS start by exploring it yourself: "
+            f'literally named "workspace". ALWAYS start by exploring it yourself: '
             f"run `bash` → `git ls-files` (or `ls -R`) to see the files, then "
             f"read_file the relevant ones by path RELATIVE to the workspace."
         )
@@ -1631,7 +1837,9 @@ async def stream_agent_loop(
         logger.info("[db-mode] forced query_sql for this turn")
     if plan_mode:
         if messages and messages[0].get("role") == "system":
-            messages[0]["content"] = PLAN_MODE_DIRECTIVE + "\n\n" + (messages[0].get("content") or "")
+            messages[0]["content"] = (
+                PLAN_MODE_DIRECTIVE + "\n\n" + (messages[0].get("content") or "")
+            )
         else:
             messages.insert(0, {"role": "system", "content": PLAN_MODE_DIRECTIVE})
     elif approved_plan and approved_plan.strip():
@@ -1645,8 +1853,8 @@ async def stream_agent_loop(
 
     _t3 = time.time()
     try:
+        from src.context_budget import DEFAULT_HARD_MAX, compute_input_token_budget
         from src.context_compactor import trim_for_context
-        from src.context_budget import compute_input_token_budget, DEFAULT_HARD_MAX
         from src.settings import is_setting_overridden
 
         soft_budget = int(get_setting("agent_input_token_budget", 6000) or 0)
@@ -1658,7 +1866,9 @@ async def stream_agent_loop(
             # (that branch ignores hard_max). Falls back to DEFAULT_HARD_MAX
             # on missing/malformed values so misconfig can't zero the budget.
             try:
-                hard_max = int(get_setting("agent_input_token_hard_max", DEFAULT_HARD_MAX) or DEFAULT_HARD_MAX)
+                hard_max = int(
+                    get_setting("agent_input_token_hard_max", DEFAULT_HARD_MAX) or DEFAULT_HARD_MAX
+                )
             except (TypeError, ValueError):
                 hard_max = DEFAULT_HARD_MAX
             if hard_max <= 0:
@@ -1700,19 +1910,19 @@ async def stream_agent_loop(
     total_start = time.time()
     time_to_first_token = None
     first_token_received = False
-    tool_events = []   # Persist tool executions for history reload
-    round_texts = []   # Cleaned text per round for history reload
+    tool_events = []  # Persist tool executions for history reload
+    round_texts = []  # Cleaned text per round for history reload
     # Completion-verifier state (mechanism 3a). _effectful_used flips on when
     # a tool that produces a checkable artifact runs; the verifier only fires
     # on such turns and at most _VERIFIER_MAX_ROUNDS times.
     _effectful_used = False
     _verifier_rounds = 0
     _verifier_instruction = _extract_last_user_message(messages)
-    real_input_tokens = 0   # Accumulated real usage from API
+    real_input_tokens = 0  # Accumulated real usage from API
     real_output_tokens = 0
     last_round_input_tokens = 0  # Last round's input tokens (for context % peak)
     has_real_usage = False
-    backend_gen_tps = 0      # backend-reported true gen speed (llama.cpp timings)
+    backend_gen_tps = 0  # backend-reported true gen speed (llama.cpp timings)
     backend_prefill_tps = 0  # backend-reported prefill speed
     total_tool_calls = 0  # for budget enforcement
 
@@ -1728,7 +1938,7 @@ async def stream_agent_loop(
     # files — produces distinct signatures and must never trip this; only a
     # model re-issuing the *identical* call over and over should.
     _call_sig_counts: collections.Counter = collections.Counter()
-    _THINK_RE = re.compile(r'<think>.*?</think>', re.DOTALL | re.IGNORECASE)
+    _THINK_RE = re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE)
     _force_answer = False  # set by loop-breaker → next round runs with NO tools
     # Supervisor: how many times we've nudged the model after it announced
     # an action without emitting the tool call. Capped to prevent a model
@@ -1760,9 +1970,9 @@ async def stream_agent_loop(
     _sql_kb_msg = None
 
     # Document streaming state (persists across rounds)
-    _doc_acc = ""          # accumulated tool-call JSON arguments
-    _doc_opened = False    # whether doc_stream_open was sent
-    _doc_last_len = 0      # last content length sent
+    _doc_acc = ""  # accumulated tool-call JSON arguments
+    _doc_opened = False  # whether doc_stream_open was sent
+    _doc_last_len = 0  # last content length sent
 
     # Set when the loop runs out of rounds while the agent was still actively
     # using tools — i.e. it was cut off, not finished. Drives a "Continue" event
@@ -1771,7 +1981,9 @@ async def stream_agent_loop(
 
     for round_num in range(1, max_rounds + 1):
         round_response = ""
-        round_reasoning = ""  # reasoning_content deltas (DeepSeek-thinking, vLLM --reasoning-parser)
+        round_reasoning = (
+            ""  # reasoning_content deltas (DeepSeek-thinking, vLLM --reasoning-parser)
+        )
         native_tool_calls = []  # populated if model uses function calling
 
         # DB mode: refresh the SQL knowledge for THIS round against the most
@@ -1783,8 +1995,7 @@ async def stream_agent_loop(
             if _kb:
                 _kb_content = (
                     "Reference material for this database (uploaded SQL knowledge, "
-                    "refreshed for the current step — use it to navigate the schema):\n"
-                    + _kb
+                    "refreshed for the current step — use it to navigate the schema):\n" + _kb
                 )
                 if _sql_kb_msg is None:
                     _sql_kb_msg = {"role": "system", "content": _kb_content}
@@ -1813,23 +2024,29 @@ async def stream_agent_loop(
             # Filter schemas by RAG-selected tools (if available)
             if _relevant_tools:
                 base_schemas = [
-                    s for s in FUNCTION_TOOL_SCHEMAS
+                    s
+                    for s in FUNCTION_TOOL_SCHEMAS
                     if s.get("function", {}).get("name") in _relevant_tools
                 ]
                 _mcp_filtered = [
-                    s for s in mcp_schemas
-                    if s.get("function", {}).get("name") in _relevant_tools
+                    s for s in mcp_schemas if s.get("function", {}).get("name") in _relevant_tools
                 ]
                 all_tool_schemas = base_schemas + _mcp_filtered
             else:
-                base_schemas = FUNCTION_TOOL_SCHEMAS if _needs_admin else [
-                    s for s in FUNCTION_TOOL_SCHEMAS
-                    if s.get("function", {}).get("name") not in _ADMIN_SCHEMA_NAMES
-                ]
+                base_schemas = (
+                    FUNCTION_TOOL_SCHEMAS
+                    if _needs_admin
+                    else [
+                        s
+                        for s in FUNCTION_TOOL_SCHEMAS
+                        if s.get("function", {}).get("name") not in _ADMIN_SCHEMA_NAMES
+                    ]
+                )
                 all_tool_schemas = base_schemas + mcp_schemas
             if disabled_tools:
                 all_tool_schemas = [
-                    t for t in all_tool_schemas
+                    t
+                    for t in all_tool_schemas
                     if t.get("function", {}).get("name") not in disabled_tools
                     and t.get("name") not in disabled_tools
                 ]
@@ -1840,8 +2057,12 @@ async def stream_agent_loop(
             all_tool_schemas = mcp_schemas if (_wants_mcp and mcp_schemas) else []
         agent_stream_timeout = int(get_setting("agent_stream_timeout_seconds", 300) or 300)
 
-        _tool_names_sent = [t.get("function", {}).get("name") for t in (all_tool_schemas or []) if t.get("function")]
-        logger.info(f"[agent-debug] round={round_num} model={model} _is_api_model={_is_api_model} tools_sent={len(_tool_names_sent)} tool_names={_tool_names_sent[:15]} relevant_tools={sorted(_relevant_tools)[:15] if _relevant_tools else 'ALL'}")
+        _tool_names_sent = [
+            t.get("function", {}).get("name") for t in (all_tool_schemas or []) if t.get("function")
+        ]
+        logger.info(
+            f"[agent-debug] round={round_num} model={model} _is_api_model={_is_api_model} tools_sent={len(_tool_names_sent)} tool_names={_tool_names_sent[:15]} relevant_tools={sorted(_relevant_tools)[:15] if _relevant_tools else 'ALL'}"
+        )
 
         # Primary target + any configured fallback models. stream_llm_with_fallback
         # only switches on a pre-content failure, so streamed output is never
@@ -1863,7 +2084,9 @@ async def stream_agent_loop(
             enable_thinking=reasoning,
         ):
             if time.time() > _round_deadline:
-                logger.warning(f"[agent] round {round_num} stream exceeded wall-clock deadline; cutting off")
+                logger.warning(
+                    f"[agent] round {round_num} stream exceeded wall-clock deadline; cutting off"
+                )
                 break
             # Forward error events from stream_llm to the frontend
             if chunk.startswith("event: error"):
@@ -1876,7 +2099,9 @@ async def stream_agent_loop(
                     # because tool_call_delta also has an "arg_delta" field.
                     if data.get("type") == "tool_call_delta":
                         # Stream document content to frontend as AI generates it
-                        logger.debug(f"tool_call_delta: name={data.get('name')}, len(arg_delta)={len(data.get('arg_delta', ''))}")
+                        logger.debug(
+                            f"tool_call_delta: name={data.get('name')}, len(arg_delta)={len(data.get('arg_delta', ''))}"
+                        )
                         _doc_acc += data.get("arg_delta", "")
                         if not _doc_opened:
                             tm = re.search(r'"title"\s*:\s*"((?:[^"\\]|\\.)*)"', _doc_acc)
@@ -1894,25 +2119,32 @@ async def stream_agent_loop(
                                     except Exception:
                                         lang = lm.group(1)
                                 logger.info(f"Doc streaming: open title={title!r} lang={lang!r}")
-                                yield f'data: {json.dumps({"type": "doc_stream_open", "title": title, "language": lang})}\n\n'
+                                yield f"data: {json.dumps({'type': 'doc_stream_open', 'title': title, 'language': lang})}\n\n"
                         if _doc_opened:
                             cm = re.search(r'"content"\s*:\s*"', _doc_acc)
                             if cm:
-                                raw = _doc_acc[cm.end():]
-                                raw = re.sub(r'"\s*\}\s*$', '', raw)
+                                raw = _doc_acc[cm.end() :]
+                                raw = re.sub(r'"\s*\}\s*$', "", raw)
                                 try:
                                     decoded = json.loads('"' + raw + '"')
                                 except Exception:
                                     try:
-                                        decoded = json.loads('"' + raw.rstrip('\\') + '"')
+                                        decoded = json.loads('"' + raw.rstrip("\\") + '"')
                                     except Exception:
-                                        decoded = raw.replace('\\n', '\n').replace('\\t', '\t').replace('\\"', '"').replace('\\\\', '\\')
+                                        decoded = (
+                                            raw.replace("\\n", "\n")
+                                            .replace("\\t", "\t")
+                                            .replace('\\"', '"')
+                                            .replace("\\\\", "\\")
+                                        )
                                 if len(decoded) > _doc_last_len:
                                     _doc_last_len = len(decoded)
-                                    yield f'data: {json.dumps({"type": "doc_stream_delta", "content": decoded})}\n\n'
+                                    yield f"data: {json.dumps({'type': 'doc_stream_delta', 'content': decoded})}\n\n"
                     elif data.get("type") == "tool_calls":
                         native_tool_calls = data.get("calls", [])
-                        logger.info(f"Agent round {round_num}: received {len(native_tool_calls)} native tool call(s)")
+                        logger.info(
+                            f"Agent round {round_num}: received {len(native_tool_calls)} native tool call(s)"
+                        )
                     elif data.get("type") == "usage":
                         u = data.get("data", {})
                         round_input = u.get("input_tokens", 0)
@@ -1924,14 +2156,26 @@ async def stream_agent_loop(
                         # usage lands, so the ring reflects occupancy mid-turn
                         # (during tool loops) instead of only at the final metrics.
                         if round_input > 0:
-                            ctx_pct_live = (min(round((round_input / context_length) * 100, 1), 100.0)
-                                            if context_length else 0)
-                            yield "data: " + json.dumps({"type": "metrics", "data": {
-                                "context_tokens": round_input,
-                                "context_percent": ctx_pct_live,
-                                "context_length": context_length,
-                                "usage_source": "real",
-                            }}) + "\n\n"
+                            ctx_pct_live = (
+                                min(round((round_input / context_length) * 100, 1), 100.0)
+                                if context_length
+                                else 0
+                            )
+                            yield (
+                                "data: "
+                                + json.dumps(
+                                    {
+                                        "type": "metrics",
+                                        "data": {
+                                            "context_tokens": round_input,
+                                            "context_percent": ctx_pct_live,
+                                            "context_length": context_length,
+                                            "usage_source": "real",
+                                        },
+                                    }
+                                )
+                                + "\n\n"
+                            )
                         # Backend-reported TRUE generation speed (llama.cpp
                         # timings.predicted_per_second) — pure decode, excludes
                         # prefill/network. Preferred over tokens/wall-clock, which
@@ -1943,8 +2187,10 @@ async def stream_agent_loop(
                     elif data.get("type") == "fallback":
                         # The selected model failed and another answered; surface
                         # the notice so a misconfigured provider isn't masked.
-                        logger.warning(f"[agent] round {round_num} fell back: "
-                                       f"{data.get('selected_model')} -> {data.get('answered_by')}")
+                        logger.warning(
+                            f"[agent] round {round_num} fell back: "
+                            f"{data.get('selected_model')} -> {data.get('answered_by')}"
+                        )
                         yield chunk
                     elif "delta" in data:
                         if not first_token_received:
@@ -1964,7 +2210,7 @@ async def stream_agent_loop(
                         # Detect text-fence doc streaming for rounds 2+
                         # (round 1 is handled by frontend fence detection + server fenced block path)
                         if round_num > 1 and not _doc_acc:
-                            _fence_marker = '```create_document\n'
+                            _fence_marker = "```create_document\n"
                             # Open a new block if we're not currently inside one
                             # and there's an unstreamed marker in the response.
                             # The marker search starts at the byte after the
@@ -1974,39 +2220,63 @@ async def stream_agent_loop(
                             # streamed and the rest were silently dropped).
                             if not _doc_opened and _fence_marker in round_response[_doc_scan_from:]:
                                 _fi = round_response.index(_fence_marker, _doc_scan_from)
-                                _fa = round_response[_fi + len(_fence_marker):]
-                                _fl = _fa.split('\n')
+                                _fa = round_response[_fi + len(_fence_marker) :]
+                                _fl = _fa.split("\n")
                                 if _fl and _fl[0].strip():
                                     _doc_opened = True
                                     _ft = _fl[0].strip()
-                                    _kl = {'python','py','javascript','js','typescript','ts','html','css','json','yaml','bash','sql','rust','go','java','c','cpp','markdown','text'}
-                                    _flang = _fl[1].strip() if len(_fl) > 1 and _fl[1].strip().lower() in _kl else ''
+                                    _kl = {
+                                        "python",
+                                        "py",
+                                        "javascript",
+                                        "js",
+                                        "typescript",
+                                        "ts",
+                                        "html",
+                                        "css",
+                                        "json",
+                                        "yaml",
+                                        "bash",
+                                        "sql",
+                                        "rust",
+                                        "go",
+                                        "java",
+                                        "c",
+                                        "cpp",
+                                        "markdown",
+                                        "text",
+                                    }
+                                    _flang = (
+                                        _fl[1].strip()
+                                        if len(_fl) > 1 and _fl[1].strip().lower() in _kl
+                                        else ""
+                                    )
                                     _doc_fence_offset = _fi + len(_fence_marker) + len(_fl[0]) + 1
                                     if _flang:
                                         _doc_fence_offset += len(_fl[1]) + 1
                                     _doc_last_len = 0
-                                    yield f'data: {json.dumps({"type": "doc_stream_open", "title": _ft, "language": _flang})}\n\n'
+                                    yield f"data: {json.dumps({'type': 'doc_stream_open', 'title': _ft, 'language': _flang})}\n\n"
                             if _doc_opened:
                                 _rc = round_response[_doc_fence_offset:]
-                                _ci = _rc.find('\n```')
+                                _ci = _rc.find("\n```")
                                 if _ci >= 0:
                                     _rc = _rc[:_ci]
                                 if len(_rc) > _doc_last_len:
                                     _doc_last_len = len(_rc)
-                                    yield f'data: {json.dumps({"type": "doc_stream_delta", "content": _rc})}\n\n'
+                                    yield f"data: {json.dumps({'type': 'doc_stream_delta', 'content': _rc})}\n\n"
                                 # If the closing fence has arrived, finalise
                                 # this block and arm detection of the NEXT
                                 # one. The model can emit multiple
                                 # `create_document` blocks in a single round.
                                 if _ci >= 0:
                                     _doc_opened = False
-                                    _doc_scan_from = _doc_fence_offset + _ci + len('\n```')
+                                    _doc_scan_from = _doc_fence_offset + _ci + len("\n```")
                                     _doc_fence_offset = 0
                                     _doc_last_len = 0
                     elif data.get("error"):
                         err_msg = data.get("error", "unknown")
                         logger.error(f"Agent round {round_num}: stream error: {err_msg}")
-                        yield f'data: {json.dumps({"delta": chr(10) + chr(10) + "*[Stream error: " + str(err_msg) + "]*"})}\n\n'
+                        yield f"data: {json.dumps({'delta': chr(10) + chr(10) + '*[Stream error: ' + str(err_msg) + ']*'})}\n\n"
                 except json.JSONDecodeError:
                     if round_num == 1:
                         yield chunk
@@ -2015,7 +2285,9 @@ async def stream_agent_loop(
                 yield chunk
             # Intercept [DONE] — don't forward until all rounds finish
 
-        tool_blocks, used_native = _resolve_tool_blocks(round_response, native_tool_calls, round_num, round_reasoning)
+        tool_blocks, used_native = _resolve_tool_blocks(
+            round_response, native_tool_calls, round_num, round_reasoning
+        )
 
         # Force-answer round: we told the model to STOP calling tools and
         # answer. If it ignored that and emitted a (possibly DSML) tool
@@ -2023,7 +2295,9 @@ async def stream_agent_loop(
         # only the prose; if there's none, emit a graceful fallback.
         if _force_answer:
             if tool_blocks:
-                logger.info(f"[agent] force-answer round {round_num}: discarding {len(tool_blocks)} ignored tool call(s)")
+                logger.info(
+                    f"[agent] force-answer round {round_num}: discarding {len(tool_blocks)} ignored tool call(s)"
+                )
             tool_blocks = []
             if not _THINK_RE.sub("", strip_tool_blocks(round_response)).strip():
                 # The model burned its budget gathering data but never wrote a
@@ -2034,49 +2308,57 @@ async def stream_agent_loop(
                 _synth = ""
                 try:
                     from src.llm_core import llm_call_async
-                    _synth_messages = list(messages) + [{
-                        "role": "user",
-                        "content": (
-                            "Using ONLY the information already gathered above, write "
-                            "the final answer for the user now. Do NOT call any tools, "
-                            "do NOT explain your reasoning — output the finished response "
-                            "directly. If some data couldn't be fetched, just work with "
-                            "what you have and note what's missing in one short line."
-                        ),
-                    }]
+
+                    _synth_messages = list(messages) + [
+                        {
+                            "role": "user",
+                            "content": (
+                                "Using ONLY the information already gathered above, write "
+                                "the final answer for the user now. Do NOT call any tools, "
+                                "do NOT explain your reasoning — output the finished response "
+                                "directly. If some data couldn't be fetched, just work with "
+                                "what you have and note what's missing in one short line."
+                            ),
+                        }
+                    ]
                     _raw = await llm_call_async(
-                        url=endpoint_url, model=model, messages=_synth_messages,
-                        headers=headers, temperature=0.3, max_tokens=max_tokens, timeout=60,
+                        url=endpoint_url,
+                        model=model,
+                        messages=_synth_messages,
+                        headers=headers,
+                        temperature=0.3,
+                        max_tokens=max_tokens,
+                        timeout=60,
                     )
                     _synth = _THINK_RE.sub("", strip_tool_blocks(_raw or "")).strip()
                 except Exception as _e:
                     logger.warning(f"[agent] grace synthesis failed: {_e}")
                 if _synth:
-                    yield f'data: {json.dumps({"delta": _synth})}\n\n'
+                    yield f"data: {json.dumps({'delta': _synth})}\n\n"
                     full_response += _synth
                 else:
-                    _fb = ("I gathered some search results but couldn't pull a clean "
-                           "answer together. Want me to try a more specific question, "
-                           "or summarize what I did find?")
-                    yield f'data: {json.dumps({"delta": _fb})}\n\n'
+                    _fb = (
+                        "I gathered some search results but couldn't pull a clean "
+                        "answer together. Want me to try a more specific question, "
+                        "or summarize what I did find?"
+                    )
+                    yield f"data: {json.dumps({'delta': _fb})}\n\n"
                     full_response += _fb
 
         # ── Fallback: auto-create document if model dumped large code in chat ──
         # If no create_document tool was used, check for big code blocks in text
         has_doc_tool = any(
-            b.tool_type in ("create_document", "update_document")
-            for b in tool_blocks
+            b.tool_type in ("create_document", "update_document") for b in tool_blocks
         ) or any(
-            tc.get("name") in ("create_document", "update_document")
-            for tc in native_tool_calls
+            tc.get("name") in ("create_document", "update_document") for tc in native_tool_calls
         )
         if not has_doc_tool and session_id and "create_document" not in (disabled_tools or set()):
-            _code_block_re = re.compile(r'```(\w*)\n([\s\S]*?)```')
+            _code_block_re = re.compile(r"```(\w*)\n([\s\S]*?)```")
             for m in _code_block_re.finditer(round_response):
                 lang_tag = m.group(1).lower()
                 code_body = m.group(2).strip()
                 # Skip small blocks and known tool tags
-                if code_body.count('\n') < 30:
+                if code_body.count("\n") < 30:
                     continue
                 if lang_tag in TOOL_TAGS:
                     continue  # already handled as a tool execution
@@ -2087,9 +2369,11 @@ async def stream_agent_loop(
                 tb = ToolBlock("create_document", f"{doc_title}\n{doc_lang}\n{code_body}")
                 tool_blocks.append(tb)
                 # Stream the document open event
-                yield f'data: {json.dumps({"type": "doc_stream_open", "title": doc_title, "language": doc_lang})}\n\n'
-                yield f'data: {json.dumps({"type": "doc_stream_delta", "content": code_body})}\n\n'
-                logger.info(f"Auto-created document from {lang_tag} code block ({code_body.count(chr(10))+1} lines)")
+                yield f"data: {json.dumps({'type': 'doc_stream_open', 'title': doc_title, 'language': doc_lang})}\n\n"
+                yield f"data: {json.dumps({'type': 'doc_stream_delta', 'content': code_body})}\n\n"
+                logger.info(
+                    f"Auto-created document from {lang_tag} code block ({code_body.count(chr(10)) + 1} lines)"
+                )
                 break  # only auto-create one document per round
 
         # Save cleaned round text for history persistence
@@ -2102,9 +2386,10 @@ async def stream_agent_loop(
         # into the same <think> form inline thinking uses so it persists via
         # round_texts and re-renders through processWithThinking. round_texts is
         # only read on reload, so this can't double-render the live stream.
-        if round_reasoning.strip() and '<think' not in cleaned_round.lower():
-            cleaned_round = (f"<think>{round_reasoning.strip()}</think>\n\n"
-                             + cleaned_round).strip()
+        if round_reasoning.strip() and "<think" not in cleaned_round.lower():
+            cleaned_round = (
+                f"<think>{round_reasoning.strip()}</think>\n\n" + cleaned_round
+            ).strip()
         round_texts.append(cleaned_round)
 
         if not tool_blocks:
@@ -2116,36 +2401,46 @@ async def stream_agent_loop(
             # to re-trigger). Skipped on force-answer rounds (no tools to
             # fix with), pure Q&A, and when the toggle is off.
             _claimed_done = bool(_THINK_RE.sub("", cleaned_round).strip())
-            if (_effectful_used and not _force_answer
-                    and _claimed_done
-                    and _verifier_rounds < _VERIFIER_MAX_ROUNDS
-                    # Default OFF: on weak local models the verifier can't judge
-                    # from the action-snapshot (no doc body), so it false-rejects
-                    # ("content not shown") and forces a costly extra round every
-                    # effectful turn. Opt-in via setting for strong models.
-                    and get_setting("agent_verifier_subagent", False)):
+            if (
+                _effectful_used
+                and not _force_answer
+                and _claimed_done
+                and _verifier_rounds < _VERIFIER_MAX_ROUNDS
+                # Default OFF: on weak local models the verifier can't judge
+                # from the action-snapshot (no doc body), so it false-rejects
+                # ("content not shown") and forces a costly extra round every
+                # effectful turn. Opt-in via setting for strong models.
+                and get_setting("agent_verifier_subagent", False)
+            ):
                 # Brief "working" indicator while the verifier runs.
-                yield f'data: {json.dumps({"type": "agent_step", "round": round_num})}\n\n'
+                yield f"data: {json.dumps({'type': 'agent_step', 'round': round_num})}\n\n"
                 _vfail = await _run_verifier_subagent(
                     _verifier_instruction,
                     _build_actions_snapshot(tool_events),
-                    endpoint_url=endpoint_url, model=model, headers=headers,
+                    endpoint_url=endpoint_url,
+                    model=model,
+                    headers=headers,
                 )
                 if _vfail:
                     _verifier_rounds += 1
-                    logger.info(f"[agent] verifier flagged {len(_vfail)} issue(s) on round {round_num}: {_vfail}")
+                    logger.info(
+                        f"[agent] verifier flagged {len(_vfail)} issue(s) on round {round_num}: {_vfail}"
+                    )
                     _note = "\n\n_Double-checked the work and found something to fix._\n\n"
-                    yield f'data: {json.dumps({"delta": _note})}\n\n'
+                    yield f"data: {json.dumps({'delta': _note})}\n\n"
                     full_response += _note
-                    messages.append({
-                        "role": "system",
-                        "content": (
-                            "An independent verifier reviewed your work against the "
-                            "original request and found issues that must be fixed before "
-                            "this is actually done:\n- " + "\n- ".join(_vfail) +
-                            "\n\nFix these now using tools, then finish."
-                        ),
-                    })
+                    messages.append(
+                        {
+                            "role": "system",
+                            "content": (
+                                "An independent verifier reviewed your work against the "
+                                "original request and found issues that must be fixed before "
+                                "this is actually done:\n- "
+                                + "\n- ".join(_vfail)
+                                + "\n\nFix these now using tools, then finish."
+                            ),
+                        }
+                    )
                     # Require fresh effectful work before verifying again, so we
                     # never re-verify an unchanged state in a loop.
                     _effectful_used = False
@@ -2174,21 +2469,25 @@ async def stream_agent_loop(
             if _looks_like_promise:
                 _intent_nudge_count += 1
                 _matched_phrase = _intent_match.group(0).strip()
-                logger.info(f"[agent] intent-without-action nudge #{_intent_nudge_count} on round {round_num}: {_matched_phrase!r}")
-                messages.append({
-                    "role": "system",
-                    "content": (
-                        f"You just wrote: \"{_matched_phrase}\" — but ended the "
-                        "turn without making the actual tool call. The user can "
-                        "see you announced the action but didn't run it, which "
-                        "is the most frustrating thing you can do. "
-                        "DO IT NOW: emit the actual function call this turn. "
-                        "If you decided not to do it after all, say so plainly in "
-                        "one sentence instead of restating the plan."
-                    ),
-                })
+                logger.info(
+                    f"[agent] intent-without-action nudge #{_intent_nudge_count} on round {round_num}: {_matched_phrase!r}"
+                )
+                messages.append(
+                    {
+                        "role": "system",
+                        "content": (
+                            f'You just wrote: "{_matched_phrase}" — but ended the '
+                            "turn without making the actual tool call. The user can "
+                            "see you announced the action but didn't run it, which "
+                            "is the most frustrating thing you can do. "
+                            "DO IT NOW: emit the actual function call this turn. "
+                            "If you decided not to do it after all, say so plainly in "
+                            "one sentence instead of restating the plan."
+                        ),
+                    }
+                )
                 # Visible signal in the stream so the user knows we caught it.
-                yield f'data: {json.dumps({"type": "agent_step", "round": round_num + 1})}\n\n'
+                yield f"data: {json.dumps({'type': 'agent_step', 'round': round_num + 1})}\n\n"
                 continue
             break  # no tools — done
 
@@ -2203,7 +2502,9 @@ async def stream_agent_loop(
         # runaway backstop). On bail we don't give up — we force one
         # tool-free round so the model declares done or declares blocked,
         # mirroring Terminus's explicit-completion handshake.
-        _sig = "|".join(sorted(f"{b.tool_type}:{(b.content or '').strip()[:120]}" for b in tool_blocks))
+        _sig = "|".join(
+            sorted(f"{b.tool_type}:{(b.content or '').strip()[:120]}" for b in tool_blocks)
+        )
         _is_repeat = _sig in _recent_call_sigs
         _recent_call_sigs.append(_sig)
         for _b in tool_blocks:
@@ -2225,31 +2526,40 @@ async def stream_agent_loop(
         _runaway_sig = next((s for s, n in _call_sig_counts.items() if n >= 8), None)
         _runaway = _runaway_sig.split(":", 1)[0] if _runaway_sig else None
         if _stuck_rounds >= 4 or _runaway:
-            reason = (f"calling {_runaway} over and over" if _runaway
-                      else "repeating the same tool calls without new progress")
-            logger.warning(f"[agent] loop-breaker tripped on round {round_num} ({reason}); sig={_sig[:80]!r}")
+            reason = (
+                f"calling {_runaway} over and over"
+                if _runaway
+                else "repeating the same tool calls without new progress"
+            )
+            logger.warning(
+                f"[agent] loop-breaker tripped on round {round_num} ({reason}); sig={_sig[:80]!r}"
+            )
             # The model has been executing tools, so its results are already
             # in context. Force ONE tool-free round to converge: write the
             # answer from what it has, or state plainly what's blocking it.
             # The force-answer handler above salvages (grace synthesis) or
             # apologizes honestly if it still writes nothing.
-            _off = [t for t in ("bash",)
-                    if disabled_tools and t in disabled_tools]
-            _off_note = (f" ({', '.join(_off)} is currently disabled — say so if "
-                         f"you needed it.)" if _off else "")
+            _off = [t for t in ("bash",) if disabled_tools and t in disabled_tools]
+            _off_note = (
+                f" ({', '.join(_off)} is currently disabled — say so if you needed it.)"
+                if _off
+                else ""
+            )
             _force_answer = True
-            messages.append({
-                "role": "system",
-                "content": (
-                    "You're repeating tool calls without converging. STOP calling "
-                    "tools and end the turn one of two ways: (a) write your best "
-                    "final answer NOW from the information already gathered, or "
-                    "(b) if you're genuinely blocked, say plainly what's blocking "
-                    "you in a sentence or two." + _off_note
-                ),
-            })
+            messages.append(
+                {
+                    "role": "system",
+                    "content": (
+                        "You're repeating tool calls without converging. STOP calling "
+                        "tools and end the turn one of two ways: (a) write your best "
+                        "final answer NOW from the information already gathered, or "
+                        "(b) if you're genuinely blocked, say plainly what's blocking "
+                        "you in a sentence or two." + _off_note
+                    ),
+                }
+            )
             full_response += "\n\n"
-            yield f'data: {json.dumps({"type": "agent_step", "round": round_num + 1})}\n\n'
+            yield f"data: {json.dumps({'type': 'agent_step', 'round': round_num + 1})}\n\n"
             continue
 
         # Pre-stream document content for fenced tool blocks (non-native path)
@@ -2272,15 +2582,15 @@ async def stream_agent_loop(
                         lang = lines[1].strip()
                         content_start = 2
                     content = "\n".join(lines[content_start:]) if len(lines) > content_start else ""
-                    yield f'data: {json.dumps({"type": "doc_stream_open", "title": title, "language": lang})}\n\n'
+                    yield f"data: {json.dumps({'type': 'doc_stream_open', 'title': title, 'language': lang})}\n\n"
                     if content:
-                        yield f'data: {json.dumps({"type": "doc_stream_delta", "content": content})}\n\n'
+                        yield f"data: {json.dumps({'type': 'doc_stream_delta', 'content': content})}\n\n"
                     break
                 elif block.tool_type == "update_document":
                     # Pre-stream the full replacement content so user sees it immediately
                     content = block.content.strip()
-                    yield f'data: {json.dumps({"type": "doc_stream_open", "title": "", "language": ""})}\n\n'
-                    yield f'data: {json.dumps({"type": "doc_stream_delta", "content": content})}\n\n'
+                    yield f"data: {json.dumps({'type': 'doc_stream_open', 'title': '', 'language': ''})}\n\n"
+                    yield f"data: {json.dumps({'type': 'doc_stream_delta', 'content': content})}\n\n"
                     break
 
         # Execute each tool block
@@ -2290,21 +2600,26 @@ async def stream_agent_loop(
         for i, block in enumerate(tool_blocks):
             # --- Tool budget check ---
             if max_tool_calls > 0 and total_tool_calls >= max_tool_calls:
-                yield f'data: {json.dumps({"type": "budget_exceeded", "limit": max_tool_calls, "used": total_tool_calls})}\n\n'
+                yield f"data: {json.dumps({'type': 'budget_exceeded', 'limit': max_tool_calls, 'used': total_tool_calls})}\n\n"
                 budget_hit = True
                 break
 
             total_tool_calls += 1
             # Build a short display string for the frontend tool bubble.
             # Document tools show a brief summary instead of dumping full content.
-            is_doc_tool = block.tool_type in ("create_document", "update_document", "edit_document", "suggest_document")
+            is_doc_tool = block.tool_type in (
+                "create_document",
+                "update_document",
+                "edit_document",
+                "suggest_document",
+            )
             if is_doc_tool:
                 cmd_display = block.content.split("\n")[0].strip()[:80]
             else:
                 cmd_display = block.content.strip()
 
             yield (
-                f'data: {json.dumps({"type": "tool_start", "tool": block.tool_type, "command": cmd_display, "round": round_num})}\n\n'
+                f"data: {json.dumps({'type': 'tool_start', 'tool': block.tool_type, 'command': cmd_display, 'round': round_num})}\n\n"
             )
 
             # Streaming progress for long-running tools (bash, python).
@@ -2313,6 +2628,7 @@ async def stream_agent_loop(
             # we forward each one as a `tool_progress` SSE event so
             # the UI can render live elapsed-time + tail-of-output.
             _progress_q: asyncio.Queue = asyncio.Queue()
+
             async def _push_progress(payload):
                 await _progress_q.put(payload)
 
@@ -2338,7 +2654,7 @@ async def stream_agent_loop(
                 if evt is None:
                     break
                 yield (
-                    f'data: {json.dumps({"type": "tool_progress", "tool": block.tool_type, "round": round_num, **evt})}\n\n'
+                    f"data: {json.dumps({'type': 'tool_progress', 'tool': block.tool_type, 'round': round_num, **evt})}\n\n"
                 )
             desc, result = await _tool_task
 
@@ -2347,18 +2663,16 @@ async def stream_agent_loop(
             if is_doc_tool and "action" in result:
                 if result["action"] == "suggest":
                     yield (
-                        f'data: {json.dumps({"type": "doc_suggestions", "doc_id": result["doc_id"], "suggestions": result["suggestions"]})}\n\n'
+                        f"data: {json.dumps({'type': 'doc_suggestions', 'doc_id': result['doc_id'], 'suggestions': result['suggestions']})}\n\n"
                     )
                 else:
                     yield (
-                        f'data: {json.dumps({"type": "doc_update", "doc_id": result["doc_id"], "content": result["content"], "version": result["version"], "title": result.get("title", ""), "language": result.get("language")})}\n\n'
+                        f"data: {json.dumps({'type': 'doc_update', 'doc_id': result['doc_id'], 'content': result['content'], 'version': result['version'], 'title': result.get('title', ''), 'language': result.get('language')})}\n\n"
                     )
 
             # Emit ui_control event for frontend to apply UI changes
             if "ui_event" in result:
-                yield (
-                    f'data: {json.dumps({"type": "ui_control", "data": result})}\n\n'
-                )
+                yield (f"data: {json.dumps({'type': 'ui_control', 'data': result})}\n\n")
 
             # ask_user: the agent posed a multiple-choice question. Emit it so the
             # frontend renders clickable options, then end the turn (below) and
@@ -2376,14 +2690,12 @@ async def stream_agent_loop(
                 if _auq_q and _auq_q not in full_response:
                     _auq_delta = ("\n\n" if full_response.strip() else "") + _auq_q
                     full_response += _auq_delta
-                    yield 'data: ' + json.dumps({"delta": _auq_delta}) + '\n\n'
-                yield (
-                    f'data: {json.dumps({"type": "ask_user", "data": result["ask_user"]})}\n\n'
-                )
+                    yield "data: " + json.dumps({"delta": _auq_delta}) + "\n\n"
+                yield (f"data: {json.dumps({'type': 'ask_user', 'data': result['ask_user']})}\n\n")
                 _awaiting_user = True
 
             if "plan_update" in result:
-                yield f'data: {json.dumps({"type": "plan_update", "data": result["plan_update"]})}\n\n'
+                yield f"data: {json.dumps({'type': 'plan_update', 'data': result['plan_update']})}\n\n"
 
             # Build output for frontend tool bubble.
             # Document tools get a short summary — content goes to the editor panel.
@@ -2395,14 +2707,18 @@ async def stream_agent_loop(
                 if action == "create":
                     output_text = f'Document created: "{title}" (v{ver})'
                 elif action == "edit":
-                    output_text = f'Document edited: "{title}" (v{ver}, {result.get("applied", 0)} edit(s))'
+                    output_text = (
+                        f'Document edited: "{title}" (v{ver}, {result.get("applied", 0)} edit(s))'
+                    )
                 elif action == "update":
                     output_text = f'Document updated: "{title}" (v{ver})'
             elif "stdout" in result:
                 # On a bash/python timeout the result carries error + (often
                 # empty) stdout/stderr; fall back to the error so the "timed
                 # out" reason reaches the UI instead of a blank result.
-                output_text = (result["stdout"] or result["stderr"] or result.get("error", ""))[:2000]
+                output_text = (result["stdout"] or result["stderr"] or result.get("error", ""))[
+                    :2000
+                ]
             elif "output" in result:
                 # bash / python canonical result: {"output": ..., "exit_code": ...}
                 output_text = (result["output"] or "")[:2000]
@@ -2426,10 +2742,24 @@ async def stream_agent_loop(
                 output_text = result["error"][:2000]
 
             # Emit tool_output (include ui_event data if present)
-            tool_output_data = {"type": "tool_output", "tool": block.tool_type, "command": cmd_display, "output": output_text, "exit_code": result.get("exit_code")}
+            tool_output_data = {
+                "type": "tool_output",
+                "tool": block.tool_type,
+                "command": cmd_display,
+                "output": output_text,
+                "exit_code": result.get("exit_code"),
+            }
             if "ui_event" in result:
                 tool_output_data["ui_event"] = result["ui_event"]
-                for k in ("toggle_name", "state", "mode", "model", "endpoint_url", "theme_name", "colors"):
+                for k in (
+                    "toggle_name",
+                    "state",
+                    "mode",
+                    "model",
+                    "endpoint_url",
+                    "theme_name",
+                    "colors",
+                ):
                     if k in result:
                         tool_output_data[k] = result[k]
             # Forward image data from generate_image tool
@@ -2448,22 +2778,30 @@ async def stream_agent_loop(
             # Forward a file-write diff for inline before/after rendering
             if "diff" in result:
                 tool_output_data["diff"] = result["diff"]
-            yield f'data: {json.dumps(tool_output_data)}\n\n'
+            yield f"data: {json.dumps(tool_output_data)}\n\n"
 
             # Native document tools open in the editor + carry the REAL doc id.
             # Emit a doc_update so the frontend opens/activates it and sends it
             # back as active_doc_id next turn (otherwise the agent can't "see"
             # the document it just created on the follow-up message).
-            if block.tool_type in ("create_document", "update_document", "edit_document") and result.get("doc_id"):
+            if block.tool_type in (
+                "create_document",
+                "update_document",
+                "edit_document",
+            ) and result.get("doc_id"):
                 yield (
-                    'data: ' + json.dumps({
-                        "type": "doc_update",
-                        "doc_id": result["doc_id"],
-                        "title": result.get("title", ""),
-                        "language": result.get("language", ""),
-                        "content": result.get("content", ""),
-                        "version": result.get("version", 1),
-                    }) + '\n\n'
+                    "data: "
+                    + json.dumps(
+                        {
+                            "type": "doc_update",
+                            "doc_id": result["doc_id"],
+                            "title": result.get("title", ""),
+                            "language": result.get("language", ""),
+                            "content": result.get("content", ""),
+                            "version": result.get("version", 1),
+                        }
+                    )
+                    + "\n\n"
                 )
 
             # Inline research: emit the open-link as part of the assistant's
@@ -2473,7 +2811,7 @@ async def stream_agent_loop(
             _rsid = result.get("research_session_id")
             if _rsid:
                 _anchor = f"\n\n[Open in Deep Research](#research-{_rsid})\n"
-                yield 'data: ' + json.dumps({"delta": _anchor}) + '\n\n'
+                yield "data: " + json.dumps({"delta": _anchor}) + "\n\n"
 
             # Save for history persistence
             tool_event = {
@@ -2484,7 +2822,13 @@ async def stream_agent_loop(
                 "exit_code": result.get("exit_code"),
             }
             if result.get("image_url"):
-                for ik in ("image_url", "image_prompt", "image_model", "image_size", "image_quality"):
+                for ik in (
+                    "image_url",
+                    "image_prompt",
+                    "image_model",
+                    "image_size",
+                    "image_quality",
+                ):
                     if result.get(ik):
                         tool_event[ik] = result[ik]
             if result.get("created_images"):
@@ -2522,14 +2866,19 @@ async def stream_agent_loop(
             break
 
         # Feed results back to LLM for next round
-        _append_tool_results(messages, round_response, native_tool_calls,
-                             tool_results, tool_result_texts, used_native, round_num,
-                             round_reasoning=round_reasoning)
+        _append_tool_results(
+            messages,
+            round_response,
+            native_tool_calls,
+            tool_results,
+            tool_result_texts,
+            used_native,
+            round_num,
+            round_reasoning=round_reasoning,
+        )
 
         # Emit agent_step event
-        yield (
-            f'data: {json.dumps({"type": "agent_step", "round": round_num + 1})}\n\n'
-        )
+        yield (f"data: {json.dumps({'type': 'agent_step', 'round': round_num + 1})}\n\n")
 
         # Separator in accumulated response
         full_response += "\n\n"
@@ -2545,8 +2894,10 @@ async def stream_agent_loop(
     # If the loop hit the round cap while still working, tell the client so it
     # can show a "Continue" affordance instead of the turn just stopping.
     if _exhausted_rounds:
-        logger.info("[agent] round cap (%d) reached mid-task — emitting rounds_exhausted", max_rounds)
-        yield f'data: {json.dumps({"type": "rounds_exhausted", "rounds": max_rounds})}\n\n'
+        logger.info(
+            "[agent] round cap (%d) reached mid-task — emitting rounds_exhausted", max_rounds
+        )
+        yield f"data: {json.dumps({'type': 'rounds_exhausted', 'rounds': max_rounds})}\n\n"
 
     # If the response is completely empty and no tools were executed,
     # yield a fallback message so the user is not left hanging.
@@ -2561,21 +2912,31 @@ async def stream_agent_loop(
     # still be lost on reload. Fold the final round's reasoning into full_response
     # as a leading <think> block — save_assistant_response's _extract_thinking_meta
     # then splits it into metadata.thinking and it renders as a normal thinking bar.
-    if (not tool_events and round_reasoning.strip()
-            and '<think' not in full_response.lower()
-            # Don't wrap when the fallback above already promoted the reasoning
-            # to be the visible reply (content was empty) — that would bury the
-            # only text in a collapsed thinking bar.
-            and full_response.strip() != round_reasoning.strip()):
-        full_response = (f"<think>{round_reasoning.strip()}</think>\n\n"
-                         + full_response).strip()
+    if (
+        not tool_events
+        and round_reasoning.strip()
+        and "<think" not in full_response.lower()
+        # Don't wrap when the fallback above already promoted the reasoning
+        # to be the visible reply (content was empty) — that would bury the
+        # only text in a collapsed thinking bar.
+        and full_response.strip() != round_reasoning.strip()
+    ):
+        full_response = (f"<think>{round_reasoning.strip()}</think>\n\n" + full_response).strip()
 
     # --- Final metrics ---
     total_duration = time.time() - total_start
     metrics = _compute_final_metrics(
-        messages, full_response, total_duration, time_to_first_token,
-        context_length, real_input_tokens, real_output_tokens,
-        has_real_usage, tool_events, round_texts, model=model,
+        messages,
+        full_response,
+        total_duration,
+        time_to_first_token,
+        context_length,
+        real_input_tokens,
+        real_output_tokens,
+        has_real_usage,
+        tool_events,
+        round_texts,
+        model=model,
         last_round_input_tokens=last_round_input_tokens,
         prep_timings=prep_timings,
         backend_gen_tps=backend_gen_tps,
@@ -2591,6 +2952,7 @@ async def stream_agent_loop(
     if not _is_teacher_run:
         try:
             from src.teacher_escalation import run_teacher_inline
+
             async for evt in run_teacher_inline(
                 student_endpoint_url=endpoint_url,
                 student_messages=messages,

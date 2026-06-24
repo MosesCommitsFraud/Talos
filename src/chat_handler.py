@@ -1,22 +1,23 @@
 # src/chat_handler.py
 """Handler for chat endpoint operations."""
-import os
-import re
+
 import asyncio
 import logging
-from typing import Dict, List, Optional, Any
+import os
+import re
+from typing import Any, Dict, List, Optional
 
 from fastapi import HTTPException
 
-from src.constants import (
-    MAX_CONTEXT_MESSAGES,
-    DEFAULT_TEMPERATURE,
-    DEFAULT_MAX_TOKENS,
-    UPLOAD_DIR,
-)
 from core.models import ChatMessage
 from src.chat_helpers import model_supports_vision
-from src.document_processor import build_user_content, analyze_image_with_vl_result
+from src.constants import (
+    DEFAULT_MAX_TOKENS,
+    DEFAULT_TEMPERATURE,
+    MAX_CONTEXT_MESSAGES,
+    UPLOAD_DIR,
+)
+from src.document_processor import analyze_image_with_vl_result, build_user_content
 
 logger = logging.getLogger(__name__)
 
@@ -129,6 +130,7 @@ class ChatHandler:
 
         # Analyze images — skip if vision disabled, or if main model is vision-capable
         from src.settings import get_setting
+
         vision_enabled = get_setting("vision_enabled", True)
         main_is_vision = await asyncio.to_thread(
             model_supports_vision, sess.model or "", getattr(sess, "endpoint_url", "") or ""
@@ -162,15 +164,17 @@ class ChatHandler:
             for att_id in att_ids:
                 fi = files_by_id.get(att_id)
                 if fi:
-                    attachment_meta.append({
-                        "id": fi["id"],
-                        "name": fi.get("name") or fi.get("original_name") or fi["id"],
-                        "mime": fi.get("mime", ""),
-                        "size": fi.get("size", 0),
-                        "width": fi.get("width"),
-                        "height": fi.get("height"),
-                        "sandbox_path": fi.get("sandbox_path"),
-                    })
+                    attachment_meta.append(
+                        {
+                            "id": fi["id"],
+                            "name": fi.get("name") or fi.get("original_name") or fi["id"],
+                            "mime": fi.get("mime", ""),
+                            "size": fi.get("size", 0),
+                            "width": fi.get("width"),
+                            "height": fi.get("height"),
+                            "sandbox_path": fi.get("sandbox_path"),
+                        }
+                    )
 
         if att_ids and vision_enabled:
             meta_by_id = {m["id"]: m for m in attachment_meta}
@@ -181,7 +185,9 @@ class ChatHandler:
                 ):
                     if main_is_vision:
                         # Main model can see images — just note it, image is passed via build_user_content.
-                        enhanced_message = f"{enhanced_message}\n\n[Image attached: {file_info['name']}]"
+                        enhanced_message = (
+                            f"{enhanced_message}\n\n[Image attached: {file_info['name']}]"
+                        )
                         _m = meta_by_id.get(att_id)
                         if _m is not None:
                             _m["vision_model"] = sess.model or ""
@@ -229,7 +235,9 @@ class ChatHandler:
                                         _vf.write(vl_desc)
                                 except Exception:
                                     pass
-                        enhanced_message = f"{enhanced_message}\n\n[Image: {file_info['name']}]\n{vl_desc}"
+                        enhanced_message = (
+                            f"{enhanced_message}\n\n[Image: {file_info['name']}]\n{vl_desc}"
+                        )
                         # Surface the description to the client live so it renders as a
                         # collapsible "image description" on the user bubble (not just
                         # after a refresh that re-parses the stored message).
@@ -239,7 +247,10 @@ class ChatHandler:
                             _m["vision_model"] = vl_model
 
         user_content = build_user_content(
-            enhanced_message, att_ids, UPLOAD_DIR, self.upload_handler,
+            enhanced_message,
+            att_ids,
+            UPLOAD_DIR,
+            self.upload_handler,
             session_id=getattr(sess, "id", None),
             auto_opened_docs=auto_opened_docs,
             owner=owner,
@@ -249,13 +260,15 @@ class ChatHandler:
         # Strip image_url entries for text-only models (VL description is already in the text)
         if not vision_enabled and isinstance(user_content, list):
             text_parts = [
-                item.get("text", "") for item in user_content
+                item.get("text", "")
+                for item in user_content
                 if isinstance(item, dict) and item.get("type") == "text"
             ]
             user_content = "\n".join(text_parts).strip() if text_parts else enhanced_message
         elif not main_is_vision and isinstance(user_content, list):
             text_parts = [
-                item.get("text", "") for item in user_content
+                item.get("text", "")
+                for item in user_content
                 if isinstance(item, dict) and item.get("type") == "text"
             ]
             user_content = "\n".join(text_parts).strip() if text_parts else enhanced_message
@@ -269,7 +282,13 @@ class ChatHandler:
         else:
             text_for_context = user_content
 
-        return enhanced_message, user_content, text_for_context, youtube_transcripts, attachment_meta
+        return (
+            enhanced_message,
+            user_content,
+            text_for_context,
+            youtube_transcripts,
+            attachment_meta,
+        )
 
     # ------------------------------------------------------------------
     # Session helpers
@@ -285,9 +304,7 @@ class ChatHandler:
 
     async def handle_memory_command(self, session, message: str) -> Optional[str]:
         """Process inline memory commands. Returns response string or None."""
-        is_memory_cmd, memory_text = self.memory_manager.process_inline_memory_command(
-            message
-        )
+        is_memory_cmd, memory_text = self.memory_manager.process_inline_memory_command(message)
         if is_memory_cmd and memory_text:
             mem = self.memory_manager.load()
             if not self.memory_manager.find_duplicates(memory_text, mem):
@@ -296,9 +313,7 @@ class ChatHandler:
                 self.memory_manager.save(mem)
 
             session.add_message(ChatMessage("user", message))
-            session.add_message(
-                ChatMessage("assistant", f"Saved to memory: {memory_text}")
-            )
+            session.add_message(ChatMessage("assistant", f"Saved to memory: {memory_text}"))
 
             from src.database import update_session_last_accessed
 

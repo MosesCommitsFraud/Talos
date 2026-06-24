@@ -4,13 +4,51 @@ Used by /api/conversations/topics and /api/memory/extract fallback.
 """
 
 import re
-from typing import Dict, Any, List
+from typing import Any, Dict, List
 
 TOPIC_KEYWORDS: Dict[str, List[str]] = {
-    "Technology": ["ai", "machine learning", "python", "code", "programming", "computer", "software", "hardware", "algorithm"],
-    "Science": ["science", "physics", "chemistry", "biology", "math", "mathematics", "research", "experiment"],
-    "Work": ["work", "job", "career", "project", "task", "deadline", "meeting", "colleague", "manager"],
-    "Personal": ["personal", "family", "friend", "relationship", "health", "wellness", "exercise", "diet"],
+    "Technology": [
+        "ai",
+        "machine learning",
+        "python",
+        "code",
+        "programming",
+        "computer",
+        "software",
+        "hardware",
+        "algorithm",
+    ],
+    "Science": [
+        "science",
+        "physics",
+        "chemistry",
+        "biology",
+        "math",
+        "mathematics",
+        "research",
+        "experiment",
+    ],
+    "Work": [
+        "work",
+        "job",
+        "career",
+        "project",
+        "task",
+        "deadline",
+        "meeting",
+        "colleague",
+        "manager",
+    ],
+    "Personal": [
+        "personal",
+        "family",
+        "friend",
+        "relationship",
+        "health",
+        "wellness",
+        "exercise",
+        "diet",
+    ],
     "Learning": ["learn", "study", "education", "course", "tutorial", "guide", "how to", "explain"],
     "Creativity": ["write", "story", "create", "design", "art", "music", "draw", "paint"],
     "Planning": ["plan", "schedule", "organize", "arrange", "coordinate", "timeline", "calendar"],
@@ -58,7 +96,9 @@ def analyze_topics(session_manager, owner: str = None) -> Dict[str, Any]:
             history = session_data.get("history", [])
 
         for msg in history:
-            content_raw = msg.get("content") if isinstance(msg, dict) else getattr(msg, "content", None)
+            content_raw = (
+                msg.get("content") if isinstance(msg, dict) else getattr(msg, "content", None)
+            )
             if not content_raw:
                 continue
 
@@ -70,16 +110,18 @@ def analyze_topics(session_manager, owner: str = None) -> Dict[str, Any]:
                 for kw in keywords:
                     if re.search(rf"\b{re.escape(kw)}\b", content):
                         topic_counts[topic] += 1
-                        sentences = re.split(r'[.!?]', str(content_raw))
+                        sentences = re.split(r"[.!?]", str(content_raw))
                         for sentence in sentences:
                             if re.search(rf"\b{re.escape(kw)}\b", sentence.lower()):
-                                topic_matches[topic].append({
-                                    "session_id": session_id,
-                                    "session_name": session_name,
-                                    "role": role,
-                                    "snippet": sentence.strip(),
-                                    "keyword": kw,
-                                })
+                                topic_matches[topic].append(
+                                    {
+                                        "session_id": session_id,
+                                        "session_name": session_name,
+                                        "role": role,
+                                        "snippet": sentence.strip(),
+                                        "keyword": kw,
+                                    }
+                                )
                                 break
 
     results = []
@@ -93,12 +135,14 @@ def analyze_topics(session_manager, owner: str = None) -> Dict[str, Any]:
             if key not in seen:
                 seen.add(key)
                 unique.append(m)
-        results.append({
-            "topic": topic,
-            "frequency": count,
-            "examples": unique[:5],
-            "session_count": len({m["session_id"] for m in unique}),
-        })
+        results.append(
+            {
+                "topic": topic,
+                "frequency": count,
+                "examples": unique[:5],
+                "session_count": len({m["session_id"] for m in unique}),
+            }
+        )
 
     results.sort(key=lambda x: x["frequency"], reverse=True)
     return {"topics": results, "total_topics": len(results)}

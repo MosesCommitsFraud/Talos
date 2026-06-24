@@ -6,8 +6,8 @@ embed them in a ChromaDB collection and retrieve only the top-K
 relevant ones per user message.
 """
 
-import logging
 import hashlib
+import logging
 import re
 import time
 from typing import Dict, List, Optional, Set
@@ -21,46 +21,58 @@ logger = logging.getLogger(__name__)
 
 # Tools that are ALWAYS included regardless of retrieval results.
 # These are the most commonly needed and should never be missing.
-ALWAYS_AVAILABLE = frozenset({
-    "bash", "python",
-    # File tools: read AND write/edit. An agent with disk access should always
-    # be able to change files, not just read them — otherwise a bare "edit X"
-    # request can miss write_file/edit_file (RAG-only) and the model wrongly
-    # falls back to edit_document (editor panel). All admin-gated by tool_security.
-    "read_file", "write_file", "edit_file",
-    "grep", "glob", "ls",  # code-navigation tools (admin-gated by tool_security)
-    "show_image",  # display a workspace image inline (charts/plots/results)
-    "run_cell",  # persistent Python kernel (stateful, Jupyter-like) for iterative work
-    "api_call",  # For configured integrations (Miniflux, Gitea, Linkding, etc.)
-    # Generic API loopback — the catch-all when no named tool fits.
-    "app_api",
-    # Memory is ambient — "remember this" can follow any message regardless
-    # of topic. Without this, RAG drops it and the agent falls back to
-    # app_api /api/memory/add which fails with 422 on first attempt.
-    "manage_memory",
-    # Ask the user a multiple-choice question for a decision/clarification.
-    # Always reachable so the agent can pause and ask at any point.
-    "ask_user", "update_plan",
-    # Retrieve the full original of a compressed tool output. Compression
-    # markers can appear after ANY tool runs, so the retrieval tool must
-    # always be in reach (RAG would never select it from the user's message).
-    "expand_output",
-})
+ALWAYS_AVAILABLE = frozenset(
+    {
+        "bash",
+        "python",
+        # File tools: read AND write/edit. An agent with disk access should always
+        # be able to change files, not just read them — otherwise a bare "edit X"
+        # request can miss write_file/edit_file (RAG-only) and the model wrongly
+        # falls back to edit_document (editor panel). All admin-gated by tool_security.
+        "read_file",
+        "write_file",
+        "edit_file",
+        "grep",
+        "glob",
+        "ls",  # code-navigation tools (admin-gated by tool_security)
+        "show_image",  # display a workspace image inline (charts/plots/results)
+        "run_cell",  # persistent Python kernel (stateful, Jupyter-like) for iterative work
+        "api_call",  # For configured integrations (Miniflux, Gitea, Linkding, etc.)
+        # Generic API loopback — the catch-all when no named tool fits.
+        "app_api",
+        # Memory is ambient — "remember this" can follow any message regardless
+        # of topic. Without this, RAG drops it and the agent falls back to
+        # app_api /api/memory/add which fails with 422 on first attempt.
+        "manage_memory",
+        # Ask the user a multiple-choice question for a decision/clarification.
+        # Always reachable so the agent can pause and ask at any point.
+        "ask_user",
+        "update_plan",
+        # Retrieve the full original of a compressed tool output. Compression
+        # markers can appear after ANY tool runs, so the retrieval tool must
+        # always be in reach (RAG would never select it from the user's message).
+        "expand_output",
+    }
+)
 
 # Tools that the Personal Assistant always has access to during scheduled
 # check-ins and proactive tasks, in addition to RAG-selected tools.
-ASSISTANT_ALWAYS_AVAILABLE = frozenset({
-    "manage_tasks",
-    "manage_memory", "read_file",
-    "create_document", "update_document",
-    "search_chats",
-    "api_call",  # For Miniflux/Gitea/Linkding/etc. integrations
-    # Core UI control (toggles, open panels, switch model/mode, themes).
-    # Always available so vague follow-ups ("now make it playful", "make it
-    # darker") that don't repeat a theme/UI keyword still keep the tool in
-    # reach — without it the model narrates instead of acting.
-    "ui_control",
-})
+ASSISTANT_ALWAYS_AVAILABLE = frozenset(
+    {
+        "manage_tasks",
+        "manage_memory",
+        "read_file",
+        "create_document",
+        "update_document",
+        "search_chats",
+        "api_call",  # For Miniflux/Gitea/Linkding/etc. integrations
+        # Core UI control (toggles, open panels, switch model/mode, themes).
+        # Always available so vague follow-ups ("now make it playful", "make it
+        # darker") that don't repeat a theme/UI keyword still keep the tool in
+        # reach — without it the model narrates instead of acting.
+        "ui_control",
+    }
+)
 
 COLLECTION_NAME = "talos_tool_index"
 
@@ -189,7 +201,7 @@ class ToolIndex:
             return
 
         # Get current MCP generation to avoid redundant reindexing
-        gen = getattr(mcp_mgr, '_generation', 0)
+        gen = getattr(mcp_mgr, "_generation", 0)
         if gen == self._mcp_generation:
             return
         self._mcp_generation = gen
@@ -274,7 +286,7 @@ class ToolIndex:
     # via "every <word>"), and catches bare clock times ("at 7:30 am", "7am").
     # Used in addition to the literal keyword hints below.
     _SCHEDULE_RE = re.compile(
-        r"\bevery\s+\w+"                                       # every day / dya / morning / monday / 2 hours
+        r"\bevery\s+\w+"  # every day / dya / morning / monday / 2 hours
         r"|\b(?:daily|nightly|hourly|weekly|monthly)\b"
         r"|\beach\s+(?:day|morning|night|week|hour|evening)\b"
         r"|\bat\s+\d{1,2}(?::\d{2})?\s*(?:a\.?m\.?|p\.?m\.?)\b",  # at 7:30 am / at 7am
@@ -287,83 +299,249 @@ class ToolIndex:
         # request (e.g. "visit <url> and tell me the title"), force-including the
         # whole email toolset and crowding out the relevant tools — the model then
         # believed it had only email tools and refused web/other tasks (#1707).
-        frozenset({"sql", "database", "db", "table", "tables", "schema", "rows", "query", "select"}):
-            {"query_sql"},
+        frozenset(
+            {"sql", "database", "db", "table", "tables", "schema", "rows", "query", "select"}
+        ): {"query_sql"},
         # Chat/session management. "rename" alone maps to documents below, so a
         # request like "rename the last 12 sessions/chats" needs these session
         # keywords to surface the right tools (NOT app_api — /api/sessions is
         # owner-filtered and returns empty for tool calls).
-        frozenset({"sessions", "my chats", "these chats", "those chats",
-                   "chat history", "rename chat", "rename session",
-                   "rename the chat", "rename my chat", "rename the session",
-                   "archive chat", "archive session", "delete chat",
-                   "delete session", "fork chat", "fork session",
-                   "name the chats", "name my chats", "rename them"}):
-            {"list_sessions", "manage_session"},
-        frozenset({"recurring", "every day", "every hour", "every morning",
-                   "every evening", "every night", "every week", "each morning",
-                   "daily task", "background task", "scheduled task", "schedule a",
-                   "automatically", "auto-summarize", "auto summarize",
-                   "cron", "periodically", "on a schedule", "set up a task",
-                   "create a task", "summarize my inbox every", "remind me every"}):
-            {"manage_tasks"},
+        frozenset(
+            {
+                "sessions",
+                "my chats",
+                "these chats",
+                "those chats",
+                "chat history",
+                "rename chat",
+                "rename session",
+                "rename the chat",
+                "rename my chat",
+                "rename the session",
+                "archive chat",
+                "archive session",
+                "delete chat",
+                "delete session",
+                "fork chat",
+                "fork session",
+                "name the chats",
+                "name my chats",
+                "rename them",
+            }
+        ): {"list_sessions", "manage_session"},
+        frozenset(
+            {
+                "recurring",
+                "every day",
+                "every hour",
+                "every morning",
+                "every evening",
+                "every night",
+                "every week",
+                "each morning",
+                "daily task",
+                "background task",
+                "scheduled task",
+                "schedule a",
+                "automatically",
+                "auto-summarize",
+                "auto summarize",
+                "cron",
+                "periodically",
+                "on a schedule",
+                "set up a task",
+                "create a task",
+                "summarize my inbox every",
+                "remind me every",
+            }
+        ): {"manage_tasks"},
         # "Ask another model" intent → chat_with_model relays to a
         # different model and returns its answer. ask_teacher escalates
         # to the configured teacher. (second_opinion was removed.)
-        frozenset({"ask gpt", "ask claude", "ask gemini", "ask deepseek",
-                   "ask minimax", "ask qwen", "ask the", "ask another model",
-                   "what does", "what would", "second opinion", "other model",
-                   "different model", "compare answers", "compare models",
-                   "delegate to", "have model"}):
-            {"chat_with_model", "ask_teacher", "list_models"},
+        frozenset(
+            {
+                "ask gpt",
+                "ask claude",
+                "ask gemini",
+                "ask deepseek",
+                "ask minimax",
+                "ask qwen",
+                "ask the",
+                "ask another model",
+                "what does",
+                "what would",
+                "second opinion",
+                "other model",
+                "different model",
+                "compare answers",
+                "compare models",
+                "delegate to",
+                "have model",
+            }
+        ): {"chat_with_model", "ask_teacher", "list_models"},
         # Settings-change intent — "change my…/set my…/use X for…/turn on…".
-        frozenset({"change my", "set my", "use the voice", "change the voice",
-                   "my voice", "tts voice", "search engine", "default model",
-                   "teacher model", "task model", "background model", "image quality",
-                   "reminder channel", "send reminders to", "remind me by",
-                   "speak faster", "speak slower", "agent timeout", "token budget",
-                   "max tool calls", "use this model for", "use that model for",
-                   "my settings", "change setting", "change a setting", "set setting",
-                   "preference", "preferences", "configure"}):
-            {"manage_settings", "ui_control"},
+        frozenset(
+            {
+                "change my",
+                "set my",
+                "use the voice",
+                "change the voice",
+                "my voice",
+                "tts voice",
+                "search engine",
+                "default model",
+                "teacher model",
+                "task model",
+                "background model",
+                "image quality",
+                "reminder channel",
+                "send reminders to",
+                "remind me by",
+                "speak faster",
+                "speak slower",
+                "agent timeout",
+                "token budget",
+                "max tool calls",
+                "use this model for",
+                "use that model for",
+                "my settings",
+                "change setting",
+                "change a setting",
+                "set setting",
+                "preference",
+                "preferences",
+                "configure",
+            }
+        ): {"manage_settings", "ui_control"},
         # Document edit/update intent
-        frozenset({"edit", "change", "fix", "rewrite", "update",
-                   "replace", "add a", "tweak", "modify", "rename", "paragraph",
-                   "section", "line", "the doc", "the document", "in the doc"}):
-            {"edit_document", "update_document", "create_document", "suggest_document"},
+        frozenset(
+            {
+                "edit",
+                "change",
+                "fix",
+                "rewrite",
+                "update",
+                "replace",
+                "add a",
+                "tweak",
+                "modify",
+                "rename",
+                "paragraph",
+                "section",
+                "line",
+                "the doc",
+                "the document",
+                "in the doc",
+            }
+        ): {"edit_document", "update_document", "create_document", "suggest_document"},
         # Document deletion / management — include generic open/find/read/show
         # verbs + file/doc synonyms so "open my <X>", "find the <X>", "delete
         # <X>" reach manage_documents even without the literal word "document".
-        frozenset({"delete this doc", "delete the doc", "delete document",
-                   "remove document", "remove the doc", "trash", "list documents",
-                   "list docs", "all my docs", "my documents", "my docs", "my files",
-                   "open the", "open my", "open document", "open doc", "find the",
-                   "find my", "find document", "read the", "read my", "show me the",
-                   "show my", "the file", "my file", "the report", "the write-up",
-                   "the writeup", "saved document", "in my library", "in the library"}):
-            {"manage_documents", "edit_document"},
+        frozenset(
+            {
+                "delete this doc",
+                "delete the doc",
+                "delete document",
+                "remove document",
+                "remove the doc",
+                "trash",
+                "list documents",
+                "list docs",
+                "all my docs",
+                "my documents",
+                "my docs",
+                "my files",
+                "open the",
+                "open my",
+                "open document",
+                "open doc",
+                "find the",
+                "find my",
+                "find document",
+                "read the",
+                "read my",
+                "show me the",
+                "show my",
+                "the file",
+                "my file",
+                "the report",
+                "the write-up",
+                "the writeup",
+                "saved document",
+                "in my library",
+                "in the library",
+            }
+        ): {"manage_documents", "edit_document"},
         # Theme / UI control intent
-        frozenset({"theme", "color scheme", "colors of the ui", "make it dark",
-                   "make it light", "make the ui", "switch theme", "change theme",
-                   "dark mode", "light mode", "toggle"}):
-            {"ui_control"},
+        frozenset(
+            {
+                "theme",
+                "color scheme",
+                "colors of the ui",
+                "make it dark",
+                "make it light",
+                "make the ui",
+                "switch theme",
+                "change theme",
+                "dark mode",
+                "light mode",
+                "toggle",
+            }
+        ): {"ui_control"},
         # Tool on/off / panel open intent — user says "turn off shell",
         # "disable search", "open library", "show gallery", etc.
-        frozenset({"turn off", "turn on", "disable", "enable",
-                   "shell off", "shell on", "search off", "search on",
-                   "research off", "research on", "incognito",
-                   "switch model", "change model", "set mode", "agent mode", "chat mode",
-                   "open library", "open documents", "open gallery",
-                   "open settings", "open memories", "open memory",
-                   "open skills", "open chats", "open sessions",
-                   "show library", "show gallery", "show settings",
-                   "show memory", "show memories", "show skills",
-                   "show chats", "show sessions", "show documents"}):
-            {"ui_control"},
+        frozenset(
+            {
+                "turn off",
+                "turn on",
+                "disable",
+                "enable",
+                "shell off",
+                "shell on",
+                "search off",
+                "search on",
+                "research off",
+                "research on",
+                "incognito",
+                "switch model",
+                "change model",
+                "set mode",
+                "agent mode",
+                "chat mode",
+                "open library",
+                "open documents",
+                "open gallery",
+                "open settings",
+                "open memories",
+                "open memory",
+                "open skills",
+                "open chats",
+                "open sessions",
+                "show library",
+                "show gallery",
+                "show settings",
+                "show memory",
+                "show memories",
+                "show skills",
+                "show chats",
+                "show sessions",
+                "show documents",
+            }
+        ): {"ui_control"},
         # Document creation intent
-        frozenset({"write a", "create a doc", "draft", "compose", "poem", "story",
-                   "essay", "outline", "letter"}):
-            {"create_document", "edit_document", "update_document"},
+        frozenset(
+            {
+                "write a",
+                "create a doc",
+                "draft",
+                "compose",
+                "poem",
+                "story",
+                "essay",
+                "outline",
+                "letter",
+            }
+        ): {"create_document", "edit_document", "update_document"},
     }
 
     def get_tools_for_query(

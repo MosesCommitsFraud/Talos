@@ -1,3 +1,22 @@
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+# Build output / vendored / generated dirs we never want to lint.
+extend-exclude = ["web/dist", "static", ".data", "data", "sandbox"]
+
+[tool.ruff.lint]
+# High-signal only: pyflakes (real bugs — unused imports, undefined names,
+# duplicate dict keys), syntax errors (E9), and isort import ordering (I).
+# The pycodestyle E4/E7 style groups are deliberately OFF: in this codebase
+# they're mostly false positives — E402 flags the intentional pre-import setup
+# in app.py, and E712 would "fix" required SQLAlchemy `== True` filters into
+# broken truthiness checks. Add rules back (e.g. "B", "UP") deliberately later.
+select = ["E9", "F", "I"]
+
+[tool.ruff.lint.per-file-ignores]
+# Package __init__ files intentionally re-export via `import *`.
+"__init__.py" = ["F403"]

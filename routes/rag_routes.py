@@ -87,10 +87,12 @@ def _public(cfg: dict) -> dict:
 
 def _reset_rag():
     import src.rag_singleton as _rs
+
     _rs.rag_instance = None
     _rs._last_attempt = 0
     try:
         from src.embeddings import reset_http_embed_state
+
         reset_http_embed_state()
     except Exception:
         pass
@@ -104,13 +106,21 @@ def setup_rag_routes():
     @router.get("/config")
     def get_config():
         settings = load_settings()
-        cfg = settings.get("rag_pipeline", {}) if isinstance(settings.get("rag_pipeline"), dict) else {}
+        cfg = (
+            settings.get("rag_pipeline", {})
+            if isinstance(settings.get("rag_pipeline"), dict)
+            else {}
+        )
         return _public(cfg)
 
     @router.put("/config")
     def set_config(body: RagPipelineConfig):
         settings = load_settings()
-        current = settings.get("rag_pipeline", {}) if isinstance(settings.get("rag_pipeline"), dict) else {}
+        current = (
+            settings.get("rag_pipeline", {})
+            if isinstance(settings.get("rag_pipeline"), dict)
+            else {}
+        )
         cfg = {
             "enabled": bool(body.enabled),
             "provider": (body.provider or "internal").strip().lower(),
@@ -160,7 +170,11 @@ def setup_rag_routes():
     @router.post("/test")
     def test_config():
         settings = load_settings()
-        cfg = settings.get("rag_pipeline", {}) if isinstance(settings.get("rag_pipeline"), dict) else {}
+        cfg = (
+            settings.get("rag_pipeline", {})
+            if isinstance(settings.get("rag_pipeline"), dict)
+            else {}
+        )
         if str(cfg.get("provider") or "internal").strip().lower() == "external":
             from src.rag_external import ExternalRagClient
 
@@ -178,9 +192,15 @@ def setup_rag_routes():
 
         rag = get_rag_manager()
         if not rag or not getattr(rag, "healthy", False):
-            raise HTTPException(503, "RAG is not available. Check embedding, Qdrant, and dependencies.")
+            raise HTTPException(
+                503, "RAG is not available. Check embedding, Qdrant, and dependencies."
+            )
         stats = rag.get_stats()
-        reranker = rag.test_reranker() if hasattr(rag, "test_reranker") else {"configured": False, "ok": False}
+        reranker = (
+            rag.test_reranker()
+            if hasattr(rag, "test_reranker")
+            else {"configured": False, "ok": False}
+        )
         return {"ok": True, "stats": stats, "reranker": reranker}
 
     @router.get("/search")
@@ -189,9 +209,15 @@ def setup_rag_routes():
 
         rag = get_rag_manager()
         if not rag or not getattr(rag, "healthy", False):
-            raise HTTPException(503, "RAG is not available. Check embedding, Qdrant, and dependencies.")
+            raise HTTPException(
+                503, "RAG is not available. Check embedding, Qdrant, and dependencies."
+            )
         settings = load_settings()
-        cfg = settings.get("rag_pipeline", {}) if isinstance(settings.get("rag_pipeline"), dict) else {}
+        cfg = (
+            settings.get("rag_pipeline", {})
+            if isinstance(settings.get("rag_pipeline"), dict)
+            else {}
+        )
         final_k = _clamp_k(k if k is not None else cfg.get("search_top_k", 5))
         candidate_k = max(final_k, _clamp_candidate_k(cfg.get("candidate_top_k", 40)))
         results = rag.search(q, k=final_k, owner=None, candidate_k=candidate_k)
@@ -200,7 +226,9 @@ def setup_rag_routes():
             "count": len(results),
             "results": [
                 {
-                    "filename": (r.get("metadata") or {}).get("filename") or (r.get("metadata") or {}).get("source") or "unknown",
+                    "filename": (r.get("metadata") or {}).get("filename")
+                    or (r.get("metadata") or {}).get("source")
+                    or "unknown",
                     "similarity": r.get("similarity"),
                     "rerank_score": r.get("rerank_score"),
                     "snippet": (r.get("document") or "")[:500],

@@ -4,9 +4,9 @@ import secrets
 import uuid
 
 import bcrypt
-from fastapi import APIRouter, HTTPException, Request, Form
+from fastapi import APIRouter, Form, HTTPException, Request
 
-from core.database import get_db_session, ApiToken
+from core.database import ApiToken, get_db_session
 from core.middleware import require_admin
 from src.auth_helpers import get_current_user
 
@@ -33,7 +33,9 @@ TOKEN_PROFILES = {
 }
 
 
-def _normalize_scopes(scopes: str | list[str] | None = None, profile: str | None = None) -> list[str]:
+def _normalize_scopes(
+    scopes: str | list[str] | None = None, profile: str | None = None
+) -> list[str]:
     profile = profile if isinstance(profile, str) else None
     profile_key = (profile or "").strip()
     if profile_key:
@@ -83,7 +85,11 @@ def setup_api_token_routes() -> APIRouter:
                     "name": t.name,
                     "owner": getattr(t, "owner", None),
                     "token_prefix": t.token_prefix,
-                    "scopes": [s.strip() for s in (getattr(t, "scopes", "") or DEFAULT_SCOPES).split(",") if s.strip()],
+                    "scopes": [
+                        s.strip()
+                        for s in (getattr(t, "scopes", "") or DEFAULT_SCOPES).split(",")
+                        if s.strip()
+                    ],
                     "is_active": t.is_active,
                     "last_used_at": t.last_used_at.isoformat() if t.last_used_at else None,
                     "created_at": t.created_at.isoformat() if t.created_at else None,
@@ -128,15 +134,17 @@ def setup_api_token_routes() -> APIRouter:
         token_id = str(uuid.uuid4())[:8]
 
         with get_db_session() as db:
-            db.add(ApiToken(
-                id=token_id,
-                owner=owner,
-                name=name,
-                token_hash=token_hash,
-                token_prefix=raw_token[:8],
-                scopes=scopes_value,
-                is_active=True,
-            ))
+            db.add(
+                ApiToken(
+                    id=token_id,
+                    owner=owner,
+                    name=name,
+                    token_hash=token_hash,
+                    token_prefix=raw_token[:8],
+                    scopes=scopes_value,
+                    is_active=True,
+                )
+            )
         _invalidate_cache(request)
 
         return {

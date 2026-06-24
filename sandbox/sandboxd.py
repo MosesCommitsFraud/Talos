@@ -1514,4 +1514,3 @@ def zip_workspace_route(user_id: str, chat_id: str):
         media_type="application/zip",
         headers={"Content-Disposition": 'attachment; filename="workspace.zip"'},
     )
-

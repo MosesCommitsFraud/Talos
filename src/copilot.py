@@ -31,29 +31,19 @@ import httpx
 # only accepts client ids that GitHub has allow-listed for Copilot access, so
 # we reuse the public VS Code client id (the de-facto standard third-party
 # clients use). Override via env if you register your own allow-listed app.
-COPILOT_CLIENT_ID = os.environ.get(
-    "TALOS_COPILOT_CLIENT_ID", "01ab8ac9400c4e429b23"
-)
+COPILOT_CLIENT_ID = os.environ.get("TALOS_COPILOT_CLIENT_ID", "01ab8ac9400c4e429b23")
 
 # Dated API version header required by the Copilot API (models + chat).
-COPILOT_API_VERSION = os.environ.get(
-    "TALOS_COPILOT_API_VERSION", "2026-06-01"
-)
+COPILOT_API_VERSION = os.environ.get("TALOS_COPILOT_API_VERSION", "2026-06-01")
 
 # Public Copilot API base. GitHub Enterprise uses ``copilot-api.<domain>``.
 COPILOT_BASE = "https://api.githubcopilot.com"
 
 # Copilot wants an editor-like User-Agent + integration id. These identify the
 # client to GitHub; keep them stable.
-COPILOT_USER_AGENT = os.environ.get(
-    "TALOS_COPILOT_USER_AGENT", "Talos/1.0"
-)
-COPILOT_INTEGRATION_ID = os.environ.get(
-    "TALOS_COPILOT_INTEGRATION_ID", "vscode-chat"
-)
-COPILOT_EDITOR_VERSION = os.environ.get(
-    "TALOS_COPILOT_EDITOR_VERSION", "Talos/1.0"
-)
+COPILOT_USER_AGENT = os.environ.get("TALOS_COPILOT_USER_AGENT", "Talos/1.0")
+COPILOT_INTEGRATION_ID = os.environ.get("TALOS_COPILOT_INTEGRATION_ID", "vscode-chat")
+COPILOT_EDITOR_VERSION = os.environ.get("TALOS_COPILOT_EDITOR_VERSION", "Talos/1.0")
 
 # OAuth scope requested during the device flow.
 COPILOT_SCOPE = "read:user"
@@ -138,6 +128,7 @@ def copilot_headers(
 # ---------------------------------------------------------------------------
 # Device-flow OAuth (pure HTTP; orchestration lives in routes.copilot_routes)
 # ---------------------------------------------------------------------------
+
 
 def _oauth_post_headers() -> Dict[str, str]:
     return {
@@ -250,4 +241,3 @@ def apply_request_headers(headers: Dict[str, str], messages) -> Dict[str, str]:
     if vision:
         headers["Copilot-Vision-Request"] = "true"
     return headers
-

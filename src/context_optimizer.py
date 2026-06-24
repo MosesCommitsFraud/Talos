@@ -48,6 +48,7 @@ EXPAND_PAGE_CHARS = 18_000
 def compression_enabled() -> bool:
     try:
         from src.settings import load_settings
+
         return bool(load_settings().get("context_compression", True))
     except Exception:
         return True
@@ -57,6 +58,7 @@ def compression_enabled() -> bool:
 # Reversible store
 # ---------------------------------------------------------------------------
 
+
 def _store_original(text: str, tool_name: str) -> str:
     global _store_total_chars
     oid = "out_" + uuid.uuid4().hex[:8]
@@ -64,8 +66,7 @@ def _store_original(text: str, tool_name: str) -> str:
         _store[oid] = {"text": text, "tool": tool_name}
         _store_total_chars += len(text)
         while _store and (
-            len(_store) > _STORE_MAX_ENTRIES
-            or _store_total_chars > _STORE_MAX_TOTAL_CHARS
+            len(_store) > _STORE_MAX_ENTRIES or _store_total_chars > _STORE_MAX_TOTAL_CHARS
         ):
             _, evicted = _store.popitem(last=False)
             _store_total_chars -= len(evicted["text"])
@@ -84,8 +85,8 @@ def get_stored_output(oid: str) -> Optional[dict]:
 # Compressors
 # ---------------------------------------------------------------------------
 
-_JSON_KEEP_HEAD = 5   # array items kept from the front
-_JSON_KEEP_TAIL = 2   # array items kept from the back
+_JSON_KEEP_HEAD = 5  # array items kept from the front
+_JSON_KEEP_TAIL = 2  # array items kept from the back
 _JSON_MAX_STRING = 400
 
 
@@ -173,6 +174,7 @@ def _head_tail(text: str, budget: int) -> str:
 # Public API
 # ---------------------------------------------------------------------------
 
+
 def optimize_tool_output(text: str, tool_name: str = "") -> str:
     """Compress a formatted tool output if it is large; reversible via store.
 
@@ -221,11 +223,17 @@ def do_expand_output(content: str) -> dict:
     arg = lines[1].strip() if len(lines) > 1 else ""
 
     if not oid:
-        return {"error": "Usage: line 1 = output id (e.g. out_3fa9c2), optional line 2 = search term or page number.", "exit_code": 1}
+        return {
+            "error": "Usage: line 1 = output id (e.g. out_3fa9c2), optional line 2 = search term or page number.",
+            "exit_code": 1,
+        }
 
     entry = get_stored_output(oid)
     if not entry:
-        return {"error": f"No stored output with id '{oid}'. Stored outputs are kept in memory and expire when the server restarts or the store fills up.", "exit_code": 1}
+        return {
+            "error": f"No stored output with id '{oid}'. Stored outputs are kept in memory and expire when the server restarts or the store fills up.",
+            "exit_code": 1,
+        }
 
     text = entry["text"]
 
@@ -235,26 +243,34 @@ def do_expand_output(content: str) -> dict:
         src_lines = text.split("\n")
         hits = [i for i, l in enumerate(src_lines) if needle in l.lower()]
         if not hits:
-            return {"output": f"No lines matching '{arg}' in stored output {oid} ({len(text):,} chars total).", "exit_code": 0}
+            return {
+                "output": f"No lines matching '{arg}' in stored output {oid} ({len(text):,} chars total).",
+                "exit_code": 0,
+            }
         chunks, last_end = [], -1
         for i in hits[:80]:
             start, end = max(0, i - 2), min(len(src_lines), i + 3)
             if start > last_end:
                 chunks.append(f"--- line {start + 1} ---")
-            chunks.extend(src_lines[max(start, last_end):end])
+            chunks.extend(src_lines[max(start, last_end) : end])
             last_end = end
         body = "\n".join(chunks)
         if len(body) > EXPAND_PAGE_CHARS:
             body = body[:EXPAND_PAGE_CHARS] + "\n… [match output truncated]"
-        return {"output": f"{len(hits)} matching line(s) for '{arg}' in {oid}:\n{body}", "exit_code": 0}
+        return {
+            "output": f"{len(hits)} matching line(s) for '{arg}' in {oid}:\n{body}",
+            "exit_code": 0,
+        }
 
     # Page mode.
     page = max(1, int(arg)) if arg.isdigit() else 1
     total_pages = max(1, -(-len(text) // EXPAND_PAGE_CHARS))
     page = min(page, total_pages)
     start = (page - 1) * EXPAND_PAGE_CHARS
-    body = text[start:start + EXPAND_PAGE_CHARS]
+    body = text[start : start + EXPAND_PAGE_CHARS]
     header = f"Stored output {oid} ({entry.get('tool') or 'tool'}, {len(text):,} chars) — page {page}/{total_pages}:"
     if total_pages > 1:
-        header += f" (pass a page number 1-{total_pages} on line 2 for other pages, or a search term)"
+        header += (
+            f" (pass a page number 1-{total_pages} on line 2 for other pages, or a search term)"
+        )
     return {"output": f"{header}\n{body}", "exit_code": 0}

@@ -28,6 +28,7 @@ if os.name == "nt":
     os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS_WARNING", "1")
 
 from dotenv import load_dotenv
+
 # encoding="utf-8-sig" tolerates a UTF-8 BOM in .env — a common Windows gotcha
 # when the file is saved from Notepad. Without this, the first key parses as
 # "﻿AUTH_ENABLED" instead of "AUTH_ENABLED", so AUTH_ENABLED=false (etc.)
@@ -38,38 +39,42 @@ load_dotenv(encoding="utf-8-sig")
 import asyncio
 import logging
 import secrets
+from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import Dict
 
-from contextlib import asynccontextmanager
-from fastapi import FastAPI, Request, HTTPException
-from fastapi.responses import JSONResponse, FileResponse
+import bcrypt as _bcrypt
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.responses import RedirectResponse
+
+from core.auth import AuthManager
 
 # Core imports
 from core.constants import (
-    BASE_DIR, STATIC_DIR, SESSIONS_FILE,
-    REQUEST_TIMEOUT, OPENAI_API_KEY,
+    BASE_DIR,
+    OPENAI_API_KEY,
+    REQUEST_TIMEOUT,
+    SESSIONS_FILE,
+    STATIC_DIR,
 )
-from core.database import SessionLocal, ApiToken
-from core.middleware import SecurityHeadersMiddleware
-from core.auth import AuthManager
+from core.database import ApiToken, SessionLocal
 from core.exceptions import (
-    SessionNotFoundError, InvalidFileUploadError,
-    LLMServiceError, WebSearchError,
+    InvalidFileUploadError,
+    LLMServiceError,
+    SessionNotFoundError,
+    WebSearchError,
 )
-
-import bcrypt as _bcrypt
-
+from core.middleware import SecurityHeadersMiddleware
 from src.generated_images import GENERATED_IMAGE_HEADERS, resolve_generated_image_path
-from starlette.responses import RedirectResponse
 
 # ========= LOGGING =========
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
 )
 logger = logging.getLogger(__name__)
 
@@ -114,16 +119,17 @@ app.add_middleware(SecurityHeadersMiddleware)
 # legitimately stay open. Without this, a single hung subprocess.run or
 # missing-timeout httpx call locks up the entire server for everyone.
 import asyncio as _asyncio
+
 from starlette.middleware.base import BaseHTTPMiddleware as _BaseHTTPMiddleware
 from starlette.responses import JSONResponse as _JSONResponse
 
 REQUEST_HARD_TIMEOUT = float(os.getenv("REQUEST_HARD_TIMEOUT", "45"))
 _TIMEOUT_EXEMPT_PREFIXES = (
-    "/api/chat",            # streaming
+    "/api/chat",  # streaming
     "/api/model/download",  # tmux setup may run pip installs
-    "/api/model/probe",     # SSE; iterates models with up to 8s timeout each
-    "/api/model-endpoints", # /probe sub-route also iterates models
-    "/api/upload",          # large files
+    "/api/model/probe",  # SSE; iterates models with up to 8s timeout each
+    "/api/model-endpoints",  # /probe sub-route also iterates models
+    "/api/upload",  # large files
 )
 
 
@@ -144,14 +150,16 @@ class _RequestTimeoutMiddleware(_BaseHTTPMiddleware):
 app.add_middleware(_RequestTimeoutMiddleware)
 
 # ========= AUTH =========
-from routes.auth_routes import setup_auth_routes, SESSION_COOKIE
+from routes.auth_routes import SESSION_COOKIE, setup_auth_routes
 
 auth_manager = AuthManager()
 app.state.auth_manager = auth_manager
 AUTH_ENABLED = os.getenv("AUTH_ENABLED", "true").lower() != "false"
 LOCALHOST_BYPASS = os.getenv("LOCALHOST_BYPASS", "false").lower() == "true"
 if LOCALHOST_BYPASS:
-    logger.warning("LOCALHOST_BYPASS is enabled, loopback requests bypass authentication. Do not expose this instance to a network.")
+    logger.warning(
+        "LOCALHOST_BYPASS is enabled, loopback requests bypass authentication. Do not expose this instance to a network."
+    )
 
 if AUTH_ENABLED:
     AUTH_EXEMPT_EXACT = {
@@ -170,7 +178,6 @@ if AUTH_ENABLED:
     # now serves only fonts. All are code/assets (no data) and must be loadable
     # before a cookie exists so the login screen can render.
     AUTH_EXEMPT_PREFIXES = ["/static", "/assets", "/fonts"]
-    import re as _re
     AUTH_EXEMPT_PATTERNS = []
 
     def _is_auth_exempt(path: str) -> bool:
@@ -197,6 +204,7 @@ if AUTH_ENABLED:
     def _token_cache_invalidate():
         nonlocal_dict = app.state.__dict__
         nonlocal_dict["_token_cache_dirty"] = True
+
     app.state.invalidate_token_cache = _token_cache_invalidate
     app.state._token_cache = _token_cache
     app.state._token_cache_dirty = True
@@ -204,13 +212,18 @@ if AUTH_ENABLED:
     def _refresh_token_cache():
         """Rebuild the prefix→[(id,hash)] map from the DB."""
         from collections import defaultdict
+
         new_map = defaultdict(list)
         db = SessionLocal()
         try:
             rows = db.query(ApiToken).filter(ApiToken.is_active == True).all()
             for r in rows:
-                scopes = [s.strip() for s in (getattr(r, "scopes", "") or "chat").split(",") if s.strip()]
-                new_map[r.token_prefix].append((r.id, r.token_hash, getattr(r, "owner", None), scopes))
+                scopes = [
+                    s.strip() for s in (getattr(r, "scopes", "") or "chat").split(",") if s.strip()
+                ]
+                new_map[r.token_prefix].append(
+                    (r.id, r.token_hash, getattr(r, "owner", None), scopes)
+                )
         finally:
             db.close()
         _token_cache.clear()
@@ -222,8 +235,13 @@ if AUTH_ENABLED:
     # 127.0.0.1, so without this check every tunneled request would look like
     # loopback and could bypass auth.
     _PROXY_FWD_HEADERS = (
-        "cf-connecting-ip", "cf-ray", "cf-visitor",
-        "x-forwarded-for", "x-forwarded-host", "x-real-ip", "forwarded",
+        "cf-connecting-ip",
+        "cf-ray",
+        "cf-visitor",
+        "x-forwarded-for",
+        "x-forwarded-host",
+        "x-real-ip",
+        "forwarded",
     )
 
     def _is_trusted_loopback(request: Request) -> bool:
@@ -252,7 +270,9 @@ if AUTH_ENABLED:
             # (no admin cookie available in that context). Restricted to
             # loopback clients + matching token to keep it locked down.
             try:
-                from core.middleware import INTERNAL_TOOL_HEADER, INTERNAL_TOOL_TOKEN as _ITT
+                from core.middleware import INTERNAL_TOOL_HEADER
+                from core.middleware import INTERNAL_TOOL_TOKEN as _ITT
+
                 _hdr = request.headers.get(INTERNAL_TOOL_HEADER)
                 if _hdr and secrets.compare_digest(_hdr, _ITT) and _is_trusted_loopback(request):
                     # Impersonation: when the agent's loopback call sets
@@ -330,10 +350,12 @@ if AUTH_ENABLED:
                                     _db.commit()
                                 finally:
                                     _db.close()
+
                             try:
                                 await _asyncio.to_thread(_do)
                             except Exception:
                                 pass
+
                         _asyncio.create_task(_touch_last_used(matched_id))
                         # Keep bearer-token callers out of normal cookie/user
                         # routes. API-aware routes can read api_token_owner.
@@ -409,12 +431,17 @@ class _ImmutableStatic(StaticFiles):
 
 
 if os.path.isdir(os.path.join(WEB_DIST, "assets")):
-    app.mount("/assets", _ImmutableStatic(directory=os.path.join(WEB_DIST, "assets")), name="webassets")
+    app.mount(
+        "/assets", _ImmutableStatic(directory=os.path.join(WEB_DIST, "assets")), name="webassets"
+    )
     if os.path.isdir(os.path.join(WEB_DIST, "fonts")):
-        app.mount("/fonts", _ImmutableStatic(directory=os.path.join(WEB_DIST, "fonts")), name="webfonts")
+        app.mount(
+            "/fonts", _ImmutableStatic(directory=os.path.join(WEB_DIST, "fonts")), name="webfonts"
+        )
     logger.info("Web UI mounted (web/dist) — serving at /")
 else:
-    logger.warning("web/dist not found — run `npm run build` in web/ (\"/\" will 503 until built)")
+    logger.warning('web/dist not found — run `npm run build` in web/ ("/" will 503 until built)')
+
 
 # ========= GENERATED IMAGES =========
 @app.get("/api/generated-image/{filename}")
@@ -425,8 +452,10 @@ async def serve_generated_image(filename: str, request: Request):
     # 12-hex content hash could pull another user's image bytes. Require
     # auth and verify ownership via the gallery row (when one exists).
     try:
+        from core.database import GalleryImage as _GI
+        from core.database import SessionLocal as _SL
         from src.auth_helpers import get_current_user
-        from core.database import SessionLocal as _SL, GalleryImage as _GI
+
         _user = get_current_user(request)
         if _user:
             _db = _SL()
@@ -442,12 +471,18 @@ async def serve_generated_image(filename: str, request: Request):
         raise
     except Exception:
         pass
-    ext = filename.rsplit('.', 1)[-1].lower()
+    ext = filename.rsplit(".", 1)[-1].lower()
     mime = {
-        "png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg",
-        "webp": "image/webp", "gif": "image/gif",
-        "mp4": "video/mp4", "mov": "video/quicktime", "webm": "video/webm",
-        "mkv": "video/x-matroska", "m4v": "video/mp4",
+        "png": "image/png",
+        "jpg": "image/jpeg",
+        "jpeg": "image/jpeg",
+        "webp": "image/webp",
+        "gif": "image/gif",
+        "mp4": "video/mp4",
+        "mov": "video/quicktime",
+        "webm": "video/webm",
+        "mkv": "video/x-matroska",
+        "m4v": "video/mp4",
     }.get(ext, "application/octet-stream")
     # Generated-image filenames are content hashes → the bytes for a given
     # filename never change. Cache them hard so the gallery doesn't
@@ -458,6 +493,7 @@ async def serve_generated_image(filename: str, request: Request):
         media_type=mime,
         headers=GENERATED_IMAGE_HEADERS,
     )
+
 
 # ========= RAG (vector document RAG) =========
 # VectorRAG (ChromaDB-backed personal-document semantic search). Initialized
@@ -470,6 +506,7 @@ async def serve_generated_image(filename: str, request: Request):
 # (chromadb 1.5.x + pydantic 2.13.x) the init works and Personal Docs
 # (POST /api/personal/add_directory etc.) is functional again.
 from src.rag_singleton import get_rag_manager
+
 rag_manager = get_rag_manager()
 rag_available = rag_manager is not None
 if rag_available:
@@ -481,43 +518,54 @@ else:
     )
 
 # ========= IMPORT CONFIG =========
-from src.config import config
 
 # ========= COMPONENT INITIALIZATION =========
 from src.app_initializer import initialize_managers
 
 components = initialize_managers(BASE_DIR, rag_manager)
 
-session_manager   = components["session_manager"]
+session_manager = components["session_manager"]
 from src.assistant_log import set_session_manager as _set_asst_sm
+
 _set_asst_sm(session_manager)
-memory_manager    = components["memory_manager"]
-memory_vector     = components.get("memory_vector")
-upload_handler    = components["upload_handler"]
+memory_manager = components["memory_manager"]
+memory_vector = components.get("memory_vector")
+upload_handler = components["upload_handler"]
 personal_docs_mgr = components["personal_docs_manager"]
-api_key_manager   = components["api_key_manager"]
-preset_manager    = components["preset_manager"]
-chat_processor    = components["chat_processor"]
-chat_handler      = components["chat_handler"]
-model_discovery   = components["model_discovery"]
-skills_manager    = components["skills_manager"]
+api_key_manager = components["api_key_manager"]
+preset_manager = components["preset_manager"]
+chat_processor = components["chat_processor"]
+chat_handler = components["chat_handler"]
+model_discovery = components["model_discovery"]
+skills_manager = components["skills_manager"]
+
 
 # ========= EXCEPTION HANDLERS =========
 @app.exception_handler(SessionNotFoundError)
 async def session_not_found_handler(request: Request, exc: SessionNotFoundError):
-    return JSONResponse(status_code=404, content={"error": "SESSION_NOT_FOUND", "message": str(exc)})
+    return JSONResponse(
+        status_code=404, content={"error": "SESSION_NOT_FOUND", "message": str(exc)}
+    )
+
 
 @app.exception_handler(InvalidFileUploadError)
 async def invalid_file_upload_handler(request: Request, exc: InvalidFileUploadError):
-    return JSONResponse(status_code=400, content={"error": "INVALID_FILE_UPLOAD", "message": str(exc)})
+    return JSONResponse(
+        status_code=400, content={"error": "INVALID_FILE_UPLOAD", "message": str(exc)}
+    )
+
 
 @app.exception_handler(LLMServiceError)
 async def llm_service_error_handler(request: Request, exc: LLMServiceError):
-    return JSONResponse(status_code=502, content={"error": "LLM_SERVICE_ERROR", "message": str(exc)})
+    return JSONResponse(
+        status_code=502, content={"error": "LLM_SERVICE_ERROR", "message": str(exc)}
+    )
+
 
 @app.exception_handler(WebSearchError)
 async def web_search_error_handler(request: Request, exc: WebSearchError):
     return JSONResponse(status_code=502, content={"error": "WEB_SEARCH_ERROR", "message": str(exc)})
+
 
 # ========= WEBHOOK MANAGER =========
 from src.webhook_manager import WebhookManager
@@ -532,6 +580,7 @@ app.include_router(auth_router)
 
 # Uploads
 from routes.upload_routes import setup_upload_routes
+
 upload_router, upload_cleanup_func = setup_upload_routes(upload_handler)
 app.include_router(upload_router)
 upload_cleanup_task = None
@@ -539,111 +588,148 @@ upload_cleanup_task = None
 # Emoji SVG proxy (same-origin, lazy-cached Twemoji) — lets the chat render
 # emojis as flat SVG instead of system color glyphs.
 from routes.emoji_routes import setup_emoji_routes
+
 app.include_router(setup_emoji_routes())
 
 from routes.workspace_routes import setup_workspace_routes
+
 app.include_router(setup_workspace_routes())
 
 # Sessions
 from routes.session_routes import setup_session_routes
-session_config = {"REQUEST_TIMEOUT": REQUEST_TIMEOUT, "OPENAI_API_KEY": OPENAI_API_KEY, "SESSIONS_FILE": SESSIONS_FILE}
-app.include_router(setup_session_routes(session_manager, session_config, webhook_manager=webhook_manager))
+
+session_config = {
+    "REQUEST_TIMEOUT": REQUEST_TIMEOUT,
+    "OPENAI_API_KEY": OPENAI_API_KEY,
+    "SESSIONS_FILE": SESSIONS_FILE,
+}
+app.include_router(
+    setup_session_routes(session_manager, session_config, webhook_manager=webhook_manager)
+)
 
 # Admin Danger Zone wipes (Settings → System → Danger Zone)
 from routes.admin_wipe_routes import setup_admin_wipe_routes
+
 app.include_router(setup_admin_wipe_routes(session_manager))
 
 # Memory
 from routes.memory_routes import setup_memory_routes
+
 memory_router = setup_memory_routes(memory_manager, session_manager, memory_vector=memory_vector)
 app.include_router(memory_router)
 from routes.skills_routes import setup_skills_routes
+
 app.include_router(setup_skills_routes(skills_manager))
 
 # Chat
 from routes.chat_routes import setup_chat_routes
-app.include_router(setup_chat_routes(
-    session_manager, chat_handler, chat_processor,
-    memory_manager, upload_handler,
-    memory_vector=memory_vector,
-    webhook_manager=webhook_manager,
-    skills_manager=skills_manager,
-))
+
+app.include_router(
+    setup_chat_routes(
+        session_manager,
+        chat_handler,
+        chat_processor,
+        memory_manager,
+        upload_handler,
+        memory_vector=memory_vector,
+        webhook_manager=webhook_manager,
+        skills_manager=skills_manager,
+    )
+)
 
 # Named AI endpoints (assistant profiles) + OpenAI-compatible API
 from routes.assistant_routes import setup_assistant_routes
+
 app.include_router(setup_assistant_routes(chat_processor, session_manager))
 
 # History
 from routes.history_routes import setup_history_routes
+
 app.include_router(setup_history_routes(session_manager))
 
 # Presets
 from routes.preset_routes import setup_preset_routes
+
 app.include_router(setup_preset_routes(preset_manager))
 
 # Diagnostics
 from routes.diagnostics_routes import setup_diagnostics_routes
+
 app.include_router(setup_diagnostics_routes(rag_manager, rag_available))
 
 # Cleanup
 from routes.cleanup_routes import setup_cleanup_routes
+
 app.include_router(setup_cleanup_routes(session_manager))
 
 # Personal docs
 from routes.personal_routes import setup_personal_routes
+
 app.include_router(setup_personal_routes(personal_docs_mgr, rag_manager, rag_available))
 
 # Embedding model management
 from routes.embedding_routes import setup_embedding_routes
+
 app.include_router(setup_embedding_routes())
 
 from routes.rag_routes import setup_rag_routes
+
 app.include_router(setup_rag_routes())
 
 # Models
 from routes.model_routes import setup_model_routes
+
 app.include_router(setup_model_routes(model_discovery))
 
 # Documents (artifacts/canvas)
 from routes.document_routes import setup_document_routes
+
 document_router = setup_document_routes(session_manager, upload_handler)
 app.include_router(document_router)
 
 # User Preferences
 from routes.prefs_routes import setup_prefs_routes
+
 app.include_router(setup_prefs_routes())
 
 from routes.capabilities_routes import setup_capabilities_routes
+
 app.include_router(setup_capabilities_routes())
 
 # Backup (export/import user data)
 from routes.backup_routes import setup_backup_routes
+
 app.include_router(setup_backup_routes(memory_manager, preset_manager, skills_manager))
 
 from routes.font_routes import setup_font_routes
+
 app.include_router(setup_font_routes())
 
 
 # MCP (Model Context Protocol)
-from src.mcp_manager import McpManager
-from src.agent_tools import set_mcp_manager
 from routes.mcp_routes import setup_mcp_routes
+from src.agent_tools import set_mcp_manager
+from src.mcp_manager import McpManager
 
 mcp_manager = McpManager()
 set_mcp_manager(mcp_manager)
 app.include_router(setup_mcp_routes(mcp_manager))
 
 from routes.sql_routes import setup_sql_routes
+
 app.include_router(setup_sql_routes())
 logger.info("MCP routes initialized")
 
 from routes.sandbox_routes import setup_sandbox_routes
+
 app.include_router(setup_sandbox_routes())
 logger.info("Talos sandbox routes initialized")
 
 # AI Interaction tools (debates, pipelines, self-managing AI, UI control)
-from src.ai_interaction import set_session_manager as set_ai_session_manager, set_memory_manager as set_ai_memory_manager, set_rag_manager as set_ai_rag_manager
+from src.ai_interaction import set_memory_manager as set_ai_memory_manager
+from src.ai_interaction import set_rag_manager as set_ai_rag_manager
+from src.ai_interaction import set_session_manager as set_ai_session_manager
+
 set_ai_session_manager(session_manager)
 set_ai_memory_manager(memory_manager, memory_vector)
 set_ai_rag_manager(rag_manager, personal_docs_mgr)
@@ -651,17 +737,24 @@ logger.info("AI interaction tools initialized (session, memory, RAG, UI control)
 
 # Webhooks
 from routes.webhook_routes import setup_webhook_routes
-app.include_router(setup_webhook_routes(webhook_manager, auth_manager, session_manager, api_key_manager))
+
+app.include_router(
+    setup_webhook_routes(webhook_manager, auth_manager, session_manager, api_key_manager)
+)
 
 # API Tokens
 from routes.api_token_routes import setup_api_token_routes
+
 app.include_router(setup_api_token_routes())
 
 logger.info("Webhook & API token routes initialized")
 
-logger.info("Talos feature profile loaded: chat, auth/RBAC, uploads, memory, documents, MCP, webhooks, API tokens")
+logger.info(
+    "Talos feature profile loaded: chat, auth/RBAC, uploads, memory, documents, MCP, webhooks, API tokens"
+)
 
 # ========= ROUTES (kept in app.py) =========
+
 
 @app.get("/")
 async def serve_index(request: Request):
@@ -672,14 +765,18 @@ async def serve_index(request: Request):
         return FileResponse(_WEB_INDEX, headers={"Cache-Control": "no-cache"})
     raise HTTPException(503, "web UI not built — run `npm run build` in web/")
 
+
 @app.get("/api/version")
 async def get_version():
     from core.constants import APP_VERSION
+
     return {"version": APP_VERSION}
+
 
 @app.get("/api/health")
 async def health_check() -> Dict[str, str]:
     return {"status": "healthy", "timestamp": datetime.utcnow().isoformat()}
+
 
 @app.get("/api/ready")
 async def readiness_check() -> JSONResponse:
@@ -689,8 +786,10 @@ async def readiness_check() -> JSONResponse:
     subsystem is whole, so an orchestrator can gate traffic on real readiness.
     """
     from src.readiness import check_readiness
+
     result = check_readiness()
     return JSONResponse(status_code=200 if result.get("ready") else 503, content=result)
+
 
 @app.get("/api/runtime")
 async def runtime_info() -> Dict[str, object]:
@@ -712,7 +811,9 @@ async def runtime_info() -> Dict[str, object]:
         "ollama_base_url": ollama_url,
     }
 
+
 # ========= LIFECYCLE =========
+
 
 @asynccontextmanager
 async def _lifespan(app):
@@ -722,6 +823,7 @@ async def _lifespan(app):
     yield
     # ── SHUTDOWN ──
     await _shutdown_event()
+
 
 app.router.lifespan_context = _lifespan
 
@@ -733,7 +835,10 @@ async def _startup_event():
     # Wipe any leftover incognito sessions from previous process — they're
     # ephemeral by design and must not survive a restart.
     try:
-        from core.database import SessionLocal as _SL, Session as _DbSess, ChatMessage as _DbMsg
+        from core.database import ChatMessage as _DbMsg
+        from core.database import Session as _DbSess
+        from core.database import SessionLocal as _SL
+
         _db = _SL()
         try:
             _ghosts = _db.query(_DbSess).filter(_DbSess.name.in_(("Nobody", "Incognito"))).all()
@@ -757,17 +862,22 @@ async def _startup_event():
     # job (#!bg) finishes — re-invokes the turn with the job output.
     try:
         from src.bg_monitor import start_bg_monitor
+
         _startup_tasks.append(start_bg_monitor())
     except Exception as _e:
         logger.warning("Failed to start background-job monitor: %s", _e)
+
     # MCP servers can be slow or blocked by local tooling. Connect them after
     # the web server is accepting traffic instead of delaying the whole UI.
     async def _startup_mcp_connections():
         try:
             from src.builtin_mcp import register_builtin_servers
+
             await register_builtin_servers(mcp_manager)
         except BaseException as e:
-            logger.warning(f"Built-in MCP registration failed (non-critical): {type(e).__name__}: {e}")
+            logger.warning(
+                f"Built-in MCP registration failed (non-critical): {type(e).__name__}: {e}"
+            )
         try:
             await asyncio.wait_for(mcp_manager.connect_all_enabled(), timeout=20)
         except asyncio.TimeoutError:
@@ -785,6 +895,7 @@ async def _startup_event():
     async def _warmup_tool_index():
         try:
             from src.tool_index import get_tool_index
+
             idx = await asyncio.to_thread(get_tool_index)
             if idx:
                 await asyncio.to_thread(idx.get_tools_for_query, "warmup", 8)
@@ -793,10 +904,12 @@ async def _startup_event():
             logger.warning(f"Tool index warmup failed (non-critical): {type(e).__name__}: {e}")
 
     _startup_tasks.append(asyncio.create_task(_warmup_tool_index()))
+
     # Warmup: ping all known LLM endpoints to prime connections
     async def _warmup_endpoints():
         try:
             import httpx
+
             endpoints = model_discovery.get_endpoints() if model_discovery else []
             for ep in endpoints[:5]:
                 url = ep.get("url", "").replace("/chat/completions", "/models")
@@ -829,6 +942,7 @@ async def _startup_event():
     # does not make an existing library look empty after auth/account changes.
     try:
         import json as _json
+
         auth_path = "data/auth.json"
         with open(auth_path, encoding="utf-8") as f:
             users = _json.load(f).get("users", {})
@@ -854,6 +968,7 @@ async def _startup_event():
             try:
                 await asyncio.sleep(3600)
                 from core.database import _migrate_assign_legacy_owner
+
                 await asyncio.to_thread(_migrate_assign_legacy_owner)
             except Exception as e:
                 logger.debug(f"Null-owner sweep skipped: {e}")
@@ -868,9 +983,11 @@ async def _startup_event():
     # `skill_audit_hour` (default 2), batch size via `skill_audit_batch` (8).
     async def _skill_audit_nightly_loop():
         from datetime import timedelta
+
         while True:
             try:
                 from src.settings import get_setting
+
                 hour = int(get_setting("skill_audit_hour", 2) or 2)
             except Exception:
                 hour = 2
@@ -881,10 +998,12 @@ async def _startup_event():
             await asyncio.sleep(max(60, (nxt - now).total_seconds()))
             try:
                 from src.settings import get_setting
+
                 if not get_setting("skill_audit_nightly", True):
                     continue
                 batch = int(get_setting("skill_audit_batch", 8) or 8)
                 from routes.skills_routes import run_scheduled_skill_audit
+
                 await run_scheduled_skill_audit(skills_manager, owner=None, max_skills=batch)
             except Exception as e:
                 logger.warning(f"Nightly skill audit failed: {e}")
@@ -892,6 +1011,7 @@ async def _startup_event():
     _startup_tasks.append(asyncio.create_task(_skill_audit_nightly_loop()))
 
     logger.info("Application startup complete")
+
 
 async def _shutdown_event():
     logger.info("Application shutting down...")

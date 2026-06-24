@@ -8,10 +8,10 @@ import json
 import logging
 import socket
 import subprocess
-from typing import Optional, Tuple, Dict
+from typing import Dict, Optional, Tuple
 from urllib.parse import urlparse, urlunparse
 
-from core.database import SessionLocal, ModelEndpoint
+from core.database import ModelEndpoint, SessionLocal
 from src.llm_core import _detect_provider, _host_match
 
 logger = logging.getLogger(__name__)
@@ -22,17 +22,25 @@ logger = logging.getLogger(__name__)
 # `text-embedding-ada-002` first, which silently broke email-summarize and
 # other resolve_endpoint callers with "Cannot reach model").
 _NON_CHAT_MODEL = (
-    "text-embedding", "embedding", "tts-", "whisper", "dall-e",
-    "moderation", "rerank", "reranker", "clip", "stable-diffusion",
+    "text-embedding",
+    "embedding",
+    "tts-",
+    "whisper",
+    "dall-e",
+    "moderation",
+    "rerank",
+    "reranker",
+    "clip",
+    "stable-diffusion",
 )
 
 
 def _first_chat_model(models) -> Optional[str]:
     """First model that isn't an embedding/tts/etc.; falls back to models[0]."""
-    for m in (models or []):
+    for m in models or []:
         if not any(p in str(m).lower() for p in _NON_CHAT_MODEL):
             return m
-    return (models[0] if models else None)
+    return models[0] if models else None
 
 
 def _endpoint_cached_models(ep) -> list:
@@ -90,11 +98,11 @@ def _resolve_tailscale_host(hostname: str) -> Optional[str]:
     # DNS failed — try tailscale
     try:
         result = subprocess.run(
-            ["tailscale", "status", "--json"],
-            capture_output=True, text=True, timeout=5
+            ["tailscale", "status", "--json"], capture_output=True, text=True, timeout=5
         )
         if result.returncode == 0:
             import json as _json
+
             data = _json.loads(result.stdout)
             peers = data.get("Peer", {})
             for _id, peer in peers.items():
@@ -158,7 +166,11 @@ def _ollama_api_root(base: str) -> str:
     if path.endswith("/api"):
         return base
     if _host_match(base, "ollama.com"):
-        root = f"{parsed.scheme}://{parsed.netloc}" if parsed.scheme and parsed.netloc else "https://ollama.com"
+        root = (
+            f"{parsed.scheme}://{parsed.netloc}"
+            if parsed.scheme and parsed.netloc
+            else "https://ollama.com"
+        )
         return root.rstrip("/") + "/api"
     return base
 
@@ -196,6 +208,7 @@ def build_headers(api_key: Optional[str], base: str) -> Dict[str, str]:
         return headers
     if provider == "copilot":
         from src.copilot import copilot_headers
+
         return copilot_headers(api_key)
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
@@ -226,11 +239,13 @@ def resolve_endpoint(
     """
     try:
         from src.settings import get_user_setting, load_settings
+
         settings = load_settings()
     except Exception:
         return fallback_url, fallback_model, fallback_headers
 
     owner_str = owner or ""
+
     def _stg(key: str) -> str:
         return (get_user_setting(key, owner_str, settings.get(key, "")) or "").strip()
 
@@ -269,6 +284,7 @@ def resolve_endpoint(
         )
         if owner:
             from src.auth_helpers import owner_filter
+
             ep = owner_filter(ep, ModelEndpoint, owner).first()
         else:
             ep = ep.first()
@@ -289,7 +305,7 @@ def resolve_endpoint(
         if not model:
             model = _first_chat_model(_endpoint_enabled_models(ep)) or ""
         if not model and not fallback_model:
-            logger.warning('[resolve_endpoint] no usable model (all models hidden or list empty)')
+            logger.warning("[resolve_endpoint] no usable model (all models hidden or list empty)")
 
         return chat_url, model or fallback_model, headers
     except Exception as e:
@@ -317,6 +333,7 @@ def resolve_endpoint_by_id(
         )
         if owner:
             from src.auth_helpers import owner_filter
+
             q = owner_filter(q, ModelEndpoint, owner)
         ep = q.first()
         if not ep:
@@ -355,8 +372,14 @@ def resolve_utility_fallback_candidates(owner: Optional[str] = None) -> list:
     """Configured fallback chain for the Utility model (`utility_model_fallbacks`)."""
     try:
         from src.settings import get_user_setting, load_settings
+
         settings = load_settings()
-        utility_ep = (get_user_setting("utility_endpoint_id", owner or "", settings.get("utility_endpoint_id", "")) or "").strip()
+        utility_ep = (
+            get_user_setting(
+                "utility_endpoint_id", owner or "", settings.get("utility_endpoint_id", "")
+            )
+            or ""
+        ).strip()
         if not utility_ep:
             return _resolve_fallback_candidates("default_model_fallbacks", owner=owner)
     except Exception:
@@ -373,6 +396,7 @@ def _resolve_fallback_candidates(setting_key: str, owner: Optional[str] = None) 
     out = []
     try:
         from src.settings import get_user_setting, load_settings
+
         settings = load_settings()
         chain = get_user_setting(setting_key, owner or "", settings.get(setting_key) or []) or []
     except Exception:
@@ -380,7 +404,9 @@ def _resolve_fallback_candidates(setting_key: str, owner: Optional[str] = None) 
     for entry in chain:
         if not isinstance(entry, dict):
             continue
-        resolved = resolve_endpoint_by_id(entry.get("endpoint_id", ""), entry.get("model", ""), owner=owner)
+        resolved = resolve_endpoint_by_id(
+            entry.get("endpoint_id", ""), entry.get("model", ""), owner=owner
+        )
         if resolved:
             out.append(resolved)
     return out

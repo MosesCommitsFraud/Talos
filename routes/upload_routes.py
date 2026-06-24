@@ -1,11 +1,13 @@
 # routes/upload_routes.py
+import asyncio
+import json
+import logging
 import os
 import time
-import json
-import asyncio
-from fastapi import APIRouter, Request, File, UploadFile, HTTPException
 from typing import List
-import logging
+
+from fastapi import APIRouter, File, HTTPException, Request, UploadFile
+
 from core.middleware import require_admin
 from src.auth_helpers import get_current_user
 from src.upload_handler import count_recent_uploads
@@ -15,11 +17,13 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/upload", tags=["upload"])
 UPLOAD_RESPONSE_HEADERS = {"X-Content-Type-Options": "nosniff"}
 
+
 def setup_upload_routes(upload_handler):
     """Setup upload routes with the provided handler"""
 
     def _upload_root() -> str:
         from src.constants import UPLOAD_DIR
+
         return os.path.realpath(getattr(upload_handler, "upload_dir", UPLOAD_DIR))
 
     def _path_inside_upload_dir(path: str) -> bool:
@@ -30,6 +34,7 @@ def setup_upload_routes(upload_handler):
 
     def _resolve_upload_path(file_id: str) -> str:
         from src.constants import UPLOAD_DIR
+
         upload_root = getattr(upload_handler, "upload_dir", UPLOAD_DIR)
         direct = os.path.join(upload_root, file_id)
         if os.path.lexists(direct):
@@ -50,13 +55,13 @@ def setup_upload_routes(upload_handler):
             raise HTTPException(404, "File not found")
 
         raise HTTPException(404, "File not found")
-    
+
     @router.post("")
     async def api_upload(request: Request, files: List[UploadFile] = File(...)):
         """Upload files with enhanced security and organization."""
         if not files:
             raise HTTPException(400, "No files uploaded")
-            
+
         client_ip = request.client.host if request.client else "unknown"
         out = []
 
@@ -73,34 +78,36 @@ def setup_upload_routes(upload_handler):
         if recent_uploads >= upload_handler.max_concurrent_uploads:
             raise HTTPException(
                 status_code=429,
-                detail=f"Maximum concurrent uploads ({upload_handler.max_concurrent_uploads}) exceeded"
+                detail=f"Maximum concurrent uploads ({upload_handler.max_concurrent_uploads}) exceeded",
             )
-        
+
         for u in files:
             try:
                 meta = upload_handler.save_upload(u, client_ip, owner=get_current_user(request))
-                out.append({
-                    "id": meta["id"],
-                    "name": meta["name"],
-                    "mime": meta["mime"],
-                    "size": meta["size"],
-                    "hash": meta["hash"],
-                    "uploaded_at": meta["uploaded_at"],
-                    "width": meta.get("width"),
-                    "height": meta.get("height"),
-                    "is_duplicate": meta.get("is_duplicate", False)
-                })
+                out.append(
+                    {
+                        "id": meta["id"],
+                        "name": meta["name"],
+                        "mime": meta["mime"],
+                        "size": meta["size"],
+                        "hash": meta["hash"],
+                        "uploaded_at": meta["uploaded_at"],
+                        "width": meta.get("width"),
+                        "height": meta.get("height"),
+                        "is_duplicate": meta.get("is_duplicate", False),
+                    }
+                )
             except HTTPException:
                 raise
             except Exception as e:
                 logger.error(f"Failed to process upload {u.filename}: {str(e)}")
                 continue
-        
+
         if not out:
             raise HTTPException(500, "All file uploads failed")
-            
+
         return {"files": out}
-    
+
     @router.post("/cleanup")
     async def manual_cleanup(request: Request):
         """Manually trigger cleanup of old uploads."""
@@ -126,6 +133,7 @@ def setup_upload_routes(upload_handler):
         if not upload_handler.validate_upload_id(file_id):
             raise HTTPException(400, "Invalid file ID")
         import mimetypes as _mt
+
         # Look up original filename and owner from uploads.json
         original_name = file_id
         info = None
@@ -148,15 +156,18 @@ def setup_upload_routes(upload_handler):
         path = _resolve_upload_path(file_id)
         mime = (info or {}).get("mime") or _mt.guess_type(path)[0] or "application/octet-stream"
         from fastapi.responses import FileResponse
+
         # Downscaled thumbnail for image previews — generated once and cached.
         if thumb and mime.startswith("image/"):
             try:
                 from PIL import Image, ImageOps
+
                 thumb_dir = os.path.join(_upload_root(), ".thumbs")
                 os.makedirs(thumb_dir, exist_ok=True)
                 thumb_path = os.path.join(thumb_dir, file_id + ".jpg")
-                if (not os.path.exists(thumb_path)
-                        or os.path.getmtime(thumb_path) < os.path.getmtime(path)):
+                if not os.path.exists(thumb_path) or os.path.getmtime(
+                    thumb_path
+                ) < os.path.getmtime(path):
                     im = Image.open(path)
                     # iPhone / camera JPEGs encode rotation in EXIF rather than
                     # the pixel data. Browsers honour that on the original via
@@ -168,7 +179,9 @@ def setup_upload_routes(upload_handler):
                     if im.mode not in ("RGB", "L"):
                         im = im.convert("RGB")
                     im.save(thumb_path, "JPEG", quality=80)
-                return FileResponse(thumb_path, media_type="image/jpeg", headers=UPLOAD_RESPONSE_HEADERS)
+                return FileResponse(
+                    thumb_path, media_type="image/jpeg", headers=UPLOAD_RESPONSE_HEADERS
+                )
             except Exception as e:
                 logger.warning(f"Thumbnail generation failed for {file_id}: {e}")
                 # Fall through to the full image.
@@ -213,6 +226,7 @@ def setup_upload_routes(upload_handler):
                 raise HTTPException(404, "File not found")
         path = _resolve_upload_path(file_id)
         import mimetypes as _mt
+
         mime = (info or {}).get("mime") or _mt.guess_type(path)[0] or ""
         if not mime.startswith("image/"):
             raise HTTPException(400, "Not an image")
@@ -224,6 +238,7 @@ def setup_upload_routes(upload_handler):
             except Exception as e:
                 logger.warning(f"Vision cache read failed for {file_id}: {e}")
         from src.document_processor import analyze_image_with_vl
+
         try:
             text = analyze_image_with_vl(path) or ""
         except Exception as e:
@@ -268,5 +283,5 @@ def setup_upload_routes(upload_handler):
         while True:
             await asyncio.sleep(3600)
             upload_handler.cleanup_rate_limits()
-    
+
     return router, periodic_rate_limit_cleanup

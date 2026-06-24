@@ -59,14 +59,33 @@ PLAN_MODE_READONLY_TOOLS = {
 
 
 _PLAN_MODE_KNOWN_MUTATORS = {
-    "bash", "python", "run_cell", "write_file", "edit_file",
-    "create_document", "edit_document", "update_document", "suggest_document",
-    "manage_documents", "create_session", "manage_session", "send_to_session",
-    "pipeline", "manage_memory", "manage_skills", "manage_tasks",
-    "manage_endpoints", "manage_mcp", "manage_webhooks", "manage_tokens",
-    "manage_settings", "api_call", "app_api",
+    "bash",
+    "python",
+    "run_cell",
+    "write_file",
+    "edit_file",
+    "create_document",
+    "edit_document",
+    "update_document",
+    "suggest_document",
+    "manage_documents",
+    "create_session",
+    "manage_session",
+    "send_to_session",
+    "pipeline",
+    "manage_memory",
+    "manage_skills",
+    "manage_tasks",
+    "manage_endpoints",
+    "manage_mcp",
+    "manage_webhooks",
+    "manage_tokens",
+    "manage_settings",
+    "api_call",
+    "app_api",
     "ui_control",
-    "generate_image", "edit_image",
+    "generate_image",
+    "edit_image",
 }
 
 
@@ -79,6 +98,7 @@ def plan_mode_disabled_tools() -> Set[str]:
     try:
         import src.agent_tools  # noqa: F401
         from src.tool_schemas import FUNCTION_TOOL_SCHEMAS
+
         all_names = {(t.get("function") or {}).get("name") for t in FUNCTION_TOOL_SCHEMAS}
         all_names.discard(None)
     except Exception as exc:

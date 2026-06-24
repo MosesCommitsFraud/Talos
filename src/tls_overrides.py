@@ -65,9 +65,9 @@ def _build_ssl_context() -> Optional[ssl.SSLContext]:
         ctx.load_verify_locations(cafile=_extra_bundle_path)
     except (ssl.SSLError, OSError) as e:
         logger.warning(
-            "LLM_CA_BUNDLE=%r failed to load (%s); falling back to the "
-            "default trust store.",
-            _extra_bundle_path, e,
+            "LLM_CA_BUNDLE=%r failed to load (%s); falling back to the default trust store.",
+            _extra_bundle_path,
+            e,
         )
         return None
     logger.info(

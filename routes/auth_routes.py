@@ -1,33 +1,42 @@
 """Authentication routes — login, logout, signup, status, user management."""
 
-from fastapi import APIRouter, Request, Response, HTTPException
-from pydantic import BaseModel
-from typing import Optional
 import asyncio
 import logging
 import os
+from typing import Optional
+
+from fastapi import APIRouter, HTTPException, Request, Response
+from pydantic import BaseModel
 
 from core.auth import AuthManager
+from src.integrations import (
+    INTEGRATION_PRESETS,
+    add_integration,
+    delete_integration,
+    execute_api_call,
+    get_integration,
+    load_integrations,
+    mask_integration_secret,
+    migrate_from_settings,
+    update_integration,
+)
 from src.rate_limiter import RateLimiter
-from src.settings_scrub import scrub_settings
 from src.settings import (
-    load_settings as _load_settings,
-    save_settings as _save_settings,
-    load_features as _load_features,
-    save_features as _save_features,
     DEFAULT_SETTINGS,
 )
-from src.integrations import (
-    load_integrations,
-    add_integration,
-    update_integration,
-    delete_integration,
-    get_integration,
-    mask_integration_secret,
-    execute_api_call,
-    INTEGRATION_PRESETS,
-    migrate_from_settings,
+from src.settings import (
+    load_features as _load_features,
 )
+from src.settings import (
+    load_settings as _load_settings,
+)
+from src.settings import (
+    save_features as _save_features,
+)
+from src.settings import (
+    save_settings as _save_settings,
+)
+from src.settings_scrub import scrub_settings
 
 logger = logging.getLogger(__name__)
 
@@ -67,8 +76,10 @@ class DeleteUserRequest(BaseModel):
 class RenameUserRequest(BaseModel):
     username: str
 
+
 class SetOpenRegistrationRequest(BaseModel):
     enabled: bool
+
 
 SESSION_COOKIE = "talos_session"
 
@@ -111,7 +122,9 @@ def setup_auth_routes(auth_manager: AuthManager) -> APIRouter:
             raise HTTPException(400, "Password must be at least 8 characters")
         if len(body.username.strip()) < 1:
             raise HTTPException(400, "Username is required")
-        ok = await asyncio.to_thread(auth_manager.create_user, body.username, body.password, is_admin=False)
+        ok = await asyncio.to_thread(
+            auth_manager.create_user, body.username, body.password, is_admin=False
+        )
         if not ok:
             raise HTTPException(409, "Username already taken")
         return {"ok": True, "message": "Account created"}
@@ -186,7 +199,9 @@ def setup_auth_routes(auth_manager: AuthManager) -> APIRouter:
         if len(body.new_password) < 8:
             raise HTTPException(400, "Password must be at least 8 characters")
         current_token = request.cookies.get(SESSION_COOKIE)
-        ok = await asyncio.to_thread(auth_manager.change_password, user, body.current_password, body.new_password)
+        ok = await asyncio.to_thread(
+            auth_manager.change_password, user, body.current_password, body.new_password
+        )
         if not ok:
             raise HTTPException(400, "Current password is incorrect")
         await asyncio.to_thread(auth_manager.revoke_user_sessions, user, current_token)
@@ -209,7 +224,11 @@ def setup_auth_routes(auth_manager: AuthManager) -> APIRouter:
             raise HTTPException(500, "Failed to generate secret")
         uri = auth_manager.totp_get_provisioning_uri(user, secret)
         # Generate QR code as base64 PNG
-        import qrcode, io, base64
+        import base64
+        import io
+
+        import qrcode
+
         qr = qrcode.make(uri, box_size=6, border=2)
         buf = io.BytesIO()
         qr.save(buf, format="PNG")
@@ -326,7 +345,9 @@ def setup_auth_routes(auth_manager: AuthManager) -> APIRouter:
         # access to its sessions, docs, email accounts, tasks, etc.
         try:
             from sqlalchemy import func
+
             from core.database import Base, SessionLocal
+
             db = SessionLocal()
             try:
                 for mapper in Base.registry.mappers:
@@ -345,12 +366,16 @@ def setup_auth_routes(auth_manager: AuthManager) -> APIRouter:
             finally:
                 db.close()
         except Exception as e:
-            logger.error("Failed to rename owner references %s -> %s: %s", old_username, new_username, e)
+            logger.error(
+                "Failed to rename owner references %s -> %s: %s", old_username, new_username, e
+            )
             raise HTTPException(500, "Failed to rename user data")
 
         # Per-user prefs are JSON-backed, not SQL-backed.
         try:
-            from routes.prefs_routes import _load as _load_prefs, _save as _save_prefs
+            from routes.prefs_routes import _load as _load_prefs
+            from routes.prefs_routes import _save as _save_prefs
+
             prefs = _load_prefs()
             users = prefs.get("_users") if isinstance(prefs, dict) else None
             if isinstance(users, dict):
@@ -363,7 +388,9 @@ def setup_auth_routes(auth_manager: AuthManager) -> APIRouter:
                     users[new_username] = users.pop(prefs_key)
                     _save_prefs(prefs)
         except Exception as e:
-            logger.warning("Failed to rename user prefs %s -> %s: %s", old_username, new_username, e)
+            logger.warning(
+                "Failed to rename user prefs %s -> %s: %s", old_username, new_username, e
+            )
 
         ok = auth_manager.rename_user(old_username, new_username, user)
         if not ok:
@@ -401,7 +428,7 @@ def setup_auth_routes(auth_manager: AuthManager) -> APIRouter:
         if not user or not auth_manager.is_admin(user):
             raise HTTPException(403, "Admin only")
         auth_manager.signup_enabled = body.enabled
-        return {"ok": True,"signup_enabled": auth_manager.signup_enabled}
+        return {"ok": True, "signup_enabled": auth_manager.signup_enabled}
 
     @router.delete("/users")
     async def admin_delete_user(body: DeleteUserRequest, request: Request):
@@ -507,7 +534,12 @@ def setup_auth_routes(auth_manager: AuthManager) -> APIRouter:
     @router.get("/integrations/presets")
     async def list_presets():
         """List available integration presets."""
-        return {"presets": {k: {kk: vv for kk, vv in v.items() if kk != "api_key"} for k, v in INTEGRATION_PRESETS.items()}}
+        return {
+            "presets": {
+                k: {kk: vv for kk, vv in v.items() if kk != "api_key"}
+                for k, v in INTEGRATION_PRESETS.items()
+            }
+        }
 
     @router.post("/integrations")
     async def create_integration(request: Request):
@@ -561,8 +593,10 @@ def setup_auth_routes(auth_manager: AuthManager) -> APIRouter:
         # subscriber app is wired up correctly, this is what the green
         # checkmark + a phone ping confirms together.
         if preset == "ntfy":
-            import httpx
             from urllib.parse import urlparse
+
+            import httpx
+
             # Strip any path/query the user accidentally pasted in the
             # base URL (e.g. `http://host:8091/talos`) — otherwise
             # the topic gets appended after the path and we publish to
@@ -570,7 +604,11 @@ def setup_auth_routes(auth_manager: AuthManager) -> APIRouter:
             # only ever serves from the root.
             raw_base = (integ.get("base_url") or "").strip()
             parsed = urlparse(raw_base)
-            base = f"{parsed.scheme}://{parsed.netloc}" if parsed.scheme and parsed.netloc else raw_base.rstrip("/")
+            base = (
+                f"{parsed.scheme}://{parsed.netloc}"
+                if parsed.scheme and parsed.netloc
+                else raw_base.rstrip("/")
+            )
             settings = _load_settings()
             topic = (settings.get("reminder_ntfy_topic") or "reminders").strip() or "reminders"
             full_url = f"{base}/{topic}"
@@ -603,16 +641,22 @@ def setup_auth_routes(auth_manager: AuthManager) -> APIRouter:
                         "ok": True,
                         "message": (
                             f"Sent to {full_url} — on your ntfy app, "
-                            f"subscribe to topic \"{topic}\" with server "
-                            f"\"{base}\" (or paste the full URL: {full_url})."
+                            f'subscribe to topic "{topic}" with server '
+                            f'"{base}" (or paste the full URL: {full_url}).'
                         ),
                     }
-                return {"ok": False, "message": f"ntfy returned HTTP {r.status_code} from {full_url}: {r.text[:200]}"}
+                return {
+                    "ok": False,
+                    "message": f"ntfy returned HTTP {r.status_code} from {full_url}: {r.text[:200]}",
+                }
             except Exception as e:
                 hint = ""
                 if parsed.hostname not in ("127.0.0.1", "localhost"):
                     hint = " If this is Docker Compose ntfy, set NTFY_BIND to that host/Tailscale IP and NTFY_BASE_URL to the same server URL in .env, then recreate ntfy."
-                return {"ok": False, "message": f"ntfy publish to {full_url} failed: {e}.{hint}"[:500]}
+                return {
+                    "ok": False,
+                    "message": f"ntfy publish to {full_url} failed: {e}.{hint}"[:500],
+                }
 
         # All other presets: GET against a known health endpoint.
         # Fall back to detecting from name if preset is missing.

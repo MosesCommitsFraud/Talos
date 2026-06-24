@@ -81,7 +81,10 @@ async def maybe_extract_skill(
     # Quiet by default; flip to DEBUG when chasing extractor issues.
     logger.debug(
         "[skill-extract] start: rounds=%d tools=%d model=%s owner=%s",
-        round_count, tool_count, model, owner,
+        round_count,
+        tool_count,
+        model,
+        owner,
     )
     if round_count < 2 and tool_count < 2:
         logger.debug("[skill-extract] BELOW threshold (need rounds>=2 or tools>=2)")
@@ -118,7 +121,9 @@ async def maybe_extract_skill(
             content = msg.get("content", "")
             if isinstance(content, list):
                 content = " ".join(
-                    b.get("text", "") for b in content if isinstance(b, dict) and b.get("type") == "text"
+                    b.get("text", "")
+                    for b in content
+                    if isinstance(b, dict) and b.get("type") == "text"
                 )
             # Truncate long messages
             if len(content) > 500:
@@ -130,10 +135,12 @@ async def maybe_extract_skill(
         prompt = SKILL_EXTRACT_PROMPT.format(rounds=round_count, tool_count=tool_count)
 
         import time as _time
+
         _t0 = _time.monotonic()
         logger.debug(
             "[skill-extract] calling LLM (endpoint=%s, ctx=%d msgs, timeout=30s)",
-            endpoint_url, len(recent),
+            endpoint_url,
+            len(recent),
         )
         response = await llm_call_async(
             endpoint_url,
@@ -147,7 +154,9 @@ async def maybe_extract_skill(
         )
         logger.debug(
             "[skill-extract] LLM returned in %.1fs (len=%d, head=%r)",
-            _time.monotonic() - _t0, len(response or ""), (response or "")[:80],
+            _time.monotonic() - _t0,
+            len(response or ""),
+            (response or "")[:80],
         )
 
         if not response or response.strip().lower() == "null":
@@ -165,6 +174,7 @@ async def maybe_extract_skill(
         # time and the silent-bail looked like "extractor doesn't work".
         try:
             from src.text_helpers import strip_think as _strip_think
+
             response = _strip_think(response, prose=True, prompt_echo=True)
         except Exception:
             pass
@@ -200,7 +210,9 @@ async def maybe_extract_skill(
         if _conf < MIN_CONFIDENCE:
             logger.debug(
                 "[skill-extract] '%s' below confidence floor (%.2f < %.2f) — dropped",
-                title, _conf, MIN_CONFIDENCE,
+                title,
+                _conf,
+                MIN_CONFIDENCE,
             )
             return None
 
@@ -223,6 +235,7 @@ async def maybe_extract_skill(
         )
         try:
             from src.event_bus import fire_event
+
             fire_event("skill_added", owner)
         except Exception:
             logger.debug("skill_added event dispatch failed", exc_info=True)

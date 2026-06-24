@@ -5,13 +5,14 @@ Registration, authorization-code + PKCE, token refresh) to Talos's web
 callback route. Tokens and the dynamic registration persist per-server,
 encrypted, so the interactive flow runs only once.
 """
+
 import asyncio
 import json
 import logging
 import os
 import time
 from typing import Dict, Optional, Tuple
-from urllib.parse import urlparse, parse_qs
+from urllib.parse import parse_qs, urlparse
 
 logger = logging.getLogger(__name__)
 
@@ -32,9 +33,9 @@ REDIRECT_URI = f"{_REDIRECT_BASE}/api/mcp/oauth/callback"
 # How long the background connect waits for the user to authorize before giving up.
 AUTH_WAIT_SECONDS = 300
 
-_pending: Dict[str, asyncio.Future] = {}   # state -> Future[(code, state)]
-_pending_ts: Dict[str, float] = {}         # state -> monotonic timestamp, for pruning
-_auth_urls: Dict[str, str] = {}            # server_id -> authorization URL
+_pending: Dict[str, asyncio.Future] = {}  # state -> Future[(code, state)]
+_pending_ts: Dict[str, float] = {}  # state -> monotonic timestamp, for pruning
+_auth_urls: Dict[str, str] = {}  # server_id -> authorization URL
 
 
 def _prune_stale() -> None:
@@ -87,11 +88,13 @@ class DbTokenStorage:
         self.server_id = server_id
         if session_factory is None:
             from core.database import SessionLocal
+
             session_factory = SessionLocal
         self._sf = session_factory
 
     def _load(self) -> dict:
         from core.database import McpServer
+
         db = self._sf()
         try:
             srv = db.query(McpServer).filter(McpServer.id == self.server_id).first()
@@ -105,6 +108,7 @@ class DbTokenStorage:
         """Load, set one key, and persist the oauth_tokens JSON in a single
         session/commit (avoids the load+save double round-trip per write)."""
         from core.database import McpServer
+
         db = self._sf()
         try:
             srv = db.query(McpServer).filter(McpServer.id == self.server_id).first()
@@ -119,6 +123,7 @@ class DbTokenStorage:
 
     async def get_tokens(self):
         from mcp.shared.auth import OAuthToken
+
         data = self._load().get("tokens")
         return OAuthToken.model_validate(data) if data else None
 
@@ -127,6 +132,7 @@ class DbTokenStorage:
 
     async def get_client_info(self):
         from mcp.shared.auth import OAuthClientInformationFull
+
         data = self._load().get("client_info")
         return OAuthClientInformationFull.model_validate(data) if data else None
 

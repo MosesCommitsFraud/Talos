@@ -1,7 +1,7 @@
 """Diagnostics routes — /api/db/stats, /api/rag/stats."""
 
 import logging
-from typing import Dict, Any
+from typing import Any, Dict
 
 from fastapi import APIRouter, HTTPException, Request
 
@@ -21,6 +21,7 @@ def setup_diagnostics_routes(
         require_admin(request)
         try:
             from core.database import get_detailed_stats
+
             return get_detailed_stats()
         except Exception as e:
             logger.error(f"DB stats error: {e}")

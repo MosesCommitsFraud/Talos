@@ -45,11 +45,15 @@ def _unified_diff(old: str, new: str, path: str) -> Optional[Dict[str, Any]]:
     old_lines = old.splitlines()
     new_lines = new.splitlines()
     label = path or "file"
-    diff_lines = list(difflib.unified_diff(
-        old_lines, new_lines,
-        fromfile=f"a/{label}", tofile=f"b/{label}",
-        lineterm="",
-    ))
+    diff_lines = list(
+        difflib.unified_diff(
+            old_lines,
+            new_lines,
+            fromfile=f"a/{label}",
+            tofile=f"b/{label}",
+            lineterm="",
+        )
+    )
     added = sum(1 for l in diff_lines if l.startswith("+") and not l.startswith("+++"))
     removed = sum(1 for l in diff_lines if l.startswith("-") and not l.startswith("---"))
     truncated = False
@@ -89,12 +93,18 @@ async def _do_edit_file(content: str, workspace: Optional[str] = None) -> Dict[s
     # Confine to the workspace when set, else the same allowlist + sensitive-file
     # policy as read/write_file.
     try:
-        path = (_resolve_tool_path_in_workspace(workspace, raw_path)
-                if workspace else _resolve_tool_path(raw_path))
+        path = (
+            _resolve_tool_path_in_workspace(workspace, raw_path)
+            if workspace
+            else _resolve_tool_path(raw_path)
+        )
     except ValueError as e:
         return {"error": f"edit_file: {e}", "exit_code": 1}
     if old == "":
-        return {"error": "edit_file: old_string required (use write_file to create a file)", "exit_code": 1}
+        return {
+            "error": "edit_file: old_string required (use write_file to create a file)",
+            "exit_code": 1,
+        }
     if old == new:
         return {"error": "edit_file: old_string and new_string are identical", "exit_code": 1}
 
@@ -114,7 +124,10 @@ async def _do_edit_file(content: str, workspace: Optional[str] = None) -> Dict[s
     try:
         original, updated, status = await asyncio.to_thread(_apply)
     except FileNotFoundError:
-        return {"error": f"edit_file: {path}: not found (use write_file to create it)", "exit_code": 1}
+        return {
+            "error": f"edit_file: {path}: not found (use write_file to create it)",
+            "exit_code": 1,
+        }
     except (IsADirectoryError, UnicodeDecodeError):
         return {"error": f"edit_file: {path}: not an editable text file", "exit_code": 1}
     except PermissionError:
@@ -123,10 +136,16 @@ async def _do_edit_file(content: str, workspace: Optional[str] = None) -> Dict[s
         return {"error": f"edit_file: {path}: {e}", "exit_code": 1}
 
     if status == "not_found":
-        return {"error": f"edit_file: old_string not found in {path}. Read the file and match it exactly.", "exit_code": 1}
+        return {
+            "error": f"edit_file: old_string not found in {path}. Read the file and match it exactly.",
+            "exit_code": 1,
+        }
     if status.startswith("not_unique"):
         n = status.split(":", 1)[1]
-        return {"error": f"edit_file: old_string is not unique in {path} ({n} matches). Add surrounding context or set replace_all=true.", "exit_code": 1}
+        return {
+            "error": f"edit_file: old_string is not unique in {path} ({n} matches). Add surrounding context or set replace_all=true.",
+            "exit_code": 1,
+        }
 
     n = original.count(old)
     result = {"output": f"Edited {path} ({n} replacement{'s' if n != 1 else ''})", "exit_code": 0}
@@ -134,6 +153,7 @@ async def _do_edit_file(content: str, workspace: Optional[str] = None) -> Dict[s
     if diff:
         result["diff"] = diff
     return result
+
 
 # ---------------------------------------------------------------------------
 # Path confinement for read_file / write_file
@@ -154,15 +174,27 @@ async def _do_edit_file(content: str, workspace: Optional[str] = None) -> Dict[s
 # ---------------------------------------------------------------------------
 
 _SENSITIVE_BASENAMES: set[str] = {
-    ".ssh", ".gnupg", ".gitconfig",
-    ".bashrc", ".bash_profile", ".bash_logout",
-    ".zshrc", ".zprofile", ".zshenv",
-    ".profile", ".tcshrc", ".cshrc",
-    ".env", ".netrc",
+    ".ssh",
+    ".gnupg",
+    ".gitconfig",
+    ".bashrc",
+    ".bash_profile",
+    ".bash_logout",
+    ".zshrc",
+    ".zprofile",
+    ".zshenv",
+    ".profile",
+    ".tcshrc",
+    ".cshrc",
+    ".env",
+    ".netrc",
 }
 
 _SENSITIVE_FILE_PATTERNS: tuple[str, ...] = (
-    "authorized_keys", "id_rsa", "id_ed25519", "id_ecdsa",
+    "authorized_keys",
+    "id_rsa",
+    "id_ed25519",
+    "id_ecdsa",
     "known_hosts",
 )
 
@@ -196,6 +228,7 @@ def _tool_path_roots() -> list[str]:
 
     # Project data directory — the agent's primary workspace.
     from src.constants import DATA_DIR
+
     roots.append(DATA_DIR)
 
     # /tmp (and its macOS realpath /private/tmp).
@@ -215,6 +248,7 @@ def _tool_path_roots() -> list[str]:
     # Opt-in extra roots from settings.
     try:
         from src.settings import get_setting
+
         extra = get_setting("tool_path_extra_roots")
         if isinstance(extra, list):
             roots.extend(str(r) for r in extra if r)
@@ -268,9 +302,7 @@ def _resolve_tool_path(raw_path: str) -> str:
             continue
         if common == root:
             return resolved
-    raise ValueError(
-        f"path '{raw_path}' is outside the allowed roots"
-    )
+    raise ValueError(f"path '{raw_path}' is outside the allowed roots")
 
 
 def _resolve_tool_path_in_workspace(workspace: str, raw_path: str) -> str:
@@ -306,12 +338,13 @@ def _resolve_tool_path_in_workspace(workspace: str, raw_path: str) -> str:
             raise ValueError(f"path '{raw_path}' is outside the workspace ({workspace})")
     return resolved
 
+
 # Bash + python tools run with NO time limit (0 = unlimited): real workloads
 # (model training, big data crunches, long installs) must not be killed
 # mid-flight. The user can always cancel via the chat stop button — when the
 # SSE stream is torn down, the asyncio task running the subprocess gets
 # cancelled and the subprocess is killed by the finally block.
-DEFAULT_BASH_TIMEOUT = 0     # 0 = unlimited
+DEFAULT_BASH_TIMEOUT = 0  # 0 = unlimited
 DEFAULT_PYTHON_TIMEOUT = 0
 
 # How often to push a progress event while a long-running subprocess
@@ -326,6 +359,7 @@ PROGRESS_TAIL_LINES = 12
 
 def get_mcp_manager():
     from src import agent_tools
+
     return agent_tools.get_mcp_manager()
 
 
@@ -333,11 +367,27 @@ def get_mcp_manager():
 # polluted by VCS internals / dependency trees / build caches. ripgrep already
 # honours .gitignore; this is the parity floor for the no-rg path (and the
 # explicit excludes passed to rg so it skips them even without a .gitignore).
-_CODENAV_SKIP_DIRS = frozenset({
-    ".git", ".hg", ".svn", "node_modules", "venv", ".venv", "__pycache__",
-    ".mypy_cache", ".pytest_cache", ".ruff_cache", "dist", "build",
-    ".next", ".cache", "site-packages", ".idea", ".tox",
-})
+_CODENAV_SKIP_DIRS = frozenset(
+    {
+        ".git",
+        ".hg",
+        ".svn",
+        "node_modules",
+        "venv",
+        ".venv",
+        "__pycache__",
+        ".mypy_cache",
+        ".pytest_cache",
+        ".ruff_cache",
+        "dist",
+        "build",
+        ".next",
+        ".cache",
+        "site-packages",
+        ".idea",
+        ".tox",
+    }
+)
 # Per-tool result caps (keep tool output cheap + model-friendly).
 _CODENAV_MAX_HITS = 200
 _CODENAV_MAX_LINE = 400
@@ -366,6 +416,7 @@ def _truncate(text: str, limit: int = MAX_OUTPUT_CHARS) -> str:
     if len(text) > limit:
         return text[:limit] + f"\n... (truncated, {len(text)} chars total)"
     return text
+
 
 logger = logging.getLogger(__name__)
 
@@ -414,10 +465,12 @@ async def _run_subprocess_streaming(
         while True:
             if progress_cb:
                 try:
-                    await progress_cb({
-                        "elapsed_s": round(time.time() - started, 1),
-                        "tail": "\n".join(list(tail)),
-                    })
+                    await progress_cb(
+                        {
+                            "elapsed_s": round(time.time() - started, 1),
+                            "tail": "\n".join(list(tail)),
+                        }
+                    )
                 except Exception:
                     # Progress is best-effort — never let a UI hiccup
                     # break the underlying subprocess.
@@ -481,6 +534,7 @@ async def _run_subprocess_streaming(
         timed_out,
     )
 
+
 _ADMIN_TOOLS = {
     "app_api",
     "manage_endpoints",
@@ -495,17 +549,18 @@ def _owner_is_admin(owner: Optional[str]) -> bool:
     """Mirror route-level admin behavior for agent tool execution."""
     return owner_is_admin_or_single_user(owner)
 
+
 # ---------------------------------------------------------------------------
 # MCP-backed tool helpers
 # ---------------------------------------------------------------------------
 
 # Map legacy tool names -> (MCP server_id, MCP tool_name)
 _MCP_TOOL_MAP = {
-    "bash":           ("bash",       "bash"),
-    "python":         ("python",     "python"),
-    "read_file":      ("filesystem", "read_file"),
-    "write_file":     ("filesystem", "write_file"),
-    "generate_image": ("image_gen",  "generate_image"),
+    "bash": ("bash", "bash"),
+    "python": ("python", "python"),
+    "read_file": ("filesystem", "read_file"),
+    "write_file": ("filesystem", "write_file"),
+    "generate_image": ("image_gen", "generate_image"),
 }
 
 
@@ -545,12 +600,12 @@ def _parse_write_file(content: str) -> Dict:
 
 
 _MCP_ARG_PARSERS: Dict[str, callable] = {
-    "bash":           lambda c: {"command": c},
-    "python":         lambda c: {"code": c},
-    "read_file":      lambda c: {"path": c.split("\n")[0].strip()},
-    "write_file":     _parse_write_file,
+    "bash": lambda c: {"command": c},
+    "python": lambda c: {"code": c},
+    "read_file": lambda c: {"path": c.split("\n")[0].strip()},
+    "write_file": _parse_write_file,
     "generate_image": _parse_generate_image,
-    "manage_memory":  _parse_manage_memory,
+    "manage_memory": _parse_manage_memory,
 }
 
 
@@ -592,7 +647,14 @@ async def _call_mcp_tool(
 
     mcp = get_mcp_manager()
     if not mcp:
-        return await _direct_fallback(tool, content, progress_cb=progress_cb, workspace=workspace, session_id=session_id, owner=owner) or {"error": f"MCP manager not available for tool '{tool}'", "exit_code": 1}
+        return await _direct_fallback(
+            tool,
+            content,
+            progress_cb=progress_cb,
+            workspace=workspace,
+            session_id=session_id,
+            owner=owner,
+        ) or {"error": f"MCP manager not available for tool '{tool}'", "exit_code": 1}
 
     server_id, tool_name = _MCP_TOOL_MAP[tool]
     qualified = f"mcp__{server_id}__{tool_name}"
@@ -600,8 +662,19 @@ async def _call_mcp_tool(
     result = await mcp.call_tool(qualified, args)
 
     # If MCP server not connected, try direct fallback
-    if isinstance(result, dict) and result.get("exit_code") == 1 and "not connected" in result.get("error", ""):
-        fallback = await _direct_fallback(tool, content, progress_cb=progress_cb, workspace=workspace, session_id=session_id, owner=owner)
+    if (
+        isinstance(result, dict)
+        and result.get("exit_code") == 1
+        and "not connected" in result.get("error", "")
+    ):
+        fallback = await _direct_fallback(
+            tool,
+            content,
+            progress_cb=progress_cb,
+            workspace=workspace,
+            session_id=session_id,
+            owner=owner,
+        )
         if fallback:
             return fallback
 
@@ -625,14 +698,14 @@ def _promote_image_fields(result: Dict) -> None:
     if not isinstance(result, dict) or result.get("exit_code") != 0:
         return
     out = result.get("stdout") or ""
-    m = re.search(r'(?:https?://[^\s)\]]+)?/api/generated-image/[A-Za-z0-9._-]+', out)
+    m = re.search(r"(?:https?://[^\s)\]]+)?/api/generated-image/[A-Za-z0-9._-]+", out)
     if not m:
         return
     result["image_url"] = m.group(0).strip()
     for field, pat in (
-        ("image_prompt", r'^Generated image for:\s*(.+)$'),
-        ("image_model", r'^model:\s*(.+)$'),
-        ("image_size", r'^size:\s*(.+)$'),
+        ("image_prompt", r"^Generated image for:\s*(.+)$"),
+        ("image_model", r"^model:\s*(.+)$"),
+        ("image_size", r"^size:\s*(.+)$"),
     ):
         fm = re.search(pat, out, re.M)
         if fm:
@@ -666,6 +739,7 @@ async def _try_sandbox_exec(
     if tool not in {"bash", "python"}:
         return None
     from src.sandbox_client import exec_in_sandbox, sandbox_enabled
+
     # When the sandbox is OFF (dev/no-container), return None so the caller may
     # run locally. When it's ON, the sandbox is mandatory: never execute on the
     # app/host container. If there's no session to scope it to, refuse.
@@ -726,7 +800,11 @@ async def _try_sandbox_exec(
         # it describes/uses them rather than trying to re-render or re-read them.
         names = ", ".join(str(im.get("name") or "image") for im in created_images)
         note_line = f"[Displayed {len(created_images)} image(s) to the user inline: {names}]"
-        result["output"] = note_line if result["output"] == "(no output)" else f"{result['output'].rstrip()}\n{note_line}"
+        result["output"] = (
+            note_line
+            if result["output"] == "(no output)"
+            else f"{result['output'].rstrip()}\n{note_line}"
+        )
     return result
 
 
@@ -791,6 +869,7 @@ async def _try_sandbox_file_tool(
     if tool not in {"read_file", "write_file", "edit_file", "grep", "glob", "ls"}:
         return None
     from src.sandbox_client import file_tool_in_sandbox, sandbox_enabled
+
     # Same containment policy as _try_sandbox_exec: sandbox off → allow local;
     # sandbox on → mandatory, refuse to touch the app/host filesystem.
     if not sandbox_enabled():
@@ -803,10 +882,16 @@ async def _try_sandbox_file_tool(
         }
     try:
         operation, payload = _parse_sandbox_file_payload(tool, content)
-        data = await file_tool_in_sandbox(owner=owner, session_id=session_id, operation=operation, payload=payload)
+        data = await file_tool_in_sandbox(
+            owner=owner, session_id=session_id, operation=operation, payload=payload
+        )
     except Exception as exc:
         logger.warning("Sandbox %s operation failed: %s", tool, exc)
-        return {"error": f"{tool}: sandbox operation failed: {exc}", "exit_code": 1, "sandboxed": True}
+        return {
+            "error": f"{tool}: sandbox operation failed: {exc}",
+            "exit_code": 1,
+            "sandboxed": True,
+        }
     data["sandboxed"] = True
     return data
 
@@ -836,17 +921,30 @@ async def _do_show_image(
         return {"error": "show_image: a workspace-relative image path is required", "exit_code": 1}
 
     from src.sandbox_client import file_tool_in_sandbox, sandbox_enabled
+
     if not sandbox_enabled() or not session_id:
         return {"error": "show_image: requires the sandbox (no session available)", "exit_code": 1}
     try:
         data = await file_tool_in_sandbox(
-            owner=owner, session_id=session_id, operation="image", payload={"path": path},
+            owner=owner,
+            session_id=session_id,
+            operation="image",
+            payload={"path": path},
         )
     except Exception as exc:
         logger.warning("show_image sandbox read failed: %s", exc)
         return {"error": f"show_image: {exc}", "exit_code": 1}
-    if not isinstance(data, dict) or data.get("exit_code") not in (0, None) or not data.get("data_url"):
-        return {"error": data.get("error") if isinstance(data, dict) else "show_image: failed to read image", "exit_code": 1}
+    if (
+        not isinstance(data, dict)
+        or data.get("exit_code") not in (0, None)
+        or not data.get("data_url")
+    ):
+        return {
+            "error": data.get("error")
+            if isinstance(data, dict)
+            else "show_image: failed to read image",
+            "exit_code": 1,
+        }
     name = data.get("name") or path
     image = {"name": name, "data_url": data["data_url"]}
     if caption:
@@ -878,6 +976,7 @@ async def _do_run_cell(
     if not code.strip():
         return {"error": "run_cell: code is required", "exit_code": 1}
     from src.sandbox_client import run_cell_in_sandbox, sandbox_enabled
+
     if not sandbox_enabled() or not session_id:
         return {"error": "run_cell: requires the sandbox (no session available)", "exit_code": 1}
     try:
@@ -891,7 +990,11 @@ async def _do_run_cell(
     output = stdout
     if stderr:
         output = (output + "\nSTDERR: " + stderr).strip() if output else "STDERR: " + stderr
-    result: Dict = {"output": _truncate(output or "(no output)", MAX_OUTPUT_CHARS), "exit_code": rc, "sandboxed": True}
+    result: Dict = {
+        "output": _truncate(output or "(no output)", MAX_OUTPUT_CHARS),
+        "exit_code": rc,
+        "sandboxed": True,
+    }
     imgs = data.get("images") or []
     if imgs:
         result["created_images"] = imgs
@@ -959,7 +1062,12 @@ async def _direct_fallback(
                 progress_cb=progress_cb,
             )
             if timed_out:
-                return {"error": f"bash: timed out after {DEFAULT_BASH_TIMEOUT}s — process killed", "exit_code": 124, "stdout": _truncate(stdout, MAX_OUTPUT_CHARS), "stderr": _truncate(stderr, MAX_OUTPUT_CHARS)}
+                return {
+                    "error": f"bash: timed out after {DEFAULT_BASH_TIMEOUT}s — process killed",
+                    "exit_code": 124,
+                    "stdout": _truncate(stdout, MAX_OUTPUT_CHARS),
+                    "stderr": _truncate(stderr, MAX_OUTPUT_CHARS),
+                }
             output = stdout.rstrip()
             err = stderr.rstrip()
             if err:
@@ -983,7 +1091,10 @@ async def _direct_fallback(
             proc = await asyncio.create_subprocess_exec(
                 # Use the running interpreter — there is no `python3.exe` on
                 # Windows, which made the agent's `python` tool fail there.
-                (sys.executable or "python"), "-I", "-c", content,
+                (sys.executable or "python"),
+                "-I",
+                "-c",
+                content,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 env=_subproc_env,
@@ -995,7 +1106,12 @@ async def _direct_fallback(
                 progress_cb=progress_cb,
             )
             if timed_out:
-                return {"error": f"python: timed out after {DEFAULT_PYTHON_TIMEOUT}s — process killed", "exit_code": 124, "stdout": _truncate(stdout, MAX_OUTPUT_CHARS), "stderr": _truncate(stderr, MAX_OUTPUT_CHARS)}
+                return {
+                    "error": f"python: timed out after {DEFAULT_PYTHON_TIMEOUT}s — process killed",
+                    "exit_code": 124,
+                    "stdout": _truncate(stdout, MAX_OUTPUT_CHARS),
+                    "stderr": _truncate(stderr, MAX_OUTPUT_CHARS),
+                }
             output = stdout.rstrip()
             err = stderr.rstrip()
             if err:
@@ -1027,8 +1143,11 @@ async def _direct_fallback(
                 except (_json.JSONDecodeError, TypeError, ValueError):
                     pass
             try:
-                path = (_resolve_tool_path_in_workspace(workspace, raw_path)
-                        if workspace else _resolve_tool_path(raw_path))
+                path = (
+                    _resolve_tool_path_in_workspace(workspace, raw_path)
+                    if workspace
+                    else _resolve_tool_path(raw_path)
+                )
             except ValueError as e:
                 return {"error": f"read_file: {e}", "exit_code": 1}
             try:
@@ -1053,6 +1172,7 @@ async def _direct_fallback(
                         return "".join(out)
                     with open(path, "r", encoding="utf-8", errors="replace") as f:
                         return f.read(MAX_READ_CHARS + 1)
+
                 data = await asyncio.to_thread(_read)
             except FileNotFoundError:
                 return {"error": f"read_file: {path}: not found", "exit_code": 1}
@@ -1071,11 +1191,15 @@ async def _direct_fallback(
             raw_path = lines[0].strip()
             body = lines[1] if len(lines) > 1 else ""
             try:
-                path = (_resolve_tool_path_in_workspace(workspace, raw_path)
-                        if workspace else _resolve_tool_path(raw_path))
+                path = (
+                    _resolve_tool_path_in_workspace(workspace, raw_path)
+                    if workspace
+                    else _resolve_tool_path(raw_path)
+                )
             except ValueError as e:
                 return {"error": f"write_file: {e}", "exit_code": 1}
             try:
+
                 def _write():
                     # Capture prior content (best-effort, text) so we can show a
                     # before/after diff. Missing/binary file → treat as empty.
@@ -1091,6 +1215,7 @@ async def _direct_fallback(
                     with open(path, "w", encoding="utf-8") as f:
                         f.write(body)
                     return old, len(body)
+
                 old_content, size = await asyncio.to_thread(_write)
             except PermissionError:
                 return {"error": f"write_file: {path}: permission denied", "exit_code": 1}
@@ -1132,10 +1257,17 @@ async def _direct_fallback(
             def _grep():
                 import re as _re
                 import shutil
+
                 rg = shutil.which("rg")
                 if rg:
-                    cmd = [rg, "--line-number", "--no-heading", "--color=never",
-                           "--max-count", str(max_hits)]
+                    cmd = [
+                        rg,
+                        "--line-number",
+                        "--no-heading",
+                        "--color=never",
+                        "--max-count",
+                        str(max_hits),
+                    ]
                     if ignore_case:
                         cmd.append("--ignore-case")
                     if glob_pat:
@@ -1147,6 +1279,7 @@ async def _direct_fallback(
                     cmd += ["--regexp", pattern, root]
                     try:
                         import subprocess
+
                         p = subprocess.run(cmd, capture_output=True, text=True, timeout=20)
                         lines = [ln for ln in (p.stdout or "").splitlines() if ln][:max_hits]
                         return lines, None
@@ -1160,6 +1293,7 @@ async def _direct_fallback(
                 except _re.error as _e:
                     return None, f"grep: bad pattern: {_e}"
                 import fnmatch
+
                 hits = []
                 if os.path.isfile(root):
                     file_iter = [root]
@@ -1215,6 +1349,7 @@ async def _direct_fallback(
 
             def _glob():
                 from pathlib import Path
+
                 base = Path(root)
                 if not base.is_dir():
                     return None, f"glob: {root}: not a directory"
@@ -1271,7 +1406,9 @@ async def _direct_fallback(
                                 continue
                             try:
                                 is_dir = entry.is_dir(follow_symlinks=False)
-                                size = entry.stat(follow_symlinks=False).st_size if not is_dir else 0
+                                size = (
+                                    entry.stat(follow_symlinks=False).st_size if not is_dir else 0
+                                )
                             except OSError:
                                 continue
                             rows.append((is_dir, entry.name, size))
@@ -1305,6 +1442,7 @@ async def _direct_fallback(
 # Dispatcher
 # ---------------------------------------------------------------------------
 
+
 async def execute_tool_block(
     block: Any,
     session_id: Optional[str] = None,
@@ -1320,14 +1458,26 @@ async def execute_tool_block(
     events while the command is in flight. Ignored by other tools.
     """
     from src.tool_implementations import (
-        do_create_document, do_update_document, do_edit_document,
-        do_suggest_document, do_search_chats, do_manage_tasks,
-        do_manage_skills, do_api_call, do_manage_endpoints,
-        do_manage_mcp, do_manage_webhooks, do_manage_tokens,
-        do_manage_documents, do_manage_settings, do_query_sql,
-        do_edit_image,
-        do_vault_search, do_vault_get, do_vault_unlock,
+        do_api_call,
         do_app_api,
+        do_create_document,
+        do_edit_document,
+        do_edit_image,
+        do_manage_documents,
+        do_manage_endpoints,
+        do_manage_mcp,
+        do_manage_settings,
+        do_manage_skills,
+        do_manage_tasks,
+        do_manage_tokens,
+        do_manage_webhooks,
+        do_query_sql,
+        do_search_chats,
+        do_suggest_document,
+        do_update_document,
+        do_vault_get,
+        do_vault_search,
+        do_vault_unlock,
     )
 
     tool = block.tool_type
@@ -1336,9 +1486,14 @@ async def execute_tool_block(
     # Misformatted tool call detection: model put JSON inside ```python``` (or
     # similar) without naming the tool. Common with MiniMax-style outputs.
     # Return a helpful error so the model retries with the correct format.
-    if tool in ("python", "json", "xml") and content.strip().startswith("{") and content.strip().endswith("}"):
+    if (
+        tool in ("python", "json", "xml")
+        and content.strip().startswith("{")
+        and content.strip().endswith("}")
+    ):
         try:
             import json as _json
+
             parsed = _json.loads(content.strip())
             if isinstance(parsed, dict):
                 desc = f"{tool}: misformatted tool call"
@@ -1347,11 +1502,11 @@ async def execute_tool_block(
                         f"You wrote a JSON object inside a ```{tool}``` block, but that's not a tool call.\n"
                         "To call a tool, use the tool name as the fence tag, e.g.\n"
                         "```edit_file\n"
-                        "{\"path\": \"...\", \"old_string\": \"...\", \"new_string\": \"...\"}\n"
+                        '{"path": "...", "old_string": "...", "new_string": "..."}\n'
                         "```\n"
                         "or\n"
                         "```grep\n"
-                        "{\"pattern\": \"...\"}\n"
+                        '{"pattern": "..."}\n'
                         "```"
                     ),
                     "exit_code": 1,
@@ -1392,6 +1547,7 @@ async def execute_tool_block(
     # the user's selection (their choice arrives as the next message).
     if tool == "ask_user":
         import json as _json
+
         question, options, multi = "", [], False
         raw = (content or "").strip()
         try:
@@ -1401,7 +1557,7 @@ async def execute_tool_block(
         if isinstance(parsed, dict):
             question = str(parsed.get("question", "")).strip()
             multi = bool(parsed.get("multi") or parsed.get("multiSelect"))
-            for opt in (parsed.get("options") or []):
+            for opt in parsed.get("options") or []:
                 if isinstance(opt, dict):
                     label = str(opt.get("label", "")).strip()
                     descr = str(opt.get("description", "")).strip()
@@ -1441,6 +1597,7 @@ async def execute_tool_block(
 
     if tool == "update_plan":
         import json as _json
+
         raw = (content or "").strip()
         plan = ""
         try:
@@ -1462,7 +1619,9 @@ async def execute_tool_block(
         desc = f"update_plan: {done}/{total} done" if total else "update_plan"
         result = {
             "plan_update": {"plan": plan},
-            "output": f"Plan updated ({done}/{total} steps complete)." if total else "Plan updated.",
+            "output": f"Plan updated ({done}/{total} steps complete)."
+            if total
+            else "Plan updated.",
             "exit_code": 0,
         }
         logger.info("Tool executed: %s", desc)
@@ -1476,6 +1635,7 @@ async def execute_tool_block(
         _is_bg, _bg_cmd = _split_bg_marker(content)
         if _is_bg and _bg_cmd:
             from src.sandbox_client import sandbox_enabled
+
             short = _bg_cmd.strip().split(chr(10))[0][:80]
             if sandbox_enabled():
                 # Containment: the local detached path (bg_jobs) runs on the
@@ -1485,13 +1645,17 @@ async def execute_tool_block(
                 # the sandbox. The chat waits for it (progress still streams).
                 desc = f"bash (sandbox): {short}"
                 result = await _try_sandbox_exec(
-                    tool="bash", content=_bg_cmd, session_id=session_id,
-                    owner=owner, timeout=DEFAULT_BASH_TIMEOUT,
+                    tool="bash",
+                    content=_bg_cmd,
+                    session_id=session_id,
+                    owner=owner,
+                    timeout=DEFAULT_BASH_TIMEOUT,
                 ) or {"error": "bash: sandbox unavailable", "exit_code": 1, "sandboxed": True}
                 logger.info("Tool executed: %s (in-sandbox, bg marker ignored)", desc)
                 return desc, result
             # Sandbox OFF (dev only): keep the legacy local detached job.
             from src import bg_jobs
+
             rec = bg_jobs.launch(_bg_cmd, session_id=session_id, cwd=workspace or _AGENT_WORKDIR)
             desc = f"bash (background): {short}"
             result = {
@@ -1513,14 +1677,27 @@ async def execute_tool_block(
     if tool in _MCP_TOOL_MAP:
         first_line = content.split(chr(10))[0][:80]
         desc = f"{tool}: {first_line}"
-        result = await _call_mcp_tool(tool, content, progress_cb=progress_cb, workspace=workspace, session_id=session_id, owner=owner)
+        result = await _call_mcp_tool(
+            tool,
+            content,
+            progress_cb=progress_cb,
+            workspace=workspace,
+            session_id=session_id,
+            owner=owner,
+        )
     elif tool in ("grep", "glob", "ls"):
         # Code-navigation tools — no MCP server; run the direct implementation.
         # Confined to the workspace when one is set (same policy as read_file).
         first_line = content.split(chr(10))[0][:80]
         desc = f"{tool}: {first_line}"
-        result = await _direct_fallback(tool, content, progress_cb=progress_cb, workspace=workspace, session_id=session_id, owner=owner) \
-            or {"error": f"{tool}: execution failed", "exit_code": 1}
+        result = await _direct_fallback(
+            tool,
+            content,
+            progress_cb=progress_cb,
+            workspace=workspace,
+            session_id=session_id,
+            owner=owner,
+        ) or {"error": f"{tool}: execution failed", "exit_code": 1}
     elif tool == "create_document":
         title = content.split("\n")[0].strip()[:60]
         desc = f"create_document: {title}"
@@ -1538,11 +1715,20 @@ async def execute_tool_block(
         query = content.split("\n")[0].strip()
         desc = f"search_chats: {query[:80]}"
         result = await do_search_chats(query, owner=owner)
-    elif tool in ("chat_with_model", "create_session", "list_sessions",
-                  "send_to_session", "pipeline",
-                  "manage_session", "manage_memory", "list_models",
-                  "ui_control", "ask_teacher"):
+    elif tool in (
+        "chat_with_model",
+        "create_session",
+        "list_sessions",
+        "send_to_session",
+        "pipeline",
+        "manage_session",
+        "manage_memory",
+        "list_models",
+        "ui_control",
+        "ask_teacher",
+    ):
         from src.ai_interaction import dispatch_ai_tool
+
         desc, result = await dispatch_ai_tool(tool, content, session_id, owner=owner)
     elif tool == "manage_tasks":
         desc = "manage_tasks"
@@ -1584,9 +1770,12 @@ async def execute_tool_block(
     elif tool == "expand_output":
         desc = "expand_output"
         from src.context_optimizer import do_expand_output
+
         result = do_expand_output(content)
     elif tool == "edit_file":
-        result = await _try_sandbox_file_tool(tool=tool, content=content, session_id=session_id, owner=owner)
+        result = await _try_sandbox_file_tool(
+            tool=tool, content=content, session_id=session_id, owner=owner
+        )
         if result is None:
             result = await _do_edit_file(content, workspace=workspace)
         desc = result.get("output") or result.get("error") or "edit_file"
@@ -1632,10 +1821,26 @@ async def execute_tool_block(
 
 # Keys handled by the dedicated branches below — never echo them as raw JSON.
 _FORMATTER_HANDLED_KEYS = {
-    "stdout", "stderr", "exit_code", "content", "size",
-    "response", "results", "session_id", "name", "model", "session_name",
-    "success", "path", "action", "title", "doc_id", "version", "applied",
-    "error", "output",
+    "stdout",
+    "stderr",
+    "exit_code",
+    "content",
+    "size",
+    "response",
+    "results",
+    "session_id",
+    "name",
+    "model",
+    "session_name",
+    "success",
+    "path",
+    "action",
+    "title",
+    "doc_id",
+    "version",
+    "applied",
+    "error",
+    "output",
 }
 
 
@@ -1655,7 +1860,9 @@ def format_tool_result(description: str, result: Dict) -> str:
         if result.get("exit_code") not in (0, None):
             parts.append(f"**exit_code:** {result['exit_code']}")
     elif "content" in result:
-        parts.append(f"**content ({result.get('size', '?')} chars):**\n```\n{result['content']}\n```")
+        parts.append(
+            f"**content ({result.get('size', '?')} chars):**\n```\n{result['content']}\n```"
+        )
     elif "response" in result:
         model = result.get("model", result.get("session_name", ""))
         if model:
@@ -1665,7 +1872,9 @@ def format_tool_result(description: str, result: Dict) -> str:
     elif "results" in result:
         parts.append(result["results"])
     elif "session_id" in result and "name" in result:
-        parts.append(f"Session created: **{result['name']}** (id: `{result['session_id']}`, model: {result.get('model', 'unknown')})")
+        parts.append(
+            f"Session created: **{result['name']}** (id: `{result['session_id']}`, model: {result.get('model', 'unknown')})"
+        )
     elif "success" in result:
         if result["success"]:
             parts.append(f"File written: {result['path']} ({result['size']} bytes)")
@@ -1674,11 +1883,15 @@ def format_tool_result(description: str, result: Dict) -> str:
     elif "action" in result:
         action = result["action"]
         if action == "create":
-            parts.append(f"Document created: \"{result.get('title', '')}\" (id: {result['doc_id']}, v{result['version']})")
+            parts.append(
+                f'Document created: "{result.get("title", "")}" (id: {result["doc_id"]}, v{result["version"]})'
+            )
         elif action == "update":
-            parts.append(f"Document updated: \"{result.get('title', '')}\" (v{result['version']})")
+            parts.append(f'Document updated: "{result.get("title", "")}" (v{result["version"]})')
         elif action == "edit":
-            parts.append(f'Document edited: "{result.get("title", "")}" (v{result.get("version", "?")}, {result.get("applied", 0)} edit(s) applied)')
+            parts.append(
+                f'Document edited: "{result.get("title", "")}" (v{result.get("version", "?")}, {result.get("applied", 0)} edit(s) applied)'
+            )
     elif "error" in result:
         parts.append(f"**Error:** {result['error']}")
 

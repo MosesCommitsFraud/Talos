@@ -19,9 +19,10 @@ def check_readiness() -> Dict[str, object]:
     ``local_first`` is informational — a remote database is a valid deployment, so
     it never fails readiness, it only reports whether storage stays on this host.
     """
+    from sqlalchemy import text as sql_text
+
     from core.constants import APP_VERSION, DATA_DIR
     from core.database import DATABASE_URL, engine
-    from sqlalchemy import text as sql_text
 
     checks: Dict[str, Dict[str, object]] = {}
 

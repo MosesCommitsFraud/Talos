@@ -18,8 +18,10 @@ def test_small_output_untouched():
 
 
 def test_large_json_array_is_crushed_and_reversible():
-    rows = [{"id": i, "name": f"user{i}", "email": f"user{i}@example.com",
-             "bio": "x" * 80} for i in range(500)]
+    rows = [
+        {"id": i, "name": f"user{i}", "email": f"user{i}@example.com", "bio": "x" * 80}
+        for i in range(500)
+    ]
     text = json.dumps(rows)
     out = co.optimize_tool_output(text, tool_name="api_call")
 
@@ -44,7 +46,9 @@ def test_repeated_log_lines_collapse():
 
 
 def test_head_tail_keeps_both_ends():
-    text = "START-MARKER\n" + "".join(f"middle filler line {i}\n" for i in range(3000)) + "END-MARKER"
+    text = (
+        "START-MARKER\n" + "".join(f"middle filler line {i}\n" for i in range(3000)) + "END-MARKER"
+    )
     out = co.optimize_tool_output(text, tool_name="read_file")
     assert out.startswith("START-MARKER")
     assert "END-MARKER" in out
@@ -86,17 +90,11 @@ def test_store_eviction_bounded():
 def test_compact_threshold_clamps(monkeypatch):
     from src import context_compactor as cc
 
-    monkeypatch.setattr(
-        "src.settings.load_settings", lambda: {"compact_threshold": 70}
-    )
+    monkeypatch.setattr("src.settings.load_settings", lambda: {"compact_threshold": 70})
     assert cc.get_compact_threshold() == 0.70
 
-    monkeypatch.setattr(
-        "src.settings.load_settings", lambda: {"compact_threshold": 0.05}
-    )
+    monkeypatch.setattr("src.settings.load_settings", lambda: {"compact_threshold": 0.05})
     assert cc.get_compact_threshold() == 0.30
 
-    monkeypatch.setattr(
-        "src.settings.load_settings", lambda: {"compact_threshold": "bogus"}
-    )
+    monkeypatch.setattr("src.settings.load_settings", lambda: {"compact_threshold": "bogus"})
     assert cc.get_compact_threshold() == cc.COMPACT_THRESHOLD

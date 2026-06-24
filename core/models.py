@@ -6,7 +6,7 @@ These are simple datacontainers. All persistence is handled by SessionManager.
 """
 
 from dataclasses import dataclass
-from typing import Dict, List, Any, Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 if TYPE_CHECKING:
     from .session_manager import SessionManager
@@ -24,6 +24,7 @@ def set_session_manager(manager: "SessionManager"):
 @dataclass
 class ChatMessage:
     """A single chat message."""
+
     role: str
     content: str
     metadata: Optional[Dict[str, Any]] = None
@@ -43,6 +44,7 @@ class ChatMessage:
 @dataclass
 class Session:
     """A chat session — pure data container."""
+
     id: str
     name: str
     endpoint_url: str
@@ -86,9 +88,7 @@ class Session:
         unaffected.
         """
         return [
-            msg.to_dict()
-            for msg in self.history
-            if (msg.metadata or {}).get("source") != "slash"
+            msg.to_dict() for msg in self.history if (msg.metadata or {}).get("source") != "slash"
         ]
 
     def get(self, key: str, default=None):

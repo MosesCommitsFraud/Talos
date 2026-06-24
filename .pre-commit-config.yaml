@@ -1,0 +1,27 @@
+# Local commit-time gate — the solo-dev stand-in for PR checks.
+# One-time setup:
+#   pip install -r requirements-dev.txt
+#   pre-commit install
+# Normalize the existing tree once (formats + auto-fixes everything):
+#   pre-commit run --all-files
+#
+# After that it runs automatically on `git commit`, touching only staged files.
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.9.6
+    hooks:
+      # Lint (auto-fixes what it safely can, e.g. import sorting / unused imports).
+      - id: ruff
+        args: [--fix]
+      # Format (Black-compatible).
+      - id: ruff-format
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-merge-conflict
+      - id: check-yaml
+      - id: check-added-large-files
+        args: [--maxkb=1024]

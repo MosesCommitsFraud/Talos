@@ -1,9 +1,9 @@
 import json
-import os
-import uuid
 import logging
+import os
 import re
-from typing import Dict, List, Optional, Any
+import uuid
+from typing import Any, Dict, List, Optional
 
 import httpx
 
@@ -28,15 +28,15 @@ INTEGRATION_PRESETS: Dict[str, Dict[str, Any]] = {
             "Miniflux RSS reader (v1 API). Key endpoints:\n"
             "  GET /v1/feeds — list all feeds\n"
             "  GET /v1/feeds/{id} — get feed details\n"
-            "  POST /v1/feeds — create feed {\"feed_url\": \"...\", \"category_id\": N}\n"
+            '  POST /v1/feeds — create feed {"feed_url": "...", "category_id": N}\n'
             "  PUT /v1/feeds/{id} — update feed\n"
             "  DELETE /v1/feeds/{id} — delete feed\n"
             "  GET /v1/feeds/{id}/entries — list entries for feed\n"
             "  GET /v1/entries — list all entries (params: status, limit, order, direction, category_id)\n"
             "  GET /v1/entries/{id} — get single entry\n"
-            "  PUT /v1/entries — update entries {\"entry_ids\": [...], \"status\": \"read|unread\"}\n"
+            '  PUT /v1/entries — update entries {"entry_ids": [...], "status": "read|unread"}\n'
             "  GET /v1/categories — list categories\n"
-            "  POST /v1/categories — create category {\"title\": \"...\"}\n"
+            '  POST /v1/categories — create category {"title": "..."}\n'
             "  GET /v1/feeds/{id}/icon — get feed icon\n"
             "  PUT /v1/entries/{id}/bookmark — toggle bookmark"
         ),
@@ -50,7 +50,7 @@ INTEGRATION_PRESETS: Dict[str, Dict[str, Any]] = {
             "  GET /api/v1/repos/search — search repositories\n"
             "  GET /api/v1/repos/{owner}/{repo} — get repo details\n"
             "  GET /api/v1/repos/{owner}/{repo}/issues — list issues\n"
-            "  POST /api/v1/repos/{owner}/{repo}/issues — create issue {\"title\": \"...\"}\n"
+            '  POST /api/v1/repos/{owner}/{repo}/issues — create issue {"title": "..."}\n'
             "  GET /api/v1/repos/{owner}/{repo}/pulls — list pull requests\n"
             "  GET /api/v1/repos/{owner}/{repo}/commits — list commits\n"
             "  GET /api/v1/user/repos — list your repos\n"
@@ -66,7 +66,7 @@ INTEGRATION_PRESETS: Dict[str, Dict[str, Any]] = {
             "Linkding bookmark manager API. Auth header value format: 'Token YOUR_TOKEN'. Key endpoints:\n"
             "  GET /api/bookmarks/ — list bookmarks (params: q, limit, offset)\n"
             "  GET /api/bookmarks/{id}/ — get bookmark\n"
-            "  POST /api/bookmarks/ — create bookmark {\"url\": \"...\", \"title\": \"...\", \"tag_names\": [...]}\n"
+            '  POST /api/bookmarks/ — create bookmark {"url": "...", "title": "...", "tag_names": [...]}\n'
             "  PUT /api/bookmarks/{id}/ — update bookmark\n"
             "  DELETE /api/bookmarks/{id}/ — delete bookmark\n"
             "  GET /api/bookmarks/archived/ — list archived bookmarks\n"
@@ -96,7 +96,7 @@ INTEGRATION_PRESETS: Dict[str, Dict[str, Any]] = {
             "ntfy push notification service. Key endpoints:\n"
             "  POST /{topic} — send notification. Body is the message text.\n"
             "    Headers: Title (notification title), Priority (1-5), Tags (comma-separated emoji tags)\n"
-            "  POST / — send JSON notification {\"topic\": \"...\", \"message\": \"...\", \"title\": \"...\", \"priority\": N}\n"
+            '  POST / — send JSON notification {"topic": "...", "message": "...", "title": "...", "priority": N}\n'
             "  GET /{topic}/json?poll=1 — poll for messages"
         ),
     },
@@ -110,11 +110,11 @@ INTEGRATION_PRESETS: Dict[str, Dict[str, Any]] = {
             "Key endpoints:\n"
             "  GET /api/ciphers — list all vault items (logins, notes, cards, identities)\n"
             "  GET /api/ciphers/{id} — get a single vault item\n"
-            "  POST /api/ciphers — create vault item {\"type\": 1, \"name\": \"...\", \"login\": {\"uri\": \"...\", \"username\": \"...\", \"password\": \"...\"}}\n"
+            '  POST /api/ciphers — create vault item {"type": 1, "name": "...", "login": {"uri": "...", "username": "...", "password": "..."}}\n'
             "  PUT /api/ciphers/{id} — update vault item\n"
             "  DELETE /api/ciphers/{id} — delete vault item\n"
             "  GET /api/folders — list folders\n"
-            "  POST /api/folders — create folder {\"name\": \"...\"}\n"
+            '  POST /api/folders — create folder {"name": "..."}\n'
             "  GET /api/collections — list collections (org vaults)\n"
             "  POST /api/ciphers/{id}/password-history — get password history\n"
             "  GET /api/sends — list Bitwarden Send items\n"
@@ -277,6 +277,7 @@ def delete_integration(integration_id: str) -> bool:
 # API execution
 # ---------------------------------------------------------------------------
 
+
 def _strip_html_tags(html: str) -> str:
     """Rough HTML tag stripping."""
     text = re.sub(r"<[^>]+>", "", html)
@@ -429,6 +430,7 @@ async def execute_api_call(
 # System prompt helper
 # ---------------------------------------------------------------------------
 
+
 def get_integrations_prompt() -> str:
     """Return a string describing all enabled integrations for system prompt injection.
 
@@ -455,10 +457,13 @@ def get_integrations_prompt() -> str:
 # Migration
 # ---------------------------------------------------------------------------
 
+
 def migrate_from_settings() -> None:
     """If data/settings.json has miniflux_url and miniflux_api_key, create a
     Miniflux integration and clear those keys from settings."""
-    settings_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "settings.json")
+    settings_path = os.path.join(
+        os.path.dirname(os.path.dirname(__file__)), "data", "settings.json"
+    )
     if not os.path.exists(settings_path):
         return
 
@@ -481,11 +486,13 @@ def migrate_from_settings() -> None:
             log.info("Miniflux integration already exists, skipping migration")
             return
 
-    add_integration({
-        "preset": "miniflux",
-        "base_url": miniflux_url.rstrip("/"),
-        "api_key": miniflux_key,
-    })
+    add_integration(
+        {
+            "preset": "miniflux",
+            "base_url": miniflux_url.rstrip("/"),
+            "api_key": miniflux_key,
+        }
+    )
 
     # Clear migrated keys
     settings.pop("miniflux_url", None)

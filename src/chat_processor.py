@@ -4,7 +4,8 @@ import math
 import re
 import time
 from collections import Counter
-from typing import List, Dict, Any, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
+
 from src.prompt_security import UNTRUSTED_CONTEXT_POLICY, untrusted_context_message
 
 logger = logging.getLogger(__name__)
@@ -32,9 +33,10 @@ _STOPWORDS = frozenset(
     "that's there's here's what's who's how's let's can't".split()
 )
 
+
 def _content_tokens(text: str) -> list:
     """Extract meaningful content words: no stopwords, min 3 chars, lowercase."""
-    words = re.findall(r'[a-z0-9]+(?:[-_][a-z0-9]+)*', text.lower())
+    words = re.findall(r"[a-z0-9]+(?:[-_][a-z0-9]+)*", text.lower())
     return [w for w in words if len(w) >= 3 and w not in _STOPWORDS]
 
 
@@ -59,7 +61,9 @@ def _chunk_relevant_to_query(query: str, document: str) -> bool:
 
 
 class ChatProcessor:
-    def __init__(self, memory_manager, personal_docs_manager, memory_vector=None, skills_manager=None):
+    def __init__(
+        self, memory_manager, personal_docs_manager, memory_vector=None, skills_manager=None
+    ):
         self.memory_manager = memory_manager
         self.personal_docs_manager = personal_docs_manager
         self.memory_vector = memory_vector
@@ -171,7 +175,9 @@ class ChatProcessor:
             mem_lower = mem["text"].lower()
             cat_boost = 1.0
             if any(w in msg_lower for w in ["name", "who am i", "my name"]):
-                if category == "identity" or any(w in mem_lower for w in ["name is", "i am", "called"]):
+                if category == "identity" or any(
+                    w in mem_lower for w in ["name is", "i am", "called"]
+                ):
                     cat_boost = 1.4
             elif any(w in msg_lower for w in ["phone", "email", "address", "contact"]):
                 if category == "contact" or "@" in mem_lower:
@@ -228,23 +234,25 @@ class ChatProcessor:
 
         # Add preset system prompt if specified
         if preset_system_prompt:
-            preface.append({
-                "role": "system",
-                "content": preset_system_prompt
-            })
+            preface.append({"role": "system", "content": preset_system_prompt})
         if not agent_mode:
             try:
                 from src.user_time import current_datetime_prompt
-                preface.append({
-                    "role": "system",
-                    "content": current_datetime_prompt(),
-                })
+
+                preface.append(
+                    {
+                        "role": "system",
+                        "content": current_datetime_prompt(),
+                    }
+                )
             except Exception:
                 logger.debug("Failed to add current date/time context", exc_info=True)
-        preface.append({
-            "role": "system",
-            "content": UNTRUSTED_CONTEXT_POLICY,
-        })
+        preface.append(
+            {
+                "role": "system",
+                "content": UNTRUSTED_CONTEXT_POLICY,
+            }
+        )
 
         # Memory: pinned (always included) + extended (RAG-retrieved when relevant)
         self._last_used_memories = []  # track what was injected
@@ -257,12 +265,16 @@ class ChatProcessor:
             _used_ids: list = []
             if pinned:
                 pinned_text = "\n- ".join([m["text"] for m in pinned])
-                preface.append(untrusted_context_message(
-                    "saved memory: pinned user facts",
-                    f"Core facts about the user:\n- {pinned_text}",
-                ))
+                preface.append(
+                    untrusted_context_message(
+                        "saved memory: pinned user facts",
+                        f"Core facts about the user:\n- {pinned_text}",
+                    )
+                )
                 for m in pinned:
-                    self._last_used_memories.append({"text": m["text"], "category": m.get("category", "fact"), "type": "pinned"})
+                    self._last_used_memories.append(
+                        {"text": m["text"], "category": m.get("category", "fact"), "type": "pinned"}
+                    )
                     if m.get("id"):
                         _used_ids.append(m["id"])
 
@@ -270,15 +282,23 @@ class ChatProcessor:
                 relevant = self._hybrid_retrieve(message, extended, k=3)
                 if relevant:
                     ext_text = "\n".join([f"- {m['text']}" for m in relevant])
-                    preface.append(untrusted_context_message(
-                        "saved memory: retrieved context",
-                        (
-                            "Memory context. Do not reference unless the user asks "
-                            f"about these topics.\n{ext_text}"
-                        ),
-                    ))
+                    preface.append(
+                        untrusted_context_message(
+                            "saved memory: retrieved context",
+                            (
+                                "Memory context. Do not reference unless the user asks "
+                                f"about these topics.\n{ext_text}"
+                            ),
+                        )
+                    )
                     for m in relevant:
-                        self._last_used_memories.append({"text": m["text"], "category": m.get("category", "fact"), "type": "recalled"})
+                        self._last_used_memories.append(
+                            {
+                                "text": m["text"],
+                                "category": m.get("category", "fact"),
+                                "type": "recalled",
+                            }
+                        )
                         if m.get("id"):
                             _used_ids.append(m["id"])
 
@@ -305,9 +325,10 @@ class ChatProcessor:
                     if not rag_manager.configured:
                         rag_manager = None
                 else:
-                    rag_manager = getattr(self.personal_docs_manager, 'rag_manager', None)
+                    rag_manager = getattr(self.personal_docs_manager, "rag_manager", None)
                     if not rag_manager:
                         from src.rag_singleton import get_rag_manager
+
                         rag_manager = get_rag_manager()
                         if rag_manager and self.personal_docs_manager is not None:
                             self.personal_docs_manager.rag_manager = rag_manager
@@ -316,16 +337,31 @@ class ChatProcessor:
                     # when enabled, indexed knowledge is available to every user.
                     rag_k = min(self._rag_k_setting("chat_top_k", 5), 20)
                     candidate_k = max(rag_k, min(self._rag_k_setting("candidate_top_k", 40), 100))
-                    rerank_min = self._rag_float_setting("rerank_min_score", self.RAG_RERANK_MIN_SCORE)
-                    sim_threshold = self._rag_float_setting("similarity_threshold", self.RAG_SIMILARITY_THRESHOLD)
+                    rerank_min = self._rag_float_setting(
+                        "rerank_min_score", self.RAG_RERANK_MIN_SCORE
+                    )
+                    sim_threshold = self._rag_float_setting(
+                        "similarity_threshold", self.RAG_SIMILARITY_THRESHOLD
+                    )
                     # Keep the SQL-only knowledge namespace out of ordinary RAG;
                     # those schema files are injected separately when the SQL
                     # source is active (see agent_loop force_db). The external
                     # client has no scope concept, so only pass it internally.
-                    if str(self._rag_cfg().get("provider") or "internal").strip().lower() == "external":
-                        results = rag_manager.search(message, k=rag_k, owner=None, candidate_k=candidate_k)
+                    if (
+                        str(self._rag_cfg().get("provider") or "internal").strip().lower()
+                        == "external"
+                    ):
+                        results = rag_manager.search(
+                            message, k=rag_k, owner=None, candidate_k=candidate_k
+                        )
                     else:
-                        results = rag_manager.search(message, k=rag_k, owner=None, candidate_k=candidate_k, exclude_scopes=["sql"])
+                        results = rag_manager.search(
+                            message,
+                            k=rag_k,
+                            owner=None,
+                            candidate_k=candidate_k,
+                            exclude_scopes=["sql"],
+                        )
                     # Decide which retrieved chunks are relevant enough to inject.
                     # When nothing clears the bar we inject NOTHING — no forced
                     # top-k fallback. Off-topic context confuses the model and
@@ -337,7 +373,8 @@ class ChatProcessor:
                         # its score directly. A vector-only match with no keyword
                         # overlap is fine here — the reranker already vetted it.
                         relevant = [
-                            r for r in results
+                            r
+                            for r in results
                             if r.get("rerank_score") is not None
                             and float(r.get("rerank_score") or 0) >= rerank_min
                         ]
@@ -347,15 +384,20 @@ class ChatProcessor:
                         # chunk to actually share distinctive query terms before
                         # injecting it.
                         relevant = [
-                            r for r in results
+                            r
+                            for r in results
                             if r.get("similarity", 0) >= sim_threshold
                             and _chunk_relevant_to_query(message, r.get("document", ""))
                         ]
                     if relevant:
-                        logger.info(f"RAG: {len(relevant)}/{len(results)} results above threshold {sim_threshold}")
+                        logger.info(
+                            f"RAG: {len(relevant)}/{len(results)} results above threshold {sim_threshold}"
+                        )
                         rag_sources = [
                             {
-                                "filename": r["metadata"].get("filename", r["metadata"].get("source", "unknown")),
+                                "filename": r["metadata"].get(
+                                    "filename", r["metadata"].get("source", "unknown")
+                                ),
                                 "snippet": r["document"][:200],
                                 "similarity": round(r.get("similarity", 0), 3),
                                 # Larger slice of the chunk, kept ONLY for the
@@ -373,7 +415,8 @@ class ChatProcessor:
                             "If the answer is present here, prefer it over general knowledge."
                         )
                         rag_content = (context_prompt + "\n\n") + "\n\n---\n\n".join(
-                            f"[{s['filename']}]\n{r['document']}" for s, r in zip(rag_sources, relevant)
+                            f"[{s['filename']}]\n{r['document']}"
+                            for s, r in zip(rag_sources, relevant)
                         )
                         try:
                             max_chars = int(self._rag_cfg().get("max_context_chars") or 10000)
@@ -382,7 +425,9 @@ class ChatProcessor:
                         max_chars = max(500, min(max_chars, 100000))
                         if len(rag_content) > max_chars:
                             rag_content = rag_content[:max_chars] + "\n[Truncated]"
-                        preface.append(untrusted_context_message("retrieved documents", rag_content))
+                        preface.append(
+                            untrusted_context_message("retrieved documents", rag_content)
+                        )
             except Exception as e:
                 logger.warning(f"RAG retrieval failed: {e}")
 
@@ -405,12 +450,16 @@ class ChatProcessor:
                 by_cat: Dict[str, list] = {}
                 for s in idx:
                     by_cat.setdefault(s.get("category") or "general", []).append(s)
-                lines = ["[Available skills — call manage_skills(action='view', name='...') to load one when relevant]"]
+                lines = [
+                    "[Available skills — call manage_skills(action='view', name='...') to load one when relevant]"
+                ]
                 for cat in sorted(by_cat):
                     lines.append(f"  {cat}:")
                     for s in sorted(by_cat[cat], key=lambda x: x["name"]):
                         desc = s.get("description") or ""
                         lines.append(f"    - {s['name']}: {desc}" if desc else f"    - {s['name']}")
-                preface.append(untrusted_context_message("available skills index", "\n".join(lines)))
+                preface.append(
+                    untrusted_context_message("available skills index", "\n".join(lines))
+                )
 
         return preface, rag_sources, web_sources

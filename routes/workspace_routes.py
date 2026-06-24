@@ -1,6 +1,8 @@
 """Workspace API — browse server directories to pick a tool workspace folder."""
+
 import os
-from fastapi import APIRouter, Request, HTTPException, Query
+
+from fastapi import APIRouter, HTTPException, Query, Request
 
 from src.auth_helpers import get_current_user
 from src.tool_security import owner_is_admin_or_single_user
@@ -40,7 +42,9 @@ def setup_workspace_routes():
                         if entry.is_dir(follow_symlinks=False) and not entry.name.startswith("."):
                             # Build the child path server-side with os.path.join
                             # so it's correct on Windows (backslashes) and Linux.
-                            dirs.append({"name": entry.name, "path": os.path.join(target, entry.name)})
+                            dirs.append(
+                                {"name": entry.name, "path": os.path.join(target, entry.name)}
+                            )
                     except OSError:
                         continue
         except (PermissionError, OSError):

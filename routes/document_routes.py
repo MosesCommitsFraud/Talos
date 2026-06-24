@@ -1,14 +1,14 @@
 """Document routes — CRUD for living documents with version history."""
 
-import uuid
 import logging
+import uuid
 from datetime import datetime, timezone
-from typing import Dict, Any, List, Optional
+from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, HTTPException, Query, Request, UploadFile, File, Form
-
+from fastapi import APIRouter, File, Form, HTTPException, Query, Request, UploadFile
 from sqlalchemy import func
-from core.database import SessionLocal, Document, DocumentVersion
+
+from core.database import Document, DocumentVersion, SessionLocal
 from core.database import Session as DbSession
 from src.auth_helpers import get_current_user
 
@@ -30,13 +30,19 @@ def _aggregate_language_facets(lang_rows):
     return out
 
 
-
 from routes.document_helpers import (
-    DocumentCreate, DocumentUpdate, DocumentPatch,
-    _doc_to_dict, _version_to_dict,
-    _verify_doc_owner, _owner_session_filter,
-    _slug, _resolve_user_upload_path, _assert_pdf_marker_upload_owned, _derive_title,
     _PDF_RENDER_SCALE,
+    DocumentCreate,
+    DocumentPatch,
+    DocumentUpdate,
+    _assert_pdf_marker_upload_owned,
+    _derive_title,
+    _doc_to_dict,
+    _owner_session_filter,
+    _resolve_user_upload_path,
+    _slug,
+    _verify_doc_owner,
+    _version_to_dict,
 )
 
 
@@ -61,6 +67,7 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
     @router.post("/api/document")
     async def create_document(request: Request, req: DocumentCreate) -> Dict[str, Any]:
         from src.auth_helpers import require_privilege
+
         user = require_privilege(request, "can_use_documents")
         db = SessionLocal()
         try:
@@ -91,6 +98,7 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
             language = req.language
             if not language:
                 from src.tool_implementations import _looks_like_email_document, _sniff_doc_language
+
                 language = _sniff_doc_language(req.content)
             else:
                 from src.tool_implementations import _looks_like_email_document
@@ -126,6 +134,7 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
             db.refresh(doc)
             try:
                 from src.event_bus import fire_event
+
                 fire_event("document_created", doc.owner)
             except Exception:
                 logger.debug("document_created event dispatch failed", exc_info=True)
@@ -153,16 +162,17 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
         with a `pdf_source` marker so the viewer renders the pages without
         overlays.
         """
-        from src.pdf_forms import has_form_fields, extract_fields
-        from src.pdf_form_doc import (
-            save_field_sidecar,
-            create_form_markdown_document,
-            create_plain_pdf_document,
-        )
-        from src.document_processor import _process_pdf, strip_pdf_content_marker
         import os
 
         from src.auth_helpers import require_privilege
+        from src.document_processor import _process_pdf, strip_pdf_content_marker
+        from src.pdf_form_doc import (
+            create_form_markdown_document,
+            create_plain_pdf_document,
+            save_field_sidecar,
+        )
+        from src.pdf_forms import extract_fields, has_form_fields
+
         user = require_privilege(request, "can_use_documents")
 
         # session_id is optional — a library import isn't tied to a chat. When
@@ -260,15 +270,20 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
         db = SessionLocal()
         try:
             from sqlalchemy import or_
+
             # Archived view shows ONLY archived docs; the default view excludes
             # them (NULL = legacy rows that predate the column = not archived).
-            _arch_cond = (Document.archived == True) if archived else or_(
-                Document.archived == False, Document.archived.is_(None))
+            _arch_cond = (
+                (Document.archived == True)
+                if archived
+                else or_(Document.archived == False, Document.archived.is_(None))
+            )
             # Language facet counts (owner-filtered)
             lang_q = (
                 db.query(Document.language, func.count(Document.id))
                 .outerjoin(DbSession, Document.session_id == DbSession.id)
-                .filter(Document.is_active == True).filter(_arch_cond)
+                .filter(Document.is_active == True)
+                .filter(_arch_cond)
             )
             lang_q = _owner_session_filter(lang_q, user)
             lang_rows = lang_q.group_by(Document.language).all()
@@ -278,7 +293,8 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
             sc_q = (
                 db.query(func.count(func.distinct(Document.session_id)))
                 .outerjoin(DbSession, Document.session_id == DbSession.id)
-                .filter(Document.is_active == True).filter(_arch_cond)
+                .filter(Document.is_active == True)
+                .filter(_arch_cond)
             )
             sc_q = _owner_session_filter(sc_q, user)
             session_count = sc_q.scalar()
@@ -287,7 +303,8 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
             q = (
                 db.query(Document, DbSession.name)
                 .outerjoin(DbSession, Document.session_id == DbSession.id)
-                .filter(Document.is_active == True).filter(_arch_cond)
+                .filter(Document.is_active == True)
+                .filter(_arch_cond)
             )
             q = _owner_session_filter(q, user)
 
@@ -299,9 +316,7 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
             if search:
                 for tok in search.split():
                     term = f"%{tok}%"
-                    q = q.filter(
-                        Document.title.ilike(term) | Document.current_content.ilike(term)
-                    )
+                    q = q.filter(Document.title.ilike(term) | Document.current_content.ilike(term))
 
             # Language filter
             if language:
@@ -327,17 +342,23 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
 
             documents = []
             for doc, session_name in rows:
-                documents.append({
-                    "id": doc.id,
-                    "session_id": doc.session_id,
-                    "session_name": session_name,
-                    "title": doc.title,
-                    "language": doc.language or "text",
-                    "preview": (doc.current_content or "")[:500],
-                    "version_count": doc.version_count,
-                    "created_at": (doc.created_at.isoformat() + "Z") if doc.created_at else None,
-                    "updated_at": (doc.updated_at.isoformat() + "Z") if doc.updated_at else None,
-                })
+                documents.append(
+                    {
+                        "id": doc.id,
+                        "session_id": doc.session_id,
+                        "session_name": session_name,
+                        "title": doc.title,
+                        "language": doc.language or "text",
+                        "preview": (doc.current_content or "")[:500],
+                        "version_count": doc.version_count,
+                        "created_at": (doc.created_at.isoformat() + "Z")
+                        if doc.created_at
+                        else None,
+                        "updated_at": (doc.updated_at.isoformat() + "Z")
+                        if doc.updated_at
+                        else None,
+                    }
+                )
 
             return {
                 "documents": documents,
@@ -368,9 +389,12 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
                 raise HTTPException(404, "Session not found")
             if user and session.owner and session.owner != user:
                 raise HTTPException(403, "Access denied")
-            docs = db.query(Document).filter(
-                Document.session_id == session_id
-            ).order_by(Document.created_at.desc()).all()
+            docs = (
+                db.query(Document)
+                .filter(Document.session_id == session_id)
+                .order_by(Document.created_at.desc())
+                .all()
+            )
             return [_doc_to_dict(d) for d in docs]
         finally:
             db.close()
@@ -396,6 +420,7 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
         finally:
             db.close()
         from src.sandbox_client import list_artifacts, sandbox_enabled
+
         if not sandbox_enabled():
             return {"artifacts": []}
         try:
@@ -409,16 +434,20 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
     @router.get("/api/artifacts/{session_id}/download")
     async def download_artifact_route(request: Request, session_id: str, path: str = Query(...)):
         from fastapi.responses import Response
+
         db = SessionLocal()
         try:
             owner = _verify_session_access(db, request, session_id)
         finally:
             db.close()
         from src.sandbox_client import download_artifact, sandbox_enabled
+
         if not sandbox_enabled():
             raise HTTPException(404, "Sandbox not available")
         try:
-            content, ctype, fname = await download_artifact(owner=owner, session_id=session_id, path=path)
+            content, ctype, fname = await download_artifact(
+                owner=owner, session_id=session_id, path=path
+            )
         except Exception as e:
             logger.warning("artifact download failed for %s (%s): %s", session_id, path, e)
             raise HTTPException(404, "File not found")
@@ -439,6 +468,7 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
         finally:
             db.close()
         from src.sandbox_client import delete_artifact, sandbox_enabled
+
         if not sandbox_enabled():
             raise HTTPException(404, "Sandbox not available")
         try:
@@ -454,12 +484,14 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
     @router.get("/api/artifacts/{session_id}/zip")
     async def zip_artifacts_route(request: Request, session_id: str):
         from fastapi.responses import Response
+
         db = SessionLocal()
         try:
             owner = _verify_session_access(db, request, session_id)
         finally:
             db.close()
         from src.sandbox_client import download_workspace_zip, sandbox_enabled
+
         if not sandbox_enabled():
             raise HTTPException(404, "Sandbox not available")
         try:
@@ -477,12 +509,14 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
     @router.post("/api/artifacts/{session_id}/run")
     async def run_artifact_route(request: Request, session_id: str, path: str = Query(...)):
         import shlex
+
         db = SessionLocal()
         try:
             owner = _verify_session_access(db, request, session_id)
         finally:
             db.close()
         from src.sandbox_client import exec_in_sandbox, sandbox_enabled
+
         if not sandbox_enabled():
             raise HTTPException(404, "Sandbox not available")
         ext = path.rsplit(".", 1)[-1].lower() if "." in path else ""
@@ -496,7 +530,9 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
         else:
             raise HTTPException(400, f"Don't know how to run .{ext or '?'} files")
         try:
-            data = await exec_in_sandbox(owner=owner, session_id=session_id, kind="bash", command=cmd, timeout=0)
+            data = await exec_in_sandbox(
+                owner=owner, session_id=session_id, kind="bash", command=cmd, timeout=0
+            )
         except Exception as e:
             logger.warning("artifact run failed for %s (%s): %s", session_id, path, e)
             raise HTTPException(500, "Run failed")
@@ -524,11 +560,14 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
         if not path:
             raise HTTPException(400, "path is required")
         from src.sandbox_client import file_tool_in_sandbox, sandbox_enabled
+
         if not sandbox_enabled():
             raise HTTPException(404, "Sandbox not available")
         try:
             res = await file_tool_in_sandbox(
-                owner=owner, session_id=session_id, operation="write",
+                owner=owner,
+                session_id=session_id,
+                operation="write",
                 payload={"path": path, "content": content},
             )
         except Exception as e:
@@ -554,7 +593,9 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
 
     # ---- POST /api/document/{doc_id}/archive — soft-archive / restore ----
     @router.post("/api/document/{doc_id}/archive")
-    async def archive_document(request: Request, doc_id: str, archived: bool = Query(True)) -> Dict[str, Any]:
+    async def archive_document(
+        request: Request, doc_id: str, archived: bool = Query(True)
+    ) -> Dict[str, Any]:
         user = get_current_user(request)
         db = SessionLocal()
         try:
@@ -579,6 +620,7 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
         text extraction was wired, plus for scanned/image-only PDFs where the
         VL model picks up text the basic pypdf path missed."""
         import re
+
         from src.document_processor import _process_pdf, strip_pdf_content_marker
         from src.pdf_form_doc import find_source_upload_id
 
@@ -606,23 +648,34 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
                 raise HTTPException(500, f"Extraction failed: {e}")
 
             if not body_text:
-                return {"ok": True, "id": doc_id, "extracted": False, "reason": "No readable content"}
+                return {
+                    "ok": True,
+                    "id": doc_id,
+                    "extracted": False,
+                    "reason": "No readable content",
+                }
 
             # Preserve everything up through the title (front-matter marker +
             # first H1) and replace the rest with the freshly extracted text.
-            head_re = re.compile(r'^(<!--[^>]+-->\s*\n+#[^\n]*\n+)', re.MULTILINE)
+            head_re = re.compile(r"^(<!--[^>]+-->\s*\n+#[^\n]*\n+)", re.MULTILINE)
             head_match = head_re.match(content)
-            head = head_match.group(1) if head_match else (content.splitlines()[0] + "\n\n# " + (doc.title or "PDF") + "\n\n")
+            head = (
+                head_match.group(1)
+                if head_match
+                else (content.splitlines()[0] + "\n\n# " + (doc.title or "PDF") + "\n\n")
+            )
             doc.current_content = head + body_text.strip() + "\n"
             doc.version_count = (doc.version_count or 1) + 1
-            db.add(DocumentVersion(
-                id=str(__import__("uuid").uuid4()),
-                document_id=doc_id,
-                version_number=doc.version_count,
-                content=doc.current_content,
-                summary="PDF text re-extracted (OCR)",
-                source="ocr",
-            ))
+            db.add(
+                DocumentVersion(
+                    id=str(__import__("uuid").uuid4()),
+                    document_id=doc_id,
+                    version_number=doc.version_count,
+                    content=doc.current_content,
+                    summary="PDF text re-extracted (OCR)",
+                    source="ocr",
+                )
+            )
             db.commit()
             return {"ok": True, "id": doc_id, "extracted": True, "chars": len(body_text)}
         finally:
@@ -643,18 +696,36 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
         if not ids:
             raise HTTPException(400, "No documents specified")
         _ext = {
-            "javascript": ".js", "python": ".py", "html": ".html", "css": ".css",
-            "markdown": ".md", "json": ".json", "yaml": ".yml", "bash": ".sh",
-            "sql": ".sql", "rust": ".rs", "go": ".go", "java": ".java", "c": ".c",
-            "cpp": ".cpp", "typescript": ".ts", "ruby": ".rb", "php": ".php",
-            "text": ".txt", "xml": ".xml", "toml": ".toml", "ini": ".ini",
+            "javascript": ".js",
+            "python": ".py",
+            "html": ".html",
+            "css": ".css",
+            "markdown": ".md",
+            "json": ".json",
+            "yaml": ".yml",
+            "bash": ".sh",
+            "sql": ".sql",
+            "rust": ".rs",
+            "go": ".go",
+            "java": ".java",
+            "c": ".c",
+            "cpp": ".cpp",
+            "typescript": ".ts",
+            "ruby": ".rb",
+            "php": ".php",
+            "text": ".txt",
+            "xml": ".xml",
+            "toml": ".toml",
+            "ini": ".ini",
         }
         db = SessionLocal()
         try:
             import io
             import re
             import zipfile
+
             from fastapi import Response
+
             docs = db.query(Document).filter(Document.id.in_(ids)).all()
             buf = io.BytesIO()
             used = set()
@@ -664,7 +735,7 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
                     try:
                         _verify_doc_owner(db, doc, user)
                     except HTTPException:
-                        continue   # skip docs the user doesn't own
+                        continue  # skip docs the user doesn't own
                     ext = _ext.get(doc.language or "text", ".txt")
                     base = (doc.title or "document").strip() or "document"
                     base = re.sub(r"[^\w\-. ]+", "", base)[:60].strip() or doc.id
@@ -709,9 +780,14 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
             _assert_pdf_marker_upload_owned(request, req.content, user, upload_handler)
 
             # Check if we can coalesce with the latest version
-            latest_ver = db.query(DocumentVersion).filter(
-                DocumentVersion.document_id == doc_id,
-            ).order_by(DocumentVersion.version_number.desc()).first()
+            latest_ver = (
+                db.query(DocumentVersion)
+                .filter(
+                    DocumentVersion.document_id == doc_id,
+                )
+                .order_by(DocumentVersion.version_number.desc())
+                .first()
+            )
 
             now = datetime.now(timezone.utc)
             coalesced = False
@@ -776,6 +852,7 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
                     # path doesn't re-surface this doc in a later chat (#1160).
                     try:
                         from src.tool_implementations import clear_active_document
+
                         clear_active_document(doc_id)
                     except Exception:
                         pass
@@ -805,6 +882,7 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
             # re-injected into a later, unrelated chat (#1160).
             try:
                 from src.tool_implementations import clear_active_document
+
                 clear_active_document(doc_id)
             except Exception:
                 pass
@@ -828,17 +906,23 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
             doc = db.query(Document).filter(Document.id == doc_id).first()
             if doc:
                 _verify_doc_owner(db, doc, user)
-            versions = db.query(DocumentVersion).filter(
-                DocumentVersion.document_id == doc_id
-            ).order_by(DocumentVersion.version_number.desc()).all()
-            return [{
-                "id": v.id,
-                "version_number": v.version_number,
-                "content": v.content,
-                "summary": v.summary,
-                "source": v.source,
-                "created_at": v.created_at.isoformat() if v.created_at else None,
-            } for v in versions]
+            versions = (
+                db.query(DocumentVersion)
+                .filter(DocumentVersion.document_id == doc_id)
+                .order_by(DocumentVersion.version_number.desc())
+                .all()
+            )
+            return [
+                {
+                    "id": v.id,
+                    "version_number": v.version_number,
+                    "content": v.content,
+                    "summary": v.summary,
+                    "source": v.source,
+                    "created_at": v.created_at.isoformat() if v.created_at else None,
+                }
+                for v in versions
+            ]
         finally:
             db.close()
 
@@ -852,10 +936,14 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
             doc = db.query(Document).filter(Document.id == doc_id).first()
             if doc:
                 _verify_doc_owner(db, doc, user)
-            ver = db.query(DocumentVersion).filter(
-                DocumentVersion.document_id == doc_id,
-                DocumentVersion.version_number == num,
-            ).first()
+            ver = (
+                db.query(DocumentVersion)
+                .filter(
+                    DocumentVersion.document_id == doc_id,
+                    DocumentVersion.version_number == num,
+                )
+                .first()
+            )
             if not ver:
                 raise HTTPException(404, "Version not found")
             return _version_to_dict(ver)
@@ -873,10 +961,14 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
                 raise HTTPException(404, "Document not found")
             _verify_doc_owner(db, doc, user)
 
-            old_ver = db.query(DocumentVersion).filter(
-                DocumentVersion.document_id == doc_id,
-                DocumentVersion.version_number == num,
-            ).first()
+            old_ver = (
+                db.query(DocumentVersion)
+                .filter(
+                    DocumentVersion.document_id == doc_id,
+                    DocumentVersion.version_number == num,
+                )
+                .first()
+            )
             if not old_ver:
                 raise HTTPException(404, "Version not found")
 
@@ -924,6 +1016,7 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
             # Same junk-detection logic as the scheduled tidy_documents
             # action (src/document_actions.py). Keep these two in sync.
             import re as _re
+
             from src.document_actions import _JUNK_TITLES
 
             to_delete = []
@@ -946,29 +1039,44 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
                 _HEADER_RE = _re.compile(r"^(to|from|cc|bcc|subject|reply-to):\s*(.*)$", _re.I)
                 _PLACEHOLDER_VALS = {"", "empty", "(empty)", "-", "—", "none", "n/a", "na", "tbd"}
                 if title in ("new email", "new mail", "new message") or doc.language == "email":
-                    body_lines = [ln.strip() for ln in content.split("\n")
-                                  if ln.strip() and ln.strip() != "---"]
+                    body_lines = [
+                        ln.strip()
+                        for ln in content.split("\n")
+                        if ln.strip() and ln.strip() != "---"
+                    ]
+
                     def _is_filler(ln):
                         m = _HEADER_RE.match(ln)
                         if not m:
                             return False
                         val = (m.group(2) or "").strip().lower()
                         return val in _PLACEHOLDER_VALS
+
                     has_real_body = any(not _is_filler(ln) for ln in body_lines)
                     if body_lines and not has_real_body:
                         _is_email_stub = True
 
                 # Hard-delete obviously empty / junk documents
                 if not content or content in ("", "# Untitled"):
-                    to_delete.append(doc); deleted += 1; continue
+                    to_delete.append(doc)
+                    deleted += 1
+                    continue
                 if _is_email_stub:
-                    to_delete.append(doc); deleted += 1; continue
+                    to_delete.append(doc)
+                    deleted += 1
+                    continue
                 if title in _JUNK_TITLES:
-                    to_delete.append(doc); deleted += 1; continue
+                    to_delete.append(doc)
+                    deleted += 1
+                    continue
                 if real_len < 30:
-                    to_delete.append(doc); deleted += 1; continue
+                    to_delete.append(doc)
+                    deleted += 1
+                    continue
                 if "\n" not in content and real_len < 50:
-                    to_delete.append(doc); deleted += 1; continue
+                    to_delete.append(doc)
+                    deleted += 1
+                    continue
 
                 # Fix empty or placeholder titles on survivors
                 if not title_raw or title_raw == "Untitled":
@@ -1011,9 +1119,9 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
     async def ai_tidy_documents(request: Request) -> Dict[str, Any]:
         """Use AI to judge if documents are junk/test/accidental, then delete them.
         Caches verdicts so previously-reviewed docs are skipped."""
-        from src.task_endpoint import resolve_task_endpoint
         from src.endpoint_resolver import resolve_endpoint
         from src.llm_core import llm_call_async
+        from src.task_endpoint import resolve_task_endpoint
 
         user = get_current_user(request)
         url, model, headers = resolve_task_endpoint()
@@ -1044,20 +1152,27 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
             doc_list = []
             for i, doc in enumerate(batch):
                 preview = (doc.current_content or "")[:300].strip()
-                doc_list.append(f"[{i}] title=\"{doc.title}\" lang={doc.language or 'text'} content_preview=\"{preview}\"")
+                doc_list.append(
+                    f'[{i}] title="{doc.title}" lang={doc.language or "text"} content_preview="{preview}"'
+                )
 
             prompt = (
                 "You are a document library cleaner. For each document below, decide if it is JUNK "
                 "(test, accidental, placeholder, empty-ish, tool-test, throwaway) or KEEP (real content worth saving).\n\n"
-                "Respond with ONLY a JSON array of verdicts, one per document, like: [\"junk\",\"keep\",\"junk\",...]\n"
-                "No explanation, no markdown, just the JSON array.\n\n"
-                + "\n".join(doc_list)
+                'Respond with ONLY a JSON array of verdicts, one per document, like: ["junk","keep","junk",...]\n'
+                "No explanation, no markdown, just the JSON array.\n\n" + "\n".join(doc_list)
             )
 
             response = await llm_call_async(
-                url, model,
-                [{"role": "system", "content": "You classify documents as junk or keep. Respond only with a JSON array."},
-                 {"role": "user", "content": prompt}],
+                url,
+                model,
+                [
+                    {
+                        "role": "system",
+                        "content": "You classify documents as junk or keep. Respond only with a JSON array.",
+                    },
+                    {"role": "user", "content": prompt},
+                ],
                 temperature=0.1,
                 max_tokens=200,
                 headers=headers,
@@ -1066,11 +1181,13 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
 
             # Parse verdicts
             import re
-            match = re.search(r'\[.*?\]', response, re.DOTALL)
+
+            match = re.search(r"\[.*?\]", response, re.DOTALL)
             if not match:
                 raise HTTPException(500, "AI returned invalid response")
 
             import json as _json
+
             verdicts = _json.loads(match.group())
 
             deleted = 0
@@ -1111,7 +1228,11 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
         Frontend shows this in a confirmation modal so the user can spot/fix
         any wrong values before triggering the actual download.
         """
-        from src.pdf_form_doc import find_source_upload_id, parse_markdown_to_values, load_field_sidecar
+        from src.pdf_form_doc import (
+            find_source_upload_id,
+            load_field_sidecar,
+            parse_markdown_to_values,
+        )
 
         user = get_current_user(request)
         db = SessionLocal()
@@ -1141,19 +1262,18 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
                 meta = field_meta.get(name)
                 if not meta:
                     continue
-                preview.append({
-                    "name": name,
-                    "label": meta.get("label") or name,
-                    "type": meta.get("type"),
-                    "options": meta.get("options") or [],
-                    "page": meta.get("page"),
-                    "value": current,
-                })
+                preview.append(
+                    {
+                        "name": name,
+                        "label": meta.get("label") or name,
+                        "type": meta.get("type"),
+                        "options": meta.get("options") or [],
+                        "page": meta.get("page"),
+                        "value": current,
+                    }
+                )
 
-            unknown = [
-                name for name in values
-                if name not in field_meta
-            ]
+            unknown = [name for name in values if name not in field_meta]
             return {
                 "doc_id": doc_id,
                 "upload_id": upload_id,
@@ -1175,7 +1295,11 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
         on that page with their rects translated to image-pixel coordinates.
         Frontend overlays HTML form controls at those positions.
         """
-        from src.pdf_form_doc import find_source_upload_id, parse_markdown_to_values, load_field_sidecar
+        from src.pdf_form_doc import (
+            find_source_upload_id,
+            load_field_sidecar,
+            parse_markdown_to_values,
+        )
 
         user = get_current_user(request)
         db = SessionLocal()
@@ -1213,23 +1337,29 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
                     fields_out = []
                     for f in by_page.get(page_no, []):
                         x0, y0, x1, y1 = f["rect"]
-                        fields_out.append({
-                            "name": f["name"],
-                            "type": f["type"],
-                            "label": f.get("label") or "",
-                            "options": f.get("options") or [],
-                            "value": values.get(f["name"], f.get("value", "")),
-                            "rect_px": [
-                                int(x0 * scale), int(y0 * scale),
-                                int(x1 * scale), int(y1 * scale),
-                            ],
-                        })
-                    pages_out.append({
-                        "page": page_no,
-                        "width": img_w,
-                        "height": img_h,
-                        "fields": fields_out,
-                    })
+                        fields_out.append(
+                            {
+                                "name": f["name"],
+                                "type": f["type"],
+                                "label": f.get("label") or "",
+                                "options": f.get("options") or [],
+                                "value": values.get(f["name"], f.get("value", "")),
+                                "rect_px": [
+                                    int(x0 * scale),
+                                    int(y0 * scale),
+                                    int(x1 * scale),
+                                    int(y1 * scale),
+                                ],
+                            }
+                        )
+                    pages_out.append(
+                        {
+                            "page": page_no,
+                            "width": img_w,
+                            "height": img_h,
+                            "fields": fields_out,
+                        }
+                    )
                 return {"doc_id": doc_id, "scale": scale, "pages": pages_out}
             finally:
                 pdf_doc.close()
@@ -1242,6 +1372,7 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
         """Render one page of the source PDF as a PNG (no values stamped — the
         frontend overlays HTML form inputs on top)."""
         from fastapi.responses import Response
+
         from src.pdf_form_doc import find_source_upload_id
 
         user = get_current_user(request)
@@ -1289,12 +1420,18 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
         """
         import base64
         import json
-        import fitz
-        from src.pdf_form_doc import find_source_upload_id
-        from src.document_processor import _resolve_vl_model, _load_vl_settings
-        from src.llm_core import llm_call_async
 
-        body = await request.json() if request.headers.get("content-type", "").startswith("application/json") else {}
+        import fitz
+
+        from src.document_processor import _load_vl_settings, _resolve_vl_model
+        from src.llm_core import llm_call_async
+        from src.pdf_form_doc import find_source_upload_id
+
+        body = (
+            await request.json()
+            if request.headers.get("content-type", "").startswith("application/json")
+            else {}
+        )
         instruction = (body or {}).get("instruction", "").strip()
         if not instruction:
             raise HTTPException(400, "instruction is required")
@@ -1367,8 +1504,12 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
                 ]
                 try:
                     raw = await llm_call_async(
-                        url, model_id, messages,
-                        temperature=0.1, max_tokens=2000, headers=headers,
+                        url,
+                        model_id,
+                        messages,
+                        temperature=0.1,
+                        max_tokens=2000,
+                        headers=headers,
                     )
                 except Exception as e:
                     logger.error(f"VL call failed on page {page_index + 1}: {e}")
@@ -1404,14 +1545,16 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
                     h = max(0.3, min(100.0 - y, h))
                     if not value.strip():
                         continue
-                    all_annotations.append({
-                        "page": page_index + 1,
-                        "x": round(x, 2),
-                        "y": round(y, 2),
-                        "w": round(w, 2),
-                        "h": round(h, 2),
-                        "value": value,
-                    })
+                    all_annotations.append(
+                        {
+                            "page": page_index + 1,
+                            "x": round(x, 2),
+                            "y": round(y, 2),
+                            "w": round(w, 2),
+                            "h": round(h, 2),
+                            "value": value,
+                        }
+                    )
         finally:
             pdf_doc.close()
 
@@ -1429,15 +1572,22 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
         import base64
         import os
         import tempfile
+
         from fastapi.responses import FileResponse
         from starlette.background import BackgroundTask
-        from src.pdf_form_doc import find_source_upload_id, parse_markdown_to_values, parse_markdown_annotations
-        from src.pdf_forms import fill_fields, stamp_annotations
+
         from core.database import Signature
+        from src.pdf_form_doc import (
+            find_source_upload_id,
+            parse_markdown_annotations,
+            parse_markdown_to_values,
+        )
+        from src.pdf_forms import fill_fields, stamp_annotations
 
         # Track temp files for this request so they get unlinked AFTER
         # the response is fully sent (BackgroundTask runs post-send).
         _to_unlink: list[str] = []
+
         def _cleanup_temps():
             for _p in _to_unlink:
                 try:
@@ -1474,7 +1624,7 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
             annotations = parse_markdown_annotations(doc.current_content or "")
             if annotations:
                 ann_sig_ids = [
-                    a["value"][len("signature:"):].strip()
+                    a["value"][len("signature:") :].strip()
                     for a in annotations
                     if a.get("kind") == "signature"
                     and isinstance(a.get("value"), str)
@@ -1523,13 +1673,21 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
         import base64
         import os
         import tempfile
+
         from fastapi.responses import FileResponse
         from starlette.background import BackgroundTask
-        from src.pdf_form_doc import find_source_upload_id, parse_markdown_to_values, load_field_sidecar, parse_markdown_annotations
-        from src.pdf_forms import fill_fields, stamp_signatures, stamp_annotations
+
         from core.database import Signature
+        from src.pdf_form_doc import (
+            find_source_upload_id,
+            load_field_sidecar,
+            parse_markdown_annotations,
+            parse_markdown_to_values,
+        )
+        from src.pdf_forms import fill_fields, stamp_annotations, stamp_signatures
 
         _to_unlink: list[str] = []
+
         def _cleanup_temps():
             for _p in _to_unlink:
                 try:
@@ -1563,8 +1721,12 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
             text_values: dict = {}
             sig_ids: dict[str, str] = {}
             for name, raw in all_values.items():
-                if name in sig_field_names and isinstance(raw, str) and raw.startswith("signature:"):
-                    sig_ids[name] = raw[len("signature:"):].strip()
+                if (
+                    name in sig_field_names
+                    and isinstance(raw, str)
+                    and raw.startswith("signature:")
+                ):
+                    sig_ids[name] = raw[len("signature:") :].strip()
                 elif name not in sig_field_names:
                     text_values[name] = raw
 
@@ -1609,7 +1771,7 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
             if annotations:
                 # Resolve any signature annotations to their PNG bytes.
                 ann_sig_ids = [
-                    a["value"][len("signature:"):].strip()
+                    a["value"][len("signature:") :].strip()
                     for a in annotations
                     if a.get("kind") == "signature"
                     and isinstance(a.get("value"), str)
@@ -1646,6 +1808,5 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
             )
         finally:
             db.close()
-
 
     return router

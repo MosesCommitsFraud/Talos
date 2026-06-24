@@ -1,0 +1,5 @@
+# Developer / CI tooling — NOT installed into the runtime image.
+# Install locally with:  pip install -r requirements-dev.txt
+# (pytest itself ships in requirements.txt so the image can run the suite.)
+ruff>=0.9,<0.10
+pre-commit>=4.0

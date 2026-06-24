@@ -1,8 +1,11 @@
 """User preferences API — per-user key/value store backed by a JSON file."""
+
 import json
 import os
 from typing import Optional
+
 from fastapi import APIRouter, Request
+
 from src.auth_helpers import get_current_user
 
 PREFS_FILE = os.path.join("data", "user_prefs.json")

@@ -6,7 +6,6 @@ from fastapi import APIRouter, HTTPException, Request
 
 from core.middleware import require_admin
 
-
 SANDBOX_URL = os.getenv("TALOS_SANDBOX_URL", "http://talos-sandbox:7800").rstrip("/")
 _SANDBOX_KEY = os.getenv("TALOS_SANDBOX_KEY", "").strip()
 _SANDBOX_HEADERS = {"X-Talos-Sandbox-Key": _SANDBOX_KEY} if _SANDBOX_KEY else {}

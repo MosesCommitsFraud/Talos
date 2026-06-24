@@ -19,7 +19,9 @@ _THINK_TAG_NAME = r"(?:think(?:ing)?|thought)"
 
 # Closed reasoning blocks. Multi-pass loop in `strip_think` handles nested
 # `<think><think>...</think></think>` patterns some models emit.
-_THINK_CLOSED_RE = re.compile(rf"<{_THINK_TAG_NAME}(?:\s+[^>]*)?>[\s\S]*?</{_THINK_TAG_NAME}>\s*", re.IGNORECASE)
+_THINK_CLOSED_RE = re.compile(
+    rf"<{_THINK_TAG_NAME}(?:\s+[^>]*)?>[\s\S]*?</{_THINK_TAG_NAME}>\s*", re.IGNORECASE
+)
 # Orphan opening or closing tags that survive after the closed-pass.
 _THINK_TAG_RE = re.compile(rf"</?{_THINK_TAG_NAME}[^>]*>\s*", re.IGNORECASE)
 # Dangling opener anywhere in the response with no closer — strip everything

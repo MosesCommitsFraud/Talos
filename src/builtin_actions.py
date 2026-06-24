@@ -7,10 +7,8 @@ scheduler without needing an LLM call.
 
 import logging
 import os
-from datetime import datetime
 from typing import Tuple
 
-from src.auth_helpers import owner_filter
 from core.platform_compat import IS_WINDOWS, find_bash
 
 logger = logging.getLogger(__name__)
@@ -43,7 +41,9 @@ async def action_tidy_sessions(owner: str, **kwargs) -> Tuple[str, bool]:
     LLM-free; sorting can be triggered manually via the Chats UI)."""
     try:
         import asyncio
+
         from src.session_actions import run_auto_sort
+
         result = await asyncio.wait_for(
             run_auto_sort(owner, skip_llm=True, delete_throwaway=False),
             timeout=60,
@@ -61,6 +61,7 @@ async def action_tidy_documents(owner: str, **kwargs) -> Tuple[str, bool]:
     """Run tidy on documents for the owner."""
     try:
         from src.document_actions import run_document_tidy
+
         result = await run_document_tidy(owner)
         return result, True
     except Exception as e:
@@ -73,6 +74,7 @@ async def action_consolidate_memory(owner: str, **kwargs) -> Tuple[str, bool]:
     try:
         import json
         import re
+
         from src.constants import DATA_DIR
         from src.endpoint_resolver import resolve_endpoint
         from src.llm_core import llm_call_async
@@ -98,7 +100,9 @@ async def action_consolidate_memory(owner: str, **kwargs) -> Tuple[str, bool]:
             for mem in all_memories:
                 memory_groups.setdefault(_memory_owner(mem), []).append(mem)
 
-        memory_groups = {group_owner: group for group_owner, group in memory_groups.items() if group}
+        memory_groups = {
+            group_owner: group for group_owner, group in memory_groups.items() if group
+        }
         if not memory_groups:
             raise TaskNoop("no memories to consolidate")
 
@@ -141,8 +145,8 @@ async def action_consolidate_memory(owner: str, **kwargs) -> Tuple[str, bool]:
                     "contacts, project context, and instructions. If memories conflict, keep the clearest/latest "
                     "one and drop the obsolete one.\n\n"
                     "JSON shape:\n"
-                    "{\"keep\":[{\"id\":\"existing id\",\"text\":\"cleaned text\",\"category\":\"fact|preference|identity|event|contact|project|instruction\"}],"
-                    "\"drop\":[{\"id\":\"existing id\",\"reason\":\"short reason\"}]}\n\n"
+                    '{"keep":[{"id":"existing id","text":"cleaned text","category":"fact|preference|identity|event|contact|project|instruction"}],'
+                    '"drop":[{"id":"existing id","reason":"short reason"}]}\n\n'
                     f"MEMORIES:\n{json.dumps(items, ensure_ascii=False)}"
                 )
                 raw = await llm_call_async(
@@ -161,7 +165,7 @@ async def action_consolidate_memory(owner: str, **kwargs) -> Tuple[str, bool]:
                 start = raw.find("{")
                 end = raw.rfind("}")
                 if start != -1 and end != -1 and end > start:
-                    decision = json.loads(raw[start:end + 1])
+                    decision = json.loads(raw[start : end + 1])
                     keep_items = decision.get("keep") if isinstance(decision, dict) else None
                     drop_items = decision.get("drop") if isinstance(decision, dict) else None
                     if isinstance(keep_items, list) and isinstance(drop_items, list):
@@ -179,7 +183,9 @@ async def action_consolidate_memory(owner: str, **kwargs) -> Tuple[str, bool]:
                                 continue
                             keep_ids.add(mid)
                             cleaned = {
-                                "category": (item.get("category") or by_id[mid].get("category") or "fact").strip(),
+                                "category": (
+                                    item.get("category") or by_id[mid].get("category") or "fact"
+                                ).strip(),
                             }
                             original_text = (by_id[mid].get("text") or "").strip()
                             if len(original_text) <= text_limit:
@@ -218,14 +224,18 @@ async def action_consolidate_memory(owner: str, **kwargs) -> Tuple[str, bool]:
                                 total_removed += removed
                                 total_cleaned += changed_text
                                 ai_used = True
-                                ai_reasons.extend([
-                                    (d.get("reason") or "").strip()
-                                    for d in drop_items
-                                    if isinstance(d, dict) and (d.get("reason") or "").strip()
-                                ])
+                                ai_reasons.extend(
+                                    [
+                                        (d.get("reason") or "").strip()
+                                        for d in drop_items
+                                        if isinstance(d, dict) and (d.get("reason") or "").strip()
+                                    ]
+                                )
                             return True
             except Exception as ai_err:
-                logger.warning("AI memory tidy failed; falling back to duplicate cleanup: %s", ai_err)
+                logger.warning(
+                    "AI memory tidy failed; falling back to duplicate cleanup: %s", ai_err
+                )
             return False
 
         for group_owner, group_memories in memory_groups.items():
@@ -255,8 +265,7 @@ async def action_consolidate_memory(owner: str, **kwargs) -> Tuple[str, bool]:
 
             group_ref_ids = {id(m) for m in group_memories}
             all_memories = [
-                m for m in all_memories
-                if id(m) not in group_ref_ids or id(m) in keep_refs
+                m for m in all_memories if id(m) not in group_ref_ids or id(m) in keep_refs
             ]
             total_removed += group_removed
 
@@ -271,8 +280,15 @@ async def action_consolidate_memory(owner: str, **kwargs) -> Tuple[str, bool]:
                     True,
                 )
             preview = "; ".join(removed_examples)
-            extra = f" (+{total_removed - len(removed_examples)} more)" if total_removed > len(removed_examples) else ""
-            return f"Removed {total_removed} duplicate(s) of {total_scanned}: {preview}{extra}", True
+            extra = (
+                f" (+{total_removed - len(removed_examples)} more)"
+                if total_removed > len(removed_examples)
+                else ""
+            )
+            return (
+                f"Removed {total_removed} duplicate(s) of {total_scanned}: {preview}{extra}",
+                True,
+            )
 
         raise TaskNoop(f"scanned {total_scanned} memories, no duplicates")
     except Exception as e:
@@ -283,14 +299,22 @@ async def action_consolidate_memory(owner: str, **kwargs) -> Tuple[str, bool]:
 # Registry: action name -> async function(owner, **kwargs) -> (result_str, success_bool)
 
 
-async def _run_subprocess(argv, *, shell: bool = False, timeout: int = 120, label: str = "Command") -> Tuple[str, bool]:
+async def _run_subprocess(
+    argv, *, shell: bool = False, timeout: int = 120, label: str = "Command"
+) -> Tuple[str, bool]:
     """Shared subprocess runner. Wraps the blocking subprocess.run in
     asyncio.to_thread so the event loop stays responsive."""
     import asyncio
     import subprocess
+
     try:
         result = await asyncio.to_thread(
-            subprocess.run, argv, shell=shell, capture_output=True, text=True, timeout=timeout,
+            subprocess.run,
+            argv,
+            shell=shell,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
         )
         output = (result.stdout or "").strip()
         if result.returncode != 0 and result.stderr:
@@ -302,7 +326,9 @@ async def _run_subprocess(argv, *, shell: bool = False, timeout: int = 120, labe
         return str(e), False
 
 
-async def action_ssh_command(owner: str, command: str = "", host: str = "localhost", **kwargs) -> Tuple[str, bool]:
+async def action_ssh_command(
+    owner: str, command: str = "", host: str = "localhost", **kwargs
+) -> Tuple[str, bool]:
     """Run a shell command locally or on a remote host via SSH."""
     if not command:
         return "No command specified", False
@@ -314,11 +340,15 @@ async def action_ssh_command(owner: str, command: str = "", host: str = "localho
             return await _run_subprocess(command, shell=True, timeout=120, label="Command")
         return await _run_subprocess(["bash", "-c", command], timeout=120, label="Command")
     return await _run_subprocess(
-        ["ssh", "-o", "ConnectTimeout=10", host, command], timeout=120, label="Command",
+        ["ssh", "-o", "ConnectTimeout=10", host, command],
+        timeout=120,
+        label="Command",
     )
 
 
-async def action_run_script(owner: str, script: str = "", host: str = "", **kwargs) -> Tuple[str, bool]:
+async def action_run_script(
+    owner: str, script: str = "", host: str = "", **kwargs
+) -> Tuple[str, bool]:
     """Run a script locally, or via SSH when a host is configured."""
     if not script:
         return "No script specified", False
@@ -345,9 +375,9 @@ async def action_test_skills(owner: str, **kwargs) -> Tuple[str, bool]:
     ADVISORY ONLY — only writes set_audit (never rewrites SKILL.md, never
     demotes status, never overrides confidence)."""
     try:
+        from routes.skills_routes import _run_skill_test_once, _skill_test_task
         from services.memory.skills import SkillsManager
         from src.constants import DATA_DIR
-        from routes.skills_routes import _run_skill_test_once, _skill_test_task
         from src.endpoint_resolver import resolve_endpoint
 
         # #3 SCOPE GUARD: refuse to run on a None/empty owner — otherwise
@@ -355,7 +385,10 @@ async def action_test_skills(owner: str, **kwargs) -> Tuple[str, bool]:
         # test (and write audit verdicts to) other users' data in a
         # multi-user deployment.
         if not owner:
-            return "test_skills requires an owner on the task — refusing to run without scope.", False
+            return (
+                "test_skills requires an owner on the task — refusing to run without scope.",
+                False,
+            )
 
         sm = SkillsManager(DATA_DIR)
         skills = sm.load(owner=owner)
@@ -373,23 +406,28 @@ async def action_test_skills(owner: str, **kwargs) -> Tuple[str, bool]:
         # garbage transcripts → 36 'unknown' verdicts with no hint why.
         try:
             from src.llm_core import list_model_ids
+
             avail = list_model_ids(url, headers=headers)
             if avail and model not in avail:
                 import os as _os
+
                 base = _os.path.basename((model or "").rstrip("/"))
                 m = next((a for a in avail if _os.path.basename(a.rstrip("/")) == base), None)
                 if m:
                     model = m
                 else:
-                    return (f"Default model '{model}' not served by endpoint {url}. "
-                            f"Available: {', '.join(avail[:8])}{'…' if len(avail) > 8 else ''}. "
-                            "Set a valid Default model in Settings."), False
+                    return (
+                        f"Default model '{model}' not served by endpoint {url}. "
+                        f"Available: {', '.join(avail[:8])}{'…' if len(avail) > 8 else ''}. "
+                        "Set a valid Default model in Settings."
+                    ), False
         except Exception as _e:
             logger.warning(f"test_skills model resolve check failed (continuing): {_e}")
 
         logger.info(f"test_skills: starting on {len(names)} skills, model={model}, owner={owner!r}")
 
         from collections import Counter
+
         tally = Counter()
         per_skill_log = []
         for skill in skills:
@@ -403,7 +441,9 @@ async def action_test_skills(owner: str, **kwargs) -> Tuple[str, bool]:
                 continue
             task = _skill_test_task(skill)
             try:
-                transcript, verdict = await _run_skill_test_once(md, task, url, model, headers, owner)
+                transcript, verdict = await _run_skill_test_once(
+                    md, task, url, model, headers, owner
+                )
                 v = (verdict or {}).get("verdict") or "unknown"
                 tally[v] += 1
                 summary = (verdict or {}).get("summary") or ""
@@ -411,9 +451,12 @@ async def action_test_skills(owner: str, **kwargs) -> Tuple[str, bool]:
                 detail = ""
                 if v in ("unknown", "inconclusive", "fail", "needs_work"):
                     bits = []
-                    if summary: bits.append(summary[:160])
-                    if tlen < 200: bits.append(f"transcript {tlen}b")
-                    if bits: detail = " — " + "; ".join(bits)
+                    if summary:
+                        bits.append(summary[:160])
+                    if tlen < 200:
+                        bits.append(f"transcript {tlen}b")
+                    if bits:
+                        detail = " — " + "; ".join(bits)
                 per_skill_log.append(f"{name}: {v}{detail}")
                 # #4 + #8 + #12: ONLY persist a real verdict (pass / needs_work /
                 # fail / inconclusive). Skip 'unknown' — that's the judge's
@@ -428,7 +471,9 @@ async def action_test_skills(owner: str, **kwargs) -> Tuple[str, bool]:
                     except Exception as _e:
                         logger.warning(f"test_skills set_audit({name}) failed: {_e}")
                 if v == "unknown":
-                    logger.warning(f"test_skills: {name} → unknown — {summary[:200]}; transcript_len={tlen}")
+                    logger.warning(
+                        f"test_skills: {name} → unknown — {summary[:200]}; transcript_len={tlen}"
+                    )
             except Exception as e:
                 logger.exception(f"test_skills: {name} errored")
                 tally["error"] += 1
@@ -459,11 +504,13 @@ async def action_audit_skills(owner: str, **kwargs) -> Tuple[str, bool]:
     tagging, and publish/draft finalization from the user's confidence threshold.
     """
     try:
+        from routes.skills_routes import (
+            _resolve_audit_models,
+            _run_audit_all_job,
+            _skill_audit_jobs,
+        )
         from services.memory.skills import SkillsManager
         from src.constants import DATA_DIR
-        from routes.skills_routes import (
-            _resolve_audit_models, _run_audit_all_job, _skill_audit_jobs,
-        )
 
         if not owner:
             return "audit_skills requires an owner — refusing to run without scope.", False
@@ -475,16 +522,14 @@ async def action_audit_skills(owner: str, **kwargs) -> Tuple[str, bool]:
 
         sm = SkillsManager(DATA_DIR)
         skills = sm.load(owner=owner)
-        names = [
-            s.get("name") for s in skills
-            if s.get("name") and not s.get("audit_verdict")
-        ]
+        names = [s.get("name") for s in skills if s.get("name") and not s.get("audit_verdict")]
         if not names:
             raise TaskNoop("no unaudited skills")
 
         url, model, headers, teacher = _resolve_audit_models()
         try:
             from src.llm_core import seconds_since_model_activity
+
             recent = seconds_since_model_activity(url, model)
         except Exception:
             recent = None
@@ -495,15 +540,22 @@ async def action_audit_skills(owner: str, **kwargs) -> Tuple[str, bool]:
             )
 
         import time as _time
+
         _skill_audit_jobs[key] = {
-            "status": "running", "scope": "scheduled-unchecked", "model": model,
+            "status": "running",
+            "scope": "scheduled-unchecked",
+            "model": model,
             "teacher": teacher[1] if teacher else None,
-            "total": len(names), "done": 0, "current": None,
-            "results": [], "log": [
+            "total": len(names),
+            "done": 0,
+            "current": None,
+            "results": [],
+            "log": [
                 f"Scheduled audit of {len(names)} unaudited skill(s) with {model}"
                 + (f"; teacher {teacher[1]}" if teacher else "")
             ],
-            "started": _time.time(), "cancel": False,
+            "started": _time.time(),
+            "cancel": False,
         }
         await _run_audit_all_job(key, sm, names, url, model, headers, teacher, owner)
         job = _skill_audit_jobs.get(key, {})

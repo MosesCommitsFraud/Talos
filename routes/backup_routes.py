@@ -5,9 +5,10 @@ import logging
 from datetime import datetime
 
 from fastapi import APIRouter, HTTPException, Request, Response
+
 from core.middleware import require_admin
 from src.auth_helpers import get_current_user
-from src.settings import load_settings, save_settings, load_features, save_features
+from src.settings import load_features, load_settings, save_features, save_settings
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +39,7 @@ def setup_backup_routes(memory_manager, preset_manager, skills_manager) -> APIRo
 
         # User preferences
         from routes.prefs_routes import _load_for_user
+
         preferences = _load_for_user(user)
 
         export_data = {
@@ -81,8 +83,9 @@ def setup_backup_routes(memory_manager, preset_manager, skills_manager) -> APIRo
             # rows (load_all) meant a memory whose text matched any other
             # user's was silently skipped, so the importing user lost their own
             # data. The full store is still saved back below.
-            existing_texts = {e.get("text", "").strip().lower()
-                              for e in existing if e.get("owner") == user}
+            existing_texts = {
+                e.get("text", "").strip().lower() for e in existing if e.get("owner") == user
+            }
             added = 0
             for mem in body["memories"]:
                 if not isinstance(mem, dict) or not mem.get("text"):
@@ -149,6 +152,7 @@ def setup_backup_routes(memory_manager, preset_manager, skills_manager) -> APIRo
         # ── Preferences ──
         if "preferences" in body and isinstance(body["preferences"], dict):
             from routes.prefs_routes import _load_for_user, _save_for_user
+
             current = _load_for_user(user)
             current.update(body["preferences"])
             _save_for_user(user, current)
