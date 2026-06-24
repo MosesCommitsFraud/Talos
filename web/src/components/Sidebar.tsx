@@ -4,7 +4,7 @@ import {
   ArrowUpDownIcon,
   CheckIcon,
   ChevronRightIcon,
-  ChevronsUpDownIcon,
+  ChevronDownIcon,
   FolderIcon,
   FolderPlusIcon,
   HelpCircleIcon,
@@ -308,7 +308,7 @@ function AccountMenu({
   const { t } = useTranslation();
   // Slightly roomier rows than the default menu item, to match the account
   // dropdown design (taller hit targets, 18px icons, full-width).
-  const itemCls = 'gap-3 px-3 py-2 text-[13px] [&_svg]:size-[18px]';
+  const itemCls = 'gap-2.5 rounded-md! px-2.5 py-1 text-[13px] [&_svg]:size-4';
   // Tooltip must wrap MenuTrigger (not the other way around) so the dropdown's
   // click handler reaches the button — otherwise it won't open in compact mode.
   const triggerNode = <MenuTrigger asChild>{trigger}</MenuTrigger>;
@@ -321,8 +321,8 @@ function AccountMenu({
       ) : (
         triggerNode
       )}
-      <MenuPopup side="top" align="start" sideOffset={8} className="w-64 p-1.5">
-        <MenuLabel className="truncate px-3 pt-1.5 pb-1 text-[13px] text-foreground/70">{username}</MenuLabel>
+      <MenuPopup side="top" align="start" sideOffset={6} className="w-60 rounded-lg! p-1">
+        <MenuLabel className="truncate px-2.5 pt-1 pb-0.5 text-xs text-foreground/70">{username}</MenuLabel>
         <MenuItem className={itemCls} onSelect={actions.onOpenSettings}>
           <SettingsIcon /> {t('sidebar.menu.settings')}
         </MenuItem>
@@ -580,13 +580,13 @@ export function Sidebar({
                 <button
                   type="button"
                   aria-label={t('sidebar.account')}
-                  className="flex w-full items-center gap-2 rounded-lg px-2 py-1 text-left transition-colors hover:bg-accent/70"
+                  className="flex w-full items-center gap-1.5 rounded-md px-2 py-0.5 text-left transition-colors hover:bg-accent/70"
                 >
-                  <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-primary/15 text-[11px] font-semibold text-primary">
+                  <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-primary/15 text-[10px] font-semibold text-primary">
                     {initial}
                   </span>
-                  <span className="min-w-0 flex-1 truncate text-sm">{auth?.username ?? t('sidebar.user')}</span>
-                  <ChevronsUpDownIcon className="size-4 shrink-0 text-muted-foreground" />
+                  <span className="min-w-0 flex-1 truncate text-[13px]">{auth?.username ?? t('sidebar.user')}</span>
+                  <ChevronDownIcon className="size-3.5 shrink-0 text-muted-foreground" />
                 </button>
               }
             />
