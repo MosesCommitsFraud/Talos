@@ -71,8 +71,8 @@ jobs:
           context: .
           load: true
           tags: talos:ci
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=main
+          cache-to: type=gha,mode=max,scope=main
 
       - name: Run test suite inside the image
         # tests/ is excluded from the image (.dockerignore) to keep it lean, so
@@ -104,5 +104,32 @@ jobs:
           tags: |
             ghcr.io/mosescommitsfraud/talos:latest
             ghcr.io/mosescommitsfraud/talos:${{ github.sha }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=main
+          cache-to: type=gha,mode=max,scope=main
+
+  # Build the agent code-execution sandbox image (sandbox/Dockerfile, built from
+  # the ./sandbox context — see the talos-sandbox service in docker-compose). It
+  # carries its own heavy scientific-Python stack pinned in sandbox/requirements
+  # .txt; the main `image` job above does NOT build it, so without this job the
+  # Dependabot bumps to those pins would merge untested.
+  sandbox-image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build sandbox image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./sandbox
+          load: true
+          tags: talos-sandbox:ci
+          cache-from: type=gha,scope=sandbox
+          cache-to: type=gha,mode=max,scope=sandbox
+
+      - name: Smoke-test that key libraries import
+        # Catches breakage from major bumps (weasyprint, pypdf, ipython, …) that
+        # a successful build alone wouldn't surface. Bypass the entrypoint.
+        run: >-
+          docker run --rm --entrypoint python talos-sandbox:ci -c
+          "import numpy, pandas, scipy, sklearn, statsmodels, duckdb, weasyprint, pypdf, IPython, pymssql; print('sandbox imports OK')"

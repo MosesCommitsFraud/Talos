@@ -1,5 +1,5 @@
 # ---- Stage 1: build the new React UI (web/ → web/dist) ----
-FROM node:22-alpine AS webbuild
+FROM node:24-alpine AS webbuild
 WORKDIR /web
 # corepack picks the pnpm version pinned in package.json ("packageManager")
 RUN corepack enable

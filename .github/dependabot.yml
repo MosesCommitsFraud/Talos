@@ -24,9 +24,17 @@ updates:
         patterns: ["*"]
         update-types: ["minor", "patch"]
 
-  # Docker base images (node:22-alpine, python:3.12-slim)
+  # Root Dockerfile base images (node:24-alpine webbuild, python:3.12-slim app)
   - package-ecosystem: docker
     directory: "/"
+    schedule:
+      interval: weekly
+
+  # Sandbox base image (sandbox/Dockerfile — the agent code-execution container;
+  # node:22-bookworm-slim). Separate entry because directory "/" above only scans
+  # the root Dockerfile.
+  - package-ecosystem: docker
+    directory: "/sandbox"
     schedule:
       interval: weekly
 
