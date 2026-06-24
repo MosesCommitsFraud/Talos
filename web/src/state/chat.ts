@@ -151,6 +151,7 @@ function metricsFromMetadata(metadata: Record<string, unknown> | undefined): Met
     'input_tokens',
     'context_percent',
     'context_length',
+    'context_tokens',
     'usage_source',
   ];
   const metrics: Metrics = {};
@@ -422,7 +423,9 @@ export const useChat = create<ChatState>((set, get) => {
               }));
               break;
             case 'metrics':
-              patchAi({ metrics: ev.data as Metrics });
+              // Merge rather than replace: per-round events carry only the live
+              // context fields, while the final event fills in the rest.
+              patchAi((m) => ({ metrics: { ...m.metrics, ...(ev.data as Metrics) } }));
               break;
             case 'compacted':
               // Auto-compaction ran before this turn streamed — surface it so

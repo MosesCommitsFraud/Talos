@@ -1144,6 +1144,10 @@ def _compute_final_metrics(
         "total_tokens": input_tokens + output_tokens,
         "context_length": context_length,
         "context_percent": ctx_pct,
+        # The actual context-window occupancy (last round's prompt), as opposed
+        # to input_tokens which sums every round. The meter shows this so its
+        # number and percentage always come from the same figure.
+        "context_tokens": ctx_tokens,
         "usage_source": "real" if has_real_usage else "estimated",
         "model": model,
     }
@@ -1906,6 +1910,18 @@ async def stream_agent_loop(
                         real_output_tokens += u.get("output_tokens", 0)
                         last_round_input_tokens = round_input
                         has_real_usage = True
+                        # Push a live context-meter update as soon as this round's
+                        # usage lands, so the ring reflects occupancy mid-turn
+                        # (during tool loops) instead of only at the final metrics.
+                        if round_input > 0:
+                            ctx_pct_live = (min(round((round_input / context_length) * 100, 1), 100.0)
+                                            if context_length else 0)
+                            yield "data: " + json.dumps({"type": "metrics", "data": {
+                                "context_tokens": round_input,
+                                "context_percent": ctx_pct_live,
+                                "context_length": context_length,
+                                "usage_source": "real",
+                            }}) + "\n\n"
                         # Backend-reported TRUE generation speed (llama.cpp
                         # timings.predicted_per_second) — pure decode, excludes
                         # prefill/network. Preferred over tokens/wall-clock, which

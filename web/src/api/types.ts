@@ -115,6 +115,10 @@ export interface Metrics {
   input_tokens?: number;
   context_percent?: number;
   context_length?: number;
+  /** Actual context-window occupancy (last round's prompt). The meter shows
+   *  this so its token number and percentage stay in sync; input_tokens by
+   *  contrast sums every agent round. */
+  context_tokens?: number;
   /** "real" when the count came from the provider's usage/tokenizer,
    *  "estimated" when it's the chars*0.3 fallback. Drives the meter's badge. */
   usage_source?: 'real' | 'estimated';

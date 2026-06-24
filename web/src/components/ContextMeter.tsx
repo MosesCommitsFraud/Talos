@@ -28,16 +28,26 @@ export function ContextMeter() {
   const metrics = [...messages].reverse().find((m) => m.metrics?.context_percent != null)?.metrics;
   if (!metrics || metrics.context_percent == null) return null;
 
-  const percent = Math.max(0, Math.min(100, metrics.context_percent));
   const maxTokens = metrics.context_length ?? null;
-  // Prefer the provider's real prompt-token count; fall back to deriving it
-  // from the percentage (older turns without input_tokens in metadata).
+  // context_tokens is the true context-window occupancy (last round's prompt);
+  // input_tokens sums every agent round, so it overcounts on tool-using turns.
+  // Fall back to input_tokens, then to deriving from the percentage (older
+  // turns without token counts in metadata).
   const usedTokens =
-    metrics.input_tokens != null
-      ? metrics.input_tokens
-      : maxTokens != null
-        ? Math.round((percent / 100) * maxTokens)
-        : null;
+    metrics.context_tokens != null
+      ? metrics.context_tokens
+      : metrics.input_tokens != null
+        ? metrics.input_tokens
+        : maxTokens != null
+          ? Math.round((metrics.context_percent / 100) * maxTokens)
+          : null;
+  // Derive the percentage from the same figure we display so the number and
+  // the ring never disagree; fall back to the backend's context_percent.
+  const rawPercent =
+    usedTokens != null && maxTokens != null && maxTokens > 0
+      ? (usedTokens / maxTokens) * 100
+      : metrics.context_percent;
+  const percent = Math.max(0, Math.min(100, rawPercent));
   const isExact = metrics.usage_source === 'real';
 
   const radius = 9.75;
