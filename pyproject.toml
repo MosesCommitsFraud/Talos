@@ -1,6 +1,10 @@
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+# Put the project root (rootdir) on sys.path so tests can `from src import ...`
+# and `from core import ...`. The package isn't pip-installed in the image, and
+# pytest's default import mode only adds the test file's own dir to sys.path.
+pythonpath = ["."]
 
 [tool.ruff]
 target-version = "py312"
