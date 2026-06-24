@@ -385,7 +385,7 @@ const en = {
     },
     models: {
       addEndpoint: 'Add endpoint',
-      baseUrlPlaceholder: 'Base URL, e.g. http://192.168.10.91:8000/v1',
+      baseUrlPlaceholder: 'Base URL, e.g. http://your-host:8000/v1',
       llm: 'LLM',
       image: 'Image',
       apiKeyOptional: 'API key (optional)',

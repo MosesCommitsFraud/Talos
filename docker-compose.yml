@@ -21,14 +21,14 @@ services:
       - TALOS_ADMIN_PASSWORD=${TALOS_ADMIN_PASSWORD:-}
       - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-http://localhost,http://127.0.0.1}
       - DATABASE_URL=${DATABASE_URL:-sqlite:///./data/app.db}
-      - LLM_HOST=${LLM_HOST:-192.168.10.91}
-      - LLM_HOSTS=${LLM_HOSTS:-192.168.10.91}
+      - LLM_HOST=${LLM_HOST:-your-llm-host}
+      - LLM_HOSTS=${LLM_HOSTS:-your-llm-host}
       # Force native (OpenAI-style) tool calling on for all endpoints, like Open
       # WebUI. Set true for self-hosted vLLM/llama.cpp launched with
       # --enable-auto-tool-choice. Hugely improves tool/edit reliability.
       - TALOS_ASSUME_NATIVE_TOOLS=${TALOS_ASSUME_NATIVE_TOOLS:-true}
       - OPENAI_API_KEY=${OPENAI_API_KEY:-not-needed}
-      - EMBEDDING_URL=${EMBEDDING_URL:-http://192.168.10.91:8001/v1/embeddings}
+      - EMBEDDING_URL=${EMBEDDING_URL:-http://your-llm-host:8001/v1/embeddings}
       - EMBEDDING_MODEL=${EMBEDDING_MODEL:-qwen3-embed}
       # RAG: Qdrant (hybrid dense+sparse) + Redis-backed async ingest. These are
       # only fallback defaults — the admin sets the real endpoints/models per UI
@@ -62,7 +62,7 @@ services:
     restart: unless-stopped
 
   # Vector store for RAG: dense + sparse (BM25/IDF) named vectors, server-side
-  # RRF hybrid fusion. Multi-arch image (runs on the DGX Spark ARM64).
+  # RRF hybrid fusion. Multi-arch image (runs on both ARM64 and AMD64 hosts).
   qdrant:
     image: qdrant/qdrant:latest
     container_name: qdrant
@@ -100,7 +100,7 @@ services:
     environment:
       - REDIS_URL=${REDIS_URL:-redis://:${RAG_REDIS_PASSWORD:-}@rag-redis:6379/0}
       - QDRANT_URL=${QDRANT_URL:-http://qdrant:6333}
-      - EMBEDDING_URL=${EMBEDDING_URL:-http://192.168.10.91:8001/v1/embeddings}
+      - EMBEDDING_URL=${EMBEDDING_URL:-http://your-llm-host:8001/v1/embeddings}
       - EMBEDDING_MODEL=${EMBEDDING_MODEL:-qwen3-embed}
       - RAG_SPARSE_MODEL=${RAG_SPARSE_MODEL:-Qdrant/bm25}
       - PUID=${PUID:-1000}

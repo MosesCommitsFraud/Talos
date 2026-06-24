@@ -387,7 +387,7 @@ const de: typeof en = {
     },
     models: {
       addEndpoint: 'Endpunkt hinzufügen',
-      baseUrlPlaceholder: 'Basis-URL, z. B. http://192.168.10.91:8000/v1',
+      baseUrlPlaceholder: 'Basis-URL, z. B. http://your-host:8000/v1',
       llm: 'LLM',
       image: 'Bild',
       apiKeyOptional: 'API-Schlüssel (optional)',

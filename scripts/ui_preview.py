@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Local UI-only preview server for Talos.
 
-Runs without Docker, Spark, vLLM, or the FastAPI backend. It serves the static UI
+Runs without Docker, an LLM host, vLLM, or the FastAPI backend. It serves the static UI
 and returns small mock responses for common API calls so layout/theme changes can
 be tested on a laptop.
 """
@@ -218,7 +218,7 @@ def _models():
     return [
         {
             "id": "mock-qwen3",
-            "name": "Spark Mock",
+            "name": "Mock Endpoint",
             "base_url": "mock://preview",
             "models": ["qwen3-llm"],
             "model_type": "llm",
@@ -419,11 +419,11 @@ class PreviewHandler(BaseHTTPRequestHandler):
                     "external_api_key_set": False,
                     "external_dataset_id": "",
                     "external_top_k": 5,
-                    "embedding_url": "http://192.168.10.91:8001/v1/embeddings",
+                    "embedding_url": "http://your-host:8001/v1/embeddings",
                     "embedding_model": "qwen3-embed",
                     "qdrant_url": "http://qdrant:6333",
                     "qdrant_api_key_set": False,
-                    "rerank_url": "http://192.168.10.91:8002/v1/rerank",
+                    "rerank_url": "http://your-host:8002/v1/rerank",
                     "rerank_model": "qwen3-reranker",
                     "rerank_api_key_set": False,
                     "sparse_model": "Qdrant/bm25",
