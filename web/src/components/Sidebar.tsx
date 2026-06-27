@@ -5,6 +5,7 @@ import {
   CheckIcon,
   ChevronRightIcon,
   ChevronDownIcon,
+  DatabaseIcon,
   FolderIcon,
   FolderPlusIcon,
   HelpCircleIcon,
@@ -331,6 +332,11 @@ function AccountMenu({
             <ShieldIcon /> {t('sidebar.menu.adminPanel')}
           </MenuItem>
         )}
+        {isAdmin && (
+          <MenuItem className={itemCls} onSelect={actions.onOpenRag}>
+            <DatabaseIcon /> {t('sidebar.menu.rag')}
+          </MenuItem>
+        )}
         <MenuItem className={itemCls} onSelect={actions.onOpenHelp}>
           <HelpCircleIcon /> {t('sidebar.menu.help')}
         </MenuItem>
@@ -362,6 +368,7 @@ interface AccountActions {
   onOpenHelp: () => void;
   onOpenArchive: () => void;
   onOpenAccount: () => void;
+  onOpenRag: () => void;
 }
 
 export function Sidebar({

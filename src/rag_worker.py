@@ -39,6 +39,9 @@ _ENV_MAP = {
     "rerank_model": "RERANK_MODEL",
     "rerank_api_key": "RERANK_API_KEY",
     "sparse_model": "RAG_SPARSE_MODEL",
+    # The Qwen instruction prefix is applied to the dense *query* at search time;
+    # the worker must resolve it too so ingest and retrieval agree on it.
+    "query_prefix": "RAG_QUERY_PREFIX",
 }
 
 _STATUS_MAP = {

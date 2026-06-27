@@ -4,6 +4,7 @@ import {
   ArrowDownIcon,
   ArrowUpIcon,
   CornerDownLeftIcon,
+  DatabaseIcon,
   MessageSquareIcon,
   MoonIcon,
   SearchIcon,
@@ -17,6 +18,7 @@ import { fetchSessions } from '@/api/client';
 import { useChat } from '@/state/chat';
 import { applyTheme, usePrefs } from '@/state/prefs';
 import { cn } from '@/lib/utils';
+import { useAuth } from './auth/AuthGate';
 import { Kbd } from './ui/misc';
 
 interface PaletteEntry {
@@ -32,7 +34,7 @@ interface PaletteGroup {
   items: PaletteEntry[];
 }
 
-export function CommandPalette({ open, onClose, onOpenSettings }: { open: boolean; onClose: () => void; onOpenSettings?: () => void }) {
+export function CommandPalette({ open, onClose, onOpenSettings, onOpenRag }: { open: boolean; onClose: () => void; onOpenSettings?: () => void; onOpenRag?: () => void }) {
   const { t } = useTranslation();
   const [query, setQuery] = useState('');
   const [selected, setSelected] = useState(0);
@@ -42,6 +44,7 @@ export function CommandPalette({ open, onClose, onOpenSettings }: { open: boolea
   const newChat = useChat((s) => s.newChat);
   const theme = usePrefs((s) => s.theme);
   const setTheme = usePrefs((s) => s.setTheme);
+  const auth = useAuth();
 
   useEffect(() => {
     if (open) {
@@ -66,6 +69,9 @@ export function CommandPalette({ open, onClose, onOpenSettings }: { open: boolea
         },
       },
       { id: 'settings', label: t('palette.openSettings'), icon: <SettingsIcon />, run: () => { onOpenSettings?.(); onClose(); } },
+      ...(auth?.is_admin && onOpenRag
+        ? [{ id: 'rag', label: t('palette.openRag'), icon: <DatabaseIcon />, run: () => { onOpenRag(); onClose(); } }]
+        : []),
     ].filter((a) => !q || a.label.toLowerCase().includes(q));
 
     const chats: PaletteEntry[] = (sessions ?? [])
@@ -83,7 +89,7 @@ export function CommandPalette({ open, onClose, onOpenSettings }: { open: boolea
     if (actions.length) next.push({ label: t('palette.actions'), items: actions });
     if (chats.length) next.push({ label: t('palette.recentChats'), items: chats });
     return next;
-  }, [query, sessions, theme, newChat, onClose, onOpenSettings, openSession, setTheme, t]);
+  }, [query, sessions, theme, newChat, onClose, onOpenSettings, onOpenRag, auth?.is_admin, openSession, setTheme, t]);
 
   // Flatten for keyboard navigation; track a running index across groups.
   const flat = useMemo(() => groups.flatMap((g) => g.items), [groups]);

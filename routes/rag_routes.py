@@ -203,6 +203,30 @@ def setup_rag_routes():
         )
         return {"ok": True, "stats": stats, "reranker": reranker}
 
+    @router.post("/rebuild")
+    def rebuild_index():
+        """Recreate the Qdrant collection (drops all vectors, keeps uploaded files).
+
+        Needed after an embedding-model change alters the vector dimension — the
+        `/rag` workspace exposes this as a "Rebuild index" button so the admin
+        never has to touch Qdrant directly. Uploaded files persist in the uploads
+        volume and can be re-ingested afterwards.
+        """
+        _reset_rag()
+        from src.rag_singleton import get_rag_manager
+
+        rag = get_rag_manager()
+        if not rag or not hasattr(rag, "rebuild_index"):
+            raise HTTPException(
+                503, "RAG is not available. Check embedding, Qdrant, and dependencies."
+            )
+        ok = rag.rebuild_index()
+        if not ok:
+            raise HTTPException(
+                503, f"Rebuild failed: {getattr(rag, 'last_error', 'unknown error')}"
+            )
+        return {"ok": True, "message": "Index recreated. Re-ingest your documents."}
+
     @router.get("/search")
     def test_search(q: str, k: int | None = None):
         from src.rag_singleton import get_rag_manager

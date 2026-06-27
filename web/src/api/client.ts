@@ -318,6 +318,10 @@ export const testRagConfig = async (): Promise<{ ok?: boolean; [key: string]: un
   return res.json();
 };
 
+/** Recreate the Qdrant collection (drops vectors, keeps uploaded files). Used
+ *  after an embedding-model change alters the vector dimension. */
+export const ragRebuildIndex = () => postJSON<{ ok?: boolean; message?: string }>('/api/rag/rebuild');
+
 export interface Integration { id?: string; name?: string; enabled?: boolean; [key: string]: unknown }
 export const fetchIntegrations = async () =>
   (await getJSON<{ integrations?: Integration[] }>('/api/auth/integrations')).integrations ?? [];

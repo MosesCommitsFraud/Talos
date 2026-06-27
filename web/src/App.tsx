@@ -10,6 +10,7 @@ import { SettingsDialog, type Panel, type SettingsScope } from './components/Set
 import { ArchiveDialog } from './components/ArchiveDialog';
 import { HelpDialog } from './components/HelpDialog';
 import { ArtifactsPanel } from './components/ArtifactsPanel';
+import { RagWorkspace } from './components/rag/RagWorkspace';
 import { Lightbox } from './components/Lightbox';
 import { PlanPanel } from './components/PlanPanel';
 import { PendingQuestion } from './components/AskUser';
@@ -32,6 +33,8 @@ export default function App() {
   const [helpOpen, setHelpOpen] = useState(false);
   const filesOpen = useUi((s) => s.artifactsOpen);
   const setFilesOpen = useUi((s) => s.setArtifactsOpen);
+  const view = useUi((s) => s.view);
+  const setView = useUi((s) => s.setView);
   const theme = usePrefs((s) => s.theme);
   const density = usePrefs((s) => s.density);
   const lang = usePrefs((s) => s.lang);
@@ -72,35 +75,48 @@ export default function App() {
                 onOpenHelp: () => setHelpOpen(true),
                 onOpenArchive: () => setArchiveOpen(true),
                 onOpenAccount: () => setSettings({ scope: 'user', panel: 'account' }),
+                onOpenRag: () => setView('rag'),
               }}
             />
-            <main className="relative flex min-w-0 flex-1 flex-col">
-              <IncognitoToggle />
-              <Messages />
-              {/* On an empty chat the composer (with the greeting above it) is
-                  lifted to the vertical center; sending the first message drops
-                  `hasMessages` → the transform releases and it slides to the
-                  bottom. transform-only, so no layout reflow during the slide. */}
-              <div
-                className={cn(
-                  'shrink-0 transition-transform duration-500 ease-out',
-                  !hasMessages && '-translate-y-[calc(50dvh-50%)]',
-                )}
-              >
-                {!hasMessages && <Welcome />}
-                <PendingQuestion />
-                <Composer />
-              </div>
-            </main>
-            <ArtifactsPanel open={filesOpen} onClose={() => setFilesOpen(false)} />
-            <PlanPanel />
+            {view === 'rag' ? (
+              <RagWorkspace />
+            ) : (
+              <>
+                <main className="relative flex min-w-0 flex-1 flex-col">
+                  <IncognitoToggle />
+                  <Messages />
+                  {/* On an empty chat the composer (with the greeting above it) is
+                      lifted to the vertical center; sending the first message drops
+                      `hasMessages` → the transform releases and it slides to the
+                      bottom. transform-only, so no layout reflow during the slide. */}
+                  <div
+                    className={cn(
+                      'shrink-0 transition-transform duration-500 ease-out',
+                      !hasMessages && '-translate-y-[calc(50dvh-50%)]',
+                    )}
+                  >
+                    {!hasMessages && <Welcome />}
+                    <PendingQuestion />
+                    <Composer />
+                  </div>
+                </main>
+                <ArtifactsPanel open={filesOpen} onClose={() => setFilesOpen(false)} />
+                <PlanPanel />
+              </>
+            )}
           </div>
-          <CommandPalette open={palette} onClose={() => setPalette(false)} onOpenSettings={() => setSettings({})} />
+          <CommandPalette
+            open={palette}
+            onClose={() => setPalette(false)}
+            onOpenSettings={() => setSettings({})}
+            onOpenRag={() => setView('rag')}
+          />
           <SettingsDialog
             open={!!settings}
             onClose={() => setSettings(null)}
             initialPanel={settings?.panel}
             scope={settings?.scope}
+            onOpenRag={() => setView('rag')}
           />
           <ArchiveDialog open={archiveOpen} onClose={() => setArchiveOpen(false)} />
           <HelpDialog open={helpOpen} onClose={() => setHelpOpen(false)} />

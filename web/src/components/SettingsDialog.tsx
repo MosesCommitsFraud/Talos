@@ -1180,7 +1180,7 @@ function ToolsPanel() {
 
 /* ── RAG (config + documents) ── */
 
-function RagPanel() {
+export function RagPanel() {
   const { t } = useTranslation();
   const { data } = useQuery({ queryKey: ['rag-config'], queryFn: fetchRagConfig });
   const [draft, setDraft] = useState<RagConfig | null>(null);
@@ -1619,11 +1619,15 @@ export function SettingsDialog({
   onClose,
   initialPanel,
   scope,
+  onOpenRag,
 }: {
   open: boolean;
   onClose: () => void;
   initialPanel?: Panel;
   scope?: SettingsScope;
+  /** Route the user to the dedicated `/rag` workspace instead of rendering the
+   *  RAG panel inline (Advanced settings → `/rag`). */
+  onOpenRag?: () => void;
 }) {
   const { t } = useTranslation();
   const [panel, setPanel] = useState<Panel>(initialPanel ?? 'appearance');
@@ -1650,15 +1654,29 @@ export function SettingsDialog({
     { id: 'assistants', label: t('settings.nav.assistants'), icon: <PlugIcon /> },
     { id: 'integrations', label: t('settings.nav.integrations'), icon: <Link2Icon /> },
     { id: 'tools', label: t('settings.nav.tools'), icon: <WrenchIcon /> },
-    { id: 'rag', label: t('settings.nav.rag'), icon: <DatabaseIcon /> },
     { id: 'users', label: t('settings.nav.users'), icon: <UsersIcon /> },
     { id: 'system', label: t('settings.nav.system'), icon: <SettingsIcon /> },
   ];
+  // Advanced — entries that open a dedicated surface rather than an in-dialog
+  // panel. RAG routes to the full-screen `/rag` workspace (no in-dialog panel).
+  const advancedNav: Array<{ id: Panel; label: string; icon: React.ReactNode }> = [
+    { id: 'rag', label: t('settings.nav.rag'), icon: <DatabaseIcon /> },
+  ];
 
+  // The RAG entry routes to the dedicated `/rag` workspace instead of swapping
+  // an in-dialog panel; everything else selects a panel as before.
+  const navClick = (id: Panel) => {
+    if (id === 'rag' && onOpenRag) {
+      onOpenRag();
+      onClose();
+    } else {
+      setPanel(id);
+    }
+  };
   const NavButton = ({ n }: { n: { id: Panel; label: string; icon: React.ReactNode } }) => (
     <button
       type="button"
-      onClick={() => setPanel(n.id)}
+      onClick={() => navClick(n.id)}
       title={n.label}
       className={cn(
         'flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm transition-colors [&_svg]:size-[18px] [&_svg]:shrink-0 [&_svg]:text-muted-foreground',
@@ -1680,7 +1698,8 @@ export function SettingsDialog({
   const matches = (n: { label: string }) => !q || n.label.toLowerCase().includes(q);
   const userItems = scope === 'admin' ? [] : userNav.filter(matches);
   const adminItems = auth?.is_admin && scope !== 'user' ? adminNav.filter(matches) : [];
-  const noResults = userItems.length === 0 && adminItems.length === 0;
+  const advancedItems = auth?.is_admin && scope !== 'user' ? advancedNav.filter(matches) : [];
+  const noResults = userItems.length === 0 && adminItems.length === 0 && advancedItems.length === 0;
 
   return (
     <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
@@ -1712,6 +1731,12 @@ export function SettingsDialog({
                   {adminItems.map((n) => <NavButton key={n.id} n={n} />)}
                 </>
               )}
+              {advancedItems.length > 0 && (
+                <>
+                  <GroupLabel>{t('settings.advanced')}</GroupLabel>
+                  {advancedItems.map((n) => <NavButton key={n.id} n={n} />)}
+                </>
+              )}
               {noResults && (
                 <div className="px-2.5 py-8 text-center text-xs text-muted-foreground">{t('settings.noResults')}</div>
               )}
@@ -1726,7 +1751,6 @@ export function SettingsDialog({
             {panel === 'assistants' && <AssistantsPanel />}
             {panel === 'integrations' && <IntegrationsPanel />}
             {panel === 'tools' && <ToolsPanel />}
-            {panel === 'rag' && <RagPanel />}
             {panel === 'users' && <UsersPanel currentUser={auth?.username} />}
             {panel === 'system' && <SystemPanel />}
           </div>
