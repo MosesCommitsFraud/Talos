@@ -129,6 +129,8 @@ def _progress_saver(job):
             {
                 "indexed_count": int(info.get("indexed_count") or 0),
                 "failed_count": int(info.get("failed_count") or 0),
+                "processed_count": int(info.get("processed") or 0),
+                "total_count": int(info.get("total") or 0),
                 "current_file": info.get("file", ""),
                 "errors": (info.get("errors") or [])[-10:],
                 "message": "Indexing",
@@ -152,10 +154,14 @@ def _finalize(job, result: Dict[str, Any]) -> None:
     if errors:
         first = errors[0]
         message = f"{message} — {first.get('file', '')}: {first.get('error', '')}"
+    total = int(result.get("total") or 0)
     job.meta.update(
         {
             "indexed_count": int(result.get("indexed_count") or 0),
             "failed_count": int(result.get("failed_count") or 0),
+            # On success processed == total; carry both so the bar lands at 100%.
+            "processed_count": int(result.get("processed") or total),
+            "total_count": total,
             "current_file": "",
             "errors": errors,
             "message": message,
@@ -271,6 +277,10 @@ def _job_to_dict(job) -> Dict[str, Any]:
         "owner": meta.get("owner"),
         "indexed_count": int(meta.get("indexed_count") or 0),
         "failed_count": int(meta.get("failed_count") or 0),
+        # Files done / total (uploads carry a known total → a real % bar; dir
+        # ingest has no upfront total → the UI shows an indeterminate state).
+        "processed_count": int(meta.get("processed_count") or 0),
+        "total_count": int(meta.get("total_count") or meta.get("file_count") or 0),
         "current_file": meta.get("current_file", ""),
         "message": message,
         "errors": meta.get("errors", []),

@@ -47,11 +47,6 @@ import {
   personalReload,
   personalUpload,
   ragSearch,
-  fetchRagJobs,
-  fetchRagWorkerDiag,
-  cancelRagJob,
-  clearRagJobs,
-  deleteRagJob,
   fetchRagDocuments,
   deleteRagDocument,
   fetchSqlKnowledge,
@@ -71,7 +66,6 @@ import {
   wipeData,
   type AppSettings,
   type RagConfig,
-  type RagJob,
   type SqlConfig,
 } from '@/api/client';
 import type { AssistantEndpoint } from '@/api/types';
@@ -1196,10 +1190,8 @@ export function RagPanel() {
     onSuccess: () => void queryClient.invalidateQueries({ queryKey: ['rag-config'] }),
   });
   const test = useMutation({ mutationFn: testRagConfig });
-  // Live ingest queue + indexed-documents views. Jobs poll while the panel is
-  // open so uploads/dir-indexing progress is visible without a refresh.
-  const jobs = useQuery({ queryKey: ['rag-jobs'], queryFn: fetchRagJobs, refetchInterval: 2000 });
-  const diag = useQuery({ queryKey: ['rag-worker-diag'], queryFn: fetchRagWorkerDiag, refetchInterval: 5000 });
+  // Indexed-documents view polls while open. The live ingest queue + worker
+  // status now live in the /rag activity rail (RagActivity), not here.
   const docs = useQuery({ queryKey: ['rag-documents'], queryFn: fetchRagDocuments, refetchInterval: 5000 });
   const refreshIngest = () => {
     void queryClient.invalidateQueries({ queryKey: ['rag-jobs'] });
@@ -1336,62 +1328,6 @@ export function RagPanel() {
         </div>
         {searchOut && <pre className="max-h-48 overflow-y-auto rounded-lg border bg-muted px-3 py-2 font-mono text-[11px] whitespace-pre-wrap">{searchOut}</pre>}
       </div>
-      </Section>
-
-      <Section title={t('settings.rag.queue')} padded
-        action={jobs.data?.jobs?.some((j) => ['completed', 'failed', 'cancelled'].includes(j.status))
-          ? <button className="text-xs text-muted-foreground hover:text-foreground"
-              onClick={() => void clearRagJobs().then(refreshIngest)}>{t('settings.rag.clearJobs')}</button>
-          : undefined}>
-        {diag.data && diag.data.active_worker_count === 0 && (
-          <p className="pb-2 text-xs text-destructive-foreground">{t('settings.rag.noWorker')}</p>
-        )}
-        {(!jobs.data?.jobs || jobs.data.jobs.length === 0) ? (
-          <p className="text-xs text-muted-foreground">{t('settings.rag.queueEmpty')}</p>
-        ) : (
-          <div className="space-y-1.5">
-            {jobs.data.jobs.map((j: RagJob) => {
-              const terminal = ['completed', 'failed', 'cancelled'].includes(j.status);
-              return (
-              <div key={j.id} className="rounded-lg border border-border/60 px-3 py-2 text-xs">
-                <div className="flex items-center gap-2">
-                  <span className={cn('inline-block w-2 h-2 rounded-full shrink-0',
-                    j.status === 'completed' ? (j.failed_count > 0 ? 'bg-amber-500' : 'bg-success')
-                    : j.status === 'failed' ? 'bg-destructive'
-                    : j.status === 'running' ? 'bg-accent animate-pulse'
-                    : j.status === 'cancelled' ? 'bg-muted-foreground'
-                    : 'bg-muted-foreground/60')} />
-                  <span className="font-medium shrink-0">{t(`settings.rag.status.${j.status}`, j.status)}</span>
-                  <span className={cn('truncate', j.status === 'failed' ? 'text-destructive-foreground' : 'text-muted-foreground')}
-                    title={j.message}>
-                    {j.status === 'failed' ? j.message : (j.current_file ? j.current_file.split('/').pop() : (j.directory || j.message))}
-                  </span>
-                  <span className="ml-auto shrink-0 tabular-nums text-muted-foreground">
-                    {j.indexed_count > 0 ? t('settings.rag.chunksIndexed', { n: j.indexed_count }) : ''}
-                    {j.failed_count > 0 ? ` · ${t('settings.rag.failedN', { n: j.failed_count })}` : ''}
-                  </span>
-                  {terminal ? (
-                    <button className="shrink-0 text-muted-foreground hover:text-destructive-foreground"
-                      onClick={() => void deleteRagJob(j.id).then(refreshIngest)}>{t('common.delete')}</button>
-                  ) : (
-                    <button className="shrink-0 text-muted-foreground hover:text-destructive-foreground"
-                      onClick={() => void cancelRagJob(j.id).then(refreshIngest)}>{t('common.cancel')}</button>
-                  )}
-                </div>
-                {j.errors && j.errors.length > 0 && (
-                  <ul className="mt-1.5 space-y-0.5 border-t border-border/40 pt-1.5">
-                    {j.errors.map((e, i) => (
-                      <li key={i} className="text-destructive-foreground">
-                        <span className="font-medium">{e.file}</span>: {e.error}
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </div>
-            );
-            })}
-          </div>
-        )}
       </Section>
 
       <Section title={t('settings.rag.indexedDocs')} padded>

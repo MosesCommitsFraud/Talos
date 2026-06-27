@@ -435,6 +435,10 @@ export interface RagJob {
   directory: string;
   indexed_count: number;
   failed_count: number;
+  /** Files processed / total. total_count is 0 for directory ingest (no upfront
+   *  count) → render an indeterminate state instead of a percentage. */
+  processed_count?: number;
+  total_count?: number;
   current_file: string;
   message: string;
   errors: { file: string; error: string }[];

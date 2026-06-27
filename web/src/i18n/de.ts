@@ -264,6 +264,11 @@ const de: typeof en = {
     uploadQueued: '{{count}} Datei(en) zum Indexieren eingereiht',
     rebuildIndex: 'Index neu aufbauen',
     rebuildDone: 'Index neu angelegt. Dokumente erneut einlesen.',
+    workersActive: '{{n}} Worker',
+    queue: 'Warteschlange',
+    filesProgress: '{{done}}/{{total}} Dateien',
+    console: 'Fehler',
+    consoleEmpty: 'Keine Fehler',
   },
   settings: {
     title: 'Einstellungen',

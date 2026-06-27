@@ -660,6 +660,8 @@ class VectorRAG:
             }
         indexed = 0
         failed = 0
+        processed = 0
+        total = len(files)
         errors: List[Dict[str, str]] = []
         for fpath, meta in files:
             if cancel_cb and cancel_cb():
@@ -668,6 +670,8 @@ class VectorRAG:
                     "cancelled": True,
                     "indexed_count": indexed,
                     "failed_count": failed,
+                    "processed": processed,
+                    "total": total,
                     "errors": errors,
                     "message": f"Cancelled after {indexed} chunks",
                 }
@@ -689,12 +693,15 @@ class VectorRAG:
                 errors.append(
                     {"file": os.path.basename(fpath), "error": f"{type(e).__name__}: {e}"}
                 )
+            processed += 1
             if progress_cb:
                 progress_cb(
                     {
                         "file": fpath,
                         "indexed_count": indexed,
                         "failed_count": failed,
+                        "processed": processed,
+                        "total": total,
                         "errors": errors,
                     }
                 )

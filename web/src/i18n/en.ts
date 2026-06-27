@@ -262,6 +262,11 @@ const en = {
     uploadQueued: 'Queued {{count}} file(s) for indexing',
     rebuildIndex: 'Rebuild index',
     rebuildDone: 'Index recreated. Re-ingest your documents.',
+    workersActive: '{{n}} worker(s)',
+    queue: 'Queue',
+    filesProgress: '{{done}}/{{total}} files',
+    console: 'Errors',
+    consoleEmpty: 'No errors',
   },
   settings: {
     title: 'Settings',
