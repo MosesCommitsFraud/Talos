@@ -1287,6 +1287,16 @@ export function RagPanel() {
         </Section>
       )}
 
+      {(draft.provider || 'internal') !== 'external' && (
+        <Section title={t('settings.rag.asrTitle')}>
+          <Row label={t('settings.rag.asrEnabled')} hint={t('settings.rag.hint.asrEnabled')}>
+            <Switch checked={!!draft.video_asr_enabled} onCheckedChange={(v) => set('video_asr_enabled', v)} />
+          </Row>
+          {draft.video_asr_enabled &&
+            field('video_asr_url', t('settings.rag.asrUrl'), { hint: t('settings.rag.hint.asrUrl'), def: 'http://video-asr:8003/transcribe' })}
+        </Section>
+      )}
+
       <Section title={t('settings.rag.context')}>
         {field('max_context_chars', t('settings.rag.maxContextChars'), { type: 'number', hint: t('settings.rag.hint.maxContextChars'), def: 10000 })}
         {field('query_prefix', t('settings.rag.queryPrefix'), { type: 'textarea', hint: t('settings.rag.hint.queryPrefix'), def: '' })}

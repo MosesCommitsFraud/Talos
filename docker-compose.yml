@@ -35,6 +35,10 @@ services:
       # field (Settings → RAG); the worker receives them as a job snapshot.
       - QDRANT_URL=${QDRANT_URL:-http://qdrant:6333}
       - RAG_SPARSE_MODEL=${RAG_SPARSE_MODEL:-Qdrant/bm25}
+      # Opt-in audio/video transcription. Harmless when unset: the lane only
+      # activates when the admin turns on "Video / ASR" in Advanced settings AND
+      # the video-asr sidecar is running (start it with `--profile asr`).
+      - VIDEO_ASR_URL=${VIDEO_ASR_URL:-http://video-asr:8003/transcribe}
       # Redis/Valkey runs with NO password by default — it has no published port
       # and is reachable only by sibling containers on the Docker network, so the
       # network is the trust boundary. For defense-in-depth, set RAG_REDIS_PASSWORD
@@ -103,6 +107,9 @@ services:
       - EMBEDDING_URL=${EMBEDDING_URL:-http://your-llm-host:8001/v1/embeddings}
       - EMBEDDING_MODEL=${EMBEDDING_MODEL:-qwen3-embed}
       - RAG_SPARSE_MODEL=${RAG_SPARSE_MODEL:-Qdrant/bm25}
+      # Same opt-in ASR endpoint as the app — the worker is what actually calls
+      # it during ingest. Inert unless the Advanced toggle is on.
+      - VIDEO_ASR_URL=${VIDEO_ASR_URL:-http://video-asr:8003/transcribe}
       - PUID=${PUID:-1000}
       - PGID=${PGID:-1000}
     volumes:
@@ -116,6 +123,29 @@ services:
         condition: service_started
       rag-redis:
         condition: service_started
+
+  # Opt-in audio/video transcription sidecar (Qwen3-ASR + ForcedAligner). Behind
+  # the `asr` compose profile so a plain `docker compose up` NEVER starts it —
+  # the default stack stays embedding + reranker only. Launch the multimodal
+  # stack with: `docker compose --profile asr up` (or COMPOSE_PROFILES=asr). The
+  # app/worker still need the Advanced → "Video / ASR" toggle on to use it.
+  video-asr:
+    build:
+      context: ./services/video_asr
+    container_name: video-asr
+    profiles: ["asr"]
+    restart: unless-stopped
+    environment:
+      # Path to the local model weights (mount them in below). Swap for the
+      # Qwen3-ASR dir on the Spark; defaults to a portable whisper backend.
+      - ASR_MODEL=${ASR_MODEL:-large-v3-turbo}
+      - ASR_DEVICE=${ASR_DEVICE:-auto}
+      - ASR_MAX_SEGMENT_SECONDS=${ASR_MAX_SEGMENT_SECONDS:-1200}
+    # Mount your downloaded model weights here (see Bauplan §Download).
+    #   volumes:
+    #     - ~/rag-stack/models:/models:ro
+    networks:
+      - default
 
   talos-sandbox:
     build:

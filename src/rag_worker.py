@@ -42,6 +42,8 @@ _ENV_MAP = {
     # The Qwen instruction prefix is applied to the dense *query* at search time;
     # the worker must resolve it too so ingest and retrieval agree on it.
     "query_prefix": "RAG_QUERY_PREFIX",
+    # Opt-in ASR lane endpoint (the toggle is applied separately, below).
+    "video_asr_url": "VIDEO_ASR_URL",
 }
 
 _STATUS_MAP = {
@@ -91,6 +93,8 @@ def _apply_snapshot(snap: Optional[Dict[str, Any]]) -> None:
         value = str(snap.get(key) or "").strip()
         if value:
             os.environ[env_name] = value
+    # Boolean toggle set explicitly so a disabled snapshot clears any stale value.
+    os.environ["VIDEO_ASR_ENABLED"] = "true" if snap.get("video_asr_enabled") else ""
 
 
 def _fresh_rag():

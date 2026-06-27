@@ -1,8 +1,8 @@
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ArrowLeftIcon, DatabaseIcon, RefreshCwIcon, UploadCloudIcon } from 'lucide-react';
 import { useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { personalUpload, ragRebuildIndex } from '@/api/client';
+import { fetchRagConfig, personalUpload, ragRebuildIndex } from '@/api/client';
 import { useUi } from '@/state/ui';
 import { cn } from '@/lib/utils';
 import { Button } from '../ui/button';
@@ -19,6 +19,9 @@ export function RagWorkspace() {
   const fileInput = useRef<HTMLInputElement>(null);
   const [dragging, setDragging] = useState(false);
   const [msg, setMsg] = useState<{ text: string; ok: boolean } | null>(null);
+  // Only advertise audio/video on the drop zone when the opt-in ASR lane is on.
+  const { data: cfg } = useQuery({ queryKey: ['rag-config'], queryFn: fetchRagConfig });
+  const asrOn = !!cfg?.video_asr_enabled;
 
   const refreshIngest = () => {
     void queryClient.invalidateQueries({ queryKey: ['rag-jobs'] });
@@ -93,7 +96,7 @@ export function RagWorkspace() {
         >
           <UploadCloudIcon className="size-7 text-muted-foreground" />
           <div className="text-sm font-medium">{t('rag.dropTitle')}</div>
-          <div className="text-xs text-muted-foreground">{t('rag.dropHint')}</div>
+          <div className="text-xs text-muted-foreground">{t(asrOn ? 'rag.dropHintAv' : 'rag.dropHint')}</div>
           <input
             ref={fileInput}
             type="file"

@@ -65,10 +65,53 @@ DEFAULT_FILE_EXTENSIONS: Set[str] = {
     ".bmp",
     ".webp",
     ".gif",
+    # Audio/video (only indexed when the ASR lane is enabled; otherwise each is
+    # reported as a skipped file — see ``_lane_av``).
+    ".mp4",
+    ".mov",
+    ".mkv",
+    ".webm",
+    ".avi",
+    ".m4v",
+    ".mp3",
+    ".wav",
+    ".m4a",
+    ".flac",
+    ".aac",
+    ".ogg",
 }
 
 COLLECTION_NAME = "talos_rag"
 _DEFAULT_SPARSE_MODEL = "Qdrant/bm25"
+
+# Audio/video extensions routed to the opt-in ASR lane (see ``_asr_active``).
+# Module-level so the router and the dir-ingest accepted-extension set agree.
+_AV_EXTS: Set[str] = {
+    ".mp4",
+    ".mov",
+    ".mkv",
+    ".webm",
+    ".avi",
+    ".m4v",
+    ".mp3",
+    ".wav",
+    ".m4a",
+    ".flac",
+    ".aac",
+    ".ogg",
+}
+
+
+def _asr_active() -> bool:
+    """True only when the ASR lane is explicitly enabled *and* an endpoint is set.
+
+    Default deployments leave this off, so audio/video files are rejected with a
+    clear message and the embedding/reranker pipeline is completely unchanged —
+    "just embedding + reranker like before".
+    """
+    return bool(os.getenv("VIDEO_ASR_ENABLED", "").strip()) and bool(
+        os.getenv("VIDEO_ASR_URL", "").strip()
+    )
 
 
 def _apply_saved_rag_config() -> None:
@@ -97,11 +140,15 @@ def _apply_saved_rag_config() -> None:
         "rerank_api_key": "RERANK_API_KEY",
         "sparse_model": "RAG_SPARSE_MODEL",
         "query_prefix": "RAG_QUERY_PREFIX",
+        "video_asr_url": "VIDEO_ASR_URL",
     }
     for key, env_name in mapping.items():
         value = str(cfg.get(key) or "").strip()
         if value:
             os.environ[env_name] = value
+    # The ASR toggle must be set explicitly (not via the truthy-skip loop) so
+    # turning it back off actually clears the env in a long-lived app process.
+    os.environ["VIDEO_ASR_ENABLED"] = "true" if cfg.get("video_asr_enabled") else ""
 
 
 def _embed_base_url() -> str:
@@ -501,36 +548,100 @@ class VectorRAG:
         return len(docs)
 
     def _documents_for_file(self, path: str, meta: Dict[str, Any]):
-        """Parse + chunk a single file into Haystack Documents with metadata."""
-        from haystack.dataclasses import Document
+        """Route a file to its modality lane → Haystack Documents with metadata.
 
+        The single ingest chokepoint for both UI uploads and dir/API ingest. A
+        small dispatch keeps each modality's handling isolated and testable:
+          * audio/video → ``_lane_av`` (opt-in ASR; rejects when disabled)
+          * rich docs/images → ``_lane_docling`` (layout-aware HybridChunk)
+          * plain text/code/json → ``_lane_text`` (length splitter)
+        """
         from src.docling_runtime import is_docling_format
 
-        if is_docling_format(path):
-            from haystack_integrations.components.converters.docling import DoclingConverter
-
-            if self._docling is None:
-                # Default export_type=DOC_CHUNKS → Docling HybridChunker.
-                self._docling = DoclingConverter()
-            docs = self._docling.run(sources=[path]).get("documents", []) or []
+        ext = Path(path).suffix.lower()
+        if ext in _AV_EXTS:
+            docs = self._lane_av(path, meta)
+        elif is_docling_format(path):
+            docs = self._lane_docling(path)
         else:
-            text = Path(path).read_text(encoding="utf-8", errors="replace")
-            if not text.strip():
-                return []
-            from haystack.components.preprocessors import DocumentSplitter
+            docs = self._lane_text(path)
 
-            if self._splitter is None:
-                self._splitter = DocumentSplitter(
-                    split_by="word", split_length=250, split_overlap=40
-                )
-                try:
-                    self._splitter.warm_up()
-                except Exception:
-                    pass
-            docs = self._splitter.run(documents=[Document(content=text)]).get("documents", []) or []
-
+        # Caller metadata (source/filename/owner/scope …) is layered on top; the
+        # lane only owns keys the caller doesn't set (e.g. start/end/modality),
+        # which ``update`` preserves because they're absent from ``meta``.
         for d in docs:
             d.meta.update(meta)
+        return docs
+
+    def _lane_docling(self, path: str):
+        """Rich docs/images → Docling HybridChunker (layout- and table-aware)."""
+        from haystack_integrations.components.converters.docling import DoclingConverter
+
+        if self._docling is None:
+            # Default export_type=DOC_CHUNKS → Docling HybridChunker.
+            self._docling = DoclingConverter()
+        return self._docling.run(sources=[path]).get("documents", []) or []
+
+    def _lane_text(self, path: str):
+        """Plain text/code/json → read directly and length-split."""
+        from haystack.components.preprocessors import DocumentSplitter
+        from haystack.dataclasses import Document
+
+        text = Path(path).read_text(encoding="utf-8", errors="replace")
+        if not text.strip():
+            return []
+        if self._splitter is None:
+            self._splitter = DocumentSplitter(split_by="word", split_length=250, split_overlap=40)
+            try:
+                self._splitter.warm_up()
+            except Exception:
+                pass
+        return self._splitter.run(documents=[Document(content=text)]).get("documents", []) or []
+
+    def _lane_av(self, path: str, meta: Dict[str, Any]):
+        """Audio/video → ASR sidecar transcript, one chunk per timed segment.
+
+        Opt-in: when the ASR lane is disabled (the default), this raises a clear
+        message so the queue shows *why* the file was skipped, while every other
+        modality keeps working untouched.
+        """
+        if not _asr_active():
+            raise RuntimeError(
+                "ASR is disabled — enable Video / ASR in Advanced settings (and run the "
+                "video-asr service) to index audio/video files"
+            )
+        import httpx
+        from haystack.dataclasses import Document
+
+        url = os.getenv("VIDEO_ASR_URL", "").strip()
+        language = os.getenv("VIDEO_ASR_LANGUAGE", "German")
+        with open(path, "rb") as fh:
+            resp = httpx.post(
+                url,
+                files={"file": (os.path.basename(path), fh)},
+                data={"language": language},
+                timeout=float(os.getenv("VIDEO_ASR_TIMEOUT", "1800")),
+            )
+        resp.raise_for_status()
+        payload = resp.json()
+
+        # A UI upload has no external video_url, so there's nothing to deep-link
+        # to — the timestamps are still stored as metadata ("from minute X").
+        base = meta.get("video_url") or meta.get("url")
+        docs = []
+        for seg in payload.get("segments") or []:
+            text = (seg.get("text") or "").strip()
+            if not text:
+                continue
+            seg_meta: Dict[str, Any] = {
+                "modality": "video",
+                "start": seg.get("start"),
+                "end": seg.get("end"),
+            }
+            if base and seg.get("start") is not None:
+                sep = "&" if "?" in str(base) else "#"
+                seg_meta["deeplink"] = f"{base}{sep}t={int(seg['start'])}"
+            docs.append(Document(content=text, meta=seg_meta))
         return docs
 
     def index_files(

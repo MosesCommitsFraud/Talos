@@ -297,6 +297,9 @@ export interface RagConfig {
   max_context_chars: number;
   query_prefix: string;
   context_prompt: string;
+  /** Advanced — opt-in audio/video transcription lane (off by default). */
+  video_asr_enabled?: boolean;
+  video_asr_url?: string;
 }
 /** Which knowledge sources are configured — drives the composer's mode control. */
 export const fetchCapabilities = () => getJSON<{ rag: boolean; sql: boolean }>('/api/capabilities');

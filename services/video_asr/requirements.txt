@@ -1,0 +1,7 @@
+# video-asr sidecar — HTTP contract + portable reference backend.
+fastapi>=0.115
+uvicorn[standard]>=0.30
+python-multipart>=0.0.9
+# Portable ASR backend with word/segment timestamps. On the Spark, replace with
+# the Qwen3-ASR + ForcedAligner stack and point ASR_MODEL at the local weights.
+faster-whisper>=1.0

@@ -1,0 +1,86 @@
+"""Unit tests for the RAG modality router and the opt-in ASR gate.
+
+These exercise pure routing/gating logic only — the heavy Haystack/Docling
+imports live inside the lane handlers and are never reached here, so the tests
+run without the optional RAG dependencies installed.
+"""
+
+import importlib
+
+import pytest
+
+rv = importlib.import_module("src.rag_vector")
+
+
+class _Router:
+    """Minimal stand-in so we can call the unbound ``_documents_for_file`` and
+    record which lane it dispatches to, without building a real VectorRAG (which
+    would require a live Qdrant + embedding endpoint)."""
+
+    def __init__(self):
+        self.calls = []
+
+    def _lane_av(self, path, meta):
+        self.calls.append("av")
+        return []
+
+    def _lane_docling(self, path):
+        self.calls.append("docling")
+        return []
+
+    def _lane_text(self, path):
+        self.calls.append("text")
+        return []
+
+
+def _route(path):
+    r = _Router()
+    rv.VectorRAG._documents_for_file(r, path, {})
+    return r.calls[0]
+
+
+def test_router_picks_av():
+    assert _route("lesson.mp4") == "av"
+    assert _route("podcast.mp3") == "av"
+
+
+def test_router_picks_docling():
+    assert _route("manual.pdf") == "docling"
+    assert _route("screenshot.png") == "docling"
+
+
+def test_router_picks_text():
+    assert _route("module.py") == "text"
+    assert _route("notes.txt") == "text"
+
+
+def test_av_exts_cover_common_formats():
+    for ext in (".mp4", ".mov", ".mkv", ".webm", ".mp3", ".wav", ".m4a"):
+        assert ext in rv._AV_EXTS
+
+
+def test_asr_inactive_by_default(monkeypatch):
+    monkeypatch.delenv("VIDEO_ASR_ENABLED", raising=False)
+    monkeypatch.delenv("VIDEO_ASR_URL", raising=False)
+    assert rv._asr_active() is False
+
+
+def test_asr_requires_both_toggle_and_url(monkeypatch):
+    monkeypatch.setenv("VIDEO_ASR_ENABLED", "true")
+    monkeypatch.delenv("VIDEO_ASR_URL", raising=False)
+    assert rv._asr_active() is False  # toggle on but no endpoint
+    monkeypatch.setenv("VIDEO_ASR_URL", "http://video-asr:8003/transcribe")
+    assert rv._asr_active() is True
+
+
+def test_av_lane_skips_when_disabled(monkeypatch):
+    """An AV file with ASR off raises a clear message (so the queue shows why),
+    and never reaches the network — proving the default stack is untouched."""
+    monkeypatch.setenv("VIDEO_ASR_ENABLED", "")
+    monkeypatch.delenv("VIDEO_ASR_URL", raising=False)
+
+    class _Dummy:
+        pass
+
+    with pytest.raises(RuntimeError, match="ASR is disabled"):
+        rv.VectorRAG._lane_av(_Dummy(), "clip.mp4", {})

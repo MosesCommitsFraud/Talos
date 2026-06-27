@@ -28,6 +28,9 @@ class RagPipelineConfig(BaseModel):
     max_context_chars: int = 10000
     query_prefix: str = ""
     context_prompt: str = ""
+    # Advanced — opt-in audio/video transcription lane (off by default).
+    video_asr_enabled: bool = False
+    video_asr_url: str = ""
 
 
 def _clamp_k(value: int, default: int = 5) -> int:
@@ -82,6 +85,8 @@ def _public(cfg: dict) -> dict:
         "max_context_chars": _clamp_chars(cfg.get("max_context_chars", 10000)),
         "query_prefix": cfg.get("query_prefix", ""),
         "context_prompt": cfg.get("context_prompt", ""),
+        "video_asr_enabled": bool(cfg.get("video_asr_enabled", False)),
+        "video_asr_url": cfg.get("video_asr_url", ""),
     }
 
 
@@ -144,6 +149,8 @@ def setup_rag_routes():
             "max_context_chars": _clamp_chars(body.max_context_chars),
             "query_prefix": body.query_prefix.strip(),
             "context_prompt": body.context_prompt.strip(),
+            "video_asr_enabled": bool(body.video_asr_enabled),
+            "video_asr_url": body.video_asr_url.strip(),
         }
         if not cfg["enabled"]:
             settings["rag_pipeline"] = cfg
