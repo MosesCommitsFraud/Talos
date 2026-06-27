@@ -103,6 +103,35 @@ def setup_personal_routes(personal_docs_manager, rag_manager, rag_available):
         )
         return {"files": files, "directories": directories}
 
+    _IMAGE_ASSET_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".tif", ".tiff"}
+
+    @router.get("/rag-asset")
+    def serve_rag_asset(
+        source: str = Query(..., description="Stored source path of an indexed file"),
+        owner: str = Depends(require_user),
+    ):
+        """Stream an indexed image so RAG citations can show a preview.
+
+        Hardened against path traversal / arbitrary file reads: the resolved path
+        must sit inside the RAG uploads dir AND be an image type — never an
+        arbitrary server path, and never a non-image indexed document. Requires a
+        logged-in user (the knowledge base is shared across users); per-chunk
+        ACLs are a separate follow-up.
+        """
+        from fastapi.responses import FileResponse
+
+        uploads_root = os.path.realpath(UPLOADS_DIR)
+        resolved = os.path.realpath(source or "")
+        try:
+            inside = os.path.commonpath([resolved, uploads_root]) == uploads_root
+        except ValueError:
+            inside = False
+        if not inside or not os.path.isfile(resolved):
+            raise HTTPException(404, "Asset not found")
+        if os.path.splitext(resolved)[1].lower() not in _IMAGE_ASSET_EXTS:
+            raise HTTPException(415, "Only image assets can be served")
+        return FileResponse(resolved)
+
     @router.post("/reload")
     def api_personal_reload(
         owner: str = Depends(require_user), _admin: None = Depends(require_admin)

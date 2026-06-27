@@ -56,6 +56,17 @@ export interface RagSource {
   filename: string;
   snippet: string;
   similarity: number;
+  /** Set for image/video chunks so the citation can show a preview/timestamp. */
+  modality?: 'image' | 'video';
+  /** Path-confined endpoint that streams the indexed image (image modality). */
+  image_url?: string;
+  /** External video URL, when one was provided at ingest (video modality). */
+  video_url?: string;
+  /** Deep-link into the source video at the segment start (video modality). */
+  deeplink?: string;
+  /** Segment start/end in seconds (video modality). */
+  start?: number;
+  end?: number;
 }
 
 export interface Attachment {

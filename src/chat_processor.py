@@ -1,14 +1,57 @@
 # src/chat_processor.py
 import logging
 import math
+import os
 import re
 import time
 from collections import Counter
 from typing import Any, Dict, List, Optional, Tuple
+from urllib.parse import quote
 
 from src.prompt_security import UNTRUSTED_CONTEXT_POLICY, untrusted_context_message
 
 logger = logging.getLogger(__name__)
+
+# Extensions used to tag a citation's modality so the UI can show an image
+# thumbnail or a video timestamp/deeplink.
+_IMAGE_EXTS = frozenset({".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".tif", ".tiff"})
+_AV_EXTS = frozenset(
+    {
+        ".mp4",
+        ".mov",
+        ".mkv",
+        ".webm",
+        ".avi",
+        ".m4v",
+        ".mp3",
+        ".wav",
+        ".m4a",
+        ".flac",
+        ".aac",
+        ".ogg",
+    }
+)
+
+
+def _citation_media(meta: Dict[str, Any]) -> Dict[str, Any]:
+    """Derive optional citation media fields (image preview / video deeplink)
+    from a chunk's metadata. Returns only the keys that apply, so it can be
+    splatted into a source dict without adding noise for plain text/docs."""
+    out: Dict[str, Any] = {}
+    modality = meta.get("modality")
+    ftype = (meta.get("type") or os.path.splitext(meta.get("filename") or "")[1] or "").lower()
+    source = meta.get("source") or ""
+    if modality == "video" or ftype in _AV_EXTS:
+        out["modality"] = "video"
+        for key in ("start", "end", "deeplink", "video_url"):
+            if meta.get(key) is not None and meta.get(key) != "":
+                out[key] = meta.get(key)
+    elif ftype in _IMAGE_EXTS and source:
+        out["modality"] = "image"
+        # Served by GET /api/personal/rag-asset (path-confined + image-only).
+        out["image_url"] = "/api/personal/rag-asset?source=" + quote(str(source), safe="")
+    return out
+
 
 # ── Stopwords & tokenizer ──
 
@@ -406,6 +449,10 @@ class ChatProcessor:
                                 # key) before the source is emitted or saved, so
                                 # it never reaches the client or the DB.
                                 "_text": r["document"][:1500],
+                                # Optional image-preview / video-timestamp fields
+                                # so citations can render a thumbnail or a #t=
+                                # deeplink (absent for plain text/docs).
+                                **_citation_media(r["metadata"] or {}),
                             }
                             for r in relevant
                         ]
