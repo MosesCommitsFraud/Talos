@@ -10,5 +10,8 @@ docs
 rag pipeline improvements
 update pipeline cicd und andere die wichtig sind?
 contextmeter doesnt show correct thing - even more wrong???
-datatypes in artifact bar
+datatypes in artifact bar besser sichtbar was neu
 skills like .claude
+artifact in chat anzeigen
+xlsx nicht gemacht wenn excel genannt??
+modell evtl schlechter und verhaspelt sich
