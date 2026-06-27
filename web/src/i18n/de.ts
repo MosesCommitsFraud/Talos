@@ -552,7 +552,10 @@ const de: typeof en = {
       imageEnabled: 'Bildpixel einbetten',
       imageUrl: 'VL-Embedding-URL',
       imageModel: 'VL-Embedding-Modell',
+      codeTitle: 'Code-Chunking (Erweitert)',
+      codeEnabled: 'AST-Code-Chunking',
       hint: {
+        codeEnabled: 'Optional: Quelldateien per tree-sitter nach Funktion/Klasse chunken statt nach fixer Länge, getaggt mit Sprache/Symbol. Fällt auf Längen-Splitting zurück, wenn die Grammatiken fehlen. Standardmäßig aus.',
         asrEnabled: 'Optional: Audio-/Video-Uploads über den video-asr-Dienst transkribieren, damit sie durchsuchbar werden. Standardmäßig aus — der Rest von RAG läuft mit nur Embedding + Reranker. Benötigt den video-asr-Sidecar (docker compose --profile asr).',
         asrUrl: 'Transkriptions-Endpunkt des video-asr-Dienstes (liefert Segmente mit Zeitstempeln).',
         imageEnabled: 'Optional: zusätzlich zum OCR-Text die Bildpixel mit einem Vision-Language-Modell in eine separate visuelle Collection einbetten — für echte visuelle Ähnlichkeit. Standardmäßig aus; Bilder sind auch ohne dies per OCR durchsuchbar. Benötigt einen VL-Embedding-Endpunkt.',

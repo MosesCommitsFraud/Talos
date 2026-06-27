@@ -133,3 +133,33 @@ def test_vl_embed_parses_openai_shape(monkeypatch):
         pass
 
     assert rv.VectorRAG._vl_embed(_Dummy(), "a query") == [0.1, 0.2, 0.3]
+
+
+# ── Phase 6: tree-sitter code lane ──
+
+
+def test_code_lane_inactive_by_default(monkeypatch):
+    monkeypatch.delenv("CODE_LANE_ENABLED", raising=False)
+    assert rv._code_active() is False
+
+
+def test_code_chunks_by_symbol():
+    """A 3-function file → 3 AST chunks, each tagged with its symbol."""
+    pytest.importorskip("tree_sitter_language_pack")
+    src = (
+        "import os\n\n"
+        "def alpha():\n    return 1\n\n"
+        "def beta(x):\n    return x + 1\n\n"
+        "def gamma():\n    return 3\n"
+    )
+    chunks = rv._code_chunks(src, "python")
+    assert chunks is not None
+    assert len(chunks) == 3
+    assert sorted(sym for _text, sym in chunks) == ["alpha", "beta", "gamma"]
+
+
+def test_extract_imports_is_language_agnostic():
+    src = "import os\nfrom a import b\n#include <stdio.h>\nx = 1\n"
+    got = rv._extract_imports(src)
+    assert "import os" in got and "from a import b" in got and "#include <stdio.h>" in got
+    assert "x = 1" not in got

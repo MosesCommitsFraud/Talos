@@ -304,6 +304,8 @@ export interface RagConfig {
   image_pixel_enabled?: boolean;
   image_embed_url?: string;
   image_embed_model?: string;
+  /** Advanced — opt-in tree-sitter AST code chunking (off by default). */
+  code_lane_enabled?: boolean;
 }
 /** Which knowledge sources are configured — drives the composer's mode control. */
 export const fetchCapabilities = () => getJSON<{ rag: boolean; sql: boolean }>('/api/capabilities');

@@ -28,6 +28,7 @@ the optional RAG dependencies installed.
 
 import logging
 import os
+import re
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
@@ -92,6 +93,72 @@ _DEFAULT_SPARSE_MODEL = "Qdrant/bm25"
 # pixel embedding is *additive* on top of that.
 _IMAGE_EXTS: Set[str] = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".tif", ".tiff"}
 
+# Code extension → tree-sitter language name for the opt-in AST code lane (see
+# ``_code_active`` / ``_lane_code``). Without the lane these still index fine via
+# the plain length splitter.
+_CODE_LANGS: Dict[str, str] = {
+    ".py": "python",
+    ".js": "javascript",
+    ".jsx": "javascript",
+    ".mjs": "javascript",
+    ".cjs": "javascript",
+    ".ts": "typescript",
+    ".tsx": "tsx",
+    ".go": "go",
+    ".java": "java",
+    ".cs": "csharp",
+    ".rs": "rust",
+    ".rb": "ruby",
+    ".php": "php",
+    ".c": "c",
+    ".h": "c",
+    ".cpp": "cpp",
+    ".cc": "cpp",
+    ".hpp": "cpp",
+}
+
+# tree-sitter node types that represent a "definition" worth being its own chunk,
+# unioned across languages (the type strings are language-specific so a single
+# set is safe — only the relevant ones ever match for a given grammar).
+_DEF_NODE_TYPES: Set[str] = {
+    "function_definition",
+    "class_definition",
+    "function_declaration",
+    "generator_function_declaration",
+    "class_declaration",
+    "method_definition",
+    "method_declaration",
+    "constructor_declaration",
+    "interface_declaration",
+    "type_alias_declaration",
+    "enum_declaration",
+    "type_declaration",
+    "struct_declaration",
+    "struct_specifier",
+    "class_specifier",
+    "function_item",
+    "struct_item",
+    "impl_item",
+    "trait_item",
+    "enum_item",
+    "method",
+    "module",
+}
+
+_NAME_NODE_TYPES = {
+    "identifier",
+    "name",
+    "type_identifier",
+    "field_identifier",
+    "property_identifier",
+    "constant",
+}
+
+_IMPORT_RE = re.compile(
+    r"^\s*(?:import\s+.+|from\s+\S+\s+import\s+.+|#include\s+.+|use\s+.+;|using\s+.+;)",
+    re.MULTILINE,
+)
+
 # Audio/video extensions routed to the opt-in ASR lane (see ``_asr_active``).
 # Module-level so the router and the dir-ingest accepted-extension set agree.
 _AV_EXTS: Set[str] = {
@@ -135,6 +202,58 @@ def _image_active() -> bool:
     )
 
 
+def _code_active() -> bool:
+    """True when the AST code lane is enabled. No external endpoint — it needs
+    only the optional ``tree-sitter-language-pack``; if that's missing the lane
+    degrades to the plain length splitter, so this stays safe to turn on."""
+    return bool(os.getenv("CODE_LANE_ENABLED", "").strip())
+
+
+def _node_symbol(node, src: bytes) -> str:
+    """Best-effort symbol name for a tree-sitter definition node."""
+    for child in node.children:
+        if child.type in _NAME_NODE_TYPES:
+            return src[child.start_byte : child.end_byte].decode("utf-8", "replace")
+    return ""
+
+
+def _code_chunks(source: str, language: str):
+    """AST-chunk source into ``[(text, symbol), …]`` by function/class/etc.
+
+    Returns ``None`` when tree-sitter or the grammar is unavailable (caller falls
+    back to the length splitter), or a list otherwise (possibly empty when the
+    file has no top-level definitions). Matched definitions aren't recursed into,
+    so a class is one chunk that includes its methods.
+    """
+    try:
+        from tree_sitter_language_pack import get_parser
+    except Exception:
+        return None
+    try:
+        parser = get_parser(language)
+        tree = parser.parse(source.encode("utf-8"))
+    except Exception:
+        return None
+    src = source.encode("utf-8")
+    chunks: List[Tuple[str, str]] = []
+
+    def visit(node):
+        for child in node.children:
+            if child.type in _DEF_NODE_TYPES:
+                text = src[child.start_byte : child.end_byte].decode("utf-8", "replace")
+                chunks.append((text, _node_symbol(child, src)))
+            else:
+                visit(child)
+
+    visit(tree.root_node)
+    return chunks
+
+
+def _extract_imports(source: str) -> List[str]:
+    """Best-effort, language-agnostic import lines (for chunk metadata)."""
+    return [m.group(0).strip() for m in _IMPORT_RE.finditer(source)][:50]
+
+
 def _apply_saved_rag_config() -> None:
     """Bridge the UI-configured ``rag_pipeline`` settings onto env vars.
 
@@ -173,6 +292,7 @@ def _apply_saved_rag_config() -> None:
     # one back off actually clears the env in a long-lived app process.
     os.environ["VIDEO_ASR_ENABLED"] = "true" if cfg.get("video_asr_enabled") else ""
     os.environ["IMAGE_PIXEL_ENABLED"] = "true" if cfg.get("image_pixel_enabled") else ""
+    os.environ["CODE_LANE_ENABLED"] = "true" if cfg.get("code_lane_enabled") else ""
 
 
 def _embed_base_url() -> str:
@@ -594,6 +714,8 @@ class VectorRAG:
         ext = Path(path).suffix.lower()
         if ext in _AV_EXTS:
             docs = self._lane_av(path, meta)
+        elif _code_active() and ext in _CODE_LANGS:
+            docs = self._lane_code(path, _CODE_LANGS[ext])
         elif is_docling_format(path):
             docs = self._lane_docling(path)
         else:
@@ -621,6 +743,27 @@ class VectorRAG:
             # Default export_type=DOC_CHUNKS → Docling HybridChunker.
             self._docling = DoclingConverter()
         return self._docling.run(sources=[path]).get("documents", []) or []
+
+    def _lane_code(self, path: str, language: str):
+        """Source code → tree-sitter AST chunks, one per function/class/etc.,
+        tagged with ``language``/``symbol``/``imports``. Falls back to the length
+        splitter when tree-sitter (or the grammar) is missing or the file has no
+        top-level definitions, so enabling the lane never breaks code ingest."""
+        from haystack.dataclasses import Document
+
+        source = Path(path).read_text(encoding="utf-8", errors="replace")
+        if not source.strip():
+            return []
+        chunks = _code_chunks(source, language)
+        if not chunks:  # None (no tree-sitter) or [] (no defs) → degrade safely
+            return self._lane_text(path)
+        imports = _extract_imports(source)
+        return [
+            Document(
+                content=text, meta={"language": language, "symbol": symbol, "imports": imports}
+            )
+            for text, symbol in chunks
+        ]
 
     def _lane_text(self, path: str):
         """Plain text/code/json → read directly and length-split."""

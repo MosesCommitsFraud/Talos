@@ -1303,6 +1303,14 @@ export function RagPanel() {
         </Section>
       )}
 
+      {(draft.provider || 'internal') !== 'external' && (
+        <Section title={t('settings.rag.codeTitle')}>
+          <Row label={t('settings.rag.codeEnabled')} hint={t('settings.rag.hint.codeEnabled')}>
+            <Switch checked={!!draft.code_lane_enabled} onCheckedChange={(v) => set('code_lane_enabled', v)} />
+          </Row>
+        </Section>
+      )}
+
       <Section title={t('settings.rag.context')}>
         {field('max_context_chars', t('settings.rag.maxContextChars'), { type: 'number', hint: t('settings.rag.hint.maxContextChars'), def: 10000 })}
         {field('query_prefix', t('settings.rag.queryPrefix'), { type: 'textarea', hint: t('settings.rag.hint.queryPrefix'), def: '' })}

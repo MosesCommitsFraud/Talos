@@ -549,7 +549,10 @@ const en = {
       imageEnabled: 'Embed image pixels',
       imageUrl: 'VL embedding URL',
       imageModel: 'VL embedding model',
+      codeTitle: 'Code chunking (Advanced)',
+      codeEnabled: 'AST code chunking',
       hint: {
+        codeEnabled: 'Opt-in: chunk source files by function/class with tree-sitter instead of fixed length, tagged with language/symbol. Falls back to length splitting if the grammars are not installed. Off by default.',
         asrEnabled: 'Opt-in: transcribe audio/video uploads via the video-asr service so they become searchable. Off by default — the rest of RAG works with just embedding + reranker. Requires the video-asr sidecar (docker compose --profile asr).',
         asrUrl: 'Transcription endpoint of the video-asr service (returns timed segments).',
         imageEnabled: 'Opt-in: in addition to OCR text, embed image pixels with a vision-language model into a separate visual collection for true visual similarity. Off by default — images are still searchable via OCR without it. Needs a VL embedding endpoint.',

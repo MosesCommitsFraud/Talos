@@ -1,0 +1,7 @@
+# Example RAG eval set — copy to data/rag_eval.jsonl and replace with 20–50 of
+# your own real questions and their expected source file(s). Lines starting with
+# '#' and blank lines are ignored. Each entry: a question + the source(s) that
+# should appear in the top-k results.
+{"q": "How do I rotate an API key?", "sources": ["api_keys.md"]}
+{"q": "Where is the sandbox memory limit configured?", "source": "docker-compose.yml"}
+{"q": "What embedding model does the RAG pipeline use by default?", "sources": ["rag_vector.py", "README.md"]}

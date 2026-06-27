@@ -6,3 +6,6 @@ markitdown
 # PDF (incl. scanned/OCR), Office, HTML, and images → structured Markdown.
 # Pulls in torch + OCR models; install only when rich ingestion is wanted.
 docling
+# tree-sitter grammars for the optional AST code lane (CODE_LANE_ENABLED). When
+# absent the lane degrades to the plain length splitter, so it's safe to omit.
+tree-sitter-language-pack

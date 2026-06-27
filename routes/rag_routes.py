@@ -35,6 +35,8 @@ class RagPipelineConfig(BaseModel):
     image_pixel_enabled: bool = False
     image_embed_url: str = ""
     image_embed_model: str = ""
+    # Advanced — opt-in tree-sitter AST code chunking (off by default).
+    code_lane_enabled: bool = False
 
 
 def _clamp_k(value: int, default: int = 5) -> int:
@@ -94,6 +96,7 @@ def _public(cfg: dict) -> dict:
         "image_pixel_enabled": bool(cfg.get("image_pixel_enabled", False)),
         "image_embed_url": cfg.get("image_embed_url", ""),
         "image_embed_model": cfg.get("image_embed_model", ""),
+        "code_lane_enabled": bool(cfg.get("code_lane_enabled", False)),
     }
 
 
@@ -161,6 +164,7 @@ def setup_rag_routes():
             "image_pixel_enabled": bool(body.image_pixel_enabled),
             "image_embed_url": body.image_embed_url.strip(),
             "image_embed_model": body.image_embed_model.strip(),
+            "code_lane_enabled": bool(body.code_lane_enabled),
         }
         if not cfg["enabled"]:
             settings["rag_pipeline"] = cfg
