@@ -1289,6 +1289,20 @@ export function RagPanel() {
         </Section>
       )}
 
+      {(draft.provider || 'internal') !== 'external' && (
+        <Section title={t('settings.rag.imageTitle')}>
+          <Row label={t('settings.rag.imageEnabled')} hint={t('settings.rag.hint.imageEnabled')}>
+            <Switch checked={!!draft.image_pixel_enabled} onCheckedChange={(v) => set('image_pixel_enabled', v)} />
+          </Row>
+          {draft.image_pixel_enabled && (
+            <>
+              {field('image_embed_url', t('settings.rag.imageUrl'), { hint: t('settings.rag.hint.imageUrl'), def: 'http://host:8004/v1/embeddings' })}
+              {field('image_embed_model', t('settings.rag.imageModel'), { hint: t('settings.rag.hint.imageModel'), def: 'qwen3-vl-embed' })}
+            </>
+          )}
+        </Section>
+      )}
+
       <Section title={t('settings.rag.context')}>
         {field('max_context_chars', t('settings.rag.maxContextChars'), { type: 'number', hint: t('settings.rag.hint.maxContextChars'), def: 10000 })}
         {field('query_prefix', t('settings.rag.queryPrefix'), { type: 'textarea', hint: t('settings.rag.hint.queryPrefix'), def: '' })}

@@ -84,3 +84,52 @@ def test_av_lane_skips_when_disabled(monkeypatch):
 
     with pytest.raises(RuntimeError, match="ASR is disabled"):
         rv.VectorRAG._lane_av(_Dummy(), "clip.mp4", {})
+
+
+# ── Phase 5: pixel image lane gating + VL embed parsing ──
+
+
+def test_image_lane_inactive_by_default(monkeypatch):
+    monkeypatch.delenv("IMAGE_PIXEL_ENABLED", raising=False)
+    monkeypatch.delenv("IMAGE_EMBED_URL", raising=False)
+    assert rv._image_active() is False
+
+
+def test_image_lane_requires_both_toggle_and_url(monkeypatch):
+    monkeypatch.setenv("IMAGE_PIXEL_ENABLED", "true")
+    monkeypatch.delenv("IMAGE_EMBED_URL", raising=False)
+    assert rv._image_active() is False
+    monkeypatch.setenv("IMAGE_EMBED_URL", "http://vl:8004/v1/embeddings")
+    assert rv._image_active() is True
+
+
+def test_pixel_write_is_noop_when_disabled(monkeypatch):
+    """With the lane off, the pixel write returns immediately — no network, no
+    qdrant — proving the default image path (OCR text only) is untouched."""
+    monkeypatch.setenv("IMAGE_PIXEL_ENABLED", "")
+    monkeypatch.delenv("IMAGE_EMBED_URL", raising=False)
+
+    class _Dummy:
+        pass
+
+    assert rv.VectorRAG._write_image_pixel(_Dummy(), "shot.png", {}, "") is False
+
+
+def test_vl_embed_parses_openai_shape(monkeypatch):
+    monkeypatch.setenv("IMAGE_EMBED_URL", "http://vl:8004/v1/embeddings")
+    monkeypatch.setenv("IMAGE_EMBED_MODEL", "qwen3-vl-embed")
+    import httpx
+
+    class _Resp:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {"data": [{"embedding": [0.1, 0.2, 0.3]}]}
+
+    monkeypatch.setattr(httpx, "post", lambda *a, **k: _Resp())
+
+    class _Dummy:
+        pass
+
+    assert rv.VectorRAG._vl_embed(_Dummy(), "a query") == [0.1, 0.2, 0.3]

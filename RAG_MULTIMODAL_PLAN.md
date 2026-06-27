@@ -311,6 +311,133 @@ it** (keep text spur, per Bauplan "nicht over‑engineeren").
 
 ---
 
+# Retrieval‑quality track (RagFlow gap analysis)
+
+Phases 0–6 make the corpus *multimodal*; these make *retrieval* better. They came
+out of comparing Talos against RagFlow and current (2026) RAG practice. Talos
+already has the strong baseline RagFlow's core also relies on — **hybrid dense+sparse
+with RRF fusion + a cross‑encoder reranker** ([rag_vector.py](src/rag_vector.py)) — so
+this track is about the layers on top of that, **not** re‑doing the baseline.
+
+> **Shared prerequisite — an LLM reachable from the ingest worker.** Phases 8/9 do
+> LLM work *at ingest time* (in the `rag-ingest-worker` container), which today only
+> gets embedding/rerank endpoints in its job snapshot. Add `llm_url` / `llm_model` to
+> the `rag_pipeline` config + the worker `_ENV_MAP` ([rag_worker.py:33](src/rag_worker.py:33))
+> first, reusing the utility‑model settings. Phase 7 runs in the web process, which
+> already has LLM access.
+
+> **Order:** Phase 0's eval harness gates this whole track — build it first, then
+> **7 → (8 or 9) → 10**, measuring Recall@k / context‑precision at each step. Phase 11
+> is explicitly deferred until the eval shows the failure modes it targets.
+
+## Phase 7 — Query transformation (conversation‑aware retrieval)
+
+**Why:** the single biggest gap for a *chat* product. Retrieval today embeds the **raw
+last user message** — `build_context_preface` calls `rag_manager.search(message, …)`
+([chat_processor.py](src/chat_processor.py)) — so a follow‑up like "and the second
+one?" carries none of the conversation and retrieves poorly. Only a static Qwen
+instruction prefix is applied (`RAG_QUERY_PREFIX`).
+
+Build (web process, uses the existing utility LLM — no worker change):
+- **Query rewrite (default on):** condense the last N turns + current message into one
+  standalone retrieval query before `search`. Keep the raw message as a fallback if the
+  rewrite is empty/errors.
+- **Multi‑query (optional):** generate 2–3 query variants, search each, merge candidates
+  before the reranker (the reranker already de‑dupes to the true top‑k).
+- **HyDE (optional):** generate a short hypothetical answer and embed *that* as the dense
+  query; pairs well with the existing reranker.
+- Config in `RagPipelineConfig` ([rag_routes.py](routes/rag_routes.py)):
+  `query_rewrite_enabled`, `multi_query_n` (0=off), `hyde_enabled`.
+
+### ✅ Verification 7
+```bash
+# Conversational eval subset: follow-up questions that depend on prior turns.
+python scripts/rag_eval.py --k 10 --subset followups   # → beats the raw-query baseline
+pytest tests/test_query_transform.py -k "rewrite_uses_history or falls_back_on_error"
+```
+Exit criteria: measurable Recall@10 gain on the follow‑up subset; rewrite degrades to the
+raw query on LLM error (never blocks retrieval).
+
+## Phase 8 — Contextual Retrieval (ingest‑time chunk enrichment)
+
+**Why:** Anthropic's technique — prepend 1–2 LLM‑generated sentences of *document
+context* to each chunk before embedding — is the best‑documented recall win (large
+reduction in retrieval failures) and is already on the Bauplan checklist.
+
+Build (ingest worker — needs the shared LLM prerequisite above):
+- After chunking in `_documents_for_file`, for each chunk call the LLM with the chunk +
+  a window of the source doc → a short situating blurb; embed `blurb + "\n" + chunk`,
+  but keep the **original** text for display/citation (store blurb in meta, not in the
+  shown snippet).
+- Cache by `content_hash` so re‑ingest doesn't re‑pay the LLM cost. Opt‑in
+  (`contextual_retrieval_enabled`) and clearly flagged as a heavier, slower ingest.
+
+### ✅ Verification 8
+```bash
+pytest tests/test_contextual.py -k "prepends_context and preserves_original_text"
+python scripts/rag_eval.py --k 10   # → Recall@10 uplift vs. Phase 1 baseline
+```
+Exit criteria: enriched chunk embeds context but the **citation snippet is unchanged**;
+Recall@10 improves; re‑ingest of unchanged files makes zero LLM calls (hash cache hit).
+
+## Phase 9 — Auto‑keyword / auto‑question (lighter recall booster)
+
+**Why:** RagFlow's cheaper cousin of Phase 8 — per chunk, the LLM emits a few
+keywords/synonyms and likely questions, appended to the embedded text. Strong for
+manuals/FAQ/policy corpora; lower quality‑uplift than #8 but simpler. Pick **8 or 9**,
+not both, based on the eval.
+
+Build: same ingest hook as #8; config `auto_keywords_n`, `auto_questions_n` (0=off).
+Keep generated terms in a separate embedded field so they don't pollute the displayed
+snippet.
+
+### ✅ Verification 9
+```bash
+pytest tests/test_autokeywords.py -k "appends_n_terms and snippet_excludes_terms"
+python scripts/rag_eval.py --k 10 --subset faq   # → recall uplift on FAQ-style queries
+```
+
+## Phase 10 — Parent‑child / small‑to‑big retrieval
+
+**Why:** match on precise small chunks (better targeting) but inject the **surrounding
+section** so the model has enough context to answer. Talos already stores Docling
+`hierarchy` in chunk meta, so the parent/section key is available.
+
+Build:
+- At ingest, tag each chunk with a stable `section_id` (from `hierarchy`).
+- At retrieval, after rerank, expand each hit to its parent section — merge sibling
+  chunks sharing `section_id` (bounded by `parent_max_chars`) — before injecting in
+  `chat_processor`. Citations still point at the matched chunk.
+- Config: `expand_to_parent_enabled`, `parent_max_chars`.
+
+### ✅ Verification 10
+```bash
+pytest tests/test_parent_expand.py -k "merges_siblings_by_section and respects_char_cap"
+python scripts/rag_eval.py --k 5 --metric context_precision  # → answers needing surrounding context improve
+```
+
+## Phase 11 — Agentic & graph retrieval (DEFERRED — data‑driven)
+
+Only build once the eval shows these specific failure modes; otherwise this is the
+"over‑engineering" the Bauplan warns against.
+- **Agentic RAG:** expose retrieval as an agent tool with a sufficiency self‑check +
+  re‑query loop (fits `agent_mode`), replacing today's fixed one‑shot preface for
+  complex questions.
+- **RAPTOR / GraphRAG:** a hierarchical summary tree (RAPTOR) or an entity/relationship
+  index (GraphRAG) for long‑doc and multi‑hop reasoning — the heaviest options, each a
+  separate index to build and keep in sync.
+- **Verification (gated):** a multi‑hop / long‑doc eval subset must regress on Phases
+  7–10 *and* improve here before any of this ships.
+
+## Not planned (deliberately)
+
+- **RagFlow's fixed vector/keyword weight (0.3/0.7):** Talos uses Qdrant **RRF** rank
+  fusion, which is generally better than a hand‑tuned weight — no knob needed.
+- **Cross‑language query translation:** Qwen3 embeddings are already multilingual; revisit
+  only if an eval shows cross‑lingual misses.
+
+---
+
 ## Unified chunk‑meta schema (carried by every lane)
 
 `type` · `source` · `url` · `title` · `hierarchy` · `image_url` · `image_caption` ·

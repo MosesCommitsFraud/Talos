@@ -31,6 +31,10 @@ class RagPipelineConfig(BaseModel):
     # Advanced — opt-in audio/video transcription lane (off by default).
     video_asr_enabled: bool = False
     video_asr_url: str = ""
+    # Advanced — opt-in pixel image embedding lane (off by default).
+    image_pixel_enabled: bool = False
+    image_embed_url: str = ""
+    image_embed_model: str = ""
 
 
 def _clamp_k(value: int, default: int = 5) -> int:
@@ -87,6 +91,9 @@ def _public(cfg: dict) -> dict:
         "context_prompt": cfg.get("context_prompt", ""),
         "video_asr_enabled": bool(cfg.get("video_asr_enabled", False)),
         "video_asr_url": cfg.get("video_asr_url", ""),
+        "image_pixel_enabled": bool(cfg.get("image_pixel_enabled", False)),
+        "image_embed_url": cfg.get("image_embed_url", ""),
+        "image_embed_model": cfg.get("image_embed_model", ""),
     }
 
 
@@ -151,6 +158,9 @@ def setup_rag_routes():
             "context_prompt": body.context_prompt.strip(),
             "video_asr_enabled": bool(body.video_asr_enabled),
             "video_asr_url": body.video_asr_url.strip(),
+            "image_pixel_enabled": bool(body.image_pixel_enabled),
+            "image_embed_url": body.image_embed_url.strip(),
+            "image_embed_model": body.image_embed_model.strip(),
         }
         if not cfg["enabled"]:
             settings["rag_pipeline"] = cfg

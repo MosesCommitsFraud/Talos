@@ -44,6 +44,9 @@ _ENV_MAP = {
     "query_prefix": "RAG_QUERY_PREFIX",
     # Opt-in ASR lane endpoint (the toggle is applied separately, below).
     "video_asr_url": "VIDEO_ASR_URL",
+    # Opt-in pixel image-embedding lane (toggle applied separately, below).
+    "image_embed_url": "IMAGE_EMBED_URL",
+    "image_embed_model": "IMAGE_EMBED_MODEL",
 }
 
 _STATUS_MAP = {
@@ -93,8 +96,9 @@ def _apply_snapshot(snap: Optional[Dict[str, Any]]) -> None:
         value = str(snap.get(key) or "").strip()
         if value:
             os.environ[env_name] = value
-    # Boolean toggle set explicitly so a disabled snapshot clears any stale value.
+    # Boolean toggles set explicitly so a disabled snapshot clears any stale value.
     os.environ["VIDEO_ASR_ENABLED"] = "true" if snap.get("video_asr_enabled") else ""
+    os.environ["IMAGE_PIXEL_ENABLED"] = "true" if snap.get("image_pixel_enabled") else ""
 
 
 def _fresh_rag():

@@ -82,7 +82,15 @@ DEFAULT_FILE_EXTENSIONS: Set[str] = {
 }
 
 COLLECTION_NAME = "talos_rag"
+# Separate collection for true pixel embeddings (Phase 5). Kept apart from the
+# text collection because VL image vectors live in a different space/dimension.
+VISUAL_COLLECTION_NAME = "talos_rag_visual"
 _DEFAULT_SPARSE_MODEL = "Qdrant/bm25"
+
+# Image extensions eligible for the opt-in pixel-embedding lane (see
+# ``_image_active``). These already go through Docling OCR for the text spur;
+# pixel embedding is *additive* on top of that.
+_IMAGE_EXTS: Set[str] = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".tif", ".tiff"}
 
 # Audio/video extensions routed to the opt-in ASR lane (see ``_asr_active``).
 # Module-level so the router and the dir-ingest accepted-extension set agree.
@@ -114,6 +122,19 @@ def _asr_active() -> bool:
     )
 
 
+def _image_active() -> bool:
+    """True only when pixel image embedding is explicitly enabled *and* a VL
+    embedding endpoint is configured.
+
+    Off by default: images still get indexed via the Docling OCR/text spur, so
+    nothing about the existing pipeline changes. When on, the image's *pixels*
+    are additionally embedded into a separate visual collection (Plan B).
+    """
+    return bool(os.getenv("IMAGE_PIXEL_ENABLED", "").strip()) and bool(
+        os.getenv("IMAGE_EMBED_URL", "").strip()
+    )
+
+
 def _apply_saved_rag_config() -> None:
     """Bridge the UI-configured ``rag_pipeline`` settings onto env vars.
 
@@ -141,14 +162,17 @@ def _apply_saved_rag_config() -> None:
         "sparse_model": "RAG_SPARSE_MODEL",
         "query_prefix": "RAG_QUERY_PREFIX",
         "video_asr_url": "VIDEO_ASR_URL",
+        "image_embed_url": "IMAGE_EMBED_URL",
+        "image_embed_model": "IMAGE_EMBED_MODEL",
     }
     for key, env_name in mapping.items():
         value = str(cfg.get(key) or "").strip()
         if value:
             os.environ[env_name] = value
-    # The ASR toggle must be set explicitly (not via the truthy-skip loop) so
-    # turning it back off actually clears the env in a long-lived app process.
+    # Boolean toggles set explicitly (not via the truthy-skip loop) so turning
+    # one back off actually clears the env in a long-lived app process.
     os.environ["VIDEO_ASR_ENABLED"] = "true" if cfg.get("video_asr_enabled") else ""
+    os.environ["IMAGE_PIXEL_ENABLED"] = "true" if cfg.get("image_pixel_enabled") else ""
 
 
 def _embed_base_url() -> str:
@@ -184,6 +208,10 @@ class VectorRAG:
         self._sparse_d = None
         self._docling = None
         self._splitter = None
+        # Pixel-embedding lane (Phase 5): a raw qdrant-client for the separate
+        # visual collection. Built lazily, only when the lane is enabled.
+        self._visual_client = None
+        self._visual_dim: Optional[int] = None
 
         Path(self.persist_directory).mkdir(parents=True, exist_ok=True)
         self._initialize_system()
@@ -446,6 +474,11 @@ class VectorRAG:
                 }
                 for d in docs
             ]
+            # Pixel lane (Phase 5): when enabled, fan out to the visual collection
+            # and let the cross-encoder reranker merge image hits with text hits.
+            # Inert (returns []) when the lane is off — text retrieval unchanged.
+            if _image_active():
+                candidates.extend(self._visual_search(query, fetch_k))
             top = self._rerank(query, candidates, k)
             logger.info("Qdrant hybrid search for '%s': %s results", query[:60], len(top))
             return top
@@ -571,6 +604,13 @@ class VectorRAG:
         # which ``update`` preserves because they're absent from ``meta``.
         for d in docs:
             d.meta.update(meta)
+
+        # Pixel lane (Phase 5): for images, ADDITIONALLY embed the pixels into
+        # the visual collection — on top of the OCR/text docs above, not instead.
+        # Uses the OCR text as the visual point's caption. No-op unless enabled.
+        if ext in _IMAGE_EXTS and _image_active():
+            caption = " ".join((d.content or "") for d in docs)[:2000]
+            self._write_image_pixel(path, meta, caption)
         return docs
 
     def _lane_docling(self, path: str):
@@ -643,6 +683,137 @@ class VectorRAG:
                 seg_meta["deeplink"] = f"{base}{sep}t={int(seg['start'])}"
             docs.append(Document(content=text, meta=seg_meta))
         return docs
+
+    # ------------------------------------------------------------------
+    # Pixel image lane (Phase 5) — opt-in true-multimodal embedding
+    # ------------------------------------------------------------------
+    #
+    # Images already get a *text* representation via Docling OCR (the main
+    # collection). When the pixel lane is enabled we ADDITIONALLY embed the
+    # image's pixels with a VL embedding model and write that vector to a
+    # separate ``talos_rag_visual`` collection. Search then fans out to both and
+    # lets the cross-encoder reranker merge them. Everything here is gated behind
+    # ``_image_active()`` and uses the raw qdrant-client (Haystack's store only
+    # models the fixed text dense+sparse vectors).
+
+    def _visual_qdrant(self):
+        if self._visual_client is None:
+            from qdrant_client import QdrantClient
+
+            api_key = os.getenv("QDRANT_API_KEY") or None
+            self._visual_client = QdrantClient(
+                url=os.getenv("QDRANT_URL", "").strip(), api_key=api_key
+            )
+        return self._visual_client
+
+    def _vl_embed(self, value: Any) -> List[float]:
+        """Embed text OR an image (data URL) with the VL model — they share one
+        vector space, which is the whole point of pixel embedding.
+
+        *** Phase-0 swap point ***: the exact request shape for image input
+        depends on the VL embedding server (OpenAI ``/v1/embeddings`` with a data
+        URL vs. vLLM ``/pooling``). Verify with the spike before relying on this;
+        it is gated off by default so an unverified call never runs in prod.
+        """
+        import httpx
+
+        url = os.getenv("IMAGE_EMBED_URL", "").strip()
+        model = os.getenv("IMAGE_EMBED_MODEL", "").strip()
+        payload: Dict[str, Any] = {"input": value}
+        if model:
+            payload["model"] = model
+        headers = {}
+        if os.getenv("IMAGE_EMBED_API_KEY"):
+            headers["Authorization"] = f"Bearer {os.getenv('IMAGE_EMBED_API_KEY')}"
+        resp = httpx.post(url, json=payload, headers=headers, timeout=60)
+        resp.raise_for_status()
+        data = resp.json()
+        item = (data.get("data") or [{}])[0]
+        emb = item.get("embedding") if isinstance(item, dict) else None
+        if not emb:
+            raise RuntimeError("image embedding endpoint returned no vector")
+        return emb
+
+    def _embed_image(self, path: str) -> List[float]:
+        import base64
+        import mimetypes
+
+        mime = mimetypes.guess_type(path)[0] or "image/png"
+        with open(path, "rb") as fh:
+            b64 = base64.b64encode(fh.read()).decode()
+        return self._vl_embed(f"data:{mime};base64,{b64}")
+
+    def _ensure_visual_collection(self, dim: int) -> None:
+        from qdrant_client.models import Distance, VectorParams
+
+        client = self._visual_qdrant()
+        existing = {c.name for c in client.get_collections().collections}
+        if VISUAL_COLLECTION_NAME not in existing:
+            client.create_collection(
+                VISUAL_COLLECTION_NAME,
+                vectors_config=VectorParams(size=dim, distance=Distance.COSINE),
+            )
+        self._visual_dim = dim
+
+    def _write_image_pixel(self, path: str, meta: Dict[str, Any], caption: str = "") -> bool:
+        """Embed an image's pixels and upsert one point into the visual
+        collection. Best-effort: a failure must never break text ingest."""
+        if not _image_active():
+            return False
+        try:
+            import uuid as _uuid
+
+            from qdrant_client.models import PointStruct
+
+            vec = self._embed_image(path)
+            if self._visual_dim is None:
+                self._ensure_visual_collection(len(vec))
+            payload = dict(meta)
+            payload["modality"] = "image"
+            # Caption (OCR/Docling text) gives the reranker a text view of the hit.
+            payload["caption"] = (caption or "")[:2000]
+            # Stable id per source so re-ingest overwrites rather than duplicates.
+            pid = str(_uuid.uuid5(_uuid.NAMESPACE_URL, str(meta.get("source") or path)))
+            self._visual_qdrant().upsert(
+                VISUAL_COLLECTION_NAME, points=[PointStruct(id=pid, vector=vec, payload=payload)]
+            )
+            return True
+        except Exception as e:
+            logger.warning("image pixel embed failed for %s: %s", path, e)
+            return False
+
+    def _visual_search(self, query: str, k: int) -> List[Dict[str, Any]]:
+        """Embed the text query with the VL model and search the visual
+        collection. Returns candidate dicts in the same shape as hybrid hits so
+        the reranker can merge them. Best-effort: errors yield no visual hits."""
+        if not _image_active():
+            return []
+        try:
+            existing = {c.name for c in self._visual_qdrant().get_collections().collections}
+            if VISUAL_COLLECTION_NAME not in existing:
+                return []
+            vec = self._vl_embed(query)
+            hits = (
+                self._visual_qdrant()
+                .query_points(VISUAL_COLLECTION_NAME, query=vec, limit=k, with_payload=True)
+                .points
+            )
+            out: List[Dict[str, Any]] = []
+            for h in hits:
+                payload = dict(h.payload or {})
+                out.append(
+                    {
+                        "id": str(h.id),
+                        "document": payload.get("caption") or payload.get("filename") or "",
+                        "metadata": payload,
+                        "similarity": round(float(h.score or 0.0), 6),
+                        "search_type": "visual",
+                    }
+                )
+            return out
+        except Exception as e:
+            logger.warning("visual search failed: %s", e)
+            return []
 
     def index_files(
         self,
@@ -839,6 +1010,16 @@ class VectorRAG:
         try:
             self._store = self._build_store(recreate=True)
             self._retriever = None
+            # Drop the visual collection too so a re-index (e.g. a VL-model swap
+            # that changes the image vector dimension) starts clean.
+            try:
+                client = self._visual_qdrant()
+                existing = {c.name for c in client.get_collections().collections}
+                if VISUAL_COLLECTION_NAME in existing:
+                    client.delete_collection(VISUAL_COLLECTION_NAME)
+                self._visual_dim = None
+            except Exception as e:
+                logger.warning("visual collection rebuild cleanup failed: %s", e)
             self._healthy = True
             return True
         except Exception as e:
@@ -956,6 +1137,21 @@ class VectorRAG:
             ids = [d.id for d in docs]
             if ids:
                 self._store.delete_documents(ids)
+            # Mirror the delete into the visual collection (best-effort).
+            try:
+                from qdrant_client.models import FieldCondition, Filter, MatchValue
+
+                client = self._visual_qdrant()
+                existing = {c.name for c in client.get_collections().collections}
+                if VISUAL_COLLECTION_NAME in existing:
+                    client.delete(
+                        VISUAL_COLLECTION_NAME,
+                        points_selector=Filter(
+                            must=[FieldCondition(key="source", match=MatchValue(value=source))]
+                        ),
+                    )
+            except Exception as e:
+                logger.warning("visual delete_by_source failed: %s", e)
             return len(ids)
         except Exception as e:
             logger.error(f"delete_by_source failed: {e}")

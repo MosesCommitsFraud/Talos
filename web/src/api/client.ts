@@ -300,6 +300,10 @@ export interface RagConfig {
   /** Advanced — opt-in audio/video transcription lane (off by default). */
   video_asr_enabled?: boolean;
   video_asr_url?: string;
+  /** Advanced — opt-in pixel image embedding lane (off by default). */
+  image_pixel_enabled?: boolean;
+  image_embed_url?: string;
+  image_embed_model?: string;
 }
 /** Which knowledge sources are configured — drives the composer's mode control. */
 export const fetchCapabilities = () => getJSON<{ rag: boolean; sql: boolean }>('/api/capabilities');
