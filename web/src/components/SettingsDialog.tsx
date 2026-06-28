@@ -1324,7 +1324,9 @@ export function RagPanel() {
           <Row label={t('settings.rag.contextualEnabled')} hint={t('settings.rag.hint.contextualEnabled')}>
             <Switch checked={!!draft.contextual_retrieval_enabled} onCheckedChange={(v) => set('contextual_retrieval_enabled', v)} />
           </Row>
-          {draft.contextual_retrieval_enabled && (
+          {field('auto_keywords_n', t('settings.rag.autoKeywords'), { type: 'number', hint: t('settings.rag.hint.autoKeywords'), def: 0 })}
+          {field('auto_questions_n', t('settings.rag.autoQuestions'), { type: 'number', hint: t('settings.rag.hint.autoQuestions'), def: 0 })}
+          {(draft.contextual_retrieval_enabled || (draft.auto_keywords_n || 0) > 0 || (draft.auto_questions_n || 0) > 0) && (
             <>
               {field('llm_url', t('settings.rag.llmUrl'), { hint: t('settings.rag.hint.llmUrl'), def: 'http://host:8000/v1/chat/completions' })}
               {field('llm_model', t('settings.rag.llmModel'), { hint: t('settings.rag.hint.llmModel'), def: 'qwen3-llm' })}

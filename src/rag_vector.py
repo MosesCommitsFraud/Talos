@@ -219,11 +219,36 @@ def _contextual_active() -> bool:
     )
 
 
+def _env_int(name: str) -> int:
+    try:
+        return int(os.getenv(name, "0") or 0)
+    except Exception:
+        return 0
+
+
+def _autokw_active() -> bool:
+    """True when auto keyword/question generation is on (either count > 0) *and*
+    an ingest LLM endpoint is configured. Off by default."""
+    if not os.getenv("RAG_LLM_URL", "").strip():
+        return False
+    return _env_int("RAG_AUTO_KEYWORDS_N") > 0 or _env_int("RAG_AUTO_QUESTIONS_N") > 0
+
+
 def _prefix_context(context: str, content: str) -> str:
     """The text actually embedded when a chunk has a situating context: context
     then the original chunk. No-op when there's no context."""
     context = (context or "").strip()
     return f"{context}\n\n{content}" if context else content
+
+
+def _embed_text(meta: Dict[str, Any], content: str) -> str:
+    """The text actually embedded for a chunk: a situating ``context`` prefix
+    (Phase 8) + the original content + auto ``aux_terms`` suffix (Phase 9). The
+    original ``content`` is what gets stored/displayed/cited — only the embedding
+    sees these enrichments."""
+    text = _prefix_context((meta or {}).get("context") or "", content)
+    aux = ((meta or {}).get("aux_terms") or "").strip()
+    return f"{text}\n\n{aux}" if aux else text
 
 
 # Content-hash → blurb cache so re-ingesting unchanged chunks never re-pays the
@@ -360,6 +385,9 @@ def _apply_saved_rag_config() -> None:
     os.environ["CONTEXTUAL_RETRIEVAL_ENABLED"] = (
         "true" if cfg.get("contextual_retrieval_enabled") else ""
     )
+    # Integer counts set explicitly so 0 clears a previously-set value.
+    os.environ["RAG_AUTO_KEYWORDS_N"] = str(int(cfg.get("auto_keywords_n") or 0))
+    os.environ["RAG_AUTO_QUESTIONS_N"] = str(int(cfg.get("auto_questions_n") or 0))
 
 
 def _embed_base_url() -> str:
@@ -762,16 +790,15 @@ class VectorRAG:
             return 0
         from haystack.document_stores.types import DuplicatePolicy
 
-        # Contextual Retrieval (Phase 8): embed dense+sparse on the context-
-        # prefixed text, but store/display the ORIGINAL chunk. Swap content in
-        # before embedding and restore it after, so citations stay verbatim.
-        swapped = []
+        # Ingest enrichment (Phases 8 & 9): embed dense+sparse on the enriched
+        # text (situating context prefix + auto keywords/questions suffix), but
+        # store/display the ORIGINAL chunk. Swap content in before embedding and
+        # restore it after, so citations stay verbatim.
         for d in docs:
-            ctx = (d.meta or {}).get("context")
-            if ctx:
+            enriched = _embed_text(d.meta or {}, d.content)
+            if enriched != d.content:
                 d.meta["_ctx_orig"] = d.content
-                d.content = _prefix_context(ctx, d.content)
-                swapped.append(d)
+                d.content = enriched
         docs = self._dense_doc_embedder().run(documents=docs)["documents"]
         docs = self._sparse_doc_embedder().run(documents=docs)["documents"]
         for d in docs:
@@ -839,6 +866,69 @@ class VectorRAG:
             if blurb:
                 d.meta["context"] = blurb
 
+    def _auto_terms(self, chunk: str) -> str:
+        """Ask the ingest LLM for keywords/synonyms and likely questions for a
+        chunk (RagFlow-style recall boost). Best-effort: "" on error."""
+        url = os.getenv("RAG_LLM_URL", "").strip()
+        if not url:
+            return ""
+        nk = _env_int("RAG_AUTO_KEYWORDS_N")
+        nq = _env_int("RAG_AUTO_QUESTIONS_N")
+        try:
+            import httpx
+
+            wants = []
+            if nk > 0:
+                wants.append(f"{nk} keywords or synonyms")
+            if nq > 0:
+                wants.append(f"{nq} likely user questions this chunk answers")
+            sys_prompt = (
+                f"From the chunk, produce {' and '.join(wants)} to improve search recall. "
+                "Output them one per line, no numbering, no preamble."
+            )
+            payload: Dict[str, Any] = {
+                "messages": [
+                    {"role": "system", "content": sys_prompt},
+                    {"role": "user", "content": f"<chunk>\n{chunk[:1500]}\n</chunk>"},
+                ],
+                "temperature": 0.0,
+                "max_tokens": 220,
+            }
+            model = os.getenv("RAG_LLM_MODEL", "").strip()
+            if model:
+                payload["model"] = model
+            headers = {}
+            if os.getenv("RAG_LLM_API_KEY"):
+                headers["Authorization"] = f"Bearer {os.getenv('RAG_LLM_API_KEY')}"
+            resp = httpx.post(url, json=payload, headers=headers, timeout=60)
+            resp.raise_for_status()
+            data = resp.json()
+            return (data["choices"][0]["message"]["content"] or "").strip()
+        except Exception as e:
+            logger.warning("auto-keywords failed: %s", e)
+            return ""
+
+    def _apply_autokeywords(self, docs) -> None:
+        """Stash auto keywords/questions in each chunk's meta ``aux_terms`` (used
+        by ``_write_documents`` for the embedding only — never shown in the
+        citation snippet). Cached by content hash + the configured counts."""
+        if not _autokw_active() or not docs:
+            return
+        tag = (
+            f"akw-v1\x00{_env_int('RAG_AUTO_KEYWORDS_N')}\x00{_env_int('RAG_AUTO_QUESTIONS_N')}\x00"
+        )
+        for d in docs:
+            chunk = d.content or ""
+            if not chunk.strip():
+                continue
+            h = hashlib.sha256((tag + chunk).encode("utf-8")).hexdigest()
+            terms = _ctx_cache_get(h)
+            if terms is None:
+                terms = self._auto_terms(chunk)
+                _ctx_cache_set(h, terms)
+            if terms:
+                d.meta["aux_terms"] = terms
+
     def _documents_for_file(self, path: str, meta: Dict[str, Any]):
         """Route a file to its modality lane → Haystack Documents with metadata.
 
@@ -876,6 +966,9 @@ class VectorRAG:
         # Contextual Retrieval (Phase 8): tag each chunk with a situating blurb
         # (used at embed time, original text preserved). No-op unless enabled.
         self._apply_contextual(docs)
+        # Auto keywords/questions (Phase 9): tag each chunk with extra search
+        # terms (embed-only, not shown in citations). No-op unless enabled.
+        self._apply_autokeywords(docs)
         return docs
 
     def _lane_docling(self, path: str):

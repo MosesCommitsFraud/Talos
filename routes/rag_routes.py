@@ -43,6 +43,9 @@ class RagPipelineConfig(BaseModel):
     contextual_retrieval_enabled: bool = False
     llm_url: str = ""
     llm_model: str = ""
+    # Advanced — auto keyword/question generation per chunk (0 = off).
+    auto_keywords_n: int = 0
+    auto_questions_n: int = 0
 
 
 def _clamp_k(value: int, default: int = 5) -> int:
@@ -55,6 +58,14 @@ def _clamp_k(value: int, default: int = 5) -> int:
 def _clamp_candidate_k(value: int, default: int = 40) -> int:
     try:
         return max(1, min(int(value), 100))
+    except Exception:
+        return default
+
+
+def _clamp_aux(value, default: int = 0) -> int:
+    """0–20, where 0 = off (unlike _clamp_k which forces a minimum of 1)."""
+    try:
+        return max(0, min(int(value), 20))
     except Exception:
         return default
 
@@ -107,6 +118,8 @@ def _public(cfg: dict) -> dict:
         "contextual_retrieval_enabled": bool(cfg.get("contextual_retrieval_enabled", False)),
         "llm_url": cfg.get("llm_url", ""),
         "llm_model": cfg.get("llm_model", ""),
+        "auto_keywords_n": _clamp_aux(cfg.get("auto_keywords_n", 0)),
+        "auto_questions_n": _clamp_aux(cfg.get("auto_questions_n", 0)),
     }
 
 
@@ -179,6 +192,8 @@ def setup_rag_routes():
             "contextual_retrieval_enabled": bool(body.contextual_retrieval_enabled),
             "llm_url": body.llm_url.strip(),
             "llm_model": body.llm_model.strip(),
+            "auto_keywords_n": _clamp_aux(body.auto_keywords_n),
+            "auto_questions_n": _clamp_aux(body.auto_questions_n),
         }
         if not cfg["enabled"]:
             settings["rag_pipeline"] = cfg

@@ -312,6 +312,9 @@ export interface RagConfig {
   contextual_retrieval_enabled?: boolean;
   llm_url?: string;
   llm_model?: string;
+  /** Advanced — auto keyword/question generation per chunk (0 = off). */
+  auto_keywords_n?: number;
+  auto_questions_n?: number;
 }
 /** Which knowledge sources are configured — drives the composer's mode control. */
 export const fetchCapabilities = () => getJSON<{ rag: boolean; sql: boolean }>('/api/capabilities');

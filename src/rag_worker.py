@@ -106,6 +106,8 @@ def _apply_snapshot(snap: Optional[Dict[str, Any]]) -> None:
     os.environ["CONTEXTUAL_RETRIEVAL_ENABLED"] = (
         "true" if snap.get("contextual_retrieval_enabled") else ""
     )
+    os.environ["RAG_AUTO_KEYWORDS_N"] = str(int(snap.get("auto_keywords_n") or 0))
+    os.environ["RAG_AUTO_QUESTIONS_N"] = str(int(snap.get("auto_questions_n") or 0))
 
 
 def _fresh_rag():
