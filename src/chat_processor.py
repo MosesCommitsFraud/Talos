@@ -145,6 +145,63 @@ class ChatProcessor:
         except Exception:
             return default
 
+    def _maybe_rewrite_query(self, message: str, session: Any, owner: Optional[str]) -> str:
+        """Conversation-aware query transformation (Phase 7).
+
+        Rewrites a context-dependent message ("and the second one?") into a
+        standalone retrieval query using the recent turns + the utility LLM.
+        Returns the **raw message** unchanged when disabled, on any error, or
+        when there's no prior turn to disambiguate against — so retrieval never
+        blocks on the rewrite and the default behaviour is identical to before.
+        """
+        if not self._rag_cfg().get("query_rewrite_enabled"):
+            return message
+        history = getattr(session, "history", None) or []
+        turns: List[str] = []
+        for m in list(history)[-7:]:
+            role = getattr(m, "role", "") or (m.get("role") if isinstance(m, dict) else "")
+            content = getattr(m, "content", "") or (m.get("content") if isinstance(m, dict) else "")
+            if role in ("user", "assistant") and isinstance(content, str) and content.strip():
+                turns.append(f"{role}: {content.strip()[:500]}")
+        # Need at least one prior turn besides the current message to be worth it.
+        if len(turns) <= 1:
+            return message
+        try:
+            from src.endpoint_resolver import resolve_endpoint
+            from src.llm_core import llm_call
+
+            url, model, headers = resolve_endpoint("utility", owner=owner)
+            if not url or not model:
+                return message
+            sys_prompt = (
+                "Rewrite the user's latest message into a single standalone search query "
+                "for a knowledge base. Resolve pronouns and references using the "
+                "conversation. Output ONLY the query text — no quotes, no preamble."
+            )
+            user_prompt = (
+                f"Conversation so far:\n{chr(10).join(turns)}\n\n"
+                f"Latest message: {message}\n\nStandalone search query:"
+            )
+            out = llm_call(
+                url,
+                model,
+                [
+                    {"role": "system", "content": sys_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+                headers=headers,
+                temperature=0.0,
+                max_tokens=120,
+                prompt_type="utility",
+            )
+            rewritten = (out or "").strip().strip('"').splitlines()[0].strip()
+            if rewritten and len(rewritten) >= 3:
+                logger.info("RAG query rewrite: %r -> %r", message[:60], rewritten[:60])
+                return rewritten
+        except Exception as e:
+            logger.warning("query rewrite failed, using raw query: %s", e)
+        return message
+
     def _hybrid_retrieve(self, message: str, mem_entries: list, k: int = 5) -> list:
         """Retrieve memories relevant to the message.
 
@@ -386,6 +443,10 @@ class ChatProcessor:
                     sim_threshold = self._rag_float_setting(
                         "similarity_threshold", self.RAG_SIMILARITY_THRESHOLD
                     )
+                    # Conversation-aware query transformation (Phase 7): resolve
+                    # follow-ups like "and the second one?" into a standalone
+                    # retrieval query. Off by default; degrades to the raw message.
+                    search_query = self._maybe_rewrite_query(message, session, owner)
                     # Keep the SQL-only knowledge namespace out of ordinary RAG;
                     # those schema files are injected separately when the SQL
                     # source is active (see agent_loop force_db). The external
@@ -395,11 +456,11 @@ class ChatProcessor:
                         == "external"
                     ):
                         results = rag_manager.search(
-                            message, k=rag_k, owner=None, candidate_k=candidate_k
+                            search_query, k=rag_k, owner=None, candidate_k=candidate_k
                         )
                     else:
                         results = rag_manager.search(
-                            message,
+                            search_query,
                             k=rag_k,
                             owner=None,
                             candidate_k=candidate_k,
@@ -430,7 +491,7 @@ class ChatProcessor:
                             r
                             for r in results
                             if r.get("similarity", 0) >= sim_threshold
-                            and _chunk_relevant_to_query(message, r.get("document", ""))
+                            and _chunk_relevant_to_query(search_query, r.get("document", ""))
                         ]
                     if relevant:
                         logger.info(

@@ -1311,6 +1311,14 @@ export function RagPanel() {
         </Section>
       )}
 
+      {(draft.provider || 'internal') !== 'external' && (
+        <Section title={t('settings.rag.queryTitle')}>
+          <Row label={t('settings.rag.queryRewriteEnabled')} hint={t('settings.rag.hint.queryRewriteEnabled')}>
+            <Switch checked={!!draft.query_rewrite_enabled} onCheckedChange={(v) => set('query_rewrite_enabled', v)} />
+          </Row>
+        </Section>
+      )}
+
       <Section title={t('settings.rag.context')}>
         {field('max_context_chars', t('settings.rag.maxContextChars'), { type: 'number', hint: t('settings.rag.hint.maxContextChars'), def: 10000 })}
         {field('query_prefix', t('settings.rag.queryPrefix'), { type: 'textarea', hint: t('settings.rag.hint.queryPrefix'), def: '' })}

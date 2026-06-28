@@ -306,6 +306,8 @@ export interface RagConfig {
   image_embed_model?: string;
   /** Advanced — opt-in tree-sitter AST code chunking (off by default). */
   code_lane_enabled?: boolean;
+  /** Advanced — conversation-aware query rewrite before retrieval (off by default). */
+  query_rewrite_enabled?: boolean;
 }
 /** Which knowledge sources are configured — drives the composer's mode control. */
 export const fetchCapabilities = () => getJSON<{ rag: boolean; sql: boolean }>('/api/capabilities');

@@ -551,8 +551,11 @@ const en = {
       imageModel: 'VL embedding model',
       codeTitle: 'Code chunking (Advanced)',
       codeEnabled: 'AST code chunking',
+      queryTitle: 'Query transformation (Advanced)',
+      queryRewriteEnabled: 'Conversation-aware query rewrite',
       hint: {
         codeEnabled: 'Opt-in: chunk source files by function/class with tree-sitter instead of fixed length, tagged with language/symbol. Falls back to length splitting if the grammars are not installed. Off by default.',
+        queryRewriteEnabled: 'Opt-in: rewrite a follow-up message ("and the second one?") into a standalone search query using the recent conversation, via the utility model, before retrieval. Adds one quick LLM call per RAG turn. Off by default.',
         asrEnabled: 'Opt-in: transcribe audio/video uploads via the video-asr service so they become searchable. Off by default — the rest of RAG works with just embedding + reranker. Requires the video-asr sidecar (docker compose --profile asr).',
         asrUrl: 'Transcription endpoint of the video-asr service (returns timed segments).',
         imageEnabled: 'Opt-in: in addition to OCR text, embed image pixels with a vision-language model into a separate visual collection for true visual similarity. Off by default — images are still searchable via OCR without it. Needs a VL embedding endpoint.',

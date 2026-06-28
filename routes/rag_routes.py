@@ -37,6 +37,8 @@ class RagPipelineConfig(BaseModel):
     image_embed_model: str = ""
     # Advanced — opt-in tree-sitter AST code chunking (off by default).
     code_lane_enabled: bool = False
+    # Advanced — conversation-aware query rewrite before retrieval (off by default).
+    query_rewrite_enabled: bool = False
 
 
 def _clamp_k(value: int, default: int = 5) -> int:
@@ -97,6 +99,7 @@ def _public(cfg: dict) -> dict:
         "image_embed_url": cfg.get("image_embed_url", ""),
         "image_embed_model": cfg.get("image_embed_model", ""),
         "code_lane_enabled": bool(cfg.get("code_lane_enabled", False)),
+        "query_rewrite_enabled": bool(cfg.get("query_rewrite_enabled", False)),
     }
 
 
@@ -165,6 +168,7 @@ def setup_rag_routes():
             "image_embed_url": body.image_embed_url.strip(),
             "image_embed_model": body.image_embed_model.strip(),
             "code_lane_enabled": bool(body.code_lane_enabled),
+            "query_rewrite_enabled": bool(body.query_rewrite_enabled),
         }
         if not cfg["enabled"]:
             settings["rag_pipeline"] = cfg
