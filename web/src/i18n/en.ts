@@ -559,7 +559,12 @@ const en = {
       autoQuestions: 'Auto questions per chunk',
       llmUrl: 'Ingest LLM URL',
       llmModel: 'Ingest LLM model',
+      parentTitle: 'Small-to-big retrieval (Advanced)',
+      expandToParent: 'Expand hits to their section',
+      parentMaxChars: 'Parent section max chars',
       hint: {
+        expandToParent: 'Opt-in: match precise small chunks but inject the surrounding section (sibling chunks) so the model has enough context. Citations still point at the matched chunk. Off by default; benefits documents re-indexed under this build.',
+        parentMaxChars: 'Upper bound on the expanded section length per hit.',
         contextualEnabled: 'Opt-in: at ingest, an LLM writes a 1–2 sentence context per chunk that is embedded with it (the original text is still shown in citations), improving retrieval. Heavier/slower ingest — one LLM call per chunk, cached by content hash. Off by default.',
         autoKeywords: 'Generate this many keywords/synonyms per chunk (embed-only, not shown in citations) to boost recall. 0 = off.',
         autoQuestions: 'Generate this many likely questions per chunk — strong for FAQ/manual corpora. 0 = off.',

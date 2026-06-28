@@ -234,6 +234,25 @@ def _autokw_active() -> bool:
     return _env_int("RAG_AUTO_KEYWORDS_N") > 0 or _env_int("RAG_AUTO_QUESTIONS_N") > 0
 
 
+def _expand_active() -> bool:
+    """True when small-to-big parent expansion is enabled. No endpoint needed —
+    it just re-reads sibling chunks from Qdrant at retrieval time."""
+    return bool(os.getenv("EXPAND_TO_PARENT_ENABLED", "").strip())
+
+
+_SECTION_WINDOW = 3  # chunks per fallback "section" when no heading info exists
+
+
+def _section_key(meta: Dict[str, Any], index: int) -> str:
+    """Group key for a chunk: its Docling heading path when available, else a
+    sliding window over the chunk order (so neighbours share a parent)."""
+    dl = meta.get("dl_meta") if isinstance(meta.get("dl_meta"), dict) else None
+    headings = (dl or {}).get("headings")
+    if isinstance(headings, (list, tuple)) and any(headings):
+        return " / ".join(str(h) for h in headings if h)
+    return f"win{index // _SECTION_WINDOW}"
+
+
 def _prefix_context(context: str, content: str) -> str:
     """The text actually embedded when a chunk has a situating context: context
     then the original chunk. No-op when there's no context."""
@@ -388,6 +407,8 @@ def _apply_saved_rag_config() -> None:
     # Integer counts set explicitly so 0 clears a previously-set value.
     os.environ["RAG_AUTO_KEYWORDS_N"] = str(int(cfg.get("auto_keywords_n") or 0))
     os.environ["RAG_AUTO_QUESTIONS_N"] = str(int(cfg.get("auto_questions_n") or 0))
+    os.environ["EXPAND_TO_PARENT_ENABLED"] = "true" if cfg.get("expand_to_parent_enabled") else ""
+    os.environ["RAG_PARENT_MAX_CHARS"] = str(int(cfg.get("parent_max_chars") or 0))
 
 
 def _embed_base_url() -> str:
@@ -695,6 +716,9 @@ class VectorRAG:
             if _image_active():
                 candidates.extend(self._visual_search(query, fetch_k))
             top = self._rerank(query, candidates, k)
+            # Small-to-big (Phase 10): attach each hit's surrounding section for
+            # injection (citations still point at the matched chunk). No-op off.
+            top = self._expand_to_parent(top)
             logger.info("Qdrant hybrid search for '%s': %s results", query[:60], len(top))
             return top
         except Exception as e:
@@ -929,6 +953,59 @@ class VectorRAG:
             if terms:
                 d.meta["aux_terms"] = terms
 
+    def _assign_sections(self, docs) -> None:
+        """Tag each chunk with ``seq`` (order in the doc) and a ``section_id``
+        shared by its siblings, so retrieval can expand a small matched chunk to
+        its surrounding section (Phase 10). Always runs (cheap metadata) so the
+        expansion toggle works without a re-index discipline beyond this build."""
+        if not docs:
+            return
+        source = str((docs[0].meta or {}).get("source") or "")
+        for i, d in enumerate(docs):
+            d.meta["seq"] = i
+            key = _section_key(d.meta or {}, i)
+            d.meta["section_id"] = hashlib.sha256(f"{source}\x00{key}".encode("utf-8")).hexdigest()[
+                :16
+            ]
+
+    def _expand_to_parent(self, results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Small-to-big: for each hit, attach an ``expanded`` field holding its
+        whole section (sibling chunks with the same ``section_id``, in ``seq``
+        order, capped). The matched chunk stays the citation; only the *injected*
+        context grows. No-op (no ``expanded`` key) when disabled."""
+        if not _expand_active() or not results or self._store is None:
+            return results
+        cap = _env_int("RAG_PARENT_MAX_CHARS") or 2000
+        section_cache: Dict[Tuple[str, str], str] = {}
+        for r in results:
+            meta = r.get("metadata") or {}
+            sid = meta.get("section_id")
+            src = meta.get("source")
+            if not sid or not src:
+                continue
+            ck = (str(src), str(sid))
+            text = section_cache.get(ck)
+            if text is None:
+                try:
+                    sibs = self._store.filter_documents(
+                        filters={
+                            "operator": "AND",
+                            "conditions": [
+                                {"field": "meta.source", "operator": "==", "value": src},
+                                {"field": "meta.section_id", "operator": "==", "value": sid},
+                            ],
+                        }
+                    )
+                    sibs = sorted(sibs, key=lambda d: (d.meta or {}).get("seq", 0))
+                    text = "\n\n".join((d.content or "") for d in sibs)
+                except Exception as e:
+                    logger.warning("parent expansion failed: %s", e)
+                    text = ""
+                section_cache[ck] = text
+            if text:
+                r["expanded"] = text[:cap]
+        return results
+
     def _documents_for_file(self, path: str, meta: Dict[str, Any]):
         """Route a file to its modality lane → Haystack Documents with metadata.
 
@@ -963,6 +1040,9 @@ class VectorRAG:
             caption = " ".join((d.content or "") for d in docs)[:2000]
             self._write_image_pixel(path, meta, caption)
 
+        # Parent/child sections (Phase 10): tag seq + section_id so retrieval can
+        # expand a small chunk to its surrounding section. Always on (metadata).
+        self._assign_sections(docs)
         # Contextual Retrieval (Phase 8): tag each chunk with a situating blurb
         # (used at embed time, original text preserved). No-op unless enabled.
         self._apply_contextual(docs)

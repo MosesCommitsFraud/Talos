@@ -46,6 +46,9 @@ class RagPipelineConfig(BaseModel):
     # Advanced — auto keyword/question generation per chunk (0 = off).
     auto_keywords_n: int = 0
     auto_questions_n: int = 0
+    # Advanced — small-to-big: inject the matched chunk's whole section.
+    expand_to_parent_enabled: bool = False
+    parent_max_chars: int = 2000
 
 
 def _clamp_k(value: int, default: int = 5) -> int:
@@ -120,6 +123,8 @@ def _public(cfg: dict) -> dict:
         "llm_model": cfg.get("llm_model", ""),
         "auto_keywords_n": _clamp_aux(cfg.get("auto_keywords_n", 0)),
         "auto_questions_n": _clamp_aux(cfg.get("auto_questions_n", 0)),
+        "expand_to_parent_enabled": bool(cfg.get("expand_to_parent_enabled", False)),
+        "parent_max_chars": max(0, min(int(cfg.get("parent_max_chars") or 2000), 20000)),
     }
 
 
@@ -194,6 +199,8 @@ def setup_rag_routes():
             "llm_model": body.llm_model.strip(),
             "auto_keywords_n": _clamp_aux(body.auto_keywords_n),
             "auto_questions_n": _clamp_aux(body.auto_questions_n),
+            "expand_to_parent_enabled": bool(body.expand_to_parent_enabled),
+            "parent_max_chars": max(0, min(int(body.parent_max_chars or 2000), 20000)),
         }
         if not cfg["enabled"]:
             settings["rag_pipeline"] = cfg

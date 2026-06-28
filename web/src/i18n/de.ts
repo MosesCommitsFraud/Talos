@@ -562,7 +562,12 @@ const de: typeof en = {
       autoQuestions: 'Auto-Fragen pro Chunk',
       llmUrl: 'Ingest-LLM-URL',
       llmModel: 'Ingest-LLM-Modell',
+      parentTitle: 'Small-to-Big-Retrieval (Erweitert)',
+      expandToParent: 'Treffer auf ihren Abschnitt erweitern',
+      parentMaxChars: 'Max. Zeichen pro Abschnitt',
       hint: {
+        expandToParent: 'Optional: präzise auf kleinen Chunks matchen, aber den umgebenden Abschnitt (Geschwister-Chunks) injizieren, damit das Modell genug Kontext hat. Quellenangaben verweisen weiterhin auf den getroffenen Chunk. Standardmäßig aus; wirkt für unter diesem Build neu indexierte Dokumente.',
+        parentMaxChars: 'Obergrenze für die Länge des erweiterten Abschnitts pro Treffer.',
         contextualEnabled: 'Optional: Beim Ingest schreibt ein LLM 1–2 Sätze Kontext pro Chunk, die mitembeddet werden (der Originaltext bleibt in den Quellenangaben sichtbar) — bessere Trefferquote. Schwererer/langsamerer Ingest: ein LLM-Aufruf pro Chunk, per Content-Hash gecacht. Standardmäßig aus.',
         autoKeywords: 'So viele Keywords/Synonyme pro Chunk generieren (nur fürs Embedding, nicht in Quellenangaben sichtbar) für bessere Trefferquote. 0 = aus.',
         autoQuestions: 'So viele wahrscheinliche Fragen pro Chunk generieren — stark für FAQ-/Handbuch-Korpora. 0 = aus.',

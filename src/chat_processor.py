@@ -522,8 +522,11 @@ class ChatProcessor:
                             "Retrieved knowledge base context. Use this context to answer the user's current question. "
                             "If the answer is present here, prefer it over general knowledge."
                         )
+                        # Inject the expanded parent section when small-to-big is
+                        # on (r["expanded"]); otherwise the matched chunk. The
+                        # citation snippet (rag_sources) still uses the chunk.
                         rag_content = (context_prompt + "\n\n") + "\n\n---\n\n".join(
-                            f"[{s['filename']}]\n{r['document']}"
+                            f"[{s['filename']}]\n{r.get('expanded') or r['document']}"
                             for s, r in zip(rag_sources, relevant)
                         )
                         try:

@@ -315,6 +315,9 @@ export interface RagConfig {
   /** Advanced — auto keyword/question generation per chunk (0 = off). */
   auto_keywords_n?: number;
   auto_questions_n?: number;
+  /** Advanced — small-to-big: inject the matched chunk's whole section. */
+  expand_to_parent_enabled?: boolean;
+  parent_max_chars?: number;
 }
 /** Which knowledge sources are configured — drives the composer's mode control. */
 export const fetchCapabilities = () => getJSON<{ rag: boolean; sql: boolean }>('/api/capabilities');

@@ -1335,6 +1335,16 @@ export function RagPanel() {
         </Section>
       )}
 
+      {(draft.provider || 'internal') !== 'external' && (
+        <Section title={t('settings.rag.parentTitle')}>
+          <Row label={t('settings.rag.expandToParent')} hint={t('settings.rag.hint.expandToParent')}>
+            <Switch checked={!!draft.expand_to_parent_enabled} onCheckedChange={(v) => set('expand_to_parent_enabled', v)} />
+          </Row>
+          {draft.expand_to_parent_enabled &&
+            field('parent_max_chars', t('settings.rag.parentMaxChars'), { type: 'number', hint: t('settings.rag.hint.parentMaxChars'), def: 2000 })}
+        </Section>
+      )}
+
       <Section title={t('settings.rag.context')}>
         {field('max_context_chars', t('settings.rag.maxContextChars'), { type: 'number', hint: t('settings.rag.hint.maxContextChars'), def: 10000 })}
         {field('query_prefix', t('settings.rag.queryPrefix'), { type: 'textarea', hint: t('settings.rag.hint.queryPrefix'), def: '' })}
