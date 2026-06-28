@@ -26,6 +26,7 @@ working. All Haystack imports are lazy so the MIT core stays importable without
 the optional RAG dependencies installed.
 """
 
+import hashlib
 import logging
 import os
 import re
@@ -209,6 +210,66 @@ def _code_active() -> bool:
     return bool(os.getenv("CODE_LANE_ENABLED", "").strip())
 
 
+def _contextual_active() -> bool:
+    """True when ingest-time Contextual Retrieval is enabled *and* an ingest LLM
+    endpoint is configured. Off by default — a heavier, slower ingest (one LLM
+    call per chunk), so it's strictly opt-in."""
+    return bool(os.getenv("CONTEXTUAL_RETRIEVAL_ENABLED", "").strip()) and bool(
+        os.getenv("RAG_LLM_URL", "").strip()
+    )
+
+
+def _prefix_context(context: str, content: str) -> str:
+    """The text actually embedded when a chunk has a situating context: context
+    then the original chunk. No-op when there's no context."""
+    context = (context or "").strip()
+    return f"{context}\n\n{content}" if context else content
+
+
+# Content-hash → blurb cache so re-ingesting unchanged chunks never re-pays the
+# LLM. In-process memo backed by Redis (shared across worker forks/restarts when
+# REDIS_URL is set); both layers degrade silently if unavailable.
+_CONTEXT_CACHE: Dict[str, str] = {}
+
+
+def _ctx_redis():
+    try:
+        url = os.getenv("REDIS_URL", "").strip()
+        if not url:
+            return None
+        from redis import Redis
+
+        return Redis.from_url(url)
+    except Exception:
+        return None
+
+
+def _ctx_cache_get(h: str) -> Optional[str]:
+    if h in _CONTEXT_CACHE:
+        return _CONTEXT_CACHE[h]
+    try:
+        r = _ctx_redis()
+        if r is not None:
+            v = r.get(f"rag:ctx:{h}")
+            if v is not None:
+                val = v.decode("utf-8", "replace")
+                _CONTEXT_CACHE[h] = val
+                return val
+    except Exception:
+        pass
+    return None
+
+
+def _ctx_cache_set(h: str, blurb: str) -> None:
+    _CONTEXT_CACHE[h] = blurb
+    try:
+        r = _ctx_redis()
+        if r is not None:
+            r.set(f"rag:ctx:{h}", blurb)
+    except Exception:
+        pass
+
+
 def _node_symbol(node, src: bytes) -> str:
     """Best-effort symbol name for a tree-sitter definition node."""
     for child in node.children:
@@ -283,6 +344,9 @@ def _apply_saved_rag_config() -> None:
         "video_asr_url": "VIDEO_ASR_URL",
         "image_embed_url": "IMAGE_EMBED_URL",
         "image_embed_model": "IMAGE_EMBED_MODEL",
+        # Ingest-time LLM (Contextual Retrieval and other ingest enrichment).
+        "llm_url": "RAG_LLM_URL",
+        "llm_model": "RAG_LLM_MODEL",
     }
     for key, env_name in mapping.items():
         value = str(cfg.get(key) or "").strip()
@@ -293,6 +357,9 @@ def _apply_saved_rag_config() -> None:
     os.environ["VIDEO_ASR_ENABLED"] = "true" if cfg.get("video_asr_enabled") else ""
     os.environ["IMAGE_PIXEL_ENABLED"] = "true" if cfg.get("image_pixel_enabled") else ""
     os.environ["CODE_LANE_ENABLED"] = "true" if cfg.get("code_lane_enabled") else ""
+    os.environ["CONTEXTUAL_RETRIEVAL_ENABLED"] = (
+        "true" if cfg.get("contextual_retrieval_enabled") else ""
+    )
 
 
 def _embed_base_url() -> str:
@@ -695,10 +762,82 @@ class VectorRAG:
             return 0
         from haystack.document_stores.types import DuplicatePolicy
 
+        # Contextual Retrieval (Phase 8): embed dense+sparse on the context-
+        # prefixed text, but store/display the ORIGINAL chunk. Swap content in
+        # before embedding and restore it after, so citations stay verbatim.
+        swapped = []
+        for d in docs:
+            ctx = (d.meta or {}).get("context")
+            if ctx:
+                d.meta["_ctx_orig"] = d.content
+                d.content = _prefix_context(ctx, d.content)
+                swapped.append(d)
         docs = self._dense_doc_embedder().run(documents=docs)["documents"]
         docs = self._sparse_doc_embedder().run(documents=docs)["documents"]
+        for d in docs:
+            if d.meta and "_ctx_orig" in d.meta:
+                d.content = d.meta.pop("_ctx_orig")
         self._store.write_documents(docs, policy=DuplicatePolicy.OVERWRITE)
         return len(docs)
+
+    def _contextual_blurb(self, full_doc: str, chunk: str) -> str:
+        """Ask the ingest LLM for a 1–2 sentence context situating ``chunk``
+        within ``full_doc``. Best-effort: returns "" on any error/misconfig so
+        ingest never blocks on it."""
+        url = os.getenv("RAG_LLM_URL", "").strip()
+        if not url:
+            return ""
+        try:
+            import httpx
+
+            model = os.getenv("RAG_LLM_MODEL", "").strip()
+            sys_prompt = (
+                "Give a short 1–2 sentence context that situates the chunk within the "
+                "document, to improve search retrieval. Output ONLY the context."
+            )
+            user_prompt = (
+                f"<document>\n{full_doc[:6000]}\n</document>\n\n"
+                f"<chunk>\n{chunk[:1500]}\n</chunk>\n\nContext:"
+            )
+            payload: Dict[str, Any] = {
+                "messages": [
+                    {"role": "system", "content": sys_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+                "temperature": 0.0,
+                "max_tokens": 120,
+            }
+            if model:
+                payload["model"] = model
+            headers = {}
+            if os.getenv("RAG_LLM_API_KEY"):
+                headers["Authorization"] = f"Bearer {os.getenv('RAG_LLM_API_KEY')}"
+            resp = httpx.post(url, json=payload, headers=headers, timeout=60)
+            resp.raise_for_status()
+            data = resp.json()
+            return (data["choices"][0]["message"]["content"] or "").strip()
+        except Exception as e:
+            logger.warning("contextual blurb failed: %s", e)
+            return ""
+
+    def _apply_contextual(self, docs) -> None:
+        """Stash a situating ``context`` blurb in each chunk's meta (used by
+        ``_write_documents`` to enrich the embedding). Cached by content hash so
+        re-ingesting unchanged chunks makes zero LLM calls. No-op when off."""
+        if not _contextual_active() or not docs:
+            return
+        full = "\n\n".join((d.content or "") for d in docs)[:8000]
+        for d in docs:
+            chunk = d.content or ""
+            if not chunk.strip():
+                continue
+            h = hashlib.sha256(("ctx-v1\x00" + chunk).encode("utf-8")).hexdigest()
+            blurb = _ctx_cache_get(h)
+            if blurb is None:
+                blurb = self._contextual_blurb(full, chunk)
+                _ctx_cache_set(h, blurb)
+            if blurb:
+                d.meta["context"] = blurb
 
     def _documents_for_file(self, path: str, meta: Dict[str, Any]):
         """Route a file to its modality lane → Haystack Documents with metadata.
@@ -733,6 +872,10 @@ class VectorRAG:
         if ext in _IMAGE_EXTS and _image_active():
             caption = " ".join((d.content or "") for d in docs)[:2000]
             self._write_image_pixel(path, meta, caption)
+
+        # Contextual Retrieval (Phase 8): tag each chunk with a situating blurb
+        # (used at embed time, original text preserved). No-op unless enabled.
+        self._apply_contextual(docs)
         return docs
 
     def _lane_docling(self, path: str):

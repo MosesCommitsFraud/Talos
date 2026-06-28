@@ -308,6 +308,10 @@ export interface RagConfig {
   code_lane_enabled?: boolean;
   /** Advanced — conversation-aware query rewrite before retrieval (off by default). */
   query_rewrite_enabled?: boolean;
+  /** Advanced — ingest-time Contextual Retrieval + the LLM endpoint it uses. */
+  contextual_retrieval_enabled?: boolean;
+  llm_url?: string;
+  llm_model?: string;
 }
 /** Which knowledge sources are configured — drives the composer's mode control. */
 export const fetchCapabilities = () => getJSON<{ rag: boolean; sql: boolean }>('/api/capabilities');

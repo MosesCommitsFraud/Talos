@@ -1319,6 +1319,20 @@ export function RagPanel() {
         </Section>
       )}
 
+      {(draft.provider || 'internal') !== 'external' && (
+        <Section title={t('settings.rag.contextualTitle')}>
+          <Row label={t('settings.rag.contextualEnabled')} hint={t('settings.rag.hint.contextualEnabled')}>
+            <Switch checked={!!draft.contextual_retrieval_enabled} onCheckedChange={(v) => set('contextual_retrieval_enabled', v)} />
+          </Row>
+          {draft.contextual_retrieval_enabled && (
+            <>
+              {field('llm_url', t('settings.rag.llmUrl'), { hint: t('settings.rag.hint.llmUrl'), def: 'http://host:8000/v1/chat/completions' })}
+              {field('llm_model', t('settings.rag.llmModel'), { hint: t('settings.rag.hint.llmModel'), def: 'qwen3-llm' })}
+            </>
+          )}
+        </Section>
+      )}
+
       <Section title={t('settings.rag.context')}>
         {field('max_context_chars', t('settings.rag.maxContextChars'), { type: 'number', hint: t('settings.rag.hint.maxContextChars'), def: 10000 })}
         {field('query_prefix', t('settings.rag.queryPrefix'), { type: 'textarea', hint: t('settings.rag.hint.queryPrefix'), def: '' })}

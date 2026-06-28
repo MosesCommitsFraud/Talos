@@ -39,6 +39,10 @@ class RagPipelineConfig(BaseModel):
     code_lane_enabled: bool = False
     # Advanced — conversation-aware query rewrite before retrieval (off by default).
     query_rewrite_enabled: bool = False
+    # Advanced — ingest-time Contextual Retrieval + the LLM endpoint it uses.
+    contextual_retrieval_enabled: bool = False
+    llm_url: str = ""
+    llm_model: str = ""
 
 
 def _clamp_k(value: int, default: int = 5) -> int:
@@ -100,6 +104,9 @@ def _public(cfg: dict) -> dict:
         "image_embed_model": cfg.get("image_embed_model", ""),
         "code_lane_enabled": bool(cfg.get("code_lane_enabled", False)),
         "query_rewrite_enabled": bool(cfg.get("query_rewrite_enabled", False)),
+        "contextual_retrieval_enabled": bool(cfg.get("contextual_retrieval_enabled", False)),
+        "llm_url": cfg.get("llm_url", ""),
+        "llm_model": cfg.get("llm_model", ""),
     }
 
 
@@ -169,6 +176,9 @@ def setup_rag_routes():
             "image_embed_model": body.image_embed_model.strip(),
             "code_lane_enabled": bool(body.code_lane_enabled),
             "query_rewrite_enabled": bool(body.query_rewrite_enabled),
+            "contextual_retrieval_enabled": bool(body.contextual_retrieval_enabled),
+            "llm_url": body.llm_url.strip(),
+            "llm_model": body.llm_model.strip(),
         }
         if not cfg["enabled"]:
             settings["rag_pipeline"] = cfg
