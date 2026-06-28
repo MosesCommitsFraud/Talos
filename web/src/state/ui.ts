@@ -30,6 +30,11 @@ interface UiState {
   lightbox: { src: string; label?: string } | null;
   openLightbox: (image: { src: string; label?: string }) => void;
   closeLightbox: () => void;
+  /** Resizable document preview panel. Set to open it on a specific workspace
+   *  file (markdown, text, Word, Excel, pdf, image…); null when closed. */
+  preview: { sessionId: string; path: string; name: string; mime?: string } | null;
+  openPreview: (file: { sessionId: string; path: string; name: string; mime?: string }) => void;
+  closePreview: () => void;
 }
 
 export const useUi = create<UiState>((set) => ({
@@ -49,4 +54,7 @@ export const useUi = create<UiState>((set) => ({
   lightbox: null,
   openLightbox: (lightbox) => set({ lightbox }),
   closeLightbox: () => set({ lightbox: null }),
+  preview: null,
+  openPreview: (preview) => set({ preview }),
+  closePreview: () => set({ preview: null }),
 }));

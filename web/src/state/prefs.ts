@@ -63,6 +63,8 @@ interface PrefsState {
   sidebarCollapsed: boolean;
   /** Names of sidebar folders the user has collapsed. */
   collapsedFolders: string[];
+  /** Width (px) of the resizable artifact preview panel. */
+  previewWidth: number;
   setTheme: (t: Theme) => void;
   setDensity: (d: Density) => void;
   setSortMode: (m: SortMode) => void;
@@ -74,6 +76,7 @@ interface PrefsState {
   setKnowledge: (useRag: boolean, useDb: boolean) => void;
   toggleSidebar: () => void;
   toggleFolder: (name: string) => void;
+  setPreviewWidth: (px: number) => void;
 }
 
 export const usePrefs = create<PrefsState>()(
@@ -91,6 +94,7 @@ export const usePrefs = create<PrefsState>()(
       incognito: false,
       sidebarCollapsed: false,
       collapsedFolders: [],
+      previewWidth: 480,
       setTheme: (theme) => set({ theme }),
       setDensity: (density) => set({ density }),
       setSortMode: (sortMode) => set({ sortMode }),
@@ -105,6 +109,7 @@ export const usePrefs = create<PrefsState>()(
           ? s.collapsedFolders.filter((n) => n !== name)
           : [...s.collapsedFolders, name],
       })),
+      setPreviewWidth: (previewWidth) => set({ previewWidth }),
     }),
     {
       name: 'talos-prefs',

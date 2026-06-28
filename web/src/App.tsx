@@ -10,6 +10,7 @@ import { SettingsDialog, type Panel, type SettingsScope } from './components/Set
 import { ArchiveDialog } from './components/ArchiveDialog';
 import { HelpDialog } from './components/HelpDialog';
 import { ArtifactsPanel } from './components/ArtifactsPanel';
+import { PreviewPanel } from './components/PreviewPanel';
 import { RagWorkspace } from './components/rag/RagWorkspace';
 import { Lightbox } from './components/Lightbox';
 import { PlanPanel } from './components/PlanPanel';
@@ -102,6 +103,7 @@ export default function App() {
                 </main>
                 <ArtifactsPanel open={filesOpen} onClose={() => setFilesOpen(false)} />
                 <PlanPanel />
+                <PreviewPanel />
               </>
             )}
           </div>

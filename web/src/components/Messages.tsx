@@ -1,9 +1,10 @@
-import { CheckIcon, ChevronDownIcon, ChevronRightIcon, CopyIcon, FileIcon, FoldVerticalIcon, ImageIcon, ListChecksIcon, PencilIcon, Trash2Icon } from 'lucide-react';
+import { CheckIcon, ChevronDownIcon, ChevronRightIcon, CopyIcon, DownloadIcon, FileIcon, FileTextIcon, FoldVerticalIcon, ImageIcon, ListChecksIcon, PencilIcon, Trash2Icon } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { Fragment, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { artifactDownloadUrl, fetchArtifacts, uploadDownloadUrl } from '@/api/client';
 import { copyTextToClipboard } from '@/lib/utils';
+import { isPreviewable, previewKind } from '@/lib/files';
 import { useChat, type UiMessage } from '@/state/chat';
 import { usePrefs } from '@/state/prefs';
 import { useUi } from '@/state/ui';
@@ -11,7 +12,7 @@ import { Markdown } from './Markdown';
 import { PlanCard } from './PlanCard';
 import { RagSources } from './RagSources';
 import { Thinking } from './Thinking';
-import { ImageGallery, ToolRow, toolImages, type ToolImage } from './ToolRow';
+import { ImageGallery, ToolRow, toolImages } from './ToolRow';
 import { Tooltip } from './ui/misc';
 import { Button } from './ui/button';
 
@@ -245,20 +246,51 @@ function EditBox({ msg, onDone }: { msg: UiMessage; onDone: () => void }) {
   );
 }
 
-/** End-of-turn affordance: a quiet button that opens the artifacts sidebar so
- *  the user can view (and download) the files/images the query produced. */
-function ArtifactsButton({ count }: { count: number }) {
+export interface ArtifactFile { path: string; name: string; size?: number; mime?: string }
+
+/** Downloadable chips for the files a turn produced — documents and images
+ *  alike, shown inline on the last turn. Clicking a previewable file
+ *  (md/text/code/csv/Word/Excel/pdf/image) opens the resizable preview panel;
+ *  the trailing icon always downloads. */
+function ArtifactChips({ sessionId, files }: { sessionId: string; files: ArtifactFile[] }) {
   const { t } = useTranslation();
-  const openArtifacts = useUi((s) => s.setArtifactsOpen);
+  const openPreview = useUi((s) => s.openPreview);
+  if (files.length === 0) return null;
   return (
-    <button
-      type="button"
-      onClick={() => openArtifacts(true)}
-      className="mt-3 inline-flex items-center gap-1.5 rounded-lg border border-border/60 bg-card px-2.5 py-1.5 text-xs text-muted-foreground transition-colors hover:border-border hover:text-foreground"
-    >
-      <ImageIcon className="size-3.5" />
-      {t('messages.viewArtifacts', { count })}
-    </button>
+    <div className="mt-3 flex flex-wrap gap-1.5">
+      {files.map((f) => {
+        const previewable = isPreviewable(f.path, f.mime);
+        const isImage = previewKind(f.path, f.mime) === 'image';
+        return (
+          <div
+            key={f.path}
+            className="group/chip inline-flex max-w-full items-center gap-1.5 rounded-lg border bg-card pl-2 pr-1 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+          >
+            <button
+              type="button"
+              onClick={() => {
+                if (previewable) openPreview({ sessionId, path: f.path, name: f.name, mime: f.mime });
+                else window.open(artifactDownloadUrl(sessionId, f.path), '_blank');
+              }}
+              title={previewable ? t('messages.openPreview', { name: f.name }) : f.name}
+              className="flex min-w-0 items-center gap-1.5 py-1.5 text-left"
+            >
+              {isImage ? <ImageIcon className="size-3.5 shrink-0" /> : <FileTextIcon className="size-3.5 shrink-0" />}
+              <span className="max-w-56 truncate">{f.name}</span>
+              {f.size != null && <span className="shrink-0 opacity-70">{formatSize(f.size)}</span>}
+            </button>
+            <a
+              href={artifactDownloadUrl(sessionId, f.path)}
+              download
+              aria-label={t('artifacts.download', { name: f.name })}
+              className="flex size-6 shrink-0 items-center justify-center rounded-md transition-colors hover:bg-accent-foreground/10"
+            >
+              <DownloadIcon className="size-3.5" />
+            </a>
+          </div>
+        );
+      })}
+    </div>
   );
 }
 
@@ -300,7 +332,7 @@ function CompactionMarker() {
  *  plus the running indicator). Once settled, the thinking and tool calls fold
  *  into a single "Worked for Xs" disclosure and only the answer stays visible —
  *  matching t3code's finished-turn compaction. */
-function AssistantTurn({ turn, containsLast, artifactImages }: { turn: UiMessage[]; containsLast: boolean; artifactImages: ToolImage[] }) {
+function AssistantTurn({ turn, containsLast, artifactFiles, sessionId }: { turn: UiMessage[]; containsLast: boolean; artifactFiles: ArtifactFile[]; sessionId: string | null }) {
   const showThinking = usePrefs((s) => s.visibility.showThinking);
   const showMetrics = usePrefs((s) => s.visibility.messageMetrics);
   const turnStartedAt = useChat((s) => s.turnStartedAt);
@@ -356,7 +388,6 @@ function AssistantTurn({ turn, containsLast, artifactImages }: { turn: UiMessage
   // settles. Rather than re-rendering those images inline, surface a button that
   // opens the artifacts sidebar — the canonical place for files the query made.
   const createdImages = turn.flatMap((m) => (m.tools ?? []).flatMap(toolImages));
-  const createdCount = createdImages.length > 0 ? createdImages.length : containsLast ? artifactImages.length : 0;
   const sources = turn.flatMap((m) => m.sources ?? []);
   // A plan-mode turn that actually proposed a plan (a checklist is present) gets
   // a compact chip; the full plan lives in the side panel. Strictly gated on
@@ -385,7 +416,12 @@ function AssistantTurn({ turn, containsLast, artifactImages }: { turn: UiMessage
           <ImageGallery images={createdImages} showLabels={false} />
         </div>
       )}
-      {createdCount > 0 && <ArtifactsButton count={createdCount} />}
+      {/* Downloadable chips for every file the turn produced (documents and
+          images alike) — each opens the resizable preview panel or downloads.
+          Shown on the last turn, where the session's output files are known. */}
+      {containsLast && sessionId && artifactFiles.length > 0 && (
+        <ArtifactChips sessionId={sessionId} files={artifactFiles} />
+      )}
       {copyText && (
         <div className="mt-2 flex items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
           <MessageActions msg={last} copyText={copyText} canDelete={false} />
@@ -451,14 +487,20 @@ export function Messages() {
       ? (m.attachments ?? []).flatMap((f) => [f.sandbox_path, f.name].filter((v): v is string => !!v))
       : []),
   );
-  const artifactImages: ToolImage[] = sessionId
+  // Output files the agent created — rendered as downloadable/previewable chips
+  // on the last turn. Images are listed by name here too (clicking opens the
+  // image in the preview panel), so every artifact type is surfaced the same way.
+  const artifactFiles: ArtifactFile[] = sessionId
     ? (artifacts ?? []).flatMap((f) => {
         const path = String(f.path ?? f.name ?? '');
         const mime = String(f.mime ?? '');
-        const isImage = f.is_image || mime.startsWith('image/') || /\.(png|jpe?g|gif|webp|svg)$/i.test(path);
-        return path && isImage && !inputPaths.has(path)
-          ? [{ src: artifactDownloadUrl(sessionId, path), label: path }]
-          : [];
+        if (!path || inputPaths.has(path)) return [];
+        return [{
+          path,
+          name: path.split(/[\\/]/).pop() ?? path,
+          size: typeof f.size === 'number' ? f.size : undefined,
+          mime: mime || undefined,
+        }];
       })
     : [];
   // Group the flat message list into render blocks: a user bubble, or an
@@ -507,7 +549,8 @@ export function Messages() {
               <AssistantTurn
                 turn={block.turn}
                 containsLast={block.turn.some((m) => m.id === lastAssistantId)}
-                artifactImages={artifactImages}
+                artifactFiles={artifactFiles}
+                sessionId={sessionId}
               />
             </div>
           ),

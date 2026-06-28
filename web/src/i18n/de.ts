@@ -171,6 +171,7 @@ const de: typeof en = {
     workedFor: '{{duration}} gearbeitet',
     worked: 'Gearbeitet',
     viewArtifacts: 'Artefakte anzeigen ({{count}})',
+    openPreview: '{{name}} öffnen',
     compacted: 'Frühere Nachrichten zusammengefasst, um ins Kontextfenster zu passen',
     sources: 'Quellen',
     generating: 'Wird generiert',
@@ -215,6 +216,13 @@ const de: typeof en = {
     usage: 'Auslastung des Kontextfensters',
     used: 'Kontextfenster zu {{percent}} ausgelastet',
     hint: 'Der Chat wird automatisch verdichtet, wenn er voll ist, aber mit einem neuen Chat erzielst du bessere Ergebnisse.',
+  },
+  preview: {
+    panelLabel: 'Dateivorschau',
+    close: 'Vorschau schließen',
+    download: 'Datei herunterladen',
+    resize: 'Vorschau anpassen',
+    error: 'Diese Datei konnte nicht geladen werden.',
   },
   artifacts: {
     panelLabel: 'Sitzungsdateien',

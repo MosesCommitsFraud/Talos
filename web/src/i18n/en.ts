@@ -169,6 +169,7 @@ const en = {
     workedFor: 'Worked for {{duration}}',
     worked: 'Worked',
     viewArtifacts: 'View artifacts ({{count}})',
+    openPreview: 'Open {{name}}',
     compacted: 'Earlier messages summarized to fit the context window',
     sources: 'Sources',
     generating: 'Generating',
@@ -213,6 +214,13 @@ const en = {
     estimated: 'est.',
     exactHint: "Counted by the model's own tokenizer — accurate.",
     estimatedHint: 'Approximate count until the model reports usage.',
+  },
+  preview: {
+    panelLabel: 'File preview',
+    close: 'Close preview',
+    download: 'Download file',
+    resize: 'Resize preview',
+    error: 'Could not load this file.',
   },
   artifacts: {
     panelLabel: 'Session files',

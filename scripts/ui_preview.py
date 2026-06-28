@@ -32,6 +32,59 @@ def _json_bytes(data) -> bytes:
     return json.dumps(data).encode("utf-8")
 
 
+def _make_png(width: int, height: int) -> bytes:
+    """A tiny gradient PNG built with stdlib only — sample image for previews."""
+    import struct
+    import zlib
+
+    def chunk(tag: bytes, data: bytes) -> bytes:
+        body = tag + data
+        return (
+            struct.pack(">I", len(data)) + body + struct.pack(">I", zlib.crc32(body) & 0xFFFFFFFF)
+        )
+
+    raw = bytearray()
+    for y in range(height):
+        raw.append(0)  # filter type 0 per scanline
+        for x in range(width):
+            raw += bytes(((x * 255) // width, (y * 255) // height, 150))
+    ihdr = struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0)
+    return (
+        b"\x89PNG\r\n\x1a\n"
+        + chunk(b"IHDR", ihdr)
+        + chunk(b"IDAT", zlib.compress(bytes(raw), 9))
+        + chunk(b"IEND", b"")
+    )
+
+
+# Sample workspace files served by the mock artifact endpoints, so the preview
+# panel has real markdown/csv/text content to render during local dev.
+_SAMPLE_ARTIFACTS: dict[str, tuple[bytes, str]] = {
+    "summary.md": (
+        b"# Analysis summary\n\n"
+        b"This file is rendered by the **preview panel** in the current theme.\n\n"
+        b"## Findings\n\n"
+        b"- Revenue grew **12%** quarter over quarter\n"
+        b"- Churn held steady at ~3%\n"
+        b"- Three regions outperformed forecast\n\n"
+        b"```python\ndef growth(a, b):\n    return (b - a) / a\n```\n\n"
+        b"| Region | Q1 | Q2 |\n|--------|----|----|\n| EMEA | 120 | 145 |\n| APAC | 90 | 110 |\n",
+        "text/markdown",
+    ),
+    "result.csv": (
+        b"region,q1,q2,growth\nEMEA,120,145,0.21\nAPAC,90,110,0.22\n"
+        b"AMER,200,205,0.025\nLATAM,40,55,0.375\n",
+        "text/csv",
+    ),
+    "notes.txt": (
+        b"Raw notes\n=========\n\nThese are plain-text notes shown verbatim in the preview panel.\n"
+        b"Line wrapping and monospace formatting are preserved.\n",
+        "text/plain",
+    ),
+    "chart.png": (_make_png(160, 100), "image/png"),
+}
+
+
 # --- Mock conversation state -------------------------------------------------
 # Real edit/revert/delete affordances only render once a message has a backend
 # row id (metadata._db_id). The live app gets that from /api/history; we mirror
@@ -500,7 +553,46 @@ class PreviewHandler(BaseHTTPRequestHandler):
             self._send_json({"path": "/preview", "entries": []})
             return
         if path.startswith("/api/artifacts/"):
-            self._send_json({"artifacts": [{"path": "result.csv", "size": 2048}]})
+            # Download endpoint: stream one of the sample files (so the preview
+            # panel has real markdown/csv/text to render in dev).
+            if "/download" in path:
+                name = parse_qs(parsed.query).get("path", [""])[0]
+                content, ctype = _SAMPLE_ARTIFACTS.get(name, (b"", "application/octet-stream"))
+                disp = "inline" if ctype.startswith("image/") else "attachment"
+                self._send(
+                    200,
+                    content,
+                    content_type=ctype,
+                    headers={"Content-Disposition": f'{disp}; filename="{name}"'},
+                )
+                return
+            self._send_json(
+                {
+                    "artifacts": [
+                        {
+                            "path": "summary.md",
+                            "size": len(_SAMPLE_ARTIFACTS["summary.md"][0]),
+                            "mime": "text/markdown",
+                        },
+                        {
+                            "path": "result.csv",
+                            "size": len(_SAMPLE_ARTIFACTS["result.csv"][0]),
+                            "mime": "text/csv",
+                        },
+                        {
+                            "path": "notes.txt",
+                            "size": len(_SAMPLE_ARTIFACTS["notes.txt"][0]),
+                            "mime": "text/plain",
+                        },
+                        {
+                            "path": "chart.png",
+                            "size": len(_SAMPLE_ARTIFACTS["chart.png"][0]),
+                            "mime": "image/png",
+                            "is_image": True,
+                        },
+                    ]
+                }
+            )
             return
         if path == "/api/assistants":
             self._send_json(

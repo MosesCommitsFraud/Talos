@@ -15,3 +15,4 @@ skills like .claude
 artifact in chat anzeigen
 xlsx nicht gemacht wenn excel genannt??
 modell evtl schlechter und verhaspelt sich
+voice to text
