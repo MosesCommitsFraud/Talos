@@ -1,4 +1,4 @@
-import { ArchiveIcon, FileTextIcon, GhostIcon, MoreVerticalIcon, PencilIcon, Trash2Icon } from 'lucide-react';
+import { ArchiveIcon, FileTextIcon, GhostIcon, MoreVerticalIcon, PencilIcon, PlayIcon, Trash2Icon } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { archiveSession, deleteSession, fetchArtifacts, renameSession } from '@/api/client';
@@ -21,6 +21,7 @@ export function IncognitoToggle() {
   const newChat = useChat((s) => s.newChat);
   const setArtifactsOpen = useUi((s) => s.setArtifactsOpen);
   const setPanelMode = useUi((s) => s.setPanelMode);
+  const panelMode = useUi((s) => s.panelMode);
   const artifactsOpen = useUi((s) => s.artifactsOpen);
   const queryClient = useQueryClient();
 
@@ -50,22 +51,46 @@ export function IncognitoToggle() {
   const btnBase =
     'flex size-7 items-center justify-center rounded-md transition-colors';
   const btnQuiet = 'text-muted-foreground hover:bg-accent hover:text-foreground';
+  // Tighter rows to match the sidebar account dropdown.
+  const menuItemCls = 'gap-2.5 rounded-sm! px-2.5 py-1 text-[13px] [&_svg]:size-4';
 
   return (
     <div className="absolute right-3 top-2 z-10 flex items-center gap-1">
-      {hasArtifacts && (
-        <Tooltip label={t('chatHeader.sessionFiles')}>
-          <button
-            type="button"
-            aria-label={t('chatHeader.sessionFilesAria')}
-            aria-pressed={artifactsOpen}
-            onClick={() => { if (!artifactsOpen) setPanelMode('files'); setArtifactsOpen(!artifactsOpen); }}
-            className={cn(btnBase, artifactsOpen ? 'bg-accent text-foreground' : btnQuiet)}
-          >
-            <FileTextIcon className="size-4" />
-          </button>
-        </Tooltip>
-      )}
+      {hasArtifacts && (() => {
+        // Each button opens the shared right panel to its view; clicking the
+        // active one closes the panel.
+        const openMode = (mode: 'files' | 'preview') => {
+          if (artifactsOpen && panelMode === mode) setArtifactsOpen(false);
+          else { setPanelMode(mode); setArtifactsOpen(true); }
+        };
+        const active = (mode: 'files' | 'preview') => artifactsOpen && panelMode === mode;
+        return (
+          <>
+            <Tooltip label={t('chatHeader.sessionFiles')}>
+              <button
+                type="button"
+                aria-label={t('chatHeader.sessionFilesAria')}
+                aria-pressed={active('files')}
+                onClick={() => openMode('files')}
+                className={cn(btnBase, active('files') ? 'bg-accent text-foreground' : btnQuiet)}
+              >
+                <FileTextIcon className="size-4" />
+              </button>
+            </Tooltip>
+            <Tooltip label={t('chatHeader.sessionPreview')}>
+              <button
+                type="button"
+                aria-label={t('chatHeader.sessionPreviewAria')}
+                aria-pressed={active('preview')}
+                onClick={() => openMode('preview')}
+                className={cn(btnBase, active('preview') ? 'bg-accent text-foreground' : btnQuiet)}
+              >
+                <PlayIcon className="size-4" />
+              </button>
+            </Tooltip>
+          </>
+        );
+      })()}
       {visible && (
         <Tooltip label={incognito ? t('chatHeader.incognitoOn') : t('chatHeader.incognitoOff')}>
           <button
@@ -89,16 +114,16 @@ export function IncognitoToggle() {
               <MoreVerticalIcon className="size-4" />
             </MenuTrigger>
           </Tooltip>
-          <MenuPopup align="end">
-            <MenuItem onSelect={onRename}>
+          <MenuPopup align="end" className="rounded-md! p-1">
+            <MenuItem className={menuItemCls} onSelect={onRename}>
               <PencilIcon /> {t('chatHeader.rename')}
             </MenuItem>
-            <MenuItem onSelect={onArchive}>
+            <MenuItem className={menuItemCls} onSelect={onArchive}>
               <ArchiveIcon /> {t('sidebar.archive')}
             </MenuItem>
             <MenuSeparator />
             <MenuItem
-              className="text-destructive-foreground [&_svg]:text-destructive-foreground"
+              className={cn(menuItemCls, 'text-destructive-foreground [&_svg]:text-destructive-foreground')}
               onSelect={onDelete}
             >
               <Trash2Icon /> {t('common.delete')}

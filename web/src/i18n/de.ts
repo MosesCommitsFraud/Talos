@@ -101,6 +101,8 @@ const de: typeof en = {
     sessionFiles: 'Sitzungsdateien & Artefakte',
     hideFiles: 'Sitzungsdateien ausblenden',
     sessionFilesAria: 'Sitzungsdateien',
+    sessionPreview: 'Vorschau',
+    sessionPreviewAria: 'Vorschau öffnen',
     exportChat: 'Chat exportieren',
     rename: 'Umbenennen',
     copyMarkdown: 'Als Markdown kopieren',

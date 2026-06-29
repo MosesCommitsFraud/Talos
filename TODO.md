@@ -1,6 +1,6 @@
 themes
 scrolling während streaming bad
-besseres kontextmenu
+besseres kontextmenu -> less icons more like claude
 sidebar für plan öffnet sich nicht
 gedanken sammeln sich in einem ding inder zsfm
 gradient at the gone???

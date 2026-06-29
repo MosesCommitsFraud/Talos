@@ -99,6 +99,8 @@ const en = {
     sessionFiles: 'Session files & artifacts',
     hideFiles: 'Hide session files',
     sessionFilesAria: 'Session files',
+    sessionPreview: 'Preview',
+    sessionPreviewAria: 'Open preview',
     exportChat: 'Export chat',
     rename: 'Rename',
     copyMarkdown: 'Copy as Markdown',
