@@ -215,12 +215,19 @@ const en = {
     exactHint: "Counted by the model's own tokenizer — accurate.",
     estimatedHint: 'Approximate count until the model reports usage.',
   },
+  rightPanel: {
+    label: 'Files and preview',
+    files: 'Files',
+    preview: 'Preview',
+    close: 'Close panel',
+  },
   preview: {
     panelLabel: 'File preview',
     close: 'Close preview',
     download: 'Download file',
     resize: 'Resize preview',
     error: 'Could not load this file.',
+    empty: 'Select a file to preview it here.',
   },
   artifacts: {
     panelLabel: 'Session files',

@@ -217,12 +217,19 @@ const de: typeof en = {
     used: 'Kontextfenster zu {{percent}} ausgelastet',
     hint: 'Der Chat wird automatisch verdichtet, wenn er voll ist, aber mit einem neuen Chat erzielst du bessere Ergebnisse.',
   },
+  rightPanel: {
+    label: 'Dateien und Vorschau',
+    files: 'Dateien',
+    preview: 'Vorschau',
+    close: 'Bereich schließen',
+  },
   preview: {
     panelLabel: 'Dateivorschau',
     close: 'Vorschau schließen',
     download: 'Datei herunterladen',
     resize: 'Vorschau anpassen',
     error: 'Diese Datei konnte nicht geladen werden.',
+    empty: 'Wähle eine Datei aus, um sie hier anzuzeigen.',
   },
   artifacts: {
     panelLabel: 'Sitzungsdateien',

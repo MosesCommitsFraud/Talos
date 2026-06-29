@@ -9,8 +9,7 @@ import { CommandPalette } from './components/CommandPalette';
 import { SettingsDialog, type Panel, type SettingsScope } from './components/SettingsDialog';
 import { ArchiveDialog } from './components/ArchiveDialog';
 import { HelpDialog } from './components/HelpDialog';
-import { ArtifactsPanel } from './components/ArtifactsPanel';
-import { PreviewPanel } from './components/PreviewPanel';
+import { RightPanel } from './components/RightPanel';
 import { RagWorkspace } from './components/rag/RagWorkspace';
 import { Lightbox } from './components/Lightbox';
 import { PlanPanel } from './components/PlanPanel';
@@ -32,8 +31,6 @@ export default function App() {
   const [settings, setSettings] = useState<{ panel?: Panel; scope?: SettingsScope } | null>(null);
   const [archiveOpen, setArchiveOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
-  const filesOpen = useUi((s) => s.artifactsOpen);
-  const setFilesOpen = useUi((s) => s.setArtifactsOpen);
   const view = useUi((s) => s.view);
   const setView = useUi((s) => s.setView);
   const theme = usePrefs((s) => s.theme);
@@ -101,9 +98,8 @@ export default function App() {
                     <Composer />
                   </div>
                 </main>
-                <ArtifactsPanel open={filesOpen} onClose={() => setFilesOpen(false)} />
                 <PlanPanel />
-                <PreviewPanel />
+                <RightPanel />
               </>
             )}
           </div>

@@ -36,6 +36,15 @@ export function isPreviewable(path: string, mime?: string): boolean {
   return previewKind(path, mime) !== 'none';
 }
 
+/** Short, uppercase data-type label for a file chip (e.g. "PDF", "XLSX", "PNG").
+ *  Falls back to the preview kind when there is no useful extension. */
+export function fileTypeLabel(path: string, mime?: string): string {
+  const ext = fileExt(path);
+  if (ext) return ext.toUpperCase();
+  const kind = previewKind(path, mime);
+  return kind === 'none' ? 'FILE' : kind.toUpperCase();
+}
+
 export function formatSize(bytes?: number): string {
   if (bytes == null) return '';
   if (bytes < 1024) return `${bytes} B`;

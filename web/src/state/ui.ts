@@ -18,9 +18,12 @@ interface UiState {
   /** Which top-level surface is shown (chat vs. the /rag workspace). */
   view: AppView;
   setView: (view: AppView) => void;
-  /** Right-side artifacts/files drawer. */
+  /** Right-side panel that hosts both the session file list and the document
+   *  preview; `panelMode` chooses which is shown and the header switch flips it. */
   artifactsOpen: boolean;
   setArtifactsOpen: (open: boolean) => void;
+  panelMode: 'files' | 'preview';
+  setPanelMode: (mode: 'files' | 'preview') => void;
   /** Right-side plan drawer (a proposed plan awaiting approval). Auto-opens when
    *  a plan is proposed; the user can collapse it and reopen from the approval bar. */
   planPanelOpen: boolean;
@@ -49,12 +52,15 @@ export const useUi = create<UiState>((set) => ({
   },
   artifactsOpen: false,
   setArtifactsOpen: (artifactsOpen) => set({ artifactsOpen }),
+  panelMode: 'files',
+  setPanelMode: (panelMode) => set({ panelMode }),
   planPanelOpen: false,
   setPlanPanelOpen: (planPanelOpen) => set({ planPanelOpen }),
   lightbox: null,
   openLightbox: (lightbox) => set({ lightbox }),
   closeLightbox: () => set({ lightbox: null }),
   preview: null,
-  openPreview: (preview) => set({ preview }),
-  closePreview: () => set({ preview: null }),
+  // Selecting a file opens the shared panel and flips it to the preview view.
+  openPreview: (preview) => set({ preview, panelMode: 'preview', artifactsOpen: true }),
+  closePreview: () => set({ preview: null, panelMode: 'files' }),
 }));

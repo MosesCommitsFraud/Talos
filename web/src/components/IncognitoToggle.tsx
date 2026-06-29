@@ -20,6 +20,7 @@ export function IncognitoToggle() {
   const sessionId = useChat((s) => s.sessionId);
   const newChat = useChat((s) => s.newChat);
   const setArtifactsOpen = useUi((s) => s.setArtifactsOpen);
+  const setPanelMode = useUi((s) => s.setPanelMode);
   const artifactsOpen = useUi((s) => s.artifactsOpen);
   const queryClient = useQueryClient();
 
@@ -58,7 +59,7 @@ export function IncognitoToggle() {
             type="button"
             aria-label={t('chatHeader.sessionFilesAria')}
             aria-pressed={artifactsOpen}
-            onClick={() => setArtifactsOpen(!artifactsOpen)}
+            onClick={() => { if (!artifactsOpen) setPanelMode('files'); setArtifactsOpen(!artifactsOpen); }}
             className={cn(btnBase, artifactsOpen ? 'bg-accent text-foreground' : btnQuiet)}
           >
             <FileTextIcon className="size-4" />

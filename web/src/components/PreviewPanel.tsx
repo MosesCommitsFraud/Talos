@@ -1,16 +1,11 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { DownloadIcon, XIcon, FileTextIcon } from 'lucide-react';
-import { artifactDownloadUrl, fetchArtifactBlob } from '@/api/client';
-import { useUi } from '@/state/ui';
-import { usePrefs } from '@/state/prefs';
+import { FileTextIcon } from 'lucide-react';
+import { fetchArtifactBlob } from '@/api/client';
 import { fileExt, previewKind, type PreviewKind } from '@/lib/files';
 import { Markdown } from './Markdown';
-import { Tooltip } from './ui/misc';
 
-const MIN_WIDTH = 320;
-/** Cap the panel at most of the viewport so the chat never fully disappears. */
-const maxWidth = () => Math.max(MIN_WIDTH, Math.round(window.innerWidth * 0.7));
+type PreviewFile = { sessionId: string; path: string; name: string; mime?: string };
 
 /** Map a code-file extension to a markdown fence language so the shared Markdown
  *  renderer highlights it (and inherits the current theme). */
@@ -32,22 +27,16 @@ type Loaded =
   | { kind: 'word'; html: string }
   | { kind: 'blobUrl'; url: string; pdf: boolean };
 
-/** Right-side resizable document viewer. Opens on a workspace file and renders
- *  it in the current theme: markdown/text/code via the shared Markdown renderer,
- *  Excel via SheetJS tables, Word via mammoth→HTML, PDFs/images inline. Chrome
- *  matches the left sidebar (rounded border, bg-background). */
-export function PreviewPanel() {
+/** Body of the document viewer (no panel chrome — the shared right panel owns
+ *  the border, header and resize). Renders the selected workspace file in the
+ *  current theme: markdown/text/code via the shared Markdown renderer, Excel via
+ *  SheetJS tables, Word via mammoth→HTML, PDFs/images inline. */
+export function PreviewContent({ preview }: { preview: PreviewFile | null }) {
   const { t } = useTranslation();
-  const preview = useUi((s) => s.preview);
-  const close = useUi((s) => s.closePreview);
-  const width = usePrefs((s) => s.previewWidth);
-  const setWidth = usePrefs((s) => s.setPreviewWidth);
 
   const [loaded, setLoaded] = useState<Loaded | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  // Live width during a drag (avoids persisting on every mousemove).
-  const [dragWidth, setDragWidth] = useState<number | null>(null);
   const objectUrl = useRef<string | null>(null);
 
   const kind: PreviewKind = preview ? previewKind(preview.path, preview.mime) : 'none';
@@ -106,79 +95,21 @@ export function PreviewPanel() {
   // Release the last object URL when the panel unmounts.
   useEffect(() => () => { if (objectUrl.current) URL.revokeObjectURL(objectUrl.current); }, []);
 
-  const onResizeStart = useCallback((e: React.PointerEvent) => {
-    e.preventDefault();
-    const startX = e.clientX;
-    const startWidth = width;
-    const onMove = (ev: PointerEvent) => {
-      const next = Math.min(maxWidth(), Math.max(MIN_WIDTH, startWidth + (startX - ev.clientX)));
-      setDragWidth(next);
-    };
-    const onUp = (ev: PointerEvent) => {
-      const next = Math.min(maxWidth(), Math.max(MIN_WIDTH, startWidth + (startX - ev.clientX)));
-      setWidth(next);
-      setDragWidth(null);
-      window.removeEventListener('pointermove', onMove);
-      window.removeEventListener('pointerup', onUp);
-      document.body.style.cursor = '';
-      document.body.style.userSelect = '';
-    };
-    document.body.style.cursor = 'col-resize';
-    document.body.style.userSelect = 'none';
-    window.addEventListener('pointermove', onMove);
-    window.addEventListener('pointerup', onUp);
-  }, [width, setWidth]);
-
-  if (!preview) return null;
-  const effWidth = dragWidth ?? width;
+  if (!preview) {
+    return (
+      <div className="flex h-full flex-col items-center justify-center gap-2 px-6 text-center text-muted-foreground">
+        <FileTextIcon className="size-7 opacity-60" />
+        <p className="text-xs">{t('preview.empty')}</p>
+      </div>
+    );
+  }
 
   return (
-    <aside
-      className="relative m-2 flex shrink-0 flex-col overflow-hidden rounded-md border bg-background"
-      style={{ width: effWidth }}
-      aria-label={t('preview.panelLabel')}
-    >
-      {/* Drag handle on the left edge — widens/narrows the panel. */}
-      <div
-        role="separator"
-        aria-orientation="vertical"
-        aria-label={t('preview.resize')}
-        onPointerDown={onResizeStart}
-        className="absolute inset-y-0 left-0 z-10 w-1.5 cursor-col-resize hover:bg-primary/30 active:bg-primary/40"
-      />
-      <div className="flex h-10 shrink-0 items-center justify-between border-b pl-3 pr-2">
-        <span className="flex min-w-0 items-center gap-2 text-sm font-medium">
-          <FileTextIcon className="size-4 shrink-0 text-muted-foreground" />
-          <span className="truncate" title={preview.name}>{preview.name}</span>
-        </span>
-        <div className="flex shrink-0 items-center gap-1">
-          <Tooltip label={t('preview.download')}>
-            <a
-              href={artifactDownloadUrl(preview.sessionId, preview.path)}
-              download
-              aria-label={t('preview.download')}
-              className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-            >
-              <DownloadIcon className="size-4" />
-            </a>
-          </Tooltip>
-          <button
-            type="button"
-            aria-label={t('preview.close')}
-            onClick={close}
-            className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-          >
-            <XIcon className="size-4" />
-          </button>
-        </div>
-      </div>
-
-      <div className="min-h-0 flex-1 overflow-auto">
-        {loading && <p className="px-4 py-6 text-center text-xs text-muted-foreground">{t('common.loading')}</p>}
-        {error && <p className="px-4 py-6 text-center text-xs text-destructive-foreground">{t('preview.error')}</p>}
-        {!loading && !error && loaded && <PreviewBody loaded={loaded} name={preview.name} />}
-      </div>
-    </aside>
+    <div className="min-h-0 flex-1 overflow-auto">
+      {loading && <p className="px-4 py-6 text-center text-xs text-muted-foreground">{t('common.loading')}</p>}
+      {error && <p className="px-4 py-6 text-center text-xs text-destructive-foreground">{t('preview.error')}</p>}
+      {!loading && !error && loaded && <PreviewBody loaded={loaded} name={preview.name} />}
+    </div>
   );
 }
 
