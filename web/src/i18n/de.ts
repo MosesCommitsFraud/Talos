@@ -118,6 +118,7 @@ const de: typeof en = {
     assistant: 'Talos',
   },
   composer: {
+    disclaimer: 'KI kann Fehler machen. Bitte überprüfe die Antworten.',
     dropFiles: 'Dateien zum Anhängen ablegen',
     placeholder: 'Nachricht an Talos…',
     messageInput: 'Nachrichteneingabe',

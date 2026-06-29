@@ -16,3 +16,4 @@ artifact in chat anzeigen
 xlsx nicht gemacht wenn excel genannt??
 modell evtl schlechter und verhaspelt sich
 voice to text
+.endings should not show in artifact tab and in chat

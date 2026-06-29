@@ -116,6 +116,7 @@ const en = {
     assistant: 'Talos',
   },
   composer: {
+    disclaimer: 'AI can make mistakes. Please double-check responses.',
     dropFiles: 'Drop files to attach',
     placeholder: 'Message Talos…',
     messageInput: 'Message input',

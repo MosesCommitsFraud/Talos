@@ -229,6 +229,16 @@ export function Composer() {
   const stop = useChat((s) => s.stop);
   const cancelPlan = useChat((s) => s.cancelPlan);
   const pendingPlan = useChat(selectPendingPlan);
+  // The disclaimer only belongs under the docked (bottom) composer, not the
+  // centered empty-chat state. It fades in *after* the composer's slide-to-
+  // bottom (~500ms in App) has settled, so the reveal isn't lost in the motion.
+  const hasMessages = useChat((s) => s.messages.length > 0);
+  const [showDisclaimer, setShowDisclaimer] = useState(false);
+  useEffect(() => {
+    if (!hasMessages) { setShowDisclaimer(false); return; }
+    const id = window.setTimeout(() => setShowDisclaimer(true), 650);
+    return () => window.clearTimeout(id);
+  }, [hasMessages]);
   const setPlanPanelOpen = useUi((s) => s.setPlanPanelOpen);
   const prefs = usePrefs();
   const queryClient = useQueryClient();
@@ -503,6 +513,16 @@ export function Composer() {
           </div>
         </div>
       </div>
+      {hasMessages && (
+        <p
+          className={cn(
+            'mt-1 text-center text-[11px] leading-tight text-muted-foreground transition-opacity duration-700',
+            showDisclaimer ? 'opacity-100' : 'opacity-0',
+          )}
+        >
+          {t('composer.disclaimer')}
+        </p>
+      )}
     </div>
   );
 }
