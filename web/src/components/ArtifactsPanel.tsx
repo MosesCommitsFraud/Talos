@@ -1,30 +1,22 @@
 import { useQuery } from '@tanstack/react-query';
-import {
-  DownloadIcon, FileIcon, FileCodeIcon, FileSpreadsheetIcon, FileTextIcon,
-} from 'lucide-react';
+import { DownloadIcon } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { artifactDownloadUrl, fetchArtifacts, uploadDownloadUrl } from '@/api/client';
 import { useChat } from '@/state/chat';
 import { fileTypeLabel, formatSize, isPreviewable, previewKind, type PreviewKind } from '@/lib/files';
+import { FileTypeIcon } from './FileTypeIcon';
 
 type PreviewFile = { sessionId: string; path: string; name: string; mime?: string };
 
-/** Icon used in the file-list tile for a non-image file, chosen by preview kind. */
-function KindIcon({ kind, className }: { kind: PreviewKind; className?: string }) {
-  if (kind === 'excel' || kind === 'csv') return <FileSpreadsheetIcon className={className} />;
-  if (kind === 'code') return <FileCodeIcon className={className} />;
-  if (kind === 'word' || kind === 'pdf' || kind === 'markdown' || kind === 'text') return <FileTextIcon className={className} />;
-  return <FileIcon className={className} />;
-}
-
-/** Square leading tile: a real thumbnail for images, otherwise a tinted icon. */
-function FileThumb({ src, kind, alt }: { src?: string; kind: PreviewKind; alt: string }) {
+/** Square leading tile: a real thumbnail for images, otherwise the file's
+ *  data-type icon (Excel/Word/Python/PDF/… where one exists). */
+function FileThumb({ name, mime, src, kind, alt }: { name: string; mime?: string; src?: string; kind: PreviewKind; alt: string }) {
   if (kind === 'image' && src) {
     return <img src={src} alt={alt} loading="lazy" className="size-9 shrink-0 rounded-md border bg-muted object-cover" />;
   }
   return (
     <div className="flex size-9 shrink-0 items-center justify-center rounded-md border bg-muted text-muted-foreground">
-      <KindIcon kind={kind} className="size-4" />
+      <FileTypeIcon path={name} mime={mime} className="size-5" />
     </div>
   );
 }
@@ -32,9 +24,10 @@ function FileThumb({ src, kind, alt }: { src?: string; kind: PreviewKind; alt: s
 /** One row in the file list. Clicking a previewable file opens the preview view;
  *  non-previewable files fall back to a download. */
 function FileRow({
-  name, sub, kind, thumbSrc, downloadUrl, onOpen,
+  name, mime, sub, kind, thumbSrc, downloadUrl, onOpen,
 }: {
   name: string;
+  mime?: string;
   sub: string;
   kind: PreviewKind;
   thumbSrc?: string;
@@ -52,11 +45,12 @@ function FileRow({
         title={clickable ? t('messages.openPreview', { name }) : name}
         className="flex min-w-0 flex-1 items-center gap-2.5 text-left enabled:cursor-pointer disabled:cursor-default"
       >
-        <FileThumb src={thumbSrc} kind={kind} alt={name} />
+        <FileThumb name={name} mime={mime} src={thumbSrc} kind={kind} alt={name} />
         <div className="min-w-0 flex-1">
           <div className="truncate text-[13px]">{name}</div>
           <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
-            <span className="rounded bg-muted px-1 py-px font-medium uppercase tracking-wide">{fileTypeLabel(name)}</span>
+            <span className="font-medium uppercase tracking-wide">{fileTypeLabel(name)}</span>
+            {sub && <span>·</span>}
             {sub && <span>{sub}</span>}
           </div>
         </div>
@@ -131,6 +125,7 @@ export function ArtifactsList({ sessionId, onOpen }: { sessionId: string | null;
           <FileRow
             key={path}
             name={path}
+            mime={mime}
             sub={f.size != null ? formatSize(f.size) : ''}
             kind={kind}
             thumbSrc={kind === 'image' && sessionId ? artifactDownloadUrl(sessionId, path) : undefined}
