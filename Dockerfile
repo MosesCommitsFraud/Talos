@@ -32,6 +32,7 @@ RUN sed -i 's|http://deb.debian.org|https://deb.debian.org|g' /etc/apt/sources.l
     && apt-get install -y --no-install-recommends -o Acquire::Retries=5 \
     build-essential \
     curl \
+    ffmpeg \
     git \
     nodejs \
     npm \

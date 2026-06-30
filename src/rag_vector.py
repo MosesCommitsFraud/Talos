@@ -1188,7 +1188,7 @@ class VectorRAG:
 
         ext = Path(path).suffix.lower()
         if ext in _AV_EXTS:
-            docs = self._lane_av(path, meta)
+            docs = self._lane_av(path, meta, stage_cb=stage_cb)
         elif _code_active() and ext in _CODE_LANGS:
             docs = self._lane_code(path, _CODE_LANGS[ext])
         elif _pdf_vlm_active() and ext in _VLM_DOC_EXTS and _file_has_images(path):
@@ -1535,63 +1535,136 @@ class VectorRAG:
                 pass
         return self._splitter.run(documents=[Document(content=text)]).get("documents", []) or []
 
-    def _lane_av(self, path: str, meta: Dict[str, Any]):
-        """Audio/video → ASR sidecar transcript, one chunk per timed segment.
+    def _extract_audio_segments(self, path: str):
+        """Demux + normalize audio to 16 kHz mono WAV via ffmpeg, split into
+        ``VIDEO_ASR_CHUNK_SEC`` pieces. Returns ``(segments, tmpdir)`` where
+        segments is ``[(wav_path, start_sec), …]``, or ``None`` if ffmpeg is
+        unavailable (caller then sends the raw file).
+
+        This is what makes *video* work: the vLLM ``/v1/audio/transcriptions``
+        endpoint rejects a video container ("Invalid or unsupported audio file"),
+        and the ASR model's small context (max_model_len 4096) can't take a long
+        recording in one go — so we strip the video track and segment the audio.
+        """
+        import shutil
+
+        if not shutil.which("ffmpeg"):
+            return None
+        import glob
+        import subprocess
+        import tempfile
+
+        try:
+            chunk = int(os.getenv("VIDEO_ASR_CHUNK_SEC", "120") or 120)
+        except Exception:
+            chunk = 120
+        tmpdir = tempfile.mkdtemp(prefix="talos_asr_")
+        cmd = [
+            "ffmpeg", "-nostdin", "-loglevel", "error", "-y",
+            "-i", path, "-vn", "-ac", "1", "-ar", "16000",
+        ]
+        if chunk > 0:
+            cmd += ["-f", "segment", "-segment_time", str(chunk),
+                    os.path.join(tmpdir, "seg_%05d.wav")]
+        else:
+            cmd += [os.path.join(tmpdir, "seg_00000.wav")]
+        subprocess.run(cmd, check=True, timeout=float(os.getenv("VIDEO_ASR_FFMPEG_TIMEOUT", "1800")))
+        files = sorted(glob.glob(os.path.join(tmpdir, "seg_*.wav")))
+        return [(f, i * chunk) for i, f in enumerate(files)], tmpdir
+
+    def _transcribe_audio_file(self, wav_path: str, language: str) -> Dict[str, Any]:
+        """POST one audio file to the ASR endpoint. Uses ``response_format=json``
+        (vLLM Qwen3-ASR rejects ``verbose_json``) and surfaces the response body
+        on error so the queue shows the real reason, not a bare status code."""
+        import httpx
+
+        url = os.getenv("VIDEO_ASR_URL", "").strip()
+        timeout = float(os.getenv("VIDEO_ASR_TIMEOUT", "1800"))
+        with open(wav_path, "rb") as fh:
+            if "/v1/audio/transcriptions" in url:
+                data = {
+                    "model": os.getenv("VIDEO_ASR_MODEL", "qwen3-asr"),
+                    "language": _asr_language_code(language),
+                    "response_format": "json",
+                }
+            else:
+                data = {"language": language}
+            resp = httpx.post(
+                url, files={"file": (os.path.basename(wav_path), fh)}, data=data, timeout=timeout
+            )
+        if resp.status_code >= 400:
+            raise RuntimeError(f"ASR endpoint {resp.status_code}: {resp.text[:300]}")
+        return resp.json()
+
+    def _lane_av(self, path: str, meta: Dict[str, Any], stage_cb=None):
+        """Audio/video → ASR transcript, one Document per timed segment.
 
         Opt-in: when the ASR lane is disabled (the default), this raises a clear
-        message so the queue shows *why* the file was skipped, while every other
-        modality keeps working untouched.
+        message so the queue shows *why* the file was skipped. Video is demuxed
+        and long audio is chunked (see ``_extract_audio_segments``); chunks are
+        transcribed concurrently and their timestamps offset by the chunk start.
+        ``stage_cb(done, total)`` reports per-chunk progress.
         """
         if not _asr_active():
             raise RuntimeError(
                 "ASR is disabled — enable Video / ASR in Advanced settings (and run the "
                 "video-asr service) to index audio/video files"
             )
-        import httpx
         from haystack.dataclasses import Document
 
-        url = os.getenv("VIDEO_ASR_URL", "").strip()
         language = os.getenv("VIDEO_ASR_LANGUAGE", "German")
-        timeout = float(os.getenv("VIDEO_ASR_TIMEOUT", "1800"))
-        with open(path, "rb") as fh:
-            if "/v1/audio/transcriptions" in url:
-                resp = httpx.post(
-                    url,
-                    files={"file": (os.path.basename(path), fh)},
-                    data={
-                        "model": os.getenv("VIDEO_ASR_MODEL", "qwen3-asr"),
-                        "language": _asr_language_code(language),
-                        "response_format": "verbose_json",
-                    },
-                    timeout=timeout,
-                )
-            else:
-                resp = httpx.post(
-                    url,
-                    files={"file": (os.path.basename(path), fh)},
-                    data={"language": language},
-                    timeout=timeout,
-                )
-        resp.raise_for_status()
-        payload = resp.json()
+        extracted = self._extract_audio_segments(path)
+        tmpdir = None
+        if extracted is None:
+            # No ffmpeg: send the raw file as a single segment. Works for plain
+            # audio; a video container will surface the endpoint's own error.
+            segments: List[Tuple[str, int]] = [(path, 0)]
+        else:
+            segments, tmpdir = extracted
+        if not segments:
+            raise RuntimeError("ffmpeg produced no audio (no audio track?)")
+
+        try:
+            total = len(segments)
+            try:
+                conc = int(os.getenv("VIDEO_ASR_CONCURRENCY", "2") or 2)
+            except Exception:
+                conc = 2
+            on_done = (lambda c: stage_cb(c, total)) if stage_cb else None
+            results = _concurrent_map(
+                lambda item: (item[1], self._transcribe_audio_file(item[0], language)),
+                segments,
+                max(1, conc),
+                on_done=on_done,
+            )
+        finally:
+            if tmpdir:
+                import shutil
+
+                shutil.rmtree(tmpdir, ignore_errors=True)
 
         # A UI upload has no external video_url, so there's nothing to deep-link
         # to — the timestamps are still stored as metadata ("from minute X").
         base = meta.get("video_url") or meta.get("url")
         docs = []
-        for seg in _asr_segments(payload):
-            text = (seg.get("text") or "").strip()
-            if not text:
+        for res in results:
+            if not res:
                 continue
-            seg_meta: Dict[str, Any] = {
-                "modality": "video",
-                "start": seg.get("start"),
-                "end": seg.get("end"),
-            }
-            if base and seg.get("start") is not None:
-                sep = "&" if "?" in str(base) else "#"
-                seg_meta["deeplink"] = f"{base}{sep}t={int(seg['start'])}"
-            docs.append(Document(content=text, meta=seg_meta))
+            start_off, payload = res
+            for seg in _asr_segments(payload):
+                text = (seg.get("text") or "").strip()
+                if not text:
+                    continue
+                start = float(seg.get("start") or 0) + start_off
+                end = float(seg.get("end") or 0) + start_off
+                seg_meta: Dict[str, Any] = {"modality": "video", "start": start, "end": end}
+                if base:
+                    sep = "&" if "?" in str(base) else "#"
+                    seg_meta["deeplink"] = f"{base}{sep}t={int(start)}"
+                docs.append(Document(content=text, meta=seg_meta))
+        if not docs:
+            raise RuntimeError("ASR returned no transcript text")
+        logger.info("asr: %s segment(s) → %s doc(s) for %s", len(segments), len(docs), os.path.basename(path))
         return docs
 
     # ------------------------------------------------------------------

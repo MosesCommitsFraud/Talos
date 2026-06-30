@@ -20,7 +20,7 @@ class _Router:
     def __init__(self):
         self.calls = []
 
-    def _lane_av(self, path, meta):
+    def _lane_av(self, path, meta, stage_cb=None):
         self.calls.append("av")
         return []
 
@@ -31,6 +31,16 @@ class _Router:
     def _lane_text(self, path):
         self.calls.append("text")
         return []
+
+    # Post-dispatch steps `_documents_for_file` always runs — no-ops on the stub.
+    def _assign_sections(self, docs):
+        pass
+
+    def _apply_contextual(self, docs):
+        pass
+
+    def _apply_autokeywords(self, docs):
+        pass
 
 
 def _route(path):
