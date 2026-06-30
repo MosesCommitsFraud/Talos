@@ -36,6 +36,13 @@ RUN sed -i 's|http://deb.debian.org|https://deb.debian.org|g' /etc/apt/sources.l
     nodejs \
     npm \
     gosu \
+    libglib2.0-0 \
+    libgl1 \
+    libgomp1 \
+    libsm6 \
+    libxext6 \
+    libxrender1 \
+    libxcb1 \
     && rm -rf /var/lib/apt/lists/*
 
 # MSSQL connectivity uses the pymssql / FreeTDS stack (see _build_external_sql_url:
