@@ -1289,6 +1289,9 @@ export function RagPanel() {
               {field('video_asr_url', t('settings.rag.asrUrl'), { hint: t('settings.rag.hint.asrUrl'), def: 'http://host:8003/v1/audio/transcriptions' })}
               {field('video_asr_language', t('settings.rag.asrLanguage'), { hint: t('settings.rag.hint.asrLanguage'), def: 'auto' })}
               {field('video_asr_prompt', t('settings.rag.asrPrompt'), { type: 'textarea', hint: t('settings.rag.hint.asrPrompt') })}
+              <Row label={t('settings.rag.asrCorrect')} hint={t('settings.rag.hint.asrCorrect')}>
+                <Switch checked={!!draft.video_asr_correct_enabled} onCheckedChange={(v) => set('video_asr_correct_enabled', v)} />
+              </Row>
             </>
           )}
         </Section>

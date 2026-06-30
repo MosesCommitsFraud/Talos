@@ -314,6 +314,7 @@ export interface RagConfig {
   video_asr_url?: string;
   video_asr_language?: string;
   video_asr_prompt?: string;
+  video_asr_correct_enabled?: boolean;
   /** Advanced — opt-in pixel image embedding lane (off by default). */
   image_pixel_enabled?: boolean;
   image_embed_url?: string;

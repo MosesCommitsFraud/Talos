@@ -190,6 +190,17 @@ def _asr_active() -> bool:
     )
 
 
+def _asr_correct_active() -> bool:
+    """True when LLM transcript cleanup is enabled *and* an ingest LLM is set.
+
+    Opt-in: after ASR, the transcript is passed to the LLM to fix recognition
+    errors and restore English technical terms (which a German-biased ASR
+    mistranscribes). Off by default — adds one LLM call per chunk."""
+    return bool(os.getenv("VIDEO_ASR_CORRECT_ENABLED", "").strip()) and bool(
+        os.getenv("RAG_LLM_URL", "").strip()
+    )
+
+
 def _asr_language_code(language: str) -> str:
     lang = (language or "").strip().lower()
     return {
@@ -549,6 +560,7 @@ def _apply_saved_rag_config() -> None:
     # Boolean toggles set explicitly (not via the truthy-skip loop) so turning
     # one back off actually clears the env in a long-lived app process.
     os.environ["VIDEO_ASR_ENABLED"] = "true" if cfg.get("video_asr_enabled") else ""
+    os.environ["VIDEO_ASR_CORRECT_ENABLED"] = "true" if cfg.get("video_asr_correct_enabled") else ""
     os.environ["IMAGE_PIXEL_ENABLED"] = "true" if cfg.get("image_pixel_enabled") else ""
     os.environ["CODE_LANE_ENABLED"] = "true" if cfg.get("code_lane_enabled") else ""
     os.environ["CONTEXTUAL_RETRIEVAL_ENABLED"] = (
@@ -1611,6 +1623,52 @@ class VectorRAG:
             raise RuntimeError(f"ASR endpoint {resp.status_code}: {resp.text[:300]}")
         return resp.json()
 
+    def _asr_correct(self, text: str, glossary: str = "") -> str:
+        """LLM cleanup of one transcript chunk: fix ASR errors and restore English
+        technical terms/proper nouns to correct spelling, without translating or
+        changing content. Best-effort — returns the original text on any error so
+        ingest never blocks on it. No-op unless the cleanup lane is active."""
+        url = os.getenv("RAG_LLM_URL", "").strip()
+        if not url or not text.strip():
+            return text
+        try:
+            import httpx
+
+            sys_prompt = (
+                "You are a transcript editor. The input is an automatic speech transcript "
+                "(mainly German) that also contains English technical terms, product names "
+                "and acronyms which the recognizer often mis-spells phonetically in German. "
+                "Fix obvious transcription errors and restore those English terms to their "
+                "correct English spelling. Do NOT translate — keep German text in German and "
+                "English terms in English. Do not add, remove, summarize or reorder anything. "
+                "Output ONLY the corrected transcript text."
+            )
+            user = (
+                f"Known terms (spell these exactly when they occur): {glossary}\n\n" if glossary.strip() else ""
+            ) + f"Transcript:\n{text}"
+            payload: Dict[str, Any] = {
+                "messages": [
+                    {"role": "system", "content": sys_prompt},
+                    {"role": "user", "content": user},
+                ],
+                "temperature": 0.0,
+                "max_tokens": min(12000, len(text) // 2 + 1000),
+                "chat_template_kwargs": {"enable_thinking": False},
+            }
+            model = os.getenv("RAG_LLM_MODEL", "").strip()
+            if model:
+                payload["model"] = model
+            headers = {}
+            if os.getenv("RAG_LLM_API_KEY"):
+                headers["Authorization"] = f"Bearer {os.getenv('RAG_LLM_API_KEY')}"
+            resp = httpx.post(url, json=payload, headers=headers, timeout=120)
+            resp.raise_for_status()
+            out = (resp.json()["choices"][0]["message"]["content"] or "").strip()
+            return out or text
+        except Exception as e:
+            logger.warning("asr correction failed: %s", e)
+            return text
+
     def _lane_av(self, path: str, meta: Dict[str, Any], stage_cb=None):
         """Audio/video → ASR transcript, one Document per timed segment.
 
@@ -1658,10 +1716,8 @@ class VectorRAG:
 
                 shutil.rmtree(tmpdir, ignore_errors=True)
 
-        # A UI upload has no external video_url, so there's nothing to deep-link
-        # to — the timestamps are still stored as metadata ("from minute X").
-        base = meta.get("video_url") or meta.get("url")
-        docs = []
+        # Flatten ASR output to timed (start, end, text) entries.
+        entries: List[Tuple[float, float, str]] = []
         for res in results:
             if not res:
                 continue
@@ -1670,13 +1726,29 @@ class VectorRAG:
                 text = (seg.get("text") or "").strip()
                 if not text:
                     continue
-                start = float(seg.get("start") or 0) + start_off
-                end = float(seg.get("end") or 0) + start_off
-                seg_meta: Dict[str, Any] = {"modality": "video", "start": start, "end": end}
-                if base:
-                    sep = "&" if "?" in str(base) else "#"
-                    seg_meta["deeplink"] = f"{base}{sep}t={int(start)}"
-                docs.append(Document(content=text, meta=seg_meta))
+                entries.append(
+                    (float(seg.get("start") or 0) + start_off, float(seg.get("end") or 0) + start_off, text)
+                )
+
+        # Optional LLM cleanup: fix ASR errors and restore English terms. One LLM
+        # call per entry, fanned out concurrently. No-op unless the lane is on.
+        if _asr_correct_active() and entries:
+            glossary = os.getenv("VIDEO_ASR_PROMPT", "")
+            fixed = _concurrent_map(
+                lambda e: self._asr_correct(e[2], glossary), entries, _vlm_concurrency()
+            )
+            entries = [(s, en, (fx or t)) for (s, en, t), fx in zip(entries, fixed)]
+
+        # A UI upload has no external video_url, so there's nothing to deep-link
+        # to — the timestamps are still stored as metadata ("from minute X").
+        base = meta.get("video_url") or meta.get("url")
+        docs = []
+        for start, end, text in entries:
+            seg_meta: Dict[str, Any] = {"modality": "video", "start": start, "end": end}
+            if base:
+                sep = "&" if "?" in str(base) else "#"
+                seg_meta["deeplink"] = f"{base}{sep}t={int(start)}"
+            docs.append(Document(content=text, meta=seg_meta))
         if not docs:
             raise RuntimeError("ASR returned no transcript text")
         logger.info("asr: %s segment(s) → %s doc(s) for %s", len(segments), len(docs), os.path.basename(path))

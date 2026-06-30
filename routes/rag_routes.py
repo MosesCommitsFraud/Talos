@@ -35,6 +35,9 @@ class RagPipelineConfig(BaseModel):
     # (better for code-switched audio). Optional context biases domain terms.
     video_asr_language: str = "auto"
     video_asr_prompt: str = ""
+    # Opt-in LLM cleanup of the ASR transcript (fixes English terms); uses the
+    # ingest LLM endpoint (llm_url/llm_model).
+    video_asr_correct_enabled: bool = False
     # Advanced — opt-in pixel image embedding lane (off by default).
     image_pixel_enabled: bool = False
     image_embed_url: str = ""
@@ -125,6 +128,7 @@ def _public(cfg: dict) -> dict:
         "video_asr_url": cfg.get("video_asr_url", ""),
         "video_asr_language": cfg.get("video_asr_language", "auto") or "auto",
         "video_asr_prompt": cfg.get("video_asr_prompt", ""),
+        "video_asr_correct_enabled": bool(cfg.get("video_asr_correct_enabled", False)),
         "image_pixel_enabled": bool(cfg.get("image_pixel_enabled", False)),
         "image_embed_url": cfg.get("image_embed_url", ""),
         "image_embed_model": cfg.get("image_embed_model", ""),
@@ -206,6 +210,7 @@ def setup_rag_routes():
             "video_asr_url": body.video_asr_url.strip(),
             "video_asr_language": (body.video_asr_language or "auto").strip(),
             "video_asr_prompt": body.video_asr_prompt.strip(),
+            "video_asr_correct_enabled": bool(body.video_asr_correct_enabled),
             "image_pixel_enabled": bool(body.image_pixel_enabled),
             "image_embed_url": body.image_embed_url.strip(),
             "image_embed_model": body.image_embed_model.strip(),

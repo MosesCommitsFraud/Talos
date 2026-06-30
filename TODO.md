@@ -24,3 +24,5 @@ back not always visible in rag settings
 remove tasks and other functions that dont exist
 sources placement
 how to get images in a bucket so ai can show user? might be impossible with pdfs
+actual queue list
+huge videos dont get queued? limit?
