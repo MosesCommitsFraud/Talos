@@ -415,6 +415,19 @@ def setup_rag_routes():
             raise HTTPException(404, "Chunk not found or could not be re-embedded")
         return {"ok": True, "id": chunk_id}
 
+    @router.delete("/documents/chunks/{chunk_id}")
+    def delete_document_chunk(chunk_id: str, source: str):
+        """Delete a single indexed chunk (explorer debug action)."""
+        from src.rag_singleton import get_rag_manager
+
+        rag = get_rag_manager()
+        if not rag or not getattr(rag, "healthy", False):
+            raise HTTPException(503, "RAG is not available")
+        ok = rag.delete_chunk(source, chunk_id)
+        if not ok:
+            raise HTTPException(404, "Chunk not found")
+        return {"ok": True, "id": chunk_id}
+
     @router.delete("/documents")
     def delete_document(source: str):
         from src.rag_singleton import get_rag_manager

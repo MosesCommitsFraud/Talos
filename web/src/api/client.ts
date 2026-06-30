@@ -525,6 +525,13 @@ export const updateRagChunk = (source: string, id: string, content: string) =>
     { source, content },
     'PUT',
   );
+export async function deleteRagChunk(source: string, id: string): Promise<void> {
+  const res = await fetch(
+    `/api/rag/documents/chunks/${encodeURIComponent(id)}?source=${encodeURIComponent(source)}`,
+    { method: 'DELETE', credentials: 'same-origin' },
+  );
+  if (!res.ok) throw new Error(`Delete failed (HTTP ${res.status})`);
+}
 export async function deleteRagDocument(source: string): Promise<void> {
   const res = await fetch(`/api/rag/documents?source=${encodeURIComponent(source)}`, {
     method: 'DELETE',

@@ -1,8 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { FileTextIcon, PencilIcon, RotateCcwIcon } from 'lucide-react';
+import { BracesIcon, FileTextIcon, PencilIcon, RotateCcwIcon, Trash2Icon } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
+  deleteRagChunk,
   fetchRagChunks,
   fetchRagDocuments,
   type RagChunk,
@@ -12,7 +13,7 @@ import { cn } from '@/lib/utils';
 import { Markdown } from '../Markdown';
 import { Button } from '../ui/button';
 import { Dialog, DialogContent } from '../ui/dialog';
-import { Textarea } from '../ui/misc';
+import { Input, Textarea } from '../ui/misc';
 
 /** One chunk: rendered markdown by default, switches to a textarea editor that
  *  re-embeds the chunk in place on save. */
@@ -20,17 +21,20 @@ function ChunkCard({ source, chunk }: { source: string; chunk: RagChunk }) {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
   const [editing, setEditing] = useState(false);
+  const [showMeta, setShowMeta] = useState(false);
   const [draft, setDraft] = useState(chunk.content);
 
   // Re-sync when the underlying chunk changes (e.g. after a save refetch).
   useEffect(() => { if (!editing) setDraft(chunk.content); }, [chunk.content, editing]);
 
+  const invalidate = () => queryClient.invalidateQueries({ queryKey: ['rag-chunks', source] });
   const save = useMutation({
     mutationFn: () => updateRagChunk(source, chunk.id, draft),
-    onSuccess: () => {
-      setEditing(false);
-      void queryClient.invalidateQueries({ queryKey: ['rag-chunks', source] });
-    },
+    onSuccess: () => { setEditing(false); void invalidate(); },
+  });
+  const remove = useMutation({
+    mutationFn: () => deleteRagChunk(source, chunk.id),
+    onSuccess: () => { void invalidate(); void queryClient.invalidateQueries({ queryKey: ['rag-documents'] }); },
   });
 
   const badges = [
@@ -48,18 +52,45 @@ function ChunkCard({ source, chunk }: { source: string; chunk: RagChunk }) {
           <span key={b} className="rounded bg-muted px-1.5 py-0.5 font-mono">{b}</span>
         ))}
         <span className="ml-auto tabular-nums">{t('rag.explorer.chars', { n: chunk.content.length })}</span>
+        <button
+          type="button"
+          aria-label={t('rag.explorer.rawMeta')}
+          title={t('rag.explorer.rawMeta')}
+          onClick={() => setShowMeta((v) => !v)}
+          className={cn('hover:text-foreground', showMeta ? 'text-foreground' : 'text-muted-foreground')}
+        >
+          <BracesIcon className="size-3.5" />
+        </button>
         {!editing && (
-          <button
-            type="button"
-            aria-label={t('rag.explorer.edit')}
-            title={t('rag.explorer.edit')}
-            onClick={() => { setDraft(chunk.content); setEditing(true); }}
-            className="text-muted-foreground hover:text-foreground"
-          >
-            <PencilIcon className="size-3.5" />
-          </button>
+          <>
+            <button
+              type="button"
+              aria-label={t('rag.explorer.edit')}
+              title={t('rag.explorer.edit')}
+              onClick={() => { setDraft(chunk.content); setEditing(true); }}
+              className="text-muted-foreground hover:text-foreground"
+            >
+              <PencilIcon className="size-3.5" />
+            </button>
+            <button
+              type="button"
+              aria-label={t('rag.explorer.deleteChunk')}
+              title={t('rag.explorer.deleteChunk')}
+              disabled={remove.isPending}
+              onClick={() => { if (window.confirm(t('rag.explorer.deleteConfirm'))) remove.mutate(); }}
+              className="text-muted-foreground hover:text-destructive-foreground disabled:opacity-50"
+            >
+              <Trash2Icon className="size-3.5" />
+            </button>
+          </>
         )}
       </div>
+
+      {showMeta && (
+        <pre className="overflow-x-auto border-b bg-muted/40 px-3 py-2 font-mono text-[10px] leading-relaxed whitespace-pre-wrap">
+          {JSON.stringify({ id: chunk.id, ...chunk.metadata }, null, 2)}
+        </pre>
+      )}
 
       {/* Ingest enrichment that's embedded but never shown in citations — useful
           to see while debugging recall. */}
@@ -108,6 +139,7 @@ function ChunkCard({ source, chunk }: { source: string; chunk: RagChunk }) {
 export function RagExplorer({ open, onOpenChange }: { open: boolean; onOpenChange: (v: boolean) => void }) {
   const { t } = useTranslation();
   const [selected, setSelected] = useState<string | null>(null);
+  const [filter, setFilter] = useState('');
 
   const docs = useQuery({ queryKey: ['rag-documents'], queryFn: fetchRagDocuments, enabled: open });
   const chunks = useQuery({
@@ -117,6 +149,10 @@ export function RagExplorer({ open, onOpenChange }: { open: boolean; onOpenChang
   });
 
   const docList = docs.data?.documents ?? [];
+  const q = filter.trim().toLowerCase();
+  const filtered = q
+    ? docList.filter((d) => d.filename.toLowerCase().includes(q) || d.source.toLowerCase().includes(q))
+    : docList;
   const selectedDoc = docList.find((d) => d.source === selected);
 
   return (
@@ -129,15 +165,25 @@ export function RagExplorer({ open, onOpenChange }: { open: boolean; onOpenChang
           {/* File list */}
           <div className="flex w-72 shrink-0 flex-col border-r">
             <div className="border-b px-3 py-2 text-[11px] font-semibold tracking-[0.08em] text-foreground/50 uppercase">
-              {t('rag.explorer.files', { n: docList.length })}
+              {t('rag.explorer.files', { n: q ? filtered.length : docList.length })}
+            </div>
+            <div className="border-b p-1.5">
+              <Input
+                className="h-7 text-xs"
+                placeholder={t('rag.explorer.searchFiles')}
+                value={filter}
+                onChange={(e) => setFilter(e.target.value)}
+              />
             </div>
             <div className="min-h-0 flex-1 overflow-y-auto p-1.5">
               {docs.data && docs.data.available === false ? (
                 <p className="px-2 py-2 text-xs text-destructive-foreground">{docs.data.error || t('settings.rag.ragUnavailable')}</p>
               ) : docList.length === 0 ? (
                 <p className="px-2 py-2 text-xs text-muted-foreground">{t('settings.rag.noDocs')}</p>
+              ) : filtered.length === 0 ? (
+                <p className="px-2 py-2 text-xs text-muted-foreground">{t('rag.explorer.noMatches')}</p>
               ) : (
-                docList.map((d) => (
+                filtered.map((d) => (
                   <button
                     key={d.source}
                     type="button"

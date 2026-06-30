@@ -1667,6 +1667,25 @@ class VectorRAG:
             logger.error(f"update_chunk failed: {e}")
             return False
 
+    def delete_chunk(self, source: str, chunk_id: str) -> bool:
+        """Delete a single chunk by ``source`` + ``id`` (explorer debug action).
+
+        Scoped to the source so a stale id from the UI can't remove an unrelated
+        point. Returns True only when a matching chunk existed and was removed."""
+        if not self.healthy:
+            return False
+        try:
+            docs = self._store.filter_documents(
+                filters={"field": "meta.source", "operator": "==", "value": source}
+            )
+            if not any(d.id == chunk_id for d in docs):
+                return False
+            self._store.delete_documents([chunk_id])
+            return True
+        except Exception as e:
+            logger.error(f"delete_chunk failed: {e}")
+            return False
+
     # ------------------------------------------------------------------
     # Delete by metadata
     # ------------------------------------------------------------------
