@@ -9,7 +9,7 @@ COPY web/ ./
 RUN pnpm run build
 
 # ---- Stage 1b: build the documentation site (docs/ → docs_build) ----
-FROM python:3.12-slim AS docsbuild
+FROM python:3.14-slim AS docsbuild
 WORKDIR /docs
 COPY requirements-docs.txt ./
 RUN pip install --no-cache-dir -r requirements-docs.txt
@@ -18,7 +18,7 @@ COPY docs/ ./docs/
 RUN mkdocs build
 
 # ---- Stage 2: the Talos app ----
-FROM python:3.12-slim
+FROM python:3.14-slim
 
 # System deps for the Talos web/API container. Agent code execution happens in
 # the separate talos-sandbox container, not in this app container.
