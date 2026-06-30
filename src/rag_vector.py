@@ -531,6 +531,8 @@ def _apply_saved_rag_config() -> None:
         "sparse_model": "RAG_SPARSE_MODEL",
         "query_prefix": "RAG_QUERY_PREFIX",
         "video_asr_url": "VIDEO_ASR_URL",
+        "video_asr_language": "VIDEO_ASR_LANGUAGE",
+        "video_asr_prompt": "VIDEO_ASR_PROMPT",
         "image_embed_url": "IMAGE_EMBED_URL",
         "image_embed_model": "IMAGE_EMBED_MODEL",
         # Ingest-time LLM (Contextual Retrieval and other ingest enrichment).
@@ -1580,15 +1582,28 @@ class VectorRAG:
 
         url = os.getenv("VIDEO_ASR_URL", "").strip()
         timeout = float(os.getenv("VIDEO_ASR_TIMEOUT", "1800"))
+        prompt = os.getenv("VIDEO_ASR_PROMPT", "").strip()
         with open(wav_path, "rb") as fh:
             if "/v1/audio/transcriptions" in url:
                 data = {
                     "model": os.getenv("VIDEO_ASR_MODEL", "qwen3-asr"),
-                    "language": _asr_language_code(language),
                     "response_format": "json",
                 }
+                # A real language code pins recognition; "auto"/empty omits the
+                # field so the model auto-detects — better for code-switched
+                # audio (German talk peppered with English terms), where forcing
+                # one language mistranscribes the foreign words. (vLLM rejects an
+                # empty language string, so we must drop the key entirely.)
+                code = _asr_language_code(language)
+                if code and code not in ("auto", "detect"):
+                    data["language"] = code
+                # Optional context to bias domain vocabulary / proper nouns.
+                if prompt:
+                    data["prompt"] = prompt
             else:
                 data = {"language": language}
+                if prompt:
+                    data["prompt"] = prompt
             resp = httpx.post(
                 url, files={"file": (os.path.basename(wav_path), fh)}, data=data, timeout=timeout
             )

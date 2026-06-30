@@ -31,6 +31,10 @@ class RagPipelineConfig(BaseModel):
     # Advanced — opt-in audio/video transcription lane (off by default).
     video_asr_enabled: bool = False
     video_asr_url: str = ""
+    # ASR language: a code/name pins recognition; "auto" lets the model detect
+    # (better for code-switched audio). Optional context biases domain terms.
+    video_asr_language: str = "auto"
+    video_asr_prompt: str = ""
     # Advanced — opt-in pixel image embedding lane (off by default).
     image_pixel_enabled: bool = False
     image_embed_url: str = ""
@@ -119,6 +123,8 @@ def _public(cfg: dict) -> dict:
         "context_prompt": cfg.get("context_prompt", ""),
         "video_asr_enabled": bool(cfg.get("video_asr_enabled", False)),
         "video_asr_url": cfg.get("video_asr_url", ""),
+        "video_asr_language": cfg.get("video_asr_language", "auto") or "auto",
+        "video_asr_prompt": cfg.get("video_asr_prompt", ""),
         "image_pixel_enabled": bool(cfg.get("image_pixel_enabled", False)),
         "image_embed_url": cfg.get("image_embed_url", ""),
         "image_embed_model": cfg.get("image_embed_model", ""),
@@ -198,6 +204,8 @@ def setup_rag_routes():
             "context_prompt": body.context_prompt.strip(),
             "video_asr_enabled": bool(body.video_asr_enabled),
             "video_asr_url": body.video_asr_url.strip(),
+            "video_asr_language": (body.video_asr_language or "auto").strip(),
+            "video_asr_prompt": body.video_asr_prompt.strip(),
             "image_pixel_enabled": bool(body.image_pixel_enabled),
             "image_embed_url": body.image_embed_url.strip(),
             "image_embed_model": body.image_embed_model.strip(),

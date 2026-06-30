@@ -44,6 +44,8 @@ _ENV_MAP = {
     "query_prefix": "RAG_QUERY_PREFIX",
     # Opt-in ASR lane endpoint (the toggle is applied separately, below).
     "video_asr_url": "VIDEO_ASR_URL",
+    "video_asr_language": "VIDEO_ASR_LANGUAGE",
+    "video_asr_prompt": "VIDEO_ASR_PROMPT",
     # Opt-in pixel image-embedding lane (toggle applied separately, below).
     "image_embed_url": "IMAGE_EMBED_URL",
     "image_embed_model": "IMAGE_EMBED_MODEL",

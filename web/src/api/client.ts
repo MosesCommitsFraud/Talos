@@ -312,6 +312,8 @@ export interface RagConfig {
   /** Advanced — opt-in audio/video transcription lane (off by default). */
   video_asr_enabled?: boolean;
   video_asr_url?: string;
+  video_asr_language?: string;
+  video_asr_prompt?: string;
   /** Advanced — opt-in pixel image embedding lane (off by default). */
   image_pixel_enabled?: boolean;
   image_embed_url?: string;
