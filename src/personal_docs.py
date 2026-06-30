@@ -60,7 +60,7 @@ PLAINTEXT_EXTS: Set[str] = {
 }
 
 
-def extract_file_content(file_path: str) -> str:
+def extract_file_content(file_path: str, heavy: bool = True) -> str:
     """Extract text from any supported file, preferring Docling.
 
     Resolution order, each step degrading gracefully to the next:
@@ -71,12 +71,22 @@ def extract_file_content(file_path: str) -> str:
 
     Returns "" when nothing can extract content, so the indexer simply skips the
     file rather than erroring.
+
+    ``heavy=False`` keeps only the cheap plaintext path and skips the
+    Docling/pypdf/markitdown parsers. Used by the boot-time keyword index
+    (``refresh_index``) so startup never blocks for minutes running CPU OCR on
+    every PDF — those rich docs are served by the Qdrant vector RAG, which is the
+    primary retrieval path; the local keyword index is only a fallback.
     """
     ext = os.path.splitext(file_path)[1].lower()
 
     # Plain text / code: skip the document converter entirely.
     if ext in PLAINTEXT_EXTS:
         return read_text_file(file_path)
+
+    # Boot-time index: don't pay the Docling/OCR cost for rich docs.
+    if not heavy:
+        return ""
 
     from src.docling_runtime import convert_to_markdown as docling_md
     from src.docling_runtime import is_docling_format
@@ -179,9 +189,16 @@ def tokenize(s: str) -> Set[str]:
 
 
 def load_personal_index(
-    personal_dir: str, extensions: Tuple[str, ...] = config.DEFAULT_EXTENSIONS
+    personal_dir: str,
+    extensions: Tuple[str, ...] = config.DEFAULT_EXTENSIONS,
+    heavy: bool = True,
 ) -> List[Dict[str, Any]]:
-    """Load and index personal documents."""
+    """Load and index personal documents.
+
+    ``heavy=False`` builds the index without the expensive Docling/OCR content
+    extraction (rich docs get empty chunks), so the synchronous boot-time
+    refresh can't block server startup.
+    """
     files = []
     for root, _, names in os.walk(personal_dir):
         for name in sorted(names):
@@ -191,7 +208,7 @@ def load_personal_index(
             if not any(name.lower().endswith(ext) for ext in extensions):
                 continue
             size = os.path.getsize(p)
-            text = extract_file_content(p)
+            text = extract_file_content(p, heavy=heavy)
             chunks = split_chunks(text)
             display = os.path.relpath(p, personal_dir)
             files.append({"name": display, "path": p, "size": size, "chunks": chunks})
@@ -414,11 +431,20 @@ class PersonalDocsManager:
         return self.indexed_directories.copy()
 
     def refresh_index(self):
-        """Refresh the document index including all tracked directories."""
+        """Refresh the document index including all tracked directories.
+
+        Runs synchronously at construction (and on directory add/remove), so it
+        uses the cheap ``heavy=False`` path: plaintext/code is keyword-indexed,
+        but rich docs (PDF/Office/images) are NOT parsed through Docling here.
+        Parsing every PDF with CPU OCR at boot blocked uvicorn's lifespan startup
+        for minutes — the app appeared dead on :7000. Rich docs are retrieved via
+        the Qdrant vector RAG (the primary path); this local index is a keyword
+        fallback only.
+        """
         self.index = []
 
         # Index the base personal directory
-        base_files = load_personal_index(self.personal_dir)
+        base_files = load_personal_index(self.personal_dir, heavy=False)
         for f in base_files:
             if os.path.abspath(f.get("path", "")) in self.excluded_files:
                 continue
@@ -436,7 +462,7 @@ class PersonalDocsManager:
                 continue
 
             # Load files from this directory
-            dir_files = load_personal_index(directory)
+            dir_files = load_personal_index(directory, heavy=False)
             for f in dir_files:
                 if os.path.abspath(f.get("path", "")) in self.excluded_files:
                     continue
