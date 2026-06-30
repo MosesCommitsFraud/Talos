@@ -427,7 +427,7 @@ def _embed_base_url() -> str:
 class VectorRAG:
     """Haystack + Qdrant hybrid RAG. Public API kept stable for callers."""
 
-    def __init__(self, persist_directory: str = "data/rag"):
+    def __init__(self, persist_directory: str = "data/rag", recreate_index: bool = False):
         self.persist_directory = persist_directory
         self._store = None
         self._dim: Optional[int] = None
@@ -450,13 +450,13 @@ class VectorRAG:
         self._visual_dim: Optional[int] = None
 
         Path(self.persist_directory).mkdir(parents=True, exist_ok=True)
-        self._initialize_system()
+        self._initialize_system(recreate_index=recreate_index)
 
     # ------------------------------------------------------------------
     # Initialization
     # ------------------------------------------------------------------
 
-    def _initialize_system(self) -> bool:
+    def _initialize_system(self, recreate_index: bool = False) -> bool:
         try:
             _apply_saved_rag_config()
 
@@ -495,7 +495,7 @@ class VectorRAG:
             last_exc: Optional[Exception] = None
             for attempt in range(6):
                 try:
-                    self._store = self._build_store(recreate=False)
+                    self._store = self._build_store(recreate=recreate_index)
                     count = self._store.count_documents()
                     last_exc = None
                     break

@@ -270,18 +270,34 @@ def setup_rag_routes():
         volume and can be re-ingested afterwards.
         """
         _reset_rag()
-        from src.rag_singleton import get_rag_manager
+        from src.rag_singleton import get_rag_manager, last_init_error
 
         rag = get_rag_manager()
         if not rag or not hasattr(rag, "rebuild_index"):
-            raise HTTPException(
-                503, "RAG is not available. Check embedding, Qdrant, and dependencies."
+            from pathlib import Path
+
+            import src.rag_singleton as _rs
+            from src.rag_vector import VectorRAG
+
+            base_dir = Path(__file__).parent.parent
+            rag = VectorRAG(
+                persist_directory=str(base_dir / "data" / "rag"),
+                recreate_index=True,
             )
-        ok = rag.rebuild_index()
-        if not ok:
-            raise HTTPException(
-                503, f"Rebuild failed: {getattr(rag, 'last_error', 'unknown error')}"
-            )
+            if not getattr(rag, "healthy", False):
+                detail = rag.last_error or last_init_error()
+                raise HTTPException(
+                    503,
+                    f"RAG rebuild failed: {detail or 'check embedding, Qdrant, and dependencies.'}",
+                )
+            _rs.rag_instance = rag
+            _rs._last_error = ""
+        else:
+            ok = rag.rebuild_index()
+            if not ok:
+                raise HTTPException(
+                    503, f"Rebuild failed: {getattr(rag, 'last_error', 'unknown error')}"
+                )
         return {"ok": True, "message": "Index recreated. Re-ingest your documents."}
 
     @router.get("/search")
