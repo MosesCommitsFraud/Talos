@@ -330,6 +330,10 @@ export interface RagConfig {
   /** Advanced — small-to-big: inject the matched chunk's whole section. */
   expand_to_parent_enabled?: boolean;
   parent_max_chars?: number;
+  /** Advanced — per-page VLM transcription for image-heavy PDFs + its endpoint. */
+  pdf_vlm_enabled?: boolean;
+  vlm_url?: string;
+  vlm_model?: string;
 }
 /** Which knowledge sources are configured — drives the composer's mode control. */
 export const fetchCapabilities = () => getJSON<{ rag: boolean; sql: boolean }>('/api/capabilities');

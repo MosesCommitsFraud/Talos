@@ -270,6 +270,16 @@ def _expand_active() -> bool:
     return bool(os.getenv("EXPAND_TO_PARENT_ENABLED", "").strip())
 
 
+def _pdf_vlm_active() -> bool:
+    """True when per-page VLM transcription is enabled *and* a vision endpoint is
+    configured. Off by default — it's a heavier ingest (one VLM call per page),
+    so strictly opt-in. When on, image-heavy PDFs (slide decks, screenshots) are
+    transcribed to Markdown by a vision model instead of OCR'd by Docling."""
+    return bool(os.getenv("PDF_VLM_ENABLED", "").strip()) and bool(
+        os.getenv("VLM_URL", "").strip()
+    )
+
+
 _SECTION_WINDOW = 3  # chunks per fallback "section" when no heading info exists
 
 
@@ -421,6 +431,9 @@ def _apply_saved_rag_config() -> None:
         # Ingest-time LLM (Contextual Retrieval and other ingest enrichment).
         "llm_url": "RAG_LLM_URL",
         "llm_model": "RAG_LLM_MODEL",
+        # Per-page VLM transcription endpoint (image-heavy PDFs).
+        "vlm_url": "VLM_URL",
+        "vlm_model": "VLM_MODEL",
     }
     for key, env_name in mapping.items():
         value = str(cfg.get(key) or "").strip()
@@ -439,6 +452,7 @@ def _apply_saved_rag_config() -> None:
     os.environ["RAG_AUTO_QUESTIONS_N"] = str(int(cfg.get("auto_questions_n") or 0))
     os.environ["EXPAND_TO_PARENT_ENABLED"] = "true" if cfg.get("expand_to_parent_enabled") else ""
     os.environ["RAG_PARENT_MAX_CHARS"] = str(int(cfg.get("parent_max_chars") or 0))
+    os.environ["PDF_VLM_ENABLED"] = "true" if cfg.get("pdf_vlm_enabled") else ""
 
 
 def _embed_base_url() -> str:
@@ -1052,6 +1066,8 @@ class VectorRAG:
             docs = self._lane_av(path, meta)
         elif _code_active() and ext in _CODE_LANGS:
             docs = self._lane_code(path, _CODE_LANGS[ext])
+        elif ext == ".pdf" and _pdf_vlm_active():
+            docs = self._lane_pdf_vlm(path, meta)
         elif is_docling_format(path):
             docs = self._lane_docling(path)
         else:
@@ -1079,6 +1095,134 @@ class VectorRAG:
         # Auto keywords/questions (Phase 9): tag each chunk with extra search
         # terms (embed-only, not shown in citations). No-op unless enabled.
         self._apply_autokeywords(docs)
+        return docs
+
+    def _vlm_chat_url(self) -> str:
+        """Normalize VLM_URL to an OpenAI ``/v1/chat/completions`` endpoint.
+
+        The UI may store a base (``…/v1``) or a full chat URL; accept either."""
+        url = os.getenv("VLM_URL", "").strip().rstrip("/")
+        if not url:
+            return ""
+        if url.endswith("/chat/completions"):
+            return url
+        if url.endswith("/v1"):
+            return url + "/chat/completions"
+        return url + "/v1/chat/completions"
+
+    def _vlm_transcribe_image(self, b64_png: str) -> str:
+        """Ask the vision model to transcribe one page image to Markdown.
+
+        Reasoning is disabled (``enable_thinking=false``) so the whole budget
+        goes to the transcript, not a chain-of-thought. Best-effort: returns ""
+        on any error so a single bad page never fails the whole document.
+        """
+        import httpx
+
+        url = self._vlm_chat_url()
+        if not url:
+            return ""
+        model = os.getenv("VLM_MODEL", "").strip()
+        prompt = (
+            "Transcribe this document page into clean GitHub-flavored Markdown. "
+            "Include ALL visible text and reproduce tables as Markdown tables. For "
+            "screenshots, diagrams, charts or UI, add a concise description of what "
+            "they show so the content is searchable. Ignore repeated logos and "
+            "watermarks. Output only the Markdown, no preamble."
+        )
+        payload: Dict[str, Any] = {
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": prompt},
+                        {
+                            "type": "image_url",
+                            "image_url": {"url": f"data:image/png;base64,{b64_png}"},
+                        },
+                    ],
+                }
+            ],
+            "temperature": 0.0,
+            "max_tokens": int(os.getenv("PDF_VLM_MAX_TOKENS", "3000") or 3000),
+            # vLLM/Qwen3: skip the reasoning pass for a transcription task.
+            "chat_template_kwargs": {"enable_thinking": False},
+        }
+        if model:
+            payload["model"] = model
+        headers = {}
+        if os.getenv("VLM_API_KEY"):
+            headers["Authorization"] = f"Bearer {os.getenv('VLM_API_KEY')}"
+        resp = httpx.post(url, json=payload, headers=headers, timeout=180)
+        resp.raise_for_status()
+        data = resp.json()
+        msg = (data.get("choices") or [{}])[0].get("message") or {}
+        # With thinking off the transcript is in ``content``; fall back to
+        # ``reasoning`` only if a build still routed it there.
+        return (msg.get("content") or msg.get("reasoning") or "").strip()
+
+    def _lane_pdf_vlm(self, path: str, meta: Dict[str, Any]):
+        """Image-heavy PDFs → render each page and transcribe it with a vision
+        model, one ``Document`` per page.
+
+        This is the "PDFs with images in them" path: a slide deck whose content
+        lives in screenshots is OCR-blind to Docling, but a VLM reads the whole
+        page. Renders with pypdfium2 (a Docling dependency, no system libs) at a
+        capped resolution. Degrades to ``_lane_docling`` if rendering is
+        unavailable or every page fails, so enabling the lane never regresses.
+        """
+        try:
+            import base64
+            import io
+
+            import pypdfium2 as pdfium
+        except Exception as e:
+            logger.warning("pdf-vlm: pypdfium2 unavailable (%s); using Docling", e)
+            return self._lane_docling(path)
+
+        from haystack.dataclasses import Document
+
+        docs: List[Any] = []
+        try:
+            pdf = pdfium.PdfDocument(path)
+        except Exception as e:
+            logger.warning("pdf-vlm: cannot open %s (%s); using Docling", path, e)
+            return self._lane_docling(path)
+        try:
+            n_pages = len(pdf)
+            for i in range(n_pages):
+                page = pdf[i]
+                # Target ~1500px on the long side: enough detail for screenshots,
+                # bounded so the VLM's vision tokens stay reasonable.
+                w, h = page.get_size()
+                scale = min(1500.0 / max(w, h), 3.0) if max(w, h) else 2.0
+                bitmap = page.render(scale=max(scale, 1.0))
+                pil = bitmap.to_pil().convert("RGB")
+                buf = io.BytesIO()
+                pil.save(buf, format="PNG")
+                b64 = base64.b64encode(buf.getvalue()).decode()
+                try:
+                    text = self._vlm_transcribe_image(b64)
+                except Exception as e:
+                    logger.warning("pdf-vlm: page %s/%s failed: %s", i + 1, n_pages, e)
+                    text = ""
+                if text:
+                    docs.append(
+                        Document(
+                            content=text,
+                            meta={"modality": "pdf_page", "page": i + 1, "pages": n_pages},
+                        )
+                    )
+        finally:
+            try:
+                pdf.close()
+            except Exception:
+                pass
+
+        if not docs:
+            logger.warning("pdf-vlm: no pages transcribed for %s; using Docling", path)
+            return self._lane_docling(path)
+        logger.info("pdf-vlm: transcribed %s page(s) of %s", len(docs), os.path.basename(path))
         return docs
 
     def _lane_docling(self, path: str):

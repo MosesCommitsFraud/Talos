@@ -30,6 +30,9 @@ haystack-ai
 qdrant-haystack
 docling-haystack
 fastembed-haystack
+# Per-page PDF rasterization for the opt-in VLM transcription lane (also a
+# Docling dependency; pinned explicitly since we render pages directly).
+pypdfium2
 # Async ingest queue (separate rag-ingest-worker container).
 rq
 redis

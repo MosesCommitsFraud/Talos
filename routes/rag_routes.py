@@ -43,6 +43,12 @@ class RagPipelineConfig(BaseModel):
     contextual_retrieval_enabled: bool = False
     llm_url: str = ""
     llm_model: str = ""
+    # Advanced — per-page VLM transcription for image-heavy PDFs (slide decks,
+    # screenshots). Renders each page to an image and asks a vision model to
+    # transcribe it to Markdown, so screenshot content becomes searchable text.
+    pdf_vlm_enabled: bool = False
+    vlm_url: str = ""
+    vlm_model: str = ""
     # Advanced — auto keyword/question generation per chunk (0 = off).
     auto_keywords_n: int = 0
     auto_questions_n: int = 0
@@ -121,6 +127,9 @@ def _public(cfg: dict) -> dict:
         "contextual_retrieval_enabled": bool(cfg.get("contextual_retrieval_enabled", False)),
         "llm_url": cfg.get("llm_url", ""),
         "llm_model": cfg.get("llm_model", ""),
+        "pdf_vlm_enabled": bool(cfg.get("pdf_vlm_enabled", False)),
+        "vlm_url": cfg.get("vlm_url", ""),
+        "vlm_model": cfg.get("vlm_model", ""),
         "auto_keywords_n": _clamp_aux(cfg.get("auto_keywords_n", 0)),
         "auto_questions_n": _clamp_aux(cfg.get("auto_questions_n", 0)),
         "expand_to_parent_enabled": bool(cfg.get("expand_to_parent_enabled", False)),
@@ -197,6 +206,9 @@ def setup_rag_routes():
             "contextual_retrieval_enabled": bool(body.contextual_retrieval_enabled),
             "llm_url": body.llm_url.strip(),
             "llm_model": body.llm_model.strip(),
+            "pdf_vlm_enabled": bool(body.pdf_vlm_enabled),
+            "vlm_url": body.vlm_url.strip(),
+            "vlm_model": body.vlm_model.strip(),
             "auto_keywords_n": _clamp_aux(body.auto_keywords_n),
             "auto_questions_n": _clamp_aux(body.auto_questions_n),
             "expand_to_parent_enabled": bool(body.expand_to_parent_enabled),

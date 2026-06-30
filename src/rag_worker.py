@@ -50,6 +50,9 @@ _ENV_MAP = {
     # Ingest-time LLM for Contextual Retrieval (toggle applied separately, below).
     "llm_url": "RAG_LLM_URL",
     "llm_model": "RAG_LLM_MODEL",
+    # Per-page VLM transcription endpoint for image-heavy PDFs (toggle below).
+    "vlm_url": "VLM_URL",
+    "vlm_model": "VLM_MODEL",
 }
 
 _STATUS_MAP = {
@@ -108,6 +111,7 @@ def _apply_snapshot(snap: Optional[Dict[str, Any]]) -> None:
     )
     os.environ["RAG_AUTO_KEYWORDS_N"] = str(int(snap.get("auto_keywords_n") or 0))
     os.environ["RAG_AUTO_QUESTIONS_N"] = str(int(snap.get("auto_questions_n") or 0))
+    os.environ["PDF_VLM_ENABLED"] = "true" if snap.get("pdf_vlm_enabled") else ""
 
 
 def _fresh_rag():

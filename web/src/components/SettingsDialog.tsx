@@ -1345,6 +1345,20 @@ export function RagPanel() {
         </Section>
       )}
 
+      {(draft.provider || 'internal') !== 'external' && (
+        <Section title={t('settings.rag.pdfVlmTitle')}>
+          <Row label={t('settings.rag.pdfVlmEnabled')} hint={t('settings.rag.hint.pdfVlmEnabled')}>
+            <Switch checked={!!draft.pdf_vlm_enabled} onCheckedChange={(v) => set('pdf_vlm_enabled', v)} />
+          </Row>
+          {draft.pdf_vlm_enabled && (
+            <>
+              {field('vlm_url', t('settings.rag.vlmUrl'), { hint: t('settings.rag.hint.vlmUrl'), def: 'http://host:8000/v1/chat/completions' })}
+              {field('vlm_model', t('settings.rag.vlmModel'), { hint: t('settings.rag.hint.vlmModel'), def: 'qwen3-llm' })}
+            </>
+          )}
+        </Section>
+      )}
+
       <Section title={t('settings.rag.context')}>
         {field('max_context_chars', t('settings.rag.maxContextChars'), { type: 'number', hint: t('settings.rag.hint.maxContextChars'), def: 10000 })}
         {field('query_prefix', t('settings.rag.queryPrefix'), { type: 'textarea', hint: t('settings.rag.hint.queryPrefix'), def: '' })}
