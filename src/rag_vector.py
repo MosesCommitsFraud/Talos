@@ -271,13 +271,75 @@ def _expand_active() -> bool:
 
 
 def _pdf_vlm_active() -> bool:
-    """True when per-page VLM transcription is enabled *and* a vision endpoint is
-    configured. Off by default — it's a heavier ingest (one VLM call per page),
-    so strictly opt-in. When on, image-heavy PDFs (slide decks, screenshots) are
-    transcribed to Markdown by a vision model instead of OCR'd by Docling."""
+    """True when VLM transcription is enabled *and* a vision endpoint is
+    configured. Off by default — it's a heavier ingest (one VLM call per page or
+    embedded image), so strictly opt-in. When on, image-bearing documents
+    (slide decks, screenshots, figures) are read by a vision model instead of
+    relying on Docling OCR alone."""
     return bool(os.getenv("PDF_VLM_ENABLED", "").strip()) and bool(
         os.getenv("VLM_URL", "").strip()
     )
+
+
+# Document formats eligible for the VLM lane. PDFs are page-rendered; Office
+# files keep Docling's text and get their *embedded* images VLM-captioned.
+_VLM_DOC_EXTS: Set[str] = {".pdf", ".docx", ".pptx"}
+
+# Raster image members inside an Office (OOXML) zip we can hand to the VLM.
+# Vector formats (.emf/.wmf) are skipped — the VLM needs raster pixels.
+_OOXML_IMG_EXTS: Tuple[str, ...] = (
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".gif",
+    ".bmp",
+    ".tif",
+    ".tiff",
+    ".webp",
+)
+
+
+def _file_has_images(path: str) -> bool:
+    """Best-effort: does this document actually contain images worth a VLM pass?
+
+    Lets the lane auto-select — a text-only PDF/Word stays on the fast Docling
+    path; only files with embedded images (slide decks, screenshots, figures)
+    pay for vision. PDFs: scan page objects for an image. Office (docx/pptx):
+    look for raster members under ``*/media/``. On any error, assume True for
+    PDFs (preserve the prior "VLM all PDFs" behavior) and False otherwise.
+    """
+    ext = Path(path).suffix.lower()
+    try:
+        if ext == ".pdf":
+            import pypdfium2 as pdfium
+            import pypdfium2.raw as pdfium_c
+
+            pdf = pdfium.PdfDocument(path)
+            try:
+                for i in range(len(pdf)):
+                    page = pdf[i]
+                    for obj in page.get_objects():
+                        if getattr(obj, "type", None) == pdfium_c.FPDF_PAGEOBJ_IMAGE:
+                            return True
+                return False
+            finally:
+                try:
+                    pdf.close()
+                except Exception:
+                    pass
+        if ext in (".docx", ".pptx", ".xlsx"):
+            import zipfile
+
+            with zipfile.ZipFile(path) as z:
+                for name in z.namelist():
+                    low = name.lower()
+                    if "/media/" in low and low.endswith(_OOXML_IMG_EXTS):
+                        return True
+            return False
+    except Exception as e:
+        logger.warning("image detection failed for %s: %s", path, e)
+        return ext == ".pdf"
+    return False
 
 
 _SECTION_WINDOW = 3  # chunks per fallback "section" when no heading info exists
@@ -1050,14 +1112,20 @@ class VectorRAG:
                 r["expanded"] = text[:cap]
         return results
 
-    def _documents_for_file(self, path: str, meta: Dict[str, Any]):
+    def _documents_for_file(self, path: str, meta: Dict[str, Any], stage_cb=None):
         """Route a file to its modality lane → Haystack Documents with metadata.
 
         The single ingest chokepoint for both UI uploads and dir/API ingest. A
         small dispatch keeps each modality's handling isolated and testable:
           * audio/video → ``_lane_av`` (opt-in ASR; rejects when disabled)
+          * image-bearing PDF/Office (VLM lane on) → ``_lane_pdf_vlm`` /
+            ``_lane_office_vlm`` (vision transcription; auto-selected only when
+            the file actually has images)
           * rich docs/images → ``_lane_docling`` (layout-aware HybridChunk)
           * plain text/code/json → ``_lane_text`` (length splitter)
+
+        ``stage_cb(done, total)`` is forwarded to the slow VLM lanes so the queue
+        can show per-page/per-image progress instead of just 0%→done.
         """
         from src.docling_runtime import is_docling_format
 
@@ -1066,8 +1134,12 @@ class VectorRAG:
             docs = self._lane_av(path, meta)
         elif _code_active() and ext in _CODE_LANGS:
             docs = self._lane_code(path, _CODE_LANGS[ext])
-        elif ext == ".pdf" and _pdf_vlm_active():
-            docs = self._lane_pdf_vlm(path, meta)
+        elif _pdf_vlm_active() and ext in _VLM_DOC_EXTS and _file_has_images(path):
+            docs = (
+                self._lane_pdf_vlm(path, meta, stage_cb=stage_cb)
+                if ext == ".pdf"
+                else self._lane_office_vlm(path, meta, stage_cb=stage_cb)
+            )
         elif is_docling_format(path):
             docs = self._lane_docling(path)
         else:
@@ -1110,12 +1182,27 @@ class VectorRAG:
             return url + "/chat/completions"
         return url + "/v1/chat/completions"
 
-    def _vlm_transcribe_image(self, b64_png: str) -> str:
-        """Ask the vision model to transcribe one page image to Markdown.
+    # Default prompts for the two VLM modes: a whole rendered page vs. a single
+    # image extracted from a document.
+    _VLM_PAGE_PROMPT = (
+        "Transcribe this document page into clean GitHub-flavored Markdown. "
+        "Include ALL visible text and reproduce tables as Markdown tables. For "
+        "screenshots, diagrams, charts or UI, add a concise description of what "
+        "they show so the content is searchable. Ignore repeated logos and "
+        "watermarks. Output only the Markdown, no preamble."
+    )
+    _VLM_IMAGE_PROMPT = (
+        "Describe this image for search. Transcribe any text verbatim, and for "
+        "screenshots, charts, diagrams or UI explain what they show and the data "
+        "they contain. Ignore logos and watermarks. Output only the description."
+    )
+
+    def _vlm_transcribe_image(self, b64_png: str, prompt: Optional[str] = None) -> str:
+        """Ask the vision model to transcribe/describe one image (Markdown).
 
         Reasoning is disabled (``enable_thinking=false``) so the whole budget
         goes to the transcript, not a chain-of-thought. Best-effort: returns ""
-        on any error so a single bad page never fails the whole document.
+        on any error so a single bad page/image never fails the whole document.
         """
         import httpx
 
@@ -1123,13 +1210,7 @@ class VectorRAG:
         if not url:
             return ""
         model = os.getenv("VLM_MODEL", "").strip()
-        prompt = (
-            "Transcribe this document page into clean GitHub-flavored Markdown. "
-            "Include ALL visible text and reproduce tables as Markdown tables. For "
-            "screenshots, diagrams, charts or UI, add a concise description of what "
-            "they show so the content is searchable. Ignore repeated logos and "
-            "watermarks. Output only the Markdown, no preamble."
-        )
+        prompt = prompt or self._VLM_PAGE_PROMPT
         payload: Dict[str, Any] = {
             "messages": [
                 {
@@ -1161,15 +1242,16 @@ class VectorRAG:
         # ``reasoning`` only if a build still routed it there.
         return (msg.get("content") or msg.get("reasoning") or "").strip()
 
-    def _lane_pdf_vlm(self, path: str, meta: Dict[str, Any]):
-        """Image-heavy PDFs → render each page and transcribe it with a vision
+    def _lane_pdf_vlm(self, path: str, meta: Dict[str, Any], stage_cb=None):
+        """Image-bearing PDFs → render each page and transcribe it with a vision
         model, one ``Document`` per page.
 
         This is the "PDFs with images in them" path: a slide deck whose content
         lives in screenshots is OCR-blind to Docling, but a VLM reads the whole
         page. Renders with pypdfium2 (a Docling dependency, no system libs) at a
-        capped resolution. Degrades to ``_lane_docling`` if rendering is
-        unavailable or every page fails, so enabling the lane never regresses.
+        capped resolution. ``stage_cb(done, total)`` reports per-page progress.
+        Degrades to ``_lane_docling`` if rendering is unavailable or every page
+        fails, so enabling the lane never regresses.
         """
         try:
             import base64
@@ -1213,6 +1295,8 @@ class VectorRAG:
                             meta={"modality": "pdf_page", "page": i + 1, "pages": n_pages},
                         )
                     )
+                if stage_cb:
+                    stage_cb(i + 1, n_pages)
         finally:
             try:
                 pdf.close()
@@ -1223,6 +1307,79 @@ class VectorRAG:
             logger.warning("pdf-vlm: no pages transcribed for %s; using Docling", path)
             return self._lane_docling(path)
         logger.info("pdf-vlm: transcribed %s page(s) of %s", len(docs), os.path.basename(path))
+        return docs
+
+    def _ooxml_images(self, path: str):
+        """Yield ``(member_name, png_base64)`` for each distinct, non-trivial
+        raster image embedded in an OOXML (docx/pptx/xlsx) file.
+
+        De-dupes by content hash (so a logo repeated on every slide is captioned
+        once) and skips icon-sized images. Converts to PNG via Pillow so any
+        supported raster format reaches the VLM uniformly.
+        """
+        import base64
+        import hashlib
+        import io
+        import zipfile
+
+        seen: Set[str] = set()
+        try:
+            from PIL import Image
+
+            with zipfile.ZipFile(path) as z:
+                for name in z.namelist():
+                    low = name.lower()
+                    if "/media/" not in low or not low.endswith(_OOXML_IMG_EXTS):
+                        continue
+                    data = z.read(name)
+                    h = hashlib.sha256(data).hexdigest()
+                    if h in seen:
+                        continue
+                    seen.add(h)
+                    try:
+                        im = Image.open(io.BytesIO(data))
+                        im.load()
+                    except Exception:
+                        continue
+                    if im.width * im.height < 100 * 100:  # icons/bullets — skip
+                        continue
+                    buf = io.BytesIO()
+                    im.convert("RGB").save(buf, format="PNG")
+                    yield name, base64.b64encode(buf.getvalue()).decode()
+        except Exception as e:
+            logger.warning("ooxml image scan failed for %s: %s", path, e)
+
+    def _lane_office_vlm(self, path: str, meta: Dict[str, Any], stage_cb=None):
+        """Image-bearing Office docs (docx/pptx) → Docling text PLUS a VLM caption
+        per embedded image, so figures/screenshots become searchable text.
+
+        Office files have no page raster to render like a PDF, so this keeps
+        Docling's (good) text extraction and *adds* one ``Document`` per embedded
+        image describing it. ``stage_cb(done, total)`` reports per-image progress.
+        """
+        from haystack.dataclasses import Document
+
+        docs = list(self._lane_docling(path))
+        images = list(self._ooxml_images(path))
+        total = len(images)
+        for idx, (name, b64) in enumerate(images):
+            try:
+                cap = self._vlm_transcribe_image(b64, prompt=self._VLM_IMAGE_PROMPT)
+            except Exception as e:
+                logger.warning("office-vlm: image %s/%s failed: %s", idx + 1, total, e)
+                cap = ""
+            if cap:
+                docs.append(
+                    Document(content=cap, meta={"modality": "image_caption", "image": name})
+                )
+            if stage_cb:
+                stage_cb(idx + 1, total)
+        logger.info(
+            "office-vlm: %s + %s embedded image(s) for %s",
+            "docling text",
+            total,
+            os.path.basename(path),
+        )
         return docs
 
     def _lane_docling(self, path: str):
@@ -1492,8 +1649,25 @@ class VectorRAG:
                     "errors": errors,
                     "message": f"Cancelled after {indexed} chunks",
                 }
+            # Per-page/per-image sub-progress for the slow VLM lanes, so the queue
+            # advances within a single large file instead of jumping 0%→done.
+            def _stage(done: int, sub_total: int, _fp=fpath) -> None:
+                if progress_cb:
+                    progress_cb(
+                        {
+                            "file": _fp,
+                            "indexed_count": indexed,
+                            "failed_count": failed,
+                            "processed": processed,
+                            "total": total,
+                            "sub_done": done,
+                            "sub_total": sub_total,
+                            "errors": errors,
+                        }
+                    )
+
             try:
-                docs = self._documents_for_file(fpath, dict(meta or {}))
+                docs = self._documents_for_file(fpath, dict(meta or {}), stage_cb=_stage)
                 if docs:
                     indexed += self._write_documents(docs)
                 else:
@@ -1570,7 +1744,21 @@ class VectorRAG:
                         }
                         if owner:
                             meta["owner"] = owner
-                        docs = self._documents_for_file(fpath, meta)
+
+                        def _stage(done: int, sub_total: int, _fp=fpath) -> None:
+                            if progress_cb:
+                                progress_cb(
+                                    {
+                                        "file": _fp,
+                                        "indexed_count": indexed,
+                                        "failed_count": failed,
+                                        "sub_done": done,
+                                        "sub_total": sub_total,
+                                        "errors": errors,
+                                    }
+                                )
+
+                        docs = self._documents_for_file(fpath, meta, stage_cb=_stage)
                         if docs:
                             indexed += self._write_documents(docs)
                     except Exception as e:

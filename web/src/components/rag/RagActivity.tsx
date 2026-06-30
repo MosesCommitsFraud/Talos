@@ -23,8 +23,18 @@ const TERMINAL = ['completed', 'failed', 'cancelled'];
 function JobProgress({ j }: { j: RagJob }) {
   const total = j.total_count ?? 0;
   const done = j.processed_count ?? 0;
+  const subTotal = j.sub_total ?? 0;
+  const subFrac = subTotal > 0 ? Math.min(1, (j.sub_done ?? 0) / subTotal) : 0;
   const terminal = TERMINAL.includes(j.status);
-  const pct = total > 0 ? Math.min(100, Math.round((done / total) * 100)) : terminal ? 100 : null;
+  // Blend the current file's page/image fraction into the file-level bar so a
+  // single multi-page VLM ingest visibly advances instead of sitting at 0%.
+  const pct = terminal
+    ? 100
+    : total > 0
+      ? Math.min(100, Math.round(((done + subFrac) / total) * 100))
+      : subTotal > 0
+        ? Math.round(subFrac * 100)
+        : null;
   const tone =
     j.status === 'failed'
       ? 'bg-destructive'
@@ -162,6 +172,9 @@ export function RagActivity() {
                   <JobProgress j={j} />
                   <div className="mt-1 flex items-center gap-2 text-[10px] text-muted-foreground tabular-nums">
                     {total > 0 && <span>{t('rag.filesProgress', { done: j.processed_count ?? 0, total })}</span>}
+                    {(j.sub_total ?? 0) > 0 && !TERMINAL.includes(j.status) && (
+                      <span>{t('rag.subProgress', { done: j.sub_done ?? 0, total: j.sub_total })}</span>
+                    )}
                     {j.indexed_count > 0 && <span>{t('settings.rag.chunksIndexed', { n: j.indexed_count })}</span>}
                     {j.failed_count > 0 && <span className="text-destructive-foreground">{t('settings.rag.failedN', { n: j.failed_count })}</span>}
                   </div>

@@ -97,6 +97,82 @@ def test_vllm_asr_helpers_normalize_language_and_segments():
     ]
 
 
+# ── Document vision (VLM) lane gating ──
+
+
+def test_pdf_vlm_inactive_by_default(monkeypatch):
+    monkeypatch.delenv("PDF_VLM_ENABLED", raising=False)
+    monkeypatch.delenv("VLM_URL", raising=False)
+    assert rv._pdf_vlm_active() is False
+
+
+def test_pdf_vlm_requires_both_toggle_and_url(monkeypatch):
+    monkeypatch.setenv("PDF_VLM_ENABLED", "true")
+    monkeypatch.delenv("VLM_URL", raising=False)
+    assert rv._pdf_vlm_active() is False  # toggle on but no endpoint
+    monkeypatch.setenv("VLM_URL", "http://192.168.10.91:8000/v1/chat/completions")
+    assert rv._pdf_vlm_active() is True
+
+
+def test_vlm_doc_exts_cover_pdf_and_office():
+    assert rv._VLM_DOC_EXTS == {".pdf", ".docx", ".pptx"}
+
+
+def test_vlm_chat_url_normalizes_base_and_full(monkeypatch):
+    class _Dummy:
+        pass
+
+    monkeypatch.setenv("VLM_URL", "http://host:8000/v1")
+    assert rv.VectorRAG._vlm_chat_url(_Dummy()) == "http://host:8000/v1/chat/completions"
+    monkeypatch.setenv("VLM_URL", "http://host:8000/v1/chat/completions")
+    assert rv.VectorRAG._vlm_chat_url(_Dummy()) == "http://host:8000/v1/chat/completions"
+    monkeypatch.setenv("VLM_URL", "http://host:8000")
+    assert rv.VectorRAG._vlm_chat_url(_Dummy()) == "http://host:8000/v1/chat/completions"
+
+
+def test_router_uses_vlm_lane_only_for_image_bearing_docs(monkeypatch):
+    """With the VLM lane on, an image-bearing PDF/Office routes to vision; a
+    text-only one (no images detected) stays on Docling."""
+    monkeypatch.setenv("PDF_VLM_ENABLED", "true")
+    monkeypatch.setenv("VLM_URL", "http://host:8000/v1/chat/completions")
+
+    class _R:
+        def __init__(self):
+            self.calls = []
+
+        def _lane_pdf_vlm(self, path, meta, stage_cb=None):
+            self.calls.append("pdf_vlm")
+            return []
+
+        def _lane_office_vlm(self, path, meta, stage_cb=None):
+            self.calls.append("office_vlm")
+            return []
+
+        def _lane_docling(self, path):
+            self.calls.append("docling")
+            return []
+
+        # Post-dispatch no-ops so the router can run on the stub.
+        def _assign_sections(self, docs):
+            pass
+
+        def _apply_contextual(self, docs):
+            pass
+
+        def _apply_autokeywords(self, docs):
+            pass
+
+    def _route_doc(path, has_images):
+        monkeypatch.setattr(rv, "_file_has_images", lambda p: has_images)
+        r = _R()
+        rv.VectorRAG._documents_for_file(r, path, {})
+        return r.calls[0]
+
+    assert _route_doc("deck.pdf", True) == "pdf_vlm"
+    assert _route_doc("report.docx", True) == "office_vlm"
+    assert _route_doc("textonly.pdf", False) == "docling"
+
+
 # ── Phase 5: pixel image lane gating + VL embed parsing ──
 
 

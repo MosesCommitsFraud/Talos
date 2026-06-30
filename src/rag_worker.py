@@ -148,6 +148,10 @@ def _progress_saver(job):
                 "failed_count": int(info.get("failed_count") or 0),
                 "processed_count": int(info.get("processed") or 0),
                 "total_count": int(info.get("total") or 0),
+                # Sub-progress within the current file (VLM lanes: pages/images),
+                # so the queue advances during a single large document.
+                "sub_done": int(info.get("sub_done") or 0),
+                "sub_total": int(info.get("sub_total") or 0),
                 "current_file": info.get("file", ""),
                 "errors": (info.get("errors") or [])[-10:],
                 "message": "Indexing",
@@ -179,6 +183,8 @@ def _finalize(job, result: Dict[str, Any]) -> None:
             # On success processed == total; carry both so the bar lands at 100%.
             "processed_count": int(result.get("processed") or total),
             "total_count": total,
+            "sub_done": 0,
+            "sub_total": 0,
             "current_file": "",
             "errors": errors,
             "message": message,

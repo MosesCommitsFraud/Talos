@@ -473,6 +473,10 @@ export interface RagJob {
    *  count) → render an indeterminate state instead of a percentage. */
   processed_count?: number;
   total_count?: number;
+  /** Sub-progress within the current file (VLM lanes report pages/images), so the
+   *  bar advances during a single large document instead of jumping 0%→done. */
+  sub_done?: number;
+  sub_total?: number;
   current_file: string;
   message: string;
   errors: { file: string; error: string }[];
