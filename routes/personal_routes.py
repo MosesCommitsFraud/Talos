@@ -16,9 +16,59 @@ from src.request_models import DirectoryRequest
 from src.upload_handler import secure_filename
 
 UPLOADS_DIR = os.path.join(BASE_DIR, "data", "personal_uploads")
-MAX_PERSONAL_UPLOAD_BYTES = int(os.getenv("TALOS_PERSONAL_UPLOAD_MAX_BYTES", str(25 * 1024 * 1024)))
+# Admin-gated knowledge-base uploads include audio/video for the ASR lane, so the
+# ceiling is generous (default 2 GB). Override with TALOS_PERSONAL_UPLOAD_MAX_BYTES.
+# The upload is streamed to disk in chunks (see upload_files_to_rag), so a large
+# file does not get buffered whole in memory.
+MAX_PERSONAL_UPLOAD_BYTES = int(
+    os.getenv("TALOS_PERSONAL_UPLOAD_MAX_BYTES", str(2 * 1024 * 1024 * 1024))
+)
 
 logger = logging.getLogger(__name__)
+
+
+def _within_uploads(path: str) -> bool:
+    """True only if ``path`` lives under the Talos-managed personal-uploads dir —
+    so cleanup never touches a user's external indexed directories."""
+    try:
+        p = os.path.abspath(path)
+        base = os.path.abspath(UPLOADS_DIR)
+        return os.path.commonpath([p, base]) == base
+    except Exception:
+        return False
+
+
+def delete_managed_upload(source: str) -> bool:
+    """Delete one stored upload file IF it's under the managed uploads dir.
+    External (user-specified) indexed files are left untouched."""
+    if not source or not _within_uploads(source):
+        return False
+    try:
+        if os.path.isfile(source):
+            os.remove(source)
+            return True
+    except OSError as e:
+        logger.warning("could not delete upload %s: %s", source, e)
+    return False
+
+
+def purge_managed_uploads() -> dict:
+    """Delete every stored RAG upload file (the big media/docs), freeing disk.
+    Leaves external indexed directories alone. Returns count + bytes freed."""
+    base = os.path.abspath(UPLOADS_DIR)
+    removed = 0
+    freed = 0
+    if os.path.isdir(base):
+        for root, _dirs, files in os.walk(base):
+            for name in files:
+                fp = os.path.join(root, name)
+                try:
+                    freed += os.path.getsize(fp)
+                    os.remove(fp)
+                    removed += 1
+                except OSError:
+                    pass
+    return {"removed": removed, "freed_bytes": freed}
 
 
 def _personal_upload_dir_for_owner(owner: str | None) -> str:
@@ -253,6 +303,7 @@ def setup_personal_routes(personal_docs_manager, rag_manager, rag_available):
 
         total_failed = 0
         uploaded_files = []
+        errors: list[str] = []
         # Collect (path, metadata) and hand the whole batch to the RQ worker,
         # which runs Docling parse + HybridChunk + embed + Qdrant upsert off the
         # request thread. No per-chunk work here any more.
@@ -263,13 +314,35 @@ def setup_personal_routes(personal_docs_manager, rag_manager, rag_available):
                 file_path, stored_name, safe_name = _unique_personal_upload_path(
                     upload_dir, upload.filename
                 )
-                content_bytes = await upload.read(MAX_PERSONAL_UPLOAD_BYTES + 1)
-                if len(content_bytes) > MAX_PERSONAL_UPLOAD_BYTES:
-                    logger.warning(f"Rejected oversized personal upload: {upload.filename!r}")
+                # Stream to disk in chunks so a large media file (video for the ASR
+                # lane) is never buffered whole in memory; enforce the size cap as
+                # we go and clean up a partial file if it's exceeded.
+                size = 0
+                too_big = False
+                with open(file_path, "wb") as f:
+                    while True:
+                        chunk = await upload.read(1024 * 1024)
+                        if not chunk:
+                            break
+                        size += len(chunk)
+                        if size > MAX_PERSONAL_UPLOAD_BYTES:
+                            too_big = True
+                            break
+                        f.write(chunk)
+                if too_big:
+                    try:
+                        os.remove(file_path)
+                    except OSError:
+                        pass
+                    limit_mb = MAX_PERSONAL_UPLOAD_BYTES // (1024 * 1024)
+                    logger.warning(
+                        "Rejected oversized personal upload %r (> %s MB)",
+                        upload.filename,
+                        limit_mb,
+                    )
+                    errors.append(f"{upload.filename}: exceeds {limit_mb} MB limit")
                     total_failed += 1
                     continue
-                with open(file_path, "wb") as f:
-                    f.write(content_bytes)
 
                 ext = os.path.splitext(safe_name)[1].lower()
                 to_index.append(
@@ -287,6 +360,7 @@ def setup_personal_routes(personal_docs_manager, rag_manager, rag_available):
                 uploaded_files.append(safe_name)
             except Exception as e:
                 logger.error(f"Failed to store upload {upload.filename}: {e}")
+                errors.append(f"{upload.filename}: {type(e).__name__}")
                 total_failed += 1
 
         # Track uploads directory
@@ -311,6 +385,7 @@ def setup_personal_routes(personal_docs_manager, rag_manager, rag_available):
             "success": True,
             "uploaded": uploaded_files,
             "failed_count": total_failed,
+            "errors": errors,
             "job_id": (job or {}).get("id"),
             "status": (job or {}).get("status", "queued" if to_index else "idle"),
         }

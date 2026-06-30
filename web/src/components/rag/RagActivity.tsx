@@ -73,7 +73,16 @@ export function RagActivity() {
 
   const upload = useMutation({
     mutationFn: (files: File[]) => personalUpload(files),
-    onSuccess: (_r, files) => { setMsg({ text: t('rag.uploadQueued', { count: files.length }), ok: true }); refresh(); },
+    onSuccess: (r, files) => {
+      const failed = Number((r as { failed_count?: number })?.failed_count ?? 0);
+      const errs = (r as { errors?: string[] })?.errors;
+      if (failed > 0) {
+        setMsg({ text: Array.isArray(errs) && errs.length ? errs.join('; ') : t('rag.uploadFailed', { count: failed }), ok: false });
+      } else {
+        setMsg({ text: t('rag.uploadQueued', { count: files.length }), ok: true });
+      }
+      refresh();
+    },
     onError: (e) => setMsg({ text: (e as Error).message, ok: false }),
   });
   const rebuild = useMutation({

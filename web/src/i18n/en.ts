@@ -278,6 +278,7 @@ const en = {
     dropHint: 'or click to choose — documents, code, images',
     dropHintAv: 'or click to choose — documents, code, images, audio & video',
     uploadQueued: 'Queued {{count}} file(s) for indexing',
+    uploadFailed: '{{count}} file(s) rejected (too large or unreadable)',
     rebuildIndex: 'Rebuild index',
     rebuildDone: 'Index recreated. Re-ingest your documents.',
     workersActive: '{{n}} worker(s)',

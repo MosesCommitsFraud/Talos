@@ -280,6 +280,7 @@ const de: typeof en = {
     dropHint: 'oder klicken zum Auswählen — Dokumente, Code, Bilder',
     dropHintAv: 'oder klicken zum Auswählen — Dokumente, Code, Bilder, Audio & Video',
     uploadQueued: '{{count}} Datei(en) zum Indexieren eingereiht',
+    uploadFailed: '{{count}} Datei(en) abgelehnt (zu groß oder nicht lesbar)',
     rebuildIndex: 'Index neu aufbauen',
     rebuildDone: 'Index neu angelegt. Dokumente erneut einlesen.',
     workersActive: '{{n}} Worker',

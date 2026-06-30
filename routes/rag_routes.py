@@ -287,12 +287,14 @@ def setup_rag_routes():
 
     @router.post("/rebuild")
     def rebuild_index():
-        """Recreate the Qdrant collection (drops all vectors, keeps uploaded files).
+        """Recreate the Qdrant collection (drops all vectors) AND delete the
+        stored RAG uploads so no orphaned big files (videos/PDFs) linger.
 
         Needed after an embedding-model change alters the vector dimension — the
         `/rag` workspace exposes this as a "Rebuild index" button so the admin
-        never has to touch Qdrant directly. Uploaded files persist in the uploads
-        volume and can be re-ingested afterwards.
+        never has to touch Qdrant directly. The text + visual collections are
+        recreated and every managed upload file is removed (external indexed
+        directories are left untouched); re-upload to re-ingest.
         """
         _reset_rag()
         from src.rag_singleton import get_rag_manager, last_init_error
@@ -323,7 +325,27 @@ def setup_rag_routes():
                 raise HTTPException(
                     503, f"Rebuild failed: {getattr(rag, 'last_error', 'unknown error')}"
                 )
-        return {"ok": True, "message": "Index recreated. Re-ingest your documents."}
+        # Purge the stored uploads so the rebuild is a true clean slate (no big
+        # orphaned media/docs). External indexed directories are left intact.
+        purged = {"removed": 0, "freed_bytes": 0}
+        try:
+            from routes.personal_routes import purge_managed_uploads
+
+            purged = purge_managed_uploads()
+        except Exception as e:
+            import logging
+
+            logging.getLogger(__name__).warning("upload purge failed: %s", e)
+        freed_mb = round(purged.get("freed_bytes", 0) / (1024 * 1024), 1)
+        return {
+            "ok": True,
+            "removed_files": purged.get("removed", 0),
+            "freed_mb": freed_mb,
+            "message": (
+                f"Index recreated. Removed {purged.get('removed', 0)} uploaded file(s) "
+                f"({freed_mb} MB freed). Re-upload to re-ingest."
+            ),
+        }
 
     @router.get("/search")
     def test_search(q: str, k: int | None = None):
@@ -461,6 +483,22 @@ def setup_rag_routes():
         if not rag or not getattr(rag, "healthy", False):
             raise HTTPException(503, "RAG is not available")
         removed = rag.delete_by_source(source)
-        return {"deleted": removed > 0, "removed_count": removed, "source": source}
+        # Also drop the stored upload file so deleting a document actually frees
+        # disk (big videos/PDFs). Only managed uploads — never external dirs.
+        file_deleted = False
+        try:
+            from routes.personal_routes import delete_managed_upload
+
+            file_deleted = delete_managed_upload(source)
+        except Exception as e:
+            import logging
+
+            logging.getLogger(__name__).warning("upload file cleanup failed: %s", e)
+        return {
+            "deleted": removed > 0,
+            "removed_count": removed,
+            "file_deleted": file_deleted,
+            "source": source,
+        }
 
     return router
