@@ -1596,6 +1596,77 @@ class VectorRAG:
             logger.error(f"list_documents failed: {e}")
             return []
 
+    def get_document_chunks(self, source: str) -> List[Dict[str, Any]]:
+        """Return every indexed chunk for one source file, in ``seq`` order.
+
+        Powers the ``/rag`` explorer's debug view: each row is the *stored* chunk
+        text (exactly what the retriever sees) plus the meta that explains how it
+        was indexed (section grouping, situating context, auto aux terms, code
+        symbol/language, modality). Reads straight from Qdrant.
+        """
+        if not self.healthy:
+            return []
+        try:
+            docs = self._store.filter_documents(
+                filters={"field": "meta.source", "operator": "==", "value": source}
+            )
+            rows: List[Dict[str, Any]] = []
+            for d in docs:
+                meta = dict(d.meta or {})
+                rows.append(
+                    {
+                        "id": d.id,
+                        "content": d.content or "",
+                        "seq": meta.get("seq", 0),
+                        "section_id": meta.get("section_id", ""),
+                        "context": meta.get("context", ""),
+                        "aux_terms": meta.get("aux_terms", ""),
+                        "symbol": meta.get("symbol", ""),
+                        "language": meta.get("language", ""),
+                        "modality": meta.get("modality", ""),
+                        "metadata": meta,
+                    }
+                )
+            return sorted(rows, key=lambda r: r.get("seq") or 0)
+        except Exception as e:
+            logger.error(f"get_document_chunks failed: {e}")
+            return []
+
+    def update_chunk(self, source: str, chunk_id: str, content: str) -> bool:
+        """Replace one chunk's text and re-embed it in place (same id + meta).
+
+        Backs the explorer's inline editor. Looks the chunk up by ``source`` +
+        ``id`` (so a stale id from the UI can't clobber an unrelated point),
+        swaps in the edited text, and re-runs the normal dense+sparse embedding
+        via ``_write_documents`` with OVERWRITE so the point is replaced, not
+        duplicated. Any previously-cached ingest enrichment (``context`` /
+        ``aux_terms``, computed from the *old* text) is dropped so the new vector
+        reflects exactly what the editor shows — predictable for debugging.
+        """
+        if not self.healthy:
+            return False
+        text = (content or "").strip()
+        if not text:
+            return False
+        try:
+            from haystack.dataclasses import Document
+
+            docs = self._store.filter_documents(
+                filters={"field": "meta.source", "operator": "==", "value": source}
+            )
+            target = next((d for d in docs if d.id == chunk_id), None)
+            if target is None:
+                return False
+            meta = dict(target.meta or {})
+            meta.pop("context", None)
+            meta.pop("aux_terms", None)
+            meta.pop("_ctx_orig", None)
+            self._write_documents([Document(id=chunk_id, content=text, meta=meta)])
+            return True
+        except Exception as e:
+            logger.error(f"update_chunk failed: {e}")
+            return False
+
     # ------------------------------------------------------------------
     # Delete by metadata
     # ------------------------------------------------------------------

@@ -500,6 +500,31 @@ export async function deleteRagJob(id: string): Promise<void> {
 }
 export const fetchRagDocuments = () =>
   getJSON<{ available: boolean; documents: RagDocument[]; error?: string }>('/api/rag/documents');
+
+/** One indexed chunk, as stored in Qdrant — the ground truth the retriever
+ *  sees. Used by the /rag explorer's debug/edit view. */
+export interface RagChunk {
+  id: string;
+  content: string;
+  seq: number;
+  section_id: string;
+  context: string;
+  aux_terms: string;
+  symbol: string;
+  language: string;
+  modality: string;
+  metadata: Record<string, unknown>;
+}
+export const fetchRagChunks = (source: string) =>
+  getJSON<{ available: boolean; source: string; chunks: RagChunk[]; error?: string }>(
+    `/api/rag/documents/chunks?source=${encodeURIComponent(source)}`,
+  );
+export const updateRagChunk = (source: string, id: string, content: string) =>
+  postJSON<{ ok: boolean; id: string }>(
+    `/api/rag/documents/chunks/${encodeURIComponent(id)}`,
+    { source, content },
+    'PUT',
+  );
 export async function deleteRagDocument(source: string): Promise<void> {
   const res = await fetch(`/api/rag/documents?source=${encodeURIComponent(source)}`, {
     method: 'DELETE',

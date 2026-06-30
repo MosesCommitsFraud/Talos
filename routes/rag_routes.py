@@ -386,6 +386,35 @@ def setup_rag_routes():
             return {"available": False, "documents": [], "error": last_init_error()}
         return {"available": True, "documents": rag.list_documents()}
 
+    @router.get("/documents/chunks")
+    def list_document_chunks(source: str):
+        """Every indexed chunk for one source file (explorer/debug view)."""
+        from src.rag_singleton import get_rag_manager, last_init_error
+
+        rag = get_rag_manager()
+        if not rag or not getattr(rag, "healthy", False):
+            return {"available": False, "chunks": [], "error": last_init_error()}
+        return {"available": True, "source": source, "chunks": rag.get_document_chunks(source)}
+
+    class ChunkUpdate(BaseModel):
+        source: str
+        content: str
+
+    @router.put("/documents/chunks/{chunk_id}")
+    def update_document_chunk(chunk_id: str, body: ChunkUpdate):
+        """Edit one chunk's text and re-embed it in place (same id + meta)."""
+        from src.rag_singleton import get_rag_manager
+
+        rag = get_rag_manager()
+        if not rag or not getattr(rag, "healthy", False):
+            raise HTTPException(503, "RAG is not available")
+        if not body.content.strip():
+            raise HTTPException(400, "Chunk content cannot be empty")
+        ok = rag.update_chunk(body.source, chunk_id, body.content)
+        if not ok:
+            raise HTTPException(404, "Chunk not found or could not be re-embedded")
+        return {"ok": True, "id": chunk_id}
+
     @router.delete("/documents")
     def delete_document(source: str):
         from src.rag_singleton import get_rag_manager

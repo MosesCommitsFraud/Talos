@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { RefreshCwIcon, UploadCloudIcon } from 'lucide-react';
+import { FolderOpenIcon, RefreshCwIcon, UploadCloudIcon } from 'lucide-react';
 import { useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
@@ -14,6 +14,7 @@ import {
 } from '@/api/client';
 import { cn } from '@/lib/utils';
 import { Button } from '../ui/button';
+import { RagExplorer } from './RagExplorer';
 
 const TERMINAL = ['completed', 'failed', 'cancelled'];
 
@@ -51,6 +52,7 @@ export function RagActivity() {
   const fileInput = useRef<HTMLInputElement>(null);
   const [dragging, setDragging] = useState(false);
   const [msg, setMsg] = useState<{ text: string; ok: boolean } | null>(null);
+  const [explorerOpen, setExplorerOpen] = useState(false);
 
   const jobs = useQuery({ queryKey: ['rag-jobs'], queryFn: fetchRagJobs, refetchInterval: 1500 });
   const diag = useQuery({ queryKey: ['rag-worker-diag'], queryFn: fetchRagWorkerDiag, refetchInterval: 5000 });
@@ -112,6 +114,9 @@ export function RagActivity() {
       </div>
 
       <div className="flex shrink-0 items-center gap-2">
+        <Button size="sm" variant="outline" onClick={() => setExplorerOpen(true)}>
+          <FolderOpenIcon /> {t('rag.explorer.open')}
+        </Button>
         <Button size="sm" variant="outline" disabled={rebuild.isPending} onClick={() => rebuild.mutate()}>
           <RefreshCwIcon className={cn(rebuild.isPending && 'animate-spin')} /> {t('rag.rebuildIndex')}
         </Button>
@@ -182,6 +187,8 @@ export function RagActivity() {
           )}
         </div>
       </div>
+
+      <RagExplorer open={explorerOpen} onOpenChange={setExplorerOpen} />
     </aside>
   );
 }
