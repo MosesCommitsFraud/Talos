@@ -17,3 +17,7 @@ xlsx nicht gemacht wenn excel genannt??
 modell evtl schlechter und verhaspelt sich
 voice to text
 .endings should not show in artifact tab and in chat
+reset to defaults button
+save setting profile
+adjust rag settings looks
+back not always visible in rag settings
