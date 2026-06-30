@@ -605,7 +605,7 @@ const en = {
       vlmUrl: 'Vision model URL',
       vlmModel: 'Vision model',
       hint: {
-        pdfVlmEnabled: 'Opt-in: when a PDF, Word or PowerPoint file contains images, a vision model reads them so slide decks, screenshots and figures become searchable text. Auto-detected per file — text-only documents stay on the fast path. PDFs are transcribed page-by-page; Word/PowerPoint keep their text and get each embedded image captioned. Heavier ingest (one VLM call per page/image). Re-index affected files after enabling. Off by default.',
+        pdfVlmEnabled: 'Opt-in: when a PDF, Word or PowerPoint file contains images, a vision model reads them so slide decks, screenshots and figures become searchable text. Auto-detected per file — text-only documents stay on the fast path. PDFs use the cheap text pass and send only image-dominant pages to the vision model (a screenshot deck sends all pages); Word/PowerPoint keep their text and get each embedded image captioned. Calls run in parallel. Re-index affected files after enabling. Off by default.',
         vlmUrl: 'OpenAI-compatible chat-completions endpoint of a vision-capable model the ingest worker calls per page/image.',
         vlmModel: 'Vision model name at that endpoint (e.g. qwen3-llm if it is multimodal).',
         expandToParent: 'Opt-in: match precise small chunks but inject the surrounding section (sibling chunks) so the model has enough context. Citations still point at the matched chunk. Off by default; benefits documents re-indexed under this build.',

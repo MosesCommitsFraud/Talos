@@ -342,6 +342,49 @@ def _file_has_images(path: str) -> bool:
     return False
 
 
+def _vlm_concurrency() -> int:
+    """How many VLM/ingest-LLM calls to run in parallel. Defaults to 4 to match a
+    typical vLLM ``--max-num-seqs 4``; raise it (env) if the server allows more."""
+    try:
+        return max(1, min(int(os.getenv("RAG_INGEST_CONCURRENCY", "4") or 4), 16))
+    except Exception:
+        return 4
+
+
+def _concurrent_map(fn, items: List[Any], concurrency: int, on_done=None) -> List[Any]:
+    """Map ``fn`` over ``items`` with a bounded thread pool, preserving order.
+
+    Used to fan out the per-page / per-chunk LLM calls at ingest (all blocking
+    httpx POSTs, so threads give real speedup). ``on_done(n_completed)`` fires
+    after each item finishes for progress. A failing item yields ``None`` so one
+    bad page/chunk never sinks the batch.
+    """
+    items = list(items)
+    results: List[Any] = [None] * len(items)
+    if not items:
+        return results
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    workers = max(1, min(concurrency, len(items)))
+    completed = 0
+    with ThreadPoolExecutor(max_workers=workers) as ex:
+        futs = {ex.submit(fn, it): i for i, it in enumerate(items)}
+        for fut in as_completed(futs):
+            i = futs[fut]
+            try:
+                results[i] = fut.result()
+            except Exception as e:
+                logger.warning("ingest concurrent task %s failed: %s", i, e)
+                results[i] = None
+            completed += 1
+            if on_done:
+                try:
+                    on_done(completed)
+                except Exception:
+                    pass
+    return results
+
+
 _SECTION_WINDOW = 3  # chunks per fallback "section" when no heading info exists
 
 
@@ -963,6 +1006,10 @@ class VectorRAG:
                 ],
                 "temperature": 0.0,
                 "max_tokens": 120,
+                # No chain-of-thought needed for a one-line blurb — skip it on
+                # Qwen3/vLLM so each per-chunk call is faster. Ignored by servers
+                # that don't support the flag.
+                "chat_template_kwargs": {"enable_thinking": False},
             }
             if model:
                 payload["model"] = model
@@ -984,10 +1031,11 @@ class VectorRAG:
         if not _contextual_active() or not docs:
             return
         full = "\n\n".join((d.content or "") for d in docs)[:8000]
-        for d in docs:
+
+        def _one(d):
             chunk = d.content or ""
             if not chunk.strip():
-                continue
+                return
             h = hashlib.sha256(("ctx-v1\x00" + chunk).encode("utf-8")).hexdigest()
             blurb = _ctx_cache_get(h)
             if blurb is None:
@@ -995,6 +1043,9 @@ class VectorRAG:
                 _ctx_cache_set(h, blurb)
             if blurb:
                 d.meta["context"] = blurb
+
+        # One LLM call per chunk — fan out so a multi-chunk doc isn't serialized.
+        _concurrent_map(_one, docs, _vlm_concurrency())
 
     def _auto_terms(self, chunk: str) -> str:
         """Ask the ingest LLM for keywords/synonyms and likely questions for a
@@ -1023,6 +1074,8 @@ class VectorRAG:
                 ],
                 "temperature": 0.0,
                 "max_tokens": 220,
+                # Keyword/question generation needs no reasoning pass — skip it.
+                "chat_template_kwargs": {"enable_thinking": False},
             }
             model = os.getenv("RAG_LLM_MODEL", "").strip()
             if model:
@@ -1047,10 +1100,11 @@ class VectorRAG:
         tag = (
             f"akw-v1\x00{_env_int('RAG_AUTO_KEYWORDS_N')}\x00{_env_int('RAG_AUTO_QUESTIONS_N')}\x00"
         )
-        for d in docs:
+
+        def _one(d):
             chunk = d.content or ""
             if not chunk.strip():
-                continue
+                return
             h = hashlib.sha256((tag + chunk).encode("utf-8")).hexdigest()
             terms = _ctx_cache_get(h)
             if terms is None:
@@ -1058,6 +1112,9 @@ class VectorRAG:
                 _ctx_cache_set(h, terms)
             if terms:
                 d.meta["aux_terms"] = terms
+
+        # One LLM call per chunk — fan out so a multi-chunk doc isn't serialized.
+        _concurrent_map(_one, docs, _vlm_concurrency())
 
     def _assign_sections(self, docs) -> None:
         """Tag each chunk with ``seq`` (order in the doc) and a ``section_id``
@@ -1243,70 +1300,120 @@ class VectorRAG:
         return (msg.get("content") or msg.get("reasoning") or "").strip()
 
     def _lane_pdf_vlm(self, path: str, meta: Dict[str, Any], stage_cb=None):
-        """Image-bearing PDFs → render each page and transcribe it with a vision
-        model, one ``Document`` per page.
+        """RagFlow-style *selective* vision for PDFs.
 
-        This is the "PDFs with images in them" path: a slide deck whose content
-        lives in screenshots is OCR-blind to Docling, but a VLM reads the whole
-        page. Renders with pypdfium2 (a Docling dependency, no system libs) at a
-        capped resolution. ``stage_cb(done, total)`` reports per-page progress.
-        Degrades to ``_lane_docling`` if rendering is unavailable or every page
-        fails, so enabling the lane never regresses.
+        Docling supplies the cheap text/table layer (no LLM). A vision model is
+        applied ONLY to image-dominant pages — measured by image-object area
+        coverage (``PDF_VLM_PAGE_RATIO``, default 0.35) — so text pages cost
+        nothing extra and slide/screenshot pages get fully read:
+          * "mostly image" docs (≥ ``PDF_VLM_DOC_RATIO`` of pages image-heavy,
+            e.g. a screenshot deck) → every page rendered + VLM-transcribed
+            (Docling's OCR of screenshots is just noise), concurrently;
+          * mixed docs → Docling text for the whole file PLUS a VLM transcription
+            of only the image-heavy pages;
+          * no image-heavy page → pure Docling text, zero VLM calls.
+        ``stage_cb(done, total)`` reports progress over the rendered pages.
+        Renders with pypdfium2 (a Docling dep, no system libs); degrades to
+        ``_lane_docling`` on any failure so the lane never regresses.
         """
         try:
             import base64
             import io
 
             import pypdfium2 as pdfium
+            import pypdfium2.raw as pdfium_c
         except Exception as e:
             logger.warning("pdf-vlm: pypdfium2 unavailable (%s); using Docling", e)
             return self._lane_docling(path)
 
         from haystack.dataclasses import Document
 
-        docs: List[Any] = []
+        def _fenv(name: str, default: float) -> float:
+            try:
+                return float(os.getenv(name, str(default)) or default)
+            except Exception:
+                return default
+
+        page_thr = _fenv("PDF_VLM_PAGE_RATIO", 0.35)
+        doc_thr = _fenv("PDF_VLM_DOC_RATIO", 0.5)
+
         try:
             pdf = pdfium.PdfDocument(path)
         except Exception as e:
             logger.warning("pdf-vlm: cannot open %s (%s); using Docling", path, e)
             return self._lane_docling(path)
+
+        rendered: Dict[int, str] = {}
+        n_pages = 0
         try:
             n_pages = len(pdf)
+            # First pass: which pages are image-dominant? (cheap, no rendering)
+            heavy: List[int] = []
             for i in range(n_pages):
                 page = pdf[i]
-                # Target ~1500px on the long side: enough detail for screenshots,
-                # bounded so the VLM's vision tokens stay reasonable.
+                w, h = page.get_size()
+                page_area = (w * h) or 1.0
+                img_area = 0.0
+                try:
+                    for obj in page.get_objects():
+                        if getattr(obj, "type", None) == pdfium_c.FPDF_PAGEOBJ_IMAGE:
+                            try:
+                                left, bottom, right, top = obj.get_pos()
+                                img_area += abs((right - left) * (top - bottom))
+                            except Exception:
+                                img_area += page_area  # unknown extent → assume full
+                except Exception:
+                    img_area = page_area  # can't introspect → treat as image page
+                if min(img_area / page_area, 1.0) >= page_thr:
+                    heavy.append(i)
+
+            mostly_image = n_pages > 0 and (len(heavy) / n_pages) >= doc_thr
+            to_render = list(range(n_pages)) if mostly_image else heavy
+
+            # Second pass: render the chosen pages serially (pypdfium2 isn't
+            # thread-safe), capped to ~1500px on the long side.
+            for i in to_render:
+                page = pdf[i]
                 w, h = page.get_size()
                 scale = min(1500.0 / max(w, h), 3.0) if max(w, h) else 2.0
                 bitmap = page.render(scale=max(scale, 1.0))
-                pil = bitmap.to_pil().convert("RGB")
                 buf = io.BytesIO()
-                pil.save(buf, format="PNG")
-                b64 = base64.b64encode(buf.getvalue()).decode()
-                try:
-                    text = self._vlm_transcribe_image(b64)
-                except Exception as e:
-                    logger.warning("pdf-vlm: page %s/%s failed: %s", i + 1, n_pages, e)
-                    text = ""
-                if text:
-                    docs.append(
-                        Document(
-                            content=text,
-                            meta={"modality": "pdf_page", "page": i + 1, "pages": n_pages},
-                        )
-                    )
-                if stage_cb:
-                    stage_cb(i + 1, n_pages)
+                bitmap.to_pil().convert("RGB").save(buf, format="PNG")
+                rendered[i] = base64.b64encode(buf.getvalue()).decode()
         finally:
             try:
                 pdf.close()
             except Exception:
                 pass
 
+        idxs = list(rendered.keys())
+        on_done = (lambda c: stage_cb(c, len(idxs))) if (stage_cb and idxs) else None
+        # Fan the network-bound VLM calls out concurrently.
+        texts = _concurrent_map(
+            self._vlm_transcribe_image, [rendered[i] for i in idxs], _vlm_concurrency(), on_done=on_done
+        )
+        vlm_docs = [
+            Document(content=t, meta={"modality": "pdf_page", "page": idxs[k] + 1, "pages": n_pages})
+            for k, t in enumerate(texts)
+            if t
+        ]
+
+        if len(idxs) == n_pages and n_pages > 0:
+            # Whole-doc vision (screenshot deck): VLM replaces Docling's OCR noise.
+            docs = vlm_docs or list(self._lane_docling(path))
+        else:
+            # Mixed/text doc: cheap Docling text + vision only on the image pages.
+            docs = list(self._lane_docling(path)) + vlm_docs
+
         if not docs:
-            logger.warning("pdf-vlm: no pages transcribed for %s; using Docling", path)
+            logger.warning("pdf-vlm: nothing extracted for %s; using Docling", path)
             return self._lane_docling(path)
-        logger.info("pdf-vlm: transcribed %s page(s) of %s", len(docs), os.path.basename(path))
+        logger.info(
+            "pdf-vlm: %s/%s page(s) sent to vision for %s",
+            len(idxs),
+            n_pages,
+            os.path.basename(path),
+        )
         return docs
 
     def _ooxml_images(self, path: str):
@@ -1362,18 +1469,18 @@ class VectorRAG:
         docs = list(self._lane_docling(path))
         images = list(self._ooxml_images(path))
         total = len(images)
-        for idx, (name, b64) in enumerate(images):
-            try:
-                cap = self._vlm_transcribe_image(b64, prompt=self._VLM_IMAGE_PROMPT)
-            except Exception as e:
-                logger.warning("office-vlm: image %s/%s failed: %s", idx + 1, total, e)
-                cap = ""
+        on_done = (lambda c: stage_cb(c, total)) if stage_cb else None
+        caps = _concurrent_map(
+            lambda b64: self._vlm_transcribe_image(b64, prompt=self._VLM_IMAGE_PROMPT),
+            [b64 for _name, b64 in images],
+            _vlm_concurrency(),
+            on_done=on_done,
+        )
+        for (name, _b64), cap in zip(images, caps):
             if cap:
                 docs.append(
                     Document(content=cap, meta={"modality": "image_caption", "image": name})
                 )
-            if stage_cb:
-                stage_cb(idx + 1, total)
         logger.info(
             "office-vlm: %s + %s embedded image(s) for %s",
             "docling text",
