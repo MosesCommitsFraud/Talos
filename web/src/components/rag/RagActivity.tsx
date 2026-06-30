@@ -136,7 +136,7 @@ export function RagActivity() {
         <Button size="sm" variant="outline" onClick={() => setExplorerOpen(true)}>
           <FolderOpenIcon /> {t('rag.explorer.open')}
         </Button>
-        <Button size="sm" variant="outline" disabled={rebuild.isPending} onClick={() => rebuild.mutate()}>
+        <Button size="sm" variant="outline" disabled={rebuild.isPending} onClick={() => { if (window.confirm(t('rag.rebuildConfirm'))) rebuild.mutate(); }}>
           <RefreshCwIcon className={cn(rebuild.isPending && 'animate-spin')} /> {t('rag.rebuildIndex')}
         </Button>
         <span className={cn('ml-auto inline-flex items-center gap-1.5 text-[11px]', workerCount === 0 ? 'text-destructive-foreground' : 'text-muted-foreground')}>

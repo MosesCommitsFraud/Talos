@@ -282,6 +282,7 @@ const de: typeof en = {
     uploadQueued: '{{count}} Datei(en) zum Indexieren eingereiht',
     uploadFailed: '{{count}} Datei(en) abgelehnt (zu groß oder nicht lesbar)',
     rebuildIndex: 'Index neu aufbauen',
+    rebuildConfirm: 'Index neu aufbauen? Verwirft alle Vektoren UND löscht die hochgeladenen Dateien (Videos, PDFs) aus der Wissensdatenbank. Externe indexierte Ordner bleiben erhalten. Kann nicht rückgängig gemacht werden.',
     rebuildDone: 'Index neu angelegt. Dokumente erneut einlesen.',
     workersActive: '{{n}} Worker',
     queue: 'Warteschlange',
