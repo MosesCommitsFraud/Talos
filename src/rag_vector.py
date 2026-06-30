@@ -190,6 +190,36 @@ def _asr_active() -> bool:
     )
 
 
+def _asr_language_code(language: str) -> str:
+    lang = (language or "").strip().lower()
+    return {
+        "german": "de",
+        "deutsch": "de",
+        "de": "de",
+        "english": "en",
+        "englisch": "en",
+        "en": "en",
+    }.get(lang, lang)
+
+
+def _asr_segments(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
+    segments = []
+    for seg in payload.get("segments") or []:
+        text = (seg.get("text") or "").strip()
+        if not text:
+            continue
+        segments.append(
+            {
+                "start": float(seg.get("start") or 0),
+                "end": float(seg.get("end") or 0),
+                "text": text,
+            }
+        )
+    if not segments and (payload.get("text") or "").strip():
+        segments.append({"start": 0.0, "end": 0.0, "text": payload["text"].strip()})
+    return segments
+
+
 def _image_active() -> bool:
     """True only when pixel image embedding is explicitly enabled *and* a VL
     embedding endpoint is configured.
@@ -1114,13 +1144,26 @@ class VectorRAG:
 
         url = os.getenv("VIDEO_ASR_URL", "").strip()
         language = os.getenv("VIDEO_ASR_LANGUAGE", "German")
+        timeout = float(os.getenv("VIDEO_ASR_TIMEOUT", "1800"))
         with open(path, "rb") as fh:
-            resp = httpx.post(
-                url,
-                files={"file": (os.path.basename(path), fh)},
-                data={"language": language},
-                timeout=float(os.getenv("VIDEO_ASR_TIMEOUT", "1800")),
-            )
+            if "/v1/audio/transcriptions" in url:
+                resp = httpx.post(
+                    url,
+                    files={"file": (os.path.basename(path), fh)},
+                    data={
+                        "model": os.getenv("VIDEO_ASR_MODEL", "qwen3-asr"),
+                        "language": _asr_language_code(language),
+                        "response_format": "verbose_json",
+                    },
+                    timeout=timeout,
+                )
+            else:
+                resp = httpx.post(
+                    url,
+                    files={"file": (os.path.basename(path), fh)},
+                    data={"language": language},
+                    timeout=timeout,
+                )
         resp.raise_for_status()
         payload = resp.json()
 
@@ -1128,7 +1171,7 @@ class VectorRAG:
         # to — the timestamps are still stored as metadata ("from minute X").
         base = meta.get("video_url") or meta.get("url")
         docs = []
-        for seg in payload.get("segments") or []:
+        for seg in _asr_segments(payload):
             text = (seg.get("text") or "").strip()
             if not text:
                 continue

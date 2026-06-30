@@ -86,6 +86,17 @@ def test_av_lane_skips_when_disabled(monkeypatch):
         rv.VectorRAG._lane_av(_Dummy(), "clip.mp4", {})
 
 
+def test_vllm_asr_helpers_normalize_language_and_segments():
+    assert rv._asr_language_code("German") == "de"
+    assert rv._asr_language_code("English") == "en"
+    assert rv._asr_segments(
+        {"segments": [{"start": 1, "end": 2.5, "text": " hello "}, {"text": ""}]}
+    ) == [{"start": 1.0, "end": 2.5, "text": "hello"}]
+    assert rv._asr_segments({"text": "full transcript"}) == [
+        {"start": 0.0, "end": 0.0, "text": "full transcript"}
+    ]
+
+
 # ── Phase 5: pixel image lane gating + VL embed parsing ──
 
 

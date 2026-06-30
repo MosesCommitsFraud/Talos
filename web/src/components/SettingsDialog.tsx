@@ -1285,7 +1285,7 @@ export function RagPanel() {
             <Switch checked={!!draft.video_asr_enabled} onCheckedChange={(v) => set('video_asr_enabled', v)} />
           </Row>
           {draft.video_asr_enabled &&
-            field('video_asr_url', t('settings.rag.asrUrl'), { hint: t('settings.rag.hint.asrUrl'), def: 'http://video-asr:8003/transcribe' })}
+            field('video_asr_url', t('settings.rag.asrUrl'), { hint: t('settings.rag.hint.asrUrl'), def: 'http://host:8003/v1/audio/transcriptions' })}
         </Section>
       )}
 

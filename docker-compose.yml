@@ -37,8 +37,10 @@ services:
       - RAG_SPARSE_MODEL=${RAG_SPARSE_MODEL:-Qdrant/bm25}
       # Opt-in audio/video transcription. Harmless when unset: the lane only
       # activates when the admin turns on "Video / ASR" in Advanced settings AND
-      # VIDEO_ASR_URL points at an ASR service exposing Talos' /transcribe API.
+      # VIDEO_ASR_URL points at a Talos /transcribe endpoint or an OpenAI/vLLM
+      # /v1/audio/transcriptions endpoint.
       - VIDEO_ASR_URL=${VIDEO_ASR_URL:-}
+      - VIDEO_ASR_MODEL=${VIDEO_ASR_MODEL:-qwen3-asr}
       # Redis/Valkey runs with NO password by default — it has no published port
       # and is reachable only by sibling containers on the Docker network, so the
       # network is the trust boundary. For defense-in-depth, set RAG_REDIS_PASSWORD
@@ -110,6 +112,7 @@ services:
       # Same opt-in ASR endpoint as the app — the worker is what actually calls
       # it during ingest. Inert unless the Advanced toggle is on.
       - VIDEO_ASR_URL=${VIDEO_ASR_URL:-}
+      - VIDEO_ASR_MODEL=${VIDEO_ASR_MODEL:-qwen3-asr}
       - PUID=${PUID:-1000}
       - PGID=${PGID:-1000}
     volumes:
