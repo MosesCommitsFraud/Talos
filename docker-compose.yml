@@ -109,6 +109,14 @@ services:
       - EMBEDDING_URL=${EMBEDDING_URL:-http://your-llm-host:8001/v1/embeddings}
       - EMBEDDING_MODEL=${EMBEDDING_MODEL:-qwen3-embed}
       - RAG_SPARSE_MODEL=${RAG_SPARSE_MODEL:-Qdrant/bm25}
+      # Docling/OCR run CPU-only here and otherwise cap at 4 threads regardless of
+      # host cores. Empty = use every available core; set a number to cap it. Same
+      # models and output, just more parallelism.
+      - RAG_DOCLING_THREADS=${RAG_DOCLING_THREADS:-}
+      # OCR/layout model weights are already baked into the image, so skip the
+      # per-start Hugging Face Hub round-trip (the "unauthenticated requests" warning).
+      - HF_HUB_OFFLINE=${HF_HUB_OFFLINE:-1}
+      - TRANSFORMERS_OFFLINE=${TRANSFORMERS_OFFLINE:-1}
       # Same opt-in ASR endpoint as the app — the worker is what actually calls
       # it during ingest. Inert unless the Advanced toggle is on.
       - VIDEO_ASR_URL=${VIDEO_ASR_URL:-}

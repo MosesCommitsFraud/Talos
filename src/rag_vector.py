@@ -362,6 +362,45 @@ def _vlm_concurrency() -> int:
         return 4
 
 
+def _docling_threads() -> int:
+    """CPU threads Docling's layout/OCR/table models may use.
+
+    Docling's ``AcceleratorOptions`` defaults to just 4 threads regardless of how
+    many cores the worker container has, so a CPU-only ingest leaves most of the
+    box idle. Default to every available core (override with ``RAG_DOCLING_THREADS``).
+    Purely a throughput knob — the models and their output are unchanged, so the
+    extracted text/tables/OCR are byte-for-byte identical, just produced faster.
+    """
+    try:
+        env = os.getenv("RAG_DOCLING_THREADS", "").strip()
+        n = int(env) if env else (os.cpu_count() or 4)
+        return max(1, n)
+    except Exception:
+        return os.cpu_count() or 4
+
+
+def _docling_pdf_options(**overrides):
+    """Shared ``PdfPipelineOptions`` with the accelerator pinned to all cores.
+
+    Keeps every extraction default (OCR on, table structure on, same engines/
+    models) so results don't change — only the thread budget is raised. Extra
+    kwargs let the figure converter add its image-generation flags on top.
+    """
+    from docling.datamodel.pipeline_options import AcceleratorOptions, PdfPipelineOptions
+
+    opts = PdfPipelineOptions()
+    try:
+        from docling.datamodel.pipeline_options import AcceleratorDevice
+
+        device = AcceleratorDevice.CPU
+    except Exception:
+        device = "cpu"
+    opts.accelerator_options = AcceleratorOptions(num_threads=_docling_threads(), device=device)
+    for key, value in overrides.items():
+        setattr(opts, key, value)
+    return opts
+
+
 def _concurrent_map(fn, items: List[Any], concurrency: int, on_done=None) -> List[Any]:
     """Map ``fn`` over ``items`` with a bounded thread pool, preserving order.
 
@@ -1457,12 +1496,12 @@ class VectorRAG:
         if self._fig_converter is not None:
             return self._fig_converter
         from docling.datamodel.base_models import InputFormat
-        from docling.datamodel.pipeline_options import PdfPipelineOptions
         from docling.document_converter import DocumentConverter, PdfFormatOption
 
-        opts = PdfPipelineOptions()
-        opts.images_scale = 2.0  # ~144 dpi — crisp enough to read a diagram
-        opts.generate_picture_images = True
+        # ~144 dpi crops (crisp enough to read a diagram), all cores like the main
+        # docling lane. images_scale/generate_picture_images are the only behavior
+        # changes vs. the default pipeline; the thread bump is result-preserving.
+        opts = _docling_pdf_options(images_scale=2.0, generate_picture_images=True)
         self._fig_converter = DocumentConverter(
             format_options={InputFormat.PDF: PdfFormatOption(pipeline_options=opts)}
         )
@@ -1657,8 +1696,23 @@ class VectorRAG:
         from haystack_integrations.components.converters.docling import DoclingConverter
 
         if self._docling is None:
-            # Default export_type=DOC_CHUNKS → Docling HybridChunker.
-            self._docling = DoclingConverter()
+            # Default export_type=DOC_CHUNKS → Docling HybridChunker. We hand it a
+            # converter whose accelerator uses all cores (Docling otherwise caps at
+            # 4 threads); identical extraction, just faster. Fall back to the bare
+            # converter if the docling internals ever shift under us.
+            try:
+                from docling.datamodel.base_models import InputFormat
+                from docling.document_converter import DocumentConverter, PdfFormatOption
+
+                converter = DocumentConverter(
+                    format_options={
+                        InputFormat.PDF: PdfFormatOption(pipeline_options=_docling_pdf_options())
+                    }
+                )
+                self._docling = DoclingConverter(converter=converter)
+            except Exception as e:
+                logger.warning("docling: thread-tuned converter unavailable (%s); using default", e)
+                self._docling = DoclingConverter()
         return self._docling.run(sources=[path]).get("documents", []) or []
 
     def _lane_code(self, path: str, language: str):
