@@ -28,6 +28,7 @@ from routes.chat_helpers import (
     resolve_session_auth,
     run_post_response_tasks,
     save_assistant_response,
+    strip_unauthorized_figures,
 )
 from routes.document_helpers import _owner_session_filter
 from routes.model_routes import _visible_models
@@ -975,6 +976,12 @@ def setup_chat_routes(
                                 if thinking_response.strip():
                                     last_metrics = dict(last_metrics or {})
                                     last_metrics["thinking"] = thinking_response.strip()
+                                # Drop any inline figure the model referenced but
+                                # that wasn't actually retrieved (anti-hallucination
+                                # guard) before it's filtered/persisted.
+                                full_response = strip_unauthorized_figures(
+                                    full_response, ctx.rag_sources
+                                )
                                 # Decide RAG citations now that the answer exists:
                                 # keep only sources the answer actually drew on,
                                 # then announce them at the very end (after the

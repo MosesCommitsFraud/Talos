@@ -606,6 +606,7 @@ class VectorRAG:
         self._dense_d = None
         self._sparse_d = None
         self._docling = None
+        self._fig_converter = None
         self._splitter = None
         # Pixel-embedding lane (Phase 5): a raw qdrant-client for the separate
         # visual collection. Built lazily, only when the lane is enabled.
@@ -1428,7 +1429,155 @@ class VectorRAG:
             n_pages,
             os.path.basename(path),
         )
+        # Figure lane: additionally crop each embedded figure to a servable asset
+        # so the model can *show* it inline (not just describe it). Additive and
+        # best-effort — a failure here never loses the text/page transcription.
+        try:
+            docs.extend(self._extract_pdf_figures(path, meta, stage_cb=stage_cb))
+        except Exception as e:
+            logger.warning("pdf-figures: extraction failed for %s: %s", path, e)
         return docs
+
+    # Figures small enough to be icons/bullets/rule-lines aren't worth showing.
+    _FIG_MIN_PX = 96
+
+    def _figures_dir(self) -> str:
+        """Directory for extracted figure crops, under the managed uploads root
+        so the existing path-confined ``/api/personal/rag-asset`` can serve them.
+        """
+        from core.constants import BASE_DIR
+
+        d = os.path.join(BASE_DIR, "data", "personal_uploads", "_pdf_figures")
+        os.makedirs(d, exist_ok=True)
+        return d
+
+    def _get_fig_converter(self):
+        """Docling converter configured to materialize figure images (the default
+        converter does not), cached so its ML models load once across files."""
+        if self._fig_converter is not None:
+            return self._fig_converter
+        from docling.datamodel.base_models import InputFormat
+        from docling.datamodel.pipeline_options import PdfPipelineOptions
+        from docling.document_converter import DocumentConverter, PdfFormatOption
+
+        opts = PdfPipelineOptions()
+        opts.images_scale = 2.0  # ~144 dpi — crisp enough to read a diagram
+        opts.generate_picture_images = True
+        self._fig_converter = DocumentConverter(
+            format_options={InputFormat.PDF: PdfFormatOption(pipeline_options=opts)}
+        )
+        return self._fig_converter
+
+    def _extract_pdf_figures(self, path: str, meta: Dict[str, Any], stage_cb=None):
+        """Extract each embedded figure from a PDF as its own retrievable asset.
+
+        Path A (Docling figure-level): Docling detects the pictures and crops
+        each one for us (``PictureItem.get_image``), so we avoid hand-mapping
+        bounding boxes onto a raster. Each crop is saved under the uploads root,
+        VLM-captioned (the caption is the searchable text), and returned as a
+        ``modality='figure'`` Document carrying an ``image_url`` — which
+        ``_citation_media`` surfaces so the model can embed it inline. De-dupes by
+        pixel hash so a logo repeated on every page is stored once. Best-effort:
+        any failure yields no figures rather than breaking the page transcription.
+        """
+        import base64
+        import hashlib
+        import io
+        from urllib.parse import quote
+
+        from haystack.dataclasses import Document
+
+        try:
+            doc = self._get_fig_converter().convert(path).document
+        except Exception as e:
+            logger.warning("pdf-figures: docling convert failed for %s: %s", path, e)
+            return []
+
+        pictures = list(getattr(doc, "pictures", None) or [])
+        if not pictures:
+            return []
+
+        figdir = self._figures_dir()
+        stem = re.sub(r"[^A-Za-z0-9_.-]", "_", Path(path).stem)[:60]
+        crops: List[Dict[str, Any]] = []
+        seen: Set[str] = set()
+        for pic in pictures:
+            try:
+                img = pic.get_image(doc)
+            except Exception:
+                img = None
+            if img is None or img.width < self._FIG_MIN_PX or img.height < self._FIG_MIN_PX:
+                continue
+            buf = io.BytesIO()
+            img.convert("RGB").save(buf, format="PNG")
+            raw = buf.getvalue()
+            digest = hashlib.sha1(raw).hexdigest()[:16]
+            if digest in seen:
+                continue
+            seen.add(digest)
+            page = None
+            try:
+                if pic.prov:
+                    page = pic.prov[0].page_no
+            except Exception:
+                page = None
+            asset_path = os.path.join(figdir, f"{stem}-{digest}.png")
+            try:
+                if not os.path.exists(asset_path):
+                    with open(asset_path, "wb") as fh:
+                        fh.write(raw)
+            except OSError as e:
+                logger.warning("pdf-figures: cannot write %s: %s", asset_path, e)
+                continue
+            docling_caption = ""
+            try:
+                docling_caption = (pic.caption_text(doc) or "").strip()
+            except Exception:
+                docling_caption = ""
+            crops.append(
+                {
+                    "b64": base64.b64encode(raw).decode(),
+                    "asset_path": asset_path,
+                    "page": page,
+                    "docling_caption": docling_caption,
+                }
+            )
+
+        if not crops:
+            return []
+
+        # Caption each crop with the vision model (concurrent, like the page lane).
+        total = len(crops)
+        on_done = (lambda c: stage_cb(c, total)) if stage_cb else None
+        captions = _concurrent_map(
+            lambda b64: self._vlm_transcribe_image(b64, prompt=self._VLM_IMAGE_PROMPT),
+            [c["b64"] for c in crops],
+            _vlm_concurrency(),
+            on_done=on_done,
+        )
+
+        out: List[Any] = []
+        fname = os.path.basename(path)
+        for i, c in enumerate(crops):
+            caption = (captions[i] or c["docling_caption"] or "").strip()
+            page_txt = f" (page {c['page']})" if c["page"] else ""
+            # The Document's content is what the retriever matches on, so fall
+            # back to a minimal locator when neither VLM nor Docling gave text.
+            content = caption or f"Figure from {fname}{page_txt}"
+            image_url = "/api/personal/rag-asset?source=" + quote(c["asset_path"], safe="")
+            out.append(
+                Document(
+                    content=content,
+                    meta={
+                        "modality": "figure",
+                        "page": c["page"],
+                        "image_url": image_url,
+                        "image_caption": caption or content,
+                    },
+                )
+            )
+        logger.info("pdf-figures: %s figure(s) extracted from %s", len(out), fname)
+        return out
 
     def _ooxml_images(self, path: str):
         """Yield ``(member_name, png_base64)`` for each distinct, non-trivial

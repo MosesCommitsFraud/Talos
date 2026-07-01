@@ -33,6 +33,20 @@ _AV_EXTS = frozenset(
 )
 
 
+# Trusted instruction injected only when a retrieved section carries a figure, so
+# the model knows it *may* show the image inline. Emitting the image as Markdown in
+# its own reply (rather than via a tool) means it renders in the transcript, is
+# saved with the message, and — via the compaction figure-preservation pass —
+# survives context compaction instead of vanishing as hidden tool output.
+_FIGURE_EMBED_RULE = (
+    "Some retrieved sections include a figure with an image_url. When showing that "
+    "figure would help answer the question, embed it inline in your reply as Markdown "
+    "image syntax ![caption](image_url) at the point where it is relevant. Copy the "
+    "image_url exactly as given in the retrieved section — never invent or alter one, "
+    "and only use image_url values that appear in the retrieved context."
+)
+
+
 def _citation_media(meta: Dict[str, Any]) -> Dict[str, Any]:
     """Derive optional citation media fields (image preview / video deeplink)
     from a chunk's metadata. Returns only the keys that apply, so it can be
@@ -46,6 +60,14 @@ def _citation_media(meta: Dict[str, Any]) -> Dict[str, Any]:
         for key in ("start", "end", "deeplink", "video_url"):
             if meta.get(key) is not None and meta.get(key) != "":
                 out[key] = meta.get(key)
+    elif meta.get("image_url"):
+        # A figure/crop chunk (e.g. a picture extracted from a PDF page) carries
+        # its own asset URL — surface it directly so the citation shows the crop
+        # and the model can embed it inline.
+        out["modality"] = "image"
+        out["image_url"] = meta["image_url"]
+        if meta.get("image_caption"):
+            out["image_caption"] = meta["image_caption"]
     elif ftype in _IMAGE_EXTS and source:
         out["modality"] = "image"
         # Served by GET /api/personal/rag-asset (path-confined + image-only).
@@ -525,9 +547,17 @@ class ChatProcessor:
                         # Inject the expanded parent section when small-to-big is
                         # on (r["expanded"]); otherwise the matched chunk. The
                         # citation snippet (rag_sources) still uses the chunk.
+                        def _rag_section(s, r):
+                            body = f"[{s['filename']}]\n{r.get('expanded') or r['document']}"
+                            # Expose the figure's asset URL so the model can embed
+                            # it inline (authorized by _FIGURE_EMBED_RULE below).
+                            if s.get("image_url"):
+                                cap = s.get("image_caption") or s.get("filename") or "figure"
+                                body += f"\n[figure image_url: {s['image_url']} — caption: {cap}]"
+                            return body
+
                         rag_content = (context_prompt + "\n\n") + "\n\n---\n\n".join(
-                            f"[{s['filename']}]\n{r.get('expanded') or r['document']}"
-                            for s, r in zip(rag_sources, relevant)
+                            _rag_section(s, r) for s, r in zip(rag_sources, relevant)
                         )
                         try:
                             max_chars = int(self._rag_cfg().get("max_context_chars") or 10000)
@@ -539,6 +569,11 @@ class ChatProcessor:
                         preface.append(
                             untrusted_context_message("retrieved documents", rag_content)
                         )
+                        # Authorize inline figure embedding only when a retrieved
+                        # section actually has one (keeps the rule out of context
+                        # otherwise). Trusted system message, not untrusted data.
+                        if any(s.get("image_url") for s in rag_sources):
+                            preface.append({"role": "system", "content": _FIGURE_EMBED_RULE})
             except Exception as e:
                 logger.warning(f"RAG retrieval failed: {e}")
 

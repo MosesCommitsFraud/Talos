@@ -165,6 +165,19 @@ const MD_COMPONENTS = {
       <table {...props}>{children}</table>
     </TableBlock>
   ),
+  // Inline images (e.g. RAG figures the model embeds) are constrained so a
+  // high-DPI crop doesn't blow out the message width; click opens full size.
+  // Same-origin /api/personal/rag-asset requests carry the session cookie.
+  img: ({ src, alt }: { src?: string; alt?: string }) => (
+    <a href={src} target="_blank" rel="noopener noreferrer">
+      <img
+        src={src}
+        alt={alt ?? ''}
+        loading="lazy"
+        className="my-2 max-h-96 max-w-full cursor-zoom-in rounded-md border"
+      />
+    </a>
+  ),
 } as const;
 
 /** Assistant message body. Memoized — re-renders only when the text changes,

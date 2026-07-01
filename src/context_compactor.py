@@ -7,6 +7,7 @@ Summarizes older messages via the same LLM, preserving key context.
 
 import json
 import logging
+import re
 from typing import Any, Dict, List, Optional
 
 from core.models import ChatMessage
@@ -35,6 +36,24 @@ def _content_as_text(content: Any) -> str:
 
 COMPACT_THRESHOLD = 0.85  # Default: trigger compaction at 85% of context window
 SUMMARY_MAX_TOKENS = 1024
+
+# Inline figures the model placed in an answer (![caption](/api/personal/rag-asset…)).
+# These must survive compaction: the LLM summary would otherwise collapse them into
+# prose and the image would disappear from both context and the visible transcript.
+_FIGURE_MD_RE = re.compile(r"!\[[^\]]*\]\(/api/personal/rag-asset\?source=[^)\s]*\)")
+
+
+def _extract_figure_markdown(msgs: List[Dict]) -> List[str]:
+    """Collect distinct inline figure image-markdown from the messages being
+    summarized, so it can be carried forward verbatim into the kept summary."""
+    seen: set = set()
+    out: List[str] = []
+    for m in msgs:
+        for md in _FIGURE_MD_RE.findall(_content_as_text(m.get("content"))):
+            if md not in seen:
+                seen.add(md)
+                out.append(md)
+    return out
 
 
 def get_compact_threshold() -> float:
@@ -405,6 +424,15 @@ async def maybe_compact(
     except Exception as e:
         logger.error(f"Compaction summary failed: {e}")
         return system_msgs + recent, context_length, False
+
+    # Carry any figures the model showed in the summarized turns into the kept
+    # summary verbatim, so they survive compaction instead of being flattened
+    # into prose (and lost from the transcript).
+    figures = _extract_figure_markdown(older)
+    if figures:
+        summary = summary + "\n\n### Figures shown earlier (still relevant)\n" + "\n\n".join(
+            figures
+        )
 
     summary_msg = {
         "role": "system",

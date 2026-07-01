@@ -834,6 +834,29 @@ def filter_used_rag_sources(answer: str, sources: list, *, min_overlap_frac: flo
     return used
 
 
+_RAG_ASSET_IMG_RE = re.compile(
+    r"!\[[^\]]*\]\((?P<url>/api/personal/rag-asset\?source=[^)\s]*)\)"
+)
+
+
+def strip_unauthorized_figures(answer: str, sources: list) -> str:
+    """Remove any inline figure image the answer references but that wasn't in the
+    retrieved set — an anti-hallucination guard on model-emitted image URLs.
+
+    The model is told to copy figure ``image_url`` values verbatim from the
+    retrieved context; this drops any rag-asset image markdown whose URL is not
+    among those, so a fabricated path can never render or persist. Non-rag-asset
+    images (generated images, external URLs) are left untouched."""
+    if not answer or "/api/personal/rag-asset" not in answer:
+        return answer
+    allowed = {s.get("image_url") for s in (sources or []) if s.get("image_url")}
+
+    def _keep(m: "re.Match") -> str:
+        return m.group(0) if m.group("url") in allowed else ""
+
+    return _RAG_ASSET_IMG_RE.sub(_keep, answer)
+
+
 def public_rag_sources(sources: list) -> list:
     """Strip internal (underscore-prefixed) keys so a source is safe to emit to
     the client / persist to the DB."""

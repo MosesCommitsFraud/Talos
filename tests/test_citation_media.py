@@ -29,6 +29,23 @@ def test_image_meta_detected_by_filename_when_type_absent():
     assert out["modality"] == "image"
 
 
+def test_figure_meta_passthrough_image_url():
+    # A figure crop extracted from a PDF page carries its own asset URL even
+    # though its source/type point at the parent .pdf.
+    out = cp._citation_media(
+        {
+            "type": ".pdf",
+            "filename": "manual.pdf",
+            "modality": "figure",
+            "image_url": "/api/personal/rag-asset?source=%2Fx%2F_pdf_figures%2Fa.png",
+            "image_caption": "A pump diagram",
+        }
+    )
+    assert out["modality"] == "image"
+    assert out["image_url"].endswith("a.png")
+    assert out["image_caption"] == "A pump diagram"
+
+
 def test_video_meta_carries_timestamps_and_deeplink():
     out = cp._citation_media(
         {"modality": "video", "start": 12.4, "end": 38.9, "deeplink": "https://vid/x#t=12"}
