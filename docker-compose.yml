@@ -113,10 +113,9 @@ services:
       # host cores. Empty = use every available core; set a number to cap it. Same
       # models and output, just more parallelism.
       - RAG_DOCLING_THREADS=${RAG_DOCLING_THREADS:-}
-      # OCR/layout model weights are already baked into the image, so skip the
-      # per-start Hugging Face Hub round-trip (the "unauthenticated requests" warning).
-      - HF_HUB_OFFLINE=${HF_HUB_OFFLINE:-1}
-      - TRANSFORMERS_OFFLINE=${TRANSFORMERS_OFFLINE:-1}
+      # NOTE: do NOT force HF_HUB_OFFLINE/TRANSFORMERS_OFFLINE here — Docling's
+      # figure model and fastembed's Qdrant/bm25 sparse model are fetched from the
+      # HF Hub on first use, so offline mode breaks figure extraction and ingest.
       # Same opt-in ASR endpoint as the app — the worker is what actually calls
       # it during ingest. Inert unless the Advanced toggle is on.
       - VIDEO_ASR_URL=${VIDEO_ASR_URL:-}
