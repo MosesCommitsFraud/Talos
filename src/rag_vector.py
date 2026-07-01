@@ -362,40 +362,46 @@ def _vlm_concurrency() -> int:
         return 4
 
 
-def _docling_threads() -> int:
-    """CPU threads Docling's layout/OCR/table models may use.
+def _docling_threads() -> Optional[int]:
+    """Explicit CPU-thread override for Docling, or ``None`` for Docling's default.
 
-    Docling's ``AcceleratorOptions`` defaults to just 4 threads regardless of how
-    many cores the worker container has, so a CPU-only ingest leaves most of the
-    box idle. Default to every available core (override with ``RAG_DOCLING_THREADS``).
-    Purely a throughput knob — the models and their output are unchanged, so the
-    extracted text/tables/OCR are byte-for-byte identical, just produced faster.
+    We deliberately do NOT default to ``os.cpu_count()``. Docling opens several
+    ONNX sessions (layout, OCR det/cls/rec, tables) that each spawn intra-op
+    threads, so a high count oversubscribes the cores and runs *slower* on this
+    memory-bound CPU-OCR workload. Leave unset to keep Docling's own default; set
+    ``RAG_DOCLING_THREADS`` to the box's physical core count only if a benchmark
+    on your hardware actually shows it helps.
     """
+    env = os.getenv("RAG_DOCLING_THREADS", "").strip()
+    if not env:
+        return None
     try:
-        env = os.getenv("RAG_DOCLING_THREADS", "").strip()
-        n = int(env) if env else (os.cpu_count() or 4)
-        return max(1, n)
-    except Exception:
-        return os.cpu_count() or 4
+        return max(1, int(env))
+    except ValueError:
+        return None
 
 
 def _docling_pdf_options(**overrides):
-    """Shared ``PdfPipelineOptions`` with the accelerator pinned to all cores.
+    """``PdfPipelineOptions`` with our overrides applied.
 
-    Keeps every extraction default (OCR on, table structure on, same engines/
-    models) so results don't change — only the thread budget is raised. Extra
-    kwargs let the figure converter add its image-generation flags on top.
+    The accelerator thread count is only touched when ``RAG_DOCLING_THREADS`` is
+    explicitly set; otherwise Docling's defaults stand untouched. Extra kwargs let
+    callers flip specific flags (e.g. the figure converter's image generation).
     """
-    from docling.datamodel.pipeline_options import AcceleratorOptions, PdfPipelineOptions
+    from docling.datamodel.pipeline_options import PdfPipelineOptions
 
     opts = PdfPipelineOptions()
-    try:
-        from docling.datamodel.pipeline_options import AcceleratorDevice
+    threads = _docling_threads()
+    if threads is not None:
+        from docling.datamodel.pipeline_options import AcceleratorOptions
 
-        device = AcceleratorDevice.CPU
-    except Exception:
-        device = "cpu"
-    opts.accelerator_options = AcceleratorOptions(num_threads=_docling_threads(), device=device)
+        try:
+            from docling.datamodel.pipeline_options import AcceleratorDevice
+
+            device = AcceleratorDevice.CPU
+        except Exception:
+            device = "cpu"
+        opts.accelerator_options = AcceleratorOptions(num_threads=threads, device=device)
     for key, value in overrides.items():
         setattr(opts, key, value)
     return opts
@@ -1498,10 +1504,17 @@ class VectorRAG:
         from docling.datamodel.base_models import InputFormat
         from docling.document_converter import DocumentConverter, PdfFormatOption
 
-        # ~144 dpi crops (crisp enough to read a diagram), all cores like the main
-        # docling lane. images_scale/generate_picture_images are the only behavior
-        # changes vs. the default pipeline; the thread bump is result-preserving.
-        opts = _docling_pdf_options(images_scale=2.0, generate_picture_images=True)
+        # ~144 dpi crops (crisp enough to read a diagram). Figure extraction only
+        # reads layout-detected pictures (``doc.pictures``), so OCR and table
+        # structure are pure waste here — turning them off avoids a second full
+        # CPU-OCR pass over the whole PDF without changing which figures we crop
+        # (picture detection is layout-based, independent of OCR).
+        opts = _docling_pdf_options(
+            images_scale=2.0,
+            generate_picture_images=True,
+            do_ocr=False,
+            do_table_structure=False,
+        )
         self._fig_converter = DocumentConverter(
             format_options={InputFormat.PDF: PdfFormatOption(pipeline_options=opts)}
         )
@@ -1696,23 +1709,25 @@ class VectorRAG:
         from haystack_integrations.components.converters.docling import DoclingConverter
 
         if self._docling is None:
-            # Default export_type=DOC_CHUNKS → Docling HybridChunker. We hand it a
-            # converter whose accelerator uses all cores (Docling otherwise caps at
-            # 4 threads); identical extraction, just faster. Fall back to the bare
-            # converter if the docling internals ever shift under us.
-            try:
-                from docling.datamodel.base_models import InputFormat
-                from docling.document_converter import DocumentConverter, PdfFormatOption
-
-                converter = DocumentConverter(
-                    format_options={
-                        InputFormat.PDF: PdfFormatOption(pipeline_options=_docling_pdf_options())
-                    }
-                )
-                self._docling = DoclingConverter(converter=converter)
-            except Exception as e:
-                logger.warning("docling: thread-tuned converter unavailable (%s); using default", e)
+            # Default export_type=DOC_CHUNKS → Docling HybridChunker. Use the bare
+            # converter (Docling's defaults) unless an explicit RAG_DOCLING_THREADS
+            # override is set, in which case hand it a thread-tuned converter.
+            if _docling_threads() is None:
                 self._docling = DoclingConverter()
+            else:
+                try:
+                    from docling.datamodel.base_models import InputFormat
+                    from docling.document_converter import DocumentConverter, PdfFormatOption
+
+                    converter = DocumentConverter(
+                        format_options={
+                            InputFormat.PDF: PdfFormatOption(pipeline_options=_docling_pdf_options())
+                        }
+                    )
+                    self._docling = DoclingConverter(converter=converter)
+                except Exception as e:
+                    logger.warning("docling: thread-tuned converter unavailable (%s); default", e)
+                    self._docling = DoclingConverter()
         return self._docling.run(sources=[path]).get("documents", []) or []
 
     def _lane_code(self, path: str, language: str):
