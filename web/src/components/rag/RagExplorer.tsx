@@ -44,6 +44,10 @@ function ChunkCard({ source, chunk }: { source: string; chunk: RagChunk }) {
     chunk.section_id && `§ ${chunk.section_id.slice(0, 8)}`,
   ].filter(Boolean) as string[];
 
+  // Figure chunks (extracted PDF images) carry the crop's asset URL — preview it
+  // so ingest quality is auditable, not just the VLM caption stored as the text.
+  const imageUrl = typeof chunk.metadata?.image_url === 'string' ? chunk.metadata.image_url : undefined;
+
   return (
     <div className="rounded-lg border border-border/60">
       <div className="flex items-center gap-2 border-b px-3 py-1.5 text-[11px] text-muted-foreground">
@@ -126,6 +130,16 @@ function ChunkCard({ source, chunk }: { source: string; chunk: RagChunk }) {
         </div>
       ) : (
         <div className="px-3 py-2 text-sm">
+          {imageUrl && (
+            <a href={imageUrl} target="_blank" rel="noopener noreferrer">
+              <img
+                src={imageUrl}
+                alt=""
+                loading="lazy"
+                className="mb-2 max-h-64 max-w-full cursor-zoom-in rounded-md border"
+              />
+            </a>
+          )}
           <Markdown text={chunk.content} />
         </div>
       )}
