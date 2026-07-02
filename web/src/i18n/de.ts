@@ -659,6 +659,8 @@ const de: typeof en = {
       testConnection: 'Verbindung testen',
       testing: 'Wird getestet…',
       testFailed: 'Test fehlgeschlagen',
+      test: 'Testen',
+      endpointOk: 'Endpoint OK',
       ok: 'OK',
       documents: 'Dokumente',
       uploadFiles: 'Dateien hochladen…',

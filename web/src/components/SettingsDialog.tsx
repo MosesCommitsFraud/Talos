@@ -59,6 +59,7 @@ import {
   testSqlConfig,
   testModelEndpoint,
   testRagConfig,
+  testRagEndpoint,
   totpConfirm,
   totpDisable,
   totpSetup,
@@ -1174,6 +1175,10 @@ function ToolsPanel() {
 
 /* ── RAG (config + documents) ── */
 
+/** Per-URL-field endpoint probe: which backend test to run and which sibling
+ *  draft fields (model/key/dataset) to send along. */
+interface EndpointTest { kind: string; modelKey?: keyof RagConfig; apiKeyKey?: keyof RagConfig; datasetKey?: keyof RagConfig }
+
 export function RagPanel() {
   const { t } = useTranslation();
   const { data } = useQuery({ queryKey: ['rag-config'], queryFn: fetchRagConfig });
@@ -1183,6 +1188,7 @@ export function RagPanel() {
   const [searchOut, setSearchOut] = useState('');
   const [dir, setDir] = useState('');
   const [docMsg, setDocMsg] = useState<{ text: string; ok: boolean } | null>(null);
+  const [testingEp, setTestingEp] = useState<keyof RagConfig | null>(null);
   const queryClient = useQueryClient();
   useEffect(() => { if (data && !draft) setDraft(data); }, [data, draft]);
   const save = useMutation({
@@ -1201,10 +1207,25 @@ export function RagPanel() {
     deleteRagDocument(source).then(() => queryClient.invalidateQueries({ queryKey: ['rag-documents'] }));
   if (!draft) return <Page><p className="text-sm text-muted-foreground">{t('common.loading')}</p></Page>;
   const set = (k: keyof RagConfig, v: unknown) => setDraft({ ...draft, [k]: v } as RagConfig);
+  const str = (k: keyof RagConfig) => String(draft[k] ?? '');
+  const testEndpoint = (k: keyof RagConfig, label: string, ep: EndpointTest) => {
+    setDocMsg(null);
+    setTestingEp(k);
+    testRagEndpoint({
+      kind: ep.kind,
+      url: str(k),
+      model: ep.modelKey ? str(ep.modelKey) : undefined,
+      api_key: ep.apiKeyKey ? str(ep.apiKeyKey) : undefined,
+      dataset_id: ep.datasetKey ? str(ep.datasetKey) : undefined,
+    })
+      .then((r) => setDocMsg({ text: `${label}: ${t('settings.rag.endpointOk')}${r.detail ? ` (${r.detail})` : ''}`, ok: true }))
+      .catch((e) => setDocMsg({ text: `${label}: ${(e as Error).message}`, ok: false }))
+      .finally(() => setTestingEp(null));
+  };
   const field = (
     k: keyof RagConfig,
     label: string,
-    opts: { type?: string; hint?: string; def?: string | number } = {},
+    opts: { type?: string; hint?: string; def?: string | number; test?: EndpointTest } = {},
   ) => {
     const type = opts.type ?? 'text';
     const hint = (opts.hint || opts.def !== undefined) ? (
@@ -1223,8 +1244,16 @@ export function RagPanel() {
         {type === 'textarea' ? (
           <Textarea className="min-h-[64px] w-full sm:w-80" value={String(draft[k] ?? '')} onChange={(e) => set(k, e.target.value)} />
         ) : (
-          <Input className="w-56" type={type} step={type === 'number' ? 'any' : undefined} value={String(draft[k] ?? '')}
-            onChange={(e) => set(k, type === 'number' ? Number(e.target.value) : e.target.value)} />
+          <div className="flex items-center gap-2">
+            <Input className="w-56" type={type} step={type === 'number' ? 'any' : undefined} value={String(draft[k] ?? '')}
+              onChange={(e) => set(k, type === 'number' ? Number(e.target.value) : e.target.value)} />
+            {opts.test && (
+              <Button size="sm" variant="outline" disabled={!str(k).trim() || testingEp !== null}
+                onClick={() => testEndpoint(k, label, opts.test!)}>
+                {testingEp === k ? t('settings.rag.testing') : t('settings.rag.test')}
+              </Button>
+            )}
+          </div>
         )}
       </Row>
     );
@@ -1250,18 +1279,18 @@ export function RagPanel() {
         </Row>
         {(draft.provider || 'internal') === 'external' ? (
           <>
-            {field('external_url', t('settings.rag.externalUrl'), { hint: t('settings.rag.hint.externalUrl'), def: 'http://ragflow/api/v1/retrieval' })}
+            {field('external_url', t('settings.rag.externalUrl'), { hint: t('settings.rag.hint.externalUrl'), def: 'http://ragflow/api/v1/retrieval', test: { kind: 'external', apiKeyKey: 'external_api_key', datasetKey: 'external_dataset_id' } })}
             {field('external_api_key', t('settings.rag.externalApiKey'), { type: 'password', hint: t('settings.rag.hint.externalApiKey') })}
             {field('external_dataset_id', t('settings.rag.externalDatasetId'), { hint: t('settings.rag.hint.externalDatasetId') })}
             {field('external_top_k', t('settings.rag.externalTopK'), { type: 'number', hint: t('settings.rag.hint.externalTopK'), def: 5 })}
           </>
         ) : (
           <>
-            {field('embedding_url', t('settings.rag.embeddingUrl'), { hint: t('settings.rag.hint.embeddingUrl'), def: 'http://host:8001/v1/embeddings' })}
+            {field('embedding_url', t('settings.rag.embeddingUrl'), { hint: t('settings.rag.hint.embeddingUrl'), def: 'http://host:8001/v1/embeddings', test: { kind: 'embedding', modelKey: 'embedding_model' } })}
             {field('embedding_model', t('settings.rag.embeddingModel'), { hint: t('settings.rag.hint.embeddingModel'), def: 'qwen3-embed' })}
-            {field('qdrant_url', t('settings.rag.qdrantUrl'), { hint: t('settings.rag.hint.qdrantUrl'), def: 'http://qdrant:6333' })}
+            {field('qdrant_url', t('settings.rag.qdrantUrl'), { hint: t('settings.rag.hint.qdrantUrl'), def: 'http://qdrant:6333', test: { kind: 'qdrant', apiKeyKey: 'qdrant_api_key' } })}
             {field('qdrant_api_key', t('settings.rag.qdrantApiKey'), { type: 'password', hint: t('settings.rag.hint.qdrantApiKey') })}
-            {field('rerank_url', t('settings.rag.rerankUrl'), { hint: t('settings.rag.hint.rerankUrl'), def: 'http://host:8002/v1/rerank' })}
+            {field('rerank_url', t('settings.rag.rerankUrl'), { hint: t('settings.rag.hint.rerankUrl'), def: 'http://host:8002/v1/rerank', test: { kind: 'rerank', modelKey: 'rerank_model', apiKeyKey: 'rerank_api_key' } })}
             {field('rerank_model', t('settings.rag.rerankModel'), { hint: t('settings.rag.hint.rerankModel'), def: 'qwen3-reranker' })}
             {field('rerank_api_key', t('settings.rag.rerankApiKey'), { type: 'password', hint: t('settings.rag.hint.rerankApiKey') })}
             {field('sparse_model', t('settings.rag.sparseModel'), { hint: t('settings.rag.hint.sparseModel'), def: 'Qdrant/bm25' })}
@@ -1286,7 +1315,7 @@ export function RagPanel() {
           </Row>
           {draft.video_asr_enabled && (
             <>
-              {field('video_asr_url', t('settings.rag.asrUrl'), { hint: t('settings.rag.hint.asrUrl'), def: 'http://host:8003/v1/audio/transcriptions' })}
+              {field('video_asr_url', t('settings.rag.asrUrl'), { hint: t('settings.rag.hint.asrUrl'), def: 'http://host:8003/v1/audio/transcriptions', test: { kind: 'asr' } })}
               {field('video_asr_language', t('settings.rag.asrLanguage'), { hint: t('settings.rag.hint.asrLanguage'), def: 'auto' })}
               {field('video_asr_prompt', t('settings.rag.asrPrompt'), { type: 'textarea', hint: t('settings.rag.hint.asrPrompt') })}
               <Row label={t('settings.rag.asrCorrect')} hint={t('settings.rag.hint.asrCorrect')}>
@@ -1304,7 +1333,7 @@ export function RagPanel() {
           </Row>
           {draft.image_pixel_enabled && (
             <>
-              {field('image_embed_url', t('settings.rag.imageUrl'), { hint: t('settings.rag.hint.imageUrl'), def: 'http://host:8004/v1/embeddings' })}
+              {field('image_embed_url', t('settings.rag.imageUrl'), { hint: t('settings.rag.hint.imageUrl'), def: 'http://host:8004/v1/embeddings', test: { kind: 'image_embed', modelKey: 'image_embed_model' } })}
               {field('image_embed_model', t('settings.rag.imageModel'), { hint: t('settings.rag.hint.imageModel'), def: 'qwen3-vl-embed' })}
             </>
           )}
@@ -1336,7 +1365,7 @@ export function RagPanel() {
           {field('auto_questions_n', t('settings.rag.autoQuestions'), { type: 'number', hint: t('settings.rag.hint.autoQuestions'), def: 0 })}
           {(draft.contextual_retrieval_enabled || (draft.auto_keywords_n || 0) > 0 || (draft.auto_questions_n || 0) > 0) && (
             <>
-              {field('llm_url', t('settings.rag.llmUrl'), { hint: t('settings.rag.hint.llmUrl'), def: 'http://host:8000/v1/chat/completions' })}
+              {field('llm_url', t('settings.rag.llmUrl'), { hint: t('settings.rag.hint.llmUrl'), def: 'http://host:8000/v1/chat/completions', test: { kind: 'llm', modelKey: 'llm_model' } })}
               {field('llm_model', t('settings.rag.llmModel'), { hint: t('settings.rag.hint.llmModel'), def: 'qwen3-llm' })}
             </>
           )}
@@ -1360,7 +1389,7 @@ export function RagPanel() {
           </Row>
           {draft.pdf_vlm_enabled && (
             <>
-              {field('vlm_url', t('settings.rag.vlmUrl'), { hint: t('settings.rag.hint.vlmUrl'), def: 'http://host:8000/v1/chat/completions' })}
+              {field('vlm_url', t('settings.rag.vlmUrl'), { hint: t('settings.rag.hint.vlmUrl'), def: 'http://host:8000/v1/chat/completions', test: { kind: 'vlm', modelKey: 'vlm_model' } })}
               {field('vlm_model', t('settings.rag.vlmModel'), { hint: t('settings.rag.hint.vlmModel'), def: 'qwen3-llm' })}
             </>
           )}

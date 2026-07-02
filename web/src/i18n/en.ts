@@ -657,6 +657,8 @@ const en = {
       testConnection: 'Test connection',
       testing: 'Testing…',
       testFailed: 'Test failed',
+      test: 'Test',
+      endpointOk: 'endpoint OK',
       ok: 'OK',
       documents: 'Documents',
       uploadFiles: 'Upload files…',

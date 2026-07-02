@@ -358,6 +358,10 @@ export const testRagConfig = async (): Promise<{ ok?: boolean; [key: string]: un
   return res.json();
 };
 
+/** Probe a single RAG endpoint with the (possibly unsaved) form values. */
+export const testRagEndpoint = (body: { kind: string; url: string; model?: string; api_key?: string; dataset_id?: string }) =>
+  postJSON<{ ok?: boolean; detail?: string }>('/api/rag/test-endpoint', body);
+
 /** Recreate the Qdrant collection (drops vectors, keeps uploaded files). Used
  *  after an embedding-model change alters the vector dimension. */
 export const ragRebuildIndex = () => postJSON<{ ok?: boolean; message?: string }>('/api/rag/rebuild');

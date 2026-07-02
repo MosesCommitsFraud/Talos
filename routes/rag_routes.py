@@ -64,6 +64,18 @@ class RagPipelineConfig(BaseModel):
     parent_max_chars: int = 2000
 
 
+class RagEndpointTest(BaseModel):
+    """One endpoint probe from the settings UI. `api_key` may be empty even
+    when a key is saved (keys are never echoed to the client), so the route
+    falls back to the stored key for that kind."""
+
+    kind: str
+    url: str = ""
+    model: str = ""
+    api_key: str = ""
+    dataset_id: str = ""
+
+
 def _clamp_k(value: int, default: int = 5) -> int:
     try:
         return max(1, min(int(value), 20))
@@ -284,6 +296,105 @@ def setup_rag_routes():
             else {"configured": False, "ok": False}
         )
         return {"ok": True, "stats": stats, "reranker": reranker}
+
+    @router.post("/test-endpoint")
+    def test_endpoint(body: RagEndpointTest):
+        """Probe a single configured endpoint with the (possibly unsaved)
+        values from the settings form. Each kind gets a minimal real request;
+        failures surface as HTTP errors so the UI shows the actual cause."""
+        import httpx
+
+        kind = (body.kind or "").strip().lower()
+        url = (body.url or "").strip()
+        if not url:
+            raise HTTPException(400, "URL is required")
+        settings = load_settings()
+        cfg = (
+            settings.get("rag_pipeline", {})
+            if isinstance(settings.get("rag_pipeline"), dict)
+            else {}
+        )
+        key_field = {
+            "external": "external_api_key",
+            "qdrant": "qdrant_api_key",
+            "rerank": "rerank_api_key",
+        }.get(kind)
+        api_key = (body.api_key or "").strip() or (
+            str(cfg.get(key_field) or "") if key_field else ""
+        )
+        model = (body.model or "").strip()
+        headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
+        try:
+            if kind == "external":
+                from src.rag_external import ExternalRagClient
+
+                client = ExternalRagClient(
+                    {
+                        "external_url": url,
+                        "external_api_key": api_key,
+                        "external_dataset_id": (body.dataset_id or "").strip()
+                        or str(cfg.get("external_dataset_id") or ""),
+                    }
+                )
+                if not client.configured:
+                    raise HTTPException(400, "External retrieval URL and dataset id are required")
+                results = client.search("ping", k=1)
+                return {"ok": True, "detail": f"{len(results)} result(s)"}
+            if kind == "qdrant":
+                r = httpx.get(
+                    url.rstrip("/") + "/collections",
+                    headers={"api-key": api_key} if api_key else {},
+                    timeout=10,
+                )
+                r.raise_for_status()
+                n = len((r.json().get("result") or {}).get("collections") or [])
+                return {"ok": True, "detail": f"{n} collection(s)"}
+            if kind in ("embedding", "image_embed"):
+                r = httpx.post(
+                    url, json={"model": model, "input": ["ping"]}, headers=headers, timeout=20
+                )
+                r.raise_for_status()
+                data = r.json().get("data") or []
+                dim = len((data[0] or {}).get("embedding") or []) if data else 0
+                return {"ok": True, "detail": f"dim {dim}"}
+            if kind == "rerank":
+                r = httpx.post(
+                    url,
+                    json={"model": model, "query": "ping", "documents": ["ping"]},
+                    headers=headers,
+                    timeout=20,
+                )
+                r.raise_for_status()
+                return {"ok": True}
+            if kind in ("llm", "vlm"):
+                r = httpx.post(
+                    url,
+                    json={
+                        "model": model,
+                        "messages": [{"role": "user", "content": "ping"}],
+                        "max_tokens": 1,
+                    },
+                    headers=headers,
+                    timeout=30,
+                )
+                r.raise_for_status()
+                return {"ok": True}
+            if kind == "asr":
+                # No sample audio to send — probe the route instead. A 4xx
+                # validation error still proves the endpoint exists; only a
+                # missing route or a transport/server error fails.
+                r = httpx.post(url, headers=headers, timeout=10)
+                if r.status_code == 404 or r.status_code >= 500:
+                    raise HTTPException(503, f"ASR endpoint returned HTTP {r.status_code}")
+                return {"ok": True, "detail": f"HTTP {r.status_code}"}
+            raise HTTPException(400, f"Unknown endpoint kind: {kind}")
+        except HTTPException:
+            raise
+        except httpx.HTTPStatusError as e:
+            detail = (e.response.text or "")[:300]
+            raise HTTPException(503, f"HTTP {e.response.status_code}: {detail}")
+        except Exception as e:
+            raise HTTPException(503, str(e) or e.__class__.__name__)
 
     @router.post("/rebuild")
     def rebuild_index():
