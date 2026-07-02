@@ -46,7 +46,7 @@ seaborn==0.13.2
 plotly==5.24.1
 kaleido==0.2.1
 jupyter==1.1.1
-ipython==8.31.0
+ipython==9.15.0
 python-docx==1.2.0
 python-pptx==1.0.2
 pypdf==5.1.0
