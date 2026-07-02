@@ -17,3 +17,8 @@ sources placement
 how to get images in a bucket so ai can show user? might be impossible with pdfs
 actual queue list
 Tage for left sidebar
+inconsistent showing image from rag also worked for thing not there for it
+scroll to bottom shows even when not scrollable
+source tag for rag images
+source tag for video asr with timestamps
+corners for everything less rounded
