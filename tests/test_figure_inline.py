@@ -30,6 +30,20 @@ def test_leaves_external_and_generated_images_untouched():
     assert ch.strip_unauthorized_figures(answer, []) == answer
 
 
+def test_keeps_decoded_variant_of_authorized_url():
+    # Models routinely percent-decode copied URLs (%2F → /); that must not get
+    # an authorized figure stripped.
+    decoded = "/api/personal/rag-asset?source=/u/_pdf_figures/ok.png"
+    answer = f"![pump]({decoded})"
+    assert ch.strip_unauthorized_figures(answer, [{"image_url": _OK}]) == answer
+
+
+def test_still_strips_fabricated_url_even_decoded():
+    fake = "/api/personal/rag-asset?source=/u/_pdf_figures/nope.png"
+    out = ch.strip_unauthorized_figures(f"![x]({fake})", [{"image_url": _OK}])
+    assert "nope.png" not in out
+
+
 def test_noop_when_no_rag_asset_present():
     answer = "Plain answer with no images."
     assert ch.strip_unauthorized_figures(answer, [{"image_url": _OK}]) == answer

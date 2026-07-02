@@ -928,11 +928,108 @@ class VectorRAG:
             # Small-to-big (Phase 10): attach each hit's surrounding section for
             # injection (citations still point at the matched chunk). No-op off.
             top = self._expand_to_parent(top)
+            # Companion figures: ride a hit's document figures along with it, so
+            # the model receives their image_url even though a caption-only
+            # figure chunk rarely wins the ranking by itself.
+            top = self._attach_companion_figures(top)
             logger.info("Qdrant hybrid search for '%s': %s results", query[:60], len(top))
             return top
         except Exception as e:
             logger.error(f"search failed: {e}")
             return []
+
+    # Cap on figures attached per search — keeps companions from crowding the
+    # text context on figure-heavy documents.
+    _COMPANION_FIGURES_MAX = 4
+
+    @staticmethod
+    def _chunk_page(meta: Dict[str, Any]) -> Optional[int]:
+        """Best-effort page number for a chunk: the explicit ``page`` key (VLM
+        page / figure chunks) or the first Docling provenance page."""
+        page = (meta or {}).get("page")
+        if isinstance(page, (int, float)) and not isinstance(page, bool):
+            return int(page)
+        try:
+            return int((meta or {})["dl_meta"]["doc_items"][0]["prov"][0]["page_no"])
+        except Exception:
+            return None
+
+    def _figures_for_source(self, source: str) -> List[Any]:
+        """All ``modality == 'figure'`` chunks indexed for one source file."""
+        try:
+            return self._store.filter_documents(
+                filters={
+                    "operator": "AND",
+                    "conditions": [
+                        {"field": "meta.source", "operator": "==", "value": source},
+                        {"field": "meta.modality", "operator": "==", "value": "figure"},
+                    ],
+                }
+            )
+        except Exception as e:
+            logger.warning("companion figures: lookup failed for %s: %s", source, e)
+            return []
+
+    def _attach_companion_figures(self, results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Attach each hit's document figures to the result set (small-to-big
+        for images).
+
+        A figure chunk's only searchable text is its short VLM caption, so it
+        almost never outranks prose or ASR transcript chunks — the model then
+        answers from the page text without ever receiving the figure's
+        ``image_url``, and has nothing it could display inline. Instead of
+        requiring figures to win the ranking, ride them along with the text
+        that did: same page when the hit has one, whole document only when it
+        has few figures (no page anchor + many figures would flood the
+        context). Attached entries inherit the hit's scores so the chat-side
+        relevance threshold keeps a figure with its text. Best-effort — any
+        failure returns the results unchanged."""
+        out = list(results)
+        try:
+            seen = {(r.get("metadata") or {}).get("image_url") for r in results}
+            by_source: Dict[str, List[Any]] = {}
+            added = 0
+            for r in results:
+                if added >= self._COMPANION_FIGURES_MAX:
+                    break
+                meta = r.get("metadata") or {}
+                if meta.get("image_url"):
+                    continue  # already a figure hit
+                source = str(meta.get("source") or "")
+                if not source:
+                    continue
+                if source not in by_source:
+                    by_source[source] = self._figures_for_source(source)
+                figs = by_source[source]
+                page = self._chunk_page(meta)
+                if page is not None:
+                    figs = [f for f in figs if self._chunk_page(f.meta or {}) == page]
+                elif len(figs) > self._COMPANION_FIGURES_MAX:
+                    continue
+                for f in figs:
+                    url = (f.meta or {}).get("image_url")
+                    if not url or url in seen:
+                        continue
+                    seen.add(url)
+                    out.append(
+                        {
+                            "id": f.id,
+                            "document": f.content or "",
+                            "metadata": dict(f.meta or {}),
+                            "similarity": r.get("similarity"),
+                            "rerank_score": r.get("rerank_score"),
+                            "search_type": "figure_companion",
+                        }
+                    )
+                    added += 1
+                    if added >= self._COMPANION_FIGURES_MAX:
+                        break
+            if added:
+                logger.info("companion figures: attached %s figure(s)", added)
+        except Exception as e:
+            logger.warning("companion figures failed: %s", e)
+            return results
+        return out
 
     def _rerank(self, query: str, candidates: List[Dict[str, Any]], k: int) -> List[Dict[str, Any]]:
         url = os.getenv("RERANK_URL", "").strip()

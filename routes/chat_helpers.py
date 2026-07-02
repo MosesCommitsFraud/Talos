@@ -849,10 +849,18 @@ def strip_unauthorized_figures(answer: str, sources: list) -> str:
     images (generated images, external URLs) are left untouched."""
     if not answer or "/api/personal/rag-asset" not in answer:
         return answer
-    allowed = {s.get("image_url") for s in (sources or []) if s.get("image_url")}
+    from urllib.parse import unquote
+
+    # Compare percent-decoded: models routinely "clean up" copied URLs (%2F → /),
+    # which must not get an authorized figure stripped. Decoding can't authorize
+    # a fabricated path — it only normalizes encodings of the same path.
+    def _norm(u: str) -> str:
+        return unquote(unquote(u or ""))
+
+    allowed = {_norm(s.get("image_url")) for s in (sources or []) if s.get("image_url")}
 
     def _keep(m: "re.Match") -> str:
-        return m.group(0) if m.group("url") in allowed else ""
+        return m.group(0) if _norm(m.group("url")) in allowed else ""
 
     return _RAG_ASSET_IMG_RE.sub(_keep, answer)
 

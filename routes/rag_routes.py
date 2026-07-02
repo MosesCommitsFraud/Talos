@@ -484,6 +484,8 @@ def setup_rag_routes():
                     "filename": (r.get("metadata") or {}).get("filename")
                     or (r.get("metadata") or {}).get("source")
                     or "unknown",
+                    "modality": (r.get("metadata") or {}).get("modality") or "text",
+                    "image_url": (r.get("metadata") or {}).get("image_url"),
                     "similarity": r.get("similarity"),
                     "rerank_score": r.get("rerank_score"),
                     "snippet": (r.get("document") or "")[:500],
