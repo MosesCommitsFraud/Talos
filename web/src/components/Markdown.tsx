@@ -4,6 +4,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeHighlight from 'rehype-highlight';
 import { copyTextToClipboard } from '@/lib/utils';
+import { useUi } from '@/state/ui';
 
 /* ── hast helpers: extract plain text/structure from the syntax tree the
       renderers receive, so copy/download get the raw content even after
@@ -166,17 +167,22 @@ const MD_COMPONENTS = {
     </TableBlock>
   ),
   // Inline images (e.g. RAG figures the model embeds) are constrained so a
-  // high-DPI crop doesn't blow out the message width; click opens full size.
+  // high-DPI crop doesn't blow out the message width; click opens the in-app
+  // lightbox (zoom + download) instead of a new tab, same as generated images.
   // Same-origin /api/personal/rag-asset requests carry the session cookie.
   img: ({ src, alt }: { src?: string; alt?: string }) => (
-    <a href={src} target="_blank" rel="noopener noreferrer">
+    <button
+      type="button"
+      onClick={() => src && useUi.getState().openLightbox({ src, label: alt || undefined })}
+      className="block cursor-zoom-in border-0 bg-transparent p-0"
+    >
       <img
         src={src}
         alt={alt ?? ''}
         loading="lazy"
-        className="my-2 max-h-96 max-w-full cursor-zoom-in rounded-md border"
+        className="my-2 max-h-96 max-w-full rounded-md border"
       />
-    </a>
+    </button>
   ),
 } as const;
 

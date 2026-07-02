@@ -10,6 +10,7 @@ import {
   updateRagChunk,
 } from '@/api/client';
 import { cn } from '@/lib/utils';
+import { useUi } from '@/state/ui';
 import { Markdown } from '../Markdown';
 import { Button } from '../ui/button';
 import { Dialog, DialogContent } from '../ui/dialog';
@@ -20,6 +21,7 @@ import { Input, Textarea } from '../ui/misc';
 function ChunkCard({ source, chunk }: { source: string; chunk: RagChunk }) {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
+  const openLightbox = useUi((s) => s.openLightbox);
   const [editing, setEditing] = useState(false);
   const [showMeta, setShowMeta] = useState(false);
   const [draft, setDraft] = useState(chunk.content);
@@ -131,14 +133,18 @@ function ChunkCard({ source, chunk }: { source: string; chunk: RagChunk }) {
       ) : (
         <div className="px-3 py-2 text-sm">
           {imageUrl && (
-            <a href={imageUrl} target="_blank" rel="noopener noreferrer">
+            <button
+              type="button"
+              onClick={() => openLightbox({ src: imageUrl, label: source.split('/').pop() })}
+              className="block cursor-zoom-in border-0 bg-transparent p-0"
+            >
               <img
                 src={imageUrl}
                 alt=""
                 loading="lazy"
-                className="mb-2 max-h-64 max-w-full cursor-zoom-in rounded-md border"
+                className="mb-2 max-h-64 max-w-full rounded-md border"
               />
-            </a>
+            </button>
           )}
           <Markdown text={chunk.content} />
         </div>
