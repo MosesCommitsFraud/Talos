@@ -551,6 +551,7 @@ class ChatProcessor:
                             "Retrieved knowledge base context. Use this context to answer the user's current question. "
                             "If the answer is present here, prefer it over general knowledge."
                         )
+
                         # Inject the expanded parent section when small-to-big is
                         # on (r["expanded"]); otherwise the matched chunk. The
                         # citation snippet (rag_sources) still uses the chunk.
@@ -561,11 +562,16 @@ class ChatProcessor:
                             # instruction adjacent to the data far more reliably than
                             # the separate _FIGURE_EMBED_RULE system message alone.
                             if s.get("image_url"):
-                                cap = (s.get("image_caption") or s.get("filename") or "figure").strip()
+                                cap = (
+                                    s.get("image_caption") or s.get("filename") or "figure"
+                                ).strip()
                                 # First line only, brackets sanitized, capped — the full
                                 # VLM description makes unusable alt text.
                                 cap = (
-                                    cap.splitlines()[0].replace("[", "(").replace("]", ")")[:120].strip()
+                                    cap.splitlines()[0]
+                                    .replace("[", "(")
+                                    .replace("]", ")")[:120]
+                                    .strip()
                                     or "figure"
                                 )
                                 body += (

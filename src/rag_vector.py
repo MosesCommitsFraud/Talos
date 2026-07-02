@@ -287,9 +287,7 @@ def _pdf_vlm_active() -> bool:
     embedded image), so strictly opt-in. When on, image-bearing documents
     (slide decks, screenshots, figures) are read by a vision model instead of
     relying on Docling OCR alone."""
-    return bool(os.getenv("PDF_VLM_ENABLED", "").strip()) and bool(
-        os.getenv("VLM_URL", "").strip()
-    )
+    return bool(os.getenv("PDF_VLM_ENABLED", "").strip()) and bool(os.getenv("VLM_URL", "").strip())
 
 
 # Document formats eligible for the VLM lane. PDFs are page-rendered; Office
@@ -1547,10 +1545,15 @@ class VectorRAG:
         on_done = (lambda c: stage_cb(c, len(idxs))) if (stage_cb and idxs) else None
         # Fan the network-bound VLM calls out concurrently.
         texts = _concurrent_map(
-            self._vlm_transcribe_image, [rendered[i] for i in idxs], _vlm_concurrency(), on_done=on_done
+            self._vlm_transcribe_image,
+            [rendered[i] for i in idxs],
+            _vlm_concurrency(),
+            on_done=on_done,
         )
         vlm_docs = [
-            Document(content=t, meta={"modality": "pdf_page", "page": idxs[k] + 1, "pages": n_pages})
+            Document(
+                content=t, meta={"modality": "pdf_page", "page": idxs[k] + 1, "pages": n_pages}
+            )
             for k, t in enumerate(texts)
             if t
         ]
@@ -1818,7 +1821,9 @@ class VectorRAG:
 
                     converter = DocumentConverter(
                         format_options={
-                            InputFormat.PDF: PdfFormatOption(pipeline_options=_docling_pdf_options())
+                            InputFormat.PDF: PdfFormatOption(
+                                pipeline_options=_docling_pdf_options()
+                            )
                         }
                     )
                     self._docling = DoclingConverter(converter=converter)
@@ -1889,15 +1894,32 @@ class VectorRAG:
             chunk = 120
         tmpdir = tempfile.mkdtemp(prefix="talos_asr_")
         cmd = [
-            "ffmpeg", "-nostdin", "-loglevel", "error", "-y",
-            "-i", path, "-vn", "-ac", "1", "-ar", "16000",
+            "ffmpeg",
+            "-nostdin",
+            "-loglevel",
+            "error",
+            "-y",
+            "-i",
+            path,
+            "-vn",
+            "-ac",
+            "1",
+            "-ar",
+            "16000",
         ]
         if chunk > 0:
-            cmd += ["-f", "segment", "-segment_time", str(chunk),
-                    os.path.join(tmpdir, "seg_%05d.wav")]
+            cmd += [
+                "-f",
+                "segment",
+                "-segment_time",
+                str(chunk),
+                os.path.join(tmpdir, "seg_%05d.wav"),
+            ]
         else:
             cmd += [os.path.join(tmpdir, "seg_00000.wav")]
-        subprocess.run(cmd, check=True, timeout=float(os.getenv("VIDEO_ASR_FFMPEG_TIMEOUT", "1800")))
+        subprocess.run(
+            cmd, check=True, timeout=float(os.getenv("VIDEO_ASR_FFMPEG_TIMEOUT", "1800"))
+        )
         files = sorted(glob.glob(os.path.join(tmpdir, "seg_*.wav")))
         return [(f, i * chunk) for i, f in enumerate(files)], tmpdir
 
@@ -1959,7 +1981,9 @@ class VectorRAG:
                 "Output ONLY the corrected transcript text."
             )
             user = (
-                f"Known terms (spell these exactly when they occur): {glossary}\n\n" if glossary.strip() else ""
+                f"Known terms (spell these exactly when they occur): {glossary}\n\n"
+                if glossary.strip()
+                else ""
             ) + f"Transcript:\n{text}"
             payload: Dict[str, Any] = {
                 "messages": [
@@ -2042,7 +2066,11 @@ class VectorRAG:
                 if not text:
                     continue
                 entries.append(
-                    (float(seg.get("start") or 0) + start_off, float(seg.get("end") or 0) + start_off, text)
+                    (
+                        float(seg.get("start") or 0) + start_off,
+                        float(seg.get("end") or 0) + start_off,
+                        text,
+                    )
                 )
 
         # Optional LLM cleanup: fix ASR errors and restore English terms. One LLM
@@ -2066,7 +2094,12 @@ class VectorRAG:
             docs.append(Document(content=text, meta=seg_meta))
         if not docs:
             raise RuntimeError("ASR returned no transcript text")
-        logger.info("asr: %s segment(s) → %s doc(s) for %s", len(segments), len(docs), os.path.basename(path))
+        logger.info(
+            "asr: %s segment(s) → %s doc(s) for %s",
+            len(segments),
+            len(docs),
+            os.path.basename(path),
+        )
         return docs
 
     # ------------------------------------------------------------------
@@ -2231,6 +2264,7 @@ class VectorRAG:
                     "errors": errors,
                     "message": f"Cancelled after {indexed} chunks",
                 }
+
             # Per-page/per-image sub-progress for the slow VLM lanes, so the queue
             # advances within a single large file instead of jumping 0%→done.
             def _stage(done: int, sub_total: int, _fp=fpath) -> None:

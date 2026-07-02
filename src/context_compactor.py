@@ -430,8 +430,8 @@ async def maybe_compact(
     # into prose (and lost from the transcript).
     figures = _extract_figure_markdown(older)
     if figures:
-        summary = summary + "\n\n### Figures shown earlier (still relevant)\n" + "\n\n".join(
-            figures
+        summary = (
+            summary + "\n\n### Figures shown earlier (still relevant)\n" + "\n\n".join(figures)
         )
 
     summary_msg = {

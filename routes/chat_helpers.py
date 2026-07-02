@@ -843,9 +843,7 @@ def filter_used_rag_sources(answer: str, sources: list, *, min_overlap_frac: flo
     return used
 
 
-_RAG_ASSET_IMG_RE = re.compile(
-    r"!\[[^\]]*\]\((?P<url>/api/personal/rag-asset\?source=[^)\s]*)\)"
-)
+_RAG_ASSET_IMG_RE = re.compile(r"!\[[^\]]*\]\((?P<url>/api/personal/rag-asset\?source=[^)\s]*)\)")
 
 
 def strip_unauthorized_figures(answer: str, sources: list) -> str:
