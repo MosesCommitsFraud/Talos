@@ -13,6 +13,7 @@ import {
   type RagJob,
 } from '@/api/client';
 import { cn } from '@/lib/utils';
+import { useRagConsole } from '@/state/ragConsole';
 import { Button } from '../ui/button';
 import { RagExplorer } from './RagExplorer';
 
@@ -100,9 +101,14 @@ export function RagActivity() {
 
   const list = jobs.data?.jobs ?? [];
   const workerCount = diag.data?.active_worker_count ?? 0;
-  // Console = every job error, newest first, plus a no-worker banner.
-  const consoleLines: { key: string; text: string; warn?: boolean }[] = [];
+  const testLines = useRagConsole((s) => s.lines);
+  // Console = a no-worker banner, endpoint-test results (newest first, green
+  // when OK), then every job error, newest first.
+  const consoleLines: { key: string; text: string; warn?: boolean; ok?: boolean }[] = [];
   if (diag.data && workerCount === 0) consoleLines.push({ key: 'no-worker', text: t('settings.rag.noWorker'), warn: true });
+  for (const l of testLines) {
+    consoleLines.push({ key: `test-${l.id}`, text: l.text, ok: l.tone === 'ok' });
+  }
   for (const j of list) {
     for (const [i, e] of (j.errors ?? []).entries()) {
       consoleLines.push({ key: `${j.id}-${i}`, text: `${e.file}: ${e.error}` });
@@ -202,7 +208,7 @@ export function RagActivity() {
             <span className="text-muted-foreground">{t('rag.consoleEmpty')}</span>
           ) : (
             consoleLines.map((l) => (
-              <div key={l.key} className={cn('whitespace-pre-wrap break-words', l.warn ? 'text-amber-600 dark:text-amber-400' : 'text-destructive-foreground')}>
+              <div key={l.key} className={cn('whitespace-pre-wrap break-words', l.ok ? 'text-success' : l.warn ? 'text-amber-600 dark:text-amber-400' : 'text-destructive-foreground')}>
                 {l.text}
               </div>
             ))

@@ -71,6 +71,7 @@ import {
 } from '@/api/client';
 import type { AssistantEndpoint } from '@/api/types';
 import { applyDensity, applyLang, applyTheme, usePrefs, type Density, type Lang, type Theme, type Visibility } from '@/state/prefs';
+import { useRagConsole } from '@/state/ragConsole';
 import { LANGUAGES } from '@/i18n';
 import { cn } from '@/lib/utils';
 import { Button } from './ui/button';
@@ -1189,6 +1190,7 @@ export function RagPanel() {
   const [dir, setDir] = useState('');
   const [docMsg, setDocMsg] = useState<{ text: string; ok: boolean } | null>(null);
   const [testingEp, setTestingEp] = useState<keyof RagConfig | null>(null);
+  const pushConsole = useRagConsole((s) => s.push);
   const queryClient = useQueryClient();
   useEffect(() => { if (data && !draft) setDraft(data); }, [data, draft]);
   const save = useMutation({
@@ -1209,7 +1211,6 @@ export function RagPanel() {
   const set = (k: keyof RagConfig, v: unknown) => setDraft({ ...draft, [k]: v } as RagConfig);
   const str = (k: keyof RagConfig) => String(draft[k] ?? '');
   const testEndpoint = (k: keyof RagConfig, label: string, ep: EndpointTest) => {
-    setDocMsg(null);
     setTestingEp(k);
     testRagEndpoint({
       kind: ep.kind,
@@ -1218,8 +1219,8 @@ export function RagPanel() {
       api_key: ep.apiKeyKey ? str(ep.apiKeyKey) : undefined,
       dataset_id: ep.datasetKey ? str(ep.datasetKey) : undefined,
     })
-      .then((r) => setDocMsg({ text: `${label}: ${t('settings.rag.endpointOk')}${r.detail ? ` (${r.detail})` : ''}`, ok: true }))
-      .catch((e) => setDocMsg({ text: `${label}: ${(e as Error).message}`, ok: false }))
+      .then((r) => pushConsole(`${label}: ${t('settings.rag.endpointOk')}${r.detail ? ` (${r.detail})` : ''}`, 'ok'))
+      .catch((e) => pushConsole(`${label}: ${(e as Error).message}`, 'error'))
       .finally(() => setTestingEp(null));
   };
   const field = (
