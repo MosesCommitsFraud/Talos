@@ -22,3 +22,6 @@ scroll to bottom shows even when not scrollable
 source tag for rag images
 source tag for video asr with timestamps
 corners for everything less rounded
+hover on recent chat is limited to inside the sidebar needs limit aswell
+search expand on rag explorer
+rag explorer needs more keywords and example questions
