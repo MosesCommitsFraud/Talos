@@ -39,11 +39,18 @@ _AV_EXTS = frozenset(
 # saved with the message, and — via the compaction figure-preservation pass —
 # survives context compaction instead of vanishing as hidden tool output.
 _FIGURE_EMBED_RULE = (
-    "Some retrieved sections include a figure with an image_url. When showing that "
-    "figure would help answer the question, embed it inline in your reply as Markdown "
-    "image syntax ![caption](image_url) at the point where it is relevant. Copy the "
-    "image_url exactly as given in the retrieved section — never invent or alter one, "
-    "and only use image_url values that appear in the retrieved context."
+    "Some retrieved sections include a figure marked as [figure image_url: ... — "
+    "caption: ...]. These are real screenshots/diagrams from the documentation and "
+    "render inline in the chat. Whenever your answer refers to something such a "
+    "figure shows (a dialog, menu, chart, diagram, or any UI element), DO include "
+    "the figure: embed it as Markdown image syntax ![caption](image_url) at the "
+    "point in your answer where it is relevant. Showing the figure is strongly "
+    "preferred over describing it in words. Copy the image_url exactly, "
+    "character-for-character, as given in the retrieved section — never invent, "
+    "shorten, or alter one, and only use image_url values that appear in the "
+    "retrieved context. Do not copy image references from inside document text "
+    "(e.g. ![...] in a transcription) — only the [figure image_url: ...] entries "
+    "are real, servable images."
 )
 
 
@@ -556,16 +563,27 @@ class ChatProcessor:
                                 body += f"\n[figure image_url: {s['image_url']} — caption: {cap}]"
                             return body
 
-                        rag_content = (context_prompt + "\n\n") + "\n\n---\n\n".join(
-                            _rag_section(s, r) for s, r in zip(rag_sources, relevant)
-                        )
+                        # Figure sections (caption + image_url, tiny) must survive
+                        # the context-size cut below — they ride at the END of the
+                        # result list, so a plain tail truncation would drop exactly
+                        # them while the embed rule still promises the model figures.
+                        # Budget the text sections around them instead.
+                        text_secs, fig_secs = [], []
+                        for s, r in zip(rag_sources, relevant):
+                            sec = _rag_section(s, r)
+                            (fig_secs if s.get("image_url") else text_secs).append(sec)
+                        rag_content = (context_prompt + "\n\n") + "\n\n---\n\n".join(text_secs)
                         try:
                             max_chars = int(self._rag_cfg().get("max_context_chars") or 10000)
                         except Exception:
                             max_chars = 10000
                         max_chars = max(500, min(max_chars, 100000))
-                        if len(rag_content) > max_chars:
-                            rag_content = rag_content[:max_chars] + "\n[Truncated]"
+                        fig_block = "\n\n---\n\n".join(fig_secs)
+                        budget = max(500, max_chars - len(fig_block))
+                        if len(rag_content) > budget:
+                            rag_content = rag_content[:budget] + "\n[Truncated]"
+                        if fig_block:
+                            rag_content += "\n\n---\n\n" + fig_block
                         preface.append(
                             untrusted_context_message("retrieved documents", rag_content)
                         )
