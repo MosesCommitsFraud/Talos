@@ -820,8 +820,17 @@ def filter_used_rag_sources(answer: str, sources: list, *, min_overlap_frac: flo
         return []
     ans_words = set(ans_tokens)
     ans_bigrams = _rag_bigrams(ans_tokens)
+    from urllib.parse import unquote
+
     used = []
     for s in sources:
+        # A figure whose image the answer actually embeds is used by definition —
+        # its *text* (a VLM caption) rarely overlaps the answer's prose, so the
+        # token check below would wrongly drop the chip for the very image shown.
+        img = s.get("image_url")
+        if img and (img in answer or unquote(img) in answer):
+            used.append(s)
+            continue
         src_tokens = _rag_content_tokens(s.get("_text") or s.get("snippet") or "")
         if not src_tokens:
             continue
@@ -860,7 +869,10 @@ def strip_unauthorized_figures(answer: str, sources: list) -> str:
     allowed = {_norm(s.get("image_url")) for s in (sources or []) if s.get("image_url")}
 
     def _keep(m: "re.Match") -> str:
-        return m.group(0) if _norm(m.group("url")) in allowed else ""
+        if _norm(m.group("url")) in allowed:
+            return m.group(0)
+        logger.info("figure guard: stripped unauthorized image %s", m.group("url")[:200])
+        return ""
 
     return _RAG_ASSET_IMG_RE.sub(_keep, answer)
 

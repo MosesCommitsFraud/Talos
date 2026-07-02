@@ -556,11 +556,24 @@ class ChatProcessor:
                         # citation snippet (rag_sources) still uses the chunk.
                         def _rag_section(s, r):
                             body = f"[{s['filename']}]\n{r.get('expanded') or r['document']}"
-                            # Expose the figure's asset URL so the model can embed
-                            # it inline (authorized by _FIGURE_EMBED_RULE below).
+                            # Expose the figure as a ready-made Markdown line with an
+                            # imperative right next to it: small local models follow an
+                            # instruction adjacent to the data far more reliably than
+                            # the separate _FIGURE_EMBED_RULE system message alone.
                             if s.get("image_url"):
-                                cap = s.get("image_caption") or s.get("filename") or "figure"
-                                body += f"\n[figure image_url: {s['image_url']} — caption: {cap}]"
+                                cap = (s.get("image_caption") or s.get("filename") or "figure").strip()
+                                # First line only, brackets sanitized, capped — the full
+                                # VLM description makes unusable alt text.
+                                cap = (
+                                    cap.splitlines()[0].replace("[", "(").replace("]", ")")[:120].strip()
+                                    or "figure"
+                                )
+                                body += (
+                                    "\n[This section is a real figure from the document above. "
+                                    "If your answer touches what it shows, display it to the "
+                                    "user by copying this exact Markdown line into your answer:]\n"
+                                    f"![{cap}]({s['image_url']})"
+                                )
                             return body
 
                         # Figure sections (caption + image_url, tiny) must survive
@@ -584,6 +597,9 @@ class ChatProcessor:
                             rag_content = rag_content[:budget] + "\n[Truncated]"
                         if fig_block:
                             rag_content += "\n\n---\n\n" + fig_block
+                            logger.info(
+                                "RAG: injected %s figure section(s) with image_url", len(fig_secs)
+                            )
                         preface.append(
                             untrusted_context_message("retrieved documents", rag_content)
                         )
