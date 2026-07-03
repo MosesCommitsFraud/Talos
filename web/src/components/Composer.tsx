@@ -345,7 +345,7 @@ export function Composer() {
   if (pendingPlan) {
     return (
       <div className="mx-auto w-full max-w-[800px] px-4 pb-4">
-        <div className="flex items-center gap-3 rounded-md border border-primary/30 bg-primary/[0.05] px-4 py-3">
+        <div className="flex items-center gap-3 rounded-[20px] border border-primary/30 bg-primary/[0.05] px-4 py-3">
           <button
             type="button"
             onClick={() => setPlanPanelOpen(true)}
@@ -381,7 +381,7 @@ export function Composer() {
       )}
       <div
         className={cn(
-          'relative rounded-md border border-border bg-card transition-colors duration-200 focus-within:border-ring/45',
+          'relative rounded-[20px] border border-border bg-card transition-colors duration-200 focus-within:border-ring/45',
           dragging && 'border-primary/60 ring-2 ring-primary/30',
         )}
       >
