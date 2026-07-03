@@ -1,6 +1,6 @@
 # trixie (Debian 13) ships Python 3.13 — the pinned numpy/scipy/scikit-learn
 # generation (numpy>=2.5) requires Python >=3.12, which bookworm's 3.11 can't satisfy.
-FROM node:22-trixie-slim
+FROM node:26-trixie-slim
 
 RUN sed -i 's|http://deb.debian.org|https://deb.debian.org|g' /etc/apt/sources.list.d/debian.sources \
     && apt-get update -o Acquire::Retries=5 -o Acquire::https::Verify-Peer=false -o Acquire::https::Verify-Host=false \
