@@ -41,11 +41,11 @@ _AV_EXTS = frozenset(
 _FIGURE_EMBED_RULE = (
     "Some retrieved sections include a figure marked as [figure image_url: ... — "
     "caption: ...]. These are real screenshots/diagrams from the documentation and "
-    "render inline in the chat. Whenever your answer refers to something such a "
-    "figure shows (a dialog, menu, chart, diagram, or any UI element), DO include "
-    "the figure: embed it as Markdown image syntax ![caption](image_url) at the "
-    "point in your answer where it is relevant. Showing the figure is strongly "
-    "preferred over describing it in words. Copy the image_url exactly, "
+    "render inline in the chat. When you answer from a document that has such a "
+    "figure, you MUST embed the figure in your answer as Markdown image syntax "
+    "![caption](image_url), placed where it is relevant. Default to showing it: "
+    "omit a figure only when it is clearly unrelated to the question. Never "
+    "describe a figure in words instead of embedding it. Copy the image_url exactly, "
     "character-for-character, as given in the retrieved section — never invent, "
     "shorten, or alter one, and only use image_url values that appear in the "
     "retrieved context. Do not copy image references from inside document text "
@@ -576,8 +576,9 @@ class ChatProcessor:
                                 )
                                 body += (
                                     "\n[This section is a real figure from the document above. "
-                                    "If your answer touches what it shows, display it to the "
-                                    "user by copying this exact Markdown line into your answer:]\n"
+                                    "If you use this document in your answer, you MUST display "
+                                    "the figure to the user by copying this exact Markdown line "
+                                    "into your answer:]\n"
                                     f"![{cap}]({s['image_url']})"
                                 )
                             return body
