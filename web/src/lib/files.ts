@@ -36,6 +36,16 @@ export function isPreviewable(path: string, mime?: string): boolean {
   return previewKind(path, mime) !== 'none';
 }
 
+/** File name as shown next to a type icon / EXT label: base name without its
+ *  extension — the icon already conveys the type, so "report.md" renders as
+ *  "report". Dotfiles (".env") and extensionless names pass through unchanged;
+ *  the full name should stay available on hover (title attribute). */
+export function displayName(path: string): string {
+  const base = path.split(/[\\/]/).pop() ?? path;
+  const dot = base.lastIndexOf('.');
+  return dot > 0 ? base.slice(0, dot) : base;
+}
+
 /** Short, uppercase data-type label for a file chip (e.g. "PDF", "XLSX", "PNG").
  *  Falls back to the preview kind when there is no useful extension. */
 export function fileTypeLabel(path: string, mime?: string): string {

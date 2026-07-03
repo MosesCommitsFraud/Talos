@@ -4,7 +4,7 @@ import { Fragment, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { artifactDownloadUrl, fetchArtifacts, uploadDownloadUrl } from '@/api/client';
 import { copyTextToClipboard } from '@/lib/utils';
-import { isPreviewable, previewKind } from '@/lib/files';
+import { displayName, isPreviewable, previewKind } from '@/lib/files';
 import { useChat, type UiMessage } from '@/state/chat';
 import { usePrefs } from '@/state/prefs';
 import { useUi } from '@/state/ui';
@@ -276,7 +276,9 @@ function ArtifactChips({ sessionId, files }: { sessionId: string; files: Artifac
               className="flex min-w-0 items-center gap-1.5 py-1.5 text-left"
             >
               {isImage ? <ImageIcon className="size-3.5 shrink-0" /> : <FileTextIcon className="size-3.5 shrink-0" />}
-              <span className="max-w-56 truncate">{f.name}</span>
+              {/* Extension elided — the icon shows the type; the hover title
+                  keeps the full file name. */}
+              <span className="max-w-56 truncate">{displayName(f.name)}</span>
               {f.size != null && <span className="shrink-0 opacity-70">{formatSize(f.size)}</span>}
             </button>
             <a
