@@ -309,7 +309,7 @@ function AccountMenu({
   const { t } = useTranslation();
   // Slightly roomier rows than the default menu item, to match the account
   // dropdown design (taller hit targets, 18px icons, full-width).
-  const itemCls = 'gap-2.5 rounded-sm! px-2.5 py-1 text-[13px] [&_svg]:size-4';
+  const itemCls = 'gap-2.5 px-2.5 py-1 text-[13px] [&_svg]:size-4';
   // Tooltip must wrap MenuTrigger (not the other way around) so the dropdown's
   // click handler reaches the button — otherwise it won't open in compact mode.
   const triggerNode = <MenuTrigger asChild>{trigger}</MenuTrigger>;
