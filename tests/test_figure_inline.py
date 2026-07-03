@@ -49,6 +49,51 @@ def test_noop_when_no_rag_asset_present():
     assert ch.strip_unauthorized_figures(answer, [{"image_url": _OK}]) == answer
 
 
+# --- append_missing_figures (server-side embed backstop) ---
+
+_ANSWER = "The centrifugal pump impeller must be aligned before startup."
+_USED_TEXT = {
+    "filename": "pump-manual.pdf",
+    "snippet": "centrifugal pump impeller alignment",
+    "_text": "The centrifugal pump impeller alignment procedure requires the shaft to be level.",
+}
+_FIG = {
+    "filename": "pump-manual.pdf",
+    "image_url": _OK,
+    "image_caption": "Impeller alignment diagram",
+}
+
+
+def test_appends_figure_when_source_used_and_no_image():
+    out = ch.append_missing_figures(_ANSWER, [_USED_TEXT, _FIG])
+    assert out == f"\n\n![Impeller alignment diagram]({_OK})"
+
+
+def test_no_append_when_answer_already_embeds_figure():
+    answer = f"{_ANSWER} ![diagram]({_OK})"
+    assert ch.append_missing_figures(answer, [_USED_TEXT, _FIG]) == ""
+
+
+def test_no_append_when_no_source_used():
+    assert ch.append_missing_figures("Completely unrelated reply.", [_USED_TEXT, _FIG]) == ""
+
+
+def test_no_append_without_figures():
+    assert ch.append_missing_figures(_ANSWER, [_USED_TEXT]) == ""
+
+
+def test_filename_mismatch_falls_back_to_first_figure():
+    fig = dict(_FIG, filename="page3_fig1.png")
+    out = ch.append_missing_figures(_ANSWER, [_USED_TEXT, fig])
+    assert _OK in out
+
+
+def test_append_caps_at_max_figures():
+    fig2 = dict(_FIG, image_url=_BAD, image_caption="Second figure")
+    out = ch.append_missing_figures(_ANSWER, [_USED_TEXT, _FIG, fig2])
+    assert out.count("![") == 1
+
+
 def test_compaction_extracts_and_dedupes_figures():
     md = f"![diagram]({_OK})"
     older = [

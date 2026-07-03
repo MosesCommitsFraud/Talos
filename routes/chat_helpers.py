@@ -875,6 +875,43 @@ def strip_unauthorized_figures(answer: str, sources: list) -> str:
     return _RAG_ASSET_IMG_RE.sub(_keep, answer)
 
 
+def append_missing_figures(answer: str, sources: list, *, max_figures: int = 1) -> str:
+    """Deterministic backstop for inline figures: when the answer drew on a
+    retrieved document that has a figure but embeds no rag-asset image itself,
+    return ready-made figure Markdown for the caller to append to the answer.
+
+    The model is instructed (_FIGURE_EMBED_RULE) to copy the figure line into
+    its answer, but small local models skip that often enough that figures
+    appeared randomly. Rather than trust sampling, the server guarantees it.
+    Returns '' when the answer already shows a rag-asset image, no figure was
+    retrieved, or the answer didn't demonstrably use any retrieved source."""
+    if not answer or not sources:
+        return ""
+    if _RAG_ASSET_IMG_RE.search(answer):
+        return ""  # the model embedded one itself
+    figures = [s for s in sources if s.get("image_url")]
+    if not figures:
+        return ""
+    used_files = {
+        s.get("filename") for s in filter_used_rag_sources(answer, sources) if not s.get("image_url")
+    }
+    if not used_files:
+        return ""
+    # Prefer figures from a document the answer used; a companion figure rode
+    # along with the top text hits anyway, so if filenames don't line up
+    # (figure chunks can carry their own asset filename) fall back to the
+    # first retrieved figure rather than silently showing nothing.
+    matched = [s for s in figures if s.get("filename") in used_files] or figures
+    lines = []
+    for s in matched[:max_figures]:
+        cap = (s.get("image_caption") or s.get("filename") or "figure").strip()
+        # First line only, brackets sanitized, capped — mirrors the alt-text
+        # treatment in the injected figure section (chat_processor._rag_section).
+        cap = cap.splitlines()[0].replace("[", "(").replace("]", ")")[:120].strip() or "figure"
+        lines.append(f"![{cap}]({s['image_url']})")
+    return "\n\n" + "\n\n".join(lines) if lines else ""
+
+
 def public_rag_sources(sources: list) -> list:
     """Strip internal (underscore-prefixed) keys so a source is safe to emit to
     the client / persist to the DB."""

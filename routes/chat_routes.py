@@ -18,6 +18,7 @@ from core.database import Session as DBSession
 from core.exceptions import SessionNotFoundError
 from core.models import ChatMessage
 from routes.chat_helpers import (
+    append_missing_figures,
     _enforce_chat_privileges,
     auto_name_session,
     build_chat_context,
@@ -980,6 +981,18 @@ def setup_chat_routes(
                                 full_response = strip_unauthorized_figures(
                                     full_response, ctx.rag_sources
                                 )
+                                # Backstop: the model is told to embed retrieved
+                                # figures but small models skip it unreliably —
+                                # append the figure server-side when the answer
+                                # used a source that has one (see
+                                # append_missing_figures). Streamed as a late
+                                # delta so the client shows what gets saved.
+                                _extra_fig = append_missing_figures(
+                                    full_response, ctx.rag_sources
+                                )
+                                if _extra_fig:
+                                    full_response += _extra_fig
+                                    yield f"data: {json.dumps({'delta': _extra_fig})}\n\n"
                                 # Decide RAG citations now that the answer exists:
                                 # keep only sources the answer actually drew on,
                                 # then announce them at the very end (after the
