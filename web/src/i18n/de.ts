@@ -778,7 +778,6 @@ const de: typeof en = {
       list_sessions: { name: 'Sitzungen auflisten', desc: 'Vorhandene Sitzungen durchsuchen' },
       manage_session: { name: 'Sitzung verwalten', desc: 'Umbenennen, archivieren, konfigurieren' },
       list_models: { name: 'Modelle auflisten', desc: 'Verfügbare Modelle anzeigen' },
-      ui_control: { name: 'UI-Steuerung', desc: 'Design, Layout, Einstellungen ändern' },
       manage_tasks: { name: 'Aufgaben', desc: 'Automatisierte Aufgaben planen' },
       api_call: { name: 'API-Aufruf', desc: 'HTTP-Anfragen stellen' },
       manage_endpoints: { name: 'Endpunkte', desc: 'Modell-Endpunkte hinzufügen/entfernen' },

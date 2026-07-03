@@ -536,7 +536,6 @@ async def _run_subprocess_streaming(
 
 
 _ADMIN_TOOLS = {
-    "app_api",
     "manage_endpoints",
     "manage_mcp",
     "manage_webhooks",
@@ -1459,10 +1458,8 @@ async def execute_tool_block(
     """
     from src.tool_implementations import (
         do_api_call,
-        do_app_api,
         do_create_document,
         do_edit_document,
-        do_edit_image,
         do_manage_documents,
         do_manage_endpoints,
         do_manage_mcp,
@@ -1724,7 +1721,6 @@ async def execute_tool_block(
         "manage_session",
         "manage_memory",
         "list_models",
-        "ui_control",
         "ask_teacher",
     ):
         from src.ai_interaction import dispatch_ai_tool
@@ -1761,12 +1757,6 @@ async def execute_tool_block(
     elif tool == "query_sql":
         desc = "query_sql"
         result = await do_query_sql(content, owner=owner)
-    elif tool == "app_api":
-        desc = "app_api"
-        result = await do_app_api(content, owner=owner)
-    elif tool == "edit_image":
-        desc = "edit_image"
-        result = await do_edit_image(content, owner=owner)
     elif tool == "expand_output":
         desc = "expand_output"
         from src.context_optimizer import do_expand_output

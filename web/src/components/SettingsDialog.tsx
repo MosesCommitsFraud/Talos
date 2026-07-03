@@ -1086,7 +1086,6 @@ const TOOL_META: Record<string, { cat: string; ctx: string }> = {
   list_sessions: { cat: 'Sessions', ctx: '~100' },
   manage_session: { cat: 'Sessions', ctx: '~100' },
   list_models: { cat: 'System', ctx: '~100' },
-  ui_control: { cat: 'System', ctx: '~150' },
   manage_tasks: { cat: 'System', ctx: '~150' },
   api_call: { cat: 'System', ctx: '~200' },
   manage_endpoints: { cat: 'System', ctx: '~100' },

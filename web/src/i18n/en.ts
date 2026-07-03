@@ -776,7 +776,6 @@ const en = {
       list_sessions: { name: 'List Sessions', desc: 'Browse existing sessions' },
       manage_session: { name: 'Manage Session', desc: 'Rename, archive, configure' },
       list_models: { name: 'List Models', desc: 'Show available models' },
-      ui_control: { name: 'UI Control', desc: 'Change theme, layout, settings' },
       manage_tasks: { name: 'Tasks', desc: 'Schedule automated tasks' },
       api_call: { name: 'API Call', desc: 'Make HTTP requests' },
       manage_endpoints: { name: 'Endpoints', desc: 'Add/remove model endpoints' },

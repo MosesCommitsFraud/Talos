@@ -2166,7 +2166,6 @@ class TaskScheduler:
                         "update_document",
                         "edit_document",
                         "generate_image",
-                        "edit_image",
                     ]
                 ),
                 session_id=session_id,

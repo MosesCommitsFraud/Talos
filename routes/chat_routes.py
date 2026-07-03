@@ -705,7 +705,6 @@ def setup_chat_routes(
                 "manage_memory",
                 "list_models",
                 "generate_image",
-                "ui_control",
             }
             disabled_tools.update(_compare_strip)
             # Compare has a "pure chat" sub-type (the Chat/Image columns) whose
@@ -942,7 +941,6 @@ def setup_chat_routes(
                                     "doc_stream_delta",
                                     "doc_update",
                                     "doc_suggestions",
-                                    "ui_control",
                                     "rounds_exhausted",
                                     "ask_user",
                                     "plan_update",
