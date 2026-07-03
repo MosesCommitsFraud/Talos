@@ -226,7 +226,7 @@ function EditBox({ msg, onDone }: { msg: UiMessage; onDone: () => void }) {
     onDone();
   };
   return (
-    <div className="w-full rounded-2xl border border-ring bg-card p-3">
+    <div className="w-full rounded-md border border-ring bg-card p-3">
       <textarea
         autoFocus
         value={draft}

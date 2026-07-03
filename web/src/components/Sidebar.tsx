@@ -322,7 +322,7 @@ function AccountMenu({
       ) : (
         triggerNode
       )}
-      <MenuPopup side="top" align="start" sideOffset={6} className="w-60 rounded-md! p-1">
+      <MenuPopup side="top" align="start" sideOffset={6} className="w-60 p-1">
         <MenuLabel className="truncate px-2.5 pt-1 pb-0.5 text-xs text-foreground/70">{username}</MenuLabel>
         <MenuItem className={itemCls} onSelect={actions.onOpenSettings}>
           <SettingsIcon /> {t('sidebar.menu.settings')}
@@ -502,7 +502,7 @@ export function Sidebar({
               <HistoryIcon />
             </button>
             <div className="invisible absolute left-full top-0 z-40 pl-2 opacity-0 transition-opacity group-hover/recents:visible group-hover/recents:opacity-100">
-              <div className="flex max-h-[70vh] w-64 flex-col overflow-hidden rounded-xl border bg-popover shadow-[0_12px_32px_rgb(0_0_0/0.18)] dark:shadow-[0_12px_32px_rgb(0_0_0/0.5)]">
+              <div className="flex max-h-[70vh] w-64 flex-col overflow-hidden rounded-md border bg-popover shadow-[0_12px_32px_rgb(0_0_0/0.18)] dark:shadow-[0_12px_32px_rgb(0_0_0/0.5)]">
                 <div className="px-3 pt-2.5 pb-1 text-xs font-medium text-muted-foreground">{t('sidebar.recents')}</div>
                 <div className="min-h-0 flex-1 space-y-px overflow-y-auto px-1.5 pb-2">{chatList}</div>
               </div>

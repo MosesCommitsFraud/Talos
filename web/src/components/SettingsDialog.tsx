@@ -105,7 +105,7 @@ export function Section({ title, action, padded, children }: { title: string; ac
         </h2>
         {action && <div className="flex items-center">{action}</div>}
       </header>
-      <div className={cn('overflow-hidden rounded-2xl border bg-card text-card-foreground', padded && 'p-4 sm:p-5')}>
+      <div className={cn('overflow-hidden rounded-md border bg-card text-card-foreground', padded && 'p-4 sm:p-5')}>
         {children}
       </div>
     </section>
@@ -1136,7 +1136,7 @@ function ToolsPanel() {
         const enabledCount = items.filter((i) => i.enabled).length;
         const open = !!openCats[cat];
         return (
-          <div key={cat} className="overflow-hidden rounded-xl border bg-card">
+          <div key={cat} className="overflow-hidden rounded-md border bg-card">
             <div className="flex w-full items-center gap-2 px-3 py-2">
               <button
                 type="button"
@@ -1548,7 +1548,7 @@ function AssistantEditor({ initial, onDone, onCancel }: { initial: Partial<Assis
   };
 
   return (
-    <div className="space-y-3 rounded-xl border bg-card p-4">
+    <div className="space-y-3 rounded-md border bg-card p-4">
       <Row label={t('settings.assistants.enabled')}>
         <Switch checked={draft.is_enabled !== false} onCheckedChange={(v) => set('is_enabled', v)} />
       </Row>

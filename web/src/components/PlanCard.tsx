@@ -47,7 +47,7 @@ export function PlanCard({ msg }: { msg: UiMessage }) {
   const done = steps.filter((s) => s.done).length;
 
   return (
-    <div className="mt-3 rounded-xl border border-primary/30 bg-primary/[0.04]">
+    <div className="mt-3 rounded-md border border-primary/30 bg-primary/[0.04]">
       <div className="flex items-center gap-2 border-b border-primary/15 px-3 py-2 text-xs font-medium text-muted-foreground">
         <ListChecksIcon className="size-3.5 text-primary" />
         <span className="ml-auto tabular-nums">{t('plan.progress', { done, total: steps.length })}</span>

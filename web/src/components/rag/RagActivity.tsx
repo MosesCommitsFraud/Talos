@@ -127,7 +127,7 @@ export function RagActivity() {
         tabIndex={0}
         onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') fileInput.current?.click(); }}
         className={cn(
-          'flex shrink-0 cursor-pointer flex-col items-center justify-center gap-1.5 rounded-xl border-2 border-dashed px-4 py-6 text-center transition-colors',
+          'flex shrink-0 cursor-pointer flex-col items-center justify-center gap-1.5 rounded-md border-2 border-dashed px-4 py-6 text-center transition-colors',
           dragging ? 'border-primary bg-primary/5' : 'border-border hover:border-ring/60 hover:bg-accent/30',
         )}
       >

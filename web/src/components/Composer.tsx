@@ -345,7 +345,7 @@ export function Composer() {
   if (pendingPlan) {
     return (
       <div className="mx-auto w-full max-w-[800px] px-4 pb-4">
-        <div className="flex items-center gap-3 rounded-[20px] border border-primary/30 bg-primary/[0.05] px-4 py-3">
+        <div className="flex items-center gap-3 rounded-md border border-primary/30 bg-primary/[0.05] px-4 py-3">
           <button
             type="button"
             onClick={() => setPlanPanelOpen(true)}
@@ -372,7 +372,7 @@ export function Composer() {
           while dragging files anywhere over the chat column. */}
       {dragging && dropZone && createPortal(
         <div className="pointer-events-none absolute inset-0 z-50 flex items-center justify-center bg-background/70 backdrop-blur-[2px]">
-          <div className="flex flex-col items-center gap-3 rounded-2xl border-2 border-dashed border-primary/50 bg-card/90 px-12 py-9 shadow-lg">
+          <div className="flex flex-col items-center gap-3 rounded-md border-2 border-dashed border-primary/50 bg-card/90 px-12 py-9 shadow-lg">
             <PaperclipIcon className="size-7 text-primary" />
             <span className="text-base font-medium text-foreground">{t('composer.dropFiles')}</span>
           </div>
@@ -381,7 +381,7 @@ export function Composer() {
       )}
       <div
         className={cn(
-          'relative rounded-[20px] border border-border bg-card transition-colors duration-200 focus-within:border-ring/45',
+          'relative rounded-md border border-border bg-card transition-colors duration-200 focus-within:border-ring/45',
           dragging && 'border-primary/60 ring-2 ring-primary/30',
         )}
       >
