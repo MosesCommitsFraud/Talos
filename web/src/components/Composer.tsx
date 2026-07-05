@@ -9,7 +9,9 @@ import {
   FileTextIcon,
   LayersIcon,
   ListChecksIcon,
+  Loader2Icon,
   MessageSquareIcon,
+  MicIcon,
   PaperclipIcon,
   PencilRulerIcon,
   PlayIcon,
@@ -24,6 +26,7 @@ import { selectPendingPlan, useChat } from '@/state/chat';
 import { usePrefs, type ChatMode } from '@/state/prefs';
 import { useUi } from '@/state/ui';
 import { cn } from '@/lib/utils';
+import { useDictation } from '@/lib/useDictation';
 import { ContextMeter } from './ContextMeter';
 import { ModelPicker } from './ModelPicker';
 import { Button } from './ui/button';
@@ -242,6 +245,47 @@ export function Composer() {
   const setPlanPanelOpen = useUi((s) => s.setPlanPanelOpen);
   const prefs = usePrefs();
   const queryClient = useQueryClient();
+  const { data: caps } = useQuery({ queryKey: ['capabilities'], queryFn: fetchCapabilities, staleTime: 60_000 });
+
+  // Voice dictation (Claude-style): while recording, the live transcript is
+  // shown italic in place of the textarea; the first Enter confirms it into
+  // the (editable) input, the second Enter sends. Escape discards the clip.
+  const dictation = useDictation(
+    (spoken) => {
+      setText((prev) => (prev.trim() ? prev.replace(/\s+$/, '') + ' ' : '') + spoken);
+    },
+    { streaming: caps?.voice_streaming },
+  );
+  const dictating = dictation.status !== 'idle';
+  // Refocus once the textarea is visible again (it's hidden while dictating —
+  // focusing it from the onFinal callback would silently fail), so the second
+  // Enter submits.
+  const wasDictating = useRef(false);
+  useEffect(() => {
+    if (wasDictating.current && !dictating) {
+      autoresize();
+      textarea.current?.focus();
+      const el = textarea.current;
+      el?.setSelectionRange(el.value.length, el.value.length);
+    }
+    wasDictating.current = dictating;
+  });
+  useEffect(() => {
+    if (!dictating) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        if (dictation.status === 'recording') dictation.confirm();
+        // While finalizing, Enter is swallowed so a fast double-Enter can't
+        // send before the transcript has landed in the input.
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        dictation.cancel();
+      }
+    };
+    document.addEventListener('keydown', onKey, true);
+    return () => document.removeEventListener('keydown', onKey, true);
+  }, [dictating, dictation]);
 
   const autoresize = () => {
     const el = textarea.current;
@@ -332,7 +376,7 @@ export function Composer() {
     void queryClient.refetchQueries({ queryKey: ['sessions'], type: 'active' });
   };
 
-  const canSend = (text.trim().length > 0 || pending.length > 0) && !uploading;
+  const canSend = (text.trim().length > 0 || pending.length > 0) && !uploading && !dictating;
 
   const acceptPlan = async () => {
     if (!pendingPlan) return;
@@ -408,7 +452,23 @@ export function Composer() {
         )}
 
         <div className="flex items-start px-4 pt-3.5">
+          {dictating && (
+            <div
+              aria-live="polite"
+              className="max-h-[200px] min-h-[26px] w-full overflow-y-auto text-[15px] leading-relaxed break-words whitespace-pre-wrap"
+            >
+              {text.trim() && <span>{text.replace(/\s+$/, '')} </span>}
+              <span className="text-muted-foreground italic">
+                {dictation.interim ||
+                  (dictation.status === 'finalizing'
+                    ? t('composer.transcribing')
+                    : t('composer.listening'))}
+              </span>
+              <span className="ml-0.5 inline-block h-[1em] w-[2px] translate-y-[0.15em] animate-pulse rounded-full bg-muted-foreground/70" />
+            </div>
+          )}
           <textarea
+            hidden={dictating}
             ref={textarea}
             data-composer-input
             value={text}
@@ -480,6 +540,43 @@ export function Composer() {
           <div className="flex shrink-0 flex-nowrap items-center justify-end gap-2">
             {prefs.visibility.contextMeter && <ContextMeter />}
 
+            {caps?.voice && (
+              <Tooltip
+                label={
+                  dictation.status === 'recording'
+                    ? t('composer.dictateStop')
+                    : t('composer.dictate')
+                }
+                side="top"
+              >
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (dictation.status === 'recording') dictation.confirm();
+                    else if (dictation.status === 'idle') void dictation.start();
+                  }}
+                  disabled={dictation.status === 'finalizing'}
+                  aria-label={
+                    dictation.status === 'recording'
+                      ? t('composer.dictateStop')
+                      : t('composer.dictate')
+                  }
+                  className={cn(
+                    'flex size-8 shrink-0 items-center justify-center rounded-full border transition-colors [&_svg]:size-[18px]',
+                    dictation.status === 'recording'
+                      ? 'animate-pulse border-red-500/50 bg-red-500/10 text-red-500 hover:bg-red-500/20'
+                      : 'border-border text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-50',
+                  )}
+                >
+                  {dictation.status === 'finalizing' ? (
+                    <Loader2Icon className="animate-spin" />
+                  ) : (
+                    <MicIcon />
+                  )}
+                </button>
+              </Tooltip>
+            )}
+
             {streaming ? (
               <button
                 type="button"
@@ -513,6 +610,13 @@ export function Composer() {
           </div>
         </div>
       </div>
+      {dictation.error && !dictating && (
+        <p className="mt-1 text-center text-[11px] leading-tight text-red-500">
+          {dictation.error === 'mic-denied'
+            ? t('composer.micDenied')
+            : t('composer.dictationFailed')}
+        </p>
+      )}
       {hasMessages && (
         <p
           className={cn(

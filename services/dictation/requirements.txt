@@ -1,0 +1,6 @@
+# dictation sidecar — streaming STT for the composer's voice input.
+fastapi>=0.115
+uvicorn[standard]>=0.30
+# RealtimeSTT drives the two-tier (realtime + final) faster-whisper setup and
+# the VAD. It pulls in faster-whisper, silero/webrtc VAD and torch(+cuda).
+RealtimeSTT>=1.0

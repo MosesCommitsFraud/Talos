@@ -21,3 +21,4 @@ hover on recent chat is limited to inside the sidebar needs limit aswell
 search expand on rag explorer
 rag explorer needs more keywords and example questions
 when sth has a lot of images in rag how do i get the ai to just show the important ones -> vlm
+scrolling title in the sidebar

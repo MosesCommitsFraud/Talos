@@ -45,7 +45,14 @@ def setup_capabilities_routes():
 
     @router.get("/capabilities")
     def capabilities(request: Request):
+        from routes.voice_routes import voice_configured, voice_streaming_configured
+
         get_current_user(request)  # ensures auth context; value unused
-        return {"rag": _rag_configured(), "sql": _sql_configured()}
+        return {
+            "rag": _rag_configured(),
+            "sql": _sql_configured(),
+            "voice": voice_configured(),
+            "voice_streaming": voice_streaming_configured(),
+        }
 
     return router

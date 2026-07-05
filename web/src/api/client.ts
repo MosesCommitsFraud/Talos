@@ -343,7 +343,30 @@ export interface RagConfig {
   vlm_model?: string;
 }
 /** Which knowledge sources are configured — drives the composer's mode control. */
-export const fetchCapabilities = () => getJSON<{ rag: boolean; sql: boolean }>('/api/capabilities');
+export const fetchCapabilities = () =>
+  getJSON<{ rag: boolean; sql: boolean; voice: boolean; voice_streaming: boolean }>(
+    '/api/capabilities',
+  );
+
+/** Send a dictation clip to the backend ASR proxy; returns the transcript. */
+export async function transcribeVoice(blob: Blob, signal?: AbortSignal): Promise<string> {
+  const ext = blob.type.includes('ogg') ? 'ogg' : blob.type.includes('mp4') ? 'mp4' : 'webm';
+  const fd = new FormData();
+  fd.append('file', blob, `dictation.${ext}`);
+  const res = await fetch('/api/voice/transcribe', {
+    method: 'POST',
+    body: fd,
+    credentials: 'same-origin',
+    signal,
+  });
+  if (res.status === 401) {
+    notifyUnauthenticated();
+    throw new Error('Not authenticated');
+  }
+  if (!res.ok) throw new Error(`Transcription failed: HTTP ${res.status}`);
+  const data = (await res.json()) as { text?: string };
+  return (data.text ?? '').trim();
+}
 
 export const fetchRagConfig = () => getJSON<RagConfig>('/api/rag/config');
 

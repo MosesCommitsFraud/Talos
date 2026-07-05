@@ -150,6 +150,12 @@ const en = {
     },
     stop: 'Stop generating',
     send: 'Send message',
+    dictate: 'Dictate (voice input)',
+    dictateStop: 'Done — insert text (Enter)',
+    listening: 'Listening…',
+    transcribing: 'Transcribing…',
+    micDenied: 'Microphone access was denied — allow it in your browser to dictate.',
+    dictationFailed: 'Transcription failed — please try again.',
   },
   lightbox: {
     title: 'Image',

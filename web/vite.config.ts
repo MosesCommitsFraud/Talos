@@ -16,7 +16,8 @@ export default defineConfig({
   server: {
     port: 5180,
     proxy: {
-      '/api': { target: proxyTarget, changeOrigin: true },
+      // ws:true forwards WebSocket upgrades (voice dictation /api/voice/stream).
+      '/api': { target: proxyTarget, changeOrigin: true, ws: true },
       // Legacy assets the new UI still references (self-hosted fonts).
       '/static': { target: proxyTarget, changeOrigin: true },
       '/login': { target: proxyTarget, changeOrigin: true },

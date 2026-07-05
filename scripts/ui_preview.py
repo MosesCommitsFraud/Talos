@@ -661,8 +661,9 @@ class PreviewHandler(BaseHTTPRequestHandler):
             return
         if path == "/api/capabilities":
             # Pretend both knowledge sources are configured so the composer
-            # renders the full RAG + SQL mode dropdown in the preview.
-            self._send_json({"rag": True, "sql": True})
+            # renders the full RAG + SQL mode dropdown in the preview, and
+            # voice so the mic button shows (streaming needs a real sidecar).
+            self._send_json({"rag": True, "sql": True, "voice": True, "voice_streaming": False})
             return
         if path == "/api/sql/config":
             self._send_json(
@@ -885,6 +886,11 @@ class PreviewHandler(BaseHTTPRequestHandler):
 
         if path == "/api/session":
             self._send_json(_sessions()[0])
+            return
+        if path == "/api/voice/transcribe":
+            # Canned dictation result so the composer's voice flow (italic
+            # interim → Enter confirms → Enter sends) is testable offline.
+            self._send_json({"text": "Hallo Welt, das ist ein Diktat-Test."})
             return
         if path == "/api/chat_stream":
             message = fields.get("message", [""])[0]

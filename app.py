@@ -711,6 +711,11 @@ from routes.capabilities_routes import setup_capabilities_routes
 
 app.include_router(setup_capabilities_routes())
 
+# Voice dictation (mic → ASR endpoint proxy)
+from routes.voice_routes import setup_voice_routes
+
+app.include_router(setup_voice_routes())
+
 # Backup (export/import user data)
 from routes.backup_routes import setup_backup_routes
 

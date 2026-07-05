@@ -152,6 +152,12 @@ const de: typeof en = {
     },
     stop: 'Generierung stoppen',
     send: 'Nachricht senden',
+    dictate: 'Diktieren (Spracheingabe)',
+    dictateStop: 'Fertig — Text einfügen (Enter)',
+    listening: 'Höre zu…',
+    transcribing: 'Transkribiere…',
+    micDenied: 'Mikrofonzugriff wurde verweigert — im Browser erlauben, um zu diktieren.',
+    dictationFailed: 'Transkription fehlgeschlagen — bitte erneut versuchen.',
   },
   lightbox: {
     title: 'Bild',
