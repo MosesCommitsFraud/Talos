@@ -315,6 +315,10 @@ export interface RagConfig {
   video_asr_language?: string;
   video_asr_prompt?: string;
   video_asr_correct_enabled?: boolean;
+  /** Advanced — opt-in video keyframe lane: index what's shown on screen (off by default). */
+  video_frames_enabled?: boolean;
+  video_frames_interval_sec?: number;
+  video_frames_max?: number;
   /** Advanced — opt-in pixel image embedding lane (off by default). */
   image_pixel_enabled?: boolean;
   image_embed_url?: string;
@@ -484,6 +488,9 @@ export interface RagJob {
    *  bar advances during a single large document instead of jumping 0%→done. */
   sub_done?: number;
   sub_total?: number;
+  /** Which sub-step is running (e.g. 'asr', 'frames_vlm') — i18n key suffix
+   *  for a label next to the sub-progress numbers. */
+  stage?: string;
   current_file: string;
   message: string;
   errors: { file: string; error: string }[];

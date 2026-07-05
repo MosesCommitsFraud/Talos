@@ -118,3 +118,76 @@ def test_store_failure_returns_results_unchanged():
     r._store = None  # filter_documents raises → best-effort no-op
     hits = [_hit(page=1)]
     assert r._attach_companion_figures(hits) == hits
+
+
+# ── Video keyframes: time-window companions ──
+
+
+def _keyframe(n, start, source="/u/training.mp4"):
+    return _Doc(
+        f"kf{n}",
+        f"screen {n}",
+        {
+            "modality": "figure",
+            "figure_kind": "keyframe",
+            "source": source,
+            "start": float(start),
+            "end": float(start) + 8.0,
+            "image_url": f"/api/personal/rag-asset?source=kf{n}.png",
+        },
+    )
+
+
+def _video_hit(start, end, source="/u/training.mp4", score=0.8):
+    return {
+        "id": "vhit",
+        "document": "transcript",
+        "metadata": {"source": source, "modality": "video", "start": start, "end": end},
+        "similarity": score,
+        "rerank_score": score,
+    }
+
+
+def test_video_hit_attaches_keyframes_in_time_window():
+    # Even with many keyframes (which would trip the unanchored flood guard),
+    # a timed hit attaches the ones near its window and skips distant ones.
+    rag = _rag([_keyframe(i, start=i * 30) for i in range(20)])  # 0..570s
+    out = rag._attach_companion_figures([_video_hit(start=100, end=130)])
+    attached = [r for r in out if r.get("search_type") == "figure_companion"]
+    assert 1 <= len(attached) <= rv.VectorRAG._COMPANION_FIGURES_MAX
+    win = rv.VectorRAG._COMPANION_TIME_WINDOW_SEC
+    for r in attached:
+        assert 100 - win <= r["metadata"]["start"] <= 130 + win
+    # Nearest-first: the closest keyframe to the segment start comes first.
+    assert attached[0]["metadata"]["start"] == 90.0
+
+
+def test_video_hit_skips_keyframes_outside_window():
+    rag = _rag([_keyframe(1, start=400)])
+    out = rag._attach_companion_figures([_video_hit(start=100, end=130)])
+    assert len(out) == 1  # 400s is far outside the ±window
+
+
+def test_citation_media_keeps_image_branch_for_keyframes():
+    """Regression: a keyframe figure whose *source* is an .mp4 must surface its
+    image preview, not be misrouted to the assetless-video branch."""
+    import importlib
+
+    cp = importlib.import_module("src.chat_processor")
+
+    kf_meta = {
+        "modality": "figure",
+        "source": "/u/training.mp4",
+        "filename": "training.mp4",
+        "start": 90.0,
+        "end": 98.0,
+        "image_url": "/api/personal/rag-asset?source=kf1.png",
+        "image_caption": "[at 1:30] Freigabe dialog",
+    }
+    media = cp._citation_media(kf_meta)
+    assert media["modality"] == "image"
+    assert media["image_url"].endswith("kf1.png")
+
+    # Plain ASR transcript chunks still take the video branch.
+    asr_meta = {"modality": "video", "source": "/u/training.mp4", "start": 10.0, "end": 20.0}
+    assert cp._citation_media(asr_meta)["modality"] == "video"

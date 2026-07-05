@@ -117,6 +117,9 @@ def _apply_snapshot(snap: Optional[Dict[str, Any]]) -> None:
     os.environ["RAG_AUTO_KEYWORDS_N"] = str(int(snap.get("auto_keywords_n") or 0))
     os.environ["RAG_AUTO_QUESTIONS_N"] = str(int(snap.get("auto_questions_n") or 0))
     os.environ["PDF_VLM_ENABLED"] = "true" if snap.get("pdf_vlm_enabled") else ""
+    os.environ["VIDEO_FRAMES_ENABLED"] = "true" if snap.get("video_frames_enabled") else ""
+    os.environ["VIDEO_FRAMES_INTERVAL_SEC"] = str(int(snap.get("video_frames_interval_sec") or 8))
+    os.environ["VIDEO_FRAMES_MAX"] = str(int(snap.get("video_frames_max") or 300))
 
 
 def _fresh_rag():
@@ -157,6 +160,9 @@ def _progress_saver(job):
                 # so the queue advances during a single large document.
                 "sub_done": int(info.get("sub_done") or 0),
                 "sub_total": int(info.get("sub_total") or 0),
+                # Which sub-step is running (asr / frames_* / ...), so the UI
+                # can label the sub-progress instead of showing bare numbers.
+                "stage": str(info.get("stage") or ""),
                 "current_file": info.get("file", ""),
                 "errors": (info.get("errors") or [])[-10:],
                 "message": "Indexing",
@@ -190,6 +196,7 @@ def _finalize(job, result: Dict[str, Any]) -> None:
             "total_count": total,
             "sub_done": 0,
             "sub_total": 0,
+            "stage": "",
             "current_file": "",
             "errors": errors,
             "message": message,
@@ -309,6 +316,11 @@ def _job_to_dict(job) -> Dict[str, Any]:
         # ingest has no upfront total → the UI shows an indeterminate state).
         "processed_count": int(meta.get("processed_count") or 0),
         "total_count": int(meta.get("total_count") or meta.get("file_count") or 0),
+        # Sub-progress within the current file + which sub-step is running
+        # (asr / frames_* / ...), so long single-file ingests show movement.
+        "sub_done": int(meta.get("sub_done") or 0),
+        "sub_total": int(meta.get("sub_total") or 0),
+        "stage": meta.get("stage", ""),
         "current_file": meta.get("current_file", ""),
         "message": message,
         "errors": meta.get("errors", []),

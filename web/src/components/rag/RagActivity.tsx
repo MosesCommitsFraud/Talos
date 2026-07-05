@@ -188,7 +188,11 @@ export function RagActivity() {
                   <div className="mt-1 flex items-center gap-2 text-[10px] text-muted-foreground tabular-nums">
                     {total > 0 && <span>{t('rag.filesProgress', { done: j.processed_count ?? 0, total })}</span>}
                     {(j.sub_total ?? 0) > 0 && !TERMINAL.includes(j.status) && (
-                      <span>{t('rag.subProgress', { done: j.sub_done ?? 0, total: j.sub_total })}</span>
+                      <span>
+                        {j.stage
+                          ? t(`rag.stage.${j.stage}`, { done: j.sub_done ?? 0, total: j.sub_total })
+                          : t('rag.subProgress', { done: j.sub_done ?? 0, total: j.sub_total })}
+                      </span>
                     )}
                     {j.indexed_count > 0 && <span>{t('settings.rag.chunksIndexed', { n: j.indexed_count })}</span>}
                     {j.failed_count > 0 && <span className="text-destructive-foreground">{t('settings.rag.failedN', { n: j.failed_count })}</span>}

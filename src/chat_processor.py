@@ -62,7 +62,10 @@ def _citation_media(meta: Dict[str, Any]) -> Dict[str, Any]:
     modality = meta.get("modality")
     ftype = (meta.get("type") or os.path.splitext(meta.get("filename") or "")[1] or "").lower()
     source = meta.get("source") or ""
-    if modality == "video" or ftype in _AV_EXTS:
+    # A chunk with its own image asset (e.g. a video keyframe) is a picture
+    # first, even when its source file is an .mp4 — only assetless AV chunks
+    # take the video branch.
+    if modality == "video" or (not meta.get("image_url") and ftype in _AV_EXTS):
         out["modality"] = "video"
         for key in ("start", "end", "deeplink", "video_url"):
             if meta.get(key) is not None and meta.get(key) != "":

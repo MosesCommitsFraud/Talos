@@ -1321,6 +1321,15 @@ export function RagPanel() {
               <Row label={t('settings.rag.asrCorrect')} hint={t('settings.rag.hint.asrCorrect')}>
                 <Switch checked={!!draft.video_asr_correct_enabled} onCheckedChange={(v) => set('video_asr_correct_enabled', v)} />
               </Row>
+              <Row label={t('settings.rag.videoFramesEnabled')} hint={t('settings.rag.hint.videoFramesEnabled')}>
+                <Switch checked={!!draft.video_frames_enabled} onCheckedChange={(v) => set('video_frames_enabled', v)} />
+              </Row>
+              {draft.video_frames_enabled && (
+                <>
+                  {field('video_frames_interval_sec', t('settings.rag.videoFramesInterval'), { type: 'number', hint: t('settings.rag.hint.videoFramesInterval'), def: 8 })}
+                  {field('video_frames_max', t('settings.rag.videoFramesMax'), { type: 'number', hint: t('settings.rag.hint.videoFramesMax'), def: 300 })}
+                </>
+              )}
             </>
           )}
         </Section>

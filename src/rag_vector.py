@@ -177,6 +177,10 @@ _AV_EXTS: Set[str] = {
     ".ogg",
 }
 
+# The subset of ``_AV_EXTS`` that actually has a video track — only these are
+# eligible for the opt-in keyframe lane (see ``_keyframes_active``).
+_VIDEO_EXTS: Set[str] = {".mp4", ".mov", ".mkv", ".webm", ".avi", ".m4v"}
+
 
 def _asr_active() -> bool:
     """True only when the ASR lane is explicitly enabled *and* an endpoint is set.
@@ -187,6 +191,16 @@ def _asr_active() -> bool:
     """
     return bool(os.getenv("VIDEO_ASR_ENABLED", "").strip()) and bool(
         os.getenv("VIDEO_ASR_URL", "").strip()
+    )
+
+
+def _keyframes_active() -> bool:
+    """True when the video keyframe lane is enabled *and* a vision model is set.
+
+    Runs inside the AV lane, so it only ever fires for files that already
+    passed the ASR gating. Off by default — adds VLM calls per video."""
+    return bool(os.getenv("VIDEO_FRAMES_ENABLED", "").strip()) and bool(
+        os.getenv("VLM_URL", "").strip()
     )
 
 
@@ -615,6 +629,9 @@ def _apply_saved_rag_config() -> None:
     os.environ["EXPAND_TO_PARENT_ENABLED"] = "true" if cfg.get("expand_to_parent_enabled") else ""
     os.environ["RAG_PARENT_MAX_CHARS"] = str(int(cfg.get("parent_max_chars") or 0))
     os.environ["PDF_VLM_ENABLED"] = "true" if cfg.get("pdf_vlm_enabled") else ""
+    os.environ["VIDEO_FRAMES_ENABLED"] = "true" if cfg.get("video_frames_enabled") else ""
+    os.environ["VIDEO_FRAMES_INTERVAL_SEC"] = str(int(cfg.get("video_frames_interval_sec") or 8))
+    os.environ["VIDEO_FRAMES_MAX"] = str(int(cfg.get("video_frames_max") or 300))
 
 
 def _embed_base_url() -> str:
@@ -939,6 +956,9 @@ class VectorRAG:
     # Cap on figures attached per search — keeps companions from crowding the
     # text context on figure-heavy documents.
     _COMPANION_FIGURES_MAX = 4
+    # How far (seconds) a video keyframe may sit outside a transcript hit's
+    # time window and still ride along as its companion.
+    _COMPANION_TIME_WINDOW_SEC = 120.0
 
     @staticmethod
     def _chunk_page(meta: Dict[str, Any]) -> Optional[int]:
@@ -1000,8 +1020,21 @@ class VectorRAG:
                     by_source[source] = self._figures_for_source(source)
                 figs = by_source[source]
                 page = self._chunk_page(meta)
+                start, end = meta.get("start"), meta.get("end")
                 if page is not None:
                     figs = [f for f in figs if self._chunk_page(f.meta or {}) == page]
+                elif isinstance(start, (int, float)) and isinstance(end, (int, float)):
+                    # Video hit: keyframes near the segment's time window,
+                    # nearest first — a keyframe-rich video would otherwise be
+                    # skipped entirely by the flood guard below.
+                    win = self._COMPANION_TIME_WINDOW_SEC
+                    figs = [
+                        f
+                        for f in figs
+                        if isinstance((f.meta or {}).get("start"), (int, float))
+                        and (start - win) <= f.meta["start"] <= (end + win)
+                    ]
+                    figs.sort(key=lambda f: abs(f.meta["start"] - start))
                 elif len(figs) > self._COMPANION_FIGURES_MAX:
                     continue
                 for f in figs:
@@ -1408,6 +1441,23 @@ class VectorRAG:
         "screenshots, charts, diagrams or UI explain what they show and the data "
         "they contain. Ignore logos and watermarks. Output only the description."
     )
+    _VLM_REGION_PROMPT = (
+        "This frame is from a screen-recording of an online training session. It "
+        "may contain webcam/participant video tiles, sidebars or chat panels "
+        "around a shared desktop/application/slide area. Return ONLY a JSON "
+        'object with the bounding box of the shared screen content, excluding '
+        'all webcam tiles and panels, as {"x1":..,"y1":..,"x2":..,"y2":..} with '
+        "coordinates normalized to 0-1000. If the whole frame is shared screen "
+        "content, return the full frame box."
+    )
+    _VLM_FRAME_PROMPT = (
+        "This is a keyframe of the shared screen from a training video. "
+        "Transcribe all visible on-screen text verbatim - window titles, menu "
+        "items, button labels, form fields, code, slide text. Then add one or "
+        "two sentences describing what is shown (which application, dialog or "
+        "slide, and what action or state is visible). Output only the "
+        "transcription and description."
+    )
 
     def _vlm_transcribe_image(self, b64_png: str, prompt: Optional[str] = None) -> str:
         """Ask the vision model to transcribe/describe one image (Markdown).
@@ -1453,6 +1503,35 @@ class VectorRAG:
         # With thinking off the transcript is in ``content``; fall back to
         # ``reasoning`` only if a build still routed it there.
         return (msg.get("content") or msg.get("reasoning") or "").strip()
+
+    def _vlm_detect_region(self, img) -> Optional[Tuple[float, float, float, float]]:
+        """Ask the vision model for the shared-desktop bounding box of a frame.
+
+        Returns a normalized ``(x1, y1, x2, y2)`` in [0, 1], or None when the
+        answer isn't a usable box (no JSON, degenerate, or under 30% of the
+        frame — a "desktop" that small is a misdetection, not a screen share).
+        """
+        import base64
+        import io
+        import json
+
+        buf = io.BytesIO()
+        img.save(buf, format="PNG")
+        text = self._vlm_transcribe_image(
+            base64.b64encode(buf.getvalue()).decode(), prompt=self._VLM_REGION_PROMPT
+        )
+        m = re.search(r"\{[^{}]*\}", text or "")
+        if not m:
+            return None
+        try:
+            data = json.loads(m.group(0))
+            vals = [float(data[k]) for k in ("x1", "y1", "x2", "y2")]
+        except Exception:
+            return None
+        x1, y1, x2, y2 = [min(1000.0, max(0.0, v)) / 1000.0 for v in vals]
+        if x2 <= x1 or y2 <= y1 or (x2 - x1) * (y2 - y1) < 0.30:
+            return None
+        return (x1, y1, x2, y2)
 
     def _lane_pdf_vlm(self, path: str, meta: Dict[str, Any], stage_cb=None):
         """RagFlow-style *selective* vision for PDFs.
@@ -1593,6 +1672,14 @@ class VectorRAG:
         from core.constants import BASE_DIR
 
         d = os.path.join(BASE_DIR, "data", "personal_uploads", "_pdf_figures")
+        os.makedirs(d, exist_ok=True)
+        return d
+
+    def _video_frames_dir(self) -> str:
+        """Directory for video keyframe crops; same confinement as figures."""
+        from core.constants import BASE_DIR
+
+        d = os.path.join(BASE_DIR, "data", "personal_uploads", "_video_frames")
         os.makedirs(d, exist_ok=True)
         return d
 
@@ -2008,6 +2095,122 @@ class VectorRAG:
             logger.warning("asr correction failed: %s", e)
             return text
 
+    def _extract_video_keyframes(self, path: str, meta: Dict[str, Any], stage_cb=None):
+        """Screen keyframes → one ``modality='figure'`` Document per frame.
+
+        Opt-in second pass of the AV lane (see ``_keyframes_active``): samples
+        the video, crops every frame to the VLM-detected shared-desktop region
+        (webcam tiles are cut away before anything reaches disk), captions the
+        kept keyframes with the vision model and stores each crop as a servable
+        asset — the same shape as the PDF figure lane, so companion attachment
+        and inline embedding in chat work unchanged. Timestamps ride in
+        ``start``/``end`` and in the caption. Best-effort: returns [].
+        """
+        if os.path.splitext(path)[1].lower() not in _VIDEO_EXTS:
+            return []  # plain audio has no frames
+
+        import base64
+        import hashlib
+        import io
+        from urllib.parse import quote
+
+        from src.video_frames import extract_keyframes
+
+        def _cb(stage: str, done: int, total: int) -> None:
+            if not stage_cb:
+                return
+            try:
+                stage_cb(done, total, stage=stage)
+            except TypeError:
+                stage_cb(done, total)
+
+        try:
+            interval = int(os.getenv("VIDEO_FRAMES_INTERVAL_SEC", "8") or 8)
+        except Exception:
+            interval = 8
+        try:
+            max_frames = int(os.getenv("VIDEO_FRAMES_MAX", "300") or 300)
+        except Exception:
+            max_frames = 300
+
+        try:
+            frames = extract_keyframes(
+                path,
+                detect_region=self._vlm_detect_region,
+                interval_sec=interval,
+                max_frames=max_frames,
+                progress=_cb,
+            )
+        except Exception as e:
+            logger.warning("video-frames: extraction failed for %s: %s", path, e)
+            return []
+        if not frames:
+            return []
+
+        figdir = self._video_frames_dir()
+        stem = re.sub(r"[^A-Za-z0-9_.-]", "_", Path(path).stem)[:60]
+        seen: Set[str] = set()
+        items: List[Dict[str, Any]] = []
+        for ts, img in frames:
+            buf = io.BytesIO()
+            img.save(buf, format="PNG")
+            raw = buf.getvalue()
+            digest = hashlib.sha1(raw).hexdigest()[:16]
+            if digest in seen:
+                continue
+            seen.add(digest)
+            asset_path = os.path.join(figdir, f"{stem}-{digest}.png")
+            try:
+                if not os.path.exists(asset_path):
+                    with open(asset_path, "wb") as fh:
+                        fh.write(raw)
+            except OSError as e:
+                logger.warning("video-frames: cannot write %s: %s", asset_path, e)
+                continue
+            items.append(
+                {
+                    "b64": base64.b64encode(raw).decode(),
+                    "asset_path": asset_path,
+                    "ts": float(ts),
+                }
+            )
+        if not items:
+            return []
+
+        total = len(items)
+        captions = _concurrent_map(
+            lambda b64: self._vlm_transcribe_image(b64, prompt=self._VLM_FRAME_PROMPT),
+            [c["b64"] for c in items],
+            _vlm_concurrency(),
+            on_done=lambda c: _cb("frames_vlm", c, total),
+        )
+
+        from haystack.dataclasses import Document
+
+        base = meta.get("video_url") or meta.get("url")
+        fname = os.path.basename(path)
+        out: List[Any] = []
+        for i, c in enumerate(items):
+            ts = c["ts"]
+            mm, ss = int(ts // 60), int(ts % 60)
+            caption = (captions[i] or "").strip()
+            content = caption or f"Screen at {mm}:{ss:02d} in {fname}"
+            kf_meta: Dict[str, Any] = {
+                "modality": "figure",
+                "figure_kind": "keyframe",
+                "start": ts,
+                "end": ts + interval,
+                "image_url": "/api/personal/rag-asset?source="
+                + quote(c["asset_path"], safe=""),
+                "image_caption": f"[at {mm}:{ss:02d}] " + (caption or content),
+            }
+            if base:
+                sep = "&" if "?" in str(base) else "#"
+                kf_meta["deeplink"] = f"{base}{sep}t={int(ts)}"
+            out.append(Document(content=content, meta=kf_meta))
+        logger.info("video-frames: %s keyframe(s) for %s", len(out), fname)
+        return out
+
     def _lane_av(self, path: str, meta: Dict[str, Any], stage_cb=None):
         """Audio/video → ASR transcript, one Document per timed segment.
 
@@ -2042,7 +2245,13 @@ class VectorRAG:
                 conc = int(os.getenv("VIDEO_ASR_CONCURRENCY", "2") or 2)
             except Exception:
                 conc = 2
-            on_done = (lambda c: stage_cb(c, total)) if stage_cb else None
+            def _asr_done(c: int) -> None:
+                try:
+                    stage_cb(c, total, stage="asr")
+                except TypeError:
+                    stage_cb(c, total)
+
+            on_done = _asr_done if stage_cb else None
             results = _concurrent_map(
                 lambda item: (item[1], self._transcribe_audio_file(item[0], language)),
                 segments,
@@ -2094,6 +2303,26 @@ class VectorRAG:
             docs.append(Document(content=text, meta=seg_meta))
         if not docs:
             raise RuntimeError("ASR returned no transcript text")
+
+        # Keyframe lane: what was *shown* while each segment was spoken. The
+        # captions are fused into the transcript chunks (so text retrieval hits
+        # on-screen-only content) and the frames ride along as figure chunks.
+        # Best-effort — a keyframe failure never breaks the ASR ingest.
+        if _keyframes_active():
+            try:
+                kf_docs = self._extract_video_keyframes(path, meta, stage_cb=stage_cb)
+                for seg in docs:
+                    caps = [
+                        (k.meta.get("image_caption") or "")[:200]
+                        for k in kf_docs
+                        if seg.meta["start"] <= k.meta["start"] < seg.meta["end"]
+                    ][:2]
+                    caps = [c for c in caps if c]
+                    if caps:
+                        seg.content = (seg.content or "") + "\nOn screen: " + "; ".join(caps)
+                docs.extend(kf_docs)
+            except Exception as e:
+                logger.warning("video-frames: keyframe lane failed for %s: %s", path, e)
         logger.info(
             "asr: %s segment(s) → %s doc(s) for %s",
             len(segments),
@@ -2267,7 +2496,7 @@ class VectorRAG:
 
             # Per-page/per-image sub-progress for the slow VLM lanes, so the queue
             # advances within a single large file instead of jumping 0%→done.
-            def _stage(done: int, sub_total: int, _fp=fpath) -> None:
+            def _stage(done: int, sub_total: int, stage: str = "", _fp=fpath) -> None:
                 if progress_cb:
                     progress_cb(
                         {
@@ -2278,6 +2507,7 @@ class VectorRAG:
                             "total": total,
                             "sub_done": done,
                             "sub_total": sub_total,
+                            "stage": stage,
                             "errors": errors,
                         }
                     )
@@ -2361,7 +2591,7 @@ class VectorRAG:
                         if owner:
                             meta["owner"] = owner
 
-                        def _stage(done: int, sub_total: int, _fp=fpath) -> None:
+                        def _stage(done: int, sub_total: int, stage: str = "", _fp=fpath) -> None:
                             if progress_cb:
                                 progress_cb(
                                     {
@@ -2370,6 +2600,7 @@ class VectorRAG:
                                         "failed_count": failed,
                                         "sub_done": done,
                                         "sub_total": sub_total,
+                                        "stage": stage,
                                         "errors": errors,
                                     }
                                 )

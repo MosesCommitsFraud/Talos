@@ -38,6 +38,11 @@ class RagPipelineConfig(BaseModel):
     # Opt-in LLM cleanup of the ASR transcript (fixes English terms); uses the
     # ingest LLM endpoint (llm_url/llm_model).
     video_asr_correct_enabled: bool = False
+    # Opt-in video keyframe lane: crop to the VLM-detected shared-desktop
+    # region and index scene-change keyframes (needs vlm_url).
+    video_frames_enabled: bool = False
+    video_frames_interval_sec: int = 8
+    video_frames_max: int = 300
     # Advanced — opt-in pixel image embedding lane (off by default).
     image_pixel_enabled: bool = False
     image_embed_url: str = ""
