@@ -15,6 +15,7 @@ import {
   PaperclipIcon,
   PencilRulerIcon,
   PlayIcon,
+  PlusIcon,
   WrenchIcon,
   XIcon,
 } from 'lucide-react';
@@ -30,13 +31,8 @@ import { useDictation } from '@/lib/useDictation';
 import { ContextMeter } from './ContextMeter';
 import { ModelPicker } from './ModelPicker';
 import { Button } from './ui/button';
-import { Menu, MenuItem, MenuPopup, MenuTrigger } from './ui/menu';
+import { Menu, MenuItem, MenuLabel, MenuPopup, MenuTrigger } from './ui/menu';
 import { Tooltip } from './ui/misc';
-
-/** Thin vertical divider between footer mode controls (t3code separator). */
-function FooterSeparator() {
-  return <div aria-hidden="true" className="mx-0.5 hidden h-4 w-px shrink-0 bg-border sm:block" />;
-}
 
 /** t3code plan-toggle style: labeled ghost button, blue tint when active.
  *  Pass inactiveIcon/inactiveLabel to swap the face by state (Plan ↔ Work). */
@@ -148,69 +144,84 @@ function KnowledgeControl() {
   }, [caps, useRag, useDb, setKnowledge]);
 
   if (!caps || (!caps.rag && !caps.sql)) return null;
-  return (
-    <>
-      <FooterSeparator />
-      {caps.rag && caps.sql ? (
-        <ChatModeDropdown />
-      ) : caps.rag ? (
-        <ModeToggle
-          active={useRag}
-          onClick={() => setKnowledge(!useRag, false)}
-          icon={<BookOpenIcon />}
-          label={t('composer.rag')}
-          tooltip={t('composer.ragTooltip')}
-        />
-      ) : (
-        <ModeToggle
-          active={useDb}
-          onClick={() => setKnowledge(false, !useDb)}
-          icon={<DatabaseIcon />}
-          label={t('composer.sql')}
-          tooltip={t('composer.sqlTooltip')}
-        />
-      )}
-    </>
+  if (caps.rag && caps.sql) return <ChatModeDropdown />;
+  return caps.rag ? (
+    <ModeToggle
+      active={useRag}
+      onClick={() => setKnowledge(!useRag, false)}
+      icon={<BookOpenIcon />}
+      label={t('composer.rag')}
+      tooltip={t('composer.ragTooltip')}
+    />
+  ) : (
+    <ModeToggle
+      active={useDb}
+      onClick={() => setKnowledge(false, !useDb)}
+      icon={<DatabaseIcon />}
+      label={t('composer.sql')}
+      tooltip={t('composer.sqlTooltip')}
+    />
   );
 }
 
-type ReasoningOpt = { on: boolean; Icon: React.ComponentType<{ className?: string }>; label: string; desc: string };
-
-/** Reasoning on/off dropdown, styled like the knowledge mode picker. Drives
- *  the `reasoning` flag; when off the backend sends vLLM enable_thinking:false. */
-function ReasoningDropdown() {
+/** One-click reasoning switch: Thinking ↔ No Thinking. Drives the `reasoning`
+ *  flag; when off the backend sends vLLM enable_thinking:false. */
+function ThinkingToggle() {
   const { t } = useTranslation();
   const reasoning = usePrefs((s) => s.reasoning);
   const toggle = usePrefs((s) => s.toggle);
-  const opts: ReasoningOpt[] = [
-    { on: true, Icon: BrainIcon, label: t('composer.reasoning.on'), desc: t('composer.reasoning.onDesc') },
-    { on: false, Icon: LightbulbIcon, label: t('composer.reasoning.off'), desc: t('composer.reasoning.offDesc') },
-  ];
-  const active = opts.find((o) => o.on === reasoning) ?? opts[0];
   return (
-    <Menu>
+    <ModeToggle
+      active={reasoning}
+      onClick={() => toggle('reasoning')}
+      icon={<BrainIcon />}
+      label={t('composer.reasoning.on')}
+      inactiveIcon={<LightbulbIcon />}
+      inactiveLabel={t('composer.reasoning.off')}
+      tooltip={reasoning ? t('composer.reasoning.onDesc') : t('composer.reasoning.offDesc')}
+    />
+  );
+}
+
+/** Microphone picker beside the dictate button: enumerates audio inputs on
+ *  open (labels appear once mic permission has been granted) and persists the
+ *  choice; "System default" clears it. Takes effect on the next recording. */
+function MicDeviceMenu() {
+  const { t } = useTranslation();
+  const micDeviceId = usePrefs((s) => s.micDeviceId);
+  const setMicDeviceId = usePrefs((s) => s.setMicDeviceId);
+  const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
+  const loadDevices = () => {
+    navigator.mediaDevices
+      ?.enumerateDevices()
+      .then((list) => setDevices(list.filter((d) => d.kind === 'audioinput' && d.deviceId)))
+      .catch(() => setDevices([]));
+  };
+  return (
+    <Menu onOpenChange={(open) => { if (open) loadDevices(); }}>
       <MenuTrigger asChild>
         <button
           type="button"
-          aria-label={t('composer.reasoning.label')}
-          className="flex h-8 shrink-0 items-center gap-1.5 rounded-lg border border-transparent px-2 text-[13px] font-medium whitespace-nowrap text-muted-foreground/70 outline-none transition-colors hover:bg-accent hover:text-foreground/80 focus:outline-none focus-visible:outline-none sm:h-7 sm:px-2.5 [&_svg]:size-4 [&_svg]:shrink-0"
+          aria-label={t('composer.micSelect')}
+          className="flex h-8 w-5 shrink-0 items-center justify-center rounded-lg border border-transparent text-muted-foreground/70 outline-none transition-colors hover:bg-accent hover:text-foreground/80 focus:outline-none focus-visible:outline-none sm:h-7"
         >
-          <active.Icon />
-          <span className="sr-only sm:not-sr-only">{active.label}</span>
-          <ChevronDownIcon className="size-3 opacity-50" />
+          <ChevronDownIcon className="size-3.5" />
         </button>
       </MenuTrigger>
       <MenuPopup align="start">
-        {opts.map((o) => (
-          <MenuItem key={String(o.on)} onSelect={() => { if (o.on !== reasoning) toggle('reasoning'); }} className="min-w-64 py-2">
-            <div className="grid min-w-0 gap-0.5">
-              <span className="inline-flex items-center gap-1.5 font-medium text-foreground">
-                <o.Icon />
-                {o.label}
-                {o.on === reasoning && <CheckIcon className="size-3.5 text-blue-400" />}
-              </span>
-              <span className="text-xs leading-4 text-muted-foreground">{o.desc}</span>
-            </div>
+        <MenuLabel>{t('composer.micSelect')}</MenuLabel>
+        <MenuItem onSelect={() => setMicDeviceId(null)} className="gap-2">
+          <MicIcon />
+          <span className="min-w-0 flex-1 truncate">{t('composer.micDefault')}</span>
+          {micDeviceId === null && <CheckIcon className="size-3.5 shrink-0 text-blue-400" />}
+        </MenuItem>
+        {devices.map((d, i) => (
+          <MenuItem key={d.deviceId} onSelect={() => setMicDeviceId(d.deviceId)} className="gap-2">
+            <MicIcon />
+            <span className="min-w-0 max-w-56 flex-1 truncate">
+              {d.label || t('composer.micUnnamed', { n: i + 1 })}
+            </span>
+            {micDeviceId === d.deviceId && <CheckIcon className="size-3.5 shrink-0 text-blue-400" />}
           </MenuItem>
         ))}
       </MenuPopup>
@@ -232,16 +243,6 @@ export function Composer() {
   const stop = useChat((s) => s.stop);
   const cancelPlan = useChat((s) => s.cancelPlan);
   const pendingPlan = useChat(selectPendingPlan);
-  // The disclaimer only belongs under the docked (bottom) composer, not the
-  // centered empty-chat state. It fades in *after* the composer's slide-to-
-  // bottom (~500ms in App) has settled, so the reveal isn't lost in the motion.
-  const hasMessages = useChat((s) => s.messages.length > 0);
-  const [showDisclaimer, setShowDisclaimer] = useState(false);
-  useEffect(() => {
-    if (!hasMessages) { setShowDisclaimer(false); return; }
-    const id = window.setTimeout(() => setShowDisclaimer(true), 650);
-    return () => window.clearTimeout(id);
-  }, [hasMessages]);
   const setPlanPanelOpen = useUi((s) => s.setPlanPanelOpen);
   const prefs = usePrefs();
   const queryClient = useQueryClient();
@@ -254,7 +255,7 @@ export function Composer() {
     (spoken) => {
       setText((prev) => (prev.trim() ? prev.replace(/\s+$/, '') + ' ' : '') + spoken);
     },
-    { streaming: caps?.voice_streaming },
+    { streaming: caps?.voice_streaming, deviceId: prefs.micDeviceId },
   );
   const dictating = dictation.status !== 'idle';
   // Refocus once the textarea is visible again (it's hidden while dictating —
@@ -362,7 +363,7 @@ export function Composer() {
 
   const submit = async () => {
     const value = text.trim();
-    if ((!value && pending.length === 0) || streaming) return;
+    if ((!value && pending.length === 0) || streaming || uploading || dictating) return;
     const attachments = pending;
     setText('');
     setPending([]);
@@ -375,8 +376,6 @@ export function Composer() {
     });
     void queryClient.refetchQueries({ queryKey: ['sessions'], type: 'active' });
   };
-
-  const canSend = (text.trim().length > 0 || pending.length > 0) && !uploading && !dictating;
 
   const acceptPlan = async () => {
     if (!pendingPlan) return;
@@ -451,7 +450,7 @@ export function Composer() {
           </div>
         )}
 
-        <div className="flex items-start px-4 pt-3.5">
+        <div className="flex items-start px-4 py-3.5">
           {dictating && (
             <div
               aria-live="polite"
@@ -490,141 +489,124 @@ export function Composer() {
             className="max-h-[200px] min-h-[26px] w-full resize-none bg-transparent text-[15px] leading-relaxed outline-none placeholder:text-muted-foreground"
           />
         </div>
+      </div>
 
-        <div className="flex min-w-0 flex-nowrap items-center justify-between gap-2 px-2.5 pt-1.5 pb-2.5 sm:px-3 sm:pb-3">
-          <input
-            ref={fileInput}
-            type="file"
-            multiple
-            hidden
-            onChange={(e) => { if (e.target.files) void attach(e.target.files); e.target.value = ''; }}
-          />
+      {/* Control row — outside the input card, Claude Code style: knowledge/add/mic
+          on the left, model/thinking/context on the right. Enter sends; a stop
+          button appears at the far right only while a response is streaming. */}
+      <div className="mt-1.5 flex min-w-0 flex-nowrap items-center justify-between gap-2 px-1.5">
+        <input
+          ref={fileInput}
+          type="file"
+          multiple
+          hidden
+          onChange={(e) => { if (e.target.files) void attach(e.target.files); e.target.value = ''; }}
+        />
+
+        {/* Left cluster: knowledge mode · add · mic + device picker · plan */}
+        <div className="-m-1 flex min-w-0 flex-1 items-center gap-1 overflow-x-auto p-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          <KnowledgeControl />
 
           {prefs.visibility.composerAttach && (
-            <Tooltip label={t('composer.attachFiles')} side="top">
-              <button
-                type="button"
-                onClick={() => fileInput.current?.click()}
-                aria-label={t('composer.attachFiles')}
-                className="flex size-8 shrink-0 items-center justify-center rounded-full border border-border text-muted-foreground transition-colors hover:bg-accent hover:text-foreground [&_svg]:size-[18px]"
-              >
-                <PaperclipIcon className={uploading ? 'animate-pulse' : undefined} />
-              </button>
-            </Tooltip>
-          )}
-
-          <div className="-m-1 flex min-w-0 flex-1 items-center gap-1 overflow-x-auto p-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-            <ModelPicker visible={prefs.visibility.composerModelPicker} />
-
-            <KnowledgeControl />
-
-            <FooterSeparator />
-            <ReasoningDropdown />
-
-            {prefs.visibility.composerPlan && (
-              <>
-                <FooterSeparator />
-                <ModeToggle
-                  active={prefs.planMode}
-                  onClick={() => prefs.toggle('planMode')}
-                  icon={<PencilRulerIcon />}
-                  label={t('composer.plan')}
-                  inactiveIcon={<WrenchIcon />}
-                  inactiveLabel={t('composer.work')}
-                  tooltip={prefs.planMode ? t('composer.planTooltipActive') : t('composer.planTooltipInactive')}
-                />
-              </>
+              <Menu>
+                <MenuTrigger asChild>
+                  <button
+                    type="button"
+                    aria-label={t('composer.add')}
+                    className="flex size-8 shrink-0 items-center justify-center rounded-lg border border-transparent text-muted-foreground/70 outline-none transition-colors hover:bg-accent hover:text-foreground/80 focus:outline-none focus-visible:outline-none sm:size-7 [&_svg]:size-4"
+                  >
+                    <PlusIcon className={uploading ? 'animate-pulse' : undefined} />
+                  </button>
+                </MenuTrigger>
+                <MenuPopup align="start">
+                  <MenuItem onSelect={() => fileInput.current?.click()} className="gap-2">
+                    <PaperclipIcon />
+                    {t('composer.attachFiles')}
+                  </MenuItem>
+                </MenuPopup>
+              </Menu>
             )}
-          </div>
-
-          <div className="flex shrink-0 flex-nowrap items-center justify-end gap-2">
-            {prefs.visibility.contextMeter && <ContextMeter />}
 
             {caps?.voice && (
-              <Tooltip
-                label={
-                  dictation.status === 'recording'
-                    ? t('composer.dictateStop')
-                    : t('composer.dictate')
-                }
-                side="top"
-              >
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (dictation.status === 'recording') dictation.confirm();
-                    else if (dictation.status === 'idle') void dictation.start();
-                  }}
-                  disabled={dictation.status === 'finalizing'}
-                  aria-label={
+              <div className="flex shrink-0 items-center">
+                <Tooltip
+                  label={
                     dictation.status === 'recording'
                       ? t('composer.dictateStop')
                       : t('composer.dictate')
                   }
-                  className={cn(
-                    'flex size-8 shrink-0 items-center justify-center rounded-full border transition-colors [&_svg]:size-[18px]',
-                    dictation.status === 'recording'
-                      ? 'animate-pulse border-red-500/50 bg-red-500/10 text-red-500 hover:bg-red-500/20'
-                      : 'border-border text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-50',
-                  )}
+                  side="top"
                 >
-                  {dictation.status === 'finalizing' ? (
-                    <Loader2Icon className="animate-spin" />
-                  ) : (
-                    <MicIcon />
-                  )}
-                </button>
-              </Tooltip>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (dictation.status === 'recording') dictation.confirm();
+                      else if (dictation.status === 'idle') void dictation.start();
+                    }}
+                    disabled={dictation.status === 'finalizing'}
+                    aria-label={
+                      dictation.status === 'recording'
+                        ? t('composer.dictateStop')
+                        : t('composer.dictate')
+                    }
+                    className={cn(
+                      'flex size-8 shrink-0 items-center justify-center rounded-lg border border-transparent transition-colors sm:size-7 [&_svg]:size-4',
+                      dictation.status === 'recording'
+                        ? 'animate-pulse bg-red-500/10 text-red-500 hover:bg-red-500/20'
+                        : 'text-muted-foreground/70 hover:bg-accent hover:text-foreground/80 disabled:opacity-50',
+                    )}
+                  >
+                    {dictation.status === 'finalizing' ? (
+                      <Loader2Icon className="animate-spin" />
+                    ) : (
+                      <MicIcon />
+                    )}
+                  </button>
+                </Tooltip>
+                <MicDeviceMenu />
+              </div>
             )}
 
-            {streaming ? (
+            {prefs.visibility.composerPlan && (
+              <ModeToggle
+                active={prefs.planMode}
+                onClick={() => prefs.toggle('planMode')}
+                icon={<PencilRulerIcon />}
+                label={t('composer.plan')}
+                inactiveIcon={<WrenchIcon />}
+                inactiveLabel={t('composer.work')}
+                tooltip={prefs.planMode ? t('composer.planTooltipActive') : t('composer.planTooltipInactive')}
+              />
+            )}
+          </div>
+
+          {/* Right cluster: model · thinking · context meter (· stop while streaming) */}
+          <div className="flex shrink-0 flex-nowrap items-center justify-end gap-1">
+            <ModelPicker visible={prefs.visibility.composerModelPicker} />
+
+            <ThinkingToggle />
+
+            {prefs.visibility.contextMeter && <ContextMeter />}
+
+            {streaming && (
               <button
                 type="button"
                 onClick={stop}
                 aria-label={t('composer.stop')}
-                className="flex h-9 w-9 cursor-pointer items-center justify-center rounded-full bg-destructive/90 text-white shadow-xs shadow-destructive/24 inset-shadow-[0_1px_rgb(255_255_255/16%)] transition-all duration-150 hover:scale-105 hover:bg-destructive active:shadow-none active:inset-shadow-[0_1px_rgb(0_0_0/8%)] sm:h-8 sm:w-8"
+                className="flex size-7 cursor-pointer items-center justify-center rounded-full bg-destructive/90 text-white shadow-xs shadow-destructive/24 inset-shadow-[0_1px_rgb(255_255_255/16%)] transition-all duration-150 hover:scale-105 hover:bg-destructive active:shadow-none active:inset-shadow-[0_1px_rgb(0_0_0/8%)]"
               >
-                <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor" aria-hidden="true">
+                <svg width="10" height="10" viewBox="0 0 12 12" fill="currentColor" aria-hidden="true">
                   <rect x="2" y="2" width="8" height="8" rx="1.5" />
-                </svg>
-              </button>
-            ) : (
-              <button
-                type="button"
-                onClick={() => void submit()}
-                disabled={!canSend}
-                aria-label={t('composer.send')}
-                className="flex h-9 w-9 items-center justify-center rounded-full bg-primary/90 text-primary-foreground shadow-xs transition-all duration-150 enabled:cursor-pointer enabled:shadow-primary/24 enabled:inset-shadow-[0_1px_rgb(255_255_255/16%)] hover:scale-105 hover:bg-primary active:shadow-none active:inset-shadow-[0_1px_rgb(0_0_0/8%)] disabled:pointer-events-none disabled:opacity-30 disabled:shadow-none disabled:hover:scale-100 sm:h-8 sm:w-8"
-              >
-                <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
-                  <path
-                    d="M7 11.5V2.5M7 2.5L3 6.5M7 2.5L11 6.5"
-                    stroke="currentColor"
-                    strokeWidth="1.8"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  />
                 </svg>
               </button>
             )}
           </div>
         </div>
-      </div>
       {dictation.error && !dictating && (
         <p className="mt-1 text-center text-[11px] leading-tight text-red-500">
           {dictation.error === 'mic-denied'
             ? t('composer.micDenied')
             : t('composer.dictationFailed')}
-        </p>
-      )}
-      {hasMessages && (
-        <p
-          className={cn(
-            'mt-1 text-center text-[11px] leading-tight text-muted-foreground transition-opacity duration-700',
-            showDisclaimer ? 'opacity-100' : 'opacity-0',
-          )}
-        >
-          {t('composer.disclaimer')}
         </p>
       )}
     </div>

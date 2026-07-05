@@ -49,7 +49,7 @@ export function ModelPicker({ visible = true }: { visible?: boolean }) {
         <button
           type="button"
           aria-label={t('modelPicker.switchModel')}
-          className="flex h-8 max-w-48 shrink-0 items-center justify-between gap-2 whitespace-nowrap rounded-lg border border-transparent px-2 text-[13px] font-medium text-muted-foreground/70 transition-colors hover:bg-accent hover:text-foreground/80 sm:h-7 sm:max-w-56 sm:px-2.5"
+          className="flex h-8 max-w-32 shrink-0 items-center justify-between gap-2 whitespace-nowrap rounded-lg border border-transparent px-2 text-[13px] font-medium text-muted-foreground/70 transition-colors hover:bg-accent hover:text-foreground/80 sm:h-7 sm:px-2.5 md:max-w-56"
         >
           <span className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden">
             <QwenIcon className="size-4 shrink-0" />

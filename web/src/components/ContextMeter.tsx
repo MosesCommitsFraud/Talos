@@ -25,10 +25,10 @@ export function ContextMeter() {
   const [open, setOpen] = useState(false);
 
   // Latest assistant metrics carry the running context state of the session.
+  // Before any metrics exist (fresh chat) the ring still renders, at 0%.
   const metrics = [...messages].reverse().find((m) => m.metrics?.context_percent != null)?.metrics;
-  if (!metrics || metrics.context_percent == null) return null;
 
-  const maxTokens = metrics.context_length ?? null;
+  const maxTokens = metrics?.context_length ?? null;
   // context_tokens is the true context-window occupancy (the last round's full
   // prompt). We deliberately do NOT fall back to input_tokens: that figure sums
   // every agent round, so a tool-using turn inflates it to many times the real
@@ -36,9 +36,9 @@ export function ContextMeter() {
   // is missing (older/estimated turns), derive the count from the backend
   // percentage so the number and the ring stay consistent.
   const usedTokens =
-    metrics.context_tokens != null
+    metrics?.context_tokens != null
       ? metrics.context_tokens
-      : maxTokens != null && metrics.context_percent != null
+      : maxTokens != null && metrics?.context_percent != null
         ? Math.round((metrics.context_percent / 100) * maxTokens)
         : null;
   // Derive the percentage from the same figure we display so the number and
@@ -46,9 +46,9 @@ export function ContextMeter() {
   const rawPercent =
     usedTokens != null && maxTokens != null && maxTokens > 0
       ? (usedTokens / maxTokens) * 100
-      : metrics.context_percent;
+      : (metrics?.context_percent ?? 0);
   const percent = Math.max(0, Math.min(100, rawPercent));
-  const isExact = metrics.usage_source === 'real';
+  const isExact = metrics?.usage_source === 'real';
 
   const radius = 9.75;
   const circumference = 2 * Math.PI * radius;

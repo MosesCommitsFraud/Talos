@@ -76,9 +76,10 @@ function toPcm16k(input: Float32Array, fromRate: number): Int16Array {
 
 export function useDictation(
   onFinal: (text: string) => void,
-  opts?: { streaming?: boolean },
+  opts?: { streaming?: boolean; deviceId?: string | null },
 ) {
   const streaming = !!opts?.streaming;
+  const deviceId = opts?.deviceId ?? null;
   const [status, setStatus] = useState<DictationStatus>('idle');
   const [interim, setInterim] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -316,10 +317,22 @@ export function useDictation(
     setInterim('');
     let media: MediaStream;
     try {
-      media = await navigator.mediaDevices.getUserMedia({ audio: true });
+      media = await navigator.mediaDevices.getUserMedia({
+        audio: deviceId ? { deviceId: { exact: deviceId } } : true,
+      });
     } catch {
-      setError('mic-denied');
-      return;
+      // The picked mic may have been unplugged — retry with the default
+      // before giving up (a plain failure there really is a permission issue).
+      if (!deviceId) {
+        setError('mic-denied');
+        return;
+      }
+      try {
+        media = await navigator.mediaDevices.getUserMedia({ audio: true });
+      } catch {
+        setError('mic-denied');
+        return;
+      }
     }
     stream.current = media;
     try {
@@ -330,7 +343,7 @@ export function useDictation(
       setError('transcribe-failed');
       setStatus('idle');
     }
-  }, [streaming, startStreaming, startBatch, teardown]);
+  }, [streaming, deviceId, startStreaming, startBatch, teardown]);
 
   /** First Enter / mic click while recording: stop and turn the speech into
    *  committed text. The hook reports 'finalizing' until `onFinal` has fired. */
