@@ -194,6 +194,24 @@ def _asr_active() -> bool:
     )
 
 
+def _downscale_for_vlm(img):
+    """Cap an image's long side before sending it to the vision model.
+
+    Vision-token count scales with pixel count, and the shared vLLM instance
+    (chat + VLM on one GPU budget) was OOM-killed by concurrent full-res
+    keyframes — the stored asset stays full-res, only the VLM copy shrinks.
+    """
+    try:
+        cap = int(os.getenv("VIDEO_FRAMES_VLM_MAX_PX", "1024") or 1024)
+    except Exception:
+        cap = 1024
+    long_side = max(img.width, img.height)
+    if cap <= 0 or long_side <= cap:
+        return img
+    ratio = cap / long_side
+    return img.resize((max(1, int(img.width * ratio)), max(1, int(img.height * ratio))))
+
+
 def _keyframes_active() -> bool:
     """True when the video keyframe lane is enabled *and* a vision model is set.
 
@@ -1515,6 +1533,7 @@ class VectorRAG:
         import io
         import json
 
+        img = _downscale_for_vlm(img)
         buf = io.BytesIO()
         img.save(buf, format="PNG")
         text = self._vlm_transcribe_image(
@@ -2167,9 +2186,12 @@ class VectorRAG:
             except OSError as e:
                 logger.warning("video-frames: cannot write %s: %s", asset_path, e)
                 continue
+            small = _downscale_for_vlm(img)
+            vbuf = io.BytesIO()
+            small.save(vbuf, format="PNG")
             items.append(
                 {
-                    "b64": base64.b64encode(raw).decode(),
+                    "b64": base64.b64encode(vbuf.getvalue()).decode(),
                     "asset_path": asset_path,
                     "ts": float(ts),
                 }
@@ -2177,11 +2199,17 @@ class VectorRAG:
         if not items:
             return []
 
+        # Serialized by default: the VLM shares one GPU budget with the chat
+        # LLM, and parallel multimodal requests have OOM-killed it in the wild.
+        try:
+            conc = int(os.getenv("VIDEO_FRAMES_VLM_CONCURRENCY", "1") or 1)
+        except Exception:
+            conc = 1
         total = len(items)
         captions = _concurrent_map(
             lambda b64: self._vlm_transcribe_image(b64, prompt=self._VLM_FRAME_PROMPT),
             [c["b64"] for c in items],
-            _vlm_concurrency(),
+            max(1, conc),
             on_done=lambda c: _cb("frames_vlm", c, total),
         )
 
