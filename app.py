@@ -135,6 +135,7 @@ _TIMEOUT_EXEMPT_PREFIXES = (
     "/api/model/probe",  # SSE; iterates models with up to 8s timeout each
     "/api/model-endpoints",  # /probe sub-route also iterates models
     "/api/upload",  # large files
+    "/api/personal/upload",  # RAG knowledge-base uploads (multi-GB videos for ASR)
 )
 
 
