@@ -711,6 +711,11 @@ from routes.capabilities_routes import setup_capabilities_routes
 
 app.include_router(setup_capabilities_routes())
 
+# Usage stats (empty-chat home screen)
+from routes.stats_routes import setup_stats_routes
+
+app.include_router(setup_stats_routes())
+
 # Voice dictation (mic → ASR endpoint proxy)
 from routes.voice_routes import setup_voice_routes
 

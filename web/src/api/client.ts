@@ -104,6 +104,26 @@ export async function uploadFiles(files: File[]): Promise<UploadedFile[]> {
   return data.files ?? [];
 }
 
+/** Aggregated usage stats for the empty-chat home screen. */
+export interface UsageStats {
+  sessions: number;
+  messages: number;
+  total_tokens: number;
+  active_days: number;
+  current_streak: number;
+  longest_streak: number;
+  /** 0–23 in the client's local time, or null with no messages yet. */
+  peak_hour: number | null;
+  favorite_model: string | null;
+  /** Daily message counts, oldest→today (~26 weeks) — feeds the heatmap. */
+  daily: { date: string; count: number }[];
+}
+
+/** days=0 → all time; otherwise tile stats cover the last N local days
+ *  (the heatmap always spans the full window). */
+export const fetchUsageStats = (days = 0) =>
+  getJSON<UsageStats>(`/api/stats?tz_offset=${-new Date().getTimezoneOffset()}&days=${days}`);
+
 export interface AuthInfo { auth_enabled: boolean; user?: string; is_admin?: boolean }
 export const fetchAuthInfo = () => getJSON<AuthInfo>('/api/auth/settings');
 
