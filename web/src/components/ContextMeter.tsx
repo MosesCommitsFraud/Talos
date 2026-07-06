@@ -50,7 +50,8 @@ export function ContextMeter() {
   const percent = Math.max(0, Math.min(100, rawPercent));
   const isExact = metrics?.usage_source === 'real';
 
-  const radius = 9.75;
+  // Leaves room in the 24px viewBox for the 4.5-wide stroke (9.5 + 2.25 < 12).
+  const radius = 9.5;
   const circumference = 2 * Math.PI * radius;
   const dashOffset = circumference - (percent / 100) * circumference;
   const isOverloaded = percent > 90;
@@ -108,20 +109,20 @@ export function ContextMeter() {
         type="button"
         onClick={() => setOpen((o) => !o)}
         aria-label={t('contextMeter.used', { percent: formatPercent(percent) })}
-        className="inline-flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-full border border-transparent text-muted-foreground outline-none transition-colors hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
+        className="inline-flex size-4 shrink-0 cursor-pointer items-center justify-center rounded-full border border-transparent text-muted-foreground outline-none transition-colors hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
       >
-        <span className="relative flex size-4 items-center justify-center">
+        <span className="relative flex size-3 items-center justify-center">
           <svg
             viewBox="0 0 24 24"
             className="absolute inset-0 size-full -rotate-90 transform-gpu"
             aria-hidden="true"
           >
             <circle
-              cx="12" cy="12" r={radius} fill="none" strokeWidth="3"
+              cx="12" cy="12" r={radius} fill="none" strokeWidth="4.5"
               stroke="color-mix(in oklab, var(--muted-foreground) 35%, transparent)"
             />
             <circle
-              cx="12" cy="12" r={radius} fill="none" strokeWidth="3" strokeLinecap="round"
+              cx="12" cy="12" r={radius} fill="none" strokeWidth="4.5" strokeLinecap="round"
               stroke={usageColor}
               strokeDasharray={circumference}
               strokeDashoffset={dashOffset}

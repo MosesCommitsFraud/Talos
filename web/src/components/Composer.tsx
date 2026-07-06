@@ -8,10 +8,8 @@ import {
   DatabaseIcon,
   LightbulbIcon,
   FileTextIcon,
-  LayersIcon,
   ListChecksIcon,
   Loader2Icon,
-  MessageSquareIcon,
   MicIcon,
   PaperclipIcon,
   PencilRulerIcon,
@@ -64,7 +62,7 @@ function ModeToggle({
         aria-pressed={active}
         aria-label={tooltip}
         className={cn(
-          'flex h-7 shrink-0 items-center gap-1.5 rounded-md border border-transparent px-1.5 text-xs font-medium whitespace-nowrap transition-colors sm:h-6 sm:px-2 [&_svg]:size-3.5 [&_svg]:shrink-0',
+          'flex h-7 shrink-0 items-center gap-1.5 rounded-sm border border-transparent px-1.5 text-xs font-medium whitespace-nowrap transition-colors sm:h-6 sm:px-2 [&_svg]:size-3.5 [&_svg]:shrink-0',
           active
             ? 'bg-blue-500/10 text-blue-400 hover:bg-blue-500/15 hover:text-blue-300'
             : 'text-muted-foreground/70 hover:bg-accent hover:text-foreground/80',
@@ -77,7 +75,7 @@ function ModeToggle({
   );
 }
 
-type ModeOpt = { key: ChatMode; rag: boolean; db: boolean; Icon: React.ComponentType<{ className?: string }>; label: string; desc: string };
+type ModeOpt = { key: ChatMode; rag: boolean; db: boolean; label: string; desc: string };
 
 /** Knowledge-mode dropdown styled like t3code's runtime-mode picker (ghost
  *  trigger, rich items with a description line). Shown only when both RAG and
@@ -89,10 +87,10 @@ function ChatModeDropdown() {
   const setKnowledge = usePrefs((s) => s.setKnowledge);
   const mode: ChatMode = useRag ? (useDb ? 'full' : 'knowledge') : (useDb ? 'sql' : 'chat');
   const modes: ModeOpt[] = [
-    { key: 'chat', rag: false, db: false, Icon: MessageSquareIcon, label: t('composer.mode.chat'), desc: t('composer.mode.chatDesc') },
-    { key: 'knowledge', rag: true, db: false, Icon: BookOpenIcon, label: t('composer.mode.knowledge'), desc: t('composer.mode.knowledgeDesc') },
-    { key: 'sql', rag: false, db: true, Icon: DatabaseIcon, label: t('composer.mode.sql'), desc: t('composer.mode.sqlDesc') },
-    { key: 'full', rag: true, db: true, Icon: LayersIcon, label: t('composer.mode.full'), desc: t('composer.mode.fullDesc') },
+    { key: 'chat', rag: false, db: false, label: t('composer.mode.chat'), desc: t('composer.mode.chatDesc') },
+    { key: 'knowledge', rag: true, db: false, label: t('composer.mode.knowledge'), desc: t('composer.mode.knowledgeDesc') },
+    { key: 'sql', rag: false, db: true, label: t('composer.mode.sql'), desc: t('composer.mode.sqlDesc') },
+    { key: 'full', rag: true, db: true, label: t('composer.mode.full'), desc: t('composer.mode.fullDesc') },
   ];
   const active = modes.find((m) => m.key === mode) ?? modes[0];
   return (
@@ -101,24 +99,25 @@ function ChatModeDropdown() {
         <button
           type="button"
           aria-label={t('composer.mode.label')}
-          className="flex h-7 shrink-0 items-center gap-1.5 rounded-md border border-transparent px-1.5 text-xs font-medium whitespace-nowrap text-muted-foreground/70 outline-none transition-colors hover:bg-accent hover:text-foreground/80 focus:outline-none focus-visible:outline-none sm:h-6 sm:px-2 [&_svg]:size-3.5 [&_svg]:shrink-0"
+          className={cn(
+            'flex h-7 shrink-0 items-center gap-1.5 rounded-sm border border-transparent px-1.5 text-xs font-medium whitespace-nowrap outline-none transition-colors focus:outline-none focus-visible:outline-none sm:h-6 sm:px-2 [&_svg]:size-3.5 [&_svg]:shrink-0',
+            mode === 'full'
+              ? 'bg-yellow-400/10 text-yellow-300 hover:bg-yellow-400/15 hover:text-yellow-200'
+              : 'text-muted-foreground/70 hover:bg-accent hover:text-foreground/80',
+          )}
         >
-          <active.Icon />
           <span className="sr-only sm:not-sr-only">{active.label}</span>
-          <ChevronDownIcon className="size-3 opacity-50" />
         </button>
       </MenuTrigger>
-      <MenuPopup align="start">
+      <MenuPopup align="start" className="min-w-36">
         {modes.map((m) => (
-          <MenuItem key={m.key} onSelect={() => setKnowledge(m.rag, m.db)} className="min-w-64 py-2">
-            <div className="grid min-w-0 gap-0.5">
-              <span className="inline-flex items-center gap-1.5 font-medium text-foreground">
-                <m.Icon />
-                {m.label}
-                {m.key === mode && <CheckIcon className="size-3.5 text-blue-400" />}
-              </span>
-              <span className="text-xs leading-4 text-muted-foreground">{m.desc}</span>
-            </div>
+          <MenuItem
+            key={m.key}
+            onSelect={() => setKnowledge(m.rag, m.db)}
+            className="gap-2 px-2 py-1 text-xs"
+          >
+            <span className="min-w-0 flex-1 truncate">{m.label}</span>
+            {m.key === mode && <CheckIcon className="size-3 shrink-0" />}
           </MenuItem>
         ))}
       </MenuPopup>
@@ -204,7 +203,7 @@ function MicDeviceMenu() {
         <button
           type="button"
           aria-label={t('composer.micSelect')}
-          className="flex h-7 w-4 shrink-0 items-center justify-center rounded-md border border-transparent text-muted-foreground/70 outline-none transition-colors hover:bg-accent hover:text-foreground/80 focus:outline-none focus-visible:outline-none sm:h-6"
+          className="flex h-7 w-4 shrink-0 items-center justify-center rounded-sm rounded-l-none border border-transparent text-muted-foreground/70 outline-none transition-colors hover:bg-accent hover:text-foreground/80 focus:outline-none focus-visible:outline-none sm:h-6"
         >
           <ChevronDownIcon className="size-3.5" />
         </button>
@@ -497,18 +496,26 @@ export function Composer() {
               type="button"
               onClick={stop}
               aria-label={t('composer.stop')}
-              className="mt-0.5 flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-[5px] border border-border text-muted-foreground transition-colors hover:border-destructive/50 hover:bg-destructive/10 hover:text-destructive"
+              className="mt-0.5 flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-sm text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive active:scale-95"
             >
-              <svg width="9" height="9" viewBox="0 0 12 12" fill="currentColor" aria-hidden="true">
-                <rect x="2" y="2" width="8" height="8" rx="1.5" />
+              <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+                <rect x="1.5" y="1.5" width="9" height="9" rx="2" stroke="currentColor" strokeWidth="1.4" />
               </svg>
             </button>
           ) : (
             (text.trim().length > 0 || dictating) && (
-              <CornerDownLeftIcon
-                aria-hidden="true"
-                className="mt-1 ml-3 size-4 shrink-0 text-muted-foreground/50"
-              />
+              <button
+                type="button"
+                aria-label={t('composer.send')}
+                onClick={() => {
+                  // Mirrors the Enter key: confirm a running dictation, send otherwise.
+                  if (dictation.status === 'recording') dictation.confirm();
+                  else void submit();
+                }}
+                className="mt-0.5 ml-2 flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-sm text-muted-foreground/50 transition-colors hover:bg-accent hover:text-foreground active:scale-95"
+              >
+                <CornerDownLeftIcon aria-hidden="true" className="size-4" />
+              </button>
             )
           )}
         </div>
@@ -536,7 +543,7 @@ export function Composer() {
                   <button
                     type="button"
                     aria-label={t('composer.add')}
-                    className="flex size-7 shrink-0 items-center justify-center rounded-md border border-transparent text-muted-foreground/70 outline-none transition-colors hover:bg-accent hover:text-foreground/80 focus:outline-none focus-visible:outline-none sm:size-6 [&_svg]:size-3.5"
+                    className="flex size-7 shrink-0 items-center justify-center rounded-sm border border-transparent text-muted-foreground/70 outline-none transition-colors hover:bg-accent hover:text-foreground/80 focus:outline-none focus-visible:outline-none sm:size-6 [&_svg]:size-3.5"
                   >
                     <PlusIcon className={uploading ? 'animate-pulse' : undefined} />
                   </button>
@@ -573,7 +580,7 @@ export function Composer() {
                         : t('composer.dictate')
                     }
                     className={cn(
-                      'flex size-7 shrink-0 items-center justify-center rounded-md border border-transparent transition-colors sm:size-6 [&_svg]:size-3.5',
+                      'flex size-7 shrink-0 items-center justify-center rounded-sm rounded-r-none border border-transparent transition-colors sm:size-6 [&_svg]:size-3.5',
                       dictation.status === 'recording'
                         ? 'animate-pulse bg-red-500/10 text-red-500 hover:bg-red-500/20'
                         : 'text-muted-foreground/70 hover:bg-accent hover:text-foreground/80 disabled:opacity-50',
