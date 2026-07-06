@@ -10,6 +10,12 @@
 # entirely, install Caddy's root CA on the clients; export it with:
 #   docker cp talos-caddy:/data/caddy/pki/authorities/local/root.crt .
 
+# Browsers omit SNI when connecting to an IP address; without this Caddy
+# rejects the no-SNI handshake instead of falling back to the IP certificate.
+{
+	default_sni {$TALOS_HTTPS_HOST:localhost}
+}
+
 {$TALOS_HTTPS_HOST:localhost} {
 	tls internal
 	reverse_proxy talos-app:7000
