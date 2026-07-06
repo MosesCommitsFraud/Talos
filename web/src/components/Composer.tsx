@@ -417,7 +417,7 @@ export function Composer() {
   }
 
   return (
-    <div className="mx-auto w-full max-w-[800px] px-4 pb-2">
+    <div className="mx-auto w-full max-w-[800px] px-4 pb-2.5">
       {/* Drop overlay — covers only the chat area (portaled into <main>, which is
           position:relative), so the sidebar and side panels stay clear. Shown
           while dragging files anywhere over the chat column. */}
@@ -511,20 +511,24 @@ export function Composer() {
               </svg>
             </button>
           ) : (
-            (text.trim().length > 0 || dictating) && (
-              <button
-                type="button"
-                aria-label={t('composer.send')}
-                onClick={() => {
-                  // Mirrors the Enter key: confirm a running dictation, send otherwise.
-                  if (dictation.status === 'recording') dictation.confirm();
-                  else void submit();
-                }}
-                className="ml-2 flex size-6 shrink-0 cursor-pointer items-center justify-center self-end rounded-sm text-muted-foreground/50 transition-colors hover:bg-accent hover:text-foreground active:scale-95"
-              >
-                <CornerDownLeftIcon aria-hidden="true" className="size-4" />
-              </button>
-            )
+            <button
+              type="button"
+              aria-label={t('composer.send')}
+              onClick={() => {
+                // Mirrors the Enter key: confirm a running dictation, send otherwise.
+                if (dictation.status === 'recording') dictation.confirm();
+                else void submit();
+              }}
+              className={cn(
+                'ml-2 flex size-6 shrink-0 cursor-pointer items-center justify-center self-end rounded-sm transition-colors active:scale-95',
+                // Always visible; barely-there while there's nothing to send.
+                text.trim().length > 0 || dictating
+                  ? 'text-muted-foreground/50 hover:bg-accent hover:text-foreground'
+                  : 'text-muted-foreground/25',
+              )}
+            >
+              <CornerDownLeftIcon aria-hidden="true" className="size-4" />
+            </button>
           )}
         </div>
       </div>
@@ -532,7 +536,7 @@ export function Composer() {
       {/* Control row — outside the input card, Claude Code style: knowledge/add/mic
           on the left, model/thinking/context on the right. Enter sends; a stop
           button appears at the far right only while a response is streaming. */}
-      <div className="mt-1.5 flex min-w-0 flex-nowrap items-center justify-between gap-2 px-1.5">
+      <div className="mt-2.5 flex min-w-0 flex-nowrap items-center justify-between gap-2 px-1.5">
         <input
           ref={fileInput}
           type="file"
