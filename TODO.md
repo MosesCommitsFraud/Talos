@@ -23,3 +23,4 @@ rag explorer needs more keywords and example questions
 when sth has a lot of images in rag how do i get the ai to just show the important ones -> vlm
 scrolling title in the sidebar
 / commands like claude
+what if images are shown despite not being relevant

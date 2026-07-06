@@ -1,0 +1,26 @@
+# GPU variant of the dictation sidecar — stack ON TOP of
+# docker-compose.dictation.yml (order matters, later files override):
+#
+#   COMPOSE_FILE=docker-compose.yml:...:docker-compose.dictation.yml:docker-compose.dictation-gpu.yml
+#
+# Builds CTranslate2 from source with CUDA (see services/dictation/
+# Dockerfile.cuda — first build takes ~20-40 min) and runs Whisper on the GPU,
+# which makes the two-tier large-v3-turbo + small setup fast enough for live
+# word-by-word partials with per-utterance language auto-detect.
+# Requires the NVIDIA container runtime (same as the vLLM services).
+services:
+  dictation:
+    build:
+      context: ./services/dictation
+      dockerfile: Dockerfile.cuda
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    environment:
+      - DICTATION_DEVICE=${DICTATION_DEVICE:-cuda}
+      - DICTATION_MODEL=${DICTATION_MODEL:-large-v3-turbo}
+      - DICTATION_REALTIME_MODEL=${DICTATION_REALTIME_MODEL:-small}
