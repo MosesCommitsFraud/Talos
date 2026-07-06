@@ -4,8 +4,10 @@
 # in over the websocket).
 FROM python:3.12-slim
 
+# gcc + portaudio19-dev: PyAudio (pulled in by RealtimeSTT) ships no wheel for
+# aarch64 and gets compiled from source during pip install.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends libportaudio2 ffmpeg \
+    && apt-get install -y --no-install-recommends libportaudio2 portaudio19-dev gcc libc6-dev ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

@@ -158,6 +158,8 @@ const en = {
     listening: 'Listening…',
     transcribing: 'Transcribing…',
     micDenied: 'Microphone access was denied — allow it in your browser to dictate.',
+    micInsecureContext:
+      'The browser blocks microphone access over plain http. Open Talos via https or localhost to dictate.',
     dictationFailed: 'Transcription failed — please try again.',
   },
   lightbox: {

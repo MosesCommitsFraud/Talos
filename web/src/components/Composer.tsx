@@ -638,7 +638,9 @@ export function Composer() {
         <p className="mt-1 text-center text-[11px] leading-tight text-red-500">
           {dictation.error === 'mic-denied'
             ? t('composer.micDenied')
-            : t('composer.dictationFailed')}
+            : dictation.error === 'insecure-context'
+              ? t('composer.micInsecureContext')
+              : t('composer.dictationFailed')}
         </p>
       )}
     </div>

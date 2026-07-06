@@ -1,0 +1,46 @@
+# HTTPS overlay — puts a Caddy reverse proxy (internal CA, self-managed certs)
+# in front of the app so browsers treat Talos as a secure context. Needed for
+# microphone access (voice dictation): getUserMedia does not exist on plain
+# http LAN origins, in any browser.
+#
+# Usage: set TALOS_HTTPS_HOST in .env to the address users open in the browser
+# (LAN IP or internal DNS name; defaults to localhost), then:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.https.yml up -d
+#
+# (stack overlays as needed, e.g. add -f docker-compose.dictation.yml too)
+#
+# Talos is then reachable at https://$TALOS_HTTPS_HOST — first visit per device
+# shows a one-time certificate warning (internal CA), after accepting it the
+# mic works. Plain http on port 7000 keeps working as before.
+services:
+  talos-app:
+    environment:
+      # Session cookies may as well be Secure once TLS fronts the app; the
+      # https origin must be allowed for the browser's API calls to pass CORS.
+      - SECURE_COOKIES=${SECURE_COOKIES:-true}
+      - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-http://localhost,http://127.0.0.1,https://${TALOS_HTTPS_HOST:-localhost}}
+
+  caddy:
+    image: caddy:2
+    container_name: talos-caddy
+    restart: unless-stopped
+    ports:
+      - "${HTTPS_BIND:-0.0.0.0}:${HTTPS_PORT:-443}:443"
+    environment:
+      - TALOS_HTTPS_HOST=${TALOS_HTTPS_HOST:-localhost}
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      # /data holds the internal CA + issued certs — must persist, otherwise
+      # every restart mints a new CA and clients re-see the cert warning.
+      - caddy-data:/data
+      - caddy-config:/config
+    networks:
+      - default
+    depends_on:
+      talos-app:
+        condition: service_started
+
+volumes:
+  caddy-data:
+  caddy-config:

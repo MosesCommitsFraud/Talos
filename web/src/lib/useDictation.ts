@@ -138,6 +138,14 @@ export function useDictation(
 
   useEffect(() => teardown, [teardown]);
 
+  // Errors are transient hints, not persistent state — fade them out on their
+  // own so a failed attempt doesn't leave a red line under the composer.
+  useEffect(() => {
+    if (!error) return;
+    const id = window.setTimeout(() => setError(null), 5000);
+    return () => window.clearTimeout(id);
+  }, [error]);
+
   const finish = useCallback(
     (text: string) => {
       teardown();
@@ -315,6 +323,13 @@ export function useDictation(
     if (statusRef.current !== 'idle') return;
     setError(null);
     setInterim('');
+    // getUserMedia only exists in secure contexts (https or localhost). Over
+    // plain http on a LAN IP the browser never even asks — surface that as
+    // its own error instead of pretending the user denied permission.
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setError('insecure-context');
+      return;
+    }
     let media: MediaStream;
     try {
       media = await navigator.mediaDevices.getUserMedia({
