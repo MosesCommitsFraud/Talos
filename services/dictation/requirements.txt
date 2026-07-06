@@ -2,5 +2,7 @@
 fastapi>=0.115
 uvicorn[standard]>=0.30
 # RealtimeSTT drives the two-tier (realtime + final) faster-whisper setup and
-# the VAD. It pulls in faster-whisper, silero/webrtc VAD and torch(+cuda).
-RealtimeSTT>=1.0
+# the VAD (silero/webrtc, via torch). The transcription engine itself became
+# an optional extra in newer releases — without [faster-whisper] the recorder
+# fails at model init with "requires the optional 'faster-whisper' package".
+RealtimeSTT[faster-whisper]>=1.0
