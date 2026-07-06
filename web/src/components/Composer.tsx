@@ -208,20 +208,28 @@ function MicDeviceMenu() {
           <ChevronDownIcon className="size-3.5" />
         </button>
       </MenuTrigger>
+      {/* Compact rows matching the knowledge-mode dropdown. */}
       <MenuPopup align="start">
-        <MenuLabel>{t('composer.micSelect')}</MenuLabel>
-        <MenuItem onSelect={() => setMicDeviceId(null)} className="gap-2">
+        <MenuLabel className="px-2 py-1">{t('composer.micSelect')}</MenuLabel>
+        <MenuItem
+          onSelect={() => setMicDeviceId(null)}
+          className="gap-2 px-2 py-1 text-xs [&_svg]:size-3.5"
+        >
           <MicIcon />
           <span className="min-w-0 flex-1 truncate">{t('composer.micDefault')}</span>
-          {micDeviceId === null && <CheckIcon className="size-3.5 shrink-0 text-blue-400" />}
+          {micDeviceId === null && <CheckIcon className="size-3 shrink-0 text-blue-400" />}
         </MenuItem>
         {devices.map((d, i) => (
-          <MenuItem key={d.deviceId} onSelect={() => setMicDeviceId(d.deviceId)} className="gap-2">
+          <MenuItem
+            key={d.deviceId}
+            onSelect={() => setMicDeviceId(d.deviceId)}
+            className="gap-2 px-2 py-1 text-xs [&_svg]:size-3.5"
+          >
             <MicIcon />
             <span className="min-w-0 max-w-56 flex-1 truncate">
               {d.label || t('composer.micUnnamed', { n: i + 1 })}
             </span>
-            {micDeviceId === d.deviceId && <CheckIcon className="size-3.5 shrink-0 text-blue-400" />}
+            {micDeviceId === d.deviceId && <CheckIcon className="size-3 shrink-0 text-blue-400" />}
           </MenuItem>
         ))}
       </MenuPopup>
@@ -387,7 +395,7 @@ export function Composer() {
   // Accept executes it via the approved-plan flow. The full plan is in the panel.
   if (pendingPlan) {
     return (
-      <div className="mx-auto w-full max-w-[800px] px-4 pb-4">
+      <div className="mx-auto w-full max-w-[800px] px-4 pb-2">
         <div className="flex items-center gap-3 rounded-[20px] border border-primary/30 bg-primary/[0.05] px-4 py-3">
           <button
             type="button"
@@ -409,7 +417,7 @@ export function Composer() {
   }
 
   return (
-    <div className="mx-auto w-full max-w-[800px] px-4 pb-4">
+    <div className="mx-auto w-full max-w-[800px] px-4 pb-2">
       {/* Drop overlay — covers only the chat area (portaled into <main>, which is
           position:relative), so the sidebar and side panels stay clear. Shown
           while dragging files anywhere over the chat column. */}
@@ -496,7 +504,7 @@ export function Composer() {
               type="button"
               onClick={stop}
               aria-label={t('composer.stop')}
-              className="mt-0.5 flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-sm text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive active:scale-95"
+              className="flex size-6 shrink-0 cursor-pointer items-center justify-center self-end rounded-sm text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive active:scale-95"
             >
               <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
                 <rect x="1.5" y="1.5" width="9" height="9" rx="2" stroke="currentColor" strokeWidth="1.4" />
@@ -512,7 +520,7 @@ export function Composer() {
                   if (dictation.status === 'recording') dictation.confirm();
                   else void submit();
                 }}
-                className="mt-0.5 ml-2 flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-sm text-muted-foreground/50 transition-colors hover:bg-accent hover:text-foreground active:scale-95"
+                className="ml-2 flex size-6 shrink-0 cursor-pointer items-center justify-center self-end rounded-sm text-muted-foreground/50 transition-colors hover:bg-accent hover:text-foreground active:scale-95"
               >
                 <CornerDownLeftIcon aria-hidden="true" className="size-4" />
               </button>
@@ -549,7 +557,10 @@ export function Composer() {
                   </button>
                 </MenuTrigger>
                 <MenuPopup align="start">
-                  <MenuItem onSelect={() => fileInput.current?.click()} className="gap-2">
+                  <MenuItem
+                    onSelect={() => fileInput.current?.click()}
+                    className="gap-2 px-2 py-1 text-xs [&_svg]:size-3.5"
+                  >
                     <PaperclipIcon />
                     {t('composer.attachFiles')}
                   </MenuItem>

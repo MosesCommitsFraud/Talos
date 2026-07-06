@@ -58,9 +58,11 @@ export function ModelPicker({ visible = true }: { visible?: boolean }) {
           <ChevronDownIcon className="size-3 shrink-0 opacity-60" aria-hidden="true" />
         </button>
       </MenuTrigger>
+      {/* Compact rows matching the knowledge-mode dropdown: same row height
+          and one uniform text size (endpoint inline, muted, not smaller). */}
       <MenuPopup align="start">
         {options.length === 0 && (
-          <div className="px-3 py-2 text-[13px] text-muted-foreground">{t('modelPicker.noEndpoints')}</div>
+          <div className="px-2 py-1 text-xs text-muted-foreground">{t('modelPicker.noEndpoints')}</div>
         )}
         {options.map((o) => {
           const selected =
@@ -69,16 +71,14 @@ export function ModelPicker({ visible = true }: { visible?: boolean }) {
             <MenuItem
               key={`${o.endpointId}:${o.model}`}
               onSelect={() => setPendingModel({ endpointId: o.endpointId, model: o.model })}
-              className="gap-2"
+              className="gap-2 px-2 py-1 text-xs [&_svg]:size-3.5"
             >
-              <QwenIcon className="size-4 shrink-0 text-muted-foreground" />
-              <div className="min-w-0 flex-1">
-                <div className="truncate">{displayName(o.model)}</div>
-                <div className="truncate text-xs text-muted-foreground">
-                  {displayName(o.model) !== o.model ? `${o.model} · ${o.endpointName}` : o.endpointName}
-                </div>
-              </div>
-              <CheckIcon className={cn('size-4 shrink-0', selected ? 'opacity-100' : 'opacity-0')} />
+              <QwenIcon className="size-3.5 shrink-0 text-muted-foreground" />
+              <span className="min-w-0 flex-1 truncate">
+                {displayName(o.model)}
+                <span className="text-muted-foreground"> · {o.endpointName}</span>
+              </span>
+              <CheckIcon className={cn('size-3 shrink-0', selected ? 'opacity-100' : 'opacity-0')} />
             </MenuItem>
           );
         })}
