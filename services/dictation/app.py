@@ -129,6 +129,21 @@ def _get_recorder():
         return _recorder
 
 
+@app.on_event("startup")
+def _preload_models() -> None:
+    """Load the models in the background right away instead of on the first
+    connection: Talos gates the composer's mic on /health reporting
+    ``loaded: true``, and the first load can take minutes (weight download)."""
+
+    def _load() -> None:
+        try:
+            _get_recorder()
+        except Exception:  # pragma: no cover — /ws retries and reports to client
+            logger.exception("model preload failed")
+
+    threading.Thread(target=_load, daemon=True, name="preload").start()
+
+
 @app.get("/health")
 def health() -> Dict[str, Any]:
     return {

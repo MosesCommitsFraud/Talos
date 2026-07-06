@@ -21,7 +21,9 @@ Either way the client gets back a flat ``{"text": "..."}``.
 import asyncio
 import logging
 import os
+import time
 from typing import Any, Dict
+from urllib.parse import urlsplit
 
 from fastapi import APIRouter, Form, HTTPException, Request, UploadFile, WebSocket
 from fastapi import File as FastFile
@@ -40,10 +42,56 @@ def voice_streaming_configured() -> bool:
     return bool(os.getenv("DICTATION_WS_URL", "").strip())
 
 
+def _sidecar_health_url() -> str:
+    """Derive the sidecar's HTTP /health URL from DICTATION_WS_URL
+    (ws://host:8004/ws → http://host:8004/health)."""
+    url = os.getenv("DICTATION_WS_URL", "").strip()
+    if not url:
+        return ""
+    parts = urlsplit(url)
+    scheme = "https" if parts.scheme == "wss" else "http"
+    return f"{scheme}://{parts.netloc}/health"
+
+
+# Probe result cache so /api/capabilities (fetched per composer mount) doesn't
+# hammer the sidecar. Short TTL: the mic (dis)appears within ~15s + the
+# frontend's own 60s staleTime after the service starts or dies.
+_HEALTH_TTL_S = 15.0
+_health_cache: tuple = (0.0, False)  # (monotonic timestamp, available)
+
+
+def voice_streaming_available() -> bool:
+    """Configured AND the sidecar is up with models loaded right now. This is
+    what gates the composer's mic icon — configuration alone isn't enough,
+    because a stopped sidecar would leave a dead mic in the UI."""
+    global _health_cache
+    url = _sidecar_health_url()
+    if not url:
+        return False
+    now = time.monotonic()
+    ts, ok = _health_cache
+    if now - ts < _HEALTH_TTL_S:
+        return ok
+    ok = False
+    try:
+        import httpx
+
+        resp = httpx.get(url, timeout=2.0)
+        if resp.status_code == 200:
+            payload = resp.json()
+            # `loaded` stays false while Whisper weights download on first
+            # start — don't offer the mic until dictation would actually work.
+            ok = bool(payload.get("ok")) and bool(payload.get("loaded"))
+    except Exception as e:
+        logger.debug("voice: dictation sidecar health probe failed: %s", e)
+    _health_cache = (now, ok)
+    return ok
+
+
 def voice_configured() -> bool:
     """Voice input works with either path. The batch fallback is deliberately
     independent of ``VIDEO_ASR_ENABLED``, which gates the RAG ingest lane."""
-    return voice_streaming_configured() or bool(os.getenv("VIDEO_ASR_URL", "").strip())
+    return voice_streaming_available() or bool(os.getenv("VIDEO_ASR_URL", "").strip())
 
 
 def _extract_text(payload: Dict[str, Any]) -> str:
