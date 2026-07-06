@@ -35,28 +35,9 @@ function pickMimeType(): string {
 }
 
 /** AudioWorklet that batches mic samples (~2048 frames) to the main thread.
- *  Inlined via Blob URL so no separate asset needs serving. */
-const WORKLET_SOURCE = `
-class PcmCapture extends AudioWorkletProcessor {
-  constructor() { super(); this.buf = []; this.len = 0; }
-  process(inputs) {
-    const ch = inputs[0] && inputs[0][0];
-    if (ch) {
-      this.buf.push(new Float32Array(ch));
-      this.len += ch.length;
-      if (this.len >= 2048) {
-        const out = new Float32Array(this.len);
-        let o = 0;
-        for (const b of this.buf) { out.set(b, o); o += b.length; }
-        this.port.postMessage(out, [out.buffer]);
-        this.buf = []; this.len = 0;
-      }
-    }
-    return true;
-  }
-}
-registerProcessor('pcm-capture', PcmCapture);
-`;
+ *  A real static asset (web/public/), NOT an inlined Blob URL: the app's CSP
+ *  is `default-src 'self'`, which blocks blob: worklet modules. */
+const WORKLET_URL = '/pcm-capture.worklet.js';
 
 /** Linear-interpolation downsample to 16 kHz, then PCM16. Dictation audio —
  *  fidelity beyond what the ASR consumes doesn't matter. */
@@ -162,14 +143,7 @@ export function useDictation(
     async (media: MediaStream) => {
       const ctx = new AudioContext();
       audioCtx.current = ctx;
-      const moduleUrl = URL.createObjectURL(
-        new Blob([WORKLET_SOURCE], { type: 'application/javascript' }),
-      );
-      try {
-        await ctx.audioWorklet.addModule(moduleUrl);
-      } finally {
-        URL.revokeObjectURL(moduleUrl);
-      }
+      await ctx.audioWorklet.addModule(WORKLET_URL);
 
       const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
       const sock = new WebSocket(`${proto}//${window.location.host}/api/voice/stream`);
