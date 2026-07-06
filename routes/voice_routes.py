@@ -119,6 +119,7 @@ def setup_voice_routes():
         url = os.getenv("VIDEO_ASR_URL", "").strip()
         if not url:
             raise HTTPException(503, "Voice input is not configured (VIDEO_ASR_URL)")
+        logger.info("voice: batch transcribe request (%s)", file.filename or "clip")
 
         import httpx
 
@@ -166,16 +167,19 @@ def setup_voice_routes():
             from routes.auth_routes import SESSION_COOKIE
 
             if not auth_mgr.validate_token(ws.cookies.get(SESSION_COOKIE)):
+                logger.info("voice: stream rejected — missing/invalid session cookie")
                 await ws.close(code=4401)
                 return
         url = os.getenv("DICTATION_WS_URL", "").strip()
         if not url:
+            logger.info("voice: stream rejected — DICTATION_WS_URL not configured")
             await ws.close(code=4503)
             return
 
         import websockets
 
         await ws.accept()
+        logger.info("voice: dictation stream started")
         try:
             async with websockets.connect(url, max_size=2**22) as upstream:
 
