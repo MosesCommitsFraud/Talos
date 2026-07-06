@@ -4,6 +4,7 @@ import {
   BrainIcon,
   CheckIcon,
   ChevronDownIcon,
+  CornerDownLeftIcon,
   DatabaseIcon,
   LightbulbIcon,
   FileTextIcon,
@@ -63,7 +64,7 @@ function ModeToggle({
         aria-pressed={active}
         aria-label={tooltip}
         className={cn(
-          'flex h-8 shrink-0 items-center gap-1.5 rounded-lg border border-transparent px-2 text-[13px] font-medium whitespace-nowrap transition-colors sm:h-7 sm:px-2.5 [&_svg]:size-4 [&_svg]:shrink-0',
+          'flex h-7 shrink-0 items-center gap-1.5 rounded-md border border-transparent px-1.5 text-xs font-medium whitespace-nowrap transition-colors sm:h-6 sm:px-2 [&_svg]:size-3.5 [&_svg]:shrink-0',
           active
             ? 'bg-blue-500/10 text-blue-400 hover:bg-blue-500/15 hover:text-blue-300'
             : 'text-muted-foreground/70 hover:bg-accent hover:text-foreground/80',
@@ -100,7 +101,7 @@ function ChatModeDropdown() {
         <button
           type="button"
           aria-label={t('composer.mode.label')}
-          className="flex h-8 shrink-0 items-center gap-1.5 rounded-lg border border-transparent px-2 text-[13px] font-medium whitespace-nowrap text-muted-foreground/70 outline-none transition-colors hover:bg-accent hover:text-foreground/80 focus:outline-none focus-visible:outline-none sm:h-7 sm:px-2.5 [&_svg]:size-4 [&_svg]:shrink-0"
+          className="flex h-7 shrink-0 items-center gap-1.5 rounded-md border border-transparent px-1.5 text-xs font-medium whitespace-nowrap text-muted-foreground/70 outline-none transition-colors hover:bg-accent hover:text-foreground/80 focus:outline-none focus-visible:outline-none sm:h-6 sm:px-2 [&_svg]:size-3.5 [&_svg]:shrink-0"
         >
           <active.Icon />
           <span className="sr-only sm:not-sr-only">{active.label}</span>
@@ -203,7 +204,7 @@ function MicDeviceMenu() {
         <button
           type="button"
           aria-label={t('composer.micSelect')}
-          className="flex h-8 w-5 shrink-0 items-center justify-center rounded-lg border border-transparent text-muted-foreground/70 outline-none transition-colors hover:bg-accent hover:text-foreground/80 focus:outline-none focus-visible:outline-none sm:h-7"
+          className="flex h-7 w-4 shrink-0 items-center justify-center rounded-md border border-transparent text-muted-foreground/70 outline-none transition-colors hover:bg-accent hover:text-foreground/80 focus:outline-none focus-visible:outline-none sm:h-6"
         >
           <ChevronDownIcon className="size-3.5" />
         </button>
@@ -424,12 +425,12 @@ export function Composer() {
       )}
       <div
         className={cn(
-          'relative rounded-[20px] border border-border bg-card transition-colors duration-200 focus-within:border-ring/45',
+          'relative rounded-[12px] border border-border bg-card transition-colors duration-200 focus-within:border-ring/45',
           dragging && 'border-primary/60 ring-2 ring-primary/30',
         )}
       >
         {pending.length > 0 && (
-          <div className="flex flex-wrap gap-1.5 px-4 pt-3">
+          <div className="flex flex-wrap gap-1.5 px-3 pt-2.5">
             {pending.map((f) => (
               <span
                 key={f.id}
@@ -450,7 +451,7 @@ export function Composer() {
           </div>
         )}
 
-        <div className="flex items-start px-4 py-3.5">
+        <div className="flex items-start px-3 py-2.5">
           {dictating && (
             <div
               aria-live="polite"
@@ -488,6 +489,28 @@ export function Composer() {
             }}
             className="max-h-[200px] min-h-[26px] w-full resize-none bg-transparent text-[15px] leading-relaxed outline-none placeholder:text-muted-foreground"
           />
+          {/* Right-edge adornment, Claude Code style: while streaming, a boxed
+              stop button; otherwise an Enter glyph once there's something to
+              send (or while dictating, where Enter stops the recording). */}
+          {streaming ? (
+            <button
+              type="button"
+              onClick={stop}
+              aria-label={t('composer.stop')}
+              className="mt-0.5 flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-[5px] border border-border text-muted-foreground transition-colors hover:border-destructive/50 hover:bg-destructive/10 hover:text-destructive"
+            >
+              <svg width="9" height="9" viewBox="0 0 12 12" fill="currentColor" aria-hidden="true">
+                <rect x="2" y="2" width="8" height="8" rx="1.5" />
+              </svg>
+            </button>
+          ) : (
+            (text.trim().length > 0 || dictating) && (
+              <CornerDownLeftIcon
+                aria-hidden="true"
+                className="mt-1 ml-3 size-4 shrink-0 text-muted-foreground/50"
+              />
+            )
+          )}
         </div>
       </div>
 
@@ -513,7 +536,7 @@ export function Composer() {
                   <button
                     type="button"
                     aria-label={t('composer.add')}
-                    className="flex size-8 shrink-0 items-center justify-center rounded-lg border border-transparent text-muted-foreground/70 outline-none transition-colors hover:bg-accent hover:text-foreground/80 focus:outline-none focus-visible:outline-none sm:size-7 [&_svg]:size-4"
+                    className="flex size-7 shrink-0 items-center justify-center rounded-md border border-transparent text-muted-foreground/70 outline-none transition-colors hover:bg-accent hover:text-foreground/80 focus:outline-none focus-visible:outline-none sm:size-6 [&_svg]:size-3.5"
                   >
                     <PlusIcon className={uploading ? 'animate-pulse' : undefined} />
                   </button>
@@ -550,7 +573,7 @@ export function Composer() {
                         : t('composer.dictate')
                     }
                     className={cn(
-                      'flex size-8 shrink-0 items-center justify-center rounded-lg border border-transparent transition-colors sm:size-7 [&_svg]:size-4',
+                      'flex size-7 shrink-0 items-center justify-center rounded-md border border-transparent transition-colors sm:size-6 [&_svg]:size-3.5',
                       dictation.status === 'recording'
                         ? 'animate-pulse bg-red-500/10 text-red-500 hover:bg-red-500/20'
                         : 'text-muted-foreground/70 hover:bg-accent hover:text-foreground/80 disabled:opacity-50',
@@ -580,26 +603,13 @@ export function Composer() {
             )}
           </div>
 
-          {/* Right cluster: model · thinking · context meter (· stop while streaming) */}
+          {/* Right cluster: model · thinking · context meter */}
           <div className="flex shrink-0 flex-nowrap items-center justify-end gap-1">
             <ModelPicker visible={prefs.visibility.composerModelPicker} />
 
             <ThinkingToggle />
 
             {prefs.visibility.contextMeter && <ContextMeter />}
-
-            {streaming && (
-              <button
-                type="button"
-                onClick={stop}
-                aria-label={t('composer.stop')}
-                className="flex size-7 cursor-pointer items-center justify-center rounded-full bg-destructive/90 text-white shadow-xs shadow-destructive/24 inset-shadow-[0_1px_rgb(255_255_255/16%)] transition-all duration-150 hover:scale-105 hover:bg-destructive active:shadow-none active:inset-shadow-[0_1px_rgb(0_0_0/8%)]"
-              >
-                <svg width="10" height="10" viewBox="0 0 12 12" fill="currentColor" aria-hidden="true">
-                  <rect x="2" y="2" width="8" height="8" rx="1.5" />
-                </svg>
-              </button>
-            )}
           </div>
         </div>
       {dictation.error && !dictating && (
