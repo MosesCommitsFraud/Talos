@@ -140,13 +140,28 @@ def setup_voice_routes():
             data = {"language": lang or "auto"}
 
         blob = await file.read()
+        # Browsers record webm/opus (MediaRecorder), which soundfile-based ASR
+        # endpoints (vLLM audio API) cannot decode — transcode to 16k mono WAV
+        # first. Falls back to the original bytes if ffmpeg is unavailable.
+        upload: tuple = (file.filename or "dictation.webm", blob)
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "ffmpeg", "-hide_banner", "-loglevel", "error",
+                "-i", "pipe:0", "-ac", "1", "-ar", "16000", "-f", "wav", "pipe:1",
+                stdin=asyncio.subprocess.PIPE,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            wav, err = await asyncio.wait_for(proc.communicate(blob), timeout=_ASR_TIMEOUT)
+            if proc.returncode == 0 and wav:
+                upload = ("dictation.wav", wav, "audio/wav")
+            else:
+                logger.warning("voice: ffmpeg transcode failed: %s", (err or b"")[-200:])
+        except (FileNotFoundError, asyncio.TimeoutError) as e:
+            logger.warning("voice: ffmpeg unavailable/timed out (%s), sending original", e)
         try:
             async with httpx.AsyncClient(timeout=_ASR_TIMEOUT) as client:
-                resp = await client.post(
-                    url,
-                    files={"file": (file.filename or "dictation.webm", blob)},
-                    data=data,
-                )
+                resp = await client.post(url, files={"file": upload}, data=data)
         except httpx.HTTPError as e:
             logger.warning("voice: ASR endpoint unreachable: %s", e)
             raise HTTPException(502, f"ASR endpoint unreachable: {type(e).__name__}")
