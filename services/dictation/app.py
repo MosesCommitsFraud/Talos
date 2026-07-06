@@ -208,6 +208,8 @@ async def ws_dictate(ws: WebSocket) -> None:
             else:
                 await ws.send_json({"type": "partial", "text": text})
 
+    logger.info("session started")
+    fed_bytes = 0
     pump = asyncio.create_task(pump_events())
     try:
         while True:
@@ -216,6 +218,9 @@ async def ws_dictate(ws: WebSocket) -> None:
                 break  # cancel: client vanished without stop — discard
             data = msg.get("bytes")
             if data:
+                if fed_bytes == 0:
+                    logger.info("first audio frame received (%d bytes)", len(data))
+                fed_bytes += len(data)
                 recorder.feed_audio(data)
                 continue
             text = msg.get("text")
@@ -231,6 +236,12 @@ async def ws_dictate(ws: WebSocket) -> None:
     except WebSocketDisconnect:
         pass
     finally:
+        logger.info(
+            "session ended (%d bytes ≈ %.1fs audio, %d sentences)",
+            fed_bytes,
+            fed_bytes / 32000.0,  # PCM16 mono @ 16 kHz
+            len(session.committed),
+        )
         pump.cancel()
         _session = None
         # Reset shared state for the next session: end any open utterance and

@@ -143,6 +143,10 @@ export function useDictation(
     async (media: MediaStream) => {
       const ctx = new AudioContext();
       audioCtx.current = ctx;
+      // Chrome can create the context 'suspended' when the user-gesture
+      // activation expired during the mic-permission prompt — a suspended
+      // context pulls no samples and dictation hears only silence.
+      if (ctx.state === 'suspended') await ctx.resume();
       await ctx.audioWorklet.addModule(WORKLET_URL);
 
       const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
