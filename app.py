@@ -791,6 +791,19 @@ async def serve_index(request: Request):
     raise HTTPException(503, "web UI not built — run `npm run build` in web/")
 
 
+@app.get("/pcm-capture.worklet.js")
+async def serve_dictation_worklet():
+    # Dictation AudioWorklet (useDictation.ts). Un-hashed dist-root file, so it
+    # needs its own route: only /assets and /fonts get StaticFiles mounts, and
+    # the CSP (script-src 'self') rules out inlining it as a blob: module.
+    path = os.path.join(WEB_DIST, "pcm-capture.worklet.js")
+    if os.path.exists(path):
+        return FileResponse(
+            path, media_type="text/javascript", headers={"Cache-Control": "no-cache"}
+        )
+    raise HTTPException(404, "worklet not built")
+
+
 @app.get("/api/version")
 async def get_version():
     from core.constants import APP_VERSION
