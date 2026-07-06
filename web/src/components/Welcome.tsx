@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { fetchUsageStats, type UsageStats } from '@/api/client';
 import { usePrefs } from '@/state/prefs';
@@ -62,12 +62,24 @@ const GAP = 3;
 function Heatmap({ daily }: { daily: UsageStats['daily'] }) {
   const { t, i18n } = useTranslation();
   const [hover, setHover] = useState<{ x: number; y: number; label: string } | null>(null);
+  // Tooltip-style delay: the first hover waits ~400ms; once one tooltip is
+  // showing, moving across cells updates it instantly. Leaving the grid
+  // resets to "cold" so the next visit waits again.
+  const warm = useRef(false);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const max = Math.max(1, ...daily.map((d) => d.count));
   // Pad the first column so rows are true weekdays (Monday on top).
   const lead = daily.length ? (new Date(`${daily[0].date}T00:00:00`).getDay() + 6) % 7 : 0;
 
   return (
-    <div className="relative w-fit" onMouseLeave={() => setHover(null)}>
+    <div
+      className="relative w-fit"
+      onMouseLeave={() => {
+        if (timer.current) clearTimeout(timer.current);
+        warm.current = false;
+        setHover(null);
+      }}
+    >
       <div
         className="grid grid-flow-col"
         style={{ gridTemplateRows: `repeat(7, ${CELL}px)`, gridAutoColumns: `${CELL}px`, gap: GAP }}
@@ -83,11 +95,20 @@ function Heatmap({ daily }: { daily: UsageStats['daily'] }) {
               const dateLabel = new Date(`${d.date}T00:00:00`).toLocaleDateString(i18n.language, {
                 weekday: 'short', day: 'numeric', month: 'short',
               });
-              setHover({
+              const next = {
                 x: Math.floor(cell / 7) * (CELL + GAP) + CELL / 2,
                 y: (cell % 7) * (CELL + GAP),
                 label: `${dateLabel} — ${t('home.heatmapCount', { count: d.count })}`,
-              });
+              };
+              if (timer.current) clearTimeout(timer.current);
+              if (warm.current) {
+                setHover(next);
+              } else {
+                timer.current = setTimeout(() => {
+                  warm.current = true;
+                  setHover(next);
+                }, 400);
+              }
             }}
             style={{
               background: d.count === 0
@@ -136,8 +157,24 @@ function StatsPanel() {
 
   return (
     <div className="w-full max-w-[560px] rounded-xl border bg-card p-4">
-      <div className="mb-3 flex justify-end">
-        <div className="flex gap-1 rounded-lg bg-muted/50 p-0.5">
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+        <StatTile label={t('home.stats.sessions')} value={num(stats.sessions)} />
+        <StatTile label={t('home.stats.messages')} value={num(stats.messages)} />
+        <StatTile label={t('home.stats.totalTokens')} value={compact.format(stats.total_tokens)} />
+        <StatTile label={t('home.stats.activeDays')} value={num(stats.active_days)} />
+        <StatTile label={t('home.stats.currentStreak')} value={t('home.stats.days', { count: stats.current_streak })} />
+        <StatTile label={t('home.stats.longestStreak')} value={t('home.stats.days', { count: stats.longest_streak })} />
+        <StatTile label={t('home.stats.peakHour')} value={peakHour} />
+        <StatTile label={t('home.stats.favoriteModel')} value={stats.favorite_model ?? '—'} />
+      </div>
+      {/* No overflow-hidden here — the hover tooltip extends past the grid. */}
+      <div className="mt-3">
+        <Heatmap daily={stats.daily} />
+      </div>
+      {/* Footer: fun fact on the left, range selector on the right. */}
+      <div className="mt-3 flex items-center justify-between gap-3">
+        <p className="min-w-0 truncate text-xs text-muted-foreground">{fact}</p>
+        <div className="flex shrink-0 gap-1 rounded-lg bg-muted/50 p-0.5">
           {RANGES.map((r) => (
             <button
               key={r.key}
@@ -154,21 +191,6 @@ function StatsPanel() {
           ))}
         </div>
       </div>
-      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-        <StatTile label={t('home.stats.sessions')} value={num(stats.sessions)} />
-        <StatTile label={t('home.stats.messages')} value={num(stats.messages)} />
-        <StatTile label={t('home.stats.totalTokens')} value={compact.format(stats.total_tokens)} />
-        <StatTile label={t('home.stats.activeDays')} value={num(stats.active_days)} />
-        <StatTile label={t('home.stats.currentStreak')} value={t('home.stats.days', { count: stats.current_streak })} />
-        <StatTile label={t('home.stats.longestStreak')} value={t('home.stats.days', { count: stats.longest_streak })} />
-        <StatTile label={t('home.stats.peakHour')} value={peakHour} />
-        <StatTile label={t('home.stats.favoriteModel')} value={stats.favorite_model ?? '—'} />
-      </div>
-      {/* No overflow-hidden here — the hover tooltip extends past the grid. */}
-      <div className="mt-3 flex justify-center">
-        <Heatmap daily={stats.daily} />
-      </div>
-      {fact && <p className="mt-3 text-xs text-muted-foreground">{fact}</p>}
     </div>
   );
 }
@@ -187,14 +209,17 @@ export function Welcome() {
   const greeting = firstName ? t(`home.greeting${variant}`, { name: firstName }) : t('messages.welcome');
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-6 overflow-y-auto px-4 py-8">
-      {show && (
-        <div className="flex select-none flex-col items-center gap-3">
-          <Logo />
-          <h1 className="text-2xl font-semibold tracking-tight">{greeting}</h1>
-        </div>
-      )}
-      <StatsPanel />
+    <div className="min-h-0 flex-1 overflow-y-auto">
+      {/* Same 800px column as the composer/messages, content left-aligned. */}
+      <div className="mx-auto flex w-full max-w-[800px] flex-col items-start gap-6 px-4 py-10">
+        {show && (
+          <div className="flex select-none items-center gap-3">
+            <Logo />
+            <h1 className="text-2xl font-semibold tracking-tight">{greeting}</h1>
+          </div>
+        )}
+        <StatsPanel />
+      </div>
     </div>
   );
 }
