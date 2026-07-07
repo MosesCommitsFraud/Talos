@@ -964,16 +964,13 @@ class VectorRAG:
             # Companion figures: ride a hit's document figures along with it, so
             # the model receives their image_url even though a caption-only
             # figure chunk rarely wins the ranking by itself.
-            top = self._attach_companion_figures(top)
+            top = self._attach_companion_figures(query, top)
             logger.info("Qdrant hybrid search for '%s': %s results", query[:60], len(top))
             return top
         except Exception as e:
             logger.error(f"search failed: {e}")
             return []
 
-    # Cap on figures attached per search — keeps companions from crowding the
-    # text context on figure-heavy documents.
-    _COMPANION_FIGURES_MAX = 4
     # How far (seconds) a video keyframe may sit outside a transcript hit's
     # time window and still ride along as its companion.
     _COMPANION_TIME_WINDOW_SEC = 120.0
@@ -1006,7 +1003,9 @@ class VectorRAG:
             logger.warning("companion figures: lookup failed for %s: %s", source, e)
             return []
 
-    def _attach_companion_figures(self, results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    def _attach_companion_figures(
+        self, query: str, results: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
         """Attach each hit's document figures to the result set (small-to-big
         for images).
 
@@ -1015,19 +1014,24 @@ class VectorRAG:
         answers from the page text without ever receiving the figure's
         ``image_url``, and has nothing it could display inline. Instead of
         requiring figures to win the ranking, ride them along with the text
-        that did: same page when the hit has one, whole document only when it
-        has few figures (no page anchor + many figures would flood the
-        context). Attached entries inherit the hit's scores so the chat-side
-        relevance threshold keeps a figure with its text. Best-effort — any
-        failure returns the results unchanged."""
+        that did: same page when the hit has one, keyframes near the segment's
+        time window for video hits, otherwise the whole document's figures.
+
+        There is no cap on how many figures ride along — each companion is
+        reranked against the query on its own caption, so the chat-side
+        ``rerank_min_score`` threshold decides per figure whether it stays.
+        Every companion carries ``anchor_id`` (the id of the text hit it rode
+        in with) so the chat side can drop figures whose anchoring text didn't
+        survive the relevance gate. Without a reranker the companions fall
+        back to inheriting their anchor's scores, as before. Best-effort —
+        any failure returns the results unchanged."""
         out = list(results)
         try:
             seen = {(r.get("metadata") or {}).get("image_url") for r in results}
             by_source: Dict[str, List[Any]] = {}
-            added = 0
+            companions: List[Dict[str, Any]] = []
+            anchor_scores: Dict[str, Dict[str, Any]] = {}
             for r in results:
-                if added >= self._COMPANION_FIGURES_MAX:
-                    break
                 meta = r.get("metadata") or {}
                 if meta.get("image_url"):
                     continue  # already a figure hit
@@ -1043,8 +1047,7 @@ class VectorRAG:
                     figs = [f for f in figs if self._chunk_page(f.meta or {}) == page]
                 elif isinstance(start, (int, float)) and isinstance(end, (int, float)):
                     # Video hit: keyframes near the segment's time window,
-                    # nearest first — a keyframe-rich video would otherwise be
-                    # skipped entirely by the flood guard below.
+                    # nearest first.
                     win = self._COMPANION_TIME_WINDOW_SEC
                     figs = [
                         f
@@ -1053,28 +1056,41 @@ class VectorRAG:
                         and (start - win) <= f.meta["start"] <= (end + win)
                     ]
                     figs.sort(key=lambda f: abs(f.meta["start"] - start))
-                elif len(figs) > self._COMPANION_FIGURES_MAX:
-                    continue
+                anchor_id = r.get("id")
+                anchor_scores[anchor_id] = {
+                    "similarity": r.get("similarity"),
+                    "rerank_score": r.get("rerank_score"),
+                }
                 for f in figs:
                     url = (f.meta or {}).get("image_url")
                     if not url or url in seen:
                         continue
                     seen.add(url)
-                    out.append(
+                    companions.append(
                         {
                             "id": f.id,
                             "document": f.content or "",
                             "metadata": dict(f.meta or {}),
-                            "similarity": r.get("similarity"),
-                            "rerank_score": r.get("rerank_score"),
+                            "similarity": None,
+                            "rerank_score": None,
                             "search_type": "figure_companion",
+                            "anchor_id": anchor_id,
                         }
                     )
-                    added += 1
-                    if added >= self._COMPANION_FIGURES_MAX:
-                        break
-            if added:
-                logger.info("companion figures: attached %s figure(s)", added)
+            if companions:
+                # Score each companion on its own caption so the chat-side
+                # threshold filters figures individually — one relevant figure
+                # on a page must not drag its neighbors into the answer.
+                scored = self._rerank(query, companions, len(companions))
+                if any(c.get("rerank_score") is not None for c in scored):
+                    companions = scored
+                else:
+                    # No reranker (or it failed): inherit the anchor's scores
+                    # so the figure still survives alongside its text.
+                    for c in companions:
+                        c.update(anchor_scores.get(c.get("anchor_id")) or {})
+                out.extend(companions)
+                logger.info("companion figures: attached %s figure(s)", len(companions))
         except Exception as e:
             logger.warning("companion figures failed: %s", e)
             return results

@@ -24,7 +24,7 @@ class RagPipelineConfig(BaseModel):
     search_top_k: int = 5
     candidate_top_k: int = 40
     similarity_threshold: float = 0.0
-    rerank_min_score: float = 0.10
+    rerank_min_score: float = 0.30
     max_context_chars: int = 10000
     query_prefix: str = ""
     context_prompt: str = ""
@@ -137,7 +137,7 @@ def _public(cfg: dict) -> dict:
         "search_top_k": _clamp_k(cfg.get("search_top_k", 5)),
         "candidate_top_k": _clamp_candidate_k(cfg.get("candidate_top_k", 40)),
         "similarity_threshold": _clamp_float(cfg.get("similarity_threshold", 0.0), 0.0),
-        "rerank_min_score": _clamp_float(cfg.get("rerank_min_score", 0.10), 0.10),
+        "rerank_min_score": _clamp_float(cfg.get("rerank_min_score", 0.30), 0.30),
         "max_context_chars": _clamp_chars(cfg.get("max_context_chars", 10000)),
         "query_prefix": cfg.get("query_prefix", ""),
         "context_prompt": cfg.get("context_prompt", ""),
@@ -219,7 +219,7 @@ def setup_rag_routes():
             "search_top_k": _clamp_k(body.search_top_k),
             "candidate_top_k": _clamp_candidate_k(body.candidate_top_k),
             "similarity_threshold": _clamp_float(body.similarity_threshold, 0.0),
-            "rerank_min_score": _clamp_float(body.rerank_min_score, 0.10),
+            "rerank_min_score": _clamp_float(body.rerank_min_score, 0.30),
             "max_context_chars": _clamp_chars(body.max_context_chars),
             "query_prefix": body.query_prefix.strip(),
             "context_prompt": body.context_prompt.strip(),

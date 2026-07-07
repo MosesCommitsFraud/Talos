@@ -41,11 +41,11 @@ _AV_EXTS = frozenset(
 _FIGURE_EMBED_RULE = (
     "Some retrieved sections include a figure marked as [figure image_url: ... — "
     "caption: ...]. These are real screenshots/diagrams from the documentation and "
-    "render inline in the chat. When you answer from a document that has such a "
-    "figure, you MUST embed the figure in your answer as Markdown image syntax "
-    "![caption](image_url), placed where it is relevant. Default to showing it: "
-    "omit a figure only when it is clearly unrelated to the question. Never "
-    "describe a figure in words instead of embedding it. Copy the image_url exactly, "
+    "render inline in the chat. Embed every figure that supports your answer as "
+    "Markdown image syntax ![caption](image_url), placed where it is relevant. "
+    "When a figure covers what the answer discusses, embed it rather than "
+    "describing it in words; skip figures that add nothing to this specific "
+    "question. Copy the image_url exactly, "
     "character-for-character, as given in the retrieved section — never invent, "
     "shorten, or alter one, and only use image_url values that appear in the "
     "retrieved context. Do not copy image references from inside document text "
@@ -148,7 +148,11 @@ class ChatProcessor:
     # dropping everything behind a hard similarity gate. Embedding/reranker
     # scales differ between providers, so a fixed threshold is brittle.
     RAG_SIMILARITY_THRESHOLD = 0.0
-    RAG_RERANK_MIN_SCORE = 0.10
+    # Companion figures get their own rerank score (caption vs. query), so this
+    # gate decides per figure whether it may be shown — 0.10 let barely-related
+    # chunks (and their figures) through; 0.30 expects a clear relevance signal
+    # from sigmoid-normalized cross-encoder scores (qwen3-reranker).
+    RAG_RERANK_MIN_SCORE = 0.30
 
     def _rag_k_setting(self, key: str, default: int) -> int:
         try:
@@ -503,28 +507,61 @@ class ChatProcessor:
                     # top-k fallback. Off-topic context confuses the model and
                     # yields misleading citations, so on a query the index has
                     # nothing useful for, RAG stays silent.
+                    def _is_figure(r):
+                        return bool((r.get("metadata") or {}).get("image_url"))
+
                     has_rerank_scores = any(r.get("rerank_score") is not None for r in results)
                     if has_rerank_scores:
-                        # The reranker is a reliable relevance oracle, so trust
-                        # its score directly. A vector-only match with no keyword
-                        # overlap is fine here — the reranker already vetted it.
+                        # Every result — figures included — carries its own
+                        # rerank score (companion figures are reranked on their
+                        # captions), so one threshold filters them all.
                         relevant = [
                             r
                             for r in results
                             if r.get("rerank_score") is not None
                             and float(r.get("rerank_score") or 0) >= rerank_min
                         ]
+                        # Rerank scores are only relative: even a contentless
+                        # query ("yoyoyo") ranks *something* first. Require at
+                        # least one surviving TEXT chunk to also share
+                        # distinctive query terms (BM25-style) before injecting
+                        # anything — a query the knowledge base has nothing for
+                        # injects nothing, text or figures.
+                        if not any(
+                            _chunk_relevant_to_query(search_query, r.get("document", ""))
+                            for r in relevant
+                            if not _is_figure(r)
+                        ):
+                            relevant = []
                     else:
                         # No reranker: raw hybrid (RRF) scores can't tell a
                         # relevant query from an unrelated one, so require the
                         # chunk to actually share distinctive query terms before
-                        # injecting it.
+                        # injecting it. Figure captions can't pass that gate —
+                        # companions are handled below via their anchor instead.
                         relevant = [
                             r
                             for r in results
-                            if r.get("similarity", 0) >= sim_threshold
+                            if not _is_figure(r)
+                            and r.get("similarity", 0) >= sim_threshold
                             and _chunk_relevant_to_query(search_query, r.get("document", ""))
                         ]
+                        text_ids = {r.get("id") for r in relevant}
+                        relevant += [
+                            r
+                            for r in results
+                            if _is_figure(r) and r.get("anchor_id") in text_ids
+                        ]
+                    # A figure is only shown alongside the text it came from:
+                    # drop any companion whose anchoring chunk didn't survive
+                    # the relevance gate above.
+                    text_ids = {r.get("id") for r in relevant if not _is_figure(r)}
+                    relevant = [
+                        r
+                        for r in relevant
+                        if r.get("search_type") != "figure_companion"
+                        or r.get("anchor_id") in text_ids
+                    ]
                     if relevant:
                         logger.info(
                             f"RAG: {len(relevant)}/{len(results)} results above threshold {sim_threshold}"
@@ -579,9 +616,9 @@ class ChatProcessor:
                                 )
                                 body += (
                                     "\n[This section is a real figure from the document above. "
-                                    "If you use this document in your answer, you MUST display "
-                                    "the figure to the user by copying this exact Markdown line "
-                                    "into your answer:]\n"
+                                    "If this figure supports your answer, display it to the "
+                                    "user by copying this exact Markdown line into your "
+                                    "answer:]\n"
                                     f"![{cap}]({s['image_url']})"
                                 )
                             return body

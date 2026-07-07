@@ -176,6 +176,15 @@ function ragSourcesFromMetadata(metadata: Record<string, unknown> | undefined): 
       filename: String(item.filename ?? item.source ?? 'unknown'),
       snippet: typeof item.snippet === 'string' ? item.snippet : '',
       similarity: typeof item.similarity === 'number' ? item.similarity : 0,
+      // Media fields must survive a cold load, or reopened chats lose their
+      // image previews / video deeplinks that the live stream showed.
+      modality: item.modality === 'image' || item.modality === 'video' ? (item.modality as 'image' | 'video') : undefined,
+      image_url: typeof item.image_url === 'string' ? item.image_url : undefined,
+      image_caption: typeof item.image_caption === 'string' ? item.image_caption : undefined,
+      video_url: typeof item.video_url === 'string' ? item.video_url : undefined,
+      deeplink: typeof item.deeplink === 'string' ? item.deeplink : undefined,
+      start: typeof item.start === 'number' ? item.start : undefined,
+      end: typeof item.end === 'number' ? item.end : undefined,
     }));
   return sources.length > 0 ? sources : undefined;
 }

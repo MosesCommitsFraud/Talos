@@ -2,13 +2,18 @@
 
 A figure chunk's caption rarely outranks prose/ASR chunks, so figures ride
 along with the text hits from their document instead of winning the ranking
-themselves. Pure logic against a stub store — no Qdrant, embeddings, or model
-deps.
+themselves. Companions are reranked against the query on their own captions
+(each carries its own score + anchor_id); without a reranker they fall back to
+inheriting their anchor's scores. Pure logic against a stub store — no Qdrant,
+embeddings, or model deps (RERANK_URL is unset under pytest, so the fallback
+path runs unless a test stubs _rerank).
 """
 
 import importlib
 
 rv = importlib.import_module("src.rag_vector")
+
+_QUERY = "how do I align the impeller"
 
 
 class _Doc:
@@ -64,32 +69,59 @@ def _hit(source="/u/doc.pdf", page=None, score=0.66, **meta):
     }
 
 
-def test_attaches_same_page_figure_and_inherits_scores():
+def test_attaches_same_page_figure_with_anchor_and_fallback_scores():
     rag = _rag([_fig(1, page=3), _fig(2, page=5)])
-    out = rag._attach_companion_figures([_hit(page=3, score=0.9)])
+    out = rag._attach_companion_figures(_QUERY, [_hit(page=3, score=0.9)])
     assert len(out) == 2
     fig = out[1]
     assert fig["metadata"]["image_url"].endswith("fig1.png")
+    # No reranker in tests → the companion inherits its anchor's scores.
     assert fig["rerank_score"] == 0.9 and fig["similarity"] == 0.9
     assert fig["search_type"] == "figure_companion"
+    assert fig["anchor_id"] == "hit"
 
 
-def test_no_page_anchor_attaches_all_when_few():
+def test_no_page_anchor_attaches_all_document_figures():
     rag = _rag([_fig(1), _fig(2)])
-    out = rag._attach_companion_figures([_hit()])
+    out = rag._attach_companion_figures(_QUERY, [_hit()])
     assert [r["id"] for r in out] == ["hit", "fig1", "fig2"]
 
 
-def test_no_page_anchor_skips_figure_heavy_doc():
-    rag = _rag([_fig(i) for i in range(6)])
-    out = rag._attach_companion_figures([_hit()])
-    assert len(out) == 1  # attaching 6 unanchored figures would flood the context
+def test_no_cap_on_attached_figures():
+    # There is deliberately no attachment cap: relevance is decided per figure
+    # by the rerank score downstream, not by an arbitrary count.
+    rag = _rag([_fig(i, page=1) for i in range(10)])
+    out = rag._attach_companion_figures(_QUERY, [_hit(page=1)])
+    assert len(out) == 11
+
+
+def test_companions_are_reranked_on_their_captions():
+    rag = _rag([_fig(1, page=1), _fig(2, page=1)])
+
+    def fake_rerank(query, candidates, k):
+        assert query == _QUERY
+        scored = []
+        for c in candidates:
+            c = dict(c)
+            c["rerank_score"] = 0.8 if c["id"] == "fig2" else 0.05
+            c["similarity"] = c["rerank_score"]
+            scored.append(c)
+        return sorted(scored, key=lambda c: -c["rerank_score"])[:k]
+
+    rag._rerank = fake_rerank
+    out = rag._attach_companion_figures(_QUERY, [_hit(page=1, score=0.9)])
+    figs = {r["id"]: r for r in out if r.get("search_type") == "figure_companion"}
+    # Each figure keeps its OWN score — not the anchor's 0.9 — so the
+    # chat-side threshold can drop fig1 while keeping fig2.
+    assert figs["fig2"]["rerank_score"] == 0.8
+    assert figs["fig1"]["rerank_score"] == 0.05
+    assert all(f["anchor_id"] == "hit" for f in figs.values())
 
 
 def test_docling_provenance_page_is_used():
     rag = _rag([_fig(1, page=2)])
     hit = _hit(dl_meta={"doc_items": [{"prov": [{"page_no": 2}]}]})
-    out = rag._attach_companion_figures([hit])
+    out = rag._attach_companion_figures(_QUERY, [hit])
     assert len(out) == 2
 
 
@@ -103,21 +135,15 @@ def test_dedupes_figure_already_retrieved():
         "similarity": 0.5,
         "rerank_score": 0.5,
     }
-    out = rag._attach_companion_figures([already, _hit(page=1)])
+    out = rag._attach_companion_figures(_QUERY, [already, _hit(page=1)])
     assert len(out) == 2  # nothing re-attached
-
-
-def test_cap_limits_attached_figures():
-    rag = _rag([_fig(i, page=1) for i in range(10)])
-    out = rag._attach_companion_figures([_hit(page=1)])
-    assert len(out) == 1 + rv.VectorRAG._COMPANION_FIGURES_MAX
 
 
 def test_store_failure_returns_results_unchanged():
     r = object.__new__(rv.VectorRAG)
     r._store = None  # filter_documents raises → best-effort no-op
     hits = [_hit(page=1)]
-    assert r._attach_companion_figures(hits) == hits
+    assert r._attach_companion_figures(_QUERY, hits) == hits
 
 
 # ── Video keyframes: time-window companions ──
@@ -149,22 +175,20 @@ def _video_hit(start, end, source="/u/training.mp4", score=0.8):
 
 
 def test_video_hit_attaches_keyframes_in_time_window():
-    # Even with many keyframes (which would trip the unanchored flood guard),
-    # a timed hit attaches the ones near its window and skips distant ones.
     rag = _rag([_keyframe(i, start=i * 30) for i in range(20)])  # 0..570s
-    out = rag._attach_companion_figures([_video_hit(start=100, end=130)])
+    out = rag._attach_companion_figures(_QUERY, [_video_hit(start=100, end=130)])
     attached = [r for r in out if r.get("search_type") == "figure_companion"]
-    assert 1 <= len(attached) <= rv.VectorRAG._COMPANION_FIGURES_MAX
     win = rv.VectorRAG._COMPANION_TIME_WINDOW_SEC
-    for r in attached:
-        assert 100 - win <= r["metadata"]["start"] <= 130 + win
+    # Every keyframe inside the ±window rides along (no cap); none outside.
+    expected = [i * 30 for i in range(20) if 100 - win <= i * 30 <= 130 + win]
+    assert sorted(r["metadata"]["start"] for r in attached) == sorted(expected)
     # Nearest-first: the closest keyframe to the segment start comes first.
     assert attached[0]["metadata"]["start"] == 90.0
 
 
 def test_video_hit_skips_keyframes_outside_window():
     rag = _rag([_keyframe(1, start=400)])
-    out = rag._attach_companion_figures([_video_hit(start=100, end=130)])
+    out = rag._attach_companion_figures(_QUERY, [_video_hit(start=100, end=130)])
     assert len(out) == 1  # 400s is far outside the ±window
 
 

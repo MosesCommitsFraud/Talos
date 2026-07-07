@@ -718,7 +718,7 @@ class PreviewHandler(BaseHTTPRequestHandler):
                     "search_top_k": 5,
                     "candidate_top_k": 40,
                     "similarity_threshold": 0.0,
-                    "rerank_min_score": 0.1,
+                    "rerank_min_score": 0.3,
                     "max_context_chars": 10000,
                     "query_prefix": "",
                     "context_prompt": "",
