@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { FolderOpenIcon, RefreshCwIcon, UploadCloudIcon } from 'lucide-react';
+import { AlertTriangleIcon, FolderOpenIcon, RefreshCwIcon, UploadCloudIcon } from 'lucide-react';
 import { useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
@@ -15,6 +15,7 @@ import {
 import { cn } from '@/lib/utils';
 import { useRagConsole } from '@/state/ragConsole';
 import { Button } from '../ui/button';
+import { Dialog, DialogContent } from '../ui/dialog';
 import { RagExplorer } from './RagExplorer';
 
 const TERMINAL = ['completed', 'failed', 'cancelled'];
@@ -64,6 +65,7 @@ export function RagActivity() {
   const [dragging, setDragging] = useState(false);
   const [msg, setMsg] = useState<{ text: string; ok: boolean } | null>(null);
   const [explorerOpen, setExplorerOpen] = useState(false);
+  const [rebuildConfirmOpen, setRebuildConfirmOpen] = useState(false);
 
   const jobs = useQuery({ queryKey: ['rag-jobs'], queryFn: fetchRagJobs, refetchInterval: 1500 });
   const diag = useQuery({ queryKey: ['rag-worker-diag'], queryFn: fetchRagWorkerDiag, refetchInterval: 5000 });
@@ -139,13 +141,16 @@ export function RagActivity() {
       </div>
 
       <div className="flex shrink-0 items-center gap-2">
-        <Button size="sm" variant="outline" onClick={() => setExplorerOpen(true)}>
+        <Button className="flex-1" size="sm" variant="outline" onClick={() => setExplorerOpen(true)}>
           <FolderOpenIcon /> {t('rag.explorer.open')}
         </Button>
-        <Button size="sm" variant="outline" disabled={rebuild.isPending} onClick={() => { if (window.confirm(t('rag.rebuildConfirm'))) rebuild.mutate(); }}>
+        <Button className="flex-1" size="sm" variant="outline" disabled={rebuild.isPending} onClick={() => setRebuildConfirmOpen(true)}>
           <RefreshCwIcon className={cn(rebuild.isPending && 'animate-spin')} /> {t('rag.rebuildIndex')}
         </Button>
-        <span className={cn('ml-auto inline-flex items-center gap-1.5 text-[11px]', workerCount === 0 ? 'text-destructive-foreground' : 'text-muted-foreground')}>
+      </div>
+      <div className="flex shrink-0 items-center justify-between rounded-md border border-border/60 bg-muted/25 px-2.5 py-2">
+        <span className="text-[11px] font-medium text-muted-foreground">{t('rag.workerStatus')}</span>
+        <span className={cn('inline-flex shrink-0 items-center gap-1.5 text-[11px] font-medium', workerCount === 0 ? 'text-destructive-foreground' : 'text-foreground')}>
           <span className={cn('size-1.5 rounded-full', workerCount === 0 ? 'bg-destructive' : 'bg-success')} />
           {t('rag.workersActive', { n: workerCount })}
         </span>
@@ -221,6 +226,22 @@ export function RagActivity() {
       </div>
 
       <RagExplorer open={explorerOpen} onOpenChange={setExplorerOpen} />
+      <Dialog open={rebuildConfirmOpen} onOpenChange={setRebuildConfirmOpen}>
+        <DialogContent title={t('rag.rebuildConfirmTitle')} className="w-[min(480px,92vw)]">
+          <div className="space-y-5 px-5 py-4">
+            <div className="flex gap-3 rounded-md border border-destructive/25 bg-destructive/5 p-3.5">
+              <AlertTriangleIcon className="mt-0.5 size-5 shrink-0 text-destructive-foreground" />
+              <p className="text-sm leading-relaxed text-muted-foreground">{t('rag.rebuildConfirm')}</p>
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" onClick={() => setRebuildConfirmOpen(false)}>{t('common.cancel')}</Button>
+              <Button variant="destructive" onClick={() => { setRebuildConfirmOpen(false); rebuild.mutate(); }}>
+                {t('rag.rebuildConfirmAction')}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </aside>
   );
 }
