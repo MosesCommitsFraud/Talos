@@ -218,6 +218,11 @@ class ChatProcessor:
                 f"Conversation so far:\n{chr(10).join(turns)}\n\n"
                 f"Latest message: {message}\n\nStandalone search query:"
             )
+            # `/no_think` is the Qwen3 soft switch; belt-and-suspenders alongside
+            # enable_thinking=False for backends that only honor the in-prompt
+            # switch. A leaked <think> block would otherwise become the query.
+            if "qwen" in (model or "").lower():
+                user_prompt += " /no_think"
             out = llm_call(
                 url,
                 model,
@@ -229,8 +234,10 @@ class ChatProcessor:
                 temperature=0.0,
                 max_tokens=120,
                 prompt_type="utility",
+                enable_thinking=False,
             )
-            rewritten = (out or "").strip().strip('"').splitlines()[0].strip()
+            lines = (out or "").strip().strip('"').splitlines()
+            rewritten = lines[0].strip() if lines else ""
             if rewritten and len(rewritten) >= 3:
                 logger.info("RAG query rewrite: %r -> %r", message[:60], rewritten[:60])
                 return rewritten
