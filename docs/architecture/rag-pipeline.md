@@ -77,6 +77,14 @@ ported from [opendataloader-pdf](https://github.com/opendataloader-project/opend
 The PDF VLM lane's per-page triage (`src/pdf_page_triage.py`) also picks up
 vector-drawn charts/diagrams (path objects, no raster image) and wide chart-shaped
 images, in addition to the original image-area rule (`PDF_VLM_PAGE_RATIO`).
+The vector/wide rules only add pages to the vision pass *on top of* Docling text;
+solely raster-dominant pages (the original rule) count toward the doc-level
+"mostly image" classification (`PDF_VLM_DOC_RATIO`) that switches a file to
+VLM-only ingestion — and even there, Docling text is kept whenever any page
+transcription comes back empty. Multimodal VLM calls (page transcriptions,
+figure/image captions) run serially by default (`PDF_VLM_CONCURRENCY`, default 1)
+because parallel image requests can OOM-kill the shared vLLM server; text-only
+ingest calls keep their own knob (`RAG_INGEST_CONCURRENCY`, default 4).
 
 ## Retrieval (answering a query)
 

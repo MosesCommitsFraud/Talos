@@ -118,6 +118,20 @@ def page_signals(page, pdfium_c) -> Dict[str, float]:
     }
 
 
+def is_image_dominant(signals: Dict[str, float], page_thr: Optional[float] = None) -> bool:
+    """True when raster images alone cover the page (scan/screenshot page).
+
+    This is the *only* signal that may count toward the doc-level "mostly
+    image" classification, which discards Docling text for the whole file.
+    The wide-image and vector-graphics rules mark pages worth an extra vision
+    pass, but a page full of tables or with an embedded 16:9 screenshot is
+    still a text page — feeding those rules into the doc-level ratio made
+    ordinary text documents lose their entire text lane.
+    """
+    thr = page_ratio_threshold() if page_thr is None else page_thr
+    return signals["img_ratio"] >= thr
+
+
 def is_visually_heavy(signals: Dict[str, float], page_thr: Optional[float] = None) -> bool:
     """True when a page should be rendered and sent to the vision model."""
     thr = page_ratio_threshold() if page_thr is None else page_thr

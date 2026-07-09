@@ -69,6 +69,23 @@ def test_explicit_threshold_overrides_env():
     assert triage.is_visually_heavy(_sig(img_ratio=0.3), page_thr=0.5) is False
 
 
+def test_image_dominant_ignores_vector_and_wide_signals():
+    """Only raster coverage may count toward the doc-level "mostly image"
+    classification — a table page (many paths) or a page with an embedded
+    16:9 screenshot is still a text page. Regression test for the bug where
+    these signals demoted whole text documents to VLM-only ingestion."""
+    assert triage.is_image_dominant(_sig(img_ratio=0.5)) is True
+    assert triage.is_image_dominant(_sig(img_ratio=0.2)) is False
+    # Vector-chart page: heavy (worth a vision pass) but NOT image-dominant.
+    sig = _sig(path_count=40, path_ratio=0.5)
+    assert triage.is_visually_heavy(sig) is True
+    assert triage.is_image_dominant(sig) is False
+    # Wide-screenshot page: heavy but NOT image-dominant.
+    sig = _sig(img_ratio=0.15, wide_img_ratio=0.15)
+    assert triage.is_visually_heavy(sig) is True
+    assert triage.is_image_dominant(sig) is False
+
+
 # ── hidden text: stripping (pure string logic) ──
 
 

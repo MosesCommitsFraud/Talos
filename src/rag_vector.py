@@ -446,12 +446,25 @@ def _file_has_images(path: str) -> bool:
 
 
 def _vlm_concurrency() -> int:
-    """How many VLM/ingest-LLM calls to run in parallel. Defaults to 4 to match a
-    typical vLLM ``--max-num-seqs 4``; raise it (env) if the server allows more."""
+    """How many text-only ingest-LLM calls to run in parallel. Defaults to 4 to
+    match a typical vLLM ``--max-num-seqs 4``; raise it (env) if the server
+    allows more."""
     try:
         return max(1, min(int(os.getenv("RAG_INGEST_CONCURRENCY", "4") or 4), 16))
     except Exception:
         return 4
+
+
+def _vlm_mm_concurrency() -> int:
+    """How many *multimodal* (image) VLM calls to run in parallel. Serialized
+    by default: the VLM shares one GPU budget with the chat LLM, and parallel
+    image requests have OOM-killed it in the wild — a killed request returns
+    "" and the page/figure is silently lost. Raise via env only if the server
+    demonstrably handles it."""
+    try:
+        return max(1, min(int(os.getenv("PDF_VLM_CONCURRENCY", "1") or 1), 16))
+    except Exception:
+        return 1
 
 
 def _docling_threads() -> Optional[int]:
@@ -1645,15 +1658,17 @@ class VectorRAG:
         """RagFlow-style *selective* vision for PDFs.
 
         Docling supplies the cheap text/table layer (no LLM). A vision model is
-        applied ONLY to image-dominant pages — measured by image-object area
-        coverage (``PDF_VLM_PAGE_RATIO``, default 0.35) — so text pages cost
+        applied ONLY to visually heavy pages (raster coverage, vector charts,
+        wide figure images — see ``pdf_page_triage``) so text pages cost
         nothing extra and slide/screenshot pages get fully read:
-          * "mostly image" docs (≥ ``PDF_VLM_DOC_RATIO`` of pages image-heavy,
-            e.g. a screenshot deck) → every page rendered + VLM-transcribed
-            (Docling's OCR of screenshots is just noise), concurrently;
+          * "mostly image" docs (≥ ``PDF_VLM_DOC_RATIO`` of pages *raster
+            image dominant*, e.g. a screenshot deck) → every page rendered +
+            VLM-transcribed (Docling's OCR of screenshots is just noise); if
+            any transcription comes back empty, Docling text is kept too so a
+            failed VLM call never loses a page;
           * mixed docs → Docling text for the whole file PLUS a VLM transcription
-            of only the image-heavy pages;
-          * no image-heavy page → pure Docling text, zero VLM calls.
+            of only the visually heavy pages;
+          * no heavy page → pure Docling text, zero VLM calls.
         ``stage_cb(done, total)`` reports progress over the rendered pages.
         Renders with pypdfium2 (a Docling dep, no system libs); degrades to
         ``_lane_docling`` on any failure so the lane never regresses.
@@ -1693,14 +1708,22 @@ class VectorRAG:
             # Beyond raster-image coverage, the triage also catches vector
             # charts/diagrams (path objects) and wide chart-shaped images —
             # signals ported from opendataloader-pdf's TriageProcessor.
-            from src.pdf_page_triage import is_visually_heavy, page_signals
+            # Only raster-dominant pages count toward the doc-level "mostly
+            # image" ratio: the vector/wide rules select pages for an *extra*
+            # vision pass, but must never demote a text document to VLM-only
+            # (that dropped the whole text lane for table/screenshot docs).
+            from src.pdf_page_triage import is_image_dominant, is_visually_heavy, page_signals
 
             heavy: List[int] = []
+            dominant = 0
             for i in range(n_pages):
-                if is_visually_heavy(page_signals(pdf[i], pdfium_c), page_thr):
+                sig = page_signals(pdf[i], pdfium_c)
+                if is_visually_heavy(sig, page_thr):
                     heavy.append(i)
+                if is_image_dominant(sig, page_thr):
+                    dominant += 1
 
-            mostly_image = n_pages > 0 and (len(heavy) / n_pages) >= doc_thr
+            mostly_image = n_pages > 0 and (dominant / n_pages) >= doc_thr
             to_render = list(range(n_pages)) if mostly_image else heavy
 
             # Second pass: render the chosen pages serially (pypdfium2 isn't
@@ -1725,7 +1748,7 @@ class VectorRAG:
         texts = _concurrent_map(
             self._vlm_transcribe_image,
             [rendered[i] for i in idxs],
-            _vlm_concurrency(),
+            _vlm_mm_concurrency(),
             on_done=on_done,
         )
         vlm_docs = [
@@ -1736,9 +1759,20 @@ class VectorRAG:
             if t
         ]
 
-        if len(idxs) == n_pages and n_pages > 0:
+        if mostly_image and n_pages > 0:
             # Whole-doc vision (screenshot deck): VLM replaces Docling's OCR noise.
-            docs = vlm_docs or list(self._lane_docling(path))
+            # But a failed/empty transcription must not silently lose a page —
+            # if any page came back empty, recover the text lane via Docling.
+            if len(vlm_docs) < len(idxs):
+                logger.warning(
+                    "pdf-vlm: %d/%d page transcription(s) empty for %s; keeping Docling text",
+                    len(idxs) - len(vlm_docs),
+                    len(idxs),
+                    os.path.basename(path),
+                )
+                docs = list(self._lane_docling(path)) + vlm_docs
+            else:
+                docs = list(vlm_docs)
         else:
             # Mixed/text doc: cheap Docling text + vision only on the image pages.
             docs = list(self._lane_docling(path)) + vlm_docs
@@ -1890,7 +1924,7 @@ class VectorRAG:
         captions = _concurrent_map(
             lambda b64: self._vlm_transcribe_image(b64, prompt=self._VLM_IMAGE_PROMPT),
             [c["b64"] for c in crops],
-            _vlm_concurrency(),
+            _vlm_mm_concurrency(),
             on_done=on_done,
         )
 
@@ -1974,7 +2008,7 @@ class VectorRAG:
         caps = _concurrent_map(
             lambda b64: self._vlm_transcribe_image(b64, prompt=self._VLM_IMAGE_PROMPT),
             [b64 for _name, b64 in images],
-            _vlm_concurrency(),
+            _vlm_mm_concurrency(),
             on_done=on_done,
         )
         for (name, _b64), cap in zip(images, caps):
