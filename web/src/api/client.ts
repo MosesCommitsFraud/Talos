@@ -361,6 +361,9 @@ export interface RagConfig {
   pdf_vlm_enabled?: boolean;
   vlm_url?: string;
   vlm_model?: string;
+  /** Advanced — redact PII from extracted text before indexing (off by default;
+   *  overridable per upload). */
+  redact_pii_enabled?: boolean;
 }
 /** Which knowledge sources are configured — drives the composer's mode control. */
 export const fetchCapabilities = () =>
@@ -504,9 +507,14 @@ export const ragSearch = (q: string, k: number) =>
 export const personalAddDirectory = (directory: string) => postJSON('/api/personal/add_directory', { directory });
 export const personalReload = () => postJSON('/api/personal/reload');
 
-export async function personalUpload(files: File[]): Promise<Record<string, unknown>> {
+export async function personalUpload(
+  files: File[],
+  opts?: { redactPii?: boolean | null },
+): Promise<Record<string, unknown>> {
   const fd = new FormData();
   for (const f of files) fd.append('files', f, f.name);
+  // Explicit per-upload PII-redaction choice; omitted → server uses the global toggle.
+  if (opts?.redactPii != null) fd.append('redact_pii', String(opts.redactPii));
   const res = await fetch('/api/personal/upload', { method: 'POST', body: fd, credentials: 'same-origin' });
   if (!res.ok) {
     const detail = await res.json().then((j) => j?.detail).catch(() => null);

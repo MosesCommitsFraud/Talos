@@ -697,6 +697,32 @@ class PreviewHandler(BaseHTTPRequestHandler):
                 }
             )
             return
+        if path == "/api/stats":
+            # Shape must match client.ts UsageStats — StatsPanel dereferences
+            # every field, so an empty object crashes the whole Welcome tree.
+            import datetime
+
+            today = datetime.date.today()
+            self._send_json(
+                {
+                    "sessions": 42,
+                    "messages": 813,
+                    "total_tokens": 1_500_000,
+                    "active_days": 23,
+                    "current_streak": 3,
+                    "longest_streak": 9,
+                    "peak_hour": 10,
+                    "favorite_model": "qwen3-llm",
+                    "daily": [
+                        {
+                            "date": (today - datetime.timedelta(days=41 - i)).isoformat(),
+                            "count": (i * 7) % 5,
+                        }
+                        for i in range(42)
+                    ],
+                }
+            )
+            return
         if path == "/api/rag/config":
             self._send_json(
                 {
@@ -722,6 +748,7 @@ class PreviewHandler(BaseHTTPRequestHandler):
                     "max_context_chars": 10000,
                     "query_prefix": "",
                     "context_prompt": "",
+                    "redact_pii_enabled": False,
                 }
             )
             return

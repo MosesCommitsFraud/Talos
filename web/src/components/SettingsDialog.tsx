@@ -1188,6 +1188,8 @@ export function RagPanel() {
   const [searchOut, setSearchOut] = useState('');
   const [dir, setDir] = useState('');
   const [docMsg, setDocMsg] = useState<{ text: string; ok: boolean } | null>(null);
+  // Per-upload PII-redaction override: null = follow the global toggle.
+  const [uploadRedact, setUploadRedact] = useState<boolean | null>(null);
   const [testingEp, setTestingEp] = useState<keyof RagConfig | null>(null);
   const pushConsole = useRagConsole((s) => s.push);
   const queryClient = useQueryClient();
@@ -1405,6 +1407,14 @@ export function RagPanel() {
         </Section>
       )}
 
+      {(draft.provider || 'internal') !== 'external' && (
+        <Section title={t('settings.rag.redactTitle')}>
+          <Row label={t('settings.rag.redactEnabled')} hint={t('settings.rag.hint.redactEnabled')}>
+            <Switch checked={!!draft.redact_pii_enabled} onCheckedChange={(v) => set('redact_pii_enabled', v)} />
+          </Row>
+        </Section>
+      )}
+
       <Section title={t('settings.rag.context')}>
         {field('max_context_chars', t('settings.rag.maxContextChars'), { type: 'number', hint: t('settings.rag.hint.maxContextChars'), def: 10000 })}
         {field('query_prefix', t('settings.rag.queryPrefix'), { type: 'textarea', hint: t('settings.rag.hint.queryPrefix'), def: '' })}
@@ -1426,10 +1436,24 @@ export function RagPanel() {
           <Button size="sm" variant="outline" onClick={() => document.getElementById('rag-upload-input')?.click()}>{t('settings.rag.uploadFiles')}</Button>
           <input
             id="rag-upload-input" type="file" multiple hidden
-            onChange={(e) => { if (e.target.files?.length) doc(() => personalUpload(Array.from(e.target.files!)).then((r) => { refreshIngest(); return r; }), t('settings.rag.uploadQueued')); e.target.value = ''; }}
+            onChange={(e) => { if (e.target.files?.length) doc(() => personalUpload(Array.from(e.target.files!), { redactPii: uploadRedact }).then((r) => { refreshIngest(); return r; }), t('settings.rag.uploadQueued')); e.target.value = ''; }}
           />
           <Button size="sm" variant="outline" onClick={() => doc(() => personalReload().then((r) => { refreshIngest(); return r; }), t('settings.rag.reindexStarted'))}>{t('settings.rag.reloadIndex')}</Button>
         </label>
+        {/* Per-upload PII-redaction choice; travels with the files being uploaded
+            and overrides the global toggle for exactly those documents. */}
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-muted-foreground">{t('settings.rag.uploadRedact')}</span>
+          <select
+            className="h-8 rounded-md border border-input bg-background px-2 text-xs"
+            value={uploadRedact === null ? 'default' : uploadRedact ? 'on' : 'off'}
+            onChange={(e) => setUploadRedact(e.target.value === 'default' ? null : e.target.value === 'on')}
+          >
+            <option value="default">{t('settings.rag.uploadRedactDefault')}</option>
+            <option value="on">{t('settings.rag.uploadRedactOn')}</option>
+            <option value="off">{t('settings.rag.uploadRedactOff')}</option>
+          </select>
+        </div>
         <div className="flex gap-2">
           <Input placeholder={t('settings.rag.addDirectory')} value={dir} onChange={(e) => setDir(e.target.value)} />
           <Button size="sm" variant="outline" disabled={!dir.trim()} onClick={() => doc(() => personalAddDirectory(dir).then((r) => { refreshIngest(); return r; }), t('settings.rag.directoryAdded'))}>{t('common.add')}</Button>

@@ -659,7 +659,15 @@ const en = {
       pdfVlmEnabled: 'Read images in documents with a vision model',
       vlmUrl: 'Vision model URL',
       vlmModel: 'Vision model',
+      redactTitle: 'PII redaction (Advanced)',
+      redactEnabled: 'Redact personal data before indexing',
+      uploadRedact: 'PII redaction for this upload:',
+      uploadRedactDefault: 'Use global setting',
+      uploadRedactOn: 'Redact',
+      uploadRedactOff: 'Keep as-is',
       hint: {
+        redactEnabled:
+          'Opt-in: replaces emails, phone/card/account numbers, IPs, MAC addresses and URLs with placeholders like [email] before documents are chunked and indexed, so this data never reaches the index or the model. Deliberately coarse — on a local deployment it is usually fine to leave this off. Can be overridden per upload in the Documents section below.',
         pdfVlmEnabled: 'Opt-in: when a PDF, Word or PowerPoint file contains images, a vision model reads them so slide decks, screenshots and figures become searchable text. Auto-detected per file — text-only documents stay on the fast path. PDFs use the cheap text pass and send only image-dominant pages to the vision model (a screenshot deck sends all pages); Word/PowerPoint keep their text and get each embedded image captioned. Calls run in parallel. Re-index affected files after enabling. Off by default.',
         vlmUrl: 'OpenAI-compatible chat-completions endpoint of a vision-capable model the ingest worker calls per page/image.',
         vlmModel: 'Vision model name at that endpoint (e.g. qwen3-llm if it is multimodal).',

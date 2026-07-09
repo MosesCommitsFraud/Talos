@@ -662,7 +662,15 @@ const de: typeof en = {
       pdfVlmEnabled: 'Bilder in Dokumenten mit Vision-Modell lesen',
       vlmUrl: 'Vision-Modell-URL',
       vlmModel: 'Vision-Modell',
+      redactTitle: 'PII-Schwärzung (Erweitert)',
+      redactEnabled: 'Personenbezogene Daten vor dem Indexieren schwärzen',
+      uploadRedact: 'PII-Schwärzung für diesen Upload:',
+      uploadRedactDefault: 'Globale Einstellung',
+      uploadRedactOn: 'Schwärzen',
+      uploadRedactOff: 'Unverändert lassen',
       hint: {
+        redactEnabled:
+          'Optional: ersetzt E-Mail-Adressen, Telefon-/Karten-/Kontonummern, IPs, MAC-Adressen und URLs durch Platzhalter wie [email], bevor Dokumente gechunkt und indexiert werden — diese Daten erreichen so weder den Index noch das Modell. Bewusst grob — auf einer lokalen Installation kann das meist aus bleiben. Pro Upload im Dokumente-Abschnitt unten übersteuerbar.',
         pdfVlmEnabled: 'Optional: Enthält eine PDF-, Word- oder PowerPoint-Datei Bilder, liest ein Vision-Modell sie — so werden Foliensätze, Screenshots und Abbildungen als durchsuchbarer Text erfasst. Pro Datei automatisch erkannt — reine Textdokumente bleiben auf dem schnellen Weg. PDFs nutzen den günstigen Text-Pass und schicken nur bilddominierte Seiten ans Vision-Modell (ein Screenshot-Foliensatz schickt alle Seiten); Word/PowerPoint behalten ihren Text und jedes eingebettete Bild wird beschrieben. Aufrufe laufen parallel. Betroffene Dateien nach Aktivierung neu indexieren. Standardmäßig aus.',
         vlmUrl: 'OpenAI-kompatibler Chat-Completions-Endpunkt eines vision-fähigen Modells, den der Ingest-Worker pro Seite/Bild aufruft.',
         vlmModel: 'Name des Vision-Modells an diesem Endpunkt (z. B. qwen3-llm, falls multimodal).',

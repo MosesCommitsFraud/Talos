@@ -55,6 +55,29 @@ Progress and cancellation are cooperative: the worker periodically writes a snap
 Redis (`_progress_saver`) and checks a cancel flag, so the UI can show a live percentage
 and stop a run mid-flight.
 
+### Ingest guards
+
+Between extraction and chunking, two guards run on the extracted text (heuristics
+ported from [opendataloader-pdf](https://github.com/opendataloader-project/opendataloader-pdf)):
+
+- **Hidden-text filter** (`src/pdf_hidden_text.py`, on by default,
+  `PDF_HIDDEN_TEXT_FILTER=false` to disable) — scans PDFs for text a human never sees
+  (invisible render mode, white-on-white / low contrast against the rendered page,
+  zero-size fonts, off-page placement) and strips it from the extracted text before it
+  reaches the index or chat context. This closes the classic PDF prompt-injection
+  channel. Also applied to chat attachments in `src/document_processor.py`.
+- **PII redaction** (`src/ingest_redaction.py`, opt-in) — replaces emails,
+  phone/card/account numbers, IPs, MACs, and URLs with typed placeholders before
+  embedding. Deliberately coarse; enable for HR/customer corpora, not engineering
+  ones. Toggled globally in **Settings → RAG → PII redaction** (bridged to
+  `RAG_REDACT_PII`), and overridable **per upload** via the redaction selector next
+  to the upload button — the choice is stamped into each file's `redact_pii`
+  metadata and wins over the global toggle in either direction.
+
+The PDF VLM lane's per-page triage (`src/pdf_page_triage.py`) also picks up
+vector-drawn charts/diagrams (path objects, no raster image) and wide chart-shaped
+images, in addition to the original image-area rule (`PDF_VLM_PAGE_RATIO`).
+
 ## Retrieval (answering a query)
 
 `VectorRAG.search()` (`src/rag_vector.py:361`) is the read path:

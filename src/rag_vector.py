@@ -322,6 +322,59 @@ def _pdf_vlm_active() -> bool:
     return bool(os.getenv("PDF_VLM_ENABLED", "").strip()) and bool(os.getenv("VLM_URL", "").strip())
 
 
+def _strip_hidden_pdf_text(path: str, docs):
+    """Drop hidden (invisible-on-render) PDF text from extracted chunks.
+
+    The scan runs once per file; matches are removed from every chunk, and a
+    chunk left empty afterwards is dropped entirely. On by default, killed by
+    ``PDF_HIDDEN_TEXT_FILTER=false``; any failure returns the docs untouched.
+    """
+    from src.pdf_hidden_text import find_hidden_spans, hidden_filter_active, strip_hidden_text
+
+    if not docs or not hidden_filter_active():
+        return docs
+    try:
+        spans = find_hidden_spans(path)
+    except Exception as e:
+        logger.warning("hidden-text scan failed for %s: %s", path, e)
+        return docs
+    if not spans:
+        return docs
+    kept, removed = [], 0
+    for d in docs:
+        text, n = strip_hidden_text(d.content or "", spans)
+        removed += n
+        if text.strip():
+            d.content = text
+            kept.append(d)
+    if removed:
+        logger.warning(
+            "hidden text: filtered %d span match(es) from %s",
+            removed,
+            os.path.basename(path),
+        )
+    return kept
+
+
+def _redact_docs(docs, override: Optional[bool] = None):
+    """Opt-in PII redaction across all extracted chunks.
+
+    ``override`` is the per-document choice made at upload time (the file's
+    ``redact_pii`` metadata): ``True``/``False`` win over the global toggle
+    (Settings → RAG / ``RAG_REDACT_PII``); ``None`` falls back to it.
+    """
+    from src.ingest_redaction import redact_pii, redaction_active
+
+    if not docs:
+        return docs
+    if not (override if override is not None else redaction_active()):
+        return docs
+    for d in docs:
+        if d.content:
+            d.content = redact_pii(d.content)
+    return docs
+
+
 # Document formats eligible for the VLM lane. PDFs are page-rendered; Office
 # files keep Docling's text and get their *embedded* images VLM-captioned.
 _VLM_DOC_EXTS: Set[str] = {".pdf", ".docx", ".pptx"}
@@ -345,9 +398,12 @@ def _file_has_images(path: str) -> bool:
 
     Lets the lane auto-select — a text-only PDF/Word stays on the fast Docling
     path; only files with embedded images (slide decks, screenshots, figures)
-    pay for vision. PDFs: scan page objects for an image. Office (docx/pptx):
-    look for raster members under ``*/media/``. On any error, assume True for
-    PDFs (preserve the prior "VLM all PDFs" behavior) and False otherwise.
+    pay for vision. PDFs: scan page objects for an image, or a page whose
+    vector-graphics signals mark it visually heavy (a chart/diagram drawn as
+    path objects has no image XObjects but still needs the vision pass).
+    Office (docx/pptx): look for raster members under ``*/media/``. On any
+    error, assume True for PDFs (preserve the prior "VLM all PDFs" behavior)
+    and False otherwise.
     """
     ext = Path(path).suffix.lower()
     try:
@@ -355,13 +411,19 @@ def _file_has_images(path: str) -> bool:
             import pypdfium2 as pdfium
             import pypdfium2.raw as pdfium_c
 
+            from src.pdf_page_triage import (
+                is_visually_heavy,
+                page_ratio_threshold,
+                page_signals,
+            )
+
             pdf = pdfium.PdfDocument(path)
             try:
+                thr = page_ratio_threshold()
                 for i in range(len(pdf)):
-                    page = pdf[i]
-                    for obj in page.get_objects():
-                        if getattr(obj, "type", None) == pdfium_c.FPDF_PAGEOBJ_IMAGE:
-                            return True
+                    sig = page_signals(pdf[i], pdfium_c)
+                    if sig["img_count"] or is_visually_heavy(sig, thr):
+                        return True
                 return False
             finally:
                 try:
@@ -647,6 +709,7 @@ def _apply_saved_rag_config() -> None:
     os.environ["EXPAND_TO_PARENT_ENABLED"] = "true" if cfg.get("expand_to_parent_enabled") else ""
     os.environ["RAG_PARENT_MAX_CHARS"] = str(int(cfg.get("parent_max_chars") or 0))
     os.environ["PDF_VLM_ENABLED"] = "true" if cfg.get("pdf_vlm_enabled") else ""
+    os.environ["RAG_REDACT_PII"] = "true" if cfg.get("redact_pii_enabled") else ""
     os.environ["VIDEO_FRAMES_ENABLED"] = "true" if cfg.get("video_frames_enabled") else ""
     os.environ["VIDEO_FRAMES_INTERVAL_SEC"] = str(int(cfg.get("video_frames_interval_sec") or 8))
     os.environ["VIDEO_FRAMES_MAX"] = str(int(cfg.get("video_frames_max") or 300))
@@ -1424,6 +1487,16 @@ class VectorRAG:
         else:
             docs = self._lane_text(path)
 
+        # Ingest guards: strip text that is invisible on the rendered page
+        # (PDF prompt-injection channel — extractors read it, humans can't),
+        # then optionally redact PII before anything reaches the index. The
+        # per-file ``redact_pii`` metadata (set at upload time) overrides the
+        # global toggle in either direction.
+        if ext == ".pdf":
+            docs = _strip_hidden_pdf_text(path, docs)
+        redact_override = meta.get("redact_pii")
+        docs = _redact_docs(docs, None if redact_override is None else bool(redact_override))
+
         # Caller metadata (source/filename/owner/scope …) is layered on top; the
         # lane only owns keys the caller doesn't set (e.g. start/end/modality),
         # which ``update`` preserves because they're absent from ``meta``.
@@ -1616,24 +1689,15 @@ class VectorRAG:
         n_pages = 0
         try:
             n_pages = len(pdf)
-            # First pass: which pages are image-dominant? (cheap, no rendering)
+            # First pass: which pages are visually heavy? (cheap, no rendering)
+            # Beyond raster-image coverage, the triage also catches vector
+            # charts/diagrams (path objects) and wide chart-shaped images —
+            # signals ported from opendataloader-pdf's TriageProcessor.
+            from src.pdf_page_triage import is_visually_heavy, page_signals
+
             heavy: List[int] = []
             for i in range(n_pages):
-                page = pdf[i]
-                w, h = page.get_size()
-                page_area = (w * h) or 1.0
-                img_area = 0.0
-                try:
-                    for obj in page.get_objects():
-                        if getattr(obj, "type", None) == pdfium_c.FPDF_PAGEOBJ_IMAGE:
-                            try:
-                                left, bottom, right, top = obj.get_pos()
-                                img_area += abs((right - left) * (top - bottom))
-                            except Exception:
-                                img_area += page_area  # unknown extent → assume full
-                except Exception:
-                    img_area = page_area  # can't introspect → treat as image page
-                if min(img_area / page_area, 1.0) >= page_thr:
+                if is_visually_heavy(page_signals(pdf[i], pdfium_c), page_thr):
                     heavy.append(i)
 
             mostly_image = n_pages > 0 and (len(heavy) / n_pages) >= doc_thr

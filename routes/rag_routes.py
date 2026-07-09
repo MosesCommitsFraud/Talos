@@ -61,6 +61,11 @@ class RagPipelineConfig(BaseModel):
     pdf_vlm_enabled: bool = False
     vlm_url: str = ""
     vlm_model: str = ""
+    # Advanced — redact PII (emails, phones, card/account numbers, IPs, URLs)
+    # from extracted text before chunks are embedded and indexed. Off by
+    # default: local deployments usually want this data searchable. Can be
+    # overridden per upload (see routes/personal_routes.py upload endpoint).
+    redact_pii_enabled: bool = False
     # Advanced — auto keyword/question generation per chunk (0 = off).
     auto_keywords_n: int = 0
     auto_questions_n: int = 0
@@ -157,6 +162,7 @@ def _public(cfg: dict) -> dict:
         "pdf_vlm_enabled": bool(cfg.get("pdf_vlm_enabled", False)),
         "vlm_url": cfg.get("vlm_url", ""),
         "vlm_model": cfg.get("vlm_model", ""),
+        "redact_pii_enabled": bool(cfg.get("redact_pii_enabled", False)),
         "auto_keywords_n": _clamp_aux(cfg.get("auto_keywords_n", 0)),
         "auto_questions_n": _clamp_aux(cfg.get("auto_questions_n", 0)),
         "expand_to_parent_enabled": bool(cfg.get("expand_to_parent_enabled", False)),
@@ -239,6 +245,7 @@ def setup_rag_routes():
             "pdf_vlm_enabled": bool(body.pdf_vlm_enabled),
             "vlm_url": body.vlm_url.strip(),
             "vlm_model": body.vlm_model.strip(),
+            "redact_pii_enabled": bool(body.redact_pii_enabled),
             "auto_keywords_n": _clamp_aux(body.auto_keywords_n),
             "auto_questions_n": _clamp_aux(body.auto_questions_n),
             "expand_to_parent_enabled": bool(body.expand_to_parent_enabled),
