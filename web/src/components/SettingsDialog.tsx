@@ -125,14 +125,20 @@ function SectionHeader({ children }: { children: React.ReactNode }) {
 
 /** A single setting row: title + description on the left, control on the right.
  *  Rows separate themselves with a top border so they read as a grouped list. */
-export function Row({ label, hint, children }: { label: React.ReactNode; hint?: React.ReactNode; children?: React.ReactNode }) {
+export function Row({ label, hint, children, stacked }: { label: React.ReactNode; hint?: React.ReactNode; children?: React.ReactNode; stacked?: boolean }) {
   return (
-    <div className="flex flex-col gap-3 border-t border-border/60 px-4 py-3.5 first:border-t-0 sm:flex-row sm:items-center sm:justify-between sm:px-5">
+    <div className={cn(
+      'flex flex-col gap-3 border-t border-border/60 px-4 py-3.5 first:border-t-0 sm:px-5',
+      stacked ? 'xl:flex-row xl:items-center xl:justify-between' : 'sm:flex-row sm:items-center sm:justify-between',
+    )}>
       <div className="min-w-0 flex-1 space-y-0.5">
         <div className="text-[13px] font-semibold tracking-[-0.01em] text-foreground">{label}</div>
         {hint && <p className="settings-row-hint text-xs text-muted-foreground/80">{hint}</p>}
       </div>
-      {children && <div className="flex w-full shrink-0 items-center gap-2 sm:w-auto sm:justify-end">{children}</div>}
+      {children && <div className={cn(
+        'flex w-full shrink-0 items-center gap-2',
+        stacked ? 'xl:w-auto xl:justify-end' : 'sm:w-auto sm:justify-end',
+      )}>{children}</div>}
     </div>
   );
 }
@@ -1271,15 +1277,18 @@ export function RagPanel() {
       </>
     ) : undefined;
     return (
-      <Row label={label} hint={hint}>
+      <Row label={label} hint={hint} stacked>
         {type === 'textarea' ? (
-          <Textarea className="min-h-[64px] w-full sm:w-56" value={String(draft[k] ?? '')} onChange={(e) => set(k, e.target.value)} />
+          <Textarea className="min-h-[64px] w-full xl:w-56" value={String(draft[k] ?? '')} onChange={(e) => set(k, e.target.value)} />
         ) : (
-          <div className="flex items-center gap-2">
-            <Input className="w-48" type={type} step={type === 'number' ? 'any' : undefined} value={String(draft[k] ?? '')}
+          <div className={cn(
+            'flex w-full gap-2 xl:w-auto',
+            opts.test ? 'flex-col items-stretch xl:flex-row xl:items-center' : 'items-center',
+          )}>
+            <Input className="min-w-0 flex-1 xl:w-48 xl:flex-none" type={type} step={type === 'number' ? 'any' : undefined} value={String(draft[k] ?? '')}
               onChange={(e) => set(k, type === 'number' ? Number(e.target.value) : e.target.value)} />
             {opts.test && (
-              <Button size="sm" variant="outline" disabled={!str(k).trim() || testingEp !== null}
+              <Button className="self-end xl:self-auto" size="sm" variant="outline" disabled={!str(k).trim() || testingEp !== null}
                 onClick={() => testEndpoint(k, label, opts.test!)}>
                 {testingEp === k ? t('settings.rag.testing') : t('settings.rag.test')}
               </Button>
@@ -1297,9 +1306,9 @@ export function RagPanel() {
     <Page className="gap-5 p-0 [&_.settings-row-hint]:line-clamp-2 [&_.settings-row-hint:hover]:line-clamp-none">
       <Section title={t('settings.rag.pipeline')}>
         <Row label={t('settings.rag.ragEnabled')} hint={t('settings.rag.hint.enabled')}><Switch checked={draft.enabled} onCheckedChange={(v) => set('enabled', v)} /></Row>
-        <Row label={t('settings.rag.provider')} hint={t('settings.rag.hint.provider')}>
+        <Row label={t('settings.rag.provider')} hint={t('settings.rag.hint.provider')} stacked>
           <Select
-            className="w-48"
+            className="w-full xl:w-48"
             value={(draft.provider || 'internal')}
             onChange={(v) => set('provider', v)}
             options={[
@@ -1339,7 +1348,7 @@ export function RagPanel() {
           {field('max_context_chars', t('settings.rag.maxContextChars'), { type: 'number', hint: t('settings.rag.hint.maxContextChars'), def: 10000 })}
           {field('query_prefix', t('settings.rag.queryPrefix'), { type: 'textarea', hint: t('settings.rag.hint.queryPrefix'), def: '' })}
           {field('context_prompt', t('settings.rag.contextPrompt'), { type: 'textarea', hint: t('settings.rag.hint.contextPrompt'), def: '' })}
-        <div className="flex items-center gap-3 border-t border-border/60 px-4 py-3.5 sm:px-5">
+        <div className="flex flex-wrap items-center gap-3 border-t border-border/60 px-4 py-3.5 sm:px-5">
           <Button size="sm" disabled={save.isPending} onClick={() => save.mutate(draft)}>{save.isPending ? t('common.saving') : t('common.save')}</Button>
           <Button size="sm" variant="outline" disabled={test.isPending} onClick={() => test.mutate()}>{test.isPending ? t('settings.rag.testing') : t('settings.rag.testConnection')}</Button>
           {test.isSuccess && (
@@ -1410,7 +1419,7 @@ export function RagPanel() {
 
       <Section title={t('settings.rag.documents')} padded>
       <div className="space-y-2">
-        <label className="flex items-center gap-2">
+        <label className="flex flex-wrap items-center gap-2">
           <Button size="sm" variant="outline" onClick={() => document.getElementById('rag-upload-input')?.click()}>{t('settings.rag.uploadFiles')}</Button>
           <input
             id="rag-upload-input" type="file" multiple hidden

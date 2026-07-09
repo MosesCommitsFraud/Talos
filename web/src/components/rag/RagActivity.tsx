@@ -140,11 +140,11 @@ export function RagActivity() {
           onChange={(e) => { if (e.target.files?.length) upload.mutate(Array.from(e.target.files)); e.target.value = ''; }} />
       </div>
 
-      <div className="flex shrink-0 items-center gap-2">
-        <Button className="flex-1" size="sm" variant="outline" onClick={() => setExplorerOpen(true)}>
+      <div className="grid shrink-0 grid-cols-1 gap-2">
+        <Button className="w-full min-w-0" size="sm" variant="outline" onClick={() => setExplorerOpen(true)}>
           <FolderOpenIcon /> {t('rag.explorer.open')}
         </Button>
-        <Button className="flex-1" size="sm" variant="outline" disabled={rebuild.isPending} onClick={() => setRebuildConfirmOpen(true)}>
+        <Button className="w-full min-w-0" size="sm" variant="outline" disabled={rebuild.isPending} onClick={() => setRebuildConfirmOpen(true)}>
           <RefreshCwIcon className={cn(rebuild.isPending && 'animate-spin')} /> {t('rag.rebuildIndex')}
         </Button>
       </div>
@@ -233,7 +233,7 @@ export function RagActivity() {
               <AlertTriangleIcon className="mt-0.5 size-5 shrink-0 text-destructive-foreground" />
               <p className="text-sm leading-relaxed text-muted-foreground">{t('rag.rebuildConfirm')}</p>
             </div>
-            <div className="flex justify-end gap-2">
+            <div className="flex flex-wrap justify-end gap-2">
               <Button variant="outline" onClick={() => setRebuildConfirmOpen(false)}>{t('common.cancel')}</Button>
               <Button variant="destructive" onClick={() => { setRebuildConfirmOpen(false); rebuild.mutate(); }}>
                 {t('rag.rebuildConfirmAction')}
