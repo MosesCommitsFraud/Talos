@@ -1,3 +1,7 @@
+import os
+from datetime import datetime
+from urllib.parse import quote
+
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
@@ -567,6 +571,62 @@ def setup_rag_routes():
         if not rag or not getattr(rag, "healthy", False):
             return {"available": False, "chunks": [], "error": last_init_error()}
         return {"available": True, "source": source, "chunks": rag.get_document_chunks(source)}
+
+    @router.get("/documents/export")
+    def export_document(source: str):
+        """Download everything indexed for one source file as a Markdown dump.
+
+        Ingest-quality audit: the file shows, chunk by chunk and in ``seq``
+        order, exactly the text the retriever sees — including modality/page
+        provenance and the embedded-but-hidden enrichment (context blurbs,
+        aux terms) — so two ingests of the same document can be diffed.
+        """
+        from fastapi.responses import PlainTextResponse
+
+        from src.rag_singleton import get_rag_manager
+
+        rag = get_rag_manager()
+        if not rag or not getattr(rag, "healthy", False):
+            raise HTTPException(503, "RAG is not available")
+        chunks = rag.get_document_chunks(source)
+        if not chunks:
+            raise HTTPException(404, "No indexed chunks for this source")
+
+        base = os.path.basename(source) or "document"
+        lines = [
+            f"# Ingest dump: {base}",
+            "",
+            f"- source: `{source}`",
+            f"- chunks: {len(chunks)}",
+            f"- exported: {datetime.now().isoformat(timespec='seconds')}",
+            "",
+        ]
+        for c in chunks:
+            meta = c.get("metadata") or {}
+            prov = [f"chunk #{c.get('seq', 0)}"]
+            if c.get("modality"):
+                prov.append(str(c["modality"]))
+            if meta.get("page"):
+                prov.append(f"page {meta['page']}")
+            prov.append(f"{len(c.get('content') or '')} chars")
+            lines.append(f"## {' · '.join(prov)}")
+            lines.append("")
+            if c.get("context"):
+                lines.append(f"> context: {c['context']}")
+            if c.get("aux_terms"):
+                lines.append(f"> aux_terms: {c['aux_terms']}")
+            if c.get("context") or c.get("aux_terms"):
+                lines.append("")
+            lines.append(c.get("content") or "")
+            lines.append("")
+        # RFC 5987 filename* so non-ASCII upload names survive the header.
+        fname = f"{base}.ingested.md"
+        headers = {
+            "Content-Disposition": f"attachment; filename*=UTF-8''{quote(fname)}"
+        }
+        return PlainTextResponse(
+            "\n".join(lines), media_type="text/markdown; charset=utf-8", headers=headers
+        )
 
     class ChunkUpdate(BaseModel):
         source: str

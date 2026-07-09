@@ -588,6 +588,10 @@ export interface RagChunk {
   modality: string;
   metadata: Record<string, unknown>;
 }
+/** Download URL for the Markdown dump of everything indexed for one source
+ *  file (ingest-quality audit; served as an attachment). */
+export const ragDocumentExportUrl = (source: string) =>
+  `/api/rag/documents/export?source=${encodeURIComponent(source)}`;
 export const fetchRagChunks = (source: string) =>
   getJSON<{ available: boolean; source: string; chunks: RagChunk[]; error?: string }>(
     `/api/rag/documents/chunks?source=${encodeURIComponent(source)}`,

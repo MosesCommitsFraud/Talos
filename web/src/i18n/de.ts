@@ -350,6 +350,7 @@ const de: typeof en = {
       auxTerms: 'Zusatzbegriffe',
       edit: 'Chunk bearbeiten',
       rawMeta: 'Rohe Metadaten',
+      download: 'Ingestierten Text herunterladen (Markdown)',
       deleteChunk: 'Chunk löschen',
       deleteConfirm: 'Diesen Chunk aus dem Index löschen? Das kann nicht rückgängig gemacht werden.',
       saveReembed: 'Speichern & neu einbetten',

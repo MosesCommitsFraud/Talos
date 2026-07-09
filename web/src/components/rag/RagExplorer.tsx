@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { BracesIcon, FileTextIcon, PencilIcon, RotateCcwIcon, Trash2Icon } from 'lucide-react';
+import { BracesIcon, DownloadIcon, FileTextIcon, PencilIcon, RotateCcwIcon, Trash2Icon } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
@@ -7,6 +7,7 @@ import {
   fetchRagChunks,
   fetchRagDocuments,
   type RagChunk,
+  ragDocumentExportUrl,
   updateRagChunk,
 } from '@/api/client';
 import { cn } from '@/lib/utils';
@@ -235,6 +236,15 @@ export function RagExplorer({ open, onOpenChange }: { open: boolean; onOpenChang
                   <span className="shrink-0 text-[11px] text-muted-foreground tabular-nums">
                     {t('settings.rag.chunksN', { n: chunks.data?.chunks?.length ?? selectedDoc?.chunks ?? 0 })}
                   </span>
+                  <a
+                    href={ragDocumentExportUrl(selected)}
+                    download
+                    aria-label={t('rag.explorer.download')}
+                    title={t('rag.explorer.download')}
+                    className="shrink-0 text-muted-foreground hover:text-foreground"
+                  >
+                    <DownloadIcon className="size-3.5" />
+                  </a>
                   <button
                     type="button"
                     aria-label={t('common.refresh')}

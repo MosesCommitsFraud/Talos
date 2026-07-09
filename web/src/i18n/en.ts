@@ -348,6 +348,7 @@ const en = {
       auxTerms: 'Aux terms',
       edit: 'Edit chunk',
       rawMeta: 'Raw metadata',
+      download: 'Download ingested text (Markdown)',
       deleteChunk: 'Delete chunk',
       deleteConfirm: 'Delete this chunk from the index? This cannot be undone.',
       saveReembed: 'Save & re-embed',
