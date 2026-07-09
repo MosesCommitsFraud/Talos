@@ -65,7 +65,7 @@ function ModeToggle({
           'flex h-7 shrink-0 items-center gap-1.5 rounded-sm border border-transparent px-1.5 text-xs font-medium whitespace-nowrap transition-colors sm:h-6 sm:px-2 [&_svg]:size-3.5 [&_svg]:shrink-0',
           active
             ? 'bg-blue-500/10 text-blue-400 hover:bg-blue-500/15 hover:text-blue-300'
-            : 'text-muted-foreground/70 hover:bg-accent hover:text-foreground/80',
+            : 'text-foreground/65 hover:bg-accent hover:text-foreground/90',
         )}
       >
         {face}
@@ -103,7 +103,7 @@ function ChatModeDropdown() {
             'flex h-7 shrink-0 items-center gap-1.5 rounded-sm border border-transparent px-1.5 text-xs font-medium whitespace-nowrap outline-none transition-colors focus:outline-none focus-visible:outline-none sm:h-6 sm:px-2 [&_svg]:size-3.5 [&_svg]:shrink-0',
             mode === 'full'
               ? 'bg-yellow-400/10 text-yellow-300 hover:bg-yellow-400/15 hover:text-yellow-200'
-              : 'text-muted-foreground/70 hover:bg-accent hover:text-foreground/80',
+              : 'text-foreground/65 hover:bg-accent hover:text-foreground/90',
           )}
         >
           <span className="sr-only sm:not-sr-only">{active.label}</span>
@@ -203,7 +203,7 @@ function MicDeviceMenu() {
         <button
           type="button"
           aria-label={t('composer.micSelect')}
-          className="flex h-7 w-4 shrink-0 items-center justify-center rounded-sm rounded-l-none border border-transparent text-muted-foreground/70 outline-none transition-colors hover:bg-accent hover:text-foreground/80 focus:outline-none focus-visible:outline-none sm:h-6"
+          className="flex h-7 w-4 shrink-0 items-center justify-center rounded-sm rounded-l-none border border-transparent text-foreground/65 outline-none transition-colors hover:bg-accent hover:text-foreground/90 focus:outline-none focus-visible:outline-none sm:h-6"
         >
           <ChevronDownIcon className="size-3.5" />
         </button>
@@ -555,7 +555,7 @@ export function Composer() {
                   <button
                     type="button"
                     aria-label={t('composer.add')}
-                    className="flex size-7 shrink-0 items-center justify-center rounded-sm border border-transparent text-muted-foreground/70 outline-none transition-colors hover:bg-accent hover:text-foreground/80 focus:outline-none focus-visible:outline-none sm:size-6 [&_svg]:size-3.5"
+                    className="flex size-7 shrink-0 items-center justify-center rounded-sm border border-transparent text-foreground/65 outline-none transition-colors hover:bg-accent hover:text-foreground/90 focus:outline-none focus-visible:outline-none sm:size-6 [&_svg]:size-3.5"
                   >
                     <PlusIcon className={uploading ? 'animate-pulse' : undefined} />
                   </button>
@@ -598,7 +598,7 @@ export function Composer() {
                       'flex size-7 shrink-0 items-center justify-center rounded-sm rounded-r-none border border-transparent transition-colors sm:size-6 [&_svg]:size-3.5',
                       dictation.status === 'recording'
                         ? 'animate-pulse bg-red-500/10 text-red-500 hover:bg-red-500/20'
-                        : 'text-muted-foreground/70 hover:bg-accent hover:text-foreground/80 disabled:opacity-50',
+                        : 'text-foreground/65 hover:bg-accent hover:text-foreground/90 disabled:opacity-50',
                     )}
                   >
                     {dictation.status === 'finalizing' ? (

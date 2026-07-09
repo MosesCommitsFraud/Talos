@@ -443,8 +443,8 @@ export function Sidebar({
   return (
     <nav
       className={cn(
-        'm-2 flex shrink-0 flex-col overflow-hidden rounded-md border bg-background transition-[width] duration-200 ease-out',
-        collapsed ? 'w-[3.25rem]' : 'w-64',
+        'm-2 flex shrink-0 flex-col rounded-md border bg-background transition-[width] duration-200 ease-out',
+        collapsed ? 'relative z-30 w-[3.25rem] overflow-visible' : 'w-64 overflow-hidden',
       )}
       aria-label={t('sidebar.navLabel')}
     >
@@ -501,7 +501,7 @@ export function Sidebar({
             >
               <HistoryIcon />
             </button>
-            <div className="invisible absolute left-full top-0 z-40 pl-2 opacity-0 transition-opacity group-hover/recents:visible group-hover/recents:opacity-100">
+            <div className="invisible absolute left-full top-0 z-40 pl-2 opacity-0 transition-opacity group-hover/recents:visible group-hover/recents:opacity-100 group-focus-within/recents:visible group-focus-within/recents:opacity-100">
               <div className="flex max-h-[70vh] w-64 flex-col overflow-hidden rounded-md border bg-popover shadow-[0_12px_32px_rgb(0_0_0/0.18)] dark:shadow-[0_12px_32px_rgb(0_0_0/0.5)]">
                 <div className="px-3 pt-2.5 pb-1 text-xs font-medium text-muted-foreground">{t('sidebar.recents')}</div>
                 <div className="min-h-0 flex-1 space-y-px overflow-y-auto px-1.5 pb-2">{chatList}</div>
