@@ -606,6 +606,10 @@ const de: typeof en = {
     },
     rag: {
       pipeline: 'Pipeline',
+      searchTuning: 'Suche & Kontext',
+      processing: 'Verarbeitung & Anreicherung',
+      active: 'Aktiv',
+      inactive: 'Aus',
       ragEnabled: 'RAG aktiviert',
       provider: 'Anbieter',
       providerInternal: 'Intern (Qdrant)',

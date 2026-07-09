@@ -604,6 +604,10 @@ const en = {
     },
     rag: {
       pipeline: 'Pipeline',
+      searchTuning: 'Search & context',
+      processing: 'Processing & enrichment',
+      active: 'Active',
+      inactive: 'Off',
       ragEnabled: 'RAG enabled',
       provider: 'Provider',
       providerInternal: 'Internal (Qdrant)',

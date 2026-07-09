@@ -116,7 +116,7 @@ export function RagActivity() {
   }
 
   return (
-    <aside className="sticky top-0 flex h-[100dvh] w-[22rem] shrink-0 flex-col gap-3 border-l bg-background/60 p-4">
+    <aside className="sticky top-0 flex h-[100dvh] w-[18rem] shrink-0 flex-col gap-3 border-l bg-background/60 p-4">
       {/* Drop zone */}
       <div
         onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
