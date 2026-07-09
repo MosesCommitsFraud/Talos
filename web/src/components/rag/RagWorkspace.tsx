@@ -13,8 +13,8 @@ export function RagWorkspace() {
   return (
     <main className="flex min-w-0 flex-1 overflow-hidden">
       <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
-        <header className="z-20 shrink-0 border-b bg-background/90 backdrop-blur-md supports-[backdrop-filter]:bg-background/75">
-          <div className="mx-auto flex w-full max-w-4xl items-center gap-3 px-5 py-3.5">
+        <header className="relative z-20 shrink-0 bg-transparent">
+          <div className="mx-auto flex w-full max-w-4xl items-center gap-3 px-5 py-3">
             <button
               type="button"
               onClick={() => setView('chat')}
@@ -23,14 +23,11 @@ export function RagWorkspace() {
             >
               <ArrowLeftIcon className="size-4" />
             </button>
-            <div className="min-w-0">
-              <h1 className="truncate text-xl font-semibold tracking-tight">{t('rag.title')}</h1>
-              <p className="truncate text-xs text-muted-foreground">{t('rag.subtitle')}</p>
-            </div>
+            <h1 className="min-w-0 truncate text-xl font-semibold tracking-tight">{t('rag.title')}</h1>
           </div>
         </header>
-        <div className="min-h-0 flex-1 overflow-y-auto">
-          <div className="mx-auto w-full max-w-4xl px-5 py-5">
+        <div className="min-h-0 flex-1 overflow-y-auto [-webkit-mask-image:linear-gradient(to_bottom,transparent_0,black_24px)] [mask-image:linear-gradient(to_bottom,transparent_0,black_24px)]">
+          <div className="mx-auto w-full max-w-4xl px-5 pt-6 pb-5">
             <RagPanel />
           </div>
         </div>
