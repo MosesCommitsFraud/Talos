@@ -23,7 +23,7 @@ import {
   Trash2Icon,
   UserIcon,
 } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   archiveSession,
@@ -73,6 +73,52 @@ const SORT_KEYS: Record<SortMode, string> = {
   newest: 'sidebar.sortNewest',
   name: 'sidebar.sortName',
 };
+
+/** Truncates normally, then slowly pans only the hidden portion on hover. The
+ *  animation stops at the end so the full title can be read without looping. */
+function ScrollableSessionTitle({ children }: { children: string }) {
+  const viewportRef = useRef<HTMLSpanElement>(null);
+  const textRef = useRef<HTMLSpanElement>(null);
+  const animationRef = useRef<Animation | null>(null);
+
+  const stop = () => {
+    animationRef.current?.cancel();
+    animationRef.current = null;
+  };
+  const start = () => {
+    stop();
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    const viewport = viewportRef.current;
+    const text = textRef.current;
+    if (!viewport || !text) return;
+    const distance = Math.ceil(text.scrollWidth - viewport.clientWidth);
+    if (distance <= 1) return;
+    // Roughly 22 px/s plus a short initial pause: calm enough to read, without
+    // making moderately long titles take forever to reveal.
+    const duration = Math.max(4_000, (distance / 22) * 1_000 + 1_200);
+    animationRef.current = text.animate(
+      [
+        { transform: 'translateX(0)', offset: 0 },
+        { transform: 'translateX(0)', offset: 0.14 },
+        { transform: `translateX(-${distance}px)`, offset: 1 },
+      ],
+      { duration, easing: 'ease-in-out', fill: 'forwards' },
+    );
+  };
+
+  useEffect(() => stop, []);
+
+  return (
+    <span
+      ref={viewportRef}
+      className="min-w-0 flex-1 overflow-hidden whitespace-nowrap"
+      onMouseEnter={start}
+      onMouseLeave={stop}
+    >
+      <span ref={textRef} className="inline-block">{children}</span>
+    </span>
+  );
+}
 
 function SessionRow({ session, folders }: { session: Session; folders: string[] }) {
   const { t } = useTranslation();
@@ -128,14 +174,13 @@ function SessionRow({ session, folders }: { session: Session; folders: string[] 
           type="button"
           onClick={() => void openSession(session.id)}
           onDoubleClick={beginRename}
-          title={session.name}
           className={cn(
             'group flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm transition-colors',
             session.id === activeId ? 'bg-accent text-accent-foreground' : 'hover:bg-accent/70',
           )}
         >
           {pinned && <PinIcon className="size-3 shrink-0 -rotate-45 text-muted-foreground" />}
-          <span className="min-w-0 flex-1 truncate">{session.name || t('common.untitled')}</span>
+          <ScrollableSessionTitle>{session.name || t('common.untitled')}</ScrollableSessionTitle>
           {status === 'working' ? (
             // Running turn — a shimmering "Working" label, shown even when this
             // chat isn't the one on screen so background turns are visible.

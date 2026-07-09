@@ -26,6 +26,7 @@ STATIC = ROOT / "static"
 # New React UI bundle — served at "/" when built (mirrors app.py's strangler
 # routing: new UI at /, legacy at /legacy).
 WEB_DIST = ROOT / "web" / "dist"
+PREVIEW_SESSION_NAME = "Quarterly planning, architecture review, and release readiness follow-up"
 
 
 def _json_bytes(data) -> bytes:
@@ -486,7 +487,7 @@ def _sessions():
     return [
         {
             "id": "preview-session",
-            "name": "UI Preview",
+            "name": PREVIEW_SESSION_NAME,
             "model": "qwen3-llm",
             "endpoint_url": "mock://preview",
             "created_at": now,
@@ -628,7 +629,11 @@ class PreviewHandler(BaseHTTPRequestHandler):
         if path.startswith("/api/history/"):
             session_id = path[len("/api/history/") :]
             self._send_json(
-                {"id": session_id, "name": "UI Preview", "history": _history_for(session_id)}
+                {
+                    "id": session_id,
+                    "name": PREVIEW_SESSION_NAME,
+                    "history": _history_for(session_id),
+                }
             )
             return
         if path in ("/api/models", "/api/model-endpoints"):
