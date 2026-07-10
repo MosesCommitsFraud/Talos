@@ -141,6 +141,25 @@ def _chunk_relevant_to_query(query: str, document: str) -> bool:
     return len(shared) >= need
 
 
+def _add_surviving_anchor_companions(
+    results: List[Dict[str, Any]], relevant: List[Dict[str, Any]]
+) -> List[Dict[str, Any]]:
+    """Restore companion figures whose text anchor survived relevance gating."""
+    text_ids = {
+        r.get("id")
+        for r in relevant
+        if not bool((r.get("metadata") or {}).get("image_url"))
+    }
+    present = {r.get("id") for r in relevant}
+    return relevant + [
+        r
+        for r in results
+        if r.get("search_type") == "figure_companion"
+        and r.get("anchor_id") in text_ids
+        and r.get("id") not in present
+    ]
+
+
 class ChatProcessor:
     def __init__(
         self, memory_manager, personal_docs_manager, memory_vector=None, skills_manager=None
@@ -541,11 +560,22 @@ class ChatProcessor:
                         # anything — a query the knowledge base has nothing for
                         # injects nothing, text or figures.
                         if not any(
-                            _chunk_relevant_to_query(search_query, r.get("document", ""))
+                            _chunk_relevant_to_query(
+                                search_query,
+                                r.get("_retrieval_document") or r.get("document", ""),
+                            )
                             for r in relevant
                             if not _is_figure(r)
                         ):
                             relevant = []
+                        else:
+                            # Same-page companion figures inherit the relevance
+                            # of their surviving text anchor. Their own caption
+                            # rerank score may be weak/cross-lingual, but page
+                            # provenance and post-answer selection keep the image
+                            # precise. Without this, correct text can survive
+                            # while its exact figure disappears.
+                            relevant = _add_surviving_anchor_companions(results, relevant)
                     else:
                         # No reranker: raw hybrid (RRF) scores can't tell a
                         # relevant query from an unrelated one, so require the
@@ -557,7 +587,10 @@ class ChatProcessor:
                             for r in results
                             if not _is_figure(r)
                             and r.get("similarity", 0) >= sim_threshold
-                            and _chunk_relevant_to_query(search_query, r.get("document", ""))
+                            and _chunk_relevant_to_query(
+                                search_query,
+                                r.get("_retrieval_document") or r.get("document", ""),
+                            )
                         ]
                         text_ids = {r.get("id") for r in relevant}
                         relevant += [
@@ -591,7 +624,9 @@ class ChatProcessor:
                                 # (filter_used_rag_sources). Stripped (underscore
                                 # key) before the source is emitted or saved, so
                                 # it never reaches the client or the DB.
-                                "_text": r["document"][:1500],
+                                "_text": (
+                                    r.get("_retrieval_document") or r["document"]
+                                )[:3000],
                                 # Internal provenance used after generation to
                                 # pair a displayed figure with the exact text
                                 # page the answer actually used. Underscore keys

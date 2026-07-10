@@ -1343,6 +1343,10 @@ class VectorRAG:
                 {
                     "id": d.id,
                     "document": d.content or "",
+                    # Dense/sparse vectors were built from this enriched view.
+                    # Use the same view for reranking and relevance gating, but
+                    # retain ``document`` as clean citation/display content.
+                    "_retrieval_document": _embed_text(d.meta or {}, d.content or ""),
                     "metadata": dict(d.meta or {}),
                     "similarity": round(float(d.score or 0.0), 6),
                     "search_type": "hybrid",
@@ -1501,7 +1505,9 @@ class VectorRAG:
             import httpx
 
             model = os.getenv("RERANK_MODEL", "")
-            docs = [c.get("document", "") for c in candidates]
+            docs = [
+                c.get("_retrieval_document") or c.get("document", "") for c in candidates
+            ]
             payload: Dict[str, Any] = {"query": query, "documents": docs}
             if model:
                 payload["model"] = model

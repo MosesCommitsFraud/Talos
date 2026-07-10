@@ -53,6 +53,21 @@ def test_embed_text_includes_hidden_same_page_visual_context():
     assert "vertikale Toolbar" in out
 
 
+def test_enriched_text_passes_german_relevance_gate_when_display_text_cannot():
+    import src.chat_processor as cp
+
+    query = "Welche Funktionen haben die Symbole in der vertikalen Toolbar in macs?"
+    content = "Elementband: Textfeld, Bild, Seiteninfo, Formel, Sparkline"
+    meta = {
+        "context": "Dieser Abschnitt beschreibt die Funktionen der Elemente.",
+        "aux_terms": "Symbolleiste\nvertikale Toolbar",
+        "_visual_context": "Die Symbole der Toolbar und ihre Funktionen werden erklärt.",
+    }
+
+    assert not cp._chunk_relevant_to_query(query, content)
+    assert cp._chunk_relevant_to_query(query, rv._embed_text(meta, content))
+
+
 class _Doc:
     def __init__(self, content):
         self.content = content

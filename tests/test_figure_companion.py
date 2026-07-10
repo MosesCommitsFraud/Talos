@@ -225,3 +225,30 @@ def test_content_tokens_keep_german_umlauts_and_drop_question_fillers():
         "band",
         "einfügen",
     ]
+
+
+def test_low_scoring_companion_survives_with_relevant_text_anchor():
+    import src.chat_processor as cp
+
+    text = {
+        "id": "page6",
+        "document": "Band einfügen",
+        "metadata": {"source": "/u/training.pdf", "page": 6},
+        "rerank_score": 0.9,
+    }
+    figure = {
+        "id": "figure6",
+        "document": "Kontextmenü",
+        "metadata": {
+            "source": "/u/training.pdf",
+            "page": 6,
+            "image_url": "/band.png",
+        },
+        "rerank_score": 0.05,
+        "search_type": "figure_companion",
+        "anchor_id": "page6",
+    }
+
+    relevant = cp._add_surviving_anchor_companions([text, figure], [text])
+
+    assert [r["id"] for r in relevant] == ["page6", "figure6"]
