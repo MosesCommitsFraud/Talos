@@ -42,6 +42,17 @@ def test_embed_text_combines_context_and_terms():
     assert "body" in out
 
 
+def test_embed_text_includes_hidden_same_page_visual_context():
+    meta = {
+        "_visual_context": "Die vertikale Toolbar enthält Symbole für Textfeld und Bild."
+    }
+
+    out = rv._embed_text(meta, "Elementband")
+
+    assert "Elementband" in out
+    assert "vertikale Toolbar" in out
+
+
 class _Doc:
     def __init__(self, content):
         self.content = content

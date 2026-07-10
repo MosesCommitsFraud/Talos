@@ -90,3 +90,36 @@ def test_pdf_visual_line_wraps_are_reflowed():
     assert "Editor-Bereich" in text
     assert "Bericht mit all seinen Elementen definiert." in text
     assert "\n\n2. Datenquelle" in text
+
+
+def test_page_retrieval_context_includes_its_figure_caption_only():
+    page = _Doc("Elementband", {"modality": "pdf_page", "page": 28})
+    figure = _Doc(
+        "Die vertikale Toolbar enthält fünf Symbole mit unterschiedlichen Funktionen.",
+        {"modality": "figure", "page": 28, "caption_source": "vlm"},
+    )
+    other = _Doc(
+        "DrillDownControl",
+        {"modality": "figure", "page": 27, "caption_source": "vlm"},
+    )
+
+    rv._attach_pdf_visual_context([page, figure, other])
+
+    assert "vertikale Toolbar" in page.meta["_visual_context"]
+    assert "DrillDownControl" not in page.meta["_visual_context"]
+
+
+def test_page_text_fallback_is_not_duplicated_as_visual_context():
+    page = _Doc("Elementband", {"modality": "pdf_page", "page": 28})
+    fallback = _Doc(
+        "Elementband",
+        {
+            "modality": "figure",
+            "page": 28,
+            "caption_source": "page_text_fallback",
+        },
+    )
+
+    rv._attach_pdf_visual_context([page, fallback])
+
+    assert "_visual_context" not in page.meta

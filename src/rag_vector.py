@@ -566,12 +566,28 @@ def _prefix_context(context: str, content: str) -> str:
     return f"{context}\n\n{content}" if context else content
 
 
+def _retrieval_body(meta: Dict[str, Any], content: str) -> str:
+    """Combine displayed text with hidden same-page visual meaning.
+
+    Figure assets remain separate records so they can be rendered, but a page's
+    text vector must also represent what its figures show. This lets retrieval
+    select the correct page before companion-image attachment.
+    """
+    body = (content or "").strip()
+    visual = ((meta or {}).get("_visual_context") or "").strip()
+    if visual:
+        return f"{body}\n\nVisual context from this page:\n{visual}" if body else visual
+    return body
+
+
 def _embed_text(meta: Dict[str, Any], content: str) -> str:
     """The text actually embedded for a chunk: a situating ``context`` prefix
     (Phase 8) + the original content + auto ``aux_terms`` suffix (Phase 9). The
     original ``content`` is what gets stored/displayed/cited — only the embedding
     sees these enrichments."""
-    text = _prefix_context((meta or {}).get("context") or "", content)
+    text = _prefix_context(
+        (meta or {}).get("context") or "", _retrieval_body(meta or {}, content)
+    )
     aux = ((meta or {}).get("aux_terms") or "").strip()
     return f"{text}\n\n{aux}" if aux else text
 
@@ -843,6 +859,37 @@ def _enrich_uncaptioned_figures(docs) -> None:
         d.content = enriched
         meta["image_caption"] = enriched
         meta["caption_source"] = "page_text_fallback"
+
+
+def _attach_pdf_visual_context(docs) -> None:
+    """Attach each real figure description to its page's retrieval metadata."""
+    try:
+        cap = max(500, min(int(os.getenv("RAG_VISUAL_CONTEXT_CHARS", "3000")), 8000))
+    except Exception:
+        cap = 3000
+
+    by_page: Dict[int, List[str]] = {}
+    for d in docs:
+        meta = d.meta or {}
+        page = meta.get("page")
+        if meta.get("modality") != "figure" or not isinstance(page, int):
+            continue
+        # This fallback already consists of the page text; adding it back would
+        # duplicate the page without contributing visual meaning.
+        if meta.get("caption_source") == "page_text_fallback":
+            continue
+        caption = (d.content or "").strip()
+        if caption:
+            by_page.setdefault(page, []).append(caption)
+
+    for d in docs:
+        meta = d.meta or {}
+        page = meta.get("page")
+        if meta.get("modality") != "pdf_page" or not isinstance(page, int):
+            continue
+        captions = by_page.get(page) or []
+        if captions:
+            meta["_visual_context"] = "\n\n".join(captions)[:cap]
 
 
 # Content-hash → blurb cache so re-ingesting unchanged chunks never re-pays the
@@ -1565,11 +1612,12 @@ class VectorRAG:
             model = os.getenv("RAG_LLM_MODEL", "").strip()
             sys_prompt = (
                 "Give a short 1–2 sentence context that situates the chunk within the "
-                "document, to improve search retrieval. Output ONLY the context."
+                "document, to improve search retrieval. Write in the same language as "
+                "the chunk (German for German source text). Output ONLY the context."
             )
             user_prompt = (
                 f"<document>\n{full_doc[:6000]}\n</document>\n\n"
-                f"<chunk>\n{chunk[:1500]}\n</chunk>\n\nContext:"
+                f"<chunk>\n{chunk[:3000]}\n</chunk>\n\nContext:"
             )
             payload: Dict[str, Any] = {
                 "messages": [
@@ -1601,13 +1649,13 @@ class VectorRAG:
         re-ingesting unchanged chunks makes zero LLM calls. No-op when off."""
         if not _contextual_active() or not docs:
             return
-        full = "\n\n".join((d.content or "") for d in docs)[:8000]
+        full = "\n\n".join(_retrieval_body(d.meta or {}, d.content or "") for d in docs)[:8000]
 
         def _one(d):
-            chunk = d.content or ""
+            chunk = _retrieval_body(d.meta or {}, d.content or "")
             if not chunk.strip():
                 return
-            h = hashlib.sha256(("ctx-v1\x00" + chunk).encode("utf-8")).hexdigest()
+            h = hashlib.sha256(("ctx-v2\x00" + chunk).encode("utf-8")).hexdigest()
             blurb = _ctx_cache_get(h)
             if blurb is None:
                 blurb = self._contextual_blurb(full, chunk)
@@ -1643,12 +1691,13 @@ class VectorRAG:
                 format_lines.append("Questions:\n- one question per line")
             sys_prompt = (
                 f"From the chunk, produce {' and '.join(wants)} to improve search recall. "
+                "Write in the same language as the chunk (German for German source text). "
                 "Use these sections and no preamble:\n" + "\n".join(format_lines)
             )
             payload: Dict[str, Any] = {
                 "messages": [
                     {"role": "system", "content": sys_prompt},
-                    {"role": "user", "content": f"<chunk>\n{chunk[:1500]}\n</chunk>"},
+                    {"role": "user", "content": f"<chunk>\n{chunk[:3000]}\n</chunk>"},
                 ],
                 "temperature": 0.0,
                 "max_tokens": 220,
@@ -1675,11 +1724,11 @@ class VectorRAG:
         if not _autokw_active() or not docs:
             return
         tag = (
-            f"akw-v2\x00{_env_int('RAG_AUTO_KEYWORDS_N')}\x00{_env_int('RAG_AUTO_QUESTIONS_N')}\x00"
+            f"akw-v3\x00{_env_int('RAG_AUTO_KEYWORDS_N')}\x00{_env_int('RAG_AUTO_QUESTIONS_N')}\x00"
         )
 
         def _one(d):
-            chunk = d.content or ""
+            chunk = _retrieval_body(d.meta or {}, d.content or "")
             if not chunk.strip():
                 return
             h = hashlib.sha256((tag + chunk).encode("utf-8")).hexdigest()
@@ -1799,6 +1848,11 @@ class VectorRAG:
             docs = _strip_hidden_pdf_text(path, docs)
         redact_override = meta.get("redact_pii")
         docs = _redact_docs(docs, None if redact_override is None else bool(redact_override))
+        if ext == ".pdf":
+            # Page vectors retrieve over both visible text and the meaning of
+            # their same-page figures, while figures remain separate renderable
+            # assets. Run after redaction so hidden embedding text is also safe.
+            _attach_pdf_visual_context(docs)
 
         # Caller metadata (source/filename/owner/scope …) is layered on top; the
         # lane only owns keys the caller doesn't set (e.g. start/end/modality),
@@ -1836,13 +1890,17 @@ class VectorRAG:
         "Transcribe this document page into clean GitHub-flavored Markdown. "
         "Include ALL visible text and reproduce tables as Markdown tables. For "
         "screenshots, diagrams, charts or UI, add a concise description of what "
-        "they show so the content is searchable. Ignore repeated logos and "
+        "they show so the content is searchable. Write descriptions in the same "
+        "language as the visible document text (use German for German pages). "
+        "Ignore repeated logos and "
         "watermarks. Output only the Markdown, no preamble."
     )
     _VLM_IMAGE_PROMPT = (
         "Describe this image for search. Transcribe any text verbatim, and for "
         "screenshots, charts, diagrams or UI explain what they show and the data "
-        "they contain. Ignore logos and watermarks. Output only the description."
+        "they contain. Write the description in the same language as the visible "
+        "text (use German for German UI/documents). Ignore logos and watermarks. "
+        "Output only the description."
     )
     _VLM_REGION_PROMPT = (
         "This frame is from a screen-recording of an online training session. It "
