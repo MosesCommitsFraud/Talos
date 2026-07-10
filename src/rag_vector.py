@@ -576,6 +576,38 @@ def _embed_text(meta: Dict[str, Any], content: str) -> str:
     return f"{text}\n\n{aux}" if aux else text
 
 
+def _openai_chat_url(raw_url: str) -> str:
+    """Accept either an OpenAI-compatible base URL or the full chat route."""
+    url = (raw_url or "").strip().rstrip("/")
+    if not url or url.endswith("/chat/completions"):
+        return url
+    if url.endswith("/v1"):
+        return url + "/chat/completions"
+    return url + "/v1/chat/completions"
+
+
+def _chat_response_text(data: Dict[str, Any]) -> str:
+    """Read normal and reasoning-model OpenAI-compatible response shapes."""
+    try:
+        msg = (data.get("choices") or [{}])[0].get("message") or {}
+    except Exception:
+        return ""
+    value = (
+        msg.get("content")
+        or msg.get("reasoning_content")
+        or msg.get("reasoning")
+        or msg.get("thinking")
+        or ""
+    )
+    if isinstance(value, list):
+        value = "\n".join(
+            str(part.get("text") or "")
+            for part in value
+            if isinstance(part, dict) and part.get("text")
+        )
+    return str(value).strip()
+
+
 def _max_chunk_chars() -> int:
     """Hard safety ceiling for parser-produced chunks.
 
@@ -635,6 +667,50 @@ def _bounded_text_parts(text: str, limit: int) -> List[str]:
     return parts
 
 
+def _reflow_pdf_text(text: str) -> str:
+    """Turn visual PDF line wraps into readable retrieval paragraphs.
+
+    PDF text layers frequently break a sentence at every text-box line and may
+    put a hyphen/dash on a line of its own.  Preserve numbered/bulleted blocks,
+    but join ordinary wrapped prose so the indexed text does not look like
+    arbitrarily split chunks.
+    """
+    lines = [re.sub(r"[ \t]+", " ", line).strip() for line in (text or "").splitlines()]
+    lines = [line for line in lines if line]
+    if not lines:
+        return ""
+
+    paragraphs: List[str] = []
+    current = lines[0]
+    for line in lines[1:]:
+        # PDF generators sometimes emit the separator between two words as its
+        # own text object/line. Keep it inside the sentence.
+        if line in {"-", "–", "—"}:
+            current = f"{current} {line}"
+            continue
+        # A leading hyphen without a following space is usually a split compound
+        # ("Editor" + "-Bereich"), not a Markdown bullet.
+        if re.match(r"^[-–—]\S", line):
+            current += line
+            continue
+
+        starts_numbered = bool(re.match(r"^\d+[.)]\s+", line))
+        starts_bullet = bool(re.match(r"^[•*]\s+|^-\s+", line))
+        current_is_numbered = bool(re.match(r"^\d+[.)]\s+", current))
+        sentence_done = bool(re.search(r"[.!?;:]$", current))
+        if starts_numbered or starts_bullet or current_is_numbered or sentence_done:
+            paragraphs.append(current)
+            current = line
+            continue
+
+        separator = "" if current.endswith("/") else " "
+        current = f"{current}{separator}{line}"
+
+    if current:
+        paragraphs.append(current)
+    return "\n\n".join(paragraphs)
+
+
 def _pdf_text_pages(path: str) -> List[Tuple[int, str]]:
     """Read the visible embedded text layer page-by-page with pypdfium2."""
     try:
@@ -654,6 +730,7 @@ def _pdf_text_pages(path: str) -> List[Tuple[int, str]]:
                 textpage = page.get_textpage()
                 text = (textpage.get_text_range() or "").replace("\x00", "")
                 text = re.sub(r"[ \t]+\r?\n", "\n", text).strip()
+                text = _reflow_pdf_text(text)
                 if text:
                     pages.append((i + 1, text))
             except Exception as e:
@@ -788,21 +865,26 @@ def _ctx_redis():
 
 def _ctx_cache_get(h: str) -> Optional[str]:
     if h in _CONTEXT_CACHE:
-        return _CONTEXT_CACHE[h]
+        # Empty output means the LLM call failed or returned no usable content.
+        # It is not a successful cache entry and must be retried on re-ingest.
+        return _CONTEXT_CACHE[h] or None
     try:
         r = _ctx_redis()
         if r is not None:
             v = r.get(f"rag:ctx:{h}")
             if v is not None:
                 val = v.decode("utf-8", "replace")
-                _CONTEXT_CACHE[h] = val
-                return val
+                if val:
+                    _CONTEXT_CACHE[h] = val
+                    return val
     except Exception:
         pass
     return None
 
 
 def _ctx_cache_set(h: str, blurb: str) -> None:
+    if not (blurb or "").strip():
+        return
     _CONTEXT_CACHE[h] = blurb
     try:
         r = _ctx_redis()
@@ -1474,7 +1556,7 @@ class VectorRAG:
         """Ask the ingest LLM for a 1–2 sentence context situating ``chunk``
         within ``full_doc``. Best-effort: returns "" on any error/misconfig so
         ingest never blocks on it."""
-        url = os.getenv("RAG_LLM_URL", "").strip()
+        url = _openai_chat_url(os.getenv("RAG_LLM_URL", ""))
         if not url:
             return ""
         try:
@@ -1508,8 +1590,7 @@ class VectorRAG:
                 headers["Authorization"] = f"Bearer {os.getenv('RAG_LLM_API_KEY')}"
             resp = httpx.post(url, json=payload, headers=headers, timeout=60)
             resp.raise_for_status()
-            data = resp.json()
-            return (data["choices"][0]["message"]["content"] or "").strip()
+            return _chat_response_text(resp.json())
         except Exception as e:
             logger.warning("contextual blurb failed: %s", e)
             return ""
@@ -1533,6 +1614,10 @@ class VectorRAG:
                 _ctx_cache_set(h, blurb)
             if blurb:
                 d.meta["context"] = blurb
+            else:
+                d.meta["context_error"] = (
+                    "Ingest LLM returned no context; check its URL, model, and worker logs."
+                )
 
         # One LLM call per chunk — fan out so a multi-chunk doc isn't serialized.
         _concurrent_map(_one, docs, _vlm_concurrency())
@@ -1540,7 +1625,7 @@ class VectorRAG:
     def _auto_terms(self, chunk: str) -> str:
         """Ask the ingest LLM for keywords/synonyms and likely questions for a
         chunk (RagFlow-style recall boost). Best-effort: "" on error."""
-        url = os.getenv("RAG_LLM_URL", "").strip()
+        url = _openai_chat_url(os.getenv("RAG_LLM_URL", ""))
         if not url:
             return ""
         nk = _env_int("RAG_AUTO_KEYWORDS_N")
@@ -1549,13 +1634,16 @@ class VectorRAG:
             import httpx
 
             wants = []
+            format_lines = []
             if nk > 0:
-                wants.append(f"{nk} keywords or synonyms")
+                wants.append(f"exactly {nk} keywords or synonyms")
+                format_lines.append("Keywords:\n- one keyword per line")
             if nq > 0:
-                wants.append(f"{nq} likely user questions this chunk answers")
+                wants.append(f"exactly {nq} likely user questions this chunk answers")
+                format_lines.append("Questions:\n- one question per line")
             sys_prompt = (
                 f"From the chunk, produce {' and '.join(wants)} to improve search recall. "
-                "Output them one per line, no numbering, no preamble."
+                "Use these sections and no preamble:\n" + "\n".join(format_lines)
             )
             payload: Dict[str, Any] = {
                 "messages": [
@@ -1575,8 +1663,7 @@ class VectorRAG:
                 headers["Authorization"] = f"Bearer {os.getenv('RAG_LLM_API_KEY')}"
             resp = httpx.post(url, json=payload, headers=headers, timeout=60)
             resp.raise_for_status()
-            data = resp.json()
-            return (data["choices"][0]["message"]["content"] or "").strip()
+            return _chat_response_text(resp.json())
         except Exception as e:
             logger.warning("auto-keywords failed: %s", e)
             return ""
@@ -1588,7 +1675,7 @@ class VectorRAG:
         if not _autokw_active() or not docs:
             return
         tag = (
-            f"akw-v1\x00{_env_int('RAG_AUTO_KEYWORDS_N')}\x00{_env_int('RAG_AUTO_QUESTIONS_N')}\x00"
+            f"akw-v2\x00{_env_int('RAG_AUTO_KEYWORDS_N')}\x00{_env_int('RAG_AUTO_QUESTIONS_N')}\x00"
         )
 
         def _one(d):
@@ -1602,6 +1689,11 @@ class VectorRAG:
                 _ctx_cache_set(h, terms)
             if terms:
                 d.meta["aux_terms"] = terms
+            else:
+                d.meta["aux_terms_error"] = (
+                    "Ingest LLM returned no keywords/questions; check its URL, model, "
+                    "and worker logs."
+                )
 
         # One LLM call per chunk — fan out so a multi-chunk doc isn't serialized.
         _concurrent_map(_one, docs, _vlm_concurrency())
@@ -1736,14 +1828,7 @@ class VectorRAG:
         """Normalize VLM_URL to an OpenAI ``/v1/chat/completions`` endpoint.
 
         The UI may store a base (``…/v1``) or a full chat URL; accept either."""
-        url = os.getenv("VLM_URL", "").strip().rstrip("/")
-        if not url:
-            return ""
-        if url.endswith("/chat/completions"):
-            return url
-        if url.endswith("/v1"):
-            return url + "/chat/completions"
-        return url + "/v1/chat/completions"
+        return _openai_chat_url(os.getenv("VLM_URL", ""))
 
     # Default prompts for the two VLM modes: a whole rendered page vs. a single
     # image extracted from a document.
@@ -1817,10 +1902,7 @@ class VectorRAG:
         resp = httpx.post(url, json=payload, headers=headers, timeout=180)
         resp.raise_for_status()
         data = resp.json()
-        msg = (data.get("choices") or [{}])[0].get("message") or {}
-        # With thinking off the transcript is in ``content``; fall back to
-        # ``reasoning`` only if a build still routed it there.
-        return (msg.get("content") or msg.get("reasoning") or "").strip()
+        return _chat_response_text(data)
 
     def _vlm_detect_region(self, img) -> Optional[Tuple[float, float, float, float]]:
         """Ask the vision model for the shared-desktop bounding box of a frame.
@@ -2389,7 +2471,7 @@ class VectorRAG:
         technical terms/proper nouns to correct spelling, without translating or
         changing content. Best-effort — returns the original text on any error so
         ingest never blocks on it. No-op unless the cleanup lane is active."""
-        url = os.getenv("RAG_LLM_URL", "").strip()
+        url = _openai_chat_url(os.getenv("RAG_LLM_URL", ""))
         if not url or not text.strip():
             return text
         try:
@@ -2426,7 +2508,7 @@ class VectorRAG:
                 headers["Authorization"] = f"Bearer {os.getenv('RAG_LLM_API_KEY')}"
             resp = httpx.post(url, json=payload, headers=headers, timeout=120)
             resp.raise_for_status()
-            out = (resp.json()["choices"][0]["message"]["content"] or "").strip()
+            out = _chat_response_text(resp.json())
             return out or text
         except Exception as e:
             logger.warning("asr correction failed: %s", e)
@@ -3122,12 +3204,14 @@ class VectorRAG:
             return []
 
     def get_document_chunks(self, source: str) -> List[Dict[str, Any]]:
-        """Return every indexed chunk for one source file, in ``seq`` order.
+        """Return every indexed chunk for one source file in audit-friendly order.
 
         Powers the ``/rag`` explorer's debug view: each row is the *stored* chunk
         text (exactly what the retriever sees) plus the meta that explains how it
         was indexed (section grouping, situating context, auto aux terms, code
-        symbol/language, modality). Reads straight from Qdrant.
+        symbol/language, modality). Page-based documents are grouped by page
+        (text first, then its figures); other documents retain ``seq`` order.
+        Reads straight from Qdrant.
         """
         if not self.healthy:
             return []
@@ -3145,14 +3229,24 @@ class VectorRAG:
                         "seq": meta.get("seq", 0),
                         "section_id": meta.get("section_id", ""),
                         "context": meta.get("context", ""),
+                        "context_error": meta.get("context_error", ""),
                         "aux_terms": meta.get("aux_terms", ""),
+                        "aux_terms_error": meta.get("aux_terms_error", ""),
                         "symbol": meta.get("symbol", ""),
                         "language": meta.get("language", ""),
                         "modality": meta.get("modality", ""),
                         "metadata": meta,
                     }
                 )
-            return sorted(rows, key=lambda r: r.get("seq") or 0)
+            def _audit_order(row):
+                meta = row.get("metadata") or {}
+                page = meta.get("page")
+                if isinstance(page, (int, float)) and not isinstance(page, bool):
+                    modality_rank = 1 if row.get("modality") == "figure" else 0
+                    return (0, int(page), modality_rank, row.get("seq") or 0)
+                return (1, row.get("seq") or 0, 0, 0)
+
+            return sorted(rows, key=_audit_order)
         except Exception as e:
             logger.error(f"get_document_chunks failed: {e}")
             return []
@@ -3184,7 +3278,9 @@ class VectorRAG:
                 return False
             meta = dict(target.meta or {})
             meta.pop("context", None)
+            meta.pop("context_error", None)
             meta.pop("aux_terms", None)
+            meta.pop("aux_terms_error", None)
             meta.pop("_ctx_orig", None)
             self._write_documents([Document(id=chunk_id, content=text, meta=meta)])
             return True

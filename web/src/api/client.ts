@@ -582,7 +582,9 @@ export interface RagChunk {
   seq: number;
   section_id: string;
   context: string;
+  context_error: string;
   aux_terms: string;
+  aux_terms_error: string;
   symbol: string;
   language: string;
   modality: string;

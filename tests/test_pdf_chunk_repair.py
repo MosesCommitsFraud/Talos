@@ -72,3 +72,21 @@ def test_real_caption_is_not_overwritten():
 
     assert figure.content == "A screenshot of the report editor."
     assert figure.meta["caption_source"] == "vlm"
+
+
+def test_pdf_visual_line_wraps_are_reflowed():
+    raw = (
+        "macs Report Editor\n"
+        "1. Editor\n"
+        "-Bereich\n"
+        "Im Editor wird der Bericht\n"
+        "mit all seinen Elementen\n"
+        "definiert.\n"
+        "2. Datenquelle"
+    )
+
+    text = rv._reflow_pdf_text(raw)
+
+    assert "Editor-Bereich" in text
+    assert "Bericht mit all seinen Elementen definiert." in text
+    assert "\n\n2. Datenquelle" in text

@@ -71,3 +71,36 @@ def test_apply_autokeywords_sets_aux_terms_and_caches(monkeypatch):
     # Re-ingest → cache hit, no new LLM calls.
     rv.VectorRAG._apply_autokeywords(_Dummy(), [_Doc("chunk one"), _Doc("chunk two")])
     assert len(calls) == 2
+
+
+def test_empty_llm_output_is_not_cached(monkeypatch):
+    monkeypatch.setenv("RAG_LLM_URL", "http://llm/v1/chat/completions")
+    monkeypatch.setenv("RAG_AUTO_KEYWORDS_N", "3")
+    monkeypatch.setenv("RAG_AUTO_QUESTIONS_N", "2")
+    monkeypatch.delenv("REDIS_URL", raising=False)
+    rv._CONTEXT_CACHE.clear()
+
+    calls = []
+
+    class _Dummy:
+        def _auto_terms(self, chunk):
+            calls.append(chunk)
+            return ""
+
+    first = _Doc("chunk one")
+    second = _Doc("chunk one")
+    rv.VectorRAG._apply_autokeywords(_Dummy(), [first])
+    rv.VectorRAG._apply_autokeywords(_Dummy(), [second])
+
+    assert calls == ["chunk one", "chunk one"]
+    assert "aux_terms_error" in first.meta
+    assert "aux_terms_error" in second.meta
+
+
+def test_llm_url_and_reasoning_response_compatibility():
+    assert rv._openai_chat_url("http://llm:8000/v1") == (
+        "http://llm:8000/v1/chat/completions"
+    )
+    assert rv._chat_response_text(
+        {"choices": [{"message": {"content": "", "reasoning_content": "keyword"}}]}
+    ) == "keyword"

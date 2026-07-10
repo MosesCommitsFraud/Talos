@@ -383,8 +383,10 @@ def setup_rag_routes():
                 r.raise_for_status()
                 return {"ok": True}
             if kind in ("llm", "vlm"):
+                from src.rag_vector import _openai_chat_url
+
                 r = httpx.post(
-                    url,
+                    _openai_chat_url(url),
                     json={
                         "model": model,
                         "messages": [{"role": "user", "content": "ping"}],
@@ -576,10 +578,10 @@ def setup_rag_routes():
     def export_document(source: str):
         """Download everything indexed for one source file as a Markdown dump.
 
-        Ingest-quality audit: the file shows, chunk by chunk and in ``seq``
-        order, exactly the text the retriever sees — including modality/page
-        provenance and the embedded-but-hidden enrichment (context blurbs,
-        aux terms) — so two ingests of the same document can be diffed.
+        Ingest-quality audit: the file shows exactly the text the retriever sees,
+        grouped by page (page text followed by its figures) when page provenance
+        is available, including embedded-but-hidden enrichment (context blurbs,
+        aux terms), so two ingests of the same document can be diffed.
         """
         from fastapi.responses import PlainTextResponse
 
@@ -600,6 +602,8 @@ def setup_rag_routes():
             f"- chunks: {len(chunks)}",
             f"- context summaries: {sum(bool(c.get('context')) for c in chunks)}/{len(chunks)} chunks",
             f"- keyword/question enrichment: {sum(bool(c.get('aux_terms')) for c in chunks)}/{len(chunks)} chunks",
+            f"- context errors: {sum(bool(c.get('context_error')) for c in chunks)}",
+            f"- keyword/question errors: {sum(bool(c.get('aux_terms_error')) for c in chunks)}",
             f"- exported: {datetime.now().isoformat(timespec='seconds')}",
             "",
         ]
@@ -616,8 +620,15 @@ def setup_rag_routes():
             if c.get("context"):
                 lines.append(f"> context: {c['context']}")
             if c.get("aux_terms"):
-                lines.append(f"> aux_terms: {c['aux_terms']}")
-            if c.get("context") or c.get("aux_terms"):
+                lines.append(f"> keywords/questions: {c['aux_terms']}")
+            if c.get("context_error"):
+                lines.append(f"> context_error: {c['context_error']}")
+            if c.get("aux_terms_error"):
+                lines.append(f"> aux_terms_error: {c['aux_terms_error']}")
+            if any(
+                c.get(key)
+                for key in ("context", "aux_terms", "context_error", "aux_terms_error")
+            ):
                 lines.append("")
             lines.append(c.get("content") or "")
             lines.append("")

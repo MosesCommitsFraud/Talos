@@ -101,13 +101,19 @@ function ChunkCard({ source, chunk }: { source: string; chunk: RagChunk }) {
 
       {/* Ingest enrichment that's embedded but never shown in citations — useful
           to see while debugging recall. */}
-      {(chunk.context || chunk.aux_terms) && !editing && (
+      {(chunk.context || chunk.aux_terms || chunk.context_error || chunk.aux_terms_error) && !editing && (
         <div className="space-y-1 border-b bg-muted/30 px-3 py-1.5 text-[11px]">
           {chunk.context && (
             <div><span className="font-semibold text-muted-foreground">{t('rag.explorer.context')}: </span>{chunk.context}</div>
           )}
           {chunk.aux_terms && (
             <div className="whitespace-pre-wrap"><span className="font-semibold text-muted-foreground">{t('rag.explorer.auxTerms')}: </span>{chunk.aux_terms}</div>
+          )}
+          {chunk.context_error && (
+            <div className="text-destructive"><span className="font-semibold">{t('rag.explorer.enrichmentError')}: </span>{chunk.context_error}</div>
+          )}
+          {chunk.aux_terms_error && (
+            <div className="text-destructive"><span className="font-semibold">{t('rag.explorer.enrichmentError')}: </span>{chunk.aux_terms_error}</div>
           )}
         </div>
       )}
