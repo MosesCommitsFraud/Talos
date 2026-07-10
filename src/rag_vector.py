@@ -576,6 +576,198 @@ def _embed_text(meta: Dict[str, Any], content: str) -> str:
     return f"{text}\n\n{aux}" if aux else text
 
 
+def _max_chunk_chars() -> int:
+    """Hard safety ceiling for parser-produced chunks.
+
+    Docling normally returns HybridChunker output, but some document shapes (in
+    particular slide-deck PDFs with a text layer) can arrive as one whole-file
+    Markdown document.  Such a chunk may fit an embedding model's token window
+    while still being far too broad for useful retrieval.
+    """
+    try:
+        value = int(os.getenv("RAG_MAX_CHUNK_CHARS", "4000") or 4000)
+        return max(1000, min(value, 20000))
+    except Exception:
+        return 4000
+
+
+def _bounded_text_parts(text: str, limit: int) -> List[str]:
+    """Split text into bounded, paragraph-aware pieces without dropping text."""
+    text = (text or "").strip()
+    if not text:
+        return []
+    if len(text) <= limit:
+        return [text]
+
+    parts: List[str] = []
+    current = ""
+    # PDF text layers commonly use single newlines rather than blank lines.  A
+    # line is therefore the safest unit; very long lines are word-wrapped.
+    units: List[str] = []
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        if len(line) <= limit:
+            units.append(line)
+            continue
+        words = line.split()
+        piece = ""
+        for word in words:
+            candidate = f"{piece} {word}".strip()
+            if piece and len(candidate) > limit:
+                units.append(piece)
+                piece = word
+            else:
+                piece = candidate
+        if piece:
+            units.append(piece)
+
+    for unit in units:
+        candidate = f"{current}\n{unit}".strip()
+        if current and len(candidate) > limit:
+            parts.append(current)
+            current = unit
+        else:
+            current = candidate
+    if current:
+        parts.append(current)
+    return parts
+
+
+def _pdf_text_pages(path: str) -> List[Tuple[int, str]]:
+    """Read the visible embedded text layer page-by-page with pypdfium2."""
+    try:
+        import pypdfium2 as pdfium
+
+        pdf = pdfium.PdfDocument(path)
+    except Exception as e:
+        logger.warning("pdf chunk repair: cannot open %s: %s", path, e)
+        return []
+
+    pages: List[Tuple[int, str]] = []
+    try:
+        for i in range(len(pdf)):
+            page = pdf[i]
+            textpage = None
+            try:
+                textpage = page.get_textpage()
+                text = (textpage.get_text_range() or "").replace("\x00", "")
+                text = re.sub(r"[ \t]+\r?\n", "\n", text).strip()
+                if text:
+                    pages.append((i + 1, text))
+            except Exception as e:
+                logger.warning("pdf chunk repair: page %d text failed: %s", i + 1, e)
+            finally:
+                try:
+                    if textpage is not None:
+                        textpage.close()
+                except Exception:
+                    pass
+                try:
+                    page.close()
+                except Exception:
+                    pass
+    finally:
+        try:
+            pdf.close()
+        except Exception:
+            pass
+    return pages
+
+
+def _repair_oversized_pdf_chunks(path: str, docs):
+    """Replace a collapsed whole-PDF text chunk with bounded page chunks.
+
+    This is deliberately a narrow repair: it activates only when there is one
+    ordinary parser chunk, that chunk exceeds the safety ceiling, and the PDF's
+    page text recovers a meaningful share of its content.  Figure and VLM page
+    documents are preserved as-is.
+    """
+    limit = _max_chunk_chars()
+    ordinary = [
+        d
+        for d in docs
+        if not (d.meta or {}).get("modality") and (d.content or "").strip()
+    ]
+    if len(ordinary) != 1 or len(ordinary[0].content or "") <= limit:
+        return docs
+
+    original = ordinary[0]
+    pages = _pdf_text_pages(path)
+    recovered = sum(len(text) for _page, text in pages)
+    if not pages or recovered < max(200, int(len(original.content or "") * 0.35)):
+        logger.warning(
+            "pdf chunk repair: page text insufficient for %s (%d vs %d chars)",
+            path,
+            recovered,
+            len(original.content or ""),
+        )
+        return docs
+
+    replacements = []
+    doc_type = type(original)
+    for page_no, page_text in pages:
+        parts = _bounded_text_parts(page_text, limit)
+        for part_no, content in enumerate(parts, start=1):
+            meta = dict(original.meta or {})
+            meta.update(
+                {
+                    "modality": "pdf_page",
+                    "page": page_no,
+                    "extraction": "pdf_text_fallback",
+                }
+            )
+            if len(parts) > 1:
+                meta["page_part"] = part_no
+            replacements.append(doc_type(content=content, meta=meta))
+
+    out = []
+    for d in docs:
+        if d is original:
+            out.extend(replacements)
+        else:
+            out.append(d)
+    logger.warning(
+        "pdf chunk repair: replaced one %d-char chunk with %d page chunk(s) for %s",
+        len(original.content or ""),
+        len(replacements),
+        os.path.basename(path),
+    )
+    return out
+
+
+def _enrich_uncaptioned_figures(docs) -> None:
+    """Make failed figure captions searchable using the figure's page text."""
+    page_text: Dict[int, str] = {}
+    for d in docs:
+        meta = d.meta or {}
+        page = meta.get("page")
+        if meta.get("modality") != "pdf_page" or not isinstance(page, int):
+            continue
+        content = (d.content or "").strip()
+        if content and len(content) > len(page_text.get(page, "")):
+            page_text[page] = content
+
+    for d in docs:
+        meta = d.meta or {}
+        if meta.get("modality") != "figure":
+            continue
+        content = (d.content or "").strip()
+        caption_source = meta.get("caption_source")
+        is_locator = caption_source == "locator" or bool(
+            re.fullmatch(r"Figure from .+ \(page \d+\)", content)
+        )
+        page = meta.get("page")
+        context = page_text.get(page, "") if isinstance(page, int) else ""
+        if not is_locator or not context:
+            continue
+        enriched = f"{content}\n\nPage text:\n{context[:2000]}"
+        d.content = enriched
+        meta["image_caption"] = enriched
+        meta["caption_source"] = "page_text_fallback"
+
+
 # Content-hash → blurb cache so re-ingesting unchanged chunks never re-pays the
 # LLM. In-process memo backed by Redis (shared across worker forks/restarts when
 # REDIS_URL is set); both layers degrade silently if unavailable.
@@ -1500,6 +1692,12 @@ class VectorRAG:
         else:
             docs = self._lane_text(path)
 
+        # Defensive PDF repair: a Docling/HybridChunker integration regression
+        # must not turn a multi-page document into one whole-file retrieval hit.
+        if ext == ".pdf":
+            docs = _repair_oversized_pdf_chunks(path, docs)
+            _enrich_uncaptioned_figures(docs)
+
         # Ingest guards: strip text that is invisible on the rendered page
         # (PDF prompt-injection channel — extractors read it, humans can't),
         # then optionally redact PII before anything reaches the index. The
@@ -1931,7 +2129,12 @@ class VectorRAG:
         out: List[Any] = []
         fname = os.path.basename(path)
         for i, c in enumerate(crops):
-            caption = (captions[i] or c["docling_caption"] or "").strip()
+            vlm_caption = (captions[i] or "").strip()
+            docling_caption = (c["docling_caption"] or "").strip()
+            caption = vlm_caption or docling_caption
+            caption_source = (
+                "vlm" if vlm_caption else ("docling" if docling_caption else "locator")
+            )
             page_txt = f" (page {c['page']})" if c["page"] else ""
             # The Document's content is what the retriever matches on, so fall
             # back to a minimal locator when neither VLM nor Docling gave text.
@@ -1945,6 +2148,7 @@ class VectorRAG:
                         "page": c["page"],
                         "image_url": image_url,
                         "image_caption": caption or content,
+                        "caption_source": caption_source,
                     },
                 )
             )

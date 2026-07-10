@@ -598,6 +598,8 @@ def setup_rag_routes():
             "",
             f"- source: `{source}`",
             f"- chunks: {len(chunks)}",
+            f"- context summaries: {sum(bool(c.get('context')) for c in chunks)}/{len(chunks)} chunks",
+            f"- keyword/question enrichment: {sum(bool(c.get('aux_terms')) for c in chunks)}/{len(chunks)} chunks",
             f"- exported: {datetime.now().isoformat(timespec='seconds')}",
             "",
         ]
