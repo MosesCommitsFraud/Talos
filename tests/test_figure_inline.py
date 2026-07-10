@@ -94,6 +94,86 @@ def test_append_caps_at_max_figures():
     assert out.count("![") == 1
 
 
+def test_same_pdf_filename_uses_exact_page_anchor_not_first_figure():
+    answer = "Im macs Report Editor wird das Band per Rechtsklick eingefügt."
+    source = "/u/training.pdf"
+    band_text = {
+        "filename": "training.pdf",
+        "_id": "page6",
+        "_source": source,
+        "_page": 6,
+        "_text": "Im macs Report Editor können Bereiche mit einem Rechtsklick hinzugefügt werden. Band einfügen.",
+    }
+    drill_text = {
+        "filename": "training.pdf",
+        "_id": "page27",
+        "_source": source,
+        "_page": 27,
+        "_text": "Im DrillDownControl kann die gewünschte Zelle ausgewählt werden.",
+    }
+    band_fig = {
+        "filename": "training.pdf",
+        "_anchor_id": "page6",
+        "_source": source,
+        "_page": 6,
+        "image_url": _OK,
+        "image_caption": "Band einfügen",
+        "_text": "Kontextmenü Band einfügen",
+    }
+    drill_fig = {
+        "filename": "training.pdf",
+        "_anchor_id": "page27",
+        "_source": source,
+        "_page": 27,
+        "image_url": _BAD,
+        "image_caption": "DrillDownControl",
+        "_text": "DrillDownControl im Gruppenband",
+    }
+
+    out = ch.append_missing_figures(
+        answer, [band_text, drill_text, drill_fig, band_fig]
+    )
+
+    assert _OK in out
+    assert _BAD not in out
+
+
+def test_wrong_model_chosen_figure_is_stripped_then_correct_anchor_can_append():
+    answer = f"Band per Rechtsklick einfügen. ![wrong]({_BAD})"
+    source = "/u/training.pdf"
+    sources = [
+        {
+            "filename": "training.pdf",
+            "_id": "page6",
+            "_source": source,
+            "_page": 6,
+            "_text": "Band per Rechtsklick einfügen.",
+        },
+        {
+            "filename": "training.pdf",
+            "_source": source,
+            "_page": 6,
+            "_anchor_id": "page6",
+            "image_url": _OK,
+            "image_caption": "Band einfügen",
+        },
+        {
+            "filename": "training.pdf",
+            "_source": source,
+            "_page": 27,
+            "_anchor_id": "page27",
+            "image_url": _BAD,
+            "image_caption": "DrillDownControl",
+        },
+    ]
+
+    stripped = ch.strip_unauthorized_figures(answer, sources)
+    appended = stripped + ch.append_missing_figures(stripped, sources)
+
+    assert _BAD not in appended
+    assert _OK in appended
+
+
 def test_compaction_extracts_and_dedupes_figures():
     md = f"![diagram]({_OK})"
     older = [

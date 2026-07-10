@@ -846,6 +846,75 @@ def filter_used_rag_sources(answer: str, sources: list, *, min_overlap_frac: flo
 _RAG_ASSET_IMG_RE = re.compile(r"!\[[^\]]*\]\((?P<url>/api/personal/rag-asset\?source=[^)\s]*)\)")
 
 
+def _eligible_figures_for_answer(answer: str, sources: list) -> list:
+    """Pair figures with the exact text page/anchor used by the final answer.
+
+    A filename is not sufficient provenance: every page and figure extracted
+    from one PDF has the same filename. Internal ``_id``/``_anchor_id`` and
+    ``_source``/``_page`` fields preserve the retrieval relationship without
+    exposing it to clients. Legacy callers without those fields retain the old
+    filename fallback.
+    """
+    figures = [s for s in (sources or []) if s.get("image_url")]
+    if not answer or not figures:
+        return []
+
+    # Do not count a model-emitted image URL as proof that its figure was used;
+    # determine usage from the prose/caption overlap and text anchors instead.
+    prose = _RAG_ASSET_IMG_RE.sub("", answer)
+    used = filter_used_rag_sources(prose, sources)
+    used_text = [s for s in used if not s.get("image_url")]
+    used_figures = [s for s in used if s.get("image_url")]
+
+    precise = any(
+        s.get("_anchor_id") or (s.get("_source") and s.get("_page") is not None)
+        for s in figures
+    ) and any(
+        s.get("_id") or (s.get("_source") and s.get("_page") is not None)
+        for s in used_text
+    )
+
+    matched = []
+    seen = set()
+
+    def _add(fig):
+        url = fig.get("image_url")
+        if url and url not in seen:
+            seen.add(url)
+            matched.append(fig)
+
+    # Preserve used-text order, which follows retrieval relevance. A companion
+    # can match by its explicit anchor id or by original-document page.
+    for text_source in used_text:
+        text_id = text_source.get("_id")
+        page_key = (text_source.get("_source"), text_source.get("_page"))
+        for fig in figures:
+            anchor_match = bool(text_id and fig.get("_anchor_id") == text_id)
+            page_match = bool(
+                page_key[0]
+                and page_key[1] is not None
+                and (fig.get("_source"), fig.get("_page")) == page_key
+            )
+            if anchor_match or page_match:
+                _add(fig)
+
+    # Standalone images can be used directly through their caption when no text
+    # anchor exists. When page text was used, never let a loosely overlapping
+    # secondary figure self-select around that stronger provenance.
+    if not used_text:
+        for fig in used_figures:
+            _add(fig)
+
+    if matched or precise:
+        return matched
+
+    # Backward-compatible fallback for older/unit-test source dictionaries.
+    used_files = {s.get("filename") for s in used_text}
+    return [s for s in figures if s.get("filename") in used_files] or (
+        figures if used_files else []
+    )
+
+
 def strip_unauthorized_figures(answer: str, sources: list) -> str:
     """Remove any inline figure image the answer references but that wasn't in the
     retrieved set — an anti-hallucination guard on model-emitted image URLs.
@@ -864,7 +933,17 @@ def strip_unauthorized_figures(answer: str, sources: list) -> str:
     def _norm(u: str) -> str:
         return unquote(unquote(u or ""))
 
-    allowed = {_norm(s.get("image_url")) for s in (sources or []) if s.get("image_url")}
+    has_precise_provenance = any(
+        s.get("image_url")
+        and (s.get("_anchor_id") or (s.get("_source") and s.get("_page") is not None))
+        for s in (sources or [])
+    )
+    allowed_sources = (
+        _eligible_figures_for_answer(answer, sources)
+        if has_precise_provenance
+        else [s for s in (sources or []) if s.get("image_url")]
+    )
+    allowed = {_norm(s.get("image_url")) for s in allowed_sources}
 
     def _keep(m: "re.Match") -> str:
         if _norm(m.group("url")) in allowed:
@@ -889,19 +968,7 @@ def append_missing_figures(answer: str, sources: list, *, max_figures: int = 1) 
         return ""
     if _RAG_ASSET_IMG_RE.search(answer):
         return ""  # the model embedded one itself
-    figures = [s for s in sources if s.get("image_url")]
-    if not figures:
-        return ""
-    used_files = {
-        s.get("filename") for s in filter_used_rag_sources(answer, sources) if not s.get("image_url")
-    }
-    if not used_files:
-        return ""
-    # Prefer figures from a document the answer used; a companion figure rode
-    # along with the top text hits anyway, so if filenames don't line up
-    # (figure chunks can carry their own asset filename) fall back to the
-    # first retrieved figure rather than silently showing nothing.
-    matched = [s for s in figures if s.get("filename") in used_files] or figures
+    matched = _eligible_figures_for_answer(answer, sources)
     lines = []
     for s in matched[:max_figures]:
         cap = (s.get("image_caption") or s.get("filename") or "figure").strip()

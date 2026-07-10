@@ -85,56 +85,6 @@ def _citation_media(meta: Dict[str, Any]) -> Dict[str, Any]:
     return out
 
 
-def _figures_from_best_text_pages(results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """Keep PDF figures only from each document's strongest retrieved text page.
-
-    Hybrid retrieval intentionally returns several text passages. Attaching a
-    companion image to every one makes generic secondary matches (for example,
-    any page mentioning "Band") leak unrelated figures into an otherwise
-    correct answer. Text passages remain untouched; only page-provenanced
-    figures are restricted to the best-scoring text page for their source.
-    Images without a comparable page-text anchor (standalone images/video) keep
-    their existing behavior.
-    """
-    best: Dict[str, Tuple[float, int]] = {}
-    for r in results:
-        meta = r.get("metadata") or {}
-        if meta.get("image_url"):
-            continue
-        source = str(meta.get("source") or "")
-        page = meta.get("page")
-        if not source or not isinstance(page, (int, float)) or isinstance(page, bool):
-            continue
-        raw_score = r.get("rerank_score")
-        if raw_score is None:
-            raw_score = r.get("similarity")
-        try:
-            score = float(raw_score or 0.0)
-        except Exception:
-            score = 0.0
-        current = best.get(source)
-        if current is None or score > current[0]:
-            best[source] = (score, int(page))
-
-    filtered: List[Dict[str, Any]] = []
-    for r in results:
-        meta = r.get("metadata") or {}
-        if not meta.get("image_url"):
-            filtered.append(r)
-            continue
-        source = str(meta.get("source") or "")
-        page = meta.get("page")
-        anchor = best.get(source)
-        if (
-            anchor is None
-            or not isinstance(page, (int, float))
-            or isinstance(page, bool)
-            or int(page) == anchor[1]
-        ):
-            filtered.append(r)
-    return filtered
-
-
 # ── Stopwords & tokenizer ──
 
 _STOPWORDS = frozenset(
@@ -155,13 +105,19 @@ _STOPWORDS = frozenset(
     "don doesn didn won wouldn couldn shouldn wasn weren isn aren haven hasn "
     "don't doesn't didn't won't wouldn't couldn't shouldn't "
     "it's i'm i've i'll i'd you're you've you'll he's she's we're we've they're they've "
-    "that's there's here's what's who's how's let's can't".split()
+    "that's there's here's what's who's how's let's can't "
+    "aber als also am an auf aus bei bin bis bist da das dass dein deine dem den der des "
+    "die diese dieser dieses doch du ein eine einer eines er es für hat haben ich im in ist "
+    "ja kann können man mit nach nicht noch nur oder sein seine sie sind so über um und uns "
+    "von vor war was wie wir wo zu zum zur".split()
 )
 
 
 def _content_tokens(text: str) -> list:
     """Extract meaningful content words: no stopwords, min 3 chars, lowercase."""
-    words = re.findall(r"[a-z0-9]+(?:[-_][a-z0-9]+)*", text.lower())
+    # ``[^\W_]`` is the Unicode-aware equivalent of an alphanumeric character,
+    # so German terms such as "einfügen" remain one searchable token.
+    words = re.findall(r"[^\W_]+(?:[-_][^\W_]+)*", text.lower())
     return [w for w in words if len(w) >= 3 and w not in _STOPWORDS]
 
 
@@ -619,10 +575,6 @@ class ChatProcessor:
                         if r.get("search_type") != "figure_companion"
                         or r.get("anchor_id") in text_ids
                     ]
-                    # A broad top-k may include several merely related pages.
-                    # Keep their text for answer synthesis, but show figures only
-                    # from this document's strongest retrieved text page.
-                    relevant = _figures_from_best_text_pages(relevant)
                     if relevant:
                         logger.info(
                             f"RAG: {len(relevant)}/{len(results)} results above threshold {sim_threshold}"
@@ -640,6 +592,14 @@ class ChatProcessor:
                                 # key) before the source is emitted or saved, so
                                 # it never reaches the client or the DB.
                                 "_text": r["document"][:1500],
+                                # Internal provenance used after generation to
+                                # pair a displayed figure with the exact text
+                                # page the answer actually used. Underscore keys
+                                # are stripped before sources reach the client.
+                                "_id": r.get("id"),
+                                "_anchor_id": r.get("anchor_id"),
+                                "_source": (r.get("metadata") or {}).get("source"),
+                                "_page": (r.get("metadata") or {}).get("page"),
                                 # Optional image-preview / video-timestamp fields
                                 # so citations can render a thumbnail or a #t=
                                 # deeplink (absent for plain text/docs).
