@@ -215,3 +215,72 @@ def test_citation_media_keeps_image_branch_for_keyframes():
     # Plain ASR transcript chunks still take the video branch.
     asr_meta = {"modality": "video", "source": "/u/training.mp4", "start": 10.0, "end": 20.0}
     assert cp._citation_media(asr_meta)["modality"] == "video"
+
+
+def test_only_best_text_pages_contribute_pdf_figures():
+    import src.chat_processor as cp
+
+    source = "/u/training.pdf"
+    results = [
+        {
+            "id": "band-text",
+            "document": "Band einfügen per Rechtsklick",
+            "metadata": {"source": source, "page": 6},
+            "rerank_score": 0.93,
+        },
+        {
+            "id": "drilldown-text",
+            "document": "DrillDownControl im Gruppenband",
+            "metadata": {"source": source, "page": 27},
+            "rerank_score": 0.51,
+        },
+        {
+            "id": "band-figure",
+            "document": "Band einfügen menu",
+            "metadata": {"source": source, "page": 6, "image_url": "/band.png"},
+            "rerank_score": 0.90,
+        },
+        {
+            "id": "drilldown-figure",
+            "document": "DrillDownControl",
+            "metadata": {"source": source, "page": 27, "image_url": "/drill.png"},
+            "rerank_score": 0.60,
+        },
+        {
+            "id": "sparkline-figure",
+            "document": "Sparkline einfügen",
+            "metadata": {"source": source, "page": 28, "image_url": "/spark.png"},
+            "rerank_score": 0.58,
+        },
+    ]
+
+    filtered = cp._figures_from_best_text_pages(results)
+
+    assert {r["id"] for r in filtered} == {
+        "band-text",
+        "drilldown-text",
+        "band-figure",
+    }
+
+
+def test_page_filter_does_not_drop_standalone_or_video_images():
+    import src.chat_processor as cp
+
+    results = [
+        {
+            "id": "standalone",
+            "metadata": {"source": "/u/image.png", "image_url": "/image.png"},
+            "rerank_score": 0.8,
+        },
+        {
+            "id": "keyframe",
+            "metadata": {
+                "source": "/u/video.mp4",
+                "image_url": "/frame.png",
+                "start": 90.0,
+            },
+            "rerank_score": 0.8,
+        },
+    ]
+
+    assert cp._figures_from_best_text_pages(results) == results

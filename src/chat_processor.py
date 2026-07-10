@@ -85,6 +85,56 @@ def _citation_media(meta: Dict[str, Any]) -> Dict[str, Any]:
     return out
 
 
+def _figures_from_best_text_pages(results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Keep PDF figures only from each document's strongest retrieved text page.
+
+    Hybrid retrieval intentionally returns several text passages. Attaching a
+    companion image to every one makes generic secondary matches (for example,
+    any page mentioning "Band") leak unrelated figures into an otherwise
+    correct answer. Text passages remain untouched; only page-provenanced
+    figures are restricted to the best-scoring text page for their source.
+    Images without a comparable page-text anchor (standalone images/video) keep
+    their existing behavior.
+    """
+    best: Dict[str, Tuple[float, int]] = {}
+    for r in results:
+        meta = r.get("metadata") or {}
+        if meta.get("image_url"):
+            continue
+        source = str(meta.get("source") or "")
+        page = meta.get("page")
+        if not source or not isinstance(page, (int, float)) or isinstance(page, bool):
+            continue
+        raw_score = r.get("rerank_score")
+        if raw_score is None:
+            raw_score = r.get("similarity")
+        try:
+            score = float(raw_score or 0.0)
+        except Exception:
+            score = 0.0
+        current = best.get(source)
+        if current is None or score > current[0]:
+            best[source] = (score, int(page))
+
+    filtered: List[Dict[str, Any]] = []
+    for r in results:
+        meta = r.get("metadata") or {}
+        if not meta.get("image_url"):
+            filtered.append(r)
+            continue
+        source = str(meta.get("source") or "")
+        page = meta.get("page")
+        anchor = best.get(source)
+        if (
+            anchor is None
+            or not isinstance(page, (int, float))
+            or isinstance(page, bool)
+            or int(page) == anchor[1]
+        ):
+            filtered.append(r)
+    return filtered
+
+
 # ── Stopwords & tokenizer ──
 
 _STOPWORDS = frozenset(
@@ -569,6 +619,10 @@ class ChatProcessor:
                         if r.get("search_type") != "figure_companion"
                         or r.get("anchor_id") in text_ids
                     ]
+                    # A broad top-k may include several merely related pages.
+                    # Keep their text for answer synthesis, but show figures only
+                    # from this document's strongest retrieved text page.
+                    relevant = _figures_from_best_text_pages(relevant)
                     if relevant:
                         logger.info(
                             f"RAG: {len(relevant)}/{len(results)} results above threshold {sim_threshold}"
