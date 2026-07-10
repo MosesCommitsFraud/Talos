@@ -592,6 +592,11 @@ def _embed_text(meta: Dict[str, Any], content: str) -> str:
     return f"{text}\n\n{aux}" if aux else text
 
 
+def _is_primary_retrieval_document(meta: Dict[str, Any]) -> bool:
+    """Figures retrieve only through an owning text/page companion anchor."""
+    return (meta or {}).get("modality") != "figure"
+
+
 def _openai_chat_url(raw_url: str) -> str:
     """Accept either an OpenAI-compatible base URL or the full chat route."""
     url = (raw_url or "").strip().rstrip("/")
@@ -1339,6 +1344,13 @@ class VectorRAG:
                 filters=self._build_filters(owner, scope, exclude_scopes),
             )
             docs = response.get("documents", []) or []
+            # Extracted PDF figures/video keyframes are renderable companions,
+            # not independent answer passages. Their page/transcript text owns
+            # retrieval; allowing figure captions to compete directly can make
+            # generic words surface an image disconnected from the selected
+            # information. `_attach_companion_figures` adds them back only with
+            # an explicit text `anchor_id`.
+            docs = [d for d in docs if _is_primary_retrieval_document(d.meta or {})]
             candidates = [
                 {
                     "id": d.id,

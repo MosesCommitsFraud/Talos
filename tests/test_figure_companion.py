@@ -252,3 +252,9 @@ def test_low_scoring_companion_survives_with_relevant_text_anchor():
     relevant = cp._add_surviving_anchor_companions([text, figure], [text])
 
     assert [r["id"] for r in relevant] == ["page6", "figure6"]
+
+
+def test_figures_are_companions_not_independent_retrieval_passages():
+    assert rv._is_primary_retrieval_document({"modality": "pdf_page", "page": 6})
+    assert rv._is_primary_retrieval_document({"modality": "video", "start": 10})
+    assert not rv._is_primary_retrieval_document({"modality": "figure", "page": 6})
