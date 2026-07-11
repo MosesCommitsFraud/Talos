@@ -1084,6 +1084,7 @@ def llm_call(
     headers: Optional[Dict] = None,
     timeout: int = LLMConfig.DEFAULT_TIMEOUT,
     prompt_type: Optional[str] = None,
+    enable_thinking: bool = True,
 ) -> str:
     """Synchronous LLM call with optional prompt type enhancement."""
     h = _provider_headers(_detect_provider(url))
@@ -1133,6 +1134,7 @@ def llm_call(
             max_tokens,
             stream=False,
             num_ctx=get_context_length(url, model),
+            think=enable_thinking,
         )
     else:
         target_url = url
@@ -1145,6 +1147,11 @@ def llm_call(
             "messages": messages_copy,
             "temperature": temperature,
         }
+        # vLLM/SGLang OpenAI extension to gate reasoning on Qwen3-style hybrid
+        # models; harmless to omit elsewhere, so only send when disabling
+        # (mirrors llm_call_async).
+        if not enable_thinking:
+            payload["chat_template_kwargs"] = {"enable_thinking": False}
         if _restricts_temperature(model):
             payload.pop("temperature", None)
         if max_tokens and max_tokens > 0:

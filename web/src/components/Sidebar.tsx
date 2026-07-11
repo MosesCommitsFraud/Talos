@@ -23,7 +23,7 @@ import {
   Trash2Icon,
   UserIcon,
 } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   archiveSession,
@@ -73,6 +73,52 @@ const SORT_KEYS: Record<SortMode, string> = {
   newest: 'sidebar.sortNewest',
   name: 'sidebar.sortName',
 };
+
+/** Truncates normally, then slowly pans only the hidden portion on hover. The
+ *  animation stops at the end so the full title can be read without looping. */
+function ScrollableSessionTitle({ children }: { children: string }) {
+  const viewportRef = useRef<HTMLSpanElement>(null);
+  const textRef = useRef<HTMLSpanElement>(null);
+  const animationRef = useRef<Animation | null>(null);
+
+  const stop = () => {
+    animationRef.current?.cancel();
+    animationRef.current = null;
+  };
+  const start = () => {
+    stop();
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    const viewport = viewportRef.current;
+    const text = textRef.current;
+    if (!viewport || !text) return;
+    const distance = Math.ceil(text.scrollWidth - viewport.clientWidth);
+    if (distance <= 1) return;
+    // Roughly 22 px/s plus a short initial pause: calm enough to read, without
+    // making moderately long titles take forever to reveal.
+    const duration = Math.max(4_000, (distance / 22) * 1_000 + 1_200);
+    animationRef.current = text.animate(
+      [
+        { transform: 'translateX(0)', offset: 0 },
+        { transform: 'translateX(0)', offset: 0.14 },
+        { transform: `translateX(-${distance}px)`, offset: 1 },
+      ],
+      { duration, easing: 'ease-in-out', fill: 'forwards' },
+    );
+  };
+
+  useEffect(() => stop, []);
+
+  return (
+    <span
+      ref={viewportRef}
+      className="min-w-0 flex-1 overflow-hidden whitespace-nowrap"
+      onMouseEnter={start}
+      onMouseLeave={stop}
+    >
+      <span ref={textRef} className="inline-block">{children}</span>
+    </span>
+  );
+}
 
 function SessionRow({ session, folders }: { session: Session; folders: string[] }) {
   const { t } = useTranslation();
@@ -128,14 +174,13 @@ function SessionRow({ session, folders }: { session: Session; folders: string[] 
           type="button"
           onClick={() => void openSession(session.id)}
           onDoubleClick={beginRename}
-          title={session.name}
           className={cn(
             'group flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm transition-colors',
             session.id === activeId ? 'bg-accent text-accent-foreground' : 'hover:bg-accent/70',
           )}
         >
           {pinned && <PinIcon className="size-3 shrink-0 -rotate-45 text-muted-foreground" />}
-          <span className="min-w-0 flex-1 truncate">{session.name || t('common.untitled')}</span>
+          <ScrollableSessionTitle>{session.name || t('common.untitled')}</ScrollableSessionTitle>
           {status === 'working' ? (
             // Running turn — a shimmering "Working" label, shown even when this
             // chat isn't the one on screen so background turns are visible.
@@ -443,8 +488,8 @@ export function Sidebar({
   return (
     <nav
       className={cn(
-        'm-2 flex shrink-0 flex-col overflow-hidden rounded-md border bg-background transition-[width] duration-200 ease-out',
-        collapsed ? 'w-[3.25rem]' : 'w-64',
+        'm-2 flex shrink-0 flex-col rounded-md border bg-background transition-[width] duration-200 ease-out',
+        collapsed ? 'relative z-30 w-[3.25rem] overflow-visible' : 'w-64 overflow-hidden',
       )}
       aria-label={t('sidebar.navLabel')}
     >
@@ -501,7 +546,7 @@ export function Sidebar({
             >
               <HistoryIcon />
             </button>
-            <div className="invisible absolute left-full top-0 z-40 pl-2 opacity-0 transition-opacity group-hover/recents:visible group-hover/recents:opacity-100">
+            <div className="invisible absolute left-full top-0 z-40 pl-2 opacity-0 transition-opacity group-hover/recents:visible group-hover/recents:opacity-100 group-focus-within/recents:visible group-focus-within/recents:opacity-100">
               <div className="flex max-h-[70vh] w-64 flex-col overflow-hidden rounded-md border bg-popover shadow-[0_12px_32px_rgb(0_0_0/0.18)] dark:shadow-[0_12px_32px_rgb(0_0_0/0.5)]">
                 <div className="px-3 pt-2.5 pb-1 text-xs font-medium text-muted-foreground">{t('sidebar.recents')}</div>
                 <div className="min-h-0 flex-1 space-y-px overflow-y-auto px-1.5 pb-2">{chatList}</div>

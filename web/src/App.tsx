@@ -35,7 +35,11 @@ export default function App() {
   const theme = usePrefs((s) => s.theme);
   const density = usePrefs((s) => s.density);
   const lang = usePrefs((s) => s.lang);
-  const hasMessages = useChat((s) => s.messages.length > 0);
+  // A cold-opened session is activated before its history request resolves.
+  // Treat the session id—not the temporary message count—as the distinction
+  // between a conversation and a genuinely new draft, avoiding a welcome-page
+  // flash while older chat history loads.
+  const hasActiveSession = useChat((s) => s.sessionId !== null);
   const pendingPlanId = useChat((s) => selectPendingPlan(s)?.id ?? null);
   const setPlanPanelOpen = useUi((s) => s.setPlanPanelOpen);
 
@@ -84,7 +88,7 @@ export default function App() {
                   {/* Empty chat shows the home screen (greeting + usage stats)
                       in the message area; the composer always sits at the
                       bottom of the viewport. */}
-                  {hasMessages ? <Messages /> : <Welcome />}
+                  {hasActiveSession ? <Messages /> : <Welcome />}
                   <div className="shrink-0">
                     <PendingQuestion />
                     <Composer />

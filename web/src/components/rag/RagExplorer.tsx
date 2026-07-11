@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { BracesIcon, FileTextIcon, PencilIcon, RotateCcwIcon, Trash2Icon } from 'lucide-react';
+import { BracesIcon, DownloadIcon, FileTextIcon, PencilIcon, RotateCcwIcon, Trash2Icon } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
@@ -7,6 +7,7 @@ import {
   fetchRagChunks,
   fetchRagDocuments,
   type RagChunk,
+  ragDocumentExportUrl,
   updateRagChunk,
 } from '@/api/client';
 import { cn } from '@/lib/utils';
@@ -100,13 +101,19 @@ function ChunkCard({ source, chunk }: { source: string; chunk: RagChunk }) {
 
       {/* Ingest enrichment that's embedded but never shown in citations — useful
           to see while debugging recall. */}
-      {(chunk.context || chunk.aux_terms) && !editing && (
+      {(chunk.context || chunk.aux_terms || chunk.context_error || chunk.aux_terms_error) && !editing && (
         <div className="space-y-1 border-b bg-muted/30 px-3 py-1.5 text-[11px]">
           {chunk.context && (
             <div><span className="font-semibold text-muted-foreground">{t('rag.explorer.context')}: </span>{chunk.context}</div>
           )}
           {chunk.aux_terms && (
             <div className="whitespace-pre-wrap"><span className="font-semibold text-muted-foreground">{t('rag.explorer.auxTerms')}: </span>{chunk.aux_terms}</div>
+          )}
+          {chunk.context_error && (
+            <div className="text-destructive"><span className="font-semibold">{t('rag.explorer.enrichmentError')}: </span>{chunk.context_error}</div>
+          )}
+          {chunk.aux_terms_error && (
+            <div className="text-destructive"><span className="font-semibold">{t('rag.explorer.enrichmentError')}: </span>{chunk.aux_terms_error}</div>
           )}
         </div>
       )}
@@ -235,6 +242,15 @@ export function RagExplorer({ open, onOpenChange }: { open: boolean; onOpenChang
                   <span className="shrink-0 text-[11px] text-muted-foreground tabular-nums">
                     {t('settings.rag.chunksN', { n: chunks.data?.chunks?.length ?? selectedDoc?.chunks ?? 0 })}
                   </span>
+                  <a
+                    href={ragDocumentExportUrl(selected)}
+                    download
+                    aria-label={t('rag.explorer.download')}
+                    title={t('rag.explorer.download')}
+                    className="shrink-0 text-muted-foreground hover:text-foreground"
+                  >
+                    <DownloadIcon className="size-3.5" />
+                  </a>
                   <button
                     type="button"
                     aria-label={t('common.refresh')}
