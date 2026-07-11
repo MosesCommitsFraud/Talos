@@ -1,6 +1,7 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   BookOpenIcon,
+  ArrowUpIcon,
   CirclePauseIcon,
   CircleStopIcon,
   BrainIcon,
@@ -272,7 +273,11 @@ export function Composer() {
   const [dragging, setDragging] = useState(false);
   const [slashIndex, setSlashIndex] = useState(0);
   const [commandError, setCommandError] = useState('');
-  const [queuedBtw, setQueuedBtw] = useState('');
+  const [queuedMessages, setQueuedMessages] = useState<Array<{
+    id: string;
+    text: string;
+    attachments: UploadedFile[];
+  }>>([]);
   const dragDepth = useRef(0);
   const textarea = useRef<HTMLTextAreaElement>(null);
   const fileInput = useRef<HTMLInputElement>(null);
@@ -330,18 +335,23 @@ export function Composer() {
     else if (rowBottom > visibleBottom) menu.scrollTop = visibleTop + rowHeight;
   }, [slashIndex, slashItems.length]);
 
-  // /btw may be entered while a turn is running. Queue it and dispatch as soon
-  // as that turn settles; goal continuation sees the new stream and waits, then
-  // resumes after the aside without losing its objective.
+  // Messages submitted during a turn wait in FIFO order. Removing the item
+  // before send prevents this effect from dispatching it twice when the store
+  // updates several times during send setup.
   useEffect(() => {
-    if (streaming || !queuedBtw) return;
-    const aside = queuedBtw;
-    setQueuedBtw('');
-    void send(
-      `Side question: ${aside}\n\nAnswer this briefly without changing, replacing, or reprioritizing the current task or goal. Then return control to the existing task.`,
-      { planMode: false },
-    );
-  }, [streaming, queuedBtw, send]);
+    if (streaming || queuedMessages.length === 0) return;
+    const next = queuedMessages[0];
+    setQueuedMessages((items) => items.filter((item) => item.id !== next.id));
+    void send(next.text, { attachments: next.attachments });
+  }, [streaming, queuedMessages, send]);
+
+  const steerQueuedMessage = (id: string) => {
+    setQueuedMessages((items) => {
+      const selected = items.find((item) => item.id === id);
+      return selected ? [selected, ...items.filter((item) => item.id !== id)] : items;
+    });
+    stop();
+  };
 
   const executeImmediate = async (name: string) => {
     setCommandError('');
@@ -476,15 +486,27 @@ export function Composer() {
   const submit = async () => {
     const value = text.trim();
     const match = value.match(/^\/(\w+)(?:\s+([\s\S]*))?$/);
-    if (streaming && match?.[1]?.toLowerCase() === 'btw') {
-      const aside = (match[2] ?? '').trim();
-      if (!aside) { setCommandError('Add a question after /btw.'); return; }
-      setQueuedBtw(aside);
+    if (streaming) {
+      if (!value && pending.length === 0) return;
+      const queuedText = match?.[1]?.toLowerCase() === 'btw'
+        ? `Side question: ${(match[2] ?? '').trim()}\n\nAnswer this briefly without changing, replacing, or reprioritizing the current task or goal. Then return control to the existing task.`
+        : value;
+      if (match?.[1]?.toLowerCase() === 'btw' && !(match[2] ?? '').trim()) {
+        setCommandError('Add a question after /btw.');
+        return;
+      }
+      setQueuedMessages((items) => [...items, {
+        id: crypto.randomUUID(),
+        text: queuedText,
+        attachments: pending,
+      }]);
       setText('');
-      setCommandError('Side question queued; it will run after the current turn.');
+      setPending([]);
+      requestAnimationFrame(autoresize);
+      setCommandError('');
       return;
     }
-    if ((!value && pending.length === 0) || streaming || uploading || dictating) return;
+    if ((!value && pending.length === 0) || uploading || dictating) return;
 
     if (match) {
       const command = match[1].toLowerCase();
@@ -579,6 +601,34 @@ export function Composer() {
           </div>
         </div>,
         dropZone,
+      )}
+      {queuedMessages.length > 0 && (
+        <div className="mb-2 space-y-1.5" aria-label={t('composer.queuedMessages')}>
+          {queuedMessages.map((item) => (
+            <div key={item.id} className="flex items-center gap-2 rounded-lg border bg-muted/50 px-3 py-2 text-xs">
+              <span className="shrink-0 font-medium text-muted-foreground">{t('composer.queued')}</span>
+              <span className="min-w-0 flex-1 truncate">{item.text}</span>
+              <Tooltip label={t('composer.steerNow')} side="top">
+                <button
+                  type="button"
+                  onClick={() => steerQueuedMessage(item.id)}
+                  aria-label={t('composer.steerNow')}
+                  className="flex size-6 shrink-0 items-center justify-center rounded-sm text-muted-foreground hover:bg-accent hover:text-foreground"
+                >
+                  <ArrowUpIcon className="size-3.5" />
+                </button>
+              </Tooltip>
+              <button
+                type="button"
+                onClick={() => setQueuedMessages((items) => items.filter((queued) => queued.id !== item.id))}
+                aria-label={t('composer.removeQueued')}
+                className="flex size-6 shrink-0 items-center justify-center rounded-sm text-muted-foreground hover:bg-accent hover:text-destructive"
+              >
+                <XIcon className="size-3.5" />
+              </button>
+            </div>
+          ))}
+        </div>
       )}
       <div
         className={cn(
@@ -687,7 +737,7 @@ export function Composer() {
           {/* Right-edge adornment, Claude Code style: while streaming, a boxed
               stop button; otherwise an Enter glyph once there's something to
               send (or while dictating, where Enter stops the recording). */}
-          {streaming ? (
+          {streaming && !text.trim() && pending.length === 0 ? (
             <button
               type="button"
               onClick={stop}

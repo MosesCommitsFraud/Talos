@@ -116,6 +116,10 @@ const en = {
     assistant: 'Talos',
   },
   composer: {
+    queued: 'Queued',
+    queuedMessages: 'Queued messages',
+    steerNow: 'Send now and steer the current turn',
+    removeQueued: 'Remove queued message',
     dropFiles: 'Drop files to attach',
     placeholder: 'Message Talos…',
     messageInput: 'Message input',

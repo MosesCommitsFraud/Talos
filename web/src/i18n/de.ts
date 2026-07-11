@@ -118,6 +118,10 @@ const de: typeof en = {
     assistant: 'Talos',
   },
   composer: {
+    queued: 'Wartet',
+    queuedMessages: 'Wartende Nachrichten',
+    steerNow: 'Jetzt senden und die laufende Antwort steuern',
+    removeQueued: 'Wartende Nachricht entfernen',
     dropFiles: 'Dateien zum Anhängen ablegen',
     placeholder: 'Nachricht an Talos…',
     messageInput: 'Nachrichteneingabe',

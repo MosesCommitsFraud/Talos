@@ -541,6 +541,20 @@ class PreviewHandler(BaseHTTPRequestHandler):
     def _send_json(self, data, status: int = 200):
         self._send(status, _json_bytes(data))
 
+    def _send_event_stream(self, body: bytes):
+        """Drip mock SSE events so running/queue UI states can be previewed."""
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream")
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.end_headers()
+        for event in body.split(b"\n\n"):
+            if not event:
+                continue
+            self.wfile.write(event + b"\n\n")
+            self.wfile.flush()
+            time.sleep(0.15)
+
     def _read_body(self) -> bytes:
         length = int(self.headers.get("Content-Length") or 0)
         return self.rfile.read(length) if length else b""
@@ -928,7 +942,7 @@ class PreviewHandler(BaseHTTPRequestHandler):
             message = fields.get("message", [""])[0]
             session_id = fields.get("session", ["preview-session"])[0]
             _record_turn(session_id, message)
-            self._send(200, _preview_stream(message), "text/event-stream")
+            self._send_event_stream(_preview_stream(message))
             return
         if path.endswith("/delete-messages"):
             # /api/session/{id}/delete-messages — drop the rows so history stays
