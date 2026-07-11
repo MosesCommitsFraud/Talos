@@ -1,0 +1,50 @@
+# Voice-to-text overlay — adds the RealtimeSTT dictation sidecar and points the
+# app at it. Opt-in because it pulls ~2 GB of Whisper weights on first start.
+#
+# Enable:   docker compose -f docker-compose.yml -f docker-compose.dictation.yml up -d --build
+# Disable:  docker compose -f docker-compose.yml -f docker-compose.dictation.yml stop dictation
+#
+# The mic icon in the composer follows the service automatically: Talos probes
+# the sidecar's /health (models loaded) and only advertises voice input while
+# it answers. First start downloads the models — the mic appears once
+# `docker logs talos-dictation` shows "models ready" (a few minutes).
+#
+# Models are NOT baked into the image: faster-whisper fetches them from
+# Hugging Face into the `dictation-models` volume on first launch and reuses
+# them afterwards. Pick different ones via DICTATION_MODEL /
+# DICTATION_REALTIME_MODEL in .env (e.g. `medium` / `tiny` for weaker hosts).
+services:
+  talos-app:
+    environment:
+      # In-compose default; override in .env if the sidecar runs elsewhere
+      # (e.g. next to the GPU stack: ws://your-llm-host:8004/ws).
+      - DICTATION_WS_URL=${DICTATION_WS_URL:-ws://dictation:8004/ws}
+
+  dictation:
+    build: ./services/dictation
+    container_name: talos-dictation
+    init: true
+    restart: unless-stopped
+    volumes:
+      - dictation-models:/root/.cache/huggingface
+    environment:
+      # cpu is the safe default: CTranslate2 pip wheels ship CPU-only on arm64,
+      # and dictation-length audio is fast enough there. Set `cuda` in .env on
+      # an x86 GPU host (and add a GPU reservation to this service).
+      - DICTATION_DEVICE=${DICTATION_DEVICE:-cpu}
+      - DICTATION_MODEL=${DICTATION_MODEL:-large-v3-turbo}
+      - DICTATION_REALTIME_MODEL=${DICTATION_REALTIME_MODEL:-small}
+      # Empty = auto-detect per utterance (right default for mixed EN/DE).
+      - DICTATION_LANGUAGE=${DICTATION_LANGUAGE:-}
+    networks:
+      - default
+    # python:3.12-slim has no curl — probe /health with the stdlib instead.
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8004/health', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 600s
+
+volumes:
+  dictation-models:

@@ -1,10 +1,10 @@
 import { CheckIcon, ChevronDownIcon, ChevronRightIcon, CopyIcon, DownloadIcon, FileIcon, FileTextIcon, FoldVerticalIcon, ImageIcon, ListChecksIcon, PencilIcon, Trash2Icon } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
-import { Fragment, useEffect, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { artifactDownloadUrl, fetchArtifacts, uploadDownloadUrl } from '@/api/client';
 import { copyTextToClipboard } from '@/lib/utils';
-import { isPreviewable, previewKind } from '@/lib/files';
+import { displayName, isPreviewable, previewKind } from '@/lib/files';
 import { useChat, type UiMessage } from '@/state/chat';
 import { usePrefs } from '@/state/prefs';
 import { useUi } from '@/state/ui';
@@ -226,7 +226,7 @@ function EditBox({ msg, onDone }: { msg: UiMessage; onDone: () => void }) {
     onDone();
   };
   return (
-    <div className="w-full rounded-2xl border border-ring bg-card p-3">
+    <div className="w-full rounded-md border border-ring bg-card p-3">
       <textarea
         autoFocus
         value={draft}
@@ -276,7 +276,9 @@ function ArtifactChips({ sessionId, files }: { sessionId: string; files: Artifac
               className="flex min-w-0 items-center gap-1.5 py-1.5 text-left"
             >
               {isImage ? <ImageIcon className="size-3.5 shrink-0" /> : <FileTextIcon className="size-3.5 shrink-0" />}
-              <span className="max-w-56 truncate">{f.name}</span>
+              {/* Extension elided — the icon shows the type; the hover title
+                  keeps the full file name. */}
+              <span className="max-w-56 truncate">{displayName(f.name)}</span>
               {f.size != null && <span className="shrink-0 opacity-70">{formatSize(f.size)}</span>}
             </button>
             <a
@@ -455,18 +457,36 @@ export function Messages() {
     refetchInterval: 10_000,
   });
 
+  const syncScrollState = useCallback(() => {
+    const el = scroller.current;
+    if (!el) return;
+    const hasOverflow = el.scrollHeight > el.clientHeight + 1;
+    const atBottom = !hasOverflow || el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+    pinned.current = atBottom;
+    setShowScrollToBottom(hasOverflow && !atBottom);
+  }, []);
+
   // Stick to the bottom while streaming unless the user scrolled up.
   useEffect(() => {
     const el = scroller.current;
     if (el && pinned.current) el.scrollTop = el.scrollHeight;
-  }, [messages]);
+    syncScrollState();
+  }, [messages, syncScrollState]);
+
+  // Content can become shorter without producing a scroll event (for example,
+  // when an activity fold closes). Keep the pill in sync with layout changes.
+  useEffect(() => {
+    const el = scroller.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(syncScrollState);
+    observer.observe(el);
+    if (el.firstElementChild) observer.observe(el.firstElementChild);
+    syncScrollState();
+    return () => observer.disconnect();
+  }, [syncScrollState]);
 
   const onScroll = () => {
-    const el = scroller.current;
-    if (!el) return;
-    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
-    pinned.current = atBottom;
-    setShowScrollToBottom(!atBottom);
+    syncScrollState();
   };
 
   const scrollToBottom = () => {

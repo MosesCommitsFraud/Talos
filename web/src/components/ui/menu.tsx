@@ -4,11 +4,11 @@ import type * as React from 'react';
 import { cn } from '@/lib/utils';
 
 /* Shared popup chrome (MIDA menu look: popover surface, alpha border,
-   deep soft shadow, 8px-radius items). */
+   deep soft shadow, 6px-radius items). */
 export const popupClass =
-  'z-50 min-w-44 rounded-xl border bg-popover p-1 text-popover-foreground shadow-[0_12px_32px_rgb(0_0_0/0.18)] dark:shadow-[0_12px_32px_rgb(0_0_0/0.5)]';
+  'z-50 min-w-44 rounded-md border bg-popover p-1 text-popover-foreground shadow-[0_12px_32px_rgb(0_0_0/0.18)] dark:shadow-[0_12px_32px_rgb(0_0_0/0.5)]';
 export const itemClass =
-  'flex cursor-pointer select-none items-center gap-2 rounded-lg px-2.5 py-1.5 text-sm outline-none data-[highlighted]:bg-accent data-[disabled]:pointer-events-none data-[disabled]:opacity-50 [&_svg]:size-4 [&_svg]:text-muted-foreground';
+  'flex cursor-pointer select-none items-center gap-2 rounded-sm px-2.5 py-1.5 text-sm outline-none data-[highlighted]:bg-accent data-[disabled]:pointer-events-none data-[disabled]:opacity-50 [&_svg]:size-4 [&_svg]:text-muted-foreground';
 export const labelClass = 'px-2.5 py-1.5 text-xs font-medium text-muted-foreground';
 export const separatorClass = '-mx-1 my-1 h-px bg-border';
 

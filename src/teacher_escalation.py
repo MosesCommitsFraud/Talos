@@ -168,7 +168,7 @@ The student's tools include (non-exhaustive): bash, python, web_search, \
 read_file, write_file, create_document, edit_document, manage_session \
 (list/switch/rename/archive/delete/important/truncate/fork), \
 list_sessions, manage_memory, manage_settings, manage_skills, \
-manage_tasks, ui_control. The student also understands the markdown \
+manage_tasks. The student also understands the markdown \
 anchor convention [Name](#session-<id>) / [Title](#document-<id>) for \
 clickable jump links.
 
@@ -218,21 +218,19 @@ respond with `[Name](#session-<id>)`".
 **PORTABILITY — CRITICAL.** Skills are shared across users. Do NOT \
 hardcode anything user-specific into the procedure:
   - NO hostnames or IPs (e.g. `gpu-box`, `user@192.0.2.10`) — \
-    use placeholders like `<gpu_host>` or call `list_serve_presets` / \
-    `list_cached_models` to discover them at runtime.
+    use placeholders like `<host>` or discover them at runtime via \
+    the available tools (`list_models`, `manage_endpoints`).
   - NO absolute filesystem paths tied to one machine (e.g. \
-    `/home/<user>/vllm-env/bin/vllm`) — say "use the user's vLLM \
-    install" or call the wrapped tool that picks the right binary.
-  - NO model repo IDs the user happened to pick this time unless the \
-    skill is specifically about THAT model — generalise to "the model \
-    the user named, looked up via list_cached_models / search_hf_models".
-  - NO tmux session names invented in the failed trace — these are \
-    one-shot artefacts. The named tool (`serve_model`, `stop_served_model`) \
-    owns session naming.
-  - NO direct `ssh <host> 'tmux ...'` shell incantations even if that's \
-    what the failed trace did — those bypass the cookbook's state \
-    tracker. The skill must use `serve_model` / `stop_served_model` \
-    / `serve_preset`, not bash.
+    `/home/<user>/some-env/bin/tool`) — describe the step in terms of \
+    the named tool that picks the right binary on whatever machine \
+    runs the skill.
+  - NO identifiers the user happened to pick this time (model names, \
+    session names) unless the skill is specifically about THAT thing — \
+    generalise to "the model/session the user named".
+  - NO raw `ssh <host> '...'` or ad-hoc shell incantations even if \
+    that's what the failed trace did — prefer the named tools \
+    (`manage_tasks`, `manage_documents`, `manage_memory`, ...) that \
+    keep app state consistent.
 
 If you do NOT believe the task is solvable with the available tools, \
 output the explanation paragraph but OMIT the JSON block entirely. \
@@ -315,18 +313,17 @@ SPECIFIC tool name and argument shape the student can copy.
 
 **PORTABILITY — CRITICAL.** Skills are shared across users. Strip every \
 user-specific token from your trace before writing the procedure:
-  - Replace hostnames/IPs with placeholders (`<gpu_host>` etc.) or \
-    instruct the student to discover them via `list_serve_presets` / \
-    `list_cached_models` at runtime.
+  - Replace hostnames/IPs with placeholders (`<host>` etc.) or \
+    instruct the student to discover them at runtime via the available \
+    tools (`list_models`, `manage_endpoints`).
   - Replace user-specific paths (`/home/<user>/...`) with the wrapped \
     tool that picks the right binary on whatever machine runs the skill.
-  - Don't bake in the specific model repo_id you happened to use unless \
-    the skill is about that exact model.
-  - Reference the high-level tools (`serve_model`, `stop_served_model`, \
-    `serve_preset`, `list_cached_models`, `search_hf_models`, etc.) \
-    rather than `ssh <host> 'tmux new-session ... vllm serve ...'` \
-    shell incantations — even if THAT'S what worked in the trace. Raw \
-    shell launches bypass the cookbook tracker and don't reproduce on \
+  - Don't bake in the specific model/session name you happened to use \
+    unless the skill is about that exact thing.
+  - Reference the high-level named tools (`manage_tasks`, \
+    `manage_documents`, `manage_memory`, etc.) rather than raw \
+    `ssh`/shell incantations — even if THAT'S what worked in the \
+    trace. Raw shell bypasses app state and doesn't reproduce on \
     another user's box.
 
 If the trace did NOT genuinely solve the user's problem (e.g. you also \

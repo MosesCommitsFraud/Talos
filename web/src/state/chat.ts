@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { createSession, deleteMessages, editMessage, fetchSession, streamChat } from '@/api/client';
+import { compactSession, createSession, deleteMessages, editMessage, fetchSession, streamChat } from '@/api/client';
 import type { Attachment, Metrics, RagSource, ToolCall } from '@/api/types';
 import { timestampMs } from '@/lib/utils';
 import { usePrefs } from './prefs';
@@ -54,9 +54,16 @@ interface SessionRuntime {
   /** True between an `ask_user` turn ending and the user's answer — drives the
    *  sidebar "Needs you" status and suppresses the "Done" badge. */
   awaitingInput: boolean;
+  goal: GoalRun | null;
 }
 
-const emptyRuntime = (): SessionRuntime => ({ messages: [], streaming: false, turnStartedAt: null, abort: null, awaitingInput: false });
+export interface GoalRun {
+  objective: string;
+  status: 'running' | 'paused' | 'completed' | 'cancelled';
+  iteration: number;
+}
+
+const emptyRuntime = (): SessionRuntime => ({ messages: [], streaming: false, turnStartedAt: null, abort: null, awaitingInput: false, goal: null });
 
 interface ChatState {
   /** Per-session live state. Outlives chat switches so background turns keep
@@ -78,14 +85,20 @@ interface ChatState {
    *  Drives the "Working for Xs" timer so it counts from send through every
    *  agent round, t3code-style, instead of resetting per assistant bubble. */
   turnStartedAt: number | null;
+  goal: GoalRun | null;
   /** Model used when the next send has to create a session first. */
   pendingModel: { endpointId: string; model: string } | null;
 
   setPendingModel: (m: ChatState['pendingModel']) => void;
   newChat: () => void;
   openSession: (id: string) => Promise<void>;
-  send: (text: string, opts?: { attachments?: Attachment[]; onSessionCreated?: (id: string) => void; approvedPlan?: string; planMode?: boolean }) => Promise<void>;
+  send: (text: string, opts?: { attachments?: Attachment[]; onSessionCreated?: (id: string) => void; approvedPlan?: string; planMode?: boolean; goalIteration?: boolean; targetSessionId?: string }) => Promise<void>;
   stop: () => void;
+  startGoal: (objective: string) => Promise<void>;
+  pauseGoal: () => void;
+  resumeGoal: (sessionId?: string) => Promise<void>;
+  cancelGoal: () => void;
+  compact: () => Promise<void>;
   edit: (msgId: string, content: string) => Promise<void>;
   remove: (msgId: string) => Promise<void>;
   /** Dismiss the active session's pending proposed plan without executing it
@@ -176,6 +189,15 @@ function ragSourcesFromMetadata(metadata: Record<string, unknown> | undefined): 
       filename: String(item.filename ?? item.source ?? 'unknown'),
       snippet: typeof item.snippet === 'string' ? item.snippet : '',
       similarity: typeof item.similarity === 'number' ? item.similarity : 0,
+      // Media fields must survive a cold load, or reopened chats lose their
+      // image previews / video deeplinks that the live stream showed.
+      modality: item.modality === 'image' || item.modality === 'video' ? (item.modality as 'image' | 'video') : undefined,
+      image_url: typeof item.image_url === 'string' ? item.image_url : undefined,
+      image_caption: typeof item.image_caption === 'string' ? item.image_caption : undefined,
+      video_url: typeof item.video_url === 'string' ? item.video_url : undefined,
+      deeplink: typeof item.deeplink === 'string' ? item.deeplink : undefined,
+      start: typeof item.start === 'number' ? item.start : undefined,
+      end: typeof item.end === 'number' ? item.end : undefined,
     }));
   return sources.length > 0 ? sources : undefined;
 }
@@ -332,7 +354,7 @@ export const useChat = create<ChatState>((set, get) => {
       const next: SessionRuntime = { ...prev, ...updater(prev) };
       const runtimes = { ...s.runtimes, [id]: next };
       return s.sessionId === id
-        ? { runtimes, messages: next.messages, streaming: next.streaming, turnStartedAt: next.turnStartedAt }
+        ? { runtimes, messages: next.messages, streaming: next.streaming, turnStartedAt: next.turnStartedAt, goal: next.goal }
         : { runtimes };
     });
   };
@@ -346,7 +368,7 @@ export const useChat = create<ChatState>((set, get) => {
       // Opening a chat clears its "Done" badge.
       const completed = id && s.completed[id] ? { ...s.completed } : s.completed;
       if (id && completed !== s.completed) delete completed[id];
-      return { sessionId: id, messages: rt.messages, streaming: rt.streaming, turnStartedAt: rt.turnStartedAt, completed };
+      return { sessionId: id, messages: rt.messages, streaming: rt.streaming, turnStartedAt: rt.turnStartedAt, goal: rt.goal, completed };
     });
   };
 
@@ -357,6 +379,7 @@ export const useChat = create<ChatState>((set, get) => {
   messages: [],
   streaming: false,
   turnStartedAt: null,
+  goal: null,
   pendingModel: null,
 
   setPendingModel: (pendingModel) => set({ pendingModel }),
@@ -392,10 +415,11 @@ export const useChat = create<ChatState>((set, get) => {
     const state = get();
     // Block re-entry only for the session we'd send into, not globally — a
     // different chat may legitimately be streaming.
-    const activeRt = state.sessionId ? state.runtimes[state.sessionId] : undefined;
+    const requestedSessionId = opts?.targetSessionId ?? state.sessionId;
+    const activeRt = requestedSessionId ? state.runtimes[requestedSessionId] : undefined;
     if (activeRt?.streaming || (!text.trim() && !opts?.attachments?.length)) return;
 
-    let sessionId = state.sessionId;
+    let sessionId = requestedSessionId;
     if (!sessionId) {
       const pm = state.pendingModel;
       if (!pm) throw new Error('No model selected');
@@ -580,7 +604,80 @@ export const useChat = create<ChatState>((set, get) => {
       // not when it ended on a question; that's surfaced as "Needs you" instead.
       const awaiting = get().runtimes[sid]?.awaitingInput;
       if (!awaiting && get().sessionId !== sid) set((s) => ({ completed: { ...s.completed, [sid]: true } }));
+
+      // A goal is a bounded Ralph-style loop: after each completed turn, inspect
+      // the explicit completion signal and otherwise schedule another turn.
+      // setTimeout avoids re-entering send() before this turn's cleanup settles.
+      const rt = get().runtimes[sid];
+      const goal = rt?.goal;
+      if (goal?.status === 'running' && !rt.awaitingInput) {
+        const answer = [...rt.messages].reverse().find((m) => m.role === 'assistant' && m.content.trim())?.content ?? '';
+        if (/\[GOAL_COMPLETE\]/i.test(answer)) {
+          writeRuntime(sid, () => ({
+            goal: { ...goal, status: 'completed' },
+            messages: rt.messages.map((m) => ({ ...m, content: m.content.replace(/\s*\[GOAL_COMPLETE\]\s*/gi, '') })),
+          }));
+        } else {
+          setTimeout(() => { void get().resumeGoal(sid); }, 0);
+        }
+      }
     }
+  },
+
+  startGoal: async (objective) => {
+    const clean = objective.trim();
+    if (!clean) return;
+    // Ensure a session exists through the normal send path, then attach goal
+    // state as soon as onSessionCreated fires (or immediately for an open chat).
+    const install = (sid: string) => writeRuntime(sid, () => ({
+      goal: { objective: clean, status: 'running', iteration: 1 },
+    }));
+    const sid = get().sessionId;
+    if (sid) install(sid);
+    await get().send(
+      `GOAL: ${clean}\n\nWork autonomously toward this objective. Check your result before stopping. If the objective is fully satisfied, end with [GOAL_COMPLETE]. Otherwise state concrete progress and the next action; the goal runner will continue you. Ask the user only when genuinely blocked.`,
+      { planMode: false, goalIteration: true, onSessionCreated: install },
+    );
+  },
+
+  pauseGoal: () => {
+    const { sessionId } = get();
+    if (!sessionId) return;
+    writeRuntime(sessionId, (rt) => rt.goal ? ({ goal: { ...rt.goal, status: 'paused' } }) : ({}));
+  },
+
+  resumeGoal: async (requestedSessionId) => {
+    const sessionId = requestedSessionId ?? get().sessionId;
+    if (!sessionId) return;
+    const rt = get().runtimes[sessionId];
+    const goal = rt?.goal;
+    if (!goal || rt.streaming || ['completed', 'cancelled'].includes(goal.status)) return;
+    const next = { ...goal, status: 'running' as const, iteration: goal.iteration + 1 };
+    writeRuntime(sessionId, () => ({ goal: next }));
+    await get().send(
+      `Continue goal (iteration ${next.iteration}): ${next.objective}\n\nReview all progress so far, perform the next useful work, and verify it. End with [GOAL_COMPLETE] only when the objective is fully satisfied. Ask the user only if genuinely blocked.`,
+      { planMode: false, goalIteration: true, targetSessionId: sessionId },
+    );
+  },
+
+  cancelGoal: () => {
+    const { sessionId, runtimes } = get();
+    if (!sessionId) return;
+    const goal = runtimes[sessionId]?.goal;
+    if (goal) writeRuntime(sessionId, () => ({ goal: { ...goal, status: 'cancelled' } }));
+    runtimes[sessionId]?.abort?.abort();
+    fetch(`/api/chat/stop/${sessionId}`, { method: 'POST', credentials: 'same-origin' }).catch(() => {});
+  },
+
+  compact: async () => {
+    const { sessionId, streaming } = get();
+    if (!sessionId || streaming) return;
+    await compactSession(sessionId);
+    const detail = await fetchSession(sessionId);
+    const messages = (detail.history ?? [])
+      .filter((m) => m.role === 'user' || m.role === 'assistant')
+      .flatMap((m) => coldLoadMessage(m as HistoryMessage));
+    writeRuntime(sessionId, (rt) => ({ messages, goal: rt.goal }));
   },
 
   stop: () => {
