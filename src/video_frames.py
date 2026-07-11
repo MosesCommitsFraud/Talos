@@ -148,9 +148,7 @@ def _sample_frames(video_path: str, interval_sec: int, tmpdir: str) -> List[str]
         "vfr",
         os.path.join(tmpdir, "frame_%06d.png"),
     ]
-    subprocess.run(
-        cmd, check=True, timeout=float(os.getenv("VIDEO_FRAMES_FFMPEG_TIMEOUT", "1800"))
-    )
+    subprocess.run(cmd, check=True, timeout=float(os.getenv("VIDEO_FRAMES_FFMPEG_TIMEOUT", "1800")))
     return sorted(glob.glob(os.path.join(tmpdir, "frame_*.png")))
 
 
@@ -370,12 +368,12 @@ def _dhash(img, size: int = 8) -> int:
     import numpy as np
     from PIL import Image
 
-    a = np.asarray(
-        img.convert("L").resize((size + 1, size), Image.LANCZOS), dtype=np.int16
-    )
+    a = np.asarray(img.convert("L").resize((size + 1, size), Image.LANCZOS), dtype=np.int16)
     bits = (a[:, 1:] > a[:, :-1]).flatten()
-    return int(np.packbits(bits).view(">u8")[0]) if bits.size == 64 else int(
-        sum(1 << i for i, b in enumerate(bits) if b)
+    return (
+        int(np.packbits(bits).view(">u8")[0])
+        if bits.size == 64
+        else int(sum(1 << i for i, b in enumerate(bits) if b))
     )
 
 

@@ -27,3 +27,4 @@ what if images are shown despite not being relevant
 opening a chat that hasnt been open in a while flashes the new chat page briefly
 images and files created not shown in the chat after restarts (neither in chat or in the sidebar)
 icons need to be brighter under composer
+queueing and steering needed

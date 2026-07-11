@@ -146,8 +146,19 @@ def setup_voice_routes():
         upload: tuple = (file.filename or "dictation.webm", blob)
         try:
             proc = await asyncio.create_subprocess_exec(
-                "ffmpeg", "-hide_banner", "-loglevel", "error",
-                "-i", "pipe:0", "-ac", "1", "-ar", "16000", "-f", "wav", "pipe:1",
+                "ffmpeg",
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-i",
+                "pipe:0",
+                "-ac",
+                "1",
+                "-ar",
+                "16000",
+                "-f",
+                "wav",
+                "pipe:1",
                 stdin=asyncio.subprocess.PIPE,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,

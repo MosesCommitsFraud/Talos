@@ -89,6 +89,12 @@ export async function markImportant(id: string, important: boolean): Promise<voi
   await fetch(`/api/session/${id}/important`, { method: 'POST', body: fd, credentials: 'same-origin' });
 }
 
+export interface CompactResult { ok: boolean; summarized: number; kept: number; message_count: number }
+
+/** Run the backend's real conversation compactor and persist the shortened history. */
+export const compactSession = (id: string) =>
+  postJSON<CompactResult>(`/api/session/${encodeURIComponent(id)}/compact`);
+
 export interface UploadedFile extends Attachment {}
 
 export async function uploadFiles(files: File[]): Promise<UploadedFile[]> {
@@ -361,6 +367,9 @@ export interface RagConfig {
   pdf_vlm_enabled?: boolean;
   vlm_url?: string;
   vlm_model?: string;
+  /** Advanced — redact PII from extracted text before indexing (off by default;
+   *  overridable per upload). */
+  redact_pii_enabled?: boolean;
 }
 /** Which knowledge sources are configured — drives the composer's mode control. */
 export const fetchCapabilities = () =>
@@ -504,9 +513,14 @@ export const ragSearch = (q: string, k: number) =>
 export const personalAddDirectory = (directory: string) => postJSON('/api/personal/add_directory', { directory });
 export const personalReload = () => postJSON('/api/personal/reload');
 
-export async function personalUpload(files: File[]): Promise<Record<string, unknown>> {
+export async function personalUpload(
+  files: File[],
+  opts?: { redactPii?: boolean | null },
+): Promise<Record<string, unknown>> {
   const fd = new FormData();
   for (const f of files) fd.append('files', f, f.name);
+  // Explicit per-upload PII-redaction choice; omitted → server uses the global toggle.
+  if (opts?.redactPii != null) fd.append('redact_pii', String(opts.redactPii));
   const res = await fetch('/api/personal/upload', { method: 'POST', body: fd, credentials: 'same-origin' });
   if (!res.ok) {
     const detail = await res.json().then((j) => j?.detail).catch(() => null);
@@ -574,12 +588,18 @@ export interface RagChunk {
   seq: number;
   section_id: string;
   context: string;
+  context_error: string;
   aux_terms: string;
+  aux_terms_error: string;
   symbol: string;
   language: string;
   modality: string;
   metadata: Record<string, unknown>;
 }
+/** Download URL for the Markdown dump of everything indexed for one source
+ *  file (ingest-quality audit; served as an attachment). */
+export const ragDocumentExportUrl = (source: string) =>
+  `/api/rag/documents/export?source=${encodeURIComponent(source)}`;
 export const fetchRagChunks = (source: string) =>
   getJSON<{ available: boolean; source: string; chunks: RagChunk[]; error?: string }>(
     `/api/rag/documents/chunks?source=${encodeURIComponent(source)}`,
