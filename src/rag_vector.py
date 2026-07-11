@@ -322,6 +322,59 @@ def _pdf_vlm_active() -> bool:
     return bool(os.getenv("PDF_VLM_ENABLED", "").strip()) and bool(os.getenv("VLM_URL", "").strip())
 
 
+def _strip_hidden_pdf_text(path: str, docs):
+    """Drop hidden (invisible-on-render) PDF text from extracted chunks.
+
+    The scan runs once per file; matches are removed from every chunk, and a
+    chunk left empty afterwards is dropped entirely. On by default, killed by
+    ``PDF_HIDDEN_TEXT_FILTER=false``; any failure returns the docs untouched.
+    """
+    from src.pdf_hidden_text import find_hidden_spans, hidden_filter_active, strip_hidden_text
+
+    if not docs or not hidden_filter_active():
+        return docs
+    try:
+        spans = find_hidden_spans(path)
+    except Exception as e:
+        logger.warning("hidden-text scan failed for %s: %s", path, e)
+        return docs
+    if not spans:
+        return docs
+    kept, removed = [], 0
+    for d in docs:
+        text, n = strip_hidden_text(d.content or "", spans)
+        removed += n
+        if text.strip():
+            d.content = text
+            kept.append(d)
+    if removed:
+        logger.warning(
+            "hidden text: filtered %d span match(es) from %s",
+            removed,
+            os.path.basename(path),
+        )
+    return kept
+
+
+def _redact_docs(docs, override: Optional[bool] = None):
+    """Opt-in PII redaction across all extracted chunks.
+
+    ``override`` is the per-document choice made at upload time (the file's
+    ``redact_pii`` metadata): ``True``/``False`` win over the global toggle
+    (Settings → RAG / ``RAG_REDACT_PII``); ``None`` falls back to it.
+    """
+    from src.ingest_redaction import redact_pii, redaction_active
+
+    if not docs:
+        return docs
+    if not (override if override is not None else redaction_active()):
+        return docs
+    for d in docs:
+        if d.content:
+            d.content = redact_pii(d.content)
+    return docs
+
+
 # Document formats eligible for the VLM lane. PDFs are page-rendered; Office
 # files keep Docling's text and get their *embedded* images VLM-captioned.
 _VLM_DOC_EXTS: Set[str] = {".pdf", ".docx", ".pptx"}
@@ -345,9 +398,12 @@ def _file_has_images(path: str) -> bool:
 
     Lets the lane auto-select — a text-only PDF/Word stays on the fast Docling
     path; only files with embedded images (slide decks, screenshots, figures)
-    pay for vision. PDFs: scan page objects for an image. Office (docx/pptx):
-    look for raster members under ``*/media/``. On any error, assume True for
-    PDFs (preserve the prior "VLM all PDFs" behavior) and False otherwise.
+    pay for vision. PDFs: scan page objects for an image, or a page whose
+    vector-graphics signals mark it visually heavy (a chart/diagram drawn as
+    path objects has no image XObjects but still needs the vision pass).
+    Office (docx/pptx): look for raster members under ``*/media/``. On any
+    error, assume True for PDFs (preserve the prior "VLM all PDFs" behavior)
+    and False otherwise.
     """
     ext = Path(path).suffix.lower()
     try:
@@ -355,13 +411,19 @@ def _file_has_images(path: str) -> bool:
             import pypdfium2 as pdfium
             import pypdfium2.raw as pdfium_c
 
+            from src.pdf_page_triage import (
+                is_visually_heavy,
+                page_ratio_threshold,
+                page_signals,
+            )
+
             pdf = pdfium.PdfDocument(path)
             try:
+                thr = page_ratio_threshold()
                 for i in range(len(pdf)):
-                    page = pdf[i]
-                    for obj in page.get_objects():
-                        if getattr(obj, "type", None) == pdfium_c.FPDF_PAGEOBJ_IMAGE:
-                            return True
+                    sig = page_signals(pdf[i], pdfium_c)
+                    if sig["img_count"] or is_visually_heavy(sig, thr):
+                        return True
                 return False
             finally:
                 try:
@@ -384,12 +446,25 @@ def _file_has_images(path: str) -> bool:
 
 
 def _vlm_concurrency() -> int:
-    """How many VLM/ingest-LLM calls to run in parallel. Defaults to 4 to match a
-    typical vLLM ``--max-num-seqs 4``; raise it (env) if the server allows more."""
+    """How many text-only ingest-LLM calls to run in parallel. Defaults to 4 to
+    match a typical vLLM ``--max-num-seqs 4``; raise it (env) if the server
+    allows more."""
     try:
         return max(1, min(int(os.getenv("RAG_INGEST_CONCURRENCY", "4") or 4), 16))
     except Exception:
         return 4
+
+
+def _vlm_mm_concurrency() -> int:
+    """How many *multimodal* (image) VLM calls to run in parallel. Serialized
+    by default: the VLM shares one GPU budget with the chat LLM, and parallel
+    image requests have OOM-killed it in the wild — a killed request returns
+    "" and the page/figure is silently lost. Raise via env only if the server
+    demonstrably handles it."""
+    try:
+        return max(1, min(int(os.getenv("PDF_VLM_CONCURRENCY", "1") or 1), 16))
+    except Exception:
+        return 1
 
 
 def _docling_threads() -> Optional[int]:
@@ -491,14 +566,329 @@ def _prefix_context(context: str, content: str) -> str:
     return f"{context}\n\n{content}" if context else content
 
 
+def _retrieval_body(meta: Dict[str, Any], content: str) -> str:
+    """Combine displayed text with hidden same-page visual meaning.
+
+    Figure assets remain separate records so they can be rendered, but a page's
+    text vector must also represent what its figures show. This lets retrieval
+    select the correct page before companion-image attachment.
+    """
+    body = (content or "").strip()
+    visual = ((meta or {}).get("_visual_context") or "").strip()
+    if visual:
+        return f"{body}\n\nVisual context from this page:\n{visual}" if body else visual
+    return body
+
+
 def _embed_text(meta: Dict[str, Any], content: str) -> str:
     """The text actually embedded for a chunk: a situating ``context`` prefix
     (Phase 8) + the original content + auto ``aux_terms`` suffix (Phase 9). The
     original ``content`` is what gets stored/displayed/cited — only the embedding
     sees these enrichments."""
-    text = _prefix_context((meta or {}).get("context") or "", content)
+    text = _prefix_context((meta or {}).get("context") or "", _retrieval_body(meta or {}, content))
     aux = ((meta or {}).get("aux_terms") or "").strip()
     return f"{text}\n\n{aux}" if aux else text
+
+
+def _is_primary_retrieval_document(meta: Dict[str, Any]) -> bool:
+    """Figures retrieve only through an owning text/page companion anchor."""
+    return (meta or {}).get("modality") != "figure"
+
+
+def _openai_chat_url(raw_url: str) -> str:
+    """Accept either an OpenAI-compatible base URL or the full chat route."""
+    url = (raw_url or "").strip().rstrip("/")
+    if not url or url.endswith("/chat/completions"):
+        return url
+    if url.endswith("/v1"):
+        return url + "/chat/completions"
+    return url + "/v1/chat/completions"
+
+
+def _chat_response_text(data: Dict[str, Any]) -> str:
+    """Read normal and reasoning-model OpenAI-compatible response shapes."""
+    try:
+        msg = (data.get("choices") or [{}])[0].get("message") or {}
+    except Exception:
+        return ""
+    value = (
+        msg.get("content")
+        or msg.get("reasoning_content")
+        or msg.get("reasoning")
+        or msg.get("thinking")
+        or ""
+    )
+    if isinstance(value, list):
+        value = "\n".join(
+            str(part.get("text") or "")
+            for part in value
+            if isinstance(part, dict) and part.get("text")
+        )
+    return str(value).strip()
+
+
+def _max_chunk_chars() -> int:
+    """Hard safety ceiling for parser-produced chunks.
+
+    Docling normally returns HybridChunker output, but some document shapes (in
+    particular slide-deck PDFs with a text layer) can arrive as one whole-file
+    Markdown document.  Such a chunk may fit an embedding model's token window
+    while still being far too broad for useful retrieval.
+    """
+    try:
+        value = int(os.getenv("RAG_MAX_CHUNK_CHARS", "4000") or 4000)
+        return max(1000, min(value, 20000))
+    except Exception:
+        return 4000
+
+
+def _bounded_text_parts(text: str, limit: int) -> List[str]:
+    """Split text into bounded, paragraph-aware pieces without dropping text."""
+    text = (text or "").strip()
+    if not text:
+        return []
+    if len(text) <= limit:
+        return [text]
+
+    parts: List[str] = []
+    current = ""
+    # PDF text layers commonly use single newlines rather than blank lines.  A
+    # line is therefore the safest unit; very long lines are word-wrapped.
+    units: List[str] = []
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        if len(line) <= limit:
+            units.append(line)
+            continue
+        words = line.split()
+        piece = ""
+        for word in words:
+            candidate = f"{piece} {word}".strip()
+            if piece and len(candidate) > limit:
+                units.append(piece)
+                piece = word
+            else:
+                piece = candidate
+        if piece:
+            units.append(piece)
+
+    for unit in units:
+        candidate = f"{current}\n{unit}".strip()
+        if current and len(candidate) > limit:
+            parts.append(current)
+            current = unit
+        else:
+            current = candidate
+    if current:
+        parts.append(current)
+    return parts
+
+
+def _reflow_pdf_text(text: str) -> str:
+    """Turn visual PDF line wraps into readable retrieval paragraphs.
+
+    PDF text layers frequently break a sentence at every text-box line and may
+    put a hyphen/dash on a line of its own.  Preserve numbered/bulleted blocks,
+    but join ordinary wrapped prose so the indexed text does not look like
+    arbitrarily split chunks.
+    """
+    lines = [re.sub(r"[ \t]+", " ", line).strip() for line in (text or "").splitlines()]
+    lines = [line for line in lines if line]
+    if not lines:
+        return ""
+
+    paragraphs: List[str] = []
+    current = lines[0]
+    for line in lines[1:]:
+        # PDF generators sometimes emit the separator between two words as its
+        # own text object/line. Keep it inside the sentence.
+        if line in {"-", "–", "—"}:
+            current = f"{current} {line}"
+            continue
+        # A leading hyphen without a following space is usually a split compound
+        # ("Editor" + "-Bereich"), not a Markdown bullet.
+        if re.match(r"^[-–—]\S", line):
+            current += line
+            continue
+
+        starts_numbered = bool(re.match(r"^\d+[.)]\s+", line))
+        starts_bullet = bool(re.match(r"^[•*]\s+|^-\s+", line))
+        current_is_numbered = bool(re.match(r"^\d+[.)]\s+", current))
+        sentence_done = bool(re.search(r"[.!?;:]$", current))
+        if starts_numbered or starts_bullet or current_is_numbered or sentence_done:
+            paragraphs.append(current)
+            current = line
+            continue
+
+        separator = "" if current.endswith("/") else " "
+        current = f"{current}{separator}{line}"
+
+    if current:
+        paragraphs.append(current)
+    return "\n\n".join(paragraphs)
+
+
+def _pdf_text_pages(path: str) -> List[Tuple[int, str]]:
+    """Read the visible embedded text layer page-by-page with pypdfium2."""
+    try:
+        import pypdfium2 as pdfium
+
+        pdf = pdfium.PdfDocument(path)
+    except Exception as e:
+        logger.warning("pdf chunk repair: cannot open %s: %s", path, e)
+        return []
+
+    pages: List[Tuple[int, str]] = []
+    try:
+        for i in range(len(pdf)):
+            page = pdf[i]
+            textpage = None
+            try:
+                textpage = page.get_textpage()
+                text = (textpage.get_text_range() or "").replace("\x00", "")
+                text = re.sub(r"[ \t]+\r?\n", "\n", text).strip()
+                text = _reflow_pdf_text(text)
+                if text:
+                    pages.append((i + 1, text))
+            except Exception as e:
+                logger.warning("pdf chunk repair: page %d text failed: %s", i + 1, e)
+            finally:
+                try:
+                    if textpage is not None:
+                        textpage.close()
+                except Exception:
+                    pass
+                try:
+                    page.close()
+                except Exception:
+                    pass
+    finally:
+        try:
+            pdf.close()
+        except Exception:
+            pass
+    return pages
+
+
+def _repair_oversized_pdf_chunks(path: str, docs):
+    """Replace a collapsed whole-PDF text chunk with bounded page chunks.
+
+    This is deliberately a narrow repair: it activates only when there is one
+    ordinary parser chunk, that chunk exceeds the safety ceiling, and the PDF's
+    page text recovers a meaningful share of its content.  Figure and VLM page
+    documents are preserved as-is.
+    """
+    limit = _max_chunk_chars()
+    ordinary = [d for d in docs if not (d.meta or {}).get("modality") and (d.content or "").strip()]
+    if len(ordinary) != 1 or len(ordinary[0].content or "") <= limit:
+        return docs
+
+    original = ordinary[0]
+    pages = _pdf_text_pages(path)
+    recovered = sum(len(text) for _page, text in pages)
+    if not pages or recovered < max(200, int(len(original.content or "") * 0.35)):
+        logger.warning(
+            "pdf chunk repair: page text insufficient for %s (%d vs %d chars)",
+            path,
+            recovered,
+            len(original.content or ""),
+        )
+        return docs
+
+    replacements = []
+    doc_type = type(original)
+    for page_no, page_text in pages:
+        parts = _bounded_text_parts(page_text, limit)
+        for part_no, content in enumerate(parts, start=1):
+            meta = dict(original.meta or {})
+            meta.update(
+                {
+                    "modality": "pdf_page",
+                    "page": page_no,
+                    "extraction": "pdf_text_fallback",
+                }
+            )
+            if len(parts) > 1:
+                meta["page_part"] = part_no
+            replacements.append(doc_type(content=content, meta=meta))
+
+    out = []
+    for d in docs:
+        if d is original:
+            out.extend(replacements)
+        else:
+            out.append(d)
+    logger.warning(
+        "pdf chunk repair: replaced one %d-char chunk with %d page chunk(s) for %s",
+        len(original.content or ""),
+        len(replacements),
+        os.path.basename(path),
+    )
+    return out
+
+
+def _enrich_uncaptioned_figures(docs) -> None:
+    """Make failed figure captions searchable using the figure's page text."""
+    page_text: Dict[int, str] = {}
+    for d in docs:
+        meta = d.meta or {}
+        page = meta.get("page")
+        if meta.get("modality") != "pdf_page" or not isinstance(page, int):
+            continue
+        content = (d.content or "").strip()
+        if content and len(content) > len(page_text.get(page, "")):
+            page_text[page] = content
+
+    for d in docs:
+        meta = d.meta or {}
+        if meta.get("modality") != "figure":
+            continue
+        content = (d.content or "").strip()
+        caption_source = meta.get("caption_source")
+        is_locator = caption_source == "locator" or bool(
+            re.fullmatch(r"Figure from .+ \(page \d+\)", content)
+        )
+        page = meta.get("page")
+        context = page_text.get(page, "") if isinstance(page, int) else ""
+        if not is_locator or not context:
+            continue
+        enriched = f"{content}\n\nPage text:\n{context[:2000]}"
+        d.content = enriched
+        meta["image_caption"] = enriched
+        meta["caption_source"] = "page_text_fallback"
+
+
+def _attach_pdf_visual_context(docs) -> None:
+    """Attach each real figure description to its page's retrieval metadata."""
+    try:
+        cap = max(500, min(int(os.getenv("RAG_VISUAL_CONTEXT_CHARS", "3000")), 8000))
+    except Exception:
+        cap = 3000
+
+    by_page: Dict[int, List[str]] = {}
+    for d in docs:
+        meta = d.meta or {}
+        page = meta.get("page")
+        if meta.get("modality") != "figure" or not isinstance(page, int):
+            continue
+        # This fallback already consists of the page text; adding it back would
+        # duplicate the page without contributing visual meaning.
+        if meta.get("caption_source") == "page_text_fallback":
+            continue
+        caption = (d.content or "").strip()
+        if caption:
+            by_page.setdefault(page, []).append(caption)
+
+    for d in docs:
+        meta = d.meta or {}
+        page = meta.get("page")
+        if meta.get("modality") != "pdf_page" or not isinstance(page, int):
+            continue
+        captions = by_page.get(page) or []
+        if captions:
+            meta["_visual_context"] = "\n\n".join(captions)[:cap]
 
 
 # Content-hash → blurb cache so re-ingesting unchanged chunks never re-pays the
@@ -521,21 +911,26 @@ def _ctx_redis():
 
 def _ctx_cache_get(h: str) -> Optional[str]:
     if h in _CONTEXT_CACHE:
-        return _CONTEXT_CACHE[h]
+        # Empty output means the LLM call failed or returned no usable content.
+        # It is not a successful cache entry and must be retried on re-ingest.
+        return _CONTEXT_CACHE[h] or None
     try:
         r = _ctx_redis()
         if r is not None:
             v = r.get(f"rag:ctx:{h}")
             if v is not None:
                 val = v.decode("utf-8", "replace")
-                _CONTEXT_CACHE[h] = val
-                return val
+                if val:
+                    _CONTEXT_CACHE[h] = val
+                    return val
     except Exception:
         pass
     return None
 
 
 def _ctx_cache_set(h: str, blurb: str) -> None:
+    if not (blurb or "").strip():
+        return
     _CONTEXT_CACHE[h] = blurb
     try:
         r = _ctx_redis()
@@ -647,6 +1042,7 @@ def _apply_saved_rag_config() -> None:
     os.environ["EXPAND_TO_PARENT_ENABLED"] = "true" if cfg.get("expand_to_parent_enabled") else ""
     os.environ["RAG_PARENT_MAX_CHARS"] = str(int(cfg.get("parent_max_chars") or 0))
     os.environ["PDF_VLM_ENABLED"] = "true" if cfg.get("pdf_vlm_enabled") else ""
+    os.environ["RAG_REDACT_PII"] = "true" if cfg.get("redact_pii_enabled") else ""
     os.environ["VIDEO_FRAMES_ENABLED"] = "true" if cfg.get("video_frames_enabled") else ""
     os.environ["VIDEO_FRAMES_INTERVAL_SEC"] = str(int(cfg.get("video_frames_interval_sec") or 8))
     os.environ["VIDEO_FRAMES_MAX"] = str(int(cfg.get("video_frames_max") or 300))
@@ -942,10 +1338,21 @@ class VectorRAG:
                 filters=self._build_filters(owner, scope, exclude_scopes),
             )
             docs = response.get("documents", []) or []
+            # Extracted PDF figures/video keyframes are renderable companions,
+            # not independent answer passages. Their page/transcript text owns
+            # retrieval; allowing figure captions to compete directly can make
+            # generic words surface an image disconnected from the selected
+            # information. `_attach_companion_figures` adds them back only with
+            # an explicit text `anchor_id`.
+            docs = [d for d in docs if _is_primary_retrieval_document(d.meta or {})]
             candidates = [
                 {
                     "id": d.id,
                     "document": d.content or "",
+                    # Dense/sparse vectors were built from this enriched view.
+                    # Use the same view for reranking and relevance gating, but
+                    # retain ``document`` as clean citation/display content.
+                    "_retrieval_document": _embed_text(d.meta or {}, d.content or ""),
                     "metadata": dict(d.meta or {}),
                     "similarity": round(float(d.score or 0.0), 6),
                     "search_type": "hybrid",
@@ -1104,7 +1511,7 @@ class VectorRAG:
             import httpx
 
             model = os.getenv("RERANK_MODEL", "")
-            docs = [c.get("document", "") for c in candidates]
+            docs = [c.get("_retrieval_document") or c.get("document", "") for c in candidates]
             payload: Dict[str, Any] = {"query": query, "documents": docs}
             if model:
                 payload["model"] = model
@@ -1206,7 +1613,7 @@ class VectorRAG:
         """Ask the ingest LLM for a 1–2 sentence context situating ``chunk``
         within ``full_doc``. Best-effort: returns "" on any error/misconfig so
         ingest never blocks on it."""
-        url = os.getenv("RAG_LLM_URL", "").strip()
+        url = _openai_chat_url(os.getenv("RAG_LLM_URL", ""))
         if not url:
             return ""
         try:
@@ -1215,11 +1622,12 @@ class VectorRAG:
             model = os.getenv("RAG_LLM_MODEL", "").strip()
             sys_prompt = (
                 "Give a short 1–2 sentence context that situates the chunk within the "
-                "document, to improve search retrieval. Output ONLY the context."
+                "document, to improve search retrieval. Write in the same language as "
+                "the chunk (German for German source text). Output ONLY the context."
             )
             user_prompt = (
                 f"<document>\n{full_doc[:6000]}\n</document>\n\n"
-                f"<chunk>\n{chunk[:1500]}\n</chunk>\n\nContext:"
+                f"<chunk>\n{chunk[:3000]}\n</chunk>\n\nContext:"
             )
             payload: Dict[str, Any] = {
                 "messages": [
@@ -1240,8 +1648,7 @@ class VectorRAG:
                 headers["Authorization"] = f"Bearer {os.getenv('RAG_LLM_API_KEY')}"
             resp = httpx.post(url, json=payload, headers=headers, timeout=60)
             resp.raise_for_status()
-            data = resp.json()
-            return (data["choices"][0]["message"]["content"] or "").strip()
+            return _chat_response_text(resp.json())
         except Exception as e:
             logger.warning("contextual blurb failed: %s", e)
             return ""
@@ -1252,19 +1659,23 @@ class VectorRAG:
         re-ingesting unchanged chunks makes zero LLM calls. No-op when off."""
         if not _contextual_active() or not docs:
             return
-        full = "\n\n".join((d.content or "") for d in docs)[:8000]
+        full = "\n\n".join(_retrieval_body(d.meta or {}, d.content or "") for d in docs)[:8000]
 
         def _one(d):
-            chunk = d.content or ""
+            chunk = _retrieval_body(d.meta or {}, d.content or "")
             if not chunk.strip():
                 return
-            h = hashlib.sha256(("ctx-v1\x00" + chunk).encode("utf-8")).hexdigest()
+            h = hashlib.sha256(("ctx-v2\x00" + chunk).encode("utf-8")).hexdigest()
             blurb = _ctx_cache_get(h)
             if blurb is None:
                 blurb = self._contextual_blurb(full, chunk)
                 _ctx_cache_set(h, blurb)
             if blurb:
                 d.meta["context"] = blurb
+            else:
+                d.meta["context_error"] = (
+                    "Ingest LLM returned no context; check its URL, model, and worker logs."
+                )
 
         # One LLM call per chunk — fan out so a multi-chunk doc isn't serialized.
         _concurrent_map(_one, docs, _vlm_concurrency())
@@ -1272,7 +1683,7 @@ class VectorRAG:
     def _auto_terms(self, chunk: str) -> str:
         """Ask the ingest LLM for keywords/synonyms and likely questions for a
         chunk (RagFlow-style recall boost). Best-effort: "" on error."""
-        url = os.getenv("RAG_LLM_URL", "").strip()
+        url = _openai_chat_url(os.getenv("RAG_LLM_URL", ""))
         if not url:
             return ""
         nk = _env_int("RAG_AUTO_KEYWORDS_N")
@@ -1281,18 +1692,22 @@ class VectorRAG:
             import httpx
 
             wants = []
+            format_lines = []
             if nk > 0:
-                wants.append(f"{nk} keywords or synonyms")
+                wants.append(f"exactly {nk} keywords or synonyms")
+                format_lines.append("Keywords:\n- one keyword per line")
             if nq > 0:
-                wants.append(f"{nq} likely user questions this chunk answers")
+                wants.append(f"exactly {nq} likely user questions this chunk answers")
+                format_lines.append("Questions:\n- one question per line")
             sys_prompt = (
                 f"From the chunk, produce {' and '.join(wants)} to improve search recall. "
-                "Output them one per line, no numbering, no preamble."
+                "Write in the same language as the chunk (German for German source text). "
+                "Use these sections and no preamble:\n" + "\n".join(format_lines)
             )
             payload: Dict[str, Any] = {
                 "messages": [
                     {"role": "system", "content": sys_prompt},
-                    {"role": "user", "content": f"<chunk>\n{chunk[:1500]}\n</chunk>"},
+                    {"role": "user", "content": f"<chunk>\n{chunk[:3000]}\n</chunk>"},
                 ],
                 "temperature": 0.0,
                 "max_tokens": 220,
@@ -1307,8 +1722,7 @@ class VectorRAG:
                 headers["Authorization"] = f"Bearer {os.getenv('RAG_LLM_API_KEY')}"
             resp = httpx.post(url, json=payload, headers=headers, timeout=60)
             resp.raise_for_status()
-            data = resp.json()
-            return (data["choices"][0]["message"]["content"] or "").strip()
+            return _chat_response_text(resp.json())
         except Exception as e:
             logger.warning("auto-keywords failed: %s", e)
             return ""
@@ -1320,11 +1734,11 @@ class VectorRAG:
         if not _autokw_active() or not docs:
             return
         tag = (
-            f"akw-v1\x00{_env_int('RAG_AUTO_KEYWORDS_N')}\x00{_env_int('RAG_AUTO_QUESTIONS_N')}\x00"
+            f"akw-v3\x00{_env_int('RAG_AUTO_KEYWORDS_N')}\x00{_env_int('RAG_AUTO_QUESTIONS_N')}\x00"
         )
 
         def _one(d):
-            chunk = d.content or ""
+            chunk = _retrieval_body(d.meta or {}, d.content or "")
             if not chunk.strip():
                 return
             h = hashlib.sha256((tag + chunk).encode("utf-8")).hexdigest()
@@ -1334,6 +1748,11 @@ class VectorRAG:
                 _ctx_cache_set(h, terms)
             if terms:
                 d.meta["aux_terms"] = terms
+            else:
+                d.meta["aux_terms_error"] = (
+                    "Ingest LLM returned no keywords/questions; check its URL, model, "
+                    "and worker logs."
+                )
 
         # One LLM call per chunk — fan out so a multi-chunk doc isn't serialized.
         _concurrent_map(_one, docs, _vlm_concurrency())
@@ -1424,6 +1843,27 @@ class VectorRAG:
         else:
             docs = self._lane_text(path)
 
+        # Defensive PDF repair: a Docling/HybridChunker integration regression
+        # must not turn a multi-page document into one whole-file retrieval hit.
+        if ext == ".pdf":
+            docs = _repair_oversized_pdf_chunks(path, docs)
+            _enrich_uncaptioned_figures(docs)
+
+        # Ingest guards: strip text that is invisible on the rendered page
+        # (PDF prompt-injection channel — extractors read it, humans can't),
+        # then optionally redact PII before anything reaches the index. The
+        # per-file ``redact_pii`` metadata (set at upload time) overrides the
+        # global toggle in either direction.
+        if ext == ".pdf":
+            docs = _strip_hidden_pdf_text(path, docs)
+        redact_override = meta.get("redact_pii")
+        docs = _redact_docs(docs, None if redact_override is None else bool(redact_override))
+        if ext == ".pdf":
+            # Page vectors retrieve over both visible text and the meaning of
+            # their same-page figures, while figures remain separate renderable
+            # assets. Run after redaction so hidden embedding text is also safe.
+            _attach_pdf_visual_context(docs)
+
         # Caller metadata (source/filename/owner/scope …) is layered on top; the
         # lane only owns keys the caller doesn't set (e.g. start/end/modality),
         # which ``update`` preserves because they're absent from ``meta``.
@@ -1452,14 +1892,7 @@ class VectorRAG:
         """Normalize VLM_URL to an OpenAI ``/v1/chat/completions`` endpoint.
 
         The UI may store a base (``…/v1``) or a full chat URL; accept either."""
-        url = os.getenv("VLM_URL", "").strip().rstrip("/")
-        if not url:
-            return ""
-        if url.endswith("/chat/completions"):
-            return url
-        if url.endswith("/v1"):
-            return url + "/chat/completions"
-        return url + "/v1/chat/completions"
+        return _openai_chat_url(os.getenv("VLM_URL", ""))
 
     # Default prompts for the two VLM modes: a whole rendered page vs. a single
     # image extracted from a document.
@@ -1467,19 +1900,23 @@ class VectorRAG:
         "Transcribe this document page into clean GitHub-flavored Markdown. "
         "Include ALL visible text and reproduce tables as Markdown tables. For "
         "screenshots, diagrams, charts or UI, add a concise description of what "
-        "they show so the content is searchable. Ignore repeated logos and "
+        "they show so the content is searchable. Write descriptions in the same "
+        "language as the visible document text (use German for German pages). "
+        "Ignore repeated logos and "
         "watermarks. Output only the Markdown, no preamble."
     )
     _VLM_IMAGE_PROMPT = (
         "Describe this image for search. Transcribe any text verbatim, and for "
         "screenshots, charts, diagrams or UI explain what they show and the data "
-        "they contain. Ignore logos and watermarks. Output only the description."
+        "they contain. Write the description in the same language as the visible "
+        "text (use German for German UI/documents). Ignore logos and watermarks. "
+        "Output only the description."
     )
     _VLM_REGION_PROMPT = (
         "This frame is from a screen-recording of an online training session. It "
         "may contain webcam/participant video tiles, sidebars or chat panels "
         "around a shared desktop/application/slide area. Return ONLY a JSON "
-        'object with the bounding box of the shared screen content, excluding '
+        "object with the bounding box of the shared screen content, excluding "
         'all webcam tiles and panels, as {"x1":..,"y1":..,"x2":..,"y2":..} with '
         "coordinates normalized to 0-1000. If the whole frame is shared screen "
         "content, return the full frame box."
@@ -1533,10 +1970,7 @@ class VectorRAG:
         resp = httpx.post(url, json=payload, headers=headers, timeout=180)
         resp.raise_for_status()
         data = resp.json()
-        msg = (data.get("choices") or [{}])[0].get("message") or {}
-        # With thinking off the transcript is in ``content``; fall back to
-        # ``reasoning`` only if a build still routed it there.
-        return (msg.get("content") or msg.get("reasoning") or "").strip()
+        return _chat_response_text(data)
 
     def _vlm_detect_region(self, img) -> Optional[Tuple[float, float, float, float]]:
         """Ask the vision model for the shared-desktop bounding box of a frame.
@@ -1572,15 +2006,17 @@ class VectorRAG:
         """RagFlow-style *selective* vision for PDFs.
 
         Docling supplies the cheap text/table layer (no LLM). A vision model is
-        applied ONLY to image-dominant pages — measured by image-object area
-        coverage (``PDF_VLM_PAGE_RATIO``, default 0.35) — so text pages cost
+        applied ONLY to visually heavy pages (raster coverage, vector charts,
+        wide figure images — see ``pdf_page_triage``) so text pages cost
         nothing extra and slide/screenshot pages get fully read:
-          * "mostly image" docs (≥ ``PDF_VLM_DOC_RATIO`` of pages image-heavy,
-            e.g. a screenshot deck) → every page rendered + VLM-transcribed
-            (Docling's OCR of screenshots is just noise), concurrently;
+          * "mostly image" docs (≥ ``PDF_VLM_DOC_RATIO`` of pages *raster
+            image dominant*, e.g. a screenshot deck) → every page rendered +
+            VLM-transcribed (Docling's OCR of screenshots is just noise); if
+            any transcription comes back empty, Docling text is kept too so a
+            failed VLM call never loses a page;
           * mixed docs → Docling text for the whole file PLUS a VLM transcription
-            of only the image-heavy pages;
-          * no image-heavy page → pure Docling text, zero VLM calls.
+            of only the visually heavy pages;
+          * no heavy page → pure Docling text, zero VLM calls.
         ``stage_cb(done, total)`` reports progress over the rendered pages.
         Renders with pypdfium2 (a Docling dep, no system libs); degrades to
         ``_lane_docling`` on any failure so the lane never regresses.
@@ -1616,27 +2052,26 @@ class VectorRAG:
         n_pages = 0
         try:
             n_pages = len(pdf)
-            # First pass: which pages are image-dominant? (cheap, no rendering)
-            heavy: List[int] = []
-            for i in range(n_pages):
-                page = pdf[i]
-                w, h = page.get_size()
-                page_area = (w * h) or 1.0
-                img_area = 0.0
-                try:
-                    for obj in page.get_objects():
-                        if getattr(obj, "type", None) == pdfium_c.FPDF_PAGEOBJ_IMAGE:
-                            try:
-                                left, bottom, right, top = obj.get_pos()
-                                img_area += abs((right - left) * (top - bottom))
-                            except Exception:
-                                img_area += page_area  # unknown extent → assume full
-                except Exception:
-                    img_area = page_area  # can't introspect → treat as image page
-                if min(img_area / page_area, 1.0) >= page_thr:
-                    heavy.append(i)
+            # First pass: which pages are visually heavy? (cheap, no rendering)
+            # Beyond raster-image coverage, the triage also catches vector
+            # charts/diagrams (path objects) and wide chart-shaped images —
+            # signals ported from opendataloader-pdf's TriageProcessor.
+            # Only raster-dominant pages count toward the doc-level "mostly
+            # image" ratio: the vector/wide rules select pages for an *extra*
+            # vision pass, but must never demote a text document to VLM-only
+            # (that dropped the whole text lane for table/screenshot docs).
+            from src.pdf_page_triage import is_image_dominant, is_visually_heavy, page_signals
 
-            mostly_image = n_pages > 0 and (len(heavy) / n_pages) >= doc_thr
+            heavy: List[int] = []
+            dominant = 0
+            for i in range(n_pages):
+                sig = page_signals(pdf[i], pdfium_c)
+                if is_visually_heavy(sig, page_thr):
+                    heavy.append(i)
+                if is_image_dominant(sig, page_thr):
+                    dominant += 1
+
+            mostly_image = n_pages > 0 and (dominant / n_pages) >= doc_thr
             to_render = list(range(n_pages)) if mostly_image else heavy
 
             # Second pass: render the chosen pages serially (pypdfium2 isn't
@@ -1661,7 +2096,7 @@ class VectorRAG:
         texts = _concurrent_map(
             self._vlm_transcribe_image,
             [rendered[i] for i in idxs],
-            _vlm_concurrency(),
+            _vlm_mm_concurrency(),
             on_done=on_done,
         )
         vlm_docs = [
@@ -1672,9 +2107,20 @@ class VectorRAG:
             if t
         ]
 
-        if len(idxs) == n_pages and n_pages > 0:
+        if mostly_image and n_pages > 0:
             # Whole-doc vision (screenshot deck): VLM replaces Docling's OCR noise.
-            docs = vlm_docs or list(self._lane_docling(path))
+            # But a failed/empty transcription must not silently lose a page —
+            # if any page came back empty, recover the text lane via Docling.
+            if len(vlm_docs) < len(idxs):
+                logger.warning(
+                    "pdf-vlm: %d/%d page transcription(s) empty for %s; keeping Docling text",
+                    len(idxs) - len(vlm_docs),
+                    len(idxs),
+                    os.path.basename(path),
+                )
+                docs = list(self._lane_docling(path)) + vlm_docs
+            else:
+                docs = list(vlm_docs)
         else:
             # Mixed/text doc: cheap Docling text + vision only on the image pages.
             docs = list(self._lane_docling(path)) + vlm_docs
@@ -1826,14 +2272,17 @@ class VectorRAG:
         captions = _concurrent_map(
             lambda b64: self._vlm_transcribe_image(b64, prompt=self._VLM_IMAGE_PROMPT),
             [c["b64"] for c in crops],
-            _vlm_concurrency(),
+            _vlm_mm_concurrency(),
             on_done=on_done,
         )
 
         out: List[Any] = []
         fname = os.path.basename(path)
         for i, c in enumerate(crops):
-            caption = (captions[i] or c["docling_caption"] or "").strip()
+            vlm_caption = (captions[i] or "").strip()
+            docling_caption = (c["docling_caption"] or "").strip()
+            caption = vlm_caption or docling_caption
+            caption_source = "vlm" if vlm_caption else ("docling" if docling_caption else "locator")
             page_txt = f" (page {c['page']})" if c["page"] else ""
             # The Document's content is what the retriever matches on, so fall
             # back to a minimal locator when neither VLM nor Docling gave text.
@@ -1847,6 +2296,7 @@ class VectorRAG:
                         "page": c["page"],
                         "image_url": image_url,
                         "image_caption": caption or content,
+                        "caption_source": caption_source,
                     },
                 )
             )
@@ -1910,7 +2360,7 @@ class VectorRAG:
         caps = _concurrent_map(
             lambda b64: self._vlm_transcribe_image(b64, prompt=self._VLM_IMAGE_PROMPT),
             [b64 for _name, b64 in images],
-            _vlm_concurrency(),
+            _vlm_mm_concurrency(),
             on_done=on_done,
         )
         for (name, _b64), cap in zip(images, caps):
@@ -2087,7 +2537,7 @@ class VectorRAG:
         technical terms/proper nouns to correct spelling, without translating or
         changing content. Best-effort — returns the original text on any error so
         ingest never blocks on it. No-op unless the cleanup lane is active."""
-        url = os.getenv("RAG_LLM_URL", "").strip()
+        url = _openai_chat_url(os.getenv("RAG_LLM_URL", ""))
         if not url or not text.strip():
             return text
         try:
@@ -2124,7 +2574,7 @@ class VectorRAG:
                 headers["Authorization"] = f"Bearer {os.getenv('RAG_LLM_API_KEY')}"
             resp = httpx.post(url, json=payload, headers=headers, timeout=120)
             resp.raise_for_status()
-            out = (resp.json()["choices"][0]["message"]["content"] or "").strip()
+            out = _chat_response_text(resp.json())
             return out or text
         except Exception as e:
             logger.warning("asr correction failed: %s", e)
@@ -2244,8 +2694,7 @@ class VectorRAG:
                 "figure_kind": "keyframe",
                 "start": ts,
                 "end": ts + interval,
-                "image_url": "/api/personal/rag-asset?source="
-                + quote(c["asset_path"], safe=""),
+                "image_url": "/api/personal/rag-asset?source=" + quote(c["asset_path"], safe=""),
                 "image_caption": f"[at {mm}:{ss:02d}] " + (caption or content),
             }
             if base:
@@ -2289,6 +2738,7 @@ class VectorRAG:
                 conc = int(os.getenv("VIDEO_ASR_CONCURRENCY", "2") or 2)
             except Exception:
                 conc = 2
+
             def _asr_done(c: int) -> None:
                 try:
                     stage_cb(c, total, stage="asr")
@@ -2820,12 +3270,14 @@ class VectorRAG:
             return []
 
     def get_document_chunks(self, source: str) -> List[Dict[str, Any]]:
-        """Return every indexed chunk for one source file, in ``seq`` order.
+        """Return every indexed chunk for one source file in audit-friendly order.
 
         Powers the ``/rag`` explorer's debug view: each row is the *stored* chunk
         text (exactly what the retriever sees) plus the meta that explains how it
         was indexed (section grouping, situating context, auto aux terms, code
-        symbol/language, modality). Reads straight from Qdrant.
+        symbol/language, modality). Page-based documents are grouped by page
+        (text first, then its figures); other documents retain ``seq`` order.
+        Reads straight from Qdrant.
         """
         if not self.healthy:
             return []
@@ -2843,14 +3295,25 @@ class VectorRAG:
                         "seq": meta.get("seq", 0),
                         "section_id": meta.get("section_id", ""),
                         "context": meta.get("context", ""),
+                        "context_error": meta.get("context_error", ""),
                         "aux_terms": meta.get("aux_terms", ""),
+                        "aux_terms_error": meta.get("aux_terms_error", ""),
                         "symbol": meta.get("symbol", ""),
                         "language": meta.get("language", ""),
                         "modality": meta.get("modality", ""),
                         "metadata": meta,
                     }
                 )
-            return sorted(rows, key=lambda r: r.get("seq") or 0)
+
+            def _audit_order(row):
+                meta = row.get("metadata") or {}
+                page = meta.get("page")
+                if isinstance(page, (int, float)) and not isinstance(page, bool):
+                    modality_rank = 1 if row.get("modality") == "figure" else 0
+                    return (0, int(page), modality_rank, row.get("seq") or 0)
+                return (1, row.get("seq") or 0, 0, 0)
+
+            return sorted(rows, key=_audit_order)
         except Exception as e:
             logger.error(f"get_document_chunks failed: {e}")
             return []
@@ -2882,7 +3345,9 @@ class VectorRAG:
                 return False
             meta = dict(target.meta or {})
             meta.pop("context", None)
+            meta.pop("context_error", None)
             meta.pop("aux_terms", None)
+            meta.pop("aux_terms_error", None)
             meta.pop("_ctx_orig", None)
             self._write_documents([Document(id=chunk_id, content=text, meta=meta)])
             return True

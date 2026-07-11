@@ -215,3 +215,46 @@ def test_citation_media_keeps_image_branch_for_keyframes():
     # Plain ASR transcript chunks still take the video branch.
     asr_meta = {"modality": "video", "source": "/u/training.mp4", "start": 10.0, "end": 20.0}
     assert cp._citation_media(asr_meta)["modality"] == "video"
+
+
+def test_content_tokens_keep_german_umlauts_and_drop_question_fillers():
+    import src.chat_processor as cp
+
+    assert cp._content_tokens("Wie kann ich in macs ein Band einfügen?") == [
+        "macs",
+        "band",
+        "einfügen",
+    ]
+
+
+def test_low_scoring_companion_survives_with_relevant_text_anchor():
+    import src.chat_processor as cp
+
+    text = {
+        "id": "page6",
+        "document": "Band einfügen",
+        "metadata": {"source": "/u/training.pdf", "page": 6},
+        "rerank_score": 0.9,
+    }
+    figure = {
+        "id": "figure6",
+        "document": "Kontextmenü",
+        "metadata": {
+            "source": "/u/training.pdf",
+            "page": 6,
+            "image_url": "/band.png",
+        },
+        "rerank_score": 0.05,
+        "search_type": "figure_companion",
+        "anchor_id": "page6",
+    }
+
+    relevant = cp._add_surviving_anchor_companions([text, figure], [text])
+
+    assert [r["id"] for r in relevant] == ["page6", "figure6"]
+
+
+def test_figures_are_companions_not_independent_retrieval_passages():
+    assert rv._is_primary_retrieval_document({"modality": "pdf_page", "page": 6})
+    assert rv._is_primary_retrieval_document({"modality": "video", "start": 10})
+    assert not rv._is_primary_retrieval_document({"modality": "figure", "page": 6})

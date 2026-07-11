@@ -18,8 +18,8 @@ from core.database import Session as DBSession
 from core.exceptions import SessionNotFoundError
 from core.models import ChatMessage
 from routes.chat_helpers import (
-    append_missing_figures,
     _enforce_chat_privileges,
+    append_missing_figures,
     auto_name_session,
     build_chat_context,
     clean_thinking_for_save,
@@ -987,9 +987,7 @@ def setup_chat_routes(
                                 # used a source that has one (see
                                 # append_missing_figures). Streamed as a late
                                 # delta so the client shows what gets saved.
-                                _extra_fig = append_missing_figures(
-                                    full_response, ctx.rag_sources
-                                )
+                                _extra_fig = append_missing_figures(full_response, ctx.rag_sources)
                                 if _extra_fig:
                                     full_response += _extra_fig
                                     yield f"data: {json.dumps({'delta': _extra_fig})}\n\n"

@@ -4,9 +4,9 @@
 import logging
 import os
 import uuid
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
 
 from core.constants import BASE_DIR, PERSONAL_DIR
 from core.middleware import require_admin
@@ -289,7 +289,10 @@ def setup_personal_routes(personal_docs_manager, rag_manager, rag_available):
 
     @router.post("/upload")
     async def upload_files_to_rag(
-        request: Request, files: List[UploadFile] = File(...), _admin: None = Depends(require_admin)
+        request: Request,
+        files: List[UploadFile] = File(...),
+        redact_pii: Optional[str] = Form(None),
+        _admin: None = Depends(require_admin),
     ):
         """Admin-only upload into the global RAG knowledge base.
 
@@ -298,8 +301,16 @@ def setup_personal_routes(personal_docs_manager, rag_manager, rag_available):
         embed + Qdrant upsert. The upload therefore does NOT require a healthy
         in-process RAG manager (that gate caused spurious 503s); progress and any
         failures surface through the RAG jobs view instead.
+
+        ``redact_pii`` ("true"/"false") is the per-upload override for PII
+        redaction: it is stamped into each file's metadata and wins over the
+        global Settings → RAG toggle in either direction; omitted/empty means
+        "use the global default".
         """
         upload_dir = _personal_upload_dir_for_owner("global")
+        redact_override: Optional[bool] = None
+        if redact_pii is not None and redact_pii.strip() != "":
+            redact_override = redact_pii.strip().lower() in ("true", "1", "on", "yes")
 
         total_failed = 0
         uploaded_files = []
@@ -345,18 +356,16 @@ def setup_personal_routes(personal_docs_manager, rag_manager, rag_available):
                     continue
 
                 ext = os.path.splitext(safe_name)[1].lower()
-                to_index.append(
-                    (
-                        file_path,
-                        {
-                            "source": file_path,
-                            "filename": safe_name,
-                            "stored_filename": stored_name,
-                            "directory": upload_dir,
-                            "type": ext,
-                        },
-                    )
-                )
+                file_meta = {
+                    "source": file_path,
+                    "filename": safe_name,
+                    "stored_filename": stored_name,
+                    "directory": upload_dir,
+                    "type": ext,
+                }
+                if redact_override is not None:
+                    file_meta["redact_pii"] = redact_override
+                to_index.append((file_path, file_meta))
                 uploaded_files.append(safe_name)
             except Exception as e:
                 logger.error(f"Failed to store upload {upload.filename}: {e}")
