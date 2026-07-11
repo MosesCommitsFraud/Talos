@@ -49,18 +49,20 @@ export function ModelPicker({ visible = true }: { visible?: boolean }) {
         <button
           type="button"
           aria-label={t('modelPicker.switchModel')}
-          className="flex h-8 max-w-48 shrink-0 items-center justify-between gap-2 whitespace-nowrap rounded-lg border border-transparent px-2 text-[13px] font-medium text-muted-foreground/70 transition-colors hover:bg-accent hover:text-foreground/80 sm:max-w-56 sm:px-3"
+          className="flex h-7 max-w-32 shrink-0 items-center justify-between gap-1.5 whitespace-nowrap rounded-sm border border-transparent px-1.5 text-xs font-medium text-foreground/65 transition-colors hover:bg-accent hover:text-foreground/90 sm:h-6 sm:px-2 md:max-w-56"
         >
-          <span className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden">
-            <QwenIcon className="size-4 shrink-0" />
+          <span className="flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden">
+            <QwenIcon className="size-3.5 shrink-0" />
             <span className="min-w-0 flex-1 truncate text-left">{label}</span>
           </span>
           <ChevronDownIcon className="size-3 shrink-0 opacity-60" aria-hidden="true" />
         </button>
       </MenuTrigger>
+      {/* Compact rows matching the knowledge-mode dropdown: same row height
+          and one uniform text size (endpoint inline, muted, not smaller). */}
       <MenuPopup align="start">
         {options.length === 0 && (
-          <div className="px-3 py-2 text-[13px] text-muted-foreground">{t('modelPicker.noEndpoints')}</div>
+          <div className="px-2 py-1 text-xs text-muted-foreground">{t('modelPicker.noEndpoints')}</div>
         )}
         {options.map((o) => {
           const selected =
@@ -69,16 +71,14 @@ export function ModelPicker({ visible = true }: { visible?: boolean }) {
             <MenuItem
               key={`${o.endpointId}:${o.model}`}
               onSelect={() => setPendingModel({ endpointId: o.endpointId, model: o.model })}
-              className="gap-2"
+              className="gap-2 px-2 py-1 text-xs [&_svg]:size-3.5"
             >
-              <QwenIcon className="size-4 shrink-0 text-muted-foreground" />
-              <div className="min-w-0 flex-1">
-                <div className="truncate">{displayName(o.model)}</div>
-                <div className="truncate text-xs text-muted-foreground">
-                  {displayName(o.model) !== o.model ? `${o.model} · ${o.endpointName}` : o.endpointName}
-                </div>
-              </div>
-              <CheckIcon className={cn('size-4 shrink-0', selected ? 'opacity-100' : 'opacity-0')} />
+              <QwenIcon className="size-3.5 shrink-0 text-muted-foreground" />
+              <span className="min-w-0 flex-1 truncate">
+                {displayName(o.model)}
+                <span className="text-muted-foreground"> · {o.endpointName}</span>
+              </span>
+              <CheckIcon className={cn('size-3 shrink-0', selected ? 'opacity-100' : 'opacity-0')} />
             </MenuItem>
           );
         })}

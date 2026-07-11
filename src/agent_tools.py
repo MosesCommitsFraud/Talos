@@ -49,7 +49,6 @@ TOOL_TAGS = {
     "manage_session",
     "manage_memory",
     "list_models",
-    "ui_control",
     "generate_image",
     "ask_user",
     "update_plan",
@@ -65,13 +64,9 @@ TOOL_TAGS = {
     "manage_documents",
     "manage_settings",
     "query_sql",
-    "edit_image",
     # Retrieve the full original of a compressed tool output
     # (see src/context_optimizer.py)
     "expand_output",
-    # Generic loopback to any UI-button endpoint — agent uses this
-    # when there's no named tool wrapper for the action.
-    "app_api",
 }
 
 ToolBlock = namedtuple("ToolBlock", ["tool_type", "content"])

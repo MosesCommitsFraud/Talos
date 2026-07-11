@@ -32,7 +32,6 @@ NON_ADMIN_BLOCKED_TOOLS = {
     "manage_documents",
     "manage_settings",
     "api_call",
-    "app_api",
     "vault_search",
     "vault_get",
     "vault_unlock",
@@ -82,10 +81,7 @@ _PLAN_MODE_KNOWN_MUTATORS = {
     "manage_tokens",
     "manage_settings",
     "api_call",
-    "app_api",
-    "ui_control",
     "generate_image",
-    "edit_image",
 }
 
 

@@ -1,3 +1,7 @@
+import os
+from datetime import datetime
+from urllib.parse import quote
+
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
@@ -24,7 +28,7 @@ class RagPipelineConfig(BaseModel):
     search_top_k: int = 5
     candidate_top_k: int = 40
     similarity_threshold: float = 0.0
-    rerank_min_score: float = 0.10
+    rerank_min_score: float = 0.30
     max_context_chars: int = 10000
     query_prefix: str = ""
     context_prompt: str = ""
@@ -38,6 +42,11 @@ class RagPipelineConfig(BaseModel):
     # Opt-in LLM cleanup of the ASR transcript (fixes English terms); uses the
     # ingest LLM endpoint (llm_url/llm_model).
     video_asr_correct_enabled: bool = False
+    # Opt-in video keyframe lane: crop to the VLM-detected shared-desktop
+    # region and index scene-change keyframes (needs vlm_url).
+    video_frames_enabled: bool = False
+    video_frames_interval_sec: int = 8
+    video_frames_max: int = 300
     # Advanced — opt-in pixel image embedding lane (off by default).
     image_pixel_enabled: bool = False
     image_embed_url: str = ""
@@ -56,6 +65,11 @@ class RagPipelineConfig(BaseModel):
     pdf_vlm_enabled: bool = False
     vlm_url: str = ""
     vlm_model: str = ""
+    # Advanced — redact PII (emails, phones, card/account numbers, IPs, URLs)
+    # from extracted text before chunks are embedded and indexed. Off by
+    # default: local deployments usually want this data searchable. Can be
+    # overridden per upload (see routes/personal_routes.py upload endpoint).
+    redact_pii_enabled: bool = False
     # Advanced — auto keyword/question generation per chunk (0 = off).
     auto_keywords_n: int = 0
     auto_questions_n: int = 0
@@ -132,7 +146,7 @@ def _public(cfg: dict) -> dict:
         "search_top_k": _clamp_k(cfg.get("search_top_k", 5)),
         "candidate_top_k": _clamp_candidate_k(cfg.get("candidate_top_k", 40)),
         "similarity_threshold": _clamp_float(cfg.get("similarity_threshold", 0.0), 0.0),
-        "rerank_min_score": _clamp_float(cfg.get("rerank_min_score", 0.10), 0.10),
+        "rerank_min_score": _clamp_float(cfg.get("rerank_min_score", 0.30), 0.30),
         "max_context_chars": _clamp_chars(cfg.get("max_context_chars", 10000)),
         "query_prefix": cfg.get("query_prefix", ""),
         "context_prompt": cfg.get("context_prompt", ""),
@@ -152,6 +166,7 @@ def _public(cfg: dict) -> dict:
         "pdf_vlm_enabled": bool(cfg.get("pdf_vlm_enabled", False)),
         "vlm_url": cfg.get("vlm_url", ""),
         "vlm_model": cfg.get("vlm_model", ""),
+        "redact_pii_enabled": bool(cfg.get("redact_pii_enabled", False)),
         "auto_keywords_n": _clamp_aux(cfg.get("auto_keywords_n", 0)),
         "auto_questions_n": _clamp_aux(cfg.get("auto_questions_n", 0)),
         "expand_to_parent_enabled": bool(cfg.get("expand_to_parent_enabled", False)),
@@ -214,7 +229,7 @@ def setup_rag_routes():
             "search_top_k": _clamp_k(body.search_top_k),
             "candidate_top_k": _clamp_candidate_k(body.candidate_top_k),
             "similarity_threshold": _clamp_float(body.similarity_threshold, 0.0),
-            "rerank_min_score": _clamp_float(body.rerank_min_score, 0.10),
+            "rerank_min_score": _clamp_float(body.rerank_min_score, 0.30),
             "max_context_chars": _clamp_chars(body.max_context_chars),
             "query_prefix": body.query_prefix.strip(),
             "context_prompt": body.context_prompt.strip(),
@@ -234,6 +249,7 @@ def setup_rag_routes():
             "pdf_vlm_enabled": bool(body.pdf_vlm_enabled),
             "vlm_url": body.vlm_url.strip(),
             "vlm_model": body.vlm_model.strip(),
+            "redact_pii_enabled": bool(body.redact_pii_enabled),
             "auto_keywords_n": _clamp_aux(body.auto_keywords_n),
             "auto_questions_n": _clamp_aux(body.auto_questions_n),
             "expand_to_parent_enabled": bool(body.expand_to_parent_enabled),
@@ -367,8 +383,10 @@ def setup_rag_routes():
                 r.raise_for_status()
                 return {"ok": True}
             if kind in ("llm", "vlm"):
+                from src.rag_vector import _openai_chat_url
+
                 r = httpx.post(
-                    url,
+                    _openai_chat_url(url),
                     json={
                         "model": model,
                         "messages": [{"role": "user", "content": "ping"}],
@@ -555,6 +573,70 @@ def setup_rag_routes():
         if not rag or not getattr(rag, "healthy", False):
             return {"available": False, "chunks": [], "error": last_init_error()}
         return {"available": True, "source": source, "chunks": rag.get_document_chunks(source)}
+
+    @router.get("/documents/export")
+    def export_document(source: str):
+        """Download everything indexed for one source file as a Markdown dump.
+
+        Ingest-quality audit: the file shows exactly the text the retriever sees,
+        grouped by page (page text followed by its figures) when page provenance
+        is available, including embedded-but-hidden enrichment (context blurbs,
+        aux terms), so two ingests of the same document can be diffed.
+        """
+        from fastapi.responses import PlainTextResponse
+
+        from src.rag_singleton import get_rag_manager
+
+        rag = get_rag_manager()
+        if not rag or not getattr(rag, "healthy", False):
+            raise HTTPException(503, "RAG is not available")
+        chunks = rag.get_document_chunks(source)
+        if not chunks:
+            raise HTTPException(404, "No indexed chunks for this source")
+
+        base = os.path.basename(source) or "document"
+        lines = [
+            f"# Ingest dump: {base}",
+            "",
+            f"- source: `{source}`",
+            f"- chunks: {len(chunks)}",
+            f"- context summaries: {sum(bool(c.get('context')) for c in chunks)}/{len(chunks)} chunks",
+            f"- keyword/question enrichment: {sum(bool(c.get('aux_terms')) for c in chunks)}/{len(chunks)} chunks",
+            f"- context errors: {sum(bool(c.get('context_error')) for c in chunks)}",
+            f"- keyword/question errors: {sum(bool(c.get('aux_terms_error')) for c in chunks)}",
+            f"- exported: {datetime.now().isoformat(timespec='seconds')}",
+            "",
+        ]
+        for c in chunks:
+            meta = c.get("metadata") or {}
+            prov = [f"chunk #{c.get('seq', 0)}"]
+            if c.get("modality"):
+                prov.append(str(c["modality"]))
+            if meta.get("page"):
+                prov.append(f"page {meta['page']}")
+            prov.append(f"{len(c.get('content') or '')} chars")
+            lines.append(f"## {' · '.join(prov)}")
+            lines.append("")
+            if c.get("context"):
+                lines.append(f"> context: {c['context']}")
+            if c.get("aux_terms"):
+                lines.append(f"> keywords/questions: {c['aux_terms']}")
+            if c.get("context_error"):
+                lines.append(f"> context_error: {c['context_error']}")
+            if c.get("aux_terms_error"):
+                lines.append(f"> aux_terms_error: {c['aux_terms_error']}")
+            if any(
+                c.get(key) for key in ("context", "aux_terms", "context_error", "aux_terms_error")
+            ):
+                lines.append("")
+            lines.append(c.get("content") or "")
+            lines.append("")
+        # RFC 5987 filename* so non-ASCII upload names survive the header.
+        fname = f"{base}.ingested.md"
+        headers = {"Content-Disposition": f"attachment; filename*=UTF-8''{quote(fname)}"}
+        return PlainTextResponse(
+            "\n".join(lines), media_type="text/markdown; charset=utf-8", headers=headers
+        )
 
     class ChunkUpdate(BaseModel):
         source: str

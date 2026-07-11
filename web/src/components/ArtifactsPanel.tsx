@@ -3,7 +3,7 @@ import { DownloadIcon } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { artifactDownloadUrl, fetchArtifacts, uploadDownloadUrl } from '@/api/client';
 import { useChat } from '@/state/chat';
-import { fileTypeLabel, formatSize, isPreviewable, previewKind, type PreviewKind } from '@/lib/files';
+import { displayName, fileTypeLabel, formatSize, isPreviewable, previewKind, type PreviewKind } from '@/lib/files';
 import { FileTypeIcon } from './FileTypeIcon';
 
 type PreviewFile = { sessionId: string; path: string; name: string; mime?: string };
@@ -47,7 +47,9 @@ function FileRow({
       >
         <FileThumb name={name} mime={mime} src={thumbSrc} kind={kind} alt={name} />
         <div className="min-w-0 flex-1">
-          <div className="truncate text-[13px]">{name}</div>
+          {/* Extension elided — the thumb icon and EXT label below already show
+              the type; the full name stays on the hover title. */}
+          <div className="truncate text-[13px]">{displayName(name)}</div>
           <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
             <span className="font-medium uppercase tracking-wide">{fileTypeLabel(name)}</span>
             {sub && <span>·</span>}

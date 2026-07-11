@@ -41,11 +41,11 @@ _AV_EXTS = frozenset(
 _FIGURE_EMBED_RULE = (
     "Some retrieved sections include a figure marked as [figure image_url: ... — "
     "caption: ...]. These are real screenshots/diagrams from the documentation and "
-    "render inline in the chat. Whenever your answer refers to something such a "
-    "figure shows (a dialog, menu, chart, diagram, or any UI element), DO include "
-    "the figure: embed it as Markdown image syntax ![caption](image_url) at the "
-    "point in your answer where it is relevant. Showing the figure is strongly "
-    "preferred over describing it in words. Copy the image_url exactly, "
+    "render inline in the chat. Embed every figure that supports your answer as "
+    "Markdown image syntax ![caption](image_url), placed where it is relevant. "
+    "When a figure covers what the answer discusses, embed it rather than "
+    "describing it in words; skip figures that add nothing to this specific "
+    "question. Copy the image_url exactly, "
     "character-for-character, as given in the retrieved section — never invent, "
     "shorten, or alter one, and only use image_url values that appear in the "
     "retrieved context. Do not copy image references from inside document text "
@@ -62,7 +62,10 @@ def _citation_media(meta: Dict[str, Any]) -> Dict[str, Any]:
     modality = meta.get("modality")
     ftype = (meta.get("type") or os.path.splitext(meta.get("filename") or "")[1] or "").lower()
     source = meta.get("source") or ""
-    if modality == "video" or ftype in _AV_EXTS:
+    # A chunk with its own image asset (e.g. a video keyframe) is a picture
+    # first, even when its source file is an .mp4 — only assetless AV chunks
+    # take the video branch.
+    if modality == "video" or (not meta.get("image_url") and ftype in _AV_EXTS):
         out["modality"] = "video"
         for key in ("start", "end", "deeplink", "video_url"):
             if meta.get(key) is not None and meta.get(key) != "":
@@ -102,13 +105,19 @@ _STOPWORDS = frozenset(
     "don doesn didn won wouldn couldn shouldn wasn weren isn aren haven hasn "
     "don't doesn't didn't won't wouldn't couldn't shouldn't "
     "it's i'm i've i'll i'd you're you've you'll he's she's we're we've they're they've "
-    "that's there's here's what's who's how's let's can't".split()
+    "that's there's here's what's who's how's let's can't "
+    "aber als also am an auf aus bei bin bis bist da das dass dein deine dem den der des "
+    "die diese dieser dieses doch du ein eine einer eines er es für hat haben ich im in ist "
+    "ja kann können man mit nach nicht noch nur oder sein seine sie sind so über um und uns "
+    "von vor war was wie wir wo zu zum zur".split()
 )
 
 
 def _content_tokens(text: str) -> list:
     """Extract meaningful content words: no stopwords, min 3 chars, lowercase."""
-    words = re.findall(r"[a-z0-9]+(?:[-_][a-z0-9]+)*", text.lower())
+    # ``[^\W_]`` is the Unicode-aware equivalent of an alphanumeric character,
+    # so German terms such as "einfügen" remain one searchable token.
+    words = re.findall(r"[^\W_]+(?:[-_][^\W_]+)*", text.lower())
     return [w for w in words if len(w) >= 3 and w not in _STOPWORDS]
 
 
@@ -132,6 +141,23 @@ def _chunk_relevant_to_query(query: str, document: str) -> bool:
     return len(shared) >= need
 
 
+def _add_surviving_anchor_companions(
+    results: List[Dict[str, Any]], relevant: List[Dict[str, Any]]
+) -> List[Dict[str, Any]]:
+    """Restore companion figures whose text anchor survived relevance gating."""
+    text_ids = {
+        r.get("id") for r in relevant if not bool((r.get("metadata") or {}).get("image_url"))
+    }
+    present = {r.get("id") for r in relevant}
+    return relevant + [
+        r
+        for r in results
+        if r.get("search_type") == "figure_companion"
+        and r.get("anchor_id") in text_ids
+        and r.get("id") not in present
+    ]
+
+
 class ChatProcessor:
     def __init__(
         self, memory_manager, personal_docs_manager, memory_vector=None, skills_manager=None
@@ -145,7 +171,11 @@ class ChatProcessor:
     # dropping everything behind a hard similarity gate. Embedding/reranker
     # scales differ between providers, so a fixed threshold is brittle.
     RAG_SIMILARITY_THRESHOLD = 0.0
-    RAG_RERANK_MIN_SCORE = 0.10
+    # Companion figures get their own rerank score (caption vs. query), so this
+    # gate decides per figure whether it may be shown — 0.10 let barely-related
+    # chunks (and their figures) through; 0.30 expects a clear relevance signal
+    # from sigmoid-normalized cross-encoder scores (qwen3-reranker).
+    RAG_RERANK_MIN_SCORE = 0.30
 
     def _rag_k_setting(self, key: str, default: int) -> int:
         try:
@@ -211,6 +241,11 @@ class ChatProcessor:
                 f"Conversation so far:\n{chr(10).join(turns)}\n\n"
                 f"Latest message: {message}\n\nStandalone search query:"
             )
+            # `/no_think` is the Qwen3 soft switch; belt-and-suspenders alongside
+            # enable_thinking=False for backends that only honor the in-prompt
+            # switch. A leaked <think> block would otherwise become the query.
+            if "qwen" in (model or "").lower():
+                user_prompt += " /no_think"
             out = llm_call(
                 url,
                 model,
@@ -222,8 +257,10 @@ class ChatProcessor:
                 temperature=0.0,
                 max_tokens=120,
                 prompt_type="utility",
+                enable_thinking=False,
             )
-            rewritten = (out or "").strip().strip('"').splitlines()[0].strip()
+            lines = (out or "").strip().strip('"').splitlines()
+            rewritten = lines[0].strip() if lines else ""
             if rewritten and len(rewritten) >= 3:
                 logger.info("RAG query rewrite: %r -> %r", message[:60], rewritten[:60])
                 return rewritten
@@ -495,33 +532,79 @@ class ChatProcessor:
                             candidate_k=candidate_k,
                             exclude_scopes=["sql"],
                         )
+
                     # Decide which retrieved chunks are relevant enough to inject.
                     # When nothing clears the bar we inject NOTHING — no forced
                     # top-k fallback. Off-topic context confuses the model and
                     # yields misleading citations, so on a query the index has
                     # nothing useful for, RAG stays silent.
+                    def _is_figure(r):
+                        return bool((r.get("metadata") or {}).get("image_url"))
+
                     has_rerank_scores = any(r.get("rerank_score") is not None for r in results)
                     if has_rerank_scores:
-                        # The reranker is a reliable relevance oracle, so trust
-                        # its score directly. A vector-only match with no keyword
-                        # overlap is fine here — the reranker already vetted it.
+                        # Every result — figures included — carries its own
+                        # rerank score (companion figures are reranked on their
+                        # captions), so one threshold filters them all.
                         relevant = [
                             r
                             for r in results
                             if r.get("rerank_score") is not None
                             and float(r.get("rerank_score") or 0) >= rerank_min
                         ]
+                        # Rerank scores are only relative: even a contentless
+                        # query ("yoyoyo") ranks *something* first. Require at
+                        # least one surviving TEXT chunk to also share
+                        # distinctive query terms (BM25-style) before injecting
+                        # anything — a query the knowledge base has nothing for
+                        # injects nothing, text or figures.
+                        if not any(
+                            _chunk_relevant_to_query(
+                                search_query,
+                                r.get("_retrieval_document") or r.get("document", ""),
+                            )
+                            for r in relevant
+                            if not _is_figure(r)
+                        ):
+                            relevant = []
+                        else:
+                            # Same-page companion figures inherit the relevance
+                            # of their surviving text anchor. Their own caption
+                            # rerank score may be weak/cross-lingual, but page
+                            # provenance and post-answer selection keep the image
+                            # precise. Without this, correct text can survive
+                            # while its exact figure disappears.
+                            relevant = _add_surviving_anchor_companions(results, relevant)
                     else:
                         # No reranker: raw hybrid (RRF) scores can't tell a
                         # relevant query from an unrelated one, so require the
                         # chunk to actually share distinctive query terms before
-                        # injecting it.
+                        # injecting it. Figure captions can't pass that gate —
+                        # companions are handled below via their anchor instead.
                         relevant = [
                             r
                             for r in results
-                            if r.get("similarity", 0) >= sim_threshold
-                            and _chunk_relevant_to_query(search_query, r.get("document", ""))
+                            if not _is_figure(r)
+                            and r.get("similarity", 0) >= sim_threshold
+                            and _chunk_relevant_to_query(
+                                search_query,
+                                r.get("_retrieval_document") or r.get("document", ""),
+                            )
                         ]
+                        text_ids = {r.get("id") for r in relevant}
+                        relevant += [
+                            r for r in results if _is_figure(r) and r.get("anchor_id") in text_ids
+                        ]
+                    # A figure is only shown alongside the text it came from:
+                    # drop any companion whose anchoring chunk didn't survive
+                    # the relevance gate above.
+                    text_ids = {r.get("id") for r in relevant if not _is_figure(r)}
+                    relevant = [
+                        r
+                        for r in relevant
+                        if r.get("search_type") != "figure_companion"
+                        or r.get("anchor_id") in text_ids
+                    ]
                     if relevant:
                         logger.info(
                             f"RAG: {len(relevant)}/{len(results)} results above threshold {sim_threshold}"
@@ -538,7 +621,15 @@ class ChatProcessor:
                                 # (filter_used_rag_sources). Stripped (underscore
                                 # key) before the source is emitted or saved, so
                                 # it never reaches the client or the DB.
-                                "_text": r["document"][:1500],
+                                "_text": (r.get("_retrieval_document") or r["document"])[:3000],
+                                # Internal provenance used after generation to
+                                # pair a displayed figure with the exact text
+                                # page the answer actually used. Underscore keys
+                                # are stripped before sources reach the client.
+                                "_id": r.get("id"),
+                                "_anchor_id": r.get("anchor_id"),
+                                "_source": (r.get("metadata") or {}).get("source"),
+                                "_page": (r.get("metadata") or {}).get("page"),
                                 # Optional image-preview / video-timestamp fields
                                 # so citations can render a thumbnail or a #t=
                                 # deeplink (absent for plain text/docs).
@@ -576,8 +667,9 @@ class ChatProcessor:
                                 )
                                 body += (
                                     "\n[This section is a real figure from the document above. "
-                                    "If your answer touches what it shows, display it to the "
-                                    "user by copying this exact Markdown line into your answer:]\n"
+                                    "If this figure supports your answer, display it to the "
+                                    "user by copying this exact Markdown line into your "
+                                    "answer:]\n"
                                     f"![{cap}]({s['image_url']})"
                                 )
                             return body

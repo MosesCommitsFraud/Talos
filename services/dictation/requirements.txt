@@ -1,0 +1,10 @@
+# dictation sidecar — streaming STT for the composer's voice input.
+fastapi>=0.115
+uvicorn[standard]>=0.30
+# RealtimeSTT drives the two-tier (realtime + final) faster-whisper setup and
+# the VAD. Newer releases made both the transcription engine and the Silero
+# VAD model optional: without [faster-whisper] the recorder fails at model
+# init, and without silero-vad it falls back to an interactive torch.hub
+# download prompt that dead-ends in a container (EOFError on input()).
+RealtimeSTT[faster-whisper]>=1.0
+silero-vad>=5.0

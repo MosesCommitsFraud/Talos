@@ -26,6 +26,7 @@ STATIC = ROOT / "static"
 # New React UI bundle — served at "/" when built (mirrors app.py's strangler
 # routing: new UI at /, legacy at /legacy).
 WEB_DIST = ROOT / "web" / "dist"
+PREVIEW_SESSION_NAME = "Quarterly planning, architecture review, and release readiness follow-up"
 
 
 def _json_bytes(data) -> bytes:
@@ -486,7 +487,7 @@ def _sessions():
     return [
         {
             "id": "preview-session",
-            "name": "UI Preview",
+            "name": PREVIEW_SESSION_NAME,
             "model": "qwen3-llm",
             "endpoint_url": "mock://preview",
             "created_at": now,
@@ -539,6 +540,20 @@ class PreviewHandler(BaseHTTPRequestHandler):
 
     def _send_json(self, data, status: int = 200):
         self._send(status, _json_bytes(data))
+
+    def _send_event_stream(self, body: bytes):
+        """Drip mock SSE events so running/queue UI states can be previewed."""
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream")
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.end_headers()
+        for event in body.split(b"\n\n"):
+            if not event:
+                continue
+            self.wfile.write(event + b"\n\n")
+            self.wfile.flush()
+            time.sleep(0.15)
 
     def _read_body(self) -> bytes:
         length = int(self.headers.get("Content-Length") or 0)
@@ -628,7 +643,11 @@ class PreviewHandler(BaseHTTPRequestHandler):
         if path.startswith("/api/history/"):
             session_id = path[len("/api/history/") :]
             self._send_json(
-                {"id": session_id, "name": "UI Preview", "history": _history_for(session_id)}
+                {
+                    "id": session_id,
+                    "name": PREVIEW_SESSION_NAME,
+                    "history": _history_for(session_id),
+                }
             )
             return
         if path in ("/api/models", "/api/model-endpoints"):
@@ -661,8 +680,9 @@ class PreviewHandler(BaseHTTPRequestHandler):
             return
         if path == "/api/capabilities":
             # Pretend both knowledge sources are configured so the composer
-            # renders the full RAG + SQL mode dropdown in the preview.
-            self._send_json({"rag": True, "sql": True})
+            # renders the full RAG + SQL mode dropdown in the preview, and
+            # voice so the mic button shows (streaming needs a real sidecar).
+            self._send_json({"rag": True, "sql": True, "voice": True, "voice_streaming": False})
             return
         if path == "/api/sql/config":
             self._send_json(
@@ -696,6 +716,32 @@ class PreviewHandler(BaseHTTPRequestHandler):
                 }
             )
             return
+        if path == "/api/stats":
+            # Shape must match client.ts UsageStats — StatsPanel dereferences
+            # every field, so an empty object crashes the whole Welcome tree.
+            import datetime
+
+            today = datetime.date.today()
+            self._send_json(
+                {
+                    "sessions": 42,
+                    "messages": 813,
+                    "total_tokens": 1_500_000,
+                    "active_days": 23,
+                    "current_streak": 3,
+                    "longest_streak": 9,
+                    "peak_hour": 10,
+                    "favorite_model": "qwen3-llm",
+                    "daily": [
+                        {
+                            "date": (today - datetime.timedelta(days=41 - i)).isoformat(),
+                            "count": (i * 7) % 5,
+                        }
+                        for i in range(42)
+                    ],
+                }
+            )
+            return
         if path == "/api/rag/config":
             self._send_json(
                 {
@@ -717,10 +763,11 @@ class PreviewHandler(BaseHTTPRequestHandler):
                     "search_top_k": 5,
                     "candidate_top_k": 40,
                     "similarity_threshold": 0.0,
-                    "rerank_min_score": 0.1,
+                    "rerank_min_score": 0.3,
                     "max_context_chars": 10000,
                     "query_prefix": "",
                     "context_prompt": "",
+                    "redact_pii_enabled": False,
                 }
             )
             return
@@ -886,11 +933,16 @@ class PreviewHandler(BaseHTTPRequestHandler):
         if path == "/api/session":
             self._send_json(_sessions()[0])
             return
+        if path == "/api/voice/transcribe":
+            # Canned dictation result so the composer's voice flow (italic
+            # interim → Enter confirms → Enter sends) is testable offline.
+            self._send_json({"text": "Hallo Welt, das ist ein Diktat-Test."})
+            return
         if path == "/api/chat_stream":
             message = fields.get("message", [""])[0]
             session_id = fields.get("session", ["preview-session"])[0]
             _record_turn(session_id, message)
-            self._send(200, _preview_stream(message), "text/event-stream")
+            self._send_event_stream(_preview_stream(message))
             return
         if path.endswith("/delete-messages"):
             # /api/session/{id}/delete-messages — drop the rows so history stays

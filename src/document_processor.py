@@ -188,6 +188,16 @@ def _process_pdf(path: str) -> str:
                         continue
 
         if pdf_text:
+            # Hidden-text guard: pypdf extracts invisible text (white-on-white,
+            # invisible render mode, off-page) just like visible text — the
+            # classic PDF prompt-injection channel. Strip it before it enters
+            # chat context. Never fatal: on any failure the text passes as-is.
+            try:
+                from src.pdf_hidden_text import filter_pdf_text
+
+                pdf_text = filter_pdf_text(path, pdf_text)
+            except Exception as e:
+                logger.warning(f"hidden-text filter unavailable for {path}: {e}")
             if len(pdf_text) > 15000:
                 pdf_text = pdf_text[:15000] + "\n[PDF content truncated]"
             return f"\n\n[PDF content]:{pdf_text}"

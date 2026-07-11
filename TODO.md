@@ -12,8 +12,19 @@ reset to defaults button
 save setting profile
 adjust rag settings looks
 back not always visible in rag settings
-remove tasks and other functions that dont exist
 sources placement
-how to get images in a bucket so ai can show user? might be impossible with pdfs
 actual queue list
 Tage for left sidebar
+scroll to bottom shows even when not scrollable
+corners for everything less rounded
+hover on recent chat is limited to inside the sidebar needs limit aswell
+search expand on rag explorer
+rag explorer needs more keywords and example questions
+when sth has a lot of images in rag how do i get the ai to just show the important ones -> vlm
+scrolling title in the sidebar
+/ commands like claude
+what if images are shown despite not being relevant
+opening a chat that hasnt been open in a while flashes the new chat page briefly
+images and files created not shown in the chat after restarts (neither in chat or in the sidebar)
+icons need to be brighter under composer
+queueing and steering needed

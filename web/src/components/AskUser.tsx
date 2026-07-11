@@ -51,7 +51,7 @@ export function AskUser({ msg }: { msg: UiMessage }) {
   return (
     <div
       className={cn(
-        'mt-3 rounded-xl border border-primary/30 bg-primary/[0.04] p-3',
+        'mt-3 rounded-md border border-primary/30 bg-primary/[0.04] p-3',
         done && 'opacity-60',
       )}
     >

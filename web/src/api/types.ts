@@ -60,6 +60,8 @@ export interface RagSource {
   modality?: 'image' | 'video';
   /** Path-confined endpoint that streams the indexed image (image modality). */
   image_url?: string;
+  /** VLM/Docling caption for a figure crop (image modality). */
+  image_caption?: string;
   /** External video URL, when one was provided at ingest (video modality). */
   video_url?: string;
   /** Deep-link into the source video at the segment start (video modality). */

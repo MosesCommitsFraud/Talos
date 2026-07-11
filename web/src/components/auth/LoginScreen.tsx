@@ -79,7 +79,7 @@ export function LoginScreen({
           <p className="mt-1 text-muted-foreground text-sm">{copy.sub}</p>
         </div>
 
-        <form onSubmit={submit} className="rounded-xl border bg-popover p-5 shadow-xs/5">
+        <form onSubmit={submit} className="rounded-md border bg-popover p-5 shadow-xs/5">
           <div className="flex flex-col gap-3">
             {mode === 'totp' ? (
               <Input

@@ -101,7 +101,7 @@ export function CommandPalette({ open, onClose, onOpenSettings, onOpenRag }: { o
         <DialogPrimitive.Overlay className="fixed inset-0 z-50 bg-background/60 backdrop-blur-[2px] data-[state=closed]:opacity-0 data-[state=open]:opacity-100" />
         <div className="pointer-events-none fixed inset-0 z-50 flex flex-col items-center px-4 py-[max(1rem,10vh)]">
           <DialogPrimitive.Content
-            className="pointer-events-auto flex max-h-[26.25rem] w-full max-w-xl flex-col overflow-hidden rounded-2xl border bg-popover text-popover-foreground shadow-[0_24px_64px_rgb(0_0_0/0.45)] outline-none data-[state=closed]:scale-[0.98] data-[state=closed]:opacity-0"
+            className="pointer-events-auto flex max-h-[26.25rem] w-full max-w-xl flex-col overflow-hidden rounded-md border bg-popover text-popover-foreground shadow-[0_24px_64px_rgb(0_0_0/0.45)] outline-none data-[state=closed]:scale-[0.98] data-[state=closed]:opacity-0"
             onOpenAutoFocus={(e) => { e.preventDefault(); inputRef.current?.focus(); }}
           >
             <DialogPrimitive.Title className="sr-only">{t('palette.searchTitle')}</DialogPrimitive.Title>
