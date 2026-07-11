@@ -892,19 +892,13 @@ def _eligible_figures_for_answer(answer: str, sources: list) -> list:
     # Do not count a model-emitted image URL as proof that its figure was used;
     # determine usage from the prose/caption overlap and text anchors instead.
     prose = _RAG_ASSET_IMG_RE.sub("", answer)
-    used = filter_used_rag_sources(
-        prose, sources, include_unembedded_figures=True
-    )
+    used = filter_used_rag_sources(prose, sources, include_unembedded_figures=True)
     used_text = [s for s in used if not s.get("image_url")]
     used_figures = [s for s in used if s.get("image_url")]
 
     precise = any(
-        s.get("_anchor_id") or (s.get("_source") and s.get("_page") is not None)
-        for s in figures
-    ) and any(
-        s.get("_id") or (s.get("_source") and s.get("_page") is not None)
-        for s in used_text
-    )
+        s.get("_anchor_id") or (s.get("_source") and s.get("_page") is not None) for s in figures
+    ) and any(s.get("_id") or (s.get("_source") and s.get("_page") is not None) for s in used_text)
 
     # Prefer the text chunk most directly reflected in the final answer, not
     # every loosely overlapping top-k result. The figure relationship itself is
@@ -913,11 +907,7 @@ def _eligible_figures_for_answer(answer: str, sources: list) -> list:
     for text_source in used_text:
         text_id = text_source.get("_id")
         page_key = (text_source.get("_source"), text_source.get("_page"))
-        anchored = [
-            fig
-            for fig in figures
-            if text_id and fig.get("_anchor_id") == text_id
-        ]
+        anchored = [fig for fig in figures if text_id and fig.get("_anchor_id") == text_id]
         if anchored:
             # Multiple crops may legitimately belong to one page/text anchor.
             # Caption overlap may order those siblings, but it can never create

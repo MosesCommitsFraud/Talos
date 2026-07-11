@@ -43,9 +43,7 @@ def test_embed_text_combines_context_and_terms():
 
 
 def test_embed_text_includes_hidden_same_page_visual_context():
-    meta = {
-        "_visual_context": "Die vertikale Toolbar enthält Symbole für Textfeld und Bild."
-    }
+    meta = {"_visual_context": "Die vertikale Toolbar enthält Symbole für Textfeld und Bild."}
 
     out = rv._embed_text(meta, "Elementband")
 
@@ -124,9 +122,10 @@ def test_empty_llm_output_is_not_cached(monkeypatch):
 
 
 def test_llm_url_and_reasoning_response_compatibility():
-    assert rv._openai_chat_url("http://llm:8000/v1") == (
-        "http://llm:8000/v1/chat/completions"
+    assert rv._openai_chat_url("http://llm:8000/v1") == ("http://llm:8000/v1/chat/completions")
+    assert (
+        rv._chat_response_text(
+            {"choices": [{"message": {"content": "", "reasoning_content": "keyword"}}]}
+        )
+        == "keyword"
     )
-    assert rv._chat_response_text(
-        {"choices": [{"message": {"content": "", "reasoning_content": "keyword"}}]}
-    ) == "keyword"

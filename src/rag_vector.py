@@ -585,9 +585,7 @@ def _embed_text(meta: Dict[str, Any], content: str) -> str:
     (Phase 8) + the original content + auto ``aux_terms`` suffix (Phase 9). The
     original ``content`` is what gets stored/displayed/cited — only the embedding
     sees these enrichments."""
-    text = _prefix_context(
-        (meta or {}).get("context") or "", _retrieval_body(meta or {}, content)
-    )
+    text = _prefix_context((meta or {}).get("context") or "", _retrieval_body(meta or {}, content))
     aux = ((meta or {}).get("aux_terms") or "").strip()
     return f"{text}\n\n{aux}" if aux else text
 
@@ -783,11 +781,7 @@ def _repair_oversized_pdf_chunks(path: str, docs):
     documents are preserved as-is.
     """
     limit = _max_chunk_chars()
-    ordinary = [
-        d
-        for d in docs
-        if not (d.meta or {}).get("modality") and (d.content or "").strip()
-    ]
+    ordinary = [d for d in docs if not (d.meta or {}).get("modality") and (d.content or "").strip()]
     if len(ordinary) != 1 or len(ordinary[0].content or "") <= limit:
         return docs
 
@@ -1517,9 +1511,7 @@ class VectorRAG:
             import httpx
 
             model = os.getenv("RERANK_MODEL", "")
-            docs = [
-                c.get("_retrieval_document") or c.get("document", "") for c in candidates
-            ]
+            docs = [c.get("_retrieval_document") or c.get("document", "") for c in candidates]
             payload: Dict[str, Any] = {"query": query, "documents": docs}
             if model:
                 payload["model"] = model
@@ -1924,7 +1916,7 @@ class VectorRAG:
         "This frame is from a screen-recording of an online training session. It "
         "may contain webcam/participant video tiles, sidebars or chat panels "
         "around a shared desktop/application/slide area. Return ONLY a JSON "
-        'object with the bounding box of the shared screen content, excluding '
+        "object with the bounding box of the shared screen content, excluding "
         'all webcam tiles and panels, as {"x1":..,"y1":..,"x2":..,"y2":..} with '
         "coordinates normalized to 0-1000. If the whole frame is shared screen "
         "content, return the full frame box."
@@ -2290,9 +2282,7 @@ class VectorRAG:
             vlm_caption = (captions[i] or "").strip()
             docling_caption = (c["docling_caption"] or "").strip()
             caption = vlm_caption or docling_caption
-            caption_source = (
-                "vlm" if vlm_caption else ("docling" if docling_caption else "locator")
-            )
+            caption_source = "vlm" if vlm_caption else ("docling" if docling_caption else "locator")
             page_txt = f" (page {c['page']})" if c["page"] else ""
             # The Document's content is what the retriever matches on, so fall
             # back to a minimal locator when neither VLM nor Docling gave text.
@@ -2704,8 +2694,7 @@ class VectorRAG:
                 "figure_kind": "keyframe",
                 "start": ts,
                 "end": ts + interval,
-                "image_url": "/api/personal/rag-asset?source="
-                + quote(c["asset_path"], safe=""),
+                "image_url": "/api/personal/rag-asset?source=" + quote(c["asset_path"], safe=""),
                 "image_caption": f"[at {mm}:{ss:02d}] " + (caption or content),
             }
             if base:
@@ -2749,6 +2738,7 @@ class VectorRAG:
                 conc = int(os.getenv("VIDEO_ASR_CONCURRENCY", "2") or 2)
             except Exception:
                 conc = 2
+
             def _asr_done(c: int) -> None:
                 try:
                     stage_cb(c, total, stage="asr")
@@ -3314,6 +3304,7 @@ class VectorRAG:
                         "metadata": meta,
                     }
                 )
+
             def _audit_order(row):
                 meta = row.get("metadata") or {}
                 page = meta.get("page")

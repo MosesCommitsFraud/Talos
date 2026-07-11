@@ -36,7 +36,5 @@ def test_reranker_uses_hidden_retrieval_document(monkeypatch):
 
     result = rag._rerank("Funktionen der Toolbar-Symbole", candidates, 1)
 
-    assert captured["documents"] == [
-        "Elementband\n\nvertikale Toolbar Symbole Funktionen"
-    ]
+    assert captured["documents"] == ["Elementband\n\nvertikale Toolbar Symbole Funktionen"]
     assert result[0]["document"] == "Elementband"

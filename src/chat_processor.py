@@ -146,9 +146,7 @@ def _add_surviving_anchor_companions(
 ) -> List[Dict[str, Any]]:
     """Restore companion figures whose text anchor survived relevance gating."""
     text_ids = {
-        r.get("id")
-        for r in relevant
-        if not bool((r.get("metadata") or {}).get("image_url"))
+        r.get("id") for r in relevant if not bool((r.get("metadata") or {}).get("image_url"))
     }
     present = {r.get("id") for r in relevant}
     return relevant + [
@@ -534,6 +532,7 @@ class ChatProcessor:
                             candidate_k=candidate_k,
                             exclude_scopes=["sql"],
                         )
+
                     # Decide which retrieved chunks are relevant enough to inject.
                     # When nothing clears the bar we inject NOTHING — no forced
                     # top-k fallback. Off-topic context confuses the model and
@@ -594,9 +593,7 @@ class ChatProcessor:
                         ]
                         text_ids = {r.get("id") for r in relevant}
                         relevant += [
-                            r
-                            for r in results
-                            if _is_figure(r) and r.get("anchor_id") in text_ids
+                            r for r in results if _is_figure(r) and r.get("anchor_id") in text_ids
                         ]
                     # A figure is only shown alongside the text it came from:
                     # drop any companion whose anchoring chunk didn't survive
@@ -624,9 +621,7 @@ class ChatProcessor:
                                 # (filter_used_rag_sources). Stripped (underscore
                                 # key) before the source is emitted or saved, so
                                 # it never reaches the client or the DB.
-                                "_text": (
-                                    r.get("_retrieval_document") or r["document"]
-                                )[:3000],
+                                "_text": (r.get("_retrieval_document") or r["document"])[:3000],
                                 # Internal provenance used after generation to
                                 # pair a displayed figure with the exact text
                                 # page the answer actually used. Underscore keys

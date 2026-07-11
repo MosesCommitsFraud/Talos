@@ -626,17 +626,14 @@ def setup_rag_routes():
             if c.get("aux_terms_error"):
                 lines.append(f"> aux_terms_error: {c['aux_terms_error']}")
             if any(
-                c.get(key)
-                for key in ("context", "aux_terms", "context_error", "aux_terms_error")
+                c.get(key) for key in ("context", "aux_terms", "context_error", "aux_terms_error")
             ):
                 lines.append("")
             lines.append(c.get("content") or "")
             lines.append("")
         # RFC 5987 filename* so non-ASCII upload names survive the header.
         fname = f"{base}.ingested.md"
-        headers = {
-            "Content-Disposition": f"attachment; filename*=UTF-8''{quote(fname)}"
-        }
+        headers = {"Content-Disposition": f"attachment; filename*=UTF-8''{quote(fname)}"}
         return PlainTextResponse(
             "\n".join(lines), media_type="text/markdown; charset=utf-8", headers=headers
         )

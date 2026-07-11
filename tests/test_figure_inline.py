@@ -130,9 +130,7 @@ def test_same_pdf_filename_uses_exact_page_anchor_not_first_figure():
         "_text": "DrillDownControl im Gruppenband",
     }
 
-    out = ch.append_missing_figures(
-        answer, [band_text, drill_text, drill_fig, band_fig]
-    )
+    out = ch.append_missing_figures(answer, [band_text, drill_text, drill_fig, band_fig])
 
     assert _OK in out
     assert _BAD not in out
@@ -240,9 +238,7 @@ def test_figure_cannot_jump_to_different_text_anchor_on_same_page():
         "_text": "Band einfügen generic overlap",
     }
 
-    eligible = ch._eligible_figures_for_answer(
-        answer, [text, wrong_anchor, correct]
-    )
+    eligible = ch._eligible_figures_for_answer(answer, [text, wrong_anchor, correct])
 
     assert [fig["image_url"] for fig in eligible] == [_OK]
 
