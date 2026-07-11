@@ -94,6 +94,155 @@ def test_append_caps_at_max_figures():
     assert out.count("![") == 1
 
 
+def test_same_pdf_filename_uses_exact_page_anchor_not_first_figure():
+    answer = "Im macs Report Editor wird das Band per Rechtsklick eingefügt."
+    source = "/u/training.pdf"
+    band_text = {
+        "filename": "training.pdf",
+        "_id": "page6",
+        "_source": source,
+        "_page": 6,
+        "_text": "Im macs Report Editor können Bereiche mit einem Rechtsklick hinzugefügt werden. Band einfügen.",
+    }
+    drill_text = {
+        "filename": "training.pdf",
+        "_id": "page27",
+        "_source": source,
+        "_page": 27,
+        "_text": "Im DrillDownControl kann die gewünschte Zelle ausgewählt werden.",
+    }
+    band_fig = {
+        "filename": "training.pdf",
+        "_anchor_id": "page6",
+        "_source": source,
+        "_page": 6,
+        "image_url": _OK,
+        "image_caption": "Band einfügen",
+        "_text": "Kontextmenü Band einfügen",
+    }
+    drill_fig = {
+        "filename": "training.pdf",
+        "_anchor_id": "page27",
+        "_source": source,
+        "_page": 27,
+        "image_url": _BAD,
+        "image_caption": "DrillDownControl",
+        "_text": "DrillDownControl im Gruppenband",
+    }
+
+    out = ch.append_missing_figures(answer, [band_text, drill_text, drill_fig, band_fig])
+
+    assert _OK in out
+    assert _BAD not in out
+
+
+def test_wrong_model_chosen_figure_is_stripped_then_correct_anchor_can_append():
+    answer = f"Band per Rechtsklick einfügen. ![wrong]({_BAD})"
+    source = "/u/training.pdf"
+    sources = [
+        {
+            "filename": "training.pdf",
+            "_id": "page6",
+            "_source": source,
+            "_page": 6,
+            "_text": "Band per Rechtsklick einfügen.",
+        },
+        {
+            "filename": "training.pdf",
+            "_source": source,
+            "_page": 6,
+            "_anchor_id": "page6",
+            "image_url": _OK,
+            "image_caption": "Band einfügen",
+        },
+        {
+            "filename": "training.pdf",
+            "_source": source,
+            "_page": 27,
+            "_anchor_id": "page27",
+            "image_url": _BAD,
+            "image_caption": "DrillDownControl",
+        },
+    ]
+
+    stripped = ch.strip_unauthorized_figures(answer, sources)
+    appended = stripped + ch.append_missing_figures(stripped, sources)
+
+    assert _BAD not in appended
+    assert _OK in appended
+
+
+def test_same_page_prefers_focused_figure_and_drops_extra_image_sources():
+    answer = f"Die vertikale Toolbar enthält Textfeld, Bild, Seiteninfo, Formel und Sparkline. ![toolbar]({_OK})"
+    source = "/u/training.pdf"
+    page_text = {
+        "filename": "training.pdf",
+        "_id": "page28",
+        "_source": source,
+        "_page": 28,
+        "_text": "Elementband mit Symbolen für Textfeld, Bild, Seiteninfo, Formel und Sparkline.",
+    }
+    generic = {
+        "filename": "training.pdf",
+        "_anchor_id": "page28",
+        "_source": source,
+        "_page": 28,
+        "image_url": _BAD,
+        "_text": "Allgemeine Oberfläche des Report Designers mit Raster und Tabs.",
+    }
+    focused = {
+        "filename": "training.pdf",
+        "_anchor_id": "page28",
+        "_source": source,
+        "_page": 28,
+        "image_url": _OK,
+        "_text": "Vertikale Toolbar: Textfeld, Bild, Seiteninfo, Formel und Sparkline.",
+    }
+    sources = [page_text, generic, focused]
+
+    eligible = ch._eligible_figures_for_answer(answer, sources)
+    used = ch.filter_used_rag_sources(answer, sources)
+    with_extra = answer + f" ![generic]({_BAD})"
+    stripped = ch.strip_unauthorized_figures(with_extra, sources)
+
+    assert [s["image_url"] for s in eligible] == [_OK]
+    assert [s["image_url"] for s in used if s.get("image_url")] == [_OK]
+    assert _OK in stripped
+    assert _BAD not in stripped
+
+
+def test_figure_cannot_jump_to_different_text_anchor_on_same_page():
+    answer = "Band per Rechtsklick einfügen."
+    source = "/u/training.pdf"
+    text = {
+        "filename": "training.pdf",
+        "_id": "band-text",
+        "_source": source,
+        "_page": 6,
+        "_text": "Band per Rechtsklick einfügen.",
+    }
+    correct = {
+        "filename": "training.pdf",
+        "_anchor_id": "band-text",
+        "_source": source,
+        "_page": 6,
+        "image_url": _OK,
+        "_text": "Band einfügen",
+    }
+    wrong_anchor = {
+        "filename": "training.pdf",
+        "_anchor_id": "other-text",
+        "_source": source,
+        "_page": 6,
+        "image_url": _BAD,
+        "_text": "Band einfügen generic overlap",
+    }
+
+    eligible = ch._eligible_figures_for_answer(answer, [text, wrong_anchor, correct])
+
+    assert [fig["image_url"] for fig in eligible] == [_OK]
+
+
 def test_compaction_extracts_and_dedupes_figures():
     md = f"![diagram]({_OK})"
     older = [
