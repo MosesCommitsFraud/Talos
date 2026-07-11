@@ -109,7 +109,7 @@ export function ContextMeter() {
         type="button"
         onClick={() => setOpen((o) => !o)}
         aria-label={t('contextMeter.used', { percent: formatPercent(percent) })}
-        className="inline-flex size-4 shrink-0 cursor-pointer items-center justify-center rounded-full border border-transparent text-muted-foreground outline-none transition-colors hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
+        className="inline-flex size-4 shrink-0 cursor-pointer items-center justify-center rounded-full border border-transparent text-foreground/65 outline-none transition-colors hover:bg-accent hover:text-foreground/90 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
       >
         <span className="relative flex size-3 items-center justify-center">
           <svg
@@ -119,7 +119,7 @@ export function ContextMeter() {
           >
             <circle
               cx="12" cy="12" r={radius} fill="none" strokeWidth="4.5"
-              stroke="color-mix(in oklab, var(--muted-foreground) 35%, transparent)"
+              stroke="color-mix(in oklab, var(--foreground) 42%, transparent)"
             />
             <circle
               cx="12" cy="12" r={radius} fill="none" strokeWidth="4.5" strokeLinecap="round"

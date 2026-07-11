@@ -42,6 +42,30 @@ def test_embed_text_combines_context_and_terms():
     assert "body" in out
 
 
+def test_embed_text_includes_hidden_same_page_visual_context():
+    meta = {"_visual_context": "Die vertikale Toolbar enthält Symbole für Textfeld und Bild."}
+
+    out = rv._embed_text(meta, "Elementband")
+
+    assert "Elementband" in out
+    assert "vertikale Toolbar" in out
+
+
+def test_enriched_text_passes_german_relevance_gate_when_display_text_cannot():
+    import src.chat_processor as cp
+
+    query = "Welche Funktionen haben die Symbole in der vertikalen Toolbar in macs?"
+    content = "Elementband: Textfeld, Bild, Seiteninfo, Formel, Sparkline"
+    meta = {
+        "context": "Dieser Abschnitt beschreibt die Funktionen der Elemente.",
+        "aux_terms": "Symbolleiste\nvertikale Toolbar",
+        "_visual_context": "Die Symbole der Toolbar und ihre Funktionen werden erklärt.",
+    }
+
+    assert not cp._chunk_relevant_to_query(query, content)
+    assert cp._chunk_relevant_to_query(query, rv._embed_text(meta, content))
+
+
 class _Doc:
     def __init__(self, content):
         self.content = content
@@ -71,3 +95,37 @@ def test_apply_autokeywords_sets_aux_terms_and_caches(monkeypatch):
     # Re-ingest → cache hit, no new LLM calls.
     rv.VectorRAG._apply_autokeywords(_Dummy(), [_Doc("chunk one"), _Doc("chunk two")])
     assert len(calls) == 2
+
+
+def test_empty_llm_output_is_not_cached(monkeypatch):
+    monkeypatch.setenv("RAG_LLM_URL", "http://llm/v1/chat/completions")
+    monkeypatch.setenv("RAG_AUTO_KEYWORDS_N", "3")
+    monkeypatch.setenv("RAG_AUTO_QUESTIONS_N", "2")
+    monkeypatch.delenv("REDIS_URL", raising=False)
+    rv._CONTEXT_CACHE.clear()
+
+    calls = []
+
+    class _Dummy:
+        def _auto_terms(self, chunk):
+            calls.append(chunk)
+            return ""
+
+    first = _Doc("chunk one")
+    second = _Doc("chunk one")
+    rv.VectorRAG._apply_autokeywords(_Dummy(), [first])
+    rv.VectorRAG._apply_autokeywords(_Dummy(), [second])
+
+    assert calls == ["chunk one", "chunk one"]
+    assert "aux_terms_error" in first.meta
+    assert "aux_terms_error" in second.meta
+
+
+def test_llm_url_and_reasoning_response_compatibility():
+    assert rv._openai_chat_url("http://llm:8000/v1") == ("http://llm:8000/v1/chat/completions")
+    assert (
+        rv._chat_response_text(
+            {"choices": [{"message": {"content": "", "reasoning_content": "keyword"}}]}
+        )
+        == "keyword"
+    )

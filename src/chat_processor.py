@@ -105,13 +105,19 @@ _STOPWORDS = frozenset(
     "don doesn didn won wouldn couldn shouldn wasn weren isn aren haven hasn "
     "don't doesn't didn't won't wouldn't couldn't shouldn't "
     "it's i'm i've i'll i'd you're you've you'll he's she's we're we've they're they've "
-    "that's there's here's what's who's how's let's can't".split()
+    "that's there's here's what's who's how's let's can't "
+    "aber als also am an auf aus bei bin bis bist da das dass dein deine dem den der des "
+    "die diese dieser dieses doch du ein eine einer eines er es für hat haben ich im in ist "
+    "ja kann können man mit nach nicht noch nur oder sein seine sie sind so über um und uns "
+    "von vor war was wie wir wo zu zum zur".split()
 )
 
 
 def _content_tokens(text: str) -> list:
     """Extract meaningful content words: no stopwords, min 3 chars, lowercase."""
-    words = re.findall(r"[a-z0-9]+(?:[-_][a-z0-9]+)*", text.lower())
+    # ``[^\W_]`` is the Unicode-aware equivalent of an alphanumeric character,
+    # so German terms such as "einfügen" remain one searchable token.
+    words = re.findall(r"[^\W_]+(?:[-_][^\W_]+)*", text.lower())
     return [w for w in words if len(w) >= 3 and w not in _STOPWORDS]
 
 
@@ -133,6 +139,23 @@ def _chunk_relevant_to_query(query: str, document: str) -> bool:
     shared = set(q) & d
     need = 1 if len(set(q)) <= 2 else 2
     return len(shared) >= need
+
+
+def _add_surviving_anchor_companions(
+    results: List[Dict[str, Any]], relevant: List[Dict[str, Any]]
+) -> List[Dict[str, Any]]:
+    """Restore companion figures whose text anchor survived relevance gating."""
+    text_ids = {
+        r.get("id") for r in relevant if not bool((r.get("metadata") or {}).get("image_url"))
+    }
+    present = {r.get("id") for r in relevant}
+    return relevant + [
+        r
+        for r in results
+        if r.get("search_type") == "figure_companion"
+        and r.get("anchor_id") in text_ids
+        and r.get("id") not in present
+    ]
 
 
 class ChatProcessor:
@@ -218,6 +241,11 @@ class ChatProcessor:
                 f"Conversation so far:\n{chr(10).join(turns)}\n\n"
                 f"Latest message: {message}\n\nStandalone search query:"
             )
+            # `/no_think` is the Qwen3 soft switch; belt-and-suspenders alongside
+            # enable_thinking=False for backends that only honor the in-prompt
+            # switch. A leaked <think> block would otherwise become the query.
+            if "qwen" in (model or "").lower():
+                user_prompt += " /no_think"
             out = llm_call(
                 url,
                 model,
@@ -229,8 +257,10 @@ class ChatProcessor:
                 temperature=0.0,
                 max_tokens=120,
                 prompt_type="utility",
+                enable_thinking=False,
             )
-            rewritten = (out or "").strip().strip('"').splitlines()[0].strip()
+            lines = (out or "").strip().strip('"').splitlines()
+            rewritten = lines[0].strip() if lines else ""
             if rewritten and len(rewritten) >= 3:
                 logger.info("RAG query rewrite: %r -> %r", message[:60], rewritten[:60])
                 return rewritten
@@ -502,6 +532,7 @@ class ChatProcessor:
                             candidate_k=candidate_k,
                             exclude_scopes=["sql"],
                         )
+
                     # Decide which retrieved chunks are relevant enough to inject.
                     # When nothing clears the bar we inject NOTHING — no forced
                     # top-k fallback. Off-topic context confuses the model and
@@ -528,11 +559,22 @@ class ChatProcessor:
                         # anything — a query the knowledge base has nothing for
                         # injects nothing, text or figures.
                         if not any(
-                            _chunk_relevant_to_query(search_query, r.get("document", ""))
+                            _chunk_relevant_to_query(
+                                search_query,
+                                r.get("_retrieval_document") or r.get("document", ""),
+                            )
                             for r in relevant
                             if not _is_figure(r)
                         ):
                             relevant = []
+                        else:
+                            # Same-page companion figures inherit the relevance
+                            # of their surviving text anchor. Their own caption
+                            # rerank score may be weak/cross-lingual, but page
+                            # provenance and post-answer selection keep the image
+                            # precise. Without this, correct text can survive
+                            # while its exact figure disappears.
+                            relevant = _add_surviving_anchor_companions(results, relevant)
                     else:
                         # No reranker: raw hybrid (RRF) scores can't tell a
                         # relevant query from an unrelated one, so require the
@@ -544,13 +586,14 @@ class ChatProcessor:
                             for r in results
                             if not _is_figure(r)
                             and r.get("similarity", 0) >= sim_threshold
-                            and _chunk_relevant_to_query(search_query, r.get("document", ""))
+                            and _chunk_relevant_to_query(
+                                search_query,
+                                r.get("_retrieval_document") or r.get("document", ""),
+                            )
                         ]
                         text_ids = {r.get("id") for r in relevant}
                         relevant += [
-                            r
-                            for r in results
-                            if _is_figure(r) and r.get("anchor_id") in text_ids
+                            r for r in results if _is_figure(r) and r.get("anchor_id") in text_ids
                         ]
                     # A figure is only shown alongside the text it came from:
                     # drop any companion whose anchoring chunk didn't survive
@@ -578,7 +621,15 @@ class ChatProcessor:
                                 # (filter_used_rag_sources). Stripped (underscore
                                 # key) before the source is emitted or saved, so
                                 # it never reaches the client or the DB.
-                                "_text": r["document"][:1500],
+                                "_text": (r.get("_retrieval_document") or r["document"])[:3000],
+                                # Internal provenance used after generation to
+                                # pair a displayed figure with the exact text
+                                # page the answer actually used. Underscore keys
+                                # are stripped before sources reach the client.
+                                "_id": r.get("id"),
+                                "_anchor_id": r.get("anchor_id"),
+                                "_source": (r.get("metadata") or {}).get("source"),
+                                "_page": (r.get("metadata") or {}).get("page"),
                                 # Optional image-preview / video-timestamp fields
                                 # so citations can render a thumbnail or a #t=
                                 # deeplink (absent for plain text/docs).
