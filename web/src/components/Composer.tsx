@@ -1,6 +1,8 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   BookOpenIcon,
+  CirclePauseIcon,
+  CircleStopIcon,
   BrainIcon,
   CheckIcon,
   ChevronDownIcon,
@@ -76,6 +78,31 @@ function ModeToggle({
 }
 
 type ModeOpt = { key: ChatMode; rag: boolean; db: boolean; label: string; desc: string };
+
+type SlashCommand = {
+  name: string;
+  description: string;
+  takesText?: boolean;
+};
+
+const SLASH_COMMANDS: SlashCommand[] = [
+  { name: 'btw', description: 'Ask a side question without changing the current task', takesText: true },
+  { name: 'goal', description: 'Run autonomously until the goal is complete or blocked', takesText: true },
+  { name: 'plan', description: 'Create an editable execution plan', takesText: true },
+  { name: 'status', description: 'Show goal progress, next action, and blockers' },
+  { name: 'compact', description: 'Summarize and persist older conversation context' },
+  { name: 'pause', description: 'Pause the active goal after the current turn' },
+  { name: 'resume', description: 'Resume a paused goal' },
+  { name: 'cancel', description: 'Cancel the active goal and current run' },
+  { name: 'attach', description: 'Choose local files to attach' },
+  { name: 'summarize', description: 'Summarize text, attachments, or this conversation', takesText: true },
+  { name: 'rewrite', description: 'Rewrite supplied or selected text', takesText: true },
+  { name: 'extract', description: 'Extract structured facts and action items', takesText: true },
+  { name: 'compare', description: 'Compare attached files or supplied passages', takesText: true },
+  { name: 'decision', description: 'Analyze options, trade-offs, and recommend', takesText: true },
+  { name: 'todos', description: 'Create an editable checklist', takesText: true },
+  { name: 'export', description: 'Prepare the result as a local export', takesText: true },
+];
 
 /** Knowledge-mode dropdown styled like t3code's runtime-mode picker (ghost
  *  trigger, rich items with a description line). Shown only when both RAG and
@@ -243,18 +270,95 @@ export function Composer() {
   const [pending, setPending] = useState<UploadedFile[]>([]);
   const [uploading, setUploading] = useState(false);
   const [dragging, setDragging] = useState(false);
+  const [slashIndex, setSlashIndex] = useState(0);
+  const [commandError, setCommandError] = useState('');
+  const [queuedBtw, setQueuedBtw] = useState('');
   const dragDepth = useRef(0);
   const textarea = useRef<HTMLTextAreaElement>(null);
   const fileInput = useRef<HTMLInputElement>(null);
+  const slashMenu = useRef<HTMLDivElement>(null);
+  const previousSlashIndex = useRef(0);
   const streaming = useChat((s) => s.streaming);
   const send = useChat((s) => s.send);
   const stop = useChat((s) => s.stop);
+  const goal = useChat((s) => s.goal);
+  const startGoal = useChat((s) => s.startGoal);
+  const pauseGoal = useChat((s) => s.pauseGoal);
+  const resumeGoal = useChat((s) => s.resumeGoal);
+  const cancelGoal = useChat((s) => s.cancelGoal);
+  const compact = useChat((s) => s.compact);
   const cancelPlan = useChat((s) => s.cancelPlan);
   const pendingPlan = useChat(selectPendingPlan);
   const setPlanPanelOpen = useUi((s) => s.setPlanPanelOpen);
   const prefs = usePrefs();
   const queryClient = useQueryClient();
   const { data: caps } = useQuery({ queryKey: ['capabilities'], queryFn: fetchCapabilities, staleTime: 60_000 });
+
+  const slashMatch = text.match(/^\/([^\s]*)$/);
+  const slashItems = slashMatch
+    ? SLASH_COMMANDS.filter((c) => c.name.startsWith(slashMatch[1].toLowerCase()))
+    : [];
+
+  useEffect(() => {
+    setSlashIndex(0);
+    previousSlashIndex.current = 0;
+  }, [text]);
+  useEffect(() => {
+    const menu = slashMenu.current;
+    const selected = menu?.querySelector<HTMLElement>(`[data-slash-index="${slashIndex}"]`);
+    if (!menu || !selected) return;
+    const previous = previousSlashIndex.current;
+    previousSlashIndex.current = slashIndex;
+    // Arrow navigation wraps. Follow that jump all the way so the newly
+    // selected first/last command never remains outside the viewport.
+    if (previous === slashItems.length - 1 && slashIndex === 0) {
+      menu.scrollTop = 0;
+      return;
+    }
+    if (previous === 0 && slashIndex === slashItems.length - 1) {
+      menu.scrollTop = menu.scrollHeight;
+      return;
+    }
+    const rowHeight = selected.offsetHeight;
+    const rowTop = selected.offsetTop;
+    const rowBottom = rowTop + rowHeight;
+    const visibleTop = menu.scrollTop;
+    const visibleBottom = visibleTop + menu.clientHeight;
+    // Move exactly one row when keyboard selection crosses either edge. Using
+    // scrollIntoView here can jump several rows depending on browser alignment.
+    if (rowTop < visibleTop) menu.scrollTop = Math.max(0, visibleTop - rowHeight);
+    else if (rowBottom > visibleBottom) menu.scrollTop = visibleTop + rowHeight;
+  }, [slashIndex, slashItems.length]);
+
+  // /btw may be entered while a turn is running. Queue it and dispatch as soon
+  // as that turn settles; goal continuation sees the new stream and waits, then
+  // resumes after the aside without losing its objective.
+  useEffect(() => {
+    if (streaming || !queuedBtw) return;
+    const aside = queuedBtw;
+    setQueuedBtw('');
+    void send(
+      `Side question: ${aside}\n\nAnswer this briefly without changing, replacing, or reprioritizing the current task or goal. Then return control to the existing task.`,
+      { planMode: false },
+    );
+  }, [streaming, queuedBtw, send]);
+
+  const executeImmediate = async (name: string) => {
+    setCommandError('');
+    if (name === 'attach') { fileInput.current?.click(); return; }
+    if (name === 'pause') { pauseGoal(); setText(''); return; }
+    if (name === 'resume') { setText(''); await resumeGoal(); return; }
+    if (name === 'cancel') { cancelGoal(); setText(''); return; }
+    if (name === 'compact') {
+      try { await compact(); setText(''); }
+      catch (err) { setCommandError(err instanceof Error ? err.message : 'Compaction failed'); }
+      return;
+    }
+    if (name === 'status') {
+      setText('');
+      await send('Report the current objective, completed work, current step, next action, and any blockers. Do not start new work.');
+    }
+  };
 
   // Voice dictation (Claude-style): while recording, the live transcript is
   // shown italic in place of the textarea; the first Enter confirms it into
@@ -371,7 +475,53 @@ export function Composer() {
 
   const submit = async () => {
     const value = text.trim();
+    const match = value.match(/^\/(\w+)(?:\s+([\s\S]*))?$/);
+    if (streaming && match?.[1]?.toLowerCase() === 'btw') {
+      const aside = (match[2] ?? '').trim();
+      if (!aside) { setCommandError('Add a question after /btw.'); return; }
+      setQueuedBtw(aside);
+      setText('');
+      setCommandError('Side question queued; it will run after the current turn.');
+      return;
+    }
     if ((!value && pending.length === 0) || streaming || uploading || dictating) return;
+
+    if (match) {
+      const command = match[1].toLowerCase();
+      const arg = (match[2] ?? '').trim();
+      setCommandError('');
+      if (command === 'attach') { fileInput.current?.click(); return; }
+      if (command === 'compact') {
+        try { await compact(); setText(''); } catch (err) { setCommandError(err instanceof Error ? err.message : 'Compaction failed'); }
+        return;
+      }
+      if (command === 'pause') { pauseGoal(); setText(''); return; }
+      if (command === 'resume') { setText(''); await resumeGoal(); return; }
+      if (command === 'cancel') { cancelGoal(); setText(''); return; }
+      if (command === 'goal') {
+        if (!arg) { setCommandError('Add an objective after /goal.'); return; }
+        setText(''); setPending([]); requestAnimationFrame(autoresize);
+        await startGoal(arg);
+        return;
+      }
+      const prompts: Record<string, string> = {
+        btw: `Side question: ${arg}\n\nAnswer this briefly without changing, replacing, or reprioritizing the current task or goal. Then return control to the existing task.`,
+        plan: `Create an editable step-by-step plan for: ${arg || 'the current request'}. Do not execute it yet.`,
+        status: 'Report the current objective, completed work, current step, next action, and any blockers. Do not start new work.',
+        summarize: `Summarize ${arg || 'the attached material or current conversation'}. Preserve decisions, constraints, dates, and open questions.`,
+        rewrite: `Rewrite the following clearly while preserving its meaning: ${arg || 'the attached or most recently discussed text'}`,
+        extract: `Extract structured facts, decisions, dates, people, and action items from: ${arg || 'the attached material or current conversation'}`,
+        compare: `Compare ${arg || 'the attached materials'}. Show meaningful similarities, differences, conflicts, and a concise conclusion.`,
+        decision: `Analyze this decision: ${arg || 'the current decision'}. Give options, trade-offs, assumptions, risks, and a recommendation.`,
+        todos: `Turn ${arg || 'the current conversation or attachments'} into an editable checklist with clear completion criteria.`,
+        export: `Prepare ${arg || 'the current result'} as a clean, self-contained document suitable for saving locally.`,
+      };
+      if (prompts[command]) {
+        setText(''); setPending([]); requestAnimationFrame(autoresize);
+        await send(prompts[command], { attachments: pending });
+        return;
+      }
+    }
     const attachments = pending;
     setText('');
     setPending([]);
@@ -436,6 +586,31 @@ export function Composer() {
           dragging && 'border-primary/60 ring-2 ring-primary/30',
         )}
       >
+        {slashItems.length > 0 && (
+          <div ref={slashMenu} className="absolute inset-x-0 bottom-full z-40 mb-1.5 max-h-64 overflow-y-auto rounded-md border bg-popover px-1 py-1.5 text-popover-foreground shadow-xl">
+            {slashItems.map((command, index) => (
+              <button
+                key={command.name}
+                data-slash-index={index}
+                type="button"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => {
+                  if (command.takesText) {
+                    setText(`/${command.name} `);
+                    requestAnimationFrame(() => textarea.current?.focus());
+                  } else {
+                    void executeImmediate(command.name);
+                  }
+                }}
+                onMouseEnter={() => setSlashIndex(index)}
+                className={cn('flex h-7 w-full items-center gap-2 rounded-sm px-2 text-left', index === slashIndex && 'bg-accent')}
+              >
+                <span className="w-20 shrink-0 font-mono text-xs font-medium text-primary">/{command.name}</span>
+                <span className="min-w-0 truncate text-[11px] leading-none text-muted-foreground">{command.description}</span>
+              </button>
+            ))}
+          </div>
+        )}
         {pending.length > 0 && (
           <div className="flex flex-wrap gap-1.5 px-3 pt-2.5">
             {pending.map((f) => (
@@ -485,6 +660,19 @@ export function Composer() {
             aria-label={t('composer.messageInput')}
             onChange={(e) => { setText(e.target.value); autoresize(); }}
             onKeyDown={(e) => {
+              if (slashItems.length && e.key === 'ArrowDown') {
+                e.preventDefault(); setSlashIndex((i) => (i + 1) % slashItems.length); return;
+              }
+              if (slashItems.length && e.key === 'ArrowUp') {
+                e.preventDefault(); setSlashIndex((i) => (i - 1 + slashItems.length) % slashItems.length); return;
+              }
+              if (slashItems.length && (e.key === 'Tab' || e.key === 'Enter')) {
+                e.preventDefault();
+                const command = slashItems[slashIndex];
+                if (command.takesText) setText(`/${command.name} `);
+                else void executeImmediate(command.name);
+                return;
+              }
               if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault();
                 void submit();
@@ -532,6 +720,22 @@ export function Composer() {
           )}
         </div>
       </div>
+
+      {goal && !['completed', 'cancelled'].includes(goal.status) && (
+        <div className="mt-2 flex items-center gap-2 rounded-md border bg-muted/40 px-3 py-2 text-xs">
+          <span className={cn('size-2 rounded-full', goal.status === 'running' ? 'animate-pulse bg-emerald-500' : 'bg-amber-500')} />
+          <span className="min-w-0 flex-1 truncate">
+            Goal · {goal.status} · iteration {goal.iteration} · {goal.objective}
+          </span>
+          {goal.status === 'running' ? (
+            <button type="button" onClick={pauseGoal} aria-label="Pause goal" className="text-muted-foreground hover:text-foreground"><CirclePauseIcon className="size-4" /></button>
+          ) : goal.status === 'paused' ? (
+            <button type="button" onClick={() => void resumeGoal()} aria-label="Resume goal" className="text-muted-foreground hover:text-foreground"><PlayIcon className="size-4" /></button>
+          ) : null}
+          <button type="button" onClick={cancelGoal} aria-label="Cancel goal" className="text-muted-foreground hover:text-destructive"><CircleStopIcon className="size-4" /></button>
+        </div>
+      )}
+      {commandError && <p className="mt-1 text-center text-xs text-destructive">{commandError}</p>}
 
       {/* Control row — outside the input card, Claude Code style: knowledge/add/mic
           on the left, model/thinking/context on the right. Enter sends; a stop

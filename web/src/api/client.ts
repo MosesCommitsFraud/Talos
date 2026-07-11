@@ -89,6 +89,12 @@ export async function markImportant(id: string, important: boolean): Promise<voi
   await fetch(`/api/session/${id}/important`, { method: 'POST', body: fd, credentials: 'same-origin' });
 }
 
+export interface CompactResult { ok: boolean; summarized: number; kept: number; message_count: number }
+
+/** Run the backend's real conversation compactor and persist the shortened history. */
+export const compactSession = (id: string) =>
+  postJSON<CompactResult>(`/api/session/${encodeURIComponent(id)}/compact`);
+
 export interface UploadedFile extends Attachment {}
 
 export async function uploadFiles(files: File[]): Promise<UploadedFile[]> {
