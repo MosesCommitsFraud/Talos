@@ -135,6 +135,7 @@ _TIMEOUT_EXEMPT_PREFIXES = (
     "/api/model/probe",  # SSE; iterates models with up to 8s timeout each
     "/api/model-endpoints",  # /probe sub-route also iterates models
     "/api/upload",  # large files
+    "/api/personal/upload",  # RAG knowledge-base uploads (multi-GB videos for ASR)
 )
 
 
@@ -710,6 +711,16 @@ from routes.capabilities_routes import setup_capabilities_routes
 
 app.include_router(setup_capabilities_routes())
 
+# Usage stats (empty-chat home screen)
+from routes.stats_routes import setup_stats_routes
+
+app.include_router(setup_stats_routes())
+
+# Voice dictation (mic → ASR endpoint proxy)
+from routes.voice_routes import setup_voice_routes
+
+app.include_router(setup_voice_routes())
+
 # Backup (export/import user data)
 from routes.backup_routes import setup_backup_routes
 
@@ -778,6 +789,19 @@ async def serve_index(request: Request):
     if os.path.exists(_WEB_INDEX):
         return FileResponse(_WEB_INDEX, headers={"Cache-Control": "no-cache"})
     raise HTTPException(503, "web UI not built — run `npm run build` in web/")
+
+
+@app.get("/pcm-capture.worklet.js")
+async def serve_dictation_worklet():
+    # Dictation AudioWorklet (useDictation.ts). Un-hashed dist-root file, so it
+    # needs its own route: only /assets and /fonts get StaticFiles mounts, and
+    # the CSP (script-src 'self') rules out inlining it as a blob: module.
+    path = os.path.join(WEB_DIST, "pcm-capture.worklet.js")
+    if os.path.exists(path):
+        return FileResponse(
+            path, media_type="text/javascript", headers={"Cache-Control": "no-cache"}
+        )
+    raise HTTPException(404, "worklet not built")
 
 
 @app.get("/api/version")

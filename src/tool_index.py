@@ -38,11 +38,8 @@ ALWAYS_AVAILABLE = frozenset(
         "show_image",  # display a workspace image inline (charts/plots/results)
         "run_cell",  # persistent Python kernel (stateful, Jupyter-like) for iterative work
         "api_call",  # For configured integrations (Miniflux, Gitea, Linkding, etc.)
-        # Generic API loopback — the catch-all when no named tool fits.
-        "app_api",
         # Memory is ambient — "remember this" can follow any message regardless
-        # of topic. Without this, RAG drops it and the agent falls back to
-        # app_api /api/memory/add which fails with 422 on first attempt.
+        # of topic. Without this, RAG drops it and the agent improvises badly.
         "manage_memory",
         # Ask the user a multiple-choice question for a decision/clarification.
         # Always reachable so the agent can pause and ask at any point.
@@ -66,11 +63,6 @@ ASSISTANT_ALWAYS_AVAILABLE = frozenset(
         "update_document",
         "search_chats",
         "api_call",  # For Miniflux/Gitea/Linkding/etc. integrations
-        # Core UI control (toggles, open panels, switch model/mode, themes).
-        # Always available so vague follow-ups ("now make it playful", "make it
-        # darker") that don't repeat a theme/UI keyword still keep the tool in
-        # reach — without it the model narrates instead of acting.
-        "ui_control",
     }
 )
 
@@ -116,10 +108,7 @@ BUILTIN_TOOL_DESCRIPTIONS: Dict[str, str] = {
     "send_to_session": "Send a message to another chat. Cross-chat communication.",
     "search_chats": "Search through chat history across all sessions.",
     "ask_user": "Ask the user a question to get a decision, clarification, or input. Use this when the task is genuinely ambiguous and the answer changes what you do next — pick between approaches, confirm an assumption, choose among options, gather a missing detail — instead of guessing. Provide a clear `question` plus either 2-6 `options` (each with a short `label`, optional `description`) for clickable buttons, or no options for an open free-text answer. Calling this ENDS your turn: the user's answer arrives as your next message. Don't use it for things you can decide from context or sensible defaults, or for irreversible-action confirmation if a dedicated flow exists.",
-    "ui_control": "Control the UI and toggle tools on/off. Use this to turn off / turn on / disable / enable individual tools and features: shell (bash), search (web), research, browser, documents, incognito. Open panels (documents library, gallery, sessions, memories/brain, skills, settings, cookbook) via `open_panel <name>`. Also switches between chat/agent modes, changes the current model, and applies/creates themes.",
     "query_sql": "Read-only SQL access to the configured external database using backend .env credentials. Use when the user asks for database data, SQL, tables, schema, rows, metrics, reports, counts, customers, orders, products, invoices, or anything stored in the DB. Supports list_tables, describe table, and read-only SELECT/WITH/SHOW/DESCRIBE/EXPLAIN/PRAGMA queries with optional max_rows; omit max_rows or pass 0 for no row limit. The model never needs DB passwords.",
-    "app_api": "Generic loopback to ANY Talos internal endpoint. Use this when the user wants something the UI can do but there's no named tool for it. Covers gallery, library/documents, memory, tasks, settings, research, compare, cookbook GPUs/state — every UI button hits some /api/* endpoint and you can hit it too. action='endpoints' with filter=<keyword> lists available endpoints. action='call' takes method+path+body. Hits same routes the UI uses — auth flows free. NOTE: themes are NOT an API endpoint — use the ui_control tool (create_theme / set_theme), not app_api. SESSIONS/CHATS: do NOT use app_api for these — GET /api/sessions returns EMPTY for tool calls (it's owner-filtered and tool calls authenticate as a different identity). To list/rename/archive/delete/fork chats use the list_sessions and manage_session tools instead.",
-    "edit_image": "Edit an image in the gallery: upscale (increase resolution), remove background (rembg), inpaint (fill selected area), or harmonize (blend edits). Specify image ID and action.",
 }
 
 
@@ -304,8 +293,7 @@ class ToolIndex:
         ): {"query_sql"},
         # Chat/session management. "rename" alone maps to documents below, so a
         # request like "rename the last 12 sessions/chats" needs these session
-        # keywords to surface the right tools (NOT app_api — /api/sessions is
-        # owner-filtered and returns empty for tool calls).
+        # keywords to surface the right tools.
         frozenset(
             {
                 "sessions",
@@ -412,7 +400,7 @@ class ToolIndex:
                 "preferences",
                 "configure",
             }
-        ): {"manage_settings", "ui_control"},
+        ): {"manage_settings"},
         # Document edit/update intent
         frozenset(
             {
@@ -472,24 +460,8 @@ class ToolIndex:
                 "in the library",
             }
         ): {"manage_documents", "edit_document"},
-        # Theme / UI control intent
-        frozenset(
-            {
-                "theme",
-                "color scheme",
-                "colors of the ui",
-                "make it dark",
-                "make it light",
-                "make the ui",
-                "switch theme",
-                "change theme",
-                "dark mode",
-                "light mode",
-                "toggle",
-            }
-        ): {"ui_control"},
-        # Tool on/off / panel open intent — user says "turn off shell",
-        # "disable search", "open library", "show gallery", etc.
+        # Tool on/off intent — user says "turn off shell", "disable search".
+        # Handled by manage_settings (disable_tool/enable_tool).
         frozenset(
             {
                 "turn off",
@@ -502,32 +474,8 @@ class ToolIndex:
                 "search on",
                 "research off",
                 "research on",
-                "incognito",
-                "switch model",
-                "change model",
-                "set mode",
-                "agent mode",
-                "chat mode",
-                "open library",
-                "open documents",
-                "open gallery",
-                "open settings",
-                "open memories",
-                "open memory",
-                "open skills",
-                "open chats",
-                "open sessions",
-                "show library",
-                "show gallery",
-                "show settings",
-                "show memory",
-                "show memories",
-                "show skills",
-                "show chats",
-                "show sessions",
-                "show documents",
             }
-        ): {"ui_control"},
+        ): {"manage_settings"},
         # Document creation intent
         frozenset(
             {

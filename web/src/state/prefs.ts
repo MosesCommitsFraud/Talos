@@ -59,6 +59,8 @@ interface PrefsState {
    *  the backend tells vLLM `enable_thinking: false`. Default on. */
   reasoning: boolean;
   incognito: boolean;
+  /** Preferred microphone for voice dictation; null = system default. */
+  micDeviceId: string | null;
   /** Compact (icon-only) sidebar mode. */
   sidebarCollapsed: boolean;
   /** Names of sidebar folders the user has collapsed. */
@@ -74,6 +76,7 @@ interface PrefsState {
   toggle: (key: 'planMode' | 'useRag' | 'useDb' | 'reasoning' | 'incognito') => void;
   /** Set both knowledge flags at once (used by the mode dropdown). */
   setKnowledge: (useRag: boolean, useDb: boolean) => void;
+  setMicDeviceId: (id: string | null) => void;
   toggleSidebar: () => void;
   toggleFolder: (name: string) => void;
   setPreviewWidth: (px: number) => void;
@@ -92,6 +95,7 @@ export const usePrefs = create<PrefsState>()(
       useDb: true,
       reasoning: true,
       incognito: false,
+      micDeviceId: null,
       sidebarCollapsed: false,
       collapsedFolders: [],
       previewWidth: 480,
@@ -103,6 +107,7 @@ export const usePrefs = create<PrefsState>()(
       resetVisibility: () => set({ visibility: DEFAULT_VISIBILITY }),
       toggle: (key) => set((s) => ({ [key]: !s[key] }) as Partial<PrefsState>),
       setKnowledge: (useRag, useDb) => set({ useRag, useDb }),
+      setMicDeviceId: (micDeviceId) => set({ micDeviceId }),
       toggleSidebar: () => set((s) => ({ sidebarCollapsed: !s.sidebarCollapsed })),
       toggleFolder: (name) => set((s) => ({
         collapsedFolders: s.collapsedFolders.includes(name)

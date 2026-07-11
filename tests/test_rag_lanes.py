@@ -107,6 +107,73 @@ def test_vllm_asr_helpers_normalize_language_and_segments():
     ]
 
 
+# ── Video keyframe lane gating ──
+
+
+def test_keyframes_inactive_by_default(monkeypatch):
+    monkeypatch.delenv("VIDEO_FRAMES_ENABLED", raising=False)
+    monkeypatch.delenv("VLM_URL", raising=False)
+    assert rv._keyframes_active() is False
+
+
+def test_keyframes_require_both_toggle_and_vlm_url(monkeypatch):
+    monkeypatch.setenv("VIDEO_FRAMES_ENABLED", "true")
+    monkeypatch.delenv("VLM_URL", raising=False)
+    assert rv._keyframes_active() is False  # toggle on but no vision endpoint
+    monkeypatch.setenv("VLM_URL", "http://192.168.10.91:8000/v1/chat/completions")
+    assert rv._keyframes_active() is True
+
+
+def test_video_exts_subset_of_av():
+    assert rv._VIDEO_EXTS < rv._AV_EXTS
+    assert ".mp3" not in rv._VIDEO_EXTS
+
+
+def test_extract_video_keyframes_skips_audio_and_never_raises(monkeypatch):
+    """Best-effort lane: audio files yield no keyframes, and an extraction
+    failure yields [] instead of breaking the ASR ingest."""
+
+    class _Dummy:
+        _vlm_detect_region = None
+
+    assert rv.VectorRAG._extract_video_keyframes(_Dummy(), "talk.mp3", {}) == []
+
+    import src.video_frames as vf
+
+    def _boom(*a, **k):
+        raise RuntimeError("decoder exploded")
+
+    monkeypatch.setattr(vf, "extract_keyframes", _boom)
+    assert rv.VectorRAG._extract_video_keyframes(_Dummy(), "clip.mp4", {}) == []
+
+
+def test_vlm_detect_region_parses_and_rejects(monkeypatch):
+    from PIL import Image
+
+    img = Image.new("RGB", (16, 9), (0, 0, 0))
+
+    def _region(answer):
+        class _Stub:
+            _VLM_REGION_PROMPT = rv.VectorRAG._VLM_REGION_PROMPT
+
+            def _vlm_transcribe_image(self, b64, prompt=None):
+                return answer
+
+        return rv.VectorRAG._vlm_detect_region(_Stub(), img)
+
+    assert _region('{"x1": 0, "y1": 0, "x2": 750, "y2": 1000}') == (0.0, 0.0, 0.75, 1.0)
+    # Values clamp into range; prose around the JSON is tolerated.
+    assert _region('The box is {"x1": -5, "y1": 0, "x2": 1200, "y2": 1000} roughly.') == (
+        0.0,
+        0.0,
+        1.0,
+        1.0,
+    )
+    assert _region("no json here") is None
+    assert _region('{"x1": 0, "y1": 0}') is None  # missing keys
+    assert _region('{"x1": 0, "y1": 0, "x2": 100, "y2": 100}') is None  # box too small
+
+
 # ── Document vision (VLM) lane gating ──
 
 

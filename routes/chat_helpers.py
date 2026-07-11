@@ -803,7 +803,13 @@ def _rag_bigrams(tokens: list) -> set:
     )
 
 
-def filter_used_rag_sources(answer: str, sources: list, *, min_overlap_frac: float = 0.16) -> list:
+def filter_used_rag_sources(
+    answer: str,
+    sources: list,
+    *,
+    min_overlap_frac: float = 0.16,
+    include_unembedded_figures: bool = False,
+) -> list:
     """Keep only the RAG sources whose content was actually reflected in the answer.
 
     Retrieval routinely surfaces chunks the model ends up ignoring — it answered
@@ -831,6 +837,12 @@ def filter_used_rag_sources(answer: str, sources: list, *, min_overlap_frac: flo
         if img and (img in answer or unquote(img) in answer):
             used.append(s)
             continue
+        # A retrieved figure is not a used/citable source merely because its
+        # verbose caption shares generic words with the answer. It becomes used
+        # when actually displayed. Figure selection can opt into caption overlap
+        # explicitly for standalone-image handling.
+        if img and not include_unembedded_figures:
+            continue
         src_tokens = _rag_content_tokens(s.get("_text") or s.get("snippet") or "")
         if not src_tokens:
             continue
@@ -843,7 +855,98 @@ def filter_used_rag_sources(answer: str, sources: list, *, min_overlap_frac: flo
     return used
 
 
+def _source_usage_score(answer: str, source: dict) -> tuple:
+    """Rank how directly the final prose reflects one retrieved source."""
+    answer_tokens = _rag_content_tokens(answer)
+    source_tokens = _rag_content_tokens(source.get("_text") or source.get("snippet") or "")
+    if not answer_tokens or not source_tokens:
+        return (0, 0, 0.0, 0.0)
+    answer_words = set(answer_tokens)
+    source_words = set(source_tokens)
+    overlap = answer_words & source_words
+    shared_bigrams = _rag_bigrams(answer_tokens) & _rag_bigrams(source_tokens)
+    fraction = len(overlap) / max(1, len(source_words))
+    try:
+        retrieval_score = float(source.get("similarity") or 0.0)
+    except Exception:
+        retrieval_score = 0.0
+    return (len(shared_bigrams), len(overlap), fraction, retrieval_score)
+
+
 _RAG_ASSET_IMG_RE = re.compile(r"!\[[^\]]*\]\((?P<url>/api/personal/rag-asset\?source=[^)\s]*)\)")
+
+
+def _eligible_figures_for_answer(answer: str, sources: list) -> list:
+    """Pair figures with the exact text page/anchor used by the final answer.
+
+    A filename is not sufficient provenance: every page and figure extracted
+    from one PDF has the same filename. Internal ``_id``/``_anchor_id`` and
+    ``_source``/``_page`` fields preserve the retrieval relationship without
+    exposing it to clients. Legacy callers without those fields retain the old
+    filename fallback.
+    """
+    figures = [s for s in (sources or []) if s.get("image_url")]
+    if not answer or not figures:
+        return []
+
+    # Do not count a model-emitted image URL as proof that its figure was used;
+    # determine usage from the prose/caption overlap and text anchors instead.
+    prose = _RAG_ASSET_IMG_RE.sub("", answer)
+    used = filter_used_rag_sources(prose, sources, include_unembedded_figures=True)
+    used_text = [s for s in used if not s.get("image_url")]
+    used_figures = [s for s in used if s.get("image_url")]
+
+    precise = any(
+        s.get("_anchor_id") or (s.get("_source") and s.get("_page") is not None) for s in figures
+    ) and any(s.get("_id") or (s.get("_source") and s.get("_page") is not None) for s in used_text)
+
+    # Prefer the text chunk most directly reflected in the final answer, not
+    # every loosely overlapping top-k result. The figure relationship itself is
+    # never inferred from words: it must carry this exact text hit's anchor id.
+    used_text.sort(key=lambda s: _source_usage_score(prose, s), reverse=True)
+    for text_source in used_text:
+        text_id = text_source.get("_id")
+        page_key = (text_source.get("_source"), text_source.get("_page"))
+        anchored = [fig for fig in figures if text_id and fig.get("_anchor_id") == text_id]
+        if anchored:
+            # Multiple crops may legitimately belong to one page/text anchor.
+            # Caption overlap may order those siblings, but it can never create
+            # or cross the anchor relationship.
+            anchored.sort(key=lambda s: _source_usage_score(prose, s), reverse=True)
+            return anchored[:1]
+
+        # Backward compatibility for records created before anchor ids were
+        # carried into chat sources. Only unanchored figures may use page
+        # provenance; an image anchored elsewhere can never jump pages/chunks.
+        legacy_page_figures = [
+            fig
+            for fig in figures
+            if not fig.get("_anchor_id")
+            and page_key[0]
+            and page_key[1] is not None
+            and (fig.get("_source"), fig.get("_page")) == page_key
+        ]
+        if legacy_page_figures:
+            return legacy_page_figures[:1]
+
+    # Standalone images have no owning text anchor and may be used directly.
+    # Anchored document figures are deliberately excluded from this path.
+    if not used_text:
+        standalone = [fig for fig in used_figures if not fig.get("_anchor_id")]
+        standalone.sort(key=lambda s: _source_usage_score(prose, s), reverse=True)
+        if standalone:
+            return standalone[:1]
+
+    if precise:
+        return []
+
+    # Backward-compatible fallback for older/unit-test source dictionaries.
+    used_files = {s.get("filename") for s in used_text}
+    legacy = [s for s in figures if s.get("filename") in used_files] or (
+        figures if used_files else []
+    )
+    legacy.sort(key=lambda s: _source_usage_score(prose, s), reverse=True)
+    return legacy[:1]
 
 
 def strip_unauthorized_figures(answer: str, sources: list) -> str:
@@ -864,7 +967,17 @@ def strip_unauthorized_figures(answer: str, sources: list) -> str:
     def _norm(u: str) -> str:
         return unquote(unquote(u or ""))
 
-    allowed = {_norm(s.get("image_url")) for s in (sources or []) if s.get("image_url")}
+    has_precise_provenance = any(
+        s.get("image_url")
+        and (s.get("_anchor_id") or (s.get("_source") and s.get("_page") is not None))
+        for s in (sources or [])
+    )
+    allowed_sources = (
+        _eligible_figures_for_answer(answer, sources)
+        if has_precise_provenance
+        else [s for s in (sources or []) if s.get("image_url")]
+    )
+    allowed = {_norm(s.get("image_url")) for s in allowed_sources}
 
     def _keep(m: "re.Match") -> str:
         if _norm(m.group("url")) in allowed:
@@ -873,6 +986,31 @@ def strip_unauthorized_figures(answer: str, sources: list) -> str:
         return ""
 
     return _RAG_ASSET_IMG_RE.sub(_keep, answer)
+
+
+def append_missing_figures(answer: str, sources: list, *, max_figures: int = 1) -> str:
+    """Deterministic backstop for inline figures: when the answer drew on a
+    retrieved document that has a figure but embeds no rag-asset image itself,
+    return ready-made figure Markdown for the caller to append to the answer.
+
+    The model is instructed (_FIGURE_EMBED_RULE) to copy the figure line into
+    its answer, but small local models skip that often enough that figures
+    appeared randomly. Rather than trust sampling, the server guarantees it.
+    Returns '' when the answer already shows a rag-asset image, no figure was
+    retrieved, or the answer didn't demonstrably use any retrieved source."""
+    if not answer or not sources:
+        return ""
+    if _RAG_ASSET_IMG_RE.search(answer):
+        return ""  # the model embedded one itself
+    matched = _eligible_figures_for_answer(answer, sources)
+    lines = []
+    for s in matched[:max_figures]:
+        cap = (s.get("image_caption") or s.get("filename") or "figure").strip()
+        # First line only, brackets sanitized, capped — mirrors the alt-text
+        # treatment in the injected figure section (chat_processor._rag_section).
+        cap = cap.splitlines()[0].replace("[", "(").replace("]", ")")[:120].strip() or "figure"
+        lines.append(f"![{cap}]({s['image_url']})")
+    return "\n\n" + "\n\n".join(lines) if lines else ""
 
 
 def public_rag_sources(sources: list) -> list:

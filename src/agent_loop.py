@@ -122,8 +122,7 @@ _API_AGENT_RULES = """\
 - AFTER A TOOL SUCCEEDS, do not second-guess. A success response means it worked. Reply in ONE short sentence confirming what was done. No verification thinking, no re-analyzing — move on.
 - AFTER A TOOL FAILS, DO NOT GO SILENT. The user expects a follow-up: retry with a fix, run a diagnostic (`tail`, `ls`, `which`), or explicitly tell them what didn't work and what you'll try next. Failure is not a stopping condition.
 - YOU DECLARE WHEN THE JOB IS DONE — not a timer. Keep taking concrete steps while the task still needs them; don't quit early just because you've made a few calls. Three ways to end a turn: (1) DONE — before declaring it, verify every concrete deliverable the user asked for actually exists or succeeded; then stop calling tools and write the final answer (that IS your "done" signal); (2) BLOCKED — you can't proceed (missing capability, permission denied, unobtainable data), so state plainly what's blocking you and stop; (3) keep going with the single most useful next step. Never trail off mid-task without (1) or (2), and never repeat a call you already ran.
-- "Disable/turn off/enable/turn on <tool>" (shell, browser, documents, incognito, etc.) → call `ui_control` with `toggle <name> <on|off>`. Aliases accepted: shell→bash, documents→document_editor. NEVER record this as a memory — the user wants the toggle flipped, not a note about preferring it.
-- "Open/show <panel>" (documents, library, gallery, sessions, brain/memories, skills, settings) → call `ui_control` with `open_panel <name>`. Panel aliases: library/doc/docs/document→documents, images→gallery, chats/history→sessions, memory/memories→brain, preferences→settings. CRITICAL: "open memory/memories/brain" / "open skills" / "open documents" means OPEN THE PANEL — call `ui_control`, NOT a manage/list tool. The "manage_*" tools list contents in chat; `ui_control open_panel` opens the visual modal the user is asking for.
+- "Disable/turn off/enable/turn on <tool>" (shell, search, browser, documents, etc.) → call `manage_settings` with `{"action":"disable_tool"|"enable_tool","tool":"<name>"}`. NEVER record this as a memory — the user wants the tool toggled, not a note about preferring it.
 - User identity facts/preferences ("my name is <name>", "I live in <place>", "I prefer concise replies", "call me <name>") → use `manage_memory` with action=add.
 - You are running INSIDE Talos — there is no OpenWebUI, ChatGPT, or external chat backend to query. All chats/sessions live in THIS app and are accessed via `list_sessions` (or `manage_session` with `action=list`), and deleted via `manage_session` with `action=delete`. Do NOT shell out to find sqlite files, curl localhost:8080, or grep for routers — those don't exist here. If `list_sessions` returns rows, that IS the source of truth.
 - After `list_sessions`, preserve the returned `[Chat title](#session-<id>)` links in your user-facing reply. Do not rewrite chat lists as plain tables with non-clickable titles.
@@ -253,34 +252,8 @@ Read-only SQL access to the configured external database(s). Use when the user a
     "send_to_session": "- ```send_to_session``` — Send a message to another session. Line 1 = session_id, rest = message. Use for orchestrating work across sessions.",
     "search_chats": "- ```search_chats``` — Search across all chat history. Use when user asks 'did we discuss X?' or 'find the conversation about Y'.",
     "pipeline": "- ```pipeline``` — Run a multi-step AI pipeline. Args (JSON) with ordered steps, each specifying a model and prompt. Use for complex workflows.",
-    "ui_control": '- ```ui_control``` — Control the UI: toggle tools on/off, OPEN PANELS, switch models, change themes. Commands: `toggle <name> on/off` (names: bash/shell, browser, incognito, document_editor/documents), `open_panel <name>` (panels: documents, gallery, sessions, memories/brain, skills, settings), `set_mode agent/chat`, `switch_model <name>`, `set_theme <preset>`, `create_theme <name> <bg> <fg> <panel> <border> <accent>` (optional key=val for advanced colors AND background effects: bgPattern=<none|dots|synapse|rain|constellations|perlin-flow|petals|sparkles|embers>, bgEffectColor=#RRGGBB, bgEffectIntensity=<num>, bgEffectSize=<num>, frosted=true|false). "open documents" / "open library" / "show gallery" all map to `open_panel <name>`. Theme presets: dark, light, midnight, paper, cyberpunk, retrowave, forest, ocean, ume, copper, terminal, organs, lavender, gpt, claude, cute.',
     "ask_user": '- ```ask_user``` — Ask the user a multiple-choice question when the task is genuinely ambiguous and the answer changes what you do next (pick an approach, confirm an assumption, choose a target). Args (JSON): {"question": "...", "options": [{"label": "...", "description": "..."?}, ...], "multi": false?}. 2-6 options. The user gets clickable buttons; calling this ENDS your turn and their choice comes back as your next message. Prefer sensible defaults — only ask when you truly can\'t proceed well without their input.',
     "update_plan": '- ```update_plan``` — While executing an approved plan, write the full checklist back with completed steps marked `- [x]`. Args (JSON): {"plan": "- [x] done step\\n- [ ] next step"}. Always pass the COMPLETE checklist, not a diff.',
-    "app_api": """\
-```app_api
-{"action": "call", "method": "GET", "path": "/api/gallery/list"}
-```
-GENERIC LOOPBACK to ANY Talos internal endpoint. Use this whenever the user wants something the UI can do but there's NO named tool for it. Every UI button hits some /api/* endpoint — you can hit the same one. Auth is handled automatically.
-
-**Discovery first.** If you're not sure of the path, call `{"action":"endpoints","filter":"<keyword>"}` (e.g. filter='calendar' or 'gallery' or 'theme') to list available endpoints with their methods + summaries. Then call with action='call'.
-
-**Common surfaces (use `endpoints` with filter to discover the full set per domain):**
-- Gallery: `/api/gallery/list`, `/api/gallery/delete`, `/api/gallery/{id}`, `/api/gallery/albums`
-- Library / Documents: list all via `/api/documents/library`; docs in a session via `/api/documents/{session_id}`; a single doc via `/api/document/{id}` (singular) and its history via `/api/document/{id}/versions` (singular). Note the plural `/api/documents/...` vs singular `/api/document/{id}` split.
-- Memory: `/api/memory`, `/api/memory/{id}`, `/api/memory/search`
-- Notes: `/api/notes`, `/api/notes/{id}`
-- Tasks: `/api/tasks`, `/api/tasks/{id}/run`, `/api/tasks/notifications`
-- Sessions: `/api/sessions`, `/api/session/{id}`, `/api/session/{id}/truncate`
-- Themes: `/api/prefs/themes`, `/api/prefs/custom-themes`
-- Settings: `/api/settings`, `/api/prefs/{key}`
-- Compare: `/api/compare/sessions`, `/api/compare/start`
-- Endpoints (model providers): `/api/endpoints`, `/api/endpoints/{id}`
-
-Body for POST/PUT/PATCH goes in `body` (object). Query params in `query` (object). Returns the parsed JSON of the response.
-
-**When to prefer named tools over app_api:** if a named wrapper exists (manage_documents, list_served_models, etc.) USE IT — it has nicer output formatting and clearer schema. Reach for `app_api` only when there's no wrapper for what you need.
-
-Blocked paths (refused for safety): /api/auth/, /api/users/, /api/tokens/, /api/admin/, /api/backup/restore.""",
 }
 
 
@@ -563,7 +536,7 @@ def _recent_context_for_retrieval(
     A contextless follow-up ("yes", "and?", "do it in November") carries no
     tool signal on its own, so RAG/keyword retrieval drops the tools the
     conversation is actually about — the model then "forgets" it has e.g.
-    query_sql and improvises with bash/app_api. Concatenating the recent
+    query_sql and improvises with bash. Concatenating the recent
     user turns lets the follow-up inherit the topic so just-used tools stay
     surfaced. Newest-first, so the latest turn survives the length cap."""
     collected = []
@@ -2670,10 +2643,6 @@ async def stream_agent_loop(
                         f"data: {json.dumps({'type': 'doc_update', 'doc_id': result['doc_id'], 'content': result['content'], 'version': result['version'], 'title': result.get('title', ''), 'language': result.get('language')})}\n\n"
                     )
 
-            # Emit ui_control event for frontend to apply UI changes
-            if "ui_event" in result:
-                yield (f"data: {json.dumps({'type': 'ui_control', 'data': result})}\n\n")
-
             # ask_user: the agent posed a multiple-choice question. Emit it so the
             # frontend renders clickable options, then end the turn (below) and
             # wait — the user's pick becomes the next message.
@@ -2741,7 +2710,7 @@ async def stream_agent_loop(
             elif "error" in result:
                 output_text = result["error"][:2000]
 
-            # Emit tool_output (include ui_event data if present)
+            # Emit tool_output
             tool_output_data = {
                 "type": "tool_output",
                 "tool": block.tool_type,
@@ -2749,19 +2718,6 @@ async def stream_agent_loop(
                 "output": output_text,
                 "exit_code": result.get("exit_code"),
             }
-            if "ui_event" in result:
-                tool_output_data["ui_event"] = result["ui_event"]
-                for k in (
-                    "toggle_name",
-                    "state",
-                    "mode",
-                    "model",
-                    "endpoint_url",
-                    "theme_name",
-                    "colors",
-                ):
-                    if k in result:
-                        tool_output_data[k] = result[k]
             # Forward image data from generate_image tool
             for k in ("image_url", "image_prompt", "image_model", "image_size", "image_quality"):
                 if k in result:

@@ -1,0 +1,22 @@
+# HTTPS front for Talos (docker-compose.https.yml) — terminates TLS with
+# Caddy's built-in internal CA and proxies everything (incl. WebSockets) to
+# the app container. No domain or Let's Encrypt needed on a LAN.
+#
+# TALOS_HTTPS_HOST is the address users type into the browser — the LAN IP or
+# an internal DNS name. The internal CA issues a certificate exactly for it.
+#
+# Browsers warn once about the unknown CA ("proceed anyway" is enough — the
+# context still counts as secure, so mic access works). To remove the warning
+# entirely, install Caddy's root CA on the clients; export it with:
+#   docker cp talos-caddy:/data/caddy/pki/authorities/local/root.crt .
+
+# Browsers omit SNI when connecting to an IP address; without this Caddy
+# rejects the no-SNI handshake instead of falling back to the IP certificate.
+{
+	default_sni {$TALOS_HTTPS_HOST:localhost}
+}
+
+{$TALOS_HTTPS_HOST:localhost} {
+	tls internal
+	reverse_proxy talos-app:7000
+}

@@ -235,7 +235,7 @@ body::after {
      scroll the page or trigger back/forward navigation. */
   overscroll-behavior-x: contain;
   border: 1px solid var(--border);
-  border-radius: 0.75rem;
+  border-radius: 0.5rem;
   background: var(--muted);
   padding: 0.8rem 0.9rem;
   font-family: var(--font-mono);

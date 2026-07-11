@@ -19,7 +19,6 @@ import { TooltipProvider } from './components/ui/misc';
 import { applyDensity, applyLang, applyTheme, usePrefs } from './state/prefs';
 import { selectPendingPlan, useChat } from './state/chat';
 import { useUi } from './state/ui';
-import { cn } from './lib/utils';
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { staleTime: 10_000, retry: 1 } },
@@ -36,7 +35,11 @@ export default function App() {
   const theme = usePrefs((s) => s.theme);
   const density = usePrefs((s) => s.density);
   const lang = usePrefs((s) => s.lang);
-  const hasMessages = useChat((s) => s.messages.length > 0);
+  // A cold-opened session is activated before its history request resolves.
+  // Treat the session id—not the temporary message count—as the distinction
+  // between a conversation and a genuinely new draft, avoiding a welcome-page
+  // flash while older chat history loads.
+  const hasActiveSession = useChat((s) => s.sessionId !== null);
   const pendingPlanId = useChat((s) => selectPendingPlan(s)?.id ?? null);
   const setPlanPanelOpen = useUi((s) => s.setPlanPanelOpen);
 
@@ -82,18 +85,11 @@ export default function App() {
               <>
                 <main className="relative flex min-w-0 flex-1 flex-col">
                   <IncognitoToggle />
-                  <Messages />
-                  {/* On an empty chat the composer (with the greeting above it) is
-                      lifted to the vertical center; sending the first message drops
-                      `hasMessages` → the transform releases and it slides to the
-                      bottom. transform-only, so no layout reflow during the slide. */}
-                  <div
-                    className={cn(
-                      'shrink-0 transition-transform duration-500 ease-out',
-                      !hasMessages && '-translate-y-[calc(50dvh-50%)]',
-                    )}
-                  >
-                    {!hasMessages && <Welcome />}
+                  {/* Empty chat shows the home screen (greeting + usage stats)
+                      in the message area; the composer always sits at the
+                      bottom of the viewport. */}
+                  {hasActiveSession ? <Messages /> : <Welcome />}
+                  <div className="shrink-0">
                     <PendingQuestion />
                     <Composer />
                   </div>

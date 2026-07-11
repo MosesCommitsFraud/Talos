@@ -89,6 +89,12 @@ export async function markImportant(id: string, important: boolean): Promise<voi
   await fetch(`/api/session/${id}/important`, { method: 'POST', body: fd, credentials: 'same-origin' });
 }
 
+export interface CompactResult { ok: boolean; summarized: number; kept: number; message_count: number }
+
+/** Run the backend's real conversation compactor and persist the shortened history. */
+export const compactSession = (id: string) =>
+  postJSON<CompactResult>(`/api/session/${encodeURIComponent(id)}/compact`);
+
 export interface UploadedFile extends Attachment {}
 
 export async function uploadFiles(files: File[]): Promise<UploadedFile[]> {
@@ -103,6 +109,26 @@ export async function uploadFiles(files: File[]): Promise<UploadedFile[]> {
   const data = await res.json();
   return data.files ?? [];
 }
+
+/** Aggregated usage stats for the empty-chat home screen. */
+export interface UsageStats {
+  sessions: number;
+  messages: number;
+  total_tokens: number;
+  active_days: number;
+  current_streak: number;
+  longest_streak: number;
+  /** 0–23 in the client's local time, or null with no messages yet. */
+  peak_hour: number | null;
+  favorite_model: string | null;
+  /** Daily message counts, oldest→today (~26 weeks) — feeds the heatmap. */
+  daily: { date: string; count: number }[];
+}
+
+/** days=0 → all time; otherwise tile stats cover the last N local days
+ *  (the heatmap always spans the full window). */
+export const fetchUsageStats = (days = 0) =>
+  getJSON<UsageStats>(`/api/stats?tz_offset=${-new Date().getTimezoneOffset()}&days=${days}`);
 
 export interface AuthInfo { auth_enabled: boolean; user?: string; is_admin?: boolean }
 export const fetchAuthInfo = () => getJSON<AuthInfo>('/api/auth/settings');
@@ -315,6 +341,10 @@ export interface RagConfig {
   video_asr_language?: string;
   video_asr_prompt?: string;
   video_asr_correct_enabled?: boolean;
+  /** Advanced — opt-in video keyframe lane: index what's shown on screen (off by default). */
+  video_frames_enabled?: boolean;
+  video_frames_interval_sec?: number;
+  video_frames_max?: number;
   /** Advanced — opt-in pixel image embedding lane (off by default). */
   image_pixel_enabled?: boolean;
   image_embed_url?: string;
@@ -337,9 +367,35 @@ export interface RagConfig {
   pdf_vlm_enabled?: boolean;
   vlm_url?: string;
   vlm_model?: string;
+  /** Advanced — redact PII from extracted text before indexing (off by default;
+   *  overridable per upload). */
+  redact_pii_enabled?: boolean;
 }
 /** Which knowledge sources are configured — drives the composer's mode control. */
-export const fetchCapabilities = () => getJSON<{ rag: boolean; sql: boolean }>('/api/capabilities');
+export const fetchCapabilities = () =>
+  getJSON<{ rag: boolean; sql: boolean; voice: boolean; voice_streaming: boolean }>(
+    '/api/capabilities',
+  );
+
+/** Send a dictation clip to the backend ASR proxy; returns the transcript. */
+export async function transcribeVoice(blob: Blob, signal?: AbortSignal): Promise<string> {
+  const ext = blob.type.includes('ogg') ? 'ogg' : blob.type.includes('mp4') ? 'mp4' : 'webm';
+  const fd = new FormData();
+  fd.append('file', blob, `dictation.${ext}`);
+  const res = await fetch('/api/voice/transcribe', {
+    method: 'POST',
+    body: fd,
+    credentials: 'same-origin',
+    signal,
+  });
+  if (res.status === 401) {
+    notifyUnauthenticated();
+    throw new Error('Not authenticated');
+  }
+  if (!res.ok) throw new Error(`Transcription failed: HTTP ${res.status}`);
+  const data = (await res.json()) as { text?: string };
+  return (data.text ?? '').trim();
+}
 
 export const fetchRagConfig = () => getJSON<RagConfig>('/api/rag/config');
 
@@ -457,9 +513,14 @@ export const ragSearch = (q: string, k: number) =>
 export const personalAddDirectory = (directory: string) => postJSON('/api/personal/add_directory', { directory });
 export const personalReload = () => postJSON('/api/personal/reload');
 
-export async function personalUpload(files: File[]): Promise<Record<string, unknown>> {
+export async function personalUpload(
+  files: File[],
+  opts?: { redactPii?: boolean | null },
+): Promise<Record<string, unknown>> {
   const fd = new FormData();
   for (const f of files) fd.append('files', f, f.name);
+  // Explicit per-upload PII-redaction choice; omitted → server uses the global toggle.
+  if (opts?.redactPii != null) fd.append('redact_pii', String(opts.redactPii));
   const res = await fetch('/api/personal/upload', { method: 'POST', body: fd, credentials: 'same-origin' });
   if (!res.ok) {
     const detail = await res.json().then((j) => j?.detail).catch(() => null);
@@ -484,6 +545,9 @@ export interface RagJob {
    *  bar advances during a single large document instead of jumping 0%→done. */
   sub_done?: number;
   sub_total?: number;
+  /** Which sub-step is running (e.g. 'asr', 'frames_vlm') — i18n key suffix
+   *  for a label next to the sub-progress numbers. */
+  stage?: string;
   current_file: string;
   message: string;
   errors: { file: string; error: string }[];
@@ -524,12 +588,18 @@ export interface RagChunk {
   seq: number;
   section_id: string;
   context: string;
+  context_error: string;
   aux_terms: string;
+  aux_terms_error: string;
   symbol: string;
   language: string;
   modality: string;
   metadata: Record<string, unknown>;
 }
+/** Download URL for the Markdown dump of everything indexed for one source
+ *  file (ingest-quality audit; served as an attachment). */
+export const ragDocumentExportUrl = (source: string) =>
+  `/api/rag/documents/export?source=${encodeURIComponent(source)}`;
 export const fetchRagChunks = (source: string) =>
   getJSON<{ available: boolean; source: string; chunks: RagChunk[]; error?: string }>(
     `/api/rag/documents/chunks?source=${encodeURIComponent(source)}`,
