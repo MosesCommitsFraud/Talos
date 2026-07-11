@@ -1,6 +1,6 @@
 import { CheckIcon, ChevronDownIcon, ChevronRightIcon, CopyIcon, DownloadIcon, FileIcon, FileTextIcon, FoldVerticalIcon, ImageIcon, ListChecksIcon, PencilIcon, Trash2Icon } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
-import { Fragment, useEffect, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { artifactDownloadUrl, fetchArtifacts, uploadDownloadUrl } from '@/api/client';
 import { copyTextToClipboard } from '@/lib/utils';
@@ -457,18 +457,36 @@ export function Messages() {
     refetchInterval: 10_000,
   });
 
+  const syncScrollState = useCallback(() => {
+    const el = scroller.current;
+    if (!el) return;
+    const hasOverflow = el.scrollHeight > el.clientHeight + 1;
+    const atBottom = !hasOverflow || el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+    pinned.current = atBottom;
+    setShowScrollToBottom(hasOverflow && !atBottom);
+  }, []);
+
   // Stick to the bottom while streaming unless the user scrolled up.
   useEffect(() => {
     const el = scroller.current;
     if (el && pinned.current) el.scrollTop = el.scrollHeight;
-  }, [messages]);
+    syncScrollState();
+  }, [messages, syncScrollState]);
+
+  // Content can become shorter without producing a scroll event (for example,
+  // when an activity fold closes). Keep the pill in sync with layout changes.
+  useEffect(() => {
+    const el = scroller.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(syncScrollState);
+    observer.observe(el);
+    if (el.firstElementChild) observer.observe(el.firstElementChild);
+    syncScrollState();
+    return () => observer.disconnect();
+  }, [syncScrollState]);
 
   const onScroll = () => {
-    const el = scroller.current;
-    if (!el) return;
-    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
-    pinned.current = atBottom;
-    setShowScrollToBottom(!atBottom);
+    syncScrollState();
   };
 
   const scrollToBottom = () => {
