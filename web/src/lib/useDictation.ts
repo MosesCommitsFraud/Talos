@@ -41,7 +41,7 @@ const WORKLET_URL = '/pcm-capture.worklet.js';
 
 /** Linear-interpolation downsample to 16 kHz, then PCM16. Dictation audio —
  *  fidelity beyond what the ASR consumes doesn't matter. */
-function toPcm16k(input: Float32Array, fromRate: number): Int16Array {
+function toPcm16k(input: Float32Array, fromRate: number): Int16Array<ArrayBuffer> {
   const ratio = fromRate / TARGET_RATE;
   const outLen = Math.floor(input.length / ratio);
   const out = new Int16Array(outLen);
