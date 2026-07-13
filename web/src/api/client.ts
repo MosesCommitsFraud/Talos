@@ -287,6 +287,14 @@ export async function createUser(username: string, password: string, isAdmin = f
 export const setDisplayName = (displayName: string) =>
   postJSON<{ ok?: boolean; display_name?: string | null }>('/api/auth/display-name', { display_name: displayName }, 'PUT');
 
+export const adminSetDisplayName = (username: string, displayName: string) =>
+  postJSON<{ ok?: boolean; display_name?: string | null }>(
+    `/api/auth/users/${encodeURIComponent(username)}/display-name`, { display_name: displayName }, 'PUT');
+
+export const adminResetPassword = (username: string, newPassword: string) =>
+  postJSON<{ ok?: boolean }>(
+    `/api/auth/users/${encodeURIComponent(username)}/password`, { new_password: newPassword }, 'PUT');
+
 export const renameUser = (username: string, next: string) =>
   postJSON<{ ok?: boolean; renamed_self?: boolean }>(
     `/api/auth/users/${encodeURIComponent(username)}/rename`, { username: next }, 'PUT');

@@ -401,6 +401,22 @@ class AuthManager:
         )
         return True, "ok"
 
+    def admin_set_password(self, username: str, new_password: str) -> bool:
+        """Set a user's password without knowing the current one (admin reset).
+
+        The route enforces the admin check; this only validates the target
+        exists. Session revocation is the caller's job (it knows which token,
+        if any, to preserve).
+        """
+        username = (username or "").strip().lower()
+        with self._config_lock:
+            if username not in self.users:
+                return False
+            self._config["users"][username]["password_hash"] = _hash_password(new_password)
+            self._save()
+        logger.info(f"Password reset for '{username}' (admin action)")
+        return True
+
     def change_password(self, username: str, current_password: str, new_password: str) -> bool:
         username = username.strip().lower()
         if username not in self.users:

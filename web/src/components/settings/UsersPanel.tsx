@@ -3,6 +3,8 @@ import { ChevronDownIcon, PlusIcon, Trash2Icon } from 'lucide-react';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
+  adminResetPassword,
+  adminSetDisplayName,
   createUser,
   deleteUser,
   fetchAuthStatus,
@@ -152,6 +154,7 @@ function UserRow({ user, currentUser, adminCount, onChanged }: {
 }) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
+  const queryClient = useQueryClient();
   const isSelf = user.username === (currentUser ?? '').toLowerCase();
   // Server blocks self-demote and last-admin demote; hiding the button is clearer.
   const canDemote = user.is_admin && !isSelf && adminCount > 1;
@@ -174,6 +177,28 @@ function UserRow({ user, currentUser, adminCount, onChanged }: {
     if (!window.confirm(t('settings.users.removeConfirm', { name: user.username }))) return;
     void deleteUser(user.username).then(onChanged).catch((e) => window.alert((e as Error).message));
   };
+  const editDisplayName = () => {
+    const next = window.prompt(
+      t('settings.users.displayNamePrompt', { name: user.username }),
+      user.display_name ?? '',
+    );
+    if (next === null || next.trim() === (user.display_name ?? '')) return;
+    void adminSetDisplayName(user.username, next.trim())
+      .then(() => {
+        onChanged();
+        // Editing your own name must also refresh the sidebar/account header.
+        if (isSelf) void queryClient.invalidateQueries({ queryKey: ['auth'] });
+      })
+      .catch((e) => window.alert((e as Error).message));
+  };
+  const resetPassword = () => {
+    const next = (window.prompt(t('settings.users.resetPasswordPrompt', { name: user.username })) ?? '').trim();
+    if (!next) return;
+    if (next.length < 8) { window.alert(t('settings.users.passwordTooShort')); return; }
+    void adminResetPassword(user.username, next)
+      .then(() => window.alert(t('settings.users.passwordResetDone', { name: user.username })))
+      .catch((e) => window.alert((e as Error).message));
+  };
 
   return (
     <div className="rounded-lg border bg-background">
@@ -193,6 +218,8 @@ function UserRow({ user, currentUser, adminCount, onChanged }: {
           </div>
         </div>
         <div className="flex shrink-0 items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
+          <Button variant="outline" size="sm" onClick={editDisplayName}>{t('settings.users.setName')}</Button>
+          <Button variant="outline" size="sm" onClick={resetPassword}>{t('settings.users.resetPassword')}</Button>
           <Button variant="outline" size="sm" onClick={rename}>{t('settings.users.rename')}</Button>
           {user.is_admin
             ? canDemote && <Button variant="outline" size="sm" onClick={() => setAdmin(false)}>{t('settings.users.demote')}</Button>

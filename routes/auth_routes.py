@@ -74,6 +74,10 @@ class SetDisplayNameRequest(BaseModel):
     display_name: str = ""
 
 
+class AdminResetPasswordRequest(BaseModel):
+    new_password: str
+
+
 class DeleteUserRequest(BaseModel):
     username: str
 
@@ -341,6 +345,43 @@ def setup_auth_routes(auth_manager: AuthManager) -> APIRouter:
         except Exception:
             pass
         return {"ok": True, "username": username.strip().lower(), "is_admin": make_admin}
+
+    @router.put("/users/{username}/display-name")
+    async def admin_set_display_name(
+        username: str, body: SetDisplayNameRequest, request: Request
+    ):
+        """Set (or clear, with an empty string) any user's display name. Admin only."""
+        user = _get_current_user(request)
+        if not user or not auth_manager.is_admin(user):
+            raise HTTPException(403, "Admin only")
+        target = (username or "").strip().lower()
+        ok = await asyncio.to_thread(auth_manager.set_display_name, target, body.display_name)
+        if not ok:
+            raise HTTPException(404, "User not found")
+        return {"ok": True, "display_name": auth_manager.get_display_name(target)}
+
+    @router.put("/users/{username}/password")
+    async def admin_reset_password(
+        username: str, body: AdminResetPasswordRequest, request: Request
+    ):
+        """Set a new password for any user without the current one. Admin only.
+
+        Revokes the target's active sessions so a lost/compromised login is
+        cut off immediately; when an admin resets their OWN password, the
+        session making the request is preserved.
+        """
+        user = _get_current_user(request)
+        if not user or not auth_manager.is_admin(user):
+            raise HTTPException(403, "Admin only")
+        if len(body.new_password) < 8:
+            raise HTTPException(400, "Password must be at least 8 characters")
+        target = (username or "").strip().lower()
+        ok = await asyncio.to_thread(auth_manager.admin_set_password, target, body.new_password)
+        if not ok:
+            raise HTTPException(404, "User not found")
+        keep = request.cookies.get(SESSION_COOKIE) if target == user else None
+        await asyncio.to_thread(auth_manager.revoke_user_sessions, target, keep)
+        return {"ok": True, "username": target}
 
     @router.put("/users/{username}/rename")
     async def rename_user(username: str, body: RenameUserRequest, request: Request):
