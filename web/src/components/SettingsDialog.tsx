@@ -30,6 +30,7 @@ import {
   updateAssistant,
   deleteAssistant,
   changePassword,
+  setDisplayName,
   createIntegration,
   deleteIntegration,
   discoverEndpoints,
@@ -515,7 +516,10 @@ function ShortcutsPanel() {
 function AccountPanel() {
   const { t } = useTranslation();
   const auth = useAuth();
+  const qc = useQueryClient();
   const { data: totp, refetch: refetchTotp } = useQuery({ queryKey: ['totp'], queryFn: fetchTotpStatus });
+  const [name, setName] = useState(auth?.display_name ?? '');
+  const [nameMsg, setNameMsg] = useState('');
   const [pw, setPw] = useState({ current: '', next: '', confirm: '' });
   const [pwMsg, setPwMsg] = useState('');
   const [setup, setSetup] = useState<{ secret: string; qr_code: string } | null>(null);
@@ -534,16 +538,26 @@ function AccountPanel() {
     } catch (e) { setPwMsg((e as Error).message); }
   };
 
+  const saveName = async () => {
+    setNameMsg('');
+    try {
+      await setDisplayName(name.trim());
+      await qc.invalidateQueries({ queryKey: ['auth'] });
+      setNameMsg(t('settings.account.nameSaved'));
+    } catch (e) { setNameMsg((e as Error).message); }
+  };
+
   return (
     <Page>
       <Section title={t('settings.account.title')} padded>
       <div className="flex items-center gap-3">
         <div className="flex size-10 items-center justify-center rounded-full bg-primary/15 text-sm font-semibold text-primary">
-          {(auth?.username ?? 'U').slice(0, 1).toUpperCase()}
+          {(auth?.display_name || auth?.username || 'U').slice(0, 1).toUpperCase()}
         </div>
         <div className="flex-1">
-          <div className="text-sm font-medium">{auth?.username ?? t('sidebar.user')}</div>
+          <div className="text-sm font-medium">{auth?.display_name || (auth?.username ?? t('sidebar.user'))}</div>
           <div className="text-xs text-muted-foreground">
+            {auth?.display_name ? `${auth.username} · ` : ''}
             {auth?.is_admin ? t('settings.account.administrator') : t('settings.account.member')}
             {auth?.auth_enabled === false && ` · ${t('settings.account.authDisabled')}`}
           </div>
@@ -554,6 +568,18 @@ function AccountPanel() {
           </Button>
         )}
       </div>
+      {auth?.auth_enabled !== false && (
+        <div className="pt-3">
+          <div className="pb-1 text-xs text-muted-foreground">{t('settings.account.displayName')}</div>
+          <div className="flex items-center gap-2">
+            <Input placeholder={t('settings.account.displayNamePlaceholder')} value={name} onChange={(e) => setName(e.target.value)} className="max-w-64" />
+            <Button size="sm" variant="outline" disabled={(name.trim() || '') === (auth?.display_name ?? '')} onClick={() => void saveName()}>
+              {t('common.save')}
+            </Button>
+            {nameMsg && <span className={cn('text-xs', nameMsg === t('settings.account.nameSaved') ? 'text-success' : 'text-destructive-foreground')}>{nameMsg}</span>}
+          </div>
+        </div>
+      )}
       </Section>
 
       <Section title={t('settings.account.changePassword')} padded>

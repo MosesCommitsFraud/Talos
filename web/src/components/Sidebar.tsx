@@ -452,7 +452,8 @@ export function Sidebar({
     .filter((g) => g.items.length > 0);
   const ungrouped = rest.filter((s) => !s.folder).sort(sorter);
   const isMac = /Mac|iPhone/.test(navigator.platform);
-  const initial = (auth?.username ?? 'U').slice(0, 1).toUpperCase();
+  const accountLabel = auth?.display_name || auth?.username;
+  const initial = (accountLabel ?? 'U').slice(0, 1).toUpperCase();
 
   // The scrolling chat list — shared by the full sidebar and the compact recents flyout.
   const chatList = (
@@ -604,9 +605,9 @@ export function Sidebar({
           <AccountMenu
             isAdmin={!!auth?.is_admin}
             authEnabled={auth?.auth_enabled !== false}
-            username={auth?.username ?? t('sidebar.user')}
+            username={accountLabel ?? t('sidebar.user')}
             actions={account}
-            tooltip={auth?.username ?? t('sidebar.account')}
+            tooltip={accountLabel ?? t('sidebar.account')}
             trigger={
               <button
                 type="button"
@@ -627,7 +628,7 @@ export function Sidebar({
             <AccountMenu
               isAdmin={!!auth?.is_admin}
               authEnabled={auth?.auth_enabled !== false}
-              username={auth?.username ?? t('sidebar.user')}
+              username={accountLabel ?? t('sidebar.user')}
               actions={account}
               trigger={
                 <button
@@ -638,7 +639,7 @@ export function Sidebar({
                   <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-primary/15 text-[10px] font-semibold text-primary">
                     {initial}
                   </span>
-                  <span className="min-w-0 flex-1 truncate text-[13px]">{auth?.username ?? t('sidebar.user')}</span>
+                  <span className="min-w-0 flex-1 truncate text-[13px]">{accountLabel ?? t('sidebar.user')}</span>
                   <ChevronDownIcon className="size-3.5 shrink-0 text-muted-foreground" />
                 </button>
               }

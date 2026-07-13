@@ -182,13 +182,15 @@ function UserRow({ user, currentUser, adminCount, onChanged }: {
         onClick={() => !user.is_admin && setOpen((v) => !v)}
       >
         <div className="flex size-7 shrink-0 items-center justify-center rounded-full bg-primary/15 text-xs font-semibold text-primary">
-          {user.username.slice(0, 1).toUpperCase()}
+          {(user.display_name || user.username).slice(0, 1).toUpperCase()}
         </div>
         <div className="min-w-0 flex-1">
-          <span className="truncate text-sm">{user.username}</span>
+          <span className="truncate text-sm">{user.display_name || user.username}</span>
           {user.is_admin
-            ? <span className="ml-2 rounded bg-primary/15 px-1.5 py-0.5 text-[10px] font-semibold tracking-wide text-primary">{t('settings.users.admin')}</span>
-            : <div className="text-[10px] text-muted-foreground">{t('settings.users.manageHint')}</div>}
+            && <span className="ml-2 rounded bg-primary/15 px-1.5 py-0.5 text-[10px] font-semibold tracking-wide text-primary">{t('settings.users.admin')}</span>}
+          <div className="truncate text-[10px] text-muted-foreground">
+            {user.display_name ? user.username : (!user.is_admin ? t('settings.users.manageHint') : '')}
+          </div>
         </div>
         <div className="flex shrink-0 items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
           <Button variant="outline" size="sm" onClick={rename}>{t('settings.users.rename')}</Button>
@@ -220,14 +222,15 @@ export function UsersPanel({ currentUser }: { currentUser?: string }) {
   const { data: users } = useQuery({ queryKey: ['users'], queryFn: fetchUsers });
   const { data: status, refetch: refetchStatus } = useQuery({ queryKey: ['auth-status'], queryFn: fetchAuthStatus });
   const [username, setUsername] = useState('');
+  const [displayName, setDisplayName] = useState('');
   const [password, setPassword] = useState('');
   const [isAdmin, setIsAdmin] = useState(false);
   const queryClient = useQueryClient();
   const refresh = () => void queryClient.invalidateQueries({ queryKey: ['users'] });
   const adminCount = (users ?? []).filter((u) => u.is_admin).length;
   const create = useMutation({
-    mutationFn: () => createUser(username.trim(), password, isAdmin),
-    onSuccess: () => { setUsername(''); setPassword(''); setIsAdmin(false); refresh(); },
+    mutationFn: () => createUser(username.trim(), password, isAdmin, displayName.trim()),
+    onSuccess: () => { setUsername(''); setDisplayName(''); setPassword(''); setIsAdmin(false); refresh(); },
   });
 
   return (
@@ -249,9 +252,10 @@ export function UsersPanel({ currentUser }: { currentUser?: string }) {
       <Section title={t('settings.users.addUser')} padded>
         <div className="space-y-2">
           <div className="flex gap-2">
-            <Input placeholder={t('settings.users.username')} value={username} onChange={(e) => setUsername(e.target.value)} />
-            <Input placeholder={t('settings.users.passwordMin')} type="password" value={password} onChange={(e) => setPassword(e.target.value)} />
+            <Input placeholder={t('settings.users.email')} type="email" value={username} onChange={(e) => setUsername(e.target.value)} />
+            <Input placeholder={t('settings.users.displayName')} value={displayName} onChange={(e) => setDisplayName(e.target.value)} />
           </div>
+          <Input placeholder={t('settings.users.passwordMin')} type="password" value={password} onChange={(e) => setPassword(e.target.value)} />
           <label className="flex items-center gap-2 text-sm text-muted-foreground">
             <Switch checked={isAdmin} onCheckedChange={setIsAdmin} /> {t('settings.users.administrator')}
           </label>

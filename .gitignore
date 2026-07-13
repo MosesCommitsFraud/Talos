@@ -94,3 +94,7 @@ docs/windows-port/
 compound.config.json
 *.error.log
 _scratch/
+Talos_DGX_Spark_RAG_Dokumentation.docx
+~$los_DGX_Spark_RAG_Dokumentation.docx
+tmp/build_talos_documentation.py
+Talos_DGX_Spark_RAG_Dokumentation_v2.docx

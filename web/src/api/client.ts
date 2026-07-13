@@ -266,15 +266,15 @@ export interface UserPrivileges {
   allowed_models?: string[];
 }
 
-export interface AppUser { username: string; is_admin: boolean; privileges?: UserPrivileges }
+export interface AppUser { username: string; display_name?: string | null; is_admin: boolean; privileges?: UserPrivileges }
 export const fetchUsers = async () =>
   (await getJSON<{ users?: AppUser[] }>('/api/auth/users')).users ?? [];
 
-export async function createUser(username: string, password: string, isAdmin = false): Promise<void> {
+export async function createUser(username: string, password: string, isAdmin = false, displayName = ''): Promise<void> {
   const res = await fetch('/api/auth/users', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ username, password, is_admin: isAdmin }),
+    body: JSON.stringify({ username, password, is_admin: isAdmin, display_name: displayName || null }),
     credentials: 'same-origin',
   });
   if (!res.ok) {
@@ -283,6 +283,9 @@ export async function createUser(username: string, password: string, isAdmin = f
     throw new Error(detail);
   }
 }
+
+export const setDisplayName = (displayName: string) =>
+  postJSON<{ ok?: boolean; display_name?: string | null }>('/api/auth/display-name', { display_name: displayName }, 'PUT');
 
 export const renameUser = (username: string, next: string) =>
   postJSON<{ ok?: boolean; renamed_self?: boolean }>(
@@ -459,6 +462,7 @@ export interface AuthStatus {
   configured?: boolean;
   authenticated?: boolean;
   username?: string;
+  display_name?: string | null;
   is_admin?: boolean;
   privileges?: UserPrivileges;
   signup_enabled?: boolean;

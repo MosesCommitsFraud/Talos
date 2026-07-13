@@ -180,7 +180,13 @@ class AuthManager:
                 return False
             return self.create_user(username, password, is_admin=True)
 
-    def create_user(self, username: str, password: str, is_admin: bool = False) -> bool:
+    def create_user(
+        self,
+        username: str,
+        password: str,
+        is_admin: bool = False,
+        display_name: Optional[str] = None,
+    ) -> bool:
         """Create a new user account."""
         username = username.strip().lower()
         if not username:
@@ -193,14 +199,36 @@ class AuthManager:
                 return False
             if "users" not in self._config:
                 self._config["users"] = {}
-            self._config["users"][username] = {
+            record = {
                 "password_hash": _hash_password(password),
                 "created": time.time(),
                 "is_admin": is_admin,
                 "privileges": dict(ADMIN_PRIVILEGES if is_admin else DEFAULT_PRIVILEGES),
             }
+            display_name = (display_name or "").strip()
+            if display_name:
+                record["display_name"] = display_name[:100]
+            self._config["users"][username] = record
             self._save()
         logger.info(f"Created user '{username}' (admin={is_admin})")
+        return True
+
+    def get_display_name(self, username: str) -> Optional[str]:
+        """Return the user's display name, or None if unset."""
+        return self.users.get((username or "").strip().lower(), {}).get("display_name") or None
+
+    def set_display_name(self, username: str, display_name: str) -> bool:
+        """Set (or clear, with an empty string) a user's display name."""
+        username = (username or "").strip().lower()
+        display_name = (display_name or "").strip()[:100]
+        with self._config_lock:
+            if username not in self.users:
+                return False
+            if display_name:
+                self._config["users"][username]["display_name"] = display_name
+            else:
+                self._config["users"][username].pop("display_name", None)
+            self._save()
         return True
 
     def delete_user(self, username: str, requesting_user: str) -> bool:
@@ -299,6 +327,7 @@ class AuthManager:
         return [
             {
                 "username": u,
+                "display_name": d.get("display_name") or None,
                 "is_admin": d.get("is_admin", False),
                 "privileges": self.get_privileges(u),
             }
@@ -538,6 +567,7 @@ class AuthManager:
             "configured": self.is_configured,
             "authenticated": authenticated,
             "username": username,
+            "display_name": self.get_display_name(username) if username else None,
             "is_admin": self.is_admin(username) if username else False,
         }
         if authenticated:

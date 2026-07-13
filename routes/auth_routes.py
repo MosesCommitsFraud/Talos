@@ -67,6 +67,11 @@ class CreateUserRequest(BaseModel):
     username: str
     password: str
     is_admin: bool = False
+    display_name: Optional[str] = None
+
+
+class SetDisplayNameRequest(BaseModel):
+    display_name: str = ""
 
 
 class DeleteUserRequest(BaseModel):
@@ -207,6 +212,17 @@ def setup_auth_routes(auth_manager: AuthManager) -> APIRouter:
         await asyncio.to_thread(auth_manager.revoke_user_sessions, user, current_token)
         return {"ok": True}
 
+    @router.put("/display-name")
+    async def set_display_name(body: SetDisplayNameRequest, request: Request):
+        """Set the current user's own display name (empty string clears it)."""
+        user = _get_current_user(request)
+        if not user:
+            raise HTTPException(401, "Not authenticated")
+        ok = await asyncio.to_thread(auth_manager.set_display_name, user, body.display_name)
+        if not ok:
+            raise HTTPException(404, "User not found")
+        return {"ok": True, "display_name": auth_manager.get_display_name(user)}
+
     # ------------------------------------------------------------------
     # Two-factor authentication
     # ------------------------------------------------------------------
@@ -285,7 +301,9 @@ def setup_auth_routes(auth_manager: AuthManager) -> APIRouter:
             raise HTTPException(403, "Admin only")
         if len(body.password) < 8:
             raise HTTPException(400, "Password must be at least 8 characters")
-        ok = auth_manager.create_user(body.username, body.password, body.is_admin)
+        ok = auth_manager.create_user(
+            body.username, body.password, body.is_admin, display_name=body.display_name
+        )
         if not ok:
             raise HTTPException(409, "Username already taken")
         return {"ok": True}
