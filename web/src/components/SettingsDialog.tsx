@@ -1097,7 +1097,6 @@ const TOOL_META: Record<string, { cat: string; ctx: string }> = {
   python: { cat: 'Code', ctx: '~200' },
   read_file: { cat: 'Code', ctx: '~150' },
   write_file: { cat: 'Code', ctx: '~150' },
-  web_search: { cat: 'Search', ctx: '~300' },
   search_chats: { cat: 'Search', ctx: '~150' },
   create_document: { cat: 'Documents', ctx: '~200' },
   update_document: { cat: 'Documents', ctx: '~200' },
@@ -1105,28 +1104,21 @@ const TOOL_META: Record<string, { cat: string; ctx: string }> = {
   suggest_document: { cat: 'Documents', ctx: '~200' },
   manage_documents: { cat: 'Documents', ctx: '~150' },
   generate_image: { cat: 'Media', ctx: '~150' },
-  manage_memory: { cat: 'Knowledge', ctx: '~200' },
   manage_skills: { cat: 'Knowledge', ctx: '~200' },
   manage_rag: { cat: 'Knowledge', ctx: '~150' },
   query_sql: { cat: 'Knowledge', ctx: '~200' },
-  chat_with_model: { cat: 'Multi-Agent', ctx: '~200' },
-  second_opinion: { cat: 'Multi-Agent', ctx: '~150' },
-  pipeline: { cat: 'Multi-Agent', ctx: '~200' },
-  ask_teacher: { cat: 'Multi-Agent', ctx: '~150' },
   send_to_session: { cat: 'Sessions', ctx: '~100' },
   create_session: { cat: 'Sessions', ctx: '~100' },
   list_sessions: { cat: 'Sessions', ctx: '~100' },
   manage_session: { cat: 'Sessions', ctx: '~100' },
   list_models: { cat: 'System', ctx: '~100' },
-  manage_tasks: { cat: 'System', ctx: '~150' },
   api_call: { cat: 'System', ctx: '~200' },
   manage_endpoints: { cat: 'System', ctx: '~100' },
   manage_mcp: { cat: 'System', ctx: '~100' },
-  manage_webhooks: { cat: 'System', ctx: '~100' },
   manage_tokens: { cat: 'System', ctx: '~100' },
   manage_settings: { cat: 'System', ctx: '~100' },
 };
-const TOOL_CAT_ORDER = ['Code', 'Search', 'Documents', 'Media', 'Knowledge', 'Multi-Agent', 'Sessions', 'System', 'Other'];
+const TOOL_CAT_ORDER = ['Code', 'Search', 'Documents', 'Media', 'Knowledge', 'Sessions', 'System', 'Other'];
 
 function ToolsPanel() {
   const { t } = useTranslation();
@@ -1509,7 +1501,7 @@ export function RagPanel() {
 
 /* ── System (backup + danger zone) ── */
 
-const WIPE_KINDS = ['chats', 'memory', 'skills', 'notes', 'tasks', 'documents', 'gallery', 'calendar'];
+const WIPE_KINDS = ['chats', 'skills', 'notes', 'documents', 'gallery', 'calendar'];
 
 function SystemPanel() {
   const { t } = useTranslation();

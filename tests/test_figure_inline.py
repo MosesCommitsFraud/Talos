@@ -211,6 +211,62 @@ def test_same_page_prefers_focused_figure_and_drops_extra_image_sources():
     assert _BAD not in stripped
 
 
+def test_two_topic_answer_gets_one_figure_per_used_anchor():
+    # The answer genuinely covers BOTH topics — each used text anchor may
+    # contribute its own figure (one per anchor, capped by RAG_MAX_ANSWER_FIGURES).
+    answer = (
+        "Im macs Report Editor wird das Band per Rechtsklick eingefügt. "
+        "Im DrillDownControl kann anschließend die gewünschte Zelle ausgewählt werden."
+    )
+    source = "/u/training.pdf"
+    band_text = {
+        "filename": "training.pdf",
+        "_id": "page6",
+        "_source": source,
+        "_page": 6,
+        "_text": "Im macs Report Editor wird das Band per Rechtsklick eingefügt.",
+    }
+    drill_text = {
+        "filename": "training.pdf",
+        "_id": "page27",
+        "_source": source,
+        "_page": 27,
+        "_text": "Im DrillDownControl kann die gewünschte Zelle ausgewählt werden.",
+    }
+    band_fig = {
+        "filename": "training.pdf",
+        "_anchor_id": "page6",
+        "_source": source,
+        "_page": 6,
+        "image_url": _OK,
+        "image_caption": "Band einfügen",
+        "_text": "Kontextmenü Band einfügen",
+    }
+    drill_fig = {
+        "filename": "training.pdf",
+        "_anchor_id": "page27",
+        "_source": source,
+        "_page": 27,
+        "image_url": _BAD,
+        "image_caption": "DrillDownControl",
+        "_text": "DrillDownControl im Gruppenband",
+    }
+
+    eligible = ch._eligible_figures_for_answer(answer, [band_text, drill_text, drill_fig, band_fig])
+    assert {fig["image_url"] for fig in eligible} == {_OK, _BAD}
+
+    out = ch.append_missing_figures(answer, [band_text, drill_text, drill_fig, band_fig])
+    assert _OK in out
+    assert _BAD in out
+
+    # A single-topic answer still gets exactly the one matching figure.
+    single = "Im macs Report Editor wird das Band per Rechtsklick eingefügt."
+    eligible_single = ch._eligible_figures_for_answer(
+        single, [band_text, drill_text, drill_fig, band_fig]
+    )
+    assert [fig["image_url"] for fig in eligible_single] == [_OK]
+
+
 def test_figure_cannot_jump_to_different_text_anchor_on_same_page():
     answer = "Band per Rechtsklick einfügen."
     source = "/u/training.pdf"

@@ -9,8 +9,6 @@ class ChatRequest(BaseModel):
     message: str = Field(..., min_length=1, max_length=50000, description="Chat message")
     session: str = Field(..., description="Session ID")
     attachments: Optional[List[str]] = Field(default=[], description="Attachment IDs")
-    use_web: Optional[bool] = Field(default=False, description="Enable web search")
-    time_filter: Optional[str] = Field(default=None, description="Time filter for search")
     preset_id: Optional[str] = Field(default=None, description="Preset identifier")
     lang: Optional[str] = Field(
         default=None, description="UI language (e.g. 'de'/'en') for auto-generated titles"
@@ -21,42 +19,12 @@ class ChatRequest(BaseModel):
     def clean_message(cls, v):
         return v.strip()
 
-    @field_validator("time_filter")
-    @classmethod
-    def validate_time_filter(cls, v):
-        if v is not None and v not in ["day", "week", "month", "year"]:
-            return None  # Just set to None if invalid rather than raising error
-        return v
-
 
 class SessionCreateRequest(BaseModel):
     name: Optional[str] = Field(default="", max_length=200, description="Session name")
     endpoint_url: str = Field(..., description="LLM endpoint URL")
     model: Optional[str] = Field(default="", description="Model ID")
     rag: Optional[bool] = Field(default=False, description="Enable RAG")
-
-
-class MemoryAddRequest(BaseModel):
-    text: str = Field(..., min_length=1, max_length=5000, description="Memory text")
-    category: str = Field(default="fact", description="Memory category")
-    source: str = Field(default="user", description="Memory source")
-    session_id: Optional[str] = Field(default=None, description="Associated session ID")
-
-    @field_validator("category")
-    @classmethod
-    def validate_category(cls, v):
-        if v not in ["fact", "contact", "task", "preference", "identity", "project", "goal"]:
-            return "fact"  # Default to 'fact' if invalid
-        return v
-
-
-class MemoryUpdateRequest(BaseModel):
-    text: str = Field(..., min_length=1, max_length=5000, description="Updated memory text")
-    category: Optional[str] = Field(
-        default=None,
-        pattern="^(fact|contact|task|preference|identity|project|goal)$",
-        description="Memory category",
-    )
 
 
 class PresetUpdateRequest(BaseModel):
@@ -114,12 +82,3 @@ class SessionResponse(BaseModel):
     model: str = Field(..., description="Model being used")
     rag: bool = Field(default=False, description="RAG enabled")
     archived: bool = Field(default=False, description="Whether session is archived")
-
-
-class MemoryResponse(BaseModel):
-    id: str = Field(..., description="Memory ID")
-    text: str = Field(..., description="Memory text")
-    category: str = Field(..., description="Memory category")
-    source: str = Field(..., description="Memory source")
-    timestamp: int = Field(..., description="Unix timestamp")
-    session_id: Optional[str] = Field(default=None, description="Associated session")

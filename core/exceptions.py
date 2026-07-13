@@ -26,12 +26,3 @@ class LLMServiceError(Exception):
         self.endpoint = endpoint
         self.message = message
         super().__init__(message)
-
-
-class WebSearchError(Exception):
-    """Raised when there is an error with web search functionality."""
-
-    def __init__(self, message: str, query: str = None):
-        self.query = query
-        self.message = message
-        super().__init__(message)

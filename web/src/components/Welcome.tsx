@@ -17,9 +17,9 @@ function Logo() {
 
 const GREETING_COUNT = 6;
 
-/** "moritz.schaefer" / "moritz_schaefer" / "Moritz Schäfer" → "Moritz". */
-function firstNameOf(username?: string): string | null {
-  const first = (username ?? '').split(/[._\-\s]+/)[0];
+/** "moritz.schaefer" / "moritz@example.com" / "Moritz Schäfer" → "Moritz". */
+function firstNameOf(name?: string | null): string | null {
+  const first = (name ?? '').split(/[._\-\s@]+/)[0];
   if (!first) return null;
   return first.charAt(0).toUpperCase() + first.slice(1);
 }
@@ -205,7 +205,7 @@ export function Welcome() {
   // Pick one greeting variant per mount so it doesn't flicker on re-renders.
   const [variant] = useState(() => Math.floor(Math.random() * GREETING_COUNT) + 1);
 
-  const firstName = auth?.auth_enabled === false ? null : firstNameOf(auth?.username);
+  const firstName = auth?.auth_enabled === false ? null : firstNameOf(auth?.display_name || auth?.username);
   const greeting = firstName ? t(`home.greeting${variant}`, { name: firstName }) : t('messages.welcome');
 
   return (

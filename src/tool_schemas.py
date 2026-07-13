@@ -416,27 +416,6 @@ FUNCTION_TOOL_SCHEMAS = [
     {
         "type": "function",
         "function": {
-            "name": "chat_with_model",
-            "description": "Send a message to another AI model and get its response. Use for getting a second opinion, delegating subtasks, or AI-to-AI communication.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "model": {
-                        "type": "string",
-                        "description": "Model name (e.g. 'qwen3-32b') or model@endpoint_name",
-                    },
-                    "message": {
-                        "type": "string",
-                        "description": "The message to send to the model",
-                    },
-                },
-                "required": ["model", "message"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
             "name": "create_session",
             "description": "Create a new chat for ongoing conversations with a specific model. (The UI calls these 'chats'; 'session' is the internal term.)",
             "parameters": {
@@ -487,37 +466,6 @@ FUNCTION_TOOL_SCHEMAS = [
     {
         "type": "function",
         "function": {
-            "name": "pipeline",
-            "description": "Run a multi-step AI pipeline where each model's output feeds the next. Example: Draft -> Critique -> Revise.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "steps": {
-                        "type": "array",
-                        "description": "Pipeline steps in order",
-                        "items": {
-                            "type": "object",
-                            "properties": {
-                                "model": {
-                                    "type": "string",
-                                    "description": "Model name for this step",
-                                },
-                                "instruction": {
-                                    "type": "string",
-                                    "description": "What this step should do",
-                                },
-                            },
-                            "required": ["model", "instruction"],
-                        },
-                    }
-                },
-                "required": ["steps"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
             "name": "manage_session",
             "description": "Manage a chat: rename, archive, unarchive, delete, mark important, truncate history, or fork it. (The UI calls these 'chats'; 'session' is the internal term.) For destructive actions like delete, call list_sessions first and pass the exact id returned there; never invent ids.",
             "parameters": {
@@ -547,34 +495,6 @@ FUNCTION_TOOL_SCHEMAS = [
                     },
                 },
                 "required": ["action", "session_id"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "manage_memory",
-            "description": "Manage the user's memory system: list, add, edit, delete, or search memories. Memories persist across sessions.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "action": {
-                        "type": "string",
-                        "enum": ["list", "add", "edit", "delete", "search"],
-                        "description": "The action to perform",
-                    },
-                    "text": {
-                        "type": "string",
-                        "description": "Memory text (for add/edit) or search query (for search)",
-                    },
-                    "memory_id": {"type": "string", "description": "Memory ID (for edit/delete)"},
-                    "category": {
-                        "type": "string",
-                        "enum": ["fact", "event", "contact", "preference"],
-                        "description": "Memory category (for add/list filter)",
-                    },
-                },
-                "required": ["action"],
             },
         },
     },
@@ -651,88 +571,6 @@ FUNCTION_TOOL_SCHEMAS = [
     {
         "type": "function",
         "function": {
-            "name": "manage_tasks",
-            "description": "Manage scheduled/automated tasks: list, create, edit, delete, pause, resume, or run tasks. Use this for ANY recurring/scheduled request ('every morning…', 'each day at 7:30', 'daily summarize…') — create a task rather than doing it once. Task types: llm (AI runs a prompt), research (runs the deep-research pipeline on a question), or action (built-in automation). Triggers can be time-based or event-based.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "action": {
-                        "type": "string",
-                        "enum": ["list", "create", "edit", "delete", "pause", "resume", "run"],
-                        "description": "The action to perform",
-                    },
-                    "task_id": {
-                        "type": "string",
-                        "description": "Task ID (for edit/delete/pause/resume/run)",
-                    },
-                    "name": {"type": "string", "description": "Task name"},
-                    "prompt": {
-                        "type": "string",
-                        "description": "The instruction (for task_type=llm) or the research question (for task_type=research). Required for both.",
-                    },
-                    "task_type": {
-                        "type": "string",
-                        "enum": ["llm", "research", "action"],
-                        "description": "llm = AI runs your prompt; research = runs the deep-research pipeline on the prompt as a question; action = direct built-in function",
-                    },
-                    "action_name": {
-                        "type": "string",
-                        "enum": [
-                            "tidy_sessions",
-                            "tidy_documents",
-                            "consolidate_memory",
-                            "tidy_research",
-                            "test_skills",
-                            "audit_skills",
-                        ],
-                        "description": "Built-in action (for task_type=action)",
-                    },
-                    "trigger_type": {
-                        "type": "string",
-                        "enum": ["schedule", "event"],
-                        "description": "schedule = time-based, event = count-based",
-                    },
-                    "schedule": {
-                        "type": "string",
-                        "enum": ["once", "daily", "weekly", "monthly"],
-                        "description": "Schedule frequency (for trigger_type=schedule)",
-                    },
-                    "scheduled_time": {
-                        "type": "string",
-                        "description": "HH:MM in UTC (for schedule triggers). Convert the user's stated local time using the UTC offset given in the 'Current date and time' context.",
-                    },
-                    "scheduled_day": {
-                        "type": "integer",
-                        "description": "Day of week 0=Mon (weekly) or day of month (monthly)",
-                    },
-                    "trigger_event": {
-                        "type": "string",
-                        "enum": [
-                            "session_created",
-                            "message_sent",
-                            "document_created",
-                            "memory_added",
-                            "research_completed",
-                            "skill_added",
-                        ],
-                        "description": "Event name (for trigger_type=event)",
-                    },
-                    "trigger_count": {
-                        "type": "integer",
-                        "description": "Fire every N events (for trigger_type=event)",
-                    },
-                    "output_target": {
-                        "type": "string",
-                        "description": "Where results go. Defaults to 'session' (results land in a dedicated chat session the user reads) — this is the right choice for 'summarize for me' / 'send to me'.",
-                    },
-                },
-                "required": ["action"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
             "name": "api_call",
             "description": "Call a registered API integration (RSS reader, git forge, bookmark manager, smart home, etc.). Check the system context for available integrations and their endpoints.",
             "parameters": {
@@ -757,27 +595,6 @@ FUNCTION_TOOL_SCHEMAS = [
                     },
                 },
                 "required": ["integration", "method", "path"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "ask_teacher",
-            "description": "Ask a more capable AI model for help when stuck on a difficult problem. The teacher provides guidance that can be saved as a learned skill.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "model": {
-                        "type": "string",
-                        "description": "Teacher model name (e.g. 'claude-sonnet-4') or 'auto' for configured default",
-                    },
-                    "problem": {
-                        "type": "string",
-                        "description": "Describe the problem or question you need help with",
-                    },
-                },
-                "required": ["problem"],
             },
         },
     },
@@ -964,33 +781,6 @@ FUNCTION_TOOL_SCHEMAS = [
     {
         "type": "function",
         "function": {
-            "name": "manage_webhooks",
-            "description": "Manage webhooks: list, add, delete, enable or disable webhook endpoints.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "action": {
-                        "type": "string",
-                        "enum": ["list", "add", "delete", "enable", "disable"],
-                    },
-                    "webhook_id": {
-                        "type": "string",
-                        "description": "Webhook ID (for delete/enable/disable)",
-                    },
-                    "name": {"type": "string", "description": "Webhook name (for add)"},
-                    "url": {"type": "string", "description": "Webhook URL (for add)"},
-                    "events": {
-                        "type": "string",
-                        "description": "Comma-separated event names (for add)",
-                    },
-                },
-                "required": ["action"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
             "name": "manage_tokens",
             "description": "Manage API access tokens: list existing tokens, create new ones, or delete them.",
             "parameters": {
@@ -1029,7 +819,7 @@ FUNCTION_TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "manage_settings",
-            "description": "Manage user preferences and settings. Use `disable_tool`/`enable_tool`/`list_tools` to turn individual tools on or off globally (e.g. shell, search, browser, documents, memory, skills, images, tasks, notes, calendar, email). Use list/get/set/delete for free-form preferences.",
+            "description": "Manage user preferences and settings. Use `disable_tool`/`enable_tool`/`list_tools` to turn individual tools on or off globally (e.g. shell, browser, documents, skills, images, notes, calendar, email). Use list/get/set/delete for free-form preferences.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -1051,7 +841,7 @@ FUNCTION_TOOL_SCHEMAS = [
                     },
                     "tool": {
                         "type": "string",
-                        "description": "Tool name to disable/enable (for disable_tool/enable_tool). Accepts aliases: shell, search, browser, documents, memory, skills, images, tasks, notes, calendar, email — or a raw tool name like 'bash' or 'web_search'.",
+                        "description": "Tool name to disable/enable (for disable_tool/enable_tool). Accepts aliases: shell, browser, documents, skills, images, notes, calendar, email — or a raw tool name like 'bash'.",
                     },
                 },
                 "required": ["action"],
@@ -1142,17 +932,12 @@ def function_call_to_tool_block(name: str, arguments: str) -> Optional[ToolBlock
         content = args.get("id", "")
         if args.get("query"):
             content += "\n" + str(args["query"])
-    elif tool_type == "chat_with_model":
-        content = args.get("model", "") + "\n" + args.get("message", "")
     elif tool_type == "create_session":
         content = args.get("name", "Untitled") + "\n" + args.get("model", "")
     elif tool_type == "list_sessions":
         content = args.get("filter", "")
     elif tool_type == "send_to_session":
         content = args.get("session_id", "") + "\n" + args.get("message", "")
-    elif tool_type == "pipeline":
-        # Pass as JSON for the pipeline parser
-        content = json.dumps({"steps": args.get("steps", [])})
     elif tool_type == "manage_session":
         action = args.get("action", "")
         value = args.get("value", "")
@@ -1170,40 +955,18 @@ def function_call_to_tool_block(name: str, arguments: str) -> Optional[ToolBlock
             content = action + "\n" + sid
             if value:
                 content += "\n" + value
-    elif tool_type == "manage_memory":
-        action = args.get("action", "")
-        if action == "add":
-            content = "add\n" + args.get("text", "")
-            if args.get("category"):
-                content += "\n" + args["category"]
-        elif action == "edit":
-            content = "edit\n" + args.get("memory_id", "") + "\n" + args.get("text", "")
-        elif action == "delete":
-            content = "delete\n" + args.get("memory_id", "")
-        elif action == "search":
-            content = "search\n" + args.get("text", "")
-        elif action == "list":
-            content = "list"
-            if args.get("category"):
-                content += "\n" + args["category"]
-        else:
-            content = action
     elif tool_type == "list_models":
         content = args.get("filter", "")
     elif tool_type in (
-        "manage_tasks",
         "manage_skills",
         "api_call",
         "manage_endpoints",
         "manage_mcp",
-        "manage_webhooks",
         "manage_tokens",
         "manage_documents",
         "manage_settings",
     ):
         content = json.dumps(args)
-    elif tool_type == "ask_teacher":
-        content = args.get("model", "auto") + "\n" + args.get("problem", "")
     else:
         content = json.dumps(args)
 

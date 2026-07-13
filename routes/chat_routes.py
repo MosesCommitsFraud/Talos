@@ -269,10 +269,7 @@ def setup_chat_routes(
     session_manager,
     chat_handler,
     chat_processor,
-    memory_manager,
     upload_handler,
-    memory_vector=None,
-    webhook_manager=None,
     skills_manager=None,
 ) -> APIRouter:
     router = APIRouter(tags=["chat"])
@@ -287,8 +284,6 @@ def setup_chat_routes(
         message = chat_request.message
         session = chat_request.session
         att_ids = chat_request.attachments or []
-        use_web = chat_request.use_web
-        time_filter = chat_request.time_filter
         preset_id = chat_request.preset_id
 
         # Verify the caller owns this session before loading it.
@@ -319,11 +314,6 @@ def setup_chat_routes(
         # non-streaming path can't be used to bypass).
         _enforce_chat_privileges(request, sess)
 
-        # Inline memory command
-        memory_response = await chat_handler.handle_memory_command(sess, message)
-        if memory_response:
-            return {"response": memory_response}
-
         # Build shared context (preset, preprocess, preface, compact)
         ctx = await build_chat_context(
             sess,
@@ -334,9 +324,6 @@ def setup_chat_routes(
             session_id=session,
             preset_id=preset_id,
             att_ids=att_ids,
-            use_web=use_web,
-            time_filter=time_filter,
-            webhook_manager=webhook_manager,
         )
 
         # Auto-name immediately now that the user message is in history, so the
@@ -361,7 +348,7 @@ def setup_chat_routes(
         update_session_last_accessed(session)
         session_manager.save_sessions()
 
-        # Background tasks (memory, webhook, auto-name)
+        # Background tasks (token accounting, skills)
         run_post_response_tasks(
             sess,
             session_manager,
@@ -370,9 +357,6 @@ def setup_chat_routes(
             reply,
             None,
             ctx.uprefs,
-            memory_manager,
-            memory_vector,
-            webhook_manager,
             character_name=ctx.preset.character_name,
             owner=ctx.user,
         )
@@ -402,14 +386,8 @@ def setup_chat_routes(
         message = form_data.get("message")
         session = form_data.get("session")
         attachments = form_data.get("attachments")
-        use_web = form_data.get("use_web")
-        time_filter = form_data.get("time_filter")
         preset_id = form_data.get("preset_id")
-        allow_web_search = form_data.get("allow_web_search")
         use_rag = form_data.get("use_rag")
-        search_context = form_data.get(
-            "search_context"
-        )  # pre-fetched web search results (compare mode)
         compare_mode = str(form_data.get("compare_mode", "")).lower() == "true"
         incognito = str(form_data.get("incognito", "")).lower() == "true"
         use_db = str(form_data.get("use_db", "")).lower() == "true"
@@ -503,7 +481,6 @@ def setup_chat_routes(
             except Exception:
                 pass
 
-        no_memory = str(form_data.get("no_memory", "")).lower() == "true"
         ui_lang = (form_data.get("lang") or "").strip()
 
         # Build shared context (stream path uses enhanced_message for context preface)
@@ -516,14 +493,9 @@ def setup_chat_routes(
             session_id=session,
             preset_id=preset_id,
             att_ids=att_ids,
-            use_web=use_web,
             use_rag=use_rag,
-            time_filter=time_filter,
             incognito=incognito,
-            no_memory=no_memory,
-            search_context=search_context,
             compare_mode=compare_mode,
-            webhook_manager=webhook_manager,
             use_enhanced_message=True,
             # Skills index only ships when the model can actually call
             # manage_skills (agent mode). In plain chat or incognito the
@@ -629,16 +601,11 @@ def setup_chat_routes(
         # coding loop depends on `bash python script.py`). There is no per-user
         # privilege gate for it — only the global `disabled_tools` admin setting
         # below can withhold it instance-wide.
-        if str(allow_web_search).lower() != "true":
-            disabled_tools.add("web_search")
-            disabled_tools.add("web_fetch")
-
         # Nobody/incognito mode: deny tools that would expose the user's
-        # persistent memory, past chats, or other identity-linked data.
+        # past chats or other identity-linked data.
         if incognito:
             disabled_tools.update(
                 {
-                    "manage_memory",  # persistent memory store
                     "search_chats",  # past chat history
                     "manage_skills",  # skill presets tied to user
                 }
@@ -661,7 +628,9 @@ def setup_chat_routes(
             if not _privs.get("can_generate_images", True):
                 disabled_tools.add("generate_image")
             if not _privs.get("can_manage_memory", True):
-                disabled_tools.update({"manage_memory", "manage_skills"})
+                # Legacy privilege key (kept for stored auth.json compat);
+                # memory itself was removed, so this now gates skills only.
+                disabled_tools.add("manage_skills")
             if not _privs.get("can_use_research", True):
                 _research_flags["do"] = False
             if not _privs.get("can_use_agent", True):
@@ -697,13 +666,10 @@ def setup_chat_routes(
                 "create_document",
                 "edit_document",
                 "update_document",
-                "chat_with_model",
                 "create_session",
                 "list_sessions",
                 "send_to_session",
-                "pipeline",
                 "manage_session",
-                "manage_memory",
                 "list_models",
                 "generate_image",
             }
@@ -722,10 +688,7 @@ def setup_chat_routes(
                         "read_file",
                         "write_file",
                         "edit_file",
-                        "web_search",
-                        "web_fetch",
                         "search_chats",
-                        "manage_tasks",
                     }
                 )
 
@@ -737,7 +700,6 @@ def setup_chat_routes(
         async def stream_with_save() -> AsyncGenerator[str, None]:
             # _effective_mode is read-only here; closure captures it from
             # the outer scope. (Was `nonlocal` but never reassigned.)
-            web_sources = ctx.web_sources
 
             # Register active stream for partial-save safety net
             _active_streams[session] = {
@@ -761,13 +723,6 @@ def setup_chat_routes(
             # shown once we know the model actually used that knowledge, so the
             # decision is deferred to after the answer streams (see the [DONE]
             # branch, which filters by usage and emits at the very end).
-
-            if web_sources:
-                yield f"data: {json.dumps({'type': 'web_sources', 'data': web_sources})}\n\n"
-
-            # Emit which memories were injected into context (captured before stream)
-            if ctx.used_memories:
-                yield f"data: {json.dumps({'type': 'memories_used', 'data': ctx.used_memories})}\n\n"
 
             messages = ctx.messages
 
@@ -931,9 +886,6 @@ def setup_chat_routes(
                                         full_response += data["delta"]
                                         _stream_set(session, partial=full_response)
                                     yield chunk
-                                elif data.get("type") == "web_sources":
-                                    web_sources = data.get("data", [])
-                                    yield chunk
                                 elif data.get("type") in (
                                     "tool_start",
                                     "tool_output",
@@ -1007,9 +959,7 @@ def setup_chat_routes(
                                     full_response,
                                     last_metrics,
                                     character_name=ctx.preset.character_name,
-                                    web_sources=web_sources,
                                     rag_sources=_used_rag,
-                                    used_memories=ctx.used_memories,
                                     incognito=incognito,
                                 )
                                 if _saved_id:
@@ -1022,9 +972,6 @@ def setup_chat_routes(
                                     full_response,
                                     last_metrics,
                                     ctx.uprefs,
-                                    memory_manager,
-                                    memory_vector,
-                                    webhook_manager,
                                     incognito=incognito,
                                     compare_mode=compare_mode,
                                     character_name=ctx.preset.character_name,

@@ -60,16 +60,15 @@ def _find_npx() -> str:
 
 # Server definitions: id -> (script path relative to project root, display name)
 #
-# bash / python / filesystem / web_search were folded into native in-process
-# execution (src/tool_execution.py:_direct_fallback). Those trivial subprocess
+# bash / python / filesystem were folded into native in-process execution
+# (src/tool_execution.py:_direct_fallback). Those trivial subprocess
 # wrappers are gone.
 #
-# image_gen / memory / rag still run as stdio MCP servers — each carries
-# hundreds of LOC of unique HTTP / manager logic not worth duplicating into
-# the native path right now.
+# image_gen / rag still run as stdio MCP servers — each carries hundreds of
+# LOC of unique HTTP / manager logic not worth duplicating into the native
+# path right now.
 _BUILTIN_SERVERS = {
     "image_gen": ("mcp_servers/image_gen_server.py", "Built-in: Image Generation"),
-    "memory": ("mcp_servers/memory_server.py", "Built-in: Memory"),
     "rag": ("mcp_servers/rag_server.py", "Built-in: RAG"),
 }
 

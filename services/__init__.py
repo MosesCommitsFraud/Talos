@@ -2,14 +2,7 @@
 """
 Service layer — plug-in capabilities for the chat core.
 
-Only the memory service remains; this build runs internally where web search
-and other external-facing services are not available.
+Only the skills service remains (services.memory.skills).
 """
 
-from .memory import Memory, MemorySearchResult, MemoryService
-
-__all__ = [
-    "MemoryService",
-    "Memory",
-    "MemorySearchResult",
-]
+__all__: list = []

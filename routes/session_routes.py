@@ -214,7 +214,7 @@ def _pick_endpoint_for_sort(owner=None):
     return None, None, None
 
 
-def setup_session_routes(session_manager: SessionManager, config: dict, webhook_manager=None):
+def setup_session_routes(session_manager: SessionManager, config: dict):
     """Setup session routes with the provided manager and config"""
 
     REQUEST_TIMEOUT = config.get("REQUEST_TIMEOUT", 20)
@@ -544,20 +544,6 @@ def setup_session_routes(session_manager: SessionManager, config: dict, webhook_
 
             session.headers = build_headers(resolved_key, resolved_base)
             _persist_session_headers(sid, session.headers)
-        # Fire webhook (sync-safe)
-        if webhook_manager:
-            webhook_manager.fire_and_forget(
-                "session.created",
-                {
-                    "session_id": sid,
-                    "name": session.name,
-                    "model": model_to_use,
-                },
-            )
-        # Fire event for automation tasks
-        from src.event_bus import fire_event
-
-        fire_event("session_created", user)
         return SessionResponse(
             id=sid,
             name=session.name,
@@ -979,9 +965,6 @@ def setup_session_routes(session_manager: SessionManager, config: dict, webhook_
         )
         session.headers = {"Authorization": f"Bearer {OPENAI_API_KEY}"}
         session_manager.save_sessions()
-        from src.event_bus import fire_event
-
-        fire_event("session_created", user)
         return {"id": sid, "name": "", "model": model}
 
     @router.post("/session/{session_id}/important")

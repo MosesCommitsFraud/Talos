@@ -24,7 +24,6 @@ from .exceptions import (
     InvalidFileUploadError,
     LLMServiceError,
     SessionNotFoundError,
-    WebSearchError,
 )
 from .middleware import SecurityHeadersMiddleware
 from .models import ChatMessage, Session
@@ -46,7 +45,6 @@ __all__ = [
     "SessionNotFoundError",
     "InvalidFileUploadError",
     "LLMServiceError",
-    "WebSearchError",
     # Models
     "Session",
     "ChatMessage",

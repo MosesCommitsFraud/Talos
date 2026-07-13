@@ -28,7 +28,7 @@ _SECRET_KEY_PATTERNS = (
     "_credentials",
     "_key",
 )
-_SECRET_KEY_ALLOW = ("google_pse_cx",)  # public identifiers, not secrets
+_SECRET_KEY_ALLOW = ()  # public identifiers, not secrets
 
 
 def is_secret_key(name: str) -> bool:

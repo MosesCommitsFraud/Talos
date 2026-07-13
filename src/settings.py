@@ -57,38 +57,6 @@ DEFAULT_SETTINGS = {
     "stt_provider": "disabled",
     "stt_model": "base",
     "stt_language": "",
-    "search_provider": "searxng",
-    # Default fallback chain — when the primary provider fails or
-    # rate-limits, we try DuckDuckGo next. Free, no API key required, so
-    # safe to ship on by default for every user.
-    "search_fallback_chain": ["duckduckgo"],
-    "search_url": "",
-    "search_result_count": 5,
-    # SafeSearch level applied to every provider that exposes one.
-    # "strict"   — block adult / explicit results (default; matches what users
-    #              expect from a research tool and avoids unrelated NSFW URLs
-    #              bleeding in via provider "related" / spam recommendations)
-    # "moderate" — provider-default behavior (filter explicit but allow
-    #              suggestive content)
-    # "off"      — disable filtering entirely (advanced users only)
-    #
-    # Providers that honor this setting (translated to each provider's native
-    # param in src/search/providers.py:_safesearch_for):
-    #     SearXNG       safesearch=0/1/2 (JSON API, HTML scrape, news fallback)
-    #     Brave Search  safesearch=off/moderate/strict
-    #     DuckDuckGo    safesearch=off/moderate/on (library + HTML kp param)
-    #     Google PSE    safe=active (omitted for "off"; PSE has no middle tier)
-    #     Serper.dev    safe=active (omitted for "off"; proxies Google's `safe`)
-    # Providers NOT touched: Tavily (no SafeSearch knob; filters at index time)
-    # and any custom backend reached via search_url — they keep whatever the
-    # backend itself decides, so operators stay in control of self-hosted /
-    # niche search instances.
-    "search_safesearch": "strict",
-    "brave_api_key": "",
-    "google_pse_key": "",
-    "google_pse_cx": "",
-    "tavily_api_key": "",
-    "serper_api_key": "",
     "research_endpoint_id": "",
     "research_model": "",
     "research_search_provider": "",
@@ -133,7 +101,6 @@ DEFAULT_SETTINGS = {
     "rag_pipeline": {},
     "disabled_tools": [
         "generate_image",
-        "manage_tasks",
     ],
     "task_endpoint_id": "",
     "task_model": "",
@@ -153,8 +120,6 @@ DEFAULT_SETTINGS = {
     # Ordered fallback chain for the Utility model (summarization, naming,
     # tidy actions, etc.).
     "utility_model_fallbacks": [],
-    "teacher_model": "",
-    "teacher_enabled": False,
     # Always-on custom system prompt. Prepended to every chat's system context
     # (before any preset prompt) and never shown in the chat transcript. Empty
     # string disables it. See routes/chat_helpers.py build_chat_context.
@@ -172,16 +137,6 @@ DEFAULT_SETTINGS = {
     "reminder_llm_synthesis": False,
     "reminder_ntfy_topic": "Reminders",
     "reminder_email_to": "",
-    # Email triage scanner rules. Running/paused state and schedule live in
-    # Tasks via the built-in `check_email_urgency` task.
-    "urgent_email_prompt": (
-        "Flag as urgent: explicit deadlines, time-sensitive requests, "
-        "work-blocking issues, messages from people I report to, or anything "
-        "where a delayed reply costs money/trust. Someone waiting outside, "
-        "at the door, locked out, or unable to get in is urgent now. "
-        "Newsletters, marketing, automated digests, and FYI-only updates are "
-        "NOT urgent."
-    ),
     # Keyboard shortcuts (action: key combination)
     "keybinds": {
         "search": "ctrl+k",
@@ -195,7 +150,6 @@ DEFAULT_SETTINGS = {
 }
 
 DEFAULT_FEATURES = {
-    "memory": True,
     "document_editor": True,
     "rag": True,
     "sensitive_filter": True,

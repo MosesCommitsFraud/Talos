@@ -66,7 +66,6 @@ from core.exceptions import (
     InvalidFileUploadError,
     LLMServiceError,
     SessionNotFoundError,
-    WebSearchError,
 )
 from core.middleware import SecurityHeadersMiddleware
 from src.generated_images import GENERATED_IMAGE_HEADERS, resolve_generated_image_path
@@ -543,8 +542,6 @@ session_manager = components["session_manager"]
 from src.assistant_log import set_session_manager as _set_asst_sm
 
 _set_asst_sm(session_manager)
-memory_manager = components["memory_manager"]
-memory_vector = components.get("memory_vector")
 upload_handler = components["upload_handler"]
 personal_docs_mgr = components["personal_docs_manager"]
 api_key_manager = components["api_key_manager"]
@@ -577,16 +574,6 @@ async def llm_service_error_handler(request: Request, exc: LLMServiceError):
     )
 
 
-@app.exception_handler(WebSearchError)
-async def web_search_error_handler(request: Request, exc: WebSearchError):
-    return JSONResponse(status_code=502, content={"error": "WEB_SEARCH_ERROR", "message": str(exc)})
-
-
-# ========= WEBHOOK MANAGER =========
-from src.webhook_manager import WebhookManager
-
-webhook_manager = WebhookManager(api_key_manager=api_key_manager)
-
 # ========= INCLUDE ROUTERS =========
 
 # Auth
@@ -618,20 +605,13 @@ session_config = {
     "OPENAI_API_KEY": OPENAI_API_KEY,
     "SESSIONS_FILE": SESSIONS_FILE,
 }
-app.include_router(
-    setup_session_routes(session_manager, session_config, webhook_manager=webhook_manager)
-)
+app.include_router(setup_session_routes(session_manager, session_config))
 
 # Admin Danger Zone wipes (Settings → System → Danger Zone)
 from routes.admin_wipe_routes import setup_admin_wipe_routes
 
 app.include_router(setup_admin_wipe_routes(session_manager))
 
-# Memory
-from routes.memory_routes import setup_memory_routes
-
-memory_router = setup_memory_routes(memory_manager, session_manager, memory_vector=memory_vector)
-app.include_router(memory_router)
 from routes.skills_routes import setup_skills_routes
 
 app.include_router(setup_skills_routes(skills_manager))
@@ -644,10 +624,7 @@ app.include_router(
         session_manager,
         chat_handler,
         chat_processor,
-        memory_manager,
         upload_handler,
-        memory_vector=memory_vector,
-        webhook_manager=webhook_manager,
         skills_manager=skills_manager,
     )
 )
@@ -724,7 +701,7 @@ app.include_router(setup_voice_routes())
 # Backup (export/import user data)
 from routes.backup_routes import setup_backup_routes
 
-app.include_router(setup_backup_routes(memory_manager, preset_manager, skills_manager))
+app.include_router(setup_backup_routes(preset_manager, skills_manager))
 
 from routes.font_routes import setup_font_routes
 
@@ -750,32 +727,23 @@ from routes.sandbox_routes import setup_sandbox_routes
 app.include_router(setup_sandbox_routes())
 logger.info("Talos sandbox routes initialized")
 
-# AI Interaction tools (debates, pipelines, self-managing AI, UI control)
-from src.ai_interaction import set_memory_manager as set_ai_memory_manager
+# AI Interaction tools (session, RAG, UI control)
 from src.ai_interaction import set_rag_manager as set_ai_rag_manager
 from src.ai_interaction import set_session_manager as set_ai_session_manager
 
 set_ai_session_manager(session_manager)
-set_ai_memory_manager(memory_manager, memory_vector)
 set_ai_rag_manager(rag_manager, personal_docs_mgr)
-logger.info("AI interaction tools initialized (session, memory, RAG, UI control)")
-
-# Webhooks
-from routes.webhook_routes import setup_webhook_routes
-
-app.include_router(
-    setup_webhook_routes(webhook_manager, auth_manager, session_manager, api_key_manager)
-)
+logger.info("AI interaction tools initialized (session, RAG, UI control)")
 
 # API Tokens
 from routes.api_token_routes import setup_api_token_routes
 
 app.include_router(setup_api_token_routes())
 
-logger.info("Webhook & API token routes initialized")
+logger.info("API token routes initialized")
 
 logger.info(
-    "Talos feature profile loaded: chat, auth/RBAC, uploads, memory, documents, MCP, webhooks, API tokens"
+    "Talos feature profile loaded: chat, auth/RBAC, uploads, documents, MCP, API tokens"
 )
 
 # ========= ROUTES (kept in app.py) =========
@@ -869,7 +837,6 @@ app.router.lifespan_context = _lifespan
 async def _startup_event():
     global upload_cleanup_task
     logger.info("Application starting up...")
-    webhook_manager.set_loop(asyncio.get_running_loop())
     # Wipe any leftover incognito sessions from previous process — they're
     # ephemeral by design and must not survive a restart.
     try:
@@ -1059,11 +1026,6 @@ async def _shutdown_event():
             await upload_cleanup_task
         except asyncio.CancelledError:
             pass
-    # Close webhook manager
-    try:
-        await webhook_manager.close()
-    except Exception as e:
-        logger.warning(f"Webhook manager shutdown error: {e}")
     # Disconnect all MCP servers
     try:
         await mcp_manager.disconnect_all()

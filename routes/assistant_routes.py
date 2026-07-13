@@ -356,11 +356,10 @@ def setup_assistant_routes(chat_processor=None, session_manager=None) -> APIRout
         preface: list[dict] = []
         if chat_processor is not None:
             try:
-                preface, _rag, _web = chat_processor.build_context_preface(
+                preface, _rag = chat_processor.build_context_preface(
                     message=_last_user_text(body.messages),
                     session=None,
                     use_rag=cfg["use_rag"],
-                    use_memory=False,
                     preset_system_prompt=cfg["system_prompt"] or None,
                     owner=owner,
                     agent_mode=True,

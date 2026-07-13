@@ -524,22 +524,6 @@ class AssistantEndpoint(TimestampMixin, Base):
     is_enabled = Column(Boolean, default=True)
 
 
-class Webhook(TimestampMixin, Base):
-    """Outgoing webhooks fired on events."""
-
-    __tablename__ = "webhooks"
-
-    id = Column(String, primary_key=True, index=True)
-    name = Column(String, nullable=False)
-    url = Column(String, nullable=False)
-    secret = Column(String, nullable=True)  # HMAC-SHA256 signing secret
-    events = Column(String, nullable=False)  # comma-separated event types
-    is_active = Column(Boolean, default=True)
-    last_triggered_at = Column(DateTime, nullable=True)
-    last_status_code = Column(Integer, nullable=True)
-    last_error = Column(String, nullable=True)
-
-
 class UserTool(TimestampMixin, Base):
     """User-created sandboxed mini-apps/tools."""
 
@@ -613,63 +597,6 @@ class CrewMember(TimestampMixin, Base):
     )
 
 
-class ScheduledTask(TimestampMixin, Base):
-    """A recurring or one-off task — LLM-powered or direct action, time or event triggered."""
-
-    __tablename__ = "scheduled_tasks"
-
-    id = Column(String, primary_key=True, index=True)
-    owner = Column(String, nullable=True, index=True)
-    name = Column(String, nullable=False, default="Untitled Task")
-    prompt = Column(Text, nullable=True)  # LLM prompt (for task_type="llm")
-    task_type = Column(String, default="llm")  # "llm" | "action"
-    action = Column(String, nullable=True)  # builtin action name (for task_type="action")
-    schedule = Column(String, nullable=True)  # "once", "daily", "weekly", "monthly"
-    scheduled_time = Column(String, nullable=True)  # "HH:MM" (24h, stored UTC)
-    scheduled_day = Column(
-        Integer, nullable=True
-    )  # day-of-week 0=Mon for weekly, day-of-month for monthly
-    scheduled_date = Column(DateTime, nullable=True)  # exact datetime for "once"
-    trigger_type = Column(String, default="schedule")  # "schedule" | "event"
-    trigger_event = Column(String, nullable=True)  # e.g. "session_created", "message_sent"
-    trigger_count = Column(Integer, nullable=True)  # fire every N events
-    trigger_counter = Column(Integer, default=0)  # current count toward trigger_count
-    next_run = Column(DateTime, nullable=True, index=True)
-    last_run = Column(DateTime, nullable=True)
-    status = Column(String, default="active")  # "active", "paused", "completed"
-    output_target = Column(String, default="session")  # "session" (extensible later)
-    session_id = Column(String, ForeignKey("sessions.id", ondelete="SET NULL"), nullable=True)
-    model = Column(String, nullable=True)
-    endpoint_url = Column(String, nullable=True)
-    run_count = Column(Integer, default=0)
-
-    cron_expression = Column(String, nullable=True)  # cron string e.g. "*/5 * * * *"
-    then_task_id = Column(
-        String, ForeignKey("scheduled_tasks.id", ondelete="SET NULL"), nullable=True
-    )
-    webhook_token = Column(String, nullable=True, unique=True)
-    crew_member_id = Column(String, nullable=True)  # optional link to crew_members.id
-    # character_id historically referenced an agent_characters table that was
-    # never actually created. Keep the column for schema compatibility but
-    # drop the ForeignKey so SQLAlchemy table sort doesn't fail on flush.
-    character_id = Column(String, nullable=True)
-    max_steps = Column(Integer, nullable=True)  # max agent loop iterations (null=unlimited)
-    email_results = Column(Boolean, default=True)  # email results to character.email_to
-    notifications_enabled = Column(
-        Boolean, default=True
-    )  # per-task on/off for completion notifications
-
-    session = relationship(
-        "Session", backref=backref("scheduled_tasks", cascade="save-update, merge")
-    )
-    then_task = relationship("ScheduledTask", remote_side=[id], foreign_keys=[then_task_id])
-
-    __table_args__ = (
-        Index("ix_scheduled_tasks_due", "status", "next_run"),
-        Index("ix_scheduled_tasks_event", "trigger_type", "trigger_event", "status"),
-    )
-
-
 class EditorDraft(TimestampMixin, Base):
     """Persisted in-progress gallery-editor session — layered project state
     that the user can close and reopen later. Stores the full layer payload
@@ -699,73 +626,6 @@ class EditorDraft(TimestampMixin, Base):
     is_active = Column(Boolean, default=True)
 
     __table_args__ = (Index("ix_editor_drafts_owner_updated", "owner", "is_active", "updated_at"),)
-
-
-class TaskRun(Base):
-    """Record of a single execution of a ScheduledTask."""
-
-    __tablename__ = "task_runs"
-
-    id = Column(String, primary_key=True, index=True)
-    task_id = Column(String, ForeignKey("scheduled_tasks.id", ondelete="CASCADE"), nullable=False)
-    started_at = Column(DateTime, nullable=False, default=utcnow_naive)
-    finished_at = Column(DateTime, nullable=True)
-    status = Column(String, default="running")  # "running", "success", "error"
-    result = Column(Text, nullable=True)
-    error = Column(Text, nullable=True)
-    tokens_used = Column(Integer, nullable=True)
-    steps = Column(Text, nullable=True)  # JSON log of agent tool calls
-    model = Column(String, nullable=True)  # model that actually ran (resolved at execution)
-
-    task = relationship(
-        "ScheduledTask",
-        backref=backref("runs", cascade="all, delete-orphan", order_by="TaskRun.started_at.desc()"),
-    )
-
-    __table_args__ = (Index("ix_task_runs_task", "task_id", "started_at"),)
-
-
-class Memory(Base):
-    """
-    SQLAlchemy model for Memory table.
-    Represents persistent memory entries with metadata.
-    """
-
-    __tablename__ = "memories"
-
-    # Primary key
-    id = Column(String, primary_key=True, index=True)
-
-    # Memory content
-    text = Column(Text, nullable=False)
-
-    # Categorization
-    category = Column(String, default="fact")
-    source = Column(String, default="user")
-
-    # Owner (username)
-    owner = Column(String, nullable=True, index=True)
-
-    # Reference to session (nullable)
-    session_id = Column(
-        String, ForeignKey("sessions.id", ondelete="SET NULL"), nullable=True, index=True
-    )
-
-    # Timestamp as Unix timestamp
-    timestamp = Column(Integer, default=lambda: int(utcnow_naive().timestamp()))
-
-    # Relationship to Session
-    session = relationship("Session", backref="memories")
-
-    # Indexes - optimized composites
-    __table_args__ = (
-        Index(
-            "ix_memories_lookup", "category", "timestamp"
-        ),  # Composite for category-based queries
-        Index(
-            "ix_memories_session", "session_id", "timestamp"
-        ),  # Composite for session-based queries
-    )
 
 
 def _migrate_add_last_message_at_column():
@@ -978,26 +838,6 @@ def _migrate_add_model_endpoint_refresh_columns():
         logging.getLogger(__name__).warning(f"model_endpoints refresh-policy migration failed: {e}")
 
 
-def _migrate_add_task_run_model_column():
-    """Add model column to task_runs if it doesn't exist (records which model ran)."""
-    import sqlite3
-
-    db_path = DATABASE_URL.replace("sqlite:///", "")
-    if not os.path.exists(db_path):
-        return
-    try:
-        conn = sqlite3.connect(db_path)
-        cursor = conn.execute("PRAGMA table_info(task_runs)")
-        columns = [row[1] for row in cursor.fetchall()]
-        if columns and "model" not in columns:
-            conn.execute("ALTER TABLE task_runs ADD COLUMN model TEXT")
-            conn.commit()
-            logging.getLogger(__name__).info("Migrated: added 'model' column to task_runs")
-        conn.close()
-    except Exception as e:
-        logging.getLogger(__name__).warning(f"task_runs model migration failed: {e}")
-
-
 def _migrate_add_supports_tools_column():
     """Add supports_tools column to model_endpoints if it doesn't exist."""
     import sqlite3
@@ -1173,8 +1013,7 @@ def _migrate_add_owner_to_table(table_name: str, index_name: str):
 
 
 def _migrate_add_multiuser_owner_columns():
-    """Add owner column to memories, gallery_images, user_tools, comparisons."""
-    _migrate_add_owner_to_table("memories", "ix_memories_owner")
+    """Add owner column to gallery_images, user_tools, comparisons."""
     _migrate_add_owner_to_table("gallery_images", "ix_gallery_images_owner")
     _migrate_add_owner_to_table("user_tools", "ix_user_tools_owner")
     _migrate_add_owner_to_table("comparisons", "ix_comparisons_owner")
@@ -1258,7 +1097,6 @@ def _migrate_assign_legacy_owner():
         # exists; the explicit list documents intent.
         tables = [
             "sessions",
-            "memories",
             "gallery_images",
             "user_tools",
             "comparisons",
@@ -1268,14 +1106,11 @@ def _migrate_assign_legacy_owner():
             "calendars",
             "calendar_events",
             "integrations",
-            "scheduled_tasks",
-            "task_runs",
             "crew_members",
             "gallery_albums",
             "gallery_people",
             "user_tool_data",
             "api_tokens",
-            "webhooks",
         ]
         for table in tables:
             try:
@@ -1295,26 +1130,6 @@ def _migrate_assign_legacy_owner():
         conn.close()
     except Exception as e:
         logger.warning(f"Legacy owner migration failed: {e}")
-
-    # Also migrate memory.json
-    mem_path = os.path.join("data", "memory.json")
-    try:
-        if os.path.exists(mem_path):
-            with open(mem_path, "r", encoding="utf-8") as f:
-                memories = _json.load(f)
-            changed = False
-            for m in memories:
-                if not m.get("owner"):
-                    m["owner"] = admin_user
-                    changed = True
-            if changed:
-                with open(mem_path, "w", encoding="utf-8") as f:
-                    _json.dump(memories, f, ensure_ascii=False, indent=2)
-                logger.info(
-                    f"Assigned {sum(1 for _ in memories)} legacy memories in memory.json to '{admin_user}'"
-                )
-    except Exception as e:
-        logger.warning(f"memory.json legacy migration failed: {e}")
 
     # Also migrate user_prefs.json to per-user format
     prefs_path = os.path.join("data", "user_prefs.json")
@@ -1402,88 +1217,6 @@ def _migrate_add_doc_source_email_cols():
         logging.getLogger(__name__).warning(f"doc source-email migration: {e}")
 
 
-def _migrate_add_task_automation_columns():
-    """Add automation columns to scheduled_tasks table if missing."""
-    new_cols = {
-        "task_type": "VARCHAR DEFAULT 'llm'",
-        "action": "VARCHAR",
-        "trigger_type": "VARCHAR DEFAULT 'schedule'",
-        "trigger_event": "VARCHAR",
-        "trigger_count": "INTEGER",
-        "trigger_counter": "INTEGER DEFAULT 0",
-    }
-    try:
-        with engine.connect() as conn:
-            cols_info = list(conn.execute(text("PRAGMA table_info(scheduled_tasks)")))
-            col_names = [r[1] for r in cols_info]
-            for col_name, col_def in new_cols.items():
-                if col_name not in col_names:
-                    conn.execute(
-                        text(f"ALTER TABLE scheduled_tasks ADD COLUMN {col_name} {col_def}")
-                    )
-
-            # Check if prompt/schedule/scheduled_time are still NOT NULL — need table rebuild
-            notnull_map = {r[1]: r[3] for r in cols_info}
-            needs_rebuild = (
-                notnull_map.get("prompt", 0) == 1
-                or notnull_map.get("schedule", 0) == 1
-                or notnull_map.get("scheduled_time", 0) == 1
-            )
-            if needs_rebuild:
-                logging.getLogger(__name__).info(
-                    "Rebuilding scheduled_tasks to make prompt/schedule/scheduled_time nullable"
-                )
-                conn.execute(text("ALTER TABLE scheduled_tasks RENAME TO _old_scheduled_tasks"))
-                conn.execute(
-                    text("""
-                    CREATE TABLE scheduled_tasks (
-                        id VARCHAR PRIMARY KEY,
-                        owner VARCHAR,
-                        name VARCHAR NOT NULL,
-                        prompt TEXT,
-                        schedule VARCHAR,
-                        scheduled_time VARCHAR,
-                        scheduled_day INTEGER,
-                        scheduled_date DATETIME,
-                        next_run DATETIME,
-                        last_run DATETIME,
-                        status VARCHAR,
-                        output_target VARCHAR,
-                        session_id VARCHAR,
-                        model VARCHAR,
-                        endpoint_url VARCHAR,
-                        run_count INTEGER,
-                        created_at DATETIME NOT NULL,
-                        updated_at DATETIME NOT NULL,
-                        task_type VARCHAR DEFAULT 'llm',
-                        action VARCHAR,
-                        trigger_type VARCHAR DEFAULT 'schedule',
-                        trigger_event VARCHAR,
-                        trigger_count INTEGER,
-                        trigger_counter INTEGER DEFAULT 0
-                    )
-                """)
-                )
-                conn.execute(
-                    text("""
-                    INSERT INTO scheduled_tasks
-                    SELECT id, owner, name, prompt, schedule, scheduled_time,
-                           scheduled_day, scheduled_date, next_run, last_run,
-                           status, output_target, session_id, model, endpoint_url,
-                           run_count, created_at, updated_at,
-                           task_type, action, trigger_type, trigger_event,
-                           trigger_count, trigger_counter
-                    FROM _old_scheduled_tasks
-                """)
-                )
-                conn.execute(text("DROP TABLE _old_scheduled_tasks"))
-
-            conn.commit()
-            logging.getLogger(__name__).info("Task automation columns migration complete")
-    except Exception as e:
-        logging.getLogger(__name__).warning(f"task automation migration: {e}")
-
-
 def _migrate_add_oauth_config():
     """Add oauth_config column to mcp_servers table if missing."""
     try:
@@ -1495,6 +1228,19 @@ def _migrate_add_oauth_config():
                 logging.getLogger(__name__).info("Added oauth_config column to mcp_servers")
     except Exception as e:
         logging.getLogger(__name__).warning(f"oauth_config migration: {e}")
+
+
+def _migrate_add_crew_member_id():
+    """Add crew_member_id column to sessions table if missing."""
+    try:
+        with engine.connect() as conn:
+            cols = [r[1] for r in conn.execute(text("PRAGMA table_info(sessions)"))]
+            if "crew_member_id" not in cols:
+                conn.execute(text("ALTER TABLE sessions ADD COLUMN crew_member_id TEXT"))
+                conn.commit()
+                logging.getLogger(__name__).info("Added crew_member_id column to sessions")
+    except Exception as e:
+        logging.getLogger(__name__).warning(f"crew_member_id migration: {e}")
 
 
 def _migrate_add_disabled_tools():
@@ -1526,94 +1272,6 @@ def _migrate_add_mcp_oauth_tokens_column():
                 logging.getLogger(__name__).info("Added oauth_tokens column to mcp_servers")
     except Exception as e:
         logging.getLogger(__name__).warning(f"oauth_tokens migration: {e}")
-
-
-def _migrate_add_task_v2_columns():
-    """Add cron_expression, then_task_id, webhook_token to scheduled_tasks."""
-    new_cols = {
-        "cron_expression": "VARCHAR",
-        "then_task_id": "VARCHAR",
-        "webhook_token": "VARCHAR",
-    }
-    try:
-        with engine.connect() as conn:
-            cols = [r[1] for r in conn.execute(text("PRAGMA table_info(scheduled_tasks)"))]
-            for col_name, col_def in new_cols.items():
-                if col_name not in cols:
-                    conn.execute(
-                        text(f"ALTER TABLE scheduled_tasks ADD COLUMN {col_name} {col_def}")
-                    )
-            if "webhook_token" not in cols:
-                conn.execute(
-                    text(
-                        "CREATE UNIQUE INDEX IF NOT EXISTS ix_scheduled_tasks_webhook ON scheduled_tasks(webhook_token)"
-                    )
-                )
-            conn.commit()
-            logging.getLogger(__name__).info("Task v2 columns migration complete")
-    except Exception as e:
-        logging.getLogger(__name__).warning(f"task v2 migration: {e}")
-
-
-def _migrate_drop_ping_notes_tasks():
-    """One-time cleanup: ping_notes and ping_events used to be seeded as
-    user-facing tasks. They're now pure background scanners inside the
-    scheduler (no LLM, don't belong in the Tasks UI). Remove existing rows
-    + their runs for both. (tidy_sessions/documents/research stay as tasks.)"""
-    targets = ("ping_notes", "ping_events")
-    try:
-        with engine.connect() as conn:
-            for action in targets:
-                conn.execute(
-                    text(
-                        "DELETE FROM task_runs WHERE task_id IN "
-                        "(SELECT id FROM scheduled_tasks WHERE action=:a)"
-                    ),
-                    {"a": action},
-                )
-                r = conn.execute(text("DELETE FROM scheduled_tasks WHERE action=:a"), {"a": action})
-                if r.rowcount:
-                    logging.getLogger(__name__).info(f"Dropped {r.rowcount} {action} task row(s)")
-            conn.commit()
-    except Exception as e:
-        logging.getLogger(__name__).debug(f"drop_ping_notes_tasks: {e}")
-
-
-def _migrate_add_notifications_enabled():
-    """Per-task notification on/off toggle (default ON)."""
-    try:
-        with engine.connect() as conn:
-            cols = [r[1] for r in conn.execute(text("PRAGMA table_info(scheduled_tasks)"))]
-            if "notifications_enabled" not in cols:
-                conn.execute(
-                    text(
-                        "ALTER TABLE scheduled_tasks ADD COLUMN notifications_enabled BOOLEAN DEFAULT 1"
-                    )
-                )
-                conn.commit()
-                logging.getLogger(__name__).info(
-                    "Added notifications_enabled column to scheduled_tasks"
-                )
-    except Exception as e:
-        logging.getLogger(__name__).warning(f"notifications_enabled migration: {e}")
-
-
-def _migrate_add_crew_member_id():
-    """Add crew_member_id column to sessions and scheduled_tasks tables if missing."""
-    try:
-        with engine.connect() as conn:
-            cols = [r[1] for r in conn.execute(text("PRAGMA table_info(sessions)"))]
-            if "crew_member_id" not in cols:
-                conn.execute(text("ALTER TABLE sessions ADD COLUMN crew_member_id TEXT"))
-                conn.commit()
-                logging.getLogger(__name__).info("Added crew_member_id column to sessions")
-            cols2 = [r[1] for r in conn.execute(text("PRAGMA table_info(scheduled_tasks)"))]
-            if "crew_member_id" not in cols2:
-                conn.execute(text("ALTER TABLE scheduled_tasks ADD COLUMN crew_member_id TEXT"))
-                conn.commit()
-                logging.getLogger(__name__).info("Added crew_member_id column to scheduled_tasks")
-    except Exception as e:
-        logging.getLogger(__name__).warning(f"crew_member_id migration: {e}")
 
 
 def _migrate_add_assistant_columns():
@@ -1847,7 +1505,6 @@ def init_db():
     _migrate_add_model_endpoint_refresh_columns()
     _migrate_add_model_endpoint_owner_column()
     _migrate_add_supports_tools_column()
-    _migrate_add_task_run_model_column()
     _migrate_add_owner_column()
     _migrate_add_document_archived_column()
     _migrate_add_last_message_at_column()
@@ -1861,12 +1518,8 @@ def init_db():
     _migrate_add_tidy_verdict()
     _migrate_add_doc_source_email_cols()
     _migrate_add_oauth_config()
-    _migrate_add_task_automation_columns()
     _migrate_add_disabled_tools()
     _migrate_add_mcp_oauth_tokens_column()
-    _migrate_add_task_v2_columns()
-    _migrate_add_notifications_enabled()
-    _migrate_drop_ping_notes_tasks()
     _migrate_add_crew_member_id()
     _migrate_add_assistant_columns()
     _migrate_add_assistant_endpoint_require_auth()
@@ -2146,7 +1799,6 @@ def get_session_stats():
             "active_sessions": db.query(Session).filter(Session.archived == False).count(),
             "archived_sessions": db.query(Session).filter(Session.archived == True).count(),
             "total_messages": db.query(ChatMessage).count(),
-            "total_memories": db.query(Memory).count(),
         }
         return stats
 

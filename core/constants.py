@@ -12,8 +12,6 @@ DATA_DIR = os.path.join(BASE_DIR, "data")
 
 # Data file paths
 SESSIONS_FILE = os.path.join(DATA_DIR, "sessions.json")
-MEMORY_FILE = os.path.join(DATA_DIR, "memory.json")
-MEMORY_DOC = os.path.join(DATA_DIR, "memory_doc.md")
 PERSONAL_DIR = os.path.join(DATA_DIR, "personal_docs")
 RUNBOOK_DIR = os.path.join(PERSONAL_DIR, "runbook")
 UPLOAD_DIR = os.path.join(DATA_DIR, "uploads")
@@ -29,7 +27,6 @@ OPENAI_COMPAT_PATH = "/v1/chat/completions"
 DEFAULT_HOST = os.getenv("LLM_HOST", "localhost")
 LLM_HOSTS = [h.strip() for h in os.getenv("LLM_HOSTS", "").split(",") if h.strip()]
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-SEARXNG_INSTANCE = os.getenv("SEARXNG_INSTANCE", "http://localhost:8080")
 
 
 # Cleanup configuration

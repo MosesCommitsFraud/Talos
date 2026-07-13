@@ -1226,9 +1226,10 @@ def _resolve_audit_models(owner=None):
     """Resolve (url, model, headers, teacher) for an audit run from Settings.
 
     Worker = Utility model (falling back to Default, normalized to a served
-    model id); teacher = the optional Settings → Teacher Model config. Shared
-    by the manual /audit-all route and scheduled/event audits. Raises
-    ValueError if no worker model.
+    model id). Shared by the manual /audit-all route and scheduled/event
+    audits. Raises ValueError if no worker model. The teacher slot is always
+    None — the teacher-escalation feature was removed; the audit self-edit
+    path handles weak skills on its own.
     """
     from src.endpoint_resolver import resolve_endpoint
 
@@ -1250,21 +1251,7 @@ def _resolve_audit_models(owner=None):
     except Exception:
         pass
 
-    teacher = None
-    try:
-        from src.settings import get_setting
-
-        if get_setting("teacher_enabled", False):
-            spec = (get_setting("teacher_model", "") or "").strip()
-            if spec:
-                from src.ai_interaction import _resolve_model
-
-                t_url, t_model, t_headers = _resolve_model(spec)
-                if t_url and t_model:
-                    teacher = (t_url, t_model, t_headers)
-    except Exception as e:
-        logger.warning(f"Audit teacher resolve failed: {e}")
-    return url, model, headers, teacher
+    return url, model, headers, None
 
 
 async def run_scheduled_skill_audit(
@@ -1333,14 +1320,6 @@ def setup_skills_routes(skills_manager: SkillsManager) -> APIRouter:
         # short-circuited the comparison. Treat missing owner as not-owned.
         if skill.get("owner") != user:
             raise HTTPException(404, "Skill not found")
-
-    def _fire_skill_added(user: Optional[str]):
-        try:
-            from src.event_bus import fire_event
-
-            fire_event("skill_added", user)
-        except Exception:
-            logger.debug("skill_added event dispatch failed", exc_info=True)
 
     @router.get("")
     async def list_skills(request: Request):
@@ -1493,8 +1472,6 @@ def setup_skills_routes(skills_manager: SkillsManager) -> APIRouter:
             solution=body.solution or "",
             steps=body.steps,
         )
-        if not entry.get("_deduped"):
-            _fire_skill_added(user)
         return {"ok": True, "deduped": bool(entry.get("_deduped")), "skill": entry}
 
     @router.get("/{skill_id}")
@@ -1807,11 +1784,6 @@ def setup_skills_routes(skills_manager: SkillsManager) -> APIRouter:
         )
         if not ok:
             raise HTTPException(500, "Update failed")
-        # Manual markdown edits can create or substantially rewrite a draft
-        # skill without going through /add. Treat unaudited saves as new audit
-        # candidates so the event-driven Skills Audit pipeline still runs.
-        if not match.get("audit_verdict"):
-            _fire_skill_added(user)
         return {"ok": True, "name": sk.name}
 
     @router.put("/{skill_id}")
@@ -1831,8 +1803,6 @@ def setup_skills_routes(skills_manager: SkillsManager) -> APIRouter:
         ok = skills_manager.update_skill(match.get("name"), updates, owner=user)
         if not ok:
             raise HTTPException(404, "Skill not found")
-        if not match.get("audit_verdict"):
-            _fire_skill_added(user)
         return {"ok": True}
 
     @router.delete("/{skill_id}")

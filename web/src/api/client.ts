@@ -688,7 +688,6 @@ export interface StreamFlags {
   approvedPlan?: string;
   useRag?: boolean;
   useDb?: boolean;
-  useWeb?: boolean;
   /** Model reasoning/thinking. When false the backend disables it (vLLM
    *  `enable_thinking: false`). Omitted/true leaves the model's default on. */
   reasoning?: boolean;
@@ -719,7 +718,6 @@ export async function streamChat(opts: {
   if (f.approvedPlan) fd.set('approved_plan', f.approvedPlan);
   if (f.useRag) fd.set('use_rag', 'true');
   if (f.useDb) fd.set('use_db', 'true');
-  if (f.useWeb) fd.set('use_web', 'true');
   if (f.reasoning === false) fd.set('reasoning', 'false');
   if (f.incognito) fd.set('incognito', 'true');
   if (f.lang) fd.set('lang', f.lang);

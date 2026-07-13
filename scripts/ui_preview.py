@@ -663,16 +663,12 @@ class PreviewHandler(BaseHTTPRequestHandler):
                             "python",
                             "read_file",
                             "write_file",
-                            "web_search",
                             "search_chats",
                             "create_document",
                             "generate_image",
-                            "manage_memory",
                             "manage_skills",
                             "query_sql",
-                            "chat_with_model",
                             "list_models",
-                            "manage_tasks",
                         )
                     ]
                 }

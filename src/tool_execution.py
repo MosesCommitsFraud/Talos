@@ -538,7 +538,6 @@ async def _run_subprocess_streaming(
 _ADMIN_TOOLS = {
     "manage_endpoints",
     "manage_mcp",
-    "manage_webhooks",
     "manage_tokens",
     "manage_settings",
 }
@@ -572,27 +571,6 @@ def _parse_generate_image(content: str) -> Dict:
     return args
 
 
-def _parse_manage_memory(content: str) -> Dict:
-    lines = content.strip().split("\n")
-    action = lines[0].strip().lower() if lines else ""
-    args = {"action": action}
-    if action == "add":
-        args["text"] = lines[1].strip() if len(lines) > 1 else ""
-        if len(lines) > 2 and lines[2].strip():
-            args["category"] = lines[2].strip().lower()
-    elif action == "edit":
-        args["memory_id"] = lines[1].strip() if len(lines) > 1 else ""
-        args["text"] = lines[2].strip() if len(lines) > 2 else ""
-    elif action == "delete":
-        args["memory_id"] = lines[1].strip() if len(lines) > 1 else ""
-    elif action == "search":
-        args["text"] = lines[1].strip() if len(lines) > 1 else ""
-    elif action == "list":
-        if len(lines) > 1 and lines[1].strip():
-            args["category"] = lines[1].strip().lower()
-    return args
-
-
 def _parse_write_file(content: str) -> Dict:
     lines = content.split("\n", 1)
     return {"path": lines[0].strip(), "content": lines[1] if len(lines) > 1 else ""}
@@ -604,7 +582,6 @@ _MCP_ARG_PARSERS: Dict[str, callable] = {
     "read_file": lambda c: {"path": c.split("\n")[0].strip()},
     "write_file": _parse_write_file,
     "generate_image": _parse_generate_image,
-    "manage_memory": _parse_manage_memory,
 }
 
 
@@ -1428,9 +1405,8 @@ async def _direct_fallback(
                 return {"error": err, "exit_code": 1}
             return {"output": _truncate(out), "exit_code": 0}
 
-        # manage_memory / generate_image still live as MCP servers
-        # (mcp_servers/{memory,image_gen}_server.py); the MCP path above
-        # handles them.
+        # generate_image still lives as an MCP server
+        # (mcp_servers/image_gen_server.py); the MCP path above handles it.
     except Exception as e:
         return {"error": f"{tool}: {e}", "exit_code": 1}
 
@@ -1465,9 +1441,7 @@ async def execute_tool_block(
         do_manage_mcp,
         do_manage_settings,
         do_manage_skills,
-        do_manage_tasks,
         do_manage_tokens,
-        do_manage_webhooks,
         do_query_sql,
         do_search_chats,
         do_suggest_document,
@@ -1713,22 +1687,15 @@ async def execute_tool_block(
         desc = f"search_chats: {query[:80]}"
         result = await do_search_chats(query, owner=owner)
     elif tool in (
-        "chat_with_model",
         "create_session",
         "list_sessions",
         "send_to_session",
-        "pipeline",
         "manage_session",
-        "manage_memory",
         "list_models",
-        "ask_teacher",
     ):
         from src.ai_interaction import dispatch_ai_tool
 
         desc, result = await dispatch_ai_tool(tool, content, session_id, owner=owner)
-    elif tool == "manage_tasks":
-        desc = "manage_tasks"
-        result = await do_manage_tasks(content, owner=owner)
     elif tool == "manage_skills":
         desc = "manage_skills"
         result = await do_manage_skills(content, owner=owner)
@@ -1742,9 +1709,6 @@ async def execute_tool_block(
     elif tool == "manage_mcp":
         desc = "manage_mcp"
         result = await do_manage_mcp(content, owner=owner)
-    elif tool == "manage_webhooks":
-        desc = "manage_webhooks"
-        result = await do_manage_webhooks(content, owner=owner)
     elif tool == "manage_tokens":
         desc = "manage_tokens"
         result = await do_manage_tokens(content, owner=owner)

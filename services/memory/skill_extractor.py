@@ -233,12 +233,6 @@ async def maybe_extract_skill(
             session_id=getattr(session, "session_id", None),
             owner=owner,
         )
-        try:
-            from src.event_bus import fire_event
-
-            fire_event("skill_added", owner)
-        except Exception:
-            logger.debug("skill_added event dispatch failed", exc_info=True)
         logger.info("Auto-extracted skill: %s (id=%s)", title, entry["id"])
         return entry
 

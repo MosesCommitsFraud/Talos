@@ -20,8 +20,6 @@ from src.constants import (
     SESSIONS_FILE,
     UPLOAD_DIR,
 )
-from src.memory import MemoryManager
-from src.memory_provider import MemoryProviderRegistry, NativeMemoryProvider
 from src.model_discovery import ModelDiscovery
 from src.personal_docs import PersonalDocsManager
 from src.preset_manager import PresetManager
@@ -50,7 +48,6 @@ def initialize_managers(base_dir: str, rag_manager=None) -> Dict[str, Any]:
     create_directories()
 
     # Initialize core managers
-    memory_manager = MemoryManager(DATA_DIR)
     skills_manager = SkillsManager(DATA_DIR)
     session_manager = SessionManager(SESSIONS_FILE)
     set_session_manager(session_manager)  # Enable Session.add_message() persistence
@@ -59,48 +56,15 @@ def initialize_managers(base_dir: str, rag_manager=None) -> Dict[str, Any]:
     api_key_manager = APIKeyManager(DATA_DIR)
     preset_manager = PresetManager(DATA_DIR)
 
-    # Initialize memory vector store (share embedding model with RAG if available)
-    memory_vector = None
-    try:
-        from src.memory_vector import MemoryVectorStore
-
-        embedding_model = getattr(rag_manager, "_model", None) if rag_manager else None
-        memory_vector = MemoryVectorStore(DATA_DIR, embedding_model=embedding_model)
-        if memory_vector.healthy:
-            # Rebuild index from existing memories if empty
-            if memory_vector.count() == 0:
-                existing = memory_manager.load()
-                if existing:
-                    memory_vector.rebuild(existing)
-                    logger.info(
-                        f"Rebuilt memory vector index from {len(existing)} existing entries"
-                    )
-            logger.info("MemoryVectorStore initialized")
-        else:
-            logger.warning("MemoryVectorStore DEGRADED: ChromaDB vector memory unavailable")
-            memory_vector = None
-    except Exception as e:
-        logger.warning(f"MemoryVectorStore DEGRADED: {e}")
-        memory_vector = None
-
-    memory_provider_registry = MemoryProviderRegistry(
-        [
-            NativeMemoryProvider(memory_manager, memory_vector),
-        ]
-    )
-
     # Initialize processors
     chat_processor = ChatProcessor(
-        memory_manager,
         personal_docs_manager,
-        memory_vector=memory_vector,
         skills_manager=skills_manager,
     )
 
     # Initialize chat handler with all dependencies
     chat_handler = ChatHandler(
         session_manager=session_manager,
-        memory_manager=memory_manager,
         chat_processor=chat_processor,
         preset_manager=preset_manager,
         upload_handler=upload_handler,
@@ -110,9 +74,6 @@ def initialize_managers(base_dir: str, rag_manager=None) -> Dict[str, Any]:
     model_discovery = ModelDiscovery(DEFAULT_HOST, OPENAI_API_KEY)
 
     return {
-        "memory_manager": memory_manager,
-        "memory_vector": memory_vector,
-        "memory_provider_registry": memory_provider_registry,
         "skills_manager": skills_manager,
         "session_manager": session_manager,
         "upload_handler": upload_handler,

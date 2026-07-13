@@ -1,15 +1,14 @@
 """Admin Danger Zone — per-category wipes.
 
 Each endpoint is admin-only and truncates exactly one domain so the
-user can selectively reset memory / skills / notes / etc. without
+user can selectively reset skills / notes / etc. without
 nuking everything. The catch-all `chats` endpoint mirrors the
 existing /api/sessions/all so the Danger Zone speaks one URL pattern.
 
 URL shape: DELETE /api/admin/wipe/{kind}
-Kinds: chats, memory, skills, notes, tasks, documents, gallery, calendar.
+Kinds: chats, skills, notes, documents, gallery, calendar.
 """
 
-import json
 import logging
 import os
 import shutil
@@ -23,11 +22,8 @@ from core.database import (
     DocumentVersion,
     GalleryAlbum,
     GalleryImage,
-    Memory,
     Note,
-    ScheduledTask,
     SessionLocal,
-    TaskRun,
 )
 from core.database import (
     ChatMessage as DbChatMessage,
@@ -39,23 +35,6 @@ from core.middleware import require_admin
 from src.constants import DATA_DIR
 
 logger = logging.getLogger(__name__)
-
-
-def _wipe_memory_files():
-    """Blank memory.json + drop the per-owner tidy-state sidecar so the
-    next audit doesn't try to diff against gone memories."""
-    for name in ("memory.json", "memory_tidy_state.json"):
-        p = os.path.join(DATA_DIR, name)
-        if not os.path.exists(p):
-            continue
-        try:
-            if name == "memory.json":
-                with open(p, "w", encoding="utf-8") as f:
-                    json.dump([], f)
-            else:
-                os.remove(p)
-        except OSError as e:
-            logger.warning(f"Could not reset {name}: {e}")
 
 
 def _rmtree_quiet(path: str):
@@ -91,24 +70,6 @@ def setup_admin_wipe_routes(session_manager):
                     pass
                 return {"status": "deleted", "kind": kind, "count": count}
 
-            if kind == "memory":
-                count = db.query(Memory).count()
-                db.query(Memory).delete()
-                db.commit()
-                _wipe_memory_files()
-                # Drop the vector store too so semantic search doesn't
-                # return ghosts. Lazy import — chromadb may not be
-                # initialised in every deployment.
-                try:
-                    from src.memory_vector import get_memory_vector_store
-
-                    mv = get_memory_vector_store()
-                    if mv and hasattr(mv, "clear"):
-                        mv.clear()
-                except Exception as e:
-                    logger.info(f"Memory vector clear skipped: {e}")
-                return {"status": "deleted", "kind": kind, "count": count}
-
             if kind == "skills":
                 # Skills live as SKILL.md files under data/skills/. Drop
                 # the entire directory; the SkillsManager re-creates the
@@ -132,14 +93,6 @@ def setup_admin_wipe_routes(session_manager):
             if kind == "notes":
                 count = db.query(Note).count()
                 db.query(Note).delete()
-                db.commit()
-                return {"status": "deleted", "kind": kind, "count": count}
-
-            if kind == "tasks":
-                # TaskRun rows reference tasks via FK — clear them first.
-                db.query(TaskRun).delete()
-                count = db.query(ScheduledTask).count()
-                db.query(ScheduledTask).delete()
                 db.commit()
                 return {"status": "deleted", "kind": kind, "count": count}
 

@@ -1,14 +1,11 @@
 # services/memory/__init__.py
-"""Memory service — persistent memory storage and retrieval."""
+"""Skills service — reusable skill library (SKILL.md format)."""
 
-from .memory import MemoryManager
-from .memory_vector import MemoryVectorStore
-from .service import Memory, MemorySearchResult, MemoryService
+from .skill_format import Skill, slugify
+from .skills import SkillsManager
 
 __all__ = [
-    "MemoryService",
-    "Memory",
-    "MemorySearchResult",
-    "MemoryManager",
-    "MemoryVectorStore",
+    "Skill",
+    "SkillsManager",
+    "slugify",
 ]

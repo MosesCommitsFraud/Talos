@@ -1,4 +1,4 @@
-"""Backup routes — export/import user data (memories, presets, settings, skills, preferences)."""
+"""Backup routes — export/import user data (presets, settings, skills, preferences)."""
 
 import json
 import logging
@@ -13,7 +13,7 @@ from src.settings import load_features, load_settings, save_features, save_setti
 logger = logging.getLogger(__name__)
 
 
-def setup_backup_routes(memory_manager, preset_manager, skills_manager) -> APIRouter:
+def setup_backup_routes(preset_manager, skills_manager) -> APIRouter:
     router = APIRouter(tags=["backup"])
 
     @router.get("/api/export")
@@ -21,9 +21,6 @@ def setup_backup_routes(memory_manager, preset_manager, skills_manager) -> APIRo
         """Export all user data as a downloadable JSON file."""
         require_admin(request)
         user = get_current_user(request)
-
-        # Memories (filtered by owner when auth is enabled)
-        memories = memory_manager.load(owner=user)
 
         # Presets (shared across users — export all)
         presets = preset_manager.get_all()
@@ -46,7 +43,6 @@ def setup_backup_routes(memory_manager, preset_manager, skills_manager) -> APIRo
             "version": 1,
             "exported_at": datetime.now().isoformat(),
             "exported_by": user,
-            "memories": memories,
             "presets": presets,
             "skills": skills,
             "settings": settings,
@@ -75,31 +71,6 @@ def setup_backup_routes(memory_manager, preset_manager, skills_manager) -> APIRo
             raise HTTPException(400, "Expected a JSON object")
 
         imported = []
-
-        # ── Memories ──
-        if "memories" in body and isinstance(body["memories"], list):
-            existing = memory_manager.load_all()
-            # Dedup against THIS user's own memories only. Using every tenant's
-            # rows (load_all) meant a memory whose text matched any other
-            # user's was silently skipped, so the importing user lost their own
-            # data. The full store is still saved back below.
-            existing_texts = {
-                e.get("text", "").strip().lower() for e in existing if e.get("owner") == user
-            }
-            added = 0
-            for mem in body["memories"]:
-                if not isinstance(mem, dict) or not mem.get("text"):
-                    continue
-                if mem["text"].strip().lower() in existing_texts:
-                    continue  # skip duplicates
-                # Assign owner when auth is enabled
-                if user and not mem.get("owner"):
-                    mem["owner"] = user
-                existing.append(mem)
-                existing_texts.add(mem["text"].strip().lower())
-                added += 1
-            memory_manager.save(existing)
-            imported.append(f"{added} memories")
 
         # ── Skills ──
         if "skills" in body and isinstance(body["skills"], list):

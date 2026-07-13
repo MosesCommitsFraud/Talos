@@ -38,9 +38,6 @@ ALWAYS_AVAILABLE = frozenset(
         "show_image",  # display a workspace image inline (charts/plots/results)
         "run_cell",  # persistent Python kernel (stateful, Jupyter-like) for iterative work
         "api_call",  # For configured integrations (Miniflux, Gitea, Linkding, etc.)
-        # Memory is ambient — "remember this" can follow any message regardless
-        # of topic. Without this, RAG drops it and the agent improvises badly.
-        "manage_memory",
         # Ask the user a multiple-choice question for a decision/clarification.
         # Always reachable so the agent can pause and ask at any point.
         "ask_user",
@@ -56,8 +53,6 @@ ALWAYS_AVAILABLE = frozenset(
 # check-ins and proactive tasks, in addition to RAG-selected tools.
 ASSISTANT_ALWAYS_AVAILABLE = frozenset(
     {
-        "manage_tasks",
-        "manage_memory",
         "read_file",
         "create_document",
         "update_document",
@@ -87,22 +82,16 @@ BUILTIN_TOOL_DESCRIPTIONS: Dict[str, str] = {
     "update_document": "Replace the entire active document content. ONLY for full rewrites (>50% changed). Do not use for small edits — use edit_document instead.",
     "suggest_document": "Suggest changes to the active document with explanations. For code review, proofreading, feedback requests.",
     "generate_image": "Generate an AI image from a text prompt. Specify model, size, and quality. Art, illustrations, photos.",
-    "chat_with_model": "Send a message to a different AI model. Compare responses, get specialized help, delegate tasks.",
-    "ask_teacher": "Ask a more capable model for help with a difficult problem. Escalate complex tasks.",
     "update_plan": "Update the approved plan checklist while executing it. Mark completed steps with - [x] and keep unchecked steps as - [ ]. Use after finishing each plan step.",
     "expand_output": "Retrieve the full original of a compressed tool output by its stored id (out_xxxxxxxx). Supports searching for specific lines or paging through large outputs.",
-    "pipeline": "Run a multi-step AI pipeline with multiple models. Chain tasks together in sequence.",
     "list_models": "List all available AI models and their endpoints.",
     "manage_session": "Chat management: rename, archive, delete, or fork chats (the UI calls these 'chats'; internally 'sessions'). Use for 'rename my chats', 'rename this chat', 'archive/delete a chat'.",
-    "manage_memory": "Memory management: list, add, edit, delete, or search persistent memories.",
     "manage_skills": "Skill management: add, update, publish, or search reusable skills/presets.",
-    "manage_tasks": "Scheduled task management: list, create, edit, delete, pause, resume, or run cron tasks.",
     "manage_endpoints": "Endpoint management: list, add, delete, enable, or disable model API endpoints.",
     "manage_mcp": "MCP server management: list, add, delete, reconnect servers, or list available tools.",
-    "manage_webhooks": "Webhook management: list, add, delete, enable, or disable webhooks.",
     "manage_tokens": "API token management: list, create, or delete API access tokens.",
     "manage_documents": "List, read, delete, or tidy documents in the editor panel. action='list' returns clickable rows (most-recent first) so the user can open any doc by clicking. action='read' (aka view/open/get) with document_id returns the content. action='delete' with document_id removes a doc (only way to delete). Use this for ANY 'show/read/list/open my documents/docs/files/notes' request — never shell or curl.",
-    "manage_settings": "Change ANY real app setting (the ones the Settings panel writes) so the user never has to open it: TTS voice/provider/speed, STT, search engine + result count, default/teacher/task/utility/vision/image/research models, image quality, reminder channel (browser/email/ntfy), agent timeout/tool-call budget, and more. action=set with key (friendly aliases ok: voice, 'search engine', 'default model', 'teacher model', 'image quality', 'reminder channel'...) + value; get/list/reset too. Also toggles tools on/off (disable_tool/enable_tool/list_tools). Secrets/API keys are read-only. Use for any 'change my…/set my…/use X for…/turn on…' preference request.",
+    "manage_settings": "Change ANY real app setting (the ones the Settings panel writes) so the user never has to open it: TTS voice/provider/speed, STT, default/utility/vision/image models, image quality, reminder channel (browser/email/ntfy), agent timeout/tool-call budget, and more. action=set with key (friendly aliases ok: voice, 'default model', 'image quality', 'reminder channel'...) + value; get/list/reset too. Also toggles tools on/off (disable_tool/enable_tool/list_tools). Secrets/API keys are read-only. Use for any 'change my…/set my…/use X for…/turn on…' preference request.",
     "create_session": "Create a new chat with a name and model.",
     "list_sessions": "List all chats with their metadata (the UI calls these 'chats'). Use for 'list my chats', 'rename all my chats' (list first, then manage_session to rename each).",
     "send_to_session": "Send a message to another chat. Cross-chat communication.",
@@ -271,17 +260,6 @@ class ToolIndex:
             logger.warning(f"Tool retrieval failed: {e}")
             return []
 
-    # Structural recurring-schedule intent. Typo-resilient (matches "every dya"
-    # via "every <word>"), and catches bare clock times ("at 7:30 am", "7am").
-    # Used in addition to the literal keyword hints below.
-    _SCHEDULE_RE = re.compile(
-        r"\bevery\s+\w+"  # every day / dya / morning / monday / 2 hours
-        r"|\b(?:daily|nightly|hourly|weekly|monthly)\b"
-        r"|\beach\s+(?:day|morning|night|week|hour|evening)\b"
-        r"|\bat\s+\d{1,2}(?::\d{2})?\s*(?:a\.?m\.?|p\.?m\.?)\b",  # at 7:30 am / at 7am
-        re.I,
-    )
-
     # Keyword hints: if the query mentions these words, force-include the tools.
     _KEYWORD_HINTS = {
         # NOTE: "tell" was removed from this set. It fired on any "tell me ..."
@@ -317,56 +295,6 @@ class ToolIndex:
                 "rename them",
             }
         ): {"list_sessions", "manage_session"},
-        frozenset(
-            {
-                "recurring",
-                "every day",
-                "every hour",
-                "every morning",
-                "every evening",
-                "every night",
-                "every week",
-                "each morning",
-                "daily task",
-                "background task",
-                "scheduled task",
-                "schedule a",
-                "automatically",
-                "auto-summarize",
-                "auto summarize",
-                "cron",
-                "periodically",
-                "on a schedule",
-                "set up a task",
-                "create a task",
-                "summarize my inbox every",
-                "remind me every",
-            }
-        ): {"manage_tasks"},
-        # "Ask another model" intent → chat_with_model relays to a
-        # different model and returns its answer. ask_teacher escalates
-        # to the configured teacher. (second_opinion was removed.)
-        frozenset(
-            {
-                "ask gpt",
-                "ask claude",
-                "ask gemini",
-                "ask deepseek",
-                "ask minimax",
-                "ask qwen",
-                "ask the",
-                "ask another model",
-                "what does",
-                "what would",
-                "second opinion",
-                "other model",
-                "different model",
-                "compare answers",
-                "compare models",
-                "delegate to",
-                "have model",
-            }
-        ): {"chat_with_model", "ask_teacher", "list_models"},
         # Settings-change intent — "change my…/set my…/use X for…/turn on…".
         frozenset(
             {
@@ -376,11 +304,7 @@ class ToolIndex:
                 "change the voice",
                 "my voice",
                 "tts voice",
-                "search engine",
                 "default model",
-                "teacher model",
-                "task model",
-                "background model",
                 "image quality",
                 "reminder channel",
                 "send reminders to",
@@ -508,13 +432,6 @@ class ToolIndex:
         for keywords, tools in self._KEYWORD_HINTS.items():
             if any(re.search(rf"\b{re.escape(kw)}\b", ql) for kw in keywords):
                 base.update(tools)
-        # Structural scheduling-intent detection — typo-resilient (the literal
-        # keyword "every day" misses "every dya"). Catches "every <word>",
-        # daily/nightly/etc., or a clock time like "at 7:30 am" / "7am", which
-        # all signal a recurring/scheduled task. Force-include manage_tasks so
-        # the agent can actually create the cron job instead of fumbling.
-        if self._SCHEDULE_RE.search(ql):
-            base.add("manage_tasks")
         return base
 
 

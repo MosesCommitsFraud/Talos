@@ -32,8 +32,6 @@ class DataConfig(BaseSettings):
     sessions_file: Path = Field(
         default=Path("data/sessions.json"), description="Sessions storage file"
     )
-    memory_file: Path = Field(default=Path("data/memory.json"), description="Memory storage file")
-    memory_doc: Path = Field(default=Path("data/memory_doc.md"), description="Memory document file")
     personal_dir: Path = Field(
         default=Path("data/personal_docs"), description="Personal documents directory"
     )
@@ -99,35 +97,6 @@ class LLMConfig(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="LLM_")
 
 
-class SearchConfig(BaseSettings):
-    """Configuration for search functionality."""
-
-    # Web search
-    searxng_instance: str = Field(
-        default="http://localhost:8080", description="SearXNG instance URL (self-hosted)"
-    )
-    web_search_count: int = Field(default=10, description="Number of search results to retrieve")
-    web_search_max_pages: int = Field(default=6, description="Maximum number of pages to search")
-    web_search_max_workers: int = Field(
-        default=4, description="Maximum number of worker threads for web search"
-    )
-
-    # Research service
-    research_service_url: str = Field(
-        default="http://localhost:8003/research", description="URL for research service"
-    )
-    research_timeout: int = Field(default=300, description="Research service timeout in seconds")
-
-    # API keys (optional)
-    serpapi_key: Optional[str] = Field(default=None, description="SerpAPI key if used")
-    google_api_key: Optional[str] = Field(default=None, description="Google API key if used")
-    google_cx: Optional[str] = Field(
-        default=None, description="Google Custom Search Engine ID if used"
-    )
-
-    model_config = SettingsConfigDict(env_prefix="SEARCH_")
-
-
 class SecurityConfig(BaseSettings):
     """Configuration for security and rate limiting."""
 
@@ -184,7 +153,6 @@ class AppConfig(BaseSettings):
 
     data: DataConfig = DataConfig()
     llm: LLMConfig = LLMConfig()
-    search: SearchConfig = SearchConfig()
     security: SecurityConfig = SecurityConfig()
 
     # Application settings
@@ -253,8 +221,6 @@ class AppConfig(BaseSettings):
             "data_dir": data_dir,
             "uploads_dir": data_dir / "uploads",
             "sessions_file": data_dir / "sessions.json",
-            "memory_file": data_dir / "memory.json",
-            "memory_doc": data_dir / "memory_doc.md",
             "personal_dir": data_dir / "personal_docs",
             "runbook_dir": data_dir / "personal_docs" / "runbook",
             "max_upload_size": max_upload_size,

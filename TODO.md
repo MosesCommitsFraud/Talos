@@ -28,5 +28,6 @@ opening a chat that hasnt been open in a while flashes the new chat page briefly
 images and files created not shown in the chat after restarts (neither in chat or in the sidebar)
 icons need to be brighter under composer
 queueing and steering needed
-teacher escalation, second opinion, other models need to go. web search relics also and tasks
-memory needs removal, webhooks too
+~~teacher escalation, second opinion, other models need to go. web search relics also and tasks~~ done
+~~memory needs removal, webhooks too~~ done
+context window explanation on meter

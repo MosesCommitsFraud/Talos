@@ -54,8 +54,6 @@ class ChatContext:
 
     preface: list
     rag_sources: list
-    web_sources: list
-    used_memories: list
     messages: list
     context_length: int
     was_compacted: bool
@@ -373,27 +371,6 @@ def add_user_message(
         chat_handler.update_session_name_if_needed(sess, preprocessed.text_for_context)
 
 
-def fire_message_event(
-    request, webhook_manager, session_id: str, sess, message: str, compare_mode: bool = False
-):
-    """Fire webhook and event_bus events for a new user message."""
-    if webhook_manager and not compare_mode:
-        asyncio.create_task(
-            webhook_manager.fire(
-                "chat.message",
-                {
-                    "session_id": session_id,
-                    "model": sess.model,
-                    "message": message[:2000],
-                },
-            )
-        )
-    from src.event_bus import fire_event
-
-    user = get_current_user(request)
-    fire_event("message_sent", user)
-
-
 def _session_url_matches_endpoint(session_url: str, endpoint_base: str) -> bool:
     if not session_url or not endpoint_base:
         return False
@@ -557,14 +534,9 @@ async def build_chat_context(
     session_id: str,
     preset_id=None,
     att_ids: list = None,
-    use_web=None,
     use_rag=None,
-    time_filter=None,
     incognito: bool = False,
-    no_memory: bool = False,
-    search_context: str = None,
     compare_mode: bool = False,
-    webhook_manager=None,
     use_enhanced_message: bool = False,
     agent_mode: bool = False,
     reasoning: bool = True,
@@ -572,7 +544,7 @@ async def build_chat_context(
     """Build the full context (preface + messages) for an LLM call.
 
     This is the shared logic between /chat and /chat_stream — preset extraction,
-    message preprocessing, memory/RAG/web injection, compaction, normalization.
+    message preprocessing, RAG injection, compaction, normalization.
     """
     # Preset
     preset = extract_preset(chat_handler, preset_id)
@@ -593,27 +565,13 @@ async def build_chat_context(
     # Add user message to history
     add_user_message(sess, chat_handler, preprocessed, incognito=incognito)
 
-    # Fire events
-    if not incognito:
-        fire_message_event(request, webhook_manager, session_id, sess, message, compare_mode)
-
     # Resolve user prefs
     user = get_current_user(request)
     uprefs = load_prefs_for_user(user)
 
-    # Memory enabled?
-    mem_enabled = not incognito and not no_memory and uprefs.get("memory_enabled", True)
-    # Skills injection respects its own enable toggle (mirrors memory_enabled).
-    # When off, the "Available skills" index is not added to the prompt.
+    # Skills injection respects its own enable toggle. When off, the
+    # "Available skills" index is not added to the prompt.
     skills_enabled = not incognito and uprefs.get("skills_enabled", True)
-    logger.debug(
-        "Memory enabled=%s for user=%s (incognito=%s, no_memory=%s, pref=%s)",
-        mem_enabled,
-        user,
-        incognito,
-        no_memory,
-        uprefs.get("memory_enabled", "NOT_SET"),
-    )
 
     # Use RAG? Driven by the chat-input mode dropdown (Knowledge / Full both
     # send use_rag=true; Just Chat sends false). Gated additionally by the global
@@ -631,9 +589,6 @@ async def build_chat_context(
         incognito,
     )
 
-    # If pre-fetched search context was provided (compare mode), skip live web search
-    skip_web = bool(search_context)
-
     # Build context preface
     # The stream path uses enhanced_message (with CoT/preprocessing applied),
     # the sync path uses text_for_context.
@@ -648,9 +603,6 @@ async def build_chat_context(
     _preface_kwargs = dict(
         message=_ctx_msg,
         session=sess,
-        use_web=use_web and not skip_web,
-        use_memory=mem_enabled,
-        time_filter=time_filter,
         preset_system_prompt=_effective_sys,
         owner=user,
         character_name=preset.character_name,
@@ -659,14 +611,7 @@ async def build_chat_context(
         use_skills=skills_enabled,
     )
     _preface_kwargs["use_rag"] = use_rag_val
-    preface, rag_sources, web_sources = chat_processor.build_context_preface(**_preface_kwargs)
-
-    # Capture used memories immediately
-    used_memories = getattr(chat_processor, "_last_used_memories", [])
-
-    # Inject pre-fetched search context (compare mode)
-    if search_context:
-        preface.append(untrusted_context_message("prefetched search context", search_context))
+    preface, rag_sources = chat_processor.build_context_preface(**_preface_kwargs)
 
     # YouTube transcripts
     for transcript in preprocessed.youtube_transcripts:
@@ -757,8 +702,6 @@ async def build_chat_context(
     return ChatContext(
         preface=preface,
         rag_sources=rag_sources,
-        web_sources=web_sources,
-        used_memories=used_memories,
         messages=messages,
         context_length=context_length,
         was_compacted=was_compacted,
@@ -876,6 +819,18 @@ def _source_usage_score(answer: str, source: dict) -> tuple:
 _RAG_ASSET_IMG_RE = re.compile(r"!\[[^\]]*\]\((?P<url>/api/personal/rag-asset\?source=[^)\s]*)\)")
 
 
+def _max_answer_figures() -> int:
+    """Ceiling on distinct anchored figures one answer may show.
+
+    Selection stays one-figure-per-used-text-anchor — a multi-topic question
+    that demonstrably used two text pages gets both their figures — so this is
+    a safety cap, not the selector. Precision comes from the anchor pairing."""
+    try:
+        return max(1, min(int(os.getenv("RAG_MAX_ANSWER_FIGURES", "3") or 3), 6))
+    except Exception:
+        return 3
+
+
 def _eligible_figures_for_answer(answer: str, sources: list) -> list:
     """Pair figures with the exact text page/anchor used by the final answer.
 
@@ -900,11 +855,25 @@ def _eligible_figures_for_answer(answer: str, sources: list) -> list:
         s.get("_anchor_id") or (s.get("_source") and s.get("_page") is not None) for s in figures
     ) and any(s.get("_id") or (s.get("_source") and s.get("_page") is not None) for s in used_text)
 
-    # Prefer the text chunk most directly reflected in the final answer, not
-    # every loosely overlapping top-k result. The figure relationship itself is
-    # never inferred from words: it must carry this exact text hit's anchor id.
+    # Walk the used text chunks from most to least reflected in the final
+    # answer and collect ONE figure per distinct text anchor. A multi-topic
+    # answer that demonstrably used two pages may show both their figures;
+    # precision is unchanged because the figure relationship itself is never
+    # inferred from words — it must carry that exact text hit's anchor id.
     used_text.sort(key=lambda s: _source_usage_score(prose, s), reverse=True)
+    cap = _max_answer_figures()
+    selected: list = []
+    seen_urls: set = set()
+
+    def _take(fig: dict) -> None:
+        url = fig.get("image_url")
+        if url and url not in seen_urls:
+            seen_urls.add(url)
+            selected.append(fig)
+
     for text_source in used_text:
+        if len(selected) >= cap:
+            break
         text_id = text_source.get("_id")
         page_key = (text_source.get("_source"), text_source.get("_page"))
         anchored = [fig for fig in figures if text_id and fig.get("_anchor_id") == text_id]
@@ -913,7 +882,8 @@ def _eligible_figures_for_answer(answer: str, sources: list) -> list:
             # Caption overlap may order those siblings, but it can never create
             # or cross the anchor relationship.
             anchored.sort(key=lambda s: _source_usage_score(prose, s), reverse=True)
-            return anchored[:1]
+            _take(anchored[0])
+            continue
 
         # Backward compatibility for records created before anchor ids were
         # carried into chat sources. Only unanchored figures may use page
@@ -927,7 +897,10 @@ def _eligible_figures_for_answer(answer: str, sources: list) -> list:
             and (fig.get("_source"), fig.get("_page")) == page_key
         ]
         if legacy_page_figures:
-            return legacy_page_figures[:1]
+            _take(legacy_page_figures[0])
+
+    if selected:
+        return selected
 
     # Standalone images have no owning text anchor and may be used directly.
     # Anchored document figures are deliberately excluded from this path.
@@ -988,7 +961,7 @@ def strip_unauthorized_figures(answer: str, sources: list) -> str:
     return _RAG_ASSET_IMG_RE.sub(_keep, answer)
 
 
-def append_missing_figures(answer: str, sources: list, *, max_figures: int = 1) -> str:
+def append_missing_figures(answer: str, sources: list, *, max_figures: Optional[int] = None) -> str:
     """Deterministic backstop for inline figures: when the answer drew on a
     retrieved document that has a figure but embeds no rag-asset image itself,
     return ready-made figure Markdown for the caller to append to the answer.
@@ -1003,8 +976,9 @@ def append_missing_figures(answer: str, sources: list, *, max_figures: int = 1) 
     if _RAG_ASSET_IMG_RE.search(answer):
         return ""  # the model embedded one itself
     matched = _eligible_figures_for_answer(answer, sources)
+    limit = max_figures if max_figures is not None else _max_answer_figures()
     lines = []
-    for s in matched[:max_figures]:
+    for s in matched[:limit]:
         cap = (s.get("image_caption") or s.get("filename") or "figure").strip()
         # First line only, brackets sanitized, capped — mirrors the alt-text
         # treatment in the injected figure section (chat_processor._rag_section).
@@ -1269,10 +1243,8 @@ def save_assistant_response(
     last_metrics: dict | None,
     *,
     character_name: str = None,
-    web_sources: list = None,
     rag_sources: list = None,
     research_sources: list = None,
-    used_memories: list = None,
     do_research: bool = False,
     tool_events: list = None,
     incognito: bool = False,
@@ -1282,14 +1254,10 @@ def save_assistant_response(
     md["model"] = sess.model
     if character_name:
         md["character_name"] = character_name
-    if web_sources:
-        md["web_sources"] = web_sources
     if rag_sources:
         md["rag_sources"] = rag_sources
     if research_sources:
         md["research_sources"] = research_sources
-    if used_memories:
-        md["memories_used"] = used_memories
     if do_research and not research_sources:
         md["research_clarification"] = True
     if tool_events:
@@ -1337,9 +1305,6 @@ def run_post_response_tasks(
     full_response: str,
     last_metrics: dict | None,
     uprefs: dict,
-    memory_manager,
-    memory_vector,
-    webhook_manager,
     *,
     incognito: bool = False,
     compare_mode: bool = False,
@@ -1350,31 +1315,7 @@ def run_post_response_tasks(
     owner: str = None,
     extract_skills: bool = True,
 ):
-    """Fire background tasks after a completed response: memory extraction, webhooks, auto-name, skill extraction."""
-    # Memory extraction — only every 4th message pair to avoid excess LLM calls
-    _msg_count = len(sess.history) if hasattr(sess, "history") else 0
-    _should_extract = (_msg_count >= 4) and (_msg_count % 4 == 0)
-    if not incognito and not compare_mode and _should_extract and uprefs.get("auto_memory", True):
-        from services.memory.memory_extractor import extract_and_store
-        from src.task_endpoint import resolve_task_endpoint
-
-        t_url, t_model, t_headers = resolve_task_endpoint(
-            sess.endpoint_url,
-            sess.model,
-            sess.headers,
-            owner=owner,
-        )
-        asyncio.create_task(
-            extract_and_store(
-                sess,
-                memory_manager,
-                memory_vector,
-                t_url,
-                t_model,
-                t_headers,
-            )
-        )
-
+    """Fire background tasks after a completed response: token accounting, skill extraction."""
     # Skill extraction from complex agent runs. Only when the user actually
     # chose agent mode — not a chat we auto-escalated for a notes/calendar
     # intent, and never in incognito/compare.
@@ -1433,20 +1374,6 @@ def run_post_response_tasks(
     # Token accumulation
     if last_metrics:
         accumulate_token_usage(session_id, last_metrics)
-
-    # Webhook
-    if webhook_manager and not compare_mode:
-        asyncio.create_task(
-            webhook_manager.fire(
-                "chat.completed",
-                {
-                    "session_id": session_id,
-                    "model": sess.model,
-                    "user_message": message,
-                    "response": full_response[:2000],
-                },
-            )
-        )
 
     # Auto-name now fires immediately when the message is sent (see the chat
     # routes, right after build_chat_context) rather than waiting for the full

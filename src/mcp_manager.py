@@ -594,7 +594,6 @@ class McpManager:
         """Check if a server is a built-in (auto-registered) server."""
         return server_id.startswith("builtin_") or server_id in {
             "image_gen",
-            "memory",
             "rag",
             "email",
         }
