@@ -553,7 +553,7 @@ export function Messages() {
                 <EditBox msg={block.msg} onDone={() => setEditing(null)} />
               ) : (
                 <>
-                  <div className="rounded-2xl rounded-br-md bg-secondary px-4 py-2.5 text-[15px] leading-relaxed whitespace-pre-wrap">
+                  <div className="rounded-lg rounded-br-sm bg-card px-3 py-1.5 text-[15px] leading-relaxed whitespace-pre-wrap">
                     {block.msg.content}
                   </div>
                   <AttachmentList msg={block.msg} />

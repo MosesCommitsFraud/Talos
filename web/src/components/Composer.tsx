@@ -632,7 +632,7 @@ export function Composer() {
       )}
       <div
         className={cn(
-          'relative rounded-[12px] border border-border bg-card transition-colors duration-200 focus-within:border-ring/45',
+          'group/composer relative rounded-[10px] border border-foreground/10 bg-card transition-colors duration-200 focus-within:border-foreground/20',
           dragging && 'border-primary/60 ring-2 ring-primary/30',
         )}
       >
@@ -683,11 +683,11 @@ export function Composer() {
           </div>
         )}
 
-        <div className="flex items-start px-3 py-2.5">
+        <div className="flex items-start py-2.5 pl-2.5 pr-2">
           {dictating && (
             <div
               aria-live="polite"
-              className="max-h-[200px] min-h-[26px] w-full overflow-y-auto text-[15px] leading-relaxed break-words whitespace-pre-wrap"
+              className="max-h-[200px] w-full overflow-y-auto text-[15px] leading-relaxed break-words whitespace-pre-wrap"
             >
               {text.trim() && <span>{text.replace(/\s+$/, '')} </span>}
               <span className="text-muted-foreground italic">
@@ -732,7 +732,7 @@ export function Composer() {
               const files = Array.from(e.clipboardData.files);
               if (files.length) { e.preventDefault(); void attach(files); }
             }}
-            className="max-h-[200px] min-h-[26px] w-full resize-none bg-transparent text-[15px] leading-relaxed outline-none placeholder:text-muted-foreground"
+            className="max-h-[200px] w-full resize-none bg-transparent text-[15px] leading-relaxed outline-none placeholder:text-muted-foreground"
           />
           {/* Right-edge adornment, Claude Code style: while streaming, a boxed
               stop button; otherwise an Enter glyph once there's something to
@@ -742,9 +742,12 @@ export function Composer() {
               type="button"
               onClick={stop}
               aria-label={t('composer.stop')}
-              className="flex size-6 shrink-0 cursor-pointer items-center justify-center self-end rounded-sm text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive active:scale-95"
+              // -my keeps the 28px hit target from adding height to the row
+              // (the textarea line is 26px), so the box doesn't grow while
+              // streaming.
+              className="-my-1 flex size-7 shrink-0 cursor-pointer items-center justify-center self-center rounded-sm text-foreground/65 transition-colors hover:bg-accent hover:text-foreground active:scale-95"
             >
-              <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+              <svg width="14" height="14" viewBox="0 0 12 12" fill="none" aria-hidden="true">
                 <rect x="1.5" y="1.5" width="9" height="9" rx="2" stroke="currentColor" strokeWidth="1.4" />
               </svg>
             </button>
@@ -758,11 +761,10 @@ export function Composer() {
                 else void submit();
               }}
               className={cn(
-                'ml-2 flex size-6 shrink-0 cursor-pointer items-center justify-center self-end rounded-sm transition-colors active:scale-95',
-                // Always visible; barely-there while there's nothing to send.
-                text.trim().length > 0 || dictating
-                  ? 'text-muted-foreground/50 hover:bg-accent hover:text-foreground'
-                  : 'text-muted-foreground/25',
+                // Tracks the box border: foreground/10 resting, /20 while the
+                // composer is focused, so glyph and frame read as one control.
+                'ml-2 flex size-6 shrink-0 cursor-pointer items-center justify-center self-end rounded-sm text-foreground/10 transition-colors group-focus-within/composer:text-foreground/20 active:scale-95',
+                (text.trim().length > 0 || dictating) && 'hover:bg-accent hover:text-foreground',
               )}
             >
               <CornerDownLeftIcon aria-hidden="true" className="size-4" />

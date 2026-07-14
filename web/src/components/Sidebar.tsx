@@ -504,7 +504,9 @@ export function Sidebar({
   return (
     <nav
       className={cn(
-        'm-2 flex shrink-0 flex-col rounded-md border bg-background transition-[width] duration-200 ease-out',
+        // Inherited gray for all sidebar text; the selected chat row (and any
+        // element with its own text color) opts back into a lighter shade.
+        'm-2 flex shrink-0 flex-col rounded-md border border-foreground/10 bg-card text-foreground/70 transition-[width] duration-200 ease-out',
         collapsed ? 'relative z-30 w-[3.25rem] overflow-visible' : 'w-64 overflow-hidden',
       )}
       aria-label={t('sidebar.navLabel')}
