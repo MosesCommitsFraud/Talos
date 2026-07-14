@@ -473,7 +473,17 @@ print(result)
                 "tokens_per_second": 109.9,
                 "context_percent": 76.0,
                 "context_length": 40960,
+                "context_tokens": 31130,
                 "usage_source": "real",
+                # Category split for the meter's detail panel; sums to
+                # context_tokens (backend guarantees this).
+                "context_breakdown": {
+                    "messages": 17890,
+                    "system": 8120,
+                    "tools": 3200,
+                    "skills": 640,
+                    "knowledge": 1280,
+                },
             },
         },
         {"type": "message_saved", "id": "preview-message"},

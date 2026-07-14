@@ -1178,6 +1178,65 @@ def _append_tool_results(
         )
 
 
+# Maps a preface message's metadata.source label to a context-meter category.
+# System-role messages are always "system"; untagged user/assistant/tool turns
+# fall through to "messages".
+_BREAKDOWN_SOURCE_CATEGORY = {
+    "retrieved documents": "knowledge",
+    "youtube transcript": "knowledge",
+    "active editor document": "knowledge",
+    "available skills index": "skills",
+    "skills": "skills",
+}
+
+
+def _compute_context_breakdown(
+    messages: List[Dict],
+    tool_schemas: Optional[List[Dict]],
+    ctx_tokens: int,
+) -> Optional[Dict[str, int]]:
+    """Split context occupancy into categories for the meter's detail panel.
+
+    Per-part sizes come from the same estimator used for trimming, then get
+    scaled proportionally so the categories sum EXACTLY to ctx_tokens — which
+    is the backend's real prompt count when usage was reported. The total
+    stays authoritative; only the split between categories is
+    proportional-to-estimate.
+    """
+    if ctx_tokens <= 0:
+        return None
+    by_cat: Dict[str, List[Dict]] = {}
+    for msg in messages:
+        if not isinstance(msg, dict):
+            continue
+        if msg.get("role") == "system":
+            cat = "system"
+        else:
+            source = ((msg.get("metadata") or {}).get("source") or "").strip().lower()
+            cat = _BREAKDOWN_SOURCE_CATEGORY.get(source, "messages")
+        by_cat.setdefault(cat, []).append(msg)
+    estimates = {cat: estimate_tokens(msgs) for cat, msgs in by_cat.items()}
+    # Native tool schemas are tokenized server-side by the chat template, so
+    # they never appear in the message list — approximate from their JSON.
+    if tool_schemas:
+        try:
+            estimates["tools"] = 4 * len(tool_schemas) + int(len(json.dumps(tool_schemas)) * 0.3)
+        except Exception:
+            pass
+    estimates = {k: v for k, v in estimates.items() if v > 0}
+    total_est = sum(estimates.values())
+    if total_est <= 0:
+        return None
+    scale = ctx_tokens / total_est
+    breakdown = {k: max(1, round(v * scale)) for k, v in estimates.items()}
+    # Rounding drift lands on the biggest bucket so the sum stays exact.
+    drift = ctx_tokens - sum(breakdown.values())
+    if drift:
+        biggest = max(breakdown, key=breakdown.get)  # type: ignore[arg-type]
+        breakdown[biggest] = max(1, breakdown[biggest] + drift)
+    return breakdown
+
+
 def _compute_final_metrics(
     messages: List[Dict],
     full_response: str,
@@ -1194,6 +1253,7 @@ def _compute_final_metrics(
     prep_timings: Optional[Dict[str, float]] = None,
     backend_gen_tps: float = 0,
     backend_prefill_tps: float = 0,
+    tool_schemas: Optional[List[Dict]] = None,
 ) -> dict:
     """Compute token counts, TPS, and build the final metrics dict."""
     # Estimate the size of the final prompt (the whole message list) — used both
@@ -1248,6 +1308,11 @@ def _compute_final_metrics(
         "usage_source": "real" if has_real_usage else "estimated",
         "model": model,
     }
+    # Per-category split of context_tokens (system/tools/skills/knowledge/
+    # messages) for the meter's detail panel. Sums exactly to context_tokens.
+    breakdown = _compute_context_breakdown(messages, tool_schemas, ctx_tokens)
+    if breakdown:
+        metrics["context_breakdown"] = breakdown
     if backend_prefill_tps and backend_prefill_tps > 0:
         metrics["prefill_tps"] = round(backend_prefill_tps, 2)
     if prep_timings:
@@ -1910,6 +1975,11 @@ async def stream_agent_loop(
     # using tools — i.e. it was cut off, not finished. Drives a "Continue" event
     # so the user can resume instead of the turn silently stalling.
     _exhausted_rounds = False
+
+    # Survives the loop so final metrics can attribute the last round's native
+    # tool schemas in the context breakdown (they're tokenized server-side and
+    # never appear in the message list).
+    all_tool_schemas: List[Dict] = []
 
     for round_num in range(1, max_rounds + 1):
         round_response = ""
@@ -2856,6 +2926,7 @@ async def stream_agent_loop(
         prep_timings=prep_timings,
         backend_gen_tps=backend_gen_tps,
         backend_prefill_tps=backend_prefill_tps,
+        tool_schemas=all_tool_schemas,
     )
     yield f"data: {json.dumps({'type': 'metrics', 'data': metrics})}\n\n"
 

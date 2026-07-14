@@ -262,6 +262,14 @@ const en = {
     estimated: 'est.',
     exactHint: "Counted by the model's own tokenizer — accurate.",
     estimatedHint: 'Approximate count until the model reports usage.',
+    categories: {
+      messages: 'Messages',
+      system: 'System prompt',
+      tools: 'Tools',
+      skills: 'Skills',
+      knowledge: 'Knowledge',
+      freeSpace: 'Free space',
+    },
   },
   rightPanel: {
     label: 'Files and preview',

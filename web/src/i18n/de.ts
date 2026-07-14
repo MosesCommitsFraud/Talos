@@ -264,6 +264,14 @@ const de: typeof en = {
     usage: 'Auslastung des Kontextfensters',
     used: 'Kontextfenster zu {{percent}} ausgelastet',
     hint: 'Der Chat wird automatisch verdichtet, wenn er voll ist, aber mit einem neuen Chat erzielst du bessere Ergebnisse.',
+    categories: {
+      messages: 'Nachrichten',
+      system: 'System-Prompt',
+      tools: 'Tools',
+      skills: 'Skills',
+      knowledge: 'Wissen',
+      freeSpace: 'Freier Platz',
+    },
   },
   rightPanel: {
     label: 'Dateien und Vorschau',

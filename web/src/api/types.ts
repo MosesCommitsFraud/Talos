@@ -135,7 +135,15 @@ export interface Metrics {
   /** "real" when the count came from the provider's usage/tokenizer,
    *  "estimated" when it's the chars*0.3 fallback. Drives the meter's badge. */
   usage_source?: 'real' | 'estimated';
+  /** Per-category split of context_tokens for the meter's detail panel.
+   *  Categories always sum to context_tokens: the total is authoritative
+   *  (real when usage_source is "real"); the split between categories is
+   *  proportional-to-estimate. */
+  context_breakdown?: Partial<Record<ContextCategory, number>>;
 }
+
+/** Context-meter breakdown categories, in display order. */
+export type ContextCategory = 'messages' | 'system' | 'tools' | 'skills' | 'knowledge';
 
 /** Server-sent event emitted by POST /api/chat_stream. The stream mixes
  *  text deltas ({delta, thinking?}) with typed control events
