@@ -76,7 +76,7 @@ const SORT_KEYS: Record<SortMode, string> = {
 
 /** Truncates normally, then slowly pans only the hidden portion on hover. The
  *  animation stops at the end so the full title can be read without looping. */
-function ScrollableSessionTitle({ children }: { children: string }) {
+function ScrollableSessionTitle({ children, className }: { children: string; className?: string }) {
   const viewportRef = useRef<HTMLSpanElement>(null);
   const textRef = useRef<HTMLSpanElement>(null);
   const animationRef = useRef<Animation | null>(null);
@@ -111,7 +111,7 @@ function ScrollableSessionTitle({ children }: { children: string }) {
   return (
     <span
       ref={viewportRef}
-      className="min-w-0 flex-1 overflow-hidden whitespace-nowrap"
+      className={cn('min-w-0 flex-1 overflow-hidden whitespace-nowrap', className)}
       onMouseEnter={start}
       onMouseLeave={stop}
     >
@@ -175,12 +175,24 @@ function SessionRow({ session, folders }: { session: Session; folders: string[] 
           onClick={() => void openSession(session.id)}
           onDoubleClick={beginRename}
           className={cn(
-            'group flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm transition-colors',
+            'group relative flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm transition-colors',
             session.id === activeId ? 'bg-accent text-accent-foreground' : 'hover:bg-accent/70',
           )}
         >
           {pinned && <PinIcon className="size-3 shrink-0 -rotate-45 text-muted-foreground" />}
-          <ScrollableSessionTitle>{session.name || t('common.untitled')}</ScrollableSessionTitle>
+          {/* When the hover timestamp overlays the row (idle only — status
+              labels reserve their own space), mask the title's tail to
+              transparent so the text fades out under the time, regardless
+              of the row's background color. */}
+          <ScrollableSessionTitle
+            className={
+              status
+                ? undefined
+                : 'group-hover:[mask-image:linear-gradient(to_right,black_calc(100%-7rem),transparent_calc(100%-2rem))]'
+            }
+          >
+            {session.name || t('common.untitled')}
+          </ScrollableSessionTitle>
           {status === 'working' ? (
             // Running turn — a shimmering "Working" label, shown even when this
             // chat isn't the one on screen so background turns are visible.
@@ -198,7 +210,10 @@ function SessionRow({ session, folders }: { session: Session; folders: string[] 
               {t('sidebar.completed')}
             </span>
           ) : (
-            <span className="shrink-0 text-[11px] text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100">
+            // Out of flow so the title gets the full row width; fades in on
+            // hover over the title's tail, which the mask above fades out —
+            // no colored backdrop needed.
+            <span className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-2 text-[11px] text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100">
               {formatRelativeTime(session.updated_at)}
             </span>
           )}
