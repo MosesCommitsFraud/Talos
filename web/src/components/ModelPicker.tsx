@@ -49,13 +49,13 @@ export function ModelPicker({ visible = true }: { visible?: boolean }) {
         <button
           type="button"
           aria-label={t('modelPicker.switchModel')}
-          className="flex h-7 max-w-32 shrink-0 items-center justify-between gap-1.5 whitespace-nowrap rounded-sm border border-transparent px-1.5 text-xs font-medium text-foreground/65 transition-colors hover:bg-accent hover:text-foreground/90 sm:h-6 sm:px-2 md:max-w-56"
+          className="flex h-6 max-w-32 shrink-0 items-center pt-[2px] justify-between gap-1.5 whitespace-nowrap rounded-[4.5px] border border-transparent px-1 text-xs font-medium text-foreground/65 transition-colors hover:bg-accent hover:text-foreground/90 sm:h-5 sm:px-1.5 md:max-w-56"
         >
           <span className="flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden">
             <QwenIcon className="size-3.5 shrink-0" />
             <span className="min-w-0 flex-1 truncate text-left">{label}</span>
           </span>
-          <ChevronDownIcon className="size-3 shrink-0 opacity-60" aria-hidden="true" />
+          <ChevronDownIcon className="size-3 shrink-0 -translate-y-px opacity-60" aria-hidden="true" />
         </button>
       </MenuTrigger>
       {/* Compact rows matching the knowledge-mode dropdown: same row height

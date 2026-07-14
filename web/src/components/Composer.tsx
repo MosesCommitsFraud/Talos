@@ -65,7 +65,7 @@ function ModeToggle({
         aria-pressed={active}
         aria-label={tooltip}
         className={cn(
-          'flex h-7 shrink-0 items-center gap-1.5 rounded-sm border border-transparent px-1.5 text-xs font-medium whitespace-nowrap transition-colors sm:h-6 sm:px-2 [&_svg]:size-3.5 [&_svg]:shrink-0',
+          'flex h-6 shrink-0 items-center pt-[2px] gap-1.5 rounded-[4.5px] border border-transparent px-1 text-xs font-medium whitespace-nowrap transition-colors sm:h-5 sm:px-1.5 [&_svg]:size-3.5 [&_svg]:shrink-0 [&_svg]:-translate-y-px',
           active
             ? 'bg-blue-500/10 text-blue-400 hover:bg-blue-500/15 hover:text-blue-300'
             : 'text-foreground/65 hover:bg-accent hover:text-foreground/90',
@@ -128,9 +128,9 @@ function ChatModeDropdown() {
           type="button"
           aria-label={t('composer.mode.label')}
           className={cn(
-            'flex h-7 shrink-0 items-center gap-1.5 rounded-sm border border-transparent px-1.5 text-xs font-medium whitespace-nowrap outline-none transition-colors focus:outline-none focus-visible:outline-none sm:h-6 sm:px-2 [&_svg]:size-3.5 [&_svg]:shrink-0',
+            'flex h-6 shrink-0 items-center pt-[2px] gap-1.5 rounded-[4.5px] border border-transparent px-1 text-xs font-medium whitespace-nowrap outline-none transition-colors focus:outline-none focus-visible:outline-none sm:h-5 sm:px-1.5 [&_svg]:size-3.5 [&_svg]:shrink-0 [&_svg]:-translate-y-px',
             mode === 'full'
-              ? 'bg-yellow-400/10 text-yellow-300 hover:bg-yellow-400/15 hover:text-yellow-200'
+              ? 'bg-yellow-400/10 text-yellow-400 hover:bg-yellow-400/15 hover:text-yellow-200'
               : 'text-foreground/65 hover:bg-accent hover:text-foreground/90',
           )}
         >
@@ -231,9 +231,9 @@ function MicDeviceMenu() {
         <button
           type="button"
           aria-label={t('composer.micSelect')}
-          className="flex h-7 w-4 shrink-0 items-center justify-center rounded-sm rounded-l-none border border-transparent text-foreground/65 outline-none transition-colors hover:bg-accent hover:text-foreground/90 focus:outline-none focus-visible:outline-none sm:h-6"
+          className="flex h-6 w-4 shrink-0 items-center pt-[2px] justify-center rounded-[4.5px] rounded-l-none border border-transparent text-foreground/65 outline-none transition-colors hover:bg-accent hover:text-foreground/90 focus:outline-none focus-visible:outline-none sm:h-5"
         >
-          <ChevronDownIcon className="size-3.5" />
+          <ChevronDownIcon className="size-3.5 -translate-y-px" />
         </button>
       </MenuTrigger>
       {/* Compact rows matching the knowledge-mode dropdown. */}
@@ -792,7 +792,7 @@ export function Composer() {
       {/* Control row — outside the input card, Claude Code style: knowledge/add/mic
           on the left, model/thinking/context on the right. Enter sends; a stop
           button appears at the far right only while a response is streaming. */}
-      <div className="mt-2.5 flex min-w-0 flex-nowrap items-center justify-between gap-2 px-1.5">
+      <div className="mt-2.5 flex min-w-0 flex-nowrap items-center justify-between gap-2">
         <input
           ref={fileInput}
           type="file"
@@ -811,7 +811,7 @@ export function Composer() {
                   <button
                     type="button"
                     aria-label={t('composer.add')}
-                    className="flex size-7 shrink-0 items-center justify-center rounded-sm border border-transparent text-foreground/65 outline-none transition-colors hover:bg-accent hover:text-foreground/90 focus:outline-none focus-visible:outline-none sm:size-6 [&_svg]:size-3.5"
+                    className="flex h-6 w-7 shrink-0 items-center pt-[2px] justify-center rounded-[4.5px] border border-transparent text-foreground/65 outline-none transition-colors hover:bg-accent hover:text-foreground/90 focus:outline-none focus-visible:outline-none sm:h-5 sm:w-6 [&_svg]:size-3.5 [&_svg]:-translate-y-px"
                   >
                     <PlusIcon className={uploading ? 'animate-pulse' : undefined} />
                   </button>
@@ -851,7 +851,7 @@ export function Composer() {
                         : t('composer.dictate')
                     }
                     className={cn(
-                      'flex size-7 shrink-0 items-center justify-center rounded-sm rounded-r-none border border-transparent transition-colors sm:size-6 [&_svg]:size-3.5',
+                      'flex h-6 w-7 shrink-0 items-center pt-[2px] justify-center rounded-[4.5px] rounded-r-none border border-transparent transition-colors sm:h-5 sm:w-6 [&_svg]:size-3.5 [&_svg]:-translate-y-px',
                       dictation.status === 'recording'
                         ? 'animate-pulse bg-red-500/10 text-red-500 hover:bg-red-500/20'
                         : 'text-foreground/65 hover:bg-accent hover:text-foreground/90 disabled:opacity-50',
