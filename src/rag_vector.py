@@ -2851,16 +2851,29 @@ class VectorRAG:
         """Embed text OR an image (data URL) with the VL model — they share one
         vector space, which is the whole point of pixel embedding.
 
-        *** Phase-0 swap point ***: the exact request shape for image input
-        depends on the VL embedding server (OpenAI ``/v1/embeddings`` with a data
-        URL vs. vLLM ``/pooling``). Verify with the spike before relying on this;
-        it is gated off by default so an unverified call never runs in prod.
+        Request shape verified against vLLM 0.23.1 + Qwen3-VL-Embedding-8B
+        (2026-07-15): a data URL passed as plain ``input`` gets TOKENIZED AS
+        TEXT — the base64 characters are embedded, yielding a garbage vector
+        (cos ≈ 0.16 to the true image vector) and >8k-token errors for
+        real-size images. True image embedding goes through the chat-style
+        ``messages`` extension of ``/v1/embeddings``; the response shape is the
+        same for both forms.
         """
         import httpx
 
         url = os.getenv("IMAGE_EMBED_URL", "").strip()
         model = os.getenv("IMAGE_EMBED_MODEL", "").strip()
-        payload: Dict[str, Any] = {"input": value}
+        if isinstance(value, str) and value.startswith("data:"):
+            payload: Dict[str, Any] = {
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": [{"type": "image_url", "image_url": {"url": value}}],
+                    }
+                ]
+            }
+        else:
+            payload = {"input": value}
         if model:
             payload["model"] = model
         headers = {}

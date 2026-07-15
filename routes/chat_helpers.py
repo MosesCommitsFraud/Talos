@@ -880,23 +880,110 @@ def _rag_asset_local_path(image_url: str) -> Optional[str]:
         return None
 
 
+# Embedding-gate cosine bounds (env-tunable). Calibrated 2026-07-15 against
+# qwen3-embed (Qwen3-VL-Embedding-8B, messages-form image input) with a
+# synthetic settings-screenshot: related answers scored 0.29-0.31, keyword-only
+# overlap 0.22, same-doc-other-topic / unrelated 0.10-0.12. Scores between the
+# bounds are ambiguous and escalate to the (slow) VLM judge.
+def _figure_embed_bounds() -> tuple:
+    try:
+        return (
+            float(os.getenv("RAG_FIGURE_EMBED_ACCEPT", "0.26")),
+            float(os.getenv("RAG_FIGURE_EMBED_REJECT", "0.15")),
+        )
+    except Exception:
+        return (0.26, 0.15)
+
+
+# Pixel vectors are immutable per crop file, so they cache indefinitely; prose
+# vectors are per-answer and shared across that answer's candidate figures.
+_FIGURE_VEC_CACHE: dict = {}
+_PROSE_VEC_CACHE: dict = {}
+_VEC_CACHE_MAX = 128
+
+
+def _cos(a, b) -> float:
+    dot = na = nb = 0.0
+    for x, y in zip(a, b):
+        dot += x * y
+        na += x * x
+        nb += y * y
+    return dot / ((na**0.5) * (nb**0.5) or 1.0)
+
+
+def _embed_gate(prose_excerpt: str, fig: dict, jpeg_b64: str) -> Optional[bool]:
+    """Fast industry-style relevance gate: cosine between the figure's pixel
+    embedding and the answer's text embedding in the shared VL vector space
+    (one ~0.6s image embed, cached per figure, + one ~0.3s text embed shared
+    per answer — vs. seconds per generative VLM call).
+
+    Returns True/False on a clear verdict, None when unconfigured
+    (IMAGE_EMBED_URL unset), unavailable, or the score lands in the ambiguous
+    band between the bounds — the caller then escalates to the VLM judge."""
+    if not os.getenv("IMAGE_EMBED_URL", "").strip():
+        return None
+    try:
+        from src.rag_singleton import get_rag_manager
+
+        rm = get_rag_manager()
+        if rm is None:
+            return None
+        url = fig.get("image_url") or ""
+        vec_fig = _FIGURE_VEC_CACHE.get(url)
+        if vec_fig is None:
+            vec_fig = rm._vl_embed(f"data:image/jpeg;base64,{jpeg_b64}")
+            if len(_FIGURE_VEC_CACHE) >= _VEC_CACHE_MAX:
+                _FIGURE_VEC_CACHE.clear()
+            _FIGURE_VEC_CACHE[url] = vec_fig
+        import hashlib
+
+        phash = hashlib.md5(prose_excerpt.encode("utf-8", "ignore")).hexdigest()
+        vec_prose = _PROSE_VEC_CACHE.get(phash)
+        if vec_prose is None:
+            vec_prose = rm._vl_embed(prose_excerpt)
+            if len(_PROSE_VEC_CACHE) >= _VEC_CACHE_MAX:
+                _PROSE_VEC_CACHE.clear()
+            _PROSE_VEC_CACHE[phash] = vec_prose
+        accept, reject = _figure_embed_bounds()
+        score = _cos(vec_fig, vec_prose)
+        logger.info(
+            "figure judge: embed score %.3f (accept>=%.2f, reject<%.2f) for %s",
+            score,
+            accept,
+            reject,
+            url[:200],
+        )
+        if score >= accept:
+            return True
+        if score < reject:
+            return False
+        return None  # ambiguous — escalate to the VLM judge
+    except Exception as e:
+        logger.warning("figure embed gate unavailable (%s)", e)
+        return None
+
+
 def _judge_figure_fits(prose: str, fig: dict) -> Optional[bool]:
-    """Show a candidate figure to the vision model next to the final answer and
-    ask whether the image actually illustrates it.
+    """Decide whether a candidate figure actually belongs under this answer.
 
-    Anchor pairing and caption reranking admit figures on lexical grounds alone,
-    so a caption keyword that happens to match lets a visually unrelated figure
-    through. This is the semantic backstop: one serial VLM call per candidate
-    (the multimodal endpoint OOMs under parallel image requests), image
-    downscaled to ``_FIGURE_JUDGE_MAX_EDGE``, run only after the answer text has
-    already streamed — it delays the appended figures, never the answer.
+    Anchor pairing and caption reranking admit figures on lexical grounds
+    alone, so a caption keyword that happens to match lets a visually unrelated
+    figure through. Two-stage semantic cascade, run only after the answer text
+    has already streamed (it delays the appended figures, never the answer):
 
-    Returns True/False, or None whenever the judge cannot run (disabled via
-    RAG_FIGURE_VLM_JUDGE=0, figure not resolvable to a local file, vision
-    disabled/unconfigured, call failed). Callers treat None as "keep", so a
-    downed judge degrades to the current lexical behavior instead of hiding
-    correct figures. Verdicts are memoized on (answer-prose, image_url) so the
-    strip and append passes don't judge the same figure twice."""
+    1. Embedding gate (`_embed_gate`): pixel-vs-prose cosine in the shared VL
+       embedding space — sub-second, decides the clear cases.
+    2. VLM judge: only for scores in the ambiguous band (or when the embed
+       endpoint is unconfigured) — one serial generate call per figure (the
+       multimodal endpoint OOMs under parallel image requests), image
+       downscaled to ``_FIGURE_JUDGE_MAX_EDGE``.
+
+    Returns True/False, or None whenever no stage can run (disabled via
+    RAG_FIGURE_VLM_JUDGE=0, figure not resolvable to a local file, both stages
+    unavailable). Callers treat None as "keep", so a downed judge degrades to
+    the lexical behavior instead of hiding correct figures. Verdicts are
+    memoized on (answer-prose, image_url) so the strip and append passes don't
+    judge the same figure twice."""
     if not _figure_judge_enabled():
         return None
     path = _rag_asset_local_path(fig.get("image_url") or "")
@@ -919,6 +1006,23 @@ def _judge_figure_fits(prose: str, fig: dict) -> Optional[bool]:
 
         from PIL import Image
 
+        with Image.open(path) as im:
+            im.thumbnail((_FIGURE_JUDGE_MAX_EDGE, _FIGURE_JUDGE_MAX_EDGE))
+            buf = io.BytesIO()
+            im.convert("RGB").save(buf, format="JPEG", quality=85)
+        b64 = base64.b64encode(buf.getvalue()).decode()
+    except Exception as e:
+        logger.warning("figure judge: could not load image (%s); keeping figure", e)
+        return None
+
+    verdict = _embed_gate(prose_excerpt, fig, b64)
+    if verdict is not None:
+        if len(_FIGURE_JUDGE_CACHE) >= _FIGURE_JUDGE_CACHE_MAX:
+            _FIGURE_JUDGE_CACHE.clear()
+        _FIGURE_JUDGE_CACHE[key] = verdict
+        return verdict
+
+    try:
         from src.document_processor import _load_vl_settings, _resolve_vl_model
         from src.llm_core import llm_call
 
@@ -926,11 +1030,6 @@ def _judge_figure_fits(prose: str, fig: dict) -> Optional[bool]:
         if not settings.get("vision_enabled", True):
             return None
         url, model, headers = _resolve_vl_model(settings.get("vision_model", ""))
-        with Image.open(path) as im:
-            im.thumbnail((_FIGURE_JUDGE_MAX_EDGE, _FIGURE_JUDGE_MAX_EDGE))
-            buf = io.BytesIO()
-            im.convert("RGB").save(buf, format="JPEG", quality=85)
-        b64 = base64.b64encode(buf.getvalue()).decode()
         caption = (fig.get("image_caption") or "").strip()[:300]
         prompt = (
             "You are checking whether a documentation figure should be displayed "
