@@ -1,5 +1,6 @@
-import { CheckIcon, CopyIcon, DownloadIcon } from 'lucide-react';
+import { CheckIcon, CopyIcon, DownloadIcon, ImageIcon } from 'lucide-react';
 import { memo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeHighlight from 'rehype-highlight';
@@ -155,22 +156,12 @@ const REMARK_PLUGINS = [remarkGfm];
 const HIGHLIGHT_PLUGINS = [rehypeHighlight];
 const NO_PLUGINS: [] = [];
 
-const MD_COMPONENTS = {
-  pre: ({ node, children, ...props }: { node?: unknown; children?: React.ReactNode }) => (
-    <CodeBlock node={node as HastNode}>
-      <pre {...props}>{children}</pre>
-    </CodeBlock>
-  ),
-  table: ({ node, children, ...props }: { node?: unknown; children?: React.ReactNode }) => (
-    <TableBlock node={node as HastNode}>
-      <table {...props}>{children}</table>
-    </TableBlock>
-  ),
-  // Inline images (e.g. RAG figures the model embeds) are constrained so a
-  // high-DPI crop doesn't blow out the message width; click opens the in-app
-  // lightbox (zoom + download) instead of a new tab, same as generated images.
-  // Same-origin /api/personal/rag-asset requests carry the session cookie.
-  img: ({ src, alt }: { src?: string; alt?: string }) => (
+// Inline images (e.g. RAG figures the model embeds) are constrained so a
+// high-DPI crop doesn't blow out the message width; click opens the in-app
+// lightbox (zoom + download) instead of a new tab, same as generated images.
+// Same-origin /api/personal/rag-asset requests carry the session cookie.
+function MarkdownImage({ src, alt }: { src?: string; alt?: string }) {
+  return (
     <button
       type="button"
       onClick={() => src && useUi.getState().openLightbox({ src, label: alt || undefined })}
@@ -183,7 +174,53 @@ const MD_COMPONENTS = {
         className="my-2 max-h-96 max-w-full rounded-md border"
       />
     </button>
+  );
+}
+
+/* RAG figures stream in as markdown before the server-side figure guards run
+   (anti-hallucination strip + vision judge, both in the [DONE] handler). A
+   figure the judge vetoes must never flash on screen, so while the message
+   streams, rag-asset images render as a neutral placeholder — the real image
+   (or nothing, if vetoed via `content_final`) appears when the turn settles.
+   Non-RAG images (generated, external) are not subject to the guards and
+   render immediately. */
+const RAG_ASSET_PREFIX = '/api/personal/rag-asset';
+
+function PendingFigure({ alt }: { alt?: string }) {
+  const { t } = useTranslation();
+  return (
+    <span
+      title={alt || undefined}
+      className="my-2 flex h-28 w-64 max-w-full animate-pulse flex-col items-center justify-center gap-1.5 rounded-md border bg-muted/50 text-muted-foreground"
+    >
+      <ImageIcon className="size-5" />
+      <span className="text-xs">{t('messages.figurePending')}</span>
+    </span>
+  );
+}
+
+const MD_COMPONENTS = {
+  pre: ({ node, children, ...props }: { node?: unknown; children?: React.ReactNode }) => (
+    <CodeBlock node={node as HastNode}>
+      <pre {...props}>{children}</pre>
+    </CodeBlock>
   ),
+  table: ({ node, children, ...props }: { node?: unknown; children?: React.ReactNode }) => (
+    <TableBlock node={node as HastNode}>
+      <table {...props}>{children}</table>
+    </TableBlock>
+  ),
+  img: MarkdownImage,
+} as const;
+
+const MD_COMPONENTS_STREAMING = {
+  ...MD_COMPONENTS,
+  img: ({ src, alt }: { src?: string; alt?: string }) =>
+    src?.startsWith(RAG_ASSET_PREFIX) ? (
+      <PendingFigure alt={alt} />
+    ) : (
+      <MarkdownImage src={src} alt={alt} />
+    ),
 } as const;
 
 /** Assistant message body. Memoized — re-renders only when the text changes,
@@ -199,7 +236,7 @@ export const Markdown = memo(function Markdown({ text, streaming = false }: { te
       <ReactMarkdown
         remarkPlugins={REMARK_PLUGINS}
         rehypePlugins={streaming ? NO_PLUGINS : HIGHLIGHT_PLUGINS}
-        components={MD_COMPONENTS}
+        components={streaming ? MD_COMPONENTS_STREAMING : MD_COMPONENTS}
       >
         {text}
       </ReactMarkdown>

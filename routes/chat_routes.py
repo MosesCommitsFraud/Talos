@@ -929,10 +929,19 @@ def setup_chat_routes(
                                     last_metrics["thinking"] = thinking_response.strip()
                                 # Drop any inline figure the model referenced but
                                 # that wasn't actually retrieved (anti-hallucination
-                                # guard) before it's filtered/persisted.
+                                # guard) or that the vision judge vetoed, before
+                                # it's filtered/persisted.
+                                _pre_strip = full_response
                                 full_response = strip_unauthorized_figures(
                                     full_response, ctx.rag_sources
                                 )
+                                if full_response != _pre_strip:
+                                    # The stripped image markdown already streamed
+                                    # to the client as deltas — without this event
+                                    # the vetoed figure stays visible until reload
+                                    # while the saved message (and the source
+                                    # chips) no longer contain it.
+                                    yield f"data: {json.dumps({'type': 'content_final', 'content': full_response})}\n\n"
                                 # Backstop: the model is told to embed retrieved
                                 # figures but small models skip it unreliably —
                                 # append the figure server-side when the answer

@@ -222,6 +222,7 @@ const de: typeof en = {
     openPreview: '{{name}} öffnen',
     compacted: 'Frühere Nachrichten zusammengefasst, um ins Kontextfenster zu passen',
     sources: 'Quellen',
+    figurePending: 'Abbildung wird geprüft…',
     generating: 'Wird generiert',
     scrollToBottom: 'Nach unten scrollen',
     timeJustNow: 'gerade eben',
