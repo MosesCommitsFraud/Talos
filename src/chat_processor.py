@@ -465,7 +465,11 @@ class ChatProcessor:
                         # Admin-overridable instruction prefacing the retrieved context.
                         context_prompt = (self._rag_cfg().get("context_prompt") or "").strip() or (
                             "Retrieved knowledge base context. Use this context to answer the user's current question. "
-                            "If the answer is present here, prefer it over general knowledge."
+                            "If the answer is present here, prefer it over general knowledge. "
+                            "Always state the answer itself in full: never reply by merely pointing "
+                            "the user to a document or saying the information can be found there — "
+                            "not even when the same question was already answered earlier in this "
+                            "conversation."
                         )
 
                         # Inject the expanded parent section when small-to-big is

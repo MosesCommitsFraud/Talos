@@ -831,6 +831,144 @@ def _max_answer_figures() -> int:
         return 3
 
 
+# Downscale ceiling for judge calls: full-res/parallel image requests OOM the
+# multimodal vLLM endpoint (see keyframe ingest, which is serial + 1024px too).
+_FIGURE_JUDGE_MAX_EDGE = 1024
+_FIGURE_JUDGE_CACHE: dict = {}
+_FIGURE_JUDGE_CACHE_MAX = 64
+
+
+def _figure_judge_enabled() -> bool:
+    return os.getenv("RAG_FIGURE_VLM_JUDGE", "1").strip().lower() not in (
+        "0",
+        "false",
+        "off",
+        "no",
+    )
+
+
+def _rag_asset_local_path(image_url: str) -> Optional[str]:
+    """Resolve a ``/api/personal/rag-asset?source=...`` URL to its on-disk file.
+
+    Mirrors the containment rules of the serving route (personal_routes
+    ``serve_rag_asset``): the path must live inside the personal-uploads dir and
+    be an image type. Returns None for anything else — the judge then simply
+    doesn't run for that figure."""
+    from urllib.parse import parse_qs, urlsplit
+
+    try:
+        source = (parse_qs(urlsplit(image_url or "").query).get("source") or [""])[0]
+        if not source:
+            return None
+        from core.constants import BASE_DIR
+
+        uploads_root = os.path.realpath(os.path.join(BASE_DIR, "data", "personal_uploads"))
+        resolved = os.path.realpath(source)
+        if os.path.commonpath([resolved, uploads_root]) != uploads_root:
+            return None
+        if os.path.splitext(resolved)[1].lower() not in {
+            ".png",
+            ".jpg",
+            ".jpeg",
+            ".gif",
+            ".webp",
+            ".bmp",
+        }:
+            return None
+        return resolved if os.path.isfile(resolved) else None
+    except Exception:
+        return None
+
+
+def _judge_figure_fits(prose: str, fig: dict) -> Optional[bool]:
+    """Show a candidate figure to the vision model next to the final answer and
+    ask whether the image actually illustrates it.
+
+    Anchor pairing and caption reranking admit figures on lexical grounds alone,
+    so a caption keyword that happens to match lets a visually unrelated figure
+    through. This is the semantic backstop: one serial VLM call per candidate
+    (the multimodal endpoint OOMs under parallel image requests), image
+    downscaled to ``_FIGURE_JUDGE_MAX_EDGE``, run only after the answer text has
+    already streamed — it delays the appended figures, never the answer.
+
+    Returns True/False, or None whenever the judge cannot run (disabled via
+    RAG_FIGURE_VLM_JUDGE=0, figure not resolvable to a local file, vision
+    disabled/unconfigured, call failed). Callers treat None as "keep", so a
+    downed judge degrades to the current lexical behavior instead of hiding
+    correct figures. Verdicts are memoized on (answer-prose, image_url) so the
+    strip and append passes don't judge the same figure twice."""
+    if not _figure_judge_enabled():
+        return None
+    path = _rag_asset_local_path(fig.get("image_url") or "")
+    if not path:
+        return None
+    prose_excerpt = (prose or "").strip()[:1500]
+    if not prose_excerpt:
+        return None
+    import hashlib
+
+    key = (
+        hashlib.md5(prose_excerpt.encode("utf-8", "ignore")).hexdigest(),
+        fig.get("image_url"),
+    )
+    if key in _FIGURE_JUDGE_CACHE:
+        return _FIGURE_JUDGE_CACHE[key]
+    try:
+        import base64
+        import io
+
+        from PIL import Image
+
+        from src.document_processor import _load_vl_settings, _resolve_vl_model
+        from src.llm_core import llm_call
+
+        settings = _load_vl_settings()
+        if not settings.get("vision_enabled", True):
+            return None
+        url, model, headers = _resolve_vl_model(settings.get("vision_model", ""))
+        with Image.open(path) as im:
+            im.thumbnail((_FIGURE_JUDGE_MAX_EDGE, _FIGURE_JUDGE_MAX_EDGE))
+            buf = io.BytesIO()
+            im.convert("RGB").save(buf, format="JPEG", quality=85)
+        b64 = base64.b64encode(buf.getvalue()).decode()
+        caption = (fig.get("image_caption") or "").strip()[:300]
+        prompt = (
+            "You are checking whether a documentation figure should be displayed "
+            "underneath a chat answer.\n\n<ANSWER>\n"
+            f"{prose_excerpt}\n</ANSWER>\n\n"
+            f"Figure caption: {caption or '(none)'}\n\n"
+            "Look at the attached image. Answer YES only if the image genuinely "
+            "illustrates something the answer text explains — a shared keyword or "
+            "merely the same general topic is NOT enough. Otherwise answer NO. "
+            "Reply with exactly one word: YES or NO."
+        )
+        messages = [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": prompt},
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": f"data:image/jpeg;base64,{b64}"},
+                    },
+                ],
+            }
+        ]
+        reply = (llm_call(url, model, messages, headers=headers, timeout=30) or "").upper()
+        # Take the LAST yes/no in the reply: reasoning models may argue both
+        # sides before the final one-word verdict.
+        matches = re.findall(r"\b(YES|NO)\b", reply)
+        verdict = (matches[-1] == "YES") if matches else None
+        if verdict is not None:
+            if len(_FIGURE_JUDGE_CACHE) >= _FIGURE_JUDGE_CACHE_MAX:
+                _FIGURE_JUDGE_CACHE.clear()
+            _FIGURE_JUDGE_CACHE[key] = verdict
+        return verdict
+    except Exception as e:
+        logger.warning("figure judge unavailable (%s); keeping figure", e)
+        return None
+
+
 def _eligible_figures_for_answer(answer: str, sources: list) -> list:
     """Pair figures with the exact text page/anchor used by the final answer.
 
@@ -950,7 +1088,22 @@ def strip_unauthorized_figures(answer: str, sources: list) -> str:
         if has_precise_provenance
         else [s for s in (sources or []) if s.get("image_url")]
     )
-    allowed = {_norm(s.get("image_url")) for s in allowed_sources}
+    # Second opinion from the vision model on figures the model embedded
+    # itself: the model only ever saw the caption, so it can pick a
+    # keyword-matching but visually unrelated figure. Judge only figures
+    # actually referenced in the answer; None (judge unavailable) keeps them.
+    ans_norm = _norm(answer)
+    prose = _RAG_ASSET_IMG_RE.sub("", answer)
+    kept = []
+    for s in allowed_sources:
+        if _norm(s.get("image_url")) in ans_norm and _judge_figure_fits(prose, s) is False:
+            logger.info(
+                "figure judge: vetoed model-embedded figure %s",
+                (s.get("image_url") or "")[:200],
+            )
+            continue
+        kept.append(s)
+    allowed = {_norm(s.get("image_url")) for s in kept}
 
     def _keep(m: "re.Match") -> str:
         if _norm(m.group("url")) in allowed:
@@ -976,6 +1129,15 @@ def append_missing_figures(answer: str, sources: list, *, max_figures: Optional[
     if _RAG_ASSET_IMG_RE.search(answer):
         return ""  # the model embedded one itself
     matched = _eligible_figures_for_answer(answer, sources)
+    # Semantic gate on the lexical selection: the anchor pairing above only
+    # proves the figure's PAGE was used, not that the image fits the answer.
+    # The vision model looks at each candidate next to the final prose and
+    # vetoes keyword-only matches; None (judge unavailable) keeps the figure.
+    prose = _RAG_ASSET_IMG_RE.sub("", answer)
+    vetoed = [s for s in matched if _judge_figure_fits(prose, s) is False]
+    if vetoed:
+        logger.info("figure judge: vetoed %s/%s appended figure(s)", len(vetoed), len(matched))
+        matched = [s for s in matched if s not in vetoed]
     limit = max_figures if max_figures is not None else _max_answer_figures()
     lines = []
     for s in matched[:limit]:
