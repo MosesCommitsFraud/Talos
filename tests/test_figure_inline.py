@@ -136,8 +136,12 @@ def test_same_pdf_filename_uses_exact_page_anchor_not_first_figure():
     assert _BAD not in out
 
 
-def test_wrong_model_chosen_figure_is_stripped_then_correct_anchor_can_append():
-    answer = f"Band per Rechtsklick einfügen. ![wrong]({_BAD})"
+def test_model_embedded_retrieved_figure_kept_fabricated_stripped():
+    # Relevance is decided BEFORE injection by the pixel gate — every figure in
+    # `sources` was already vetted, so one the model chose to embed must never
+    # be yanked back out of the transcript. Only fabricated URLs get stripped.
+    fake = "/api/personal/rag-asset?source=%2Fu%2F_pdf_figures%2Ffabricated.png"
+    answer = f"Band per Rechtsklick einfügen. ![fig]({_BAD}) ![nope]({fake})"
     source = "/u/training.pdf"
     sources = [
         {
@@ -166,10 +170,11 @@ def test_wrong_model_chosen_figure_is_stripped_then_correct_anchor_can_append():
     ]
 
     stripped = ch.strip_unauthorized_figures(answer, sources)
-    appended = stripped + ch.append_missing_figures(stripped, sources)
 
-    assert _BAD not in appended
-    assert _OK in appended
+    assert _BAD in stripped  # retrieved figure, model's choice — kept
+    assert "fabricated.png" not in stripped
+    # The backstop appends nothing when the answer already shows a figure.
+    assert ch.append_missing_figures(stripped, sources) == ""
 
 
 def test_same_page_prefers_focused_figure_and_drops_extra_image_sources():
@@ -207,8 +212,10 @@ def test_same_page_prefers_focused_figure_and_drops_extra_image_sources():
 
     assert [s["image_url"] for s in eligible] == [_OK]
     assert [s["image_url"] for s in used if s.get("image_url")] == [_OK]
+    # Both images are retrieved (pre-gated) figures — the model may embed
+    # either; strip only removes fabricated URLs.
     assert _OK in stripped
-    assert _BAD not in stripped
+    assert _BAD in stripped
 
 
 def test_two_topic_answer_gets_one_figure_per_used_anchor():

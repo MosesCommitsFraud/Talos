@@ -929,8 +929,9 @@ def setup_chat_routes(
                                     last_metrics["thinking"] = thinking_response.strip()
                                 # Drop any inline figure the model referenced but
                                 # that wasn't actually retrieved (anti-hallucination
-                                # guard) or that the vision judge vetoed, before
-                                # it's filtered/persisted.
+                                # guard) before it's filtered/persisted. Relevance
+                                # itself is decided pre-injection by the pixel gate
+                                # (chat_processor._pixel_gate_figures).
                                 _pre_strip = full_response
                                 full_response = strip_unauthorized_figures(
                                     full_response, ctx.rag_sources

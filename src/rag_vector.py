@@ -2897,6 +2897,89 @@ class VectorRAG:
             b64 = base64.b64encode(fh.read()).decode()
         return self._vl_embed(f"data:{mime};base64,{b64}")
 
+    # In-memory text-vector cache for the pixel gate: chunk/query texts repeat
+    # across turns, and one text embed costs ~0.3s on the Spark.
+    _PIXEL_TEXT_VECS: Dict[str, List[float]] = {}
+    _PIXEL_TEXT_VECS_MAX = 256
+    # Downscale ceiling before embedding: the embed server's context is 8192
+    # tokens, and full-res page crops exceed it; 1024px also matches the
+    # serial-ingest OOM guidance for the multimodal endpoints.
+    _PIXEL_EMBED_MAX_EDGE = 1024
+
+    def _pixel_vec_for_image(self, image_path: str) -> Optional[List[float]]:
+        """Pixel vector for one image file, with a JSON sidecar cache next to
+        the crop (``<path>.vec.json``) so each figure is embedded exactly once
+        across restarts. Crops are immutable, so the sidecar never goes stale;
+        it is keyed to the embed model and recomputed if that changes."""
+        import base64
+        import io
+        import json as _json
+
+        model = os.getenv("IMAGE_EMBED_MODEL", "").strip()
+        sidecar = image_path + ".vec.json"
+        try:
+            with open(sidecar, "r", encoding="utf-8") as fh:
+                data = _json.load(fh)
+            if data.get("model") == model and data.get("vec"):
+                return data["vec"]
+        except Exception:
+            pass
+        try:
+            from PIL import Image
+
+            with Image.open(image_path) as im:
+                im.thumbnail((self._PIXEL_EMBED_MAX_EDGE, self._PIXEL_EMBED_MAX_EDGE))
+                buf = io.BytesIO()
+                im.convert("RGB").save(buf, format="JPEG", quality=85)
+            vec = self._vl_embed(
+                f"data:image/jpeg;base64,{base64.b64encode(buf.getvalue()).decode()}"
+            )
+        except Exception as e:
+            logger.warning("pixel gate: image embed failed for %s: %s", image_path, e)
+            return None
+        try:
+            with open(sidecar, "w", encoding="utf-8") as fh:
+                _json.dump({"model": model, "vec": vec}, fh)
+        except Exception:
+            pass  # cache miss next time — never a functional failure
+        return vec
+
+    def pixel_relevance(self, text: str, image_path: str) -> Optional[float]:
+        """Cosine between a text and an image in the shared VL embedding space.
+
+        The retrieval-time relevance gate for figures: scored BEFORE injection
+        so the chat model only ever sees figures that visually match the text
+        they ride along with — no post-answer judging or stripping needed.
+        Returns None when the VL embed endpoint is unconfigured or either
+        embed fails; callers must treat None as "cannot tell" (fail-open)."""
+        if not os.getenv("IMAGE_EMBED_URL", "").strip():
+            return None
+        text = (text or "").strip()[:1500]
+        if not text:
+            return None
+        vec_img = self._pixel_vec_for_image(image_path)
+        if not vec_img:
+            return None
+        import hashlib
+
+        thash = hashlib.md5(text.encode("utf-8", "ignore")).hexdigest()
+        vec_txt = self._PIXEL_TEXT_VECS.get(thash)
+        if vec_txt is None:
+            try:
+                vec_txt = self._vl_embed(text)
+            except Exception as e:
+                logger.warning("pixel gate: text embed failed: %s", e)
+                return None
+            if len(self._PIXEL_TEXT_VECS) >= self._PIXEL_TEXT_VECS_MAX:
+                self._PIXEL_TEXT_VECS.clear()
+            self._PIXEL_TEXT_VECS[thash] = vec_txt
+        dot = na = nb = 0.0
+        for x, y in zip(vec_img, vec_txt):
+            dot += x * y
+            na += x * x
+            nb += y * y
+        return dot / ((na**0.5) * (nb**0.5) or 1.0)
+
     def _ensure_visual_collection(self, dim: int) -> None:
         from qdrant_client.models import Distance, VectorParams
 

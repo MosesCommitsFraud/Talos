@@ -220,7 +220,6 @@ const en = {
     openPreview: 'Open {{name}}',
     compacted: 'Earlier messages summarized to fit the context window',
     sources: 'Sources',
-    figurePending: 'Checking figure…',
     generating: 'Generating',
     scrollToBottom: 'Scroll to bottom',
     timeJustNow: 'just now',

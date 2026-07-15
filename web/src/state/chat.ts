@@ -542,10 +542,10 @@ export const useChat = create<ChatState>((set, get) => {
               patchAi({ compacted: { contextLength: ev.context_length as number | undefined } });
               break;
             case 'content_final':
-              // Server-side figure guards (hallucination strip / vision judge)
-              // can remove image markdown that already streamed as deltas —
-              // replace the accumulated content with the authoritative text
-              // that gets persisted.
+              // The server-side anti-hallucination guard can strip fabricated
+              // figure URLs that already streamed as deltas — replace the
+              // accumulated content with the authoritative text that gets
+              // persisted.
               if (typeof ev.content === 'string') patchAi({ content: ev.content });
               break;
             case 'rag_sources':

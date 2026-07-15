@@ -138,6 +138,95 @@ def _chunk_relevant_to_query(query: str, document: str) -> bool:
     return len(shared) >= need
 
 
+def _figure_local_path(meta: Dict[str, Any]) -> Optional[str]:
+    """Resolve a figure chunk's ``image_url`` to its on-disk crop file, with the
+    same containment rules as the serving route (inside the personal-uploads
+    dir). Returns None when unresolvable — the pixel gate then skips it."""
+    from urllib.parse import parse_qs, urlsplit
+
+    try:
+        source = (parse_qs(urlsplit(meta.get("image_url") or "").query).get("source") or [""])[0]
+        if not source:
+            return None
+        from core.constants import BASE_DIR
+
+        uploads_root = os.path.realpath(os.path.join(BASE_DIR, "data", "personal_uploads"))
+        resolved = os.path.realpath(source)
+        if os.path.commonpath([resolved, uploads_root]) != uploads_root:
+            return None
+        return resolved if os.path.isfile(resolved) else None
+    except Exception:
+        return None
+
+
+def _pixel_gate_min() -> float:
+    # Calibrated 2026-07-15 against qwen3-embed (Qwen3-VL-Embedding-8B):
+    # related figure↔text pairs scored 0.29-0.31, keyword-only overlap 0.22,
+    # unrelated 0.10-0.12. Tune from the "pixel gate" log lines.
+    try:
+        return float(os.getenv("RAG_FIGURE_GATE_MIN", "0.25"))
+    except Exception:
+        return 0.25
+
+
+def _pixel_gate_figures(
+    results: List[Dict[str, Any]], rag_manager: Any, query: str
+) -> List[Dict[str, Any]]:
+    """Retrieval-time figure relevance gate (the industry pattern: filter
+    BEFORE generation, then trust what was injected).
+
+    Caption rerank and page provenance admit figures on lexical/positional
+    grounds, so a page can still contribute a visually unrelated image. Score
+    each figure's pixel embedding against the query plus its anchor chunk's
+    text in the shared VL vector space and drop figures below the threshold —
+    the model then never sees them, so nothing needs to be judged, stripped,
+    or un-rendered after the answer. Image vectors come from a per-crop
+    sidecar cache (embedded once, ever); the text embed is one ~0.3s call.
+    Fail-open per figure: an unconfigured/failed gate keeps the figure."""
+    fn = getattr(rag_manager, "pixel_relevance", None)
+    if not callable(fn):
+        return results
+    if not any((r.get("metadata") or {}).get("image_url") for r in results):
+        return results
+    by_id = {r.get("id"): r for r in results}
+    min_score = _pixel_gate_min()
+    out = []
+    for r in results:
+        meta = r.get("metadata") or {}
+        if not meta.get("image_url"):
+            out.append(r)
+            continue
+        path = _figure_local_path(meta)
+        anchor = by_id.get(r.get("anchor_id"))
+        anchor_text = ""
+        if anchor:
+            anchor_text = anchor.get("_retrieval_document") or anchor.get("document") or ""
+        comparator = f"{query}\n\n{anchor_text}".strip()
+        try:
+            score = fn(comparator, path) if path else None
+        except Exception:
+            score = None
+        if score is None:
+            out.append(r)  # gate unavailable — keep, same behavior as before the gate
+            continue
+        if score >= min_score:
+            logger.info(
+                "pixel gate: kept figure (score %.3f >= %.2f) %s",
+                score,
+                min_score,
+                (meta.get("image_url") or "")[:200],
+            )
+            out.append(r)
+        else:
+            logger.info(
+                "pixel gate: dropped figure (score %.3f < %.2f) %s",
+                score,
+                min_score,
+                (meta.get("image_url") or "")[:200],
+            )
+    return out
+
+
 def _add_surviving_anchor_companions(
     results: List[Dict[str, Any]], relevant: List[Dict[str, Any]]
 ) -> List[Dict[str, Any]]:
@@ -430,6 +519,10 @@ class ChatProcessor:
                         if r.get("search_type") != "figure_companion"
                         or r.get("anchor_id") in text_ids
                     ]
+                    # Pixel gate: drop figures whose IMAGE doesn't match the
+                    # query/anchor text before anything reaches the model. What
+                    # survives is trusted downstream — no post-answer judging.
+                    relevant = _pixel_gate_figures(relevant, rag_manager, search_query)
                     if relevant:
                         logger.info(
                             f"RAG: {len(relevant)}/{len(results)} results above threshold {sim_threshold}"
