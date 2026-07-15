@@ -1,5 +1,5 @@
 fastapi==0.139.0
-uvicorn[standard]==0.50.2
+uvicorn[standard]==0.51.0
 python-multipart==0.0.32
 httpx==0.28.1
 requests==2.34.2
@@ -15,7 +15,7 @@ scipy==1.18.0
 openpyxl==3.1.5
 xlsxwriter==3.2.9
 xlrd==2.0.2
-python-calamine==0.7.0
+python-calamine==0.8.2
 odfpy==1.4.1
 
 # Math, optimization, statistics, and equation solving
