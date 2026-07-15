@@ -43,6 +43,17 @@ export function ModelPicker({ visible = true }: { visible?: boolean }) {
 
   if (!visible) return null;
 
+  // With a single model there is nothing to switch — show a static label
+  // (no chevron, no menu, default cursor) that still hovers like its neighbors.
+  if (options.length === 1) {
+    return (
+      <span className="flex h-6 max-w-32 shrink-0 cursor-default items-center pt-[2px] gap-1.5 whitespace-nowrap rounded-[4.5px] border border-transparent px-1 text-xs font-medium text-foreground/65 transition-colors hover:bg-accent hover:text-foreground/90 sm:h-5 sm:px-1.5 md:max-w-56">
+        <QwenIcon className="size-3.5 shrink-0" />
+        <span className="min-w-0 flex-1 truncate text-left">{label}</span>
+      </span>
+    );
+  }
+
   return (
     <Menu>
       <MenuTrigger asChild>

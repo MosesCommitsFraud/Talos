@@ -4,12 +4,10 @@ import {
   ArrowUpIcon,
   CirclePauseIcon,
   CircleStopIcon,
-  BrainIcon,
   CheckIcon,
   ChevronDownIcon,
   CornerDownLeftIcon,
   DatabaseIcon,
-  LightbulbIcon,
   FileTextIcon,
   ListChecksIcon,
   Loader2Icon,
@@ -72,7 +70,8 @@ function ModeToggle({
         )}
       >
         {face}
-        <span className="sr-only sm:not-sr-only">{text}</span>
+        {/* Without an icon the label is the whole face, so it must stay visible on mobile too. */}
+        <span className={face ? 'sr-only sm:not-sr-only' : undefined}>{text}</span>
       </button>
     </Tooltip>
   );
@@ -202,9 +201,8 @@ function ThinkingToggle() {
     <ModeToggle
       active={reasoning}
       onClick={() => toggle('reasoning')}
-      icon={<BrainIcon />}
+      icon={null}
       label={t('composer.reasoning.on')}
-      inactiveIcon={<LightbulbIcon />}
       inactiveLabel={t('composer.reasoning.off')}
       tooltip={reasoning ? t('composer.reasoning.onDesc') : t('composer.reasoning.offDesc')}
     />
@@ -811,7 +809,7 @@ export function Composer() {
                   <button
                     type="button"
                     aria-label={t('composer.add')}
-                    className="flex h-6 w-7 shrink-0 items-center pt-[2px] justify-center rounded-[4.5px] border border-transparent text-foreground/65 outline-none transition-colors hover:bg-accent hover:text-foreground/90 focus:outline-none focus-visible:outline-none sm:h-5 sm:w-6 [&_svg]:size-3.5 [&_svg]:-translate-y-px"
+                    className="flex size-6 shrink-0 items-center pt-[2px] justify-center rounded-[4.5px] border border-transparent text-foreground/65 outline-none transition-colors hover:bg-accent hover:text-foreground/90 focus:outline-none focus-visible:outline-none sm:size-5 [&_svg]:size-3.5 [&_svg]:-translate-y-px"
                   >
                     <PlusIcon className={uploading ? 'animate-pulse' : undefined} />
                   </button>
