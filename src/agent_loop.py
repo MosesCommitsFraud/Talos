@@ -2731,7 +2731,14 @@ async def stream_agent_loop(
                 "exit_code": result.get("exit_code"),
             }
             # Forward image data from generate_image tool
-            for k in ("image_url", "image_prompt", "image_model", "image_size", "image_quality"):
+            for k in (
+                "image_url",
+                "image_id",
+                "image_prompt",
+                "image_model",
+                "image_size",
+                "image_quality",
+            ):
                 if k in result:
                     tool_output_data[k] = result[k]
             # Forward screenshots from browser tools (base64 images)
@@ -2743,6 +2750,27 @@ async def stream_agent_loop(
                 tool_output_data["created_images"] = result["created_images"]
                 if result.get("image_note"):
                     tool_output_data["image_note"] = result["image_note"]
+            created_artifacts = list(result.get("created_artifacts") or [])
+            if result.get("image_id"):
+                created_artifacts.append(f"generated-image:{result['image_id']}")
+            for image in result.get("created_images") or []:
+                image_name = str(image.get("name") or "").strip()
+                if image_name and image_name not in created_artifacts:
+                    created_artifacts.append(image_name)
+            artifact_changed = bool(created_artifacts)
+            if block.tool_type in {
+                "create_document",
+                "update_document",
+                "edit_document",
+                "write_file",
+                "edit_file",
+                "show_image",
+                "generate_image",
+            } and result.get("exit_code") in (0, None) and "error" not in result:
+                artifact_changed = True
+            if artifact_changed:
+                tool_output_data["artifacts_changed"] = True
+                tool_output_data["created_artifacts"] = created_artifacts
             # Forward a file-write diff for inline before/after rendering
             if "diff" in result:
                 tool_output_data["diff"] = result["diff"]

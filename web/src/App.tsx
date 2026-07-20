@@ -1,4 +1,4 @@
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { QueryClientProvider } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
 import { Sidebar } from './components/Sidebar';
 import { IncognitoToggle } from './components/IncognitoToggle';
@@ -19,10 +19,7 @@ import { TooltipProvider } from './components/ui/misc';
 import { applyDensity, applyLang, applyTheme, usePrefs } from './state/prefs';
 import { selectPendingPlan, useChat } from './state/chat';
 import { useUi } from './state/ui';
-
-const queryClient = new QueryClient({
-  defaultOptions: { queries: { staleTime: 10_000, retry: 1 } },
-});
+import { queryClient } from './lib/queryClient';
 
 export default function App() {
   const [palette, setPalette] = useState(false);

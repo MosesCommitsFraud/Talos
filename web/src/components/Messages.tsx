@@ -259,8 +259,8 @@ function ArtifactChips({ sessionId, files }: { sessionId: string; files: Artifac
   return (
     <div className="mt-3 flex flex-wrap gap-1.5">
       {files.map((f) => {
-        const previewable = isPreviewable(f.path, f.mime);
-        const isImage = previewKind(f.path, f.mime) === 'image';
+        const previewable = isPreviewable(f.name, f.mime);
+        const isImage = previewKind(f.name, f.mime) === 'image';
         return (
           <div
             key={f.path}
@@ -513,11 +513,12 @@ export function Messages() {
   const artifactFiles: ArtifactFile[] = sessionId
     ? (artifacts ?? []).flatMap((f) => {
         const path = String(f.path ?? f.name ?? '');
+        const name = String(f.name ?? path);
         const mime = String(f.mime ?? '');
-        if (!path || inputPaths.has(path)) return [];
+        if (!path || (f.source === 'workspace' && inputPaths.has(path))) return [];
         return [{
           path,
-          name: path.split(/[\\/]/).pop() ?? path,
+          name,
           size: typeof f.size === 'number' ? f.size : undefined,
           mime: mime || undefined,
         }];

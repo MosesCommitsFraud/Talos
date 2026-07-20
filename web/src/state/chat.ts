@@ -1,8 +1,11 @@
 import { create } from 'zustand';
-import { compactSession, createSession, deleteMessages, editMessage, fetchSession, streamChat } from '@/api/client';
-import type { Attachment, Metrics, RagSource, ToolCall } from '@/api/types';
+import { compactSession, createSession, deleteMessages, editMessage, fetchArtifacts, fetchSession, streamChat } from '@/api/client';
+import type { Artifact, Attachment, Metrics, RagSource, ToolCall } from '@/api/types';
+import { isPreviewable } from '@/lib/files';
 import { timestampMs } from '@/lib/utils';
+import { queryClient } from '@/lib/queryClient';
 import { usePrefs } from './prefs';
+import { useUi } from './ui';
 
 export interface UiMessage {
   id: string;
@@ -474,8 +477,38 @@ export const useChat = create<ChatState>((set, get) => {
       aiId = next.id;
       writeRuntime(sid, (rt) => ({ messages: [...rt.messages, next] }));
     };
+    const revealArtifacts = (preferredPaths: string[] = []) => {
+      void queryClient.invalidateQueries({ queryKey: ['artifacts', sid] });
+      if (get().sessionId !== sid) return;
+      useUi.getState().setPanelMode('files');
+      useUi.getState().setArtifactsOpen(true);
+      void queryClient.fetchQuery({
+        queryKey: ['artifacts', sid],
+        queryFn: () => fetchArtifacts(sid),
+        staleTime: 0,
+      }).then((artifacts: Artifact[]) => {
+        if (get().sessionId !== sid) return;
+        const normalized = (path: string) => path.replace(/\\/g, '/').replace(/^\.\//, '');
+        const preferred = preferredPaths
+          .map((path) => artifacts.find((artifact) => (
+            normalized(String(artifact.path ?? '')) === normalized(path)
+          )))
+          .find((artifact): artifact is Artifact => !!artifact);
+        if (!preferred) return;
+        const path = String(preferred.path ?? preferred.name ?? '');
+        const name = String(preferred.name ?? path);
+        const mime = typeof preferred.mime === 'string' ? preferred.mime : undefined;
+        if (path && isPreviewable(name, mime)) {
+          useUi.getState().openPreview({ sessionId: sid, path, name, mime });
+        }
+      }).catch(() => { /* Files tab remains available if preview lookup fails. */ });
+    };
 
     const prefs = usePrefs.getState();
+    const activePreview = useUi.getState().preview;
+    const activeDocId = activePreview?.sessionId === sid && activePreview.path.startsWith('document:')
+      ? activePreview.path.slice('document:'.length)
+      : undefined;
     // Plan-mode applies to this turn unless the caller overrides it (e.g. an
     // "Implement plan" approval forces it off and passes the approved checklist).
     const planMode = opts?.planMode ?? prefs.planMode;
@@ -492,6 +525,7 @@ export const useChat = create<ChatState>((set, get) => {
           incognito: prefs.incognito,
           lang: prefs.lang,
           llmLanguage: prefs.llmLang,
+          activeDocId,
           attachments: attachments.map((file) => file.id),
         },
         signal: abort.signal,
@@ -531,6 +565,15 @@ export const useChat = create<ChatState>((set, get) => {
                     : t,
                 ),
               }));
+              if (ev.artifacts_changed) {
+                const created = Array.isArray(ev.created_artifacts)
+                  ? ev.created_artifacts.map(String)
+                  : [];
+                revealArtifacts(created);
+              }
+              break;
+            case 'doc_update':
+              revealArtifacts(typeof ev.doc_id === 'string' ? [`document:${ev.doc_id}`] : []);
               break;
             case 'metrics':
               // Merge rather than replace: per-round events carry only the live
@@ -579,6 +622,10 @@ export const useChat = create<ChatState>((set, get) => {
           }
         },
       });
+      // Catch workspace outputs from older servers/tools that do not emit an
+      // explicit artifact event. Active queries refetch immediately; closed
+      // sessions are marked stale for their next open.
+      void queryClient.invalidateQueries({ queryKey: ['artifacts', sid] });
       // Quiet re-sync: the stream only reports the assistant row id; pull
       // history once so the user message gets its db id too (enables
       // edit/delete without a manual reload).

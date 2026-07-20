@@ -285,6 +285,7 @@ const de: typeof en = {
     download: 'Datei herunterladen',
     resize: 'Vorschau anpassen',
     error: 'Diese Datei konnte nicht geladen werden.',
+    saveError: 'Dieses Dokument konnte nicht gespeichert werden.',
     empty: 'Wähle eine Datei aus, um sie hier anzuzeigen.',
   },
   artifacts: {

@@ -764,6 +764,8 @@ async def _try_sandbox_exec(
         "workspace": data.get("workspace"),
         "sandboxed": True,
     }
+    if data.get("created_artifacts"):
+        result["created_artifacts"] = data["created_artifacts"]
     # Images the run created (matplotlib plots, etc.) — forwarded so the chat can
     # show them inline. Kept under a distinct key so it isn't confused with the
     # browser tools' `images` (screenshot) shape.
@@ -869,6 +871,10 @@ async def _try_sandbox_file_tool(
             "sandboxed": True,
         }
     data["sandboxed"] = True
+    if tool in {"write_file", "edit_file"} and data.get("exit_code") in (0, None):
+        path = str(payload.get("path") or "").strip()
+        if path:
+            data["created_artifacts"] = [path]
     return data
 
 
@@ -971,6 +977,8 @@ async def _do_run_cell(
         "exit_code": rc,
         "sandboxed": True,
     }
+    if data.get("created_artifacts"):
+        result["created_artifacts"] = data["created_artifacts"]
     imgs = data.get("images") or []
     if imgs:
         result["created_images"] = imgs

@@ -1,6 +1,7 @@
 """Document routes — CRUD for living documents with version history."""
 
 import logging
+import mimetypes
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
@@ -8,7 +9,7 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, File, Form, HTTPException, Query, Request, UploadFile
 from sqlalchemy import func
 
-from core.database import Document, DocumentVersion, SessionLocal
+from core.database import Document, DocumentVersion, GalleryImage, SessionLocal
 from core.database import Session as DbSession
 from src.auth_helpers import get_current_user
 
@@ -405,23 +406,86 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
             raise HTTPException(403, "Access denied")
         return session.owner or user
 
-    # ---- GET /api/artifacts/{session_id} — files in the chat's sandbox workspace ----
+    def _document_artifact(doc: Document) -> Dict[str, Any]:
+        extensions = {
+            "markdown": ".md",
+            "python": ".py",
+            "javascript": ".js",
+            "typescript": ".ts",
+            "html": ".html",
+            "css": ".css",
+            "json": ".json",
+            "yaml": ".yaml",
+            "xml": ".xml",
+            "sql": ".sql",
+            "csv": ".csv",
+            "text": ".txt",
+            "email": ".eml",
+        }
+        title = (doc.title or "Untitled").strip() or "Untitled"
+        title = title.replace("/", "_").replace("\\", "_").replace('"', "'")
+        title = title.replace("\r", " ").replace("\n", " ")
+        if "." not in title.rsplit("/", 1)[-1]:
+            title += extensions.get((doc.language or "").lower(), ".txt")
+        mime = mimetypes.guess_type(title)[0] or "text/plain"
+        updated = doc.updated_at or doc.created_at
+        return {
+            "path": f"document:{doc.id}",
+            "name": title,
+            "size": len((doc.current_content or "").encode("utf-8")),
+            "mtime": updated.replace(tzinfo=timezone.utc).timestamp() if updated else 0,
+            "mime": mime,
+            "is_image": False,
+            "source": "document",
+            "version": doc.version_count or 1,
+        }
+
+    def _gallery_artifact(image: GalleryImage) -> Dict[str, Any]:
+        created = image.created_at
+        mime = mimetypes.guess_type(image.filename)[0] or "image/png"
+        return {
+            "path": f"generated-image:{image.id}",
+            "name": image.filename,
+            "size": image.file_size,
+            "mtime": created.replace(tzinfo=timezone.utc).timestamp() if created else 0,
+            "mime": mime,
+            "is_image": mime.startswith("image/"),
+            "source": "generated_image",
+        }
+
+    # ---- GET /api/artifacts/{session_id} — every output associated with the chat ----
     @router.get("/api/artifacts/{session_id}")
     async def list_artifacts_route(request: Request, session_id: str) -> Dict[str, Any]:
         db = SessionLocal()
         try:
             owner = _verify_session_access(db, request, session_id)
+            documents = [
+                _document_artifact(doc)
+                for doc in db.query(Document).filter(Document.session_id == session_id).all()
+            ]
+            images = [
+                _gallery_artifact(image)
+                for image in db.query(GalleryImage).filter(GalleryImage.session_id == session_id).all()
+            ]
         finally:
             db.close()
         from src.sandbox_client import list_artifacts, sandbox_enabled
 
-        if not sandbox_enabled():
-            return {"artifacts": []}
-        try:
-            artifacts = await list_artifacts(owner=owner, session_id=session_id)
-        except Exception as e:
-            logger.warning("artifacts list failed for %s: %s", session_id, e)
-            return {"artifacts": [], "error": "sandbox unavailable"}
+        artifacts = []
+        error = None
+        if sandbox_enabled():
+            try:
+                artifacts = await list_artifacts(owner=owner, session_id=session_id)
+            except Exception as e:
+                logger.warning("artifacts list failed for %s: %s", session_id, e)
+                error = "sandbox unavailable"
+        for artifact in artifacts:
+            artifact.setdefault("source", "workspace")
+        artifacts.extend(documents)
+        artifacts.extend(images)
+        artifacts.sort(key=lambda item: float(item.get("mtime") or 0), reverse=True)
+        if error:
+            return {"artifacts": artifacts, "error": error}
         return {"artifacts": artifacts}
 
     # ---- GET /api/artifacts/{session_id}/download?path= — stream a workspace file ----
@@ -432,6 +496,47 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
         db = SessionLocal()
         try:
             owner = _verify_session_access(db, request, session_id)
+            if path.startswith("document:"):
+                doc = (
+                    db.query(Document)
+                    .filter(
+                        Document.id == path.split(":", 1)[1],
+                        Document.session_id == session_id,
+                    )
+                    .first()
+                )
+                if not doc:
+                    raise HTTPException(404, "Document not found")
+                artifact = _document_artifact(doc)
+                return Response(
+                    content=(doc.current_content or "").encode("utf-8"),
+                    media_type=artifact["mime"],
+                    headers={
+                        "Content-Disposition": f'attachment; filename="{artifact["name"]}"'
+                    },
+                )
+            if path.startswith("generated-image:"):
+                image = (
+                    db.query(GalleryImage)
+                    .filter(
+                        GalleryImage.id == path.split(":", 1)[1],
+                        GalleryImage.session_id == session_id,
+                    )
+                    .first()
+                )
+                if not image:
+                    raise HTTPException(404, "Image not found")
+                from src.generated_images import resolve_generated_image_path
+
+                image_path = resolve_generated_image_path(image.filename)
+                mime = mimetypes.guess_type(image.filename)[0] or "image/png"
+                return Response(
+                    content=image_path.read_bytes(),
+                    media_type=mime,
+                    headers={
+                        "Content-Disposition": f'inline; filename="{image.filename}"'
+                    },
+                )
         finally:
             db.close()
         from src.sandbox_client import download_artifact, sandbox_enabled

@@ -283,6 +283,7 @@ const en = {
     download: 'Download file',
     resize: 'Resize preview',
     error: 'Could not load this file.',
+    saveError: 'Could not save this document.',
     empty: 'Select a file to preview it here.',
   },
   artifacts: {

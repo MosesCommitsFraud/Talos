@@ -88,7 +88,7 @@ export function ArtifactsList({ sessionId, onOpen }: { sessionId: string | null;
   );
   const files = (data ?? []).filter((f) => {
     const path = String(f.path ?? f.name ?? '');
-    return path && !inputPaths.has(path);
+    return path && (f.source !== 'workspace' || !inputPaths.has(path));
   });
 
   return (
@@ -120,19 +120,20 @@ export function ArtifactsList({ sessionId, onOpen }: { sessionId: string | null;
       )}
       {files.map((f) => {
         const path = String(f.path ?? f.name ?? '');
+        const name = String(f.name ?? path);
         const mime = typeof f.mime === 'string' ? f.mime : undefined;
-        const kind = previewKind(path, mime);
-        const previewable = isPreviewable(path, mime) && !!sessionId;
+        const kind = previewKind(name, mime);
+        const previewable = isPreviewable(name, mime) && !!sessionId;
         return (
           <FileRow
             key={path}
-            name={path}
+            name={name}
             mime={mime}
             sub={f.size != null ? formatSize(f.size) : ''}
             kind={kind}
             thumbSrc={kind === 'image' && sessionId ? artifactDownloadUrl(sessionId, path) : undefined}
             downloadUrl={sessionId ? artifactDownloadUrl(sessionId, path) : '#'}
-            onOpen={previewable ? () => onOpen({ sessionId: sessionId!, path, name: path, mime }) : undefined}
+            onOpen={previewable ? () => onOpen({ sessionId: sessionId!, path, name, mime }) : undefined}
           />
         );
       })}

@@ -82,6 +82,7 @@ class ExecResponse(BaseModel):
     # as base64 data URLs so the chat can display them inline.
     images: list[dict[str, str]] = []
     image_note: str = ""
+    created_artifacts: list[str] = []
 
 
 class ExecuteRequest(BaseModel):
@@ -839,9 +840,38 @@ def _collect_new_images(workspace: Path, since: float) -> tuple[list[dict[str, s
     return images, note
 
 
+def _artifact_snapshot(workspace: Path) -> dict[str, tuple[int, int]]:
+    """Capture visible workspace files so executions can report new/changed outputs."""
+    root = workspace.resolve()
+    snapshot: dict[str, tuple[int, int]] = {}
+    try:
+        for path in root.rglob("*"):
+            if not path.is_file():
+                continue
+            rel = path.relative_to(root)
+            if set(rel.parts) & SKIP_DIRS:
+                continue
+            if path.suffix.lower() in ARTIFACT_JUNK_EXTS or path.name in ARTIFACT_JUNK_NAMES:
+                continue
+            try:
+                stat = path.stat()
+            except OSError:
+                continue
+            snapshot[str(rel)] = (stat.st_size, stat.st_mtime_ns)
+    except OSError:
+        pass
+    return snapshot
+
+
+def _changed_artifacts(workspace: Path, before: dict[str, tuple[int, int]]) -> list[str]:
+    after = _artifact_snapshot(workspace)
+    return sorted(path for path, metadata in after.items() if before.get(path) != metadata)
+
+
 @app.post("/users/{user_id}/workspaces/{chat_id}/exec", response_model=ExecResponse)
 async def exec_route(user_id: str, chat_id: str, req: ExecRequest) -> ExecResponse:
     name, workspace = _workspace(user_id, chat_id)
+    artifacts_before = _artifact_snapshot(workspace)
     # timeout <= 0 means "run as long as it needs" (no limit). Otherwise it's the
     # wall-clock budget in seconds, uncapped.
     _t = int(req.timeout or 0)
@@ -860,10 +890,10 @@ async def exec_route(user_id: str, chat_id: str, req: ExecRequest) -> ExecRespon
         proc.exit_code = 124
         proc.finished_at = time.time()
         output, _next, _truncated = _read_process_log(proc.log_path, offset=0)
-        return ExecResponse(user_id=user_id, chat_id=chat_id, linux_user=name, workspace=str(workspace), stdout=output, stderr="", exit_code=124, timed_out=True)
+        return ExecResponse(user_id=user_id, chat_id=chat_id, linux_user=name, workspace=str(workspace), stdout=output, stderr="", exit_code=124, timed_out=True, created_artifacts=_changed_artifacts(workspace, artifacts_before))
     output, _next, _truncated = _read_process_log(proc.log_path, offset=0)
     images, image_note = _collect_new_images(workspace, started_at)
-    return ExecResponse(user_id=user_id, chat_id=chat_id, linux_user=name, workspace=str(workspace), stdout=output, stderr="", exit_code=proc.exit_code or 0, images=images, image_note=image_note)
+    return ExecResponse(user_id=user_id, chat_id=chat_id, linux_user=name, workspace=str(workspace), stdout=output, stderr="", exit_code=proc.exit_code or 0, images=images, image_note=image_note, created_artifacts=_changed_artifacts(workspace, artifacts_before))
 
 
 def _kernel_sock_path(workspace: Path) -> Path:
@@ -954,6 +984,7 @@ def _kernel_exec_sync(sock_path: str, code: str, timeout: int) -> dict[str, Any]
 @app.post("/users/{user_id}/workspaces/{chat_id}/kernel/execute", response_model=ExecResponse)
 async def kernel_execute_route(user_id: str, chat_id: str, req: CellRequest) -> ExecResponse:
     name, workspace = _workspace(user_id, chat_id)
+    artifacts_before = _artifact_snapshot(workspace)
     rec = await _ensure_kernel(user_id, chat_id)
     if not Path(rec["sock"]).exists():
         return ExecResponse(user_id=user_id, chat_id=chat_id, linux_user=name, workspace=str(workspace), stdout="", stderr="kernel: failed to start", exit_code=1)
@@ -975,6 +1006,7 @@ async def kernel_execute_route(user_id: str, chat_id: str, req: CellRequest) -> 
         user_id=user_id, chat_id=chat_id, linux_user=name, workspace=str(workspace),
         stdout=_truncate(stdout, MAX_OUTPUT_CHARS), stderr=_truncate(stderr, MAX_OUTPUT_CHARS),
         exit_code=1 if error else 0, images=images, image_note=image_note,
+        created_artifacts=_changed_artifacts(workspace, artifacts_before),
     )
 
 

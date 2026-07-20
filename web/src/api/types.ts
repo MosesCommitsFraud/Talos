@@ -88,6 +88,8 @@ export interface Artifact {
   size?: number;
   mime?: string;
   is_image?: boolean;
+  source?: 'workspace' | 'document' | 'generated_image';
+  version?: number;
   [key: string]: unknown;
 }
 

@@ -178,6 +178,16 @@ export async function fetchArtifactBlob(sessionId: string, path: string): Promis
   return res.blob();
 }
 
+export async function updateDocument(docId: string, content: string): Promise<void> {
+  const res = await fetch(`/api/document/${encodeURIComponent(docId)}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ content, summary: 'Edited in Preview' }),
+    credentials: 'same-origin',
+  });
+  if (!res.ok) throw new Error(`Document save failed (HTTP ${res.status})`);
+}
+
 export const artifactsZipUrl = (sessionId: string) => `/api/artifacts/${sessionId}/zip`;
 
 export const uploadDownloadUrl = (id: string) => `/api/upload/${encodeURIComponent(id)}`;
@@ -706,6 +716,8 @@ export interface StreamFlags {
   lang?: string;
   /** Language for model reasoning/thinking and final responses. */
   llmLanguage?: string;
+  /** Database-backed document currently selected in Preview. */
+  activeDocId?: string;
 }
 
 /**
@@ -732,6 +744,7 @@ export async function streamChat(opts: {
   if (f.incognito) fd.set('incognito', 'true');
   if (f.lang) fd.set('lang', f.lang);
   if (f.llmLanguage) fd.set('llm_language', f.llmLanguage);
+  if (f.activeDocId) fd.set('active_doc_id', f.activeDocId);
   if (f.attachments?.length) fd.set('attachments', JSON.stringify(f.attachments));
 
   const tzOffsetMin = -new Date().getTimezoneOffset();

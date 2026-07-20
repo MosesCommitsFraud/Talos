@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { FileTextIcon } from 'lucide-react';
-import { fetchArtifactBlob } from '@/api/client';
+import { fetchArtifactBlob, updateDocument } from '@/api/client';
 import { fileExt, previewKind, type PreviewKind } from '@/lib/files';
+import { queryClient } from '@/lib/queryClient';
 import { Markdown } from './Markdown';
 
 type PreviewFile = { sessionId: string; path: string; name: string; mime?: string };
@@ -37,9 +38,13 @@ export function PreviewContent({ preview }: { preview: PreviewFile | null }) {
   const [loaded, setLoaded] = useState<Loaded | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState(false);
   const objectUrl = useRef<string | null>(null);
 
-  const kind: PreviewKind = preview ? previewKind(preview.path, preview.mime) : 'none';
+  const kind: PreviewKind = preview ? previewKind(preview.name, preview.mime) : 'none';
 
   useEffect(() => {
     if (!preview) return;
@@ -47,6 +52,8 @@ export function PreviewContent({ preview }: { preview: PreviewFile | null }) {
     setLoaded(null);
     setError(null);
     setLoading(true);
+    setEditing(false);
+    setSaveError(false);
     // Revoke any object URL from a previous file before loading the next.
     if (objectUrl.current) { URL.revokeObjectURL(objectUrl.current); objectUrl.current = null; }
 
@@ -72,12 +79,12 @@ export function PreviewContent({ preview }: { preview: PreviewFile | null }) {
           if (!cancelled) setLoaded({ kind: 'excel', sheets });
         } else if (kind === 'csv') {
           const text = await blob.text();
-          const sep = fileExt(preview.path) === 'tsv' ? '\t' : ',';
+          const sep = fileExt(preview.name) === 'tsv' ? '\t' : ',';
           const rows = parseDelimited(text, sep);
           if (!cancelled) setLoaded({ kind: 'csv', rows });
         } else if (kind === 'code') {
           const text = await blob.text();
-          if (!cancelled) setLoaded({ kind: 'code', text, lang: FENCE_LANG[fileExt(preview.path)] ?? '' });
+          if (!cancelled) setLoaded({ kind: 'code', text, lang: FENCE_LANG[fileExt(preview.name)] ?? '' });
         } else {
           const text = await blob.text();
           if (!cancelled) setLoaded({ kind: kind === 'markdown' ? 'markdown' : 'text', text });
@@ -104,11 +111,52 @@ export function PreviewContent({ preview }: { preview: PreviewFile | null }) {
     );
   }
 
+  const editableText = loaded && (
+    loaded.kind === 'markdown' || loaded.kind === 'text' || loaded.kind === 'code'
+  ) ? loaded.text : null;
+  const editableDocument = preview.path.startsWith('document:') && editableText !== null;
+
+  const save = async () => {
+    if (!editableDocument) return;
+    setSaving(true);
+    setSaveError(false);
+    try {
+      await updateDocument(preview.path.slice('document:'.length), draft);
+      if (loaded?.kind === 'code') setLoaded({ ...loaded, text: draft });
+      else if (loaded?.kind === 'markdown') setLoaded({ kind: 'markdown', text: draft });
+      else setLoaded({ kind: 'text', text: draft });
+      setEditing(false);
+      void queryClient.invalidateQueries({ queryKey: ['artifacts', preview.sessionId] });
+    } catch (e) {
+      setSaveError(true);
+    } finally {
+      setSaving(false);
+    }
+  };
+
   return (
-    <div className="min-h-0 flex-1 overflow-auto">
+    <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+      {editableDocument && !loading && !error && (
+        <div className="flex shrink-0 items-center gap-2 border-b px-3 py-2">
+          {saveError && <span className="mr-auto text-xs text-destructive-foreground">{t('preview.saveError')}</span>}
+          {editing ? (
+            <>
+              <button type="button" onClick={() => setEditing(false)} disabled={saving} className="rounded-md px-2.5 py-1 text-xs text-muted-foreground hover:bg-accent">{t('common.cancel')}</button>
+              <button type="button" onClick={() => void save()} disabled={saving} className="rounded-md bg-primary px-2.5 py-1 text-xs font-medium text-primary-foreground disabled:opacity-60">{saving ? t('common.loading') : t('common.save')}</button>
+            </>
+          ) : (
+            <button type="button" onClick={() => { setDraft(editableText ?? ''); setSaveError(false); setEditing(true); }} className="ml-auto rounded-md px-2.5 py-1 text-xs font-medium hover:bg-accent">{t('common.edit')}</button>
+          )}
+        </div>
+      )}
+      <div className="min-h-0 flex-1 overflow-auto">
       {loading && <p className="px-4 py-6 text-center text-xs text-muted-foreground">{t('common.loading')}</p>}
       {error && <p className="px-4 py-6 text-center text-xs text-destructive-foreground">{t('preview.error')}</p>}
-      {!loading && !error && loaded && <PreviewBody loaded={loaded} name={preview.name} />}
+      {!loading && !error && editing && (
+        <textarea value={draft} onChange={(e) => setDraft(e.target.value)} className="h-full min-h-96 w-full resize-none bg-background p-4 font-mono text-[13px] leading-relaxed outline-none" spellCheck={false} />
+      )}
+      {!loading && !error && !editing && loaded && <PreviewBody loaded={loaded} name={preview.name} />}
+      </div>
     </div>
   );
 }
