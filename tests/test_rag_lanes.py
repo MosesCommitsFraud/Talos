@@ -7,6 +7,7 @@ run without the optional RAG dependencies installed.
 
 import base64
 import importlib
+import zipfile
 
 import pytest
 
@@ -27,6 +28,10 @@ class _Router:
 
     def _lane_docling(self, path):
         self.calls.append("docling")
+        return []
+
+    def _lane_opendocument(self, path):
+        self.calls.append("opendocument")
         return []
 
     def _lane_text(self, path):
@@ -58,6 +63,12 @@ def test_router_picks_av():
 def test_router_picks_docling():
     assert _route("manual.pdf") == "docling"
     assert _route("screenshot.png") == "docling"
+
+
+def test_router_picks_native_opendocument_lane():
+    assert _route("manual.odt") == "opendocument"
+    assert _route("slides.odp") == "opendocument"
+    assert _route("budget.ods") == "opendocument"
 
 
 def test_router_picks_text():
@@ -193,7 +204,16 @@ def test_pdf_vlm_requires_both_toggle_and_url(monkeypatch):
 
 
 def test_vlm_doc_exts_cover_pdf_and_office():
-    assert rv._VLM_DOC_EXTS == {".pdf", ".docx", ".pptx"}
+    assert rv._VLM_DOC_EXTS == {
+        ".pdf",
+        ".docx",
+        ".pptx",
+        ".xlsx",
+        ".odt",
+        ".odp",
+        ".ods",
+    }
+    assert {".odt", ".odp", ".ods"} <= rv.DEFAULT_FILE_EXTENSIONS
 
 
 def test_vlm_chat_url_normalizes_base_and_full(monkeypatch):
@@ -230,6 +250,10 @@ def test_router_uses_vlm_lane_only_for_image_bearing_docs(monkeypatch):
             self.calls.append("docling")
             return []
 
+        def _lane_opendocument(self, path):
+            self.calls.append("opendocument")
+            return []
+
         # Post-dispatch no-ops so the router can run on the stub.
         def _assign_sections(self, docs):
             pass
@@ -248,6 +272,8 @@ def test_router_uses_vlm_lane_only_for_image_bearing_docs(monkeypatch):
 
     assert _route_doc("deck.pdf", True) == "pdf_vlm"
     assert _route_doc("report.docx", True) == "office_vlm"
+    assert _route_doc("book.xlsx", True) == "office_vlm"
+    assert _route_doc("slides.odp", True) == "office_vlm"
     assert _route_doc("textonly.pdf", False) == "docling"
 
 
@@ -262,7 +288,7 @@ def test_office_vlm_persists_images_as_renderable_figures(monkeypatch, tmp_path)
         def _lane_docling(self, path):
             return []
 
-        def _ooxml_images(self, path):
+        def _office_archive_images(self, path):
             return [("word/media/image1.png", base64.b64encode(b"png-bytes").decode())]
 
         def _figures_dir(self):
@@ -281,6 +307,77 @@ def test_office_vlm_persists_images_as_renderable_figures(monkeypatch, tmp_path)
     assert docs[0].meta["image_url"].startswith("/api/personal/rag-asset?source=")
     assert docs[0].meta["image_caption"] == "Gauge diagram"
     assert len(list(tmp_path.iterdir())) == 1
+
+
+def test_opendocument_lane_extracts_headings_paragraphs_and_cells(tmp_path):
+    path = tmp_path / "guide.odt"
+    content = """<?xml version="1.0" encoding="UTF-8"?>
+    <office:document-content
+      xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0"
+      xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0">
+      <office:body><office:text>
+        <text:h text:outline-level="2">Setup Guide</text:h>
+        <text:p>Connect the <text:span>pressure gauge</text:span>.</text:p>
+        <text:p>Cell value</text:p>
+      </office:text></office:body>
+    </office:document-content>"""
+    with zipfile.ZipFile(path, "w") as archive:
+        archive.writestr("content.xml", content)
+
+    class _R:
+        class _Doc:
+            def __init__(self, content):
+                self.content = content
+                self.meta = {}
+
+        def _documents_from_text(self, text):
+            return [self._Doc(text)]
+
+    docs = rv.VectorRAG._lane_opendocument(_R(), str(path))
+    text = "\n".join(d.content for d in docs)
+
+    assert "## Setup Guide" in text
+    assert "Connect the pressure gauge." in text
+    assert "Cell value" in text
+
+
+def test_opendocument_picture_is_detected(tmp_path):
+    path = tmp_path / "slides.odp"
+    with zipfile.ZipFile(path, "w") as archive:
+        archive.writestr("Pictures/chart.png", b"image")
+
+    assert rv._file_has_images(str(path)) is True
+
+
+def test_opendocument_presentation_is_chunked_per_slide(tmp_path):
+    path = tmp_path / "slides.odp"
+    content = """<?xml version="1.0" encoding="UTF-8"?>
+    <office:document-content
+      xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0"
+      xmlns:draw="urn:oasis:names:tc:opendocument:xmlns:drawing:1.0"
+      xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0">
+      <office:body><office:presentation>
+        <draw:page><text:p>First slide</text:p></draw:page>
+        <draw:page><text:p>Second slide</text:p></draw:page>
+      </office:presentation></office:body>
+    </office:document-content>"""
+    with zipfile.ZipFile(path, "w") as archive:
+        archive.writestr("content.xml", content)
+
+    class _R:
+        class _Doc:
+            def __init__(self, content):
+                self.content = content
+                self.meta = {}
+
+        def _documents_from_text(self, text):
+            return [self._Doc(text)] if text else []
+
+    docs = rv.VectorRAG._lane_opendocument(_R(), str(path))
+
+    assert [d.content for d in docs] == ["First slide", "Second slide"]
+    assert [d.meta["slide"] for d in docs] == [1, 2]
+    assert [d.meta["page"] for d in docs] == [1, 2]
 
 
 # ── Phase 5: pixel image lane gating + VL embed parsing ──

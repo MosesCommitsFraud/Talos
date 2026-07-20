@@ -47,7 +47,7 @@ DEFAULT_FILE_EXTENSIONS: Set[str] = {
     ".css",
     ".js",
     ".ts",
-    # Rich documents (Docling parse + HybridChunk)
+    # Rich documents (Docling or native OpenDocument parse + chunking)
     ".csv",
     ".html",
     ".xhtml",
@@ -56,6 +56,9 @@ DEFAULT_FILE_EXTENSIONS: Set[str] = {
     ".docx",
     ".pptx",
     ".xlsx",
+    ".odt",
+    ".odp",
+    ".ods",
     ".xls",
     ".epub",
     # Images (Docling OCR + layout)
@@ -375,9 +378,11 @@ def _redact_docs(docs, override: Optional[bool] = None):
     return docs
 
 
-# Document formats eligible for the VLM lane. PDFs are page-rendered; Office
-# files keep Docling's text and get their *embedded* images VLM-captioned.
-_VLM_DOC_EXTS: Set[str] = {".pdf", ".docx", ".pptx"}
+# Document formats eligible for the VLM lane. PDFs are page-rendered; Office and
+# OpenDocument files keep their extracted text and add VLM-captioned images.
+_OOXML_DOC_EXTS: Set[str] = {".docx", ".pptx", ".xlsx"}
+_OPENDOCUMENT_EXTS: Set[str] = {".odt", ".odp", ".ods"}
+_VLM_DOC_EXTS: Set[str] = {".pdf"} | _OOXML_DOC_EXTS | _OPENDOCUMENT_EXTS
 
 # Raster image members inside an Office (OOXML) zip we can hand to the VLM.
 # Vector formats (.emf/.wmf) are skipped — the VLM needs raster pixels.
@@ -401,9 +406,9 @@ def _file_has_images(path: str) -> bool:
     pay for vision. PDFs: scan page objects for an image, or a page whose
     vector-graphics signals mark it visually heavy (a chart/diagram drawn as
     path objects has no image XObjects but still needs the vision pass).
-    Office (docx/pptx): look for raster members under ``*/media/``. On any
-    error, assume True for PDFs (preserve the prior "VLM all PDFs" behavior)
-    and False otherwise.
+    OOXML/OpenDocument: look for raster members under ``*/media/`` or
+    ``Pictures/``. On any error, assume True for PDFs (preserve the prior "VLM
+    all PDFs" behavior) and False otherwise.
     """
     ext = Path(path).suffix.lower()
     try:
@@ -430,13 +435,14 @@ def _file_has_images(path: str) -> bool:
                     pdf.close()
                 except Exception:
                     pass
-        if ext in (".docx", ".pptx", ".xlsx"):
+        if ext in _OOXML_DOC_EXTS | _OPENDOCUMENT_EXTS:
             import zipfile
 
             with zipfile.ZipFile(path) as z:
                 for name in z.namelist():
                     low = name.lower()
-                    if "/media/" in low and low.endswith(_OOXML_IMG_EXTS):
+                    is_image_member = "/media/" in low or low.startswith("pictures/")
+                    if is_image_member and low.endswith(_OOXML_IMG_EXTS):
                         return True
             return False
     except Exception as e:
@@ -1892,6 +1898,8 @@ class VectorRAG:
                 if ext == ".pdf"
                 else self._lane_office_vlm(path, meta, stage_cb=stage_cb)
             )
+        elif ext in _OPENDOCUMENT_EXTS:
+            docs = self._lane_opendocument(path)
         elif is_docling_format(path):
             docs = self._lane_docling(path)
         else:
@@ -1918,7 +1926,7 @@ class VectorRAG:
             # their same-page figures, while figures remain separate renderable
             # assets. Run after redaction so hidden embedding text is also safe.
             _attach_pdf_visual_context(docs)
-        elif ext in {".docx", ".pptx"}:
+        elif ext in _OOXML_DOC_EXTS | _OPENDOCUMENT_EXTS:
             _attach_office_visual_context(docs)
 
         # Caller metadata (source/filename/owner/scope …) is layered on top; the
@@ -2360,13 +2368,11 @@ class VectorRAG:
         logger.info("pdf-figures: %s figure(s) extracted from %s", len(out), fname)
         return out
 
-    def _ooxml_images(self, path: str):
-        """Yield ``(member_name, png_base64)`` for each distinct, non-trivial
-        raster image embedded in an OOXML (docx/pptx/xlsx) file.
+    def _office_archive_images(self, path: str):
+        """Yield ``(member_name, png_base64)`` for embedded archive images.
 
-        De-dupes by content hash (so a logo repeated on every slide is captioned
-        once) and skips icon-sized images. Converts to PNG via Pillow so any
-        supported raster format reaches the VLM uniformly.
+        Handles OOXML's ``*/media/`` and OpenDocument's ``Pictures/`` layout.
+        Images are de-duplicated and normalized to PNG for the VLM.
         """
         import base64
         import hashlib
@@ -2380,7 +2386,8 @@ class VectorRAG:
             with zipfile.ZipFile(path) as z:
                 for name in z.namelist():
                     low = name.lower()
-                    if "/media/" not in low or not low.endswith(_OOXML_IMG_EXTS):
+                    is_image_member = "/media/" in low or low.startswith("pictures/")
+                    if not is_image_member or not low.endswith(_OOXML_IMG_EXTS):
                         continue
                     data = z.read(name)
                     h = hashlib.sha256(data).hexdigest()
@@ -2398,10 +2405,10 @@ class VectorRAG:
                     im.convert("RGB").save(buf, format="PNG")
                     yield name, base64.b64encode(buf.getvalue()).decode()
         except Exception as e:
-            logger.warning("ooxml image scan failed for %s: %s", path, e)
+            logger.warning("office image scan failed for %s: %s", path, e)
 
     def _lane_office_vlm(self, path: str, meta: Dict[str, Any], stage_cb=None):
-        """Image-bearing Office docs (docx/pptx) → text plus renderable figures.
+        """Image-bearing Office/OpenDocument files → text plus renderable figures.
 
         Office files have no stable page raster like a PDF, so each embedded image
         is normalized to PNG, persisted, captioned, and indexed as a document-level
@@ -2413,8 +2420,13 @@ class VectorRAG:
 
         from haystack.dataclasses import Document
 
-        docs = list(self._lane_docling(path))
-        images = list(self._ooxml_images(path))
+        ext = Path(path).suffix.lower()
+        docs = list(
+            self._lane_opendocument(path)
+            if ext in _OPENDOCUMENT_EXTS
+            else self._lane_docling(path)
+        )
+        images = list(self._office_archive_images(path))
         total = len(images)
         on_done = (lambda c: stage_cb(c, total)) if stage_cb else None
         caps = _concurrent_map(
@@ -2461,6 +2473,91 @@ class VectorRAG:
             total,
             os.path.basename(path),
         )
+        return docs
+
+    def _lane_opendocument(self, path: str):
+        """OpenDocument text/spreadsheet/presentation → structured text chunks.
+
+        ODT/ODS/ODP are ZIP containers with their body in ``content.xml``. This
+        stdlib path avoids requiring LibreOffice on the ingest worker while
+        preserving paragraph, heading, table-cell, and slide-text boundaries.
+        """
+        import xml.etree.ElementTree as ET
+        import zipfile
+
+        with zipfile.ZipFile(path) as archive:
+            xml = archive.read("content.xml")
+        root = ET.fromstring(xml)
+
+        def _local(tag: str) -> str:
+            return tag.rsplit("}", 1)[-1]
+
+        def _text(node) -> str:
+            pieces = [node.text or ""]
+            for child in node:
+                local = _local(child.tag)
+                if local == "s":
+                    count = next(
+                        (int(v) for k, v in child.attrib.items() if _local(k) == "c"),
+                        1,
+                    )
+                    pieces.append(" " * max(1, count))
+                elif local == "tab":
+                    pieces.append("\t")
+                elif local == "line-break":
+                    pieces.append("\n")
+                else:
+                    pieces.append(_text(child))
+                pieces.append(child.tail or "")
+            return "".join(pieces)
+
+        def _blocks(parent) -> List[str]:
+            blocks: List[str] = []
+            for node in parent.iter():
+                local = _local(node.tag)
+                if local not in {"h", "p"}:
+                    continue
+                value = re.sub(r"[ \t]+", " ", _text(node)).strip()
+                if not value:
+                    continue
+                if local == "h":
+                    level = next(
+                        (
+                            int(v)
+                            for k, v in node.attrib.items()
+                            if _local(k) == "outline-level"
+                        ),
+                        1,
+                    )
+                    value = f"{'#' * max(1, min(level, 6))} {value}"
+                blocks.append(value)
+            return blocks
+
+        ext = Path(path).suffix.lower()
+        drawing_ns = "urn:oasis:names:tc:opendocument:xmlns:drawing:1.0"
+        table_ns = "urn:oasis:names:tc:opendocument:xmlns:table:1.0"
+        if ext == ".odp":
+            units = [
+                (node, "slide", i)
+                for i, node in enumerate(root.iter(f"{{{drawing_ns}}}page"), 1)
+            ]
+        elif ext == ".ods":
+            units = [
+                (node, "sheet", i)
+                for i, node in enumerate(root.iter(f"{{{table_ns}}}table"), 1)
+            ]
+        else:
+            units = [(root, "", 0)]
+
+        docs = []
+        for node, unit_key, unit_no in units:
+            unit_docs = self._documents_from_text("\n\n".join(_blocks(node)))
+            if unit_key:
+                for d in unit_docs:
+                    d.meta[unit_key] = unit_no
+                    if unit_key == "slide":
+                        d.meta["page"] = unit_no
+            docs.extend(unit_docs)
         return docs
 
     def _lane_docling(self, path: str):
@@ -2514,10 +2611,14 @@ class VectorRAG:
 
     def _lane_text(self, path: str):
         """Plain text/code/json → read directly and length-split."""
+        text = Path(path).read_text(encoding="utf-8", errors="replace")
+        return self._documents_from_text(text)
+
+    def _documents_from_text(self, text: str):
+        """Create overlapping word chunks from already-extracted text."""
         from haystack.components.preprocessors import DocumentSplitter
         from haystack.dataclasses import Document
 
-        text = Path(path).read_text(encoding="utf-8", errors="replace")
         if not text.strip():
             return []
         if self._splitter is None:
