@@ -297,6 +297,7 @@ const en = {
     input: 'Input',
     output: 'Output',
     noFiles: 'No files yet. Uploaded inputs and files the agent writes in its workspace show up here.',
+    loadError: 'Could not load this chat’s artifacts.',
     download: 'Download {{name}}',
   },
   login: {

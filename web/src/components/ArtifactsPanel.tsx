@@ -73,7 +73,7 @@ function FileRow({
 export function ArtifactsList({ sessionId, onOpen }: { sessionId: string | null; onOpen: (f: PreviewFile) => void }) {
   const { t } = useTranslation();
   const messages = useChat((s) => s.messages);
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError } = useQuery({
     queryKey: ['artifacts', sessionId],
     queryFn: () => fetchArtifacts(sessionId!),
     enabled: !!sessionId,
@@ -93,6 +93,7 @@ export function ArtifactsList({ sessionId, onOpen }: { sessionId: string | null;
     <div className="min-h-0 flex-1 space-y-1 overflow-y-auto p-2">
       {!sessionId && <p className="px-2 py-6 text-center text-xs text-muted-foreground">{t('artifacts.openChat')}</p>}
       {sessionId && isLoading && <p className="px-2 py-6 text-center text-xs text-muted-foreground">{t('common.loading')}</p>}
+      {sessionId && isError && <p className="px-2 py-6 text-center text-xs text-destructive-foreground">{t('artifacts.loadError')}</p>}
 
       {sessionId && inputs.length > 0 && (
         <div className="pb-2">
@@ -113,7 +114,7 @@ export function ArtifactsList({ sessionId, onOpen }: { sessionId: string | null;
       )}
 
       {sessionId && files.length > 0 && <div className="px-2 pb-1 pt-1 text-xs font-medium text-muted-foreground">{t('artifacts.output')}</div>}
-      {sessionId && !isLoading && files.length === 0 && inputs.length === 0 && (
+      {sessionId && !isLoading && !isError && files.length === 0 && inputs.length === 0 && (
         <p className="px-2 py-6 text-center text-xs text-muted-foreground">{t('artifacts.noFiles')}</p>
       )}
       {files.map((f) => {

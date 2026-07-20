@@ -11,7 +11,7 @@ from sqlalchemy import func
 
 from core.database import Document, DocumentVersion, GalleryImage, SessionLocal
 from core.database import Session as DbSession
-from src.auth_helpers import effective_user, get_current_user
+from src.auth_helpers import effective_user, get_current_user, require_user
 
 logger = logging.getLogger(__name__)
 
@@ -398,11 +398,14 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
         """Return the owner for a session the caller may access, else raise."""
         user = effective_user(request)
         if not user:
-            raise HTTPException(401, "Authentication required")
+            # Preserve supported AUTH_ENABLED=false / localhost-bypass modes.
+            # require_user raises 401 for a configured unauthenticated caller,
+            # but returns "" for an intentionally anonymous deployment.
+            user = require_user(request) or "anonymous"
         session = db.query(DbSession).filter(DbSession.id == session_id).first()
         if not session:
             raise HTTPException(404, "Session not found")
-        if session.owner and session.owner != user:
+        if session.owner and user != "anonymous" and session.owner != user:
             raise HTTPException(403, "Access denied")
         return session.owner or user
 

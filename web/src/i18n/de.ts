@@ -299,6 +299,7 @@ const de: typeof en = {
     input: 'Eingabe',
     output: 'Ausgabe',
     noFiles: 'Noch keine Dateien. Hochgeladene Eingaben und vom Agenten erstellte Dateien erscheinen hier.',
+    loadError: 'Die Artefakte dieses Chats konnten nicht geladen werden.',
     download: '{{name}} herunterladen',
   },
   login: {

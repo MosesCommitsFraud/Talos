@@ -628,6 +628,20 @@ export const useChat = create<ChatState>((set, get) => {
                   streaming: false,
                 });
               }
+              const docContent = typeof ev.content === 'string' ? ev.content : '';
+              const docArtifact: Artifact = {
+                path: `document:${ev.doc_id}`,
+                name: documentFileName(title, language, docContent),
+                size: new TextEncoder().encode(docContent).byteLength,
+                mime: language === 'markdown' ? 'text/markdown' : 'text/plain',
+                source: 'document',
+                version: typeof ev.version === 'number' ? ev.version : 1,
+                mtime: Date.now() / 1000,
+              };
+              queryClient.setQueryData<Artifact[]>(['artifacts', sid], (current = []) => [
+                docArtifact,
+                ...current.filter((artifact) => artifact.path !== docArtifact.path),
+              ]);
               void queryClient.invalidateQueries({ queryKey: ['artifacts', sid] });
               break;
             }
