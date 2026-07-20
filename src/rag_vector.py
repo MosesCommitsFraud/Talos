@@ -567,16 +567,19 @@ def _prefix_context(context: str, content: str) -> str:
 
 
 def _retrieval_body(meta: Dict[str, Any], content: str) -> str:
-    """Combine displayed text with hidden same-page visual meaning.
+    """Combine displayed text with document identity and hidden visual meaning.
 
     Figure assets remain separate records so they can be rendered, but a page's
     text vector must also represent what its figures show. This lets retrieval
     select the correct page before companion-image attachment.
     """
     body = (content or "").strip()
+    filename = str((meta or {}).get("filename") or "").strip()
+    if filename:
+        body = f"Document: {filename}\n\n{body}" if body else f"Document: {filename}"
     visual = ((meta or {}).get("_visual_context") or "").strip()
     if visual:
-        return f"{body}\n\nVisual context from this page:\n{visual}" if body else visual
+        return f"{body}\n\nVisual context from this document:\n{visual}" if body else visual
     return body
 
 
@@ -684,6 +687,33 @@ def _bounded_text_parts(text: str, limit: int) -> List[str]:
     if current:
         parts.append(current)
     return parts
+
+
+def _split_oversized_chunks(docs):
+    """Bound parser-produced chunks for every document format.
+
+    PDF has a page-aware repair first, but Office converters can also collapse a
+    whole file into one broad chunk that embeds successfully and retrieves poorly.
+    Figure records stay intact because their captions own one renderable asset.
+    """
+    limit = _max_chunk_chars()
+    out = []
+    for d in docs:
+        content = (d.content or "").strip()
+        if (d.meta or {}).get("modality") == "figure" or len(content) <= limit:
+            out.append(d)
+            continue
+        parts = _bounded_text_parts(content, limit)
+        if len(parts) <= 1:
+            out.append(d)
+            continue
+        doc_type = type(d)
+        for part_no, part in enumerate(parts, start=1):
+            meta = dict(d.meta or {})
+            meta["chunk_part"] = part_no
+            meta["chunk_parts"] = len(parts)
+            out.append(doc_type(content=part, meta=meta))
+    return out
 
 
 def _reflow_pdf_text(text: str) -> str:
@@ -889,6 +919,25 @@ def _attach_pdf_visual_context(docs) -> None:
         captions = by_page.get(page) or []
         if captions:
             meta["_visual_context"] = "\n\n".join(captions)[:cap]
+
+
+def _attach_office_visual_context(docs) -> None:
+    """Make embedded Office images retrievable through their document text."""
+    captions = [
+        (d.content or "").strip()
+        for d in docs
+        if (d.meta or {}).get("modality") == "figure" and (d.content or "").strip()
+    ]
+    if not captions:
+        return
+    try:
+        cap = max(500, min(int(os.getenv("RAG_VISUAL_CONTEXT_CHARS", "3000")), 8000))
+    except Exception:
+        cap = 3000
+    visual = "\n\n".join(captions)[:cap]
+    for d in docs:
+        if (d.meta or {}).get("modality") != "figure" and (d.content or "").strip():
+            d.meta["_visual_context"] = visual
 
 
 # Content-hash → blurb cache so re-ingesting unchanged chunks never re-pays the
@@ -1451,7 +1500,12 @@ class VectorRAG:
                 page = self._chunk_page(meta)
                 start, end = meta.get("start"), meta.get("end")
                 if page is not None:
-                    figs = [f for f in figs if self._chunk_page(f.meta or {}) == page]
+                    figs = [
+                        f
+                        for f in figs
+                        if self._chunk_page(f.meta or {}) == page
+                        or (f.meta or {}).get("document_figure") is True
+                    ]
                 elif isinstance(start, (int, float)) and isinstance(end, (int, float)):
                     # Video hit: keyframes near the segment's time window,
                     # nearest first.
@@ -1848,6 +1902,7 @@ class VectorRAG:
         if ext == ".pdf":
             docs = _repair_oversized_pdf_chunks(path, docs)
             _enrich_uncaptioned_figures(docs)
+        docs = _split_oversized_chunks(docs)
 
         # Ingest guards: strip text that is invisible on the rendered page
         # (PDF prompt-injection channel — extractors read it, humans can't),
@@ -1863,6 +1918,8 @@ class VectorRAG:
             # their same-page figures, while figures remain separate renderable
             # assets. Run after redaction so hidden embedding text is also safe.
             _attach_pdf_visual_context(docs)
+        elif ext in {".docx", ".pptx"}:
+            _attach_office_visual_context(docs)
 
         # Caller metadata (source/filename/owner/scope …) is layered on top; the
         # lane only owns keys the caller doesn't set (e.g. start/end/modality),
@@ -2344,13 +2401,16 @@ class VectorRAG:
             logger.warning("ooxml image scan failed for %s: %s", path, e)
 
     def _lane_office_vlm(self, path: str, meta: Dict[str, Any], stage_cb=None):
-        """Image-bearing Office docs (docx/pptx) → Docling text PLUS a VLM caption
-        per embedded image, so figures/screenshots become searchable text.
+        """Image-bearing Office docs (docx/pptx) → text plus renderable figures.
 
-        Office files have no page raster to render like a PDF, so this keeps
-        Docling's (good) text extraction and *adds* one ``Document`` per embedded
-        image describing it. ``stage_cb(done, total)`` reports per-image progress.
+        Office files have no stable page raster like a PDF, so each embedded image
+        is normalized to PNG, persisted, captioned, and indexed as a document-level
+        figure. ``stage_cb(done, total)`` reports per-image progress.
         """
+        import base64
+        import hashlib
+        from urllib.parse import quote
+
         from haystack.dataclasses import Document
 
         docs = list(self._lane_docling(path))
@@ -2363,14 +2423,41 @@ class VectorRAG:
             _vlm_mm_concurrency(),
             on_done=on_done,
         )
-        for (name, _b64), cap in zip(images, caps):
-            if cap:
-                docs.append(
-                    Document(content=cap, meta={"modality": "image_caption", "image": name})
+        figdir = self._figures_dir()
+        stem = re.sub(r"[^A-Za-z0-9_.-]", "_", Path(path).stem)[:60]
+        saved = 0
+        for (name, b64), raw_caption in zip(images, caps):
+            try:
+                raw = base64.b64decode(b64)
+                digest = hashlib.sha1(raw).hexdigest()[:16]
+                asset_path = os.path.join(figdir, f"{stem}-{digest}.png")
+                if not os.path.exists(asset_path):
+                    with open(asset_path, "wb") as fh:
+                        fh.write(raw)
+            except (OSError, ValueError) as e:
+                logger.warning("office-vlm: cannot persist %s from %s: %s", name, path, e)
+                continue
+            caption = (raw_caption or "").strip()
+            content = caption or f"Embedded image {name} from {os.path.basename(path)}"
+            docs.append(
+                Document(
+                    content=content,
+                    meta={
+                        "modality": "figure",
+                        "document_figure": True,
+                        "image": name,
+                        "image_url": "/api/personal/rag-asset?source="
+                        + quote(asset_path, safe=""),
+                        "image_caption": caption or content,
+                        "caption_source": "vlm" if caption else "locator",
+                    },
                 )
+            )
+            saved += 1
         logger.info(
-            "office-vlm: %s + %s embedded image(s) for %s",
+            "office-vlm: %s + %s/%s embedded image(s) for %s",
             "docling text",
+            saved,
             total,
             os.path.basename(path),
         )

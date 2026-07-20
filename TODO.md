@@ -22,3 +22,6 @@ zensierung von dokumenten
 rag video screenshots when important
 projects?
 reload breaks running chat
+running chat disappears when reloading
+rag cant find new documents
+websearch experimental

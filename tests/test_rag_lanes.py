@@ -5,6 +5,7 @@ imports live inside the lane handlers and are never reached here, so the tests
 run without the optional RAG dependencies installed.
 """
 
+import base64
 import importlib
 
 import pytest
@@ -248,6 +249,38 @@ def test_router_uses_vlm_lane_only_for_image_bearing_docs(monkeypatch):
     assert _route_doc("deck.pdf", True) == "pdf_vlm"
     assert _route_doc("report.docx", True) == "office_vlm"
     assert _route_doc("textonly.pdf", False) == "docling"
+
+
+def test_office_vlm_persists_images_as_renderable_figures(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        rv,
+        "_concurrent_map",
+        lambda fn, values, workers, on_done=None: ["Gauge diagram"],
+    )
+
+    class _R:
+        def _lane_docling(self, path):
+            return []
+
+        def _ooxml_images(self, path):
+            return [("word/media/image1.png", base64.b64encode(b"png-bytes").decode())]
+
+        def _figures_dir(self):
+            return str(tmp_path)
+
+        def _vlm_transcribe_image(self, b64, prompt=None):
+            return "Gauge diagram"
+
+        _VLM_IMAGE_PROMPT = "describe"
+
+    docs = rv.VectorRAG._lane_office_vlm(_R(), "report.docx", {})
+
+    assert len(docs) == 1
+    assert docs[0].meta["modality"] == "figure"
+    assert docs[0].meta["document_figure"] is True
+    assert docs[0].meta["image_url"].startswith("/api/personal/rag-asset?source=")
+    assert docs[0].meta["image_caption"] == "Gauge diagram"
+    assert len(list(tmp_path.iterdir())) == 1
 
 
 # ── Phase 5: pixel image lane gating + VL embed parsing ──

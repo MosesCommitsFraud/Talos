@@ -39,6 +39,25 @@ def test_pdf_repair_leaves_good_chunks_untouched(monkeypatch):
     assert rv._repair_oversized_pdf_chunks("deck.pdf", docs) is docs
 
 
+def test_oversized_office_chunk_is_split_without_losing_metadata(monkeypatch):
+    monkeypatch.setenv("RAG_MAX_CHUNK_CHARS", "1000")
+    original = _Doc("alpha beta gamma\n" * 200, {"dl_meta": {"headings": ["Report"]}})
+
+    docs = rv._split_oversized_chunks([original])
+
+    assert len(docs) > 1
+    assert all(len(d.content) <= 1000 for d in docs)
+    assert all(d.meta["dl_meta"]["headings"] == ["Report"] for d in docs)
+    assert [d.meta["chunk_part"] for d in docs] == list(range(1, len(docs) + 1))
+
+
+def test_embedding_retrieval_text_includes_filename():
+    text = rv._embed_text({"filename": "Quarterly Falcon Report.docx"}, "Revenue increased.")
+
+    assert text.startswith("Document: Quarterly Falcon Report.docx")
+    assert text.endswith("Revenue increased.")
+
+
 def test_figure_locator_inherits_searchable_page_text():
     page = _Doc(
         "Gruppierung: Neue Gruppierung, Sortierung, Löschen und Verschieben.",
@@ -123,3 +142,15 @@ def test_page_text_fallback_is_not_duplicated_as_visual_context():
     rv._attach_pdf_visual_context([page, fallback])
 
     assert "_visual_context" not in page.meta
+
+
+def test_office_image_caption_is_attached_to_text_retrieval_context():
+    text = _Doc("Main report text")
+    figure = _Doc(
+        "A blue pump connected to a pressure gauge.",
+        {"modality": "figure", "document_figure": True},
+    )
+
+    rv._attach_office_visual_context([text, figure])
+
+    assert "pressure gauge" in text.meta["_visual_context"]

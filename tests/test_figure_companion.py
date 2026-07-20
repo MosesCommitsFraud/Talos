@@ -87,6 +87,18 @@ def test_no_page_anchor_attaches_all_document_figures():
     assert [r["id"] for r in out] == ["hit", "fig1", "fig2"]
 
 
+def test_paged_office_anchor_attaches_document_level_figure():
+    figure = _fig(1, source="/u/report.docx")
+    figure.meta["document_figure"] = True
+    rag = _rag([figure])
+
+    out = rag._attach_companion_figures(
+        _QUERY, [_hit(source="/u/report.docx", page=2)]
+    )
+
+    assert [r["id"] for r in out] == ["hit", "fig1"]
+
+
 def test_no_cap_on_attached_figures():
     # There is deliberately no attachment cap: relevance is decided per figure
     # by the rerank score downstream, not by an arbitrary count.

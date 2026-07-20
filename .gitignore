@@ -100,3 +100,5 @@ tmp/build_talos_documentation.py
 Talos_DGX_Spark_RAG_Dokumentation_v2.docx
 tmp/a11y_v2.json
 tmp/audit_doc_v2.py
+tmp/build_current_setup_guide.py
+DGX_Spark_Talos_Setup_Guide_Aktuelle_Modelle.docx
