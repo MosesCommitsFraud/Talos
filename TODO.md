@@ -27,3 +27,5 @@ rag cant find new documents
 websearch experimental
 system prompt needs to be better
 ragflow erwähnt in rag settings
+queueing gives grey screen
+artifact editing for markdown output

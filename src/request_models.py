@@ -13,6 +13,9 @@ class ChatRequest(BaseModel):
     lang: Optional[str] = Field(
         default=None, description="UI language (e.g. 'de'/'en') for auto-generated titles"
     )
+    llm_language: Optional[str] = Field(
+        default=None, description="Language for model reasoning and final responses"
+    )
 
     @field_validator("message")
     @classmethod

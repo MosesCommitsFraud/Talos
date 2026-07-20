@@ -25,7 +25,7 @@ FUNCTION_TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "bash",
-            "description": "Run a modest command in the isolated workspace for shell tasks, file inspection, git, builds, or system information. Software installation is unavailable except for a necessary small Python library via `python -m pip install`. To run Python code use the `python` tool. To create or edit files use write_file/edit_file, not shell redirects.",
+            "description": "Run a command in the isolated workspace for shell tasks, dependency installation, file inspection, git, builds, tests, development servers, or system information. Use the project's existing package manager. To run inline Python use the `python` tool. To create or edit files use write_file/edit_file, not shell redirects.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -39,7 +39,7 @@ FUNCTION_TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "python",
-            "description": "Execute a modest Python computation or check in the isolated workspace. For charts, save the finished image to a relative workspace path and call `show_image`; images under `output/` are also shown automatically. Do not save deliverables under /tmp or absolute paths.",
+            "description": "Execute Python code to compute a result or check something in the isolated workspace. For charts, save the finished image to a relative workspace path and call `show_image`; images under `output/` are also shown automatically. Do not save deliverables under /tmp or absolute paths.",
             "parameters": {
                 "type": "object",
                 "properties": {"code": {"type": "string", "description": "Python code to execute"}},

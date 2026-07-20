@@ -438,6 +438,9 @@ const en = {
       spacious: 'Spacious',
       language: 'Language',
       languageHint: 'Interface language.',
+      llmLanguage: 'AI language',
+      llmLanguageHint: 'Language used for AI thinking and responses.',
+      languageAuto: 'Automatic',
       resetVisibility: 'Reset visibility',
       sec: {
         sidebar: 'Sidebar',

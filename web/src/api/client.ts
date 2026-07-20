@@ -704,6 +704,8 @@ export interface StreamFlags {
   /** UI language ("de"/"en") — the backend writes auto-generated session
    *  titles in this language. */
   lang?: string;
+  /** Language for model reasoning/thinking and final responses. */
+  llmLanguage?: string;
 }
 
 /**
@@ -729,6 +731,7 @@ export async function streamChat(opts: {
   if (f.reasoning === false) fd.set('reasoning', 'false');
   if (f.incognito) fd.set('incognito', 'true');
   if (f.lang) fd.set('lang', f.lang);
+  if (f.llmLanguage) fd.set('llm_language', f.llmLanguage);
   if (f.attachments?.length) fd.set('attachments', JSON.stringify(f.attachments));
 
   const tzOffsetMin = -new Date().getTimezoneOffset();

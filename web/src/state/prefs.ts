@@ -6,6 +6,7 @@ export type Theme = 'dark' | 'light' | 'system';
 export type Density = 'compact' | 'comfortable' | 'spacious';
 export type SortMode = 'active' | 'newest' | 'name';
 export type ChatMode = 'chat' | 'knowledge' | 'sql' | 'full';
+export type LlmLang = 'auto' | Lang;
 export type { Lang };
 
 /** Per-surface visibility toggles — the new-UI equivalent of legacy's
@@ -47,6 +48,7 @@ interface PrefsState {
   density: Density;
   sortMode: SortMode;
   lang: Lang;
+  llmLang: LlmLang;
   visibility: Visibility;
   /** Composer knowledge sources. The chat-input control (mode dropdown when
    *  both are configured, single toggle when one is) drives these; they map to
@@ -71,6 +73,7 @@ interface PrefsState {
   setDensity: (d: Density) => void;
   setSortMode: (m: SortMode) => void;
   setLang: (l: Lang) => void;
+  setLlmLang: (l: LlmLang) => void;
   setVisibility: (key: keyof Visibility, value: boolean) => void;
   resetVisibility: () => void;
   toggle: (key: 'planMode' | 'useRag' | 'useDb' | 'reasoning' | 'incognito') => void;
@@ -89,6 +92,7 @@ export const usePrefs = create<PrefsState>()(
       density: 'comfortable',
       sortMode: 'active',
       lang: 'en',
+      llmLang: 'auto',
       visibility: DEFAULT_VISIBILITY,
       planMode: false,
       useRag: true,
@@ -103,6 +107,7 @@ export const usePrefs = create<PrefsState>()(
       setDensity: (density) => set({ density }),
       setSortMode: (sortMode) => set({ sortMode }),
       setLang: (lang) => { void i18n.changeLanguage(lang); set({ lang }); },
+      setLlmLang: (llmLang) => set({ llmLang }),
       setVisibility: (key, value) => set((s) => ({ visibility: { ...s.visibility, [key]: value } })),
       resetVisibility: () => set({ visibility: DEFAULT_VISIBILITY }),
       toggle: (key) => set((s) => ({ [key]: !s[key] }) as Partial<PrefsState>),

@@ -440,6 +440,9 @@ const de: typeof en = {
       spacious: 'Geräumig',
       language: 'Sprache',
       languageHint: 'Sprache der Oberfläche.',
+      llmLanguage: 'KI-Sprache',
+      llmLanguageHint: 'Sprache für das Denken und die Antworten der KI.',
+      languageAuto: 'Automatisch',
       resetVisibility: 'Sichtbarkeit zurücksetzen',
       sec: {
         sidebar: 'Seitenleiste',

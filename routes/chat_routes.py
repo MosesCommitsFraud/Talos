@@ -324,6 +324,7 @@ def setup_chat_routes(
             session_id=session,
             preset_id=preset_id,
             att_ids=att_ids,
+            llm_language=chat_request.llm_language,
         )
 
         # Auto-name immediately now that the user message is in history, so the
@@ -482,6 +483,7 @@ def setup_chat_routes(
                 pass
 
         ui_lang = (form_data.get("lang") or "").strip()
+        llm_language = (form_data.get("llm_language") or "").strip()
 
         # Build shared context (stream path uses enhanced_message for context preface)
         ctx = await build_chat_context(
@@ -505,6 +507,7 @@ def setup_chat_routes(
             # on the latest user turn when thinking is disabled. See
             # _append_no_think_reminder.
             reasoning=reasoning,
+            llm_language=llm_language,
         )
 
         # Auto-name the session immediately — the user message is now in

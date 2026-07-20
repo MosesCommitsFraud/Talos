@@ -71,7 +71,7 @@ import {
   type SqlConfig,
 } from '@/api/client';
 import type { AssistantEndpoint } from '@/api/types';
-import { applyDensity, applyLang, applyTheme, usePrefs, type Density, type Lang, type Theme, type Visibility } from '@/state/prefs';
+import { applyDensity, applyLang, applyTheme, usePrefs, type Density, type Lang, type LlmLang, type Theme, type Visibility } from '@/state/prefs';
 import { useRagConsole } from '@/state/ragConsole';
 import { LANGUAGES } from '@/i18n';
 import { cn } from '@/lib/utils';
@@ -385,6 +385,17 @@ function AppearancePanel() {
             value={prefs.lang}
             onChange={(v) => { prefs.setLang(v as Lang); applyLang(v as Lang); }}
             options={LANGUAGES.map((l) => ({ value: l.value, label: l.label }))}
+          />
+        </Row>
+        <Row label={t('settings.appearance.llmLanguage')} hint={t('settings.appearance.llmLanguageHint')}>
+          <Select
+            className="w-44"
+            value={prefs.llmLang}
+            onChange={(v) => prefs.setLlmLang(v as LlmLang)}
+            options={[
+              { value: 'auto', label: t('settings.appearance.languageAuto') },
+              ...LANGUAGES.map((l) => ({ value: l.value, label: l.label })),
+            ]}
           />
         </Row>
         <Row label={t('settings.appearance.density')} hint={t('settings.appearance.densityHint')}>

@@ -503,6 +503,25 @@ _NO_THINK_REMINDER = (
     "have explicitly told you their name in this conversation."
 )
 
+_LLM_LANGUAGE_NAMES = {"en": "English", "de": "German"}
+
+
+def llm_language_prompt(language: str | None) -> str:
+    """Build the trusted language directive sent to both reasoning modes."""
+    code = (language or "").strip().lower().split("-", 1)[0]
+    if code == "auto":
+        target = "the language of the user's current message"
+    elif code in _LLM_LANGUAGE_NAMES:
+        target = _LLM_LANGUAGE_NAMES[code]
+    else:
+        return ""
+    return (
+        f"Language preference: Use {target} for all reasoning and thinking, including "
+        "thinking shown to the user, and for the final response. Keep code, identifiers, "
+        "tool arguments, quoted text, and content the user explicitly asks to translate "
+        "or produce in another language in their natural or required language."
+    )
+
 
 def _append_no_think_reminder(messages: list) -> None:
     """Append the no-think directive to the end of the latest user message.
@@ -540,6 +559,7 @@ async def build_chat_context(
     use_enhanced_message: bool = False,
     agent_mode: bool = False,
     reasoning: bool = True,
+    llm_language: str | None = None,
 ) -> ChatContext:
     """Build the full context (preface + messages) for an LLM call.
 
@@ -599,7 +619,10 @@ async def build_chat_context(
     # prompt so it leads the system context; sent every turn, never shown in chat.
     _custom_sys = (get_setting("custom_system_prompt", "") or "").strip()
     _preset_sys = preset.system_prompt or ""
-    _effective_sys = "\n\n".join(p for p in (_custom_sys, _preset_sys) if p) or None
+    _language_sys = llm_language_prompt(llm_language)
+    _effective_sys = (
+        "\n\n".join(p for p in (_custom_sys, _preset_sys, _language_sys) if p) or None
+    )
     _preface_kwargs = dict(
         message=_ctx_msg,
         session=sess,
@@ -685,7 +708,7 @@ async def build_chat_context(
 
     if rag_sources:
         final_text = "\n".join(str(m.get("content") or "") for m in messages if isinstance(m, dict))
-        if "retrieved documents" not in final_text and "UNTRUSTED SOURCE DATA" not in final_text:
+        if "retrieved documents" not in final_text and "SUPPLIED CONTEXT" not in final_text:
             logger.warning(
                 "RAG sources were retrieved but no RAG context marker remained in final LLM messages"
             )
