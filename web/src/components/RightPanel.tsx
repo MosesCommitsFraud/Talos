@@ -1,7 +1,7 @@
 import { useCallback, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { DownloadIcon, FolderArchiveIcon, XIcon } from 'lucide-react';
-import { artifactDownloadUrl, artifactsZipUrl } from '@/api/client';
+import { downloadArtifact, downloadArtifactsZip } from '@/api/client';
 import { useChat } from '@/state/chat';
 import { usePrefs } from '@/state/prefs';
 import { useUi } from '@/state/ui';
@@ -95,26 +95,26 @@ export function RightPanel() {
         <div className="flex shrink-0 items-center gap-1">
           {mode === 'files' && sessionId && (
             <Tooltip label={t('artifacts.downloadZip')}>
-              <a
-                href={artifactsZipUrl(sessionId)}
-                download
+              <button
+                type="button"
+                onClick={() => { void downloadArtifactsZip(sessionId); }}
                 aria-label={t('artifacts.downloadZip')}
                 className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
               >
                 <FolderArchiveIcon className="size-4" />
-              </a>
+              </button>
             </Tooltip>
           )}
           {mode === 'preview' && preview && !preview.streaming && (
             <Tooltip label={t('preview.download')}>
-              <a
-                href={artifactDownloadUrl(preview.sessionId, preview.path)}
-                download
+              <button
+                type="button"
+                onClick={() => { void downloadArtifact(preview.sessionId, preview.path, preview.name); }}
                 aria-label={t('preview.download')}
                 className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
               >
                 <DownloadIcon className="size-4" />
-              </a>
+              </button>
             </Tooltip>
           )}
           <button

@@ -159,12 +159,12 @@ export async function deleteMessages(sessionId: string, msgIds: string[]): Promi
 }
 
 export async function fetchArtifacts(sessionId: string): Promise<import('./types').Artifact[]> {
-  const data = await getJSON<{ artifacts?: import('./types').Artifact[] }>(`/api/artifacts/${sessionId}`);
+  const data = await getJSON<{ artifacts?: import('./types').Artifact[] }>(`/api/artifacts/${encodeURIComponent(sessionId)}`);
   return data.artifacts ?? [];
 }
 
 export const artifactDownloadUrl = (sessionId: string, path: string) =>
-  `/api/artifacts/${sessionId}/download?path=${encodeURIComponent(path)}`;
+  `/api/artifacts/${encodeURIComponent(sessionId)}/download?path=${encodeURIComponent(path)}`;
 
 /** Fetch a workspace file's raw bytes — used by the preview panel to render
  *  Word/Excel/PDF (which need the binary) and text/markdown (decoded to text). */
@@ -176,6 +176,21 @@ export async function fetchArtifactBlob(sessionId: string, path: string): Promis
   }
   if (!res.ok) throw new Error(`artifact ${path}: ${res.status}`);
   return res.blob();
+}
+
+export async function downloadArtifact(sessionId: string, path: string, name: string): Promise<void> {
+  const blob = await fetchArtifactBlob(sessionId, path);
+  const url = URL.createObjectURL(blob);
+  try {
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = name;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+  } finally {
+    window.setTimeout(() => URL.revokeObjectURL(url), 1_000);
+  }
 }
 
 export interface DocumentRecord {
@@ -212,7 +227,28 @@ export const fetchDocumentVersions = (docId: string) =>
 export const restoreDocumentVersion = (docId: string, version: number) =>
   postJSON<DocumentRecord>(`/api/document/${encodeURIComponent(docId)}/restore/${version}`, {});
 
-export const artifactsZipUrl = (sessionId: string) => `/api/artifacts/${sessionId}/zip`;
+export const artifactsZipUrl = (sessionId: string) => `/api/artifacts/${encodeURIComponent(sessionId)}/zip`;
+
+export async function downloadArtifactsZip(sessionId: string): Promise<void> {
+  const res = await fetch(artifactsZipUrl(sessionId), { credentials: 'same-origin' });
+  if (res.status === 401) {
+    notifyUnauthenticated();
+    throw new Error('Not authenticated');
+  }
+  if (!res.ok) throw new Error(`Artifact archive failed (HTTP ${res.status})`);
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  try {
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = 'chat-files.zip';
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+  } finally {
+    window.setTimeout(() => URL.revokeObjectURL(url), 1_000);
+  }
+}
 
 export const uploadDownloadUrl = (id: string) => `/api/upload/${encodeURIComponent(id)}`;
 

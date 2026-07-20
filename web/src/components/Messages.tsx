@@ -2,7 +2,7 @@ import { CheckIcon, ChevronDownIcon, ChevronRightIcon, CopyIcon, DownloadIcon, F
 import { useQuery } from '@tanstack/react-query';
 import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { artifactDownloadUrl, fetchArtifacts, uploadDownloadUrl } from '@/api/client';
+import { downloadArtifact, fetchArtifacts, uploadDownloadUrl } from '@/api/client';
 import { copyTextToClipboard } from '@/lib/utils';
 import { artifactDisplayName, displayName, isPreviewable, previewKind } from '@/lib/files';
 import { useChat, type UiMessage } from '@/state/chat';
@@ -270,7 +270,7 @@ function ArtifactChips({ sessionId, files }: { sessionId: string; files: Artifac
               type="button"
               onClick={() => {
                 if (previewable) openPreview({ sessionId, path: f.path, name: f.name, mime: f.mime });
-                else window.open(artifactDownloadUrl(sessionId, f.path), '_blank');
+                else void downloadArtifact(sessionId, f.path, f.name);
               }}
               title={previewable ? t('messages.openPreview', { name: f.name }) : f.name}
               className="flex min-w-0 items-center gap-1.5 py-1.5 text-left"
@@ -281,14 +281,14 @@ function ArtifactChips({ sessionId, files }: { sessionId: string; files: Artifac
               <span className="max-w-56 truncate">{displayName(f.name)}</span>
               {f.size != null && <span className="shrink-0 opacity-70">{formatSize(f.size)}</span>}
             </button>
-            <a
-              href={artifactDownloadUrl(sessionId, f.path)}
-              download
+            <button
+              type="button"
+              onClick={() => { void downloadArtifact(sessionId, f.path, f.name); }}
               aria-label={t('artifacts.download', { name: f.name })}
               className="flex size-6 shrink-0 items-center justify-center rounded-md transition-colors hover:bg-accent-foreground/10"
             >
               <DownloadIcon className="size-3.5" />
-            </a>
+            </button>
           </div>
         );
       })}

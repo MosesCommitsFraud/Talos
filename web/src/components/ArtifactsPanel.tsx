@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { DownloadIcon } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import { artifactDownloadUrl, fetchArtifacts, uploadDownloadUrl } from '@/api/client';
+import { artifactDownloadUrl, downloadArtifact, fetchArtifacts, uploadDownloadUrl } from '@/api/client';
 import { useChat } from '@/state/chat';
 import { artifactDisplayName, displayName, fileTypeLabel, formatSize, isPreviewable, previewKind, type PreviewKind } from '@/lib/files';
 import { FileTypeIcon } from './FileTypeIcon';
@@ -24,7 +24,7 @@ function FileThumb({ name, mime, src, kind, alt }: { name: string; mime?: string
 /** One row in the file list. Clicking a previewable file opens the preview view;
  *  non-previewable files fall back to a download. */
 function FileRow({
-  name, mime, sub, kind, thumbSrc, downloadUrl, onOpen,
+  name, mime, sub, kind, thumbSrc, downloadUrl, onOpen, onDownload,
 }: {
   name: string;
   mime?: string;
@@ -33,6 +33,7 @@ function FileRow({
   thumbSrc?: string;
   downloadUrl: string;
   onOpen?: () => void;
+  onDownload?: () => void;
 }) {
   const { t } = useTranslation();
   const clickable = !!onOpen;
@@ -57,14 +58,11 @@ function FileRow({
           </div>
         </div>
       </button>
-      <a
-        href={downloadUrl}
-        download
-        aria-label={t('artifacts.download', { name })}
-        className="flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground opacity-0 transition-all group-hover:opacity-100 hover:bg-accent hover:text-foreground"
-      >
-        <DownloadIcon className="size-3.5" />
-      </a>
+      {onDownload ? (
+        <button type="button" onClick={onDownload} aria-label={t('artifacts.download', { name })} className="flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground opacity-0 transition-all group-hover:opacity-100 hover:bg-accent hover:text-foreground"><DownloadIcon className="size-3.5" /></button>
+      ) : (
+        <a href={downloadUrl} download aria-label={t('artifacts.download', { name })} className="flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground opacity-0 transition-all group-hover:opacity-100 hover:bg-accent hover:text-foreground"><DownloadIcon className="size-3.5" /></a>
+      )}
     </div>
   );
 }
@@ -133,6 +131,7 @@ export function ArtifactsList({ sessionId, onOpen }: { sessionId: string | null;
             kind={kind}
             thumbSrc={kind === 'image' && sessionId ? artifactDownloadUrl(sessionId, path) : undefined}
             downloadUrl={sessionId ? artifactDownloadUrl(sessionId, path) : '#'}
+            onDownload={sessionId ? () => { void downloadArtifact(sessionId, path, name); } : undefined}
             onOpen={previewable ? () => onOpen({ sessionId: sessionId!, path, name, mime }) : undefined}
           />
         );

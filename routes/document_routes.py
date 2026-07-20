@@ -11,7 +11,7 @@ from sqlalchemy import func
 
 from core.database import Document, DocumentVersion, GalleryImage, SessionLocal
 from core.database import Session as DbSession
-from src.auth_helpers import get_current_user
+from src.auth_helpers import effective_user, get_current_user
 
 logger = logging.getLogger(__name__)
 
@@ -396,15 +396,24 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
 
     def _verify_session_access(db, request, session_id: str) -> str:
         """Return the owner for a session the caller may access, else raise."""
-        user = get_current_user(request)
+        user = effective_user(request)
         if not user:
-            raise HTTPException(403, "Authentication required")
+            raise HTTPException(401, "Authentication required")
         session = db.query(DbSession).filter(DbSession.id == session_id).first()
         if not session:
             raise HTTPException(404, "Session not found")
         if session.owner and session.owner != user:
             raise HTTPException(403, "Access denied")
         return session.owner or user
+
+    def _workspace_owners(db, request, session_id: str) -> list[str]:
+        """Primary sandbox owner plus the legacy null-owner workspace fallback."""
+        owner = _verify_session_access(db, request, session_id)
+        session = db.query(DbSession).filter(DbSession.id == session_id).first()
+        owners = [owner]
+        if session and not session.owner and owner != "anonymous":
+            owners.append("anonymous")
+        return owners
 
     def _document_artifact(doc: Document) -> Dict[str, Any]:
         extensions = {
@@ -462,7 +471,7 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
     async def list_artifacts_route(request: Request, session_id: str) -> Dict[str, Any]:
         db = SessionLocal()
         try:
-            owner = _verify_session_access(db, request, session_id)
+            owners = _workspace_owners(db, request, session_id)
             documents = [
                 _document_artifact(doc)
                 for doc in db.query(Document).filter(Document.session_id == session_id).all()
@@ -478,11 +487,22 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
         artifacts = []
         error = None
         if sandbox_enabled():
-            try:
-                artifacts = await list_artifacts(owner=owner, session_id=session_id)
-            except Exception as e:
-                logger.warning("artifacts list failed for %s: %s", session_id, e)
-                error = "sandbox unavailable"
+            seen_paths = set()
+            successful_owner = False
+            for owner in owners:
+                try:
+                    owner_artifacts = await list_artifacts(owner=owner, session_id=session_id)
+                    successful_owner = True
+                    for artifact in owner_artifacts:
+                        artifact_path = str(artifact.get("path") or "")
+                        if artifact_path and artifact_path not in seen_paths:
+                            seen_paths.add(artifact_path)
+                            artifacts.append(artifact)
+                except Exception as e:
+                    logger.warning("artifacts list failed for %s (%s): %s", session_id, owner, e)
+                    error = "sandbox unavailable"
+            if successful_owner:
+                error = None
         for artifact in artifacts:
             artifact.setdefault("source", "workspace")
         artifacts.extend(documents)
@@ -499,7 +519,7 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
 
         db = SessionLocal()
         try:
-            owner = _verify_session_access(db, request, session_id)
+            owners = _workspace_owners(db, request, session_id)
             if path.startswith("document:"):
                 doc = (
                     db.query(Document)
@@ -547,12 +567,17 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
 
         if not sandbox_enabled():
             raise HTTPException(404, "Sandbox not available")
-        try:
-            content, ctype, fname = await download_artifact(
-                owner=owner, session_id=session_id, path=path
-            )
-        except Exception as e:
-            logger.warning("artifact download failed for %s (%s): %s", session_id, path, e)
+        last_error = None
+        for owner in owners:
+            try:
+                content, ctype, fname = await download_artifact(
+                    owner=owner, session_id=session_id, path=path
+                )
+                break
+            except Exception as e:
+                last_error = e
+        else:
+            logger.warning("artifact download failed for %s (%s): %s", session_id, path, last_error)
             raise HTTPException(404, "File not found")
         # Inline for images (preview), attachment for everything else (download).
         disp = "inline" if ctype.startswith("image/") else "attachment"

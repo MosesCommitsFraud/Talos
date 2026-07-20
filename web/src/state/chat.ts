@@ -374,6 +374,11 @@ export const useChat = create<ChatState>((set, get) => {
       if (id && completed !== s.completed) delete completed[id];
       return { sessionId: id, messages: rt.messages, streaming: rt.streaming, turnStartedAt: rt.turnStartedAt, goal: rt.goal, completed };
     });
+    const preview = useUi.getState().preview;
+    if (preview && preview.sessionId !== id) {
+      useUi.getState().closePreview();
+      useUi.getState().setArtifactsOpen(false);
+    }
   };
 
   return {

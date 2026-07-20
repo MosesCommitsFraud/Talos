@@ -29,6 +29,7 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
     queryFn: fetchAuthStatus,
     staleTime: 60_000,
     retry: 1,
+    refetchOnWindowFocus: 'always',
   });
 
   useEffect(() => {

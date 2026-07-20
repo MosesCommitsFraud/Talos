@@ -1,6 +1,7 @@
 import os
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
 import httpx
 
@@ -36,6 +37,8 @@ async def exec_in_sandbox(
     if not session_id:
         raise RuntimeError("sandbox execution requires a session_id")
     user_id = safe_user_id(owner)
+    user_path = quote(user_id, safe="")
+    session_path = quote(session_id, safe="")
     # No read/write/pool timeout: a long compute or install must not be cut off.
     # Only the connect phase is bounded. The sandbox enforces its own limit via
     # the `timeout` field (0 = unlimited there too).
@@ -43,7 +46,7 @@ async def exec_in_sandbox(
         headers=_SANDBOX_HEADERS, timeout=httpx.Timeout(None, connect=15.0)
     ) as client:
         resp = await client.post(
-            f"{SANDBOX_URL}/users/{user_id}/workspaces/{session_id}/exec",
+            f"{SANDBOX_URL}/users/{user_path}/workspaces/{session_path}/exec",
             json={"kind": kind, "command": command, "code": code, "timeout": timeout},
         )
         resp.raise_for_status()
@@ -161,11 +164,13 @@ async def list_artifacts(*, owner: str | None, session_id: str | None) -> list[d
     if not session_id:
         return []
     user_id = safe_user_id(owner)
+    user_path = quote(user_id, safe="")
+    session_path = quote(session_id, safe="")
     async with httpx.AsyncClient(
         headers=_SANDBOX_HEADERS, timeout=httpx.Timeout(SANDBOX_TIMEOUT, connect=15.0)
     ) as client:
         resp = await client.get(
-            f"{SANDBOX_URL}/users/{user_id}/workspaces/{session_id}/artifacts",
+            f"{SANDBOX_URL}/users/{user_path}/workspaces/{session_path}/artifacts",
         )
         resp.raise_for_status()
         return resp.json().get("artifacts", [])
@@ -176,11 +181,13 @@ async def delete_artifact(*, owner: str | None, session_id: str | None, path: st
     if not session_id:
         return False
     user_id = safe_user_id(owner)
+    user_path = quote(user_id, safe="")
+    session_path = quote(session_id, safe="")
     async with httpx.AsyncClient(
         headers=_SANDBOX_HEADERS, timeout=httpx.Timeout(30.0, connect=10.0)
     ) as client:
         resp = await client.post(
-            f"{SANDBOX_URL}/users/{user_id}/workspaces/{session_id}/files/delete",
+            f"{SANDBOX_URL}/users/{user_path}/workspaces/{session_path}/files/delete",
             json={"path": path},
         )
         resp.raise_for_status()
@@ -193,11 +200,13 @@ async def download_workspace_zip(*, owner: str | None, session_id: str | None) -
     if not session_id:
         raise RuntimeError("zip requires a session_id")
     user_id = safe_user_id(owner)
+    user_path = quote(user_id, safe="")
+    session_path = quote(session_id, safe="")
     async with httpx.AsyncClient(
         headers=_SANDBOX_HEADERS, timeout=httpx.Timeout(None, connect=15.0)
     ) as client:
         resp = await client.get(
-            f"{SANDBOX_URL}/users/{user_id}/workspaces/{session_id}/files/zip",
+            f"{SANDBOX_URL}/users/{user_path}/workspaces/{session_path}/files/zip",
         )
         resp.raise_for_status()
         return resp.content
@@ -210,11 +219,13 @@ async def download_artifact(
     if not session_id:
         raise RuntimeError("sandbox download requires a session_id")
     user_id = safe_user_id(owner)
+    user_path = quote(user_id, safe="")
+    session_path = quote(session_id, safe="")
     async with httpx.AsyncClient(
         headers=_SANDBOX_HEADERS, timeout=httpx.Timeout(None, connect=15.0)
     ) as client:
         resp = await client.get(
-            f"{SANDBOX_URL}/users/{user_id}/workspaces/{session_id}/files/download",
+            f"{SANDBOX_URL}/users/{user_path}/workspaces/{session_path}/files/download",
             params={"path": path},
         )
         resp.raise_for_status()
