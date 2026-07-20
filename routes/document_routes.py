@@ -423,6 +423,10 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
             "email": ".eml",
         }
         title = (doc.title or "Untitled").strip() or "Untitled"
+        if re.match(r"^(?:untitled|document(?::|$)|code\s*\()", title, re.IGNORECASE):
+            derived = _derive_title(doc.current_content or "")
+            if derived != "Untitled":
+                title = derived
         title = title.replace("/", "_").replace("\\", "_").replace('"', "'")
         title = title.replace("\r", " ").replace("\n", " ")
         if "." not in title.rsplit("/", 1)[-1]:

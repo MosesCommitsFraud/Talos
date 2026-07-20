@@ -286,6 +286,8 @@ const de: typeof en = {
     resize: 'Vorschau anpassen',
     error: 'Diese Datei konnte nicht geladen werden.',
     saveError: 'Dieses Dokument konnte nicht gespeichert werden.',
+    currentVersion: 'Aktuelle Version (v{{version}})',
+    restoreVersion: 'Diese Version wiederherstellen',
     empty: 'Wähle eine Datei aus, um sie hier anzuzeigen.',
   },
   artifacts: {

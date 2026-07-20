@@ -284,7 +284,10 @@ FUNCTION_TOOL_SCHEMAS = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "title": {"type": "string", "description": "Document title"},
+                    "title": {
+                        "type": "string",
+                        "description": "Short, topic-specific human title used as the artifact filename. Never use Untitled, Document, an internal ID, or a generic label such as Code.",
+                    },
                     "language": {
                         "type": "string",
                         "description": "Programming language or format (e.g. python, javascript, markdown, text)",

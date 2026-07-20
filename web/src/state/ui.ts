@@ -7,6 +7,17 @@ import { create } from 'zustand';
  *  swaps in the full-screen knowledge-base workspace (deep-linkable at `#/rag`). */
 export type AppView = 'chat' | 'rag';
 
+export interface PreviewFile {
+  sessionId: string;
+  path: string;
+  name: string;
+  mime?: string;
+  content?: string;
+  language?: string;
+  version?: number;
+  streaming?: boolean;
+}
+
 /** Map the URL hash to a view on first load so `#/rag` opens the workspace. */
 function viewFromHash(): AppView {
   return typeof location !== 'undefined' && location.hash.replace(/^#\/?/, '') === 'rag'
@@ -35,8 +46,9 @@ interface UiState {
   closeLightbox: () => void;
   /** Resizable document preview panel. Set to open it on a specific workspace
    *  file (markdown, text, Word, Excel, pdf, image…); null when closed. */
-  preview: { sessionId: string; path: string; name: string; mime?: string } | null;
-  openPreview: (file: { sessionId: string; path: string; name: string; mime?: string }) => void;
+  preview: PreviewFile | null;
+  openPreview: (file: PreviewFile) => void;
+  updatePreview: (patch: Partial<PreviewFile>) => void;
   closePreview: () => void;
 }
 
@@ -62,5 +74,8 @@ export const useUi = create<UiState>((set) => ({
   preview: null,
   // Selecting a file opens the shared panel and flips it to the preview view.
   openPreview: (preview) => set({ preview, panelMode: 'preview', artifactsOpen: true }),
+  updatePreview: (patch) => set((state) => ({
+    preview: state.preview ? { ...state.preview, ...patch } : null,
+  })),
   closePreview: () => set({ preview: null, panelMode: 'files' }),
 }));

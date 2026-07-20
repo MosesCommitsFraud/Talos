@@ -284,6 +284,8 @@ const en = {
     resize: 'Resize preview',
     error: 'Could not load this file.',
     saveError: 'Could not save this document.',
+    currentVersion: 'Current version (v{{version}})',
+    restoreVersion: 'Restore this version',
     empty: 'Select a file to preview it here.',
   },
   artifacts: {

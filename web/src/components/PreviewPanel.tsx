@@ -1,12 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { FileTextIcon } from 'lucide-react';
-import { fetchArtifactBlob, updateDocument } from '@/api/client';
+import { FileTextIcon, RotateCcwIcon } from 'lucide-react';
+import { fetchArtifactBlob, fetchDocumentVersions, restoreDocumentVersion, updateDocument, type DocumentVersion } from '@/api/client';
 import { fileExt, previewKind, type PreviewKind } from '@/lib/files';
 import { queryClient } from '@/lib/queryClient';
+import { useUi, type PreviewFile } from '@/state/ui';
 import { Markdown } from './Markdown';
-
-type PreviewFile = { sessionId: string; path: string; name: string; mime?: string };
 
 /** Map a code-file extension to a markdown fence language so the shared Markdown
  *  renderer highlights it (and inherits the current theme). */
@@ -26,7 +25,48 @@ type Loaded =
   | { kind: 'csv'; rows: string[][] }
   | { kind: 'excel'; sheets: { name: string; rows: string[][] }[] }
   | { kind: 'word'; html: string }
+  | { kind: 'presentation'; slides: { texts: string[]; images: string[] }[] }
   | { kind: 'blobUrl'; url: string; pdf: boolean };
+
+function textLoaded(kind: PreviewKind, text: string, name: string): Loaded {
+  if (kind === 'markdown') return { kind: 'markdown', text };
+  if (kind === 'code') return { kind: 'code', text, lang: FENCE_LANG[fileExt(name)] ?? '' };
+  return { kind: 'text', text };
+}
+
+async function parsePresentation(blob: Blob): Promise<{ texts: string[]; images: string[] }[]> {
+  const { default: JSZip } = await import('jszip');
+  const zip = await JSZip.loadAsync(await blob.arrayBuffer());
+  const slidePaths = Object.keys(zip.files)
+    .filter((path) => /^ppt\/slides\/slide\d+\.xml$/.test(path))
+    .sort((a, b) => Number(a.match(/\d+/)?.[0] ?? 0) - Number(b.match(/\d+/)?.[0] ?? 0));
+  return Promise.all(slidePaths.map(async (slidePath) => {
+    const xml = await zip.file(slidePath)!.async('text');
+    const doc = new DOMParser().parseFromString(xml, 'application/xml');
+    const texts = Array.from(doc.getElementsByTagNameNS('*', 't'))
+      .map((node) => node.textContent?.trim() ?? '')
+      .filter(Boolean);
+    const slideName = slidePath.split('/').pop()!;
+    const rel = zip.file(`ppt/slides/_rels/${slideName}.rels`);
+    const images: string[] = [];
+    if (rel) {
+      const relXml = await rel.async('text');
+      const relDoc = new DOMParser().parseFromString(relXml, 'application/xml');
+      const targets = Array.from(relDoc.getElementsByTagNameNS('*', 'Relationship'))
+        .map((node) => node.getAttribute('Target') ?? '')
+        .filter((target) => /(?:^|\/)media\//.test(target));
+      for (const target of targets) {
+        const mediaPath = target.replace(/^\.\.\//, 'ppt/');
+        const file = zip.file(mediaPath);
+        if (!file) continue;
+        const ext = fileExt(mediaPath);
+        const mime = ext === 'svg' ? 'image/svg+xml' : ext === 'jpg' || ext === 'jpeg' ? 'image/jpeg' : `image/${ext || 'png'}`;
+        images.push(`data:${mime};base64,${await file.async('base64')}`);
+      }
+    }
+    return { texts, images };
+  }));
+}
 
 /** Body of the document viewer (no panel chrome — the shared right panel owns
  *  the border, header and resize). Renders the selected workspace file in the
@@ -42,7 +82,11 @@ export function PreviewContent({ preview }: { preview: PreviewFile | null }) {
   const [draft, setDraft] = useState('');
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState(false);
+  const [versions, setVersions] = useState<DocumentVersion[]>([]);
+  const [viewedVersion, setViewedVersion] = useState<number | 'current'>('current');
+  const [currentText, setCurrentText] = useState('');
   const objectUrl = useRef<string | null>(null);
+  const updatePreview = useUi((s) => s.updatePreview);
 
   const kind: PreviewKind = preview ? previewKind(preview.name, preview.mime) : 'none';
 
@@ -54,8 +98,16 @@ export function PreviewContent({ preview }: { preview: PreviewFile | null }) {
     setLoading(true);
     setEditing(false);
     setSaveError(false);
+    setViewedVersion('current');
     // Revoke any object URL from a previous file before loading the next.
     if (objectUrl.current) { URL.revokeObjectURL(objectUrl.current); objectUrl.current = null; }
+
+    if (preview.content !== undefined && ['markdown', 'text', 'code'].includes(kind)) {
+      setCurrentText(preview.content);
+      setLoaded(textLoaded(kind, preview.content, preview.name));
+      setLoading(false);
+      return () => { cancelled = true; };
+    }
 
     (async () => {
       try {
@@ -69,6 +121,9 @@ export function PreviewContent({ preview }: { preview: PreviewFile | null }) {
           const mammoth = await import('mammoth');
           const { value } = await mammoth.convertToHtml({ arrayBuffer: await blob.arrayBuffer() });
           if (!cancelled) setLoaded({ kind: 'word', html: value });
+        } else if (kind === 'presentation') {
+          const slides = await parsePresentation(blob);
+          if (!cancelled) setLoaded({ kind: 'presentation', slides });
         } else if (kind === 'excel') {
           const XLSX = await import('xlsx');
           const wb = XLSX.read(await blob.arrayBuffer(), { type: 'array' });
@@ -84,10 +139,16 @@ export function PreviewContent({ preview }: { preview: PreviewFile | null }) {
           if (!cancelled) setLoaded({ kind: 'csv', rows });
         } else if (kind === 'code') {
           const text = await blob.text();
-          if (!cancelled) setLoaded({ kind: 'code', text, lang: FENCE_LANG[fileExt(preview.name)] ?? '' });
+          if (!cancelled) {
+            setCurrentText(text);
+            setLoaded({ kind: 'code', text, lang: FENCE_LANG[fileExt(preview.name)] ?? '' });
+          }
         } else {
           const text = await blob.text();
-          if (!cancelled) setLoaded({ kind: kind === 'markdown' ? 'markdown' : 'text', text });
+          if (!cancelled) {
+            setCurrentText(text);
+            setLoaded({ kind: kind === 'markdown' ? 'markdown' : 'text', text });
+          }
         }
       } catch (e) {
         if (!cancelled) setError(e instanceof Error ? e.message : String(e));
@@ -98,6 +159,19 @@ export function PreviewContent({ preview }: { preview: PreviewFile | null }) {
 
     return () => { cancelled = true; };
   }, [preview, kind]);
+
+  const docId = preview?.path.startsWith('document:')
+    ? preview.path.slice('document:'.length)
+    : null;
+
+  useEffect(() => {
+    if (!docId || preview?.streaming) { setVersions([]); return; }
+    let cancelled = false;
+    void fetchDocumentVersions(docId).then((items) => {
+      if (!cancelled) setVersions(items);
+    }).catch(() => { if (!cancelled) setVersions([]); });
+    return () => { cancelled = true; };
+  }, [docId, preview?.version, preview?.streaming]);
 
   // Release the last object URL when the panel unmounts.
   useEffect(() => () => { if (objectUrl.current) URL.revokeObjectURL(objectUrl.current); }, []);
@@ -121,13 +195,49 @@ export function PreviewContent({ preview }: { preview: PreviewFile | null }) {
     setSaving(true);
     setSaveError(false);
     try {
-      await updateDocument(preview.path.slice('document:'.length), draft);
+      const saved = await updateDocument(preview.path.slice('document:'.length), draft);
       if (loaded?.kind === 'code') setLoaded({ ...loaded, text: draft });
       else if (loaded?.kind === 'markdown') setLoaded({ kind: 'markdown', text: draft });
       else setLoaded({ kind: 'text', text: draft });
+      setCurrentText(draft);
+      updatePreview({ content: draft, version: saved.version_count, streaming: false });
       setEditing(false);
       void queryClient.invalidateQueries({ queryKey: ['artifacts', preview.sessionId] });
+      void fetchDocumentVersions(saved.id).then(setVersions);
     } catch (e) {
+      setSaveError(true);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const chooseVersion = (value: string) => {
+    if (value === 'current') {
+      setViewedVersion('current');
+      if (loaded) setLoaded(textLoaded(kind, currentText, preview.name));
+      return;
+    }
+    const number = Number(value);
+    const selected = versions.find((version) => version.version_number === number);
+    if (!selected) return;
+    setViewedVersion(number);
+    if (loaded) setLoaded(textLoaded(kind, selected.content, preview.name));
+    setEditing(false);
+  };
+
+  const restore = async () => {
+    if (!docId || viewedVersion === 'current') return;
+    setSaving(true);
+    setSaveError(false);
+    try {
+      const restored = await restoreDocumentVersion(docId, viewedVersion);
+      setCurrentText(restored.current_content);
+      setLoaded(textLoaded(kind, restored.current_content, preview.name));
+      setViewedVersion('current');
+      updatePreview({ content: restored.current_content, version: restored.version_count });
+      setVersions(await fetchDocumentVersions(docId));
+      void queryClient.invalidateQueries({ queryKey: ['artifacts', preview.sessionId] });
+    } catch {
       setSaveError(true);
     } finally {
       setSaving(false);
@@ -139,13 +249,22 @@ export function PreviewContent({ preview }: { preview: PreviewFile | null }) {
       {editableDocument && !loading && !error && (
         <div className="flex shrink-0 items-center gap-2 border-b px-3 py-2">
           {saveError && <span className="mr-auto text-xs text-destructive-foreground">{t('preview.saveError')}</span>}
+          {!editing && versions.length > 1 && (
+            <select value={viewedVersion} onChange={(e) => chooseVersion(e.target.value)} className="mr-auto max-w-44 rounded-md border bg-background px-2 py-1 text-xs">
+              <option value="current">{t('preview.currentVersion', { version: versions[0]?.version_number })}</option>
+              {versions.slice(1).map((version) => <option key={version.id} value={version.version_number}>v{version.version_number} · {version.summary || version.source || ''}</option>)}
+            </select>
+          )}
+          {!editing && viewedVersion !== 'current' && (
+            <button type="button" onClick={() => void restore()} disabled={saving} className="inline-flex items-center gap-1 rounded-md px-2.5 py-1 text-xs font-medium hover:bg-accent disabled:opacity-60"><RotateCcwIcon className="size-3.5" />{t('preview.restoreVersion')}</button>
+          )}
           {editing ? (
             <>
               <button type="button" onClick={() => setEditing(false)} disabled={saving} className="rounded-md px-2.5 py-1 text-xs text-muted-foreground hover:bg-accent">{t('common.cancel')}</button>
               <button type="button" onClick={() => void save()} disabled={saving} className="rounded-md bg-primary px-2.5 py-1 text-xs font-medium text-primary-foreground disabled:opacity-60">{saving ? t('common.loading') : t('common.save')}</button>
             </>
           ) : (
-            <button type="button" onClick={() => { setDraft(editableText ?? ''); setSaveError(false); setEditing(true); }} className="ml-auto rounded-md px-2.5 py-1 text-xs font-medium hover:bg-accent">{t('common.edit')}</button>
+            viewedVersion === 'current' && <button type="button" onClick={() => { setDraft(editableText ?? ''); setSaveError(false); setEditing(true); }} className="ml-auto rounded-md px-2.5 py-1 text-xs font-medium hover:bg-accent">{t('common.edit')}</button>
           )}
         </div>
       )}
@@ -179,6 +298,23 @@ function PreviewBody({ loaded, name }: { loaded: Loaded; name: string }) {
   }
   if (loaded.kind === 'word') {
     return <div className="docx-preview p-5" dangerouslySetInnerHTML={{ __html: loaded.html }} />;
+  }
+  if (loaded.kind === 'presentation') {
+    return (
+      <div className="space-y-5 bg-muted/30 p-4">
+        {loaded.slides.map((slide, index) => (
+          <section key={index} className="mx-auto aspect-video w-full max-w-4xl overflow-auto rounded-md border bg-white p-8 text-slate-900 shadow-sm">
+            <div className="mb-3 text-[11px] font-medium text-slate-400">{index + 1}</div>
+            <div className="space-y-3">
+              {slide.texts.map((text, i) => i === 0
+                ? <h2 key={i} className="text-2xl font-semibold">{text}</h2>
+                : <p key={i} className="text-base leading-relaxed">{text}</p>)}
+            </div>
+            {slide.images.length > 0 && <div className="mt-5 grid grid-cols-2 gap-3">{slide.images.map((src, i) => <img key={i} src={src} alt="" className="max-h-64 w-full object-contain" />)}</div>}
+          </section>
+        ))}
+      </div>
+    );
   }
   // blobUrl: pdf in an iframe, otherwise an image.
   if (loaded.pdf) {

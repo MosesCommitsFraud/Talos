@@ -716,6 +716,12 @@ async def do_create_document(
 
     if not title:
         title = "Untitled"
+    if _re.match(r"^(?:untitled|document(?::|$)|code\s*\()", title, _re.IGNORECASE):
+        from routes.document_helpers import _derive_title
+
+        derived = _derive_title(content)
+        if derived != "Untitled":
+            title = derived
 
     if not session_id:
         return {"error": "No session context for document creation"}

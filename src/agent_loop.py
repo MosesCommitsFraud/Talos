@@ -189,7 +189,7 @@ Each `target` must match exactly and be unique (set "allow_multiple": true to re
 <language>
 <content>
 ```
-Create a NEW document in the editor panel. Only use when the user explicitly asks for a new file/document. If a document is already open in the editor, the user's request "fix this", "add X", "change Y", etc. refers to THAT document — use edit_document, never create_document.""",
+Create a NEW document in the editor panel. Only use when the user explicitly asks for a new file/document. Give it a short, topic-specific human title; never use Untitled, Document, an internal ID, or a generic title such as Code. If a document is already open in the editor, the user's request "fix this", "add X", "change Y", etc. refers to THAT document — use edit_document, never create_document.""",
     "edit_document": """\
 ```edit_document
 <<<FIND>>>
@@ -2192,9 +2192,9 @@ async def stream_agent_loop(
                             round_response += data["delta"]
                             full_response += data["delta"]
                         yield chunk  # Stream all rounds
-                        # Detect text-fence doc streaming for rounds 2+
-                        # (round 1 is handled by frontend fence detection + server fenced block path)
-                        if round_num > 1 and not _doc_acc:
+                        # Detect fenced document output in every round so Preview
+                        # opens and updates while the model is still generating.
+                        if not _doc_acc:
                             _fence_marker = "```create_document\n"
                             # Open a new block if we're not currently inside one
                             # and there's an unstreamed marker in the response.
@@ -2775,30 +2775,6 @@ async def stream_agent_loop(
             if "diff" in result:
                 tool_output_data["diff"] = result["diff"]
             yield f"data: {json.dumps(tool_output_data)}\n\n"
-
-            # Native document tools open in the editor + carry the REAL doc id.
-            # Emit a doc_update so the frontend opens/activates it and sends it
-            # back as active_doc_id next turn (otherwise the agent can't "see"
-            # the document it just created on the follow-up message).
-            if block.tool_type in (
-                "create_document",
-                "update_document",
-                "edit_document",
-            ) and result.get("doc_id"):
-                yield (
-                    "data: "
-                    + json.dumps(
-                        {
-                            "type": "doc_update",
-                            "doc_id": result["doc_id"],
-                            "title": result.get("title", ""),
-                            "language": result.get("language", ""),
-                            "content": result.get("content", ""),
-                            "version": result.get("version", 1),
-                        }
-                    )
-                    + "\n\n"
-                )
 
             # Inline research: emit the open-link as part of the assistant's
             # actual response text — a `#research-<id>` anchor that chatRenderer

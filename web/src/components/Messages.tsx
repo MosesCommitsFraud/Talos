@@ -4,7 +4,7 @@ import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { artifactDownloadUrl, fetchArtifacts, uploadDownloadUrl } from '@/api/client';
 import { copyTextToClipboard } from '@/lib/utils';
-import { displayName, isPreviewable, previewKind } from '@/lib/files';
+import { artifactDisplayName, displayName, isPreviewable, previewKind } from '@/lib/files';
 import { useChat, type UiMessage } from '@/state/chat';
 import { usePrefs } from '@/state/prefs';
 import { useUi } from '@/state/ui';
@@ -513,7 +513,7 @@ export function Messages() {
   const artifactFiles: ArtifactFile[] = sessionId
     ? (artifacts ?? []).flatMap((f) => {
         const path = String(f.path ?? f.name ?? '');
-        const name = String(f.name ?? path);
+        const name = artifactDisplayName(path, typeof f.name === 'string' ? f.name : undefined);
         const mime = String(f.mime ?? '');
         if (!path || (f.source === 'workspace' && inputPaths.has(path))) return [];
         return [{

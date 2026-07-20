@@ -3,7 +3,7 @@ import { DownloadIcon } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { artifactDownloadUrl, fetchArtifacts, uploadDownloadUrl } from '@/api/client';
 import { useChat } from '@/state/chat';
-import { displayName, fileTypeLabel, formatSize, isPreviewable, previewKind, type PreviewKind } from '@/lib/files';
+import { artifactDisplayName, displayName, fileTypeLabel, formatSize, isPreviewable, previewKind, type PreviewKind } from '@/lib/files';
 import { FileTypeIcon } from './FileTypeIcon';
 
 type PreviewFile = { sessionId: string; path: string; name: string; mime?: string };
@@ -120,7 +120,7 @@ export function ArtifactsList({ sessionId, onOpen }: { sessionId: string | null;
       )}
       {files.map((f) => {
         const path = String(f.path ?? f.name ?? '');
-        const name = String(f.name ?? path);
+        const name = artifactDisplayName(path, typeof f.name === 'string' ? f.name : undefined);
         const mime = typeof f.mime === 'string' ? f.mime : undefined;
         const kind = previewKind(name, mime);
         const previewable = isPreviewable(name, mime) && !!sessionId;

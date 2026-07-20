@@ -178,7 +178,24 @@ export async function fetchArtifactBlob(sessionId: string, path: string): Promis
   return res.blob();
 }
 
-export async function updateDocument(docId: string, content: string): Promise<void> {
+export interface DocumentRecord {
+  id: string;
+  title: string;
+  language?: string;
+  current_content: string;
+  version_count: number;
+}
+
+export interface DocumentVersion {
+  id: string;
+  version_number: number;
+  content: string;
+  summary?: string;
+  source?: string;
+  created_at?: string;
+}
+
+export async function updateDocument(docId: string, content: string): Promise<DocumentRecord> {
   const res = await fetch(`/api/document/${encodeURIComponent(docId)}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
@@ -186,7 +203,14 @@ export async function updateDocument(docId: string, content: string): Promise<vo
     credentials: 'same-origin',
   });
   if (!res.ok) throw new Error(`Document save failed (HTTP ${res.status})`);
+  return res.json() as Promise<DocumentRecord>;
 }
+
+export const fetchDocumentVersions = (docId: string) =>
+  getJSON<DocumentVersion[]>(`/api/document/${encodeURIComponent(docId)}/versions`);
+
+export const restoreDocumentVersion = (docId: string, version: number) =>
+  postJSON<DocumentRecord>(`/api/document/${encodeURIComponent(docId)}/restore/${version}`, {});
 
 export const artifactsZipUrl = (sessionId: string) => `/api/artifacts/${sessionId}/zip`;
 

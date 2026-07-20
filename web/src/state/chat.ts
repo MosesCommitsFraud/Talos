@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { compactSession, createSession, deleteMessages, editMessage, fetchArtifacts, fetchSession, streamChat } from '@/api/client';
 import type { Artifact, Attachment, Metrics, RagSource, ToolCall } from '@/api/types';
-import { isPreviewable } from '@/lib/files';
+import { documentFileName, isPreviewable } from '@/lib/files';
 import { timestampMs } from '@/lib/utils';
 import { queryClient } from '@/lib/queryClient';
 import { usePrefs } from './prefs';
@@ -543,6 +543,10 @@ export const useChat = create<ChatState>((set, get) => {
               patchAi((m) => ({
                 tools: [...(m.tools ?? []), { tool: String(ev.tool), command: ev.command as string | undefined, status: 'running' }],
               }));
+              if (['create_document', 'write_file', 'generate_image'].includes(String(ev.tool)) && get().sessionId === sid) {
+                useUi.getState().setPanelMode('files');
+                useUi.getState().setArtifactsOpen(true);
+              }
               break;
             case 'tool_output':
               patchAi((m) => ({
@@ -572,9 +576,56 @@ export const useChat = create<ChatState>((set, get) => {
                 revealArtifacts(created);
               }
               break;
-            case 'doc_update':
-              revealArtifacts(typeof ev.doc_id === 'string' ? [`document:${ev.doc_id}`] : []);
+            case 'doc_stream_open': {
+              if (get().sessionId !== sid) break;
+              const current = useUi.getState().preview;
+              const title = typeof ev.title === 'string' ? ev.title : '';
+              const language = typeof ev.language === 'string' ? ev.language : '';
+              const keepCurrent = current?.sessionId === sid && current.path.startsWith('document:');
+              useUi.getState().openPreview({
+                sessionId: sid,
+                path: keepCurrent ? current.path : `streaming-document:${sid}`,
+                name: title ? documentFileName(title, language) : (current?.name ?? 'Document.md'),
+                mime: language === 'markdown' ? 'text/markdown' : 'text/plain',
+                content: keepCurrent ? current.content : '',
+                language: language || current?.language,
+                version: current?.version,
+                streaming: true,
+              });
               break;
+            }
+            case 'doc_stream_delta':
+              if (get().sessionId === sid && typeof ev.content === 'string') {
+                const current = useUi.getState().preview;
+                const language = current?.language || (/^#{1,6}\s|\*\*[^*]+\*\*|^[-*]\s/m.test(ev.content) ? 'markdown' : undefined);
+                useUi.getState().updatePreview({
+                  content: ev.content,
+                  name: current ? documentFileName(current.name, language, ev.content) : undefined,
+                  language,
+                  mime: language === 'markdown' ? 'text/markdown' : current?.mime,
+                  streaming: true,
+                });
+              }
+              break;
+            case 'doc_update': {
+              if (typeof ev.doc_id !== 'string') break;
+              const language = typeof ev.language === 'string' ? ev.language : '';
+              const title = typeof ev.title === 'string' ? ev.title : '';
+              if (get().sessionId === sid) {
+                useUi.getState().openPreview({
+                  sessionId: sid,
+                  path: `document:${ev.doc_id}`,
+                  name: documentFileName(title, language, typeof ev.content === 'string' ? ev.content : ''),
+                  mime: language === 'markdown' ? 'text/markdown' : 'text/plain',
+                  content: typeof ev.content === 'string' ? ev.content : '',
+                  language,
+                  version: typeof ev.version === 'number' ? ev.version : undefined,
+                  streaming: false,
+                });
+              }
+              void queryClient.invalidateQueries({ queryKey: ['artifacts', sid] });
+              break;
+            }
             case 'metrics':
               // Merge rather than replace: per-round events carry only the live
               // context fields, while the final event fills in the rest.

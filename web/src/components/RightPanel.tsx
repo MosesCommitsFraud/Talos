@@ -105,7 +105,7 @@ export function RightPanel() {
               </a>
             </Tooltip>
           )}
-          {mode === 'preview' && preview && (
+          {mode === 'preview' && preview && !preview.streaming && (
             <Tooltip label={t('preview.download')}>
               <a
                 href={artifactDownloadUrl(preview.sessionId, preview.path)}

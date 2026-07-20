@@ -1,7 +1,31 @@
 /** File-type classification shared by the artifact chips (which icon, whether a
  *  file can be previewed) and the preview panel (how to render it). */
 
-export type PreviewKind = 'markdown' | 'text' | 'code' | 'csv' | 'excel' | 'word' | 'pdf' | 'image' | 'none';
+export type PreviewKind = 'markdown' | 'text' | 'code' | 'csv' | 'excel' | 'word' | 'presentation' | 'pdf' | 'image' | 'none';
+
+const DOCUMENT_EXTENSIONS: Record<string, string> = {
+  markdown: 'md', python: 'py', javascript: 'js', typescript: 'ts', html: 'html',
+  css: 'css', json: 'json', yaml: 'yaml', xml: 'xml', sql: 'sql', csv: 'csv',
+  text: 'txt', email: 'eml',
+};
+
+export function documentFileName(title?: string, language?: string, content?: string): string {
+  const clean = (title ?? '').trim().replace(/[\\/]/g, '_');
+  const placeholder = !clean || /^(?:document(?:[:.]|$)|untitled(?:\.|$)|code\s*\()/i.test(clean);
+  const heading = (content ?? '').match(/^#{1,3}\s+(.+)$/m)?.[1]?.trim();
+  const firstLine = (content ?? '').split('\n').map((line) => line.trim()).find(Boolean);
+  const derived = (heading || firstLine || 'Document').replace(/[\\/]/g, '_').slice(0, 60);
+  const base = placeholder ? derived : clean;
+  if (fileExt(base)) return base;
+  return `${base}.${DOCUMENT_EXTENSIONS[(language ?? '').toLowerCase()] ?? 'txt'}`;
+}
+
+export function artifactDisplayName(path: string, name?: string): string {
+  if (name?.trim()) return name;
+  if (path.startsWith('document:')) return 'Document';
+  if (path.startsWith('generated-image:')) return 'Generated image';
+  return path.split(/[\\/]/).pop() || 'Artifact';
+}
 
 export function fileExt(path: string): string {
   const base = path.split(/[\\/]/).pop() ?? path;
@@ -25,6 +49,7 @@ export function previewKind(path: string, mime?: string): PreviewKind {
   if (ext === 'md' || ext === 'markdown') return 'markdown';
   if (ext === 'pdf' || m === 'application/pdf') return 'pdf';
   if (ext === 'docx' || ext === 'doc' || m.includes('wordprocessingml')) return 'word';
+  if (ext === 'pptx' || m.includes('presentationml')) return 'presentation';
   if (ext === 'xlsx' || ext === 'xls' || ext === 'xlsm' || m.includes('spreadsheetml')) return 'excel';
   if (ext === 'csv' || ext === 'tsv') return 'csv';
   if (CODE_EXTS.has(ext)) return 'code';
