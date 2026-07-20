@@ -25,7 +25,7 @@ FUNCTION_TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "bash",
-            "description": "Run a shell command for SHELL tasks: installing packages, inspecting files (ls/cat/grep), git, builds, system info. To run Python code use the `python` tool (not `bash python ...`). To create or edit files use write_file/edit_file (not bash redirects/heredocs).",
+            "description": "Run a modest command in the isolated workspace for shell tasks, file inspection, git, builds, or system information. Software installation is unavailable except for a necessary small Python library via `python -m pip install`. To run Python code use the `python` tool. To create or edit files use write_file/edit_file, not shell redirects.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -39,7 +39,7 @@ FUNCTION_TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "python",
-            "description": "Execute Python code to compute a result or test something. Runs with NO time limit, so heavy/long work is fine. For charts and plots, prefer modern libraries — seaborn (preferred) or plotly over raw matplotlib. To SHOW an image to the user (a finished chart or visual result), save it with a RELATIVE path in your workspace (e.g. `fig.savefig('chart.png', dpi=150, bbox_inches='tight')`) and then call the `show_image` tool with that path. (Images saved under an `output/` directory are also shown automatically.) Do NOT upload via api_call, and do NOT save to /tmp or absolute paths (those won't show).",
+            "description": "Execute a modest Python computation or check in the isolated workspace. For charts, save the finished image to a relative workspace path and call `show_image`; images under `output/` are also shown automatically. Do not save deliverables under /tmp or absolute paths.",
             "parameters": {
                 "type": "object",
                 "properties": {"code": {"type": "string", "description": "Python code to execute"}},

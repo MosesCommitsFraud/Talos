@@ -76,7 +76,7 @@ _AGENT_RULES = """\
 - Code/content >15 lines → ```create_document (NOT in chat). Short snippets OK in chat.
 - Editing an existing document: ALWAYS use ```edit_document with FIND/REPLACE blocks. Do NOT rewrite the whole document with ```update_document unless genuinely changing more than half of it.
 - BIAS TOWARD ACTION on edit requests. If the user says "edit out X", "remove the Y paragraph", "change Z" — JUST DO IT with your best interpretation. Don't ask for clarification on minor ambiguity. The user can undo or re-prompt if wrong.
-- AFTER A TOOL SUCCEEDS, do not second-guess. The success message ("Document edited: v2, 1 edit") means it worked. Reply in ONE short sentence confirming what was done. No re-checking, no replaying the diff in your head, no validation theater.
+- AFTER A TOOL SUCCEEDS, do not repeat it without a reason. Verify the user's requested outcome when the result alone does not establish correctness, then report concisely.
 - AFTER A TOOL FAILS (timeout, error, "Unknown action", "not found"), DO NOT GO SILENT. The user expects a follow-up: either retry with a fix (e.g. correct args, longer-running form, run `tail -f /tmp/foo.log` to see progress, split into smaller steps), OR explicitly tell them "this didn't work, want me to try X instead?". A failed tool is not a stopping condition — only a successful one is.
 - YOU DECLARE WHEN THE JOB IS DONE — not a timer. Keep taking concrete steps while the task still needs them; you have plenty of rounds, so don't rush to quit just because you've made a few calls. There are exactly three ways to end a turn: (1) DONE — before you declare it, sanity-check that every concrete thing the user asked for actually exists or succeeded (file written, edit applied, command exited clean); then stop calling tools and write the final answer (that IS your "done" signal); (2) BLOCKED — you genuinely can't proceed (a capability is missing, permission denied, or data you can't obtain), so say plainly what's blocking you, in a sentence or two, and stop; (3) keep going with the single most useful next step. The only wrong moves are trailing off mid-task without one of these, and repeating a call you already ran.
 
@@ -114,9 +114,9 @@ _API_AGENT_RULES = """\
 - To CREATE a new file or fully rewrite one, call `write_file`. NEVER create or change files through bash — no `>`/`>>` redirects, no `tee`, no `sed -i`/`awk -i`, no heredocs (`cat > f << 'EOF'`).
 - To CHANGE an existing file, call `edit_file` with the exact text to replace (`old_string`/`new_string`, or the `edits` array to fix several spots in one call). Do NOT resend the whole file via `write_file` to change a few lines — that is the failure mode to avoid. If `edit_file` reports the target wasn't found, `read_file` the relevant lines and retry with the exact text.
 - Script iteration loop: `write_file` the script ONCE → run it (`bash` `python script.py`) → on error, fix ONLY the broken lines with `edit_file` → rerun. Never regenerate the script from scratch after an error.
-- Use `bash` for shell tasks: installs, git, builds, running an existing script. Prefer the `read_file`/`grep`/`glob`/`ls` tools over their bash equivalents when exploring code.
+- Use `bash` for modest shell tasks, git inspection, builds, and running an existing script. Prefer the `read_file`/`grep`/`glob`/`ls` tools over their bash equivalents when exploring code. Installation is limited to small, necessary Python libraries as specified by the Talos operating policy.
 ## More rules
-- AFTER A TOOL SUCCEEDS, do not second-guess. A success response means it worked. Reply in ONE short sentence confirming what was done. No verification thinking, no re-analyzing — move on.
+- AFTER A TOOL SUCCEEDS, do not repeat it without a reason. Verify the user's requested outcome when the tool result alone does not establish correctness, then report concisely.
 - AFTER A TOOL FAILS, DO NOT GO SILENT. The user expects a follow-up: retry with a fix, run a diagnostic (`tail`, `ls`, `which`), or explicitly tell them what didn't work and what you'll try next. Failure is not a stopping condition.
 - YOU DECLARE WHEN THE JOB IS DONE — not a timer. Keep taking concrete steps while the task still needs them; don't quit early just because you've made a few calls. Three ways to end a turn: (1) DONE — before declaring it, verify every concrete deliverable the user asked for actually exists or succeeded; then stop calling tools and write the final answer (that IS your "done" signal); (2) BLOCKED — you can't proceed (missing capability, permission denied, unobtainable data), so state plainly what's blocking you and stop; (3) keep going with the single most useful next step. Never trail off mid-task without (1) or (2), and never repeat a call you already ran.
 - "Disable/turn off/enable/turn on <tool>" (shell, browser, documents, etc.) → call `manage_settings` with `{"action":"disable_tool"|"enable_tool","tool":"<name>"}`.
@@ -142,11 +142,11 @@ TOOL_SECTIONS = {
 ```bash
 <shell command>
 ```
-Run any shell command. Output is returned to you. Use for: installing packages, checking files, git, curl, system info, etc. Everything runs INSIDE an isolated sandbox container — never on the host — and your working directory is your private workspace. Whatever you produce should be saved with a RELATIVE path in this workspace, not to `/tmp` or other absolute paths (those may not persist or be visible to the user).
-Use `bash` for SHELL tasks only: installing packages, inspecting files (`ls`, `cat` to READ, `grep`), git, system info, builds. To RUN Python, use the `python` tool — NOT `bash python ...`. NEVER use bash to create or change files — no `>`/`>>` redirects, no heredocs (`cat > f << 'EOF'`), no `tee`, `sed -i`, `awk -i`. To CREATE or fully rewrite a file use `write_file`; to change part of an existing file use `edit_file` (it shows a before/after diff and is far more efficient than rewriting). Those are the way to write files.
-LONG-running commands (package installs, pip/npm, ffmpeg, model downloads, training, builds) are fine — there is NO time limit and they run to completion in the sandbox, so just run them directly.
+Run a modest, non-interactive shell command in the isolated workspace sandbox, never on the host or user's computer. Use for inspecting files, git, system information, builds, and running existing scripts. Save deliverables with RELATIVE workspace paths, not `/tmp` or other absolute paths.
+Use `bash` for SHELL tasks only. To RUN Python, use the `python` tool — NOT `bash python ...`. NEVER use bash to create or change files — no `>`/`>>` redirects, no `tee`, `sed -i`, or `awk -i`. To CREATE or fully rewrite a file use `write_file`; to change part of an existing file use `edit_file`.
+INSTALL LIMIT: only a small, necessary Python library may be installed, using `python -m pip install`. Never install OS or Node packages, global tools, browser binaries, models, datasets, arbitrary URLs, Git repositories, or shell install scripts. Commands may time out and the sandbox may be rebuilt; do not start services or assume installed packages persist.
 SANDBOX LIMITS: stdin/stdout are pipes, so there is NO interactive terminal — `input()`, `curses`, `termios`, `pygame`, and `tkinter` will all fail. Don't try to RUN interactive terminal games or GUI apps here — verify syntax (`python -c "import py_compile; py_compile.compile('x.py')"`) and tell the user to run it themselves in their own terminal. For anything the USER should play/use interactively (games, UIs, demos), prefer a single self-contained HTML file with `<canvas>` + inline JS — save it via `create_document` with language="html" and tell the user to hit the Run / Preview button (▶) in the document editor toolbar; it renders inline in a sandboxed iframe so the game is playable right there. Works from any machine that can reach the Talos UI — no need to copy files out.
-NEVER pipe multi-line Python through `python -c "..."` — shell quoting eats real newlines and `\\n` arrives as literal backslash-n, which Python parses as a line-continuation error on line 1. To run multi-line code, either use the dedicated `python` tool block above, or save to a file first with a quoted HEREDOC (`cat > /tmp/x.py << 'EOF' ... EOF`) and then `python /tmp/x.py`.""",
+NEVER pipe multi-line Python through `python -c "..."`. Use the dedicated `python` tool, or create a workspace script with `write_file` and run it.""",
     "python": """\
 ```python
 <python code>
@@ -244,6 +244,14 @@ Read-only SQL access to the configured external database(s). Use when the user a
     "ask_user": '- ```ask_user``` — Ask the user a multiple-choice question when the task is genuinely ambiguous and the answer changes what you do next (pick an approach, confirm an assumption, choose a target). Args (JSON): {"question": "...", "options": [{"label": "...", "description": "..."?}, ...], "multi": false?}. 2-6 options. The user gets clickable buttons; calling this ENDS your turn and their choice comes back as your next message. Prefer sensible defaults — only ask when you truly can\'t proceed well without their input.',
     "update_plan": '- ```update_plan``` — While executing an approved plan, write the full checklist back with completed steps marked `- [x]`. Args (JSON): {"plan": "- [x] done step\\n- [ ] next step"}. Always pass the COMPLETE checklist, not a diff.',
 }
+
+# Keep the effective Python guidance aligned with the protected sandbox policy.
+# This assignment also replaces older cached prompt text during module import.
+TOOL_SECTIONS["python"] = """\
+```python
+<python code>
+```
+Execute a modest Python computation or check in the isolated workspace. Use this for short, throwaway code. For a longer script, create a `.py` file with `write_file`, run it, and make targeted fixes with `edit_file`. For requested spreadsheets, produce a real `.xlsx` with pandas/openpyxl rather than substituting CSV. Save charts and other deliverables to relative workspace paths; use `show_image` for a finished image. There is no GUI or interactive input. Use installed libraries first. If necessary, install only a small Python library with `python -m pip install` through bash; other software installation is unavailable."""
 
 
 def get_builtin_overrides() -> dict:

@@ -94,6 +94,27 @@ class InputRequest(BaseModel):
     input: str
 
 
+_DISALLOWED_INSTALL_RE = re.compile(
+    r"(?:^|[;&|\n]\s*|\bsudo\s+)"
+    r"(?:apt(?:-get)?|apk|dnf|yum|pacman|zypper|brew)\s+(?:install|add)\b|"
+    r"(?:npm|pnpm|yarn|bun)\s+(?:install|add|i|exec|x|dlx)\b|"
+    r"npx(?:\s|$)|"
+    r"(?:gem|cargo|go|conda|mamba|micromamba)\s+install\b",
+    re.IGNORECASE,
+)
+
+
+def _blocked_install_reason(command: str) -> str | None:
+    """Reject package managers outside the sandbox's narrow Python allowance."""
+    if _DISALLOWED_INSTALL_RE.search(command or ""):
+        return (
+            "Software installation is limited to small Python libraries via "
+            "`python -m pip install`; OS, Node, global, and language-toolchain "
+            "package installs are disabled in this web sandbox."
+        )
+    return None
+
+
 class CwdRequest(BaseModel):
     path: str
 
@@ -630,6 +651,8 @@ async def execute_route(
     wait: float | None = None,
     tail: int | None = None,
 ) -> dict[str, Any]:
+    if reason := _blocked_install_reason(req.command):
+        raise HTTPException(403, reason)
     proc = await _start_process(user_id, chat_id, req)
     if wait is not None:
         try:
@@ -690,6 +713,8 @@ def process_input_route(user_id: str, chat_id: str, process_id: str, req: InputR
     proc = _get_process(user_id, chat_id, process_id)
     if proc.status != "running":
         raise HTTPException(400, "Process has already exited")
+    if reason := _blocked_install_reason(req.input):
+        raise HTTPException(403, reason)
     proc.runner.write_input(req.input.encode("raw_unicode_escape").decode("unicode_escape"))
     return {"status": "ok"}
 
@@ -850,6 +875,8 @@ async def exec_route(user_id: str, chat_id: str, req: ExecRequest) -> ExecRespon
         command = f"/opt/talos-sandbox-venv/bin/python -c {shlex.quote(req.code or req.command)}"
     else:
         command = req.command
+        if reason := _blocked_install_reason(command):
+            raise HTTPException(403, reason)
     started_at = time.time()
     proc = await _start_process(user_id, chat_id, ExecuteRequest(command=command))
     try:

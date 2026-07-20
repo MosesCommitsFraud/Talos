@@ -370,6 +370,12 @@ class ChatProcessor:
         preface = []
         rag_sources = []
 
+        # The shipped policy always leads system context. Presets and the admin
+        # custom prompt may customize behavior but cannot replace this policy.
+        from src.prompt_security import TALOS_SYSTEM_PROMPT
+
+        preface.append({"role": "system", "content": TALOS_SYSTEM_PROMPT})
+
         # Add preset system prompt if specified
         if preset_system_prompt:
             preface.append({"role": "system", "content": preset_system_prompt})

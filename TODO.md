@@ -25,3 +25,5 @@ reload breaks running chat
 running chat disappears when reloading
 rag cant find new documents
 websearch experimental
+system prompt needs to be better
+ragflow erwähnt in rag settings
