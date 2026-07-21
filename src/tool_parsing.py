@@ -116,6 +116,59 @@ def _normalize_dsml(text: str) -> str:
     return t
 
 
+# Document tools stream their content into the editor panel and often carry
+# Markdown that itself contains ``` code fences. The generic non-greedy
+# `_TOOL_BLOCK_RE` mis-handles both: it stops at the FIRST inner ``` (truncating
+# the document) and it needs a CLOSING fence at all (a create_document left
+# unclosed at the end of a message — very common — is dropped entirely, so the
+# document streams into the preview live but is never executed/saved and no
+# artifact chip appears). Scan these fences depth-aware instead.
+_DOC_FENCE_TAGS = ("create_document", "update_document", "edit_document", "suggest_document")
+_DOC_FENCE_OPEN_RE = re.compile(
+    r"^[ \t]*```(" + "|".join(_DOC_FENCE_TAGS) + r")[ \t]*$", re.IGNORECASE
+)
+_CODE_FENCE_RE = re.compile(r"^[ \t]*```([^\s`]*)[ \t]*$")
+
+
+def _iter_document_fences(text: str):
+    """Yield (tag, content, start_line, end_line_exclusive) for each document
+    fence, tracking nested code fences so inner ``` blocks don't end the
+    document early, and treating an unclosed fence as running to end-of-text."""
+    lines = (text or "").split("\n")
+    i = 0
+    n = len(lines)
+    while i < n:
+        m = _DOC_FENCE_OPEN_RE.match(lines[i])
+        if not m:
+            i += 1
+            continue
+        tag = m.group(1).lower()
+        start = i
+        i += 1
+        content_lines = []
+        depth = 0
+        while i < n:
+            fence = _CODE_FENCE_RE.match(lines[i])
+            if fence:
+                lang = fence.group(1)
+                if lang:  # ```lang — opens an inner code block
+                    depth += 1
+                    content_lines.append(lines[i])
+                    i += 1
+                    continue
+                # bare ``` — closes an inner block, or the document block itself
+                if depth > 0:
+                    depth -= 1
+                    content_lines.append(lines[i])
+                    i += 1
+                    continue
+                i += 1  # depth 0: this closes the document fence
+                break
+            content_lines.append(lines[i])
+            i += 1
+        yield tag, "\n".join(content_lines).strip(), start, i
+
+
 # Map model tool names to our tool types
 _TOOL_NAME_MAP = {
     "shell": "bash",
@@ -342,9 +395,20 @@ def parse_tool_blocks(text: str) -> List[ToolBlock]:
     # XML patterns below catch it.
     text = _normalize_dsml(text)
 
+    # Document fences first: scanned depth-aware so Markdown documents with
+    # inner ``` fences aren't truncated and an unclosed create_document at the
+    # end of a message still runs (otherwise it streams to the preview but is
+    # never saved as an artifact). The generic Pattern-1 pass below skips these
+    # tags so it can't also emit a truncated duplicate.
+    for tag, content, _s, _e in _iter_document_fences(text):
+        if content:
+            blocks.append(ToolBlock(tag, content))
+
     # Pattern 1: fenced code blocks
     for m in _TOOL_BLOCK_RE.finditer(text):
         tag = m.group(1).lower()
+        if tag in _DOC_FENCE_TAGS:
+            continue  # handled by the depth-aware document scanner above
         content = m.group(2).strip()
         if not content:
             continue
@@ -392,11 +456,28 @@ def parse_tool_blocks(text: str) -> List[ToolBlock]:
     return blocks
 
 
+def _strip_document_fences(text: str) -> str:
+    """Drop document-fence regions (create_document/update_document/…) line-span
+    aware, so a Markdown document with inner ``` fences — or an unclosed fence —
+    is fully removed from the chat display instead of leaking its raw content."""
+    spans = [(s, e) for _tag, _c, s, e in _iter_document_fences(text)]
+    if not spans:
+        return text
+    lines = text.split("\n")
+    drop = set()
+    for s, e in spans:
+        drop.update(range(s, e))
+    return "\n".join(line for i, line in enumerate(lines) if i not in drop)
+
+
 def strip_tool_blocks(text: str) -> str:
     """Remove executable tool blocks from text for clean display."""
     # Normalize DSML first so its markup gets stripped by the <invoke>
     # / <tool_call> removers below instead of leaking to the user.
     text = _normalize_dsml(text)
+    # Document fences first (depth-aware; handles nested/unclosed fences the
+    # generic regex below cannot), then the standard removers.
+    text = _strip_document_fences(text)
     cleaned = _TOOL_BLOCK_RE.sub("", text)
     cleaned = _TOOL_CALL_RE.sub("", cleaned)
     cleaned = _XML_TOOL_CALL_RE.sub("", cleaned)

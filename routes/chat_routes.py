@@ -956,6 +956,23 @@ def setup_chat_routes(
                                 if _extra_fig:
                                     full_response += _extra_fig
                                     yield f"data: {json.dumps({'delta': _extra_fig})}\n\n"
+                                # Keep round_texts in sync with the post-processed
+                                # answer. Multi-round (agent) turns reload from
+                                # metadata.round_texts, NOT from the saved content,
+                                # so any figure the server stripped here would
+                                # re-appear on reload — and, worse, any figure the
+                                # backstop APPENDED would be missing on reload (it
+                                # lives only in full_response). Mirror both edits
+                                # onto the final round's text so a reopened agent
+                                # turn shows exactly the figures the live turn did.
+                                _rt = (last_metrics or {}).get("round_texts")
+                                if isinstance(_rt, list) and _rt:
+                                    _rt[:] = [
+                                        strip_unauthorized_figures(str(_t), ctx.rag_sources)
+                                        for _t in _rt
+                                    ]
+                                    if _extra_fig:
+                                        _rt[-1] = _rt[-1] + _extra_fig
                                 # Decide RAG citations now that the answer exists:
                                 # keep only sources the answer actually drew on,
                                 # then announce them at the very end (after the

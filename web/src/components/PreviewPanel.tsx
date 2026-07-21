@@ -274,14 +274,27 @@ export function PreviewContent({ preview }: { preview: PreviewFile | null }) {
       {!loading && !error && editing && (
         <textarea value={draft} onChange={(e) => setDraft(e.target.value)} className="h-full min-h-96 w-full resize-none bg-background p-4 font-mono text-[13px] leading-relaxed outline-none" spellCheck={false} />
       )}
-      {!loading && !error && !editing && loaded && <PreviewBody loaded={loaded} name={preview.name} />}
+      {!loading && !error && !editing && loaded && <PreviewBody loaded={loaded} name={preview.name} document={preview.path.startsWith('document:')} />}
       </div>
     </div>
   );
 }
 
-function PreviewBody({ loaded, name }: { loaded: Loaded; name: string }) {
+function PreviewBody({ loaded, name, document = false }: { loaded: Loaded; name: string; document?: boolean }) {
   if (loaded.kind === 'markdown') {
+    // A saved document (create_document / an imported Word doc) is prose the
+    // user wants to READ like a Word file, not a raw markdown listing. Its
+    // content is stored as Markdown, so present it on a paper-like page with
+    // document typography. Plain workspace .md files keep the compact look.
+    if (document) {
+      return (
+        <div className="docx-page bg-muted/30 p-4 sm:p-6">
+          <div className="mx-auto max-w-3xl rounded-sm border bg-card px-8 py-10 shadow-sm sm:px-14 sm:py-16">
+            <Markdown text={loaded.text} />
+          </div>
+        </div>
+      );
+    }
     return <div className="p-4"><Markdown text={loaded.text} /></div>;
   }
   if (loaded.kind === 'text') {
