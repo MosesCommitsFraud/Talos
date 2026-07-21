@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { FileTextIcon, RotateCcwIcon } from 'lucide-react';
 import { fetchArtifactBlob, fetchDocumentVersions, restoreDocumentVersion, updateDocument, type DocumentVersion } from '@/api/client';
@@ -24,7 +24,7 @@ type Loaded =
   | { kind: 'code'; text: string; lang: string }
   | { kind: 'csv'; rows: string[][] }
   | { kind: 'excel'; sheets: { name: string; rows: string[][] }[] }
-  | { kind: 'word'; html: string }
+  | { kind: 'word'; blob: Blob }
   | { kind: 'presentation'; slides: { texts: string[]; images: string[] }[] }
   | { kind: 'blobUrl'; url: string; pdf: boolean };
 
@@ -71,7 +71,7 @@ async function parsePresentation(blob: Blob): Promise<{ texts: string[]; images:
 /** Body of the document viewer (no panel chrome — the shared right panel owns
  *  the border, header and resize). Renders the selected workspace file in the
  *  current theme: markdown/text/code via the shared Markdown renderer, Excel via
- *  SheetJS tables, Word via mammoth→HTML, PDFs/images inline. */
+ *  SheetJS tables, Word via docx-preview (real pages), PDFs/images inline. */
 export function PreviewContent({ preview }: { preview: PreviewFile | null }) {
   const { t } = useTranslation();
 
@@ -118,9 +118,10 @@ export function PreviewContent({ preview }: { preview: PreviewFile | null }) {
           objectUrl.current = url;
           setLoaded({ kind: 'blobUrl', url, pdf: kind === 'pdf' });
         } else if (kind === 'word') {
-          const mammoth = await import('mammoth');
-          const { value } = await mammoth.convertToHtml({ arrayBuffer: await blob.arrayBuffer() });
-          if (!cancelled) setLoaded({ kind: 'word', html: value });
+          // Rendered by docx-preview in <WordDocument> — it reads the .docx's
+          // own styles/fonts/page layout, so keep the raw blob rather than a
+          // lossy semantic HTML conversion.
+          if (!cancelled) setLoaded({ kind: 'word', blob });
         } else if (kind === 'presentation') {
           const slides = await parsePresentation(blob);
           if (!cancelled) setLoaded({ kind: 'presentation', slides });
@@ -280,16 +281,48 @@ export function PreviewContent({ preview }: { preview: PreviewFile | null }) {
   );
 }
 
-/** A paper "page" surface, like the Claude app's document viewer: the rendered
- *  document sits centered on a page (max ~8.5in wide) with generous margins, a
- *  border and a soft shadow, floating on a muted backdrop. Theme-aware so the
- *  page reads as paper in light mode and an elevated surface in dark mode. */
-function DocumentSurface({ children }: { children: ReactNode }) {
+/** Renders a real .docx with docx-preview: it reads the document's own styles,
+ *  fonts, sizes and page geometry and lays it out as actual paper pages (like
+ *  Word / the Claude app), instead of the lossy semantic HTML mammoth produced.
+ *  Renders imperatively into a container ref since the library writes DOM. */
+function WordDocument({ blob }: { blob: Blob }) {
+  const { t } = useTranslation();
+  const host = useRef<HTMLDivElement>(null);
+  const [error, setError] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    const el = host.current;
+    if (!el) return;
+    setError(false);
+    el.innerHTML = '';
+    (async () => {
+      try {
+        const { renderAsync } = await import('docx-preview');
+        if (cancelled) return;
+        await renderAsync(blob, el, undefined, {
+          className: 'docx',
+          inWrapper: true,     // gray backdrop with centered white pages
+          breakPages: true,    // real page breaks, like Word
+          ignoreLastRenderedPageBreak: true,
+          experimental: true,  // tab stops / better layout fidelity
+          useBase64URL: true,  // inline images (no blob-URL lifetime issues)
+          renderHeaders: true,
+          renderFooters: true,
+          renderFootnotes: true,
+          renderEndnotes: true,
+        });
+      } catch {
+        if (!cancelled) setError(true);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [blob]);
+
   return (
-    <div className="min-h-full bg-muted/40 px-3 py-5 sm:px-8 sm:py-8">
-      <div className="mx-auto w-full max-w-[816px] rounded-md border bg-card shadow-sm ring-1 ring-black/5">
-        <div className="px-[7%] py-[6%] sm:px-16 sm:py-14">{children}</div>
-      </div>
+    <div className="docx-host min-h-full">
+      {error && <p className="px-4 py-6 text-center text-xs text-destructive-foreground">{t('preview.error')}</p>}
+      <div ref={host} />
     </div>
   );
 }
@@ -313,8 +346,7 @@ function PreviewBody({ loaded, name }: { loaded: Loaded; name: string }) {
     return <ExcelView sheets={loaded.sheets} />;
   }
   if (loaded.kind === 'word') {
-    // Real .docx rendered to HTML by mammoth — show it on the same paper page.
-    return <DocumentSurface><div className="docx-preview" dangerouslySetInnerHTML={{ __html: loaded.html }} /></DocumentSurface>;
+    return <WordDocument blob={loaded.blob} />;
   }
   if (loaded.kind === 'presentation') {
     return (
