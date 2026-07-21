@@ -288,6 +288,7 @@ const de: typeof en = {
     saveError: 'Dieses Dokument konnte nicht gespeichert werden.',
     currentVersion: 'Aktuelle Version (v{{version}})',
     restoreVersion: 'Diese Version wiederherstellen',
+    pageOf: '{{cur}} / {{total}}',
     empty: 'Wähle eine Datei aus, um sie hier anzuzeigen.',
   },
   artifacts: {

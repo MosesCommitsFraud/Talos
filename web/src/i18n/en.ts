@@ -286,6 +286,7 @@ const en = {
     saveError: 'Could not save this document.',
     currentVersion: 'Current version (v{{version}})',
     restoreVersion: 'Restore this version',
+    pageOf: '{{cur}} / {{total}}',
     empty: 'Select a file to preview it here.',
   },
   artifacts: {

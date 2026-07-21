@@ -287,13 +287,14 @@ export function PreviewContent({ preview }: { preview: PreviewFile | null }) {
  *  makes it faithful: rendered into the app's DOM, the global CSS reset (Tailwind
  *  preflight) strips table borders, overrides fonts, and flattens spacing. An
  *  iframe has its own clean document, so only docx-preview's own styles apply.
- *  The iframe auto-sizes to its content so the surrounding panel does the
- *  scrolling (one continuous scroll through all pages). */
+ *  The iframe fills the panel and scrolls its own content, so a "current / total"
+ *  page badge can float over a fixed viewport (bottom-left) and update on scroll. */
 function WordDocument({ blob }: { blob: Blob }) {
   const { t } = useTranslation();
   const frameRef = useRef<HTMLIFrameElement>(null);
+  const cleanupRef = useRef<(() => void) | undefined>(undefined);
   const [error, setError] = useState(false);
-  const [height, setHeight] = useState(480);
+  const [page, setPage] = useState<{ cur: number; total: number }>({ cur: 1, total: 0 });
 
   useEffect(() => {
     let cancelled = false;
@@ -301,6 +302,7 @@ function WordDocument({ blob }: { blob: Blob }) {
     const doc = frame?.contentDocument;
     if (!frame || !doc) return;
     setError(false);
+    setPage({ cur: 1, total: 0 });
     // Fresh, reset-free document for docx-preview to own.
     doc.open();
     doc.write('<!doctype html><html><head><meta charset="utf-8"></head><body></body></html>');
@@ -323,26 +325,57 @@ function WordDocument({ blob }: { blob: Blob }) {
           renderEndnotes: true,
         });
         if (cancelled || !frame.contentDocument) return;
-        // Grow the iframe to fit its content; re-measure after fonts/images
-        // settle so a late-loading image doesn't clip the last page.
-        const measure = () => {
-          const b = frame.contentDocument?.body;
-          if (b && !cancelled) setHeight(b.scrollHeight + 4);
+        const win = frame.contentWindow;
+        if (!win) return;
+        const pages = () => Array.from(frame.contentDocument?.querySelectorAll('section.docx') ?? []);
+        setPage({ cur: 1, total: pages().length });
+        // Current page = the last page whose top has scrolled above a marker line
+        // ~30% down the viewport (so a page counts as "current" once it dominates
+        // the view). Recomputed cheaply on each scroll/resize via rAF.
+        let raf = 0;
+        const update = () => {
+          raf = 0;
+          const secs = pages();
+          if (!secs.length || cancelled) return;
+          const marker = (frame.contentDocument?.documentElement.clientHeight ?? 0) * 0.3;
+          let cur = 1;
+          for (let i = 0; i < secs.length; i++) {
+            if (secs[i].getBoundingClientRect().top <= marker) cur = i + 1;
+            else break;
+          }
+          setPage({ cur, total: secs.length });
         };
-        measure();
-        window.setTimeout(measure, 250);
-        window.setTimeout(measure, 1000);
+        const onScroll = () => { if (!raf) raf = win.requestAnimationFrame(update); };
+        win.addEventListener('scroll', onScroll, { passive: true });
+        window.addEventListener('resize', onScroll);
+        cleanupRef.current = () => {
+          win.removeEventListener('scroll', onScroll);
+          window.removeEventListener('resize', onScroll);
+          if (raf) win.cancelAnimationFrame(raf);
+        };
+        update();
+        // Re-measure once images/fonts settle (may change page count/offsets).
+        window.setTimeout(update, 400);
       } catch {
         if (!cancelled) setError(true);
       }
     })();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+      cleanupRef.current?.();
+      cleanupRef.current = undefined;
+    };
   }, [blob]);
 
   return (
-    <div className="min-h-full bg-muted/40">
+    <div className="relative h-full bg-muted/40">
       {error && <p className="px-4 py-6 text-center text-xs text-destructive-foreground">{t('preview.error')}</p>}
-      <iframe ref={frameRef} title="Word document" className="block w-full border-0" style={{ height }} />
+      <iframe ref={frameRef} title="Word document" className="block h-full w-full border-0" />
+      {page.total > 0 && (
+        <div className="pointer-events-none absolute bottom-3 left-3 rounded-full border bg-background/90 px-2.5 py-1 text-[11px] font-medium tabular-nums text-muted-foreground shadow-sm backdrop-blur">
+          {t('preview.pageOf', { cur: page.cur, total: page.total, defaultValue: '{{cur}} / {{total}}' })}
+        </div>
+      )}
     </div>
   );
 }
