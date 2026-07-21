@@ -255,9 +255,18 @@ body::after {
 .chat-markdown th, .chat-markdown td { border: 1px solid var(--border); padding: 0.35rem 0.45rem; text-align: left; }
 
 /* ── Word (.docx) preview — mammoth-rendered HTML, themed to match the app ── */
-.docx-preview { color: var(--foreground); line-height: 1.65; overflow-wrap: anywhere; }
+/* Serif document typography so a real .docx reads like a Word page (matches the
+   markdown-document .docx-page look), on the paper surface the wrapper gives. */
+.docx-preview {
+  color: var(--foreground);
+  font-family: Georgia, Cambria, 'Times New Roman', serif;
+  font-size: 15.5px;
+  line-height: 1.75;
+  overflow-wrap: anywhere;
+}
 .docx-preview > :first-child { margin-top: 0; }
-.docx-preview p { margin: 0.6rem 0; }
+.docx-preview p { margin: 0.75rem 0; }
+.docx-preview code, .docx-preview pre { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
 .docx-preview h1, .docx-preview h2, .docx-preview h3,
 .docx-preview h4, .docx-preview h5, .docx-preview h6 { font-weight: 600; margin: 1.1em 0 0.4em; line-height: 1.3; }
 .docx-preview h1 { font-size: 1.5em; }
@@ -270,28 +279,6 @@ body::after {
 .docx-preview table { width: 100%; border-collapse: collapse; margin: 0.8rem 0; font-size: 0.92em; }
 .docx-preview th, .docx-preview td { border: 1px solid var(--border); padding: 0.35rem 0.5rem; text-align: left; }
 .docx-preview img { max-width: 100%; height: auto; }
-
-/* Word-like "page" for prose documents in the preview panel. The content is
-   stored as Markdown (a create_document doc, or an imported Word file), so we
-   render it to READ like a document: serif body, roomy leading and a proper
-   heading scale, on the paper page the wrapper provides. Code stays monospace. */
-.docx-page .chat-markdown {
-  font-family: Georgia, Cambria, 'Times New Roman', serif;
-  font-size: 15.5px;
-  line-height: 1.75;
-}
-.docx-page .chat-markdown h1, .docx-page .chat-markdown h2,
-.docx-page .chat-markdown h3, .docx-page .chat-markdown h4 {
-  font-family: Georgia, Cambria, 'Times New Roman', serif;
-  line-height: 1.3;
-}
-.docx-page .chat-markdown h1 { font-size: 1.9em; margin: 0.1em 0 0.5em; }
-.docx-page .chat-markdown h2 { font-size: 1.45em; }
-.docx-page .chat-markdown h3 { font-size: 1.2em; }
-.docx-page .chat-markdown p { margin: 0.75rem 0; }
-.docx-page .chat-markdown code, .docx-page .chat-markdown pre {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-}
 
 /* highlight.js — one set per scheme */
 .hljs-keyword, .hljs-selector-tag { color: #a626a4; }

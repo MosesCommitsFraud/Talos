@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { FileTextIcon, RotateCcwIcon } from 'lucide-react';
 import { fetchArtifactBlob, fetchDocumentVersions, restoreDocumentVersion, updateDocument, type DocumentVersion } from '@/api/client';
@@ -274,27 +274,30 @@ export function PreviewContent({ preview }: { preview: PreviewFile | null }) {
       {!loading && !error && editing && (
         <textarea value={draft} onChange={(e) => setDraft(e.target.value)} className="h-full min-h-96 w-full resize-none bg-background p-4 font-mono text-[13px] leading-relaxed outline-none" spellCheck={false} />
       )}
-      {!loading && !error && !editing && loaded && <PreviewBody loaded={loaded} name={preview.name} document={preview.path.startsWith('document:')} />}
+      {!loading && !error && !editing && loaded && <PreviewBody loaded={loaded} name={preview.name} />}
       </div>
     </div>
   );
 }
 
-function PreviewBody({ loaded, name, document = false }: { loaded: Loaded; name: string; document?: boolean }) {
+/** A paper "page" surface, like the Claude app's document viewer: the rendered
+ *  document sits centered on a page (max ~8.5in wide) with generous margins, a
+ *  border and a soft shadow, floating on a muted backdrop. Theme-aware so the
+ *  page reads as paper in light mode and an elevated surface in dark mode. */
+function DocumentSurface({ children }: { children: ReactNode }) {
+  return (
+    <div className="min-h-full bg-muted/40 px-3 py-5 sm:px-8 sm:py-8">
+      <div className="mx-auto w-full max-w-[816px] rounded-md border bg-card shadow-sm ring-1 ring-black/5">
+        <div className="px-[7%] py-[6%] sm:px-16 sm:py-14">{children}</div>
+      </div>
+    </div>
+  );
+}
+
+function PreviewBody({ loaded, name }: { loaded: Loaded; name: string }) {
   if (loaded.kind === 'markdown') {
-    // A saved document (create_document / an imported Word doc) is prose the
-    // user wants to READ like a Word file, not a raw markdown listing. Its
-    // content is stored as Markdown, so present it on a paper-like page with
-    // document typography. Plain workspace .md files keep the compact look.
-    if (document) {
-      return (
-        <div className="docx-page bg-muted/30 p-4 sm:p-6">
-          <div className="mx-auto max-w-3xl rounded-sm border bg-card px-8 py-10 shadow-sm sm:px-14 sm:py-16">
-            <Markdown text={loaded.text} />
-          </div>
-        </div>
-      );
-    }
+    // Markdown stays a plain, pageless reader — it isn't a Word document. Only
+    // real Office files (.docx/.xlsx/.pptx) get the paper-page / grid treatment.
     return <div className="p-4"><Markdown text={loaded.text} /></div>;
   }
   if (loaded.kind === 'text') {
@@ -304,27 +307,30 @@ function PreviewBody({ loaded, name, document = false }: { loaded: Loaded; name:
     return <div className="p-4"><Markdown text={'```' + loaded.lang + '\n' + loaded.text + '\n```'} /></div>;
   }
   if (loaded.kind === 'csv') {
-    return <div className="p-3 overflow-auto"><DataTable rows={loaded.rows} /></div>;
+    return <div className="min-h-full bg-muted/40 p-3"><SpreadsheetGrid rows={loaded.rows} /></div>;
   }
   if (loaded.kind === 'excel') {
     return <ExcelView sheets={loaded.sheets} />;
   }
   if (loaded.kind === 'word') {
-    return <div className="docx-preview p-5" dangerouslySetInnerHTML={{ __html: loaded.html }} />;
+    // Real .docx rendered to HTML by mammoth — show it on the same paper page.
+    return <DocumentSurface><div className="docx-preview" dangerouslySetInnerHTML={{ __html: loaded.html }} /></DocumentSurface>;
   }
   if (loaded.kind === 'presentation') {
     return (
-      <div className="space-y-5 bg-muted/30 p-4">
+      <div className="space-y-5 bg-muted/40 p-4">
         {loaded.slides.map((slide, index) => (
-          <section key={index} className="mx-auto aspect-video w-full max-w-4xl overflow-auto rounded-md border bg-white p-8 text-slate-900 shadow-sm">
-            <div className="mb-3 text-[11px] font-medium text-slate-400">{index + 1}</div>
-            <div className="space-y-3">
-              {slide.texts.map((text, i) => i === 0
-                ? <h2 key={i} className="text-2xl font-semibold">{text}</h2>
-                : <p key={i} className="text-base leading-relaxed">{text}</p>)}
-            </div>
-            {slide.images.length > 0 && <div className="mt-5 grid grid-cols-2 gap-3">{slide.images.map((src, i) => <img key={i} src={src} alt="" className="max-h-64 w-full object-contain" />)}</div>}
-          </section>
+          <figure key={index} className="mx-auto w-full max-w-4xl">
+            <section className="flex aspect-video w-full flex-col overflow-auto rounded-lg border bg-white p-8 text-slate-900 shadow-sm ring-1 ring-black/5">
+              <div className="space-y-3">
+                {slide.texts.map((text, i) => i === 0
+                  ? <h2 key={i} className="text-2xl font-semibold leading-tight">{text}</h2>
+                  : <p key={i} className="text-base leading-relaxed">{text}</p>)}
+              </div>
+              {slide.images.length > 0 && <div className="mt-5 grid grid-cols-2 gap-3">{slide.images.map((src, i) => <img key={i} src={src} alt="" className="max-h-64 w-full object-contain" />)}</div>}
+            </section>
+            <figcaption className="mt-1.5 text-center text-[11px] font-medium text-muted-foreground">{index + 1} / {loaded.slides.length}</figcaption>
+          </figure>
         ))}
       </div>
     );
@@ -334,8 +340,8 @@ function PreviewBody({ loaded, name, document = false }: { loaded: Loaded; name:
     return <iframe src={loaded.url} title={name} className="h-full w-full border-0 bg-white" />;
   }
   return (
-    <div className="flex h-full items-center justify-center p-4">
-      <img src={loaded.url} alt={name} className="max-h-full max-w-full object-contain" />
+    <div className="flex h-full items-center justify-center bg-muted/40 p-4">
+      <img src={loaded.url} alt={name} className="max-h-full max-w-full rounded-md object-contain shadow-sm" />
     </div>
   );
 }
@@ -344,9 +350,15 @@ function ExcelView({ sheets }: { sheets: { name: string; rows: string[][] }[] })
   const [active, setActive] = useState(0);
   const sheet = sheets[active];
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
+    <div className="flex min-h-0 flex-1 flex-col bg-muted/40">
+      <div className="min-h-0 flex-1 overflow-auto p-3">
+        {sheet && sheet.rows.length > 0 ? <SpreadsheetGrid rows={sheet.rows} /> : (
+          <p className="px-1 py-4 text-xs text-muted-foreground">—</p>
+        )}
+      </div>
+      {/* Sheet tabs pinned to the bottom, like a spreadsheet app. */}
       {sheets.length > 1 && (
-        <div className="flex shrink-0 gap-1 overflow-x-auto border-b px-2 py-1.5">
+        <div className="flex shrink-0 gap-1 overflow-x-auto border-t bg-card px-2 py-1.5">
           {sheets.map((s, i) => (
             <button
               key={s.name}
@@ -361,42 +373,56 @@ function ExcelView({ sheets }: { sheets: { name: string; rows: string[][] }[] })
           ))}
         </div>
       )}
-      <div className="min-h-0 flex-1 overflow-auto p-3">
-        {sheet && sheet.rows.length > 0 ? <DataTable rows={sheet.rows} /> : (
-          <p className="px-1 py-4 text-xs text-muted-foreground">—</p>
-        )}
-      </div>
     </div>
   );
 }
 
-/** Renders a matrix as a bordered, themed table; the first row is the header. */
-function DataTable({ rows }: { rows: string[][] }) {
+/** Spreadsheet column label for a 0-based index: 0→A, 25→Z, 26→AA, … */
+function columnLabel(index: number): string {
+  let label = '';
+  let n = index + 1;
+  while (n > 0) {
+    const rem = (n - 1) % 26;
+    label = String.fromCharCode(65 + rem) + label;
+    n = Math.floor((n - 1) / 26);
+  }
+  return label;
+}
+
+/** A real spreadsheet grid — A/B/C column headers, a row-number gutter, sticky
+ *  headers and gridlines — so .xlsx/.csv artifacts read like a spreadsheet app
+ *  rather than a plain HTML table. Every row is data (no header row is stolen),
+ *  matching how a sheet actually looks. */
+function SpreadsheetGrid({ rows }: { rows: string[][] }) {
   if (rows.length === 0) return <p className="px-1 py-4 text-xs text-muted-foreground">—</p>;
-  const [head, ...body] = rows;
   const cols = rows.reduce((n, r) => Math.max(n, r.length), 0);
-  const pad = (r: string[]) => Array.from({ length: cols }, (_, i) => r[i] ?? '');
+  const colIdx = Array.from({ length: cols }, (_, i) => i);
   return (
-    <table className="w-full border-collapse text-[13px]">
-      <thead>
-        <tr>
-          {pad(head).map((cell, i) => (
-            <th key={i} className="sticky top-0 border bg-muted px-2 py-1 text-left font-medium">{String(cell)}</th>
-          ))}
-        </tr>
-      </thead>
-      <tbody>
-        {body.map((r, ri) => (
-          <tr key={ri} className="even:bg-muted/30">
-            {pad(r).map((cell, ci) => (
-              <td key={ci} className="border px-2 py-1 align-top">{String(cell)}</td>
+    <div className="inline-block min-w-full overflow-hidden rounded-md border bg-card shadow-sm">
+      <table className="border-collapse text-[13px] tabular-nums">
+        <thead>
+          <tr>
+            <th className="sticky left-0 top-0 z-20 w-11 border border-border/70 bg-muted" />
+            {colIdx.map((i) => (
+              <th key={i} className="sticky top-0 z-10 min-w-[84px] border border-border/70 bg-muted px-2 py-1 text-center text-xs font-medium text-muted-foreground">{columnLabel(i)}</th>
             ))}
           </tr>
-        ))}
-      </tbody>
-    </table>
+        </thead>
+        <tbody>
+          {rows.map((r, ri) => (
+            <tr key={ri}>
+              <th className="sticky left-0 z-10 border border-border/70 bg-muted px-2 py-1 text-center text-xs font-normal text-muted-foreground">{ri + 1}</th>
+              {colIdx.map((ci) => (
+                <td key={ci} className="max-w-[28rem] truncate border border-border/60 px-2 py-1 align-top" title={r[ci] ?? ''}>{r[ci] ?? ''}</td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   );
 }
+
 
 /** Minimal RFC-4180-ish parser: handles quoted fields, escaped quotes and the
  *  chosen separator inside quotes. Good enough for previewing agent output. */
