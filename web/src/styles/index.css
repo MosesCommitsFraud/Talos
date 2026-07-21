@@ -254,20 +254,6 @@ body::after {
 .chat-markdown table { width: 100%; border-collapse: collapse; font-size: 0.9em; }
 .chat-markdown th, .chat-markdown td { border: 1px solid var(--border); padding: 0.35rem 0.45rem; text-align: left; }
 
-/* ── Word (.docx) preview — rendered by docx-preview as real paper pages ── */
-/* The library reads the document's own styles/fonts/sizes and lays out actual
-   pages inside a `.docx-wrapper` (gray backdrop + centered white pages). We only
-   re-tint the backdrop to the app's muted tone and give each page a soft shadow;
-   everything inside a page keeps the document's real Word formatting untouched. */
-.docx-host .docx-wrapper {
-  background: var(--muted);
-  padding: 1.5rem 1rem;
-  gap: 1.25rem;
-}
-.docx-host .docx-wrapper > section.docx {
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12), 0 8px 28px rgba(0, 0, 0, 0.10);
-  border-radius: 2px;
-}
 
 /* highlight.js — one set per scheme */
 .hljs-keyword, .hljs-selector-tag { color: #a626a4; }

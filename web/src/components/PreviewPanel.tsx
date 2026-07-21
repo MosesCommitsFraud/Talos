@@ -281,30 +281,40 @@ export function PreviewContent({ preview }: { preview: PreviewFile | null }) {
   );
 }
 
-/** Renders a real .docx with docx-preview: it reads the document's own styles,
- *  fonts, sizes and page geometry and lays it out as actual paper pages (like
- *  Word / the Claude app), instead of the lossy semantic HTML mammoth produced.
- *  Renders imperatively into a container ref since the library writes DOM. */
+/** Renders a real .docx with docx-preview inside an ISOLATED iframe. The library
+ *  reads the document's own styles, fonts, sizes and page geometry and lays it
+ *  out as actual paper pages (like Word / the Claude app). The iframe is what
+ *  makes it faithful: rendered into the app's DOM, the global CSS reset (Tailwind
+ *  preflight) strips table borders, overrides fonts, and flattens spacing. An
+ *  iframe has its own clean document, so only docx-preview's own styles apply.
+ *  The iframe auto-sizes to its content so the surrounding panel does the
+ *  scrolling (one continuous scroll through all pages). */
 function WordDocument({ blob }: { blob: Blob }) {
   const { t } = useTranslation();
-  const host = useRef<HTMLDivElement>(null);
+  const frameRef = useRef<HTMLIFrameElement>(null);
   const [error, setError] = useState(false);
+  const [height, setHeight] = useState(480);
 
   useEffect(() => {
     let cancelled = false;
-    const el = host.current;
-    if (!el) return;
+    const frame = frameRef.current;
+    const doc = frame?.contentDocument;
+    if (!frame || !doc) return;
     setError(false);
-    el.innerHTML = '';
+    // Fresh, reset-free document for docx-preview to own.
+    doc.open();
+    doc.write('<!doctype html><html><head><meta charset="utf-8"></head><body></body></html>');
+    doc.close();
     (async () => {
       try {
         const { renderAsync } = await import('docx-preview');
-        if (cancelled) return;
-        await renderAsync(blob, el, undefined, {
+        if (cancelled || !frame.contentDocument) return;
+        const idoc = frame.contentDocument;
+        await renderAsync(blob, idoc.body, idoc.head, {
           className: 'docx',
           inWrapper: true,     // gray backdrop with centered white pages
           breakPages: true,    // real page breaks, like Word
-          ignoreLastRenderedPageBreak: true,
+          ignoreLastRenderedPageBreak: false, // honor Word's page-break marks so pages show
           experimental: true,  // tab stops / better layout fidelity
           useBase64URL: true,  // inline images (no blob-URL lifetime issues)
           renderHeaders: true,
@@ -312,6 +322,16 @@ function WordDocument({ blob }: { blob: Blob }) {
           renderFootnotes: true,
           renderEndnotes: true,
         });
+        if (cancelled || !frame.contentDocument) return;
+        // Grow the iframe to fit its content; re-measure after fonts/images
+        // settle so a late-loading image doesn't clip the last page.
+        const measure = () => {
+          const b = frame.contentDocument?.body;
+          if (b && !cancelled) setHeight(b.scrollHeight + 4);
+        };
+        measure();
+        window.setTimeout(measure, 250);
+        window.setTimeout(measure, 1000);
       } catch {
         if (!cancelled) setError(true);
       }
@@ -320,9 +340,9 @@ function WordDocument({ blob }: { blob: Blob }) {
   }, [blob]);
 
   return (
-    <div className="docx-host min-h-full">
+    <div className="min-h-full bg-muted/40">
       {error && <p className="px-4 py-6 text-center text-xs text-destructive-foreground">{t('preview.error')}</p>}
-      <div ref={host} />
+      <iframe ref={frameRef} title="Word document" className="block w-full border-0" style={{ height }} />
     </div>
   );
 }
