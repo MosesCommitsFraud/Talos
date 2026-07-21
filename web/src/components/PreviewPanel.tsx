@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { FileTextIcon, RotateCcwIcon } from 'lucide-react';
-import { fetchArtifactBlob, fetchDocumentVersions, restoreDocumentVersion, updateDocument, type DocumentVersion } from '@/api/client';
+import { fetchArtifactBlob, fetchArtifactPreviewBlob, fetchDocumentVersions, restoreDocumentVersion, updateDocument, type DocumentVersion } from '@/api/client';
 import { fileExt, previewKind, type PreviewKind } from '@/lib/files';
 import { queryClient } from '@/lib/queryClient';
 import { useUi, type PreviewFile } from '@/state/ui';
@@ -71,7 +71,7 @@ async function parsePresentation(blob: Blob): Promise<{ texts: string[]; images:
 /** Body of the document viewer (no panel chrome — the shared right panel owns
  *  the border, header and resize). Renders the selected workspace file in the
  *  current theme: markdown/text/code via the shared Markdown renderer, Excel via
- *  SheetJS tables, Word via docx-preview (real pages), PDFs/images inline. */
+ *  SheetJS tables, Word via a server-rendered PDF, PDFs/images inline. */
 export function PreviewContent({ preview }: { preview: PreviewFile | null }) {
   const { t } = useTranslation();
 
@@ -111,6 +111,19 @@ export function PreviewContent({ preview }: { preview: PreviewFile | null }) {
 
     (async () => {
       try {
+        if (kind === 'word') {
+          try {
+            const pdf = await fetchArtifactPreviewBlob(preview.sessionId, preview.path);
+            if (cancelled) return;
+            const url = URL.createObjectURL(pdf);
+            objectUrl.current = url;
+            setLoaded({ kind: 'blobUrl', url, pdf: true });
+            return;
+          } catch {
+            // Keep the browser renderer as a fallback for local setups without
+            // LibreOffice and while a newly deployed sandbox is restarting.
+          }
+        }
         const blob = await fetchArtifactBlob(preview.sessionId, preview.path);
         if (cancelled) return;
         if (kind === 'image' || kind === 'pdf') {
@@ -118,9 +131,6 @@ export function PreviewContent({ preview }: { preview: PreviewFile | null }) {
           objectUrl.current = url;
           setLoaded({ kind: 'blobUrl', url, pdf: kind === 'pdf' });
         } else if (kind === 'word') {
-          // Rendered by docx-preview in <WordDocument> — it reads the .docx's
-          // own styles/fonts/page layout, so keep the raw blob rather than a
-          // lossy semantic HTML conversion.
           if (!cancelled) setLoaded({ kind: 'word', blob });
         } else if (kind === 'presentation') {
           const slides = await parsePresentation(blob);

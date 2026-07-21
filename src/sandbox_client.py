@@ -232,3 +232,22 @@ async def download_artifact(
         ctype = resp.headers.get("content-type", "application/octet-stream")
         fname = Path(path).name
         return resp.content, ctype, fname
+
+
+async def preview_office_artifact(
+    *, owner: str | None, session_id: str | None, path: str
+) -> bytes:
+    """Render a workspace Word document to PDF in the sandbox."""
+    if not session_id:
+        raise RuntimeError("office preview requires a session_id")
+    user_path = quote(safe_user_id(owner), safe="")
+    session_path = quote(session_id, safe="")
+    async with httpx.AsyncClient(
+        headers=_SANDBOX_HEADERS, timeout=httpx.Timeout(120.0, connect=15.0)
+    ) as client:
+        resp = await client.get(
+            f"{SANDBOX_URL}/users/{user_path}/workspaces/{session_path}/files/office-preview",
+            params={"path": path},
+        )
+        resp.raise_for_status()
+        return resp.content

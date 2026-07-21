@@ -21,6 +21,9 @@ RUN sed -i 's|http://deb.debian.org|https://deb.debian.org|g' /etc/apt/sources.l
     freetds-dev \
     ffmpeg \
     file \
+    fonts-crosextra-caladea \
+    fonts-crosextra-carlito \
+    fonts-liberation \
     gfortran \
     git \
     gosu \
@@ -29,6 +32,7 @@ RUN sed -i 's|http://deb.debian.org|https://deb.debian.org|g' /etc/apt/sources.l
     iputils-ping \
     jq \
     less \
+    libreoffice-writer \
     lsof \
     make \
     netcat-openbsd \

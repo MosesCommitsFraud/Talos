@@ -166,6 +166,9 @@ export async function fetchArtifacts(sessionId: string): Promise<import('./types
 export const artifactDownloadUrl = (sessionId: string, path: string) =>
   `/api/artifacts/${encodeURIComponent(sessionId)}/download?path=${encodeURIComponent(path)}`;
 
+export const artifactPreviewUrl = (sessionId: string, path: string) =>
+  `/api/artifacts/${encodeURIComponent(sessionId)}/preview?path=${encodeURIComponent(path)}`;
+
 /** Fetch a workspace file's raw bytes — used by the preview panel to render
  *  Word/Excel/PDF (which need the binary) and text/markdown (decoded to text). */
 export async function fetchArtifactBlob(sessionId: string, path: string): Promise<Blob> {
@@ -175,6 +178,13 @@ export async function fetchArtifactBlob(sessionId: string, path: string): Promis
     throw new Error('Not authenticated');
   }
   if (!res.ok) throw new Error(`artifact ${path}: ${res.status}`);
+  return res.blob();
+}
+
+export async function fetchArtifactPreviewBlob(sessionId: string, path: string): Promise<Blob> {
+  const res = await fetch(artifactPreviewUrl(sessionId, path), { credentials: 'same-origin' });
+  if (res.status === 401) notifyUnauthenticated();
+  if (!res.ok) throw new Error(`artifact preview ${path}: ${res.status}`);
   return res.blob();
 }
 

@@ -590,6 +590,41 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
             headers={"Content-Disposition": f'{disp}; filename="{fname}"'},
         )
 
+    # ---- GET /api/artifacts/{session_id}/preview — high-fidelity rendered preview ----
+    @router.get("/api/artifacts/{session_id}/preview")
+    async def preview_artifact_route(request: Request, session_id: str, path: str = Query(...)):
+        from fastapi.responses import Response
+        from src.sandbox_client import preview_office_artifact, sandbox_enabled
+
+        if not path.lower().endswith((".doc", ".docx")):
+            raise HTTPException(400, "Preview conversion is only available for Word documents")
+        db = SessionLocal()
+        try:
+            owners = _workspace_owners(db, request, session_id)
+        finally:
+            db.close()
+        if not sandbox_enabled():
+            raise HTTPException(404, "Sandbox not available")
+
+        last_error = None
+        for owner in owners:
+            try:
+                content = await preview_office_artifact(
+                    owner=owner, session_id=session_id, path=path
+                )
+                return Response(
+                    content=content,
+                    media_type="application/pdf",
+                    headers={
+                        "Content-Disposition": "inline",
+                        "Cache-Control": "no-store",
+                    },
+                )
+            except Exception as exc:
+                last_error = exc
+        logger.warning("artifact preview failed for %s (%s): %s", session_id, path, last_error)
+        raise HTTPException(422, "Document preview conversion failed")
+
     # ---- DELETE /api/artifacts/{session_id}?path= — remove a workspace file ----
     @router.delete("/api/artifacts/{session_id}")
     async def delete_artifact_route(request: Request, session_id: str, path: str = Query(...)):

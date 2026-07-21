@@ -150,7 +150,7 @@ class ListRequest(BaseModel):
 MAX_READ_CHARS = 20_000
 MAX_OUTPUT_CHARS = 10_000
 MAX_DIFF_LINES = 400
-SKIP_DIRS = {".git", "node_modules", "__pycache__", ".venv", "venv", "dist", "build", ".pytest_cache", ".mypy_cache"}
+SKIP_DIRS = {".git", ".talos-preview", "node_modules", "__pycache__", ".venv", "venv", "dist", "build", ".pytest_cache", ".mypy_cache"}
 PROCESS_LOG_ROOT = STATE_PATH.parent / "processes"
 PROCESS_RETENTION_SECONDS = 3600
 SESSION_CWD_TTL_SECONDS = int(os.getenv("TALOS_SANDBOX_SESSION_CWD_TTL", "604800"))
@@ -1466,6 +1466,54 @@ def download_file_route(user_id: str, chat_id: str, path: str):
         raise HTTPException(404, "File not found")
     mime = mimetypes.guess_type(target.name)[0] or "application/octet-stream"
     return FileResponse(str(target), media_type=mime, filename=target.name)
+
+
+@app.get("/users/{user_id}/workspaces/{chat_id}/files/office-preview")
+def office_preview_route(user_id: str, chat_id: str, path: str):
+    """Convert a Word file to PDF using a real office layout engine."""
+    from fastapi.responses import FileResponse
+
+    name, workspace = _workspace(user_id, chat_id)
+    target = _safe_path(workspace, path)
+    if not target.is_file():
+        raise HTTPException(404, "File not found")
+    if target.suffix.lower() not in {".doc", ".docx"}:
+        raise HTTPException(400, "Only Word documents can be previewed")
+
+    try:
+        digest = hashlib.sha256(target.read_bytes()).hexdigest()
+        cache_dir = workspace / ".talos-preview" / digest
+        pdf_path = cache_dir / f"{target.stem}.pdf"
+        if not pdf_path.is_file():
+            cache_dir.mkdir(parents=True, exist_ok=True)
+            _chown_user_chain(name, workspace, cache_dir)
+            profile = cache_dir / f"profile-{uuid.uuid4().hex}"
+            profile.mkdir()
+            _chown_user_chain(name, workspace, profile)
+            try:
+                result = subprocess.run(
+                    [
+                        "gosu", name, "soffice", "--headless", "--nologo", "--nodefault",
+                        "--nolockcheck", "--nofirststartwizard",
+                        f"-env:UserInstallation={profile.as_uri()}",
+                        "--convert-to", "pdf:writer_pdf_Export",
+                        "--outdir", str(cache_dir), str(target),
+                    ],
+                    capture_output=True,
+                    text=True,
+                    timeout=90,
+                )
+            finally:
+                shutil.rmtree(profile, ignore_errors=True)
+            if result.returncode != 0 or not pdf_path.is_file():
+                detail = (result.stderr or result.stdout or "conversion failed").strip()
+                raise HTTPException(422, detail[-500:])
+    except subprocess.TimeoutExpired:
+        raise HTTPException(504, "Word preview conversion timed out")
+    except OSError as exc:
+        raise HTTPException(500, f"Word preview conversion failed: {exc}")
+
+    return FileResponse(str(pdf_path), media_type="application/pdf", filename=pdf_path.name)
 
 
 @app.post("/users/{user_id}/workspaces/{chat_id}/files/delete")
