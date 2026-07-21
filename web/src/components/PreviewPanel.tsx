@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { FileTextIcon, RotateCcwIcon } from 'lucide-react';
-import { fetchArtifactBlob, fetchArtifactPreviewBlob, fetchDocumentVersions, restoreDocumentVersion, updateDocument, type DocumentVersion } from '@/api/client';
+import { downloadArtifact, fetchArtifactBlob, fetchArtifactPreviewBlob, fetchDocumentVersions, restoreDocumentVersion, updateDocument, type DocumentVersion } from '@/api/client';
 import { fileExt, previewKind, type PreviewKind } from '@/lib/files';
 import { queryClient } from '@/lib/queryClient';
 import { useUi, type PreviewFile } from '@/state/ui';
 import { Markdown } from './Markdown';
+import { PdfViewer } from './PdfViewer';
 
 /** Map a code-file extension to a markdown fence language so the shared Markdown
  *  renderer highlights it (and inherits the current theme). */
@@ -26,7 +27,8 @@ type Loaded =
   | { kind: 'excel'; sheets: { name: string; rows: string[][] }[] }
   | { kind: 'word'; blob: Blob }
   | { kind: 'presentation'; slides: { texts: string[]; images: string[] }[] }
-  | { kind: 'blobUrl'; url: string; pdf: boolean };
+  | { kind: 'pdf'; blob: Blob }
+  | { kind: 'image'; url: string };
 
 function textLoaded(kind: PreviewKind, text: string, name: string): Loaded {
   if (kind === 'markdown') return { kind: 'markdown', text };
@@ -115,9 +117,7 @@ export function PreviewContent({ preview }: { preview: PreviewFile | null }) {
           try {
             const pdf = await fetchArtifactPreviewBlob(preview.sessionId, preview.path);
             if (cancelled) return;
-            const url = URL.createObjectURL(pdf);
-            objectUrl.current = url;
-            setLoaded({ kind: 'blobUrl', url, pdf: true });
+            setLoaded({ kind: 'pdf', blob: pdf });
             return;
           } catch {
             // Keep the browser renderer as a fallback for local setups without
@@ -127,9 +127,13 @@ export function PreviewContent({ preview }: { preview: PreviewFile | null }) {
         const blob = await fetchArtifactBlob(preview.sessionId, preview.path);
         if (cancelled) return;
         if (kind === 'image' || kind === 'pdf') {
-          const url = URL.createObjectURL(blob);
-          objectUrl.current = url;
-          setLoaded({ kind: 'blobUrl', url, pdf: kind === 'pdf' });
+          if (kind === 'pdf') {
+            setLoaded({ kind: 'pdf', blob });
+          } else {
+            const url = URL.createObjectURL(blob);
+            objectUrl.current = url;
+            setLoaded({ kind: 'image', url });
+          }
         } else if (kind === 'word') {
           if (!cancelled) setLoaded({ kind: 'word', blob });
         } else if (kind === 'presentation') {
@@ -285,7 +289,7 @@ export function PreviewContent({ preview }: { preview: PreviewFile | null }) {
       {!loading && !error && editing && (
         <textarea value={draft} onChange={(e) => setDraft(e.target.value)} className="h-full min-h-96 w-full resize-none bg-background p-4 font-mono text-[13px] leading-relaxed outline-none" spellCheck={false} />
       )}
-      {!loading && !error && !editing && loaded && <PreviewBody loaded={loaded} name={preview.name} />}
+       {!loading && !error && !editing && loaded && <PreviewBody loaded={loaded} preview={preview} />}
       </div>
     </div>
   );
@@ -390,7 +394,7 @@ function WordDocument({ blob }: { blob: Blob }) {
   );
 }
 
-function PreviewBody({ loaded, name }: { loaded: Loaded; name: string }) {
+function PreviewBody({ loaded, preview }: { loaded: Loaded; preview: PreviewFile }) {
   if (loaded.kind === 'markdown') {
     // Markdown stays a plain, pageless reader — it isn't a Word document. Only
     // real Office files (.docx/.xlsx/.pptx) get the paper-page / grid treatment.
@@ -430,13 +434,18 @@ function PreviewBody({ loaded, name }: { loaded: Loaded; name: string }) {
       </div>
     );
   }
-  // blobUrl: pdf in an iframe, otherwise an image.
-  if (loaded.pdf) {
-    return <iframe src={loaded.url} title={name} className="h-full w-full border-0 bg-white" />;
+  if (loaded.kind === 'pdf') {
+    return (
+      <PdfViewer
+        blob={loaded.blob}
+        name={preview.name}
+        onDownload={() => { void downloadArtifact(preview.sessionId, preview.path, preview.name); }}
+      />
+    );
   }
   return (
     <div className="flex h-full items-center justify-center bg-muted/40 p-4">
-      <img src={loaded.url} alt={name} className="max-h-full max-w-full rounded-md object-contain shadow-sm" />
+      <img src={loaded.url} alt={preview.name} className="max-h-full max-w-full rounded-md object-contain shadow-sm" />
     </div>
   );
 }

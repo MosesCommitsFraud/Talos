@@ -39,6 +39,66 @@
   --font-mono: "Fira Code", ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
+/* PDF.js text overlay keeps preview text selectable without importing the
+   browser viewer's own visual chrome. */
+.talos-pdf-text-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  overflow: clip;
+  color: transparent;
+  line-height: 1;
+  text-align: initial;
+  transform-origin: 0 0;
+  forced-color-adjust: none;
+  text-size-adjust: none;
+}
+
+.talos-pdf-text-layer :is(span, br) {
+  position: absolute;
+  color: transparent;
+  white-space: pre;
+  cursor: text;
+  transform-origin: 0 0;
+  user-select: text;
+}
+
+.talos-pdf-text-layer {
+  --min-font-size: 1;
+  --text-scale-factor: calc(var(--total-scale-factor) * var(--min-font-size));
+  --min-font-size-inv: calc(1 / var(--min-font-size));
+}
+
+.talos-pdf-text-layer > :not(.markedContent),
+.talos-pdf-text-layer .markedContent span:not(.markedContent) {
+  z-index: 1;
+  --scale-x: 1;
+  --rotate: 0deg;
+  font-size: calc(var(--text-scale-factor) * var(--font-height));
+  transform: rotate(var(--rotate)) scaleX(var(--scale-x)) scale(var(--min-font-size-inv));
+}
+
+.talos-pdf-text-layer .markedContent {
+  display: contents;
+}
+
+.talos-pdf-text-layer[data-main-rotation="90"] {
+  transform: rotate(90deg) translateY(-100%);
+}
+
+.talos-pdf-text-layer[data-main-rotation="180"] {
+  transform: rotate(180deg) translate(-100%, -100%);
+}
+
+.talos-pdf-text-layer[data-main-rotation="270"] {
+  transform: rotate(270deg) translateX(-100%);
+}
+
+.talos-pdf-text-layer ::selection {
+  color: transparent;
+  background: rgb(29 78 216 / 28%);
+}
+
 :root {
   color-scheme: light;
   --radius: 0.625rem;
