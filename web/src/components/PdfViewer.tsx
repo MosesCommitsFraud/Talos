@@ -23,6 +23,49 @@ type PdfViewerProps = {
   onDownload: () => void;
 };
 
+function buildPdfSelectionBoxes(textContainer: HTMLDivElement, boxContainer: HTMLDivElement, pageNumber: number) {
+  boxContainer.replaceChildren();
+  const pageRect = boxContainer.getBoundingClientRect();
+  const spans = Array.from(textContainer.querySelectorAll<HTMLSpanElement>('span'))
+    .map((span) => ({ span, rect: span.getBoundingClientRect(), text: span.textContent?.trim() ?? '' }))
+    .filter((item) => item.text && item.rect.width > 1 && item.rect.height > 1)
+    .sort((a, b) => a.rect.top - b.rect.top || a.rect.left - b.rect.left);
+  const lines: typeof spans[] = [];
+  for (const item of spans) {
+    const center = item.rect.top + item.rect.height / 2;
+    const line = lines.find((items) => {
+      const first = items[0].rect;
+      return Math.abs(center - (first.top + first.height / 2)) <= Math.max(first.height, item.rect.height) * 0.55;
+    });
+    if (line) line.push(item);
+    else lines.push([item]);
+  }
+  let blockIndex = 0;
+  for (const line of lines) {
+    line.sort((a, b) => a.rect.left - b.rect.left);
+    const runs: typeof spans[] = [];
+    for (const item of line) {
+      const run = runs[runs.length - 1];
+      const previous = run?.[run.length - 1];
+      if (!previous || item.rect.left - previous.rect.right > Math.max(20, item.rect.height * 2)) runs.push([item]);
+      else run.push(item);
+    }
+    for (const run of runs) {
+      const left = Math.min(...run.map((item) => item.rect.left)) - pageRect.left;
+      const top = Math.min(...run.map((item) => item.rect.top)) - pageRect.top;
+      const right = Math.max(...run.map((item) => item.rect.right)) - pageRect.left;
+      const bottom = Math.max(...run.map((item) => item.rect.bottom)) - pageRect.top;
+      const box = document.createElement('div');
+      box.className = 'talos-pdf-selection-box absolute pointer-events-none';
+      box.dataset.selectionBox = 'pdf-text';
+      box.dataset.artifactElement = `pdf-text-${pageNumber}-${++blockIndex}`;
+      box.dataset.selectionQuote = run.map((item) => item.text).join(' ');
+      Object.assign(box.style, { left: `${left}px`, top: `${top}px`, width: `${right - left}px`, height: `${bottom - top}px` });
+      boxContainer.appendChild(box);
+    }
+  }
+}
+
 function PageCanvas({ document, pageNumber, scale, fitWidth, availableWidth, rotation, scrollRoot, onElement, label, errorLabel, fallbackSize }: {
   document: PDFDocumentProxy;
   pageNumber: number;
@@ -39,6 +82,7 @@ function PageCanvas({ document, pageNumber, scale, fitWidth, availableWidth, rot
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const textRef = useRef<HTMLDivElement>(null);
+  const boxRef = useRef<HTMLDivElement>(null);
   const [visible, setVisible] = useState(false);
   const [page, setPage] = useState<PDFPageProxy | null>(null);
   const [pageError, setPageError] = useState(false);
@@ -100,21 +144,24 @@ function PageCanvas({ document, pageNumber, scale, fitWidth, availableWidth, rot
       if (!cancelled && error instanceof Error && error.name !== 'RenderingCancelledException') setRendering(false);
     });
     const textContainer = textRef.current;
-    if (textContainer) {
+    const boxContainer = boxRef.current;
+    if (textContainer && boxContainer) {
       textContainer.replaceChildren();
+      boxContainer.replaceChildren();
       textContainer.style.width = `${viewport.width}px`;
       textContainer.style.height = `${viewport.height}px`;
       textContainer.style.setProperty('--scale-factor', String(pageScale));
       textContainer.style.setProperty('--user-unit', String(page.userUnit));
       textContainer.style.setProperty('--total-scale-factor', String(pageScale));
-      void import('pdfjs-dist').then(({ TextLayer }) => {
+      void import('pdfjs-dist').then(async ({ TextLayer }) => {
         if (cancelled) return;
         textLayer = new TextLayer({
           textContentSource: page.streamTextContent({ includeMarkedContent: true }),
           container: textContainer,
           viewport,
         });
-        return textLayer.render();
+        await textLayer.render();
+        if (!cancelled) buildPdfSelectionBoxes(textContainer, boxContainer, pageNumber);
       }).catch(() => undefined);
     }
 
@@ -122,6 +169,7 @@ function PageCanvas({ document, pageNumber, scale, fitWidth, availableWidth, rot
       cancelled = true;
       task?.cancel();
       textLayer?.cancel();
+      boxContainer?.replaceChildren();
     };
   }, [page, pageScale, rotation, visible]);
 
@@ -141,7 +189,7 @@ function PageCanvas({ document, pageNumber, scale, fitWidth, availableWidth, rot
         <>
           {pageError
             ? <div className="flex h-full items-center justify-center px-4 text-xs text-destructive-foreground">{errorLabel}</div>
-            : <><canvas ref={canvasRef} className="block max-w-none" /><div ref={textRef} className="talos-pdf-text-layer" />{rendering && <div className="absolute inset-0 animate-pulse bg-white" />}</>}
+            : <><canvas ref={canvasRef} className="block max-w-none" /><div ref={textRef} className="talos-pdf-text-layer" /><div ref={boxRef} className="pointer-events-none absolute inset-0 z-[2]" />{rendering && <div className="absolute inset-0 animate-pulse bg-white" />}</>}
         </>
       )}
     </div>

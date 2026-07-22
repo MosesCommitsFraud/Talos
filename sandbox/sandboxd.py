@@ -8,6 +8,7 @@ import shlex
 import shutil
 import signal
 import subprocess
+import threading
 import time
 import uuid
 import fnmatch
@@ -150,7 +151,7 @@ class ListRequest(BaseModel):
 MAX_READ_CHARS = 20_000
 MAX_OUTPUT_CHARS = 10_000
 MAX_DIFF_LINES = 400
-SKIP_DIRS = {".git", ".talos-preview", "node_modules", "__pycache__", ".venv", "venv", "dist", "build", ".pytest_cache", ".mypy_cache"}
+SKIP_DIRS = {".git", ".talos-home", ".talos-preview", "node_modules", "__pycache__", ".venv", "venv", "dist", "build", ".pytest_cache", ".mypy_cache"}
 PROCESS_LOG_ROOT = STATE_PATH.parent / "processes"
 PROCESS_RETENTION_SECONDS = 3600
 SESSION_CWD_TTL_SECONDS = int(os.getenv("TALOS_SANDBOX_SESSION_CWD_TTL", "604800"))
@@ -195,6 +196,8 @@ class BackgroundProcess:
 
 _processes: dict[str, BackgroundProcess] = {}
 _session_cwds: dict[str, tuple[str, float]] = {}
+_repaired_workspaces: set[str] = set()
+_workspace_repair_lock = threading.Lock()
 # Persistent per-workspace Python kernels: session_key -> {"proc", "sock"}.
 _kernels: dict[str, dict[str, Any]] = {}
 
@@ -300,15 +303,79 @@ def _session_key(user_id: str, chat_id: str) -> str:
 
 
 def _workspace(user_id: str, chat_id: str) -> tuple[str, Path]:
-    name, _home = ensure_user(user_id)
+    name, home = ensure_user(user_id)
+    if home.is_symlink():
+        raise HTTPException(500, "Unsafe sandbox home")
+    workspaces = home / "workspaces"
+    if workspaces.is_symlink():
+        raise HTTPException(500, "Unsafe sandbox workspace root")
+    workspaces.mkdir(parents=True, exist_ok=True)
     workspace = workspace_path(user_id, chat_id)
+    if workspace.is_symlink():
+        raise HTTPException(500, "Unsafe sandbox workspace")
     workspace.mkdir(parents=True, exist_ok=True)
-    # Always ensure the workspace dir is owned by the sandbox user, so code
-    # running as that user (gosu) can create files in it. Without this, a
-    # workspace first created by a root-run path (e.g. an upload) stays
-    # root-owned and the agent can't write anything into it.
+    # The path above each workspace stays root-managed so the sandbox account
+    # cannot replace the workspace root with a symlink before root repairs it.
+    _run(["chown", "root:root", str(home), str(workspaces)])
+    home.chmod(0o711)
+    workspaces.chmod(0o711)
     _run(["chown", f"{name}:{name}", str(workspace)])
+    private_home = workspace / ".talos-home"
+    private_home.mkdir(exist_ok=True)
+    _run(["chown", f"{name}:{name}", str(private_home)])
+    private_home.chmod(0o700)
+
+    # Migrate legacy/restored files created by the root-running daemon. Tool
+    # processes run as the per-user account and must be able to update every
+    # listed artifact and create sibling temp files for atomic Office saves.
+    repair_key = str(workspace.resolve())
+    with _workspace_repair_lock:
+        if repair_key not in _repaired_workspaces:
+            _repair_workspace_tree(name, workspace)
+            _repaired_workspaces.add(repair_key)
     return name, workspace
+
+
+def _repair_workspace_tree(name: str, root: Path) -> None:
+    """Descriptor-relative repair that cannot be redirected through symlinks."""
+    import pwd
+    import stat
+
+    account = pwd.getpwnam(name)
+    if root.is_symlink() or not root.is_dir():
+        raise HTTPException(500, "Unsafe sandbox workspace")
+    for _current, dirs, files, dir_fd in os.fwalk(root, topdown=True, follow_symlinks=False):
+        os.fchown(dir_fd, account.pw_uid, account.pw_gid)
+        os.fchmod(dir_fd, os.fstat(dir_fd).st_mode | 0o700)
+        all_dirs = list(dirs)
+        dirs[:] = [entry for entry in dirs if entry not in SKIP_DIRS]
+        for entry_name in all_dirs + files:
+            try:
+                entry_stat = os.stat(entry_name, dir_fd=dir_fd, follow_symlinks=False)
+                os.chown(
+                    entry_name,
+                    account.pw_uid,
+                    account.pw_gid,
+                    dir_fd=dir_fd,
+                    follow_symlinks=False,
+                )
+                if stat.S_ISLNK(entry_stat.st_mode):
+                    continue
+                flags = os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW | os.O_CLOEXEC
+                if stat.S_ISDIR(entry_stat.st_mode):
+                    flags |= os.O_DIRECTORY
+                entry_fd = os.open(entry_name, flags, dir_fd=dir_fd)
+                try:
+                    opened_stat = os.fstat(entry_fd)
+                    os.fchown(entry_fd, account.pw_uid, account.pw_gid)
+                    os.fchmod(
+                        entry_fd,
+                        opened_stat.st_mode | (0o700 if stat.S_ISDIR(opened_stat.st_mode) else 0o600),
+                    )
+                finally:
+                    os.close(entry_fd)
+            except OSError:
+                continue
 
 
 def _chown_user_chain(name: str, workspace: Path, path: Path) -> None:
@@ -319,6 +386,8 @@ def _chown_user_chain(name: str, workspace: Path, path: Path) -> None:
         root = workspace.resolve()
         node = path.resolve()
     except OSError:
+        return
+    if node != root and root not in node.parents:
         return
     targets: list[Path] = []
     while True:
@@ -388,7 +457,8 @@ class PtyRunner:
             proc_env = os.environ.copy()
             if env:
                 proc_env.update({str(k): str(v) for k, v in env.items()})
-            proc_env["HOME"] = str(HOME_ROOT / linux_user)
+            if not env or "HOME" not in env:
+                proc_env["HOME"] = str(HOME_ROOT / linux_user)
             proc_env["TERM"] = "xterm-256color"
             proc_env["COLUMNS"] = "120"
             proc_env["LINES"] = "40"
@@ -511,14 +581,10 @@ def ensure_user(user_id: str) -> tuple[str, Path]:
     if not home.exists():
         home.mkdir(parents=True, exist_ok=True)
         created = True
-    if created:
-        _run(["chown", "-R", f"{name}:{name}", str(home)])
-    # Private home (0700): users can't traverse into each other's home/workspaces.
-    # Idempotent — applied every call so pre-existing 0755 homes get tightened.
-    try:
-        home.chmod(0o700)
-    except OSError:
-        pass
+    # Workspace roots are daemon-managed; tool processes receive a writable
+    # private HOME inside their own workspace instead.
+    _run(["chown", "root:root", str(home)])
+    home.chmod(0o711)
     return name, home
 
 
@@ -553,6 +619,7 @@ def delete_workspace_route(user_id: str, chat_id: str) -> dict[str, Any]:
     existed = workspace.exists()
     if existed:
         shutil.rmtree(workspace, ignore_errors=True)
+    _repaired_workspaces.discard(str(workspace.resolve()))
     # Drop any cached session cwd for this chat so a recreated workspace starts clean.
     _session_cwds.pop(_session_key(user_id, chat_id), None)
     return {"ok": True, "deleted": existed, "workspace": str(workspace)}
@@ -568,6 +635,7 @@ async def upload_file_route(user_id: str, chat_id: str, file: UploadFile = File(
     with target.open("wb") as out:
         shutil.copyfileobj(file.file, out)
     _run(["chown", f"{name}:{name}", str(target)])
+    target.chmod(target.stat().st_mode | 0o600)
     return WorkspaceResponse(user_id=user_id, chat_id=chat_id, linux_user=name, workspace=str(workspace), filename=filename, path=str(target))
 
 
@@ -593,7 +661,8 @@ async def _start_process(user_id: str, chat_id: str, req: ExecuteRequest) -> Bac
         raise HTTPException(404, "Working directory not found")
     process_id = time.strftime("%Y%m%d-%H%M%S-") + uuid.uuid4().hex[:6]
     log_path = PROCESS_LOG_ROOT / f"{process_id}.jsonl"
-    runner = PtyRunner(linux_user=name, command=req.command, cwd=cwd, env=req.env)
+    process_env = {**(req.env or {}), "HOME": str(workspace / ".talos-home")}
+    runner = PtyRunner(linux_user=name, command=req.command, cwd=cwd, env=process_env)
     proc = BackgroundProcess(
         id=process_id,
         user_id=user_id,
@@ -928,7 +997,7 @@ async def _ensure_kernel(user_id: str, chat_id: str) -> dict[str, Any]:
     except OSError:
         pass
     env = os.environ.copy()
-    env["HOME"] = str(HOME_ROOT / name)
+    env["HOME"] = str(workspace / ".talos-home")
     env["PATH"] = f"/opt/talos-sandbox-venv/bin:{env.get('PATH', '')}"
     proc = subprocess.Popen(
         ["gosu", name, "/opt/talos-sandbox-venv/bin/python", "-c", _KERNEL_SERVER_SRC, str(sock), str(workspace)],
@@ -1502,6 +1571,12 @@ def office_preview_route(user_id: str, chat_id: str, path: str):
                     capture_output=True,
                     text=True,
                     timeout=90,
+                    env={
+                        **os.environ,
+                        "HOME": str(workspace / ".talos-home"),
+                        "XDG_CACHE_HOME": str(profile / "cache"),
+                        "XDG_CONFIG_HOME": str(profile / "config"),
+                    },
                 )
             finally:
                 shutil.rmtree(profile, ignore_errors=True)

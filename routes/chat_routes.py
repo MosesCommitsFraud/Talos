@@ -448,6 +448,7 @@ def setup_chat_routes(
                 artifact_selection = {
                     "path": selected_path,
                     "name": _safe_text(candidate.get("name"), 300),
+                    "mime": _safe_text(candidate.get("mime"), 200),
                     "kind": "",
                     "version": selected_version,
                     "target": {
@@ -537,6 +538,49 @@ def setup_chat_routes(
         ui_lang = (form_data.get("lang") or "").strip()
         llm_language = (form_data.get("llm_language") or "").strip()
 
+        if artifact_selection:
+            selected_path = artifact_selection["path"]
+            if selected_path.startswith("document:"):
+                active_doc_id = selected_path.split(":", 1)[1]
+                artifact_selection["kind"] = "document"
+                selection_db = SessionLocal()
+                try:
+                    selected_doc_query = selection_db.query(DBDocument).filter(
+                        DBDocument.id == active_doc_id,
+                        DBDocument.session_id == session,
+                    )
+                    selected_doc = _owner_session_filter(selected_doc_query, owner).first()
+                    if not selected_doc:
+                        raise HTTPException(404, "Selected document was not found")
+                    selected_version = artifact_selection.get("version")
+                    current_version = getattr(selected_doc, "version_count", None)
+                    if selected_version is not None and current_version is not None and int(selected_version) != int(current_version):
+                        raise HTTPException(409, "The selected document changed; select the target again")
+                    artifact_selection["name"] = str(selected_doc.title or artifact_selection.get("name") or "Document")[:300]
+                finally:
+                    selection_db.close()
+            elif selected_path.startswith("generated-image:"):
+                raise HTTPException(400, "Generated gallery images cannot be edited in place")
+            else:
+                from src.sandbox_client import list_artifacts
+
+                workspace_artifacts = await list_artifacts(owner=owner, session_id=session)
+                selected_artifact = next(
+                    (item for item in workspace_artifacts if str(item.get("path") or "") == selected_path),
+                    None,
+                )
+                if not selected_artifact:
+                    raise HTTPException(404, "Selected artifact was not found in this workspace")
+                extension = os.path.splitext(selected_path)[1].lower()
+                artifact_selection["kind"] = {
+                    ".doc": "word", ".docx": "word", ".pdf": "pdf",
+                    ".xls": "excel", ".xlsx": "excel", ".xlsm": "excel",
+                    ".ppt": "presentation", ".pptx": "presentation",
+                    ".png": "image", ".jpg": "image", ".jpeg": "image",
+                    ".gif": "image", ".webp": "image",
+                }.get(extension, "text")
+                artifact_selection["mime"] = str(selected_artifact.get("mime") or artifact_selection.get("mime") or "")[:200]
+
         # Build shared context (stream path uses enhanced_message for context preface)
         ctx = await build_chat_context(
             sess,
@@ -560,29 +604,8 @@ def setup_chat_routes(
             # _append_no_think_reminder.
             reasoning=reasoning,
             llm_language=llm_language,
+            artifact_selection=artifact_selection,
         )
-
-        if artifact_selection:
-            selected_path = artifact_selection["path"]
-            if selected_path.startswith("document:"):
-                active_doc_id = selected_path.split(":", 1)[1]
-                artifact_selection["kind"] = "document"
-            elif selected_path.startswith("generated-image:"):
-                raise HTTPException(400, "Generated gallery images cannot be edited in place")
-            else:
-                from src.sandbox_client import list_artifacts
-
-                workspace_artifacts = await list_artifacts(owner=ctx.user, session_id=session)
-                if not any(str(item.get("path") or "") == selected_path for item in workspace_artifacts):
-                    raise HTTPException(404, "Selected artifact was not found in this workspace")
-                extension = os.path.splitext(selected_path)[1].lower()
-                artifact_selection["kind"] = {
-                    ".doc": "word", ".docx": "word", ".pdf": "pdf",
-                    ".xls": "excel", ".xlsx": "excel", ".xlsm": "excel",
-                    ".ppt": "presentation", ".pptx": "presentation",
-                    ".png": "image", ".jpg": "image", ".jpeg": "image",
-                    ".gif": "image", ".webp": "image",
-                }.get(extension, "text")
 
         # Auto-name the session immediately — the user message is now in
         # history, so fire title generation right away instead of waiting for

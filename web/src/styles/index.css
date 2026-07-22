@@ -99,6 +99,26 @@
   background: rgb(29 78 216 / 28%);
 }
 
+.talos-selection-candidate {
+  outline: 2px solid color-mix(in srgb, var(--primary) 78%, transparent) !important;
+  outline-offset: 2px;
+}
+
+.talos-selection-committed {
+  outline: 2px solid var(--primary) !important;
+  outline-offset: 2px;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 16%, transparent);
+}
+
+.talos-mark-mode :is([data-selection-box], [data-cell], td, th, [data-artifact-element], p, h1, h2, h3, h4, h5, h6, li, blockquote, pre, img, table, figure, [data-page-number]):hover {
+  outline: 2px solid color-mix(in srgb, var(--primary) 48%, transparent);
+  outline-offset: 2px;
+}
+
+.talos-mark-mode .talos-pdf-selection-box {
+  pointer-events: auto;
+}
+
 :root {
   color-scheme: light;
   --radius: 0.625rem;

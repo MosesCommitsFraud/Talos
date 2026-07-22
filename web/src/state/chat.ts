@@ -20,6 +20,7 @@ export interface UiMessage {
   thinking?: string;
   tools?: ToolCall[];
   attachments?: Attachment[];
+  artifactSelection?: ArtifactSelection;
   metrics?: Metrics;
   /** RAG knowledge-base chunks cited for this answer. */
   sources?: RagSource[];
@@ -223,6 +224,23 @@ function attachmentsFromMetadata(metadata: Record<string, unknown> | undefined):
   return attachments.length > 0 ? attachments : undefined;
 }
 
+function artifactSelectionFromMetadata(metadata: Record<string, unknown> | undefined, sessionId: string): ArtifactSelection | undefined {
+  const raw = metadata?.artifact_selection;
+  if (!raw || typeof raw !== 'object') return undefined;
+  const item = raw as Record<string, unknown>;
+  const target = item.target;
+  if (!target || typeof target !== 'object' || typeof item.path !== 'string') return undefined;
+  return {
+    sessionId,
+    path: item.path,
+    name: typeof item.name === 'string' ? item.name : item.path,
+    mime: typeof item.mime === 'string' ? item.mime : undefined,
+    version: typeof item.version === 'number' ? item.version : undefined,
+    kind: typeof item.kind === 'string' ? item.kind : 'text',
+    target: target as ArtifactSelection['target'],
+  };
+}
+
 /** A persisted tool event keeps its 1-based agent `round` so cold-loaded turns
  *  can be split back into the per-round bubbles the live stream produced. */
 type RoundedToolCall = ToolCall & { round?: number };
@@ -284,7 +302,7 @@ interface HistoryMessage {
   metadata?: Record<string, unknown>;
 }
 
-function coldLoadMessage(m: HistoryMessage): UiMessage[] {
+function coldLoadMessage(m: HistoryMessage, sessionId: string): UiMessage[] {
   const createdAt = timestampMs(m.metadata?.timestamp as string | undefined) || undefined;
   if (m.role !== 'assistant') {
     return [{
@@ -294,6 +312,7 @@ function coldLoadMessage(m: HistoryMessage): UiMessage[] {
       createdAt,
       content: displayUserContent(m.content),
       attachments: attachmentsFromMetadata(m.metadata),
+      artifactSelection: artifactSelectionFromMetadata(m.metadata, sessionId),
     }];
   }
 
@@ -420,7 +439,7 @@ export const useChat = create<ChatState>((set, get) => {
 
     const messages = (detail.history ?? [])
       .filter((m) => m.role === 'user' || m.role === 'assistant')
-      .flatMap((m) => coldLoadMessage(m as HistoryMessage));
+      .flatMap((m) => coldLoadMessage(m as HistoryMessage, id));
     writeRuntime(id, () => ({ ...emptyRuntime(), messages }));
   },
 
@@ -446,7 +465,7 @@ export const useChat = create<ChatState>((set, get) => {
     const sid = sessionId;
 
     const attachments = opts?.attachments ?? [];
-    const userMsg: UiMessage = { id: uid(), role: 'user', content: text, attachments, createdAt: Date.now() };
+    const userMsg: UiMessage = { id: uid(), role: 'user', content: text, attachments, artifactSelection: opts?.artifactSelection, createdAt: Date.now() };
     const aiMsg: UiMessage = { id: uid(), role: 'assistant', content: '', streaming: true, createdAt: Date.now() };
     const abort = new AbortController();
     // A new turn supersedes any open question/plan card: mark them answered so
@@ -807,7 +826,7 @@ export const useChat = create<ChatState>((set, get) => {
     const detail = await fetchSession(sessionId);
     const messages = (detail.history ?? [])
       .filter((m) => m.role === 'user' || m.role === 'assistant')
-      .flatMap((m) => coldLoadMessage(m as HistoryMessage));
+      .flatMap((m) => coldLoadMessage(m as HistoryMessage, sessionId));
     writeRuntime(sessionId, (rt) => ({ messages, goal: rt.goal }));
   },
 
@@ -838,7 +857,7 @@ export const useChat = create<ChatState>((set, get) => {
     const dropIds = messages.slice(idx).map((m) => m.dbId).filter((id): id is string => !!id);
     await deleteMessages(sessionId, dropIds);
     writeRuntime(sessionId, () => ({ messages: messages.slice(0, idx) }));
-    await get().send(content, { attachments: msg.attachments });
+    await get().send(content, { attachments: msg.attachments, artifactSelection: msg.artifactSelection });
   },
 
   remove: async (msgId) => {

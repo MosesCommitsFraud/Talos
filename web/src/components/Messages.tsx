@@ -1,4 +1,4 @@
-import { CheckIcon, ChevronDownIcon, ChevronRightIcon, CopyIcon, DownloadIcon, FileIcon, FileTextIcon, FoldVerticalIcon, ImageIcon, ListChecksIcon, PencilIcon, Trash2Icon } from 'lucide-react';
+import { CheckIcon, ChevronDownIcon, ChevronRightIcon, CopyIcon, DownloadIcon, FileIcon, FileTextIcon, FoldVerticalIcon, ImageIcon, ListChecksIcon, PencilIcon, ScanSearchIcon, Trash2Icon } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -191,6 +191,27 @@ function AttachmentList({ msg }: { msg: UiMessage }) {
           {file.size != null && <span className="shrink-0 opacity-70">{formatSize(file.size)}</span>}
         </a>
       ))}
+    </div>
+  );
+}
+
+function ArtifactSelectionChip({ msg }: { msg: UiMessage }) {
+  const openPreview = useUi((state) => state.openPreview);
+  const selection = msg.artifactSelection;
+  if (!selection) return null;
+  const detail = selection.target.quote || selection.target.cell || selection.target.element
+    || (selection.target.page ? `p. ${selection.target.page}` : selection.target.slide ? `Slide ${selection.target.slide}` : 'Selection');
+  return (
+    <div className="mt-1 flex max-w-full justify-end">
+      <button
+        type="button"
+        onClick={() => openPreview({ sessionId: selection.sessionId, path: selection.path, name: selection.name, mime: selection.mime, version: selection.version })}
+        className="inline-flex max-w-full items-center gap-1.5 rounded-lg border border-primary/25 bg-primary/5 px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-primary/10 hover:text-foreground"
+      >
+        <ScanSearchIcon className="size-3.5 shrink-0 text-primary" />
+        <span className="max-w-40 truncate">{selection.name}</span>
+        <span className="max-w-44 truncate opacity-70">· {detail}</span>
+      </button>
     </div>
   );
 }
@@ -558,6 +579,7 @@ export function Messages() {
                     {block.msg.content}
                   </div>
                   <AttachmentList msg={block.msg} />
+                  <ArtifactSelectionChip msg={block.msg} />
                   <div className="flex items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
                     <MessageTime ts={block.msg.createdAt} />
                     <MessageActions msg={block.msg} onEdit={() => setEditing(block.msg.id)} />
