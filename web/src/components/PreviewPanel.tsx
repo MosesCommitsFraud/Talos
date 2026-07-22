@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
 import { useTranslation } from 'react-i18next';
-import { CheckIcon, FileTextIcon, MousePointer2Icon, RotateCcwIcon, XIcon } from 'lucide-react';
+import { FileTextIcon, MousePointer2Icon, RotateCcwIcon } from 'lucide-react';
 import type { ArtifactSelectionTarget } from '@/api/types';
 import { downloadArtifact, fetchArtifactBlob, fetchArtifactPreviewBlob, fetchDocumentVersions, restoreDocumentVersion, updateDocument, type DocumentVersion } from '@/api/client';
 import { fileExt, previewKind, type PreviewKind } from '@/lib/files';
@@ -112,6 +112,7 @@ export function PreviewContent({ preview }: { preview: PreviewFile | null }) {
   const committedElements = useRef<HTMLElement[]>([]);
   const [markMode, setMarkMode] = useState(false);
   const [selectionCandidates, setSelectionCandidates] = useState<BoxSelectionCandidate[]>([]);
+  const selectionCandidatesRef = useRef<BoxSelectionCandidate[]>([]);
   const [groupRect, setGroupRect] = useState<DOMRect | null>(null);
   const [selectionLayoutVersion, setSelectionLayoutVersion] = useState(0);
   const updatePreview = useUi((s) => s.updatePreview);
@@ -130,9 +131,10 @@ export function PreviewContent({ preview }: { preview: PreviewFile | null }) {
     setSaveError(false);
     setViewedVersion('current');
     setMarkMode(false);
-    selectionCandidates.forEach((candidate) => candidate.element.classList.remove('talos-selection-candidate'));
+    selectionCandidatesRef.current.forEach((candidate) => candidate.element.classList.remove('talos-selection-candidate', 'talos-selection-committed'));
     committedElements.current.forEach((element) => element.classList.remove('talos-selection-committed'));
     committedElements.current = [];
+    selectionCandidatesRef.current = [];
     setSelectionCandidates([]);
     // Revoke any object URL from a previous file before loading the next.
     if (objectUrl.current) { URL.revokeObjectURL(objectUrl.current); objectUrl.current = null; }
@@ -232,6 +234,9 @@ export function PreviewContent({ preview }: { preview: PreviewFile | null }) {
 
   useEffect(() => {
     if (artifactSelection && preview && artifactSelection.sessionId === preview.sessionId && artifactSelection.path === preview.path) return;
+    selectionCandidatesRef.current.forEach((candidate) => candidate.element.classList.remove('talos-selection-candidate', 'talos-selection-committed'));
+    selectionCandidatesRef.current = [];
+    setSelectionCandidates([]);
     committedElements.current.forEach((element) => element.classList.remove('talos-selection-committed'));
     committedElements.current = [];
   }, [artifactSelection, preview]);
@@ -380,6 +385,7 @@ export function PreviewContent({ preview }: { preview: PreviewFile | null }) {
   const targetFromElement = (element: Element | null, quote?: string): ArtifactSelectionTarget => {
     const page = element?.closest<HTMLElement>('[data-page-number]')?.dataset.pageNumber;
     const cell = element?.closest<HTMLElement>('[data-cell]');
+    const sheet = element?.closest<HTMLElement>('[data-sheet]')?.dataset.sheet;
     const slide = element?.closest<HTMLElement>('[data-slide]')?.dataset.slide;
     let marked = element?.closest<HTMLElement>('[data-artifact-element]');
     if (!marked && element instanceof HTMLElement) {
@@ -390,7 +396,7 @@ export function PreviewContent({ preview }: { preview: PreviewFile | null }) {
       type: 'element',
       quote: (element as HTMLElement | null)?.dataset.selectionQuote?.slice(0, 4000) || quote?.trim().slice(0, 4000) || undefined,
       page: page ? Number(page) : undefined,
-      sheet: cell?.dataset.sheet,
+      sheet: cell?.dataset.sheet ?? sheet,
       cell: cell?.dataset.cell,
       slide: slide ? Number(slide) : undefined,
       element: marked?.dataset.artifactElement,
@@ -398,11 +404,34 @@ export function PreviewContent({ preview }: { preview: PreviewFile | null }) {
   };
 
   const chooseCandidate = (target: ArtifactSelectionTarget, element: HTMLElement, additive = false) => {
-    setSelectionCandidates((current) => {
+    const current = selectionCandidatesRef.current;
+      let nextTarget = target;
+      let nextElement = element;
+      const clickedKey = `${target.page ?? ''}|${target.sheet ?? ''}|${target.cell ?? ''}|${target.slide ?? ''}|${target.element ?? ''}|${target.quote ?? ''}`;
+      const clickedIsSelected = current.some((candidate) => (
+        `${candidate.target.page ?? ''}|${candidate.target.sheet ?? ''}|${candidate.target.cell ?? ''}|${candidate.target.slide ?? ''}|${candidate.target.element ?? ''}|${candidate.target.quote ?? ''}` === clickedKey
+      ));
+      if (!additive && clickedIsSelected) {
+        const parent = element.closest<HTMLElement>('table, figure[data-slide]');
+        if (parent && parent !== element) {
+          parent.dataset.artifactElement ||= `box-${crypto.randomUUID()}`;
+          nextElement = parent;
+          const parentTarget = targetFromElement(parent, parent.innerText.trim());
+          nextTarget = {
+            ...parentTarget,
+            page: parentTarget.page ?? target.page,
+            slide: parentTarget.slide ?? target.slide,
+            sheet: parentTarget.sheet ?? target.sheet,
+          };
+        }
+      }
       if (!additive) {
         current.forEach((candidate) => candidate.element.classList.remove('talos-selection-candidate'));
-        element.classList.add('talos-selection-candidate');
-        return [{ target, element }];
+        const next = [{ target: nextTarget, element: nextElement }];
+        selectionCandidatesRef.current = next;
+        setSelectionCandidates(next);
+        applyArtifactSelection(next);
+        return;
       }
       const targetKey = `${target.page ?? ''}|${target.sheet ?? ''}|${target.cell ?? ''}|${target.slide ?? ''}|${target.element ?? ''}|${target.quote ?? ''}`;
       const existing = current.findIndex((candidate) => (
@@ -411,30 +440,29 @@ export function PreviewContent({ preview }: { preview: PreviewFile | null }) {
       if (existing >= 0) {
         current[existing].element.classList.remove('talos-selection-candidate');
         element.classList.remove('talos-selection-candidate');
-        return current.filter((_, index) => index !== existing);
+        const next = current.filter((_, index) => index !== existing);
+        selectionCandidatesRef.current = next;
+        setSelectionCandidates(next);
+        applyArtifactSelection(next);
+        return;
       }
-      element.classList.add('talos-selection-candidate');
-      return [...current, { target, element }];
-    });
+      const next = [...current, { target, element }];
+      selectionCandidatesRef.current = next;
+      setSelectionCandidates(next);
+      applyArtifactSelection(next);
   };
 
-  const captureElement = (event: ReactMouseEvent<HTMLDivElement>) => {
-    if (!markMode) return;
-    const clicked = event.target instanceof Element ? event.target : null;
-    const smallest = clicked?.closest<HTMLElement>('[data-selection-box], [data-cell], td, th, [data-artifact-element^="shape-"], p, h1, h2, h3, h4, h5, h6, li, blockquote, pre, img');
-    const promoted = clicked?.closest<HTMLElement>('table, figure[data-slide], [data-page-number]');
-    const element = smallest ?? promoted;
-    if (!element || !selectionRoot.current?.contains(element)) return;
-    event.preventDefault();
-    event.stopPropagation();
-    window.getSelection()?.removeAllRanges();
-    const quote = element instanceof HTMLImageElement ? undefined : element.innerText.trim();
-    chooseCandidate(targetFromElement(element, quote), element, event.shiftKey);
-  };
-
-  const commitSelection = () => {
-    if (!selectionCandidates.length || !preview) return;
-    const targets = selectionCandidates.map((candidate) => candidate.target);
+  const applyArtifactSelection = (candidates: BoxSelectionCandidate[]) => {
+    candidates.forEach((candidate) => candidate.element.classList.remove('talos-selection-candidate'));
+    committedElements.current.forEach((committed) => committed.classList.remove('talos-selection-committed'));
+    if (!candidates.length) {
+      committedElements.current = [];
+      setArtifactSelection(null);
+      return;
+    }
+    candidates.forEach((candidate) => candidate.element.classList.add('talos-selection-committed'));
+    committedElements.current = candidates.map((candidate) => candidate.element);
+    const targets = candidates.map((candidate) => candidate.target);
     setArtifactSelection({
       sessionId: preview.sessionId,
       path: preview.path,
@@ -445,12 +473,20 @@ export function PreviewContent({ preview }: { preview: PreviewFile | null }) {
       target: targets[0],
       targets,
     });
-    selectionCandidates.forEach((candidate) => candidate.element.classList.remove('talos-selection-candidate'));
-    committedElements.current.forEach((element) => element.classList.remove('talos-selection-committed'));
-    selectionCandidates.forEach((candidate) => candidate.element.classList.add('talos-selection-committed'));
-    committedElements.current = selectionCandidates.map((candidate) => candidate.element);
-    setSelectionCandidates([]);
+  };
+
+  const captureElement = (event: ReactMouseEvent<HTMLDivElement>) => {
+    if (!markMode) return;
+    const clicked = event.target instanceof Element ? event.target : null;
+    const smallest = clicked?.closest<HTMLElement>('[data-selection-box], [data-cell], td, th, [data-artifact-element^="shape-"], p, h1, h2, h3, h4, h5, h6, li, blockquote, pre, img');
+    const promoted = clicked?.closest<HTMLElement>('table, figure[data-slide]');
+    const element = smallest ?? promoted;
+    if (!element || !selectionRoot.current?.contains(element)) return;
+    event.preventDefault();
+    event.stopPropagation();
     window.getSelection()?.removeAllRanges();
+    const quote = element instanceof HTMLImageElement ? undefined : element.innerText.trim();
+    chooseCandidate(targetFromElement(element, quote), element, event.shiftKey);
   };
 
   return (
@@ -479,16 +515,10 @@ export function PreviewContent({ preview }: { preview: PreviewFile | null }) {
       )}
       {!loading && !error && !editing && loaded && (
         <div className="flex h-9 shrink-0 items-center gap-2 border-b bg-card px-2">
-          <button type="button" aria-pressed={markMode} onClick={() => { setMarkMode((value) => !value); selectionCandidates.forEach((candidate) => candidate.element.classList.remove('talos-selection-candidate')); setSelectionCandidates([]); }} className={`inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium ${markMode ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:bg-accent hover:text-foreground'}`}>
+          <button type="button" aria-pressed={markMode} onClick={() => setMarkMode((value) => !value)} className={`inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium ${markMode ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:bg-accent hover:text-foreground'}`}>
             <MousePointer2Icon className="size-3.5" />{t('preview.markElement')}
           </button>
-          {selectionCandidates.length > 0 && (
-            <div className="ml-auto flex min-w-0 items-center gap-1">
-              <span className="max-w-48 truncate text-xs text-muted-foreground">{selectionCandidates.length > 1 ? `${selectionCandidates.length} ${t('preview.selectedElements')}` : selectionCandidates[0].target.quote || selectionCandidates[0].target.cell || selectionCandidates[0].target.element || t('preview.selectedElement')}</span>
-              <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={commitSelection} className="inline-flex items-center gap-1 rounded-md bg-primary px-2 py-1 text-xs font-medium text-primary-foreground"><CheckIcon className="size-3" />{t('preview.addToPrompt')}</button>
-              <button type="button" onClick={() => { selectionCandidates.forEach((candidate) => candidate.element.classList.remove('talos-selection-candidate')); setSelectionCandidates([]); }} aria-label={t('common.cancel')} className="rounded-md p-1 text-muted-foreground hover:bg-accent"><XIcon className="size-3.5" /></button>
-            </div>
-          )}
+          {selectionCandidates.length > 0 && <span className="ml-auto text-xs text-muted-foreground">{selectionCandidates.length > 1 ? `${selectionCandidates.length} ${t('preview.selectedElements')}` : t('preview.selectedElement')}</span>}
         </div>
       )}
       <div ref={selectionRoot} onClickCapture={captureElement} className={`min-h-0 flex-1 overflow-auto ${markMode ? 'talos-mark-mode cursor-crosshair select-none' : ''}`}>
@@ -591,7 +621,7 @@ function WordDocument({ blob, markMode, onBoxCandidate, committedTargets }: { bl
           if (!markModeRef.current) return;
           const clicked = event.target instanceof Element ? event.target : null;
           const smallest = clicked?.closest<HTMLElement>('td, th, p, h1, h2, h3, h4, h5, h6, li, img');
-          const promoted = clicked?.closest<HTMLElement>('table, section.docx');
+          const promoted = clicked?.closest<HTMLElement>('table');
           const element = smallest ?? promoted;
           if (!element) return;
           event.preventDefault();
@@ -756,7 +786,7 @@ function SpreadsheetGrid({ rows, sheet, startRow, startCol }: { rows: string[][]
   const colIdx = Array.from({ length: cols }, (_, i) => i);
   return (
     <div className="inline-block min-w-full overflow-hidden rounded-md border bg-card shadow-sm">
-      <table className="border-collapse text-[13px] tabular-nums">
+      <table data-sheet={sheet} data-artifact-element={`table-${sheet}`} className="border-collapse text-[13px] tabular-nums">
         <thead>
           <tr>
             <th className="sticky left-0 top-0 z-20 w-11 border border-border/70 bg-muted" />
