@@ -797,6 +797,8 @@ def _build_system_prompt(
                 "This is an EDIT of an existing binary artifact; all document-creation recipes elsewhere "
                 "are inapplicable. Do not use pandas.to_excel, xlsxwriter, Document(), Presentation(), or "
                 "any workflow that starts from a blank package. "
+                "Use sandboxed Python, directly or through Bash, to inspect and patch the existing artifact at the exact path above; "
+                "being open in Preview does not lock the source file. "
                 "Open the EXISTING file with a format-native library and mutate only the selected "
                 "object/range in place. Preserve all other pages, slides, sheets, formulas, styles, "
                 "themes, media, metadata, relationships, and layout. Never reconstruct the artifact "
@@ -1603,7 +1605,15 @@ async def stream_agent_loop(
         # unavailable for this turn. Targeted text edits and format-native
         # Python mutation remain available.
         disabled_tools.update({"write_file", "create_document", "update_document"})
+    artifact_edit_tools = {
+        "bash", "python", "run_cell", "read_file", "edit_file", "grep", "glob", "ls"
+    } if artifact_selection else set()
     public_blocked_tools = blocked_tools_for_owner(owner)
+    if artifact_selection:
+        # The artifact was owner/session validated by the route. These tools run
+        # inside that chat's isolated sandbox and are required for targeted text
+        # edits and format-native Office mutation by regular users.
+        public_blocked_tools.difference_update(artifact_edit_tools)
     if public_blocked_tools:
         disabled_tools.update(public_blocked_tools)
         # MCP tools are namespaced dynamically, so hide all MCP schemas for
@@ -1687,6 +1697,11 @@ async def stream_agent_loop(
     # or what keywords were in the latest user message.
     if _relevant_tools is not None and active_document is not None:
         _relevant_tools.update({"edit_document", "update_document", "suggest_document"})
+    if _relevant_tools is not None and artifact_selection is not None:
+        if artifact_selection.get("kind") in {"word", "excel", "presentation", "pdf", "image"}:
+            _relevant_tools.update({"bash", "python", "run_cell", "read_file", "ls"})
+        else:
+            _relevant_tools.update({"read_file", "edit_file", "grep"})
 
     # query_sql is gated by the DB button (force_db): expose it only when the
     # user turned the database toggle on for this message. Otherwise keep it
@@ -2746,6 +2761,7 @@ async def stream_agent_loop(
                         session_id=session_id,
                         disabled_tools=disabled_tools,
                         owner=owner,
+                        public_tool_exceptions=artifact_edit_tools,
                         progress_cb=_push_progress,
                         workspace=workspace,
                     )

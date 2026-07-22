@@ -1431,6 +1431,7 @@ async def execute_tool_block(
     session_id: Optional[str] = None,
     disabled_tools: Optional[set] = None,
     owner: Optional[str] = None,
+    public_tool_exceptions: Optional[set] = None,
     progress_cb: Optional[Callable[[Dict], Awaitable[None]]] = None,
     workspace: Optional[str] = None,
 ) -> Tuple[str, Dict]:
@@ -1507,7 +1508,11 @@ async def execute_tool_block(
         logger.warning("Admin tool blocked for non-admin owner=%r tool=%s", owner, tool)
         return desc, result
 
-    if is_public_blocked_tool(tool) and not _owner_is_admin(owner):
+    if (
+        is_public_blocked_tool(tool)
+        and (not isinstance(tool, str) or tool not in (public_tool_exceptions or set()))
+        and not _owner_is_admin(owner)
+    ):
         desc = f"{tool}: BLOCKED"
         result = {
             "error": (
