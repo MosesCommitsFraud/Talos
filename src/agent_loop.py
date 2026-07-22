@@ -797,8 +797,10 @@ def _build_system_prompt(
                 "This is an EDIT of an existing binary artifact; all document-creation recipes elsewhere "
                 "are inapplicable. Do not use pandas.to_excel, xlsxwriter, Document(), Presentation(), or "
                 "any workflow that starts from a blank package. "
-                "Use sandboxed Python, directly or through Bash, to inspect and patch the existing artifact at the exact path above; "
-                "being open in Preview does not lock the source file. "
+                "Use sandboxed Python, directly or through Bash, to inspect and patch the existing artifact at the exact path above. "
+                "You may create helper scripts and temporary files in the workspace. Being open in Preview NEVER locks the source file. "
+                "Do not claim a lock unless the save or replace operation itself returns a permission/locking error; Python exceptions such as "
+                "NameError and TypeError are coding errors that must be corrected using the literal traceback. "
                 "Open the EXISTING file with a format-native library and mutate only the selected "
                 "object/range in place. Preserve all other pages, slides, sheets, formulas, styles, "
                 "themes, media, metadata, relationships, and layout. Never reconstruct the artifact "
@@ -1601,12 +1603,12 @@ async def stream_agent_loop(
     prep_timings: Dict[str, float] = {}
     disabled_tools = set(disabled_tools or [])
     if artifact_selection:
-        # Marked edits are scope-restricted: creation/full-replacement tools are
-        # unavailable for this turn. Targeted text edits and format-native
-        # Python mutation remain available.
-        disabled_tools.update({"write_file", "create_document", "update_document"})
+        # Marked workspace-artifact edits must not be redirected into the
+        # separate Talos document workflow. Sandboxed file and mutation tools
+        # remain available for the existing artifact.
+        disabled_tools.update({"create_document", "update_document"})
     artifact_edit_tools = {
-        "bash", "python", "run_cell", "read_file", "edit_file", "grep", "glob", "ls"
+        "bash", "python", "run_cell", "read_file", "write_file", "edit_file", "grep", "glob", "ls"
     } if artifact_selection else set()
     public_blocked_tools = blocked_tools_for_owner(owner)
     if artifact_selection:
@@ -1699,7 +1701,7 @@ async def stream_agent_loop(
         _relevant_tools.update({"edit_document", "update_document", "suggest_document"})
     if _relevant_tools is not None and artifact_selection is not None:
         if artifact_selection.get("kind") in {"word", "excel", "presentation", "pdf", "image"}:
-            _relevant_tools.update({"bash", "python", "run_cell", "read_file", "ls"})
+            _relevant_tools.update({"bash", "python", "run_cell", "read_file", "write_file", "ls"})
         else:
             _relevant_tools.update({"read_file", "edit_file", "grep"})
 
