@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import type { ArtifactSelection } from '@/api/types';
 
 /** Ephemeral, non-persisted UI state shared across sibling components (e.g. the
  *  artifacts sidebar, which a message turn opens but `App` renders). Kept out of
@@ -50,6 +51,8 @@ interface UiState {
   openPreview: (file: PreviewFile) => void;
   updatePreview: (patch: Partial<PreviewFile>) => void;
   closePreview: () => void;
+  artifactSelection: ArtifactSelection | null;
+  setArtifactSelection: (selection: ArtifactSelection | null) => void;
 }
 
 export const useUi = create<UiState>((set) => ({
@@ -78,4 +81,6 @@ export const useUi = create<UiState>((set) => ({
     preview: state.preview ? { ...state.preview, ...patch } : null,
   })),
   closePreview: () => set({ preview: null, panelMode: 'files' }),
+  artifactSelection: null,
+  setArtifactSelection: (artifactSelection) => set({ artifactSelection }),
 }));

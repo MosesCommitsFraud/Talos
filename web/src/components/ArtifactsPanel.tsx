@@ -6,7 +6,7 @@ import { useChat } from '@/state/chat';
 import { artifactDisplayName, displayName, fileTypeLabel, formatSize, isPreviewable, previewKind, type PreviewKind } from '@/lib/files';
 import { FileTypeIcon } from './FileTypeIcon';
 
-type PreviewFile = { sessionId: string; path: string; name: string; mime?: string };
+type PreviewFile = { sessionId: string; path: string; name: string; mime?: string; version?: number };
 
 /** Square leading tile: a real thumbnail for images, otherwise the file's
  *  data-type icon (Excel/Word/Python/PDF/… where one exists). */
@@ -133,7 +133,7 @@ export function ArtifactsList({ sessionId, onOpen }: { sessionId: string | null;
             thumbSrc={kind === 'image' && sessionId ? artifactDownloadUrl(sessionId, path) : undefined}
             downloadUrl={sessionId ? artifactDownloadUrl(sessionId, path) : '#'}
             onDownload={sessionId ? () => { void downloadArtifact(sessionId, path, name); } : undefined}
-            onOpen={previewable ? () => onOpen({ sessionId: sessionId!, path, name, mime }) : undefined}
+            onOpen={previewable ? () => onOpen({ sessionId: sessionId!, path, name, mime, version: typeof f.version === 'number' ? f.version : undefined }) : undefined}
           />
         );
       })}

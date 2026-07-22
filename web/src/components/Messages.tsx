@@ -246,7 +246,7 @@ function EditBox({ msg, onDone }: { msg: UiMessage; onDone: () => void }) {
   );
 }
 
-export interface ArtifactFile { path: string; name: string; size?: number; mime?: string }
+export interface ArtifactFile { path: string; name: string; size?: number; mime?: string; version?: number }
 
 /** Downloadable chips for the files a turn produced — documents and images
  *  alike, shown inline on the last turn. Clicking a previewable file
@@ -269,7 +269,7 @@ function ArtifactChips({ sessionId, files }: { sessionId: string; files: Artifac
             <button
               type="button"
               onClick={() => {
-                if (previewable) openPreview({ sessionId, path: f.path, name: f.name, mime: f.mime });
+                if (previewable) openPreview({ sessionId, path: f.path, name: f.name, mime: f.mime, version: typeof f.version === 'number' ? f.version : undefined });
                 else void downloadArtifact(sessionId, f.path, f.name);
               }}
               title={previewable ? t('messages.openPreview', { name: f.name }) : f.name}

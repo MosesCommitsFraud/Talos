@@ -93,6 +93,25 @@ export interface Artifact {
   [key: string]: unknown;
 }
 
+export interface ArtifactSelection {
+  sessionId: string;
+  path: string;
+  name: string;
+  mime?: string;
+  version?: number;
+  kind: string;
+  target: {
+    type: 'text' | 'element';
+    quote?: string;
+    page?: number;
+    pageEnd?: number;
+    sheet?: string;
+    cell?: string;
+    slide?: number;
+    element?: string;
+  };
+}
+
 export interface SessionDetail {
   id: string;
   name: string;

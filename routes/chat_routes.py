@@ -411,6 +411,58 @@ def setup_chat_routes(
         if not plan_mode:
             approved_plan = (form_data.get("approved_plan") or "").strip()[:8192]
         active_doc_id = form_data.get("active_doc_id", "").strip()
+        artifact_selection = None
+        artifact_selection_raw = form_data.get("artifact_selection")
+        if artifact_selection_raw:
+            try:
+                candidate = json.loads(str(artifact_selection_raw))
+                target = candidate.get("target") if isinstance(candidate, dict) else None
+                if not isinstance(target, dict):
+                    raise ValueError("missing target")
+                selected_session = str(candidate.get("sessionId") or "")
+                selected_path = str(candidate.get("path") or "")
+                if selected_session and selected_session != str(form_data.get("session") or ""):
+                    raise ValueError("selection belongs to another session")
+                if not selected_path or len(selected_path) > 1000:
+                    raise ValueError("invalid artifact path")
+                if "<<<" in selected_path or ">>>" in selected_path:
+                    raise ValueError("artifact path contains reserved delimiters")
+                def _safe_text(value, limit):
+                    return str(value or "")[:limit].replace("<<<", "‹‹‹").replace(">>>", "›››")
+
+                def _optional_positive_int(value, field):
+                    if value in (None, ""):
+                        return None
+                    parsed = int(value)
+                    if parsed < 1:
+                        raise ValueError(f"invalid {field}")
+                    return parsed
+
+                selection_type = "element" if target.get("type") == "element" else "text"
+                quote = _safe_text(target.get("quote"), 4000)
+                cell = _safe_text(target.get("cell"), 40)
+                element = _safe_text(target.get("element"), 200)
+                if not any((quote, cell, element, target.get("page"), target.get("slide"))):
+                    raise ValueError("empty target")
+                selected_version = _optional_positive_int(candidate.get("version"), "version")
+                artifact_selection = {
+                    "path": selected_path,
+                    "name": _safe_text(candidate.get("name"), 300),
+                    "kind": "",
+                    "version": selected_version,
+                    "target": {
+                        "type": selection_type,
+                        "quote": quote,
+                        "page": _optional_positive_int(target.get("page"), "page"),
+                        "pageEnd": _optional_positive_int(target.get("pageEnd"), "pageEnd"),
+                        "sheet": _safe_text(target.get("sheet"), 200),
+                        "cell": cell,
+                        "slide": _optional_positive_int(target.get("slide"), "slide"),
+                        "element": element,
+                    },
+                }
+            except (TypeError, ValueError, json.JSONDecodeError) as exc:
+                raise HTTPException(400, f"Invalid artifact selection: {exc}")
         logger.info(f"[doc-inject] active_doc_id={active_doc_id!r}")
 
         try:
@@ -510,6 +562,28 @@ def setup_chat_routes(
             llm_language=llm_language,
         )
 
+        if artifact_selection:
+            selected_path = artifact_selection["path"]
+            if selected_path.startswith("document:"):
+                active_doc_id = selected_path.split(":", 1)[1]
+                artifact_selection["kind"] = "document"
+            elif selected_path.startswith("generated-image:"):
+                raise HTTPException(400, "Generated gallery images cannot be edited in place")
+            else:
+                from src.sandbox_client import list_artifacts
+
+                workspace_artifacts = await list_artifacts(owner=ctx.user, session_id=session)
+                if not any(str(item.get("path") or "") == selected_path for item in workspace_artifacts):
+                    raise HTTPException(404, "Selected artifact was not found in this workspace")
+                extension = os.path.splitext(selected_path)[1].lower()
+                artifact_selection["kind"] = {
+                    ".doc": "word", ".docx": "word", ".pdf": "pdf",
+                    ".xls": "excel", ".xlsx": "excel", ".xlsm": "excel",
+                    ".ppt": "presentation", ".pptx": "presentation",
+                    ".png": "image", ".jpg": "image", ".jpeg": "image",
+                    ".gif": "image", ".webp": "image",
+                }.get(extension, "text")
+
         # Auto-name the session immediately — the user message is now in
         # history, so fire title generation right away instead of waiting for
         # the response to finish (which left titles inconsistent on interrupted
@@ -554,7 +628,7 @@ def setup_chat_routes(
                         )
                 else:
                     logger.warning(f"[doc-inject] NOT FOUND by ID {active_doc_id}")
-            if not active_doc:
+            if not active_doc and not (artifact_selection and artifact_selection["path"].startswith("document:")):
                 _session_doc_q = _doc_db.query(DBDocument).filter(
                     DBDocument.session_id == session, DBDocument.is_active == True
                 )
@@ -573,7 +647,7 @@ def setup_chat_routes(
             # neither lookup above can associate them with this conversation,
             # so the agent never sees what it just wrote. Guarded so we never
             # leak a doc that belongs to a DIFFERENT session.
-            if not active_doc:
+            if not active_doc and not (artifact_selection and artifact_selection["path"].startswith("document:")):
                 try:
                     from src.tool_implementations import get_active_document
 
@@ -589,9 +663,20 @@ def setup_chat_routes(
                 except Exception as _e:
                     logger.debug(f"[doc-inject] in-memory fallback failed: {_e}")
             if not active_doc:
+                if artifact_selection and artifact_selection["path"].startswith("document:"):
+                    raise HTTPException(404, "Selected document was not found")
                 logger.info(f"[doc-inject] no active doc for session {session}")
             if active_doc:
+                if artifact_selection and artifact_selection["path"].startswith("document:"):
+                    selected_version = artifact_selection.get("version")
+                    current_version = getattr(active_doc, "version_count", None)
+                    if selected_version is not None and current_version is not None and int(selected_version) != int(current_version):
+                        raise HTTPException(409, "The selected document changed; select the target again")
                 _doc_db.expunge(active_doc)
+            if artifact_selection and not artifact_selection["path"].startswith("document:"):
+                active_doc = None
+        except HTTPException:
+            raise
         except Exception as e:
             logger.warning(f"Failed to query active document: {e}")
         finally:
@@ -866,6 +951,7 @@ def setup_chat_routes(
                         max_rounds=_max_rounds,
                         context_length=ctx.context_length,
                         active_document=active_doc,
+                        artifact_selection=artifact_selection,
                         session_id=session,
                         disabled_tools=disabled_tools if disabled_tools else None,
                         owner=_user,

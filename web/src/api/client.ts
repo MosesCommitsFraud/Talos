@@ -788,6 +788,7 @@ export interface StreamFlags {
   llmLanguage?: string;
   /** Database-backed document currently selected in Preview. */
   activeDocId?: string;
+  artifactSelection?: import('./types').ArtifactSelection;
 }
 
 /**
@@ -815,6 +816,7 @@ export async function streamChat(opts: {
   if (f.lang) fd.set('lang', f.lang);
   if (f.llmLanguage) fd.set('llm_language', f.llmLanguage);
   if (f.activeDocId) fd.set('active_doc_id', f.activeDocId);
+  if (f.artifactSelection) fd.set('artifact_selection', JSON.stringify(f.artifactSelection));
   if (f.attachments?.length) fd.set('attachments', JSON.stringify(f.attachments));
 
   const tzOffsetMin = -new Date().getTimezoneOffset();

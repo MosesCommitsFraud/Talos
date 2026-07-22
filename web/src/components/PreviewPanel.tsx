@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
 import { useTranslation } from 'react-i18next';
-import { FileTextIcon, RotateCcwIcon } from 'lucide-react';
+import { CheckIcon, FileTextIcon, MousePointer2Icon, RotateCcwIcon, XIcon } from 'lucide-react';
+import type { ArtifactSelection } from '@/api/types';
 import { downloadArtifact, fetchArtifactBlob, fetchArtifactPreviewBlob, fetchDocumentVersions, restoreDocumentVersion, updateDocument, type DocumentVersion } from '@/api/client';
 import { fileExt, previewKind, type PreviewKind } from '@/lib/files';
 import { queryClient } from '@/lib/queryClient';
@@ -24,9 +25,9 @@ type Loaded =
   | { kind: 'text'; text: string }
   | { kind: 'code'; text: string; lang: string }
   | { kind: 'csv'; rows: string[][] }
-  | { kind: 'excel'; sheets: { name: string; rows: string[][] }[] }
+  | { kind: 'excel'; sheets: { name: string; rows: string[][]; startRow: number; startCol: number }[] }
   | { kind: 'word'; blob: Blob }
-  | { kind: 'presentation'; slides: { texts: string[]; images: string[] }[] }
+  | { kind: 'presentation'; slides: PresentationSlide[] }
   | { kind: 'pdf'; blob: Blob }
   | { kind: 'image'; url: string };
 
@@ -36,7 +37,10 @@ function textLoaded(kind: PreviewKind, text: string, name: string): Loaded {
   return { kind: 'text', text };
 }
 
-async function parsePresentation(blob: Blob): Promise<{ texts: string[]; images: string[] }[]> {
+type PresentationElement = { id: string; name: string; text?: string; src?: string };
+type PresentationSlide = { texts: PresentationElement[]; images: PresentationElement[] };
+
+async function parsePresentation(blob: Blob): Promise<PresentationSlide[]> {
   const { default: JSZip } = await import('jszip');
   const zip = await JSZip.loadAsync(await blob.arrayBuffer());
   const slidePaths = Object.keys(zip.files)
@@ -45,25 +49,40 @@ async function parsePresentation(blob: Blob): Promise<{ texts: string[]; images:
   return Promise.all(slidePaths.map(async (slidePath) => {
     const xml = await zip.file(slidePath)!.async('text');
     const doc = new DOMParser().parseFromString(xml, 'application/xml');
-    const texts = Array.from(doc.getElementsByTagNameNS('*', 't'))
-      .map((node) => node.textContent?.trim() ?? '')
-      .filter(Boolean);
+    const texts = Array.from(doc.getElementsByTagNameNS('*', 'sp')).flatMap((shape) => {
+      const properties = shape.getElementsByTagNameNS('*', 'cNvPr')[0];
+      const text = Array.from(shape.getElementsByTagNameNS('*', 't'))
+        .map((node) => node.textContent ?? '')
+        .join('')
+        .trim();
+      return text ? [{ id: properties?.getAttribute('id') || crypto.randomUUID(), name: properties?.getAttribute('name') || 'Text', text }] : [];
+    });
     const slideName = slidePath.split('/').pop()!;
     const rel = zip.file(`ppt/slides/_rels/${slideName}.rels`);
-    const images: string[] = [];
+    const images: PresentationElement[] = [];
     if (rel) {
       const relXml = await rel.async('text');
       const relDoc = new DOMParser().parseFromString(relXml, 'application/xml');
-      const targets = Array.from(relDoc.getElementsByTagNameNS('*', 'Relationship'))
-        .map((node) => node.getAttribute('Target') ?? '')
-        .filter((target) => /(?:^|\/)media\//.test(target));
-      for (const target of targets) {
+      const targets = new Map(Array.from(relDoc.getElementsByTagNameNS('*', 'Relationship')).map((node) => [
+        node.getAttribute('Id') ?? '',
+        node.getAttribute('Target') ?? '',
+      ]));
+      for (const picture of Array.from(doc.getElementsByTagNameNS('*', 'pic'))) {
+        const properties = picture.getElementsByTagNameNS('*', 'cNvPr')[0];
+        const relationshipId = picture.getElementsByTagNameNS('*', 'blip')[0]?.getAttributeNS('http://schemas.openxmlformats.org/officeDocument/2006/relationships', 'embed')
+          || picture.getElementsByTagNameNS('*', 'blip')[0]?.getAttribute('r:embed') || '';
+        const target = targets.get(relationshipId) || '';
+        if (!/(?:^|\/)media\//.test(target)) continue;
         const mediaPath = target.replace(/^\.\.\//, 'ppt/');
         const file = zip.file(mediaPath);
         if (!file) continue;
         const ext = fileExt(mediaPath);
         const mime = ext === 'svg' ? 'image/svg+xml' : ext === 'jpg' || ext === 'jpeg' ? 'image/jpeg' : `image/${ext || 'png'}`;
-        images.push(`data:${mime};base64,${await file.async('base64')}`);
+        images.push({
+          id: properties?.getAttribute('id') || relationshipId,
+          name: properties?.getAttribute('name') || file.name,
+          src: `data:${mime};base64,${await file.async('base64')}`,
+        });
       }
     }
     return { texts, images };
@@ -88,7 +107,11 @@ export function PreviewContent({ preview }: { preview: PreviewFile | null }) {
   const [viewedVersion, setViewedVersion] = useState<number | 'current'>('current');
   const [currentText, setCurrentText] = useState('');
   const objectUrl = useRef<string | null>(null);
+  const selectionRoot = useRef<HTMLDivElement>(null);
+  const [markMode, setMarkMode] = useState(false);
+  const [selectionCandidate, setSelectionCandidate] = useState<ArtifactSelection['target'] | null>(null);
   const updatePreview = useUi((s) => s.updatePreview);
+  const setArtifactSelection = useUi((s) => s.setArtifactSelection);
 
   const kind: PreviewKind = preview ? previewKind(preview.name, preview.mime) : 'none';
 
@@ -101,6 +124,8 @@ export function PreviewContent({ preview }: { preview: PreviewFile | null }) {
     setEditing(false);
     setSaveError(false);
     setViewedVersion('current');
+    setMarkMode(false);
+    setSelectionCandidate(null);
     // Revoke any object URL from a previous file before loading the next.
     if (objectUrl.current) { URL.revokeObjectURL(objectUrl.current); objectUrl.current = null; }
 
@@ -142,10 +167,16 @@ export function PreviewContent({ preview }: { preview: PreviewFile | null }) {
         } else if (kind === 'excel') {
           const XLSX = await import('xlsx');
           const wb = XLSX.read(await blob.arrayBuffer(), { type: 'array' });
-          const sheets = wb.SheetNames.map((name) => ({
-            name,
-            rows: XLSX.utils.sheet_to_json<string[]>(wb.Sheets[name], { header: 1, blankrows: false, defval: '' }),
-          }));
+          const sheets = wb.SheetNames.map((name) => {
+            const sheet = wb.Sheets[name];
+            const usedRange = XLSX.utils.decode_range(sheet['!ref'] || 'A1:A1');
+            return {
+              name,
+              rows: XLSX.utils.sheet_to_json<string[]>(sheet, { header: 1, blankrows: true, defval: '' }),
+              startRow: usedRange.s.r,
+              startCol: usedRange.s.c,
+            };
+          });
           if (!cancelled) setLoaded({ kind: 'excel', sheets });
         } else if (kind === 'csv') {
           const text = await blob.text();
@@ -259,6 +290,79 @@ export function PreviewContent({ preview }: { preview: PreviewFile | null }) {
     }
   };
 
+  const targetFromElement = (element: Element | null, type: 'text' | 'element', quote?: string): ArtifactSelection['target'] => {
+    const page = element?.closest<HTMLElement>('[data-page-number]')?.dataset.pageNumber;
+    const cell = element?.closest<HTMLElement>('[data-cell]');
+    const slide = element?.closest<HTMLElement>('[data-slide]')?.dataset.slide;
+    const marked = element?.closest<HTMLElement>('[data-artifact-element]');
+    return {
+      type,
+      quote: quote?.trim().slice(0, 4000) || undefined,
+      page: page ? Number(page) : undefined,
+      sheet: cell?.dataset.sheet,
+      cell: cell?.dataset.cell,
+      slide: slide ? Number(slide) : undefined,
+      element: marked?.dataset.artifactElement,
+    };
+  };
+
+  const captureTextSelection = () => {
+    if (markMode) return;
+    const root = selectionRoot.current;
+    const selection = window.getSelection();
+    if (!root || !selection || selection.isCollapsed || !selection.rangeCount) return;
+    const range = selection.getRangeAt(0);
+    const ancestor = range.commonAncestorContainer instanceof Element
+      ? range.commonAncestorContainer
+      : range.commonAncestorContainer.parentElement;
+    if (!ancestor || !root.contains(ancestor)) return;
+    const quote = selection.toString().trim();
+    if (!quote) return;
+    const start = range.startContainer instanceof Element ? range.startContainer : range.startContainer.parentElement;
+    const end = range.endContainer instanceof Element ? range.endContainer : range.endContainer.parentElement;
+    const target = targetFromElement(start ?? ancestor, 'text', quote);
+    const endPage = end?.closest<HTMLElement>('[data-page-number]')?.dataset.pageNumber;
+    if (endPage && Number(endPage) !== target.page) target.pageEnd = Number(endPage);
+    const startCell = start?.closest<HTMLElement>('[data-cell]');
+    const endCell = end?.closest<HTMLElement>('[data-cell]');
+    if (startCell?.dataset.cell && endCell?.dataset.cell && startCell.dataset.sheet === endCell.dataset.sheet) {
+      target.sheet = startCell.dataset.sheet;
+      target.cell = startCell.dataset.cell === endCell.dataset.cell
+        ? startCell.dataset.cell
+        : `${startCell.dataset.cell}:${endCell.dataset.cell}`;
+    }
+    setSelectionCandidate(target);
+  };
+
+  const captureElement = (event: ReactMouseEvent<HTMLDivElement>) => {
+    if (!markMode) return;
+    const clicked = event.target instanceof Element ? event.target : null;
+    const element = clicked?.closest<HTMLElement>(
+      '[data-cell], [data-artifact-element], [data-page-number], td, th, p, h1, h2, h3, h4, h5, h6, li, pre, table, img, figure',
+    );
+    if (!element || !selectionRoot.current?.contains(element)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const quote = element instanceof HTMLImageElement ? undefined : element.innerText.trim();
+    setSelectionCandidate(targetFromElement(element, 'element', quote));
+    setMarkMode(false);
+  };
+
+  const commitSelection = () => {
+    if (!selectionCandidate || !preview) return;
+    setArtifactSelection({
+      sessionId: preview.sessionId,
+      path: preview.path,
+      name: preview.name,
+      mime: preview.mime,
+      version: preview.version,
+      kind,
+      target: selectionCandidate,
+    });
+    setSelectionCandidate(null);
+    window.getSelection()?.removeAllRanges();
+  };
+
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
       {editableDocument && !loading && !error && (
@@ -283,13 +387,27 @@ export function PreviewContent({ preview }: { preview: PreviewFile | null }) {
           )}
         </div>
       )}
-      <div className="min-h-0 flex-1 overflow-auto">
+      {!loading && !error && !editing && loaded && (
+        <div className="flex h-9 shrink-0 items-center gap-2 border-b bg-card px-2">
+          <button type="button" aria-pressed={markMode} onClick={() => { setMarkMode((value) => !value); setSelectionCandidate(null); }} className={`inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium ${markMode ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:bg-accent hover:text-foreground'}`}>
+            <MousePointer2Icon className="size-3.5" />{t('preview.markElement')}
+          </button>
+          {selectionCandidate && (
+            <div className="ml-auto flex min-w-0 items-center gap-1">
+              <span className="max-w-48 truncate text-xs text-muted-foreground">{selectionCandidate.quote || selectionCandidate.cell || selectionCandidate.element || t('preview.selectedElement')}</span>
+              <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={commitSelection} className="inline-flex items-center gap-1 rounded-md bg-primary px-2 py-1 text-xs font-medium text-primary-foreground"><CheckIcon className="size-3" />{t('preview.addToPrompt')}</button>
+              <button type="button" onClick={() => setSelectionCandidate(null)} aria-label={t('common.cancel')} className="rounded-md p-1 text-muted-foreground hover:bg-accent"><XIcon className="size-3.5" /></button>
+            </div>
+          )}
+        </div>
+      )}
+      <div ref={selectionRoot} onMouseUp={captureTextSelection} onClickCapture={captureElement} className={`min-h-0 flex-1 overflow-auto ${markMode ? 'cursor-crosshair [&_p:hover]:outline [&_p:hover]:outline-2 [&_p:hover]:outline-primary/50 [&_td:hover]:bg-primary/10 [&_img:hover]:outline [&_img:hover]:outline-2 [&_img:hover]:outline-primary' : ''}`}>
       {loading && <p className="px-4 py-6 text-center text-xs text-muted-foreground">{t('common.loading')}</p>}
       {error && <p className="px-4 py-6 text-center text-xs text-destructive-foreground">{t('preview.error')}</p>}
       {!loading && !error && editing && (
         <textarea value={draft} onChange={(e) => setDraft(e.target.value)} className="h-full min-h-96 w-full resize-none bg-background p-4 font-mono text-[13px] leading-relaxed outline-none" spellCheck={false} />
       )}
-       {!loading && !error && !editing && loaded && <PreviewBody loaded={loaded} preview={preview} />}
+       {!loading && !error && !editing && loaded && <PreviewBody loaded={loaded} preview={preview} onSelectionCandidate={setSelectionCandidate} />}
       </div>
     </div>
   );
@@ -303,7 +421,7 @@ export function PreviewContent({ preview }: { preview: PreviewFile | null }) {
  *  iframe has its own clean document, so only docx-preview's own styles apply.
  *  The iframe fills the panel and scrolls its own content, so a "current / total"
  *  page badge can float over a fixed viewport (bottom-left) and update on scroll. */
-function WordDocument({ blob }: { blob: Blob }) {
+function WordDocument({ blob, onSelectionCandidate }: { blob: Blob; onSelectionCandidate: (target: ArtifactSelection['target']) => void }) {
   const { t } = useTranslation();
   const frameRef = useRef<HTMLIFrameElement>(null);
   const cleanupRef = useRef<(() => void) | undefined>(undefined);
@@ -360,10 +478,21 @@ function WordDocument({ blob }: { blob: Blob }) {
           setPage({ cur, total: secs.length });
         };
         const onScroll = () => { if (!raf) raf = win.requestAnimationFrame(update); };
+        const onMouseUp = () => {
+          const selection = win.getSelection();
+          const quote = selection?.toString().trim();
+          if (!selection || !quote || !selection.anchorNode) return;
+          const anchor = selection.anchorNode instanceof Element ? selection.anchorNode : selection.anchorNode.parentElement;
+          const section = anchor?.closest('section.docx');
+          const pageNumber = section ? pages().indexOf(section) + 1 : undefined;
+          onSelectionCandidate({ type: 'text', quote: quote.slice(0, 4000), page: pageNumber || undefined });
+        };
         win.addEventListener('scroll', onScroll, { passive: true });
+        idoc.addEventListener('mouseup', onMouseUp);
         window.addEventListener('resize', onScroll);
         cleanupRef.current = () => {
           win.removeEventListener('scroll', onScroll);
+          idoc.removeEventListener('mouseup', onMouseUp);
           window.removeEventListener('resize', onScroll);
           if (raf) win.cancelAnimationFrame(raf);
         };
@@ -379,7 +508,7 @@ function WordDocument({ blob }: { blob: Blob }) {
       cleanupRef.current?.();
       cleanupRef.current = undefined;
     };
-  }, [blob]);
+  }, [blob, onSelectionCandidate]);
 
   return (
     <div className="relative h-full bg-muted/40">
@@ -394,7 +523,7 @@ function WordDocument({ blob }: { blob: Blob }) {
   );
 }
 
-function PreviewBody({ loaded, preview }: { loaded: Loaded; preview: PreviewFile }) {
+function PreviewBody({ loaded, preview, onSelectionCandidate }: { loaded: Loaded; preview: PreviewFile; onSelectionCandidate: (target: ArtifactSelection['target']) => void }) {
   if (loaded.kind === 'markdown') {
     // Markdown stays a plain, pageless reader — it isn't a Word document. Only
     // real Office files (.docx/.xlsx/.pptx) get the paper-page / grid treatment.
@@ -407,26 +536,26 @@ function PreviewBody({ loaded, preview }: { loaded: Loaded; preview: PreviewFile
     return <div className="p-4"><Markdown text={'```' + loaded.lang + '\n' + loaded.text + '\n```'} /></div>;
   }
   if (loaded.kind === 'csv') {
-    return <div className="min-h-full bg-muted/40 p-3"><SpreadsheetGrid rows={loaded.rows} /></div>;
+    return <div className="min-h-full bg-muted/40 p-3"><SpreadsheetGrid rows={loaded.rows} sheet="CSV" startRow={0} startCol={0} /></div>;
   }
   if (loaded.kind === 'excel') {
     return <ExcelView sheets={loaded.sheets} />;
   }
   if (loaded.kind === 'word') {
-    return <WordDocument blob={loaded.blob} />;
+    return <WordDocument blob={loaded.blob} onSelectionCandidate={onSelectionCandidate} />;
   }
   if (loaded.kind === 'presentation') {
     return (
       <div className="space-y-5 bg-muted/40 p-4">
         {loaded.slides.map((slide, index) => (
-          <figure key={index} className="mx-auto w-full max-w-4xl">
+          <figure key={index} data-slide={index + 1} data-artifact-element={`slide-${index + 1}`} className="mx-auto w-full max-w-4xl">
             <section className="flex aspect-video w-full flex-col overflow-auto rounded-lg border bg-white p-8 text-slate-900 shadow-sm ring-1 ring-black/5">
               <div className="space-y-3">
-                {slide.texts.map((text, i) => i === 0
-                  ? <h2 key={i} className="text-2xl font-semibold leading-tight">{text}</h2>
-                  : <p key={i} className="text-base leading-relaxed">{text}</p>)}
+                {slide.texts.map((element, i) => i === 0
+                  ? <h2 key={element.id} data-artifact-element={`shape-${element.id}`} title={element.name} className="text-2xl font-semibold leading-tight">{element.text}</h2>
+                  : <p key={element.id} data-artifact-element={`shape-${element.id}`} title={element.name} className="text-base leading-relaxed">{element.text}</p>)}
               </div>
-              {slide.images.length > 0 && <div className="mt-5 grid grid-cols-2 gap-3">{slide.images.map((src, i) => <img key={i} src={src} alt="" className="max-h-64 w-full object-contain" />)}</div>}
+              {slide.images.length > 0 && <div className="mt-5 grid grid-cols-2 gap-3">{slide.images.map((element) => <img key={element.id} src={element.src} alt={element.name} data-artifact-element={`shape-${element.id}`} className="max-h-64 w-full object-contain" />)}</div>}
             </section>
             <figcaption className="mt-1.5 text-center text-[11px] font-medium text-muted-foreground">{index + 1} / {loaded.slides.length}</figcaption>
           </figure>
@@ -445,18 +574,18 @@ function PreviewBody({ loaded, preview }: { loaded: Loaded; preview: PreviewFile
   }
   return (
     <div className="flex h-full items-center justify-center bg-muted/40 p-4">
-      <img src={loaded.url} alt={preview.name} className="max-h-full max-w-full rounded-md object-contain shadow-sm" />
+      <img src={loaded.url} alt={preview.name} data-artifact-element="image" className="max-h-full max-w-full rounded-md object-contain shadow-sm" />
     </div>
   );
 }
 
-function ExcelView({ sheets }: { sheets: { name: string; rows: string[][] }[] }) {
+function ExcelView({ sheets }: { sheets: { name: string; rows: string[][]; startRow: number; startCol: number }[] }) {
   const [active, setActive] = useState(0);
   const sheet = sheets[active];
   return (
     <div className="flex min-h-0 flex-1 flex-col bg-muted/40">
       <div className="min-h-0 flex-1 overflow-auto p-3">
-        {sheet && sheet.rows.length > 0 ? <SpreadsheetGrid rows={sheet.rows} /> : (
+        {sheet && sheet.rows.length > 0 ? <SpreadsheetGrid rows={sheet.rows} sheet={sheet.name} startRow={sheet.startRow} startCol={sheet.startCol} /> : (
           <p className="px-1 py-4 text-xs text-muted-foreground">—</p>
         )}
       </div>
@@ -497,7 +626,7 @@ function columnLabel(index: number): string {
  *  headers and gridlines — so .xlsx/.csv artifacts read like a spreadsheet app
  *  rather than a plain HTML table. Every row is data (no header row is stolen),
  *  matching how a sheet actually looks. */
-function SpreadsheetGrid({ rows }: { rows: string[][] }) {
+function SpreadsheetGrid({ rows, sheet, startRow, startCol }: { rows: string[][]; sheet: string; startRow: number; startCol: number }) {
   if (rows.length === 0) return <p className="px-1 py-4 text-xs text-muted-foreground">—</p>;
   const cols = rows.reduce((n, r) => Math.max(n, r.length), 0);
   const colIdx = Array.from({ length: cols }, (_, i) => i);
@@ -508,16 +637,16 @@ function SpreadsheetGrid({ rows }: { rows: string[][] }) {
           <tr>
             <th className="sticky left-0 top-0 z-20 w-11 border border-border/70 bg-muted" />
             {colIdx.map((i) => (
-              <th key={i} className="sticky top-0 z-10 min-w-[84px] border border-border/70 bg-muted px-2 py-1 text-center text-xs font-medium text-muted-foreground">{columnLabel(i)}</th>
+              <th key={i} className="sticky top-0 z-10 min-w-[84px] border border-border/70 bg-muted px-2 py-1 text-center text-xs font-medium text-muted-foreground">{columnLabel(i + startCol)}</th>
             ))}
           </tr>
         </thead>
         <tbody>
           {rows.map((r, ri) => (
             <tr key={ri}>
-              <th className="sticky left-0 z-10 border border-border/70 bg-muted px-2 py-1 text-center text-xs font-normal text-muted-foreground">{ri + 1}</th>
+              <th className="sticky left-0 z-10 border border-border/70 bg-muted px-2 py-1 text-center text-xs font-normal text-muted-foreground">{ri + startRow + 1}</th>
               {colIdx.map((ci) => (
-                <td key={ci} className="max-w-[28rem] truncate border border-border/60 px-2 py-1 align-top" title={r[ci] ?? ''}>{r[ci] ?? ''}</td>
+                <td key={ci} data-sheet={sheet} data-cell={`${columnLabel(ci + startCol)}${ri + startRow + 1}`} data-artifact-element={`${sheet}!${columnLabel(ci + startCol)}${ri + startRow + 1}`} className="max-w-[28rem] truncate border border-border/60 px-2 py-1 align-top" title={r[ci] ?? ''}>{r[ci] ?? ''}</td>
               ))}
             </tr>
           ))}

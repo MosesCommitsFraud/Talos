@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { compactSession, createSession, deleteMessages, editMessage, fetchArtifacts, fetchSession, streamChat } from '@/api/client';
-import type { Artifact, Attachment, Metrics, RagSource, ToolCall } from '@/api/types';
+import type { Artifact, ArtifactSelection, Attachment, Metrics, RagSource, ToolCall } from '@/api/types';
 import { documentFileName, isPreviewable } from '@/lib/files';
 import { timestampMs } from '@/lib/utils';
 import { queryClient } from '@/lib/queryClient';
@@ -95,7 +95,7 @@ interface ChatState {
   setPendingModel: (m: ChatState['pendingModel']) => void;
   newChat: () => void;
   openSession: (id: string) => Promise<void>;
-  send: (text: string, opts?: { attachments?: Attachment[]; onSessionCreated?: (id: string) => void; approvedPlan?: string; planMode?: boolean; goalIteration?: boolean; targetSessionId?: string }) => Promise<void>;
+  send: (text: string, opts?: { attachments?: Attachment[]; artifactSelection?: ArtifactSelection; onSessionCreated?: (id: string) => void; approvedPlan?: string; planMode?: boolean; goalIteration?: boolean; targetSessionId?: string }) => Promise<void>;
   stop: () => void;
   startGoal: (objective: string) => Promise<void>;
   pauseGoal: () => void;
@@ -375,6 +375,10 @@ export const useChat = create<ChatState>((set, get) => {
       return { sessionId: id, messages: rt.messages, streaming: rt.streaming, turnStartedAt: rt.turnStartedAt, goal: rt.goal, completed };
     });
     const preview = useUi.getState().preview;
+    const artifactSelection = useUi.getState().artifactSelection;
+    if (artifactSelection && artifactSelection.sessionId !== id) {
+      useUi.getState().setArtifactSelection(null);
+    }
     if (preview && preview.sessionId !== id) {
       useUi.getState().closePreview();
       useUi.getState().setArtifactsOpen(false);
@@ -531,6 +535,7 @@ export const useChat = create<ChatState>((set, get) => {
           lang: prefs.lang,
           llmLanguage: prefs.llmLang,
           activeDocId,
+          artifactSelection: opts?.artifactSelection,
           attachments: attachments.map((file) => file.id),
         },
         signal: abort.signal,

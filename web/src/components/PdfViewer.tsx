@@ -134,6 +134,8 @@ function PageCanvas({ document, pageNumber, scale, fitWidth, availableWidth, rot
       style={{ width, height }}
       className="relative scroll-mt-4 bg-white shadow-md ring-1 ring-black/10"
       aria-label={label}
+      data-page-number={pageNumber}
+      data-artifact-element={`page-${pageNumber}`}
     >
       {visible && (
         <>

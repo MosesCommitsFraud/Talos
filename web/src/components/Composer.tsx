@@ -18,11 +18,13 @@ import {
   PlusIcon,
   WrenchIcon,
   XIcon,
+  ScanSearchIcon,
 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 import { fetchCapabilities, uploadFiles, type UploadedFile } from '@/api/client';
+import type { ArtifactSelection } from '@/api/types';
 import { selectPendingPlan, useChat } from '@/state/chat';
 import { usePrefs, type ChatMode } from '@/state/prefs';
 import { useUi } from '@/state/ui';
@@ -271,10 +273,12 @@ export function Composer() {
   const [dragging, setDragging] = useState(false);
   const [slashIndex, setSlashIndex] = useState(0);
   const [commandError, setCommandError] = useState('');
+  const [planArtifactSelections, setPlanArtifactSelections] = useState<Record<string, ArtifactSelection>>({});
   const [queuedMessages, setQueuedMessages] = useState<Array<{
     id: string;
     text: string;
     attachments: UploadedFile[];
+    artifactSelection?: ArtifactSelection;
   }>>([]);
   const dragDepth = useRef(0);
   const textarea = useRef<HTMLTextAreaElement>(null);
@@ -282,6 +286,7 @@ export function Composer() {
   const slashMenu = useRef<HTMLDivElement>(null);
   const previousSlashIndex = useRef(0);
   const streaming = useChat((s) => s.streaming);
+  const sessionId = useChat((s) => s.sessionId);
   const send = useChat((s) => s.send);
   const stop = useChat((s) => s.stop);
   const goal = useChat((s) => s.goal);
@@ -293,6 +298,8 @@ export function Composer() {
   const cancelPlan = useChat((s) => s.cancelPlan);
   const pendingPlan = useChat(selectPendingPlan);
   const setPlanPanelOpen = useUi((s) => s.setPlanPanelOpen);
+  const artifactSelection = useUi((s) => s.artifactSelection);
+  const setArtifactSelection = useUi((s) => s.setArtifactSelection);
   const prefs = usePrefs();
   const queryClient = useQueryClient();
   const { data: caps } = useQuery({ queryKey: ['capabilities'], queryFn: fetchCapabilities, staleTime: 60_000 });
@@ -301,6 +308,17 @@ export function Composer() {
   const slashItems = slashMatch
     ? SLASH_COMMANDS.filter((c) => c.name.startsWith(slashMatch[1].toLowerCase()))
     : [];
+
+  const rememberPlanSelection = (selection: ArtifactSelection | null) => {
+    const key = selection?.sessionId ?? sessionId;
+    if (!key) return;
+    setPlanArtifactSelections((items) => {
+      if (selection) return { ...items, [key]: selection };
+      const next = { ...items };
+      delete next[key];
+      return next;
+    });
+  };
 
   useEffect(() => {
     setSlashIndex(0);
@@ -340,7 +358,7 @@ export function Composer() {
     if (streaming || queuedMessages.length === 0) return;
     const next = queuedMessages[0];
     setQueuedMessages((items) => items.filter((item) => item.id !== next.id));
-    void send(next.text, { attachments: next.attachments });
+    void send(next.text, { attachments: next.attachments, artifactSelection: next.artifactSelection });
   }, [streaming, queuedMessages, send]);
 
   const steerQueuedMessage = (id: string) => {
@@ -497,9 +515,12 @@ export function Composer() {
         id: crypto.randomUUID(),
         text: queuedText,
         attachments: pending,
+        artifactSelection: artifactSelection ?? undefined,
       }]);
+      if (prefs.planMode) rememberPlanSelection(artifactSelection);
       setText('');
       setPending([]);
+      if (!prefs.planMode) setArtifactSelection(null);
       requestAnimationFrame(autoresize);
       setCommandError('');
       return;
@@ -538,16 +559,23 @@ export function Composer() {
       };
       if (prompts[command]) {
         setText(''); setPending([]); requestAnimationFrame(autoresize);
-        await send(prompts[command], { attachments: pending });
+        const selection = artifactSelection ?? undefined;
+        if (command === 'plan' || prefs.planMode) rememberPlanSelection(artifactSelection);
+        if (command !== 'plan' && !prefs.planMode) setArtifactSelection(null);
+        await send(prompts[command], { attachments: pending, artifactSelection: selection });
         return;
       }
     }
     const attachments = pending;
+    const selection = artifactSelection ?? undefined;
+    if (prefs.planMode) rememberPlanSelection(artifactSelection);
     setText('');
     setPending([]);
+    if (!prefs.planMode) setArtifactSelection(null);
     requestAnimationFrame(autoresize);
     await send(value, {
       attachments,
+      artifactSelection: selection,
       onSessionCreated: () => {
         void queryClient.refetchQueries({ queryKey: ['sessions'], type: 'active' });
       },
@@ -557,7 +585,10 @@ export function Composer() {
 
   const acceptPlan = async () => {
     if (!pendingPlan) return;
-    await send(t('plan.implementing'), { approvedPlan: pendingPlan.content, planMode: false });
+    const selection = sessionId ? planArtifactSelections[sessionId] : undefined;
+    rememberPlanSelection(null);
+    setArtifactSelection(null);
+    await send(t('plan.implementing'), { approvedPlan: pendingPlan.content, planMode: false, artifactSelection: selection });
     void queryClient.refetchQueries({ queryKey: ['sessions'], type: 'active' });
   };
 
@@ -678,6 +709,15 @@ export function Composer() {
                 </button>
               </span>
             ))}
+          </div>
+        )}
+        {artifactSelection && (
+          <div className="flex flex-wrap gap-1.5 px-3 pt-2.5">
+            <span className="inline-flex items-center gap-1.5 rounded-lg border border-primary/25 bg-primary/5 px-2 py-1 text-xs">
+              <ScanSearchIcon className="size-3.5 text-primary" />
+              <span className="max-w-64 truncate">{artifactSelection.name} · {artifactSelection.target.quote || artifactSelection.target.cell || artifactSelection.target.element || t('composer.markedElement')}</span>
+              <button type="button" aria-label={t('composer.removeArtifactSelection')} onClick={() => setArtifactSelection(null)} className="text-muted-foreground hover:text-foreground"><XIcon className="size-3" /></button>
+            </span>
           </div>
         )}
 
