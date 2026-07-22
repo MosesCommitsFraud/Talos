@@ -438,12 +438,35 @@ def setup_chat_routes(
                         raise ValueError(f"invalid {field}")
                     return parsed
 
-                selection_type = "element" if target.get("type") == "element" else "text"
-                quote = _safe_text(target.get("quote"), 4000)
-                cell = _safe_text(target.get("cell"), 40)
-                element = _safe_text(target.get("element"), 200)
-                if not any((quote, cell, element, target.get("page"), target.get("slide"))):
-                    raise ValueError("empty target")
+                raw_targets = candidate.get("targets")
+                if isinstance(raw_targets, list):
+                    if not 1 <= len(raw_targets) <= 20:
+                        raise ValueError("selection must contain 1 to 20 targets")
+                    raw_target_list = raw_targets
+                else:
+                    raw_target_list = [target]
+                quote_limit = 4000 if len(raw_target_list) == 1 else 2000
+
+                def _sanitize_target(raw_target):
+                    if not isinstance(raw_target, dict):
+                        raise ValueError("invalid target")
+                    quote = _safe_text(raw_target.get("quote"), quote_limit)
+                    cell = _safe_text(raw_target.get("cell"), 40)
+                    element = _safe_text(raw_target.get("element"), 200)
+                    if not any((quote, cell, element, raw_target.get("page"), raw_target.get("slide"))):
+                        raise ValueError("empty target")
+                    return {
+                        "type": "element" if raw_target.get("type") == "element" else "text",
+                        "quote": quote,
+                        "page": _optional_positive_int(raw_target.get("page"), "page"),
+                        "pageEnd": _optional_positive_int(raw_target.get("pageEnd"), "pageEnd"),
+                        "sheet": _safe_text(raw_target.get("sheet"), 200),
+                        "cell": cell,
+                        "slide": _optional_positive_int(raw_target.get("slide"), "slide"),
+                        "element": element,
+                    }
+
+                targets = [_sanitize_target(item) for item in raw_target_list]
                 selected_version = _optional_positive_int(candidate.get("version"), "version")
                 artifact_selection = {
                     "path": selected_path,
@@ -451,16 +474,8 @@ def setup_chat_routes(
                     "mime": _safe_text(candidate.get("mime"), 200),
                     "kind": "",
                     "version": selected_version,
-                    "target": {
-                        "type": selection_type,
-                        "quote": quote,
-                        "page": _optional_positive_int(target.get("page"), "page"),
-                        "pageEnd": _optional_positive_int(target.get("pageEnd"), "pageEnd"),
-                        "sheet": _safe_text(target.get("sheet"), 200),
-                        "cell": cell,
-                        "slide": _optional_positive_int(target.get("slide"), "slide"),
-                        "element": element,
-                    },
+                    "target": targets[0],
+                    "targets": targets,
                 }
             except (TypeError, ValueError, json.JSONDecodeError) as exc:
                 raise HTTPException(400, f"Invalid artifact selection: {exc}")

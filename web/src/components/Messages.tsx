@@ -196,10 +196,13 @@ function AttachmentList({ msg }: { msg: UiMessage }) {
 }
 
 function ArtifactSelectionChip({ msg }: { msg: UiMessage }) {
+  const { t } = useTranslation();
   const openPreview = useUi((state) => state.openPreview);
   const selection = msg.artifactSelection;
   if (!selection) return null;
-  const detail = selection.target.quote || selection.target.cell || selection.target.element
+  const detail = selection.targets && selection.targets.length > 1
+    ? t('composer.markedElements', { count: selection.targets.length })
+    : selection.target.quote || selection.target.cell || selection.target.element
     || (selection.target.page ? `p. ${selection.target.page}` : selection.target.slide ? `Slide ${selection.target.slide}` : 'Selection');
   return (
     <div className="mt-1 flex max-w-full justify-end">

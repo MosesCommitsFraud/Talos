@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { CheckIcon, FileTextIcon, MousePointer2Icon, RotateCcwIcon, XIcon } from 'lucide-react';
-import type { ArtifactSelection } from '@/api/types';
+import type { ArtifactSelectionTarget } from '@/api/types';
 import { downloadArtifact, fetchArtifactBlob, fetchArtifactPreviewBlob, fetchDocumentVersions, restoreDocumentVersion, updateDocument, type DocumentVersion } from '@/api/client';
 import { fileExt, previewKind, type PreviewKind } from '@/lib/files';
 import { queryClient } from '@/lib/queryClient';
@@ -39,7 +39,7 @@ function textLoaded(kind: PreviewKind, text: string, name: string): Loaded {
 
 type PresentationElement = { id: string; name: string; text?: string; src?: string };
 type PresentationSlide = { texts: PresentationElement[]; images: PresentationElement[] };
-type BoxSelectionCandidate = { target: ArtifactSelection['target']; element: HTMLElement };
+type BoxSelectionCandidate = { target: ArtifactSelectionTarget; element: HTMLElement };
 
 async function parsePresentation(blob: Blob): Promise<PresentationSlide[]> {
   const { default: JSZip } = await import('jszip');
@@ -109,9 +109,11 @@ export function PreviewContent({ preview }: { preview: PreviewFile | null }) {
   const [currentText, setCurrentText] = useState('');
   const objectUrl = useRef<string | null>(null);
   const selectionRoot = useRef<HTMLDivElement>(null);
-  const committedElement = useRef<HTMLElement | null>(null);
+  const committedElements = useRef<HTMLElement[]>([]);
   const [markMode, setMarkMode] = useState(false);
-  const [selectionCandidate, setSelectionCandidate] = useState<BoxSelectionCandidate | null>(null);
+  const [selectionCandidates, setSelectionCandidates] = useState<BoxSelectionCandidate[]>([]);
+  const [groupRect, setGroupRect] = useState<DOMRect | null>(null);
+  const [selectionLayoutVersion, setSelectionLayoutVersion] = useState(0);
   const updatePreview = useUi((s) => s.updatePreview);
   const artifactSelection = useUi((s) => s.artifactSelection);
   const setArtifactSelection = useUi((s) => s.setArtifactSelection);
@@ -128,10 +130,10 @@ export function PreviewContent({ preview }: { preview: PreviewFile | null }) {
     setSaveError(false);
     setViewedVersion('current');
     setMarkMode(false);
-    selectionCandidate?.element.classList.remove('talos-selection-candidate');
-    committedElement.current?.classList.remove('talos-selection-committed');
-    committedElement.current = null;
-    setSelectionCandidate(null);
+    selectionCandidates.forEach((candidate) => candidate.element.classList.remove('talos-selection-candidate'));
+    committedElements.current.forEach((element) => element.classList.remove('talos-selection-committed'));
+    committedElements.current = [];
+    setSelectionCandidates([]);
     // Revoke any object URL from a previous file before loading the next.
     if (objectUrl.current) { URL.revokeObjectURL(objectUrl.current); objectUrl.current = null; }
 
@@ -230,8 +232,8 @@ export function PreviewContent({ preview }: { preview: PreviewFile | null }) {
 
   useEffect(() => {
     if (artifactSelection && preview && artifactSelection.sessionId === preview.sessionId && artifactSelection.path === preview.path) return;
-    committedElement.current?.classList.remove('talos-selection-committed');
-    committedElement.current = null;
+    committedElements.current.forEach((element) => element.classList.remove('talos-selection-committed'));
+    committedElements.current = [];
   }, [artifactSelection, preview]);
 
   useEffect(() => {
@@ -240,19 +242,72 @@ export function PreviewContent({ preview }: { preview: PreviewFile | null }) {
     const applyClasses = () => {
       root.querySelectorAll('.talos-selection-candidate').forEach((element) => element.classList.remove('talos-selection-candidate'));
       root.querySelectorAll('.talos-selection-committed').forEach((element) => element.classList.remove('talos-selection-committed'));
-      const candidateKey = selectionCandidate?.target.element;
-      if (candidateKey) root.querySelector<HTMLElement>(`[data-artifact-element="${CSS.escape(candidateKey)}"]`)?.classList.add('talos-selection-candidate');
-      const committed = artifactSelection && preview
-        && artifactSelection.sessionId === preview.sessionId && artifactSelection.path === preview.path
-        ? artifactSelection.target.element
-        : undefined;
-      if (committed) root.querySelector<HTMLElement>(`[data-artifact-element="${CSS.escape(committed)}"]`)?.classList.add('talos-selection-committed');
+      for (const candidate of selectionCandidates) {
+        const candidateKey = candidate.target.element;
+        if (candidateKey) root.querySelector<HTMLElement>(`[data-artifact-element="${CSS.escape(candidateKey)}"]`)?.classList.add('talos-selection-candidate');
+      }
+      const selectionMatches = !!artifactSelection && !!preview
+        && artifactSelection.sessionId === preview.sessionId && artifactSelection.path === preview.path;
+      const committedTargets = selectionMatches
+        ? artifactSelection.targets ?? [artifactSelection.target]
+        : [];
+      for (const target of committedTargets) {
+        if (target.element) root.querySelector<HTMLElement>(`[data-artifact-element="${CSS.escape(target.element)}"]`)?.classList.add('talos-selection-committed');
+      }
     };
     applyClasses();
-    const observer = new MutationObserver(applyClasses);
+    const observer = new MutationObserver(() => {
+      applyClasses();
+      setSelectionLayoutVersion((value) => value + 1);
+    });
     observer.observe(root, { childList: true, subtree: true });
     return () => observer.disconnect();
-  }, [artifactSelection, preview, selectionCandidate]);
+  }, [artifactSelection, preview, selectionCandidates]);
+
+  useEffect(() => {
+    const update = () => {
+      const resolveElement = (candidate: BoxSelectionCandidate) => (
+        candidate.target.element
+          ? selectionRoot.current?.querySelector<HTMLElement>(`[data-artifact-element="${CSS.escape(candidate.target.element)}"]`) ?? candidate.element
+          : candidate.element
+      );
+      let elements = selectionCandidates.length > 1
+        ? selectionCandidates.map(resolveElement)
+        : [];
+      const selectionMatches = !!artifactSelection && !!preview
+        && artifactSelection.sessionId === preview.sessionId && artifactSelection.path === preview.path;
+      if (!elements.length && selectionMatches && artifactSelection.targets && artifactSelection.targets.length > 1) {
+        elements = artifactSelection.targets.map((target) => (
+          target.element
+            ? selectionRoot.current?.querySelector<HTMLElement>(`[data-artifact-element="${CSS.escape(target.element)}"]`)
+            : null
+        )).filter((element): element is HTMLElement => !!element);
+        if (elements.length < 2) elements = committedElements.current;
+      }
+      const rects = elements.filter((element) => element.isConnected).map((element) => {
+        const rect = element.getBoundingClientRect();
+        const frame = element.ownerDocument.defaultView?.frameElement;
+        if (!(frame instanceof HTMLElement)) return rect;
+        const frameRect = frame.getBoundingClientRect();
+        return new DOMRect(frameRect.left + rect.left, frameRect.top + rect.top, rect.width, rect.height);
+      });
+      if (rects.length < 2) { setGroupRect(null); return; }
+      const left = Math.min(...rects.map((rect) => rect.left));
+      const top = Math.min(...rects.map((rect) => rect.top));
+      const right = Math.max(...rects.map((rect) => rect.right));
+      const bottom = Math.max(...rects.map((rect) => rect.bottom));
+      setGroupRect(new DOMRect(left, top, right - left, bottom - top));
+    };
+    update();
+    document.addEventListener('scroll', update, true);
+    window.addEventListener('resize', update);
+    window.addEventListener('talos-selection-layout', update);
+    return () => {
+      document.removeEventListener('scroll', update, true);
+      window.removeEventListener('resize', update);
+      window.removeEventListener('talos-selection-layout', update);
+    };
+  }, [artifactSelection, preview, selectionCandidates, selectionLayoutVersion]);
 
   if (!preview) {
     return (
@@ -322,11 +377,15 @@ export function PreviewContent({ preview }: { preview: PreviewFile | null }) {
     }
   };
 
-  const targetFromElement = (element: Element | null, quote?: string): ArtifactSelection['target'] => {
+  const targetFromElement = (element: Element | null, quote?: string): ArtifactSelectionTarget => {
     const page = element?.closest<HTMLElement>('[data-page-number]')?.dataset.pageNumber;
     const cell = element?.closest<HTMLElement>('[data-cell]');
     const slide = element?.closest<HTMLElement>('[data-slide]')?.dataset.slide;
-    const marked = element?.closest<HTMLElement>('[data-artifact-element]');
+    let marked = element?.closest<HTMLElement>('[data-artifact-element]');
+    if (!marked && element instanceof HTMLElement) {
+      element.dataset.artifactElement = `box-${crypto.randomUUID()}`;
+      marked = element;
+    }
     return {
       type: 'element',
       quote: (element as HTMLElement | null)?.dataset.selectionQuote?.slice(0, 4000) || quote?.trim().slice(0, 4000) || undefined,
@@ -338,10 +397,26 @@ export function PreviewContent({ preview }: { preview: PreviewFile | null }) {
     };
   };
 
-  const chooseCandidate = (target: ArtifactSelection['target'], element: HTMLElement) => {
-    selectionCandidate?.element.classList.remove('talos-selection-candidate');
-    element.classList.add('talos-selection-candidate');
-    setSelectionCandidate({ target, element });
+  const chooseCandidate = (target: ArtifactSelectionTarget, element: HTMLElement, additive = false) => {
+    setSelectionCandidates((current) => {
+      if (!additive) {
+        current.forEach((candidate) => candidate.element.classList.remove('talos-selection-candidate'));
+        element.classList.add('talos-selection-candidate');
+        return [{ target, element }];
+      }
+      const targetKey = `${target.page ?? ''}|${target.sheet ?? ''}|${target.cell ?? ''}|${target.slide ?? ''}|${target.element ?? ''}|${target.quote ?? ''}`;
+      const existing = current.findIndex((candidate) => (
+        `${candidate.target.page ?? ''}|${candidate.target.sheet ?? ''}|${candidate.target.cell ?? ''}|${candidate.target.slide ?? ''}|${candidate.target.element ?? ''}|${candidate.target.quote ?? ''}` === targetKey
+      ));
+      if (existing >= 0) {
+        current[existing].element.classList.remove('talos-selection-candidate');
+        element.classList.remove('talos-selection-candidate');
+        return current.filter((_, index) => index !== existing);
+      }
+      if (current.length >= 20) return current;
+      element.classList.add('talos-selection-candidate');
+      return [...current, { target, element }];
+    });
   };
 
   const captureElement = (event: ReactMouseEvent<HTMLDivElement>) => {
@@ -349,17 +424,18 @@ export function PreviewContent({ preview }: { preview: PreviewFile | null }) {
     const clicked = event.target instanceof Element ? event.target : null;
     const smallest = clicked?.closest<HTMLElement>('[data-selection-box], [data-cell], td, th, [data-artifact-element^="shape-"], p, h1, h2, h3, h4, h5, h6, li, blockquote, pre, img');
     const promoted = clicked?.closest<HTMLElement>('table, figure[data-slide], [data-page-number]');
-    const element = event.shiftKey ? promoted ?? smallest : smallest ?? promoted;
+    const element = smallest ?? promoted;
     if (!element || !selectionRoot.current?.contains(element)) return;
     event.preventDefault();
     event.stopPropagation();
     window.getSelection()?.removeAllRanges();
     const quote = element instanceof HTMLImageElement ? undefined : element.innerText.trim();
-    chooseCandidate(targetFromElement(element, quote), element);
+    chooseCandidate(targetFromElement(element, quote), element, event.shiftKey);
   };
 
   const commitSelection = () => {
-    if (!selectionCandidate || !preview) return;
+    if (!selectionCandidates.length || !preview) return;
+    const targets = selectionCandidates.map((candidate) => candidate.target);
     setArtifactSelection({
       sessionId: preview.sessionId,
       path: preview.path,
@@ -367,13 +443,14 @@ export function PreviewContent({ preview }: { preview: PreviewFile | null }) {
       mime: preview.mime,
       version: preview.version,
       kind,
-      target: selectionCandidate.target,
+      target: targets[0],
+      targets,
     });
-    selectionCandidate.element.classList.remove('talos-selection-candidate');
-    committedElement.current?.classList.remove('talos-selection-committed');
-    selectionCandidate.element.classList.add('talos-selection-committed');
-    committedElement.current = selectionCandidate.element;
-    setSelectionCandidate(null);
+    selectionCandidates.forEach((candidate) => candidate.element.classList.remove('talos-selection-candidate'));
+    committedElements.current.forEach((element) => element.classList.remove('talos-selection-committed'));
+    selectionCandidates.forEach((candidate) => candidate.element.classList.add('talos-selection-committed'));
+    committedElements.current = selectionCandidates.map((candidate) => candidate.element);
+    setSelectionCandidates([]);
     window.getSelection()?.removeAllRanges();
   };
 
@@ -403,14 +480,14 @@ export function PreviewContent({ preview }: { preview: PreviewFile | null }) {
       )}
       {!loading && !error && !editing && loaded && (
         <div className="flex h-9 shrink-0 items-center gap-2 border-b bg-card px-2">
-          <button type="button" aria-pressed={markMode} onClick={() => { setMarkMode((value) => !value); selectionCandidate?.element.classList.remove('talos-selection-candidate'); setSelectionCandidate(null); }} className={`inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium ${markMode ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:bg-accent hover:text-foreground'}`}>
+          <button type="button" aria-pressed={markMode} onClick={() => { setMarkMode((value) => !value); selectionCandidates.forEach((candidate) => candidate.element.classList.remove('talos-selection-candidate')); setSelectionCandidates([]); }} className={`inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium ${markMode ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:bg-accent hover:text-foreground'}`}>
             <MousePointer2Icon className="size-3.5" />{t('preview.markElement')}
           </button>
-          {selectionCandidate && (
+          {selectionCandidates.length > 0 && (
             <div className="ml-auto flex min-w-0 items-center gap-1">
-              <span className="max-w-48 truncate text-xs text-muted-foreground">{selectionCandidate.target.quote || selectionCandidate.target.cell || selectionCandidate.target.element || t('preview.selectedElement')}</span>
+              <span className="max-w-48 truncate text-xs text-muted-foreground">{selectionCandidates.length > 1 ? `${selectionCandidates.length} ${t('preview.selectedElements')}` : selectionCandidates[0].target.quote || selectionCandidates[0].target.cell || selectionCandidates[0].target.element || t('preview.selectedElement')}</span>
               <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={commitSelection} className="inline-flex items-center gap-1 rounded-md bg-primary px-2 py-1 text-xs font-medium text-primary-foreground"><CheckIcon className="size-3" />{t('preview.addToPrompt')}</button>
-              <button type="button" onClick={() => { selectionCandidate.element.classList.remove('talos-selection-candidate'); setSelectionCandidate(null); }} aria-label={t('common.cancel')} className="rounded-md p-1 text-muted-foreground hover:bg-accent"><XIcon className="size-3.5" /></button>
+              <button type="button" onClick={() => { selectionCandidates.forEach((candidate) => candidate.element.classList.remove('talos-selection-candidate')); setSelectionCandidates([]); }} aria-label={t('common.cancel')} className="rounded-md p-1 text-muted-foreground hover:bg-accent"><XIcon className="size-3.5" /></button>
             </div>
           )}
         </div>
@@ -421,8 +498,9 @@ export function PreviewContent({ preview }: { preview: PreviewFile | null }) {
       {!loading && !error && editing && (
         <textarea value={draft} onChange={(e) => setDraft(e.target.value)} className="h-full min-h-96 w-full resize-none bg-background p-4 font-mono text-[13px] leading-relaxed outline-none" spellCheck={false} />
       )}
-       {!loading && !error && !editing && loaded && <PreviewBody loaded={loaded} preview={preview} markMode={markMode} onBoxCandidate={chooseCandidate} />}
+       {!loading && !error && !editing && loaded && <PreviewBody loaded={loaded} preview={preview} markMode={markMode} onBoxCandidate={chooseCandidate} committedTargets={artifactSelection && artifactSelection.sessionId === preview.sessionId && artifactSelection.path === preview.path ? artifactSelection.targets ?? [artifactSelection.target] : []} />}
       </div>
+      {groupRect && <div className="pointer-events-none fixed z-50 rounded-sm border-2 border-primary bg-primary/[0.03] shadow-[0_0_0_4px_color-mix(in_srgb,var(--primary)_14%,transparent)]" style={{ left: groupRect.left - 4, top: groupRect.top - 4, width: groupRect.width + 8, height: groupRect.height + 8 }} />}
     </div>
   );
 }
@@ -435,7 +513,7 @@ export function PreviewContent({ preview }: { preview: PreviewFile | null }) {
  *  iframe has its own clean document, so only docx-preview's own styles apply.
  *  The iframe fills the panel and scrolls its own content, so a "current / total"
  *  page badge can float over a fixed viewport (bottom-left) and update on scroll. */
-function WordDocument({ blob, markMode, onBoxCandidate }: { blob: Blob; markMode: boolean; onBoxCandidate: (target: ArtifactSelection['target'], element: HTMLElement) => void }) {
+function WordDocument({ blob, markMode, onBoxCandidate, committedTargets }: { blob: Blob; markMode: boolean; onBoxCandidate: (target: ArtifactSelectionTarget, element: HTMLElement, additive?: boolean) => void; committedTargets: ArtifactSelectionTarget[] }) {
   const { t } = useTranslation();
   const frameRef = useRef<HTMLIFrameElement>(null);
   const cleanupRef = useRef<(() => void) | undefined>(undefined);
@@ -495,16 +573,27 @@ function WordDocument({ blob, markMode, onBoxCandidate }: { blob: Blob; markMode
           }
           setPage({ cur, total: secs.length });
         };
-        const onScroll = () => { if (!raf) raf = win.requestAnimationFrame(update); };
+        const onScroll = () => {
+          if (!raf) raf = win.requestAnimationFrame(update);
+          window.dispatchEvent(new Event('talos-selection-layout'));
+        };
         const style = idoc.createElement('style');
         style.textContent = '.talos-selection-candidate{outline:2px solid #3d87cb;outline-offset:2px}.talos-selection-committed{outline:2px solid #3d87cb;outline-offset:2px;box-shadow:0 0 0 3px rgb(61 135 203 / 18%)}';
         idoc.head.appendChild(style);
+        pages().forEach((section, pageIndex) => {
+          section.querySelectorAll<HTMLElement>('td, th, p, h1, h2, h3, h4, h5, h6, li, img, table').forEach((element, elementIndex) => {
+            element.dataset.artifactElement ||= `word-page-${pageIndex + 1}-box-${elementIndex + 1}`;
+          });
+        });
+        for (const target of committedTargets) {
+          if (target.element) idoc.querySelector<HTMLElement>(`[data-artifact-element="${CSS.escape(target.element)}"]`)?.classList.add('talos-selection-committed');
+        }
         const onClick = (event: MouseEvent) => {
           if (!markModeRef.current) return;
           const clicked = event.target instanceof Element ? event.target : null;
           const smallest = clicked?.closest<HTMLElement>('td, th, p, h1, h2, h3, h4, h5, h6, li, img');
           const promoted = clicked?.closest<HTMLElement>('table, section.docx');
-          const element = event.shiftKey ? promoted ?? smallest : smallest ?? promoted;
+          const element = smallest ?? promoted;
           if (!element) return;
           event.preventDefault();
           event.stopPropagation();
@@ -512,7 +601,7 @@ function WordDocument({ blob, markMode, onBoxCandidate }: { blob: Blob; markMode
           const section = element.closest('section.docx');
           const pageNumber = section ? pages().indexOf(section) + 1 : undefined;
           const quote = element instanceof HTMLImageElement ? undefined : element.innerText.trim().slice(0, 4000);
-          onBoxCandidateRef.current({ type: 'element', quote, page: pageNumber || undefined, element: element.tagName.toLowerCase() }, element);
+          onBoxCandidateRef.current({ type: 'element', quote, page: pageNumber || undefined, element: element.dataset.artifactElement }, element, event.shiftKey);
         };
         win.addEventListener('scroll', onScroll, { passive: true });
         idoc.addEventListener('click', onClick, true);
@@ -537,6 +626,15 @@ function WordDocument({ blob, markMode, onBoxCandidate }: { blob: Blob; markMode
     };
   }, [blob]);
 
+  useEffect(() => {
+    const idoc = frameRef.current?.contentDocument;
+    if (!idoc) return;
+    idoc.querySelectorAll('.talos-selection-committed').forEach((element) => element.classList.remove('talos-selection-committed'));
+    for (const target of committedTargets) {
+      if (target.element) idoc.querySelector<HTMLElement>(`[data-artifact-element="${CSS.escape(target.element)}"]`)?.classList.add('talos-selection-committed');
+    }
+  }, [committedTargets]);
+
   return (
     <div className="relative h-full bg-muted/40">
       {error && <p className="px-4 py-6 text-center text-xs text-destructive-foreground">{t('preview.error')}</p>}
@@ -550,7 +648,7 @@ function WordDocument({ blob, markMode, onBoxCandidate }: { blob: Blob; markMode
   );
 }
 
-function PreviewBody({ loaded, preview, markMode, onBoxCandidate }: { loaded: Loaded; preview: PreviewFile; markMode: boolean; onBoxCandidate: (target: ArtifactSelection['target'], element: HTMLElement) => void }) {
+function PreviewBody({ loaded, preview, markMode, onBoxCandidate, committedTargets }: { loaded: Loaded; preview: PreviewFile; markMode: boolean; onBoxCandidate: (target: ArtifactSelectionTarget, element: HTMLElement, additive?: boolean) => void; committedTargets: ArtifactSelectionTarget[] }) {
   if (loaded.kind === 'markdown') {
     // Markdown stays a plain, pageless reader — it isn't a Word document. Only
     // real Office files (.docx/.xlsx/.pptx) get the paper-page / grid treatment.
@@ -569,7 +667,7 @@ function PreviewBody({ loaded, preview, markMode, onBoxCandidate }: { loaded: Lo
     return <ExcelView sheets={loaded.sheets} />;
   }
   if (loaded.kind === 'word') {
-    return <WordDocument blob={loaded.blob} markMode={markMode} onBoxCandidate={onBoxCandidate} />;
+    return <WordDocument blob={loaded.blob} markMode={markMode} onBoxCandidate={onBoxCandidate} committedTargets={committedTargets} />;
   }
   if (loaded.kind === 'presentation') {
     return (
@@ -579,10 +677,10 @@ function PreviewBody({ loaded, preview, markMode, onBoxCandidate }: { loaded: Lo
             <section className="flex aspect-video w-full flex-col overflow-auto rounded-lg border bg-white p-8 text-slate-900 shadow-sm ring-1 ring-black/5">
               <div className="space-y-3">
                 {slide.texts.map((element, i) => i === 0
-                  ? <h2 key={element.id} data-artifact-element={`shape-${element.id}`} title={element.name} className="text-2xl font-semibold leading-tight">{element.text}</h2>
-                  : <p key={element.id} data-artifact-element={`shape-${element.id}`} title={element.name} className="text-base leading-relaxed">{element.text}</p>)}
+                  ? <h2 key={element.id} data-artifact-element={`slide-${index + 1}-shape-${element.id}`} title={element.name} className="text-2xl font-semibold leading-tight">{element.text}</h2>
+                  : <p key={element.id} data-artifact-element={`slide-${index + 1}-shape-${element.id}`} title={element.name} className="text-base leading-relaxed">{element.text}</p>)}
               </div>
-              {slide.images.length > 0 && <div className="mt-5 grid grid-cols-2 gap-3">{slide.images.map((element) => <img key={element.id} src={element.src} alt={element.name} data-artifact-element={`shape-${element.id}`} className="max-h-64 w-full object-contain" />)}</div>}
+              {slide.images.length > 0 && <div className="mt-5 grid grid-cols-2 gap-3">{slide.images.map((element) => <img key={element.id} src={element.src} alt={element.name} data-artifact-element={`slide-${index + 1}-shape-${element.id}`} className="max-h-64 w-full object-contain" />)}</div>}
             </section>
             <figcaption className="mt-1.5 text-center text-[11px] font-medium text-muted-foreground">{index + 1} / {loaded.slides.length}</figcaption>
           </figure>

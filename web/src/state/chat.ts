@@ -238,6 +238,9 @@ function artifactSelectionFromMetadata(metadata: Record<string, unknown> | undef
     version: typeof item.version === 'number' ? item.version : undefined,
     kind: typeof item.kind === 'string' ? item.kind : 'text',
     target: target as ArtifactSelection['target'],
+    targets: Array.isArray(item.targets)
+      ? item.targets.filter((entry): entry is ArtifactSelection['target'] => !!entry && typeof entry === 'object')
+      : undefined,
   };
 }
 
