@@ -4,6 +4,7 @@ import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { downloadArtifact, fetchArtifacts, uploadDownloadUrl } from '@/api/client';
 import { copyTextToClipboard } from '@/lib/utils';
+import { artifactSelectionLocator } from '@/lib/artifactSelection';
 import { artifactDisplayName, displayName, isPreviewable, previewKind } from '@/lib/files';
 import { useChat, type UiMessage } from '@/state/chat';
 import { usePrefs } from '@/state/prefs';
@@ -200,10 +201,8 @@ function ArtifactSelectionChip({ msg }: { msg: UiMessage }) {
   const openPreview = useUi((state) => state.openPreview);
   const selection = msg.artifactSelection;
   if (!selection) return null;
-  const detail = selection.targets && selection.targets.length > 1
-    ? t('composer.markedElements', { count: selection.targets.length })
-    : selection.target.quote || selection.target.cell || selection.target.element
-    || (selection.target.page ? `p. ${selection.target.page}` : selection.target.slide ? `Slide ${selection.target.slide}` : 'Selection');
+  const locator = artifactSelectionLocator(selection);
+  const label = t('composer.selectionChip', { locator: locator ? ` ${locator}` : '' });
   return (
     <div className="mt-1 flex max-w-full justify-end">
       <button
@@ -212,8 +211,7 @@ function ArtifactSelectionChip({ msg }: { msg: UiMessage }) {
         className="inline-flex max-w-full items-center gap-1.5 rounded-lg border border-primary/25 bg-primary/5 px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-primary/10 hover:text-foreground"
       >
         <ScanSearchIcon className="size-3.5 shrink-0 text-primary" />
-        <span className="max-w-40 truncate">{selection.name}</span>
-        <span className="max-w-44 truncate opacity-70">· {detail}</span>
+        <span>{label}</span>
       </button>
     </div>
   );

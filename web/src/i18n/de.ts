@@ -129,6 +129,7 @@ const de: typeof en = {
     removeArtifactSelection: 'Markierte Artefaktauswahl entfernen',
     markedElement: 'Markiertes Element',
     markedElements: '{{count}} markierte Elemente',
+    selectionChip: 'Auswahl{{locator}}',
     add: 'Hinzufügen',
     attachFiles: 'Dateien anhängen',
     micSelect: 'Mikrofon',

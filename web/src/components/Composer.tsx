@@ -30,6 +30,7 @@ import { usePrefs, type ChatMode } from '@/state/prefs';
 import { useUi } from '@/state/ui';
 import { cn } from '@/lib/utils';
 import { useDictation } from '@/lib/useDictation';
+import { artifactSelectionLocator } from '@/lib/artifactSelection';
 import { ContextMeter } from './ContextMeter';
 import { ModelPicker } from './ModelPicker';
 import { Button } from './ui/button';
@@ -715,7 +716,7 @@ export function Composer() {
           <div className="flex flex-wrap gap-1.5 px-3 pt-2.5">
             <span className="inline-flex items-center gap-1.5 rounded-lg border border-primary/25 bg-primary/5 px-2 py-1 text-xs">
               <ScanSearchIcon className="size-3.5 text-primary" />
-              <span className="max-w-64 truncate">{artifactSelection.name} · {artifactSelection.targets && artifactSelection.targets.length > 1 ? t('composer.markedElements', { count: artifactSelection.targets.length }) : artifactSelection.target.quote || artifactSelection.target.cell || artifactSelection.target.element || t('composer.markedElement')}</span>
+              <span className="max-w-64 truncate">{t('composer.selectionChip', { locator: artifactSelectionLocator(artifactSelection) ? ` ${artifactSelectionLocator(artifactSelection)}` : '' })}</span>
               <button type="button" aria-label={t('composer.removeArtifactSelection')} onClick={() => setArtifactSelection(null)} className="text-muted-foreground hover:text-foreground"><XIcon className="size-3" /></button>
             </span>
           </div>

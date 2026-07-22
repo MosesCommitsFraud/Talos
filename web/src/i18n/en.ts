@@ -127,6 +127,7 @@ const en = {
     removeArtifactSelection: 'Remove marked artifact selection',
     markedElement: 'Marked element',
     markedElements: '{{count}} marked elements',
+    selectionChip: 'Selection{{locator}}',
     add: 'Add',
     attachFiles: 'Attach files',
     micSelect: 'Microphone',

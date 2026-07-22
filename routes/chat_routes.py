@@ -440,8 +440,8 @@ def setup_chat_routes(
 
                 raw_targets = candidate.get("targets")
                 if isinstance(raw_targets, list):
-                    if not 1 <= len(raw_targets) <= 20:
-                        raise ValueError("selection must contain 1 to 20 targets")
+                    if not raw_targets:
+                        raise ValueError("selection must contain at least one target")
                     raw_target_list = raw_targets
                 else:
                     raw_target_list = [target]

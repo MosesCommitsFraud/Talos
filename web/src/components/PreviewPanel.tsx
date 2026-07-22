@@ -413,7 +413,6 @@ export function PreviewContent({ preview }: { preview: PreviewFile | null }) {
         element.classList.remove('talos-selection-candidate');
         return current.filter((_, index) => index !== existing);
       }
-      if (current.length >= 20) return current;
       element.classList.add('talos-selection-candidate');
       return [...current, { target, element }];
     });
