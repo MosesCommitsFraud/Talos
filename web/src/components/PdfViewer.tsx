@@ -249,7 +249,7 @@ export function PdfViewer({ blob, name, onDownload }: PdfViewerProps) {
 
   const goToPage = (page: number) => {
     const target = Math.min(Math.max(Math.round(page), 1), document?.numPages || 1);
-    pageElements.current.get(target)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    pageElements.current.get(target)?.scrollIntoView({ behavior: 'auto', block: 'start' });
     setCurrentPage(target);
     setPageInput(String(target));
   };
@@ -322,16 +322,18 @@ export function PdfViewer({ blob, name, onDownload }: PdfViewerProps) {
         <Tooltip label={t('preview.previousPage')}>
           <Button variant="ghost-muted" size="icon-sm" onClick={() => goToPage(currentPage - 1)} disabled={loading || currentPage <= 1} aria-label={t('preview.previousPage')}><ChevronLeftIcon /></Button>
         </Tooltip>
-        <div className="flex h-7 items-center rounded-lg border bg-background px-1 text-xs tabular-nums shadow-xs">
+        <div className="flex h-7 min-w-14 items-center justify-center gap-1 rounded-lg border bg-background px-2 text-xs leading-none tabular-nums shadow-xs">
           <input
             value={pageInput}
             onChange={(event) => setPageInput(event.target.value.replace(/\D/g, ''))}
             onBlur={applyPageInput}
             onKeyDown={(event) => { if (event.key === 'Enter') applyPageInput(); }}
             aria-label={t('preview.pageNumber')}
-            className="w-7 bg-transparent text-center outline-none"
+            style={{ width: `${Math.max(pageInput.length, 1)}ch` }}
+            className="h-full min-w-0 bg-transparent p-0 text-center leading-none outline-none"
           />
-          <span className="text-muted-foreground">/ {document?.numPages || '–'}</span>
+          <span className="text-muted-foreground">/</span>
+          <span className="text-muted-foreground">{document?.numPages || '–'}</span>
         </div>
         <Tooltip label={t('preview.nextPage')}>
           <Button variant="ghost-muted" size="icon-sm" onClick={() => goToPage(currentPage + 1)} disabled={loading || currentPage >= (document?.numPages || 1)} aria-label={t('preview.nextPage')}><ChevronRightIcon /></Button>
