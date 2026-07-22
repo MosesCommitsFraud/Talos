@@ -1,5 +1,5 @@
-fastapi==0.139.0
-uvicorn[standard]==0.50.2
+fastapi==0.139.2
+uvicorn[standard]==0.51.0
 python-multipart==0.0.32
 httpx==0.28.1
 requests==2.34.2
@@ -7,7 +7,7 @@ requests==2.34.2
 # Dataframes, numerical computing, and file formats
 numpy==2.5.1
 pandas==2.2.3
-polars==1.42.1
+polars==1.43.0
 pyarrow==18.1.0
 scipy==1.18.0
 
@@ -15,7 +15,7 @@ scipy==1.18.0
 openpyxl==3.1.5
 xlsxwriter==3.2.9
 xlrd==2.0.2
-python-calamine==0.7.0
+python-calamine==0.8.2
 odfpy==1.4.1
 
 # Math, optimization, statistics, and equation solving
@@ -41,7 +41,7 @@ beautifulsoup4==4.15.0
 lxml==5.3.0
 tabulate==0.10.0
 jinja2==3.1.6
-matplotlib==3.11.0
+matplotlib==3.11.1
 seaborn==0.13.2
 plotly==5.24.1
 kaleido==0.2.1
@@ -52,7 +52,7 @@ python-pptx==1.0.2
 pypdf==6.14.2
 csvkit==2.2.0
 weasyprint==69.0
-tqdm==4.68.4
+tqdm==4.69.0
 rich==15.0.0
 pyyaml==6.0.3
 toml==0.10.2
