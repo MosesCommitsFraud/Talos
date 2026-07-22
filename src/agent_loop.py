@@ -7,12 +7,14 @@ The LLM decides when to use tools by writing fenced code blocks.
 """
 
 import asyncio
+import base64
 import collections
 import json
 import logging
 import os
 import re
 import time
+import tempfile
 from typing import AsyncGenerator, Dict, List, Optional, Set
 from urllib.parse import urlparse
 
@@ -34,7 +36,7 @@ from src.context_optimizer import optimize_tool_output
 from src.llm_core import _is_ollama_native_url, stream_llm_with_fallback
 from src.model_context import estimate_tokens
 from src.prompt_security import untrusted_context_message
-from src.settings import get_setting
+from src.settings import get_setting, get_user_setting
 from src.tool_security import blocked_tools_for_owner, plan_mode_disabled_tools
 
 logger = logging.getLogger(__name__)
@@ -596,6 +598,7 @@ def _build_system_prompt(
     mcp_disabled_map: Optional[Dict[str, set]] = None,
     compact: bool = False,
     owner: Optional[str] = None,
+    selection_vision: bool = False,
 ) -> List[Dict]:
     """Build agent system prompt, inject MCP/document context, merge consecutive system msgs."""
     global _cached_base_prompt, _cached_base_prompt_key
@@ -782,6 +785,8 @@ def _build_system_prompt(
             "target": _selection_target,
             "targets": _selection_targets,
         }
+        if artifact_selection.get("visual_description"):
+            _scope["visual_description"] = artifact_selection["visual_description"]
         if _is_editor_doc:
             _edit_rules = (
                 "Use edit_document with an exact FIND/REPLACE limited to the selected target. "
@@ -789,11 +794,20 @@ def _build_system_prompt(
             )
         elif _is_binary:
             _edit_rules = (
+                "This is an EDIT of an existing binary artifact; all document-creation recipes elsewhere "
+                "are inapplicable. Do not use pandas.to_excel, xlsxwriter, Document(), Presentation(), or "
+                "any workflow that starts from a blank package. "
                 "Open the EXISTING file with a format-native library and mutate only the selected "
                 "object/range in place. Preserve all other pages, slides, sheets, formulas, styles, "
                 "themes, media, metadata, relationships, and layout. Never reconstruct the artifact "
-                "from extracted text and never create a replacement file. If this exact edit cannot "
-                "be performed safely in place, explain the limitation instead of recreating it."
+                "from extracted text. For DOCX/PPTX, do not assign paragraph.text, cell.text, shape.text, "
+                "or text_frame.text when formatted runs exist; update existing text nodes/runs while "
+                "retaining run, paragraph, cell, table, shape, and theme properties. For XLSX, retain cell "
+                "style indices, formulas outside scope, table definitions, conditional formatting, merged "
+                "ranges, dimensions, drawings, and relationships. A sibling temporary file is allowed only "
+                "for validated atomic replacement at the SAME artifact path; never create a second visible "
+                "artifact. Reopen the saved artifact and verify the selected content plus surrounding styles. "
+                "If this exact edit cannot be performed safely in place, explain the limitation instead of recreating it."
             )
         else:
             _edit_rules = (
@@ -809,6 +823,17 @@ def _build_system_prompt(
             + _edit_rules
         )
         _selection_message = untrusted_context_message("user-marked artifact selection", _selection_ctx)
+        if selection_vision and artifact_selection.get("visuals"):
+            _selection_message["content"] = [
+                {"type": "text", "text": _selection_message["content"]},
+                *[
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": visual["dataUrl"]},
+                    }
+                    for visual in artifact_selection["visuals"]
+                ],
+            ]
         _selection_message["_protected"] = True
 
     # Inject relevant skills based on the user's last message. The
@@ -1777,6 +1802,38 @@ async def stream_agent_loop(
         _is_api_model = True
     else:
         _is_api_model = any(h in endpoint_url for h in _API_HOSTS) or _model_supports_tools
+    from src.chat_helpers import model_supports_vision
+
+    vision_allowed = bool(get_user_setting("vision_enabled", owner or "", True))
+    selection_vision = vision_allowed and model_supports_vision(model, endpoint_url)
+    if artifact_selection and artifact_selection.get("visuals") and vision_allowed and not selection_vision:
+        try:
+            from src.document_processor import analyze_image_with_vl_result
+
+            descriptions = []
+            for visual in artifact_selection["visuals"][:2]:
+                encoded = visual["dataUrl"].split(",", 1)[1]
+                with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as image_file:
+                    image_file.write(base64.b64decode(encoded))
+                    image_path = image_file.name
+                try:
+                    result = await asyncio.to_thread(
+                        analyze_image_with_vl_result,
+                        image_path,
+                        "Describe this selected document region for a precision edit. Identify table structure, fills and pattern fills, exact colors, borders, line weights, typography, alignment, spacing, geometry, hierarchy, and repeated design motifs. State what visual properties must be preserved.",
+                        owner,
+                    )
+                    if result.get("text"):
+                        descriptions.append(result["text"])
+                finally:
+                    os.unlink(image_path)
+            if descriptions:
+                artifact_selection["visual_description"] = "\n\n".join(descriptions)
+        except Exception as visual_error:
+            logger.warning("Artifact selection visual analysis failed: %s", visual_error)
+    elif artifact_selection and not vision_allowed:
+        artifact_selection["visuals"] = []
+
     messages, mcp_schemas = _build_system_prompt(
         messages,
         model,
@@ -1789,6 +1846,7 @@ async def stream_agent_loop(
         mcp_disabled_map=_mcp_disabled_map,
         compact=_is_api_model,
         owner=owner,
+        selection_vision=selection_vision,
     )
     if workspace:
         # PREPEND (not append) so it dominates the large base prompt — appended
@@ -2318,6 +2376,21 @@ async def stream_agent_loop(
                 # Forward error events to frontend as visible text
                 yield chunk
             # Intercept [DONE] — don't forward until all rounds finish
+
+        if round_num == 1:
+            for message in messages:
+                content = message.get("content")
+                is_selection_visual = isinstance(content, list) and any(
+                    isinstance(block, dict)
+                    and block.get("type") == "text"
+                    and "user-marked artifact selection" in str(block.get("text", ""))
+                    for block in content
+                )
+                if is_selection_visual:
+                    message["content"] = [
+                        block for block in content
+                        if not isinstance(block, dict) or block.get("type") != "image_url"
+                    ]
 
         tool_blocks, used_native = _resolve_tool_blocks(
             round_response, native_tool_calls, round_num, round_reasoning

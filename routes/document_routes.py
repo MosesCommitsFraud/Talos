@@ -587,7 +587,10 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
         return Response(
             content=content,
             media_type=ctype,
-            headers={"Content-Disposition": f'{disp}; filename="{fname}"'},
+            headers={
+                "Content-Disposition": f'{disp}; filename="{fname}"',
+                "Cache-Control": "no-store",
+            },
         )
 
     # ---- GET /api/artifacts/{session_id}/preview — high-fidelity rendered preview ----
@@ -596,8 +599,8 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
         from fastapi.responses import Response
         from src.sandbox_client import preview_office_artifact, sandbox_enabled
 
-        if not path.lower().endswith((".doc", ".docx")):
-            raise HTTPException(400, "Preview conversion is only available for Word documents")
+        if not path.lower().endswith((".doc", ".docx", ".xls", ".xlsx", ".xlsm", ".ppt", ".pptx")):
+            raise HTTPException(400, "Preview conversion is only available for Office documents")
         db = SessionLocal()
         try:
             owners = _workspace_owners(db, request, session_id)

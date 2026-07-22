@@ -113,6 +113,7 @@ export interface ArtifactSelection {
   kind: string;
   target: ArtifactSelectionTarget;
   targets?: ArtifactSelectionTarget[];
+  visuals?: Array<{ page?: number; dataUrl: string }>;
 }
 
 export interface SessionDetail {

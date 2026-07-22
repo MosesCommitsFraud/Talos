@@ -297,17 +297,20 @@ def strip_pdf_content_marker(text: str) -> str:
     return (text or "").removeprefix(_PDF_CONTENT_MARKER).strip()
 
 
-def _load_vl_settings() -> dict:
+def _load_vl_settings(owner: str | None = None) -> dict:
     """Load admin settings from disk."""
     try:
-        from src.settings import load_settings
+        from src.settings import get_user_setting, load_settings
 
-        return load_settings()
+        settings = load_settings()
+        for key in ("vision_enabled", "vision_model", "vision_model_fallbacks"):
+            settings[key] = get_user_setting(key, owner or "", settings.get(key))
+        return settings
     except Exception:
         return {}
 
 
-def _resolve_vl_model(configured: str) -> tuple:
+def _resolve_vl_model(configured: str, owner: str | None = None) -> tuple:
     """Resolve the vision model to (url, model_id, headers).
 
     Uses admin-configured model if set, otherwise tries auto-detection
@@ -316,7 +319,7 @@ def _resolve_vl_model(configured: str) -> tuple:
     from src.ai_interaction import _resolve_model
 
     if configured:
-        return _resolve_model(configured)
+        return _resolve_model(configured, owner=owner)
 
     # Auto-detect: try known vision-capable models in priority order
     candidates = [
@@ -334,24 +337,24 @@ def _resolve_vl_model(configured: str) -> tuple:
     ]
     for candidate in candidates:
         try:
-            return _resolve_model(candidate)
+            return _resolve_model(candidate, owner=owner)
         except (ValueError, Exception):
             continue
 
     raise ValueError("No vision model available")
 
 
-def analyze_image_with_vl_result(image_path: str) -> dict:
+def analyze_image_with_vl_result(image_path: str, prompt: str = "Describe this image in detail", owner: str | None = None) -> dict:
     """Analyze an image and return both text and the model that produced it."""
     logger.info(f"Analyzing image with VL model: {image_path}")
     try:
-        settings = _load_vl_settings()
+        settings = _load_vl_settings(owner)
         if not settings.get("vision_enabled", True):
             return {"text": "[Vision is disabled — enable it in Settings → Vision]", "model": ""}
         vl_model = settings.get("vision_model", "")
 
         try:
-            url, model_id, headers = _resolve_vl_model(vl_model)
+            url, model_id, headers = _resolve_vl_model(vl_model, owner=owner)
         except ValueError:
             return {
                 "text": "[No vision model configured — set one in Settings → Vision]",
@@ -369,7 +372,7 @@ def analyze_image_with_vl_result(image_path: str) -> dict:
             {
                 "role": "user",
                 "content": [
-                    {"type": "text", "text": "Describe this image in detail"},
+                    {"type": "text", "text": prompt},
                     {
                         "type": "image_url",
                         "image_url": {"url": f"data:image/{img_format};base64,{img_data}"},
@@ -383,7 +386,7 @@ def analyze_image_with_vl_result(image_path: str) -> dict:
         try:
             from src.endpoint_resolver import resolve_vision_fallback_candidates
 
-            _vl_candidates = [(url, model_id, headers)] + resolve_vision_fallback_candidates()
+            _vl_candidates = [(url, model_id, headers)] + resolve_vision_fallback_candidates(owner=owner)
         except Exception:
             _vl_candidates = [(url, model_id, headers)]
 

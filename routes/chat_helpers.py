@@ -368,7 +368,9 @@ def add_user_message(
     if preprocessed.attachment_meta:
         user_meta["attachments"] = preprocessed.attachment_meta
     if artifact_selection:
-        user_meta["artifact_selection"] = artifact_selection
+        user_meta["artifact_selection"] = {
+            key: value for key, value in artifact_selection.items() if key != "visuals"
+        }
     sess.add_message(ChatMessage("user", preprocessed.user_content, metadata=user_meta or None))
     if not incognito:
         chat_handler.update_session_name_if_needed(sess, preprocessed.text_for_context)

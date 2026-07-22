@@ -1,6 +1,8 @@
 """Chat routes — /api/chat, /api/chat_stream, /api/inject_context, /api/search."""
 
 import asyncio
+import base64
+import binascii
 import json
 import logging
 import os
@@ -467,6 +469,24 @@ def setup_chat_routes(
                     }
 
                 targets = [_sanitize_target(item) for item in raw_target_list]
+                visuals = []
+                raw_visuals = candidate.get("visuals")
+                if isinstance(raw_visuals, list):
+                    for visual in raw_visuals[:3]:
+                        if not isinstance(visual, dict):
+                            continue
+                        data_url = str(visual.get("dataUrl") or "")
+                        prefix = next((value for value in ("data:image/jpeg;base64,", "data:image/png;base64,") if data_url.startswith(value)), None)
+                        if not prefix or len(data_url) > 2_000_000:
+                            continue
+                        try:
+                            base64.b64decode(data_url[len(prefix):], validate=True)
+                        except (ValueError, binascii.Error):
+                            continue
+                        visuals.append({
+                            "page": _optional_positive_int(visual.get("page"), "visual page"),
+                            "dataUrl": data_url,
+                        })
                 selected_version = _optional_positive_int(candidate.get("version"), "version")
                 artifact_selection = {
                     "path": selected_path,
@@ -476,6 +496,7 @@ def setup_chat_routes(
                     "version": selected_version,
                     "target": targets[0],
                     "targets": targets,
+                    "visuals": visuals,
                 }
             except (TypeError, ValueError, json.JSONDecodeError) as exc:
                 raise HTTPException(400, f"Invalid artifact selection: {exc}")

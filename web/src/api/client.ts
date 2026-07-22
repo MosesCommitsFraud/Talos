@@ -172,7 +172,7 @@ export const artifactPreviewUrl = (sessionId: string, path: string) =>
 /** Fetch a workspace file's raw bytes — used by the preview panel to render
  *  Word/Excel/PDF (which need the binary) and text/markdown (decoded to text). */
 export async function fetchArtifactBlob(sessionId: string, path: string): Promise<Blob> {
-  const res = await fetch(artifactDownloadUrl(sessionId, path), { credentials: 'same-origin' });
+  const res = await fetch(artifactDownloadUrl(sessionId, path), { credentials: 'same-origin', cache: 'no-store' });
   if (res.status === 401) {
     notifyUnauthenticated();
     throw new Error('Not authenticated');
@@ -182,7 +182,7 @@ export async function fetchArtifactBlob(sessionId: string, path: string): Promis
 }
 
 export async function fetchArtifactPreviewBlob(sessionId: string, path: string): Promise<Blob> {
-  const res = await fetch(artifactPreviewUrl(sessionId, path), { credentials: 'same-origin' });
+  const res = await fetch(artifactPreviewUrl(sessionId, path), { credentials: 'same-origin', cache: 'no-store' });
   if (res.status === 401) notifyUnauthenticated();
   if (!res.ok) throw new Error(`artifact preview ${path}: ${res.status}`);
   return res.blob();

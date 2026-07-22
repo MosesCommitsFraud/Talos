@@ -525,12 +525,17 @@ export const useChat = create<ChatState>((set, get) => {
             normalized(String(artifact.path ?? '')) === normalized(path)
           )))
           .find((artifact): artifact is Artifact => !!artifact);
-        if (!preferred) return;
-        const path = String(preferred.path ?? preferred.name ?? '');
-        const name = String(preferred.name ?? path);
-        const mime = typeof preferred.mime === 'string' ? preferred.mime : undefined;
+        const currentPreview = useUi.getState().preview;
+        const currentArtifact = currentPreview?.sessionId === sid
+          ? artifacts.find((artifact) => normalized(String(artifact.path ?? '')) === normalized(currentPreview.path))
+          : undefined;
+        const toPreview = preferred ?? currentArtifact;
+        if (!toPreview) return;
+        const path = String(toPreview.path ?? toPreview.name ?? '');
+        const name = String(toPreview.name ?? path);
+        const mime = typeof toPreview.mime === 'string' ? toPreview.mime : undefined;
         if (path && isPreviewable(name, mime)) {
-          useUi.getState().openPreview({ sessionId: sid, path, name, mime });
+          useUi.getState().openPreview({ sessionId: sid, path, name, mime, version: typeof toPreview.version === 'number' ? toPreview.version : undefined });
         }
       }).catch(() => { /* Files tab remains available if preview lookup fails. */ });
     };

@@ -1539,15 +1539,21 @@ def download_file_route(user_id: str, chat_id: str, path: str):
 
 @app.get("/users/{user_id}/workspaces/{chat_id}/files/office-preview")
 def office_preview_route(user_id: str, chat_id: str, path: str):
-    """Convert a Word file to PDF using a real office layout engine."""
+    """Convert an Office file to PDF using a real office layout engine."""
     from fastapi.responses import FileResponse
 
     name, workspace = _workspace(user_id, chat_id)
     target = _safe_path(workspace, path)
     if not target.is_file():
         raise HTTPException(404, "File not found")
-    if target.suffix.lower() not in {".doc", ".docx"}:
-        raise HTTPException(400, "Only Word documents can be previewed")
+    extension = target.suffix.lower()
+    filters = {
+        ".doc": "writer_pdf_Export", ".docx": "writer_pdf_Export",
+        ".xls": "calc_pdf_Export", ".xlsx": "calc_pdf_Export", ".xlsm": "calc_pdf_Export",
+        ".ppt": "impress_pdf_Export", ".pptx": "impress_pdf_Export",
+    }
+    if extension not in filters:
+        raise HTTPException(400, "Only Office documents can be previewed")
 
     try:
         digest = hashlib.sha256(target.read_bytes()).hexdigest()
@@ -1565,7 +1571,7 @@ def office_preview_route(user_id: str, chat_id: str, path: str):
                         "gosu", name, "soffice", "--headless", "--nologo", "--nodefault",
                         "--nolockcheck", "--nofirststartwizard",
                         f"-env:UserInstallation={profile.as_uri()}",
-                        "--convert-to", "pdf:writer_pdf_Export",
+                        "--convert-to", f"pdf:{filters[extension]}",
                         "--outdir", str(cache_dir), str(target),
                     ],
                     capture_output=True,
@@ -1584,9 +1590,9 @@ def office_preview_route(user_id: str, chat_id: str, path: str):
                 detail = (result.stderr or result.stdout or "conversion failed").strip()
                 raise HTTPException(422, detail[-500:])
     except subprocess.TimeoutExpired:
-        raise HTTPException(504, "Word preview conversion timed out")
+        raise HTTPException(504, "Office preview conversion timed out")
     except OSError as exc:
-        raise HTTPException(500, f"Word preview conversion failed: {exc}")
+        raise HTTPException(500, f"Office preview conversion failed: {exc}")
 
     return FileResponse(str(pdf_path), media_type="application/pdf", filename=pdf_path.name)
 

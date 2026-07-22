@@ -33,6 +33,8 @@ RUN sed -i 's|http://deb.debian.org|https://deb.debian.org|g' /etc/apt/sources.l
     jq \
     less \
     libreoffice-writer \
+    libreoffice-calc \
+    libreoffice-impress \
     lsof \
     make \
     netcat-openbsd \

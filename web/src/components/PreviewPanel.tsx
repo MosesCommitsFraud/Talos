@@ -115,7 +115,9 @@ export function PreviewContent({ preview }: { preview: PreviewFile | null }) {
   const selectionCandidatesRef = useRef<BoxSelectionCandidate[]>([]);
   const [groupRect, setGroupRect] = useState<DOMRect | null>(null);
   const [selectionLayoutVersion, setSelectionLayoutVersion] = useState(0);
-  const dragSelection = useRef<{ startX: number; startY: number; startElement: HTMLElement | null; moved: boolean; additive: boolean } | null>(null);
+  const dragSelection = useRef<{ startX: number; startY: number; moved: boolean; additive: boolean } | null>(null);
+  const visualFramesRef = useRef<Array<{ page: number; x: number; y: number; width: number; height: number }>>([]);
+  const dragOverlayRef = useRef<HTMLDivElement>(null);
   const suppressClick = useRef(false);
   const updatePreview = useUi((s) => s.updatePreview);
   const artifactSelection = useUi((s) => s.artifactSelection);
@@ -137,6 +139,7 @@ export function PreviewContent({ preview }: { preview: PreviewFile | null }) {
     committedElements.current.forEach((element) => element.classList.remove('talos-selection-committed'));
     committedElements.current = [];
     selectionCandidatesRef.current = [];
+    visualFramesRef.current = [];
     setSelectionCandidates([]);
     // Revoke any object URL from a previous file before loading the next.
     if (objectUrl.current) { URL.revokeObjectURL(objectUrl.current); objectUrl.current = null; }
@@ -150,15 +153,15 @@ export function PreviewContent({ preview }: { preview: PreviewFile | null }) {
 
     (async () => {
       try {
-        if (kind === 'word') {
+        if (kind === 'word' || kind === 'presentation' || kind === 'excel') {
           try {
             const pdf = await fetchArtifactPreviewBlob(preview.sessionId, preview.path);
             if (cancelled) return;
             setLoaded({ kind: 'pdf', blob: pdf });
             return;
           } catch {
-            // Keep the browser renderer as a fallback for local setups without
-            // LibreOffice and while a newly deployed sandbox is restarting.
+            // Keep the browser renderers as fallbacks for local setups without
+            // the matching LibreOffice module while a sandbox is restarting.
           }
         }
         const blob = await fetchArtifactBlob(preview.sessionId, preview.path);
@@ -238,6 +241,7 @@ export function PreviewContent({ preview }: { preview: PreviewFile | null }) {
     if (artifactSelection && preview && artifactSelection.sessionId === preview.sessionId && artifactSelection.path === preview.path) return;
     selectionCandidatesRef.current.forEach((candidate) => candidate.element.classList.remove('talos-selection-candidate', 'talos-selection-committed'));
     selectionCandidatesRef.current = [];
+    visualFramesRef.current = [];
     setSelectionCandidates([]);
     committedElements.current.forEach((element) => element.classList.remove('talos-selection-committed'));
     committedElements.current = [];
@@ -417,6 +421,7 @@ export function PreviewContent({ preview }: { preview: PreviewFile | null }) {
   };
 
   const chooseCandidate = (target: ArtifactSelectionTarget, element: HTMLElement, additive = false) => {
+    visualFramesRef.current = [];
     const current = selectionCandidatesRef.current;
       let nextTarget = target;
       let nextElement = element;
@@ -476,6 +481,60 @@ export function PreviewContent({ preview }: { preview: PreviewFile | null }) {
     candidates.forEach((candidate) => candidate.element.classList.add('talos-selection-committed'));
     committedElements.current = candidates.map((candidate) => candidate.element);
     const targets = candidates.map((candidate) => candidate.target);
+    const visualPages = new Map<HTMLElement, BoxSelectionCandidate[]>();
+    for (const candidate of candidates) {
+      const page = candidate.element.closest<HTMLElement>('[data-page-number]');
+      if (page?.querySelector('canvas')) visualPages.set(page, [...(visualPages.get(page) ?? []), candidate]);
+    }
+    const visuals = Array.from(visualPages.entries()).slice(0, 3).flatMap(([page, pageCandidates]) => {
+      const source = page.querySelector<HTMLCanvasElement>('canvas');
+      if (!source) return [];
+      const pageRect = page.getBoundingClientRect();
+      const pageNumber = Number(page.dataset.pageNumber);
+      const framedRects = visualFramesRef.current
+        .filter((frame) => frame.page === pageNumber)
+        .map((frame) => new DOMRect(
+          pageRect.left + frame.x * pageRect.width,
+          pageRect.top + frame.y * pageRect.height,
+          frame.width * pageRect.width,
+          frame.height * pageRect.height,
+        ));
+      const rects = framedRects.length ? framedRects : pageCandidates.map((candidate) => candidate.element.getBoundingClientRect());
+      const padding = 16;
+      const left = Math.max(0, Math.min(...rects.map((rect) => rect.left)) - pageRect.left - padding);
+      const top = Math.max(0, Math.min(...rects.map((rect) => rect.top)) - pageRect.top - padding);
+      const right = Math.min(pageRect.width, Math.max(...rects.map((rect) => rect.right)) - pageRect.left + padding);
+      const bottom = Math.min(pageRect.height, Math.max(...rects.map((rect) => rect.bottom)) - pageRect.top + padding);
+      const scaleX = source.width / pageRect.width;
+      const scaleY = source.height / pageRect.height;
+      const sx = Math.floor(left * scaleX);
+      const sy = Math.floor(top * scaleY);
+      const sw = Math.max(1, Math.ceil((right - left) * scaleX));
+      const sh = Math.max(1, Math.ceil((bottom - top) * scaleY));
+      const maxWidth = 1200;
+      const outputScale = Math.min(1, maxWidth / sw);
+      const output = document.createElement('canvas');
+      output.width = Math.max(1, Math.round(sw * outputScale));
+      output.height = Math.max(1, Math.round(sh * outputScale));
+      const context = output.getContext('2d');
+      if (!context) return [];
+      context.fillStyle = '#f3f4f6';
+      context.fillRect(0, 0, output.width, output.height);
+      context.save();
+      context.beginPath();
+      for (const rect of rects) {
+        const maskPadding = framedRects.length ? 0 : 8;
+        const x = Math.max(0, (rect.left - pageRect.left - left - maskPadding) * scaleX * outputScale);
+        const y = Math.max(0, (rect.top - pageRect.top - top - maskPadding) * scaleY * outputScale);
+        const width = Math.min(output.width - x, (rect.width + maskPadding * 2) * scaleX * outputScale);
+        const height = Math.min(output.height - y, (rect.height + maskPadding * 2) * scaleY * outputScale);
+        context.rect(x, y, width, height);
+      }
+      context.clip();
+      context.drawImage(source, sx, sy, sw, sh, 0, 0, output.width, output.height);
+      context.restore();
+      return [{ page: Number(page.dataset.pageNumber) || undefined, dataUrl: output.toDataURL('image/jpeg', 0.82) }];
+    });
     setArtifactSelection({
       sessionId: preview.sessionId,
       path: preview.path,
@@ -485,6 +544,7 @@ export function PreviewContent({ preview }: { preview: PreviewFile | null }) {
       kind,
       target: targets[0],
       targets,
+      visuals: visuals.length ? visuals : undefined,
     });
   };
 
@@ -507,25 +567,11 @@ export function PreviewContent({ preview }: { preview: PreviewFile | null }) {
     chooseCandidate(selectionTargetForElement(element), element, event.shiftKey);
   };
 
-  const addDraggedElement = (element: HTMLElement) => {
-    const target = selectionTargetForElement(element);
-    const key = `${target.page ?? ''}|${target.sheet ?? ''}|${target.cell ?? ''}|${target.slide ?? ''}|${target.element ?? ''}|${target.quote ?? ''}`;
-    if (selectionCandidatesRef.current.some((candidate) => (
-      `${candidate.target.page ?? ''}|${candidate.target.sheet ?? ''}|${candidate.target.cell ?? ''}|${candidate.target.slide ?? ''}|${candidate.target.element ?? ''}|${candidate.target.quote ?? ''}` === key
-    ))) return;
-    element.classList.add('talos-selection-candidate');
-    const next = [...selectionCandidatesRef.current, { target, element }];
-    selectionCandidatesRef.current = next;
-    setSelectionCandidates(next);
-  };
-
   const startDragSelection = (event: ReactPointerEvent<HTMLDivElement>) => {
     if (!markMode || event.button !== 0) return;
-    const clicked = event.target instanceof Element ? event.target : null;
     dragSelection.current = {
       startX: event.clientX,
       startY: event.clientY,
-      startElement: selectableElement(clicked),
       moved: false,
       additive: event.shiftKey,
     };
@@ -538,16 +584,17 @@ export function PreviewContent({ preview }: { preview: PreviewFile | null }) {
     if (!drag.moved) {
       drag.moved = true;
       event.currentTarget.setPointerCapture(event.pointerId);
-      if (!drag.additive) {
-        selectionCandidatesRef.current.forEach((candidate) => candidate.element.classList.remove('talos-selection-candidate', 'talos-selection-committed'));
-        selectionCandidatesRef.current = [];
-        setSelectionCandidates([]);
-      }
-      if (drag.startElement) addDraggedElement(drag.startElement);
     }
-    const hovered = document.elementFromPoint(event.clientX, event.clientY);
-    const element = selectableElement(hovered);
-    if (element && selectionRoot.current?.contains(element)) addDraggedElement(element);
+    const left = Math.min(drag.startX, event.clientX);
+    const top = Math.min(drag.startY, event.clientY);
+    const overlay = dragOverlayRef.current;
+    if (overlay) {
+      overlay.style.display = 'block';
+      overlay.style.left = `${left}px`;
+      overlay.style.top = `${top}px`;
+      overlay.style.width = `${Math.abs(event.clientX - drag.startX)}px`;
+      overlay.style.height = `${Math.abs(event.clientY - drag.startY)}px`;
+    }
     event.preventDefault();
   };
 
@@ -558,7 +605,58 @@ export function PreviewContent({ preview }: { preview: PreviewFile | null }) {
     if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
     suppressClick.current = true;
     window.setTimeout(() => { suppressClick.current = false; }, 0);
-    applyArtifactSelection(selectionCandidatesRef.current);
+    const frame = new DOMRect(
+      Math.min(drag.startX, event.clientX),
+      Math.min(drag.startY, event.clientY),
+      Math.abs(event.clientX - drag.startX),
+      Math.abs(event.clientY - drag.startY),
+    );
+    const root = selectionRoot.current;
+    const normalizedFrames = root ? Array.from(root.querySelectorAll<HTMLElement>('[data-page-number]')).flatMap((page) => {
+      const pageRect = page.getBoundingClientRect();
+      const left = Math.max(frame.left, pageRect.left);
+      const top = Math.max(frame.top, pageRect.top);
+      const right = Math.min(frame.right, pageRect.right);
+      const bottom = Math.min(frame.bottom, pageRect.bottom);
+      if (right <= left || bottom <= top || !pageRect.width || !pageRect.height) return [];
+      return [{
+        page: Number(page.dataset.pageNumber),
+        x: (left - pageRect.left) / pageRect.width,
+        y: (top - pageRect.top) / pageRect.height,
+        width: (right - left) / pageRect.width,
+        height: (bottom - top) / pageRect.height,
+      }];
+    }) : [];
+    visualFramesRef.current = drag.additive ? [...visualFramesRef.current, ...normalizedFrames] : normalizedFrames;
+    const elements = root ? Array.from(root.querySelectorAll<HTMLElement>(
+      '[data-selection-box], [data-cell], [data-artifact-element^="shape-"], p, h1, h2, h3, h4, h5, h6, li, blockquote, pre, img',
+    )) : [];
+    const inside = elements.filter((element) => {
+      const rect = element.getBoundingClientRect();
+      const centerX = rect.left + rect.width / 2;
+      const centerY = rect.top + rect.height / 2;
+      return rect.width > 0 && rect.height > 0
+        && centerX >= frame.left && centerX <= frame.right
+        && centerY >= frame.top && centerY <= frame.bottom;
+    });
+    const previous = selectionCandidatesRef.current;
+    if (!drag.additive) previous.forEach((candidate) => candidate.element.classList.remove('talos-selection-candidate', 'talos-selection-committed'));
+    const base = drag.additive ? previous : [];
+    const byKey = new Map<string, BoxSelectionCandidate>();
+    for (const candidate of base) {
+      const target = candidate.target;
+      byKey.set(`${target.page ?? ''}|${target.sheet ?? ''}|${target.cell ?? ''}|${target.slide ?? ''}|${target.element ?? ''}|${target.quote ?? ''}`, candidate);
+    }
+    for (const element of inside) {
+      const target = selectionTargetForElement(element);
+      const key = `${target.page ?? ''}|${target.sheet ?? ''}|${target.cell ?? ''}|${target.slide ?? ''}|${target.element ?? ''}|${target.quote ?? ''}`;
+      byKey.set(key, { target, element });
+    }
+    const next = Array.from(byKey.values());
+    selectionCandidatesRef.current = next;
+    setSelectionCandidates(next);
+    if (dragOverlayRef.current) dragOverlayRef.current.style.display = 'none';
+    applyArtifactSelection(next);
     window.getSelection()?.removeAllRanges();
     event.preventDefault();
   };
@@ -604,6 +702,7 @@ export function PreviewContent({ preview }: { preview: PreviewFile | null }) {
        {!loading && !error && !editing && loaded && <PreviewBody loaded={loaded} preview={preview} markMode={markMode} onBoxCandidate={chooseCandidate} committedTargets={artifactSelection && artifactSelection.sessionId === preview.sessionId && artifactSelection.path === preview.path ? artifactSelection.targets ?? [artifactSelection.target] : []} />}
       </div>
       {groupRect && <div className="pointer-events-none fixed z-50 rounded-sm border-2 border-primary bg-primary/[0.03] shadow-[0_0_0_4px_color-mix(in_srgb,var(--primary)_14%,transparent)]" style={{ left: groupRect.left - 4, top: groupRect.top - 4, width: groupRect.width + 8, height: groupRect.height + 8 }} />}
+      <div ref={dragOverlayRef} className="pointer-events-none fixed z-[60] hidden border border-dashed border-primary bg-primary/10" />
     </div>
   );
 }
