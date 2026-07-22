@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
+import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { FileTextIcon, MousePointer2Icon, RotateCcwIcon } from 'lucide-react';
 import type { ArtifactSelectionTarget } from '@/api/types';
@@ -115,6 +115,8 @@ export function PreviewContent({ preview }: { preview: PreviewFile | null }) {
   const selectionCandidatesRef = useRef<BoxSelectionCandidate[]>([]);
   const [groupRect, setGroupRect] = useState<DOMRect | null>(null);
   const [selectionLayoutVersion, setSelectionLayoutVersion] = useState(0);
+  const dragSelection = useRef<{ startX: number; startY: number; startElement: HTMLElement | null; moved: boolean; additive: boolean } | null>(null);
+  const suppressClick = useRef(false);
   const updatePreview = useUi((s) => s.updatePreview);
   const artifactSelection = useUi((s) => s.artifactSelection);
   const setArtifactSelection = useUi((s) => s.setArtifactSelection);
@@ -403,6 +405,17 @@ export function PreviewContent({ preview }: { preview: PreviewFile | null }) {
     };
   };
 
+  const selectableElement = (clicked: Element | null) => {
+    const smallest = clicked?.closest<HTMLElement>('[data-selection-box], [data-cell], td, th, [data-artifact-element^="shape-"], p, h1, h2, h3, h4, h5, h6, li, blockquote, pre, img');
+    const parent = clicked?.closest<HTMLElement>('table, figure[data-slide]');
+    return smallest ?? parent ?? null;
+  };
+
+  const selectionTargetForElement = (element: HTMLElement) => {
+    const quote = element instanceof HTMLImageElement ? undefined : element.innerText.trim();
+    return targetFromElement(element, quote);
+  };
+
   const chooseCandidate = (target: ArtifactSelectionTarget, element: HTMLElement, additive = false) => {
     const current = selectionCandidatesRef.current;
       let nextTarget = target;
@@ -477,16 +490,77 @@ export function PreviewContent({ preview }: { preview: PreviewFile | null }) {
 
   const captureElement = (event: ReactMouseEvent<HTMLDivElement>) => {
     if (!markMode) return;
+    if (suppressClick.current) {
+      suppressClick.current = false;
+      event.preventDefault();
+      event.stopPropagation();
+      return;
+    }
     const clicked = event.target instanceof Element ? event.target : null;
-    const smallest = clicked?.closest<HTMLElement>('[data-selection-box], [data-cell], td, th, [data-artifact-element^="shape-"], p, h1, h2, h3, h4, h5, h6, li, blockquote, pre, img');
+    const smallest = selectableElement(clicked);
     const promoted = clicked?.closest<HTMLElement>('table, figure[data-slide]');
     const element = smallest ?? promoted;
     if (!element || !selectionRoot.current?.contains(element)) return;
     event.preventDefault();
     event.stopPropagation();
     window.getSelection()?.removeAllRanges();
-    const quote = element instanceof HTMLImageElement ? undefined : element.innerText.trim();
-    chooseCandidate(targetFromElement(element, quote), element, event.shiftKey);
+    chooseCandidate(selectionTargetForElement(element), element, event.shiftKey);
+  };
+
+  const addDraggedElement = (element: HTMLElement) => {
+    const target = selectionTargetForElement(element);
+    const key = `${target.page ?? ''}|${target.sheet ?? ''}|${target.cell ?? ''}|${target.slide ?? ''}|${target.element ?? ''}|${target.quote ?? ''}`;
+    if (selectionCandidatesRef.current.some((candidate) => (
+      `${candidate.target.page ?? ''}|${candidate.target.sheet ?? ''}|${candidate.target.cell ?? ''}|${candidate.target.slide ?? ''}|${candidate.target.element ?? ''}|${candidate.target.quote ?? ''}` === key
+    ))) return;
+    element.classList.add('talos-selection-candidate');
+    const next = [...selectionCandidatesRef.current, { target, element }];
+    selectionCandidatesRef.current = next;
+    setSelectionCandidates(next);
+  };
+
+  const startDragSelection = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (!markMode || event.button !== 0) return;
+    const clicked = event.target instanceof Element ? event.target : null;
+    dragSelection.current = {
+      startX: event.clientX,
+      startY: event.clientY,
+      startElement: selectableElement(clicked),
+      moved: false,
+      additive: event.shiftKey,
+    };
+  };
+
+  const moveDragSelection = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const drag = dragSelection.current;
+    if (!drag) return;
+    if (!drag.moved && Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY) < 5) return;
+    if (!drag.moved) {
+      drag.moved = true;
+      event.currentTarget.setPointerCapture(event.pointerId);
+      if (!drag.additive) {
+        selectionCandidatesRef.current.forEach((candidate) => candidate.element.classList.remove('talos-selection-candidate', 'talos-selection-committed'));
+        selectionCandidatesRef.current = [];
+        setSelectionCandidates([]);
+      }
+      if (drag.startElement) addDraggedElement(drag.startElement);
+    }
+    const hovered = document.elementFromPoint(event.clientX, event.clientY);
+    const element = selectableElement(hovered);
+    if (element && selectionRoot.current?.contains(element)) addDraggedElement(element);
+    event.preventDefault();
+  };
+
+  const finishDragSelection = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const drag = dragSelection.current;
+    dragSelection.current = null;
+    if (!drag?.moved) return;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+    suppressClick.current = true;
+    window.setTimeout(() => { suppressClick.current = false; }, 0);
+    applyArtifactSelection(selectionCandidatesRef.current);
+    window.getSelection()?.removeAllRanges();
+    event.preventDefault();
   };
 
   return (
@@ -521,7 +595,7 @@ export function PreviewContent({ preview }: { preview: PreviewFile | null }) {
           {selectionCandidates.length > 0 && <span className="ml-auto text-xs text-muted-foreground">{selectionCandidates.length > 1 ? `${selectionCandidates.length} ${t('preview.selectedElements')}` : t('preview.selectedElement')}</span>}
         </div>
       )}
-      <div ref={selectionRoot} onClickCapture={captureElement} className={`min-h-0 flex-1 overflow-auto ${markMode ? 'talos-mark-mode cursor-crosshair select-none' : ''}`}>
+      <div ref={selectionRoot} onClickCapture={captureElement} onPointerDown={startDragSelection} onPointerMove={moveDragSelection} onPointerUp={finishDragSelection} onPointerCancel={finishDragSelection} className={`min-h-0 flex-1 overflow-auto ${markMode ? 'talos-mark-mode cursor-crosshair select-none' : ''}`}>
       {loading && <p className="px-4 py-6 text-center text-xs text-muted-foreground">{t('common.loading')}</p>}
       {error && <p className="px-4 py-6 text-center text-xs text-destructive-foreground">{t('preview.error')}</p>}
       {!loading && !error && editing && (
