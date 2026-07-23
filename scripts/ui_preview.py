@@ -875,6 +875,12 @@ class PreviewHandler(BaseHTTPRequestHandler):
                     headers={"Content-Disposition": f'{disp}; filename="{name}"'},
                 )
                 return
+            # Office preview (LibreOffice→PDF) isn't available in the mock, so
+            # 404 like a backend without the sandbox. This forces the frontend's
+            # client-side fallback (SheetJS for .xlsx), matching real setups.
+            if "/preview" in path:
+                self._send_json({"detail": "Sandbox not available"}, 404)
+                return
             self._send_json(
                 {
                     "artifacts": [

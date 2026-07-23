@@ -117,8 +117,12 @@ function CodeBlock({ node, children }: { node?: HastNode; children: React.ReactN
     .find((c) => c.startsWith('language-'))
     ?.slice('language-'.length);
   const ext = (lang && (LANG_EXT[lang] ?? lang)) || 'txt';
+  // min-w-0 + max-w-full stop the wrapper from being widened by a very long
+  // code line in a squeezed flex column (preview panel open / narrow window):
+  // without them the box can grow past its container instead of letting the
+  // inner <pre> scroll horizontally.
   return (
-    <div className="group/block relative">
+    <div className="group/block relative min-w-0 max-w-full">
       <div className="absolute top-2 right-2 flex gap-1 opacity-0 transition-opacity group-hover/block:opacity-100">
         <CopyBlockButton text={text} />
         <BlockButton label="Download" onClick={() => downloadBlob(text, `code.${ext}`, 'text/plain;charset=utf-8')}>

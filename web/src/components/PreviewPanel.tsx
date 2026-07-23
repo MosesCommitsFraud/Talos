@@ -153,7 +153,12 @@ export function PreviewContent({ preview }: { preview: PreviewFile | null }) {
 
     (async () => {
       try {
-        if (kind === 'word' || kind === 'presentation' || kind === 'excel') {
+        // Word/PowerPoint render best as the server's LibreOffice PDF, so try
+        // that first. Spreadsheets are handled below by the client-side SheetJS
+        // table instead: it needs no sandbox and always works for a valid
+        // .xlsx, so it's the reliable primary path (a broken server PDF that
+        // returned 200 used to leave xlsx unopenable with no fallback).
+        if (kind === 'word' || kind === 'presentation') {
           try {
             const pdf = await fetchArtifactPreviewBlob(preview.sessionId, preview.path);
             if (cancelled) return;
@@ -180,19 +185,26 @@ export function PreviewContent({ preview }: { preview: PreviewFile | null }) {
           const slides = await parsePresentation(blob);
           if (!cancelled) setLoaded({ kind: 'presentation', slides });
         } else if (kind === 'excel') {
-          const XLSX = await import('xlsx');
-          const wb = XLSX.read(await blob.arrayBuffer(), { type: 'array' });
-          const sheets = wb.SheetNames.map((name) => {
-            const sheet = wb.Sheets[name];
-            const usedRange = XLSX.utils.decode_range(sheet['!ref'] || 'A1:A1');
-            return {
-              name,
-              rows: XLSX.utils.sheet_to_json<string[]>(sheet, { header: 1, blankrows: true, defval: '' }),
-              startRow: usedRange.s.r,
-              startCol: usedRange.s.c,
-            };
-          });
-          if (!cancelled) setLoaded({ kind: 'excel', sheets });
+          try {
+            const XLSX = await import('xlsx');
+            const wb = XLSX.read(await blob.arrayBuffer(), { type: 'array' });
+            const sheets = wb.SheetNames.map((name) => {
+              const sheet = wb.Sheets[name];
+              const usedRange = XLSX.utils.decode_range(sheet['!ref'] || 'A1:A1');
+              return {
+                name,
+                rows: XLSX.utils.sheet_to_json<string[]>(sheet, { header: 1, blankrows: true, defval: '' }),
+                startRow: usedRange.s.r,
+                startCol: usedRange.s.c,
+              };
+            });
+            if (!cancelled) setLoaded({ kind: 'excel', sheets });
+          } catch {
+            // SheetJS couldn't read it (unusual features / corruption): fall
+            // back to the server's LibreOffice PDF render if one is available.
+            const pdf = await fetchArtifactPreviewBlob(preview.sessionId, preview.path);
+            if (!cancelled) setLoaded({ kind: 'pdf', blob: pdf });
+          }
         } else if (kind === 'csv') {
           const text = await blob.text();
           const sep = fileExt(preview.name) === 'tsv' ? '\t' : ',';
@@ -695,7 +707,12 @@ export function PreviewContent({ preview }: { preview: PreviewFile | null }) {
       )}
       <div ref={selectionRoot} onClickCapture={captureElement} onPointerDown={startDragSelection} onPointerMove={moveDragSelection} onPointerUp={finishDragSelection} onPointerCancel={finishDragSelection} className={`min-h-0 flex-1 overflow-auto ${markMode ? 'talos-mark-mode cursor-crosshair select-none' : ''}`}>
       {loading && <p className="px-4 py-6 text-center text-xs text-muted-foreground">{t('common.loading')}</p>}
-      {error && <p className="px-4 py-6 text-center text-xs text-destructive-foreground">{t('preview.error')}</p>}
+      {error && (
+        <div className="px-4 py-6 text-center">
+          <p className="text-xs text-destructive-foreground">{t('preview.error')}</p>
+          <p className="mt-1 text-[11px] break-words text-muted-foreground">{error}</p>
+        </div>
+      )}
       {!loading && !error && editing && (
         <textarea value={draft} onChange={(e) => setDraft(e.target.value)} className="h-full min-h-96 w-full resize-none bg-background p-4 font-mono text-[13px] leading-relaxed outline-none" spellCheck={false} />
       )}
