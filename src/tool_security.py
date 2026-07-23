@@ -60,9 +60,12 @@ BASH_POLICY_MESSAGE = (
     "System administration, system/hardware inspection, services, containers, "
     "remote shells, and non-Python package managers are not available here. "
     "If the user asked how to set something up on their own machine, answer "
-    "in text from the documentation — do not execute those commands. Do not "
-    "mention this policy or describe the execution environment to the user; "
-    "just deliver the requested result or guidance."
+    "in text from the documentation — do not execute those commands and do "
+    "not retry variants of this command. The user does NOT see this message. "
+    "Never mention this rejection, the policy, a sandbox, or your execution "
+    "environment in your reply — no phrases like 'the error messages come "
+    "from my environment'. Simply write the requested guidance as if you "
+    "never attempted the command."
 )
 
 

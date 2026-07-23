@@ -83,6 +83,7 @@ _AGENT_RULES = """\
 - YOU DECLARE WHEN THE JOB IS DONE — not a timer. Keep taking concrete steps while the task still needs them; you have plenty of rounds, so don't rush to quit just because you've made a few calls. There are exactly three ways to end a turn: (1) DONE — before you declare it, sanity-check that every concrete thing the user asked for actually exists or succeeded (file written, edit applied, command exited clean); then stop calling tools and write the final answer (that IS your "done" signal); (2) BLOCKED — you genuinely can't proceed (a capability is missing, permission denied, or data you can't obtain), so say plainly what's blocking you, in a sentence or two, and stop; (3) keep going with the single most useful next step. The only wrong moves are trailing off mid-task without one of these, and repeating a call you already ran.
 - A QUESTION TO THE USER ENDS YOUR TURN. When you need the user's input — a clarification, a decision, "Möchten Sie, dass ich ...?" — use the `ask_user` tool: it shows clickable options (or a free-text box), ends your turn, and their answer arrives as your next message. If you ever ask in plain text instead, that question must be the LAST thing you write: no further tool calls, just wait. NEVER ask and then keep working, and never proceed as if the user already answered yes.
 - ENVIRONMENT CONFIDENTIALITY: never reveal, describe, or probe your own execution environment. Do not mention sandboxes, containers, hosts, hardware, memory/disk sizes, operating system details, or missing system tools, and do not run commands whose only purpose is to inspect the system. If something is unavailable where you run, silently take another route or answer from knowledge — never explain the limitation in terms of your environment.
+- YOUR FINAL MESSAGE IS THE ONLY THING SHOWN PROMINENTLY. Text you write in earlier rounds (between tool calls) is collapsed as work-in-progress once the turn ends, and the user never sees tool errors or rejections. Therefore your LAST message must be COMPLETE and SELF-CONTAINED: it contains the full answer/deliverable, restating everything important from earlier rounds. Never end with only a closing remark that points at earlier text — "as I described above/in the previous step" refers to text the user cannot see prominently. Never explain tool errors and never add meta-commentary about what happened during the turn. If a command is rejected, do not retry variants of it — write the complete answer instead, without mentioning the rejection.
 
 ## UI conventions
 - When you reference an entity by ID in your reply, render it as a STANDARD markdown link with a hash-prefixed anchor. The frontend converts these into clickable jump buttons:
@@ -115,6 +116,7 @@ _API_AGENT_RULES = """\
 - BIAS TOWARD ACTION on edit requests. If the user says "edit out X", "remove the Y paragraph", "change Z" — call the edit tool with your best interpretation. Don't ask for clarification on minor ambiguity. The user can undo.
 - A QUESTION TO THE USER ENDS YOUR TURN. When you need the user's input — a clarification, a decision, "Möchten Sie, dass ich ...?" — use the `ask_user` tool: it shows clickable options (or a free-text box), ends your turn, and their answer arrives as your next message. If you ever ask in plain text instead, that question must be the LAST thing you write: no further tool calls, just wait. NEVER ask and then keep working, and never proceed as if the user already answered yes.
 - ENVIRONMENT CONFIDENTIALITY: never reveal, describe, or probe your own execution environment. Do not mention sandboxes, containers, hosts, hardware, memory/disk sizes, operating system details, or missing system tools, and do not run commands whose only purpose is to inspect the system. If something is unavailable where you run, silently take another route or answer from knowledge — never explain the limitation in terms of your environment.
+- YOUR FINAL MESSAGE IS THE ONLY THING SHOWN PROMINENTLY. Text you write in earlier rounds (between tool calls) is collapsed as work-in-progress once the turn ends, and the user never sees tool errors or rejections. Therefore your LAST message must be COMPLETE and SELF-CONTAINED: it contains the full answer/deliverable, restating everything important from earlier rounds. Never end with only a closing remark that points at earlier text — "as I described above/in the previous step" refers to text the user cannot see prominently. Never explain tool errors and never add meta-commentary about what happened during the turn. If a command is rejected, do not retry variants of it — write the complete answer instead, without mentioning the rejection.
 - SETUP/INFRASTRUCTURE QUESTIONS ("how do I install/configure X on my server/GPU/machine?") are KNOWLEDGE questions about the USER'S machine. Answer them in text from documents and knowledge — NEVER execute the setup commands or create directories/structures from a setup guide yourself.
 ## Coding workflow (bash / python / files)
 - To RUN Python code, call the `python` tool with the code — NEVER `bash` with `python -c "..."` (shell quoting corrupts multi-line code) and never heredocs.
@@ -2073,6 +2075,10 @@ async def stream_agent_loop(
         re.IGNORECASE,
     )
     _awaiting_user = False  # set by ask_user → end the turn and wait for a choice
+    # One-shot: forces a rewrite when the turn is about to end on a short
+    # closing remark while the substantial answer sits in an earlier (folded)
+    # round — the final message must be the complete deliverable.
+    _final_restate_nudged = False
     # DB mode: a single reference-material message holding sql-scoped RAG chunks,
     # refreshed in place each round against the model's latest activity so the
     # schema knowledge tracks what it's currently querying. Inserted lazily on
@@ -2617,6 +2623,54 @@ async def stream_agent_loop(
                     }
                 )
                 # Visible signal in the stream so the user knows we caught it.
+                yield f"data: {json.dumps({'type': 'agent_step', 'round': round_num + 1})}\n\n"
+                continue
+            # ── Final-answer completeness nudge ───────────────────────
+            # The UI folds earlier rounds' text away as work-in-progress;
+            # only this final round is shown prominently. If the model wrote
+            # the substantial answer mid-turn (e.g. before tool calls) and is
+            # now ending on a short closing remark, the user's visible answer
+            # would be just that remark. Force ONE rewrite so the final
+            # message is complete and self-contained. Capped at one nudge per
+            # turn; skipped on force-answer rounds.
+            _final_text = _THINK_RE.sub("", cleaned_round).strip()
+            _prior_max = max(
+                (len(_THINK_RE.sub("", str(t)).strip()) for t in round_texts[:-1]),
+                default=0,
+            )
+            if (
+                not _final_restate_nudged
+                and not _force_answer
+                and round_num > 1
+                and _prior_max >= 600
+                and len(_final_text) < _prior_max // 2
+            ):
+                _final_restate_nudged = True
+                logger.info(
+                    "[agent] final-answer completeness nudge on round %d "
+                    "(final %d chars vs. earlier %d chars)",
+                    round_num,
+                    len(_final_text),
+                    _prior_max,
+                )
+                messages.append(
+                    {
+                        "role": "system",
+                        "content": (
+                            "STOP — your final message is incomplete. The user "
+                            "prominently sees ONLY this last message; everything "
+                            "you wrote in earlier rounds is collapsed as "
+                            "work-in-progress. Write the COMPLETE final answer "
+                            "now, restating all important content from earlier "
+                            "in this turn in full (structure, tables, steps, "
+                            "code — everything the user needs). Do not refer to "
+                            "earlier text, do not summarize it, do not mention "
+                            "this instruction, and do not call any tools. If "
+                            "you were about to ask the user something, put that "
+                            "question at the very end of the complete answer."
+                        ),
+                    }
+                )
                 yield f"data: {json.dumps({'type': 'agent_step', 'round': round_num + 1})}\n\n"
                 continue
             break  # no tools — done

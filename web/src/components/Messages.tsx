@@ -85,10 +85,10 @@ function Working({ startedAt }: { startedAt?: number }) {
 
 /** Settled-turn fold: collapses everything a finished turn did — thinking, tool
  *  calls, and any interim commentary the model emitted between tool calls —
- *  behind a quiet "Worked for Xs" disclosure (t3code style). Only the terminal
- *  message's text renders outside the fold as the final answer; `terminalId`
- *  marks it so its commentary isn't duplicated here. */
-function ActivityFold({ turn, terminalId, showThinking, durationMs }: { turn: UiMessage[]; terminalId: string; showThinking: boolean; durationMs: number | null }) {
+ *  behind a quiet "Worked for Xs" disclosure (t3code style). Only the answer
+ *  bubbles' text renders outside the fold; `answerIds` marks them so their
+ *  text isn't duplicated here. */
+function ActivityFold({ turn, answerIds, showThinking, durationMs }: { turn: UiMessage[]; answerIds: ReadonlySet<string>; showThinking: boolean; durationMs: number | null }) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const label = durationMs != null ? t('messages.workedFor', { duration: formatDurationMs(durationMs) }) : t('messages.worked');
@@ -109,8 +109,8 @@ function ActivityFold({ turn, terminalId, showThinking, durationMs }: { turn: Ui
             <Fragment key={m.id}>
               {m.thinking && showThinking && <Thinking text={m.thinking} streaming={false} />}
               {/* Interim commentary the model said between tool calls — folded
-                  away too; the terminal message's text shows below the fold. */}
-              {m.id !== terminalId && m.content && (
+                  away too; the answer bubbles' text shows below the fold. */}
+              {!answerIds.has(m.id) && m.content && (
                 <div className="text-sm text-muted-foreground">
                   <Markdown text={m.content} />
                 </div>
@@ -397,9 +397,12 @@ function AssistantTurn({ turn, containsLast, artifactFiles, sessionId }: { turn:
   // Settled turn: fold the work, keep only the final answer. The terminal
   // message is the last bubble that produced text — everything before it
   // (thinking, tools, and any interim commentary) folds into the disclosure.
+  // The agent loop guarantees the final round restates the complete answer
+  // (final-answer completeness nudge), so folding earlier text is lossless.
   const terminal = [...turn].reverse().find((m) => m.content.trim().length > 0);
   const terminalId = terminal?.id ?? '';
-  const hasFoldedCommentary = turn.some((m) => m.id !== terminalId && m.content.trim().length > 0);
+  const answerIds = new Set<string>(terminal ? [terminalId] : []);
+  const hasFoldedCommentary = turn.some((m) => !answerIds.has(m.id) && m.content.trim().length > 0);
   const hasActivity = hasFoldedCommentary || turn.some((m) => (m.thinking && showThinking) || (m.tools?.length ?? 0) > 0);
   const durationMs =
     last.turnElapsedMs ??
@@ -422,14 +425,17 @@ function AssistantTurn({ turn, containsLast, artifactFiles, sessionId }: { turn:
   return (
     <>
       {compacted && <CompactionMarker />}
-      {hasActivity && <ActivityFold turn={turn} terminalId={terminalId} showThinking={showThinking} durationMs={durationMs} />}
+      {hasActivity && <ActivityFold turn={turn} answerIds={answerIds} showThinking={showThinking} durationMs={durationMs} />}
       {/* A proposed plan opens in the side panel; the message stream shows a
           compact chip rather than duplicating the whole plan inline. */}
-      {terminal && !proposalMsg && (
-        <div className={terminal.error ? 'text-destructive-foreground' : ''}>
-          <Markdown text={terminal.content} />
-        </div>
-      )}
+      {!proposalMsg &&
+        turn
+          .filter((m) => answerIds.has(m.id) && m.content.trim().length > 0)
+          .map((m) => (
+            <div key={m.id} className={m.error ? 'text-destructive-foreground' : ''}>
+              <Markdown text={m.content} />
+            </div>
+          ))}
       {proposalMsg && <PlanChip />}
       {planMsg && !proposalMsg && <PlanCard msg={planMsg} />}
       {/* The tool rows (with their inline images) fold away once the turn
