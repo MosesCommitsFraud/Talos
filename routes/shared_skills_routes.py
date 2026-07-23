@@ -44,10 +44,10 @@ def setup_shared_skills_routes() -> APIRouter:
     @router.get("")
     async def list_skills(request: Request):
         user: Optional[str] = get_current_user(request)
-        disabled = shared_skills._disabled_for(user)
+        active = shared_skills.enabled_names_for(user)
         out = []
         for s in shared_skills.list_skills():
-            s["enabled"] = s["name"] not in disabled
+            s["enabled"] = s["name"] in active
             s["mine"] = user is None or s.get("uploaded_by") == user
             out.append(s)
         return {"skills": out, "count": len(out)}
@@ -61,6 +61,7 @@ def setup_shared_skills_routes() -> APIRouter:
             raise HTTPException(403, str(e))
         except ValueError as e:
             raise HTTPException(400, str(e))
+        shared_skills.set_enabled(user, meta["name"], True)
         return {"ok": True, "skill": meta}
 
     @router.post("/upload")
@@ -81,6 +82,9 @@ def setup_shared_skills_routes() -> APIRouter:
             raise HTTPException(400, "Skill file must be UTF-8 markdown (or a .zip bundle).")
         except ValueError as e:
             raise HTTPException(400, str(e))
+        # Skills are opt-in; auto-enable the upload for its own uploader so
+        # they can try it immediately (everyone else stays opted out).
+        shared_skills.set_enabled(user, meta["name"], True)
         return {"ok": True, "skill": meta}
 
     @router.get("/{name}")

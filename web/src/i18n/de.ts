@@ -425,7 +425,7 @@ const de: typeof en = {
     saveChanges: 'Änderungen speichern',
     skills: {
       title: 'Skill-Bibliothek',
-      intro: 'SKILL.md-Dateien (Claude-Format: Frontmatter mit name + description, danach die Anleitung) oder .zip-Bundles (SKILL.md plus Referenzen/Skripte) hochladen und mit allen Benutzern teilen. Aktivierte Skills werden der KI angeboten; sie lädt die vollständige Anleitung bei Bedarf und folgt ihr exakt.',
+      intro: 'SKILL.md-Dateien (Claude-Format: Frontmatter mit name + description, danach die Anleitung) oder .zip-Bundles (SKILL.md plus Referenzen/Skripte) hochladen und mit allen Benutzern teilen. Neue Skills sind für dich AUS, bis du sie hier aktivierst; aktivierte Skills werden der KI angeboten, die die vollständige Anleitung bei Bedarf lädt und ihr exakt folgt.',
       upload: 'Skill hochladen',
       uploaded: 'Skill gespeichert.',
       empty: 'Noch keine Skills. Lade eine SKILL.md hoch, um zu starten.',

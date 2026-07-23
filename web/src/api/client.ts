@@ -322,6 +322,23 @@ export async function saveAppSettings(patch: AppSettings): Promise<void> {
   if (!res.ok) throw new Error(`Save failed (HTTP ${res.status})`);
 }
 
+/* ── Per-user preferences (server-side key/value store) ── */
+
+export async function fetchUserPref<T>(key: string): Promise<T | null> {
+  const data = await getJSON<{ key: string; value: T | null }>(`/api/prefs/${encodeURIComponent(key)}`);
+  return data.value ?? null;
+}
+
+export async function saveUserPref(key: string, value: unknown): Promise<void> {
+  const res = await fetch(`/api/prefs/${encodeURIComponent(key)}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ value }),
+    credentials: 'same-origin',
+  });
+  if (!res.ok) throw new Error(`Save failed (HTTP ${res.status})`);
+}
+
 /* ── Shared uploaded skills (Claude-style SKILL.md library) ── */
 
 export interface SharedSkill {

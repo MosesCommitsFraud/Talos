@@ -2,6 +2,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect } from 'react';
 import type * as React from 'react';
 import { fetchAuthStatus, UNAUTHENTICATED_EVENT, type AuthStatus } from '@/api/client';
+import { syncPrefsForUser } from '@/state/prefs';
 import { LoginScreen } from './LoginScreen';
 
 const AUTH_QUERY_KEY = ['auth', 'status'] as const;
@@ -40,6 +41,13 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
     window.addEventListener(UNAUTHENTICATED_EVENT, onUnauthenticated);
     return () => window.removeEventListener(UNAUTHENTICATED_EVENT, onUnauthenticated);
   }, [qc]);
+
+  // Once we know who's signed in (or that auth is off), pull that user's
+  // server-side UI prefs and start pushing local changes back.
+  const signedInAs = data?.auth_enabled === false ? 'local' : data?.authenticated ? (data.username ?? 'local') : null;
+  useEffect(() => {
+    if (signedInAs) void syncPrefsForUser(signedInAs);
+  }, [signedInAs]);
 
   if (isLoading) {
     return (

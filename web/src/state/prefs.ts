@@ -132,6 +132,76 @@ export const usePrefs = create<PrefsState>()(
   ),
 );
 
+/* ── Per-user server sync ──
+ * localStorage keeps prefs fast and offline-capable, but it's per-browser.
+ * The durable, user-scoped copy lives server-side in /api/prefs under the
+ * `ui` key: hydrate from it after login (server wins), then push changes
+ * back debounced. Device-ish state (sidebar width, collapsed folders,
+ * incognito, plan mode, mic) intentionally stays local-only. */
+
+const SYNCED_KEYS = [
+  'theme', 'density', 'sortMode', 'lang', 'llmLang', 'visibility',
+  'useRag', 'useDb', 'reasoning',
+] as const;
+type SyncedKey = (typeof SYNCED_KEYS)[number];
+type SyncedPrefs = Pick<PrefsState, SyncedKey>;
+
+const UI_PREF_KEY = 'ui';
+let hydrating = false;
+let syncStarted = false;
+let saveTimer: ReturnType<typeof setTimeout> | null = null;
+let hydratedFor: string | null = null;
+
+function collectSynced(): SyncedPrefs {
+  const s = usePrefs.getState();
+  return Object.fromEntries(SYNCED_KEYS.map((k) => [k, s[k]])) as unknown as SyncedPrefs;
+}
+
+function startPrefsPush() {
+  if (syncStarted) return;
+  syncStarted = true;
+  usePrefs.subscribe((state, prev) => {
+    if (hydrating) return;
+    if (SYNCED_KEYS.every((k) => state[k] === prev[k])) return;
+    if (saveTimer) clearTimeout(saveTimer);
+    saveTimer = setTimeout(() => {
+      void import('@/api/client').then(({ saveUserPref }) =>
+        saveUserPref(UI_PREF_KEY, collectSynced()).catch(() => { /* offline/401 — local copy stands */ }),
+      );
+    }, 600);
+  });
+}
+
+/** Pull this user's prefs from the server and start pushing changes back.
+ *  Call once auth is settled; `who` distinguishes users so switching accounts
+ *  in the same browser re-hydrates. */
+export async function syncPrefsForUser(who: string): Promise<void> {
+  if (hydratedFor === who) return;
+  hydratedFor = who;
+  try {
+    const { fetchUserPref } = await import('@/api/client');
+    const value = await fetchUserPref<Partial<SyncedPrefs>>(UI_PREF_KEY);
+    if (value && typeof value === 'object') {
+      hydrating = true;
+      const patch: Partial<PrefsState> = {};
+      for (const k of SYNCED_KEYS) {
+        if (value[k] !== undefined) (patch as Record<string, unknown>)[k] = value[k];
+      }
+      patch.visibility = { ...DEFAULT_VISIBILITY, ...(value.visibility ?? {}) };
+      usePrefs.setState(patch);
+      if (patch.lang) void i18n.changeLanguage(patch.lang);
+      hydrating = false;
+    } else {
+      // First login on this account: seed the server with the local prefs.
+      const { saveUserPref } = await import('@/api/client');
+      await saveUserPref(UI_PREF_KEY, collectSynced()).catch(() => undefined);
+    }
+  } catch {
+    // Server unreachable — keep local prefs, still push future changes.
+  }
+  startPrefsPush();
+}
+
 export function applyTheme(theme: Theme) {
   const dark = theme === 'dark' || (theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
   document.documentElement.classList.toggle('dark', dark);

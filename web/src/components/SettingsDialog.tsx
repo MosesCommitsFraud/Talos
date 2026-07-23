@@ -66,6 +66,8 @@ import {
   totpSetup,
   updateIntegration,
   wipeData,
+  fetchUserPref,
+  saveUserPref,
   fetchSharedSkills,
   uploadSharedSkill,
   uploadSharedSkillBundle,
@@ -507,9 +509,19 @@ function KeybindRecorder({ value, onChange }: { value?: string; onChange: (next:
 
 function ShortcutsPanel() {
   const { t } = useTranslation();
-  const s = useSettingsDraft();
-  const binds = (s.value('keybinds') ?? {}) as Record<string, string>;
-  if (!s.ready) return <Page><p className="text-sm text-muted-foreground">{t('common.loading')}</p></Page>;
+  const qc = useQueryClient();
+  // Per-user storage: each user records their own bindings (was a single
+  // global settings.json entry shared by everyone).
+  const { data, isSuccess } = useQuery({
+    queryKey: ['userPref', 'keybinds'],
+    queryFn: () => fetchUserPref<Record<string, string>>('keybinds'),
+  });
+  const binds = data ?? {};
+  const save = useMutation({
+    mutationFn: (next: Record<string, string>) => saveUserPref('keybinds', next),
+    onSettled: () => qc.invalidateQueries({ queryKey: ['userPref', 'keybinds'] }),
+  });
+  if (!isSuccess) return <Page><p className="text-sm text-muted-foreground">{t('common.loading')}</p></Page>;
   return (
     <Page>
       <Section title={t('settings.shortcuts.title')}>
@@ -517,13 +529,13 @@ function ShortcutsPanel() {
           <Row key={key} label={t(`settings.shortcuts.labels.${key}`)}>
             <KeybindRecorder
               value={binds[key]}
-              onChange={(next) => s.setValue('keybinds', { ...binds, [key]: next })}
+              onChange={(next) => save.mutate({ ...binds, [key]: next })}
             />
           </Row>
         ))}
       </Section>
       <p className="-mt-3 px-1 text-xs text-muted-foreground">{t('settings.shortcuts.hint')}</p>
-      <SaveBar dirty={s.dirty} saving={s.save.isPending} error={s.save.isError ? (s.save.error as Error).message : undefined} onSave={() => s.save.mutate()} />
+      {save.isError && <p className="px-1 text-xs text-destructive">{(save.error as Error).message}</p>}
     </Page>
   );
 }

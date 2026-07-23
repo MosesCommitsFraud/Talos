@@ -30,7 +30,10 @@ MAX_BUNDLE_FILES = 100
 MAX_BUNDLE_FILE_BYTES = 5_000_000
 MAX_BUNDLE_TOTAL_BYTES = 25_000_000
 
-DISABLED_PREF_KEY = "shared_skills_disabled"
+# Per-user OPT-IN list: a skill is active for a user only when its name is in
+# this pref. New/unknown skills therefore default to OFF for everyone (the
+# uploader gets their own upload auto-enabled at the route layer).
+ENABLED_PREF_KEY = "shared_skills_enabled"
 
 _FM_RE = re.compile(r"\A\s*---\s*\n(.*?)\n---\s*(?:\n|\Z)", re.S)
 _FM_FIELD_RE = re.compile(r"^([A-Za-z_][A-Za-z0-9_-]*)\s*:\s*(.*)$")
@@ -290,14 +293,14 @@ def delete_skill(name: str, user: Optional[str], is_admin: bool = False) -> bool
         return True
 
 
-# ── Per-user enable/disable (prefs-backed) ──
+# ── Per-user enable/disable (prefs-backed, opt-in) ──
 
 
-def _disabled_for(user: Optional[str]) -> set:
+def enabled_names_for(user: Optional[str]) -> set:
     try:
         from routes.prefs_routes import _load_for_user
 
-        raw = (_load_for_user(user) or {}).get(DISABLED_PREF_KEY)
+        raw = (_load_for_user(user) or {}).get(ENABLED_PREF_KEY)
         return {str(n) for n in raw} if isinstance(raw, list) else set()
     except Exception as e:
         logger.debug(f"shared-skills prefs read failed: {e}")
@@ -308,23 +311,24 @@ def set_enabled(user: Optional[str], name: str, enabled: bool) -> None:
     from routes.prefs_routes import _load_for_user, _save_for_user
 
     prefs = _load_for_user(user) or {}
-    raw = prefs.get(DISABLED_PREF_KEY)
-    disabled = {str(n) for n in raw} if isinstance(raw, list) else set()
+    raw = prefs.get(ENABLED_PREF_KEY)
+    active = {str(n) for n in raw} if isinstance(raw, list) else set()
     name = slugify(name, fallback="")
     if enabled:
-        disabled.discard(name)
+        active.add(name)
     else:
-        disabled.add(name)
-    prefs[DISABLED_PREF_KEY] = sorted(disabled)
+        active.discard(name)
+    prefs[ENABLED_PREF_KEY] = sorted(active)
     _save_for_user(user, prefs)
 
 
 def enabled_skills_for(user: Optional[str]) -> List[dict]:
     """The `[{name, description}]` index of skills this user has enabled —
-    what gets silently injected into the agent's context."""
-    disabled = _disabled_for(user)
+    what gets silently injected into the agent's context. Opt-in: anything
+    the user never enabled stays invisible to their agent."""
+    active = enabled_names_for(user)
     return [
         {"name": s["name"], "description": s["description"]}
         for s in list_skills()
-        if s["name"] not in disabled
+        if s["name"] in active
     ]
