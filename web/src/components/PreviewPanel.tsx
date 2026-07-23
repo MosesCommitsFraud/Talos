@@ -153,14 +153,16 @@ export function PreviewContent({ preview }: { preview: PreviewFile | null }) {
 
     (async () => {
       try {
-        // Office files (Word / PowerPoint / Excel) all render via the server's
-        // LibreOffice PDF so they look consistent and keep their real
-        // formatting. Guard the response: if the sandbox is unavailable the
-        // fetch throws, and if it ever returns a non-PDF body (e.g. an error
-        // page with a 200), the magic-byte check rejects it — either way we
-        // fall through to the browser renderers below (the SheetJS table for
-        // .xlsx), so a spreadsheet is never left unopenable.
-        if (kind === 'word' || kind === 'presentation' || kind === 'excel') {
+        // Only Word documents render via the server's LibreOffice PDF: a paged
+        // layout is the natural way to read prose, and it preserves formatting.
+        // Spreadsheets (SheetJS table) and presentations (per-slide text+images
+        // via parsePresentation) are rendered in-browser instead of as a PDF —
+        // LibreOffice can only export those to PDF too, which reads poorly.
+        // Guard the response: the fetch throws when the sandbox is unavailable,
+        // and the magic-byte check rejects a non-PDF body (e.g. an error page
+        // returned with a 200); either way we fall through to the browser
+        // renderers below.
+        if (kind === 'word') {
           try {
             const pdf = await fetchArtifactPreviewBlob(preview.sessionId, preview.path);
             if (cancelled) return;
@@ -191,8 +193,9 @@ export function PreviewContent({ preview }: { preview: PreviewFile | null }) {
           const slides = await parsePresentation(blob);
           if (!cancelled) setLoaded({ kind: 'presentation', slides });
         } else if (kind === 'excel') {
-          // Reached only when the LibreOffice PDF above was unavailable/invalid.
-          // The SheetJS table is the reliable no-sandbox fallback.
+          // Spreadsheets render as an interactive SheetJS table (scrollable
+          // rows/columns, themed) rather than a PDF — the primary, no-sandbox
+          // view for .xlsx.
           const XLSX = await import('xlsx');
           const wb = XLSX.read(await blob.arrayBuffer(), { type: 'array' });
           const sheets = wb.SheetNames.map((name) => {
