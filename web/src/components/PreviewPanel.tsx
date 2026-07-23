@@ -153,17 +153,23 @@ export function PreviewContent({ preview }: { preview: PreviewFile | null }) {
 
     (async () => {
       try {
-        // Word/PowerPoint render best as the server's LibreOffice PDF, so try
-        // that first. Spreadsheets are handled below by the client-side SheetJS
-        // table instead: it needs no sandbox and always works for a valid
-        // .xlsx, so it's the reliable primary path (a broken server PDF that
-        // returned 200 used to leave xlsx unopenable with no fallback).
-        if (kind === 'word' || kind === 'presentation') {
+        // Office files (Word / PowerPoint / Excel) all render via the server's
+        // LibreOffice PDF so they look consistent and keep their real
+        // formatting. Guard the response: if the sandbox is unavailable the
+        // fetch throws, and if it ever returns a non-PDF body (e.g. an error
+        // page with a 200), the magic-byte check rejects it — either way we
+        // fall through to the browser renderers below (the SheetJS table for
+        // .xlsx), so a spreadsheet is never left unopenable.
+        if (kind === 'word' || kind === 'presentation' || kind === 'excel') {
           try {
             const pdf = await fetchArtifactPreviewBlob(preview.sessionId, preview.path);
             if (cancelled) return;
-            setLoaded({ kind: 'pdf', blob: pdf });
-            return;
+            const head = new Uint8Array(await pdf.slice(0, 5).arrayBuffer());
+            const isPdf = head[0] === 0x25 && head[1] === 0x50 && head[2] === 0x44 && head[3] === 0x46; // %PDF
+            if (isPdf) {
+              setLoaded({ kind: 'pdf', blob: pdf });
+              return;
+            }
           } catch {
             // Keep the browser renderers as fallbacks for local setups without
             // the matching LibreOffice module while a sandbox is restarting.
@@ -185,26 +191,21 @@ export function PreviewContent({ preview }: { preview: PreviewFile | null }) {
           const slides = await parsePresentation(blob);
           if (!cancelled) setLoaded({ kind: 'presentation', slides });
         } else if (kind === 'excel') {
-          try {
-            const XLSX = await import('xlsx');
-            const wb = XLSX.read(await blob.arrayBuffer(), { type: 'array' });
-            const sheets = wb.SheetNames.map((name) => {
-              const sheet = wb.Sheets[name];
-              const usedRange = XLSX.utils.decode_range(sheet['!ref'] || 'A1:A1');
-              return {
-                name,
-                rows: XLSX.utils.sheet_to_json<string[]>(sheet, { header: 1, blankrows: true, defval: '' }),
-                startRow: usedRange.s.r,
-                startCol: usedRange.s.c,
-              };
-            });
-            if (!cancelled) setLoaded({ kind: 'excel', sheets });
-          } catch {
-            // SheetJS couldn't read it (unusual features / corruption): fall
-            // back to the server's LibreOffice PDF render if one is available.
-            const pdf = await fetchArtifactPreviewBlob(preview.sessionId, preview.path);
-            if (!cancelled) setLoaded({ kind: 'pdf', blob: pdf });
-          }
+          // Reached only when the LibreOffice PDF above was unavailable/invalid.
+          // The SheetJS table is the reliable no-sandbox fallback.
+          const XLSX = await import('xlsx');
+          const wb = XLSX.read(await blob.arrayBuffer(), { type: 'array' });
+          const sheets = wb.SheetNames.map((name) => {
+            const sheet = wb.Sheets[name];
+            const usedRange = XLSX.utils.decode_range(sheet['!ref'] || 'A1:A1');
+            return {
+              name,
+              rows: XLSX.utils.sheet_to_json<string[]>(sheet, { header: 1, blankrows: true, defval: '' }),
+              startRow: usedRange.s.r,
+              startCol: usedRange.s.c,
+            };
+          });
+          if (!cancelled) setLoaded({ kind: 'excel', sheets });
         } else if (kind === 'csv') {
           const text = await blob.text();
           const sep = fileExt(preview.name) === 'tsv' ? '\t' : ',';
