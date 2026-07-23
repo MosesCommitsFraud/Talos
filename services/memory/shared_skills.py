@@ -58,7 +58,11 @@ def parse_frontmatter(content: str) -> dict:
     if not description:
         raise ValueError("Frontmatter is missing a `description` field.")
     fields["name"] = name
-    fields["description"] = description[:500]
+    # Generous ceiling: official Anthropic skills ship trigger descriptions
+    # around 1-1.5k chars. Keep A ceiling though — every enabled skill's
+    # description is injected into context on every agent turn, so an
+    # unbounded description would silently eat the prompt budget.
+    fields["description"] = description[:4000]
     return fields
 
 
