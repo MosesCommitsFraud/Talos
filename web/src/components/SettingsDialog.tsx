@@ -66,6 +66,12 @@ import {
   totpSetup,
   updateIntegration,
   wipeData,
+  fetchSharedSkills,
+  uploadSharedSkill,
+  uploadSharedSkillBundle,
+  deleteSharedSkill,
+  setSharedSkillEnabled,
+  type SharedSkill,
   type AppSettings,
   type RagConfig,
   type SqlConfig,
@@ -84,7 +90,7 @@ import { useAuth } from './auth/AuthGate';
 import { UsersPanel } from './settings/UsersPanel';
 
 export type Panel =
-  | 'appearance' | 'shortcuts' | 'account'
+  | 'appearance' | 'shortcuts' | 'account' | 'skills'
   | 'models' | 'ai' | 'assistants' | 'integrations' | 'tools' | 'rag' | 'users' | 'system';
 
 /* ── Shared layout (t3code settings design) ── */
@@ -1710,6 +1716,112 @@ function AssistantsPanel() {
   );
 }
 
+/* ── Shared skills (Claude-style SKILL.md library) ── */
+
+function SharedSkillsPanel() {
+  const { t } = useTranslation();
+  const qc = useQueryClient();
+  const auth = useAuth();
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [msg, setMsg] = useState('');
+  const { data } = useQuery({ queryKey: ['sharedSkills'], queryFn: fetchSharedSkills });
+  const skills = data?.skills ?? [];
+  const invalidate = () => qc.invalidateQueries({ queryKey: ['sharedSkills'] });
+
+  const toggle = useMutation({
+    mutationFn: ({ name, enabled }: { name: string; enabled: boolean }) =>
+      setSharedSkillEnabled(name, enabled),
+    onSettled: invalidate,
+  });
+
+  const onUpload = async (file: File) => {
+    setMsg('');
+    try {
+      if (file.name.toLowerCase().endsWith('.zip')) {
+        await uploadSharedSkillBundle(file);
+      } else {
+        await uploadSharedSkill(await file.text());
+      }
+      setMsg(t('settings.skills.uploaded'));
+      invalidate();
+    } catch (e) { setMsg((e as Error).message); }
+  };
+
+  const onDelete = async (s: SharedSkill) => {
+    setMsg('');
+    try {
+      await deleteSharedSkill(s.name);
+      invalidate();
+    } catch (e) { setMsg((e as Error).message); }
+  };
+
+  return (
+    <Page>
+      <Section
+        title={t('settings.skills.title')}
+        action={
+          <>
+            <input
+              ref={fileRef}
+              type="file"
+              accept=".md,.zip,text/markdown,application/zip"
+              className="hidden"
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (f) void onUpload(f);
+                e.target.value = '';
+              }}
+            />
+            <Button size="sm" variant="outline" onClick={() => fileRef.current?.click()}>
+              <PlusIcon /> {t('settings.skills.upload')}
+            </Button>
+          </>
+        }
+      >
+        <div className="px-4 pt-3 text-xs text-muted-foreground sm:px-5">{t('settings.skills.intro')}</div>
+        {msg && <div className="px-4 pt-2 text-xs text-muted-foreground sm:px-5">{msg}</div>}
+        {skills.length === 0 && (
+          <div className="px-4 py-6 text-center text-xs text-muted-foreground sm:px-5">
+            {t('settings.skills.empty')}
+          </div>
+        )}
+        {skills.map((s) => (
+          <Row
+            key={s.name}
+            label={<span className="font-mono text-[13px]">{s.name}</span>}
+            hint={
+              <>
+                {s.description}
+                {s.uploaded_by && (
+                  <span className="opacity-70"> · {t('settings.skills.by', { user: s.uploaded_by })}</span>
+                )}
+                {s.files > 0 && (
+                  <span className="opacity-70"> · {t('settings.skills.files', { count: s.files })}</span>
+                )}
+              </>
+            }
+          >
+            {(s.mine || auth?.is_admin) && (
+              <Button
+                size="icon-sm"
+                variant="ghost"
+                title={t('settings.skills.delete')}
+                onClick={() => void onDelete(s)}
+              >
+                <Trash2Icon />
+              </Button>
+            )}
+            <Switch
+              checked={s.enabled}
+              onCheckedChange={(v: boolean) => toggle.mutate({ name: s.name, enabled: v })}
+            />
+          </Row>
+        ))}
+      </Section>
+    </Page>
+  );
+}
+
 /* ── Dialog shell ── */
 
 /** Scope controls which settings groups are shown. 'user' hides every admin
@@ -1750,6 +1862,7 @@ export function SettingsDialog({
     { id: 'appearance', label: t('settings.nav.appearance'), icon: <PaletteIcon /> },
     { id: 'shortcuts', label: t('settings.nav.shortcuts'), icon: <KeyboardIcon /> },
     { id: 'account', label: t('settings.nav.account'), icon: <UserIcon /> },
+    { id: 'skills', label: t('settings.nav.skills'), icon: <FileTextIcon /> },
   ];
   const adminNav: Array<{ id: Panel; label: string; icon: React.ReactNode }> = [
     { id: 'models', label: t('settings.nav.models'), icon: <ServerIcon /> },
@@ -1849,6 +1962,7 @@ export function SettingsDialog({
             {panel === 'appearance' && <AppearancePanel />}
             {panel === 'shortcuts' && <ShortcutsPanel />}
             {panel === 'account' && <AccountPanel />}
+            {panel === 'skills' && <SharedSkillsPanel />}
             {panel === 'models' && <AddModelsPanel />}
             {panel === 'ai' && <AiDefaultsPanel />}
             {panel === 'assistants' && <AssistantsPanel />}

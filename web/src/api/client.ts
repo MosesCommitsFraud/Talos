@@ -322,6 +322,70 @@ export async function saveAppSettings(patch: AppSettings): Promise<void> {
   if (!res.ok) throw new Error(`Save failed (HTTP ${res.status})`);
 }
 
+/* ── Shared uploaded skills (Claude-style SKILL.md library) ── */
+
+export interface SharedSkill {
+  name: string;
+  description: string;
+  uploaded_by?: string | null;
+  size: number;
+  files: number;
+  created_at?: string | null;
+  updated_at?: string | null;
+  enabled: boolean;
+  mine: boolean;
+}
+
+export const fetchSharedSkills = () =>
+  getJSON<{ skills: SharedSkill[]; count: number }>('/api/shared-skills');
+
+export async function uploadSharedSkill(content: string): Promise<void> {
+  const res = await fetch('/api/shared-skills', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ content }),
+    credentials: 'same-origin',
+  });
+  if (!res.ok) {
+    let detail = `Upload failed (HTTP ${res.status})`;
+    try { detail = (await res.json()).detail ?? detail; } catch { /* keep default */ }
+    throw new Error(detail);
+  }
+}
+
+export async function uploadSharedSkillBundle(file: File): Promise<void> {
+  const form = new FormData();
+  form.append('file', file);
+  const res = await fetch('/api/shared-skills/upload', {
+    method: 'POST',
+    body: form,
+    credentials: 'same-origin',
+  });
+  if (!res.ok) {
+    let detail = `Upload failed (HTTP ${res.status})`;
+    try { detail = (await res.json()).detail ?? detail; } catch { /* keep default */ }
+    throw new Error(detail);
+  }
+}
+
+export async function deleteSharedSkill(name: string): Promise<void> {
+  const res = await fetch(`/api/shared-skills/${encodeURIComponent(name)}`, {
+    method: 'DELETE',
+    credentials: 'same-origin',
+  });
+  if (!res.ok) throw new Error(`Delete failed (HTTP ${res.status})`);
+}
+
+export async function setSharedSkillEnabled(name: string, enabled: boolean): Promise<void> {
+  const res = await fetch(`/api/shared-skills/${encodeURIComponent(name)}/enabled`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ enabled }),
+    credentials: 'same-origin',
+  });
+  if (!res.ok) throw new Error(`Update failed (HTTP ${res.status})`);
+}
+
 export type Features = Record<string, boolean>;
 export const fetchFeatures = () => getJSON<Features>('/api/auth/features');
 

@@ -492,6 +492,29 @@ print(result)
     return "".join(_sse(event) for event in events).encode("utf-8")
 
 
+# In-memory shared-skills store for the settings panel preview.
+_SHARED_SKILLS: list[dict] = [
+    {
+        "name": "pdf-report-builder",
+        "description": "Build polished PDF reports from raw data.",
+        "uploaded_by": "alice",
+        "size": 2048,
+        "files": 3,
+        "enabled": True,
+        "mine": False,
+    },
+    {
+        "name": "weekly-summary",
+        "description": "Summarize the week's chats into a structured digest.",
+        "uploaded_by": "preview",
+        "size": 1024,
+        "files": 0,
+        "enabled": False,
+        "mine": True,
+    },
+]
+
+
 def _sessions():
     now = int(time.time())
     return [
@@ -909,6 +932,9 @@ class PreviewHandler(BaseHTTPRequestHandler):
                 ]
             )
             return
+        if path == "/api/shared-skills":
+            self._send_json({"skills": _SHARED_SKILLS, "count": len(_SHARED_SKILLS)})
+            return
         if path.startswith("/api/"):
             self._send_json({})
             return
@@ -992,13 +1018,73 @@ class PreviewHandler(BaseHTTPRequestHandler):
         if path.startswith("/api/upload"):
             self._send_json({"files": []})
             return
+        if path == "/api/shared-skills/upload":
+            # Multipart bundle upload — the preview doesn't unzip; it just adds
+            # a canned bundle entry so the flow is exercisable in the UI.
+            _SHARED_SKILLS[:] = [s for s in _SHARED_SKILLS if s["name"] != "uploaded-bundle"]
+            _SHARED_SKILLS.append(
+                {
+                    "name": "uploaded-bundle",
+                    "description": "Bundle uploaded in preview mode.",
+                    "uploaded_by": "preview",
+                    "size": len(body or b""),
+                    "files": 4,
+                    "enabled": True,
+                    "mine": True,
+                }
+            )
+            _SHARED_SKILLS.sort(key=lambda s: s["name"])
+            self._send_json({"ok": True})
+            return
+        if path == "/api/shared-skills":
+            try:
+                content = json.loads(body or b"{}").get("content", "")
+            except ValueError:
+                content = ""
+            import re as _re
+
+            m = _re.match(r"\A\s*---\s*\n(.*?)\n---", content, _re.S)
+            fm = dict(
+                _re.findall(r"^([A-Za-z_-]+)\s*:\s*(.+)$", m.group(1), _re.M) if m else []
+            )
+            if not fm.get("name") or not fm.get("description"):
+                self._send_json(
+                    {"detail": "SKILL.md needs frontmatter with name + description"}, 400
+                )
+                return
+            name = _re.sub(r"[^a-z0-9]+", "-", fm["name"].lower()).strip("-")
+            _SHARED_SKILLS[:] = [s for s in _SHARED_SKILLS if s["name"] != name]
+            _SHARED_SKILLS.append(
+                {
+                    "name": name,
+                    "description": fm["description"].strip(),
+                    "uploaded_by": "preview",
+                    "size": len(content),
+                    "files": 0,
+                    "enabled": True,
+                    "mine": True,
+                }
+            )
+            _SHARED_SKILLS.sort(key=lambda s: s["name"])
+            self._send_json({"ok": True})
+            return
         if path.startswith("/api/"):
             self._send_json({"ok": True})
             return
         self._send_json({"error": "not found"}, 404)
 
     def do_PUT(self):
-        self._read_body()
+        body = self._read_body()
+        path = urlparse(self.path).path
+        if path.startswith("/api/shared-skills/") and path.endswith("/enabled"):
+            name = path[len("/api/shared-skills/") : -len("/enabled")]
+            try:
+                enabled = bool(json.loads(body or b"{}").get("enabled"))
+            except ValueError:
+                enabled = True
+            for s in _SHARED_SKILLS:
+                if s["name"] == name:
+                    s["enabled"] = enabled
         self._send_json({"ok": True})
 
     def do_PATCH(self):
@@ -1006,6 +1092,10 @@ class PreviewHandler(BaseHTTPRequestHandler):
         self._send_json({"ok": True})
 
     def do_DELETE(self):
+        path = urlparse(self.path).path
+        if path.startswith("/api/shared-skills/"):
+            name = path[len("/api/shared-skills/") :]
+            _SHARED_SKILLS[:] = [s for s in _SHARED_SKILLS if s["name"] != name]
         self._send_json({"ok": True})
 
 

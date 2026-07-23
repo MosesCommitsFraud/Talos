@@ -46,6 +46,10 @@ ALWAYS_AVAILABLE = frozenset(
         # markers can appear after ANY tool runs, so the retrieval tool must
         # always be in reach (RAG would never select it from the user's message).
         "expand_output",
+        # Load a shared uploaded skill's full instructions. The enabled-skills
+        # index is injected silently into context, so the tool it points at
+        # must always be callable (RAG can't infer it from the user message).
+        "read_skill",
     }
 )
 
@@ -87,6 +91,7 @@ BUILTIN_TOOL_DESCRIPTIONS: Dict[str, str] = {
     "list_models": "List all available AI models and their endpoints.",
     "manage_session": "Chat management: rename, archive, delete, or fork chats (the UI calls these 'chats'; internally 'sessions'). Use for 'rename my chats', 'rename this chat', 'archive/delete a chat'.",
     "manage_skills": "Skill management: add, update, publish, or search reusable skills/presets.",
+    "read_skill": "Load the full instructions of an enabled shared skill (user-uploaded SKILL.md) by name, then follow its method exactly.",
     "manage_endpoints": "Endpoint management: list, add, delete, enable, or disable model API endpoints.",
     "manage_mcp": "MCP server management: list, add, delete, reconnect servers, or list available tools.",
     "manage_tokens": "API token management: list, create, or delete API access tokens.",

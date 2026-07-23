@@ -1095,6 +1095,108 @@ async def do_search_chats(query: str, limit: int = 20, owner: str | None = None)
 
 
 # ---------------------------------------------------------------------------
+# Shared uploaded skills — read_skill tool
+# ---------------------------------------------------------------------------
+
+
+async def do_read_skill(
+    content: str, owner: Optional[str] = None, workspace: Optional[str] = None
+) -> Dict:
+    """Load a shared (user-uploaded) skill by name, or one of its bundle files.
+
+    Accepts `{"name": "...", "path": "..."}` JSON args, or fenced content with
+    the skill name on line 1 and an optional bundle-file path on line 2.
+    Without `path`: returns the full SKILL.md, lists bundled files, and (when a
+    workspace is available) materializes the whole bundle to disk so bash/python
+    can run its scripts. With `path`: returns that bundled file's content.
+    Only skills the current user has ENABLED are readable — a disabled skill
+    behaves as if it doesn't exist, matching the injected index.
+    """
+    raw = (content or "").strip()
+    name, path = "", ""
+    if raw.startswith("{"):
+        try:
+            args = _parse_tool_args(raw)
+            name = str(args.get("name") or args.get("skill") or "").strip()
+            path = str(args.get("path") or "").strip()
+        except ValueError:
+            return {"error": "Invalid JSON arguments", "exit_code": 1}
+    else:
+        lines = raw.splitlines()
+        name = lines[0].strip() if lines else ""
+        path = lines[1].strip() if len(lines) > 1 else ""
+    if not name:
+        return {"error": "name is required (the skill's name from the skills list)", "exit_code": 1}
+
+    try:
+        from services.memory import shared_skills
+
+        enabled = {s["name"] for s in shared_skills.enabled_skills_for(owner)}
+        skill = shared_skills.get_skill(name)
+    except Exception as e:
+        logger.error(f"read_skill failed: {e}")
+        return {"error": f"Could not load skill: {e}", "exit_code": 1}
+
+    if skill is None or skill["name"] not in enabled:
+        available = ", ".join(sorted(enabled)) or "(none)"
+        return {
+            "error": f"No enabled skill named {name!r}. Enabled skills: {available}",
+            "exit_code": 1,
+        }
+
+    # Level 2: a single bundled reference/script file.
+    if path:
+        data = shared_skills.get_skill_file(skill["name"], path)
+        if data is None:
+            listing = ", ".join(skill.get("file_paths") or []) or "(no bundled files)"
+            return {
+                "error": f"No file {path!r} in skill {skill['name']!r}. Bundled files: {listing}",
+                "exit_code": 1,
+            }
+        try:
+            text = data.decode("utf-8")
+        except UnicodeDecodeError:
+            return {
+                "results": (
+                    f"{path} is a binary file ({len(data)} bytes). It has been "
+                    "materialized in the workspace (load the skill without a path "
+                    "first if it isn't) — use bash/python to work with it."
+                )
+            }
+        return {"results": f"=== {skill['name']} / {path} ===\n{text}"}
+
+    # Level 1: the SKILL.md itself (+ bundle listing / materialization).
+    extra = ""
+    file_paths = skill.get("file_paths") or []
+    if file_paths:
+        listing = "\n".join(f"  - {p}" for p in file_paths)
+        extra = (
+            f"\n\nBundled files (load one with read_skill name + path when the "
+            f"skill refers to it):\n{listing}"
+        )
+        if workspace:
+            try:
+                import os as _os
+
+                dest = _os.path.join(workspace, "skills", skill["name"])
+                shared_skills.materialize(skill["name"], dest)
+                extra += (
+                    f"\n\nThe full bundle (incl. scripts) is on disk at: {dest}\n"
+                    "Run its scripts from there with bash/python when the skill says to."
+                )
+            except Exception as e:
+                logger.warning(f"read_skill materialize failed: {e}")
+    return {
+        "results": (
+            f"=== SKILL: {skill['name']} ===\n{skill['content']}{extra}\n\n"
+            "[Instruction: You have now loaded this skill. Follow its method "
+            "EXACTLY as written, step by step — do not deviate from, reorder, "
+            "or substitute the procedure it prescribes.]"
+        )
+    }
+
+
+# ---------------------------------------------------------------------------
 # Skills management tool
 # ---------------------------------------------------------------------------
 

@@ -673,4 +673,30 @@ class ChatProcessor:
                     untrusted_context_message("available skills index", "\n".join(lines))
                 )
 
+        # Shared uploaded skills (Claude-style SKILL.md library). Injected
+        # silently — only the name+description index; the model fetches a
+        # skill's full method on demand via the read_skill tool and must then
+        # follow it verbatim. Gated like the learned-skills index above.
+        if agent_mode and not incognito and use_skills:
+            try:
+                from services.memory import shared_skills
+
+                enabled = shared_skills.enabled_skills_for(owner)
+            except Exception as e:
+                logger.debug(f"Shared skills index unavailable: {e}")
+                enabled = []
+            if enabled:
+                lines = [
+                    "[Skill library — these skills are enabled for this user. When a "
+                    "request matches a skill's description, call read_skill(name=...) "
+                    "BEFORE doing the work, then follow the loaded skill's method "
+                    "exactly as written — no deviating from its procedure. Do not "
+                    "recite this list unprompted.]"
+                ]
+                for s in sorted(enabled, key=lambda x: x["name"]):
+                    lines.append(f"  - {s['name']}: {s['description']}")
+                preface.append(
+                    untrusted_context_message("shared skill library index", "\n".join(lines))
+                )
+
         return preface, rag_sources

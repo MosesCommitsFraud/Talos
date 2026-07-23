@@ -1735,6 +1735,11 @@ async def execute_tool_block(
     elif tool == "manage_skills":
         desc = "manage_skills"
         result = await do_manage_skills(content, owner=owner)
+    elif tool == "read_skill":
+        from src.tool_implementations import do_read_skill
+
+        desc = f"read_skill: {content.split(chr(10))[0].strip()[:60]}"
+        result = await do_read_skill(content, owner=owner, workspace=workspace)
     elif tool == "api_call":
         first_line = content.split("\n")[0].strip()[:60]
         desc = f"api_call: {first_line}"

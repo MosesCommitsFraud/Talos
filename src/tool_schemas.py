@@ -604,6 +604,38 @@ FUNCTION_TOOL_SCHEMAS = [
     {
         "type": "function",
         "function": {
+            "name": "read_skill",
+            "description": (
+                "Load the full instructions of an enabled skill from the shared "
+                "skill library. The skills available to you (name + description) "
+                "are listed in your context. When the user's request matches a "
+                "skill's description, call this FIRST to load its method, then "
+                "follow that method exactly as written — no deviating, no "
+                "substituting your own approach."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "description": "Exact skill name from the skills list in your context.",
+                    },
+                    "path": {
+                        "type": "string",
+                        "description": (
+                            "Optional: a bundled file inside the skill (e.g. "
+                            "'references/details.md'). Load the skill without a path "
+                            "first — it lists the bundled files and puts scripts on disk."
+                        ),
+                    },
+                },
+                "required": ["name"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "manage_skills",
             "description": (
                 "Read or modify the user's skill library. Skills are SKILL.md files "
@@ -960,6 +992,10 @@ def function_call_to_tool_block(name: str, arguments: str) -> Optional[ToolBlock
                 content += "\n" + value
     elif tool_type == "list_models":
         content = args.get("filter", "")
+    elif tool_type == "read_skill":
+        content = args.get("name", "")
+        if args.get("path"):
+            content += "\n" + str(args["path"])
     elif tool_type in (
         "manage_skills",
         "api_call",

@@ -156,6 +156,8 @@ PLAN_MODE_READONLY_TOOLS = {
     # multiple-choice question (it ends the turn and waits) instead of
     # re-deriving the answer itself. Read-only: it mutates nothing.
     "ask_user",
+    # Read-only lookup of a shared skill's instructions.
+    "read_skill",
 }
 
 

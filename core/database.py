@@ -12,6 +12,7 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     Integer,
+    LargeBinary,
     String,
     Text,
     create_engine,
@@ -1412,6 +1413,49 @@ class Integration(TimestampMixin, Base):
     type = Column(String, nullable=False)  # "email", "rss", "webhook"
     config = Column(JSON, nullable=True)  # type-specific config
     enabled = Column(Boolean, default=True)
+
+
+class SharedSkill(TimestampMixin, Base):
+    """A user-uploaded SKILL.md shared with every user (Claude-style skills).
+
+    The full markdown (YAML frontmatter with `name` + `description`, free-form
+    body) is stored verbatim in `content`. Which users have a skill enabled is
+    a per-user preference (prefs key `shared_skills_disabled`), not a column.
+    """
+
+    __tablename__ = "shared_skills"
+
+    name = Column(String, primary_key=True, index=True)  # kebab-case slug
+    description = Column(String, nullable=False, default="")
+    content = Column(Text, nullable=False)
+    uploaded_by = Column(String, nullable=True, index=True)
+
+    files = relationship(
+        "SharedSkillFile", cascade="all, delete-orphan", passive_deletes=True
+    )
+
+
+class SharedSkillFile(TimestampMixin, Base):
+    """A bundled resource inside a shared skill (references/*, scripts/*, …).
+
+    Multi-file Claude-style skill bundles: SKILL.md lives on SharedSkill;
+    every other file of the uploaded zip is a row here, keyed by its
+    POSIX-relative path inside the bundle.
+    """
+
+    __tablename__ = "shared_skill_files"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    skill_name = Column(
+        String,
+        ForeignKey("shared_skills.name", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    path = Column(String, nullable=False)
+    content = Column(LargeBinary, nullable=False)
+
+    __table_args__ = (Index("ix_shared_skill_files_unique", "skill_name", "path", unique=True),)
 
 
 def _migrate_seed_email_account():

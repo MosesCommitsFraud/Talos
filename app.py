@@ -616,6 +616,11 @@ from routes.skills_routes import setup_skills_routes
 
 app.include_router(setup_skills_routes(skills_manager))
 
+# Shared user-uploaded skills (Claude-style SKILL.md, DB-backed)
+from routes.shared_skills_routes import setup_shared_skills_routes
+
+app.include_router(setup_shared_skills_routes())
+
 # Chat
 from routes.chat_routes import setup_chat_routes
 
