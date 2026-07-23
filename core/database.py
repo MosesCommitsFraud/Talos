@@ -150,7 +150,12 @@ class Session(TimestampMixin, Base):
     crew_member_id = Column(String, nullable=True)  # links to crew_members.id
 
     # Relationship to chat messages
-    messages = relationship("ChatMessage", back_populates="session", cascade="all, delete-orphan")
+    messages = relationship(
+        "ChatMessage",
+        back_populates="session",
+        cascade="all, delete-orphan",
+        order_by="ChatMessage.timestamp, ChatMessage.id",
+    )
 
     @property
     def is_active(self):

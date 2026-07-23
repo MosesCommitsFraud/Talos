@@ -134,42 +134,27 @@ class SessionManager:
         """Convert a database session to a Session object."""
         history = []
 
-        # Try relationship first, then direct query
-        if db_session.messages:
-            for db_msg in db_session.messages:
-                meta = json.loads(db_msg.meta_data) if db_msg.meta_data else {}
-                if meta is None:
-                    meta = {}
-                meta["_db_id"] = db_msg.id
-                meta.setdefault("timestamp", _message_timestamp_iso(db_msg.timestamp))
-                history.append(
-                    ChatMessage(
-                        role=db_msg.role,
-                        content=_parse_msg_content(db_msg.content),
-                        metadata=meta,
-                    )
+        # Never rely on relationship/database row order for model context. A
+        # cold-loaded follow-up must see the assistant turn immediately before it.
+        db_messages = (
+            db.query(DbChatMessage)
+            .filter(DbChatMessage.session_id == db_session.id)
+            .order_by(DbChatMessage.timestamp, DbChatMessage.id)
+            .all()
+        )
+        for db_msg in db_messages:
+            meta = json.loads(db_msg.meta_data) if db_msg.meta_data else {}
+            if meta is None:
+                meta = {}
+            meta["_db_id"] = db_msg.id
+            meta.setdefault("timestamp", _message_timestamp_iso(db_msg.timestamp))
+            history.append(
+                ChatMessage(
+                    role=db_msg.role,
+                    content=_parse_msg_content(db_msg.content),
+                    metadata=meta,
                 )
-        else:
-            db_messages = (
-                db.query(DbChatMessage)
-                .filter(DbChatMessage.session_id == db_session.id)
-                .order_by(DbChatMessage.timestamp)
-                .all()
             )
-
-            for db_msg in db_messages:
-                meta = json.loads(db_msg.meta_data) if db_msg.meta_data else {}
-                if meta is None:
-                    meta = {}
-                meta["_db_id"] = db_msg.id
-                meta.setdefault("timestamp", _message_timestamp_iso(db_msg.timestamp))
-                history.append(
-                    ChatMessage(
-                        role=db_msg.role,
-                        content=_parse_msg_content(db_msg.content),
-                        metadata=meta,
-                    )
-                )
 
         if not history:
             return None
