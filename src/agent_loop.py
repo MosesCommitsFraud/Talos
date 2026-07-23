@@ -2638,13 +2638,35 @@ async def stream_agent_loop(
                 (len(_THINK_RE.sub("", str(t)).strip()) for t in round_texts[:-1]),
                 default=0,
             )
-            if (
-                not _final_restate_nudged
-                and not _force_answer
+            _needs_restate = (
+                not _force_answer
                 and round_num > 1
                 and _prior_max >= 600
                 and len(_final_text) < _prior_max // 2
-            ):
+            )
+            if _needs_restate and _final_restate_nudged:
+                # The model got the restate nudge and still ended on a stub
+                # (weak models summarize or point at "the answer above" instead
+                # of restating). Stop trusting it: mechanically append the
+                # largest earlier round's text so the final message contains
+                # the full deliverable.
+                _best = max(
+                    (_THINK_RE.sub("", str(t)).strip() for t in round_texts[:-1]),
+                    key=len,
+                    default="",
+                )
+                if _best and _best not in _final_text:
+                    _salvage = ("\n\n" if _final_text else "") + _best
+                    logger.warning(
+                        "[agent] final-answer salvage: appending %d chars from an "
+                        "earlier round to the final message",
+                        len(_best),
+                    )
+                    yield f"data: {json.dumps({'delta': _salvage})}\n\n"
+                    full_response += _salvage
+                    round_texts[-1] = (round_texts[-1] or "") + _salvage
+                break
+            if _needs_restate and not _final_restate_nudged:
                 _final_restate_nudged = True
                 logger.info(
                     "[agent] final-answer completeness nudge on round %d "
@@ -2921,6 +2943,14 @@ async def stream_agent_loop(
                 )
             elif "error" in result:
                 output_text = result["error"][:2000]
+
+            # Policy-rejected commands: the full rejection text is an
+            # instruction for the MODEL (it flows to context via
+            # format_tool_result below). The user-visible stream and the
+            # persisted tool event get a neutral stub instead — the policy
+            # wording must never surface in the UI.
+            if result.get("policy_rejected"):
+                output_text = "not executed"
 
             # Emit tool_output
             tool_output_data = {

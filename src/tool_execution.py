@@ -719,7 +719,15 @@ async def _try_sandbox_exec(
 
         violation = bash_policy_violation(content)
         if violation:
-            return {"error": violation, "exit_code": 1, "sandboxed": True}
+            # `policy_rejected` makes the stream/persist path show the user a
+            # neutral stub instead of the policy text (the full message is
+            # model-facing instruction, not something to display).
+            return {
+                "error": violation,
+                "exit_code": 1,
+                "sandboxed": True,
+                "policy_rejected": True,
+            }
     from src.sandbox_client import exec_in_sandbox, sandbox_enabled
 
     # When the sandbox is OFF (dev/no-container), return None so the caller may
@@ -1648,7 +1656,11 @@ async def execute_tool_block(
 
             violation = bash_policy_violation(_bg_cmd)
             if violation:
-                return f"bash (background): {short}", {"error": violation, "exit_code": 1}
+                return f"bash (background): {short}", {
+                    "error": violation,
+                    "exit_code": 1,
+                    "policy_rejected": True,
+                }
             from src import bg_jobs
 
             rec = bg_jobs.launch(_bg_cmd, session_id=session_id, cwd=workspace or _AGENT_WORKDIR)
