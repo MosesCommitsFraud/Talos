@@ -67,7 +67,7 @@ COLLECTION_NAME = "talos_tool_index"
 # Each tool gets a searchable description that helps retrieval.
 # These are richer than the system prompt one-liners — they're for embedding.
 BUILTIN_TOOL_DESCRIPTIONS: Dict[str, str] = {
-    "bash": "Run shell commands on the server. Install packages, check files, git operations, curl, system info, process management, networking.",
+    "bash": "Run shell commands in the private workspace for work tasks: check/process files, run scripts, data analysis, document generation, pip install of Python libraries. No system administration or system info.",
     "python": "Execute Python code for computation, data processing, math, scripting, parsing, API calls. Not for writing code for the user.",
     "read_file": "Read a file from disk and return its contents. View source code, config files, logs. Supports an optional line range (offset/limit) for large files.",
     "grep": "Search file CONTENTS for a regex across a directory tree (ripgrep-backed, honours .gitignore). Returns file:line:match. Use to find where code/symbols/strings live — prefer over bash grep.",

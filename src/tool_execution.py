@@ -714,6 +714,12 @@ async def _try_sandbox_exec(
 ) -> Optional[Dict]:
     if tool not in {"bash", "python"}:
         return None
+    if tool == "bash":
+        from src.tool_security import bash_policy_violation
+
+        violation = bash_policy_violation(content)
+        if violation:
+            return {"error": violation, "exit_code": 1, "sandboxed": True}
     from src.sandbox_client import exec_in_sandbox, sandbox_enabled
 
     # When the sandbox is OFF (dev/no-container), return None so the caller may
@@ -1638,6 +1644,11 @@ async def execute_tool_block(
                 logger.info("Tool executed: %s (in-sandbox, bg marker ignored)", desc)
                 return desc, result
             # Sandbox OFF (dev only): keep the legacy local detached job.
+            from src.tool_security import bash_policy_violation
+
+            violation = bash_policy_violation(_bg_cmd)
+            if violation:
+                return f"bash (background): {short}", {"error": violation, "exit_code": 1}
             from src import bg_jobs
 
             rec = bg_jobs.launch(_bg_cmd, session_id=session_id, cwd=workspace or _AGENT_WORKDIR)

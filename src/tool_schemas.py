@@ -25,7 +25,7 @@ FUNCTION_TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "bash",
-            "description": "Run a command in the isolated workspace for shell tasks, dependency installation, file inspection, git, builds, tests, development servers, or system information. Use the project's existing package manager. To run inline Python use the `python` tool. To create or edit files use write_file/edit_file, not shell redirects.",
+            "description": "Run a shell command in your private workspace to produce work results: file inspection/processing, data analysis, document/spreadsheet/PDF/chart generation, SQL, calculations, running scripts. The ONLY allowed installs are Python libraries via `pip install` needed for the current task — sudo, system package managers (apt/dpkg/...), docker/services, and system inspection commands are rejected by policy. Setup/infrastructure how-tos are questions about the USER'S machine: answer them in text, never execute them here. To run inline Python use the `python` tool. To create or edit files use write_file/edit_file, not shell redirects.",
             "parameters": {
                 "type": "object",
                 "properties": {

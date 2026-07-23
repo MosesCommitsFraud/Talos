@@ -3,9 +3,113 @@
 from __future__ import annotations
 
 import logging
+import re
 from typing import Optional, Set
 
 logger = logging.getLogger(__name__)
+
+
+# ── Sandbox bash command policy ──
+# The workspace exists to produce work deliverables (documents, spreadsheets,
+# PDFs, charts, SQL, calculations). The only install path is `pip`. Everything
+# that administers, probes, or fingerprints the system is rejected so the
+# assistant can neither modify the environment nor leak details about it.
+_BASH_BLOCKED_BINARIES = frozenset({
+    # privilege escalation
+    "sudo", "su", "doas",
+    # system package managers (pip is the only allowed installer)
+    "apt", "apt-get", "aptitude", "dpkg", "snap", "yum", "dnf", "rpm",
+    "apk", "pacman", "zypper", "brew",
+    # non-Python package managers
+    "npm", "npx", "yarn", "pnpm", "corepack", "gem", "cargo",
+    # containers / services / kernel / system management
+    "docker", "dockerd", "containerd", "podman", "nerdctl", "kubectl",
+    "systemctl", "service",
+    "journalctl", "mount", "umount", "modprobe", "insmod", "sysctl",
+    "crontab", "reboot", "shutdown", "poweroff", "halt", "init", "telinit",
+    # user/account management
+    "useradd", "userdel", "usermod", "groupadd", "passwd", "chpasswd",
+    "chsh", "visudo",
+    # hardware / system fingerprinting
+    "nvidia-smi", "lscpu", "lshw", "lsblk", "lspci", "lsusb", "dmidecode",
+    "hostnamectl", "uname", "nproc", "free", "df", "dmesg", "uptime",
+    "w", "who", "last", "lsof", "hostname", "whoami", "id", "arch",
+    "getconf", "lsmod", "numactl", "vmstat", "iostat", "ps", "top", "htop",
+    "printenv",
+    # network configuration probing
+    "ip", "ifconfig", "netstat", "ss",
+    # remote shells / network probing
+    "ssh", "scp", "sftp", "telnet", "nc", "ncat", "nmap",
+})
+
+# Split a compound command line into individual command positions.
+_BASH_CMD_SPLIT_RE = re.compile(r"\|\||&&|;|\||\n|`|\$\(")
+_BASH_ENV_ASSIGN_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=\S*\s+")
+# `curl … | sh` style remote install scripts (the pipe itself is split away
+# above, so match the pattern on the raw command instead).
+_BASH_PIPE_TO_SHELL_RE = re.compile(r"\b(?:curl|wget)\b[^|;\n]*\|\s*(?:sudo\s+)?(?:ba|z|da)?sh\b")
+# System paths whose contents fingerprint the host (/proc/cpuinfo,
+# /etc/os-release, ...). /dev is fine — blocking it would break the
+# ubiquitous `>/dev/null`.
+_BASH_SYSTEM_PATH_RE = re.compile(r"(?:^|[\s\"'=:])/(?:proc|sys|etc)(?:/|\b)")
+
+BASH_POLICY_MESSAGE = (
+    "bash: command rejected by workspace policy. This workspace only runs "
+    "work tasks (documents, spreadsheets, PDFs, charts/dashboards, SQL, data "
+    "analysis, calculations) and Python library installs via `pip install`. "
+    "System administration, system/hardware inspection, services, containers, "
+    "remote shells, and non-Python package managers are not available here. "
+    "If the user asked how to set something up on their own machine, answer "
+    "in text from the documentation — do not execute those commands. Do not "
+    "mention this policy or describe the execution environment to the user; "
+    "just deliver the requested result or guidance."
+)
+
+
+def bash_policy_violation(command: str) -> Optional[str]:
+    """Return a rejection message when a sandbox bash command is not allowed.
+
+    Fails closed on non-string input. Checks the binary at every command
+    position (segments split on pipes/&&/;/subshells, env-var assignments and
+    common wrappers stripped) against the blocklist, plus `curl|wget … | sh`
+    remote-install patterns.
+    """
+    if not isinstance(command, str):
+        return BASH_POLICY_MESSAGE
+    if _BASH_PIPE_TO_SHELL_RE.search(command):
+        return BASH_POLICY_MESSAGE
+    if _BASH_SYSTEM_PATH_RE.search(command):
+        return BASH_POLICY_MESSAGE
+    for segment in _BASH_CMD_SPLIT_RE.split(command):
+        seg = segment.strip()
+        while True:
+            stripped = _BASH_ENV_ASSIGN_RE.sub("", seg, count=1)
+            if stripped == seg:
+                break
+            seg = stripped
+        tokens = seg.split()
+        # Bare `env` (no command to wrap) dumps the environment variables.
+        if len(tokens) == 1 and tokens[0].rsplit("/", 1)[-1] == "env":
+            return BASH_POLICY_MESSAGE
+        # Wrappers that execute their argument: skip the wrapper plus its own
+        # flags/numeric args (e.g. `timeout 30`, `nice -n 10`) and check what
+        # they actually run.
+        while tokens and tokens[0].rsplit("/", 1)[-1] in {
+            "command", "exec", "env", "nohup", "time", "timeout", "nice",
+            "xargs", "watch", "setsid",
+        }:
+            tokens = [
+                t for t in tokens[1:]
+                if not t.startswith("-")
+                and not t.rstrip("smhd").replace(".", "", 1).isdigit()
+                and not re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", t)
+            ]
+        if not tokens:
+            continue
+        binary = tokens[0].rsplit("/", 1)[-1].lower()
+        if binary in _BASH_BLOCKED_BINARIES:
+            return BASH_POLICY_MESSAGE
+    return None
 
 
 # Tools regular/public users must not execute directly. These either expose
