@@ -691,8 +691,12 @@ async def build_chat_context(
                 current = messages[target_idx].get("content", "")
                 prefix = (
                     f"{rag_text}\n\n"
-                    "Use the retrieved knowledge above to answer the user question below. "
-                    "If the retrieved knowledge contains the answer, use it and do not ignore it.\n\n"
+                    "Use the retrieved knowledge above when it matches the topic of the user "
+                    "question below and the ongoing conversation; in that case use it and do "
+                    "not ignore it. The question may be a follow-up — resolve references "
+                    "against the conversation history first. If the retrieved knowledge is "
+                    "about a different topic than the conversation, ignore it and answer "
+                    "from the conversation instead.\n\n"
                     "USER QUESTION:\n"
                 )
                 if isinstance(current, str):

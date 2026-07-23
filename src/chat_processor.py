@@ -295,7 +295,10 @@ class ChatProcessor:
         when there's no prior turn to disambiguate against — so retrieval never
         blocks on the rewrite and the default behaviour is identical to before.
         """
-        if not self._rag_cfg().get("query_rewrite_enabled"):
+        # Default ON: without the rewrite, vague follow-ups ("expand on that")
+        # go to retrieval verbatim and match unrelated documents, which then
+        # hijack the answer away from the conversation topic.
+        if self._rag_cfg().get("query_rewrite_enabled", True) is False:
             return message
         history = getattr(session, "history", None) or []
         turns: List[str] = []
@@ -563,7 +566,13 @@ class ChatProcessor:
                         ]
                         # Admin-overridable instruction prefacing the retrieved context.
                         context_prompt = (self._rag_cfg().get("context_prompt") or "").strip() or (
-                            "Retrieved knowledge base context. Use this context to answer the user's current question. "
+                            "Retrieved knowledge base context. Use this context to answer the user's "
+                            "current question when it matches the topic of the question and the "
+                            "ongoing conversation. The user's message may be a follow-up — resolve "
+                            "references like 'this', 'that', or 'expand on it' against the "
+                            "conversation history FIRST; retrieval for such short messages can miss, "
+                            "so if this context is about a different topic than the conversation, "
+                            "ignore it completely and answer from the conversation instead. "
                             "If the answer is present here, prefer it over general knowledge. "
                             "Always state the answer itself in full: never reply by merely pointing "
                             "the user to a document or saying the information can be found there — "

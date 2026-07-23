@@ -37,7 +37,8 @@ def _inject_llm(monkeypatch, *, resolve, llm_call):
 
 def test_rewrite_disabled_returns_raw(monkeypatch):
     cp = _cp()
-    monkeypatch.setattr(cp, "_rag_cfg", lambda: {})  # toggle off
+    # Rewrite is ON by default; only an explicit False disables it.
+    monkeypatch.setattr(cp, "_rag_cfg", lambda: {"query_rewrite_enabled": False})
     sess = _Session([_Msg("user", "hi"), _Msg("assistant", "hello")])
     assert cp._maybe_rewrite_query("and the second?", sess, None) == "and the second?"
 

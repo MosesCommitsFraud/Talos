@@ -2528,6 +2528,37 @@ async def stream_agent_loop(
             ).strip()
         round_texts.append(cleaned_round)
 
+        # ── Question-ends-turn guard ──────────────────────────────────
+        # A substantial answer that ENDS by asking the user something is a
+        # finished turn. Executing the round's remaining tool calls anyway
+        # steamrolls the user's chance to reply: the results spawn extra
+        # rounds that re-answer or contradict the question (the "asked but
+        # kept working" failure). Drop the pending calls, close their UI
+        # rows, and end the turn on the question. ask_user is exempt — it
+        # is the proper way to ask and handles turn-ending itself.
+        _round_answer_text = _THINK_RE.sub("", cleaned_round).strip()
+        if (
+            tool_blocks
+            and len(_round_answer_text) >= 600
+            and _round_answer_text.endswith("?")
+            and not any(b.tool_type == "ask_user" for b in tool_blocks)
+        ):
+            logger.info(
+                "[agent] round %d wrote a full answer ending in a user-directed "
+                "question — dropping %d pending tool call(s) and ending the turn",
+                round_num,
+                len(tool_blocks),
+            )
+            for _b in tool_blocks:
+                _cmd = (_b.content or "").strip()[:200]
+                yield (
+                    f"data: {json.dumps({'type': 'tool_start', 'tool': _b.tool_type, 'command': _cmd, 'round': round_num})}\n\n"
+                )
+                yield (
+                    f"data: {json.dumps({'type': 'tool_output', 'tool': _b.tool_type, 'command': _cmd, 'output': 'not executed', 'exit_code': None})}\n\n"
+                )
+            break
+
         if not tool_blocks:
             # ── Completion verifier (mechanism 3a) ────────────────────
             # The model is finishing. If this was an effectful agentic turn,
