@@ -6,7 +6,7 @@ import logging
 import re
 import threading
 import time
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import urlparse
 
 import httpx
@@ -1399,9 +1399,16 @@ async def stream_llm(
     timeout: int = LLMConfig.STREAM_TIMEOUT,
     prompt_type: Optional[str] = None,
     tools: Optional[List[Dict]] = None,
+    tool_choice: Optional[Any] = None,
     enable_thinking: bool = True,
 ):
     """Stream LLM responses with improved error handling.
+
+    `tool_choice` (OpenAI/vLLM only) forces tool selection: "auto" (default when
+    None), "required" (must call some tool), or
+    {"type":"function","function":{"name":"..."}} to force a specific tool. Used
+    to guarantee the model calls e.g. browse_skills on a given round instead of
+    relying on it to choose.
 
     Yields SSE chunks:
       - data: {"delta": "text"}           — text content
@@ -1465,6 +1472,10 @@ async def stream_llm(
             payload[tok_key] = max_tokens
         if tools:
             payload["tools"] = tools
+            # Force a specific tool / any tool when asked. OpenAI-compatible and
+            # supported by vLLM's server; only meaningful when tools are sent.
+            if tool_choice is not None:
+                payload["tool_choice"] = tool_choice
         # Disable reasoning on Qwen3-style hybrid models served via vLLM. This is
         # a vLLM/SGLang extension to the OpenAI API; harmless to omit elsewhere,
         # so we only send it when the user explicitly turned thinking off.

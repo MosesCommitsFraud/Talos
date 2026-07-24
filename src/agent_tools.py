@@ -52,6 +52,7 @@ TOOL_TAGS = {
     "api_call",
     "manage_skills",
     "read_skill",
+    "browse_skills",
     "suggest_document",
     "manage_endpoints",
     "manage_mcp",

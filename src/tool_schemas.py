@@ -604,6 +604,29 @@ FUNCTION_TOOL_SCHEMAS = [
     {
         "type": "function",
         "function": {
+            "name": "browse_skills",
+            "description": (
+                "Review the user's enabled skill library for the current task. "
+                "Returns the list of available skills and, for any that fit the "
+                "request, their full step-by-step instructions inline. Call this "
+                "at the START of a task when skills are available, then follow any "
+                "returned skill's method exactly."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "The user's task in a few words, used to pick matching skills.",
+                    },
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "read_skill",
             "description": (
                 "Load the full instructions of an enabled skill from the shared "
@@ -992,6 +1015,8 @@ def function_call_to_tool_block(name: str, arguments: str) -> Optional[ToolBlock
                 content += "\n" + value
     elif tool_type == "list_models":
         content = args.get("filter", "")
+    elif tool_type == "browse_skills":
+        content = json.dumps({"query": args.get("query", "")})
     elif tool_type == "read_skill":
         content = args.get("name", "")
         if args.get("path"):

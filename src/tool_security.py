@@ -158,6 +158,7 @@ PLAN_MODE_READONLY_TOOLS = {
     "ask_user",
     # Read-only lookup of a shared skill's instructions.
     "read_skill",
+    "browse_skills",
 }
 
 

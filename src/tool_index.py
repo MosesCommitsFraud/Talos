@@ -50,6 +50,9 @@ ALWAYS_AVAILABLE = frozenset(
         # index is injected silently into context, so the tool it points at
         # must always be callable (RAG can't infer it from the user message).
         "read_skill",
+        # The forced 'look at your skills' tool — must always be reachable so
+        # the agent loop can compel it when skills are active.
+        "browse_skills",
     }
 )
 
@@ -92,6 +95,7 @@ BUILTIN_TOOL_DESCRIPTIONS: Dict[str, str] = {
     "manage_session": "Chat management: rename, archive, delete, or fork chats (the UI calls these 'chats'; internally 'sessions'). Use for 'rename my chats', 'rename this chat', 'archive/delete a chat'.",
     "manage_skills": "Skill management: add, update, publish, or search reusable skills/presets.",
     "read_skill": "Load the full instructions of an enabled shared skill (user-uploaded SKILL.md) by name, then follow its method exactly.",
+    "browse_skills": "Review the enabled skill library for the current task; returns matching skills' full instructions inline to follow exactly.",
     "manage_endpoints": "Endpoint management: list, add, delete, enable, or disable model API endpoints.",
     "manage_mcp": "MCP server management: list, add, delete, reconnect servers, or list available tools.",
     "manage_tokens": "API token management: list, create, or delete API access tokens.",

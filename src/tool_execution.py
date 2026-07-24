@@ -1735,6 +1735,11 @@ async def execute_tool_block(
     elif tool == "manage_skills":
         desc = "manage_skills"
         result = await do_manage_skills(content, owner=owner)
+    elif tool == "browse_skills":
+        from src.tool_implementations import do_browse_skills
+
+        desc = "browse_skills"
+        result = await do_browse_skills(content, owner=owner)
     elif tool == "read_skill":
         from src.tool_implementations import do_read_skill
 

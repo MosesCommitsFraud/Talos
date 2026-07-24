@@ -1099,6 +1099,94 @@ async def do_search_chats(query: str, limit: int = 20, owner: str | None = None)
 # ---------------------------------------------------------------------------
 
 
+def _skill_matches_query(skill_meta: dict, query: str) -> bool:
+    """Cheap relevance check: does the user's task overlap the skill's trigger
+    text (name + description)? Word-level overlap so a spreadsheet request hits
+    the 'xlsx' skill without a full embedding pass."""
+    import re as _re
+
+    q = (query or "").lower()
+    if not q:
+        return False
+    tokens = {t for t in _re.split(r"[^a-z0-9]+", q) if len(t) > 3}
+    if not tokens:
+        return False
+    hay = (skill_meta.get("name", "") + " " + skill_meta.get("description", "")).lower()
+    hay_tokens = {t for t in _re.split(r"[^a-z0-9]+", hay) if len(t) > 3}
+    # Direct name mention, or a couple of shared significant words.
+    if skill_meta.get("name", "").lower() in q:
+        return True
+    overlap = tokens & hay_tokens
+    return len(overlap) >= 2
+
+
+async def do_browse_skills(content: str, owner: Optional[str] = None) -> Dict:
+    """List the user's enabled skills and, for any that match the task, inline
+    their full instructions so the model can follow them immediately.
+
+    This is the forced 'look at your skills' step: the agent loop compels a call
+    to this on the first round of a turn when at least one skill is enabled, so
+    the model can't skip consulting the library. Accepts an optional
+    `{"query": "..."}` (the user's task) used to decide which skills to expand.
+    """
+    query = ""
+    raw = (content or "").strip()
+    if raw.startswith("{"):
+        try:
+            args = _parse_tool_args(raw)
+            query = str(args.get("query") or args.get("task") or "").strip()
+        except ValueError:
+            query = ""
+    elif raw:
+        query = raw
+
+    try:
+        from services.memory import shared_skills
+
+        enabled = shared_skills.enabled_skills_for(owner)
+    except Exception as e:
+        logger.error(f"browse_skills failed: {e}")
+        return {"error": f"Could not list skills: {e}", "exit_code": 1}
+
+    if not enabled:
+        return {"results": "No skills are enabled. Proceed with the task normally."}
+
+    # Decide which skills to expand fully. With a query, expand the matches;
+    # with no usable query, expand everything when the library is small so the
+    # forced call still surfaces the method (the common single-skill case).
+    matched = [s for s in enabled if _skill_matches_query(s, query)]
+    if not matched and (not query or len(enabled) <= 2):
+        matched = list(enabled)
+
+    lines = ["## Your enabled skills"]
+    for s in sorted(enabled, key=lambda x: x["name"]):
+        lines.append(f"- {s['name']}: {s['description']}")
+
+    expanded = []
+    for s in sorted(matched, key=lambda x: x["name"]):
+        try:
+            full = shared_skills.get_skill(s["name"])
+        except Exception as e:
+            logger.warning(f"browse_skills expand failed for {s['name']}: {e}")
+            continue
+        if full and full.get("content"):
+            expanded.append(f"### SKILL: {s['name']}\n{full['content']}")
+
+    if expanded:
+        lines.append(
+            "\nOne or more skills fit this task. Their full instructions follow — "
+            "carry out the task by following them EXACTLY, step by step, without "
+            "deviating from or substituting your own method:"
+        )
+        lines.append("\n\n".join(expanded))
+    else:
+        lines.append(
+            "\nNone of these skills clearly matches the task. If one does, load it "
+            "with read_skill; otherwise proceed normally."
+        )
+    return {"results": "\n".join(lines)}
+
+
 async def do_read_skill(
     content: str, owner: Optional[str] = None, workspace: Optional[str] = None
 ) -> Dict:
