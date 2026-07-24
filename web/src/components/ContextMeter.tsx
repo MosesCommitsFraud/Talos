@@ -8,20 +8,33 @@ import { Tooltip } from './ui/misc';
  * composer showing how full the model's context window is, with the detail
  * panel (percent · used/max tokens, stacked category bar + legend) on hover. */
 
-// Display order + segment color per breakdown category. Colors come from the
-// --ctx-* ramp (styles/index.css): one accent hue fading to lighter tints, so
-// the stacked bar reads as one quantity split into parts. Ordered from the most
-// fixed part of the prompt (system) to the most volatile (messages), which also
-// means the ramp darkest→lightest tracks "always there"→"grows as you chat".
-const BREAKDOWN_CATEGORIES: ReadonlyArray<{ key: ContextCategory; color: string }> = [
-  { key: 'system', color: 'var(--ctx-1)' },
-  { key: 'tools', color: 'var(--ctx-2)' },
-  { key: 'mcpTools', color: 'var(--ctx-3)' },
-  { key: 'skills', color: 'var(--ctx-4)' },
-  { key: 'knowledge', color: 'var(--ctx-5)' },
-  { key: 'documents', color: 'var(--ctx-6)' },
-  { key: 'toolResults', color: 'var(--ctx-7)' },
-  { key: 'messages', color: 'var(--ctx-8)' },
+// Canonical category order. Only used to break ties between equally-sized
+// categories, so their colors don't swap between renders.
+const CATEGORY_ORDER: readonly ContextCategory[] = [
+  'system',
+  'tools',
+  'mcpTools',
+  'skills',
+  'knowledge',
+  'documents',
+  'toolResults',
+  'messages',
+];
+
+// Accent ramp from styles/index.css: one hue fading to lighter tints, so the
+// stacked bar reads as one quantity split into parts rather than as unrelated
+// categories. Assigned by SIZE, not by category — the biggest contributor gets
+// the darkest tint and each smaller one gets lighter, so the bar is a gradient
+// and the eye lands on whatever is actually filling the window.
+const RAMP: readonly string[] = [
+  'var(--ctx-1)',
+  'var(--ctx-2)',
+  'var(--ctx-3)',
+  'var(--ctx-4)',
+  'var(--ctx-5)',
+  'var(--ctx-6)',
+  'var(--ctx-7)',
+  'var(--ctx-8)',
 ];
 
 function formatTokens(value: number | null): string {
@@ -70,11 +83,16 @@ export function ContextMeter() {
   // Category breakdown (present on final metrics; mid-turn live updates only
   // carry the total, so the panel degrades to the plain bar until it lands).
   const breakdown = metrics?.context_breakdown;
+  // Sorted biggest-first, then coloured by rank: the bar becomes a dark→light
+  // gradient and the legend leads with whatever is actually filling the window.
   const breakdownEntries = breakdown
-    ? BREAKDOWN_CATEGORIES.filter((c) => (breakdown[c.key] ?? 0) > 0).map((c) => ({
-        ...c,
-        value: breakdown[c.key] as number,
-      }))
+    ? CATEGORY_ORDER.filter((key) => (breakdown[key] ?? 0) > 0)
+        .map((key) => ({ key, value: breakdown[key] as number }))
+        .sort(
+          (a, b) =>
+            b.value - a.value || CATEGORY_ORDER.indexOf(a.key) - CATEGORY_ORDER.indexOf(b.key),
+        )
+        .map((entry, i) => ({ ...entry, color: RAMP[Math.min(i, RAMP.length - 1)] }))
     : [];
   const breakdownTotal = breakdownEntries.reduce((sum, e) => sum + e.value, 0);
   // Segment widths are fractions of the WINDOW, not of the used part, so the
