@@ -931,7 +931,7 @@ function ExcelView({ sheets }: { sheets: { name: string; rows: string[][]; start
   const [active, setActive] = useState(0);
   const sheet = sheets[active];
   return (
-    <div className="flex min-h-0 flex-1 flex-col bg-muted/40">
+    <div className="flex h-full min-h-0 flex-col bg-muted/40">
       <div className="min-h-0 flex-1 overflow-auto p-3">
         {sheet && sheet.rows.length > 0 ? <SpreadsheetGrid rows={sheet.rows} sheet={sheet.name} startRow={sheet.startRow} startCol={sheet.startCol} /> : (
           <p className="px-1 py-4 text-xs text-muted-foreground">—</p>
