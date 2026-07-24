@@ -277,6 +277,35 @@ def test_keeps_retrieved_figure_when_answer_uses_its_exact_anchor():
     assert ch.strip_unauthorized_figures(answer, [page_text, dropdown]) == answer
 
 
+def test_caption_backed_synthetic_anchor_is_kept_when_answer_uses_caption():
+    figure = {
+        "filename": "image-only-slide.pptx",
+        "image_url": _OK,
+        "_synthetic_anchor": True,
+        "_text": "Pressure chart showing a sharp increase at 80 bar.",
+    }
+    answer = (
+        "The pressure chart shows a sharp increase at 80 bar. "
+        f"![Pressure chart]({_OK})"
+    )
+
+    assert ch.strip_unauthorized_figures(answer, [figure]) == answer
+
+
+def test_caption_backed_synthetic_anchor_is_stripped_from_unrelated_answer():
+    figure = {
+        "filename": "image-only-slide.pptx",
+        "image_url": _OK,
+        "_synthetic_anchor": True,
+        "_text": "Pressure chart showing a sharp increase at 80 bar.",
+    }
+    answer = f"The almond sales forecast is seasonal. ![Pressure chart]({_OK})"
+
+    stripped = ch.strip_unauthorized_figures(answer, [figure])
+
+    assert _OK not in stripped
+
+
 def test_two_topic_answer_gets_one_figure_per_used_anchor():
     # The answer genuinely covers BOTH topics — each used text anchor may
     # contribute its own figure (one per anchor, capped by RAG_MAX_ANSWER_FIGURES).

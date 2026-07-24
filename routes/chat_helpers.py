@@ -1004,7 +1004,11 @@ def strip_unauthorized_figures(answer: str, sources: list) -> str:
         # provenance covers older indexed document figures that predate anchor
         # ids. A source with neither is a standalone/legacy image, for which
         # there is no text anchor to validate.
-        requires_relevance = bool(source.get("_anchor_id")) or source.get("_page") is not None
+        requires_relevance = (
+            bool(source.get("_anchor_id"))
+            or source.get("_page") is not None
+            or source.get("_synthetic_anchor") is True
+        )
         if not requires_relevance or url in eligible:
             return m.group(0)
         logger.info(

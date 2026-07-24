@@ -600,8 +600,9 @@ def _embed_text(meta: Dict[str, Any], content: str) -> str:
 
 
 def _is_primary_retrieval_document(meta: Dict[str, Any]) -> bool:
-    """Figures retrieve only through an owning text/page companion anchor."""
-    return (meta or {}).get("modality") != "figure"
+    """Exclude companion figures, but admit caption-backed synthetic anchors."""
+    meta = meta or {}
+    return meta.get("modality") != "figure" or meta.get("synthetic_anchor") is True
 
 
 def _openai_chat_url(raw_url: str) -> str:
@@ -944,6 +945,49 @@ def _attach_office_visual_context(docs) -> None:
     for d in docs:
         if (d.meta or {}).get("modality") != "figure" and (d.content or "").strip():
             d.meta["_visual_context"] = visual
+
+
+def _mark_synthetic_figure_anchors(docs) -> None:
+    """Mark figures whose own caption must act as their retrieval anchor.
+
+    PDF figures normally ride with text from the same page. A captioned figure
+    on a page with no text has no such owner, so excluding every figure from
+    primary retrieval makes that page undiscoverable. Office archive images do
+    not currently carry reliable slide/page provenance; their VLM caption is a
+    more precise anchor than arbitrary text elsewhere in the document.
+
+    Locator-only captions and page-text fallbacks are deliberately excluded:
+    they contain no independent visual meaning and must never compete as
+    standalone answer passages.
+    """
+    text_pages = {
+        (d.meta or {}).get("page")
+        for d in docs
+        if (d.meta or {}).get("modality") != "figure"
+        and isinstance((d.meta or {}).get("page"), int)
+        and (d.content or "").strip()
+    }
+    has_document_text = any(
+        (d.meta or {}).get("modality") != "figure" and (d.content or "").strip() for d in docs
+    )
+    for d in docs:
+        meta = d.meta or {}
+        if (
+            meta.get("modality") != "figure"
+            or not meta.get("image_url")
+            or not (d.content or "").strip()
+        ):
+            continue
+        if meta.get("caption_source") not in {"vlm", "docling"}:
+            continue
+        page = meta.get("page")
+        lacks_precise_text_anchor = (
+            meta.get("document_figure") is True
+            or (isinstance(page, int) and page not in text_pages)
+            or (page is None and not has_document_text)
+        )
+        if lacks_precise_text_anchor:
+            meta["synthetic_anchor"] = True
 
 
 # Content-hash → blurb cache so re-ingesting unchanged chunks never re-pays the
@@ -1393,12 +1437,11 @@ class VectorRAG:
                 filters=self._build_filters(owner, scope, exclude_scopes),
             )
             docs = response.get("documents", []) or []
-            # Extracted PDF figures/video keyframes are renderable companions,
-            # not independent answer passages. Their page/transcript text owns
-            # retrieval; allowing figure captions to compete directly can make
-            # generic words surface an image disconnected from the selected
-            # information. `_attach_companion_figures` adds them back only with
-            # an explicit text `anchor_id`.
+            # Ordinary extracted figures/video keyframes are renderable
+            # companions, not independent answer passages. Their owning text
+            # retrieves them through `_attach_companion_figures`. The narrow
+            # exception is a meaningful caption explicitly marked as a
+            # synthetic anchor because no precise native text owner exists.
             docs = [d for d in docs if _is_primary_retrieval_document(d.meta or {})]
             candidates = [
                 {
@@ -1928,6 +1971,7 @@ class VectorRAG:
             _attach_pdf_visual_context(docs)
         elif ext in _OOXML_DOC_EXTS | _OPENDOCUMENT_EXTS:
             _attach_office_visual_context(docs)
+        _mark_synthetic_figure_anchors(docs)
 
         # Caller metadata (source/filename/owner/scope …) is layered on top; the
         # lane only owns keys the caller doesn't set (e.g. start/end/modality),
@@ -3136,8 +3180,10 @@ class VectorRAG:
         """Cosine between a text and an image in the shared VL embedding space.
 
         The retrieval-time relevance gate for figures: scored BEFORE injection
-        so the chat model only ever sees figures that visually match the text
-        they ride along with — no post-answer judging or stripping needed.
+        so the chat model only sees figures that visually match the text they
+        ride along with. The final answer guard independently verifies that an
+        injected document figure's anchor or synthetic caption was actually
+        reflected in the generated prose.
         Returns None when the VL embed endpoint is unconfigured or either
         embed fails; callers must treat None as "cannot tell" (fail-open)."""
         if not os.getenv("IMAGE_EMBED_URL", "").strip():

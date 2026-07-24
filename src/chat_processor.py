@@ -138,6 +138,26 @@ def _chunk_relevant_to_query(query: str, document: str) -> bool:
     return len(shared) >= need
 
 
+def _synthetic_figure_relevant_to_query(query: str, result: Dict[str, Any]) -> bool:
+    """Whether an unanchored, caption-backed figure can stand on its own.
+
+    Synthetic anchors are created only for figures without a precise owning
+    text chunk. They still need direct lexical evidence from their own caption;
+    retrieval membership or a high relative rank alone is not sufficient.
+    """
+    meta = result.get("metadata") or {}
+    if (
+        not meta.get("image_url")
+        or meta.get("synthetic_anchor") is not True
+        or result.get("anchor_id")
+    ):
+        return False
+    return _chunk_relevant_to_query(
+        query,
+        result.get("_retrieval_document") or result.get("document", ""),
+    )
+
+
 def _figure_local_path(meta: Dict[str, Any]) -> Optional[str]:
     """Resolve a figure chunk's ``image_url`` to its on-disk crop file, with the
     same containment rules as the serving route (inside the personal-uploads
@@ -476,19 +496,23 @@ class ChatProcessor:
                             and float(r.get("rerank_score") or 0) >= rerank_min
                         ]
                         # Rerank scores are only relative: even a contentless
-                        # query ("yoyoyo") ranks *something* first. Require at
-                        # least one surviving TEXT chunk to also share
-                        # distinctive query terms (BM25-style) before injecting
-                        # anything — a query the knowledge base has nothing for
-                        # injects nothing, text or figures.
-                        if not any(
+                        # query ("yoyoyo") ranks *something* first. Require
+                        # distinctive lexical evidence from a surviving text
+                        # chunk OR from a caption explicitly marked as a
+                        # synthetic anchor for an image-only page/document.
+                        text_evidence = any(
                             _chunk_relevant_to_query(
                                 search_query,
                                 r.get("_retrieval_document") or r.get("document", ""),
                             )
                             for r in relevant
                             if not _is_figure(r)
-                        ):
+                        )
+                        figure_evidence = any(
+                            _synthetic_figure_relevant_to_query(search_query, r)
+                            for r in relevant
+                        )
+                        if not text_evidence and not figure_evidence:
                             relevant = []
                         else:
                             # Same-page companion figures inherit the relevance
@@ -514,6 +538,12 @@ class ChatProcessor:
                                 r.get("_retrieval_document") or r.get("document", ""),
                             )
                         ]
+                        relevant += [
+                            r
+                            for r in results
+                            if r.get("similarity", 0) >= sim_threshold
+                            and _synthetic_figure_relevant_to_query(search_query, r)
+                        ]
                         text_ids = {r.get("id") for r in relevant}
                         relevant += [
                             r for r in results if _is_figure(r) and r.get("anchor_id") in text_ids
@@ -529,8 +559,9 @@ class ChatProcessor:
                         or r.get("anchor_id") in text_ids
                     ]
                     # Pixel gate: drop figures whose IMAGE doesn't match the
-                    # query/anchor text before anything reaches the model. What
-                    # survives is trusted downstream — no post-answer judging.
+                    # query/anchor text before anything reaches the model. The
+                    # final response guard still verifies that the generated
+                    # prose used the exact native or synthetic anchor.
                     relevant = _pixel_gate_figures(relevant, rag_manager, search_query)
                     if relevant:
                         logger.info(
@@ -557,6 +588,9 @@ class ChatProcessor:
                                 "_anchor_id": r.get("anchor_id"),
                                 "_source": (r.get("metadata") or {}).get("source"),
                                 "_page": (r.get("metadata") or {}).get("page"),
+                                "_synthetic_anchor": (
+                                    (r.get("metadata") or {}).get("synthetic_anchor") is True
+                                ),
                                 # Optional image-preview / video-timestamp fields
                                 # so citations can render a thumbnail or a #t=
                                 # deeplink (absent for plain text/docs).

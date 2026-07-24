@@ -154,3 +154,73 @@ def test_office_image_caption_is_attached_to_text_retrieval_context():
     rv._attach_office_visual_context([text, figure])
 
     assert "pressure gauge" in text.meta["_visual_context"]
+
+
+def test_captioned_figure_on_image_only_pdf_page_becomes_synthetic_anchor():
+    other_page = _Doc("Text on another page", {"modality": "pdf_page", "page": 1})
+    figure = _Doc(
+        "A pressure chart showing a sharp increase at 80 bar.",
+        {
+            "modality": "figure",
+            "page": 2,
+            "caption_source": "vlm",
+            "image_url": "/chart.png",
+        },
+    )
+
+    rv._mark_synthetic_figure_anchors([other_page, figure])
+
+    assert figure.meta["synthetic_anchor"] is True
+    assert rv._is_primary_retrieval_document(figure.meta)
+
+
+def test_pdf_figure_with_same_page_text_remains_a_companion():
+    page = _Doc("Pressure rises sharply at 80 bar.", {"modality": "pdf_page", "page": 2})
+    figure = _Doc(
+        "A pressure chart showing a sharp increase at 80 bar.",
+        {
+            "modality": "figure",
+            "page": 2,
+            "caption_source": "vlm",
+            "image_url": "/chart.png",
+        },
+    )
+
+    rv._mark_synthetic_figure_anchors([page, figure])
+
+    assert "synthetic_anchor" not in figure.meta
+    assert not rv._is_primary_retrieval_document(figure.meta)
+
+
+def test_locator_only_figure_never_becomes_synthetic_anchor():
+    figure = _Doc(
+        "Figure from deck.pdf (page 2)",
+        {
+            "modality": "figure",
+            "page": 2,
+            "caption_source": "locator",
+            "image_url": "/figure.png",
+        },
+    )
+
+    rv._mark_synthetic_figure_anchors([figure])
+
+    assert "synthetic_anchor" not in figure.meta
+
+
+def test_captioned_office_image_uses_caption_as_precise_synthetic_anchor():
+    text = _Doc("Unrelated text elsewhere in the presentation.")
+    figure = _Doc(
+        "A pressure chart showing a sharp increase at 80 bar.",
+        {
+            "modality": "figure",
+            "document_figure": True,
+            "caption_source": "vlm",
+            "image_url": "/chart.png",
+        },
+    )
+
+    rv._mark_synthetic_figure_anchors([text, figure])
+
+    assert figure.meta["synthetic_anchor"] is True
+    assert rv._is_primary_retrieval_document(figure.meta)

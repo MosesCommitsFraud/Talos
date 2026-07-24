@@ -270,3 +270,40 @@ def test_figures_are_companions_not_independent_retrieval_passages():
     assert rv._is_primary_retrieval_document({"modality": "pdf_page", "page": 6})
     assert rv._is_primary_retrieval_document({"modality": "video", "start": 10})
     assert not rv._is_primary_retrieval_document({"modality": "figure", "page": 6})
+    assert rv._is_primary_retrieval_document(
+        {"modality": "figure", "synthetic_anchor": True}
+    )
+
+
+def test_synthetic_figure_requires_direct_query_caption_overlap():
+    import src.chat_processor as cp
+
+    figure = {
+        "document": "Pressure chart with a sharp increase at 80 bar",
+        "metadata": {
+            "image_url": "/chart.png",
+            "synthetic_anchor": True,
+        },
+    }
+
+    assert cp._synthetic_figure_relevant_to_query(
+        "show the pressure chart increase at 80 bar", figure
+    )
+    assert not cp._synthetic_figure_relevant_to_query(
+        "forecast almond sales by month", figure
+    )
+
+
+def test_companion_figure_cannot_claim_synthetic_anchor_after_attachment():
+    import src.chat_processor as cp
+
+    figure = {
+        "document": "Pressure chart with a sharp increase at 80 bar",
+        "metadata": {
+            "image_url": "/chart.png",
+            "synthetic_anchor": True,
+        },
+        "anchor_id": "page2",
+    }
+
+    assert not cp._synthetic_figure_relevant_to_query("pressure chart", figure)
