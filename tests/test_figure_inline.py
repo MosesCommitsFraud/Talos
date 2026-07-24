@@ -136,10 +136,9 @@ def test_same_pdf_filename_uses_exact_page_anchor_not_first_figure():
     assert _BAD not in out
 
 
-def test_model_embedded_retrieved_figure_kept_fabricated_stripped():
-    # Relevance is decided BEFORE injection by the pixel gate — every figure in
-    # `sources` was already vetted, so one the model chose to embed must never
-    # be yanked back out of the transcript. Only fabricated URLs get stripped.
+def test_model_embedded_wrong_anchor_and_fabricated_figures_are_stripped():
+    # Retrieval membership is necessary but no longer sufficient: the answer
+    # uses page6, so a retrieved page27 figure and a fabricated URL are removed.
     fake = "/api/personal/rag-asset?source=%2Fu%2F_pdf_figures%2Ffabricated.png"
     answer = f"Band per Rechtsklick einfügen. ![fig]({_BAD}) ![nope]({fake})"
     source = "/u/training.pdf"
@@ -171,10 +170,11 @@ def test_model_embedded_retrieved_figure_kept_fabricated_stripped():
 
     stripped = ch.strip_unauthorized_figures(answer, sources)
 
-    assert _BAD in stripped  # retrieved figure, model's choice — kept
+    assert _BAD not in stripped
     assert "fabricated.png" not in stripped
-    # The backstop appends nothing when the answer already shows a figure.
-    assert ch.append_missing_figures(stripped, sources) == ""
+    # Once the irrelevant model choice is removed, the backstop can add the
+    # actually eligible page6 figure.
+    assert _OK in ch.append_missing_figures(stripped, sources)
 
 
 def test_same_page_prefers_focused_figure_and_drops_extra_image_sources():
@@ -212,10 +212,69 @@ def test_same_page_prefers_focused_figure_and_drops_extra_image_sources():
 
     assert [s["image_url"] for s in eligible] == [_OK]
     assert [s["image_url"] for s in used if s.get("image_url")] == [_OK]
-    # Both images are retrieved (pre-gated) figures — the model may embed
-    # either; strip only removes fabricated URLs.
+    # Both images were retrieved, but only the most relevant figure attached to
+    # the used text anchor remains eligible in the final answer.
     assert _OK in stripped
-    assert _BAD in stripped
+    assert _BAD not in stripped
+
+
+def test_strips_retrieved_figure_when_forecast_answer_did_not_use_its_anchor():
+    answer = (
+        "Die Prognose für 2024 und 2025 beträgt jeweils 62.826 Einheiten. "
+        "Sie basiert auf 36 Monaten historischer Absatzdaten und einem stabilen "
+        "saisonalen Muster aus der Tabelle ait_Absatzmenge_m_322_1."
+    )
+    source = "/u/02_macs_Report_Training.pdf"
+    page_text = {
+        "filename": "02_macs_Report_Training.pdf",
+        "_id": "page7",
+        "_source": source,
+        "_page": 7,
+        "_text": (
+            "Datenquelle hinzufügen. Standard-Quellen sind Pivot und die "
+            "erweiterte Datenquelle. Nach Veränderungen Schemas aktualisieren."
+        ),
+    }
+    dropdown = {
+        "filename": "02_macs_Report_Training.pdf",
+        "_anchor_id": "page7",
+        "_source": source,
+        "_page": 7,
+        "image_url": _OK,
+        "image_caption": "Dropdown-Menü für Datenquellen",
+        "_text": (
+            "Erweiterte Datenquelle, Pivot, SQL Abfrage Datenquelle und "
+            "Dimensions Tabelle."
+        ),
+    }
+
+    with_image = answer + f"\n\n![Datenquellen]({_OK})"
+    stripped = ch.strip_unauthorized_figures(with_image, [page_text, dropdown])
+
+    assert _OK not in stripped
+    assert stripped.strip() == answer
+
+
+def test_keeps_retrieved_figure_when_answer_uses_its_exact_anchor():
+    answer = f"Die Datenquelle wird über das Dropdown hinzugefügt. ![Menü]({_OK})"
+    source = "/u/training.pdf"
+    page_text = {
+        "filename": "training.pdf",
+        "_id": "page7",
+        "_source": source,
+        "_page": 7,
+        "_text": "Die Datenquelle wird über das Dropdown hinzugefügt.",
+    }
+    dropdown = {
+        "filename": "training.pdf",
+        "_anchor_id": "page7",
+        "_source": source,
+        "_page": 7,
+        "image_url": _OK,
+        "_text": "Dropdown zum Hinzufügen einer Datenquelle.",
+    }
+
+    assert ch.strip_unauthorized_figures(answer, [page_text, dropdown]) == answer
 
 
 def test_two_topic_answer_gets_one_figure_per_used_anchor():

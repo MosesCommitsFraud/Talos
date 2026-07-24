@@ -962,18 +962,19 @@ def _eligible_figures_for_answer(answer: str, sources: list) -> list:
 
 
 def strip_unauthorized_figures(answer: str, sources: list) -> str:
-    """Remove any inline figure image the answer references but that wasn't in the
-    retrieved set — an anti-hallucination guard on model-emitted image URLs.
+    """Remove inline document figures that are fabricated or irrelevant.
 
     The model is told to copy figure ``image_url`` values verbatim from the
-    retrieved context; this drops any rag-asset image markdown whose URL is not
-    among those, so a fabricated path can never render or persist. Whether a
-    retrieved figure is RELEVANT is decided before injection by the pixel gate
-    (chat_processor._pixel_gate_figures) — a figure the model chose to embed
-    from the injected set is trusted here, so an already-streamed image is
-    never yanked back out of the transcript after the answer finished.
-    Non-rag-asset images (generated images, external URLs) are left
-    untouched."""
+    retrieved context. A retrieved URL alone is not sufficient for an anchored
+    document figure: the final prose must also use that figure's exact text
+    anchor, as determined by ``_eligible_figures_for_answer``. This closes the
+    path where broad retrieval (for example "database" or "report") exposes an
+    unrelated screenshot and the model embeds it on its own.
+
+    Unanchored figures without page provenance are standalone images or legacy
+    source records; for those, retrieval membership remains the only available
+    authorization signal. Non-RAG images (generated images and external URLs)
+    are left untouched."""
     if not answer or "/api/personal/rag-asset" not in answer:
         return answer
     from urllib.parse import unquote
@@ -984,12 +985,32 @@ def strip_unauthorized_figures(answer: str, sources: list) -> str:
     def _norm(u: str) -> str:
         return unquote(unquote(u or ""))
 
-    allowed = {_norm(s.get("image_url")) for s in (sources or []) if s.get("image_url")}
+    retrieved = {
+        _norm(s.get("image_url")): s for s in (sources or []) if s.get("image_url")
+    }
+    eligible = {
+        _norm(s.get("image_url"))
+        for s in _eligible_figures_for_answer(answer, sources)
+        if s.get("image_url")
+    }
 
     def _keep(m: "re.Match") -> str:
-        if _norm(m.group("url")) in allowed:
+        url = _norm(m.group("url"))
+        source = retrieved.get(url)
+        if source is None:
+            logger.info("figure guard: stripped fabricated image %s", m.group("url")[:200])
+            return ""
+        # Exact anchors are present on current companion figures. Page
+        # provenance covers older indexed document figures that predate anchor
+        # ids. A source with neither is a standalone/legacy image, for which
+        # there is no text anchor to validate.
+        requires_relevance = bool(source.get("_anchor_id")) or source.get("_page") is not None
+        if not requires_relevance or url in eligible:
             return m.group(0)
-        logger.info("figure guard: stripped unauthorized image %s", m.group("url")[:200])
+        logger.info(
+            "figure guard: stripped retrieved but irrelevant image %s",
+            m.group("url")[:200],
+        )
         return ""
 
     return _RAG_ASSET_IMG_RE.sub(_keep, answer)

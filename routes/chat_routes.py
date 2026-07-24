@@ -1075,11 +1075,12 @@ def setup_chat_routes(
                                 if thinking_response.strip():
                                     last_metrics = dict(last_metrics or {})
                                     last_metrics["thinking"] = thinking_response.strip()
-                                # Drop any inline figure the model referenced but
-                                # that wasn't actually retrieved (anti-hallucination
-                                # guard) before it's filtered/persisted. Relevance
-                                # itself is decided pre-injection by the pixel gate
-                                # (chat_processor._pixel_gate_figures).
+                                # Drop fabricated figure URLs and retrieved
+                                # document figures whose exact text anchor is not
+                                # reflected in the final prose. Retrieval/pixel
+                                # gating alone is intentionally insufficient:
+                                # broad queries can expose a real but irrelevant
+                                # screenshot that the model elects to embed.
                                 _pre_strip = full_response
                                 full_response = strip_unauthorized_figures(
                                     full_response, ctx.rag_sources
