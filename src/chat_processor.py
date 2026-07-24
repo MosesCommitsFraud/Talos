@@ -677,13 +677,26 @@ class ChatProcessor:
         # silently — only the name+description index; the model fetches a
         # skill's full method on demand via the read_skill tool and must then
         # follow it verbatim. Gated like the learned-skills index above.
-        if agent_mode and not incognito and use_skills:
+        #
+        # Log the gate decision unconditionally so a single message reveals why
+        # the skill index did or didn't ship (a False gate was previously
+        # silent, making "read_skill never fires" impossible to diagnose).
+        _shared_gate_ok = bool(agent_mode and not incognito and use_skills)
+        logger.info(
+            "Shared-skill gate: owner=%s agent_mode=%s incognito=%s use_skills=%s -> %s",
+            owner,
+            agent_mode,
+            incognito,
+            use_skills,
+            "ON" if _shared_gate_ok else "OFF (skipped)",
+        )
+        if _shared_gate_ok:
             try:
                 from services.memory import shared_skills
 
                 enabled = shared_skills.enabled_skills_for(owner)
             except Exception as e:
-                logger.debug(f"Shared skills index unavailable: {e}")
+                logger.warning(f"Shared skills index unavailable: {e}")
                 enabled = []
             if enabled:
                 # The skill names/descriptions are user-uploaded, so they ride in
