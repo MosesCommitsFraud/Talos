@@ -55,6 +55,57 @@ def test_head_tail_keeps_both_ends():
     assert "chars omitted" in out
 
 
+def test_low_pressure_passes_through_untouched():
+    """With context to spare, a large output must NOT be truncated."""
+    text = "START-MARKER\n" + "".join(f"line {i}\n" for i in range(3000)) + "END-MARKER"
+    out = co.optimize_tool_output(
+        text, tool_name="read_file", used_tokens=20_000, budget_tokens=200_000
+    )
+    assert out == text
+
+
+def test_high_pressure_compresses_aggressively():
+    text = "START-MARKER\n" + "".join(f"line {i}\n" for i in range(3000)) + "END-MARKER"
+    out = co.optimize_tool_output(
+        text, tool_name="read_file", used_tokens=190_000, budget_tokens=200_000
+    )
+    assert len(out) < len(text) / 2
+    assert "expand_output" in out
+    # At/above the ceiling the aggressive target applies.
+    assert len(out) < co.TARGET_CHARS + 500
+
+
+def test_mid_pressure_is_gentler_than_high_pressure():
+    text = "START-MARKER\n" + "".join(f"line {i}\n" for i in range(6000)) + "END-MARKER"
+    mid = co.optimize_tool_output(
+        text, tool_name="read_file", used_tokens=150_000, budget_tokens=200_000
+    )
+    high = co.optimize_tool_output(
+        text, tool_name="read_file", used_tokens=190_000, budget_tokens=200_000
+    )
+    assert len(text) > len(mid) > len(high)
+
+
+def test_unmeasurable_pressure_falls_back_to_aggressive():
+    """Callers that pass no budget keep the old unconditional behaviour."""
+    text = "START-MARKER\n" + "".join(f"line {i}\n" for i in range(3000)) + "END-MARKER"
+    assert len(co.optimize_tool_output(text, tool_name="read_file", budget_tokens=0)) < len(text)
+
+
+def test_pressure_floor_boundary():
+    assert co._thresholds_for_pressure(co.PRESSURE_FLOOR - 0.01) is None
+    assert co._thresholds_for_pressure(co.PRESSURE_FLOOR) == (
+        co.RELAXED_COMPRESS_CHARS,
+        co.RELAXED_TARGET_CHARS,
+    )
+    assert co._thresholds_for_pressure(co.PRESSURE_CEILING) == (
+        co.MIN_COMPRESS_CHARS,
+        co.TARGET_CHARS,
+    )
+    # Above the ceiling stays clamped, never inverts.
+    assert co._thresholds_for_pressure(3.0) == (co.MIN_COMPRESS_CHARS, co.TARGET_CHARS)
+
+
 def test_disabled_passthrough(monkeypatch):
     monkeypatch.setattr(co, "compression_enabled", lambda: False)
     text = "x\n" * 50_000

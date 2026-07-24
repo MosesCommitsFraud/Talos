@@ -26,12 +26,31 @@ logger = logging.getLogger(__name__)
 
 # Outputs smaller than this are never touched — compression overhead (marker
 # text, retrieval round-trips) isn't worth it below a few thousand chars.
+# This is the *aggressive* floor, used only when the context is nearly full.
 MIN_COMPRESS_CHARS = 4_000
-# Target size for a compressed output (chars, ~1.5K tokens).
+# Target size for a compressed output (chars, ~1.5K tokens). Aggressive end.
 TARGET_CHARS = 5_000
 # Compression must save at least this fraction or the original is kept
 # (a marker that says "saved 3%" is pure noise).
 MIN_SAVINGS = 0.25
+
+# --- Context-pressure scaling -------------------------------------------------
+# Compression is not free: head/tail truncation drops the middle of a tool
+# output, and the model only recovers it by noticing the marker and spending a
+# round on expand_output. That trade is worth it when the context is about to
+# overflow and worthless when there is plenty of room. So the thresholds move
+# with how full the context actually is.
+#
+#   pressure < FLOOR    -> pass everything through untouched
+#   FLOOR..CEILING      -> interpolate between the relaxed and aggressive limits
+#   pressure >= CEILING -> full aggression (MIN_COMPRESS_CHARS / TARGET_CHARS)
+PRESSURE_FLOOR = 0.60
+PRESSURE_CEILING = 0.90
+# Limits used at PRESSURE_FLOOR. Tool outputs are already capped upstream
+# (MAX_OUTPUT_CHARS=10k, MAX_READ_CHARS=20k), so a 16k floor means only a
+# full-size file read is touched while there is still room to spare.
+RELAXED_COMPRESS_CHARS = 16_000
+RELAXED_TARGET_CHARS = 12_000
 
 # Reversible store: id -> {"text", "tool"}. Bounded so a long-running server
 # can't leak memory; oldest entries are evicted first.
@@ -175,13 +194,61 @@ def _head_tail(text: str, budget: int) -> str:
 # ---------------------------------------------------------------------------
 
 
-def optimize_tool_output(text: str, tool_name: str = "") -> str:
+def _thresholds_for_pressure(pressure: Optional[float]) -> Optional[tuple]:
+    """Resolve (min_compress_chars, target_chars) for the current context load.
+
+    `pressure` is used/budget tokens. None means the caller couldn't measure it
+    — fall back to the aggressive limits rather than silently disabling
+    compression for a caller that may genuinely be near the wall. Returns None
+    when there is enough headroom that compressing would only cost fidelity.
+    """
+    if pressure is None:
+        return MIN_COMPRESS_CHARS, TARGET_CHARS
+    if pressure < PRESSURE_FLOOR:
+        return None
+    span = PRESSURE_CEILING - PRESSURE_FLOOR
+    t = 1.0 if span <= 0 else min(1.0, (pressure - PRESSURE_FLOOR) / span)
+    min_chars = int(RELAXED_COMPRESS_CHARS + (MIN_COMPRESS_CHARS - RELAXED_COMPRESS_CHARS) * t)
+    target = int(RELAXED_TARGET_CHARS + (TARGET_CHARS - RELAXED_TARGET_CHARS) * t)
+    return min_chars, target
+
+
+def context_pressure(used_tokens: int, budget_tokens: int) -> Optional[float]:
+    """Fraction of the input budget already consumed, or None if unmeasurable."""
+    try:
+        if used_tokens > 0 and budget_tokens > 0:
+            return float(used_tokens) / float(budget_tokens)
+    except (TypeError, ValueError, ZeroDivisionError):
+        pass
+    return None
+
+
+def optimize_tool_output(
+    text: str,
+    tool_name: str = "",
+    used_tokens: int = 0,
+    budget_tokens: int = 0,
+) -> str:
     """Compress a formatted tool output if it is large; reversible via store.
 
-    Returns the original text unchanged when compression is disabled, the
-    text is small, or compression wouldn't save enough to matter.
+    Compression scales with context pressure: with plenty of headroom the
+    output passes through in full, and the limits tighten as the context fills.
+    Pass `used_tokens`/`budget_tokens` to enable that; omitting both keeps the
+    unconditional aggressive behaviour.
+
+    Returns the original text unchanged when compression is disabled, there is
+    enough context headroom, the text is small, or compression wouldn't save
+    enough to matter.
     """
-    if not isinstance(text, str) or len(text) < MIN_COMPRESS_CHARS:
+    if not isinstance(text, str):
+        return text
+
+    limits = _thresholds_for_pressure(context_pressure(used_tokens, budget_tokens))
+    if limits is None:
+        return text
+    min_compress_chars, target_chars = limits
+
+    if len(text) < min_compress_chars:
         return text
     # Skill tools deliver the procedure the model is required to follow verbatim;
     # compressing them (head/tail + summary) strips the very steps they exist to
@@ -195,7 +262,7 @@ def optimize_tool_output(text: str, tool_name: str = "") -> str:
         compressed = _try_compress_json(text)
         if compressed is None:
             compressed = _collapse_log_lines(text)
-        compressed = _head_tail(compressed, TARGET_CHARS)
+        compressed = _head_tail(compressed, target_chars)
     except Exception as e:  # never let compression break a tool round
         logger.warning(f"context_optimizer: compression failed ({e}); passing through")
         return text
@@ -212,7 +279,9 @@ def optimize_tool_output(text: str, tool_name: str = "") -> str:
     )
     logger.info(
         f"context_optimizer: compressed {tool_name or 'tool'} output "
-        f"{len(text)} -> {len(compressed)} chars (id={oid})"
+        f"{len(text)} -> {len(compressed)} chars (id={oid}, "
+        f"floor={min_compress_chars}, target={target_chars}, "
+        f"pressure={used_tokens}/{budget_tokens})"
     )
     return compressed + marker
 

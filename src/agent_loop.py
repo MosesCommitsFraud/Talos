@@ -1967,6 +1967,10 @@ async def stream_agent_loop(
     prep_timings["prompt_build"] = time.time() - _t2
 
     _t3 = time.time()
+    # Input-token ceiling this turn actually has to live within — the soft
+    # budget when one applies, otherwise the raw model window. Used to scale
+    # tool-output compression to real context pressure (see context_optimizer).
+    _ctx_budget_tokens = context_length or 0
     try:
         from src.context_budget import DEFAULT_HARD_MAX, compute_input_token_budget
         from src.context_compactor import trim_for_context
@@ -1997,6 +2001,8 @@ async def stream_agent_loop(
                 is_setting_overridden("agent_input_token_budget"),
                 hard_max=hard_max,
             )
+            if effective_budget > 0:
+                _ctx_budget_tokens = effective_budget
             trimmed_messages = trim_for_context(
                 messages,
                 effective_budget,
@@ -3119,8 +3125,22 @@ async def stream_agent_loop(
             formatted = format_tool_result(desc, result)
             # Headroom-style compression: big outputs (huge JSON, log dumps)
             # are shrunk before entering context; the full original stays
-            # retrievable via the expand_output tool.
-            formatted = optimize_tool_output(formatted, tool_name=block.tool_type)
+            # retrievable via the expand_output tool. Scaled to real context
+            # pressure — with headroom to spare the output passes through in
+            # full, and the limits tighten as the window fills. Prefer the
+            # backend's reported input tokens for the last round; fall back to
+            # the estimate before any usage has landed. Results already
+            # produced this round count too, so a burst of large reads inside
+            # one round raises the pressure it sees.
+            _used_tokens = (
+                last_round_input_tokens if has_real_usage else estimate_tokens(messages)
+            ) + sum(int(len(t) * 0.3) for t in tool_results)
+            formatted = optimize_tool_output(
+                formatted,
+                tool_name=block.tool_type,
+                used_tokens=_used_tokens,
+                budget_tokens=_ctx_budget_tokens,
+            )
             tool_results.append(formatted)
             tool_result_texts.append(formatted)
 
