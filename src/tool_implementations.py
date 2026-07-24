@@ -1120,7 +1120,9 @@ def _skill_matches_query(skill_meta: dict, query: str) -> bool:
     return len(overlap) >= 2
 
 
-async def do_browse_skills(content: str, owner: Optional[str] = None) -> Dict:
+async def do_browse_skills(
+    content: str, owner: Optional[str] = None, workspace: Optional[str] = None
+) -> Dict:
     """List the user's enabled skills and, for any that match the task, inline
     their full instructions so the model can follow them immediately.
 
@@ -1128,6 +1130,9 @@ async def do_browse_skills(content: str, owner: Optional[str] = None) -> Dict:
     to this on the first round of a turn when at least one skill is enabled, so
     the model can't skip consulting the library. Accepts an optional
     `{"query": "..."}` (the user's task) used to decide which skills to expand.
+    For matched skills that ship a bundle (references/scripts), the bundle is
+    materialized into the workspace so the model can run those scripts — many
+    skills (e.g. xlsx's recalc.py) require them.
     """
     query = ""
     raw = (content or "").strip()
@@ -1163,6 +1168,7 @@ async def do_browse_skills(content: str, owner: Optional[str] = None) -> Dict:
         lines.append(f"- {s['name']}: {s['description']}")
 
     expanded = []
+    bundle_notes = []
     for s in sorted(matched, key=lambda x: x["name"]):
         try:
             full = shared_skills.get_skill(s["name"])
@@ -1171,6 +1177,32 @@ async def do_browse_skills(content: str, owner: Optional[str] = None) -> Dict:
             continue
         if full and full.get("content"):
             expanded.append(f"### SKILL: {s['name']}\n{full['content']}")
+        # Materialize any bundled files (references/scripts) so the model can
+        # actually run them — the skill's instructions reference them by path.
+        if full and full.get("file_paths") and workspace:
+            try:
+                import os as _os
+
+                paths = full["file_paths"]
+                dest = _os.path.join(workspace, "skills", s["name"])
+                shared_skills.materialize(s["name"], dest)
+                rel_dir = _os.path.join("skills", s["name"])
+                # Point at a couple of representative scripts rather than dumping
+                # all (a deep bundle can be dozens of files).
+                scripts = [p for p in paths if p.lower().endswith(".py")][:6]
+                script_hint = (
+                    "e.g. " + "; ".join(f"`python {_os.path.join(rel_dir, p)}`" for p in scripts)
+                    if scripts
+                    else ""
+                )
+                bundle_notes.append(
+                    f"- `{s['name']}`: {len(paths)} bundled file(s) written to "
+                    f"`{dest}`. The skill's paths (e.g. `scripts/...`) are relative to "
+                    f"that directory, so prefix them with `{rel_dir}/` when you run "
+                    f"them from the workspace root. {script_hint}".rstrip()
+                )
+            except Exception as e:
+                logger.warning(f"browse_skills materialize failed for {s['name']}: {e}")
 
     if expanded:
         lines.append(
@@ -1179,6 +1211,12 @@ async def do_browse_skills(content: str, owner: Optional[str] = None) -> Dict:
             "deviating from or substituting your own method:"
         )
         lines.append("\n\n".join(expanded))
+        if bundle_notes:
+            lines.append(
+                "\nBundled files for these skills have been placed in the workspace. "
+                "Use these exact paths (do NOT expect the scripts at a bare "
+                "`scripts/` path):\n" + "\n".join(bundle_notes)
+            )
     else:
         lines.append(
             "\nNone of these skills clearly matches the task. If one does, load it "

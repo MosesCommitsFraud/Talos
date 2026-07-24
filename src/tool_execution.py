@@ -1739,7 +1739,7 @@ async def execute_tool_block(
         from src.tool_implementations import do_browse_skills
 
         desc = "browse_skills"
-        result = await do_browse_skills(content, owner=owner)
+        result = await do_browse_skills(content, owner=owner, workspace=workspace)
     elif tool == "read_skill":
         from src.tool_implementations import do_read_skill
 

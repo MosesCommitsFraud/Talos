@@ -32,3 +32,5 @@ artifact editing for markdown output
 modell weiß nicht was es ist.
 switching chat when preview or artifact panel is open should close it automatically
 sometimes image not shown and still no artifact when create document
+better contextmeter
+context optimizer?
