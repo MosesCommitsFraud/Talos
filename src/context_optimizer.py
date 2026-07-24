@@ -183,6 +183,11 @@ def optimize_tool_output(text: str, tool_name: str = "") -> str:
     """
     if not isinstance(text, str) or len(text) < MIN_COMPRESS_CHARS:
         return text
+    # Skill tools deliver the procedure the model is required to follow verbatim;
+    # compressing them (head/tail + summary) strips the very steps they exist to
+    # provide. Always pass skill output through in full.
+    if tool_name in ("browse_skills", "read_skill"):
+        return text
     if not compression_enabled():
         return text
 
