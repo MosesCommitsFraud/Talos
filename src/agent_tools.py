@@ -53,6 +53,7 @@ TOOL_TAGS = {
     "manage_skills",
     "read_skill",
     "browse_skills",
+    "create_skill",
     "suggest_document",
     "manage_endpoints",
     "manage_mcp",

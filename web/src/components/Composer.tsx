@@ -105,6 +105,7 @@ const SLASH_COMMANDS: SlashCommand[] = [
   { name: 'decision', description: 'Analyze options, trade-offs, and recommend', takesText: true },
   { name: 'todos', description: 'Create an editable checklist', takesText: true },
   { name: 'export', description: 'Prepare the result as a local export', takesText: true },
+  { name: 'skill', description: 'Create a reusable skill from a workflow or description', takesText: true },
 ];
 
 /** Knowledge-mode dropdown styled like t3code's runtime-mode picker (ghost
@@ -557,6 +558,7 @@ export function Composer() {
         decision: `Analyze this decision: ${arg || 'the current decision'}. Give options, trade-offs, assumptions, risks, and a recommendation.`,
         todos: `Turn ${arg || 'the current conversation or attachments'} into an editable checklist with clear completion criteria.`,
         export: `Prepare ${arg || 'the current result'} as a clean, self-contained document suitable for saving locally.`,
+        skill: `Create a reusable Talos skill for: ${arg || 'the workflow in the current conversation'}. Follow the skill-creator workflow — capture the intent (what it does, when it should trigger and when NOT, expected output), draft SKILL.md with a pushy description plus any needed references/scripts in a workspace folder, then save it with the create_skill tool. Ask me for anything you need before finalizing.`,
       };
       if (prompts[command]) {
         setText(''); setPending([]); requestAnimationFrame(autoresize);

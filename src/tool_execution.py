@@ -1740,6 +1740,11 @@ async def execute_tool_block(
 
         desc = "browse_skills"
         result = await do_browse_skills(content, owner=owner, workspace=workspace)
+    elif tool == "create_skill":
+        from src.tool_implementations import do_create_skill
+
+        desc = "create_skill"
+        result = await do_create_skill(content, owner=owner, session_id=session_id)
     elif tool == "read_skill":
         from src.tool_implementations import do_read_skill
 

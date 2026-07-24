@@ -177,6 +177,7 @@ _PLAN_MODE_KNOWN_MUTATORS = {
     "manage_session",
     "send_to_session",
     "manage_skills",
+    "create_skill",
     "manage_endpoints",
     "manage_mcp",
     "manage_tokens",

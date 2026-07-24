@@ -604,6 +604,36 @@ FUNCTION_TOOL_SCHEMAS = [
     {
         "type": "function",
         "function": {
+            "name": "create_skill",
+            "description": (
+                "Save a new (or updated) shared skill into the library — the write "
+                "counterpart to read_skill/browse_skills, used when authoring a "
+                "skill. Normally you first build a folder in the workspace holding "
+                "SKILL.md (YAML frontmatter with name + description, then the body) "
+                "plus any references/scripts, then call this with source_dir set to "
+                "that folder to package and store it. For a simple one-file skill, "
+                "pass content (the full SKILL.md) instead. The skill is enabled for "
+                "you and offered to all users."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "source_dir": {
+                        "type": "string",
+                        "description": "Workspace folder containing SKILL.md (+ references/scripts) to package as the skill bundle.",
+                    },
+                    "content": {
+                        "type": "string",
+                        "description": "Full SKILL.md text, for a single-file skill (alternative to source_dir).",
+                    },
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "browse_skills",
             "description": (
                 "Review the user's enabled skill library for the current task. "
@@ -1015,6 +1045,8 @@ def function_call_to_tool_block(name: str, arguments: str) -> Optional[ToolBlock
                 content += "\n" + value
     elif tool_type == "list_models":
         content = args.get("filter", "")
+    elif tool_type == "create_skill":
+        content = json.dumps(args)
     elif tool_type == "browse_skills":
         content = json.dumps({"query": args.get("query", "")})
     elif tool_type == "read_skill":

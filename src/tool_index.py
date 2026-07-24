@@ -96,6 +96,7 @@ BUILTIN_TOOL_DESCRIPTIONS: Dict[str, str] = {
     "manage_skills": "Skill management: add, update, publish, or search reusable skills/presets.",
     "read_skill": "Load the full instructions of an enabled shared skill (user-uploaded SKILL.md) by name, then follow its method exactly.",
     "browse_skills": "Review the enabled skill library for the current task; returns matching skills' full instructions inline to follow exactly.",
+    "create_skill": "Author/save a shared skill (SKILL.md + optional references/scripts) into the library from a workspace folder or inline content. Use when creating or updating a reusable skill.",
     "manage_endpoints": "Endpoint management: list, add, delete, enable, or disable model API endpoints.",
     "manage_mcp": "MCP server management: list, add, delete, reconnect servers, or list available tools.",
     "manage_tokens": "API token management: list, create, or delete API access tokens.",
@@ -409,6 +410,22 @@ class ToolIndex:
                 "research on",
             }
         ): {"manage_settings"},
+        # Skill authoring intent — surface create_skill (and browse for the
+        # skill-creator workflow) when the user wants to build/save a skill.
+        frozenset(
+            {
+                "create a skill",
+                "make a skill",
+                "build a skill",
+                "write a skill",
+                "new skill",
+                "author a skill",
+                "save this as a skill",
+                "turn this into a skill",
+                "skill creator",
+                "skill-creator",
+            }
+        ): {"create_skill", "browse_skills"},
         # Document creation intent
         frozenset(
             {

@@ -1322,6 +1322,111 @@ async def do_read_skill(
     }
 
 
+async def do_create_skill(
+    content: str, owner: Optional[str] = None, session_id: Optional[str] = None
+) -> Dict:
+    """Create or update a shared skill FROM the agent (skill-creator support).
+
+    Args (JSON):
+      - `source_dir`: a workspace folder the agent built, holding SKILL.md plus
+        any references/scripts. The whole folder is packaged as the skill's
+        bundle (this is the normal path — it captures scripts/references).
+      - `content`: alternatively, the full SKILL.md text for a single-file skill.
+      - `name`: optional; otherwise taken from the SKILL.md frontmatter.
+
+    The saved skill is auto-enabled for its author and becomes available to every
+    user (who each opt in). This is the write counterpart to read_skill/
+    browse_skills, so a skill that teaches skill authoring can actually produce a
+    new skill on Talos.
+    """
+    try:
+        args = _parse_tool_args(content)
+    except ValueError:
+        return {"error": "Invalid JSON arguments", "exit_code": 1}
+
+    from services.memory import shared_skills
+
+    source_dir = str(args.get("source_dir") or args.get("dir") or "").strip().strip("/")
+    inline = args.get("content")
+
+    try:
+        if source_dir:
+            import io
+            import zipfile
+
+            from src.sandbox_client import download_workspace_zip
+
+            raw = await download_workspace_zip(owner=owner, session_id=session_id)
+            prefix = source_dir + "/"
+            bundle_files: Dict[str, bytes] = {}
+            skill_md = None
+            total = 0
+            with zipfile.ZipFile(io.BytesIO(raw)) as zf:
+                for info in zf.infolist():
+                    nm = info.filename.replace("\\", "/")
+                    if info.is_dir() or not nm.startswith(prefix):
+                        continue
+                    rel = nm[len(prefix) :]
+                    if not rel:
+                        continue
+                    data = zf.read(info)
+                    if rel.lower() == "skill.md":
+                        try:
+                            skill_md = data.decode("utf-8")
+                        except UnicodeDecodeError:
+                            return {"error": "SKILL.md is not valid UTF-8", "exit_code": 1}
+                        continue
+                    safe = shared_skills._safe_bundle_path(rel)
+                    if safe is None:
+                        continue
+                    total += len(data)
+                    if (
+                        len(data) > shared_skills.MAX_BUNDLE_FILE_BYTES
+                        or total > shared_skills.MAX_BUNDLE_TOTAL_BYTES
+                        or len(bundle_files) >= shared_skills.MAX_BUNDLE_FILES
+                    ):
+                        return {
+                            "error": "Skill bundle exceeds size/file limits; trim the folder.",
+                            "exit_code": 1,
+                        }
+                    bundle_files[safe] = data
+            if skill_md is None:
+                return {
+                    "error": f"No SKILL.md found in workspace folder {source_dir!r}. "
+                    "Create it there first (with a name + description frontmatter).",
+                    "exit_code": 1,
+                }
+            meta = shared_skills.save_skill(skill_md, uploader=owner, bundle_files=bundle_files)
+        elif isinstance(inline, str) and inline.strip():
+            meta = shared_skills.save_skill(inline, uploader=owner)
+        else:
+            return {
+                "error": "Provide either source_dir (a workspace folder containing "
+                "SKILL.md) or content (the full SKILL.md text).",
+                "exit_code": 1,
+            }
+    except PermissionError as e:
+        return {"error": str(e), "exit_code": 1}
+    except ValueError as e:
+        return {"error": str(e), "exit_code": 1}
+    except Exception as e:
+        logger.error(f"create_skill failed: {e}")
+        return {"error": f"Could not save skill: {e}", "exit_code": 1}
+
+    try:
+        shared_skills.set_enabled(owner, meta["name"], True)
+    except Exception:
+        pass
+    return {
+        "results": (
+            f"Saved shared skill `{meta['name']}` ({meta.get('files', 0)} bundled "
+            "file(s)) and enabled it for you. It is now in the skill library; other "
+            "users can enable it in Settings → Skills. Test it by starting a fresh "
+            "request that should trigger it."
+        )
+    }
+
+
 # ---------------------------------------------------------------------------
 # Skills management tool
 # ---------------------------------------------------------------------------
