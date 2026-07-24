@@ -8,14 +8,20 @@ import { Tooltip } from './ui/misc';
  * composer showing how full the model's context window is, with the detail
  * panel (percent · used/max tokens, stacked category bar + legend) on hover. */
 
-// Display order + segment color per breakdown category. Tailwind classes (not
-// CSS vars) so the colors are guaranteed to exist in the build.
-const BREAKDOWN_CATEGORIES: ReadonlyArray<{ key: ContextCategory; className: string }> = [
-  { key: 'messages', className: 'bg-blue-500' },
-  { key: 'system', className: 'bg-violet-500' },
-  { key: 'tools', className: 'bg-cyan-500' },
-  { key: 'skills', className: 'bg-emerald-500' },
-  { key: 'knowledge', className: 'bg-amber-500' },
+// Display order + segment color per breakdown category. Colors come from the
+// --ctx-* ramp (styles/index.css): one accent hue fading to lighter tints, so
+// the stacked bar reads as one quantity split into parts. Ordered from the most
+// fixed part of the prompt (system) to the most volatile (messages), which also
+// means the ramp darkest→lightest tracks "always there"→"grows as you chat".
+const BREAKDOWN_CATEGORIES: ReadonlyArray<{ key: ContextCategory; color: string }> = [
+  { key: 'system', color: 'var(--ctx-1)' },
+  { key: 'tools', color: 'var(--ctx-2)' },
+  { key: 'mcpTools', color: 'var(--ctx-3)' },
+  { key: 'skills', color: 'var(--ctx-4)' },
+  { key: 'knowledge', color: 'var(--ctx-5)' },
+  { key: 'documents', color: 'var(--ctx-6)' },
+  { key: 'toolResults', color: 'var(--ctx-7)' },
+  { key: 'messages', color: 'var(--ctx-8)' },
 ];
 
 function formatTokens(value: number | null): string {
@@ -81,8 +87,11 @@ export function ContextMeter() {
   const radius = 9.5;
   const circumference = 2 * Math.PI * radius;
   const dashOffset = circumference - (percent / 100) * circumference;
-  const isOverloaded = percent > 90;
-  const usageColor = isOverloaded ? 'var(--color-red-500)' : 'var(--color-blue-500)';
+  // The ring stays on the accent hue for the normal range and only breaks to a
+  // warning/danger color when the window is genuinely close to compacting —
+  // a colored ring should mean something, not just decorate.
+  const usageColor =
+    percent > 90 ? 'var(--destructive)' : percent > 75 ? 'var(--warning)' : 'var(--primary)';
 
   return (
     <Tooltip
@@ -90,28 +99,29 @@ export function ContextMeter() {
       open={open}
       onOpenChange={setOpen}
       label={
-        <div className="flex w-56 flex-col gap-2 p-1.5">
-          <div className="flex items-center justify-between gap-3">
-            <div className="flex items-center gap-1.5">
-              <span className="text-xs font-medium text-muted-foreground">{t('contextMeter.title')}</span>
-              <span
-                className="rounded px-1 py-px text-[9px] font-medium uppercase tracking-wide text-muted-foreground/60 ring-1 ring-inset ring-border"
-                title={isExact ? t('contextMeter.exactHint') : t('contextMeter.estimatedHint')}
-              >
-                {isExact ? t('contextMeter.exact') : t('contextMeter.estimated')}
+        <div className="flex w-64 flex-col gap-2 p-1.5">
+          {/* Title and the numbers sit on separate rows: crammed onto one line
+            * the token counts ("262k/262k") collide with the title and the
+            * badge as soon as the window is large or nearly full. */}
+          <div className="flex items-center gap-1.5">
+            <span className="text-xs font-medium text-muted-foreground">{t('contextMeter.title')}</span>
+            <span
+              className="shrink-0 rounded px-1 py-px text-[9px] font-medium uppercase tracking-wide text-muted-foreground/60 ring-1 ring-inset ring-border"
+              title={isExact ? t('contextMeter.exactHint') : t('contextMeter.estimatedHint')}
+            >
+              {isExact ? t('contextMeter.exact') : t('contextMeter.estimated')}
+            </span>
+          </div>
+          <div className="flex items-baseline gap-1.5 tabular-nums">
+            <span className="text-sm font-medium text-foreground/90">{formatPercent(percent)}</span>
+            {usedTokens != null && maxTokens != null && (
+              <span className="whitespace-nowrap text-[11px] text-muted-foreground/70">
+                {t('contextMeter.usedOf', {
+                  used: formatTokens(usedTokens),
+                  max: formatTokens(maxTokens),
+                })}
               </span>
-            </div>
-            <div className="text-[11px] text-muted-foreground/70 tabular-nums">
-              <span>{formatPercent(percent)}</span>
-              {usedTokens != null && maxTokens != null && (
-                <>
-                  <span className="mx-1">·</span>
-                  <span>
-                    {formatTokens(usedTokens)}/{formatTokens(maxTokens)}
-                  </span>
-                </>
-              )}
-            </div>
+            )}
           </div>
           <div
             className="flex h-1.5 w-full overflow-hidden rounded-full bg-muted/60"
@@ -125,8 +135,11 @@ export function ContextMeter() {
               breakdownEntries.map((entry) => (
                 <div
                   key={entry.key}
-                  className={`h-full ${entry.className}`}
-                  style={{ width: `${(entry.value / (barDenominator as number)) * 100}%` }}
+                  className="h-full transition-[width] duration-500 ease-out motion-reduce:transition-none"
+                  style={{
+                    width: `${(entry.value / (barDenominator as number)) * 100}%`,
+                    backgroundColor: entry.color,
+                  }}
                 />
               ))
             ) : (
@@ -139,20 +152,30 @@ export function ContextMeter() {
           {hasBreakdown && (
             <div className="flex flex-col gap-0.5">
               {breakdownEntries.map((entry) => (
-                <div key={entry.key} className="flex items-center justify-between gap-3 text-[11px]">
-                  <span className="flex items-center gap-1.5 text-muted-foreground">
-                    <span aria-hidden="true" className={`size-1.5 shrink-0 rounded-full ${entry.className}`} />
-                    {t(`contextMeter.categories.${entry.key}`)}
+                <div key={entry.key} className="flex items-center justify-between gap-2 text-[11px]">
+                  {/* min-w-0 + truncate keeps a long category label from pushing
+                    * the token count out of the panel. */}
+                  <span className="flex min-w-0 items-center gap-1.5 text-muted-foreground">
+                    <span
+                      aria-hidden="true"
+                      className="size-1.5 shrink-0 rounded-full"
+                      style={{ backgroundColor: entry.color }}
+                    />
+                    <span className="truncate">{t(`contextMeter.categories.${entry.key}`)}</span>
                   </span>
-                  <span className="text-muted-foreground/70 tabular-nums">{formatTokens(entry.value)}</span>
+                  <span className="shrink-0 whitespace-nowrap text-muted-foreground/70 tabular-nums">
+                    {formatTokens(entry.value)}
+                  </span>
                 </div>
               ))}
-              <div className="flex items-center justify-between gap-3 text-[11px]">
-                <span className="flex items-center gap-1.5 text-muted-foreground/70">
+              <div className="flex items-center justify-between gap-2 text-[11px]">
+                <span className="flex min-w-0 items-center gap-1.5 text-muted-foreground/70">
                   <span aria-hidden="true" className="size-1.5 shrink-0 rounded-full bg-muted-foreground/30" />
-                  {t('contextMeter.categories.freeSpace')}
+                  <span className="truncate">{t('contextMeter.categories.freeSpace')}</span>
                 </span>
-                <span className="text-muted-foreground/70 tabular-nums">{formatTokens(freeTokens)}</span>
+                <span className="shrink-0 whitespace-nowrap text-muted-foreground/70 tabular-nums">
+                  {formatTokens(freeTokens)}
+                </span>
               </div>
             </div>
           )}

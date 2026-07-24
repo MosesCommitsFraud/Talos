@@ -168,7 +168,15 @@ export interface Metrics {
 }
 
 /** Context-meter breakdown categories, in display order. */
-export type ContextCategory = 'messages' | 'system' | 'tools' | 'skills' | 'knowledge';
+export type ContextCategory =
+  | 'system'
+  | 'tools'
+  | 'mcpTools'
+  | 'skills'
+  | 'knowledge'
+  | 'documents'
+  | 'toolResults'
+  | 'messages';
 
 /** Server-sent event emitted by POST /api/chat_stream. The stream mixes
  *  text deltas ({delta, thinking?}) with typed control events

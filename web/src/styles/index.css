@@ -148,6 +148,19 @@
   --info: var(--color-blue-500);
   --success: var(--color-emerald-500);
   --warning: var(--color-amber-500);
+
+  /* Context-meter ramp: one hue (Talos blue) fading to lighter tints, so the
+   * stacked bar reads as a single quantity split into parts rather than five
+   * unrelated categories. Ordered densest → lightest; the meter assigns them
+   * in category order. Light mode fades toward white. */
+  --ctx-1: var(--primary);
+  --ctx-2: color-mix(in oklab, var(--primary) 82%, var(--color-white));
+  --ctx-3: color-mix(in oklab, var(--primary) 66%, var(--color-white));
+  --ctx-4: color-mix(in oklab, var(--primary) 52%, var(--color-white));
+  --ctx-5: color-mix(in oklab, var(--primary) 40%, var(--color-white));
+  --ctx-6: color-mix(in oklab, var(--primary) 30%, var(--color-white));
+  --ctx-7: color-mix(in oklab, var(--primary) 22%, var(--color-white));
+  --ctx-8: color-mix(in oklab, var(--primary) 14%, var(--color-white));
 }
 
 .dark {
@@ -179,6 +192,18 @@
   --info: var(--color-blue-500);
   --success: var(--color-emerald-500);
   --warning: var(--color-amber-500);
+
+  /* Dark mode fades the same hue toward white too — lighter tints stay legible
+   * against the dark track, where fading toward the background would make the
+   * tail segments vanish. Held at a higher floor than light mode for contrast. */
+  --ctx-1: var(--primary);
+  --ctx-2: color-mix(in oklab, var(--primary) 84%, var(--color-white));
+  --ctx-3: color-mix(in oklab, var(--primary) 70%, var(--color-white));
+  --ctx-4: color-mix(in oklab, var(--primary) 58%, var(--color-white));
+  --ctx-5: color-mix(in oklab, var(--primary) 48%, var(--color-white));
+  --ctx-6: color-mix(in oklab, var(--primary) 40%, var(--color-white));
+  --ctx-7: color-mix(in oklab, var(--primary) 32%, var(--color-white));
+  --ctx-8: color-mix(in oklab, var(--primary) 26%, var(--color-white));
 }
 
 /* Self-hosted DM Sans (variable, 300–800) + Fira Code for code */

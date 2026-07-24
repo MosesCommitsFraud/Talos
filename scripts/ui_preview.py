@@ -400,6 +400,45 @@ print(result)
         # the real backend emits this just before streaming. Renders the in-stream
         # "earlier messages summarized" marker above the assistant turn.
         {"type": "compacted", "context_length": 40960},
+        # Live context-meter frames. The real backend emits one at the top of
+        # the turn (history only, before any prep work), a refined one after
+        # prompt assembly, one per usage report, and one after each round's tool
+        # results land — so the meter fills at the start of the turn instead of
+        # only when final metrics arrive.
+        #
+        # Frame 1: turn start. Only the conversation history exists, so the
+        # split is coarse — but it is real, and the ring moves immediately.
+        {
+            "type": "metrics",
+            "data": {
+                "context_percent": 15.7,
+                "context_length": 262144,
+                "context_tokens": 41200,
+                "usage_source": "estimated",
+                "context_breakdown": {"messages": 29200, "toolResults": 12000},
+            },
+        },
+        # Frame 2: prompt assembled — system prompt, tool schemas, skills index
+        # and retrieved knowledge have landed, so every category appears.
+        {
+            "type": "metrics",
+            "data": {
+                "context_percent": 41.2,
+                "context_length": 262144,
+                "context_tokens": 108000,
+                "usage_source": "estimated",
+                "context_breakdown": {
+                    "system": 8120,
+                    "tools": 12400,
+                    "mcpTools": 9260,
+                    "skills": 6400,
+                    "knowledge": 21280,
+                    "documents": 14300,
+                    "toolResults": 12000,
+                    "messages": 24240,
+                },
+            },
+        },
         {
             "delta": "I need to inspect the request, decide whether a quick calculation is enough, and then show the UI states for reasoning, code, tools, and metrics.\n",
             "thinking": True,
@@ -468,21 +507,27 @@ print(result)
                 "response_time": 1.42,
                 # Near-full window with a real tokenizer count, so the context meter
                 # shows the "exact" badge and the post-compaction usage.
-                "input_tokens": 31130,
+                "input_tokens": 247650,
                 "output_tokens": 156,
                 "tokens_per_second": 109.9,
-                "context_percent": 76.0,
-                "context_length": 40960,
-                "context_tokens": 31130,
+                # A near-full 262k window is the worst case for the meter's
+                # layout: "262k of 262k tokens" is the widest the numbers get.
+                "context_percent": 94.5,
+                "context_length": 262144,
+                "context_tokens": 247650,
                 "usage_source": "real",
                 # Category split for the meter's detail panel; sums to
-                # context_tokens (backend guarantees this).
+                # context_tokens (backend guarantees this). All categories
+                # present so the full ramp and every legend label render.
                 "context_breakdown": {
-                    "messages": 17890,
                     "system": 8120,
-                    "tools": 3200,
-                    "skills": 640,
-                    "knowledge": 1280,
+                    "tools": 12400,
+                    "mcpTools": 9260,
+                    "skills": 6400,
+                    "knowledge": 21280,
+                    "documents": 14300,
+                    "toolResults": 98600,
+                    "messages": 77290,
                 },
             },
         },

@@ -1239,9 +1239,14 @@ def _append_tool_results(
             msg["reasoning_content"] = round_reasoning
         messages.append(msg)
         messages.append(
-            {"role": "user", "content": f"[Tool execution results]\n\n{tool_output_text}"}
+            {"role": "user", "content": f"{TOOL_RESULT_PREFIX}\n\n{tool_output_text}"}
         )
 
+
+# Marker that opens the synthetic user message carrying a round's tool output
+# (text-protocol path). Used both to build that message and to classify it into
+# the "toolResults" context-meter category.
+TOOL_RESULT_PREFIX = "[Tool execution results]"
 
 # Maps a preface message's metadata.source label to a context-meter category.
 # System-role messages are always "system"; untagged user/assistant/tool turns
@@ -1249,10 +1254,43 @@ def _append_tool_results(
 _BREAKDOWN_SOURCE_CATEGORY = {
     "retrieved documents": "knowledge",
     "youtube transcript": "knowledge",
-    "active editor document": "knowledge",
+    "active editor document": "documents",
     "available skills index": "skills",
     "skills": "skills",
 }
+
+
+def _is_tool_result_message(msg: Dict) -> bool:
+    """True for a message that carries tool output rather than conversation."""
+    if msg.get("role") == "tool":
+        return True
+    content = msg.get("content")
+    return (
+        msg.get("role") == "user"
+        and isinstance(content, str)
+        and content.startswith(TOOL_RESULT_PREFIX)
+    )
+
+
+def _split_tool_schema_estimates(tool_schemas: List[Dict]) -> Dict[str, int]:
+    """Estimate schema tokens, split into built-in vs MCP-provided tools.
+
+    MCP tools are namespaced `mcp__server__tool` (see tool_schemas.py), which is
+    the only reliable way to tell a connected server's tools from the built-ins
+    — and it's worth telling them apart, since a chatty MCP server is a common
+    reason the window fills up before the conversation does.
+    """
+    out: Dict[str, int] = {}
+    for schema in tool_schemas:
+        fn = schema.get("function") if isinstance(schema, dict) else None
+        name = (fn or schema or {}).get("name", "") if isinstance(schema, dict) else ""
+        cat = "mcpTools" if str(name).startswith("mcp__") else "tools"
+        try:
+            size = 4 + int(len(json.dumps(schema)) * 0.3)
+        except (TypeError, ValueError):
+            continue
+        out[cat] = out.get(cat, 0) + size
+    return out
 
 
 def _compute_context_breakdown(
@@ -1276,6 +1314,11 @@ def _compute_context_breakdown(
             continue
         if msg.get("role") == "system":
             cat = "system"
+        elif _is_tool_result_message(msg):
+            # Tool output is usually the biggest and most compressible part of
+            # a long turn, so it gets its own row instead of inflating
+            # "Messages" and hiding why the window filled up.
+            cat = "toolResults"
         else:
             source = ((msg.get("metadata") or {}).get("source") or "").strip().lower()
             cat = _BREAKDOWN_SOURCE_CATEGORY.get(source, "messages")
@@ -1285,21 +1328,33 @@ def _compute_context_breakdown(
     # they never appear in the message list — approximate from their JSON.
     if tool_schemas:
         try:
-            estimates["tools"] = 4 * len(tool_schemas) + int(len(json.dumps(tool_schemas)) * 0.3)
+            for cat, size in _split_tool_schema_estimates(tool_schemas).items():
+                estimates[cat] = estimates.get(cat, 0) + size
         except Exception:
             pass
     estimates = {k: v for k, v in estimates.items() if v > 0}
     total_est = sum(estimates.values())
     if total_est <= 0:
         return None
+    # Largest-remainder allocation: floor every share, then hand the leftover
+    # units to the categories with the biggest fractional parts. This sums to
+    # ctx_tokens by construction. Rounding each share independently and pushing
+    # the drift onto one bucket does not: a per-category `max(1, …)` floor
+    # silently adds a token per category, so with enough categories and a small
+    # ctx_tokens the total overshot — and the meter derives free space from
+    # window minus this sum, so an inflated total under-reports free space.
     scale = ctx_tokens / total_est
-    breakdown = {k: max(1, round(v * scale)) for k, v in estimates.items()}
-    # Rounding drift lands on the biggest bucket so the sum stays exact.
-    drift = ctx_tokens - sum(breakdown.values())
-    if drift:
-        biggest = max(breakdown, key=breakdown.get)  # type: ignore[arg-type]
-        breakdown[biggest] = max(1, breakdown[biggest] + drift)
-    return breakdown
+    exact = {k: v * scale for k, v in estimates.items()}
+    breakdown = {k: int(v) for k, v in exact.items()}
+    leftover = ctx_tokens - sum(breakdown.values())
+    if leftover > 0:
+        by_remainder = sorted(exact, key=lambda k: exact[k] - breakdown[k], reverse=True)
+        for key in by_remainder[:leftover]:
+            breakdown[key] += 1
+    # Categories too small to claim a whole token are dropped rather than
+    # floored to 1 — a 1-token legend row is noise, and keeping it would break
+    # the exact-sum guarantee again.
+    return {k: v for k, v in breakdown.items() if v > 0}
 
 
 def _compute_final_metrics(
@@ -1635,6 +1690,52 @@ async def stream_agent_loop(
 
     if plan_mode:
         disabled_tools.update(plan_mode_disabled_tools())
+
+    # Survives the loop so final metrics can attribute the last round's native
+    # tool schemas in the context breakdown (they're tokenized server-side and
+    # never appear in the message list). Declared up here so the first
+    # context-meter frame — emitted before any prep work — can read it.
+    all_tool_schemas: List[Dict] = []
+
+    def _context_metrics_frame(ctx_tokens: int, source: str) -> str:
+        """Build a live context-meter SSE frame for the current message list.
+
+        The meter used to move only when the backend reported usage — once per
+        round, after the model had already read the prompt. That left it stale
+        across the whole tool phase, which is exactly when the window fills.
+        This frame is emitted at every point where occupancy actually changes,
+        and always carries the category breakdown so the detail panel stays
+        populated instead of collapsing to the plain bar between rounds.
+
+        The breakdown is omitted when there is nothing real to split yet, so a
+        chat with no accumulated context shows the bar alone rather than a
+        legend invented out of nothing.
+        """
+        pct = min(round((ctx_tokens / context_length) * 100, 1), 100.0) if context_length else 0
+        data = {
+            "context_tokens": ctx_tokens,
+            "context_percent": pct,
+            "context_length": context_length,
+            "usage_source": source,
+        }
+        try:
+            bd = _compute_context_breakdown(messages, all_tool_schemas, ctx_tokens)
+            # A single-category breakdown carries no information — the one row
+            # would just restate the total — so it's withheld and the panel
+            # shows the plain bar. Happens only on the opening frame of a brand
+            # new chat, where the sole content is the user's first message.
+            if bd and len(bd) > 1:
+                data["context_breakdown"] = bd
+        except Exception:  # a meter update must never break the turn
+            pass
+        return "data: " + json.dumps({"type": "metrics", "data": data}) + "\n\n"
+
+    # Earliest honest frame: the conversation history handed to this turn is
+    # already occupying the window, before tool selection, prompt assembly and
+    # RAG retrieval run. Emitting here fills the meter at the top of the turn
+    # instead of after the whole prep phase; the frames that follow refine the
+    # split as the system prompt, skills and retrieved documents land.
+    yield _context_metrics_frame(estimate_tokens(messages), "estimated")
 
     _t0 = time.time()
     _needs_admin = _detect_admin_intent(messages)
@@ -2027,6 +2128,10 @@ async def stream_agent_loop(
 
     yield f"data: {json.dumps({'type': 'agent_prep', 'data': {k: round(v, 3) for k, v in prep_timings.items()}})}\n\n"
 
+    # Refined frame: prompt assembly (system prompt, skills index, retrieved
+    # knowledge) and trimming have now happened, so the split is complete.
+    yield _context_metrics_frame(estimate_tokens(messages), "estimated")
+
     full_response = ""
     total_start = time.time()
     time_to_first_token = None
@@ -2103,11 +2208,6 @@ async def stream_agent_loop(
     # using tools — i.e. it was cut off, not finished. Drives a "Continue" event
     # so the user can resume instead of the turn silently stalling.
     _exhausted_rounds = False
-
-    # Survives the loop so final metrics can attribute the last round's native
-    # tool schemas in the context breakdown (they're tokenized server-side and
-    # never appear in the message list).
-    all_tool_schemas: List[Dict] = []
 
     # Forced skill review: when the user has enabled skills (and the feature is
     # on for them), compel a browse_skills call on round 1 via tool_choice, so a
@@ -2320,26 +2420,7 @@ async def stream_agent_loop(
                         # usage lands, so the ring reflects occupancy mid-turn
                         # (during tool loops) instead of only at the final metrics.
                         if round_input > 0:
-                            ctx_pct_live = (
-                                min(round((round_input / context_length) * 100, 1), 100.0)
-                                if context_length
-                                else 0
-                            )
-                            yield (
-                                "data: "
-                                + json.dumps(
-                                    {
-                                        "type": "metrics",
-                                        "data": {
-                                            "context_tokens": round_input,
-                                            "context_percent": ctx_pct_live,
-                                            "context_length": context_length,
-                                            "usage_source": "real",
-                                        },
-                                    }
-                                )
-                                + "\n\n"
-                            )
+                            yield _context_metrics_frame(round_input, "real")
                         # Backend-reported TRUE generation speed (llama.cpp
                         # timings.predicted_per_second) — pure decode, excludes
                         # prefill/network. Preferred over tokens/wall-clock, which
@@ -3166,6 +3247,11 @@ async def stream_agent_loop(
             round_num,
             round_reasoning=round_reasoning,
         )
+
+        # Tool output just landed in the message list — that's the single
+        # biggest jump in occupancy a turn makes, so refresh the meter now
+        # instead of waiting for the next round's usage report.
+        yield _context_metrics_frame(estimate_tokens(messages), "estimated")
 
         # Emit agent_step event
         yield (f"data: {json.dumps({'type': 'agent_step', 'round': round_num + 1})}\n\n")
