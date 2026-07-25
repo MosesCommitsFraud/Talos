@@ -85,9 +85,13 @@ services:
       - ./searxng:/etc/searxng:rw
     environment:
       - SEARXNG_BASE_URL=${SEARXNG_URL:-http://searxng:8080}/
-      # Signs SearxNG's internal tokens. Generate one with `openssl rand -hex 32`
-      # and set it in .env, or replace `ultrasecretkey` in searxng/settings.yml.
-      - SEARXNG_SECRET=${SEARXNG_SECRET:-ultrasecretkey}
+      # Signs SearxNG's internal tokens; SearxNG refuses to start until it is
+      # changed from the shipped placeholder. Set SEARXNG_SECRET in .env
+      # (`openssl rand -hex 32`) or edit secret_key in searxng/settings.yml.
+      # Passed WITHOUT a default on purpose: this env var overrides the config
+      # file, so a placeholder default here would silently clobber a secret set
+      # in settings.yml and leave the container crash-looping.
+      - SEARXNG_SECRET
     # Rate-limiting middleware keeps per-IP state in memory; a single caller
     # (the app) never trips it, so no Redis dependency is needed here.
     networks:
