@@ -24,6 +24,8 @@ Grouped by concern:
 
 - `agent_loop.py` — the model ↔ tool loop driving agentic chat.
 - `agent_tools.py`, `builtin_actions.py`, `builtin_mcp.py` — tools available to the agent.
+- `web_search.py` — internet access (`web_search` / `web_fetch`) via the bundled
+  self-hosted SearxNG service; `web_fetch` is SSRF-guarded against internal hosts.
 - `chat_handler.py`, `chat_processor.py`, `chat_helpers.py` — request handling & streaming.
 - `context_budget.py`, `context_compactor.py`, `context_optimizer.py` — context-window management.
 - `ai_interaction.py`, `llm_core.py`, `model_context.py`, `model_discovery.py` — LLM plumbing.

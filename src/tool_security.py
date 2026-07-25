@@ -159,6 +159,10 @@ PLAN_MODE_READONLY_TOOLS = {
     # Read-only lookup of a shared skill's instructions.
     "read_skill",
     "browse_skills",
+    # Research while planning. Both are read-only: they mutate nothing on the
+    # server and nothing the user owns.
+    "web_search",
+    "web_fetch",
 }
 
 

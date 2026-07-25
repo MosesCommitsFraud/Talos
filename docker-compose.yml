@@ -46,6 +46,9 @@ services:
       # network is the trust boundary. For defense-in-depth, set RAG_REDIS_PASSWORD
       # in .env; it's then enforced on the server and injected into this URL.
       - REDIS_URL=${REDIS_URL:-redis://:${RAG_REDIS_PASSWORD:-}@rag-redis:6379/0}
+      # Internet access for the web_search tool. Points at the bundled SearxNG
+      # service below; override to reuse a SearxNG you already run.
+      - SEARXNG_URL=${SEARXNG_URL:-http://searxng:8080}
       - TALOS_SANDBOX_URL=${TALOS_SANDBOX_URL:-http://talos-sandbox:7800}
       # Shared secret the app sends on every sandbox API call. Set this in your
       # .env to a long random string to require auth on the sandbox daemon.
@@ -65,7 +68,30 @@ services:
         condition: service_started
       rag-redis:
         condition: service_started
+      searxng:
+        condition: service_started
     restart: unless-stopped
+
+  # Metasearch engine behind the web_search tool: it queries Google/Bing/
+  # DuckDuckGo/Wikipedia/... server-side and returns merged JSON, so Talos gets
+  # internet access without a paid search API. No published port — only the app
+  # talks to it, over the internal network. Its config lives in ./searxng and
+  # MUST keep `json` in search.formats, which upstream disables by default.
+  searxng:
+    image: searxng/searxng:latest
+    container_name: searxng
+    restart: unless-stopped
+    volumes:
+      - ./searxng:/etc/searxng:rw
+    environment:
+      - SEARXNG_BASE_URL=${SEARXNG_URL:-http://searxng:8080}/
+      # Signs SearxNG's internal tokens. Generate one with `openssl rand -hex 32`
+      # and set it in .env, or replace `ultrasecretkey` in searxng/settings.yml.
+      - SEARXNG_SECRET=${SEARXNG_SECRET:-ultrasecretkey}
+    # Rate-limiting middleware keeps per-IP state in memory; a single caller
+    # (the app) never trips it, so no Redis dependency is needed here.
+    networks:
+      - default
 
   # Vector store for RAG: dense + sparse (BM25/IDF) named vectors, server-side
   # RRF hybrid fusion. Multi-arch image (runs on both ARM64 and AMD64 hosts).

@@ -2498,6 +2498,58 @@ async def do_manage_settings(content: str, owner: Optional[str] = None) -> Dict:
 
 
 # ---------------------------------------------------------------------------
+# Web search / fetch tools (self-hosted SearxNG)
+# ---------------------------------------------------------------------------
+
+
+async def do_web_search(
+    content: str, owner: Optional[str] = None, session_id: Optional[str] = None
+) -> Dict:
+    """Search the public internet through the configured SearxNG instance."""
+    del owner
+    try:
+        args = _parse_tool_args(content) if content.strip() else {}
+    except ValueError:
+        # Models frequently emit a bare query instead of JSON — that's the
+        # single most common call shape, so accept it rather than erroring.
+        args = {"query": content.strip()}
+    if not isinstance(args, dict):
+        args = {"query": str(args)}
+    if not args.get("query") and content.strip() and not content.strip().startswith("{"):
+        args["query"] = content.strip()
+
+    from src.web_search import search
+
+    return await search(
+        query=str(args.get("query") or ""),
+        max_results=args.get("max_results") or args.get("num_results") or 0,
+        language=str(args.get("language") or ""),
+        category=str(args.get("category") or args.get("categories") or ""),
+        time_range=str(args.get("time_range") or args.get("recency") or ""),
+        page=args.get("page") or 1,
+        # Scopes the leak guard to the knowledge retrieved for THIS chat.
+        session_id=session_id or "",
+    )
+
+
+async def do_web_fetch(content: str, owner: Optional[str] = None) -> Dict:
+    """Fetch a public web page and return its readable text."""
+    del owner
+    try:
+        args = _parse_tool_args(content) if content.strip() else {}
+    except ValueError:
+        args = {"url": content.strip()}
+    if not isinstance(args, dict):
+        args = {"url": str(args)}
+    if not args.get("url") and content.strip() and not content.strip().startswith("{"):
+        args["url"] = content.strip().split()[0]
+
+    from src.web_search import fetch
+
+    return await fetch(url=str(args.get("url") or ""), max_chars=args.get("max_chars") or 0)
+
+
+# ---------------------------------------------------------------------------
 # API call tool
 # ---------------------------------------------------------------------------
 

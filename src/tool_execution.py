@@ -1750,6 +1750,16 @@ async def execute_tool_block(
 
         desc = f"read_skill: {content.split(chr(10))[0].strip()[:60]}"
         result = await do_read_skill(content, owner=owner, workspace=workspace)
+    elif tool == "web_search":
+        from src.tool_implementations import do_web_search
+
+        desc = f"web_search: {content.split(chr(10))[0].strip()[:80]}"
+        result = await do_web_search(content, owner=owner, session_id=session_id)
+    elif tool == "web_fetch":
+        from src.tool_implementations import do_web_fetch
+
+        desc = f"web_fetch: {content.split(chr(10))[0].strip()[:80]}"
+        result = await do_web_fetch(content, owner=owner)
     elif tool == "api_call":
         first_line = content.split("\n")[0].strip()[:60]
         desc = f"api_call: {first_line}"

@@ -98,6 +98,20 @@ DEFAULT_SETTINGS = {
     # rc files, SSH key files) are always blocked regardless of roots.
     "tool_path_extra_roots": [],
     "sql_database": {"enabled": False},
+    # Base URL of the SearxNG instance behind the web_search tool. Empty = use
+    # the SEARXNG_URL env var, which defaults to the bundled compose service.
+    # Set this only to point at a SearxNG you run elsewhere.
+    "searxng_url": "",
+    # Keep internal knowledge out of outbound search queries: refuses a
+    # web_search whose wording is copied from the documents retrieved for the
+    # same turn, and adds the matching confidentiality rule to the prompt.
+    # See src/web_leak_guard.py. Off = the model may search for anything.
+    "web_leak_guard": True,
+    # Domain policy for web_search results and web_fetch. Blocklist always
+    # wins; a NON-EMPTY allowlist means only those domains (and their
+    # subdomains) may be used at all. Entries may be bare hosts or full URLs.
+    "web_domain_allowlist": [],
+    "web_domain_blocklist": [],
     "rag_pipeline": {},
     "disabled_tools": [
         "generate_image",

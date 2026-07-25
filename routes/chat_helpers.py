@@ -661,6 +661,24 @@ async def build_chat_context(
     # Build messages
     messages = preface + sess.get_context_messages()
 
+    # Hand the retrieved knowledge to the web-search leak guard (or clear a
+    # stale entry when this turn retrieved nothing), so an outbound query can
+    # be checked against what the model is actually looking at.
+    from src.web_leak_guard import forget_context, remember_context
+
+    if rag_sources:
+        remember_context(
+            session_id,
+            "\n\n".join(
+                str(m.get("content") or "")
+                for m in messages
+                if isinstance(m, dict)
+                and (m.get("metadata") or {}).get("source") == "retrieved documents"
+            ),
+        )
+    else:
+        forget_context(session_id)
+
     # OpenWebUI-style RAG injection: merge retrieved source context into the
     # current user turn instead of leaving it as a separate earlier message.
     # Many models treat a standalone prior user message as chat history, while
@@ -696,7 +714,10 @@ async def build_chat_context(
                     "not ignore it. The question may be a follow-up — resolve references "
                     "against the conversation history first. If the retrieved knowledge is "
                     "about a different topic than the conversation, ignore it and answer "
-                    "from the conversation instead.\n\n"
+                    "from the conversation instead. This retrieved knowledge outranks the "
+                    "web: only search the internet when it does not cover the question, is "
+                    "out of date for a question about current facts, or the user explicitly "
+                    "asks you to look something up.\n\n"
                     "USER QUESTION:\n"
                 )
                 if isinstance(current, str):
@@ -752,37 +773,11 @@ async def build_chat_context(
     )
 
 
-# Common English + German function words — filtered out before measuring
-# answer↔source overlap so shared stopwords ("the", "und", …) don't make an
-# unrelated source look "used".
-_RAG_STOPWORDS = frozenset(
-    """
-the a an and or but if then else of to in into on at for with without from by as is are was were be been being
-this that these those it its they them their there here what which who whom whose how why when while where also
-do does did done can could should would may might must will shall not no nor yes you your yours we our ours us
-i me my mine he she him her his hers them about over under again more most some any each such only than too very
-der die das den dem des ein eine einen einem einer und oder aber wenn dann sonst von zu im in an auf fuer für mit
-ohne aus durch als ist sind war waren sein seine ich wir unser unsere du dein deine nicht kein keine ja was welche
-welcher wer wie warum wann wo dies diese dieser jene jener es sie ihr ihre auch nur mehr sehr noch schon man
-""".split()
-)
-
-_RAG_WORD_RE = re.compile(r"[0-9A-Za-zÀ-ÿ_]+")
-
-
-def _rag_content_tokens(text: str) -> list:
-    """Lowercased content words (≥3 chars, non-stopword) for overlap scoring."""
-    return [
-        w
-        for w in (m.lower() for m in _RAG_WORD_RE.findall(text or ""))
-        if len(w) >= 3 and w not in _RAG_STOPWORDS
-    ]
-
-
-def _rag_bigrams(tokens: list) -> set:
-    return (
-        {(tokens[i], tokens[i + 1]) for i in range(len(tokens) - 1)} if len(tokens) >= 2 else set()
-    )
+# Tokenizer/bigram helpers live in src.text_overlap so the web-search leak
+# guard can score a query against the same retrieved text with identical
+# tokenization (see src/web_leak_guard.py).
+from src.text_overlap import bigrams as _rag_bigrams  # noqa: E402
+from src.text_overlap import content_tokens as _rag_content_tokens  # noqa: E402
 
 
 def filter_used_rag_sources(

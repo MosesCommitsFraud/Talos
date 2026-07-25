@@ -1,0 +1,46 @@
+# SearxNG configuration for Talos' web_search tool.
+#
+# This instance is NOT a public search page — it has no published port and is
+# reached only by the app container over the internal Docker network. It exists
+# so the agent can query the open web without a paid search API.
+#
+# The one setting that must not be removed is `json` under search.formats:
+# upstream ships HTML-only, and without JSON the web_search tool gets HTTP 403.
+
+use_default_settings: true
+
+general:
+  instance_name: "Talos Search"
+  # Keep the debug/stats endpoints off — nothing here needs to be inspectable.
+  enable_metrics: false
+
+search:
+  safe_search: 0
+  autocomplete: ""
+  # HTML is kept so an admin can open the UI through a port-forward when
+  # debugging which engines are actually answering.
+  formats:
+    - html
+    - json
+
+server:
+  # `ultrasecretkey` is the literal placeholder SearxNG's own container
+  # entrypoint looks for when substituting $SEARXNG_SECRET — keep the spelling
+  # or the substitution silently does nothing. Safest is to replace it here
+  # with a real value on the host (see .env.example), which works regardless of
+  # whether the container can write to this bind mount.
+  secret_key: "ultrasecretkey"
+  # No limiter: the only client is the app container over the internal network,
+  # so per-IP rate limiting would only ever throttle ourselves — and skipping it
+  # keeps this service free of the Redis dependency it would otherwise need.
+  limiter: false
+  image_proxy: false
+
+ui:
+  default_locale: ""
+
+outgoing:
+  request_timeout: 6.0
+  max_request_timeout: 12.0
+  pool_connections: 100
+  pool_maxsize: 20

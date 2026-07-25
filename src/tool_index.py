@@ -53,6 +53,14 @@ ALWAYS_AVAILABLE = frozenset(
         # The forced 'look at your skills' tool — must always be reachable so
         # the agent loop can compel it when skills are active.
         "browse_skills",
+        # Internet access is never gated behind retrieval. Whether a turn needs
+        # the web is a judgement the model makes mid-answer ("I don't know this",
+        # "that document is from 2023") — by then the tool set for the turn is
+        # already fixed, so RAG selection would have had to guess from the first
+        # user message. The RAG-first ordering lives in the tool description,
+        # not in whether the tool is present.
+        "web_search",
+        "web_fetch",
     }
 )
 
@@ -107,6 +115,8 @@ BUILTIN_TOOL_DESCRIPTIONS: Dict[str, str] = {
     "send_to_session": "Send a message to another chat. Cross-chat communication.",
     "search_chats": "Search through chat history across all sessions.",
     "ask_user": "Ask the user a question to get a decision, clarification, or input. Use this when the task is genuinely ambiguous and the answer changes what you do next — pick between approaches, confirm an assumption, choose among options, gather a missing detail — instead of guessing. Provide a clear `question` plus either 2-6 `options` (each with a short `label`, optional `description`) for clickable buttons, or no options for an open free-text answer. Calling this ENDS your turn: the user's answer arrives as your next message. Don't use it for things you can decide from context or sensible defaults, or for irreversible-action confirmation if a dedicated flow exists.",
+    "web_search": "Search the live internet via the self-hosted SearxNG instance (Google/Bing/DuckDuckGo/Wikipedia results, no API key). For current events, news, prices, releases, versions, documentation, laws, people, companies — anything newer than training data or absent from the user's own documents. Also for any explicit request to search, look up, google, or research something, in English or German (suche, recherchiere, nachschlagen, aktuelle Informationen). Check the retrieved knowledge in context first; use the web when it doesn't answer. Multiple calls per task are expected.",
+    "web_fetch": "Open a public web page URL and return its readable text. Follow-up to web_search when snippets are too thin, or direct read of a link the user provided. Public http(s) HTML/text pages only.",
     "query_sql": "Read-only SQL access to the configured external database using backend .env credentials. Use when the user asks for database data, SQL, tables, schema, rows, metrics, reports, counts, customers, orders, products, invoices, or anything stored in the DB. Supports list_tables, describe table, and read-only SELECT/WITH/SHOW/DESCRIBE/EXPLAIN/PRAGMA queries with optional max_rows; omit max_rows or pass 0 for no row limit. The model never needs DB passwords.",
 }
 

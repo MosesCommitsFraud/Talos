@@ -61,6 +61,9 @@ TOOL_TAGS = {
     "manage_documents",
     "manage_settings",
     "query_sql",
+    # Internet access via the self-hosted SearxNG instance
+    "web_search",
+    "web_fetch",
     # Retrieve the full original of a compressed tool output
     # (see src/context_optimizer.py)
     "expand_output",

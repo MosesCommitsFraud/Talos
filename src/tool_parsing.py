@@ -232,6 +232,24 @@ _TOOL_NAME_MAP = {
     "manage_settings": "manage_settings",
     "settings": "manage_settings",
     "preferences": "manage_settings",
+    # Internet access. The aliases cover what models reach for unprompted —
+    # "search"/"google"/"suche" for the query side, "browse"/"open_url" for
+    # reading a page — so a near-miss name still executes instead of being
+    # printed as prose.
+    "web_search": "web_search",
+    "search_web": "web_search",
+    "internet_search": "web_search",
+    "websearch": "web_search",
+    "search": "web_search",
+    "google": "web_search",
+    "suche": "web_search",
+    "web_fetch": "web_fetch",
+    "fetch_url": "web_fetch",
+    "fetch": "web_fetch",
+    "open_url": "web_fetch",
+    "read_url": "web_fetch",
+    "browse": "web_fetch",
+    "visit": "web_fetch",
 }
 
 

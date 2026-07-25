@@ -6,6 +6,7 @@ import {
   ChevronRightIcon,
   DatabaseIcon,
   FileTextIcon,
+  GlobeIcon,
   KeyboardIcon,
   Link2Icon,
   LogOutIcon,
@@ -93,7 +94,7 @@ import { UsersPanel } from './settings/UsersPanel';
 
 export type Panel =
   | 'appearance' | 'shortcuts' | 'account' | 'skills'
-  | 'models' | 'ai' | 'assistants' | 'integrations' | 'tools' | 'rag' | 'users' | 'system';
+  | 'models' | 'ai' | 'assistants' | 'integrations' | 'web' | 'tools' | 'rag' | 'users' | 'system';
 
 /* ── Shared layout (t3code settings design) ── */
 
@@ -1117,6 +1118,67 @@ function SqlDatabaseSection() {
   );
 }
 
+/* ── Web access (SearxNG backend, leak guard, domain policy) ── */
+
+function WebPanel() {
+  const { t } = useTranslation();
+  const s = useSettingsDraft();
+  if (!s.ready) return <Page><p className="text-sm text-muted-foreground">{t('common.loading')}</p></Page>;
+
+  // Both lists are stored as string arrays but edited as one-per-line text —
+  // admins paste domains, they don't manage rows.
+  const asText = (k: string) => {
+    const v = s.value(k);
+    return Array.isArray(v) ? v.join('\n') : String(v ?? '');
+  };
+  const setFromText = (k: string, text: string) =>
+    s.setValue(k, text.split('\n').map((l) => l.trim()).filter(Boolean));
+
+  return (
+    <Page>
+      <Section title={t('settings.web.backend')}>
+        <TextRow
+          s={s} k="searxng_url"
+          label={t('settings.web.instance')}
+          hint={t('settings.web.instanceHint')}
+          placeholder="http://searxng:8080"
+          width="w-72"
+        />
+      </Section>
+
+      <Section title={t('settings.web.privacy')}>
+        <BoolRow
+          s={s} k="web_leak_guard"
+          label={t('settings.web.leakGuard')}
+          hint={t('settings.web.leakGuardHint')}
+        />
+      </Section>
+
+      <Section title={t('settings.web.allowlist')} padded>
+        <p className="mb-2.5 text-xs text-muted-foreground/80">{t('settings.web.allowlistHint')}</p>
+        <Textarea
+          className="min-h-[110px] font-mono text-[13px]"
+          placeholder={'wikipedia.org\ndocs.python.org\nheise.de'}
+          value={asText('web_domain_allowlist')}
+          onChange={(e) => setFromText('web_domain_allowlist', e.target.value)}
+        />
+      </Section>
+
+      <Section title={t('settings.web.blocklist')} padded>
+        <p className="mb-2.5 text-xs text-muted-foreground/80">{t('settings.web.blocklistHint')}</p>
+        <Textarea
+          className="min-h-[110px] font-mono text-[13px]"
+          placeholder={'facebook.com\npastebin.com'}
+          value={asText('web_domain_blocklist')}
+          onChange={(e) => setFromText('web_domain_blocklist', e.target.value)}
+        />
+      </Section>
+
+      <SaveBar dirty={s.dirty} saving={s.save.isPending} error={s.save.isError ? (s.save.error as Error).message : undefined} onSave={() => s.save.mutate()} />
+    </Page>
+  );
+}
+
 /* ── Agent Tools (built-in tool toggles, grouped by category like legacy) ── */
 
 /** Category + approximate context cost per tool. Display name & description
@@ -1127,6 +1189,8 @@ const TOOL_META: Record<string, { cat: string; ctx: string }> = {
   read_file: { cat: 'Code', ctx: '~150' },
   write_file: { cat: 'Code', ctx: '~150' },
   search_chats: { cat: 'Search', ctx: '~150' },
+  web_search: { cat: 'Search', ctx: '~250' },
+  web_fetch: { cat: 'Search', ctx: '~150' },
   create_document: { cat: 'Documents', ctx: '~200' },
   update_document: { cat: 'Documents', ctx: '~200' },
   edit_document: { cat: 'Documents', ctx: '~200' },
@@ -1881,6 +1945,7 @@ export function SettingsDialog({
     { id: 'ai', label: t('settings.nav.ai'), icon: <BotIcon /> },
     { id: 'assistants', label: t('settings.nav.assistants'), icon: <PlugIcon /> },
     { id: 'integrations', label: t('settings.nav.integrations'), icon: <Link2Icon /> },
+    { id: 'web', label: t('settings.nav.web'), icon: <GlobeIcon /> },
     { id: 'tools', label: t('settings.nav.tools'), icon: <WrenchIcon /> },
     { id: 'users', label: t('settings.nav.users'), icon: <UsersIcon /> },
     { id: 'system', label: t('settings.nav.system'), icon: <SettingsIcon /> },
@@ -1979,6 +2044,7 @@ export function SettingsDialog({
             {panel === 'ai' && <AiDefaultsPanel />}
             {panel === 'assistants' && <AssistantsPanel />}
             {panel === 'integrations' && <IntegrationsPanel />}
+            {panel === 'web' && <WebPanel />}
             {panel === 'tools' && <ToolsPanel />}
             {panel === 'users' && <UsersPanel currentUser={auth?.username} />}
             {panel === 'system' && <SystemPanel />}

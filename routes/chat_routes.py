@@ -836,6 +836,8 @@ def setup_chat_routes(
                         "write_file",
                         "edit_file",
                         "search_chats",
+                        "web_search",
+                        "web_fetch",
                     }
                 )
 
