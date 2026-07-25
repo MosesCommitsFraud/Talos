@@ -81,3 +81,36 @@ def test_strip_removes_nested_fence_document_but_keeps_trailing_chat():
     cleaned = tp.strip_tool_blocks(text)
     assert "print(1)" not in cleaned
     assert "Anything else?" in cleaned
+
+
+# ── orphan tool-call markup ──
+
+
+def test_orphan_tool_call_tag_is_stripped():
+    """qwen3 opens `<tool_call>` and then emits the call through the native
+    tool_calls field, so no closing tag ever arrives and the literal markup
+    used to reach the user."""
+    from src.tool_parsing import strip_tool_blocks
+
+    out = strip_tool_blocks("Kurze Antwort.\n<tool_call>\n")
+    assert "<tool_call>" not in out
+    assert "Kurze Antwort." in out
+
+
+def test_orphan_closing_and_namespaced_tags_are_stripped():
+    from src.tool_parsing import strip_tool_blocks
+
+    out = strip_tool_blocks("A</tool_call>B<minimax:tool_call>C</function_call>D")
+    assert "tool_call" not in out and "function_call" not in out
+    assert "A" in out and "D" in out
+
+
+def test_balanced_tool_call_block_still_removed_entirely():
+    from src.tool_parsing import strip_tool_blocks
+
+    out = strip_tool_blocks(
+        'Text.<tool_call><invoke name="bash"><parameter name="command">ls</parameter>'
+        "</invoke></tool_call>"
+    )
+    assert "ls" not in out and "invoke" not in out
+    assert out.strip() == "Text."

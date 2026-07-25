@@ -46,6 +46,13 @@ _XML_PARAM_RE = re.compile(
     r'<parameter\s+name=["\'](\w+)["\']>([\s\S]*?)</parameter>',
     re.IGNORECASE,
 )
+# Leftover open/close tags after the paired removers have run — a model that
+# writes `<tool_call>` and then emits the call through the native tool_calls
+# field never produces a closing tag, so the literal markup reaches the user.
+_ORPHAN_TOOL_TAG_RE = re.compile(
+    r"</?(?:[\w]+:)?(?:tool_call|function_call|tool_code)\s*>",
+    re.IGNORECASE,
+)
 
 # Pattern 4: <tool_code> blocks (MiniMax-M2.5 style)
 # {tool => 'tool_name', args => '<param>value</param>'}
@@ -513,5 +520,9 @@ def strip_tool_blocks(text: str) -> str:
     cleaned = re.sub(
         r'<invoke\s+name=["\'].*?</invoke>', "", cleaned, flags=re.DOTALL | re.IGNORECASE
     )
+    # Orphan <tool_call> / </function_call> tags. The removers above only match
+    # balanced pairs, so a model that opens the tag and then emits the call
+    # natively (qwen3 does this) leaves the literal tag in the visible answer.
+    cleaned = _ORPHAN_TOOL_TAG_RE.sub("", cleaned)
     cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
     return cleaned.strip()

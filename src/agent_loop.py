@@ -257,6 +257,7 @@ Read-only SQL access to the configured external database(s). Use when the user a
 ```
 Search the live internet (self-hosted SearxNG). Only `query` is required; a bare query line without JSON also works.
 **Order of sources:** the retrieved knowledge in your context (the user's own documents) comes FIRST — if it answers the question, answer from it and don't search. Go to the web when that knowledge is absent, insufficient, or stale, when the question is about current/dated facts (news, prices, releases, versions, weather, laws, people, companies), or whenever the user asks you to search, look something up, or research a topic — in any language ("suche", "recherchiere", "google mal", "was gibt es Neues zu", "search for", "look up").
+**Search, don't ask.** When a question needs the web, call this tool immediately — never reply "möchtest du, dass ich danach suche?" or otherwise ask permission first, and never say you cannot look something up while this tool is in your tool list. Searching is a normal, reversible action that needs no confirmation.
 **Use several calls.** Real research needs more than one query: split the question into sub-questions, run a query per sub-question, and reformulate when the results are weak. Search in the language the answer lives in (German sources for German topics — pass `language: "de"`). Use `time_range` for "latest"/"aktuell" questions.
 Results are snippets, not pages. When the snippet doesn't settle the question, open the best URLs with `web_fetch`. Cite what you used as markdown links.""",
     "web_fetch": """\
