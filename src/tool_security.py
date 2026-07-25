@@ -42,6 +42,27 @@ _BASH_BLOCKED_BINARIES = frozenset({
     "ssh", "scp", "sftp", "telnet", "nc", "ncat", "nmap",
 })
 
+# HTTP fetchers. These are not a safety concern — they simply cannot work: the
+# sandbox sits on an `internal: true` Docker network with no route out, so every
+# one of them dies on DNS resolution. Left alone, a model asked for something
+# from the web scrapes DuckDuckGo with curl, watches it fail, and reports to the
+# user that the whole assistant has no internet access — which is what happened
+# before this check existed. Redirecting to web_search costs one round instead.
+_BASH_NETWORK_BINARIES = frozenset({
+    "curl", "wget", "aria2c", "httpie", "http", "https",
+    "lynx", "w3m", "links", "elinks", "youtube-dl", "yt-dlp",
+})
+
+NETWORK_REDIRECT_MESSAGE = (
+    "bash: the workspace has no network access, so this command cannot reach "
+    "the internet — retrying it, or trying wget/urllib/requests instead, will "
+    "fail the same way. Use the `web_search` tool to search the internet and "
+    "`web_fetch` to read a specific URL; those run outside the workspace and "
+    "do have network access. If neither tool is available to you this turn, "
+    "tell the user web access is not enabled rather than describing this "
+    "workspace or its network."
+)
+
 # Split a compound command line into individual command positions.
 _BASH_CMD_SPLIT_RE = re.compile(r"\|\||&&|;|\||\n|`|\$\(")
 _BASH_ENV_ASSIGN_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=\S*\s+")
@@ -76,6 +97,10 @@ def bash_policy_violation(command: str) -> Optional[str]:
     position (segments split on pipes/&&/;/subshells, env-var assignments and
     common wrappers stripped) against the blocklist, plus `curl|wget … | sh`
     remote-install patterns.
+
+    HTTP fetchers get their own message pointing at web_search/web_fetch — they
+    are unreachable rather than forbidden, and the difference matters to what
+    the model does next.
     """
     if not isinstance(command, str):
         return BASH_POLICY_MESSAGE
@@ -83,6 +108,22 @@ def bash_policy_violation(command: str) -> Optional[str]:
         return BASH_POLICY_MESSAGE
     if _BASH_SYSTEM_PATH_RE.search(command):
         return BASH_POLICY_MESSAGE
+    for binary, bare_env in _command_binaries(command):
+        # Bare `env` (no command to wrap) dumps the environment variables.
+        if bare_env:
+            return BASH_POLICY_MESSAGE
+        if binary in _BASH_BLOCKED_BINARIES:
+            return BASH_POLICY_MESSAGE
+    return None
+
+
+def _command_binaries(command: str):
+    """Yield `(binary, is_bare_env)` for each command position in `command`.
+
+    Segments are split on pipes/&&/;/subshells, then env-var assignments and
+    wrappers that execute their argument (`timeout 30 …`, `nice -n 10 …`) are
+    stripped so the binary that actually runs is what gets checked.
+    """
     for segment in _BASH_CMD_SPLIT_RE.split(command):
         seg = segment.strip()
         while True:
@@ -91,12 +132,9 @@ def bash_policy_violation(command: str) -> Optional[str]:
                 break
             seg = stripped
         tokens = seg.split()
-        # Bare `env` (no command to wrap) dumps the environment variables.
         if len(tokens) == 1 and tokens[0].rsplit("/", 1)[-1] == "env":
-            return BASH_POLICY_MESSAGE
-        # Wrappers that execute their argument: skip the wrapper plus its own
-        # flags/numeric args (e.g. `timeout 30`, `nice -n 10`) and check what
-        # they actually run.
+            yield "env", True
+            continue
         while tokens and tokens[0].rsplit("/", 1)[-1] in {
             "command", "exec", "env", "nohup", "time", "timeout", "nice",
             "xargs", "watch", "setsid",
@@ -109,9 +147,22 @@ def bash_policy_violation(command: str) -> Optional[str]:
             ]
         if not tokens:
             continue
-        binary = tokens[0].rsplit("/", 1)[-1].lower()
-        if binary in _BASH_BLOCKED_BINARIES:
-            return BASH_POLICY_MESSAGE
+        yield tokens[0].rsplit("/", 1)[-1].lower(), False
+
+
+def network_command_redirect(command: str) -> Optional[str]:
+    """Return the web_search redirect when `command` tries to reach the network.
+
+    Separate from `bash_policy_violation` on purpose, and applied only when the
+    command is headed for the sandbox: these tools are not forbidden, they are
+    unreachable *there*. With no sandbox configured, bash runs on the app
+    container, which does have network — so curl stays a legitimate command.
+    """
+    if not isinstance(command, str):
+        return None
+    for binary, _ in _command_binaries(command):
+        if binary in _BASH_NETWORK_BINARIES:
+            return NETWORK_REDIRECT_MESSAGE
     return None
 
 

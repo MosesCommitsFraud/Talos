@@ -735,6 +735,21 @@ async def _try_sandbox_exec(
     # app/host container. If there's no session to scope it to, refuse.
     if not sandbox_enabled():
         return None
+    if tool == "bash":
+        # Only meaningful once we know the command is headed for the sandbox,
+        # which has no route to the internet. Without this the model scrapes
+        # search engines with curl, watches DNS fail, and reports to the user
+        # that the assistant has no internet access at all.
+        from src.tool_security import network_command_redirect
+
+        redirect = network_command_redirect(content)
+        if redirect:
+            return {
+                "error": redirect,
+                "exit_code": 1,
+                "sandboxed": True,
+                "policy_rejected": True,
+            }
     if not session_id:
         return {
             "error": f"{tool}: no sandbox session available — refusing to run outside the sandbox.",

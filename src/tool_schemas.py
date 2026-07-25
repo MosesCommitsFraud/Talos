@@ -25,7 +25,7 @@ FUNCTION_TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "bash",
-            "description": "Run a shell command in your private workspace to produce work results: file inspection/processing, data analysis, document/spreadsheet/PDF/chart generation, SQL, calculations, running scripts. The ONLY allowed installs are Python libraries via `pip install` needed for the current task — sudo, system package managers (apt/dpkg/...), docker/services, and system inspection commands are rejected by policy. Setup/infrastructure how-tos are questions about the USER'S machine: answer them in text, never execute them here. To run inline Python use the `python` tool. To create or edit files use write_file/edit_file, not shell redirects.",
+            "description": "Run a shell command in your private workspace to produce work results: file inspection/processing, data analysis, document/spreadsheet/PDF/chart generation, SQL, calculations, running scripts. The ONLY allowed installs are Python libraries via `pip install` needed for the current task — sudo, system package managers (apt/dpkg/...), docker/services, and system inspection commands are rejected by policy. Setup/infrastructure how-tos are questions about the USER'S machine: answer them in text, never execute them here. To run inline Python use the `python` tool. To create or edit files use write_file/edit_file, not shell redirects. The workspace has NO network access — curl, wget, and urllib/requests always fail here; use the `web_search` and `web_fetch` tools for anything on the internet.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -39,7 +39,7 @@ FUNCTION_TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "python",
-            "description": "Execute Python code to compute a result or check something in the isolated workspace. For charts, save the finished image to a relative workspace path and call `show_image`; images under `output/` are also shown automatically. Do not save deliverables under /tmp or absolute paths.",
+            "description": "Execute Python code to compute a result or check something in the isolated workspace. For charts, save the finished image to a relative workspace path and call `show_image`; images under `output/` are also shown automatically. Do not save deliverables under /tmp or absolute paths. The workspace has NO network access — urllib/requests/httpx calls to the internet always fail here; use the `web_search` and `web_fetch` tools instead.",
             "parameters": {
                 "type": "object",
                 "properties": {"code": {"type": "string", "description": "Python code to execute"}},
