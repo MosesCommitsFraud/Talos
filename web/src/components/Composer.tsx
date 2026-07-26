@@ -145,10 +145,9 @@ function ChatModeDropdown() {
           <MenuItem
             key={m.key}
             onSelect={() => setKnowledge(m.rag, m.db)}
-            className="gap-2 px-2 py-1 text-xs"
           >
             <span className="min-w-0 flex-1 truncate">{m.label}</span>
-            {m.key === mode && <CheckIcon className="size-3 shrink-0" />}
+            {m.key === mode && <CheckIcon className="size-3.5 shrink-0 text-primary opacity-100" />}
           </MenuItem>
         ))}
       </MenuPopup>
@@ -240,26 +239,24 @@ function MicDeviceMenu() {
       </MenuTrigger>
       {/* Compact rows matching the knowledge-mode dropdown. */}
       <MenuPopup align="start">
-        <MenuLabel className="px-2 py-1">{t('composer.micSelect')}</MenuLabel>
+        <MenuLabel>{t('composer.micSelect')}</MenuLabel>
         <MenuItem
           onSelect={() => setMicDeviceId(null)}
-          className="gap-2 px-2 py-1 text-xs [&_svg]:size-3.5"
         >
           <MicIcon />
           <span className="min-w-0 flex-1 truncate">{t('composer.micDefault')}</span>
-          {micDeviceId === null && <CheckIcon className="size-3 shrink-0 text-blue-400" />}
+          {micDeviceId === null && <CheckIcon className="size-3.5 shrink-0 text-primary opacity-100" />}
         </MenuItem>
         {devices.map((d, i) => (
           <MenuItem
             key={d.deviceId}
             onSelect={() => setMicDeviceId(d.deviceId)}
-            className="gap-2 px-2 py-1 text-xs [&_svg]:size-3.5"
           >
             <MicIcon />
             <span className="min-w-0 max-w-56 flex-1 truncate">
               {d.label || t('composer.micUnnamed', { n: i + 1 })}
             </span>
-            {micDeviceId === d.deviceId && <CheckIcon className="size-3 shrink-0 text-blue-400" />}
+            {micDeviceId === d.deviceId && <CheckIcon className="size-3.5 shrink-0 text-primary opacity-100" />}
           </MenuItem>
         ))}
       </MenuPopup>
@@ -669,7 +666,7 @@ export function Composer() {
         )}
       >
         {slashItems.length > 0 && (
-          <div ref={slashMenu} className="absolute inset-x-0 bottom-full z-40 mb-1.5 max-h-64 overflow-y-auto rounded-md border bg-popover px-1 py-1.5 text-popover-foreground shadow-xl">
+          <div ref={slashMenu} className="dropdown-glass absolute inset-x-0 bottom-full z-40 mb-1.5 max-h-64 overflow-y-auto rounded-lg p-1 text-popover-foreground">
             {slashItems.map((command, index) => (
               <button
                 key={command.name}
@@ -685,7 +682,10 @@ export function Composer() {
                   }
                 }}
                 onMouseEnter={() => setSlashIndex(index)}
-                className={cn('flex h-7 w-full items-center gap-2 rounded-sm px-2 text-left', index === slashIndex && 'bg-accent')}
+                className={cn(
+                  'flex min-h-8 w-full cursor-default items-center gap-2 rounded-sm px-2 text-left sm:min-h-7',
+                  index === slashIndex && 'bg-accent text-accent-foreground',
+                )}
               >
                 <span className="w-20 shrink-0 font-mono text-xs font-medium text-primary">/{command.name}</span>
                 <span className="min-w-0 truncate text-[11px] leading-none text-muted-foreground">{command.description}</span>
@@ -858,10 +858,7 @@ export function Composer() {
                   </button>
                 </MenuTrigger>
                 <MenuPopup align="start">
-                  <MenuItem
-                    onSelect={() => fileInput.current?.click()}
-                    className="gap-2 px-2 py-1 text-xs [&_svg]:size-3.5"
-                  >
+                  <MenuItem onSelect={() => fileInput.current?.click()}>
                     <PaperclipIcon />
                     {t('composer.attachFiles')}
                   </MenuItem>

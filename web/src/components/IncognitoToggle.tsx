@@ -51,8 +51,6 @@ export function IncognitoToggle() {
   const btnBase =
     'flex size-7 items-center justify-center rounded-md transition-colors';
   const btnQuiet = 'text-muted-foreground hover:bg-accent hover:text-foreground';
-  // Tighter rows to match the sidebar account dropdown.
-  const menuItemCls = 'gap-2.5 rounded-sm! px-2.5 py-1 text-[13px] [&_svg]:size-4';
 
   return (
     <div className="absolute right-3 top-2 z-10 flex items-center gap-1">
@@ -114,18 +112,15 @@ export function IncognitoToggle() {
               <MoreVerticalIcon className="size-4" />
             </MenuTrigger>
           </Tooltip>
-          <MenuPopup align="end" className="rounded-md! p-1">
-            <MenuItem className={menuItemCls} onSelect={onRename}>
+          <MenuPopup align="end">
+            <MenuItem onSelect={onRename}>
               <PencilIcon /> {t('chatHeader.rename')}
             </MenuItem>
-            <MenuItem className={menuItemCls} onSelect={onArchive}>
+            <MenuItem onSelect={onArchive}>
               <ArchiveIcon /> {t('sidebar.archive')}
             </MenuItem>
             <MenuSeparator />
-            <MenuItem
-              className={cn(menuItemCls, 'text-destructive-foreground [&_svg]:text-destructive-foreground')}
-              onSelect={onDelete}
-            >
+            <MenuItem variant="destructive" onSelect={onDelete}>
               <Trash2Icon /> {t('common.delete')}
             </MenuItem>
           </MenuPopup>

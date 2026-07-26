@@ -149,6 +149,11 @@
   --success: var(--color-emerald-500);
   --warning: var(--color-amber-500);
 
+  /* Glass surfaces (t3code): elevated popups tint their own --popover and blur
+   * whatever sits behind them. */
+  --glass-blur: 12px;
+  --glass-opacity: 80%;
+
   /* Context-meter ramp: one hue (Talos blue) fading to lighter tints, so the
    * stacked bar reads as a single quantity split into parts rather than five
    * unrelated categories. Ordered densest → lightest; the meter assigns them
@@ -192,6 +197,7 @@
   --info: var(--color-blue-500);
   --success: var(--color-emerald-500);
   --warning: var(--color-amber-500);
+  --glass-blur: 16px;
 
   /* Dark mode fades the same hue toward white too — lighter tints stay legible
    * against the dark track, where fading toward the background would make the
@@ -274,6 +280,38 @@ body::after {
   :where(:focus-visible) {
     outline: 2px solid var(--ring);
     outline-offset: 2px;
+  }
+}
+
+/* ── Elevated glass surface (t3code) ──
+   The single chrome shared by every dropdown, context menu and flyout: a
+   translucent, blurred tint of --popover with an alpha border and a deep,
+   tight shadow. Nesting the opacity mix inside an 18% popover tint keeps
+   high-contrast page content from blooming through the menu. */
+@layer components {
+  .dropdown-glass {
+    background: color-mix(
+      in srgb,
+      var(--popover) 18%,
+      color-mix(in srgb, var(--popover) var(--glass-opacity), transparent)
+    );
+    -webkit-backdrop-filter: blur(var(--glass-blur));
+    backdrop-filter: blur(var(--glass-blur));
+    border: 1px solid color-mix(in srgb, var(--foreground) 10%, transparent);
+    box-shadow: 0 16px 40px -18px rgb(0 0 0 / 55%);
+  }
+
+  .dark .dropdown-glass {
+    border-color: color-mix(in srgb, var(--color-white) 8%, transparent);
+    box-shadow: 0 18px 44px -18px rgb(0 0 0 / 80%);
+  }
+
+  /* Browsers without backdrop-filter get the opaque surface instead of a
+     washed-out translucent one. */
+  @supports not ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
+    .dropdown-glass {
+      background: var(--popover);
+    }
   }
 }
 

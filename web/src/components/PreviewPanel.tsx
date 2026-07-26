@@ -8,6 +8,7 @@ import { queryClient } from '@/lib/queryClient';
 import { useUi, type PreviewFile } from '@/state/ui';
 import { Markdown } from './Markdown';
 import { PdfViewer } from './PdfViewer';
+import { Select } from './ui/select';
 
 /** Map a code-file extension to a markdown fence language so the shared Markdown
  *  renderer highlights it (and inherits the current theme). */
@@ -683,10 +684,19 @@ export function PreviewContent({ preview }: { preview: PreviewFile | null }) {
         <div className="flex shrink-0 items-center gap-2 border-b px-3 py-2">
           {saveError && <span className="mr-auto text-xs text-destructive-foreground">{t('preview.saveError')}</span>}
           {!editing && versions.length > 1 && (
-            <select value={viewedVersion} onChange={(e) => chooseVersion(e.target.value)} className="mr-auto max-w-44 rounded-md border bg-background px-2 py-1 text-xs">
-              <option value="current">{t('preview.currentVersion', { version: versions[0]?.version_number })}</option>
-              {versions.slice(1).map((version) => <option key={version.id} value={version.version_number}>v{version.version_number} · {version.summary || version.source || ''}</option>)}
-            </select>
+            <Select
+              size="sm"
+              className="mr-auto max-w-44"
+              value={String(viewedVersion)}
+              onChange={chooseVersion}
+              options={[
+                { value: 'current', label: t('preview.currentVersion', { version: versions[0]?.version_number }) },
+                ...versions.slice(1).map((version) => ({
+                  value: String(version.version_number),
+                  label: `v${version.version_number} · ${version.summary || version.source || ''}`,
+                })),
+              ]}
+            />
           )}
           {!editing && viewedVersion !== 'current' && (
             <button type="button" onClick={() => void restore()} disabled={saving} className="inline-flex items-center gap-1 rounded-md px-2.5 py-1 text-xs font-medium hover:bg-accent disabled:opacity-60"><RotateCcwIcon className="size-3.5" />{t('preview.restoreVersion')}</button>

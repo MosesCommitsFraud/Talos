@@ -82,14 +82,13 @@ export function ModelPicker({ visible = true }: { visible?: boolean }) {
             <MenuItem
               key={`${o.endpointId}:${o.model}`}
               onSelect={() => setPendingModel({ endpointId: o.endpointId, model: o.model })}
-              className="gap-2 px-2 py-1 text-xs [&_svg]:size-3.5"
             >
               <QwenIcon className="size-3.5 shrink-0 text-muted-foreground" />
               <span className="min-w-0 flex-1 truncate">
                 {displayName(o.model)}
                 <span className="text-muted-foreground"> · {o.endpointName}</span>
               </span>
-              <CheckIcon className={cn('size-3 shrink-0', selected ? 'opacity-100' : 'opacity-0')} />
+              <CheckIcon className={cn('size-3.5 shrink-0 text-primary', selected ? 'opacity-100' : 'opacity-0')} />
             </MenuItem>
           );
         })}

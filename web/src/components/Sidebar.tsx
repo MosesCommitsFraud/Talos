@@ -229,7 +229,6 @@ function SessionRow({ session, folders }: { session: Session; folders: string[] 
         <ContextMenuSub>
           <ContextMenuSubTrigger>
             <FolderIcon /> {t('sidebar.moveToFolder')}
-            <ChevronRightIcon className="ml-auto" />
           </ContextMenuSubTrigger>
           <ContextMenuSubPopup>
             {folders.map((name) => (
@@ -254,7 +253,7 @@ function SessionRow({ session, folders }: { session: Session; folders: string[] 
         </ContextMenuItem>
         <ContextMenuSeparator />
         <ContextMenuItem
-          className="text-destructive-foreground [&_svg]:text-destructive-foreground"
+          variant="destructive"
           onSelect={() => {
             void deleteSession(session.id).then(() => {
               if (session.id === activeId) newChat();
@@ -367,9 +366,6 @@ function AccountMenu({
   actions: AccountActions;
 }) {
   const { t } = useTranslation();
-  // Slightly roomier rows than the default menu item, to match the account
-  // dropdown design (taller hit targets, 18px icons, full-width).
-  const itemCls = 'gap-2.5 px-2.5 py-1 text-[13px] [&_svg]:size-4';
   // Tooltip must wrap MenuTrigger (not the other way around) so the dropdown's
   // click handler reaches the button — otherwise it won't open in compact mode.
   const triggerNode = <MenuTrigger asChild>{trigger}</MenuTrigger>;
@@ -382,37 +378,34 @@ function AccountMenu({
       ) : (
         triggerNode
       )}
-      <MenuPopup side="top" align="start" sideOffset={6} className="w-60 p-1">
-        <MenuLabel className="truncate px-2.5 pt-1 pb-0.5 text-xs text-foreground/70">{username}</MenuLabel>
-        <MenuItem className={itemCls} onSelect={actions.onOpenSettings}>
+      <MenuPopup side="top" align="start" sideOffset={6} className="w-60">
+        <MenuLabel className="truncate text-foreground/70">{username}</MenuLabel>
+        <MenuItem onSelect={actions.onOpenSettings}>
           <SettingsIcon /> {t('sidebar.menu.settings')}
         </MenuItem>
         {isAdmin && (
-          <MenuItem className={itemCls} onSelect={actions.onOpenAdmin}>
+          <MenuItem onSelect={actions.onOpenAdmin}>
             <ShieldIcon /> {t('sidebar.menu.adminPanel')}
           </MenuItem>
         )}
         {isAdmin && (
-          <MenuItem className={itemCls} onSelect={actions.onOpenRag}>
+          <MenuItem onSelect={actions.onOpenRag}>
             <DatabaseIcon /> {t('sidebar.menu.rag')}
           </MenuItem>
         )}
-        <MenuItem className={itemCls} onSelect={actions.onOpenHelp}>
+        <MenuItem onSelect={actions.onOpenHelp}>
           <HelpCircleIcon /> {t('sidebar.menu.help')}
         </MenuItem>
-        <MenuItem className={itemCls} onSelect={actions.onOpenArchive}>
+        <MenuItem onSelect={actions.onOpenArchive}>
           <ArchiveIcon /> {t('sidebar.menu.archive')}
         </MenuItem>
-        <MenuItem className={itemCls} onSelect={actions.onOpenAccount}>
+        <MenuItem onSelect={actions.onOpenAccount}>
           <UserIcon /> {t('sidebar.menu.account')}
         </MenuItem>
         {authEnabled && (
           <>
             <MenuSeparator />
-            <MenuItem
-              className={cn(itemCls, 'text-destructive-foreground [&_svg]:text-destructive-foreground')}
-              onSelect={() => void logout()}
-            >
+            <MenuItem variant="destructive" onSelect={() => void logout()}>
               <LogOutIcon /> {t('sidebar.menu.logOut')}
             </MenuItem>
           </>
@@ -565,7 +558,7 @@ export function Sidebar({
               <HistoryIcon />
             </button>
             <div className="invisible absolute left-full top-0 z-40 pl-2 opacity-0 transition-opacity group-hover/recents:visible group-hover/recents:opacity-100 group-focus-within/recents:visible group-focus-within/recents:opacity-100">
-              <div className="flex max-h-[70vh] w-64 flex-col overflow-hidden rounded-md border bg-popover shadow-[0_12px_32px_rgb(0_0_0/0.18)] dark:shadow-[0_12px_32px_rgb(0_0_0/0.5)]">
+              <div className="dropdown-glass flex max-h-[70vh] w-64 flex-col overflow-hidden rounded-lg">
                 <div className="px-3 pt-2.5 pb-1 text-xs font-medium text-muted-foreground">{t('sidebar.recents')}</div>
                 <div className="min-h-0 flex-1 space-y-px overflow-y-auto px-1.5 pb-2">{chatList}</div>
               </div>
