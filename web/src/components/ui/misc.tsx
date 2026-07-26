@@ -38,19 +38,7 @@ export function Switch({ className, ...props }: SwitchPrimitive.SwitchProps) {
   );
 }
 
-/* ── Kbd chip ── */
-export function Kbd({ children, className }: { children: React.ReactNode; className?: string }) {
-  return (
-    <kbd
-      className={cn(
-        'inline-flex h-5 min-w-5 items-center justify-center rounded-md border bg-muted px-1 font-sans text-[11px] text-muted-foreground',
-        className,
-      )}
-    >
-      {children}
-    </kbd>
-  );
-}
+/* Kbd lives in ./kbd — one keycap implementation for every hotkey in the app. */
 
 /* ── Input ── */
 export function Input({ className, ...props }: React.InputHTMLAttributes<HTMLInputElement>) {

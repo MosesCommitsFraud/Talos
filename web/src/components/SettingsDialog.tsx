@@ -11,7 +11,6 @@ import {
   PaletteIcon,
   PlugIcon,
   PlusIcon,
-  SearchIcon,
   ServerIcon,
   SettingsIcon,
   Trash2Icon,
@@ -87,6 +86,7 @@ import { Dialog, DialogContent } from './ui/dialog';
 import { Input, Switch, Textarea } from './ui/misc';
 import { Select } from './ui/select';
 import { KeybindingPill } from './ui/kbd';
+import { SearchInput } from './ui/search';
 import { useAuth } from './auth/AuthGate';
 import { UsersPanel } from './settings/UsersPanel';
 
@@ -1962,16 +1962,12 @@ export function SettingsDialog({
         <div className="flex h-[min(760px,86vh)]">
           <div className="flex w-60 shrink-0 flex-col border-r">
             <div className="p-2.5">
-              <div className="relative">
-                <SearchIcon className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-                <input
-                  value={query}
-                  onChange={(e) => setQuery(e.target.value)}
-                  placeholder={t('settings.searchPlaceholder')}
-                  aria-label={t('settings.searchPlaceholder')}
-                  className="h-9 w-full rounded-lg border border-input bg-transparent pr-2.5 pl-8 text-sm outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30 dark:bg-input/20"
-                />
-              </div>
+              <SearchInput
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder={t('settings.searchPlaceholder')}
+                aria-label={t('settings.searchPlaceholder')}
+              />
             </div>
             <div className="min-h-0 flex-1 space-y-0.5 overflow-y-auto px-2 pb-2">
               {userItems.length > 0 && (

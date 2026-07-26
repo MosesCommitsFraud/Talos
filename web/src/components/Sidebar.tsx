@@ -39,7 +39,8 @@ import type { Session } from '@/api/types';
 import { selectChatStatus, useChat } from '@/state/chat';
 import { usePrefs, type SortMode } from '@/state/prefs';
 import { cn, formatRelativeTime, timestampMs } from '@/lib/utils';
-import { Kbd, Tooltip } from './ui/misc';
+import { Tooltip } from './ui/misc';
+import { KeybindingPill } from './ui/kbd';
 import {
   ContextMenu,
   ContextMenuItem,
@@ -459,7 +460,6 @@ export function Sidebar({
     .map((name) => ({ name, items: rest.filter((s) => s.folder === name).sort(sorter) }))
     .filter((g) => g.items.length > 0);
   const ungrouped = rest.filter((s) => !s.folder).sort(sorter);
-  const isMac = /Mac|iPhone/.test(navigator.platform);
   const accountLabel = auth?.display_name || auth?.username;
   const initial = (accountLabel ?? 'U').slice(0, 1).toUpperCase();
 
@@ -545,7 +545,7 @@ export function Sidebar({
           icon={<SearchIcon />}
           label={t('sidebar.search')}
           onClick={onOpenPalette}
-          trailing={<Kbd>{isMac ? '⌘K' : 'Ctrl K'}</Kbd>}
+          trailing={<KeybindingPill value="mod+k" />}
         />
         {collapsed && (
           // Recents — hover to reveal a flyout list of chats.

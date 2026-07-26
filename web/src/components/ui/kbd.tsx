@@ -20,13 +20,28 @@ export function KbdGroup({ className, ...props }: React.ComponentProps<'kbd'>) {
   return (
     <kbd
       data-slot="kbd-group"
-      className={cn('inline-flex items-center gap-1', className)}
+      // font-sans: a bare <kbd> renders monospace, which would leak into any
+      // plain label sitting beside the keycaps.
+      className={cn('inline-flex items-center gap-1 font-sans', className)}
       {...props}
     />
   );
 }
 
-const isMac = typeof navigator !== 'undefined' && navigator.platform.toLowerCase().includes('mac');
+/** A hint pairing one or more keycaps with what they do ("⏎ Select"). */
+export function KbdHint({ keys, children }: { keys: React.ReactNode[]; children: React.ReactNode }) {
+  return (
+    <KbdGroup className="items-center gap-1.5">
+      {keys.map((key, i) => (
+        // biome-ignore lint/suspicious/noArrayIndexKey: keycaps are a fixed, static list
+        <Kbd key={i}>{key}</Kbd>
+      ))}
+      <span>{children}</span>
+    </KbdGroup>
+  );
+}
+
+export const isMac = typeof navigator !== 'undefined' && navigator.platform.toLowerCase().includes('mac');
 
 /** Pretty label for a single keybind token (e.g. "meta" → "⌘", "a" → "A"). */
 function tokenLabel(part: string): string {

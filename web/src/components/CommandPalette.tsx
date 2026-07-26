@@ -7,7 +7,6 @@ import {
   DatabaseIcon,
   MessageSquareIcon,
   MoonIcon,
-  SearchIcon,
   SettingsIcon,
   SquarePenIcon,
   SunIcon,
@@ -19,7 +18,8 @@ import { useChat } from '@/state/chat';
 import { applyTheme, usePrefs } from '@/state/prefs';
 import { cn } from '@/lib/utils';
 import { useAuth } from './auth/AuthGate';
-import { Kbd } from './ui/misc';
+import { KbdHint } from './ui/kbd';
+import { SearchInput } from './ui/search';
 
 interface PaletteEntry {
   id: string;
@@ -98,16 +98,17 @@ export function CommandPalette({ open, onClose, onOpenSettings, onOpenRag }: { o
   return (
     <DialogPrimitive.Root open={open} onOpenChange={(v) => !v && onClose()}>
       <DialogPrimitive.Portal>
-        <DialogPrimitive.Overlay className="fixed inset-0 z-50 bg-background/60 backdrop-blur-[2px] data-[state=closed]:opacity-0 data-[state=open]:opacity-100" />
-        <div className="pointer-events-none fixed inset-0 z-50 flex flex-col items-center px-4 py-[max(1rem,10vh)]">
+        <DialogPrimitive.Overlay className="dialog-backdrop fixed inset-0 z-50 transition-opacity duration-200 data-[state=closed]:opacity-0" />
+        <div className="pointer-events-none fixed inset-0 z-50 flex flex-col items-center px-4 py-[max(1rem,4vh)] sm:py-[10vh]">
           <DialogPrimitive.Content
-            className="pointer-events-auto flex max-h-[26.25rem] w-full max-w-xl flex-col overflow-hidden rounded-md border bg-popover text-popover-foreground shadow-[0_24px_64px_rgb(0_0_0/0.45)] outline-none data-[state=closed]:scale-[0.98] data-[state=closed]:opacity-0"
+            className="dialog-glass pointer-events-auto flex max-h-[26.25rem] w-full max-w-xl flex-col overflow-hidden rounded-2xl text-foreground outline-none transition-[scale,opacity] duration-200 ease-in-out data-[state=closed]:scale-[0.98] data-[state=closed]:opacity-0"
             onOpenAutoFocus={(e) => { e.preventDefault(); inputRef.current?.focus(); }}
           >
             <DialogPrimitive.Title className="sr-only">{t('palette.searchTitle')}</DialogPrimitive.Title>
-            <div className="flex items-center gap-2.5 px-3.5 py-3">
-              <SearchIcon className="size-[18px] shrink-0 text-muted-foreground" />
-              <input
+            <div className="px-2.5 py-1.5">
+              <SearchInput
+                bare
+                size="lg"
                 ref={inputRef}
                 value={query}
                 onChange={(e) => { setQuery(e.target.value); setSelected(0); }}
@@ -117,16 +118,15 @@ export function CommandPalette({ open, onClose, onOpenSettings, onOpenRag }: { o
                   if (e.key === 'Enter') { e.preventDefault(); flat[clampedSelected]?.run(); }
                 }}
                 placeholder={t('palette.searchPlaceholder')}
-                className="h-6 w-full bg-transparent text-[15px] outline-none placeholder:text-muted-foreground"
               />
             </div>
 
-            <div className="min-h-0 flex-1 overflow-y-auto border-t p-2">
+            <div className="min-h-0 flex-1 scroll-py-2 overflow-y-auto border-t p-2">
               {groups.map((group) => {
                 const base = flat.findIndex((e) => e.id === group.items[0]?.id);
                 return (
-                  <div key={group.label} className="not-first:mt-2">
-                    <div className="px-2 py-1.5 text-xs font-medium text-muted-foreground/70">{group.label}</div>
+                  <div key={group.label} className="not-first:mt-1.5">
+                    <div className="px-2 py-1.5 text-xs font-medium text-muted-foreground">{group.label}</div>
                     {group.items.map((entry, i) => {
                       const index = base + i;
                       return (
@@ -136,8 +136,8 @@ export function CommandPalette({ open, onClose, onOpenSettings, onOpenRag }: { o
                           onClick={entry.run}
                           onMouseEnter={() => setSelected(index)}
                           className={cn(
-                            'flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-sm [&_svg]:size-4 [&_svg]:shrink-0 [&_svg]:text-muted-foreground',
-                            index === clampedSelected && 'bg-accent',
+                            "flex min-h-8 w-full cursor-default select-none items-center gap-2 rounded-sm px-2 py-1.5 text-left text-base sm:min-h-7 sm:text-sm [&>svg]:shrink-0 [&>svg:not([class*='size-'])]:size-4.5 sm:[&>svg:not([class*='size-'])]:size-4 [&>svg:not([class*='opacity-'])]:opacity-80 [&>svg:not([class*='text-'])]:text-muted-foreground",
+                            index === clampedSelected && 'bg-foreground/[0.09] text-foreground',
                           )}
                         >
                           {entry.icon}
@@ -150,26 +150,18 @@ export function CommandPalette({ open, onClose, onOpenSettings, onOpenRag }: { o
                 );
               })}
               {flat.length === 0 && (
-                <div className="px-3 py-8 text-center text-sm text-muted-foreground">{t('palette.noMatches')}</div>
+                <div className="p-6 text-center text-base text-muted-foreground sm:text-sm">{t('palette.noMatches')}</div>
               )}
             </div>
 
-            <div className="flex items-center justify-between gap-2 border-t px-4 py-2.5 text-xs text-muted-foreground">
+            <div className="flex items-center justify-between gap-3 bg-foreground/[0.025] px-5 py-3 text-xs font-medium text-muted-foreground [&_[data-slot=kbd]]:bg-foreground/[0.08] [&_[data-slot=kbd]]:text-foreground">
               <div className="flex items-center gap-3">
-                <span className="flex items-center gap-1.5">
-                  <Kbd className="[&_svg]:size-3"><ArrowUpIcon /></Kbd>
-                  <Kbd className="[&_svg]:size-3"><ArrowDownIcon /></Kbd>
-                  <span className="text-muted-foreground/80">{t('palette.navigate')}</span>
-                </span>
-                <span className="flex items-center gap-1.5">
-                  <Kbd className="[&_svg]:size-3"><CornerDownLeftIcon /></Kbd>
-                  <span className="text-muted-foreground/80">{t('palette.select')}</span>
-                </span>
+                <KbdHint keys={[<ArrowUpIcon key="up" />, <ArrowDownIcon key="down" />]}>
+                  {t('palette.navigate')}
+                </KbdHint>
+                <KbdHint keys={[<CornerDownLeftIcon key="enter" />]}>{t('palette.select')}</KbdHint>
               </div>
-              <span className="flex items-center gap-1.5">
-                <Kbd>Esc</Kbd>
-                <span className="text-muted-foreground/80">{t('palette.close')}</span>
-              </span>
+              <KbdHint keys={['Esc']}>{t('palette.close')}</KbdHint>
             </div>
           </DialogPrimitive.Content>
         </div>
