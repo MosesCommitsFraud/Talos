@@ -278,10 +278,19 @@ jobs:
           IMAGE="$REGISTRY/$OWNER/${{ matrix.repo }}"
           TAGS="-t $IMAGE:${{ github.sha }}"
           case "$GITHUB_REF" in
-            # A release tag adds the bare version and leaves :latest alone —
-            # releases are cut from main, so the main push already moved it,
-            # and tagging an older commit must not drag :latest backwards.
-            refs/tags/v*) TAGS="$TAGS -t $IMAGE:${GITHUB_REF_NAME#v}" ;;
+            # A release tag publishes the bare version AND moves :stable, but
+            # leaves :latest alone — releases are cut from main, so the main
+            # push already moved :latest, and tagging an older commit must not
+            # drag it backwards.
+            #
+            # The two floating tags mean different things on purpose:
+            #   :latest — newest main build. Reports itself as a dev build,
+            #             because it carries no release version.
+            #   :stable — newest release. This is the one to deploy: `pull` and
+            #             `up -d` always lands on the newest release without
+            #             editing a pinned tag, and the running container still
+            #             knows its version, so the update banner works.
+            refs/tags/v*) TAGS="$TAGS -t $IMAGE:${GITHUB_REF_NAME#v} -t $IMAGE:stable" ;;
             *)            TAGS="$TAGS -t $IMAGE:latest" ;;
           esac
           docker buildx imagetools create $TAGS \
