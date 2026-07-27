@@ -839,6 +839,8 @@ const en = {
       buildHint: 'Build {{sha}}',
       updates: 'Updates',
       checking: 'Checking…',
+      devBuild: 'Development build',
+      devHint: 'Not built from a release, so there is nothing to compare against.',
       upToDate: 'Up to date',
       updateAvailable: 'Version {{version}} available',
       updateHint: 'Pull the new image to update: docker compose pull && docker compose up -d',

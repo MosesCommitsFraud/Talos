@@ -1577,8 +1577,11 @@ function AboutSection() {
   });
 
   const current = build.data?.version ?? updates.data?.current ?? '';
+  // Anything not built from a release tag: main builds, local builds, running
+  // from source. There's no release to compare against, so don't pretend.
+  const isDev = updates.data?.dev ?? !current.startsWith('v');
   const latest = updates.data?.latest ?? '';
-  const outdated = Boolean(latest && current && latest !== current);
+  const outdated = !isDev && Boolean(latest && current && latest !== current);
   // "dev-build" means a locally built image rather than one CI published, so
   // the sha would be noise.
   const sha = build.data?.build && build.data.build !== 'dev-build' ? build.data.build.slice(0, 7) : '';
@@ -1586,12 +1589,14 @@ function AboutSection() {
   return (
     <Section title={t('settings.system.about')}>
       <Row label={t('settings.system.version')} hint={sha ? t('settings.system.buildHint', { sha }) : undefined}>
-        <span className="font-mono text-sm tabular-nums">{current || '—'}</span>
+        <span className="font-mono text-sm tabular-nums">
+          {isDev ? t('settings.system.devBuild') : current || '—'}
+        </span>
       </Row>
       <Row label={t('settings.system.updates')} hint={outdated ? t('settings.system.updateHint') : undefined}>
         {outdated ? (
           <a
-            href={`https://github.com/MosesCommitsFraud/Talos/releases/tag/v${latest}`}
+            href={`https://github.com/MosesCommitsFraud/Talos/releases/tag/${latest}`}
             target="_blank"
             rel="noreferrer"
             className="rounded-md px-2 py-1 text-sm font-medium text-primary underline-offset-4 hover:underline focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
@@ -1600,7 +1605,11 @@ function AboutSection() {
           </a>
         ) : (
           <span className="text-sm text-muted-foreground">
-            {updates.isPending ? t('settings.system.checking') : t('settings.system.upToDate')}
+            {updates.isPending
+              ? t('settings.system.checking')
+              : isDev
+                ? t('settings.system.devHint')
+                : t('settings.system.upToDate')}
           </span>
         )}
       </Row>

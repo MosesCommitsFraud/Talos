@@ -815,10 +815,20 @@ async def get_version_updates():
     """
     import httpx
 
-    from core.constants import APP_VERSION, UPDATE_CHECK_ENABLED, UPDATE_CHECK_REPO
+    from core.constants import (
+        APP_VERSION,
+        IS_DEV_BUILD,
+        UPDATE_CHECK_ENABLED,
+        UPDATE_CHECK_REPO,
+    )
 
-    if not UPDATE_CHECK_ENABLED:
-        return {"current": APP_VERSION, "latest": APP_VERSION, "enabled": False}
+    base = {"current": APP_VERSION, "latest": APP_VERSION, "dev": IS_DEV_BUILD}
+
+    # A build that didn't come from a release tag has no version to compare —
+    # saying "0.2.0 available" to someone running main would be noise, since
+    # their build is likely ahead of it, not behind.
+    if not UPDATE_CHECK_ENABLED or IS_DEV_BUILD:
+        return {**base, "enabled": UPDATE_CHECK_ENABLED}
 
     try:
         # Short timeout on purpose: this runs while a settings dialog is
@@ -829,15 +839,14 @@ async def get_version_updates():
                 headers={"Accept": "application/vnd.github+json"},
             )
             resp.raise_for_status()
-            # Releases are tagged vX.Y.Z; APP_VERSION carries no prefix.
-            latest = str(resp.json().get("tag_name") or "").lstrip("v").strip()
-        if not latest:
-            latest = APP_VERSION
+            # tag_name comes back as "v0.2.0" and APP_VERSION is the same tag,
+            # so these compare directly with no prefix juggling.
+            latest = str(resp.json().get("tag_name") or "").strip()
     except Exception as e:
         logger.debug("version update check failed: %s", e)
-        latest = APP_VERSION
+        latest = ""
 
-    return {"current": APP_VERSION, "latest": latest, "enabled": True}
+    return {**base, "latest": latest or APP_VERSION, "enabled": True}
 
 
 @app.get("/api/health")

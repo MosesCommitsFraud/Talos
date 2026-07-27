@@ -48,25 +48,6 @@ jobs:
       - name: Ruff format check
         run: ruff format --check .
 
-      - name: Release tag must match APP_VERSION
-        if: startsWith(github.ref, 'refs/tags/v')
-        # The update banner compares the release tag against APP_VERSION. If
-        # they drift, every deployment is told an update is available forever
-        # (or never) — and nothing else would catch it, since both values look
-        # perfectly valid on their own.
-        run: |
-          set -euo pipefail
-          tag="${GITHUB_REF_NAME#v}"
-          # Read the literal rather than importing it: core/__init__.py pulls in
-          # AuthManager (and therefore pyotp), which this job doesn't install —
-          # it only needs requirements-dev.txt. An import here would fail on
-          # every release tag.
-          app="$(sed -n 's/^APP_VERSION = "\(.*\)"/\1/p' core/constants.py)"
-          if [ "$tag" != "$app" ]; then
-            echo "tag v$tag does not match APP_VERSION $app in core/constants.py" >&2
-            exit 1
-          fi
-          echo "release $tag matches APP_VERSION"
 
       - uses: pnpm/action-setup@v6
         with:
@@ -108,6 +89,7 @@ jobs:
             build_args: |
               TALOS_BUILD_HASH=${{ github.sha }}
               TALOS_IMAGE_TAG=${{ github.sha }}
+              TALOS_VERSION=${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || 'dev' }}
           # The agent code-execution sandbox (sandbox/Dockerfile, built from the
           # ./sandbox context). It carries its own heavy scientific-Python stack
           # pinned in sandbox/requirements.txt, so it must be built and published

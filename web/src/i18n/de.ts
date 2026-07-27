@@ -841,6 +841,8 @@ const de: typeof en = {
       buildHint: 'Build {{sha}}',
       updates: 'Updates',
       checking: 'Wird geprüft…',
+      devBuild: 'Entwicklungs-Build',
+      devHint: 'Nicht aus einem Release gebaut — es gibt nichts zum Vergleichen.',
       upToDate: 'Aktuell',
       updateAvailable: 'Version {{version}} verfügbar',
       updateHint: 'Zum Aktualisieren das neue Image ziehen: docker compose pull && docker compose up -d',

@@ -31,7 +31,9 @@ export const fetchBuildInfo = () =>
  *  latest === current whenever it can't reach GitHub or the check is disabled,
  *  so callers never have to render an error state for this. */
 export const fetchVersionUpdates = () =>
-  getJSON<{ current: string; latest: string; enabled: boolean }>('/api/version/updates');
+  getJSON<{ current: string; latest: string; enabled: boolean; dev: boolean }>(
+    '/api/version/updates',
+  );
 
 export async function fetchSession(id: string): Promise<SessionDetail> {
   const data = await getJSON<Omit<SessionDetail, 'id'> & { id?: string }>(`/api/history/${id}`);

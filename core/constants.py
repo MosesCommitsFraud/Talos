@@ -3,15 +3,26 @@
 
 import os
 
-APP_VERSION = "0.1.0"
-
-# Which build is actually running. Set as ENV in the Dockerfile from CI's
-# --build-arg; "dev-build"/"dev" means a locally built or bare-metal run. The
-# update check compares BUILD_HASH against the newest sha published to GHCR,
-# because APP_VERSION is hand-bumped and can't distinguish two images built
-# from the same release.
+# Which build is actually running. All three are baked in as ENV by the
+# Dockerfile from CI's --build-arg.
+#
+# APP_VERSION is NOT hand-maintained: on a release build CI passes the git tag
+# ("v0.2.0"), and everything else — main builds, local builds, running from
+# source — reports "dev". Keeping it out of the source tree means cutting a
+# release is just creating the release, with no version literal to bump, no
+# ordering rule between the bump and the tag, and nothing that can drift out of
+# sync with the tag it claims to be.
+#
+# The "v" prefix is deliberate: GitHub's releases API returns tag_name the same
+# way, so the update check compares the two strings directly.
+APP_VERSION = os.getenv("TALOS_VERSION", "dev")
 BUILD_HASH = os.getenv("TALOS_BUILD_HASH", "dev-build")
 IMAGE_TAG = os.getenv("TALOS_IMAGE_TAG", "dev")
+
+# A build that didn't come from a release tag. Such a build has no meaningful
+# version to compare, so the UI reports it as a development build instead of
+# claiming it's out of date against every release.
+IS_DEV_BUILD = not APP_VERSION.startswith("v")
 
 # Update check: compares APP_VERSION against the newest GitHub release tag.
 # On by default, but a deployment with no outbound internet (or an admin who

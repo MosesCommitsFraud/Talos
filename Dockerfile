@@ -113,8 +113,12 @@ RUN chmod +x /usr/local/bin/entrypoint.sh
 # how /api/version reports whether it's serving a released image or a local one.
 ARG TALOS_BUILD_HASH=dev-build
 ARG TALOS_IMAGE_TAG=dev
+# The release tag CI built from ("v0.2.0"), or "dev" for anything else. This is
+# the only place a version number exists — there is no literal in the source.
+ARG TALOS_VERSION=dev
 ENV TALOS_BUILD_HASH=${TALOS_BUILD_HASH} \
-    TALOS_IMAGE_TAG=${TALOS_IMAGE_TAG}
+    TALOS_IMAGE_TAG=${TALOS_IMAGE_TAG} \
+    TALOS_VERSION=${TALOS_VERSION}
 
 EXPOSE 7000
 
