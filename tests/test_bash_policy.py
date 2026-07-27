@@ -14,7 +14,6 @@ from src.tool_security import (
     network_command_redirect,
 )
 
-
 BLOCKED = [
     # exactly what the misbehaving Spark chat tried to run
     "docker --version",

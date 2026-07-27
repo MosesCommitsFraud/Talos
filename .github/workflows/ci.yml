@@ -69,6 +69,10 @@ jobs:
   # take hours. Each leg pushes an untagged, digest-only image; the merge job
   # below stitches the two architectures into one multi-arch tag.
   build:
+    # Without an explicit name GitHub builds one from every matrix value, so the
+    # build_args entry drags two 40-char shas into the job label and pushes the
+    # architecture out of view — the two `talos` legs then render identically.
+    name: build ${{ matrix.image.repo }} (${{ matrix.platform.arch }})
     runs-on: ${{ matrix.platform.runner }}
     strategy:
       fail-fast: false
