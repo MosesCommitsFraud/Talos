@@ -9,6 +9,11 @@ name: CI
 on:
   push:
     branches: [main]
+    # Release tags build and publish too, and additionally get a bare version
+    # tag (v0.2.0 -> :0.2.0). That is what the in-app update check compares
+    # APP_VERSION against, so a release without images would advertise an
+    # update nobody can pull.
+    tags: ["v*"]
   workflow_dispatch: {}
 
 # Newer push supersedes an in-flight run on the same ref.
@@ -42,6 +47,26 @@ jobs:
         run: ruff check .
       - name: Ruff format check
         run: ruff format --check .
+
+      - name: Release tag must match APP_VERSION
+        if: startsWith(github.ref, 'refs/tags/v')
+        # The update banner compares the release tag against APP_VERSION. If
+        # they drift, every deployment is told an update is available forever
+        # (or never) — and nothing else would catch it, since both values look
+        # perfectly valid on their own.
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME#v}"
+          # Read the literal rather than importing it: core/__init__.py pulls in
+          # AuthManager (and therefore pyotp), which this job doesn't install —
+          # it only needs requirements-dev.txt. An import here would fail on
+          # every release tag.
+          app="$(sed -n 's/^APP_VERSION = "\(.*\)"/\1/p' core/constants.py)"
+          if [ "$tag" != "$app" ]; then
+            echo "tag v$tag does not match APP_VERSION $app in core/constants.py" >&2
+            exit 1
+          fi
+          echo "release $tag matches APP_VERSION"
 
       - uses: pnpm/action-setup@v6
         with:
@@ -268,10 +293,17 @@ jobs:
             echo "expected 2 digests (amd64 + arm64) for ${{ matrix.repo }}, found $count" >&2
             exit 1
           fi
-          docker buildx imagetools create \
-            -t "$REGISTRY/$OWNER/${{ matrix.repo }}:latest" \
-            -t "$REGISTRY/$OWNER/${{ matrix.repo }}:${{ github.sha }}" \
-            $(printf "$REGISTRY/$OWNER/${{ matrix.repo }}@sha256:%s " *)
+          IMAGE="$REGISTRY/$OWNER/${{ matrix.repo }}"
+          TAGS="-t $IMAGE:${{ github.sha }}"
+          case "$GITHUB_REF" in
+            # A release tag adds the bare version and leaves :latest alone —
+            # releases are cut from main, so the main push already moved it,
+            # and tagging an older commit must not drag :latest backwards.
+            refs/tags/v*) TAGS="$TAGS -t $IMAGE:${GITHUB_REF_NAME#v}" ;;
+            *)            TAGS="$TAGS -t $IMAGE:latest" ;;
+          esac
+          docker buildx imagetools create $TAGS \
+            $(printf "$IMAGE@sha256:%s " *)
 
       - name: Inspect published manifest
         run: docker buildx imagetools inspect "$REGISTRY/$OWNER/${{ matrix.repo }}:${{ github.sha }}"

@@ -13,6 +13,17 @@ APP_VERSION = "0.1.0"
 BUILD_HASH = os.getenv("TALOS_BUILD_HASH", "dev-build")
 IMAGE_TAG = os.getenv("TALOS_IMAGE_TAG", "dev")
 
+# Update check: compares APP_VERSION against the newest GitHub release tag.
+# On by default, but a deployment with no outbound internet (or an admin who
+# doesn't want the app calling home at all) turns it off with
+# TALOS_UPDATE_CHECK=false and the endpoint stops reaching out entirely.
+UPDATE_CHECK_ENABLED = os.getenv("TALOS_UPDATE_CHECK", "true").strip().lower() not in (
+    "false",
+    "0",
+    "no",
+)
+UPDATE_CHECK_REPO = os.getenv("TALOS_UPDATE_CHECK_REPO", "MosesCommitsFraud/Talos")
+
 # Base paths
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__))) + "/"
 STATIC_DIR = os.path.join(BASE_DIR, "static")

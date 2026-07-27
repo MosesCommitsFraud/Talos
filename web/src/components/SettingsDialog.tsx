@@ -28,6 +28,8 @@ import {
   updateAssistant,
   deleteAssistant,
   changePassword,
+  fetchBuildInfo,
+  fetchVersionUpdates,
   setDisplayName,
   createIntegration,
   deleteIntegration,
@@ -1558,11 +1560,61 @@ export function RagPanel() {
 
 const WIPE_KINDS = ['chats', 'skills', 'notes', 'documents', 'gallery', 'calendar'];
 
+/** Version + update status.
+ *
+ *  Both queries are deliberately quiet: /api/version/updates answers
+ *  latest === current whenever the check is off or GitHub is unreachable, so
+ *  there is no error branch to render — the row just reads "up to date". */
+function AboutSection() {
+  const { t } = useTranslation();
+  const build = useQuery({ queryKey: ['build-info'], queryFn: fetchBuildInfo });
+  const updates = useQuery({
+    queryKey: ['version-updates'],
+    queryFn: fetchVersionUpdates,
+    // The answer changes at most a few times a week; don't re-hit GitHub every
+    // time the dialog is reopened.
+    staleTime: 60 * 60 * 1000,
+  });
+
+  const current = build.data?.version ?? updates.data?.current ?? '';
+  const latest = updates.data?.latest ?? '';
+  const outdated = Boolean(latest && current && latest !== current);
+  // "dev-build" means a locally built image rather than one CI published, so
+  // the sha would be noise.
+  const sha = build.data?.build && build.data.build !== 'dev-build' ? build.data.build.slice(0, 7) : '';
+
+  return (
+    <Section title={t('settings.system.about')}>
+      <Row label={t('settings.system.version')} hint={sha ? t('settings.system.buildHint', { sha }) : undefined}>
+        <span className="font-mono text-sm tabular-nums">{current || '—'}</span>
+      </Row>
+      <Row label={t('settings.system.updates')} hint={outdated ? t('settings.system.updateHint') : undefined}>
+        {outdated ? (
+          <a
+            href={`https://github.com/MosesCommitsFraud/Talos/releases/tag/v${latest}`}
+            target="_blank"
+            rel="noreferrer"
+            className="rounded-md px-2 py-1 text-sm font-medium text-primary underline-offset-4 hover:underline focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+          >
+            {t('settings.system.updateAvailable', { version: latest })}
+          </a>
+        ) : (
+          <span className="text-sm text-muted-foreground">
+            {updates.isPending ? t('settings.system.checking') : t('settings.system.upToDate')}
+          </span>
+        )}
+      </Row>
+    </Section>
+  );
+}
+
 function SystemPanel() {
   const { t } = useTranslation();
   const [msg, setMsg] = useState('');
   return (
     <Page>
+      <AboutSection />
+
       <Section title={t('settings.system.dataBackup')} padded>
         <p className="pb-2 text-xs text-muted-foreground">
           {t('settings.system.backupHint')}

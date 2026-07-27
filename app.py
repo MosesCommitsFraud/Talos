@@ -801,6 +801,45 @@ async def get_build_info():
     return {"version": APP_VERSION, "build": BUILD_HASH, "tag": IMAGE_TAG}
 
 
+@app.get("/api/version/updates")
+async def get_version_updates():
+    """Is a newer release published? Compares APP_VERSION to the latest tag.
+
+    Also not auth-exempt, so only a logged-in user triggers the outbound call —
+    an anonymous visitor can neither fingerprint the deployment nor make the
+    server hit GitHub on demand.
+
+    Every failure path returns latest == current, i.e. "you're up to date".
+    A version banner is not worth surfacing an error for: an air-gapped box, a
+    rate-limited API or a GitHub outage should look calm, not broken.
+    """
+    import httpx
+
+    from core.constants import APP_VERSION, UPDATE_CHECK_ENABLED, UPDATE_CHECK_REPO
+
+    if not UPDATE_CHECK_ENABLED:
+        return {"current": APP_VERSION, "latest": APP_VERSION, "enabled": False}
+
+    try:
+        # Short timeout on purpose: this runs while a settings dialog is
+        # rendering, so a slow GitHub must not hold the panel hostage.
+        async with httpx.AsyncClient(timeout=3.0) as client:
+            resp = await client.get(
+                f"https://api.github.com/repos/{UPDATE_CHECK_REPO}/releases/latest",
+                headers={"Accept": "application/vnd.github+json"},
+            )
+            resp.raise_for_status()
+            # Releases are tagged vX.Y.Z; APP_VERSION carries no prefix.
+            latest = str(resp.json().get("tag_name") or "").lstrip("v").strip()
+        if not latest:
+            latest = APP_VERSION
+    except Exception as e:
+        logger.debug("version update check failed: %s", e)
+        latest = APP_VERSION
+
+    return {"current": APP_VERSION, "latest": latest, "enabled": True}
+
+
 @app.get("/api/health")
 async def health_check() -> Dict[str, str]:
     return {"status": "healthy", "timestamp": datetime.utcnow().isoformat()}

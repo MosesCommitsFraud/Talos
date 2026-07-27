@@ -22,6 +22,17 @@ async function getJSON<T>(url: string): Promise<T> {
 export const fetchSessions = () => getJSON<Session[]>('/api/sessions');
 export const fetchArchivedSessions = () => getJSON<Session[]>('/api/sessions/archived');
 
+/** Which build this container was started from. `build` is the git sha CI
+ *  compiled, or "dev-build" for a locally built image. */
+export const fetchBuildInfo = () =>
+  getJSON<{ version: string; build: string; tag: string }>('/api/version/build');
+
+/** Newest published release vs. the running one. The server answers
+ *  latest === current whenever it can't reach GitHub or the check is disabled,
+ *  so callers never have to render an error state for this. */
+export const fetchVersionUpdates = () =>
+  getJSON<{ current: string; latest: string; enabled: boolean }>('/api/version/updates');
+
 export async function fetchSession(id: string): Promise<SessionDetail> {
   const data = await getJSON<Omit<SessionDetail, 'id'> & { id?: string }>(`/api/history/${id}`);
   return { id: data.id ?? id, name: data.name ?? '', history: Array.isArray(data.history) ? data.history : [] };

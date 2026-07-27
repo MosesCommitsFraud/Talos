@@ -35,3 +35,4 @@ sometimes image not shown and still no artifact when create document
 light mode needs work
 analyse pro account
 detaillierter für websuche skills und account
+download chat button
