@@ -99,6 +99,16 @@ jobs:
           - repo: talos-dictation
             context: ./services/dictation
             build_args: ""
+          # Config-only images: upstream base + the one file Talos needs baked
+          # in, so a deployment doesn't have to keep config on disk. Seconds to
+          # build, which is why they ride along here rather than getting their
+          # own workflow.
+          - repo: talos-searxng
+            context: ./searxng
+            build_args: ""
+          - repo: talos-caddy
+            context: ./caddy
+            build_args: ""
         platform:
           - { id: linux/amd64, runner: ubuntu-latest, arch: amd64 }
           - { id: linux/arm64, runner: ubuntu-24.04-arm, arch: arm64 }
@@ -152,6 +162,24 @@ jobs:
         run: >-
           docker run --rm --entrypoint python talos-dictation:ci -c
           "import RealtimeSTT, faster_whisper, silero_vad, fastapi, uvicorn; print('dictation imports OK')"
+
+      - name: Check the baked SearxNG config kept JSON enabled
+        if: matrix.image.repo == 'talos-searxng'
+        # `web_search` talks to SearxNG over its JSON API, which upstream ships
+        # DISABLED. If a settings.yml edit ever drops `json` from search.formats
+        # the container still starts happily and every search just fails, so
+        # assert it here instead of finding out from a dead tool.
+        run: >-
+          docker run --rm --entrypoint grep talos-searxng:ci -q '^ *- json$' /etc/searxng/settings.yml
+          && echo 'searxng json format OK'
+
+      - name: Validate the baked Caddyfile
+        if: matrix.image.repo == 'talos-caddy'
+        # Catches a malformed Caddyfile at build time rather than when the
+        # reverse proxy refuses to start and takes HTTPS (and the mic) down.
+        run: >-
+          docker run --rm --entrypoint caddy talos-caddy:ci
+          validate --adapter caddyfile --config /etc/caddy/Caddyfile
 
       - name: Log in to GHCR
         if: github.event_name == 'push'
@@ -209,7 +237,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        repo: [talos, talos-sandbox, talos-dictation]
+        repo: [talos, talos-sandbox, talos-dictation, talos-searxng, talos-caddy]
     steps:
       - name: Download digests
         uses: actions/download-artifact@v4
