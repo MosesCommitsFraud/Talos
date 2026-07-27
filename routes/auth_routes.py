@@ -90,7 +90,11 @@ class SetOpenRegistrationRequest(BaseModel):
     enabled: bool
 
 
-SESSION_COOKIE = "talos_session"
+# Cookies are scoped to host + path and IGNORE the port, so two Talos instances
+# on the same machine (a dev stack on :7000, prod on :7100) share one cookie jar
+# and silently log each other out — whichever logged in last wins. Give each
+# deployment its own name to keep the sessions independent.
+SESSION_COOKIE = os.getenv("TALOS_SESSION_COOKIE", "talos_session")
 
 
 def setup_auth_routes(auth_manager: AuthManager) -> APIRouter:
