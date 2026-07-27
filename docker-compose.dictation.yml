@@ -1,8 +1,12 @@
 # Voice-to-text overlay — adds the RealtimeSTT dictation sidecar and points the
 # app at it. Opt-in because it pulls ~2 GB of Whisper weights on first start.
 #
-# Enable:   docker compose -f docker-compose.yml -f docker-compose.dictation.yml up -d --build
+# Enable:   docker compose -f docker-compose.yml -f docker-compose.dictation.yml up -d
 # Disable:  docker compose -f docker-compose.yml -f docker-compose.dictation.yml stop dictation
+#
+# Like the base stack this pulls a published multi-arch image, so a host that
+# wants voice input needs no source checkout. To build it from this repo
+# instead, add docker-compose.dictation.dev.yml after this file.
 #
 # The mic icon in the composer follows the service automatically: Talos probes
 # the sidecar's /health (models loaded) and only advertises voice input while
@@ -21,7 +25,7 @@ services:
       - DICTATION_WS_URL=${DICTATION_WS_URL:-ws://dictation:8004/ws}
 
   dictation:
-    build: ./services/dictation
+    image: ${TALOS_DICTATION_IMAGE:-ghcr.io/mosescommitsfraud/talos-dictation:latest}
     container_name: talos-dictation
     init: true
     restart: unless-stopped

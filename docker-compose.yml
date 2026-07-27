@@ -1,6 +1,13 @@
+# Production compose: every service runs a PUBLISHED image, so a prod host needs
+# only this file, .env, and the bind-mounted config dirs — no source checkout.
+# Updating is `docker compose pull && docker compose up -d`.
+# For local development use the override, which restores the build: keys:
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
+# Pin TALOS_IMAGE to an immutable sha tag in prod (never :latest) so a rollback
+# is just editing .env and re-running `up -d`.
 services:
   talos-app:
-    build: .
+    image: ${TALOS_IMAGE:-ghcr.io/mosescommitsfraud/talos:latest}
     container_name: talos
     ports:
       - "${APP_BIND:-127.0.0.1}:${APP_PORT:-7000}:7000"
@@ -129,7 +136,7 @@ services:
   # embed + Qdrant upsert, so the web process never blocks on uploads. Same image
   # as talos-app; shares the uploads volume so files are physically present.
   rag-ingest-worker:
-    build: .
+    image: ${TALOS_IMAGE:-ghcr.io/mosescommitsfraud/talos:latest}
     container_name: rag-ingest-worker
     restart: unless-stopped
     command: ["rq", "worker", "ingest", "--url", "${REDIS_URL:-redis://:${RAG_REDIS_PASSWORD:-}@rag-redis:6379/0}"]
@@ -165,8 +172,7 @@ services:
         condition: service_started
 
   talos-sandbox:
-    build:
-      context: ./sandbox
+    image: ${TALOS_SANDBOX_IMAGE:-ghcr.io/mosescommitsfraud/talos-sandbox:latest}
     container_name: talos-sandbox
     volumes:
       - talos-sandbox-home:/home/talos

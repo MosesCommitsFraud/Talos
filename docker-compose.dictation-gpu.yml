@@ -3,16 +3,22 @@
 #
 #   COMPOSE_FILE=docker-compose.yml:...:docker-compose.dictation.yml:docker-compose.dictation-gpu.yml
 #
-# Builds CTranslate2 from source with CUDA (see services/dictation/
-# Dockerfile.cuda — first build takes ~20-40 min) and runs Whisper on the GPU,
-# which makes the two-tier large-v3-turbo + small setup fast enough for live
-# word-by-word partials with per-utterance language auto-detect.
-# Requires the NVIDIA container runtime (same as the vLLM services).
+# Swaps in the CUDA image (CTranslate2 compiled from source against CUDA+cuDNN)
+# and runs Whisper on the GPU, which makes the two-tier large-v3-turbo + small
+# setup fast enough for live word-by-word partials with per-utterance language
+# auto-detect. Requires the NVIDIA container runtime (same as the vLLM services).
+#
+# This image is arm64-only and built for GB10/SBSA — that's the point of it, as
+# CTranslate2 publishes no CUDA wheels for aarch64. On an x86 GPU host don't use
+# this file at all: set DICTATION_DEVICE=cuda in .env and the plain dictation
+# image already runs on the GPU there.
+#
+# CI publishes it from .github/workflows/dictation-cuda.yml (it does NOT rebuild
+# on every push — the compile takes 20-40 min). To build it locally instead, use
+# docker-compose.dictation.dev.yml.
 services:
   dictation:
-    build:
-      context: ./services/dictation
-      dockerfile: Dockerfile.cuda
+    image: ${TALOS_DICTATION_CUDA_IMAGE:-ghcr.io/mosescommitsfraud/talos-dictation-cuda:latest}
     deploy:
       resources:
         reservations:

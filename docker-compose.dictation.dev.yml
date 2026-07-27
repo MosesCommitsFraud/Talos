@@ -1,0 +1,24 @@
+# Development override for the dictation sidecar: build it from this checkout
+# instead of pulling the published image.
+#
+# Kept separate from docker-compose.dev.yml on purpose. That file is stacked on
+# every local run, and a `dictation:` service defined there would spring into
+# existence even when you never asked for the dictation overlay.
+#
+# CPU build:
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml \
+#                  -f docker-compose.dictation.yml -f docker-compose.dictation.dev.yml \
+#                  up -d --build
+#
+# GPU build — append docker-compose.dictation-gpu.yml BEFORE this file, so the
+# build: key here wins over its image: key (later files override earlier ones):
+#   ... -f docker-compose.dictation.yml -f docker-compose.dictation-gpu.yml \
+#       -f docker-compose.dictation.dev.yml up -d --build
+# and set DICTATION_DOCKERFILE=Dockerfile.cuda. That compile takes 20-40 min and
+# only produces a usable image on an arm64 CUDA host (GB10/SBSA).
+services:
+  dictation:
+    build:
+      context: ./services/dictation
+      dockerfile: ${DICTATION_DOCKERFILE:-Dockerfile}
+    image: talos-dictation:dev

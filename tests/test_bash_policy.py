@@ -10,8 +10,8 @@ import pytest
 from src.tool_security import (
     BASH_POLICY_MESSAGE,
     NETWORK_REDIRECT_MESSAGE,
-    network_command_redirect,
     bash_policy_violation,
+    network_command_redirect,
 )
 
 

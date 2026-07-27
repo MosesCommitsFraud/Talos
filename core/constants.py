@@ -3,7 +3,15 @@
 
 import os
 
-APP_VERSION = "0.9.1"
+APP_VERSION = "0.1.0"
+
+# Which build is actually running. Set as ENV in the Dockerfile from CI's
+# --build-arg; "dev-build"/"dev" means a locally built or bare-metal run. The
+# update check compares BUILD_HASH against the newest sha published to GHCR,
+# because APP_VERSION is hand-bumped and can't distinguish two images built
+# from the same release.
+BUILD_HASH = os.getenv("TALOS_BUILD_HASH", "dev-build")
+IMAGE_TAG = os.getenv("TALOS_IMAGE_TAG", "dev")
 
 # Base paths
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__))) + "/"

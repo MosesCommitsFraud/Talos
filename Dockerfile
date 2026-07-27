@@ -81,6 +81,16 @@ RUN mkdir -p data logs services/cache/search
 COPY docker/entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh
 
+# Build identity. Baked in last so a new commit doesn't invalidate any layer
+# above it. TALOS_BUILD_HASH is the git sha CI built from; TALOS_IMAGE_TAG is
+# the immutable GHCR tag that carries this build. Both stay at their dev
+# defaults for local `docker compose -f docker-compose.dev.yml build`, which is
+# how /api/version reports whether it's serving a released image or a local one.
+ARG TALOS_BUILD_HASH=dev-build
+ARG TALOS_IMAGE_TAG=dev
+ENV TALOS_BUILD_HASH=${TALOS_BUILD_HASH} \
+    TALOS_IMAGE_TAG=${TALOS_IMAGE_TAG}
+
 EXPOSE 7000
 
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]

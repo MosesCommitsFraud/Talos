@@ -1,7 +1,9 @@
 # Solo-dev CI: not a merge gate (you push straight to main) but a safety net +
 # build factory. On every push to main it lints, type-checks, builds the web
-# bundle, builds the Docker image, runs the test suite inside that image, and
-# pushes the image to GHCR so "deploy" == "docker pull".
+# bundle, builds both Docker images for amd64 AND arm64, runs the test suite
+# inside each, and publishes multi-arch manifests to GHCR so "deploy" ==
+# "docker compose pull". arm64 matters: the prod host is a DGX Spark, which
+# cannot run an amd64-only image at all.
 name: CI
 
 on:
@@ -17,6 +19,10 @@ concurrency:
 permissions:
   contents: read
   packages: write # needed to push the image to GHCR
+
+env:
+  REGISTRY: ghcr.io
+  OWNER: mosescommitsfraud
 
 jobs:
   # Fast feedback: Python lint/format + web typecheck/build. Fails in ~1-2 min
@@ -57,24 +63,60 @@ jobs:
         run: pnpm build
         working-directory: web
 
-  # Build the real image, run the test suite inside it (so tests run against the
-  # exact runtime deps that ship), then push to GHCR on success.
-  image:
-    runs-on: ubuntu-latest
+  # One leg per (image x architecture). Each leg builds NATIVELY on a runner of
+  # that architecture — no QEMU — because both images compile C extensions
+  # (build-essential, numpy/scipy in the sandbox) and emulated builds of that
+  # take hours. Each leg pushes an untagged, digest-only image; the merge job
+  # below stitches the two architectures into one multi-arch tag.
+  build:
+    runs-on: ${{ matrix.platform.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        image:
+          - repo: talos
+            context: .
+            build_args: |
+              TALOS_BUILD_HASH=${{ github.sha }}
+              TALOS_IMAGE_TAG=${{ github.sha }}
+          # The agent code-execution sandbox (sandbox/Dockerfile, built from the
+          # ./sandbox context). It carries its own heavy scientific-Python stack
+          # pinned in sandbox/requirements.txt, so it must be built and published
+          # separately — prod pulls it rather than building from source.
+          - repo: talos-sandbox
+            context: ./sandbox
+            build_args: ""
+          # Voice-input sidecar (docker-compose.dictation.yml). CPU-wheel build:
+          # on x86 the CTranslate2 pip wheels carry CUDA, so this same image
+          # serves DICTATION_DEVICE=cuda there. The aarch64 leg compiles PyAudio
+          # from source (no wheel), which is why it builds on a native runner.
+          # The GB10/SBSA CUDA build is a different Dockerfile — see
+          # dictation-cuda.yml.
+          - repo: talos-dictation
+            context: ./services/dictation
+            build_args: ""
+        platform:
+          - { id: linux/amd64, runner: ubuntu-latest, arch: amd64 }
+          - { id: linux/arm64, runner: ubuntu-24.04-arm, arch: arm64 }
     steps:
       - uses: actions/checkout@v7
       - uses: docker/setup-buildx-action@v4
 
+      # Build once into the local daemon so the tests below run against the
+      # exact runtime deps that ship, on the target architecture. The push step
+      # afterwards is a cache hit on every layer, so this isn't a double build.
       - name: Build image (load locally for testing)
         uses: docker/build-push-action@v7
         with:
-          context: .
+          context: ${{ matrix.image.context }}
           load: true
-          tags: talos:ci
-          cache-from: type=gha,scope=main
-          cache-to: type=gha,mode=max,scope=main
+          tags: ${{ matrix.image.repo }}:ci
+          build-args: ${{ matrix.image.build_args }}
+          cache-from: type=gha,scope=${{ matrix.image.repo }}-${{ matrix.platform.arch }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.image.repo }}-${{ matrix.platform.arch }}
 
       - name: Run test suite inside the image
+        if: matrix.image.repo == 'talos'
         # tests/ is excluded from the image (.dockerignore) to keep it lean, so
         # mount the repo's tests into the container at runtime — the image still
         # supplies the installed runtime deps and pyproject.toml config. Bypass
@@ -84,50 +126,8 @@ jobs:
           -v "${{ github.workspace }}/tests:/app/tests:ro"
           --entrypoint pytest talos:ci -q
 
-      - name: Log in to GHCR
-        if: github.event_name == 'push'
-        uses: docker/login-action@v4
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Push image to GHCR
-        if: github.event_name == 'push'
-        uses: docker/build-push-action@v7
-        with:
-          context: .
-          push: true
-          # Single-arch (amd64) to stay lean. To also ship arm64, add:
-          #   platforms: linux/amd64,linux/arm64
-          # (roughly doubles build time).
-          tags: |
-            ghcr.io/mosescommitsfraud/talos:latest
-            ghcr.io/mosescommitsfraud/talos:${{ github.sha }}
-          cache-from: type=gha,scope=main
-          cache-to: type=gha,mode=max,scope=main
-
-  # Build the agent code-execution sandbox image (sandbox/Dockerfile, built from
-  # the ./sandbox context — see the talos-sandbox service in docker-compose). It
-  # carries its own heavy scientific-Python stack pinned in sandbox/requirements
-  # .txt; the main `image` job above does NOT build it, so without this job the
-  # Dependabot bumps to those pins would merge untested.
-  sandbox-image:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      - uses: docker/setup-buildx-action@v4
-
-      - name: Build sandbox image
-        uses: docker/build-push-action@v7
-        with:
-          context: ./sandbox
-          load: true
-          tags: talos-sandbox:ci
-          cache-from: type=gha,scope=sandbox
-          cache-to: type=gha,mode=max,scope=sandbox
-
-      - name: Smoke-test that key libraries import
+      - name: Smoke-test that key sandbox libraries import
+        if: matrix.image.repo == 'talos-sandbox'
         # Catches breakage from major bumps (weasyprint, pypdf, ipython, …) that
         # a successful build alone wouldn't surface. Invoke the venv python
         # DIRECTLY: the /usr/local/bin/python symlink doesn't reliably re-activate
@@ -136,3 +136,103 @@ jobs:
         run: >-
           docker run --rm --entrypoint /opt/talos-sandbox-venv/bin/python talos-sandbox:ci -c
           "import numpy, pandas, scipy, sklearn, statsmodels, duckdb, weasyprint, pypdf, IPython, pymssql; print('sandbox imports OK')"
+
+      - name: Smoke-test that the dictation stack imports
+        if: matrix.image.repo == 'talos-dictation'
+        # RealtimeSTT needs portaudio present at import time even though the mic
+        # is never used, and it made faster-whisper/silero-vad optional extras —
+        # a missing extra only explodes later at model init, not at build. Import
+        # them here so a bad pin fails CI instead of the first dictation attempt.
+        # Import only, no model load: weights are fetched at runtime into the
+        # dictation-models volume, not baked into the image.
+        run: >-
+          docker run --rm --entrypoint python talos-dictation:ci -c
+          "import RealtimeSTT, faster_whisper, silero_vad, fastapi, uvicorn; print('dictation imports OK')"
+
+      - name: Log in to GHCR
+        if: github.event_name == 'push'
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Push by digest
+        id: push
+        if: github.event_name == 'push'
+        uses: docker/build-push-action@v7
+        with:
+          context: ${{ matrix.image.context }}
+          platforms: ${{ matrix.platform.id }}
+          build-args: ${{ matrix.image.build_args }}
+          # No tag here on purpose: each arch pushes a bare digest, and only the
+          # merge job assigns the human-readable tags. provenance:false keeps the
+          # index free of attestation manifests, which `imagetools create` would
+          # otherwise fold in and confuse single-arch pulls.
+          provenance: false
+          outputs: type=image,name=${{ env.REGISTRY }}/${{ env.OWNER }}/${{ matrix.image.repo }},push-by-digest=true,name-canonical=true,push=true
+          cache-from: type=gha,scope=${{ matrix.image.repo }}-${{ matrix.platform.arch }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.image.repo }}-${{ matrix.platform.arch }}
+
+      - name: Export digest
+        if: github.event_name == 'push'
+        run: |
+          mkdir -p /tmp/digests
+          digest="${{ steps.push.outputs.digest }}"
+          touch "/tmp/digests/${digest#sha256:}"
+
+      - name: Upload digest
+        if: github.event_name == 'push'
+        uses: actions/upload-artifact@v4
+        with:
+          name: digests-${{ matrix.image.repo }}-${{ matrix.platform.arch }}
+          path: /tmp/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  # Combine the per-architecture digests into one multi-arch manifest per image,
+  # so `docker pull ghcr.io/…/talos:latest` resolves to arm64 on the Spark and
+  # amd64 on a dev box without either side knowing.
+  merge:
+    if: github.event_name == 'push'
+    needs: build
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        repo: [talos, talos-sandbox, talos-dictation]
+    steps:
+      - name: Download digests
+        uses: actions/download-artifact@v4
+        with:
+          path: /tmp/digests
+          pattern: digests-${{ matrix.repo }}-*
+          merge-multiple: true
+
+      - uses: docker/setup-buildx-action@v4
+      - name: Log in to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create multi-arch manifest
+        working-directory: /tmp/digests
+        # Guard on the count: if one arch leg failed, publishing a "multi-arch"
+        # tag containing only amd64 would silently break the Spark, and the
+        # failure would only surface at `docker compose up` on prod.
+        run: |
+          set -euo pipefail
+          count="$(ls -1 | wc -l)"
+          if [ "$count" -ne 2 ]; then
+            echo "expected 2 digests (amd64 + arm64) for ${{ matrix.repo }}, found $count" >&2
+            exit 1
+          fi
+          docker buildx imagetools create \
+            -t "$REGISTRY/$OWNER/${{ matrix.repo }}:latest" \
+            -t "$REGISTRY/$OWNER/${{ matrix.repo }}:${{ github.sha }}" \
+            $(printf "$REGISTRY/$OWNER/${{ matrix.repo }}@sha256:%s " *)
+
+      - name: Inspect published manifest
+        run: docker buildx imagetools inspect "$REGISTRY/$OWNER/${{ matrix.repo }}:${{ github.sha }}"

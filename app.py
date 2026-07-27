@@ -779,9 +779,28 @@ async def serve_dictation_worklet():
 
 @app.get("/api/version")
 async def get_version():
+    # Deliberately coarse: this route is in AUTH_EXEMPT_EXACT, so anyone who can
+    # reach the port gets this answer without logging in. The hand-bumped
+    # APP_VERSION is safe to leak; the exact commit is not, because the repo is
+    # public and a sha tells a visitor exactly which fixes this deployment is
+    # still missing. Build identity lives on /api/version/build instead.
     from core.constants import APP_VERSION
 
     return {"version": APP_VERSION}
+
+
+@app.get("/api/version/build")
+async def get_build_info():
+    """Exact build identity — which image this container was started from.
+
+    NOT auth-exempt (the exemption list matches "/api/version" exactly), so the
+    middleware requires a session cookie or API token here. That's the whole
+    point: the update check needs the running sha, but only for someone already
+    logged in.
+    """
+    from core.constants import APP_VERSION, BUILD_HASH, IMAGE_TAG
+
+    return {"version": APP_VERSION, "build": BUILD_HASH, "tag": IMAGE_TAG}
 
 
 @app.get("/api/health")

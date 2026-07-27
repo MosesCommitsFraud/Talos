@@ -10,7 +10,7 @@ def test_talos_system_prompt_defines_workspace_policy_and_environment():
 def test_talos_system_prompt_allows_project_dependencies_with_safety_boundaries():
     assert "Install dependencies when they are needed" in TALOS_SYSTEM_PROMPT
     assert "existing package manager and lockfile conventions" in TALOS_SYSTEM_PROMPT
-    assert "SQL access is read-only" in TALOS_SYSTEM_PROMPT
+    assert "SQL tools are read-only" in TALOS_SYSTEM_PROMPT
 
 
 def test_llm_language_prompt_covers_thinking_and_output():

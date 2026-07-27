@@ -2,6 +2,7 @@
 
 import logging
 import mimetypes
+import re
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
@@ -597,6 +598,7 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
     @router.get("/api/artifacts/{session_id}/preview")
     async def preview_artifact_route(request: Request, session_id: str, path: str = Query(...)):
         from fastapi.responses import Response
+
         from src.sandbox_client import preview_office_artifact, sandbox_enabled
 
         if not path.lower().endswith((".doc", ".docx", ".xls", ".xlsx", ".xlsm", ".ppt", ".pptx")):

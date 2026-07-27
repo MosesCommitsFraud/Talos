@@ -1,0 +1,33 @@
+# Development override: build the images from this checkout instead of pulling
+# them from GHCR. The base docker-compose.yml is production-shaped (image: only,
+# no source needed on the host), so this file puts the build: keys back.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
+#
+# `image:` is repeated alongside `build:` on purpose — Compose then tags the
+# locally built image with that name, so the app and the ingest worker share one
+# build instead of building the same context twice.
+services:
+  talos-app:
+    build:
+      context: .
+      args:
+        # Mirrors what CI bakes in, so a locally built image reports
+        # build "dev-build" / tag "dev" on /api/version and the update check
+        # knows not to compare it against published shas.
+        TALOS_BUILD_HASH: dev-build
+        TALOS_IMAGE_TAG: dev
+    image: talos:dev
+
+  rag-ingest-worker:
+    build:
+      context: .
+      args:
+        TALOS_BUILD_HASH: dev-build
+        TALOS_IMAGE_TAG: dev
+    image: talos:dev
+
+  talos-sandbox:
+    build:
+      context: ./sandbox
+    image: talos-sandbox:dev

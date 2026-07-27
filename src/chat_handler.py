@@ -9,7 +9,6 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import HTTPException
 
-from core.models import ChatMessage
 from src.chat_helpers import model_supports_vision
 from src.constants import (
     DEFAULT_MAX_TOKENS,
