@@ -2,11 +2,23 @@
 # generation (numpy>=2.5) requires Python >=3.12, which bookworm's 3.11 can't satisfy.
 FROM node:22-trixie-slim
 
-RUN sed -i 's|http://deb.debian.org|https://deb.debian.org|g' /etc/apt/sources.list.d/debian.sources \
-    && apt-get update -o Acquire::Retries=5 -o Acquire::https::Verify-Peer=false -o Acquire::https::Verify-Host=false \
-    && apt-get install -y --no-install-recommends -o Acquire::Retries=5 -o Acquire::https::Verify-Peer=false -o Acquire::https::Verify-Host=false ca-certificates \
-    && apt-get update -o Acquire::Retries=5 \
-    && apt-get install -y --no-install-recommends -o Acquire::Retries=5 \
+# Same CDN-resilience treatment as the app image (see the long note there): the
+# Fastly mirror resets connections under apt's default pipelining, and this
+# package list is far larger, so it's the more likely of the two to be bitten.
+RUN set -eu; \
+    sed -i 's|http://deb.debian.org|https://deb.debian.org|g' /etc/apt/sources.list.d/debian.sources; \
+    printf '%s\n' \
+        'Acquire::Retries "5";' \
+        'Acquire::http::Pipeline-Depth "0";' \
+        'Acquire::https::Pipeline-Depth "0";' \
+        > /etc/apt/apt.conf.d/99-talos-apt-resilience; \
+    apt-get update -o Acquire::https::Verify-Peer=false -o Acquire::https::Verify-Host=false; \
+    apt-get install -y --no-install-recommends \
+        -o Acquire::https::Verify-Peer=false -o Acquire::https::Verify-Host=false \
+        ca-certificates; \
+    ok=0; \
+    for attempt in 1 2 3; do \
+        if apt-get update && apt-get install -y --no-install-recommends \
     bash \
     bc \
     build-essential \
@@ -69,8 +81,13 @@ RUN sed -i 's|http://deb.debian.org|https://deb.debian.org|g' /etc/apt/sources.l
     unixodbc-dev \
     unzip \
     wget \
-    zip \
-    && rm -rf /var/lib/apt/lists/*
+    zip; \
+        then ok=1; break; fi; \
+        echo "apt install failed (attempt $attempt/3), retrying in 10s"; \
+        sleep 10; \
+    done; \
+    [ "$ok" = 1 ]; \
+    rm -rf /var/lib/apt/lists/*
 
 WORKDIR /srv/talos-sandbox
 

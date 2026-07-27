@@ -22,29 +22,54 @@ FROM python:3.12-slim
 
 # System deps for the Talos web/API container. Agent code execution happens in
 # the separate talos-sandbox container, not in this app container.
-# nodejs/npm are kept for existing static build/tooling compatibility.
+# nodejs/npm are NOT just build tooling: src/builtin_mcp.py resolves `npx` at
+# runtime to launch stdio MCP servers, so they have to stay in the final image.
 # gosu lets the entrypoint drop privileges cleanly so signals still reach
 # uvicorn directly (no extra shell layer like `su`/`sudo` would add).
-RUN sed -i 's|http://deb.debian.org|https://deb.debian.org|g' /etc/apt/sources.list.d/debian.sources \
-    && apt-get update -o Acquire::Retries=5 -o Acquire::https::Verify-Peer=false -o Acquire::https::Verify-Host=false \
-    && apt-get install -y --no-install-recommends -o Acquire::Retries=5 -o Acquire::https::Verify-Peer=false -o Acquire::https::Verify-Host=false ca-certificates \
-    && apt-get update -o Acquire::Retries=5 \
-    && apt-get install -y --no-install-recommends -o Acquire::Retries=5 \
-    build-essential \
-    curl \
-    ffmpeg \
-    git \
-    nodejs \
-    npm \
-    gosu \
-    libglib2.0-0 \
-    libgl1 \
-    libgomp1 \
-    libsm6 \
-    libxext6 \
-    libxrender1 \
-    libxcb1 \
-    && rm -rf /var/lib/apt/lists/*
+#
+# The apt dance below exists because deb.debian.org is a Fastly CDN that resets
+# the connection when apt pipelines hundreds of small .debs at once — Debian's
+# `npm` package alone drags in ~650 node-* packages. Pipeline-Depth 0 serialises
+# the requests. Acquire::Retries does NOT rescue this on its own: it doesn't
+# cover the OpenSSL "connection reset by peer" error class, which is why a build
+# with Retries=5 already set still died on a single .deb. Hence the retry loop.
+# The Verify-Peer bypass is one-shot, for the two bootstrap commands only: the
+# base image can't verify the https sources we just rewrote until
+# ca-certificates exists.
+RUN set -eu; \
+    sed -i 's|http://deb.debian.org|https://deb.debian.org|g' /etc/apt/sources.list.d/debian.sources; \
+    printf '%s\n' \
+        'Acquire::Retries "5";' \
+        'Acquire::http::Pipeline-Depth "0";' \
+        'Acquire::https::Pipeline-Depth "0";' \
+        > /etc/apt/apt.conf.d/99-talos-apt-resilience; \
+    apt-get update -o Acquire::https::Verify-Peer=false -o Acquire::https::Verify-Host=false; \
+    apt-get install -y --no-install-recommends \
+        -o Acquire::https::Verify-Peer=false -o Acquire::https::Verify-Host=false \
+        ca-certificates; \
+    ok=0; \
+    for attempt in 1 2 3; do \
+        if apt-get update && apt-get install -y --no-install-recommends \
+            build-essential \
+            curl \
+            ffmpeg \
+            git \
+            nodejs \
+            npm \
+            gosu \
+            libglib2.0-0 \
+            libgl1 \
+            libgomp1 \
+            libsm6 \
+            libxext6 \
+            libxrender1 \
+            libxcb1; \
+        then ok=1; break; fi; \
+        echo "apt install failed (attempt $attempt/3), retrying in 10s"; \
+        sleep 10; \
+    done; \
+    [ "$ok" = 1 ]; \
+    rm -rf /var/lib/apt/lists/*
 
 # MSSQL connectivity uses the pymssql / FreeTDS stack (see _build_external_sql_url:
 # `mssql+pymssql://`). The pinned pymssql wheel bundles FreeTDS statically, so no
