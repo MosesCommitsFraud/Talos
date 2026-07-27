@@ -189,7 +189,12 @@ jobs:
         if: github.event_name == 'push'
         uses: actions/upload-artifact@v4
         with:
-          name: digests-${{ matrix.image.repo }}-${{ matrix.platform.arch }}
+          # "__" separates the fields because every image name starts with
+          # "talos": with a "-" separator the merge job's `digests-talos-*`
+          # glob also matches digests-talos-sandbox-* and
+          # digests-talos-dictation-*, so the talos leg collects all six
+          # digests and tries to publish them as one manifest.
+          name: digests__${{ matrix.image.repo }}__${{ matrix.platform.arch }}
           path: /tmp/digests/*
           if-no-files-found: error
           retention-days: 1
@@ -210,7 +215,9 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           path: /tmp/digests
-          pattern: digests-${{ matrix.repo }}-*
+          # Must stay in sync with the artifact name in the build job — see the
+          # note there on why the separator is "__" and not "-".
+          pattern: digests__${{ matrix.repo }}__*
           merge-multiple: true
 
       - uses: docker/setup-buildx-action@v4
