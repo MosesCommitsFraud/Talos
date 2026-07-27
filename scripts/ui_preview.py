@@ -1095,9 +1095,7 @@ class PreviewHandler(BaseHTTPRequestHandler):
             import re as _re
 
             m = _re.match(r"\A\s*---\s*\n(.*?)\n---", content, _re.S)
-            fm = dict(
-                _re.findall(r"^([A-Za-z_-]+)\s*:\s*(.+)$", m.group(1), _re.M) if m else []
-            )
+            fm = dict(_re.findall(r"^([A-Za-z_-]+)\s*:\s*(.+)$", m.group(1), _re.M) if m else [])
             if not fm.get("name") or not fm.get("description"):
                 self._send_json(
                     {"detail": "SKILL.md needs frontmatter with name + description"}, 400

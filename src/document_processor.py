@@ -344,7 +344,9 @@ def _resolve_vl_model(configured: str, owner: str | None = None) -> tuple:
     raise ValueError("No vision model available")
 
 
-def analyze_image_with_vl_result(image_path: str, prompt: str = "Describe this image in detail", owner: str | None = None) -> dict:
+def analyze_image_with_vl_result(
+    image_path: str, prompt: str = "Describe this image in detail", owner: str | None = None
+) -> dict:
     """Analyze an image and return both text and the model that produced it."""
     logger.info(f"Analyzing image with VL model: {image_path}")
     try:
@@ -386,7 +388,9 @@ def analyze_image_with_vl_result(image_path: str, prompt: str = "Describe this i
         try:
             from src.endpoint_resolver import resolve_vision_fallback_candidates
 
-            _vl_candidates = [(url, model_id, headers)] + resolve_vision_fallback_candidates(owner=owner)
+            _vl_candidates = [(url, model_id, headers)] + resolve_vision_fallback_candidates(
+                owner=owner
+            )
         except Exception:
             _vl_candidates = [(url, model_id, headers)]
 

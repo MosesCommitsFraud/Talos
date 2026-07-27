@@ -273,6 +273,7 @@ Read one public web page's text. Use after `web_search` when a snippet is too th
     "update_plan": '- ```update_plan``` — While executing an approved plan, write the full checklist back with completed steps marked `- [x]`. Args (JSON): {"plan": "- [x] done step\\n- [ ] next step"}. Always pass the COMPLETE checklist, not a diff.',
 }
 
+
 def get_builtin_overrides() -> dict:
     """User overrides for built-in tool descriptions (TOOL_SECTIONS).
     Stored globally in settings.json so the user can preview + edit how
@@ -808,8 +809,14 @@ def _build_system_prompt(
                 _last_user_msg = _content.lower()
                 break
         _suggest_keywords = [
-            "suggest", "review", "improve", "feedback", "critique",
-            "proofread", "check my", "look over",
+            "suggest",
+            "review",
+            "improve",
+            "feedback",
+            "critique",
+            "proofread",
+            "check my",
+            "look over",
         ]
         if any(kw in _last_user_msg for kw in _suggest_keywords):
             _doc_message["content"] += (
@@ -875,7 +882,9 @@ def _build_system_prompt(
             "instruction. If it is stale, ambiguous, or no longer matches, ask rather than guessing.\n"
             + _edit_rules
         )
-        _selection_message = untrusted_context_message("user-marked artifact selection", _selection_ctx)
+        _selection_message = untrusted_context_message(
+            "user-marked artifact selection", _selection_ctx
+        )
         if selection_vision and artifact_selection.get("visuals"):
             _selection_message["content"] = [
                 {"type": "text", "text": _selection_message["content"]},
@@ -1276,9 +1285,7 @@ def _append_tool_results(
         if round_reasoning:
             msg["reasoning_content"] = round_reasoning
         messages.append(msg)
-        messages.append(
-            {"role": "user", "content": f"{TOOL_RESULT_PREFIX}\n\n{tool_output_text}"}
-        )
+        messages.append({"role": "user", "content": f"{TOOL_RESULT_PREFIX}\n\n{tool_output_text}"})
 
 
 # Marker that opens the synthetic user message carrying a round's tool output
@@ -1711,9 +1718,11 @@ async def stream_agent_loop(
         # separate Talos document workflow. Sandboxed file and mutation tools
         # remain available for the existing artifact.
         disabled_tools.update({"create_document", "update_document"})
-    artifact_edit_tools = {
-        "bash", "python", "run_cell", "read_file", "write_file", "edit_file", "grep", "glob", "ls"
-    } if artifact_selection else set()
+    artifact_edit_tools = (
+        {"bash", "python", "run_cell", "read_file", "write_file", "edit_file", "grep", "glob", "ls"}
+        if artifact_selection
+        else set()
+    )
     public_blocked_tools = blocked_tools_for_owner(owner)
     if artifact_selection:
         # The artifact was owner/session validated by the route. These tools run
@@ -1973,7 +1982,12 @@ async def stream_agent_loop(
 
     vision_allowed = bool(get_user_setting("vision_enabled", owner or "", True))
     selection_vision = vision_allowed and model_supports_vision(model, endpoint_url)
-    if artifact_selection and artifact_selection.get("visuals") and vision_allowed and not selection_vision:
+    if (
+        artifact_selection
+        and artifact_selection.get("visuals")
+        and vision_allowed
+        and not selection_vision
+    ):
         try:
             from src.document_processor import analyze_image_with_vl_result
 
@@ -2579,7 +2593,8 @@ async def stream_agent_loop(
                 )
                 if is_selection_visual:
                     message["content"] = [
-                        block for block in content
+                        block
+                        for block in content
                         if not isinstance(block, dict) or block.get("type") != "image_url"
                     ]
 
@@ -3181,15 +3196,20 @@ async def stream_agent_loop(
                 if image_name and image_name not in created_artifacts:
                     created_artifacts.append(image_name)
             artifact_changed = bool(created_artifacts)
-            if block.tool_type in {
-                "create_document",
-                "update_document",
-                "edit_document",
-                "write_file",
-                "edit_file",
-                "show_image",
-                "generate_image",
-            } and result.get("exit_code") in (0, None) and "error" not in result:
+            if (
+                block.tool_type
+                in {
+                    "create_document",
+                    "update_document",
+                    "edit_document",
+                    "write_file",
+                    "edit_file",
+                    "show_image",
+                    "generate_image",
+                }
+                and result.get("exit_code") in (0, None)
+                and "error" not in result
+            ):
                 artifact_changed = True
             if artifact_changed:
                 tool_output_data["artifacts_changed"] = True

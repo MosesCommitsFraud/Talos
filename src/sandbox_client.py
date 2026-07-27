@@ -234,9 +234,7 @@ async def download_artifact(
         return resp.content, ctype, fname
 
 
-async def preview_office_artifact(
-    *, owner: str | None, session_id: str | None, path: str
-) -> bytes:
+async def preview_office_artifact(*, owner: str | None, session_id: str | None, path: str) -> bytes:
     """Render a workspace Word document to PDF in the sandbox."""
     if not session_id:
         raise RuntimeError("office preview requires a session_id")

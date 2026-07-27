@@ -76,6 +76,7 @@ def _identifiers(text: str) -> set:
         found.add(tok)
     return found
 
+
 # Retrieved text per session. Bounded — this is a cache for the current turn,
 # not storage: the entry is rewritten on every turn that retrieves anything.
 _MAX_SESSIONS = 200
@@ -143,9 +144,7 @@ def check_query(query: str, session_id: str = "") -> Optional[str]:
     # Rule 1: an internal identifier lifted straight out of the document.
     shared_ids = _identifiers(query) & _identifiers(protected)
     if shared_ids:
-        logger.info(
-            "[web-guard] blocked outbound query (session=%s, identifier reuse)", session_id
-        )
+        logger.info("[web-guard] blocked outbound query (session=%s, identifier reuse)", session_id)
         return _refusal(", ".join(sorted(shared_ids)[:3]))
 
     # Rule 2: copied phrasing. One shared pair can be coincidence on a topic the

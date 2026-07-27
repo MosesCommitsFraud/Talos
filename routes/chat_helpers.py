@@ -358,7 +358,10 @@ async def preprocess(
 
 
 def add_user_message(
-    sess, chat_handler, preprocessed: PreprocessedMessage, incognito: bool = False,
+    sess,
+    chat_handler,
+    preprocessed: PreprocessedMessage,
+    incognito: bool = False,
     artifact_selection: Optional[dict] = None,
 ):
     """Add user message to session history and update session name.
@@ -632,9 +635,7 @@ async def build_chat_context(
     _custom_sys = (get_setting("custom_system_prompt", "") or "").strip()
     _preset_sys = preset.system_prompt or ""
     _language_sys = llm_language_prompt(llm_language)
-    _effective_sys = (
-        "\n\n".join(p for p in (_custom_sys, _preset_sys, _language_sys) if p) or None
-    )
+    _effective_sys = "\n\n".join(p for p in (_custom_sys, _preset_sys, _language_sys) if p) or None
     _preface_kwargs = dict(
         message=_ctx_msg,
         session=sess,
@@ -980,9 +981,7 @@ def strip_unauthorized_figures(answer: str, sources: list) -> str:
     def _norm(u: str) -> str:
         return unquote(unquote(u or ""))
 
-    retrieved = {
-        _norm(s.get("image_url")): s for s in (sources or []) if s.get("image_url")
-    }
+    retrieved = {_norm(s.get("image_url")): s for s in (sources or []) if s.get("image_url")}
     eligible = {
         _norm(s.get("image_url"))
         for s in _eligible_figures_for_answer(answer, sources)

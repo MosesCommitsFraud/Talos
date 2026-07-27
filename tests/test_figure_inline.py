@@ -242,10 +242,7 @@ def test_strips_retrieved_figure_when_forecast_answer_did_not_use_its_anchor():
         "_page": 7,
         "image_url": _OK,
         "image_caption": "Dropdown-Menü für Datenquellen",
-        "_text": (
-            "Erweiterte Datenquelle, Pivot, SQL Abfrage Datenquelle und "
-            "Dimensions Tabelle."
-        ),
+        "_text": ("Erweiterte Datenquelle, Pivot, SQL Abfrage Datenquelle und Dimensions Tabelle."),
     }
 
     with_image = answer + f"\n\n![Datenquellen]({_OK})"
@@ -284,10 +281,7 @@ def test_caption_backed_synthetic_anchor_is_kept_when_answer_uses_caption():
         "_synthetic_anchor": True,
         "_text": "Pressure chart showing a sharp increase at 80 bar.",
     }
-    answer = (
-        "The pressure chart shows a sharp increase at 80 bar. "
-        f"![Pressure chart]({_OK})"
-    )
+    answer = f"The pressure chart shows a sharp increase at 80 bar. ![Pressure chart]({_OK})"
 
     assert ch.strip_unauthorized_figures(answer, [figure]) == answer
 

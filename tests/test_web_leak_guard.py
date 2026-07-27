@@ -75,13 +75,17 @@ def test_guard_is_scoped_to_its_own_session():
 def test_disabled_guard_allows_everything(monkeypatch):
     guard.remember_context(SESSION, RETRIEVED)
     monkeypatch.setattr(guard, "is_enabled", lambda: False)
-    assert guard.check_query("Kündigungsfrist Rahmenvertrag Müller GmbH Klausel 7.3", SESSION) is None
+    assert (
+        guard.check_query("Kündigungsfrist Rahmenvertrag Müller GmbH Klausel 7.3", SESSION) is None
+    )
 
 
 def test_forget_clears_protection():
     guard.remember_context(SESSION, RETRIEVED)
     guard.forget_context(SESSION)
-    assert guard.check_query("Kündigungsfrist Rahmenvertrag Müller GmbH Klausel 7.3", SESSION) is None
+    assert (
+        guard.check_query("Kündigungsfrist Rahmenvertrag Müller GmbH Klausel 7.3", SESSION) is None
+    )
 
 
 def test_session_store_is_bounded():
@@ -112,8 +116,11 @@ def test_search_refuses_before_any_request(monkeypatch):
     def _explode(*a, **kw):
         raise AssertionError("an outbound request was made for a blocked query")
 
-    monkeypatch.setattr(ws.httpx if hasattr(ws, "httpx") else importlib.import_module("httpx"),
-                        "AsyncClient", _explode)
+    monkeypatch.setattr(
+        ws.httpx if hasattr(ws, "httpx") else importlib.import_module("httpx"),
+        "AsyncClient",
+        _explode,
+    )
     result = asyncio.run(
         ws.search("Kündigungsfrist Rahmenvertrag Müller GmbH Klausel 7.3", session_id=SESSION)
     )

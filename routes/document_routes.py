@@ -482,7 +482,9 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
             ]
             images = [
                 _gallery_artifact(image)
-                for image in db.query(GalleryImage).filter(GalleryImage.session_id == session_id).all()
+                for image in db.query(GalleryImage)
+                .filter(GalleryImage.session_id == session_id)
+                .all()
             ]
         finally:
             db.close()
@@ -539,9 +541,7 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
                 return Response(
                     content=(doc.current_content or "").encode("utf-8"),
                     media_type=artifact["mime"],
-                    headers={
-                        "Content-Disposition": f'attachment; filename="{artifact["name"]}"'
-                    },
+                    headers={"Content-Disposition": f'attachment; filename="{artifact["name"]}"'},
                 )
             if path.startswith("generated-image:"):
                 image = (
@@ -561,9 +561,7 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
                 return Response(
                     content=image_path.read_bytes(),
                     media_type=mime,
-                    headers={
-                        "Content-Disposition": f'inline; filename="{image.filename}"'
-                    },
+                    headers={"Content-Disposition": f'inline; filename="{image.filename}"'},
                 )
         finally:
             db.close()

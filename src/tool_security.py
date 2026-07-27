@@ -14,33 +14,111 @@ logger = logging.getLogger(__name__)
 # PDFs, charts, SQL, calculations). The only install path is `pip`. Everything
 # that administers, probes, or fingerprints the system is rejected so the
 # assistant can neither modify the environment nor leak details about it.
-_BASH_BLOCKED_BINARIES = frozenset({
-    # privilege escalation
-    "sudo", "su", "doas",
-    # system package managers (pip is the only allowed installer)
-    "apt", "apt-get", "aptitude", "dpkg", "snap", "yum", "dnf", "rpm",
-    "apk", "pacman", "zypper", "brew",
-    # non-Python package managers
-    "npm", "npx", "yarn", "pnpm", "corepack", "gem", "cargo",
-    # containers / services / kernel / system management
-    "docker", "dockerd", "containerd", "podman", "nerdctl", "kubectl",
-    "systemctl", "service",
-    "journalctl", "mount", "umount", "modprobe", "insmod", "sysctl",
-    "crontab", "reboot", "shutdown", "poweroff", "halt", "init", "telinit",
-    # user/account management
-    "useradd", "userdel", "usermod", "groupadd", "passwd", "chpasswd",
-    "chsh", "visudo",
-    # hardware / system fingerprinting
-    "nvidia-smi", "lscpu", "lshw", "lsblk", "lspci", "lsusb", "dmidecode",
-    "hostnamectl", "uname", "nproc", "free", "df", "dmesg", "uptime",
-    "w", "who", "last", "lsof", "hostname", "whoami", "id", "arch",
-    "getconf", "lsmod", "numactl", "vmstat", "iostat", "ps", "top", "htop",
-    "printenv",
-    # network configuration probing
-    "ip", "ifconfig", "netstat", "ss",
-    # remote shells / network probing
-    "ssh", "scp", "sftp", "telnet", "nc", "ncat", "nmap",
-})
+_BASH_BLOCKED_BINARIES = frozenset(
+    {
+        # privilege escalation
+        "sudo",
+        "su",
+        "doas",
+        # system package managers (pip is the only allowed installer)
+        "apt",
+        "apt-get",
+        "aptitude",
+        "dpkg",
+        "snap",
+        "yum",
+        "dnf",
+        "rpm",
+        "apk",
+        "pacman",
+        "zypper",
+        "brew",
+        # non-Python package managers
+        "npm",
+        "npx",
+        "yarn",
+        "pnpm",
+        "corepack",
+        "gem",
+        "cargo",
+        # containers / services / kernel / system management
+        "docker",
+        "dockerd",
+        "containerd",
+        "podman",
+        "nerdctl",
+        "kubectl",
+        "systemctl",
+        "service",
+        "journalctl",
+        "mount",
+        "umount",
+        "modprobe",
+        "insmod",
+        "sysctl",
+        "crontab",
+        "reboot",
+        "shutdown",
+        "poweroff",
+        "halt",
+        "init",
+        "telinit",
+        # user/account management
+        "useradd",
+        "userdel",
+        "usermod",
+        "groupadd",
+        "passwd",
+        "chpasswd",
+        "chsh",
+        "visudo",
+        # hardware / system fingerprinting
+        "nvidia-smi",
+        "lscpu",
+        "lshw",
+        "lsblk",
+        "lspci",
+        "lsusb",
+        "dmidecode",
+        "hostnamectl",
+        "uname",
+        "nproc",
+        "free",
+        "df",
+        "dmesg",
+        "uptime",
+        "w",
+        "who",
+        "last",
+        "lsof",
+        "hostname",
+        "whoami",
+        "id",
+        "arch",
+        "getconf",
+        "lsmod",
+        "numactl",
+        "vmstat",
+        "iostat",
+        "ps",
+        "top",
+        "htop",
+        "printenv",
+        # network configuration probing
+        "ip",
+        "ifconfig",
+        "netstat",
+        "ss",
+        # remote shells / network probing
+        "ssh",
+        "scp",
+        "sftp",
+        "telnet",
+        "nc",
+        "ncat",
+        "nmap",
+    }
+)
 
 # HTTP fetchers. These are not a safety concern — they simply cannot work: the
 # sandbox sits on an `internal: true` Docker network with no route out, so every
@@ -48,10 +126,22 @@ _BASH_BLOCKED_BINARIES = frozenset({
 # from the web scrapes DuckDuckGo with curl, watches it fail, and reports to the
 # user that the whole assistant has no internet access — which is what happened
 # before this check existed. Redirecting to web_search costs one round instead.
-_BASH_NETWORK_BINARIES = frozenset({
-    "curl", "wget", "aria2c", "httpie", "http", "https",
-    "lynx", "w3m", "links", "elinks", "youtube-dl", "yt-dlp",
-})
+_BASH_NETWORK_BINARIES = frozenset(
+    {
+        "curl",
+        "wget",
+        "aria2c",
+        "httpie",
+        "http",
+        "https",
+        "lynx",
+        "w3m",
+        "links",
+        "elinks",
+        "youtube-dl",
+        "yt-dlp",
+    }
+)
 
 NETWORK_REDIRECT_MESSAGE = (
     "bash: the workspace has no network access, so this command cannot reach "
@@ -136,11 +226,20 @@ def _command_binaries(command: str):
             yield "env", True
             continue
         while tokens and tokens[0].rsplit("/", 1)[-1] in {
-            "command", "exec", "env", "nohup", "time", "timeout", "nice",
-            "xargs", "watch", "setsid",
+            "command",
+            "exec",
+            "env",
+            "nohup",
+            "time",
+            "timeout",
+            "nice",
+            "xargs",
+            "watch",
+            "setsid",
         }:
             tokens = [
-                t for t in tokens[1:]
+                t
+                for t in tokens[1:]
                 if not t.startswith("-")
                 and not t.rstrip("smhd").replace(".", "", 1).isdigit()
                 and not re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", t)

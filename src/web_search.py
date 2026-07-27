@@ -244,7 +244,10 @@ async def search(
             "exit_code": 1,
         }
     except httpx.TimeoutException:
-        return {"error": f"SearxNG at {base} timed out after {SEARCH_TIMEOUT:.0f}s.", "exit_code": 1}
+        return {
+            "error": f"SearxNG at {base} timed out after {SEARCH_TIMEOUT:.0f}s.",
+            "exit_code": 1,
+        }
     except Exception as e:
         return {"error": f"Search request failed: {e}", "exit_code": 1}
 
@@ -405,7 +408,10 @@ async def fetch(url: str, max_chars: int = DEFAULT_FETCH_CHARS) -> Dict[str, Any
             else:
                 return {"error": f"Too many redirects starting at {url}.", "exit_code": 1}
     except httpx.TimeoutException:
-        return {"error": f"Fetching {current} timed out after {FETCH_TIMEOUT:.0f}s.", "exit_code": 1}
+        return {
+            "error": f"Fetching {current} timed out after {FETCH_TIMEOUT:.0f}s.",
+            "exit_code": 1,
+        }
     except httpx.ConnectError as e:
         return {"error": f"Could not connect to {current}: {e}", "exit_code": 1}
     except Exception as e:

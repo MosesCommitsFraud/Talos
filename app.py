@@ -747,9 +747,7 @@ app.include_router(setup_api_token_routes())
 
 logger.info("API token routes initialized")
 
-logger.info(
-    "Talos feature profile loaded: chat, auth/RBAC, uploads, documents, MCP, API tokens"
-)
+logger.info("Talos feature profile loaded: chat, auth/RBAC, uploads, documents, MCP, API tokens")
 
 # ========= ROUTES (kept in app.py) =========
 

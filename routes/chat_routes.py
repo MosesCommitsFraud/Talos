@@ -429,6 +429,7 @@ def setup_chat_routes(
                     raise ValueError("invalid artifact path")
                 if "<<<" in selected_path or ">>>" in selected_path:
                     raise ValueError("artifact path contains reserved delimiters")
+
                 def _safe_text(value, limit):
                     return str(value or "")[:limit].replace("<<<", "‹‹‹").replace(">>>", "›››")
 
@@ -455,7 +456,9 @@ def setup_chat_routes(
                     quote = _safe_text(raw_target.get("quote"), quote_limit)
                     cell = _safe_text(raw_target.get("cell"), 40)
                     element = _safe_text(raw_target.get("element"), 200)
-                    if not any((quote, cell, element, raw_target.get("page"), raw_target.get("slide"))):
+                    if not any(
+                        (quote, cell, element, raw_target.get("page"), raw_target.get("slide"))
+                    ):
                         raise ValueError("empty target")
                     return {
                         "type": "element" if raw_target.get("type") == "element" else "text",
@@ -476,17 +479,26 @@ def setup_chat_routes(
                         if not isinstance(visual, dict):
                             continue
                         data_url = str(visual.get("dataUrl") or "")
-                        prefix = next((value for value in ("data:image/jpeg;base64,", "data:image/png;base64,") if data_url.startswith(value)), None)
+                        prefix = next(
+                            (
+                                value
+                                for value in ("data:image/jpeg;base64,", "data:image/png;base64,")
+                                if data_url.startswith(value)
+                            ),
+                            None,
+                        )
                         if not prefix or len(data_url) > 2_000_000:
                             continue
                         try:
-                            base64.b64decode(data_url[len(prefix):], validate=True)
+                            base64.b64decode(data_url[len(prefix) :], validate=True)
                         except (ValueError, binascii.Error):
                             continue
-                        visuals.append({
-                            "page": _optional_positive_int(visual.get("page"), "visual page"),
-                            "dataUrl": data_url,
-                        })
+                        visuals.append(
+                            {
+                                "page": _optional_positive_int(visual.get("page"), "visual page"),
+                                "dataUrl": data_url,
+                            }
+                        )
                 selected_version = _optional_positive_int(candidate.get("version"), "version")
                 artifact_selection = {
                     "path": selected_path,
@@ -590,9 +602,17 @@ def setup_chat_routes(
                         raise HTTPException(404, "Selected document was not found")
                     selected_version = artifact_selection.get("version")
                     current_version = getattr(selected_doc, "version_count", None)
-                    if selected_version is not None and current_version is not None and int(selected_version) != int(current_version):
-                        raise HTTPException(409, "The selected document changed; select the target again")
-                    artifact_selection["name"] = str(selected_doc.title or artifact_selection.get("name") or "Document")[:300]
+                    if (
+                        selected_version is not None
+                        and current_version is not None
+                        and int(selected_version) != int(current_version)
+                    ):
+                        raise HTTPException(
+                            409, "The selected document changed; select the target again"
+                        )
+                    artifact_selection["name"] = str(
+                        selected_doc.title or artifact_selection.get("name") or "Document"
+                    )[:300]
                 finally:
                     selection_db.close()
             elif selected_path.startswith("generated-image:"):
@@ -602,20 +622,34 @@ def setup_chat_routes(
 
                 workspace_artifacts = await list_artifacts(owner=owner, session_id=session)
                 selected_artifact = next(
-                    (item for item in workspace_artifacts if str(item.get("path") or "") == selected_path),
+                    (
+                        item
+                        for item in workspace_artifacts
+                        if str(item.get("path") or "") == selected_path
+                    ),
                     None,
                 )
                 if not selected_artifact:
                     raise HTTPException(404, "Selected artifact was not found in this workspace")
                 extension = os.path.splitext(selected_path)[1].lower()
                 artifact_selection["kind"] = {
-                    ".doc": "word", ".docx": "word", ".pdf": "pdf",
-                    ".xls": "excel", ".xlsx": "excel", ".xlsm": "excel",
-                    ".ppt": "presentation", ".pptx": "presentation",
-                    ".png": "image", ".jpg": "image", ".jpeg": "image",
-                    ".gif": "image", ".webp": "image",
+                    ".doc": "word",
+                    ".docx": "word",
+                    ".pdf": "pdf",
+                    ".xls": "excel",
+                    ".xlsx": "excel",
+                    ".xlsm": "excel",
+                    ".ppt": "presentation",
+                    ".pptx": "presentation",
+                    ".png": "image",
+                    ".jpg": "image",
+                    ".jpeg": "image",
+                    ".gif": "image",
+                    ".webp": "image",
                 }.get(extension, "text")
-                artifact_selection["mime"] = str(selected_artifact.get("mime") or artifact_selection.get("mime") or "")[:200]
+                artifact_selection["mime"] = str(
+                    selected_artifact.get("mime") or artifact_selection.get("mime") or ""
+                )[:200]
 
         # Build shared context (stream path uses enhanced_message for context preface)
         ctx = await build_chat_context(
@@ -687,7 +721,9 @@ def setup_chat_routes(
                         )
                 else:
                     logger.warning(f"[doc-inject] NOT FOUND by ID {active_doc_id}")
-            if not active_doc and not (artifact_selection and artifact_selection["path"].startswith("document:")):
+            if not active_doc and not (
+                artifact_selection and artifact_selection["path"].startswith("document:")
+            ):
                 _session_doc_q = _doc_db.query(DBDocument).filter(
                     DBDocument.session_id == session, DBDocument.is_active == True
                 )
@@ -706,7 +742,9 @@ def setup_chat_routes(
             # neither lookup above can associate them with this conversation,
             # so the agent never sees what it just wrote. Guarded so we never
             # leak a doc that belongs to a DIFFERENT session.
-            if not active_doc and not (artifact_selection and artifact_selection["path"].startswith("document:")):
+            if not active_doc and not (
+                artifact_selection and artifact_selection["path"].startswith("document:")
+            ):
                 try:
                     from src.tool_implementations import get_active_document
 
@@ -729,8 +767,14 @@ def setup_chat_routes(
                 if artifact_selection and artifact_selection["path"].startswith("document:"):
                     selected_version = artifact_selection.get("version")
                     current_version = getattr(active_doc, "version_count", None)
-                    if selected_version is not None and current_version is not None and int(selected_version) != int(current_version):
-                        raise HTTPException(409, "The selected document changed; select the target again")
+                    if (
+                        selected_version is not None
+                        and current_version is not None
+                        and int(selected_version) != int(current_version)
+                    ):
+                        raise HTTPException(
+                            409, "The selected document changed; select the target again"
+                        )
                 _doc_db.expunge(active_doc)
             if artifact_selection and not artifact_selection["path"].startswith("document:"):
                 active_doc = None

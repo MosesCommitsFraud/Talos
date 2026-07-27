@@ -94,9 +94,7 @@ def _safe_bundle_path(raw: str) -> Optional[str]:
     return "/".join(parts)
 
 
-def save_skill(
-    content: str, uploader: Optional[str], bundle_files: Optional[dict] = None
-) -> dict:
+def save_skill(content: str, uploader: Optional[str], bundle_files: Optional[dict] = None) -> dict:
     """Create or update a shared skill from raw SKILL.md text.
 
     `bundle_files` maps relative path -> bytes for multi-file bundles; when
@@ -129,9 +127,7 @@ def save_skill(
                 db.add(SharedSkillFile(skill_name=name, path=path, content=data))
         db.commit()
         db.refresh(row)
-        n_files = (
-            db.query(SharedSkillFile).filter(SharedSkillFile.skill_name == name).count()
-        )
+        n_files = db.query(SharedSkillFile).filter(SharedSkillFile.skill_name == name).count()
         return _row_meta(row, n_files)
 
 
@@ -190,7 +186,7 @@ def save_bundle(zip_bytes: bytes, uploader: Optional[str]) -> dict:
         raise ValueError("SKILL.md is not valid UTF-8.")
 
     bundle_files = {
-        p[len(prefix):]: data
+        p[len(prefix) :]: data
         for p, data in members.items()
         if p != skill_key and p.startswith(prefix)
     }
@@ -264,11 +260,7 @@ def materialize(name: str, dest_dir: str) -> List[str]:
         f.write(skill["content"])
     written.append("SKILL.md")
     with SessionLocal() as db:
-        rows = (
-            db.query(SharedSkillFile)
-            .filter(SharedSkillFile.skill_name == skill["name"])
-            .all()
-        )
+        rows = db.query(SharedSkillFile).filter(SharedSkillFile.skill_name == skill["name"]).all()
         for row in rows:
             rel = _safe_bundle_path(row.path)
             if rel is None:

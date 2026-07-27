@@ -1430,9 +1430,7 @@ class SharedSkill(TimestampMixin, Base):
     content = Column(Text, nullable=False)
     uploaded_by = Column(String, nullable=True, index=True)
 
-    files = relationship(
-        "SharedSkillFile", cascade="all, delete-orphan", passive_deletes=True
-    )
+    files = relationship("SharedSkillFile", cascade="all, delete-orphan", passive_deletes=True)
 
 
 class SharedSkillFile(TimestampMixin, Base):

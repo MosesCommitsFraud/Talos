@@ -298,4 +298,3 @@ class ChatHandler:
     def trim_history_if_needed(self, session):
         if len(session.history) > MAX_CONTEXT_MESSAGES:
             session.history = session.history[-MAX_CONTEXT_MESSAGES:]
-

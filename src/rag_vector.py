@@ -2466,9 +2466,7 @@ class VectorRAG:
 
         ext = Path(path).suffix.lower()
         docs = list(
-            self._lane_opendocument(path)
-            if ext in _OPENDOCUMENT_EXTS
-            else self._lane_docling(path)
+            self._lane_opendocument(path) if ext in _OPENDOCUMENT_EXTS else self._lane_docling(path)
         )
         images = list(self._office_archive_images(path))
         total = len(images)
@@ -2502,8 +2500,7 @@ class VectorRAG:
                         "modality": "figure",
                         "document_figure": True,
                         "image": name,
-                        "image_url": "/api/personal/rag-asset?source="
-                        + quote(asset_path, safe=""),
+                        "image_url": "/api/personal/rag-asset?source=" + quote(asset_path, safe=""),
                         "image_caption": caption or content,
                         "caption_source": "vlm" if caption else "locator",
                     },
@@ -2566,11 +2563,7 @@ class VectorRAG:
                     continue
                 if local == "h":
                     level = next(
-                        (
-                            int(v)
-                            for k, v in node.attrib.items()
-                            if _local(k) == "outline-level"
-                        ),
+                        (int(v) for k, v in node.attrib.items() if _local(k) == "outline-level"),
                         1,
                     )
                     value = f"{'#' * max(1, min(level, 6))} {value}"
@@ -2582,13 +2575,11 @@ class VectorRAG:
         table_ns = "urn:oasis:names:tc:opendocument:xmlns:table:1.0"
         if ext == ".odp":
             units = [
-                (node, "slide", i)
-                for i, node in enumerate(root.iter(f"{{{drawing_ns}}}page"), 1)
+                (node, "slide", i) for i, node in enumerate(root.iter(f"{{{drawing_ns}}}page"), 1)
             ]
         elif ext == ".ods":
             units = [
-                (node, "sheet", i)
-                for i, node in enumerate(root.iter(f"{{{table_ns}}}table"), 1)
+                (node, "sheet", i) for i, node in enumerate(root.iter(f"{{{table_ns}}}table"), 1)
             ]
         else:
             units = [(root, "", 0)]

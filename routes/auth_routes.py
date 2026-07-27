@@ -347,9 +347,7 @@ def setup_auth_routes(auth_manager: AuthManager) -> APIRouter:
         return {"ok": True, "username": username.strip().lower(), "is_admin": make_admin}
 
     @router.put("/users/{username}/display-name")
-    async def admin_set_display_name(
-        username: str, body: SetDisplayNameRequest, request: Request
-    ):
+    async def admin_set_display_name(username: str, body: SetDisplayNameRequest, request: Request):
         """Set (or clear, with an empty string) any user's display name. Admin only."""
         user = _get_current_user(request)
         if not user or not auth_manager.is_admin(user):

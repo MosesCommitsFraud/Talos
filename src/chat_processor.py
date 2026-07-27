@@ -509,8 +509,7 @@ class ChatProcessor:
                             if not _is_figure(r)
                         )
                         figure_evidence = any(
-                            _synthetic_figure_relevant_to_query(search_query, r)
-                            for r in relevant
+                            _synthetic_figure_relevant_to_query(search_query, r) for r in relevant
                         )
                         if not text_evidence and not figure_evidence:
                             relevant = []

@@ -1689,7 +1689,6 @@ def _skill_dump(sk) -> Dict:
     }
 
 
-
 # ---------------------------------------------------------------------------
 # Endpoint management tool
 # ---------------------------------------------------------------------------
@@ -1947,7 +1946,6 @@ async def do_manage_mcp(content: str, owner: Optional[str] = None) -> Dict:
 
     else:
         return {"error": f"Unknown action: {action}", "exit_code": 1}
-
 
 
 # ---------------------------------------------------------------------------
