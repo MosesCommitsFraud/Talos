@@ -90,12 +90,28 @@ def _blank_agg() -> dict:
         "active_days": set(),
         "tools": {},
         "modes": {},
+        "session_modes": {},
         "models": {},
         "skills": {},
         "hours": [0] * 24,
+        "weekday": [0] * 7,  # Monday-first, matching the heatmap's layout
         "daily": {},
         "last_active": None,
+        "first_seen": None,
+        # Wall-clock and agent depth. Only raw events carry these; the daily
+        # rollup drops them (like the hour histogram), so they describe the
+        # raw-retention window only.
+        "duration_ms": 0,
+        "timed_turns": 0,
+        "rounds": 0,
+        "rounds_turns": 0,
     }
+
+
+def _day_bucket(agg: dict, day):
+    return agg["daily"].setdefault(
+        day, {"turns": 0, "tokens": 0, "input": 0, "output": 0, "tools": 0}
+    )
 
 
 def _fold_event(agg: dict, ev, shift: timedelta) -> None:
@@ -107,17 +123,30 @@ def _fold_event(agg: dict, ev, shift: timedelta) -> None:
         agg["sessions"].add(ev.session_id)
     if agg["last_active"] is None or ev.ts > agg["last_active"]:
         agg["last_active"] = ev.ts
-    bucket = agg["daily"].setdefault(day, {"turns": 0, "tokens": 0, "tools": 0})
+    if agg["first_seen"] is None or ev.ts < agg["first_seen"]:
+        agg["first_seen"] = ev.ts
+    bucket = _day_bucket(agg, day)
 
     if ev.kind == "turn":
         agg["turns"] += 1
         agg["input_tokens"] += ev.input_tokens or 0
         agg["output_tokens"] += ev.output_tokens or 0
         agg["hours"][local.hour] += 1
+        agg["weekday"][local.weekday()] += 1
         bucket["turns"] += 1
+        bucket["input"] += ev.input_tokens or 0
+        bucket["output"] += ev.output_tokens or 0
         bucket["tokens"] += (ev.input_tokens or 0) + (ev.output_tokens or 0)
+        if ev.duration_ms:
+            agg["duration_ms"] += ev.duration_ms
+            agg["timed_turns"] += 1
+        if ev.rounds:
+            agg["rounds"] += ev.rounds
+            agg["rounds_turns"] += 1
         if ev.mode:
             agg["modes"][ev.mode] = agg["modes"].get(ev.mode, 0) + 1
+        if ev.session_mode:
+            agg["session_modes"][ev.session_mode] = agg["session_modes"].get(ev.session_mode, 0) + 1
         if ev.model:
             agg["models"][ev.model] = agg["models"].get(ev.model, 0) + 1
     elif ev.kind == "tool":
@@ -153,8 +182,10 @@ def _fold_rollup(agg: dict, row) -> None:
     agg["sessions_rolled"] += row.sessions or 0
     if row.turns:
         agg["active_days"].add(row.day)
-    bucket = agg["daily"].setdefault(row.day, {"turns": 0, "tokens": 0, "tools": 0})
+    bucket = _day_bucket(agg, row.day)
     bucket["turns"] += row.turns or 0
+    bucket["input"] += row.input_tokens or 0
+    bucket["output"] += row.output_tokens or 0
     bucket["tokens"] += (row.input_tokens or 0) + (row.output_tokens or 0)
     bucket["tools"] += row.tool_calls or 0
     for tool, n in (row.tools or {}).items():
@@ -310,18 +341,22 @@ def setup_admin_usage_routes(auth_manager, session_manager):
             a = aggs.get(username, _blank_agg())
 
             start = today - timedelta(days=SERIES_DAYS - 1)
+            empty_day = {"turns": 0, "tokens": 0, "input": 0, "output": 0, "tools": 0}
             daily = []
             for i in range(SERIES_DAYS):
                 d = start + timedelta(days=i)
-                b = a["daily"].get(d, {"turns": 0, "tokens": 0, "tools": 0})
+                b = a["daily"].get(d, empty_day)
                 daily.append(
                     {
                         "date": d.isoformat(),
                         "turns": b["turns"],
                         "tokens": b["tokens"],
+                        "input": b["input"],
+                        "output": b["output"],
                         "tools": b["tools"],
                     }
                 )
+            busiest = max(daily, key=lambda r: r["tokens"]) if daily else None
 
             tools = sorted(
                 ({"tool": k, "count": v["count"], "errors": v["errors"]} for k, v in a["tools"].items()),
@@ -375,11 +410,25 @@ def setup_admin_usage_routes(auth_manager, session_manager):
                     if any(a["hours"])
                     else None,
                     "last_active": a["last_active"].isoformat() if a["last_active"] else None,
+                    "first_seen": a["first_seen"].isoformat() if a["first_seen"] else None,
+                    # Wall-clock spent generating for this user, and how deep
+                    # their turns run. Raw-window only — the rollup drops both.
+                    "avg_response_ms": round(a["duration_ms"] / a["timed_turns"])
+                    if a["timed_turns"]
+                    else 0,
+                    "total_compute_ms": a["duration_ms"],
+                    "avg_rounds": round(a["rounds"] / a["rounds_turns"], 1)
+                    if a["rounds_turns"]
+                    else 0,
+                    "busiest_day": busiest["date"] if busiest and busiest["tokens"] else None,
+                    "busiest_day_tokens": busiest["tokens"] if busiest else 0,
                 },
                 "daily": daily,
                 "hours": a["hours"],
+                "weekday": a["weekday"],
                 "tools": tools,
                 "modes": a["modes"],
+                "session_modes": a["session_modes"],
                 "models": a["models"],
                 "skills": {"used": skills_used, "authored": authored},
                 "comparison": {

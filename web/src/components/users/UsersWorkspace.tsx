@@ -1,10 +1,11 @@
 import { useQuery } from '@tanstack/react-query';
 import { ArrowLeftIcon, SettingsIcon } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { fetchUsageOverview, fetchUsers, type AppUser, type UsageUserRow } from '@/api/client';
 import { useUi } from '@/state/ui';
 import { cn } from '@/lib/utils';
+import { useAuth } from '../auth/AuthGate';
 import { SettingsDialog } from '../SettingsDialog';
 import { SearchInput } from '../ui/search';
 import { Tile, useNum } from './parts';
@@ -62,6 +63,7 @@ export function UsersWorkspace() {
   const { t } = useTranslation();
   const { num, compact } = useNum();
   const setView = useUi((s) => s.setView);
+  const auth = useAuth();
   const [range, setRange] = useState<(typeof RANGES)[number]>(RANGES[1]);
   const [query, setQuery] = useState('');
   const [selected, setSelected] = useState<string | null>(null);
@@ -69,20 +71,41 @@ export function UsersWorkspace() {
   // settings dialog — opened over the workspace rather than duplicated here.
   const [manageOpen, setManageOpen] = useState(false);
 
+  // Admin-only surface. The API enforces this too (require_admin on every
+  // route), but `#/users` is typeable, and a wall of failed requests is a worse
+  // answer than sending them back to chat.
+  const isAdmin = auth?.is_admin || auth?.auth_enabled === false;
+  useEffect(() => {
+    if (auth && !isAdmin) setView('chat');
+  }, [auth, isAdmin, setView]);
+
   const { data: overview } = useQuery({
     queryKey: ['usage-overview', range.days],
     queryFn: () => fetchUsageOverview(range.days),
     staleTime: 30_000,
     placeholderData: (prev) => prev,
+    enabled: !!isAdmin,
+    // See UserDetail: don't let a failed request park silently as 'paused'.
+    networkMode: 'always',
+    retry: false,
   });
-  const { data: accounts } = useQuery({ queryKey: ['users'], queryFn: fetchUsers });
+  const { data: accounts } = useQuery({
+    queryKey: ['users'],
+    queryFn: fetchUsers,
+    enabled: !!isAdmin,
+  });
 
   const rows = overview?.users ?? [];
   const q = query.trim().toLowerCase();
   const visible = rows.filter(
     (r) => !q || r.username.toLowerCase().includes(q) || (r.display_name ?? '').toLowerCase().includes(q),
   );
-  const active = visible.find((r) => r.username === selected) ?? visible[0];
+  // Selection is sticky: once an admin picks someone, a background refetch or a
+  // reordering of the list (it sorts by tokens, which moves as data arrives)
+  // must not bounce them back to the top row. Only fall back to the first row
+  // while nothing has been picked, or when the pick is filtered out entirely.
+  const picked = selected ? rows.find((r) => r.username === selected) : undefined;
+  const active = picked ?? visible[0];
   const activeAccount: (AppUser & { orphaned?: boolean }) | undefined = active
     ? {
       ...(accounts ?? []).find((a) => a.username === active.username)

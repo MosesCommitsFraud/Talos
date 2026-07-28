@@ -1,3 +1,4 @@
+import { useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { cn } from '@/lib/utils';
 
@@ -20,9 +21,73 @@ export function useNum() {
       return `${v.toLocaleString(lang, { maximumFractionDigits: v < 10 && i > 0 ? 1 : 0 })} ${units[i]}`;
     },
     hour: (h: number) => new Date(2000, 0, 1, h).toLocaleTimeString(lang, { hour: 'numeric' }),
+    /** Milliseconds → "4.2s" / "3m 20s" / "5h 12m". Used for both a single
+     *  turn's latency and a whole window's accumulated generation time. */
+    duration: (ms: number) => {
+      if (ms < 1000) return `${Math.round(ms)} ms`;
+      const s = ms / 1000;
+      if (s < 60) return `${s.toLocaleString(lang, { maximumFractionDigits: 1 })}s`;
+      const m = Math.floor(s / 60);
+      if (m < 60) return `${m}m ${Math.round(s % 60)}s`;
+      const h = Math.floor(m / 60);
+      return `${h}h ${m % 60}m`;
+    },
     date: (iso: string) =>
       new Date(iso).toLocaleDateString(lang, { day: 'numeric', month: 'short', year: 'numeric' }),
   };
+}
+
+/** Hover tooltip with the home screen's timing (components/Welcome.tsx): the
+ *  first hover waits ~400ms, then moving between neighbouring cells updates it
+ *  instantly until the pointer leaves the chart and it goes cold again.
+ *
+ *  Returns the props to spread on the positioned wrapper plus the rendered
+ *  bubble, so any chart in this file gets identical behaviour. */
+export function useHoverTip() {
+  const [tip, setTip] = useState<{ x: number; y: number; label: string } | null>(null);
+  const warm = useRef(false);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const show = (next: { x: number; y: number; label: string }) => {
+    if (timer.current) clearTimeout(timer.current);
+    if (warm.current) {
+      setTip(next);
+    } else {
+      timer.current = setTimeout(() => { warm.current = true; setTip(next); }, 400);
+    }
+  };
+  const clear = () => {
+    if (timer.current) clearTimeout(timer.current);
+    warm.current = false;
+    setTip(null);
+  };
+
+  const node = tip ? (
+    <div
+      className="pointer-events-none absolute z-10 -translate-x-1/2 -translate-y-full rounded-md border bg-popover px-2 py-1 text-xs whitespace-nowrap text-popover-foreground shadow-md"
+      style={{ left: tip.x, top: tip.y - 4 }}
+    >
+      {tip.label}
+    </div>
+  ) : null;
+
+  return { show, clear, node };
+}
+
+/** Wrapper every chart shares: relative positioning for the tooltip, and a
+ *  mouse-leave that resets it to cold. */
+function ChartFrame({ onLeave, children, tip, className }: {
+  onLeave: () => void;
+  children: React.ReactNode;
+  tip: React.ReactNode;
+  className?: string;
+}) {
+  return (
+    <div className={cn('relative', className)} onMouseLeave={onLeave}>
+      {children}
+      {tip}
+    </div>
+  );
 }
 
 export function Tile({ label, value, hint, tone }: {
@@ -94,34 +159,85 @@ export function BarList({ rows, empty }: {
   );
 }
 
-/** Daily bars for the selected window. Values are token counts by default;
- *  the tooltip carries the exact figure since the bars are only ~4px wide. */
-export function DailyChart({ daily, days }: {
-  daily: Array<{ date: string; turns: number; tokens: number; tools: number }>;
-  days: number;
-}) {
+export interface DailyPoint {
+  date: string;
+  turns: number;
+  tokens: number;
+  input: number;
+  output: number;
+  tools: number;
+}
+
+/** Daily bars for the selected window, each split into input (lower, muted)
+ *  and output (upper, solid) tokens — output is the half that actually costs
+ *  GPU time, so the stack shows where the load really is. */
+export function DailyChart({ daily, days }: { daily: DailyPoint[]; days: number }) {
   const { t } = useTranslation();
   const { num, date } = useNum();
+  const { show, clear, node } = useHoverTip();
   // The API always returns a fixed-length series; the range selector trims it
   // so switching to 7d doesn't render 91 near-empty columns.
   const rows = days > 0 ? daily.slice(-days) : daily;
   const max = Math.max(...rows.map((d) => d.tokens), 1);
+
   return (
-    <div className="flex h-24 items-end gap-px" role="img" aria-label={t('users.chart.label')}>
-      {rows.map((d) => (
-        <div
-          key={d.date}
-          className="min-w-px flex-1 rounded-t-[2px] transition-colors hover:brightness-125"
-          title={`${date(d.date)} — ${t('users.chart.tooltip', { tokens: num(d.tokens), turns: num(d.turns) })}`}
-          style={{
-            height: `${Math.max(d.tokens ? 3 : 1, (d.tokens / max) * 100)}%`,
-            background: d.tokens
-              ? 'color-mix(in srgb, var(--primary) 65%, transparent)'
-              : 'color-mix(in srgb, var(--foreground) 8%, transparent)',
-          }}
-        />
-      ))}
-    </div>
+    <ChartFrame onLeave={clear} tip={node}>
+      <div className="flex h-28 items-end gap-px" role="img" aria-label={t('users.chart.label')}>
+        {rows.map((d, i) => (
+          <div
+            key={d.date}
+            className="flex min-w-px flex-1 flex-col justify-end self-stretch"
+            onMouseEnter={(e) => show({
+              // Anchor to the bar's centre within the frame, not the pointer,
+              // so the bubble doesn't jitter as the mouse moves inside a bar.
+              x: e.currentTarget.offsetLeft + e.currentTarget.offsetWidth / 2,
+              y: e.currentTarget.offsetTop,
+              label: `${date(d.date)} — ${t('users.chart.tooltip', {
+                tokens: num(d.tokens), turns: num(d.turns),
+              })}${d.tokens ? ` · ${t('users.chart.split', {
+                input: num(d.input), output: num(d.output),
+              })}` : ''}${d.tools ? ` · ${t('users.chart.tools', { count: d.tools })}` : ''}`,
+            })}
+            aria-hidden={i > 0 || undefined}
+          >
+            {d.tokens === 0 ? (
+              <div
+                className="h-px rounded-[1px]"
+                style={{ background: 'color-mix(in srgb, var(--foreground) 8%, transparent)' }}
+              />
+            ) : (
+              <>
+                <div
+                  className="rounded-t-[2px]"
+                  style={{
+                    height: `${(d.output / max) * 100}%`,
+                    minHeight: d.output ? 2 : 0,
+                    background: 'color-mix(in srgb, var(--primary) 85%, transparent)',
+                  }}
+                />
+                <div
+                  style={{
+                    height: `${(d.input / max) * 100}%`,
+                    minHeight: d.input ? 2 : 0,
+                    background: 'color-mix(in srgb, var(--primary) 35%, transparent)',
+                  }}
+                />
+              </>
+            )}
+          </div>
+        ))}
+      </div>
+      <div className="mt-1.5 flex items-center gap-3 text-[10px] text-muted-foreground">
+        <span className="flex items-center gap-1">
+          <i className="size-2 rounded-[2px]" style={{ background: 'color-mix(in srgb, var(--primary) 85%, transparent)' }} />
+          {t('users.chart.output')}
+        </span>
+        <span className="flex items-center gap-1">
+          <i className="size-2 rounded-[2px]" style={{ background: 'color-mix(in srgb, var(--primary) 35%, transparent)' }} />
+          {t('users.chart.input')}
+        </span>
+      </div>
+    </ChartFrame>
   );
 }
 
@@ -129,29 +245,84 @@ export function DailyChart({ daily, days }: {
  *  which is what tells you whose peaks overlap. */
 export function HourStrip({ hours }: { hours: number[] }) {
   const { t } = useTranslation();
-  const { num, hour } = useNum();
+  const { hour } = useNum();
+  const { show, clear, node } = useHoverTip();
   const max = Math.max(...hours, 1);
   return (
-    <div>
+    <ChartFrame onLeave={clear} tip={node}>
       <div className="flex h-12 items-end gap-0.5">
         {hours.map((n, h) => (
           <div
             key={h}
-            className="flex-1 rounded-t-[2px]"
-            title={`${hour(h)} — ${t('users.hours.tooltip', { count: num(n) })}`}
-            style={{
-              height: `${Math.max(n ? 4 : 2, (n / max) * 100)}%`,
-              background: n
-                ? 'color-mix(in srgb, var(--primary) 55%, transparent)'
-                : 'color-mix(in srgb, var(--foreground) 8%, transparent)',
-            }}
-          />
+            className="flex-1 self-stretch"
+            onMouseEnter={(e) => show({
+              x: e.currentTarget.offsetLeft + e.currentTarget.offsetWidth / 2,
+              y: e.currentTarget.offsetTop,
+              label: `${hour(h)} — ${t('users.hours.tooltip', { count: n })}`,
+            })}
+          >
+            <div className="flex h-full flex-col justify-end">
+              <div
+                className="rounded-t-[2px]"
+                style={{
+                  height: `${Math.max(n ? 4 : 2, (n / max) * 100)}%`,
+                  background: n
+                    ? 'color-mix(in srgb, var(--primary) 55%, transparent)'
+                    : 'color-mix(in srgb, var(--foreground) 8%, transparent)',
+                }}
+              />
+            </div>
+          </div>
         ))}
       </div>
       <div className="mt-1 flex justify-between text-[10px] text-muted-foreground">
         <span>{hour(0)}</span><span>{hour(6)}</span><span>{hour(12)}</span><span>{hour(18)}</span><span>{hour(23)}</span>
       </div>
-    </div>
+    </ChartFrame>
+  );
+}
+
+/** Monday-first weekday histogram. Separates "works weekends" from "9-to-5",
+ *  which the hour strip alone can't tell you. */
+export function WeekdayStrip({ weekday }: { weekday: number[] }) {
+  const { t, i18n } = useTranslation();
+  const { show, clear, node } = useHoverTip();
+  const max = Math.max(...weekday, 1);
+  // Locale weekday names, Monday first (2024-01-01 was a Monday).
+  const names = weekday.map((_, i) =>
+    new Date(2024, 0, 1 + i).toLocaleDateString(i18n.language, { weekday: 'short' }));
+
+  return (
+    <ChartFrame onLeave={clear} tip={node}>
+      <div className="flex h-12 items-end gap-1">
+        {weekday.map((n, i) => (
+          <div
+            key={i}
+            className="flex-1 self-stretch"
+            onMouseEnter={(e) => show({
+              x: e.currentTarget.offsetLeft + e.currentTarget.offsetWidth / 2,
+              y: e.currentTarget.offsetTop,
+              label: `${names[i]} — ${t('users.hours.tooltip', { count: n })}`,
+            })}
+          >
+            <div className="flex h-full flex-col justify-end">
+              <div
+                className="rounded-t-[2px]"
+                style={{
+                  height: `${Math.max(n ? 4 : 2, (n / max) * 100)}%`,
+                  background: n
+                    ? 'color-mix(in srgb, var(--primary) 55%, transparent)'
+                    : 'color-mix(in srgb, var(--foreground) 8%, transparent)',
+                }}
+              />
+            </div>
+          </div>
+        ))}
+      </div>
+      <div className="mt-1 flex gap-1 text-[10px] text-muted-foreground">
+        {names.map((n, i) => <span key={i} className="flex-1 truncate text-center">{n}</span>)}
+      </div>
+    </ChartFrame>
   );
 }
 

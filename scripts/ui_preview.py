@@ -650,18 +650,26 @@ def _usage_detail(name: str, days: int) -> dict:
     for i in range(91):
         d = today - datetime.timedelta(days=90 - i)
         busy = (i * 13) % 7
+        tokens = busy * (row["total_tokens"] // 200 or 1) if row["turns"] else 0
         daily.append(
             {
                 "date": d.isoformat(),
                 "turns": busy if row["turns"] else 0,
-                "tokens": busy * (row["total_tokens"] // 200 or 1) if row["turns"] else 0,
+                "tokens": tokens,
+                # Roughly the real ratio: prompts dominate, output is the
+                # expensive minority.
+                "input": int(tokens * 0.82),
+                "output": tokens - int(tokens * 0.82),
                 "tools": busy // 2 if row["turns"] else 0,
             }
         )
     hours = [0] * 24
+    weekday = [0] * 7
     if row["turns"]:
         for h, n in ((8, 4), (9, 11), (10, 19), (11, 14), (13, 9), (14, 16), (15, 12), (16, 6), (21, 3)):
             hours[h] = n
+        for wd, n in ((0, 21), (1, 27), (2, 24), (3, 19), (4, 14), (5, 3), (6, 1)):
+            weekday[wd] = n
     return {
         "username": name,
         "days": days,
@@ -679,9 +687,17 @@ def _usage_detail(name: str, days: int) -> dict:
             "avg_tokens_per_turn": row["total_tokens"] // row["turns"] if row["turns"] else 0,
             "peak_hour": 10 if row["turns"] else None,
             "last_active": row["last_active"],
+            "first_seen": _iso(-3600 * 24 * 74) if row["turns"] else None,
+            "avg_response_ms": 4200 if row["turns"] else 0,
+            "total_compute_ms": row["turns"] * 4200,
+            "avg_rounds": 2.4 if row["turns"] else 0,
+            "busiest_day": max(daily, key=lambda r: r["tokens"])["date"] if row["turns"] else None,
+            "busiest_day_tokens": max((r["tokens"] for r in daily), default=0),
         },
         "daily": daily,
         "hours": hours,
+        "weekday": weekday,
+        "session_modes": {"agent": row["turns"]} if row["turns"] else {},
         "tools": [
             {"tool": t, "count": c, "errors": e}
             for t, c, e in (

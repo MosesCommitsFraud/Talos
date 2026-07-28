@@ -527,13 +527,22 @@ export interface UsageDetail {
     input_tokens: number; output_tokens: number; total_tokens: number;
     sessions: number; active_days: number; web_searches: number; skill_loads: number;
     avg_tokens_per_turn: number; peak_hour: number | null; last_active: string | null;
+    first_seen: string | null;
+    /** Wall-clock generation time. Raw-retention window only — the daily
+     *  rollup drops per-turn durations. */
+    avg_response_ms: number; total_compute_ms: number; avg_rounds: number;
+    busiest_day: string | null; busiest_day_tokens: number;
   };
-  daily: Array<{ date: string; turns: number; tokens: number; tools: number }>;
+  daily: Array<{ date: string; turns: number; tokens: number; input: number; output: number; tools: number }>;
   hours: number[];
+  /** Monday-first turn counts. */
+  weekday: number[];
   tools: Array<{ tool: string; count: number; errors: number }>;
   /** chat | knowledge | sql | full → turn count. Empty for history recorded
    *  before the knowledge mode was persisted (see the backfill script). */
   modes: Record<string, number>;
+  /** agent | chat | research → turn count (sessions.mode). */
+  session_modes: Record<string, number>;
   models: Record<string, number>;
   skills: { used: Array<{ name: string; count: number }>; authored: string[] };
   comparison: {

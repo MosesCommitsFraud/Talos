@@ -10,7 +10,7 @@ import {
   type StorageCategory,
 } from '@/api/client';
 import { Button } from '../ui/button';
-import { BarList, Card, DailyChart, HourStrip, Tile, useNum, VersusMedian } from './parts';
+import { BarList, Card, DailyChart, HourStrip, Tile, useNum, VersusMedian, WeekdayStrip } from './parts';
 
 /** The four knowledge modes the composer offers (state/prefs.ts ChatMode),
  *  in the order the dropdown lists them. */
@@ -18,18 +18,49 @@ const MODE_ORDER = ['full', 'knowledge', 'sql', 'chat'];
 
 function UsageSection({ username, days }: { username: string; days: number }) {
   const { t } = useTranslation();
-  const { num, compact, hour, date } = useNum();
-  const { data, isLoading } = useQuery({
+  const { num, compact, hour, date, duration } = useNum();
+  const { data, isError, error, fetchStatus, refetch } = useQuery({
     queryKey: ['usage-detail', username, days],
     queryFn: () => fetchUsageDetail(username, days),
     staleTime: 30_000,
-    placeholderData: (prev) => prev,
+    // Deliberately NOT placeholderData:(prev)=>prev — carrying the previous
+    // user's numbers under the new user's name reads as real data for the
+    // split second before the fetch lands.
+    //
+    // A failed request here must surface, not hang. With the app-wide default
+    // (retry: 1) React Query parks the PENDING RETRY in fetchStatus 'paused'
+    // with no error attached — the panel then spins forever and the Retry
+    // button is a no-op, because refetch() cannot resume a paused query.
+    // Verified against @tanstack/react-query 5.101.2: networkMode 'always'
+    // alone does not prevent that parking, but having no retry to park does.
+    // One attempt, then a real error and an explicit Retry, which is the right
+    // shape for an admin panel anyway.
+    networkMode: 'always',
+    retry: false,
   });
 
-  if (isLoading && !data) {
-    return <p className="text-xs text-muted-foreground">{t('common.loading')}</p>;
+  // Failure is checked BEFORE pending, and `paused` counts as failure. React
+  // Query keeps status 'pending' while a query is retrying or parked by its
+  // network manager, so guarding on isPending first swallows both states and
+  // leaves the panel spinning with no explanation of what went wrong.
+  if (isError || fetchStatus === 'paused') {
+    return (
+      <Card title={t('users.section.activity')}>
+        <p className="text-xs text-destructive-foreground">
+          {t('users.loadFailed', { user: username })}
+        </p>
+        <p className="mt-1 text-[11px] break-words text-muted-foreground">
+          {(error as Error)?.message ?? t('users.unreachable')}
+        </p>
+        <Button variant="outline" size="sm" className="mt-3" onClick={() => void refetch()}>
+          {t('users.retry')}
+        </Button>
+      </Card>
+    );
   }
-  if (!data) return null;
+  if (!data) {
+    return <p className="py-6 text-center text-xs text-muted-foreground">{t('common.loading')}</p>;
+  }
 
   const { tiles, comparison } = data;
   const modeRows = MODE_ORDER.filter((m) => data.modes[m]).map((m) => ({
@@ -43,6 +74,9 @@ function UsageSection({ username, days }: { username: string; days: number }) {
   const modesUnknown = data.tiles.turns > 0 && modeRows.length === 0;
   const modelRows = Object.entries(data.models)
     .map(([key, value]) => ({ key, label: key.split('/').pop() ?? key, value }))
+    .sort((a, b) => b.value - a.value);
+  const sessionModeRows = Object.entries(data.session_modes)
+    .map(([key, value]) => ({ key, label: t(`users.sessionModes.${key}`, { defaultValue: key }), value }))
     .sort((a, b) => b.value - a.value);
 
   return (
@@ -78,6 +112,28 @@ function UsageSection({ username, days }: { username: string; days: number }) {
                 })
                 : undefined
             }
+          />
+        </div>
+        {/* Second tile row: cost/latency shape rather than volume. */}
+        <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4">
+          <Tile
+            label={t('users.tiles.avgResponse')}
+            value={tiles.avg_response_ms ? duration(tiles.avg_response_ms) : '—'}
+          />
+          <Tile
+            label={t('users.tiles.totalCompute')}
+            value={tiles.total_compute_ms ? duration(tiles.total_compute_ms) : '—'}
+            hint={t('users.tiles.computeHint')}
+          />
+          <Tile
+            label={t('users.tiles.avgRounds')}
+            value={tiles.avg_rounds ? tiles.avg_rounds.toString() : '—'}
+            hint={t('users.tiles.roundsHint')}
+          />
+          <Tile
+            label={t('users.tiles.busiestDay')}
+            value={tiles.busiest_day ? date(tiles.busiest_day) : '—'}
+            hint={tiles.busiest_day ? compact(tiles.busiest_day_tokens) : undefined}
           />
         </div>
         <div className="mt-3">
@@ -144,6 +200,14 @@ function UsageSection({ username, days }: { username: string; days: number }) {
           ) : (
             <BarList empty={t('users.empty.modes')} rows={modeRows} />
           )}
+          {sessionModeRows.length > 0 && (
+            <>
+              <div className="mt-3 text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
+                {t('users.section.sessionModes')}
+              </div>
+              <BarList empty="" rows={sessionModeRows} />
+            </>
+          )}
           {/* A single-model deployment gets no model chart — it would just be
               one bar at 100%. It appears on its own once a second model runs. */}
           {modelRows.length > 1 && (
@@ -158,11 +222,18 @@ function UsageSection({ username, days }: { username: string; days: number }) {
 
         <Card title={t('users.section.hours')}>
           <HourStrip hours={data.hours} />
-          <p className="mt-2 text-xs text-muted-foreground">
+          <div className="mt-4 text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
+            {t('users.section.weekday')}
+          </div>
+          <div className="mt-1">
+            <WeekdayStrip weekday={data.weekday} />
+          </div>
+          <p className="mt-3 text-xs text-muted-foreground">
             {tiles.peak_hour === null
               ? t('users.empty.hours')
               : t('users.peakHour', { hour: hour(tiles.peak_hour) })}
             {tiles.last_active && ` · ${t('users.lastActive', { when: date(tiles.last_active) })}`}
+            {tiles.first_seen && ` · ${t('users.firstSeen', { when: date(tiles.first_seen) })}`}
           </p>
         </Card>
       </div>
@@ -179,6 +250,8 @@ function StorageSection({ username }: { username: string }) {
     queryKey: ['user-storage', username],
     queryFn: () => fetchUserStorage(username),
     staleTime: 30_000,
+    networkMode: 'always',
+    retry: false, // same reasoning as the usage query above
   });
 
   const remove = useMutation({
