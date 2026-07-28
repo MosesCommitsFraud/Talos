@@ -55,6 +55,11 @@ _ENV_MAP = {
     # Per-page VLM transcription endpoint for image-heavy PDFs (toggle below).
     "vlm_url": "VLM_URL",
     "vlm_model": "VLM_MODEL",
+    # Output language for VLM figure captions. The caption is the figure's only
+    # searchable text, so a caption written in a different language than the
+    # queries scores near zero and the figure survives retrieval only by riding
+    # along with its anchor chunk. Empty = let the model infer.
+    "caption_language": "RAG_CAPTION_LANGUAGE",
 }
 
 _STATUS_MAP = {

@@ -2018,9 +2018,35 @@ class VectorRAG:
         "Describe this image for search. Transcribe any text verbatim, and for "
         "screenshots, charts, diagrams or UI explain what they show and the data "
         "they contain. Write the description in the same language as the visible "
-        "text (use German for German UI/documents). Ignore logos and watermarks. "
+        "text (use German for German UI/documents). Do not name or comment on "
+        "the language itself. Ignore logos and watermarks. "
         "Output only the description."
     )
+
+    def _vlm_image_prompt(self) -> str:
+        """Figure-caption prompt, with the output language pinned when the admin
+        set one (Settings → RAG → caption language; `RAG_CAPTION_LANGUAGE`).
+
+        The caption IS the figure's searchable text, so its language decides
+        whether a figure can ever match a query. Asking the model to infer the
+        language from the image does not work reliably: on a German UI
+        screenshot it tends to describe in English and then *report* the
+        language ("Language: German"), which leaves a German query scoring
+        against an English caption — the figure then only survives retrieval by
+        riding along with its anchor chunk. Naming the language outright removes
+        the inference. Empty = infer (previous behaviour)."""
+        lang = (os.getenv("RAG_CAPTION_LANGUAGE", "") or "").strip()
+        if not lang or lang.lower() in ("auto", "detect"):
+            return self._VLM_IMAGE_PROMPT
+        return (
+            f"Write the ENTIRE description in {lang}, whatever language appears "
+            f"in the image. Do not name or comment on the language itself.\n\n"
+            "Describe this image for search. Transcribe any text verbatim (keep "
+            "UI labels in their original wording, but write everything around "
+            f"them in {lang}), and for screenshots, charts, diagrams or UI "
+            "explain what they show and the data they contain. Ignore logos and "
+            "watermarks. Output only the description."
+        )
     _VLM_REGION_PROMPT = (
         "This frame is from a screen-recording of an online training session. It "
         "may contain webcam/participant video tiles, sidebars or chat panels "
@@ -2379,7 +2405,7 @@ class VectorRAG:
         total = len(crops)
         on_done = (lambda c: stage_cb(c, total)) if stage_cb else None
         captions = _concurrent_map(
-            lambda b64: self._vlm_transcribe_image(b64, prompt=self._VLM_IMAGE_PROMPT),
+            lambda b64: self._vlm_transcribe_image(b64, prompt=self._vlm_image_prompt()),
             [c["b64"] for c in crops],
             _vlm_mm_concurrency(),
             on_done=on_done,
@@ -2472,7 +2498,7 @@ class VectorRAG:
         total = len(images)
         on_done = (lambda c: stage_cb(c, total)) if stage_cb else None
         caps = _concurrent_map(
-            lambda b64: self._vlm_transcribe_image(b64, prompt=self._VLM_IMAGE_PROMPT),
+            lambda b64: self._vlm_transcribe_image(b64, prompt=self._vlm_image_prompt()),
             [b64 for _name, b64 in images],
             _vlm_mm_concurrency(),
             on_done=on_done,

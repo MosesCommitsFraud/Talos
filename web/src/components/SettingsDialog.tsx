@@ -1484,6 +1484,7 @@ export function RagPanel() {
               {draft.pdf_vlm_enabled && <>
                 {field('vlm_url', t('settings.rag.vlmUrl'), { hint: t('settings.rag.hint.vlmUrl'), def: 'http://host:8000/v1/chat/completions', test: { kind: 'vlm', modelKey: 'vlm_model' } })}
                 {field('vlm_model', t('settings.rag.vlmModel'), { hint: t('settings.rag.hint.vlmModel'), def: 'qwen3-llm' })}
+                {field('caption_language', t('settings.rag.captionLanguage'), { hint: t('settings.rag.hint.captionLanguage'), def: '' })}
               </>}
             </RagDisclosure>
             <RagDisclosure title={t('settings.rag.redactTitle')} enabled={!!draft.redact_pii_enabled}>

@@ -694,6 +694,8 @@ export interface RagConfig {
   pdf_vlm_enabled?: boolean;
   vlm_url?: string;
   vlm_model?: string;
+  /** Output language for VLM figure captions (""/"auto" = infer). */
+  caption_language?: string;
   /** Advanced — redact PII from extracted text before indexing (off by default;
    *  overridable per upload). */
   redact_pii_enabled?: boolean;

@@ -70,6 +70,10 @@ class RagPipelineConfig(BaseModel):
     pdf_vlm_enabled: bool = False
     vlm_url: str = ""
     vlm_model: str = ""
+    # Output language for VLM figure captions ("" / "auto" = let the model
+    # infer). The caption is a figure's only searchable text, so it must be
+    # written in the language users actually search in.
+    caption_language: str = ""
     # Advanced — redact PII (emails, phones, card/account numbers, IPs, URLs)
     # from extracted text before chunks are embedded and indexed. Off by
     # default: local deployments usually want this data searchable. Can be
@@ -172,6 +176,7 @@ def _public(cfg: dict) -> dict:
         "pdf_vlm_enabled": bool(cfg.get("pdf_vlm_enabled", False)),
         "vlm_url": cfg.get("vlm_url", ""),
         "vlm_model": cfg.get("vlm_model", ""),
+        "caption_language": cfg.get("caption_language", ""),
         "redact_pii_enabled": bool(cfg.get("redact_pii_enabled", False)),
         "auto_keywords_n": _clamp_aux(cfg.get("auto_keywords_n", 0)),
         "auto_questions_n": _clamp_aux(cfg.get("auto_questions_n", 0)),
@@ -256,6 +261,7 @@ def setup_rag_routes():
             "pdf_vlm_enabled": bool(body.pdf_vlm_enabled),
             "vlm_url": body.vlm_url.strip(),
             "vlm_model": body.vlm_model.strip(),
+            "caption_language": body.caption_language.strip(),
             "redact_pii_enabled": bool(body.redact_pii_enabled),
             "auto_keywords_n": _clamp_aux(body.auto_keywords_n),
             "auto_questions_n": _clamp_aux(body.auto_questions_n),
