@@ -45,6 +45,7 @@ from src.endpoint_resolver import normalize_base as _normalize_base
 from src.llm_core import llm_call_async, stream_llm
 from src.prompt_security import untrusted_context_message
 from src.request_models import ChatRequest
+from src.usage_tracking import record_turn
 
 logger = logging.getLogger(__name__)
 
@@ -1186,6 +1187,21 @@ def setup_chat_routes(
                                 )
                                 if _saved_id:
                                     yield f"data: {json.dumps({'type': 'message_saved', 'id': _saved_id})}\n\n"
+                                # Usage accounting for the admin view. The
+                                # knowledge mode lives only in these request
+                                # flags, so it has to be captured here — nothing
+                                # downstream persists them.
+                                record_turn(
+                                    owner=_user,
+                                    session_id=session,
+                                    model=_answered_by or sess.model,
+                                    metrics=last_metrics,
+                                    use_rag=str(use_rag).lower() == "true",
+                                    use_db=use_db,
+                                    session_mode=getattr(sess, "mode", None),
+                                    rounds=_agent_rounds,
+                                    incognito=incognito,
+                                )
                                 run_post_response_tasks(
                                     sess,
                                     session_manager,

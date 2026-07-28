@@ -10,6 +10,7 @@ import {
   SettingsIcon,
   SquarePenIcon,
   SunIcon,
+  UsersIcon,
 } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -34,7 +35,7 @@ interface PaletteGroup {
   items: PaletteEntry[];
 }
 
-export function CommandPalette({ open, onClose, onOpenSettings, onOpenRag }: { open: boolean; onClose: () => void; onOpenSettings?: () => void; onOpenRag?: () => void }) {
+export function CommandPalette({ open, onClose, onOpenSettings, onOpenRag, onOpenUsers }: { open: boolean; onClose: () => void; onOpenSettings?: () => void; onOpenRag?: () => void; onOpenUsers?: () => void }) {
   const { t } = useTranslation();
   const [query, setQuery] = useState('');
   const [selected, setSelected] = useState(0);
@@ -72,6 +73,9 @@ export function CommandPalette({ open, onClose, onOpenSettings, onOpenRag }: { o
       ...(auth?.is_admin && onOpenRag
         ? [{ id: 'rag', label: t('palette.openRag'), icon: <DatabaseIcon />, run: () => { onOpenRag(); onClose(); } }]
         : []),
+      ...(auth?.is_admin && onOpenUsers
+        ? [{ id: 'users', label: t('palette.openUsers'), icon: <UsersIcon />, run: () => { onOpenUsers(); onClose(); } }]
+        : []),
     ].filter((a) => !q || a.label.toLowerCase().includes(q));
 
     const chats: PaletteEntry[] = (sessions ?? [])
@@ -89,7 +93,7 @@ export function CommandPalette({ open, onClose, onOpenSettings, onOpenRag }: { o
     if (actions.length) next.push({ label: t('palette.actions'), items: actions });
     if (chats.length) next.push({ label: t('palette.recentChats'), items: chats });
     return next;
-  }, [query, sessions, theme, newChat, onClose, onOpenSettings, onOpenRag, auth?.is_admin, openSession, setTheme, t]);
+  }, [query, sessions, theme, newChat, onClose, onOpenSettings, onOpenRag, onOpenUsers, auth?.is_admin, openSession, setTheme, t]);
 
   // Flatten for keyboard navigation; track a running index across groups.
   const flat = useMemo(() => groups.flatMap((g) => g.items), [groups]);

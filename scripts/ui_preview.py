@@ -560,6 +560,188 @@ _SHARED_SKILLS: list[dict] = [
 ]
 
 
+# ── Users & usage workspace (#/users) ──
+# Shapes must match client.ts UsageOverview / UsageDetail / StorageOverview —
+# the workspace dereferences every field.
+
+_PREVIEW_USERS = [
+    {"username": "preview", "display_name": "Preview Admin", "is_admin": True, "privileges": {}},
+    {
+        "username": "mara",
+        "display_name": "Mara Kessler",
+        "is_admin": False,
+        "privileges": {"can_use_agent": True, "max_messages_per_day": 40},
+    },
+    {"username": "jonas", "display_name": None, "is_admin": False, "privileges": {}},
+    {"username": "sam", "display_name": "Sam Ito", "is_admin": False, "privileges": {}},
+]
+
+# (username, turns, tokens, tools, web, skill loads, errors)
+_USAGE_SEED = {
+    "preview": (61, 980_000, 140, 18, 9, 3),
+    "mara": (214, 3_400_000, 512, 74, 41, 22),
+    "jonas": (38, 410_000, 61, 6, 2, 1),
+    "sam": (0, 0, 0, 0, 0, 0),
+}
+
+
+def _usage_row(name: str, days: int) -> dict:
+    turns, tokens, tools, web, skills, errors = _USAGE_SEED.get(name, (0, 0, 0, 0, 0, 0))
+    scale = 1 if days == 0 else min(1.0, days / 90)
+    turns, tokens, tools = int(turns * scale), int(tokens * scale), int(tools * scale)
+    acct = next((u for u in _PREVIEW_USERS if u["username"] == name), {})
+    return {
+        "username": name,
+        "display_name": acct.get("display_name"),
+        "is_admin": acct.get("is_admin", False),
+        "orphaned": False,
+        "turns": turns,
+        "tool_calls": tools,
+        "tool_errors": int(errors * scale),
+        "input_tokens": int(tokens * 0.82),
+        "output_tokens": int(tokens * 0.18),
+        "total_tokens": tokens,
+        "sessions": max(0, turns // 6),
+        "active_days": min(days or 90, max(0, turns // 8)),
+        "web_searches": int(web * scale),
+        "skill_loads": int(skills * scale),
+        "skills_created": 2 if name == "mara" else 0,
+        "top_tool": "web_search" if turns else None,
+        "modes": {"full": turns // 2, "knowledge": turns // 3, "chat": turns // 8} if turns else {},
+        "last_active": _iso(-3600 * 5) if turns else None,
+        "rank": 0,
+    }
+
+
+def _usage_overview(days: int) -> dict:
+    rows = [_usage_row(u["username"], days) for u in _PREVIEW_USERS]
+    rows.sort(key=lambda r: r["total_tokens"], reverse=True)
+    for i, r in enumerate(rows):
+        r["rank"] = i + 1
+    tot = [r["total_tokens"] for r in rows]
+    return {
+        "days": days,
+        "users": rows,
+        "totals": {
+            "turns": sum(r["turns"] for r in rows),
+            "tool_calls": sum(r["tool_calls"] for r in rows),
+            "total_tokens": sum(tot),
+            "input_tokens": sum(r["input_tokens"] for r in rows),
+            "output_tokens": sum(r["output_tokens"] for r in rows),
+            "sessions": sum(r["sessions"] for r in rows),
+            "active_users": sum(1 for r in rows if r["turns"]),
+        },
+        "median": {
+            "turns": sorted(r["turns"] for r in rows)[len(rows) // 2],
+            "total_tokens": sorted(tot)[len(tot) // 2],
+            "tool_calls": sorted(r["tool_calls"] for r in rows)[len(rows) // 2],
+        },
+        # One model — the workspace hides the model breakdown at this size.
+        "models": {"qwen3-llm": sum(r["turns"] for r in rows)},
+    }
+
+
+def _usage_detail(name: str, days: int) -> dict:
+    import datetime
+
+    row = _usage_row(name, days)
+    today = datetime.date.today()
+    daily = []
+    for i in range(91):
+        d = today - datetime.timedelta(days=90 - i)
+        busy = (i * 13) % 7
+        daily.append(
+            {
+                "date": d.isoformat(),
+                "turns": busy if row["turns"] else 0,
+                "tokens": busy * (row["total_tokens"] // 200 or 1) if row["turns"] else 0,
+                "tools": busy // 2 if row["turns"] else 0,
+            }
+        )
+    hours = [0] * 24
+    if row["turns"]:
+        for h, n in ((8, 4), (9, 11), (10, 19), (11, 14), (13, 9), (14, 16), (15, 12), (16, 6), (21, 3)):
+            hours[h] = n
+    return {
+        "username": name,
+        "days": days,
+        "tiles": {
+            "turns": row["turns"],
+            "tool_calls": row["tool_calls"],
+            "tool_errors": row["tool_errors"],
+            "input_tokens": row["input_tokens"],
+            "output_tokens": row["output_tokens"],
+            "total_tokens": row["total_tokens"],
+            "sessions": row["sessions"],
+            "active_days": row["active_days"],
+            "web_searches": row["web_searches"],
+            "skill_loads": row["skill_loads"],
+            "avg_tokens_per_turn": row["total_tokens"] // row["turns"] if row["turns"] else 0,
+            "peak_hour": 10 if row["turns"] else None,
+            "last_active": row["last_active"],
+        },
+        "daily": daily,
+        "hours": hours,
+        "tools": [
+            {"tool": t, "count": c, "errors": e}
+            for t, c, e in (
+                ("web_search", row["web_searches"], 0),
+                ("read_file", max(0, row["tool_calls"] // 3), 1),
+                ("run_shell", max(0, row["tool_calls"] // 4), row["tool_errors"]),
+                ("read_skill", row["skill_loads"], 0),
+                ("create_document", max(0, row["tool_calls"] // 9), 0),
+            )
+            if c
+        ],
+        "modes": row["modes"],
+        "models": {"qwen3-llm": row["turns"]} if row["turns"] else {},
+        "skills": {
+            "used": [{"name": n, "count": c} for n, c in (("pdf-forms", 12), ("weekly-report", 5))]
+            if row["skill_loads"]
+            else [],
+            "authored": ["weekly-report", "invoice-check"] if name == "mara" else [],
+        },
+        "comparison": {
+            # Same rule as the real endpoint: how many users are strictly above.
+            "rank": sum(
+                1
+                for u in _PREVIEW_USERS
+                if _usage_row(u["username"], days)["total_tokens"] > row["total_tokens"]
+            )
+            + 1,
+            "of": len(_PREVIEW_USERS),
+            "median_tokens": 695_000,
+            "median_turns": 49,
+            "median_tools": 100,
+        },
+        "limit": {
+            "max_messages_per_day": 40 if name == "mara" else 0,
+            "hit_days": 6 if name == "mara" else 0,
+        },
+    }
+
+
+def _user_storage(name: str) -> dict:
+    seed = {
+        "mara": [("chats", 61, "1,204 messages", 4_100_000), ("documents", 22, None, 880_000),
+                 ("gallery", 14, None, 22_400_000), ("notes", 7, None, 0), ("tools", 3, None, 0)],
+        "preview": [("chats", 12, "190 messages", 620_000), ("notes", 2, None, 0)],
+        "jonas": [("chats", 6, "74 messages", 210_000)],
+        "sam": [],
+    }.get(name, [])
+    cats = [{"kind": k, "count": c, "detail": d, "bytes": b} for k, c, d, b in seed]
+    known = {c["kind"] for c in cats}
+    for kind in ("chats", "documents", "gallery", "notes", "tools", "drafts", "crew", "calendars", "comparisons"):
+        if kind not in known:
+            cats.append({"kind": kind, "count": 0, "detail": None, "bytes": 0})
+    return {
+        "username": name,
+        "categories": cats,
+        "total_bytes": sum(c["bytes"] for c in cats),
+        "uploads_attributable": False,
+    }
+
+
 def _sessions():
     now = int(time.time())
     return [
@@ -815,6 +997,19 @@ class PreviewHandler(BaseHTTPRequestHandler):
                     ],
                 }
             )
+            return
+        if path == "/api/auth/users":
+            self._send_json({"users": _PREVIEW_USERS})
+            return
+        if path == "/api/admin/usage/overview":
+            self._send_json(_usage_overview(int(parse_qs(parsed.query).get("days", ["30"])[0])))
+            return
+        if path.startswith("/api/admin/usage/user/"):
+            name = path[len("/api/admin/usage/user/") :]
+            self._send_json(_usage_detail(name, int(parse_qs(parsed.query).get("days", ["30"])[0])))
+            return
+        if path.startswith("/api/admin/storage/"):
+            self._send_json(_user_storage(path[len("/api/admin/storage/") :]))
             return
         if path == "/api/rag/config":
             self._send_json(

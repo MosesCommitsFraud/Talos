@@ -11,6 +11,7 @@ import { ArchiveDialog } from './components/ArchiveDialog';
 import { HelpDialog } from './components/HelpDialog';
 import { RightPanel } from './components/RightPanel';
 import { RagWorkspace } from './components/rag/RagWorkspace';
+import { UsersWorkspace } from './components/users/UsersWorkspace';
 import { Lightbox } from './components/Lightbox';
 import { PlanPanel } from './components/PlanPanel';
 import { PendingQuestion } from './components/AskUser';
@@ -78,6 +79,8 @@ export default function App() {
             />
             {view === 'rag' ? (
               <RagWorkspace />
+            ) : view === 'users' ? (
+              <UsersWorkspace />
             ) : (
               <>
                 <main className="relative flex min-w-0 flex-1 flex-col">
@@ -101,6 +104,7 @@ export default function App() {
             onClose={() => setPalette(false)}
             onOpenSettings={() => setSettings({})}
             onOpenRag={() => setView('rag')}
+            onOpenUsers={() => setView('users')}
           />
           <SettingsDialog
             open={!!settings}
@@ -108,6 +112,7 @@ export default function App() {
             initialPanel={settings?.panel}
             scope={settings?.scope}
             onOpenRag={() => setView('rag')}
+            onOpenUsers={() => setView('users')}
           />
           <ArchiveDialog open={archiveOpen} onClose={() => setArchiveOpen(false)} />
           <HelpDialog open={helpOpen} onClose={() => setHelpOpen(false)} />

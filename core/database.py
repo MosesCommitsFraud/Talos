@@ -7,6 +7,7 @@ from sqlalchemy import (
     JSON,
     Boolean,
     Column,
+    Date,
     DateTime,
     Float,
     ForeignKey,
@@ -218,6 +219,85 @@ class ChatMessage(Base):
             "ix_messages_session_time", "session_id", "timestamp"
         ),  # Composite for efficient message retrieval
     )
+
+
+class UsageEvent(Base):
+    """One row per completed turn, plus one per tool call inside it.
+
+    Tool usage used to be readable only by deserializing `chat_messages.metadata`
+    — a JSON blob that also carries every tool's full output. Aggregating that
+    per user meant reading the whole corpus, so this table exists purely so the
+    admin usage view can answer "who used what" with an indexed query.
+
+    Deliberately NOT FK'd to sessions: deleting a chat (or a user's storage)
+    must not silently rewrite the usage history the admin view reports on.
+
+    Privacy: tool NAMES and counts only. `detail` is populated for a small
+    whitelist of tools whose argument is a library identifier (skill names) —
+    never for `web_search` and friends, whose arguments are user content.
+    """
+
+    __tablename__ = "usage_events"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    # Naive UTC, matching ChatMessage.timestamp — the API shifts to local time.
+    ts = Column(DateTime, default=utcnow_naive, nullable=False, index=True)
+    owner = Column(String, nullable=True, index=True)  # username; null = legacy/shared
+    session_id = Column(String, nullable=True, index=True)
+
+    kind = Column(String, nullable=False)  # "turn" | "tool"
+
+    # Turn rows -------------------------------------------------------------
+    model = Column(String, nullable=True)
+    # Knowledge mode derived from the request's use_rag/use_db flags:
+    # chat | knowledge | sql | full. Null on rows recovered by the backfill —
+    # the flags were never persisted before this table existed.
+    mode = Column(String, nullable=True)
+    session_mode = Column(String, nullable=True)  # sessions.mode: agent|chat|research
+    input_tokens = Column(Integer, default=0)
+    output_tokens = Column(Integer, default=0)
+    duration_ms = Column(Integer, nullable=True)
+    rounds = Column(Integer, nullable=True)  # agent rounds in this turn
+
+    # Tool rows -------------------------------------------------------------
+    tool = Column(String, nullable=True, index=True)
+    ok = Column(Boolean, nullable=True)  # False when the tool reported a failure
+    detail = Column(String, nullable=True)  # whitelisted identifier (skill name)
+
+    __table_args__ = (
+        # The two access patterns: one user's timeline, and everyone's timeline
+        # for the deployment-wide comparison.
+        Index("ix_usage_owner_ts", "owner", "ts"),
+        Index("ix_usage_kind_ts", "kind", "ts"),
+    )
+
+
+class UsageDaily(Base):
+    """Per-user daily rollup, written when raw `usage_events` age out.
+
+    Retention keeps raw rows for a window (so the tool/skill breakdown stays
+    exact and recent), then folds anything older into one row per user per day.
+    The API reads raw rows for the recent window and these for everything
+    before it, so long-range charts survive without unbounded row growth.
+    """
+
+    __tablename__ = "usage_daily"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    day = Column(Date, nullable=False, index=True)
+    owner = Column(String, nullable=True, index=True)
+
+    turns = Column(Integer, default=0)
+    tool_calls = Column(Integer, default=0)
+    input_tokens = Column(Integer, default=0)
+    output_tokens = Column(Integer, default=0)
+    sessions = Column(Integer, default=0)
+    # {"web_search": 12, ...} and {"full": 8, "sql": 1, ...} — the breakdowns
+    # the detail view charts, kept in aggregate form.
+    tools = Column(JSON, default=dict)
+    modes = Column(JSON, default=dict)
+
+    __table_args__ = (Index("ix_usage_daily_unique", "owner", "day", unique=True),)
 
 
 class Document(TimestampMixin, Base):

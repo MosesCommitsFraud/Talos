@@ -612,6 +612,11 @@ from routes.admin_wipe_routes import setup_admin_wipe_routes
 
 app.include_router(setup_admin_wipe_routes(session_manager))
 
+# Per-user usage analytics + scoped storage management (Admin → Users workspace)
+from routes.admin_usage_routes import setup_admin_usage_routes
+
+app.include_router(setup_admin_usage_routes(auth_manager, session_manager))
+
 from routes.skills_routes import setup_skills_routes
 
 app.include_router(setup_skills_routes(skills_manager))

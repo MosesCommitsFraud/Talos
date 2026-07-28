@@ -476,6 +476,113 @@ export const renameUser = (username: string, next: string) =>
 export const setUserPrivileges = (username: string, patch: UserPrivileges) =>
   postJSON(`/api/auth/users/${encodeURIComponent(username)}/privileges`, patch, 'PUT');
 
+/* ── Admin usage analytics (Users workspace) ──
+   Backed by the `usage_events` table; see routes/admin_usage_routes.py. The
+   `tz_offset` argument is minutes east of UTC, matching /api/stats — day
+   buckets have to land on the admin's local calendar, not UTC's. */
+
+const tzOffset = () => -new Date().getTimezoneOffset();
+
+export interface UsageUserRow {
+  username: string;
+  display_name?: string | null;
+  is_admin: boolean;
+  /** Activity from an account that no longer exists. */
+  orphaned: boolean;
+  turns: number;
+  tool_calls: number;
+  tool_errors: number;
+  input_tokens: number;
+  output_tokens: number;
+  total_tokens: number;
+  sessions: number;
+  active_days: number;
+  web_searches: number;
+  skill_loads: number;
+  skills_created: number;
+  top_tool: string | null;
+  modes: Record<string, number>;
+  last_active: string | null;
+  rank: number;
+}
+
+export interface UsageOverview {
+  days: number;
+  users: UsageUserRow[];
+  totals: {
+    turns: number; tool_calls: number; total_tokens: number;
+    input_tokens: number; output_tokens: number; sessions: number; active_users: number;
+  };
+  median: { turns: number; total_tokens: number; tool_calls: number };
+  /** Model → turn count. One entry = single-model deployment; the UI hides
+   *  the breakdown until a second model shows up. */
+  models: Record<string, number>;
+}
+
+export interface UsageDetail {
+  username: string;
+  days: number;
+  tiles: {
+    turns: number; tool_calls: number; tool_errors: number;
+    input_tokens: number; output_tokens: number; total_tokens: number;
+    sessions: number; active_days: number; web_searches: number; skill_loads: number;
+    avg_tokens_per_turn: number; peak_hour: number | null; last_active: string | null;
+  };
+  daily: Array<{ date: string; turns: number; tokens: number; tools: number }>;
+  hours: number[];
+  tools: Array<{ tool: string; count: number; errors: number }>;
+  /** chat | knowledge | sql | full → turn count. Empty for history recorded
+   *  before the knowledge mode was persisted (see the backfill script). */
+  modes: Record<string, number>;
+  models: Record<string, number>;
+  skills: { used: Array<{ name: string; count: number }>; authored: string[] };
+  comparison: {
+    rank: number; of: number;
+    median_tokens: number; median_turns: number; median_tools: number;
+  };
+  limit: { max_messages_per_day: number; hit_days: number };
+}
+
+export interface StorageCategory {
+  kind: string;
+  count: number;
+  detail: string | null;
+  bytes: number;
+}
+
+export interface StorageOverview {
+  username: string;
+  categories: StorageCategory[];
+  total_bytes: number;
+  /** Uploads sit in a flat directory with no per-user subtree, so they can't
+   *  be attributed; the UI says so rather than showing a wrong number. */
+  uploads_attributable: boolean;
+}
+
+export const fetchUsageOverview = (days: number) =>
+  getJSON<UsageOverview>(`/api/admin/usage/overview?tz_offset=${tzOffset()}&days=${days}`);
+
+export const fetchUsageDetail = (username: string, days: number) =>
+  getJSON<UsageDetail>(
+    `/api/admin/usage/user/${encodeURIComponent(username)}?tz_offset=${tzOffset()}&days=${days}`,
+  );
+
+export const fetchUserStorage = (username: string) =>
+  getJSON<StorageOverview>(`/api/admin/storage/${encodeURIComponent(username)}`);
+
+export async function deleteUserStorage(username: string, kind: string): Promise<{ count: number }> {
+  const res = await fetch(
+    `/api/admin/storage/${encodeURIComponent(username)}/${encodeURIComponent(kind)}`,
+    { method: 'DELETE', credentials: 'same-origin' },
+  );
+  if (!res.ok) {
+    let detail = `HTTP ${res.status}`;
+    try { const e = await res.json(); detail = e.detail || detail; } catch { /* noop */ }
+    throw new Error(detail);
+  }
+  return res.json();
+}
+
 export async function deleteUser(username: string): Promise<void> {
   const res = await fetch('/api/auth/users', {
     method: 'DELETE',

@@ -1934,6 +1934,7 @@ export function SettingsDialog({
   initialPanel,
   scope,
   onOpenRag,
+  onOpenUsers,
 }: {
   open: boolean;
   onClose: () => void;
@@ -1942,6 +1943,9 @@ export function SettingsDialog({
   /** Route the user to the dedicated `/rag` workspace instead of rendering the
    *  RAG panel inline (Advanced settings → `/rag`). */
   onOpenRag?: () => void;
+  /** Same idea for Users: the panel outgrew the dialog once it grew usage
+   *  analytics and storage management, so it lives at `/users`. */
+  onOpenUsers?: () => void;
 }) {
   const { t } = useTranslation();
   const [panel, setPanel] = useState<Panel>(initialPanel ?? 'appearance');
@@ -1970,20 +1974,23 @@ export function SettingsDialog({
     { id: 'integrations', label: t('settings.nav.integrations'), icon: <Link2Icon /> },
     { id: 'web', label: t('settings.nav.web'), icon: <GlobeIcon /> },
     { id: 'tools', label: t('settings.nav.tools'), icon: <WrenchIcon /> },
-    { id: 'users', label: t('settings.nav.users'), icon: <UsersIcon /> },
     { id: 'system', label: t('settings.nav.system'), icon: <SettingsIcon /> },
   ];
   // Advanced — entries that open a dedicated surface rather than an in-dialog
-  // panel. RAG routes to the full-screen `/rag` workspace (no in-dialog panel).
+  // panel. Both route to full-screen workspaces (no in-dialog panel).
   const advancedNav: Array<{ id: Panel; label: string; icon: React.ReactNode }> = [
     { id: 'rag', label: t('settings.nav.rag'), icon: <DatabaseIcon /> },
+    { id: 'users', label: t('settings.nav.users'), icon: <UsersIcon /> },
   ];
 
-  // The RAG entry routes to the dedicated `/rag` workspace instead of swapping
+  // These two entries route to their dedicated workspaces instead of swapping
   // an in-dialog panel; everything else selects a panel as before.
   const navClick = (id: Panel) => {
     if (id === 'rag' && onOpenRag) {
       onOpenRag();
+      onClose();
+    } else if (id === 'users' && onOpenUsers) {
+      onOpenUsers();
       onClose();
     } else {
       setPanel(id);

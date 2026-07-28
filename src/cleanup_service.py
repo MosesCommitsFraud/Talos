@@ -331,4 +331,14 @@ async def cleanup_sessions(session_manager, owner: Optional[str] = None) -> Tupl
     except Exception as e:
         logger.error(f"Delete operation failed: {e}")
 
+    # Usage retention is deployment-wide, so only the unscoped sweep rolls it
+    # up — a single user's cleanup must not prune everyone's raw events.
+    if owner is None:
+        try:
+            from src.usage_tracking import rollup_and_prune
+
+            rollup_and_prune()
+        except Exception as e:
+            logger.error(f"Usage rollup failed: {e}")
+
     return archived_count, deleted_count, space_freed_mb

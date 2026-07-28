@@ -5,8 +5,9 @@ import type { ArtifactSelection } from '@/api/types';
  *  artifacts sidebar, which a message turn opens but `App` renders). Kept out of
  *  `prefs` so it never persists across reloads. */
 /** Top-level surface shown in the main column. `chat` is the default; `rag`
- *  swaps in the full-screen knowledge-base workspace (deep-linkable at `#/rag`). */
-export type AppView = 'chat' | 'rag';
+ *  swaps in the full-screen knowledge-base workspace (deep-linkable at `#/rag`),
+ *  `users` in the admin user/usage workspace (`#/users`). */
+export type AppView = 'chat' | 'rag' | 'users';
 
 export interface PreviewFile {
   sessionId: string;
@@ -19,11 +20,12 @@ export interface PreviewFile {
   streaming?: boolean;
 }
 
-/** Map the URL hash to a view on first load so `#/rag` opens the workspace. */
+/** Map the URL hash to a view on first load so `#/rag` and `#/users` open
+ *  their workspaces directly. */
 function viewFromHash(): AppView {
-  return typeof location !== 'undefined' && location.hash.replace(/^#\/?/, '') === 'rag'
-    ? 'rag'
-    : 'chat';
+  if (typeof location === 'undefined') return 'chat';
+  const slug = location.hash.replace(/^#\/?/, '');
+  return slug === 'rag' || slug === 'users' ? slug : 'chat';
 }
 
 interface UiState {
@@ -61,7 +63,11 @@ export const useUi = create<UiState>((set) => ({
     // Keep the URL hash in sync so the workspace is shareable/refresh-safe,
     // without pulling in a router.
     if (typeof history !== 'undefined') {
-      history.replaceState(null, '', view === 'rag' ? '#/rag' : location.pathname + location.search);
+      history.replaceState(
+        null,
+        '',
+        view === 'chat' ? location.pathname + location.search : `#/${view}`,
+      );
     }
     set({ view });
   },
