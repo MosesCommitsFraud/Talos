@@ -1,6 +1,5 @@
 """Shared helpers for chat routes — context building, post-response tasks, auth resolution."""
 
-import asyncio
 import json
 import logging
 import os
@@ -1350,80 +1349,21 @@ def save_assistant_response(
     return None
 
 
-def run_post_response_tasks(
-    sess,
-    session_manager,
-    session_id: str,
-    message: str,
-    full_response: str,
-    last_metrics: dict | None,
-    uprefs: dict,
-    *,
-    incognito: bool = False,
-    compare_mode: bool = False,
-    character_name: str = None,
-    agent_rounds: int = 0,
-    agent_tool_calls: int = 0,
-    skills_manager=None,
-    owner: str = None,
-    extract_skills: bool = True,
-):
-    """Fire background tasks after a completed response: token accounting, skill extraction."""
-    # Skill extraction from complex agent runs. Only when the user actually
-    # chose agent mode — not a chat we auto-escalated for a notes/calendar
-    # intent, and never in incognito/compare.
-    auto_skills_enabled = bool(uprefs.get("auto_skills", True))
-    # Quiet by default — full gate/dispatch/start trace runs at DEBUG so
-    # users can re-enable diagnostics with LOG_LEVEL=DEBUG when something
-    # silently breaks. INFO-level only shows the outcome inside
-    # maybe_extract_skill (Auto-extracted / dropped / failed).
-    logger.debug(
-        "[skill-extract] gate: extract_skills=%s auto_skills=%s incognito=%s "
-        "compare=%s rounds=%d tools=%d skills_manager=%s",
-        extract_skills,
-        auto_skills_enabled,
-        incognito,
-        compare_mode,
-        agent_rounds,
-        agent_tool_calls,
-        "set" if skills_manager else "MISSING",
-    )
-    if (
-        extract_skills
-        and auto_skills_enabled
-        and not incognito
-        and not compare_mode
-        and (agent_rounds >= 2 or agent_tool_calls >= 2)
-    ):
-        if skills_manager is None:
-            logger.warning(
-                "[skill-extract] gate PASSED but skills_manager is None — "
-                "extraction skipped. (Bug: caller didn't pass skills_manager.)"
-            )
-        else:
-            from services.memory.skill_extractor import maybe_extract_skill
-            from src.task_endpoint import resolve_task_endpoint
+def run_post_response_tasks(session_id: str, last_metrics: dict | None):
+    """Fire background tasks after a completed response: token accounting.
 
-            s_url, s_model, s_headers = resolve_task_endpoint(
-                sess.endpoint_url,
-                sess.model,
-                sess.headers,
-                owner=owner,
-            )
-            logger.debug("[skill-extract] dispatching extractor (model=%s)", s_model)
-            asyncio.create_task(
-                maybe_extract_skill(
-                    sess,
-                    skills_manager,
-                    s_url,
-                    s_model,
-                    s_headers,
-                    agent_rounds,
-                    agent_tool_calls,
-                    owner=owner,
-                )
-            )
-
+    Automatic skill extraction used to run here. It was removed: it fired on
+    `rounds >= 2 or tool_calls >= 2` — met by any turn with a single tool call —
+    and judged reusability from the transcript's shape alone, with no notion of
+    where the answer came from. A how-to read out of a retrieved document is
+    literally a numbered computer procedure, so knowledge-base content was
+    laundered into pseudo-skills that then sat in the always-injected skills
+    index, never refreshed when the source document changed. Skills are now
+    created deliberately: `create_skill` / `manage_skills` and the uploaded
+    SKILL.md library, both unaffected. Every parameter that existed only to
+    feed the extractor went with it — what remains is the session and its
+    metrics.
+    """
     # Token accumulation
     if last_metrics:
         accumulate_token_usage(session_id, last_metrics)

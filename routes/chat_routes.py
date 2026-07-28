@@ -353,17 +353,8 @@ def setup_chat_routes(
         session_manager.save_sessions()
 
         # Background tasks (token accounting, skills)
-        run_post_response_tasks(
-            sess,
-            session_manager,
-            session,
-            message,
-            reply,
-            None,
-            ctx.uprefs,
-            character_name=ctx.preset.character_name,
-            owner=ctx.user,
-        )
+        # No post-response tasks here: the non-streaming path has no metrics to
+        # accumulate (it never produced any), so this call was already a no-op.
 
         return {"response": reply}
 
@@ -1021,7 +1012,6 @@ def setup_chat_routes(
             else:
                 # ── Unified path: full agent loop with all tools ──
                 _agent_rounds = 0
-                _agent_tool_calls = 0
                 _answered_by = None  # set if the selected model failed and a fallback answered
                 try:
                     from src.agent_tools import MAX_AGENT_ROUNDS as _DEFAULT_ROUNDS
@@ -1096,8 +1086,6 @@ def setup_chat_routes(
                                 ):
                                     if data.get("type") == "agent_step":
                                         _agent_rounds = max(_agent_rounds, data.get("round", 1))
-                                    elif data.get("type") == "tool_start":
-                                        _agent_tool_calls += 1
                                     yield chunk
                                 elif data.get("type") == "rag_sources_partial":
                                     # search_knowledge retrieved mid-turn. Merge
@@ -1222,23 +1210,7 @@ def setup_chat_routes(
                                     rounds=_agent_rounds,
                                     incognito=incognito,
                                 )
-                                run_post_response_tasks(
-                                    sess,
-                                    session_manager,
-                                    session,
-                                    message,
-                                    full_response,
-                                    last_metrics,
-                                    ctx.uprefs,
-                                    incognito=incognito,
-                                    compare_mode=compare_mode,
-                                    character_name=ctx.preset.character_name,
-                                    agent_rounds=_agent_rounds,
-                                    agent_tool_calls=_agent_tool_calls,
-                                    skills_manager=skills_manager,
-                                    owner=_user,
-                                    extract_skills=(not incognito and not compare_mode),
-                                )
+                                run_post_response_tasks(session, last_metrics)
                             _stream_set(session, status="done")
                             yield chunk
                 except (asyncio.CancelledError, GeneratorExit):

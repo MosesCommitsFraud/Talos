@@ -61,6 +61,9 @@ TOOL_TAGS = {
     "manage_documents",
     "manage_settings",
     "query_sql",
+    # Knowledge-base retrieval the model asks for itself (the counterpart to
+    # auto-injection — see rag_pipeline.auto_inject_enabled)
+    "search_knowledge",
     # Internet access via the self-hosted SearxNG instance
     "web_search",
     "web_fetch",
