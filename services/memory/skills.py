@@ -643,38 +643,41 @@ class SkillsManager:
         threshold: float = 0.3,
         max_items: int = 5,
         min_confidence: float = 0.0,
+        published_only: bool = False,
     ) -> List[Dict]:
+        """Relevance-rank skills against ``query``.
+
+        ``published_only`` is for callers whose result reaches the MODEL — the
+        prompt injection in agent_loop and the agent's own skill search. Those
+        must never surface a draft: the injected block frames its contents as
+        "a procedure proven to work. Follow them step by step", and a draft is
+        by definition unreviewed. Drafts were originally admitted here for the
+        teacher-escalation loop, which no longer exists (see
+        routes/skills_routes.py `_resolve_audit_models`), and the auto-extractor
+        then filled that opening with unreviewed procedures scraped from
+        ordinary conversations. Publishing is the review step.
+
+        Human-facing search leaves it False — you can't publish or delete a
+        draft you're not allowed to find.
+        """
         if skills is None:
             skills = self.load_all()
         if not skills or not query.strip():
             return []
-        # Consider published AND draft skills for relevance retrieval.
-        # The teacher-escalation loop writes new skills as drafts; the
-        # whole point is for the student to find them on the next try
-        # without a manual publish click. The UI flags teacher-written
-        # entries with a 🎓 badge so users can demote / delete bad
-        # ones when they spot them.
-        skills = [s for s in skills if s.get("status") in ("published", "draft")]
-        # Confidence gate (used by prompt-injection, NOT by search): a DRAFT
-        # skill must clear the bar to be injected. Published skills are already
-        # vetted, so they always qualify. Missing confidence = treat as 1.0
-        # (legacy skills shouldn't silently vanish). 0 disables the gate.
+        # `status is None` covers pre-status legacy entries (treated as
+        # published, matching index_for); anything explicitly marked draft is
+        # excluded for model-facing callers.
+        _allowed = ("published", None) if published_only else ("published", "draft", None)
+        skills = [s for s in skills if s.get("status") in _allowed]
+        # Confidence gate. Everything surviving above is published (i.e. already
+        # vetted by a human), so confidence only ever filters legacy entries
+        # that carry a low one. Missing confidence = treat as 1.0 — legacy
+        # skills shouldn't silently vanish. 0 disables the gate.
         if min_confidence > 0:
 
             def _passes(s):
                 if s.get("status") == "published":
                     return True
-                # Teacher-escalation drafts are auto-written from a (possibly
-                # untrusted) trace and injected as authoritative guidance, so they
-                # must EARN injection with an explicit, parseable confidence that
-                # clears the bar — fail closed on a missing/garbage value instead
-                # of treating it as 1.0. Hand-authored legacy drafts keep the
-                # lenient "unset → keep" behavior so they don't silently vanish.
-                if s.get("source") == "teacher-escalation":
-                    c = s.get("confidence")
-                    if c is None:
-                        return False
-                    return _to_float(c, 0.0) >= min_confidence  # unparseable → fail closed
                 c = s.get("confidence")
                 if c is None:
                     return True  # unset → don't filter (legacy)

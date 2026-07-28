@@ -957,6 +957,9 @@ def _build_system_prompt(
                     threshold=0.25,
                     max_items=_skill_max_injected,
                     min_confidence=_skill_min_conf,
+                    # Injected as "a procedure proven to work" — only skills a
+                    # human published qualify for that framing.
+                    published_only=True,
                 )
                 if _skill_max_injected > 0
                 else []

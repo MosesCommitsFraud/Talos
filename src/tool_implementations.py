@@ -1706,7 +1706,11 @@ async def do_manage_skills(content: str, owner: Optional[str] = None) -> Dict:
         query = (args.get("query") or "").strip()
         if not query:
             return {"error": "query is required for search", "exit_code": 1}
-        results = sm.get_relevant_skills(query, sm.load(owner=owner), max_items=5)
+        # Model-facing search: same rule as the prompt injection — the agent is
+        # never pointed at an unreviewed draft.
+        results = sm.get_relevant_skills(
+            query, sm.load(owner=owner), max_items=5, published_only=True
+        )
         if not results:
             return {"results": "No matching skills found."}
         lines = []
