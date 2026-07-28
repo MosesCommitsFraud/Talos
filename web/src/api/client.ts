@@ -566,29 +566,24 @@ export interface StorageOverview {
   uploads_attributable: boolean;
 }
 
+/* Usernames are email addresses, so they go in the POST body — never in the
+   URL. A path like /api/admin/usage/user/name%40company.com puts personal data
+   in the server access log and browser history, and content blockers drop
+   email-shaped URLs outright, which fails as an unexplained "Failed to fetch"
+   with no request ever reaching the server. Only the overview, which names
+   nobody, stays a GET. */
+
 export const fetchUsageOverview = (days: number) =>
   getJSON<UsageOverview>(`/api/admin/usage/overview?tz_offset=${tzOffset()}&days=${days}`);
 
 export const fetchUsageDetail = (username: string, days: number) =>
-  getJSON<UsageDetail>(
-    `/api/admin/usage/user/${encodeURIComponent(username)}?tz_offset=${tzOffset()}&days=${days}`,
-  );
+  postJSON<UsageDetail>('/api/admin/usage/detail', { username, tz_offset: tzOffset(), days });
 
 export const fetchUserStorage = (username: string) =>
-  getJSON<StorageOverview>(`/api/admin/storage/${encodeURIComponent(username)}`);
+  postJSON<StorageOverview>('/api/admin/storage/detail', { username });
 
-export async function deleteUserStorage(username: string, kind: string): Promise<{ count: number }> {
-  const res = await fetch(
-    `/api/admin/storage/${encodeURIComponent(username)}/${encodeURIComponent(kind)}`,
-    { method: 'DELETE', credentials: 'same-origin' },
-  );
-  if (!res.ok) {
-    let detail = `HTTP ${res.status}`;
-    try { const e = await res.json(); detail = e.detail || detail; } catch { /* noop */ }
-    throw new Error(detail);
-  }
-  return res.json();
-}
+export const deleteUserStorage = (username: string, kind: string) =>
+  postJSON<{ count: number }>('/api/admin/storage/delete', { username, kind });
 
 export async function deleteUser(username: string): Promise<void> {
   const res = await fetch('/api/auth/users', {

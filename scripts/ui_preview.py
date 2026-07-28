@@ -1033,13 +1033,8 @@ class PreviewHandler(BaseHTTPRequestHandler):
         if path == "/api/admin/usage/overview":
             self._send_json(_usage_overview(int(parse_qs(parsed.query).get("days", ["30"])[0])))
             return
-        if path.startswith("/api/admin/usage/user/"):
-            name = path[len("/api/admin/usage/user/") :]
-            self._send_json(_usage_detail(name, int(parse_qs(parsed.query).get("days", ["30"])[0])))
-            return
-        if path.startswith("/api/admin/storage/"):
-            self._send_json(_user_storage(path[len("/api/admin/storage/") :]))
-            return
+        # The per-user reads are POSTs — usernames are emails and stay out of
+        # the URL. See do_POST.
         if path == "/api/rag/config":
             self._send_json(
                 {
@@ -1244,6 +1239,20 @@ class PreviewHandler(BaseHTTPRequestHandler):
             # Canned dictation result so the composer's voice flow (italic
             # interim → Enter confirms → Enter sends) is testable offline.
             self._send_json({"text": "Hallo Welt, das ist ein Diktat-Test."})
+            return
+        # Users & usage: the username travels in the body, never the URL.
+        if path in ("/api/admin/usage/detail", "/api/admin/storage/detail", "/api/admin/storage/delete"):
+            try:
+                payload = json.loads(body or b"{}")
+            except ValueError:
+                payload = {}
+            name = str(payload.get("username", ""))
+            if path == "/api/admin/usage/detail":
+                self._send_json(_usage_detail(name, int(payload.get("days", 30))))
+            elif path == "/api/admin/storage/detail":
+                self._send_json(_user_storage(name))
+            else:
+                self._send_json({"status": "deleted", "kind": payload.get("kind"), "count": 1})
             return
         if path == "/api/chat_stream":
             message = fields.get("message", [""])[0]

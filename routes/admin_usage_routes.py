@@ -19,6 +19,7 @@ import os
 from datetime import datetime, timedelta
 
 from fastapi import APIRouter, HTTPException, Request
+from pydantic import BaseModel, Field
 from sqlalchemy import func
 
 from core.database import (
@@ -51,6 +52,27 @@ SERIES_DAYS = 91
 WEB_TOOLS = {"web_search", "web_fetch"}
 SKILL_READ_TOOLS = {"read_skill", "browse_skills"}
 SKILL_WRITE_TOOLS = {"create_skill", "manage_skills"}
+
+
+# Usernames are email addresses in real deployments, so they travel in the
+# REQUEST BODY, never in the path or query string. A URL like
+# /api/admin/usage/user/name%40company.com writes personal data into the access
+# log, browser history, and any proxy in between — and, observed in practice,
+# content blockers treat an email-shaped URL as tracking and drop the request
+# before it leaves the browser, which fails with no server-side trace at all.
+class UsageQuery(BaseModel):
+    username: str = Field(max_length=320)
+    tz_offset: int = 0
+    days: int = 30
+
+
+class StorageQuery(BaseModel):
+    username: str = Field(max_length=320)
+
+
+class StorageDelete(BaseModel):
+    username: str = Field(max_length=320)
+    kind: str = Field(max_length=40)
 
 
 def _median(values: list) -> float:
@@ -324,11 +346,15 @@ def setup_admin_usage_routes(auth_manager, session_manager):
         finally:
             db.close()
 
-    @router.get("/usage/user/{username}")
-    def usage_user(username: str, request: Request, tz_offset: int = 0, days: int = 30):
-        """Full detail for one user, including their standing against the rest."""
+    @router.post("/usage/detail")
+    def usage_user(body: UsageQuery, request: Request):
+        """Full detail for one user, including their standing against the rest.
+
+        POST, not GET: the username is an email address and must stay out of
+        the URL (see the note on UsageQuery)."""
         require_admin(request)
-        username = (username or "").strip().lower()
+        username = (body.username or "").strip().lower()
+        days, tz_offset = body.days, body.tz_offset
         shift, today, cutoff = _window(days, tz_offset)
         db = SessionLocal()
         try:
@@ -527,10 +553,10 @@ def setup_admin_usage_routes(auth_manager, session_manager):
             },
         ]
 
-    @router.get("/storage/{username}")
-    def storage_overview(username: str, request: Request):
+    @router.post("/storage/detail")
+    def storage_overview(body: StorageQuery, request: Request):
         require_admin(request)
-        username = (username or "").strip().lower()
+        username = (body.username or "").strip().lower()
         db = SessionLocal()
         try:
             cats = _storage_categories(db, username)
@@ -564,14 +590,14 @@ def setup_admin_usage_routes(auth_manager, session_manager):
                 except OSError as e:
                     logger.warning("Could not remove gallery file %s: %s", path, e)
 
-    @router.delete("/storage/{username}/{kind}")
-    def storage_delete(username: str, kind: str, request: Request):
+    @router.post("/storage/delete")
+    def storage_delete(body: StorageDelete, request: Request):
         """Delete one category for one user. Usage history is intentionally
         untouched — the admin view must keep reporting on activity that
         happened, even after its artifacts are gone."""
         require_admin(request)
-        username = (username or "").strip().lower()
-        kind = (kind or "").strip().lower()
+        username = (body.username or "").strip().lower()
+        kind = (body.kind or "").strip().lower()
         db = SessionLocal()
         try:
             if kind == "chats":
