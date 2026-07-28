@@ -112,6 +112,7 @@ const en = {
     incognitoOff: 'Incognito off',
     toggleIncognito: 'Toggle incognito',
     moreOptions: 'More options',
+    debugDump: 'Download debug dump (admin)',
     you: 'You',
     assistant: 'Talos',
   },

@@ -1,7 +1,9 @@
-import { ArchiveIcon, FileTextIcon, GhostIcon, MoreVerticalIcon, PencilIcon, PlayIcon, Trash2Icon } from 'lucide-react';
+import { ArchiveIcon, BugIcon, FileTextIcon, GhostIcon, MoreVerticalIcon, PencilIcon, PlayIcon, Trash2Icon } from 'lucide-react';
+import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { archiveSession, deleteSession, fetchArtifacts, renameSession } from '@/api/client';
+import { archiveSession, deleteSession, downloadChatDebugDump, fetchArtifacts, renameSession } from '@/api/client';
+import { useAuth } from './auth/AuthGate';
 import { useChat } from '@/state/chat';
 import { usePrefs } from '@/state/prefs';
 import { useUi } from '@/state/ui';
@@ -24,6 +26,8 @@ export function IncognitoToggle() {
   const panelMode = useUi((s) => s.panelMode);
   const artifactsOpen = useUi((s) => s.artifactsOpen);
   const queryClient = useQueryClient();
+  const auth = useAuth();
+  const [dumping, setDumping] = useState(false);
 
   const { data: artifacts } = useQuery({
     queryKey: ['artifacts', sessionId],
@@ -46,6 +50,14 @@ export function IncognitoToggle() {
   const onDelete = () => {
     if (!sessionId) return;
     void deleteSession(sessionId).then(() => { newChat(); refresh(); });
+  };
+
+  const onDebugDump = () => {
+    if (!sessionId || dumping) return;
+    setDumping(true);
+    void downloadChatDebugDump(sessionId)
+      .catch((err: unknown) => window.alert(err instanceof Error ? err.message : String(err)))
+      .finally(() => setDumping(false));
   };
 
   const btnBase =
@@ -89,6 +101,21 @@ export function IncognitoToggle() {
           </>
         );
       })()}
+      {/* Admin-only: raw JSON dump of the whole chat (reasoning, tool calls,
+          tool errors, metrics) for debugging. */}
+      {sessionId && auth?.is_admin && (
+        <Tooltip label={t('chatHeader.debugDump')}>
+          <button
+            type="button"
+            aria-label={t('chatHeader.debugDump')}
+            onClick={onDebugDump}
+            disabled={dumping}
+            className={cn(btnBase, btnQuiet, dumping && 'opacity-50')}
+          >
+            <BugIcon className="size-4" />
+          </button>
+        </Tooltip>
+      )}
       {visible && (
         <Tooltip label={incognito ? t('chatHeader.incognitoOn') : t('chatHeader.incognitoOff')}>
           <button

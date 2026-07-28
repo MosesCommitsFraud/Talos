@@ -275,6 +275,36 @@ export async function downloadArtifactsZip(sessionId: string): Promise<void> {
 
 export const uploadDownloadUrl = (id: string) => `/api/upload/${encodeURIComponent(id)}`;
 
+/** Admin: download the raw debug dump of a chat — every message with its full
+ *  content and metadata (per-round reasoning, tool calls with commands, outputs
+ *  and exit codes, turn metrics), plus the live in-memory history. */
+export async function downloadChatDebugDump(sessionId: string): Promise<void> {
+  const res = await fetch(`/api/session/${encodeURIComponent(sessionId)}/debug-dump`, {
+    credentials: 'same-origin',
+    cache: 'no-store',
+  });
+  if (res.status === 401) {
+    notifyUnauthenticated();
+    throw new Error('Not authenticated');
+  }
+  if (!res.ok) throw new Error(`Debug dump failed (HTTP ${res.status})`);
+  // Honour the filename the server picked (debug_<chat>_<timestamp>.json).
+  const disposition = res.headers.get('Content-Disposition') ?? '';
+  const name = /filename="?([^";]+)"?/.exec(disposition)?.[1] ?? `debug_${sessionId}.json`;
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  try {
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = name;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+  } finally {
+    window.setTimeout(() => URL.revokeObjectURL(url), 1_000);
+  }
+}
+
 /** Admin: register a model endpoint (matches legacy "Add Models"). */
 export async function addModelEndpoint(opts: { name?: string; baseUrl: string; apiKey?: string; modelType?: string }): Promise<void> {
   const fd = new FormData();

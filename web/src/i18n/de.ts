@@ -114,6 +114,7 @@ const de: typeof en = {
     incognitoOff: 'Inkognito aus',
     toggleIncognito: 'Inkognito umschalten',
     moreOptions: 'Weitere Optionen',
+    debugDump: 'Debug-Dump herunterladen (Admin)',
     you: 'Du',
     assistant: 'Talos',
   },

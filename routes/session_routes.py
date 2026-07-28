@@ -936,6 +936,112 @@ def setup_session_routes(session_manager: SessionManager, config: dict):
             headers={"Content-Disposition": f"attachment; filename={out_name}"},
         )
 
+    @router.get("/session/{sid}/debug-dump")
+    def debug_dump_session(request: Request, sid: str):
+        """Admin-only raw dump of everything a session recorded, for debugging.
+
+        Unlike /export (which flattens history to readable text), this returns
+        the untouched persisted rows: every message's full content plus its
+        metadata blob — which carries the per-round texts (including the
+        `<think>` reasoning), every tool event with its command, full output and
+        exit code, and the turn metrics. Nothing is summarized or trimmed;
+        the only thing removed is endpoint auth headers (API keys).
+        """
+        from core.database import ChatMessage as DbMessage
+        from core.database import UsageEvent
+        from core.middleware import require_admin
+
+        require_admin(request)
+        _verify_session_owner(request, sid, session_manager)
+
+        def _iso(value):
+            return value.isoformat() if isinstance(value, datetime) else value
+
+        def _row(obj) -> dict:
+            return {c.name: _iso(getattr(obj, c.key)) for c in obj.__table__.columns}
+
+        def _parse_metadata(raw):
+            """metadata is a JSON string column; keep the raw text when it
+            doesn't parse so a corrupt blob is still debuggable."""
+            if raw in (None, ""):
+                return None
+            try:
+                return json.loads(raw)
+            except Exception:
+                return {"_unparsed": raw}
+
+        db = SessionLocal()
+        try:
+            db_session = db.query(DbSession).filter(DbSession.id == sid).first()
+            session_row = _row(db_session) if db_session else None
+            if session_row and session_row.get("headers"):
+                # Keep the header NAMES (useful: tells you which auth scheme was
+                # in play) but never ship the secrets into a downloaded file.
+                session_row["headers"] = {k: "<redacted>" for k in session_row["headers"]}
+            messages = (
+                db.query(DbMessage)
+                .filter(DbMessage.session_id == sid)
+                .order_by(DbMessage.timestamp, DbMessage.id)
+                .all()
+            )
+            message_rows = []
+            for m in messages:
+                row = _row(m)
+                # The column is mapped as meta_data but named "metadata" in the
+                # DB; expose it parsed under the name the frontend uses.
+                row.pop("metadata", None)
+                row["metadata"] = _parse_metadata(m.meta_data)
+                message_rows.append(row)
+            usage = (
+                db.query(UsageEvent)
+                .filter(UsageEvent.session_id == sid)
+                .order_by(UsageEvent.ts, UsageEvent.id)
+                .all()
+            )
+            usage_rows = [_row(u) for u in usage]
+        finally:
+            db.close()
+
+        # In-memory session state — the live history can differ from the DB
+        # (unsaved turn, ghost session), which is itself worth seeing.
+        live = None
+        try:
+            session = session_manager.get_session(sid)
+        except KeyError:
+            session = None
+        if session is not None:
+            live = {
+                "name": getattr(session, "name", None),
+                "model": getattr(session, "model", None),
+                "endpoint_url": getattr(session, "endpoint_url", None),
+                "owner": getattr(session, "owner", None),
+                "rag": getattr(session, "rag", None),
+                "mode": getattr(session, "mode", None),
+                "history": [m.to_dict() for m in getattr(session, "history", [])],
+            }
+
+        from src import agent_runs
+
+        payload = {
+            "exported_at": datetime.now().isoformat(),
+            "exported_by": effective_user(request),
+            "session_id": sid,
+            "run_active": agent_runs.is_active(sid),
+            "session": session_row,
+            "live_session": live,
+            "messages": message_rows,
+            "usage_events": usage_rows,
+        }
+
+        safe_name = re.sub(r"[^\w\-_]", "_", (session_row or {}).get("name") or sid)
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        out_name = _sanitize_export_filename(f"debug_{safe_name}_{timestamp}.json")
+        return Response(
+            content=json.dumps(payload, indent=2, ensure_ascii=False, default=str),
+            media_type="application/json",
+            headers={"Content-Disposition": f'attachment; filename="{out_name}"'},
+        )
+
     @router.post("/sessions/save")
     def sessions_save_now(request: Request):
         user = effective_user(request)
