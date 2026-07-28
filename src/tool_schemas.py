@@ -115,6 +115,32 @@ FUNCTION_TOOL_SCHEMAS = [
     {
         "type": "function",
         "function": {
+            "name": "search_knowledge",
+            "description": (
+                "Search the documents indexed in this Talos instance (the knowledge base). "
+                "Returns matching passages with their source filenames, or nothing when "
+                "there is no match. Cheap to call — an empty result is a normal and useful "
+                "outcome, not a failure. Several calls with different wording are expected "
+                "when the first one misses."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": (
+                            "What to look for. Write it as a standalone query — resolve "
+                            "pronouns and references against the conversation yourself."
+                        ),
+                    },
+                },
+                "required": ["query"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "web_search",
             "description": (
                 "Search the live internet (self-hosted SearxNG — Google/Bing/DuckDuckGo/Wikipedia "

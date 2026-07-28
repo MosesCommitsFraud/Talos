@@ -1094,6 +1094,68 @@ async def do_search_chats(query: str, limit: int = 20, owner: str | None = None)
         db.close()
 
 
+async def do_search_knowledge(content: str, owner: Optional[str] = None) -> Dict:
+    """`search_knowledge` — let the agent query the knowledge base itself.
+
+    The counterpart to auto-injection (``rag_pipeline.auto_inject_enabled``).
+    Instead of prefixing retrieved chunks onto every user turn — which is how a
+    contentless follow-up like "alle drei" ended up resolved against an
+    unrelated PDF — the model asks when it actually wants to look something up.
+
+    Both paths go through ``ChatProcessor.retrieve()``, so the relevance gates
+    (rerank floor, lexical evidence, companion figures, pixel gate) live in
+    exactly one place. ``ChatProcessor(None)`` is fine here: ``retrieve()``
+    falls back to the process-wide ``get_rag_manager()`` singleton, which is the
+    same manager the injection path uses.
+
+    Returns the retrieved sections under ``output`` plus the citation dicts
+    under ``rag_sources`` so the caller can merge them into the turn's sources
+    and run the existing post-generation figure/citation guards.
+    """
+    try:
+        args = _parse_tool_args(content)
+    except ValueError as e:
+        return {"error": f"Invalid JSON arguments: {e}", "exit_code": 1}
+    query = str((args or {}).get("query") or "").strip()
+    if not query:
+        return {"error": "search_knowledge requires a non-empty 'query'.", "exit_code": 1}
+
+    try:
+        from src.chat_processor import ChatProcessor
+
+        sources, block = ChatProcessor(None).retrieve(query)
+    except Exception as e:
+        logger.error(f"search_knowledge failed: {e}")
+        return {"error": str(e), "exit_code": 1}
+
+    if not sources:
+        # An empty result is a normal, useful answer — say so plainly rather
+        # than returning an error, so the model moves on instead of retrying.
+        return {
+            "output": (
+                f'No indexed document matched "{query}". The knowledge base has nothing '
+                "on this — answer from the conversation, or use another source."
+            ),
+            "rag_sources": [],
+        }
+
+    # Retrieved document text is untrusted input (prompt-injection surface), so
+    # it keeps the same framing here as on the injection path — a tool result
+    # is not a licence to drop the marker.
+    from src.prompt_security import UNTRUSTED_CONTEXT_HEADER
+
+    return {
+        "output": (
+            f"{UNTRUSTED_CONTEXT_HEADER}\n"
+            "Source: retrieved documents\n\n"
+            "<<<SUPPLIED_CONTEXT>>>\n"
+            f"{block}\n"
+            "<<<END_SUPPLIED_CONTEXT>>>"
+        ),
+        "rag_sources": sources,
+    }
+
+
 # ---------------------------------------------------------------------------
 # Shared uploaded skills — read_skill tool
 # ---------------------------------------------------------------------------

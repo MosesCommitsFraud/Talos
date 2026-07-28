@@ -1066,6 +1066,7 @@ def setup_chat_routes(
                         plan_mode=plan_mode,
                         approved_plan=approved_plan or None,
                         force_db=use_db,
+                        use_rag=str(use_rag).lower() == "true",
                         reasoning=reasoning,
                     ):
                         if chunk.startswith("data: ") and not chunk.startswith("data: [DONE]"):
@@ -1098,6 +1099,25 @@ def setup_chat_routes(
                                     elif data.get("type") == "tool_start":
                                         _agent_tool_calls += 1
                                     yield chunk
+                                elif data.get("type") == "rag_sources_partial":
+                                    # search_knowledge retrieved mid-turn. Merge
+                                    # into the turn's sources (deduped by _id) so
+                                    # the post-generation citation/figure guards
+                                    # below see tool-retrieved knowledge exactly
+                                    # like auto-injected knowledge. Not forwarded
+                                    # to the client — the filtered `rag_sources`
+                                    # event after generation is the one the UI
+                                    # renders, so a chunk the answer never used
+                                    # doesn't become a citation chip.
+                                    _seen_src = {
+                                        s.get("_id") for s in ctx.rag_sources if s.get("_id")
+                                    }
+                                    for _s in data.get("data") or []:
+                                        if _s.get("_id") and _s["_id"] in _seen_src:
+                                            continue
+                                        ctx.rag_sources.append(_s)
+                                        if _s.get("_id"):
+                                            _seen_src.add(_s["_id"])
                                 elif data.get("type") == "fallback":
                                     # Selected model failed; a fallback answered.
                                     # Forward the notice and remember the real

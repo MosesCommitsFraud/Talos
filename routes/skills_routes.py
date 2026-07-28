@@ -490,6 +490,10 @@ async def _run_skill_test_job(key, name, md, task, url, model, headers, owner, s
             max_tokens=0,
             max_rounds=8,
             owner=owner,
+            # A skill under test must have the same tools it will have when it
+            # actually runs — otherwise a skill that consults the knowledge
+            # base fails its own test for a reason that is not the skill.
+            use_rag=True,
         ):
             if not chunk.startswith("data: ") or chunk.strip() == "data: [DONE]":
                 continue
@@ -805,6 +809,10 @@ async def _run_skill_test_once(md: str, task: str, url, model, headers, owner) -
             max_tokens=0,
             max_rounds=8,
             owner=owner,
+            # A skill under test must have the same tools it will have when it
+            # actually runs — otherwise a skill that consults the knowledge
+            # base fails its own test for a reason that is not the skill.
+            use_rag=True,
         ):
             if not chunk.startswith("data: ") or chunk.strip() == "data: [DONE]":
                 continue

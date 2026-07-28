@@ -401,6 +401,7 @@ def setup_assistant_routes(chat_processor=None, session_manager=None) -> APIRout
                 temperature=temperature,
                 max_tokens=max_tokens,
                 force_db=cfg["use_sql"],
+                use_rag=bool(cfg["use_rag"]),
                 reasoning=cfg["reasoning"],
                 disabled_tools=disabled,
                 owner=owner,

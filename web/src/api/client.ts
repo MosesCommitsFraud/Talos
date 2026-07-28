@@ -659,6 +659,9 @@ export interface RagConfig {
   max_context_chars: number;
   query_prefix: string;
   context_prompt: string;
+  /** Auto-inject retrieved context on every RAG/Full-Knowledge turn (default on).
+   *  When off, knowledge reaches the model only via the `search_knowledge` tool. */
+  auto_inject_enabled?: boolean;
   /** Advanced — opt-in audio/video transcription lane (off by default). */
   video_asr_enabled?: boolean;
   video_asr_url?: string;

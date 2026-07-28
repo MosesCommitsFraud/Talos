@@ -32,6 +32,11 @@ class RagPipelineConfig(BaseModel):
     max_context_chars: int = 10000
     query_prefix: str = ""
     context_prompt: str = ""
+    # Auto-inject retrieved context into the prompt on every RAG/Full-Knowledge
+    # turn (the historical behaviour). When off, knowledge reaches the model
+    # only when it calls `search_knowledge` itself — which keeps a contentless
+    # follow-up ("alle drei") from having unrelated chunks prefixed onto it.
+    auto_inject_enabled: bool = True
     # Advanced — opt-in audio/video transcription lane (off by default).
     video_asr_enabled: bool = False
     video_asr_url: str = ""
@@ -150,6 +155,7 @@ def _public(cfg: dict) -> dict:
         "max_context_chars": _clamp_chars(cfg.get("max_context_chars", 10000)),
         "query_prefix": cfg.get("query_prefix", ""),
         "context_prompt": cfg.get("context_prompt", ""),
+        "auto_inject_enabled": bool(cfg.get("auto_inject_enabled", True)),
         "video_asr_enabled": bool(cfg.get("video_asr_enabled", False)),
         "video_asr_url": cfg.get("video_asr_url", ""),
         "video_asr_language": cfg.get("video_asr_language", "auto") or "auto",
@@ -233,6 +239,7 @@ def setup_rag_routes():
             "max_context_chars": _clamp_chars(body.max_context_chars),
             "query_prefix": body.query_prefix.strip(),
             "context_prompt": body.context_prompt.strip(),
+            "auto_inject_enabled": bool(body.auto_inject_enabled),
             "video_asr_enabled": bool(body.video_asr_enabled),
             "video_asr_url": body.video_asr_url.strip(),
             "video_asr_language": (body.video_asr_language or "auto").strip(),

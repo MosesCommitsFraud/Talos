@@ -373,6 +373,253 @@ class ChatProcessor:
             logger.warning("query rewrite failed, using raw query: %s", e)
         return message
 
+    def retrieve(
+        self,
+        search_query: str,
+        *,
+        prefix: str = "",
+        max_chars: Optional[int] = None,
+    ) -> Tuple[List[Dict[str, Any]], str]:
+        """Search the knowledge base and build the injectable context block.
+
+        Shared by the ``search_knowledge`` agent tool and by the auto-injection
+        fallback in ``build_context_preface`` (non-agent ``/api/chat`` only, so
+        rarely exercised), so both go through exactly ONE copy of the relevance
+        gates (rerank floor, lexical evidence, companion figures, pixel gate).
+        Forking them would let the gates drift, and the gates are the part that
+        works.
+
+        ``search_query`` is used verbatim: the conversation-aware rewrite stays
+        in the caller, because the tool path supplies the model's own query and
+        must not have it rewritten underneath.
+
+        Returns ``(sources, content)`` — ``([], "")`` when nothing clears the
+        bar. ``prefix`` is prepended to ``content`` inside the size budget.
+        """
+        try:
+            # External provider (e.g. RagFlow) replaces the internal Qdrant
+            # manager but returns the same result shape, so everything below
+            # the search() call is shared.
+            if str(self._rag_cfg().get("provider") or "internal").strip().lower() == "external":
+                from src.rag_external import ExternalRagClient
+
+                rag_manager = ExternalRagClient(self._rag_cfg())
+                if not rag_manager.configured:
+                    rag_manager = None
+            else:
+                rag_manager = getattr(self.personal_docs_manager, "rag_manager", None)
+                if not rag_manager:
+                    from src.rag_singleton import get_rag_manager
+
+                    rag_manager = get_rag_manager()
+                    if rag_manager and self.personal_docs_manager is not None:
+                        self.personal_docs_manager.rag_manager = rag_manager
+            if not rag_manager:
+                return [], ""
+
+            # RAG is a global admin-managed knowledge base. Do not owner-filter here:
+            # when enabled, indexed knowledge is available to every user.
+            rag_k = min(self._rag_k_setting("chat_top_k", 5), 20)
+            candidate_k = max(rag_k, min(self._rag_k_setting("candidate_top_k", 40), 100))
+            rerank_min = self._rag_float_setting("rerank_min_score", self.RAG_RERANK_MIN_SCORE)
+            sim_threshold = self._rag_float_setting(
+                "similarity_threshold", self.RAG_SIMILARITY_THRESHOLD
+            )
+            # Keep the SQL-only knowledge namespace out of ordinary RAG;
+            # those schema files are injected separately when the SQL
+            # source is active (see agent_loop force_db). The external
+            # client has no scope concept, so only pass it internally.
+            if str(self._rag_cfg().get("provider") or "internal").strip().lower() == "external":
+                results = rag_manager.search(
+                    search_query, k=rag_k, owner=None, candidate_k=candidate_k
+                )
+            else:
+                results = rag_manager.search(
+                    search_query,
+                    k=rag_k,
+                    owner=None,
+                    candidate_k=candidate_k,
+                    exclude_scopes=["sql"],
+                )
+
+            # Decide which retrieved chunks are relevant enough to inject.
+            # When nothing clears the bar we inject NOTHING — no forced
+            # top-k fallback. Off-topic context confuses the model and
+            # yields misleading citations, so on a query the index has
+            # nothing useful for, RAG stays silent.
+            def _is_figure(r):
+                return bool((r.get("metadata") or {}).get("image_url"))
+
+            has_rerank_scores = any(r.get("rerank_score") is not None for r in results)
+            if has_rerank_scores:
+                # Every result — figures included — carries its own
+                # rerank score (companion figures are reranked on their
+                # captions), so one threshold filters them all.
+                relevant = [
+                    r
+                    for r in results
+                    if r.get("rerank_score") is not None
+                    and float(r.get("rerank_score") or 0) >= rerank_min
+                ]
+                # Rerank scores are only relative: even a contentless
+                # query ("yoyoyo") ranks *something* first. Require
+                # distinctive lexical evidence from a surviving text
+                # chunk OR from a caption explicitly marked as a
+                # synthetic anchor for an image-only page/document.
+                text_evidence = any(
+                    _chunk_relevant_to_query(
+                        search_query,
+                        r.get("_retrieval_document") or r.get("document", ""),
+                    )
+                    for r in relevant
+                    if not _is_figure(r)
+                )
+                figure_evidence = any(
+                    _synthetic_figure_relevant_to_query(search_query, r) for r in relevant
+                )
+                if not text_evidence and not figure_evidence:
+                    relevant = []
+                else:
+                    # Same-page companion figures inherit the relevance
+                    # of their surviving text anchor. Their own caption
+                    # rerank score may be weak/cross-lingual, but page
+                    # provenance and post-answer selection keep the image
+                    # precise. Without this, correct text can survive
+                    # while its exact figure disappears.
+                    relevant = _add_surviving_anchor_companions(results, relevant)
+            else:
+                # No reranker: raw hybrid (RRF) scores can't tell a
+                # relevant query from an unrelated one, so require the
+                # chunk to actually share distinctive query terms before
+                # injecting it. Figure captions can't pass that gate —
+                # companions are handled below via their anchor instead.
+                relevant = [
+                    r
+                    for r in results
+                    if not _is_figure(r)
+                    and r.get("similarity", 0) >= sim_threshold
+                    and _chunk_relevant_to_query(
+                        search_query,
+                        r.get("_retrieval_document") or r.get("document", ""),
+                    )
+                ]
+                relevant += [
+                    r
+                    for r in results
+                    if r.get("similarity", 0) >= sim_threshold
+                    and _synthetic_figure_relevant_to_query(search_query, r)
+                ]
+                text_ids = {r.get("id") for r in relevant}
+                relevant += [
+                    r for r in results if _is_figure(r) and r.get("anchor_id") in text_ids
+                ]
+            # A figure is only shown alongside the text it came from:
+            # drop any companion whose anchoring chunk didn't survive
+            # the relevance gate above.
+            text_ids = {r.get("id") for r in relevant if not _is_figure(r)}
+            relevant = [
+                r
+                for r in relevant
+                if r.get("search_type") != "figure_companion"
+                or r.get("anchor_id") in text_ids
+            ]
+            # Pixel gate: drop figures whose IMAGE doesn't match the
+            # query/anchor text before anything reaches the model. The
+            # final response guard still verifies that the generated
+            # prose used the exact native or synthetic anchor.
+            relevant = _pixel_gate_figures(relevant, rag_manager, search_query)
+            if not relevant:
+                return [], ""
+
+            logger.info(
+                f"RAG: {len(relevant)}/{len(results)} results above threshold {sim_threshold}"
+            )
+            rag_sources = [
+                {
+                    "filename": r["metadata"].get(
+                        "filename", r["metadata"].get("source", "unknown")
+                    ),
+                    "snippet": r["document"][:200],
+                    "similarity": round(r.get("similarity", 0), 3),
+                    # Larger slice of the chunk, kept ONLY for the
+                    # post-generation "was this actually used?" check
+                    # (filter_used_rag_sources). Stripped (underscore
+                    # key) before the source is emitted or saved, so
+                    # it never reaches the client or the DB.
+                    "_text": (r.get("_retrieval_document") or r["document"])[:3000],
+                    # Internal provenance used after generation to
+                    # pair a displayed figure with the exact text
+                    # page the answer actually used. Underscore keys
+                    # are stripped before sources reach the client.
+                    "_id": r.get("id"),
+                    "_anchor_id": r.get("anchor_id"),
+                    "_source": (r.get("metadata") or {}).get("source"),
+                    "_page": (r.get("metadata") or {}).get("page"),
+                    "_synthetic_anchor": (
+                        (r.get("metadata") or {}).get("synthetic_anchor") is True
+                    ),
+                    # Optional image-preview / video-timestamp fields
+                    # so citations can render a thumbnail or a #t=
+                    # deeplink (absent for plain text/docs).
+                    **_citation_media(r["metadata"] or {}),
+                }
+                for r in relevant
+            ]
+
+            # Inject the expanded parent section when small-to-big is
+            # on (r["expanded"]); otherwise the matched chunk. The
+            # citation snippet (rag_sources) still uses the chunk.
+            def _rag_section(s, r):
+                body = f"[{s['filename']}]\n{r.get('expanded') or r['document']}"
+                # Expose the figure as a ready-made Markdown line with an
+                # imperative right next to it: small local models follow an
+                # instruction adjacent to the data far more reliably than
+                # the separate _FIGURE_EMBED_RULE system message alone.
+                if s.get("image_url"):
+                    cap = (s.get("image_caption") or s.get("filename") or "figure").strip()
+                    # First line only, brackets sanitized, capped — the full
+                    # VLM description makes unusable alt text.
+                    cap = (
+                        cap.splitlines()[0].replace("[", "(").replace("]", ")")[:120].strip()
+                        or "figure"
+                    )
+                    body += (
+                        "\n[This section is a real figure from the document above. "
+                        "If this figure supports your answer, display it to the "
+                        "user by copying this exact Markdown line into your "
+                        "answer:]\n"
+                        f"![{cap}]({s['image_url']})"
+                    )
+                return body
+
+            # Figure sections (caption + image_url, tiny) must survive
+            # the context-size cut below — they ride at the END of the
+            # result list, so a plain tail truncation would drop exactly
+            # them while the embed rule still promises the model figures.
+            # Budget the text sections around them instead.
+            text_secs, fig_secs = [], []
+            for s, r in zip(rag_sources, relevant):
+                sec = _rag_section(s, r)
+                (fig_secs if s.get("image_url") else text_secs).append(sec)
+            rag_content = ((prefix + "\n\n") if prefix else "") + "\n\n---\n\n".join(text_secs)
+            if max_chars is None:
+                try:
+                    max_chars = int(self._rag_cfg().get("max_context_chars") or 10000)
+                except Exception:
+                    max_chars = 10000
+            max_chars = max(500, min(max_chars, 100000))
+            fig_block = "\n\n---\n\n".join(fig_secs)
+            budget = max(500, max_chars - len(fig_block))
+            if len(rag_content) > budget:
+                rag_content = rag_content[:budget] + "\n[Truncated]"
+            if fig_block:
+                rag_content += "\n\n---\n\n" + fig_block
+                logger.info("RAG: injected %s figure section(s) with image_url", len(fig_secs))
+            return rag_sources, rag_content
+        except Exception as e:
+            logger.warning(f"RAG retrieval failed: {e}")
+            return [], ""
+
     def build_context_preface(
         self,
         message: str,
@@ -421,263 +668,48 @@ class ChatProcessor:
             }
         )
 
-        # RAG: search if enabled and rag_manager available, inject only above threshold
-        if use_rag:
-            try:
-                # External provider (e.g. RagFlow) replaces the internal Qdrant
-                # manager but returns the same result shape, so everything below
-                # the search() call is shared.
-                if str(self._rag_cfg().get("provider") or "internal").strip().lower() == "external":
-                    from src.rag_external import ExternalRagClient
-
-                    rag_manager = ExternalRagClient(self._rag_cfg())
-                    if not rag_manager.configured:
-                        rag_manager = None
-                else:
-                    rag_manager = getattr(self.personal_docs_manager, "rag_manager", None)
-                    if not rag_manager:
-                        from src.rag_singleton import get_rag_manager
-
-                        rag_manager = get_rag_manager()
-                        if rag_manager and self.personal_docs_manager is not None:
-                            self.personal_docs_manager.rag_manager = rag_manager
-                if rag_manager:
-                    # RAG is a global admin-managed knowledge base. Do not owner-filter here:
-                    # when enabled, indexed knowledge is available to every user.
-                    rag_k = min(self._rag_k_setting("chat_top_k", 5), 20)
-                    candidate_k = max(rag_k, min(self._rag_k_setting("candidate_top_k", 40), 100))
-                    rerank_min = self._rag_float_setting(
-                        "rerank_min_score", self.RAG_RERANK_MIN_SCORE
-                    )
-                    sim_threshold = self._rag_float_setting(
-                        "similarity_threshold", self.RAG_SIMILARITY_THRESHOLD
-                    )
-                    # Conversation-aware query transformation (Phase 7): resolve
-                    # follow-ups like "and the second one?" into a standalone
-                    # retrieval query. Off by default; degrades to the raw message.
-                    search_query = self._maybe_rewrite_query(message, session, owner)
-                    # Keep the SQL-only knowledge namespace out of ordinary RAG;
-                    # those schema files are injected separately when the SQL
-                    # source is active (see agent_loop force_db). The external
-                    # client has no scope concept, so only pass it internally.
-                    if (
-                        str(self._rag_cfg().get("provider") or "internal").strip().lower()
-                        == "external"
-                    ):
-                        results = rag_manager.search(
-                            search_query, k=rag_k, owner=None, candidate_k=candidate_k
-                        )
-                    else:
-                        results = rag_manager.search(
-                            search_query,
-                            k=rag_k,
-                            owner=None,
-                            candidate_k=candidate_k,
-                            exclude_scopes=["sql"],
-                        )
-
-                    # Decide which retrieved chunks are relevant enough to inject.
-                    # When nothing clears the bar we inject NOTHING — no forced
-                    # top-k fallback. Off-topic context confuses the model and
-                    # yields misleading citations, so on a query the index has
-                    # nothing useful for, RAG stays silent.
-                    def _is_figure(r):
-                        return bool((r.get("metadata") or {}).get("image_url"))
-
-                    has_rerank_scores = any(r.get("rerank_score") is not None for r in results)
-                    if has_rerank_scores:
-                        # Every result — figures included — carries its own
-                        # rerank score (companion figures are reranked on their
-                        # captions), so one threshold filters them all.
-                        relevant = [
-                            r
-                            for r in results
-                            if r.get("rerank_score") is not None
-                            and float(r.get("rerank_score") or 0) >= rerank_min
-                        ]
-                        # Rerank scores are only relative: even a contentless
-                        # query ("yoyoyo") ranks *something* first. Require
-                        # distinctive lexical evidence from a surviving text
-                        # chunk OR from a caption explicitly marked as a
-                        # synthetic anchor for an image-only page/document.
-                        text_evidence = any(
-                            _chunk_relevant_to_query(
-                                search_query,
-                                r.get("_retrieval_document") or r.get("document", ""),
-                            )
-                            for r in relevant
-                            if not _is_figure(r)
-                        )
-                        figure_evidence = any(
-                            _synthetic_figure_relevant_to_query(search_query, r) for r in relevant
-                        )
-                        if not text_evidence and not figure_evidence:
-                            relevant = []
-                        else:
-                            # Same-page companion figures inherit the relevance
-                            # of their surviving text anchor. Their own caption
-                            # rerank score may be weak/cross-lingual, but page
-                            # provenance and post-answer selection keep the image
-                            # precise. Without this, correct text can survive
-                            # while its exact figure disappears.
-                            relevant = _add_surviving_anchor_companions(results, relevant)
-                    else:
-                        # No reranker: raw hybrid (RRF) scores can't tell a
-                        # relevant query from an unrelated one, so require the
-                        # chunk to actually share distinctive query terms before
-                        # injecting it. Figure captions can't pass that gate —
-                        # companions are handled below via their anchor instead.
-                        relevant = [
-                            r
-                            for r in results
-                            if not _is_figure(r)
-                            and r.get("similarity", 0) >= sim_threshold
-                            and _chunk_relevant_to_query(
-                                search_query,
-                                r.get("_retrieval_document") or r.get("document", ""),
-                            )
-                        ]
-                        relevant += [
-                            r
-                            for r in results
-                            if r.get("similarity", 0) >= sim_threshold
-                            and _synthetic_figure_relevant_to_query(search_query, r)
-                        ]
-                        text_ids = {r.get("id") for r in relevant}
-                        relevant += [
-                            r for r in results if _is_figure(r) and r.get("anchor_id") in text_ids
-                        ]
-                    # A figure is only shown alongside the text it came from:
-                    # drop any companion whose anchoring chunk didn't survive
-                    # the relevance gate above.
-                    text_ids = {r.get("id") for r in relevant if not _is_figure(r)}
-                    relevant = [
-                        r
-                        for r in relevant
-                        if r.get("search_type") != "figure_companion"
-                        or r.get("anchor_id") in text_ids
-                    ]
-                    # Pixel gate: drop figures whose IMAGE doesn't match the
-                    # query/anchor text before anything reaches the model. The
-                    # final response guard still verifies that the generated
-                    # prose used the exact native or synthetic anchor.
-                    relevant = _pixel_gate_figures(relevant, rag_manager, search_query)
-                    if relevant:
-                        logger.info(
-                            f"RAG: {len(relevant)}/{len(results)} results above threshold {sim_threshold}"
-                        )
-                        rag_sources = [
-                            {
-                                "filename": r["metadata"].get(
-                                    "filename", r["metadata"].get("source", "unknown")
-                                ),
-                                "snippet": r["document"][:200],
-                                "similarity": round(r.get("similarity", 0), 3),
-                                # Larger slice of the chunk, kept ONLY for the
-                                # post-generation "was this actually used?" check
-                                # (filter_used_rag_sources). Stripped (underscore
-                                # key) before the source is emitted or saved, so
-                                # it never reaches the client or the DB.
-                                "_text": (r.get("_retrieval_document") or r["document"])[:3000],
-                                # Internal provenance used after generation to
-                                # pair a displayed figure with the exact text
-                                # page the answer actually used. Underscore keys
-                                # are stripped before sources reach the client.
-                                "_id": r.get("id"),
-                                "_anchor_id": r.get("anchor_id"),
-                                "_source": (r.get("metadata") or {}).get("source"),
-                                "_page": (r.get("metadata") or {}).get("page"),
-                                "_synthetic_anchor": (
-                                    (r.get("metadata") or {}).get("synthetic_anchor") is True
-                                ),
-                                # Optional image-preview / video-timestamp fields
-                                # so citations can render a thumbnail or a #t=
-                                # deeplink (absent for plain text/docs).
-                                **_citation_media(r["metadata"] or {}),
-                            }
-                            for r in relevant
-                        ]
-                        # Admin-overridable instruction prefacing the retrieved context.
-                        context_prompt = (self._rag_cfg().get("context_prompt") or "").strip() or (
-                            "Retrieved knowledge base context. Use this context to answer the user's "
-                            "current question when it matches the topic of the question and the "
-                            "ongoing conversation. The user's message may be a follow-up — resolve "
-                            "references like 'this', 'that', or 'expand on it' against the "
-                            "conversation history FIRST; retrieval for such short messages can miss, "
-                            "so if this context is about a different topic than the conversation, "
-                            "ignore it completely and answer from the conversation instead. "
-                            "If the answer is present here, prefer it over general knowledge. "
-                            "Always state the answer itself in full: never reply by merely pointing "
-                            "the user to a document or saying the information can be found there — "
-                            "not even when the same question was already answered earlier in this "
-                            "conversation."
-                        )
-
-                        # Inject the expanded parent section when small-to-big is
-                        # on (r["expanded"]); otherwise the matched chunk. The
-                        # citation snippet (rag_sources) still uses the chunk.
-                        def _rag_section(s, r):
-                            body = f"[{s['filename']}]\n{r.get('expanded') or r['document']}"
-                            # Expose the figure as a ready-made Markdown line with an
-                            # imperative right next to it: small local models follow an
-                            # instruction adjacent to the data far more reliably than
-                            # the separate _FIGURE_EMBED_RULE system message alone.
-                            if s.get("image_url"):
-                                cap = (
-                                    s.get("image_caption") or s.get("filename") or "figure"
-                                ).strip()
-                                # First line only, brackets sanitized, capped — the full
-                                # VLM description makes unusable alt text.
-                                cap = (
-                                    cap.splitlines()[0]
-                                    .replace("[", "(")
-                                    .replace("]", ")")[:120]
-                                    .strip()
-                                    or "figure"
-                                )
-                                body += (
-                                    "\n[This section is a real figure from the document above. "
-                                    "If this figure supports your answer, display it to the "
-                                    "user by copying this exact Markdown line into your "
-                                    "answer:]\n"
-                                    f"![{cap}]({s['image_url']})"
-                                )
-                            return body
-
-                        # Figure sections (caption + image_url, tiny) must survive
-                        # the context-size cut below — they ride at the END of the
-                        # result list, so a plain tail truncation would drop exactly
-                        # them while the embed rule still promises the model figures.
-                        # Budget the text sections around them instead.
-                        text_secs, fig_secs = [], []
-                        for s, r in zip(rag_sources, relevant):
-                            sec = _rag_section(s, r)
-                            (fig_secs if s.get("image_url") else text_secs).append(sec)
-                        rag_content = (context_prompt + "\n\n") + "\n\n---\n\n".join(text_secs)
-                        try:
-                            max_chars = int(self._rag_cfg().get("max_context_chars") or 10000)
-                        except Exception:
-                            max_chars = 10000
-                        max_chars = max(500, min(max_chars, 100000))
-                        fig_block = "\n\n---\n\n".join(fig_secs)
-                        budget = max(500, max_chars - len(fig_block))
-                        if len(rag_content) > budget:
-                            rag_content = rag_content[:budget] + "\n[Truncated]"
-                        if fig_block:
-                            rag_content += "\n\n---\n\n" + fig_block
-                            logger.info(
-                                "RAG: injected %s figure section(s) with image_url", len(fig_secs)
-                            )
-                        preface.append(
-                            untrusted_context_message("retrieved documents", rag_content)
-                        )
-                        # Authorize inline figure embedding only when a retrieved
-                        # section actually has one (keeps the rule out of context
-                        # otherwise). Trusted system message, not untrusted data.
-                        if any(s.get("image_url") for s in rag_sources):
-                            preface.append({"role": "system", "content": _FIGURE_EMBED_RULE})
-            except Exception as e:
-                logger.warning(f"RAG retrieval failed: {e}")
+        # RAG: search if enabled and rag_manager available, inject only above threshold.
+        #
+        # `auto_inject_enabled` (admin, RAG settings) decides whether retrieval
+        # happens here at all. When ON this is the historical behaviour: every
+        # RAG/Full-Knowledge turn gets context prefixed onto the user message.
+        # When OFF, knowledge reaches the model only through the
+        # `search_knowledge` tool, so a contentless follow-up ("alle drei")
+        # can't have unrelated chunks stacked on top of it — the model asks
+        # when it wants to look something up.
+        # Non-agent callers (the legacy non-streaming /api/chat) have no tool
+        # loop, so `search_knowledge` can never run there. Turning the setting
+        # off would leave them with no knowledge at all and no way to ask for
+        # it — so the choice only applies where a tool actually exists.
+        _auto_inject = self._rag_cfg().get("auto_inject_enabled", True) is not False
+        if use_rag and (_auto_inject or not agent_mode):
+            # Conversation-aware query transformation (Phase 7): resolve
+            # follow-ups like "and the second one?" into a standalone
+            # retrieval query. Off by default; degrades to the raw message.
+            search_query = self._maybe_rewrite_query(message, session, owner)
+            # Admin-overridable instruction prefacing the retrieved context.
+            context_prompt = (self._rag_cfg().get("context_prompt") or "").strip() or (
+                "Retrieved knowledge base context. Use this context to answer the user's "
+                "current question when it matches the topic of the question and the "
+                "ongoing conversation. The user's message may be a follow-up — resolve "
+                "references like 'this', 'that', or 'expand on it' against the "
+                "conversation history FIRST; retrieval for such short messages can miss, "
+                "so if this context is about a different topic than the conversation, "
+                "ignore it completely and answer from the conversation instead. "
+                "If the answer is present here, prefer it over general knowledge. "
+                "Always state the answer itself in full: never reply by merely pointing "
+                "the user to a document or saying the information can be found there — "
+                "not even when the same question was already answered earlier in this "
+                "conversation."
+            )
+            rag_sources, rag_content = self.retrieve(search_query, prefix=context_prompt)
+            if rag_content:
+                preface.append(untrusted_context_message("retrieved documents", rag_content))
+                # Authorize inline figure embedding only when a retrieved
+                # section actually has one (keeps the rule out of context
+                # otherwise). Trusted system message, not untrusted data.
+                if any(s.get("image_url") for s in rag_sources):
+                    preface.append({"role": "system", "content": _FIGURE_EMBED_RULE})
 
         # Skills index — progressive disclosure. Only injected when the
         # model has the `manage_skills` tool available (agent_mode), and

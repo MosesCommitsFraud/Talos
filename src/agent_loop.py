@@ -246,6 +246,13 @@ Generate an image. Line 1 = description, line 2 = model name, line 3 = WxH (e.g.
     "manage_tokens": '- ```manage_tokens``` — Generate or revoke API access tokens for external integrations. Args (JSON): {"action": "list|create|delete", ...}',
     "manage_documents": '- ```manage_documents``` — List, read/open, delete, or tidy documents in the editor panel. Args (JSON): {"action": "list|read|delete|tidy", ...}. `list` returns rows like `[Title](#document-<id>) — lang, size, updated 5m ago` sorted MOST-RECENT FIRST; the user clicks the anchor to open. `read` (aliases: view/open/get) takes `document_id` and returns the content. When the user asks "open/show/read my notes" or "what documents do I have", use this — do NOT shell out, do NOT curl.',
     "manage_settings": '- ```manage_settings``` — View/change the REAL app settings (same ones the Settings panel writes) AND turn tools on/off. Change a setting: `{"action":"set","key":"...","value":"..."}` — keys accept friendly aliases, e.g. voice→tts_voice, "default model"→default_model, "image quality"→image_quality, "reminder channel"→reminder_channel (browser|email|ntfy), "agent timeout"/"max tool calls"/"token budget". Read: `{"action":"get","key":"..."}`; see all: `{"action":"list"}`; reset one: `{"action":"reset","key":"..."}`. Use this when the user asks to change ANY preference instead of making them open Settings. Secrets/API keys are read-only (tell them to set those in the panel). Tool toggles: `{"action":"disable_tool|enable_tool","tool":"shell"}` (aliases: shell/browser/documents/skills/images), list disabled: `{"action":"list_tools"}`.',
+    "search_knowledge": """\
+```search_knowledge
+{"query": "Summierungsoptionen erweiterte Datenquelle"}
+```
+Search the documents indexed in this Talos instance (the knowledge base: manuals, training material, schema references, process docs, transcripts). Returns matching passages with their source filenames.
+**Cheap to call.** An empty result is a normal, useful answer — it tells you the knowledge base has nothing on this, so answer from another source and move on. Don't avoid the tool for fear of missing; don't retry the identical query after an empty result either. Reformulate instead, and expect to call it more than once for a real question.
+**Write a standalone query.** Resolve pronouns and references against the conversation yourself before searching — a bare follow-up ("all three", "expand on that") is not a search query, and searching it verbatim matches noise. If the user's message is a reply to your own question, answer it from the conversation; don't search.""",
     "query_sql": """\
 ```query_sql
 {"action": "query", "query": "SELECT ...", "max_rows": 100}
@@ -256,7 +263,7 @@ Read-only SQL access to the configured external database(s). Use when the user a
 {"query": "...", "max_results": 6, "language": "de", "time_range": "week"}
 ```
 Search the live internet (self-hosted SearxNG). Only `query` is required; a bare query line without JSON also works.
-**Order of sources:** the retrieved knowledge in your context (the user's own documents) comes FIRST — if it answers the question, answer from it and don't search. Go to the web when that knowledge is absent, insufficient, or stale, when the question is about current/dated facts (news, prices, releases, versions, weather, laws, people, companies), or whenever the user asks you to search, look something up, or research a topic — in any language ("suche", "recherchiere", "google mal", "was gibt es Neues zu", "search for", "look up").
+**Order of sources:** the user's own documents come FIRST. If `search_knowledge` is in your tool list, call it before searching the web — the answer may already be indexed. Any retrieved knowledge already in your context counts the same: if it answers the question, answer from it and don't search. Go to the web when the knowledge base returns nothing or is insufficient or stale, when the question is about current/dated facts (news, prices, releases, versions, weather, laws, people, companies), or whenever the user asks you to search, look something up, or research a topic — in any language ("suche", "recherchiere", "google mal", "was gibt es Neues zu", "search for", "look up").
 **Search, don't ask.** When a question needs the web, call this tool immediately — never reply "möchtest du, dass ich danach suche?" or otherwise ask permission first, and never say you cannot look something up while this tool is in your tool list. Searching is a normal, reversible action that needs no confirmation.
 **Use several calls.** Real research needs more than one query: split the question into sub-questions, run a query per sub-question, and reformulate when the results are weak. Search in the language the answer lives in (German sources for German topics — pass `language: "de"`). Use `time_range` for "latest"/"aktuell" questions.
 Results are snippets, not pages. When the snippet doesn't settle the question, open the best URLs with `web_fetch`. Cite what you used as markdown links.""",
@@ -1697,6 +1704,7 @@ async def stream_agent_loop(
     plan_mode: bool = False,
     approved_plan: Optional[str] = None,
     force_db: bool = False,
+    use_rag: bool = False,
     reasoning: bool = True,
 ) -> AsyncGenerator[str, None]:
     """Streaming agent loop generator.
@@ -1876,6 +1884,19 @@ async def stream_agent_loop(
         disabled_tools.add("query_sql")
         if _relevant_tools is not None:
             _relevant_tools.discard("query_sql")
+
+    # search_knowledge mirrors that, gated by the Knowledge/Full-Knowledge mode
+    # (use_rag) instead. The two gates are independent of `auto_inject_enabled`:
+    # that admin setting decides whether context is ALSO prefixed onto the user
+    # turn, not whether the model may look things up itself.
+    if use_rag:
+        if _relevant_tools is not None:
+            _relevant_tools.add("search_knowledge")
+        disabled_tools.discard("search_knowledge")
+    else:
+        disabled_tools.add("search_knowledge")
+        if _relevant_tools is not None:
+            _relevant_tools.discard("search_knowledge")
 
     prep_timings["tool_selection"] = time.time() - _t1
 
@@ -3107,6 +3128,24 @@ async def stream_agent_loop(
 
             if "plan_update" in result:
                 yield f"data: {json.dumps({'type': 'plan_update', 'data': result['plan_update']})}\n\n"
+
+            # search_knowledge retrieved sources mid-turn. On the auto-inject
+            # path the turn's sources are known before generation; here they
+            # only exist once the model asks. Emit them so the caller can merge
+            # them into the turn and still run the post-generation guards
+            # (filter_used_rag_sources / append_missing_figures /
+            # strip_unauthorized_figures) over everything the answer could
+            # have drawn on. Internal underscore keys are preserved — the
+            # caller strips them via public_rag_sources before the client
+            # sees anything.
+            if result.get("rag_sources"):
+                yield (
+                    "data: "
+                    + json.dumps(
+                        {"type": "rag_sources_partial", "data": result["rag_sources"]}
+                    )
+                    + "\n\n"
+                )
 
             # Build output for frontend tool bubble.
             # Document tools get a short summary — content goes to the editor panel.

@@ -1482,6 +1482,7 @@ async def execute_tool_block(
         do_manage_tokens,
         do_query_sql,
         do_search_chats,
+        do_search_knowledge,
         do_suggest_document,
         do_update_document,
         do_vault_get,
@@ -1797,6 +1798,10 @@ async def execute_tool_block(
     elif tool == "query_sql":
         desc = "query_sql"
         result = await do_query_sql(content, owner=owner)
+    elif tool == "search_knowledge":
+        result = await do_search_knowledge(content, owner=owner)
+        _hits = len(result.get("rag_sources") or [])
+        desc = f"search_knowledge: {_hits} hit(s)"
     elif tool == "expand_output":
         desc = "expand_output"
         from src.context_optimizer import do_expand_output

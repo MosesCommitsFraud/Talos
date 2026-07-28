@@ -1423,6 +1423,7 @@ export function RagPanel() {
           {field('max_context_chars', t('settings.rag.maxContextChars'), { type: 'number', hint: t('settings.rag.hint.maxContextChars'), def: 10000 })}
           {field('query_prefix', t('settings.rag.queryPrefix'), { type: 'textarea', hint: t('settings.rag.hint.queryPrefix'), def: '' })}
           {field('context_prompt', t('settings.rag.contextPrompt'), { type: 'textarea', hint: t('settings.rag.hint.contextPrompt'), def: '' })}
+          <Row label={t('settings.rag.autoInjectEnabled')} hint={t('settings.rag.hint.autoInjectEnabled')}><Switch checked={draft.auto_inject_enabled !== false} onCheckedChange={(v) => set('auto_inject_enabled', v)} /></Row>
         <div className="flex flex-wrap items-center gap-3 border-t border-border/60 px-4 py-3.5 sm:px-5">
           <Button size="sm" disabled={save.isPending} onClick={() => save.mutate(draft)}>{save.isPending ? t('common.saving') : t('common.save')}</Button>
           <Button size="sm" variant="outline" disabled={test.isPending} onClick={() => test.mutate()}>{test.isPending ? t('settings.rag.testing') : t('settings.rag.testConnection')}</Button>
