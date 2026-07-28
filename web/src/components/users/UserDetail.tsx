@@ -75,9 +75,6 @@ function UsageSection({ username, days }: { username: string; days: number }) {
   const modelRows = Object.entries(data.models)
     .map(([key, value]) => ({ key, label: key.split('/').pop() ?? key, value }))
     .sort((a, b) => b.value - a.value);
-  const sessionModeRows = Object.entries(data.session_modes)
-    .map(([key, value]) => ({ key, label: t(`users.sessionModes.${key}`, { defaultValue: key }), value }))
-    .sort((a, b) => b.value - a.value);
 
   return (
     <div className="space-y-4">
@@ -199,14 +196,6 @@ function UsageSection({ username, days }: { username: string; days: number }) {
             <p className="py-2 text-xs text-muted-foreground">{t('users.modesUnknown')}</p>
           ) : (
             <BarList empty={t('users.empty.modes')} rows={modeRows} />
-          )}
-          {sessionModeRows.length > 0 && (
-            <>
-              <div className="mt-3 text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
-                {t('users.section.sessionModes')}
-              </div>
-              <BarList empty="" rows={sessionModeRows} />
-            </>
           )}
           {/* A single-model deployment gets no model chart — it would just be
               one bar at 100%. It appears on its own once a second model runs. */}

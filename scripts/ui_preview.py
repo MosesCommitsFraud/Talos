@@ -564,8 +564,22 @@ _SHARED_SKILLS: list[dict] = [
 # Shapes must match client.ts UsageOverview / UsageDetail / StorageOverview —
 # the workspace dereferences every field.
 
+# Admins come back from auth_manager.get_privileges with every flag on
+# (core/auth.py ADMIN_PRIVILEGES), so mirror that — an admin row rendered with
+# empty privileges would make the read-only panel look wrong in the preview.
+_ADMIN_PRIVS = {
+    "can_use_agent": True,
+    "can_use_browser": True,
+    "can_use_documents": True,
+    "can_use_research": True,
+    "can_generate_images": True,
+    "can_manage_memory": True,
+    "max_messages_per_day": 0,
+    "allowed_models": [],
+}
+
 _PREVIEW_USERS = [
-    {"username": "preview", "display_name": "Preview Admin", "is_admin": True, "privileges": {}},
+    {"username": "preview", "display_name": "Preview Admin", "is_admin": True, "privileges": dict(_ADMIN_PRIVS)},
     {
         "username": "mara",
         "display_name": "Mara Kessler",
@@ -697,7 +711,6 @@ def _usage_detail(name: str, days: int) -> dict:
         "daily": daily,
         "hours": hours,
         "weekday": weekday,
-        "session_modes": {"agent": row["turns"]} if row["turns"] else {},
         "tools": [
             {"tool": t, "count": c, "errors": e}
             for t, c, e in (

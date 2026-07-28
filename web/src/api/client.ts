@@ -541,8 +541,6 @@ export interface UsageDetail {
   /** chat | knowledge | sql | full → turn count. Empty for history recorded
    *  before the knowledge mode was persisted (see the backfill script). */
   modes: Record<string, number>;
-  /** agent | chat | research → turn count (sessions.mode). */
-  session_modes: Record<string, number>;
   models: Record<string, number>;
   skills: { used: Array<{ name: string; count: number }>; authored: string[] };
   comparison: {

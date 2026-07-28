@@ -90,7 +90,6 @@ def _blank_agg() -> dict:
         "active_days": set(),
         "tools": {},
         "modes": {},
-        "session_modes": {},
         "models": {},
         "skills": {},
         "hours": [0] * 24,
@@ -145,8 +144,6 @@ def _fold_event(agg: dict, ev, shift: timedelta) -> None:
             agg["rounds_turns"] += 1
         if ev.mode:
             agg["modes"][ev.mode] = agg["modes"].get(ev.mode, 0) + 1
-        if ev.session_mode:
-            agg["session_modes"][ev.session_mode] = agg["session_modes"].get(ev.session_mode, 0) + 1
         if ev.model:
             agg["models"][ev.model] = agg["models"].get(ev.model, 0) + 1
     elif ev.kind == "tool":
@@ -428,7 +425,6 @@ def setup_admin_usage_routes(auth_manager, session_manager):
                 "weekday": a["weekday"],
                 "tools": tools,
                 "modes": a["modes"],
-                "session_modes": a["session_modes"],
                 "models": a["models"],
                 "skills": {"used": skills_used, "authored": authored},
                 "comparison": {

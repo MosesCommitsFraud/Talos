@@ -60,7 +60,7 @@ function useAllModels(enabled: boolean) {
     .flatMap((ep) => ep.models.map((mid) => ({ mid, epName: ep.name, display: mid.split('/').pop() ?? mid })));
 }
 
-function AllowedModels({ user, onSaved }: { user: AppUser; onSaved: () => void }) {
+function AllowedModels({ user, onSaved, readOnly }: { user: AppUser; onSaved: () => void; readOnly?: boolean }) {
   const { t } = useTranslation();
   const allModels = useAllModels(true);
   const stored = user.privileges?.allowed_models ?? [];
@@ -72,6 +72,7 @@ function AllowedModels({ user, onSaved }: { user: AppUser; onSaved: () => void }
   const effectiveChecked = stored.length === 0 && checked.size === 0 ? new Set(allModels.map((m) => m.mid)) : checked;
 
   const save = (next: Set<string>) => {
+    if (readOnly) return;
     setChecked(next);
     // All checked ⇒ persist [] = unrestricted (legacy semantics).
     const value = next.size === allModels.length ? [] : [...next];
@@ -89,10 +90,12 @@ function AllowedModels({ user, onSaved }: { user: AppUser; onSaved: () => void }
     <div className="pt-2">
       <div className="flex items-center justify-between">
         <span className="text-sm">{t('settings.users.allowedModels')}</span>
-        <div className="flex gap-3 text-xs">
-          <button type="button" className="text-muted-foreground hover:text-foreground" onClick={() => save(new Set(allModels.map((m) => m.mid)))}>{t('settings.users.all')}</button>
-          <button type="button" className="text-muted-foreground hover:text-foreground" onClick={() => save(new Set())}>{t('settings.users.none')}</button>
-        </div>
+        {!readOnly && (
+          <div className="flex gap-3 text-xs">
+            <button type="button" className="text-muted-foreground hover:text-foreground" onClick={() => save(new Set(allModels.map((m) => m.mid)))}>{t('settings.users.all')}</button>
+            <button type="button" className="text-muted-foreground hover:text-foreground" onClick={() => save(new Set())}>{t('settings.users.none')}</button>
+          </div>
+        )}
       </div>
       <div className="pb-1 text-xs text-muted-foreground">
         {unrestricted ? t('settings.users.unrestricted') : t('settings.users.restricted', { count: stored.length })}
@@ -102,8 +105,8 @@ function AllowedModels({ user, onSaved }: { user: AppUser; onSaved: () => void }
       ) : (
         <div className="max-h-44 space-y-0.5 overflow-y-auto rounded-lg border bg-background p-1.5">
           {allModels.map((m) => (
-            <label key={m.mid} className="flex cursor-pointer items-center gap-2 rounded-md px-1.5 py-1 text-sm hover:bg-accent/60" title={m.mid}>
-              <input type="checkbox" checked={effectiveChecked.has(m.mid)} onChange={() => toggle(m.mid)} className="accent-primary" />
+            <label key={m.mid} className={cn('flex items-center gap-2 rounded-md px-1.5 py-1 text-sm', readOnly ? 'opacity-70' : 'cursor-pointer hover:bg-accent/60')} title={m.mid}>
+              <input type="checkbox" checked={effectiveChecked.has(m.mid)} disabled={readOnly} onChange={() => toggle(m.mid)} className="accent-primary" />
               <span className="min-w-0 flex-1 truncate">{m.display}</span>
               <span className="text-[10px] text-muted-foreground">{m.epName}</span>
             </label>
@@ -114,34 +117,53 @@ function AllowedModels({ user, onSaved }: { user: AppUser; onSaved: () => void }
   );
 }
 
-function PrivilegesPanel({ user, onSaved }: { user: AppUser; onSaved: () => void }) {
+/** `readOnly` is used for admin accounts: the server refuses to change an
+ *  admin's privileges (core/auth.py set_privileges — admins always have full
+ *  access), so the controls are shown inert rather than hidden. Hiding them
+ *  made admin rows un-openable, which reads as "I can't look at other admins"
+ *  when the real rule is only "I can't edit them". */
+function PrivilegesPanel({ user, onSaved, readOnly }: {
+  user: AppUser;
+  onSaved: () => void;
+  readOnly?: boolean;
+}) {
   const { t } = useTranslation();
   const [limit, setLimit] = useState(String(user.privileges?.max_messages_per_day ?? 0));
   const savePriv = (patch: UserPrivileges) =>
     void setUserPrivileges(user.username, patch).then(onSaved).catch(() => {});
   return (
     <div className="border-t px-3 pt-2 pb-3">
+      {readOnly && (
+        <p className="pt-1.5 pb-1 text-xs text-muted-foreground">{t('settings.users.adminReadOnly')}</p>
+      )}
       <div className="pt-1 pb-0.5 text-[11px] font-medium tracking-wide text-muted-foreground uppercase">{t('settings.users.features')}</div>
       {PRIV_KEYS.map((key) => (
         <MiniRow key={key} label={t(`settings.users.priv.${key}`)}>
           <Switch
             checked={!!user.privileges?.[key]}
+            disabled={readOnly}
+            className={cn(readOnly && 'cursor-default opacity-70')}
             onCheckedChange={(v) => savePriv({ [key]: v })}
           />
         </MiniRow>
       ))}
       <div className="pt-2 pb-0.5 text-[11px] font-medium tracking-wide text-muted-foreground uppercase">{t('settings.users.limits')}</div>
-      <MiniRow label={t('settings.users.dailyLimit')} hint={t('settings.users.dailyLimitHint')}>
+      <MiniRow
+        label={t('settings.users.dailyLimit')}
+        hint={readOnly ? t('settings.users.noLimit') : t('settings.users.dailyLimitHint')}
+      >
         <Input
           type="number"
           min={0}
           value={limit}
+          readOnly={readOnly}
+          disabled={readOnly}
           onChange={(e) => setLimit(e.target.value)}
           onBlur={() => savePriv({ max_messages_per_day: Math.max(0, parseInt(limit, 10) || 0) })}
-          className="w-20 text-center"
+          className={cn('w-20 text-center', readOnly && 'opacity-70')}
         />
       </MiniRow>
-      <AllowedModels user={user} onSaved={onSaved} />
+      <AllowedModels user={user} onSaved={onSaved} readOnly={readOnly} />
     </div>
   );
 }
@@ -203,8 +225,8 @@ function UserRow({ user, currentUser, adminCount, onChanged }: {
   return (
     <div className="rounded-lg border bg-background">
       <div
-        className={cn('flex items-center gap-3 px-3 py-2', !user.is_admin && 'cursor-pointer')}
-        onClick={() => !user.is_admin && setOpen((v) => !v)}
+        className="flex cursor-pointer items-center gap-3 px-3 py-2"
+        onClick={() => setOpen((v) => !v)}
       >
         <div className="flex size-7 shrink-0 items-center justify-center rounded-full bg-primary/15 text-xs font-semibold text-primary">
           {(user.display_name || user.username).slice(0, 1).toUpperCase()}
@@ -214,7 +236,7 @@ function UserRow({ user, currentUser, adminCount, onChanged }: {
           {user.is_admin
             && <span className="ml-2 rounded bg-primary/15 px-1.5 py-0.5 text-[10px] font-semibold tracking-wide text-primary">{t('settings.users.admin')}</span>}
           <div className="truncate text-[10px] text-muted-foreground">
-            {user.display_name ? user.username : (!user.is_admin ? t('settings.users.manageHint') : '')}
+            {user.display_name ? user.username : t('settings.users.manageHint')}
           </div>
         </div>
         <div className="flex shrink-0 items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
@@ -234,12 +256,10 @@ function UserRow({ user, currentUser, adminCount, onChanged }: {
               <Trash2Icon className="size-3.5" />
             </button>
           )}
-          {!user.is_admin && (
-            <ChevronDownIcon className={cn('size-3.5 text-muted-foreground transition-transform', open && 'rotate-180')} />
-          )}
+          <ChevronDownIcon className={cn('size-3.5 text-muted-foreground transition-transform', open && 'rotate-180')} />
         </div>
       </div>
-      {open && !user.is_admin && <PrivilegesPanel user={user} onSaved={onChanged} />}
+      {open && <PrivilegesPanel user={user} onSaved={onChanged} readOnly={user.is_admin} />}
     </div>
   );
 }
