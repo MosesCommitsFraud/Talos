@@ -865,6 +865,59 @@ def _max_answer_figures() -> int:
         return 3
 
 
+def _min_extra_figure_bigrams() -> int:
+    """Caption-overlap floor a SECOND (third, …) figure must clear before it may
+    ride along. See ``_gate_figures_by_caption``."""
+    try:
+        return max(1, min(int(os.getenv("RAG_MIN_EXTRA_FIGURE_BIGRAMS", "2") or 2), 20))
+    except Exception:
+        return 2
+
+
+def _gate_figures_by_caption(prose: str, figures: list) -> list:
+    """Keep the figure the answer actually illustrates, plus any other that
+    earns its place on its OWN caption.
+
+    Anchor pairing alone over-admits. ``filter_used_rag_sources`` counts a text
+    chunk as "used" on a *single* shared bigram, and inside one product manual
+    the boilerplate ("macs Report Editor") repeats on every page — so several
+    chunks look used, each drags in its page's figure, and the answer ends with
+    a pile of screenshots it never refers to. On a real "Band einfügen" answer,
+    a page about *Freies Dataset* was authorized solely by the phrase "über
+    Neu" appearing in a parenthetical.
+
+    A figure's caption is the honest signal, now that captions are written in
+    the document's own language (``RAG_CAPTION_LANGUAGE``). On that same answer
+    the correct screenshot shared 12 caption bigrams with the prose and the two
+    spurious ones shared 1 each — while their RETRIEVAL scores ranked them
+    backwards (0.926 for the least relevant, 0.178 for the right one). That is
+    why this gate reads prose overlap and never similarity.
+
+    The best figure is always kept, so a thin caption can never cost the one
+    image that matters; the bar applies only to the extras, and scales with the
+    leader so it stays meaningful whatever the captions look like. A genuinely
+    multi-topic answer keeps every figure whose page it actually discussed.
+    """
+    if len(figures) <= 1:
+        return figures
+    ranked = sorted(figures, key=lambda f: _source_usage_score(prose, f), reverse=True)
+    lead = _source_usage_score(prose, ranked[0])[0]
+    bar = max(_min_extra_figure_bigrams(), lead // 3)
+    kept = [ranked[0]]
+    for fig in ranked[1:]:
+        shared = _source_usage_score(prose, fig)[0]
+        if shared >= bar:
+            kept.append(fig)
+        else:
+            logger.info(
+                "figure gate: dropped %s (caption bigrams %d < %d)",
+                (fig.get("image_url") or "")[:160],
+                shared,
+                bar,
+            )
+    return kept
+
+
 def _eligible_figures_for_answer(answer: str, sources: list) -> list:
     """Pair figures with the exact text page/anchor used by the final answer.
 
@@ -934,7 +987,10 @@ def _eligible_figures_for_answer(answer: str, sources: list) -> list:
             _take(legacy_page_figures[0])
 
     if selected:
-        return selected
+        # One-per-used-anchor is the *candidate* set, not the answer: several
+        # chunks of the same manual look "used" on one shared bigram each. Let
+        # the captions decide which of those figures the prose really shows.
+        return _gate_figures_by_caption(prose, selected)
 
     # Standalone images have no owning text anchor and may be used directly.
     # Anchored document figures are deliberately excluded from this path.
