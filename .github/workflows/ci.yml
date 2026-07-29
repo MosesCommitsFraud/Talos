@@ -222,7 +222,7 @@ jobs:
 
       - name: Upload digest
         if: github.event_name == 'push'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           # "__" separates the fields because every image name starts with
           # "talos": with a "-" separator the merge job's `digests-talos-*`
