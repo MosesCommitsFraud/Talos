@@ -189,6 +189,20 @@ def _pixel_gate_min() -> float:
         return 0.25
 
 
+def _figure_protect_ratio() -> float:
+    """How close to the best text hit a figure must score to keep its
+    reserved (truncation-proof) slot in the injected context.
+
+    Relative, not absolute, because the score family differs by pipeline
+    (rerank_score when a reranker ran, cosine similarity otherwise) and the
+    two are not on the same scale. A ratio compares like with like.
+    """
+    try:
+        return max(0.0, min(float(os.getenv("RAG_FIGURE_PROTECT_RATIO", "0.6")), 1.0))
+    except Exception:
+        return 0.6
+
+
 def _pixel_gate_figures(
     results: List[Dict[str, Any]], rag_manager: Any, query: str
 ) -> List[Dict[str, Any]]:
@@ -592,29 +606,91 @@ class ChatProcessor:
                     )
                 return body
 
-            # Figure sections (caption + image_url, tiny) must survive
-            # the context-size cut below — they ride at the END of the
-            # result list, so a plain tail truncation would drop exactly
-            # them while the embed rule still promises the model figures.
-            # Budget the text sections around them instead.
-            text_secs, fig_secs = [], []
-            for s, r in zip(rag_sources, relevant):
-                sec = _rag_section(s, r)
-                (fig_secs if s.get("image_url") else text_secs).append(sec)
-            rag_content = ((prefix + "\n\n") if prefix else "") + "\n\n---\n\n".join(text_secs)
+            def _score(r):
+                rs = r.get("rerank_score")
+                return float(rs) if rs is not None else float(r.get("similarity") or 0.0)
+
+            sep = "\n\n---\n\n"
+            entries = [
+                {
+                    "sec": _rag_section(s, r),
+                    "score": _score(r),
+                    "figure": bool(s.get("image_url")),
+                }
+                for s, r in zip(rag_sources, relevant)
+            ]
+            text_entries = [e for e in entries if not e["figure"]]
+            fig_entries = [e for e in entries if e["figure"]]
+
+            # Figure sections (caption + image_url, tiny) ride at the END of
+            # the result list, so a plain tail cut drops exactly them while
+            # the embed rule still promises the model figures — hence the
+            # reserved slot. But only a figure scoring near the best text hit
+            # earns it. Without that bar the ranking inverts under budget
+            # pressure: a weak screenshot keeps its protected slot while the
+            # strong text page owning the *right* figure is cut, and the model
+            # dutifully embeds the only image it was handed.
+            best_text = max((e["score"] for e in text_entries), default=0.0)
+            floor = best_text * _figure_protect_ratio()
+            protected = [e for e in fig_entries if not text_entries or e["score"] >= floor]
+            protected_ids = {id(e) for e in protected}
+            for e in fig_entries:
+                if id(e) not in protected_ids:
+                    logger.info(
+                        "RAG: figure score %.3f below protection floor %.3f — "
+                        "competes for budget on its own merit",
+                        e["score"],
+                        floor,
+                    )
+
             if max_chars is None:
                 try:
                     max_chars = int(self._rag_cfg().get("max_context_chars") or 10000)
                 except Exception:
                     max_chars = 10000
             max_chars = max(500, min(max_chars, 100000))
-            fig_block = "\n\n---\n\n".join(fig_secs)
-            budget = max(500, max_chars - len(fig_block))
-            if len(rag_content) > budget:
-                rag_content = rag_content[:budget] + "\n[Truncated]"
+
+            fig_block = sep.join(e["sec"] for e in protected)
+            prefix_block = (prefix + "\n\n") if prefix else ""
+            budget = max(500, max_chars - len(fig_block) - len(prefix_block))
+
+            # Fill with WHOLE sections, best score first. A character-level cut
+            # can slice a section mid-sentence or halve a figure's Markdown
+            # link, leaving the model with prose describing a screenshot whose
+            # URL it never received. An oversized section is skipped rather
+            # than allowed to block the smaller ones behind it; emission order
+            # follows the retrieval order, not the fill order.
+            pool = text_entries + [e for e in fig_entries if id(e) not in protected_ids]
+            used = 0
+            kept_ids: set = set()
+            for e in sorted(pool, key=lambda x: x["score"], reverse=True):
+                cost = len(e["sec"]) + (len(sep) if kept_ids else 0)
+                if used + cost > budget:
+                    continue
+                used += cost
+                kept_ids.add(id(e))
+            kept = [e for e in pool if id(e) in kept_ids]
+            if kept:
+                body = sep.join(e["sec"] for e in kept)
+            elif pool:
+                # Nothing fits whole (one oversized chunk against a small
+                # budget) — fall back to a character cut of the best section
+                # rather than returning the model an empty context.
+                body = max(pool, key=lambda x: x["score"])["sec"][:budget] + "\n[Truncated]"
+            else:
+                body = ""
+            if len(kept) < len(pool):
+                logger.info(
+                    "RAG: dropped %s/%s section(s) whole to fit %s chars",
+                    len(pool) - len(kept),
+                    len(pool),
+                    max_chars,
+                )
+
+            rag_content = prefix_block + body
             if fig_block:
-                rag_content += "\n\n---\n\n" + fig_block
-                logger.info("RAG: injected %s figure section(s) with image_url", len(fig_secs))
+                rag_content += sep + fig_block
+                logger.info("RAG: injected %s figure section(s) with image_url", len(protected))
             return rag_sources, rag_content
         except Exception as e:
             logger.warning(f"RAG retrieval failed: {e}")
