@@ -20,6 +20,7 @@ import {
 } from '@/api/client';
 import { useUi } from '@/state/ui';
 import { cn, formatRelativeTime } from '@/lib/utils';
+import { useAuth } from '../auth/AuthGate';
 import { Button } from '../ui/button';
 import { SearchInput } from '../ui/search';
 import { TranscriptViewer } from './TranscriptViewer';
@@ -55,6 +56,11 @@ export function TicketsWorkspace() {
   const { t } = useTranslation();
   const setView = useUi((s) => s.setView);
   const queryClient = useQueryClient();
+  const auth = useAuth();
+  // Admin-only surface. The menu and palette entries are already gated, but
+  // `#/tickets` is deep-linkable, so a non-admin landing here goes back to chat
+  // rather than seeing an empty (403-backed) triage view.
+  const isAdmin = auth?.is_admin !== false;
   const [tab, setTab] = useState<Tab>('open');
   const [query, setQuery] = useState('');
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -64,11 +70,12 @@ export function TicketsWorkspace() {
     queryKey: ['tickets', tab],
     queryFn: () => fetchTickets(tab),
     refetchInterval: 60_000,
+    enabled: isAdmin,
   });
   const { data: detail } = useQuery({
     queryKey: ['ticket', selectedId],
     queryFn: () => fetchTicket(selectedId as string),
-    enabled: !!selectedId,
+    enabled: isAdmin && !!selectedId,
   });
 
   const rows = useMemo(() => {
@@ -87,6 +94,10 @@ export function TicketsWorkspace() {
     }
   }, [rows, selectedId]);
 
+  useEffect(() => {
+    if (!isAdmin) setView('chat');
+  }, [isAdmin, setView]);
+
   const refresh = () => {
     void queryClient.invalidateQueries({ queryKey: ['tickets'] });
     void queryClient.invalidateQueries({ queryKey: ['ticket'] });
@@ -103,6 +114,8 @@ export function TicketsWorkspace() {
     setSelectedId(null);
     refresh();
   };
+
+  if (!isAdmin) return null;
 
   return (
     <main className="flex min-w-0 flex-1 overflow-hidden">
