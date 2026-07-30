@@ -266,7 +266,9 @@ def setup_ticket_routes() -> APIRouter:
             }
 
     @router.get("/{ticket_id}/attachments/{attachment_id}/download")
-    def download_attachment(request: Request, ticket_id: str, attachment_id: str, format: str = "md"):
+    def download_attachment(
+        request: Request, ticket_id: str, attachment_id: str, format: str = "md"
+    ):
         require_admin(request)
         if format not in ("md", "json"):
             raise HTTPException(400, "Unknown format")

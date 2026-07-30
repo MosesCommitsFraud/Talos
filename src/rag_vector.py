@@ -2062,6 +2062,7 @@ class VectorRAG:
             "explain what they show and the data they contain. Ignore logos and "
             "watermarks. Output only the description."
         )
+
     _VLM_REGION_PROMPT = (
         "This frame is from a screen-recording of an online training session. It "
         "may contain webcam/participant video tiles, sidebars or chat panels "

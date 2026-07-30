@@ -524,9 +524,7 @@ class ChatProcessor:
                     and _synthetic_figure_relevant_to_query(search_query, r)
                 ]
                 text_ids = {r.get("id") for r in relevant}
-                relevant += [
-                    r for r in results if _is_figure(r) and r.get("anchor_id") in text_ids
-                ]
+                relevant += [r for r in results if _is_figure(r) and r.get("anchor_id") in text_ids]
             # A figure is only shown alongside the text it came from:
             # drop any companion whose anchoring chunk didn't survive
             # the relevance gate above.
@@ -534,8 +532,7 @@ class ChatProcessor:
             relevant = [
                 r
                 for r in relevant
-                if r.get("search_type") != "figure_companion"
-                or r.get("anchor_id") in text_ids
+                if r.get("search_type") != "figure_companion" or r.get("anchor_id") in text_ids
             ]
             # Pixel gate: drop figures whose IMAGE doesn't match the
             # query/anchor text before anything reaches the model. The

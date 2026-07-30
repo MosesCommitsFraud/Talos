@@ -185,7 +185,7 @@ def build_artifact_manifest(messages: List[Dict]) -> str:
         lines.append(f"- file: {name}")
     lines.append(
         "These already exist — do not recreate them. To read a document's current "
-        "content call manage_documents with {\"action\":\"read\",\"document_id\":\"<id>\"}; "
+        'content call manage_documents with {"action":"read","document_id":"<id>"}; '
         "to change one use edit_document. Reference them with the markdown anchors above."
     )
     return "\n".join(lines)

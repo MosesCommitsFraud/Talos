@@ -3204,9 +3204,7 @@ async def stream_agent_loop(
             if result.get("rag_sources"):
                 yield (
                     "data: "
-                    + json.dumps(
-                        {"type": "rag_sources_partial", "data": result["rag_sources"]}
-                    )
+                    + json.dumps({"type": "rag_sources_partial", "data": result["rag_sources"]})
                     + "\n\n"
                 )
 

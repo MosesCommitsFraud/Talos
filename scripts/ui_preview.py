@@ -579,7 +579,12 @@ _ADMIN_PRIVS = {
 }
 
 _PREVIEW_USERS = [
-    {"username": "preview", "display_name": "Preview Admin", "is_admin": True, "privileges": dict(_ADMIN_PRIVS)},
+    {
+        "username": "preview",
+        "display_name": "Preview Admin",
+        "is_admin": True,
+        "privileges": dict(_ADMIN_PRIVS),
+    },
     {
         "username": "mara",
         "display_name": "Mara Kessler",
@@ -680,7 +685,17 @@ def _usage_detail(name: str, days: int) -> dict:
     hours = [0] * 24
     weekday = [0] * 7
     if row["turns"]:
-        for h, n in ((8, 4), (9, 11), (10, 19), (11, 14), (13, 9), (14, 16), (15, 12), (16, 6), (21, 3)):
+        for h, n in (
+            (8, 4),
+            (9, 11),
+            (10, 19),
+            (11, 14),
+            (13, 9),
+            (14, 16),
+            (15, 12),
+            (16, 6),
+            (21, 3),
+        ):
             hours[h] = n
         for wd, n in ((0, 21), (1, 27), (2, 24), (3, 19), (4, 14), (5, 3), (6, 1)):
             weekday[wd] = n
@@ -752,15 +767,30 @@ def _usage_detail(name: str, days: int) -> dict:
 
 def _user_storage(name: str) -> dict:
     seed = {
-        "mara": [("chats", 61, "1,204 messages", 4_100_000), ("documents", 22, None, 880_000),
-                 ("gallery", 14, None, 22_400_000), ("notes", 7, None, 0), ("tools", 3, None, 0)],
+        "mara": [
+            ("chats", 61, "1,204 messages", 4_100_000),
+            ("documents", 22, None, 880_000),
+            ("gallery", 14, None, 22_400_000),
+            ("notes", 7, None, 0),
+            ("tools", 3, None, 0),
+        ],
         "preview": [("chats", 12, "190 messages", 620_000), ("notes", 2, None, 0)],
         "jonas": [("chats", 6, "74 messages", 210_000)],
         "sam": [],
     }.get(name, [])
     cats = [{"kind": k, "count": c, "detail": d, "bytes": b} for k, c, d, b in seed]
     known = {c["kind"] for c in cats}
-    for kind in ("chats", "documents", "gallery", "notes", "tools", "drafts", "crew", "calendars", "comparisons"):
+    for kind in (
+        "chats",
+        "documents",
+        "gallery",
+        "notes",
+        "tools",
+        "drafts",
+        "crew",
+        "calendars",
+        "comparisons",
+    ):
         if kind not in known:
             cats.append({"kind": kind, "count": 0, "detail": None, "bytes": 0})
     return {
@@ -1241,7 +1271,11 @@ class PreviewHandler(BaseHTTPRequestHandler):
             self._send_json({"text": "Hallo Welt, das ist ein Diktat-Test."})
             return
         # Users & usage: the username travels in the body, never the URL.
-        if path in ("/api/admin/usage/detail", "/api/admin/storage/detail", "/api/admin/storage/delete"):
+        if path in (
+            "/api/admin/usage/detail",
+            "/api/admin/storage/detail",
+            "/api/admin/storage/delete",
+        ):
             try:
                 payload = json.loads(body or b"{}")
             except ValueError:

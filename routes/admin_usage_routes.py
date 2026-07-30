@@ -382,7 +382,10 @@ def setup_admin_usage_routes(auth_manager, session_manager):
             busiest = max(daily, key=lambda r: r["tokens"]) if daily else None
 
             tools = sorted(
-                ({"tool": k, "count": v["count"], "errors": v["errors"]} for k, v in a["tools"].items()),
+                (
+                    {"tool": k, "count": v["count"], "errors": v["errors"]}
+                    for k, v in a["tools"].items()
+                ),
                 key=lambda r: r["count"],
                 reverse=True,
             )
@@ -399,7 +402,9 @@ def setup_admin_usage_routes(auth_manager, session_manager):
 
             authored = [
                 s.name
-                for s in db.query(SharedSkill.name).filter(SharedSkill.uploaded_by == username).all()
+                for s in db.query(SharedSkill.name)
+                .filter(SharedSkill.uploaded_by == username)
+                .all()
             ]
 
             totals = [ag["input_tokens"] + ag["output_tokens"] for ag in aggs.values()]
@@ -654,7 +659,8 @@ def setup_admin_usage_routes(auth_manager, session_manager):
 
             elif kind == "calendars":
                 cal_ids = [
-                    c.id for c in db.query(CalendarCal.id).filter(CalendarCal.owner == username).all()
+                    c.id
+                    for c in db.query(CalendarCal.id).filter(CalendarCal.owner == username).all()
                 ]
                 count = len(cal_ids)
                 if cal_ids:

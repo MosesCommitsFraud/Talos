@@ -185,9 +185,7 @@ def test_expanding_a_compressed_output_round_trips_in_one_hop():
 def test_retrieval_and_instruction_tools_pass_through(tool):
     text = "A\n" + "".join(f"passage line {i}\n" for i in range(1500)) + "Z"
     assert co.RELAXED_COMPRESS_CHARS < len(text) < co.EXEMPTION_CEILING_CHARS
-    out = co.optimize_tool_output(
-        text, tool_name=tool, used_tokens=190_000, budget_tokens=200_000
-    )
+    out = co.optimize_tool_output(text, tool_name=tool, used_tokens=190_000, budget_tokens=200_000)
     assert out == text
 
 
@@ -196,9 +194,7 @@ def test_capped_tools_still_compress_under_real_pressure(tool):
     """These are capped upstream (10k), so they only reach compression when the
     context is genuinely full — exactly when it's the right trade."""
     text = "START-MARKER\n" + "".join(f"line {i}\n" for i in range(3000)) + "END-MARKER"
-    out = co.optimize_tool_output(
-        text, tool_name=tool, used_tokens=190_000, budget_tokens=200_000
-    )
+    out = co.optimize_tool_output(text, tool_name=tool, used_tokens=190_000, budget_tokens=200_000)
     assert len(out) < len(text)
     assert "expand_output" in out
 
