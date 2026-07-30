@@ -50,8 +50,11 @@ ALWAYS_AVAILABLE = frozenset(
         # index is injected silently into context, so the tool it points at
         # must always be callable (RAG can't infer it from the user message).
         "read_skill",
-        # The forced 'look at your skills' tool — must always be reachable so
-        # the agent loop can compel it when skills are active.
+        # Skill lookup is never gated behind retrieval, same reasoning as
+        # web_search below: whether a turn wants a skill is a judgement the
+        # model makes against the injected skill menu, which RAG can't infer
+        # from the first user message. Reachable ≠ mandatory — nothing forces
+        # the call; the tool description says when it's worth making.
         "browse_skills",
         # Internet access is never gated behind retrieval. Whether a turn needs
         # the web is a judgement the model makes mid-answer ("I don't know this",
@@ -103,7 +106,7 @@ BUILTIN_TOOL_DESCRIPTIONS: Dict[str, str] = {
     "manage_session": "Chat management: rename, archive, delete, or fork chats (the UI calls these 'chats'; internally 'sessions'). Use for 'rename my chats', 'rename this chat', 'archive/delete a chat'.",
     "manage_skills": "Skill management: add, update, publish, or search reusable skills/presets.",
     "read_skill": "Load the full instructions of an enabled shared skill (user-uploaded SKILL.md) by name, then follow its method exactly.",
-    "browse_skills": "Review the enabled skill library for the current task; returns matching skills' full instructions inline to follow exactly.",
+    "browse_skills": "Look up the enabled skill library for the current task; returns matching skills' full instructions inline to follow exactly. The first step whenever something is about to be created or produced — a document, deck, spreadsheet, PDF, report, chart, image, or a build/deploy/release/workflow procedure — so the established method is used instead of an improvised one. Also for any request resembling a listed skill's description.",
     "create_skill": "Author/save a shared skill (SKILL.md + optional references/scripts) into the library from a workspace folder or inline content. Use when creating or updating a reusable skill.",
     "manage_endpoints": "Endpoint management: list, add, delete, enable, or disable model API endpoints.",
     "manage_mcp": "MCP server management: list, add, delete, reconnect servers, or list available tools.",

@@ -250,8 +250,8 @@ Generate an image. Line 1 = description, line 2 = model name, line 3 = WxH (e.g.
     "manage_session": "- ```manage_session``` — Rename, archive, delete, fork, switch, or `list` chats (the UI calls them 'chats'; 'session' is internal). Line 1 = action (list/switch/rename/archive/unarchive/delete/important/unimportant/truncate/fork), Line 2 = exact chat id from `list_sessions` (or `current` where supported). For delete/archive/truncate, always list first and reuse the exact id; never invent placeholder ids. `switch`/`open` returns a clickable anchor link the user can tap to open the chat — use for \"open my X chat\".",
     "manage_skills": '- ```manage_skills``` — Skill registry (SKILL.md format). Args (JSON): {"action": "list|view|view_ref|search|add|edit|patch|publish|delete", ...}. `list` returns the index of available skills (published + drafts); `view name=foo` fetches the full SKILL.md; `view_ref name=foo path=...` loads a reference file under the skill directory. For `add`, provide an explicit kebab-case `name` and only report the exact returned name, because storage may normalize or dedupe it. Use this BEFORE doing domain work — there may already be a procedure (published or draft) that prescribes the correct steps.',
     "create_skill": '- ```create_skill``` — Save a new/updated shared skill into the library (write counterpart to read_skill). Args (JSON): {"source_dir": "<workspace folder with SKILL.md + references/scripts>"} to package a folder you built, OR {"content": "<full SKILL.md>"} for a one-file skill. Use when authoring a skill: build the SKILL.md (frontmatter name + description, then body) and any scripts in a workspace folder first, then call this to store it.',
-    "browse_skills": "- ```browse_skills``` — Review your enabled skill library for the current task. Optional content = the user's task in a few words. Returns the list of skills plus, for any that fit, their full instructions inline. When skills are available, call this at the START of the task; if a skill is returned, follow its method EXACTLY.",
-    "read_skill": "- ```read_skill``` — Load the full instructions of a skill from the shared skill library. Line 1 = the exact skill name from the skills list in your context; optional line 2 = a bundled file path inside the skill (e.g. references/details.md) once the loaded skill refers to one. When the user's request matches a listed skill's description, call this FIRST (name only — it also lists bundled files and puts the skill's scripts on disk in the workspace under skills/<name>/), then follow the loaded method EXACTLY as written — do not deviate from or reorder its procedure.",
+    "browse_skills": "- ```browse_skills``` — Look up your enabled skill library for the current task. Optional content = the user's task in a few words. Returns the list of skills plus, for any that fit, their full instructions inline. **Whenever you are about to CREATE or PRODUCE something — a document, deck, spreadsheet, PDF, report, chart, image, a build/deploy/release run, any multi-step procedure — make this your first step, before you write a line of it.** A matching skill carries the method, format and pitfalls you would otherwise have to guess at, so this is the difference between the established way and an improvised one; follow what it returns EXACTLY. Skip it only for pure conversation, a quick factual answer, or a request no listed skill is related to.",
+    "read_skill": "- ```read_skill``` — Load the full instructions of a skill from the shared skill library. Line 1 = the exact skill name from the skills list in your context; optional line 2 = a bundled file path inside the skill (e.g. references/details.md) once the loaded skill refers to one. When the user's request matches a listed skill's description, call this before starting the work (name only — it also lists bundled files and puts the skill's scripts on disk in the workspace under skills/<name>/), then follow the loaded method EXACTLY as written — do not deviate from or reorder its procedure.",
     "manage_endpoints": '- ```manage_endpoints``` — Add, remove, or configure AI model API endpoints. Args (JSON): {"action": "list|add|delete|enable|disable", ...}. Use when user wants to add a new AI provider.',
     "manage_mcp": '- ```manage_mcp``` — Manage MCP (Model Context Protocol) tool servers — external tools that extend your capabilities. Args (JSON): {"action": "list|add|delete|reconnect|list_tools", ...}',
     "manage_tokens": '- ```manage_tokens``` — Generate or revoke API access tokens for external integrations. Args (JSON): {"action": "list|create|delete", ...}',
@@ -2322,23 +2322,6 @@ async def stream_agent_loop(
     # so the user can resume instead of the turn silently stalling.
     _exhausted_rounds = False
 
-    # Forced skill review: when the user has enabled skills (and the feature is
-    # on for them), compel a browse_skills call on round 1 via tool_choice, so a
-    # weak model that would otherwise never call it is guaranteed to consult the
-    # library. Only meaningful on the native-tool (API) path; the schema-presence
-    # guard in the loop handles the local fenced-block path automatically.
-    _force_browse_skills = False
-    try:
-        from routes.prefs_routes import _load_for_user as _load_prefs
-
-        if (_load_prefs(owner) or {}).get("skills_enabled", True):
-            from services.memory import shared_skills as _sh
-
-            if _sh.enabled_skills_for(owner):
-                _force_browse_skills = True
-    except Exception as _sk_e:
-        logger.debug(f"skill-force check skipped: {_sk_e}")
-
     for round_num in range(1, max_rounds + 1):
         round_response = ""
         round_reasoning = (
@@ -2462,22 +2445,10 @@ async def stream_agent_loop(
         _tool_names_sent = [
             t.get("function", {}).get("name") for t in (all_tool_schemas or []) if t.get("function")
         ]
-        # Force the model to consult its skills FIRST. tool_choice pins round 1
-        # to browse_skills so it can't skip straight to the work (the compliance
-        # failure we saw with a prompt-only directive). Only when the tool is
-        # actually being sent this round and we're not in the force-answer path.
+        # Tool selection stays the model's call — skills are offered the same way
+        # search_knowledge/web_search are (tool always reachable + a description
+        # that says when it's worth calling), never pinned via tool_choice.
         _round_tool_choice = None
-        if (
-            _force_browse_skills
-            and round_num == 1
-            and not _force_answer
-            and "browse_skills" in _tool_names_sent
-        ):
-            _round_tool_choice = {
-                "type": "function",
-                "function": {"name": "browse_skills"},
-            }
-            logger.info("[skills] round 1: forcing browse_skills via tool_choice")
         logger.info(
             f"[agent-debug] round={round_num} model={model} _is_api_model={_is_api_model} tools_sent={len(_tool_names_sent)} tool_names={_tool_names_sent[:15]} relevant_tools={sorted(_relevant_tools)[:15] if _relevant_tools else 'ALL'}"
         )

@@ -1406,9 +1406,10 @@ async def stream_llm(
 
     `tool_choice` (OpenAI/vLLM only) forces tool selection: "auto" (default when
     None), "required" (must call some tool), or
-    {"type":"function","function":{"name":"..."}} to force a specific tool. Used
-    to guarantee the model calls e.g. browse_skills on a given round instead of
-    relying on it to choose.
+    {"type":"function","function":{"name":"..."}} to force a specific tool —
+    i.e. to guarantee a given tool runs on a round instead of relying on the
+    model to choose. The agent loop leaves this None; nothing currently pins a
+    tool, and skill lookup in particular is deliberately a model judgement.
 
     Yields SSE chunks:
       - data: {"delta": "text"}           — text content
