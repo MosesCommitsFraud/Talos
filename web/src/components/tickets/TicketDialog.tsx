@@ -42,7 +42,7 @@ function ChatPicker({
   }, [sessions, query]);
 
   return (
-    <div ref={wrapRef} className="relative">
+    <div ref={wrapRef}>
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
@@ -57,8 +57,10 @@ function ChatPicker({
         <ChevronDownIcon className="size-3.5 shrink-0 text-muted-foreground" />
       </button>
 
+      {/* In flow rather than absolutely positioned: the dialog body is its own
+          scroll container, so a floating popup would be clipped by it. */}
       {open && (
-        <div className="absolute z-50 mt-1 w-full overflow-hidden rounded-lg border bg-popover shadow-lg">
+        <div className="mt-1 w-full overflow-hidden rounded-lg border bg-popover shadow-lg">
           <div className="border-b p-1.5">
             <SearchInput
               autoFocus

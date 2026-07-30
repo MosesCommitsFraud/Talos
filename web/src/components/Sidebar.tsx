@@ -2,6 +2,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   ArchiveIcon,
   ArrowUpDownIcon,
+  BugIcon,
   CheckIcon,
   ChevronRightIcon,
   ChevronDownIcon,
@@ -741,7 +742,7 @@ export function Sidebar({
               aria-label={t('tickets.report')}
               className="flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
             >
-              <TicketIcon className="size-4" />
+              <BugIcon className="size-4" />
             </button>
           </Tooltip>
           <AccountMenu
@@ -767,8 +768,10 @@ export function Sidebar({
         <div className="px-2 pt-1.5 pb-1.5">
           <div className="mx-1 mb-1 h-px bg-border" />
           {(visibility.sidebarUserBar || visibility.sidebarSettingsBtn) && (
-            // Account row + the ticket button sitting to its right.
-            <div className="flex items-center gap-1">
+            // Account row + the ticket button pinned to the right edge. The
+            // account trigger sizes to its label (capped) instead of filling
+            // the row, so the two never crowd each other.
+            <div className="flex items-center gap-2">
               <AccountMenu
                 isAdmin={!!auth?.is_admin}
                 authEnabled={auth?.auth_enabled !== false}
@@ -778,7 +781,7 @@ export function Sidebar({
                   <button
                     type="button"
                     aria-label={t('sidebar.account')}
-                    className="flex min-w-0 flex-1 items-center gap-1.5 rounded-sm px-2 py-1 text-left transition-colors outline-none hover:bg-accent/70 focus-visible:outline-none data-[state=open]:bg-accent/70"
+                    className="flex min-w-0 max-w-[calc(100%-2.5rem)] items-center gap-1.5 rounded-sm px-2 py-1 text-left transition-colors outline-none hover:bg-accent/70 focus-visible:outline-none data-[state=open]:bg-accent/70"
                   >
                     <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-primary/15 text-[10px] font-semibold text-primary">
                       {initial}
@@ -793,9 +796,9 @@ export function Sidebar({
                   type="button"
                   onClick={onOpenTicketDialog}
                   aria-label={t('tickets.report')}
-                  className="flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                  className="ml-auto flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
                 >
-                  <TicketIcon className="size-4" />
+                  <BugIcon className="size-4" />
                 </button>
               </Tooltip>
             </div>
