@@ -1,8 +1,8 @@
-import { ArchiveIcon, BugIcon, FileTextIcon, GhostIcon, MoreVerticalIcon, PencilIcon, PlayIcon, Trash2Icon } from 'lucide-react';
+﻿import { ArchiveIcon, BugIcon, FileTextIcon, GhostIcon, MoreVerticalIcon, PencilIcon, PlayIcon, Trash2Icon } from 'lucide-react';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { archiveSession, deleteSession, downloadChatDebugDump, fetchArtifacts, renameSession } from '@/api/client';
+import { archiveSession, deleteSession, downloadChatDebugDump, fetchArtifacts, fetchSessions, renameSession } from '@/api/client';
 import { useAuth } from './auth/AuthGate';
 import { useChat } from '@/state/chat';
 import { usePrefs } from '@/state/prefs';
@@ -11,9 +11,11 @@ import { cn } from '@/lib/utils';
 import { Tooltip } from './ui/misc';
 import { Menu, MenuItem, MenuPopup, MenuSeparator, MenuTrigger } from './ui/menu';
 
-/** Floating chat controls pinned to the top-right of the chat area (where the
- *  old header used to sit): the incognito toggle, plus a three-dot menu with
- *  per-session actions (rename / archive / delete). */
+/** Floating chat header (where the old solid header used to sit): the session
+ *  title on the left, and on the right the artifact/preview buttons, the
+ *  incognito toggle and a three-dot menu with per-session actions
+ *  (rename / archive / delete). A background-coloured fade underneath keeps
+ *  messages from scrolling visibly through the controls. */
 export function IncognitoToggle() {
   const { t } = useTranslation();
   const incognito = usePrefs((s) => s.incognito);
@@ -28,6 +30,9 @@ export function IncognitoToggle() {
   const queryClient = useQueryClient();
   const auth = useAuth();
   const [dumping, setDumping] = useState(false);
+
+  const { data: sessions } = useQuery({ queryKey: ['sessions'], queryFn: fetchSessions });
+  const title = sessions?.find((s) => s.id === sessionId)?.name ?? '';
 
   const { data: artifacts } = useQuery({
     queryKey: ['artifacts', sessionId],
@@ -65,94 +70,108 @@ export function IncognitoToggle() {
   const btnQuiet = 'text-muted-foreground hover:bg-accent hover:text-foreground';
 
   return (
-    <div className="absolute right-3 top-2 z-10 flex items-center gap-1">
-      {hasArtifacts && (() => {
-        // Each button opens the shared right panel to its view; clicking the
-        // active one closes the panel.
-        const openMode = (mode: 'files' | 'preview') => {
-          if (artifactsOpen && panelMode === mode) setArtifactsOpen(false);
-          else { setPanelMode(mode); setArtifactsOpen(true); }
-        };
-        const active = (mode: 'files' | 'preview') => artifactsOpen && panelMode === mode;
-        return (
-          <>
-            <Tooltip label={t('chatHeader.sessionFiles')}>
+    <>
+      {/* Fade in the chat background so messages dissolve instead of sliding
+          out from behind the controls. */}
+      <div className="pointer-events-none absolute inset-x-0 top-0 z-10 h-16 bg-gradient-to-b from-background via-background to-transparent" />
+      <div className="pointer-events-none absolute inset-x-0 top-2 z-10 flex items-center gap-2 px-3">
+        <div className="min-w-0 flex-1">
+          {/* pointer-events only on the text itself, so the empty space next to
+              a short title doesn't swallow clicks meant for the chat. */}
+          <span className="pointer-events-auto inline-block max-w-full truncate align-middle text-sm font-medium leading-7 text-foreground">
+            {title}
+          </span>
+        </div>
+        <div className="pointer-events-auto flex shrink-0 items-center gap-1">
+          {hasArtifacts && (() => {
+            // Each button opens the shared right panel to its view; clicking the
+            // active one closes the panel.
+            const openMode = (mode: 'files' | 'preview') => {
+              if (artifactsOpen && panelMode === mode) setArtifactsOpen(false);
+              else { setPanelMode(mode); setArtifactsOpen(true); }
+            };
+            const active = (mode: 'files' | 'preview') => artifactsOpen && panelMode === mode;
+            return (
+              <>
+                <Tooltip label={t('chatHeader.sessionFiles')}>
+                  <button
+                    type="button"
+                    aria-label={t('chatHeader.sessionFilesAria')}
+                    aria-pressed={active('files')}
+                    onClick={() => openMode('files')}
+                    className={cn(btnBase, active('files') ? 'bg-accent text-foreground' : btnQuiet)}
+                  >
+                    <FileTextIcon className="size-4" />
+                  </button>
+                </Tooltip>
+                <Tooltip label={t('chatHeader.sessionPreview')}>
+                  <button
+                    type="button"
+                    aria-label={t('chatHeader.sessionPreviewAria')}
+                    aria-pressed={active('preview')}
+                    onClick={() => openMode('preview')}
+                    className={cn(btnBase, active('preview') ? 'bg-accent text-foreground' : btnQuiet)}
+                  >
+                    <PlayIcon className="size-4" />
+                  </button>
+                </Tooltip>
+              </>
+            );
+          })()}
+          {/* Admin-only: raw JSON dump of the whole chat (reasoning, tool calls,
+              tool errors, metrics) for debugging. */}
+          {sessionId && auth?.is_admin && (
+            <Tooltip label={t('chatHeader.debugDump')}>
               <button
                 type="button"
-                aria-label={t('chatHeader.sessionFilesAria')}
-                aria-pressed={active('files')}
-                onClick={() => openMode('files')}
-                className={cn(btnBase, active('files') ? 'bg-accent text-foreground' : btnQuiet)}
+                aria-label={t('chatHeader.debugDump')}
+                onClick={onDebugDump}
+                disabled={dumping}
+                className={cn(btnBase, btnQuiet, dumping && 'opacity-50')}
               >
-                <FileTextIcon className="size-4" />
+                <BugIcon className="size-4" />
               </button>
             </Tooltip>
-            <Tooltip label={t('chatHeader.sessionPreview')}>
+          )}
+          {visible && (
+            <Tooltip label={incognito ? t('chatHeader.incognitoOn') : t('chatHeader.incognitoOff')}>
               <button
                 type="button"
-                aria-label={t('chatHeader.sessionPreviewAria')}
-                aria-pressed={active('preview')}
-                onClick={() => openMode('preview')}
-                className={cn(btnBase, active('preview') ? 'bg-accent text-foreground' : btnQuiet)}
+                aria-label={t('chatHeader.toggleIncognito')}
+                aria-pressed={incognito}
+                onClick={() => toggle('incognito')}
+                className={cn(btnBase, incognito ? 'bg-primary/15 text-primary' : btnQuiet)}
               >
-                <PlayIcon className="size-4" />
+                <GhostIcon className="size-4" />
               </button>
             </Tooltip>
-          </>
-        );
-      })()}
-      {/* Admin-only: raw JSON dump of the whole chat (reasoning, tool calls,
-          tool errors, metrics) for debugging. */}
-      {sessionId && auth?.is_admin && (
-        <Tooltip label={t('chatHeader.debugDump')}>
-          <button
-            type="button"
-            aria-label={t('chatHeader.debugDump')}
-            onClick={onDebugDump}
-            disabled={dumping}
-            className={cn(btnBase, btnQuiet, dumping && 'opacity-50')}
-          >
-            <BugIcon className="size-4" />
-          </button>
-        </Tooltip>
-      )}
-      {visible && (
-        <Tooltip label={incognito ? t('chatHeader.incognitoOn') : t('chatHeader.incognitoOff')}>
-          <button
-            type="button"
-            aria-label={t('chatHeader.toggleIncognito')}
-            aria-pressed={incognito}
-            onClick={() => toggle('incognito')}
-            className={cn(btnBase, incognito ? 'bg-primary/15 text-primary' : btnQuiet)}
-          >
-            <GhostIcon className="size-4" />
-          </button>
-        </Tooltip>
-      )}
-      {sessionId && (
-        <Menu>
-          <Tooltip label={t('chatHeader.moreOptions')}>
-            <MenuTrigger
-              aria-label={t('chatHeader.moreOptions')}
-              className={cn(btnBase, btnQuiet, 'data-[state=open]:bg-accent data-[state=open]:text-foreground')}
-            >
-              <MoreVerticalIcon className="size-4" />
-            </MenuTrigger>
-          </Tooltip>
-          <MenuPopup align="end">
-            <MenuItem onSelect={onRename}>
-              <PencilIcon /> {t('chatHeader.rename')}
-            </MenuItem>
-            <MenuItem onSelect={onArchive}>
-              <ArchiveIcon /> {t('sidebar.archive')}
-            </MenuItem>
-            <MenuSeparator />
-            <MenuItem variant="destructive" onSelect={onDelete}>
-              <Trash2Icon /> {t('common.delete')}
-            </MenuItem>
-          </MenuPopup>
-        </Menu>
-      )}
-    </div>
+          )}
+          {sessionId && (
+            <Menu>
+              <Tooltip label={t('chatHeader.moreOptions')}>
+                <MenuTrigger
+                  aria-label={t('chatHeader.moreOptions')}
+                  className={cn(btnBase, btnQuiet, 'data-[state=open]:bg-accent data-[state=open]:text-foreground')}
+                >
+                  <MoreVerticalIcon className="size-4" />
+                </MenuTrigger>
+              </Tooltip>
+              <MenuPopup align="end">
+                <MenuItem onSelect={onRename}>
+                  <PencilIcon /> {t('chatHeader.rename')}
+                </MenuItem>
+                <MenuItem onSelect={onArchive}>
+                  <ArchiveIcon /> {t('sidebar.archive')}
+                </MenuItem>
+                <MenuSeparator />
+                <MenuItem variant="destructive" onSelect={onDelete}>
+                  <Trash2Icon /> {t('common.delete')}
+                </MenuItem>
+              </MenuPopup>
+            </Menu>
+          )}
+        </div>
+      </div>
+    </>
   );
 }

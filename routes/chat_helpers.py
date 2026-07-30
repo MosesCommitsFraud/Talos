@@ -911,7 +911,14 @@ def _gate_figures_by_caption(prose: str, figures: list) -> list:
         return figures
     ranked = sorted(figures, key=lambda f: _source_usage_score(prose, f), reverse=True)
     lead = _source_usage_score(prose, ranked[0])[0]
-    bar = max(_min_extra_figure_bigrams(), lead // 3)
+    floor = _min_extra_figure_bigrams()
+    if lead < floor:
+        # Even the best figure's caption shares no distinctive phrasing with the
+        # prose — short captions ("Band einfügen") simply do not repeat verbatim.
+        # With no usable caption signal the gate has nothing to discriminate on,
+        # so it must not fire: anchor pairing already authorized these figures.
+        return ranked
+    bar = max(floor, lead // 3)
     kept = [ranked[0]]
     for fig in ranked[1:]:
         shared = _source_usage_score(prose, fig)[0]

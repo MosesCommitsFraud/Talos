@@ -32,13 +32,13 @@ from src.agent_tools import (
     set_active_model,
     strip_tool_blocks,
 )
-from src.context_optimizer import optimize_tool_output
-from src.llm_core import _is_ollama_native_url, stream_llm_with_fallback
 from src.context_compactor import (
     MAX_MID_TURN_COMPACTIONS,
     compact_mid_turn,
     get_compact_threshold,
 )
+from src.context_optimizer import optimize_tool_output
+from src.llm_core import _is_ollama_native_url, stream_llm_with_fallback
 from src.model_context import estimate_tokens
 from src.prompt_security import untrusted_context_message
 from src.settings import get_setting, get_user_setting
