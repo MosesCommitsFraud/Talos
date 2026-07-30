@@ -117,8 +117,98 @@ _BASH_BLOCKED_BINARIES = frozenset(
         "nc",
         "ncat",
         "nmap",
+        # model serving / inference runtimes. These belong to the USER'S GPU
+        # box, never to this workspace: they appear here only when a setup
+        # guide is being executed instead of written out.
+        "ollama",
+        "vllm",
+        "llama-cli",
+        "llama-server",
+        "llama-bench",
+        "llamafile",
+        "lms",
+        "text-generation-launcher",
+        "tensorrtllm",
+        "trtllm-build",
+        "huggingface-cli",
+        "hf",
+        "modelscope",
+        # source builds / toolchains. Work deliverables never require compiling
+        # anything; a build here is a setup guide running away with itself.
+        "cmake",
+        "make",
+        "ninja",
+        "meson",
+        "bazel",
+        "gcc",
+        "g++",
+        "cc",
+        "clang",
+        "clang++",
+        "nvcc",
+        "ld",
+        "configure",
+        # alternative Python environment managers. `pip install` is the one
+        # sanctioned install path; these fetch interpreters and toolchains.
+        "conda",
+        "mamba",
+        "micromamba",
+        "conda-env",
+        "pyenv",
+        "asdf",
     }
 )
+
+# Cloning a repo is step one of every build guide. Blocked at the subcommand
+# level rather than the binary level: read-only `git status` / `git log` on
+# workspace files is legitimate work, `git clone` is a setup guide starting up.
+# Per-VCS, because the subcommand names collide: `git checkout <branch>` is a
+# local no-op on workspace files, while `svn checkout` IS the clone.
+_VCS_REMOTE_SUBCOMMANDS = {
+    "git": frozenset({"clone", "fetch", "pull", "push", "submodule"}),
+    "svn": frozenset({"checkout", "co", "export", "update", "up"}),
+    "hg": frozenset({"clone", "pull", "push"}),
+}
+
+# Python packages that only make sense on the user's own GPU machine. `pip
+# install` stays open for the work libraries the workspace exists to use
+# (pandas, openpyxl, python-pptx, sqlalchemy, plotly, ...) — this list only
+# catches multi-gigabyte inference/training stacks, which are always a setup
+# guide being executed rather than a work task needing a dependency.
+_PIP_BLOCKED_PACKAGES = frozenset(
+    {
+        "vllm",
+        "torch",
+        "torchvision",
+        "torchaudio",
+        "tensorflow",
+        "jax",
+        "jaxlib",
+        "transformers",
+        "accelerate",
+        "bitsandbytes",
+        "unsloth",
+        "peft",
+        "trl",
+        "deepspeed",
+        "flash-attn",
+        "xformers",
+        "llama-cpp-python",
+        "text-generation",
+        "auto-gptq",
+        "autoawq",
+        "optimum",
+        "ms-swift",
+        "megatron-lm",
+        "nvidia-cudnn-cu12",
+        "triton",
+    }
+)
+
+_PIP_BINARIES = frozenset({"pip", "pip3", "uv", "poetry", "pdm", "pipenv"})
+# Strip version/extras decoration so `torch==2.4.0`, `vllm[all]`, and
+# `flash-attn>=2` all resolve back to the package name.
+_PIP_PKG_SPLIT_RE = re.compile(r"[\[=<>!~;@\s]")
 
 # HTTP fetchers. These are not a safety concern — they simply cannot work: the
 # sandbox sits on an `internal: true` Docker network with no route out, so every
@@ -169,7 +259,9 @@ BASH_POLICY_MESSAGE = (
     "work tasks (documents, spreadsheets, PDFs, charts/dashboards, SQL, data "
     "analysis, calculations) and Python library installs via `pip install`. "
     "System administration, system/hardware inspection, services, containers, "
-    "remote shells, and non-Python package managers are not available here. "
+    "remote shells, non-Python package managers, source builds, repository "
+    "checkouts, model runtimes (ollama/vLLM/llama.cpp), and GPU inference or "
+    "training stacks are not available here. "
     "If the user asked how to set something up on their own machine, answer "
     "in text from the documentation — do not execute those commands and do "
     "not retry variants of this command. The user does NOT see this message. "
@@ -198,21 +290,25 @@ def bash_policy_violation(command: str) -> Optional[str]:
         return BASH_POLICY_MESSAGE
     if _BASH_SYSTEM_PATH_RE.search(command):
         return BASH_POLICY_MESSAGE
-    for binary, bare_env in _command_binaries(command):
+    for tokens, bare_env in _command_segments(command):
         # Bare `env` (no command to wrap) dumps the environment variables.
         if bare_env:
             return BASH_POLICY_MESSAGE
-        if binary in _BASH_BLOCKED_BINARIES:
+        if tokens[0].rsplit("/", 1)[-1].lower() in _BASH_BLOCKED_BINARIES:
+            return BASH_POLICY_MESSAGE
+        if _pip_installs_blocked_package(tokens):
+            return BASH_POLICY_MESSAGE
+        if _vcs_fetches_remote(tokens):
             return BASH_POLICY_MESSAGE
     return None
 
 
-def _command_binaries(command: str):
-    """Yield `(binary, is_bare_env)` for each command position in `command`.
+def _command_segments(command: str):
+    """Yield `(tokens, is_bare_env)` for each command position in `command`.
 
     Segments are split on pipes/&&/;/subshells, then env-var assignments and
     wrappers that execute their argument (`timeout 30 …`, `nice -n 10 …`) are
-    stripped so the binary that actually runs is what gets checked.
+    stripped so the binary that actually runs is first in `tokens`.
     """
     for segment in _BASH_CMD_SPLIT_RE.split(command):
         seg = segment.strip()
@@ -223,7 +319,7 @@ def _command_binaries(command: str):
             seg = stripped
         tokens = seg.split()
         if len(tokens) == 1 and tokens[0].rsplit("/", 1)[-1] == "env":
-            yield "env", True
+            yield ["env"], True
             continue
         while tokens and tokens[0].rsplit("/", 1)[-1] in {
             "command",
@@ -246,7 +342,53 @@ def _command_binaries(command: str):
             ]
         if not tokens:
             continue
-        yield tokens[0].rsplit("/", 1)[-1].lower(), False
+        yield tokens, False
+
+
+def _command_binaries(command: str):
+    """Yield `(binary, is_bare_env)` for each command position in `command`."""
+    for tokens, bare_env in _command_segments(command):
+        yield tokens[0].rsplit("/", 1)[-1].lower(), bare_env
+
+
+def _vcs_fetches_remote(tokens: list) -> bool:
+    """True when this command position clones or syncs a repository."""
+    if not tokens:
+        return False
+    subcommands = _VCS_REMOTE_SUBCOMMANDS.get(tokens[0].rsplit("/", 1)[-1].lower())
+    if not subcommands:
+        return False
+    # Only the SUBCOMMAND position counts — the first non-flag token. Scanning
+    # every argument would reject `git commit -m pull` on its message text.
+    for token in tokens[1:]:
+        if token.startswith("-"):
+            continue
+        return token.lower() in subcommands
+    return False
+
+
+def _pip_installs_blocked_package(tokens: list) -> bool:
+    """True when this command position pip-installs a GPU inference/training
+    stack. Requirements files are opaque to us, so `-r requirements.txt` is
+    left alone; the named-package form is what setup guides actually use.
+    """
+    if not tokens:
+        return False
+    # `python -m pip install …` is the same command wearing a hat.
+    if tokens[0].rsplit("/", 1)[-1].lower().startswith("python") and tokens[1:3] == ["-m", "pip"]:
+        tokens = tokens[2:]
+    if not tokens or tokens[0].rsplit("/", 1)[-1].lower() not in _PIP_BINARIES:
+        return False
+    rest = [t for t in tokens[1:] if not t.startswith("-")]
+    if "install" not in rest and "add" not in rest:
+        return False
+    for token in rest:
+        # Quotes survive the whitespace split (`pip install 'vllm[all]'`), so
+        # strip them before the extras/version decoration.
+        name = _PIP_PKG_SPLIT_RE.split(token.strip("\"'"), 1)[0].strip().lower().replace("_", "-")
+        if name in _PIP_BLOCKED_PACKAGES:
+            return True
+    return False
 
 
 def network_command_redirect(command: str) -> Optional[str]:

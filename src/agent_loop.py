@@ -83,6 +83,8 @@ _AGENT_RULES = """\
 - YOU DECLARE WHEN THE JOB IS DONE — not a timer. Keep taking concrete steps while the task still needs them; you have plenty of rounds, so don't rush to quit just because you've made a few calls. There are exactly three ways to end a turn: (1) DONE — before you declare it, sanity-check that every concrete thing the user asked for actually exists or succeeded (file written, edit applied, command exited clean); then stop calling tools and write the final answer (that IS your "done" signal); (2) BLOCKED — you genuinely can't proceed (a capability is missing, permission denied, or data you can't obtain), so say plainly what's blocking you, in a sentence or two, and stop; (3) keep going with the single most useful next step. The only wrong moves are trailing off mid-task without one of these, and repeating a call you already ran.
 - A QUESTION TO THE USER ENDS YOUR TURN. When you need the user's input — a clarification, a decision, "Möchten Sie, dass ich ...?" — use the `ask_user` tool: it shows clickable options (or a free-text box), ends your turn, and their answer arrives as your next message. If you ever ask in plain text instead, that question must be the LAST thing you write: no further tool calls, just wait. NEVER ask and then keep working, and never proceed as if the user already answered yes.
 - ENVIRONMENT CONFIDENTIALITY: never reveal, describe, or probe your own execution environment. Do not mention sandboxes, containers, hosts, hardware, memory/disk sizes, operating system details, or missing system tools, and do not run commands whose only purpose is to inspect the system. If something is unavailable where you run, silently take another route or answer from knowledge — never explain the limitation in terms of your environment.
+- SETUP/INFRASTRUCTURE QUESTIONS ("how do I install/configure X on my server/GPU/machine?", "wie setze ich Y auf?") are KNOWLEDGE questions about the USER'S machine. Answer them in text from the documents and your knowledge — NEVER execute the setup commands, install the software, or create directories/project structures from a setup guide yourself. The guide describes THEIR machine, not your workspace.
+- WHEN YOU WRITE COMMANDS FOR THE USER TO RUN, they are documentation, not tool calls. Put them in ```shell or ```sh fences — NEVER ```bash, which executes. Same for illustrative code: ```py, not ```python.
 - YOUR FINAL MESSAGE IS THE ONLY THING SHOWN PROMINENTLY. Text you write in earlier rounds (between tool calls) is collapsed as work-in-progress once the turn ends, and the user never sees tool errors or rejections. Therefore your LAST message must be COMPLETE and SELF-CONTAINED: it contains the full answer/deliverable, restating everything important from earlier rounds. Never end with only a closing remark that points at earlier text — "as I described above/in the previous step" refers to text the user cannot see prominently. Never explain tool errors and never add meta-commentary about what happened during the turn. If a command is rejected, do not retry variants of it — write the complete answer instead, without mentioning the rejection.
 
 ## UI conventions
@@ -153,7 +155,7 @@ TOOL_SECTIONS = {
 ```
 Run a shell command in your private workspace. Use it ONLY to produce work results: inspecting/processing workspace files, data analysis, document/spreadsheet/PDF/chart generation, SQL work, calculations, and running scripts you created with write_file. Save deliverables with RELATIVE workspace paths, not `/tmp` or other absolute paths.
 Use `bash` for SHELL tasks only. To RUN Python, use the `python` tool — NOT `bash python ...`. NEVER use bash to create or change files — no `>`/`>>` redirects, no `tee`, `sed -i`, or `awk -i`. To CREATE or fully rewrite a file use `write_file`; to change part of an existing file use `edit_file`.
-INSTALL POLICY: the ONLY thing you may install is Python libraries via `pip install <package>`, and only when the current work task needs them (e.g. openpyxl, python-pptx, pypdf, plotly, pandas, sqlalchemy). System package managers (apt, dpkg, snap, ...), `sudo`/privilege escalation, docker/systemctl/services, non-Python package managers (npm, cargo, ...), and piping curl/wget into a shell are all rejected by policy — do not attempt them. Installed libraries may not persist forever, so do not assume they survive between sessions.
+INSTALL POLICY: the ONLY thing you may install is Python libraries via `pip install <package>`, and only when the current work task needs them (e.g. openpyxl, python-pptx, pypdf, plotly, pandas, sqlalchemy). System package managers (apt, dpkg, snap, ...), `sudo`/privilege escalation, docker/systemctl/services, non-Python package managers (npm, cargo, ...), conda/pyenv, `git clone`, source builds (cmake, make, gcc, nvcc), model runtimes (ollama, vllm, llama.cpp, huggingface-cli), heavyweight ML/GPU packages via pip (torch, vllm, transformers, unsloth, ...), and piping curl/wget into a shell are all rejected by policy — do not attempt them. Installed libraries may not persist forever, so do not assume they survive between sessions.
 SETUP/INFRASTRUCTURE QUESTIONS: when the user asks HOW to install or configure software, servers, GPUs, containers, or hardware, that is a KNOWLEDGE question about THEIR machine — answer it in text from the documents and your knowledge. NEVER execute or "test" those setup commands yourself, and never create directories or project structures from a setup guide: the guide describes the user's machine, not your workspace.
 NO NETWORK IN THE WORKSPACE: the workspace has no route to the internet, so `curl`, `wget`, and Python `urllib`/`requests`/`httpx` calls to any external host fail here — always, not intermittently. Never try to search or scrape the web from the shell. Use the `web_search` tool to search and `web_fetch` to read a URL; those run outside the workspace and do have network access. If those tools are not in your tool list this turn, tell the user web access is not enabled — do NOT report it as a sandbox/DNS problem.
 WORKSPACE LIMITS: stdin/stdout are pipes, so there is NO interactive terminal — `input()`, `curses`, `termios`, `pygame`, and `tkinter` will all fail. Don't try to RUN interactive terminal games or GUI apps here — verify syntax (`python -c "import py_compile; py_compile.compile('x.py')"`) and tell the user to run it themselves in their own terminal. For anything the USER should play/use interactively (games, UIs, demos), prefer a single self-contained HTML file with `<canvas>` + inline JS — save it via `create_document` with language="html" and tell the user to hit the Run / Preview button (▶) in the document editor toolbar; it renders inline in a sandboxed iframe so the game is playable right there. Works from any machine that can reach the Talos UI — no need to copy files out.
@@ -1170,9 +1172,23 @@ def _build_base_prompt(
 
 
 def _resolve_tool_blocks(
-    round_response: str, native_tool_calls: list, round_num: int, round_reasoning: str = ""
+    round_response: str,
+    native_tool_calls: list,
+    round_num: int,
+    round_reasoning: str = "",
+    native_mode: bool = False,
 ):
-    """Choose native function calls or fenced code block parsing. Returns (tool_blocks, used_native)."""
+    """Choose native function calls or fenced code block parsing. Returns (tool_blocks, used_native).
+
+    `native_mode` marks an endpoint that has a native tool-call channel. There,
+    a ```bash fence in the response text is never an attempted tool call — the
+    model would have used the channel — so it is documentation and must not be
+    executed. Without this, any prose answer that documents shell commands ran
+    them: a "how do I set up X on my server" answer is a dozen ```bash blocks,
+    and the fenced fallback below fired precisely because the model wrote prose
+    instead of calling a tool. Non-exec fences (create_document, read_file, ...)
+    still fall back, so a model that fumbles the channel doesn't lose them.
+    """
     used_native = False
     if native_tool_calls:
         tool_blocks = []
@@ -1190,7 +1206,7 @@ def _resolve_tool_blocks(
         if tool_blocks:
             used_native = True
     if not used_native:
-        tool_blocks = parse_tool_blocks(round_response)
+        tool_blocks = parse_tool_blocks(round_response, allow_exec_fences=not native_mode)
         # Thinking-model recovery: some reasoning models route the ENTIRE turn —
         # including the fenced tool call — into reasoning_content, leaving the
         # visible content empty. Without this we'd find no tool block, surface the
@@ -1201,7 +1217,7 @@ def _resolve_tool_blocks(
             and not (round_response or "").strip()
             and (round_reasoning or "").strip()
         ):
-            recovered = parse_tool_blocks(round_reasoning)
+            recovered = parse_tool_blocks(round_reasoning, allow_exec_fences=not native_mode)
             if recovered:
                 tool_blocks = recovered
                 logger.info(
@@ -2623,7 +2639,11 @@ async def stream_agent_loop(
                     ]
 
         tool_blocks, used_native = _resolve_tool_blocks(
-            round_response, native_tool_calls, round_num, round_reasoning
+            round_response,
+            native_tool_calls,
+            round_num,
+            round_reasoning,
+            native_mode=_is_api_model,
         )
 
         # Force-answer round: we told the model to STOP calling tools and
@@ -2636,7 +2656,9 @@ async def stream_agent_loop(
                     f"[agent] force-answer round {round_num}: discarding {len(tool_blocks)} ignored tool call(s)"
                 )
             tool_blocks = []
-            if not _THINK_RE.sub("", strip_tool_blocks(round_response)).strip():
+            if not _THINK_RE.sub(
+                "", strip_tool_blocks(round_response, allow_exec_fences=not _is_api_model)
+            ).strip():
                 # The model burned its budget gathering data but never wrote a
                 # final answer (common with weaker models on multi-source
                 # briefings). Salvage it: one blunt non-streaming synthesis call
@@ -2667,7 +2689,9 @@ async def stream_agent_loop(
                         max_tokens=max_tokens,
                         timeout=60,
                     )
-                    _synth = _THINK_RE.sub("", strip_tool_blocks(_raw or "")).strip()
+                    _synth = _THINK_RE.sub(
+                        "", strip_tool_blocks(_raw or "", allow_exec_fences=not _is_api_model)
+                    ).strip()
                 except Exception as _e:
                     logger.warning(f"[agent] grace synthesis failed: {_e}")
                 if _synth:
@@ -2715,7 +2739,9 @@ async def stream_agent_loop(
 
         # Save cleaned round text for history persistence
         # Keep <think> blocks so they render in the thinking section on reload
-        cleaned_round = strip_tool_blocks(round_response).strip()
+        cleaned_round = strip_tool_blocks(
+            round_response, allow_exec_fences=not _is_api_model
+        ).strip()
         # Reasoning that arrived via reasoning_content (DeepSeek / vLLM
         # --reasoning-parser) is streamed live as {thinking:true} deltas but is
         # NOT part of round_response, so without this it's lost on reload —

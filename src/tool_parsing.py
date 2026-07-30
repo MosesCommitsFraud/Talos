@@ -136,6 +136,73 @@ _DOC_FENCE_OPEN_RE = re.compile(
 )
 _CODE_FENCE_RE = re.compile(r"^[ \t]*```([^\s`]*)[ \t]*$")
 
+# ---------------------------------------------------------------------------
+# Documentation guard
+# ---------------------------------------------------------------------------
+# Fences that EXECUTE code. These are also exactly the tags a model reaches for
+# when it writes user-facing documentation about shell/Python commands, so they
+# are the only ones that can silently turn a prose answer into an execution.
+# (A "how do I install X on my server" answer is a wall of ```bash blocks; every
+# one of them used to be submitted to the sandbox.) Every other tool tag is an
+# invocation the model had to construct deliberately.
+_EXEC_FENCE_TAGS = frozenset({"bash", "python", "run_cell"})
+
+# More than this many exec fences in one round is documentation, not a plan:
+# genuine tool rounds issue one or two commands, look at the output, and
+# continue. A guide issues a dozen with no output in between.
+_MAX_EXEC_FENCES = 2
+
+# Markdown structure that only appears in an answer written FOR THE USER.
+_PROSE_HEADING_RE = re.compile(r"^[ \t]{0,3}#{1,6}[ \t]+\S", re.MULTILINE)
+_PROSE_TABLE_RE = re.compile(r"^[ \t]{0,3}\|.*\|[ \t]*$", re.MULTILINE)
+
+
+def _strip_all_fences(text: str) -> str:
+    """Remove every fenced region so prose detection can't be fooled by fence
+    contents. Critical for headings: `# Ollama installieren` inside a ```bash
+    block is a shell comment, and it matches the heading pattern exactly."""
+    out = []
+    in_fence = False
+    for line in (text or "").split("\n"):
+        if line.lstrip().startswith("```"):
+            in_fence = not in_fence
+            continue
+        if not in_fence:
+            out.append(line)
+    return "\n".join(out)
+
+
+def _count_exec_fences(text: str) -> int:
+    return sum(1 for m in _TOOL_BLOCK_RE.finditer(text) if m.group(1).lower() in _EXEC_FENCE_TAGS)
+
+
+def should_drop_exec_fences(text: str, allow_exec_fences: bool = True) -> bool:
+    """Whether this round's exec fences are documentation rather than calls.
+
+    Shared by `parse_tool_blocks` and `strip_tool_blocks` so the two never
+    disagree. They must not: a fence that is suppressed instead of executed has
+    to stay VISIBLE, or the user gets the setup guide with every command block
+    silently deleted out of it.
+    """
+    count = _count_exec_fences(text)
+    return count > 0 and (not allow_exec_fences or looks_like_documentation(text, count))
+
+
+def looks_like_documentation(text: str, exec_fence_count: int) -> bool:
+    """True when a round reads as a written answer that happens to contain
+    shell/Python fences, rather than as tool calls.
+
+    Deliberately conservative: it only ever suppresses EXEC fences, and only
+    when the round carries prose structure (headings, tables) around them or
+    stacks up more commands than a real tool round ever needs.
+    """
+    if exec_fence_count <= 0:
+        return False
+    if exec_fence_count > _MAX_EXEC_FENCES:
+        return True
+    prose = _strip_all_fences(text)
+    return bool(_PROSE_HEADING_RE.search(prose) or _PROSE_TABLE_RE.search(prose))
+
 
 def _iter_document_fences(text: str):
     """Yield (tag, content, start_line, end_line_exclusive) for each document
@@ -413,7 +480,7 @@ def _parse_tool_code_block(raw: str) -> Optional[ToolBlock]:
     return None
 
 
-def parse_tool_blocks(text: str) -> List[ToolBlock]:
+def parse_tool_blocks(text: str, *, allow_exec_fences: bool = True) -> List[ToolBlock]:
     """Extract executable tool blocks from LLM response text.
 
     Supports multiple formats:
@@ -422,6 +489,12 @@ def parse_tool_blocks(text: str) -> List[ToolBlock]:
     3. XML-style <tool_call>/<invoke> blocks
     4. <tool_code> blocks (MiniMax-M2.5 style)
     5. DeepSeek DSML markup (normalized to <invoke> first)
+
+    `allow_exec_fences=False` drops ```bash/```python/```run_cell fences without
+    executing them — used when the model has a native tool-call channel, so a
+    shell fence in the text is documentation by definition. Even when they are
+    allowed, `looks_like_documentation` suppresses them for rounds that read as
+    a written answer.
     """
     blocks = []
 
@@ -438,11 +511,24 @@ def parse_tool_blocks(text: str) -> List[ToolBlock]:
         if content:
             blocks.append(ToolBlock(tag, content))
 
+    # Decide up front whether the ```bash/```python fences in this round are
+    # tool calls or documentation. Both checks look at the WHOLE round, so they
+    # can't be made per-fence inside the loop below.
+    drop_exec_fences = should_drop_exec_fences(text, allow_exec_fences)
+    if drop_exec_fences:
+        logger.info(
+            "Suppressed %d exec fence(s) as documentation (allow_exec_fences=%s)",
+            _count_exec_fences(text),
+            allow_exec_fences,
+        )
+
     # Pattern 1: fenced code blocks
     for m in _TOOL_BLOCK_RE.finditer(text):
         tag = m.group(1).lower()
         if tag in _DOC_FENCE_TAGS:
             continue  # handled by the depth-aware document scanner above
+        if tag in _EXEC_FENCE_TAGS and drop_exec_fences:
+            continue  # prose about commands, not a command to run
         content = m.group(2).strip()
         if not content:
             continue
@@ -504,15 +590,26 @@ def _strip_document_fences(text: str) -> str:
     return "\n".join(line for i, line in enumerate(lines) if i not in drop)
 
 
-def strip_tool_blocks(text: str) -> str:
-    """Remove executable tool blocks from text for clean display."""
+def strip_tool_blocks(text: str, *, allow_exec_fences: bool = True) -> str:
+    """Remove executable tool blocks from text for clean display.
+
+    Fences that `parse_tool_blocks` suppressed as documentation are KEPT — they
+    were never executed, so they are part of the answer the user asked for and
+    render as ordinary Markdown code blocks. Stripping them would hand back a
+    setup guide with holes where every command used to be.
+    """
     # Normalize DSML first so its markup gets stripped by the <invoke>
     # / <tool_call> removers below instead of leaking to the user.
     text = _normalize_dsml(text)
     # Document fences first (depth-aware; handles nested/unclosed fences the
     # generic regex below cannot), then the standard removers.
     text = _strip_document_fences(text)
-    cleaned = _TOOL_BLOCK_RE.sub("", text)
+    if should_drop_exec_fences(text, allow_exec_fences):
+        cleaned = _TOOL_BLOCK_RE.sub(
+            lambda m: m.group(0) if m.group(1).lower() in _EXEC_FENCE_TAGS else "", text
+        )
+    else:
+        cleaned = _TOOL_BLOCK_RE.sub("", text)
     cleaned = _TOOL_CALL_RE.sub("", cleaned)
     cleaned = _XML_TOOL_CALL_RE.sub("", cleaned)
     cleaned = _TOOL_CODE_RE.sub("", cleaned)
