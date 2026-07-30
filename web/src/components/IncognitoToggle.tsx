@@ -73,15 +73,20 @@ export function IncognitoToggle() {
     <>
       {/* Fade in the chat background so messages dissolve instead of sliding
           out from behind the controls: solid down to the bottom of the button
-          row, then a short fade. Ends on `background/0` rather than
-          `transparent` — fading to transparent *black* tints the gradient. */}
-      <div
-        className="pointer-events-none absolute inset-x-0 top-0 z-10 h-12"
-        style={{
-          background:
-            'linear-gradient(to bottom, var(--background) 75%, rgb(from var(--background) r g b / 0) 100%)',
-        }}
-      />
+          row, then a short fade. Ends on the background colour at zero alpha
+          rather than `transparent` — fading to transparent *black* tints the
+          gradient. Only over a real conversation; the welcome screen has
+          nothing scrolling under the controls. No z-index on purpose (see the
+          render order in App.tsx). */}
+      {sessionId && (
+        <div
+          className="pointer-events-none absolute inset-x-0 top-0 h-12"
+          style={{
+            background:
+              'linear-gradient(to bottom, var(--background) 75%, rgb(from var(--background) r g b / 0) 100%)',
+          }}
+        />
+      )}
       <div className="pointer-events-none absolute inset-x-0 top-2 z-10 flex items-center gap-2 px-3">
         <div className="min-w-0 flex-1">
           {/* pointer-events only on the text itself, so the empty space next to

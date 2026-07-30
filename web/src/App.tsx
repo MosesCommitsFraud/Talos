@@ -121,11 +121,16 @@ export default function App() {
             ) : (
               <>
                 <main className="relative flex min-w-0 flex-1 flex-col">
-                  <IncognitoToggle />
                   {/* Empty chat shows the home screen (greeting + usage stats)
                       in the message area; the composer always sits at the
                       bottom of the viewport. */}
                   {hasActiveSession ? <Messages /> : <Welcome />}
+                  {/* After the message area on purpose: the header's fade is
+                      unlayered (no z-index) so it paints over the messages but
+                      still under the body film grain — with a z-index it would
+                      sit above the grain and read as a different colour than
+                      the chat background it is meant to match. */}
+                  <IncognitoToggle />
                   <div className="shrink-0">
                     <PendingQuestion />
                     <Composer />
