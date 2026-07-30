@@ -72,8 +72,16 @@ export function IncognitoToggle() {
   return (
     <>
       {/* Fade in the chat background so messages dissolve instead of sliding
-          out from behind the controls. */}
-      <div className="pointer-events-none absolute inset-x-0 top-0 z-10 h-16 bg-gradient-to-b from-background via-background to-transparent" />
+          out from behind the controls: solid down to the bottom of the button
+          row, then a short fade. Ends on `background/0` rather than
+          `transparent` — fading to transparent *black* tints the gradient. */}
+      <div
+        className="pointer-events-none absolute inset-x-0 top-0 z-10 h-12"
+        style={{
+          background:
+            'linear-gradient(to bottom, var(--background) 75%, rgb(from var(--background) r g b / 0) 100%)',
+        }}
+      />
       <div className="pointer-events-none absolute inset-x-0 top-2 z-10 flex items-center gap-2 px-3">
         <div className="min-w-0 flex-1">
           {/* pointer-events only on the text itself, so the empty space next to
