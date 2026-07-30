@@ -1,6 +1,6 @@
 import { create } from 'zustand';
-import { compactSession, createSession, deleteMessages, editMessage, fetchArtifacts, fetchSession, streamChat } from '@/api/client';
-import type { Artifact, ArtifactSelection, Attachment, Metrics, RagSource, ToolCall } from '@/api/types';
+import { compactSession, createSession, deleteMessages, editMessage, fetchActiveRuns, fetchArtifacts, fetchSession, resumeChat, streamChat } from '@/api/client';
+import type { Artifact, ArtifactSelection, Attachment, ChatEvent, Metrics, RagSource, ToolCall } from '@/api/types';
 import { documentFileName, isPreviewable, previewKind } from '@/lib/files';
 import { timestampMs } from '@/lib/utils';
 import { queryClient } from '@/lib/queryClient';
@@ -96,7 +96,16 @@ interface ChatState {
   setPendingModel: (m: ChatState['pendingModel']) => void;
   newChat: () => void;
   openSession: (id: string) => Promise<void>;
-  send: (text: string, opts?: { attachments?: Attachment[]; artifactSelection?: ArtifactSelection; onSessionCreated?: (id: string) => void; approvedPlan?: string; planMode?: boolean; goalIteration?: boolean; targetSessionId?: string }) => Promise<void>;
+  send: (text: string, opts?: { attachments?: Attachment[]; artifactSelection?: ArtifactSelection; onSessionCreated?: (id: string) => void; approvedPlan?: string; planMode?: boolean; goalIteration?: boolean; targetSessionId?: string; resume?: boolean }) => Promise<void>;
+  /** Reattach to a turn that is still running server-side for `id` (after a
+   *  page reload). Loads the session's history first when we have none. */
+  attachRun: (id: string) => Promise<void>;
+  /** Reopen the chat that was on screen before the last reload. No-op when a
+   *  session is already active or the remembered chat no longer exists. */
+  restoreLastSession: () => Promise<void>;
+  /** Page-load bootstrap: reattach to every run still in flight so a refresh
+   *  mid-turn keeps streaming instead of silently dropping the turn. */
+  hydrateActiveRuns: () => Promise<void>;
   stop: () => void;
   startGoal: (objective: string) => Promise<void>;
   pauseGoal: () => void;
@@ -155,8 +164,44 @@ export const selectChatStatus = (id: string | null | undefined) => (s: ChatState
   return s.completed[id] ? 'completed' : null;
 };
 
+/** The most urgent status among a folder's chats, so a collapsed folder still
+ *  shows that something inside it is running / waiting / just finished.
+ *  Returns a primitive, so it's safe to pass a fresh id array every render. */
+export const selectFolderStatus = (ids: string[]) => (s: ChatState): ChatStatus => {
+  let best: ChatStatus = null;
+  for (const id of ids) {
+    const status = selectChatStatus(id)(s);
+    if (status === 'working') return 'working';
+    if (status === 'awaiting') best = 'awaiting';
+    else if (status === 'completed' && best !== 'awaiting') best = 'completed';
+  }
+  return best;
+};
+
 let nextId = 0;
 const uid = () => `m${Date.now()}-${nextId++}`;
+
+/** The chat that was on screen, remembered across reloads so a refresh returns
+ *  to the conversation (and to its running turn) instead of a blank draft. */
+const LAST_SESSION_KEY = 'talos.lastSession';
+const rememberLastSession = (id: string | null) => {
+  try {
+    if (id) localStorage.setItem(LAST_SESSION_KEY, id);
+    else localStorage.removeItem(LAST_SESSION_KEY);
+  } catch { /* storage disabled — restoring is a nicety, not a requirement */ }
+};
+/** Trailing assistant bubbles that were never persisted — the partial output of
+ *  a stream connection that dropped mid-turn. The run kept going server-side and
+ *  replays from the start on reconnect, so these get rebuilt. */
+const dropUnsavedTail = (messages: UiMessage[]): UiMessage[] => {
+  let end = messages.length;
+  while (end > 0 && messages[end - 1].role === 'assistant' && !messages[end - 1].dbId) end -= 1;
+  return end === messages.length ? messages : messages.slice(0, end);
+};
+
+export const lastSessionId = (): string | null => {
+  try { return localStorage.getItem(LAST_SESSION_KEY); } catch { return null; }
+};
 
 function metricsFromMetadata(metadata: Record<string, unknown> | undefined): Metrics | undefined {
   if (!metadata) return undefined;
@@ -390,6 +435,7 @@ export const useChat = create<ChatState>((set, get) => {
    *  session keeps streaming in the background. */
   const activate = (id: string | null) => {
     const rt = (id && get().runtimes[id]) || emptyRuntime();
+    rememberLastSession(id);
     set((s) => {
       // Opening a chat clears its "Done" badge.
       const completed = id && s.completed[id] ? { ...s.completed } : s.completed;
@@ -446,13 +492,76 @@ export const useChat = create<ChatState>((set, get) => {
     writeRuntime(id, () => ({ ...emptyRuntime(), messages }));
   },
 
+  attachRun: async (id) => {
+    if (get().runtimes[id]?.streaming) return;
+    // A freshly loaded page has no runtime for this chat: pull the history the
+    // running turn is appending to first, so everything before the answer is on
+    // screen while the replayed deltas stream into a new assistant bubble.
+    if (!get().runtimes[id]) {
+      try {
+        const detail = await fetchSession(id);
+        const rt = get().runtimes[id];
+        if (rt?.streaming) return; // a real send claimed this session meanwhile
+        if (!rt) {
+          const messages = (detail.history ?? [])
+            .filter((m) => m.role === 'user' || m.role === 'assistant')
+            .flatMap((m) => coldLoadMessage(m as HistoryMessage, id));
+          writeRuntime(id, () => ({ ...emptyRuntime(), messages }));
+        }
+      } catch {
+        return; // session gone or not ours — nothing to reattach to
+      }
+    }
+    const before = get().runtimes[id]?.messages.length ?? 0;
+    await get().send('', { targetSessionId: id, resume: true });
+    // Nothing replayed: the run finished (or was evicted) between discovery and
+    // reconnect. Pull the saved history so the finished answer is on screen.
+    if ((get().runtimes[id]?.messages.length ?? 0) <= before && !get().runtimes[id]?.streaming) {
+      try {
+        const detail = await fetchSession(id);
+        if (get().runtimes[id]?.streaming) return;
+        const messages = (detail.history ?? [])
+          .filter((m) => m.role === 'user' || m.role === 'assistant')
+          .flatMap((m) => coldLoadMessage(m as HistoryMessage, id));
+        if (messages.length) writeRuntime(id, () => ({ messages }));
+      } catch { /* best-effort */ }
+    }
+  },
+
+  restoreLastSession: async () => {
+    const id = lastSessionId();
+    if (!id || get().sessionId) return;
+    // Already have live state for it (a background run was reattached first) —
+    // just point the view at it rather than clobbering it with cold history.
+    if (get().runtimes[id]) { activate(id); return; }
+    try {
+      const detail = await fetchSession(id);
+      if (get().sessionId || get().runtimes[id]) return;
+      const messages = (detail.history ?? [])
+        .filter((m) => m.role === 'user' || m.role === 'assistant')
+        .flatMap((m) => coldLoadMessage(m as HistoryMessage, id));
+      writeRuntime(id, () => ({ ...emptyRuntime(), messages }));
+      activate(id);
+    } catch {
+      rememberLastSession(null); // deleted or no longer ours
+    }
+  },
+
+  hydrateActiveRuns: async () => {
+    const ids = await fetchActiveRuns();
+    await Promise.all(ids.map((id) => get().attachRun(id).catch(() => { /* best-effort */ })));
+  },
+
   send: async (text, opts) => {
     const state = get();
     // Block re-entry only for the session we'd send into, not globally — a
     // different chat may legitimately be streaming.
     const requestedSessionId = opts?.targetSessionId ?? state.sessionId;
     const activeRt = requestedSessionId ? state.runtimes[requestedSessionId] : undefined;
-    if (activeRt?.streaming || (!text.trim() && !opts?.attachments?.length)) return;
+    if (activeRt?.streaming) return;
+    // A resume carries no new user text — it reattaches to a turn already
+    // running on the server, so the empty-message guard doesn't apply.
+    if (!opts?.resume && !text.trim() && !opts?.attachments?.length) return;
 
     let sessionId = requestedSessionId;
     if (!sessionId) {
@@ -491,10 +600,15 @@ export const useChat = create<ChatState>((set, get) => {
     // they go inert, and clear the "needs you" flag.
     writeRuntime(sid, (rt) => ({
       messages: [
-        ...rt.messages.map((m) =>
+        // A resume replays the run's whole event log, so any assistant bubbles
+        // left behind by the connection it replaces (never persisted, hence no
+        // dbId) would be duplicated — drop them and let the replay rebuild.
+        ...(opts?.resume ? dropUnsavedTail(rt.messages) : rt.messages).map((m) =>
           m.pendingQuestion || m.planProposed ? { ...m, answered: true } : m,
         ),
-        userMsg,
+        // On a resume the user message is already in the loaded history — only
+        // the assistant bubble the replayed events stream into is new.
+        ...(opts?.resume ? [] : [userMsg]),
         aiMsg,
       ],
       streaming: true,
@@ -562,26 +676,36 @@ export const useChat = create<ChatState>((set, get) => {
       : undefined;
     // Plan-mode applies to this turn unless the caller overrides it (e.g. an
     // "Implement plan" approval forces it off and passes the approved checklist).
-    const planMode = opts?.planMode ?? prefs.planMode;
+    // A resumed turn inherits whatever mode it was started in; only a fresh
+    // send decides plan mode here.
+    const planMode = opts?.resume ? false : (opts?.planMode ?? prefs.planMode);
     try {
-      await streamChat({
-        message: text,
-        sessionId: sid,
-        flags: {
-          planMode,
-          approvedPlan: opts?.approvedPlan,
-          useRag: prefs.useRag,
-          useDb: prefs.useDb,
-          reasoning: prefs.reasoning,
-          incognito: prefs.incognito,
-          lang: prefs.lang,
-          llmLanguage: prefs.llmLang,
-          activeDocId,
-          artifactSelection,
-          attachments: attachments.map((file) => file.id),
-        },
-        signal: abort.signal,
-        onEvent: (ev) => {
+      // Two transports, one event handler: a new turn POSTs and reads the
+      // response stream, a resume subscribes to the detached server-side run
+      // (which replays everything it has emitted so far, then goes live).
+      const consume = (onEvent: (ev: ChatEvent) => void) =>
+        opts?.resume
+          ? resumeChat({ sessionId: sid, signal: abort.signal, onEvent })
+          : streamChat({
+              message: text,
+              sessionId: sid,
+              flags: {
+                planMode,
+                approvedPlan: opts?.approvedPlan,
+                useRag: prefs.useRag,
+                useDb: prefs.useDb,
+                reasoning: prefs.reasoning,
+                incognito: prefs.incognito,
+                lang: prefs.lang,
+                llmLanguage: prefs.llmLang,
+                activeDocId,
+                artifactSelection,
+                attachments: attachments.map((file) => file.id),
+              },
+              signal: abort.signal,
+              onEvent,
+            });
+      await consume((ev) => {
           if ('delta' in ev && typeof ev.delta === 'string') {
             if (ev.thinking) patchAi((m) => ({ thinking: (m.thinking ?? '') + ev.delta }));
             else patchAi((m) => ({ content: m.content + ev.delta }));
@@ -737,7 +861,6 @@ export const useChat = create<ChatState>((set, get) => {
               break;
             }
           }
-        },
       });
       // Catch workspace outputs from older servers/tools that do not emit an
       // explicit artifact event. Active queries refetch immediately; closed
@@ -773,6 +896,16 @@ export const useChat = create<ChatState>((set, get) => {
       }));
       // Clear only this session's turn flags — a different chat may be active.
       writeRuntime(sid, () => ({ streaming: false, turnStartedAt: null, abort: null }));
+      // A resume that reconnected to an already-finished run replays nothing —
+      // drop the bubble it would have streamed into instead of leaving a blank
+      // one in the transcript (attachRun reloads the history in that case).
+      if (opts?.resume) {
+        writeRuntime(sid, (rt) => {
+          const last = rt.messages[rt.messages.length - 1];
+          const empty = last && last.id === aiId && !last.content && !last.thinking && !last.tools?.length;
+          return empty ? { messages: rt.messages.slice(0, -1) } : {};
+        });
+      }
       // Badge it "Done" if it finished in the background (user is elsewhere) — but
       // not when it ended on a question; that's surfaced as "Needs you" instead.
       const awaiting = get().runtimes[sid]?.awaitingInput;

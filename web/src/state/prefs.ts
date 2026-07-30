@@ -82,6 +82,8 @@ interface PrefsState {
   setMicDeviceId: (id: string | null) => void;
   toggleSidebar: () => void;
   toggleFolder: (name: string) => void;
+  /** Keep a folder's collapsed state with it when it's renamed or deleted. */
+  renameFolderPref: (from: string, to: string | null) => void;
   setPreviewWidth: (px: number) => void;
 }
 
@@ -119,6 +121,11 @@ export const usePrefs = create<PrefsState>()(
           ? s.collapsedFolders.filter((n) => n !== name)
           : [...s.collapsedFolders, name],
       })),
+      renameFolderPref: (from, to) => set((s) => {
+        if (!s.collapsedFolders.includes(from)) return {};
+        const rest = s.collapsedFolders.filter((n) => n !== from && n !== to);
+        return { collapsedFolders: to ? [...rest, to] : rest };
+      }),
       setPreviewWidth: (previewWidth) => set({ previewWidth }),
     }),
     {

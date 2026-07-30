@@ -1079,7 +1079,43 @@ export async function streamChat(opts: {
     throw new Error(detail);
   }
 
-  const reader = res.body.getReader();
+  await readSse(res, opts.onEvent);
+}
+
+/** Reattach to a turn that is still running server-side (the run is detached
+ *  from the request that started it, so a reload/tab close doesn't kill it).
+ *  The server replays the run's whole event log before going live, so the
+ *  caller rebuilds the turn from the start exactly as it originally streamed. */
+export async function resumeChat(opts: {
+  sessionId: string;
+  signal?: AbortSignal;
+  onEvent: (ev: ChatEvent) => void;
+}): Promise<void> {
+  const res = await fetch(`/api/chat/resume/${opts.sessionId}`, {
+    credentials: 'same-origin',
+    signal: opts.signal,
+  });
+  // 404 = the run finished (or was evicted) between discovery and reconnect.
+  if (res.status === 404) return;
+  if (!res.ok || !res.body) throw new Error(`resumeChat: ${res.status}`);
+  await readSse(res, opts.onEvent);
+}
+
+/** Session ids whose turn is still running server-side — asked once on page
+ *  load so the UI can reattach to background runs it knows nothing about. */
+export async function fetchActiveRuns(): Promise<string[]> {
+  try {
+    const data = await getJSON<{ sessions?: string[] }>('/api/chat/active_runs');
+    return Array.isArray(data.sessions) ? data.sessions : [];
+  } catch {
+    return []; // older server without the endpoint — nothing to reattach to
+  }
+}
+
+/** Parse an SSE body frame-by-frame, dispatching each `data:` payload. Returns
+ *  when the stream ends or a `[DONE]` sentinel arrives. */
+async function readSse(res: Response, onEvent: (ev: ChatEvent) => void): Promise<void> {
+  const reader = res.body!.getReader();
   const decoder = new TextDecoder();
   let buffer = '';
 
@@ -1097,7 +1133,7 @@ export async function streamChat(opts: {
         const payload = line.slice(6);
         if (payload === '[DONE]') return;
         try {
-          opts.onEvent(JSON.parse(payload) as ChatEvent);
+          onEvent(JSON.parse(payload) as ChatEvent);
         } catch {
           // Malformed frame — skip rather than kill the stream.
         }

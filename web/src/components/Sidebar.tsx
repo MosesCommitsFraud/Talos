@@ -7,6 +7,7 @@ import {
   ChevronDownIcon,
   DatabaseIcon,
   FolderIcon,
+  FolderMinusIcon,
   FolderPlusIcon,
   HelpCircleIcon,
   HistoryIcon,
@@ -36,7 +37,7 @@ import {
 } from '@/api/client';
 import { useAuth } from './auth/AuthGate';
 import type { Session } from '@/api/types';
-import { selectChatStatus, useChat } from '@/state/chat';
+import { selectChatStatus, selectFolderStatus, useChat } from '@/state/chat';
 import { usePrefs, type SortMode } from '@/state/prefs';
 import { cn, formatRelativeTime, timestampMs } from '@/lib/utils';
 import { Tooltip } from './ui/misc';
@@ -227,6 +228,13 @@ function SessionRow({ session, folders }: { session: Session; folders: string[] 
         <ContextMenuItem onSelect={() => void markImportant(session.id, !pinned).then(refresh)}>
           {pinned ? <PinOffIcon /> : <PinIcon />} {t(pinned ? 'sidebar.unpin' : 'sidebar.pin')}
         </ContextMenuItem>
+        {/* Getting a chat back out has its own row: burying it at the bottom of
+            the "Move to folder" submenu made it look like a one-way trip. */}
+        {session.folder && (
+          <ContextMenuItem onSelect={() => moveToFolder(null)}>
+            <FolderMinusIcon /> {t('sidebar.removeFromFolder')}
+          </ContextMenuItem>
+        )}
         <ContextMenuSub>
           <ContextMenuSubTrigger>
             <FolderIcon /> {t('sidebar.moveToFolder')}
@@ -269,21 +277,107 @@ function SessionRow({ session, folders }: { session: Session; folders: string[] 
   );
 }
 
-function FolderGroup({ name, sessions, folders }: { name: string; sessions: Session[]; folders: string[] }) {
+function FolderGroup({
+  name,
+  sessions,
+  members,
+  folders,
+}: {
+  name: string;
+  /** Rows shown under this header (pinned chats render in their own section). */
+  sessions: Session[];
+  /** Every chat carrying this folder label, pinned ones included — renaming or
+   *  deleting the folder has to move all of them, not just the visible rows. */
+  members: Session[];
+  folders: string[];
+}) {
+  const { t } = useTranslation();
   const collapsed = usePrefs((s) => s.collapsedFolders.includes(name));
   const toggleFolder = usePrefs((s) => s.toggleFolder);
+  const renameFolderPref = usePrefs((s) => s.renameFolderPref);
+  const queryClient = useQueryClient();
+  const [renaming, setRenaming] = useState(false);
+  const [draft, setDraft] = useState(name);
+  // A folder has no row of its own on the server — it exists only as a label on
+  // its chats, so renaming/deleting one is a batch update of its members.
+  const setFolder = async (target: string | null) => {
+    await Promise.all(members.map((s) => setSessionFolder(s.id, target)));
+    renameFolderPref(name, target);
+    void queryClient.invalidateQueries({ queryKey: ['sessions'] });
+  };
+  // Collapsed folders hide their rows' own status labels, so the header carries
+  // the most urgent one — otherwise a background turn goes unnoticed.
+  const status = useChat(selectFolderStatus(sessions.map((s) => s.id)));
+
+  const commitRename = async () => {
+    const value = draft.trim();
+    setRenaming(false);
+    if (value && value !== name) await setFolder(value);
+  };
+
+  // Only the header turns into an input — the folder's chats stay put, so
+  // renaming doesn't make the list jump around underneath.
   return (
     <div>
-      <button
-        type="button"
-        onClick={() => toggleFolder(name)}
-        className="group flex w-full items-center gap-1.5 rounded-lg px-2 py-1.5 text-left text-xs font-medium text-muted-foreground transition-colors hover:bg-accent/70"
-      >
-        <ChevronRightIcon className={cn('size-3.5 shrink-0 transition-transform', !collapsed && 'rotate-90')} />
-        <FolderIcon className="size-3.5 shrink-0" />
-        <span className="min-w-0 flex-1 truncate">{name}</span>
-        <span className="shrink-0 tabular-nums opacity-70">{sessions.length}</span>
-      </button>
+      {renaming ? (
+        <input
+          autoFocus
+          value={draft}
+          placeholder={t('sidebar.folderPlaceholder')}
+          onChange={(e) => setDraft(e.target.value)}
+          onBlur={() => void commitRename()}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') void commitRename();
+            if (e.key === 'Escape') { setDraft(name); setRenaming(false); }
+          }}
+          className="mx-0.5 my-px w-[calc(100%-4px)] rounded-lg border border-ring bg-transparent px-2 py-1.5 text-sm outline-none"
+        />
+      ) : (
+      <ContextMenu>
+        <ContextMenuTrigger asChild>
+          <button
+            type="button"
+            onClick={() => toggleFolder(name)}
+            onDoubleClick={() => { setDraft(name); setRenaming(true); }}
+            className="group flex w-full items-center gap-1.5 rounded-lg px-2 py-1.5 text-left text-xs font-medium text-muted-foreground transition-colors hover:bg-accent/70"
+          >
+            <ChevronRightIcon className={cn('size-3.5 shrink-0 transition-transform', !collapsed && 'rotate-90')} />
+            <FolderIcon className="size-3.5 shrink-0" />
+            <span className="min-w-0 flex-1 truncate">{name}</span>
+            {collapsed && status === 'working' ? (
+              <span className="shimmer-text shrink-0 text-[11px] font-medium" title={t('sidebar.folderWorking')}>
+                {t('sidebar.working')}
+              </span>
+            ) : collapsed && status ? (
+              // Quieter than a label: a dot in the same palette the rows use.
+              <span
+                title={t(status === 'awaiting' ? 'sidebar.folderAwaiting' : 'sidebar.folderCompleted')}
+                className={cn(
+                  'size-1.5 shrink-0 rounded-full',
+                  status === 'awaiting' ? 'bg-warning' : 'bg-success',
+                )}
+              />
+            ) : null}
+            <span className="shrink-0 tabular-nums opacity-70">{sessions.length}</span>
+          </button>
+        </ContextMenuTrigger>
+        <ContextMenuPopup>
+          <ContextMenuItem onSelect={() => { setDraft(name); setRenaming(true); }}>
+            <PencilIcon /> {t('sidebar.renameFolder')}
+          </ContextMenuItem>
+          <ContextMenuItem onSelect={() => toggleFolder(name)}>
+            <ChevronRightIcon className={cn('transition-transform', !collapsed && 'rotate-90')} />
+            {t(collapsed ? 'sidebar.expandFolder' : 'sidebar.collapseFolder')}
+          </ContextMenuItem>
+          <ContextMenuSeparator />
+          {/* Deletes the folder only — its chats move back to the flat list. */}
+          <ContextMenuItem variant="destructive" onSelect={() => void setFolder(null)}>
+            <FolderMinusIcon /> {t('sidebar.deleteFolder')}
+            <span className="ms-auto ps-2 text-[11px] text-muted-foreground">{t('sidebar.deleteFolderHint')}</span>
+          </ContextMenuItem>
+        </ContextMenuPopup>
+      </ContextMenu>
+      )}
       {!collapsed && (
         <div className="space-y-px pl-2">
           {sessions.map((s) => (
@@ -457,7 +551,11 @@ export function Sidebar({
   const pinned = active.filter((s) => s.is_important).sort(sorter);
   const rest = active.filter((s) => !s.is_important);
   const grouped = folderNames
-    .map((name) => ({ name, items: rest.filter((s) => s.folder === name).sort(sorter) }))
+    .map((name) => ({
+      name,
+      items: rest.filter((s) => s.folder === name).sort(sorter),
+      members: active.filter((s) => s.folder === name),
+    }))
     .filter((g) => g.items.length > 0);
   const ungrouped = rest.filter((s) => !s.folder).sort(sorter);
   const accountLabel = auth?.display_name || auth?.username;
@@ -477,7 +575,7 @@ export function Sidebar({
         </>
       )}
       {grouped.map((g) => (
-        <FolderGroup key={g.name} name={g.name} sessions={g.items} folders={folderNames} />
+        <FolderGroup key={g.name} name={g.name} sessions={g.items} members={g.members} folders={folderNames} />
       ))}
       {(pinned.length > 0 || grouped.length > 0) && ungrouped.length > 0 && (
         <div className="px-2 pt-2 pb-0.5 text-xs font-medium text-muted-foreground">{t('sidebar.chats')}</div>

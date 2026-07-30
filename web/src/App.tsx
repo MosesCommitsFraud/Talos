@@ -22,6 +22,35 @@ import { selectPendingPlan, useChat } from './state/chat';
 import { useUi } from './state/ui';
 import { queryClient } from './lib/queryClient';
 
+/** Runs once, after auth resolves: reopens the chat that was on screen before
+ *  the reload, then reattaches to every turn still running server-side. Without
+ *  it a refresh mid-turn looks like the query died — the run keeps going on the
+ *  server, but nothing in the UI is listening to it. */
+function SessionRestore() {
+  const restoreLastSession = useChat((s) => s.restoreLastSession);
+  const hydrateActiveRuns = useChat((s) => s.hydrateActiveRuns);
+  useEffect(() => {
+    void (async () => {
+      await restoreLastSession();
+      await hydrateActiveRuns();
+    })();
+    // Keep checking: a stream that drops for any other reason (sleep, network
+    // blip, a proxy timing the connection out) reattaches on the next tick and
+    // replays what it missed, instead of leaving the chat frozen mid-answer.
+    const tick = () => void hydrateActiveRuns();
+    const timer = window.setInterval(tick, 15_000);
+    const onVisible = () => { if (document.visibilityState === 'visible') tick(); };
+    document.addEventListener('visibilitychange', onVisible);
+    window.addEventListener('online', tick);
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener('visibilitychange', onVisible);
+      window.removeEventListener('online', tick);
+    };
+  }, [restoreLastSession, hydrateActiveRuns]);
+  return null;
+}
+
 export default function App() {
   const [palette, setPalette] = useState(false);
   // null = closed. When set, the settings dialog opens to the given panel/scope.
@@ -65,6 +94,7 @@ export default function App() {
     <QueryClientProvider client={queryClient}>
       <TooltipProvider>
         <AuthGate>
+          <SessionRestore />
           <div className="flex h-full">
             <Sidebar
               onOpenPalette={() => setPalette(true)}

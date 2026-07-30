@@ -81,6 +81,12 @@ def is_active(session_id: str) -> bool:
     return bool(r and r.status == "running")
 
 
+def active_sessions() -> list:
+    """Every session id with a run still in flight. Lets a freshly loaded page
+    ask "what is still going?" and reconnect to each via subscribe()."""
+    return [sid for sid, run in list(_RUNS.items()) if run.status == "running"]
+
+
 def get_status(session_id: str) -> Optional[str]:
     r = _RUNS.get(session_id)
     return r.status if r else None

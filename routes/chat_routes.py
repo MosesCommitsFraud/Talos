@@ -1275,6 +1275,23 @@ def setup_chat_routes(
         return StreamingResponse(agent_runs.subscribe(session_id), media_type="text/event-stream")
 
     # ------------------------------------------------------------------ #
+    # GET /api/chat/active_runs — which of the caller's sessions are still
+    # running. A page that just (re)loaded asks this once and reattaches to
+    # each via /api/chat/resume, so a refresh mid-turn resumes the live stream
+    # instead of leaving the turn invisible until it finishes.
+    # ------------------------------------------------------------------ #
+    @router.get("/api/chat/active_runs")
+    async def chat_active_runs(request: Request) -> Dict[str, Any]:
+        owned = []
+        for sid in agent_runs.active_sessions():
+            try:
+                _verify_session_owner(request, sid)
+            except HTTPException:
+                continue  # someone else's run — not visible to this caller
+            owned.append(sid)
+        return {"sessions": owned}
+
+    # ------------------------------------------------------------------ #
     # POST /api/chat/stop — cancel a detached run (Stop button). Closing the SSE
     # no longer stops it (it's detached), so the Stop button must call this.
     # ------------------------------------------------------------------ #
