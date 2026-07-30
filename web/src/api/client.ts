@@ -1009,6 +1009,70 @@ export const fetchBuiltinTools = async () =>
   (await getJSON<{ tools?: BuiltinTool[] }>('/api/tools')).tools ?? [];
 export const saveDisabledTools = (disabled: string[]) => postJSON('/api/tools', { disabled });
 
+/* ── Support tickets ── */
+export interface TicketAttachmentInfo {
+  id: string;
+  session_id: string | null;
+  session_name: string;
+  message_count: number;
+}
+
+export interface Ticket {
+  id: string;
+  title: string;
+  body: string;
+  status: 'open' | 'archived';
+  created_by: string | null;
+  created_at: string | null;
+  resolved_at: string | null;
+  resolved_by: string | null;
+  attachment_count: number;
+}
+
+export interface TicketDetail extends Omit<Ticket, 'attachment_count'> {
+  updated_at: string | null;
+  attachments: TicketAttachmentInfo[];
+}
+
+export interface TicketTranscriptMessage {
+  role: string;
+  content: string;
+  timestamp: string | null;
+}
+
+export interface TicketTranscript extends TicketAttachmentInfo {
+  transcript: TicketTranscriptMessage[];
+}
+
+/** File a ticket. Attached chats are snapshotted server-side at this moment. */
+export const createTicket = (body: { title: string; body: string; session_ids: string[] }) =>
+  postJSON<{ id: string }>('/api/tickets', body);
+
+export const fetchTickets = (status: 'open' | 'archived' | 'all') =>
+  getJSON<Ticket[]>(`/api/tickets?status=${status}`);
+
+export const fetchTicket = (id: string) =>
+  getJSON<TicketDetail>(`/api/tickets/${encodeURIComponent(id)}`);
+
+export const fetchTicketTranscript = (ticketId: string, attachmentId: string) =>
+  getJSON<TicketTranscript>(
+    `/api/tickets/${encodeURIComponent(ticketId)}/attachments/${encodeURIComponent(attachmentId)}`,
+  );
+
+export const ticketAttachmentDownloadUrl = (ticketId: string, attachmentId: string, format: 'md' | 'json' = 'md') =>
+  `/api/tickets/${encodeURIComponent(ticketId)}/attachments/${encodeURIComponent(attachmentId)}/download?format=${format}`;
+
+export const setTicketStatus = (id: string, status: 'open' | 'archived') =>
+  postJSON<TicketDetail>(`/api/tickets/${encodeURIComponent(id)}`, { status }, 'PATCH');
+
+export async function deleteTicket(id: string): Promise<void> {
+  const res = await fetch(`/api/tickets/${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+    credentials: 'same-origin',
+  });
+  if (!res.ok) throw new Error(`Delete failed (HTTP ${res.status})`);
+}
+
 /* ── System: backup + danger zone ── */
 export const importData = (data: unknown) => postJSON<{ ok?: boolean; message?: string }>('/api/import', data);
 export const wipeData = (kind: string) => postJSON<{ ok?: boolean;[key: string]: unknown }>(`/api/admin/wipe/${kind}`, undefined, 'DELETE');

@@ -10,6 +10,7 @@ import {
   SettingsIcon,
   SquarePenIcon,
   SunIcon,
+  TicketIcon,
   UsersIcon,
 } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -35,7 +36,7 @@ interface PaletteGroup {
   items: PaletteEntry[];
 }
 
-export function CommandPalette({ open, onClose, onOpenSettings, onOpenRag, onOpenUsers }: { open: boolean; onClose: () => void; onOpenSettings?: () => void; onOpenRag?: () => void; onOpenUsers?: () => void }) {
+export function CommandPalette({ open, onClose, onOpenSettings, onOpenRag, onOpenUsers, onOpenTickets }: { open: boolean; onClose: () => void; onOpenSettings?: () => void; onOpenRag?: () => void; onOpenUsers?: () => void; onOpenTickets?: () => void }) {
   const { t } = useTranslation();
   const [query, setQuery] = useState('');
   const [selected, setSelected] = useState(0);
@@ -76,6 +77,9 @@ export function CommandPalette({ open, onClose, onOpenSettings, onOpenRag, onOpe
       ...(auth?.is_admin && onOpenUsers
         ? [{ id: 'users', label: t('palette.openUsers'), icon: <UsersIcon />, run: () => { onOpenUsers(); onClose(); } }]
         : []),
+      ...(auth?.is_admin && onOpenTickets
+        ? [{ id: 'tickets', label: t('palette.openTickets'), icon: <TicketIcon />, run: () => { onOpenTickets(); onClose(); } }]
+        : []),
     ].filter((a) => !q || a.label.toLowerCase().includes(q));
 
     const chats: PaletteEntry[] = (sessions ?? [])
@@ -93,7 +97,7 @@ export function CommandPalette({ open, onClose, onOpenSettings, onOpenRag, onOpe
     if (actions.length) next.push({ label: t('palette.actions'), items: actions });
     if (chats.length) next.push({ label: t('palette.recentChats'), items: chats });
     return next;
-  }, [query, sessions, theme, newChat, onClose, onOpenSettings, onOpenRag, onOpenUsers, auth?.is_admin, openSession, setTheme, t]);
+  }, [query, sessions, theme, newChat, onClose, onOpenSettings, onOpenRag, onOpenUsers, onOpenTickets, auth?.is_admin, openSession, setTheme, t]);
 
   // Flatten for keyboard navigation; track a running index across groups.
   const flat = useMemo(() => groups.flatMap((g) => g.items), [groups]);

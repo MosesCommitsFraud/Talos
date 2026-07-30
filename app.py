@@ -752,6 +752,13 @@ app.include_router(setup_api_token_routes())
 
 logger.info("API token routes initialized")
 
+# Support tickets (user-filed, admin-triaged)
+from routes.ticket_routes import setup_ticket_routes
+
+app.include_router(setup_ticket_routes())
+
+logger.info("Ticket routes initialized")
+
 logger.info("Talos feature profile loaded: chat, auth/RBAC, uploads, documents, MCP, API tokens")
 
 # ========= ROUTES (kept in app.py) =========

@@ -12,6 +12,8 @@ import { HelpDialog } from './components/HelpDialog';
 import { RightPanel } from './components/RightPanel';
 import { RagWorkspace } from './components/rag/RagWorkspace';
 import { UsersWorkspace } from './components/users/UsersWorkspace';
+import { TicketsWorkspace } from './components/tickets/TicketsWorkspace';
+import { TicketDialog } from './components/tickets/TicketDialog';
 import { Lightbox } from './components/Lightbox';
 import { PlanPanel } from './components/PlanPanel';
 import { PendingQuestion } from './components/AskUser';
@@ -57,6 +59,7 @@ export default function App() {
   const [settings, setSettings] = useState<{ panel?: Panel; scope?: SettingsScope } | null>(null);
   const [archiveOpen, setArchiveOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
+  const [ticketOpen, setTicketOpen] = useState(false);
   const view = useUi((s) => s.view);
   const setView = useUi((s) => s.setView);
   const theme = usePrefs((s) => s.theme);
@@ -105,12 +108,16 @@ export default function App() {
                 onOpenArchive: () => setArchiveOpen(true),
                 onOpenAccount: () => setSettings({ scope: 'user', panel: 'account' }),
                 onOpenRag: () => setView('rag'),
+                onOpenTickets: () => setView('tickets'),
               }}
+              onOpenTicketDialog={() => setTicketOpen(true)}
             />
             {view === 'rag' ? (
               <RagWorkspace />
             ) : view === 'users' ? (
               <UsersWorkspace />
+            ) : view === 'tickets' ? (
+              <TicketsWorkspace />
             ) : (
               <>
                 <main className="relative flex min-w-0 flex-1 flex-col">
@@ -135,6 +142,7 @@ export default function App() {
             onOpenSettings={() => setSettings({})}
             onOpenRag={() => setView('rag')}
             onOpenUsers={() => setView('users')}
+            onOpenTickets={() => setView('tickets')}
           />
           <SettingsDialog
             open={!!settings}
@@ -146,6 +154,7 @@ export default function App() {
           />
           <ArchiveDialog open={archiveOpen} onClose={() => setArchiveOpen(false)} />
           <HelpDialog open={helpOpen} onClose={() => setHelpOpen(false)} />
+          <TicketDialog open={ticketOpen} onClose={() => setTicketOpen(false)} />
           <Lightbox />
         </AuthGate>
       </TooltipProvider>

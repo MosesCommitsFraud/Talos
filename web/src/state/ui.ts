@@ -6,8 +6,9 @@ import type { ArtifactSelection } from '@/api/types';
  *  `prefs` so it never persists across reloads. */
 /** Top-level surface shown in the main column. `chat` is the default; `rag`
  *  swaps in the full-screen knowledge-base workspace (deep-linkable at `#/rag`),
- *  `users` in the admin user/usage workspace (`#/users`). */
-export type AppView = 'chat' | 'rag' | 'users';
+ *  `users` in the admin user/usage workspace (`#/users`), `tickets` in the
+ *  admin support-ticket workspace (`#/tickets`). */
+export type AppView = 'chat' | 'rag' | 'users' | 'tickets';
 
 export interface PreviewFile {
   sessionId: string;
@@ -25,7 +26,7 @@ export interface PreviewFile {
 function viewFromHash(): AppView {
   if (typeof location === 'undefined') return 'chat';
   const slug = location.hash.replace(/^#\/?/, '');
-  return slug === 'rag' || slug === 'users' ? slug : 'chat';
+  return slug === 'rag' || slug === 'users' || slug === 'tickets' ? slug : 'chat';
 }
 
 interface UiState {

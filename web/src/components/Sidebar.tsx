@@ -21,6 +21,7 @@ import {
   SettingsIcon,
   ShieldIcon,
   SquarePenIcon,
+  TicketIcon,
   Trash2Icon,
   UserIcon,
 } from 'lucide-react';
@@ -501,6 +502,11 @@ function AccountMenu({
             <DatabaseIcon /> {t('sidebar.menu.rag')}
           </MenuItem>
         )}
+        {isAdmin && (
+          <MenuItem onSelect={actions.onOpenTickets}>
+            <TicketIcon /> {t('sidebar.menu.tickets')}
+          </MenuItem>
+        )}
         <MenuItem onSelect={actions.onOpenHelp}>
           <HelpCircleIcon /> {t('sidebar.menu.help')}
         </MenuItem>
@@ -530,14 +536,19 @@ interface AccountActions {
   onOpenArchive: () => void;
   onOpenAccount: () => void;
   onOpenRag: () => void;
+  onOpenTickets: () => void;
 }
 
 export function Sidebar({
   onOpenPalette,
   account,
+  onOpenTicketDialog,
 }: {
   onOpenPalette: () => void;
   account: AccountActions;
+  /** Opens the "report a problem" modal — the ticket button next to the
+   *  account row, available to every user (admins triage in /tickets). */
+  onOpenTicketDialog: () => void;
 }) {
   const { t } = useTranslation();
   const { data: sessions } = useQuery({ queryKey: ['sessions'], queryFn: fetchSessions, refetchInterval: 30_000 });
@@ -722,7 +733,17 @@ export function Sidebar({
           Help / Archive / Account / Log out) instead of the old settings cog. */}
       {collapsed ? (
         // Centered in the rail, matching the header logo + nav icon column.
-        <div className="flex justify-center pb-2">
+        <div className="flex flex-col items-center gap-1 pb-2">
+          <Tooltip label={t('tickets.report')} side="right">
+            <button
+              type="button"
+              onClick={onOpenTicketDialog}
+              aria-label={t('tickets.report')}
+              className="flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+            >
+              <TicketIcon className="size-4" />
+            </button>
+          </Tooltip>
           <AccountMenu
             isAdmin={!!auth?.is_admin}
             authEnabled={auth?.auth_enabled !== false}
@@ -746,25 +767,38 @@ export function Sidebar({
         <div className="px-2 pt-1.5 pb-1.5">
           <div className="mx-1 mb-1 h-px bg-border" />
           {(visibility.sidebarUserBar || visibility.sidebarSettingsBtn) && (
-            <AccountMenu
-              isAdmin={!!auth?.is_admin}
-              authEnabled={auth?.auth_enabled !== false}
-              username={accountLabel ?? t('sidebar.user')}
-              actions={account}
-              trigger={
+            // Account row + the ticket button sitting to its right.
+            <div className="flex items-center gap-1">
+              <AccountMenu
+                isAdmin={!!auth?.is_admin}
+                authEnabled={auth?.auth_enabled !== false}
+                username={accountLabel ?? t('sidebar.user')}
+                actions={account}
+                trigger={
+                  <button
+                    type="button"
+                    aria-label={t('sidebar.account')}
+                    className="flex min-w-0 flex-1 items-center gap-1.5 rounded-sm px-2 py-1 text-left transition-colors outline-none hover:bg-accent/70 focus-visible:outline-none data-[state=open]:bg-accent/70"
+                  >
+                    <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-primary/15 text-[10px] font-semibold text-primary">
+                      {initial}
+                    </span>
+                    <span className="min-w-0 flex-1 truncate text-[13px]">{accountLabel ?? t('sidebar.user')}</span>
+                    <ChevronDownIcon className="size-3.5 shrink-0 text-muted-foreground" />
+                  </button>
+                }
+              />
+              <Tooltip label={t('tickets.report')}>
                 <button
                   type="button"
-                  aria-label={t('sidebar.account')}
-                  className="flex w-full items-center gap-1.5 rounded-sm px-2 py-1 text-left transition-colors outline-none hover:bg-accent/70 focus-visible:outline-none data-[state=open]:bg-accent/70"
+                  onClick={onOpenTicketDialog}
+                  aria-label={t('tickets.report')}
+                  className="flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
                 >
-                  <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-primary/15 text-[10px] font-semibold text-primary">
-                    {initial}
-                  </span>
-                  <span className="min-w-0 flex-1 truncate text-[13px]">{accountLabel ?? t('sidebar.user')}</span>
-                  <ChevronDownIcon className="size-3.5 shrink-0 text-muted-foreground" />
+                  <TicketIcon className="size-4" />
                 </button>
-              }
-            />
+              </Tooltip>
+            </div>
           )}
         </div>
       )}

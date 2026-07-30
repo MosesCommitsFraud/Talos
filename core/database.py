@@ -1536,6 +1536,48 @@ class SharedSkillFile(TimestampMixin, Base):
     __table_args__ = (Index("ix_shared_skill_files_unique", "skill_name", "path", unique=True),)
 
 
+class Ticket(TimestampMixin, Base):
+    """A support ticket a user files for the admins.
+
+    Chats are attached as *snapshots* (see :class:`TicketAttachment`), not as
+    live references: the admin reading the ticket must see what the reporter
+    saw, even if the chat is edited or deleted afterwards, and the snapshot is
+    the only thing an admin is allowed to read out of someone else's chat.
+    """
+
+    __tablename__ = "tickets"
+
+    id = Column(String, primary_key=True, index=True)
+    title = Column(String, nullable=False)
+    body = Column(Text, nullable=False, default="")
+    # 'open' while it needs attention, 'archived' once an admin marks it done.
+    status = Column(String, nullable=False, default="open", index=True)
+    created_by = Column(String, nullable=True, index=True)  # username; null = auth disabled
+    resolved_at = Column(DateTime, nullable=True)
+    resolved_by = Column(String, nullable=True)
+
+    attachments = relationship(
+        "TicketAttachment", cascade="all, delete-orphan", passive_deletes=True
+    )
+
+
+class TicketAttachment(TimestampMixin, Base):
+    """A frozen copy of one chat transcript attached to a ticket."""
+
+    __tablename__ = "ticket_attachments"
+
+    id = Column(String, primary_key=True, index=True)
+    ticket_id = Column(
+        String, ForeignKey("tickets.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    # Kept for reference only — the chat may be gone by the time it's read.
+    session_id = Column(String, nullable=True)
+    session_name = Column(String, nullable=False, default="")
+    message_count = Column(Integer, nullable=False, default=0)
+    # JSON array of {role, content, timestamp?} — the snapshot itself.
+    transcript = Column(Text, nullable=False, default="[]")
+
+
 def _migrate_seed_email_account():
     """If email_accounts is empty and settings.json has legacy flat imap_host/smtp_host
     keys, create a single default account from them so nothing breaks for users who
