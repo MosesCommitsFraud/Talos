@@ -131,7 +131,17 @@ export default function App() {
                       sit above the grain and read as a different colour than
                       the chat background it is meant to match. */}
                   <IncognitoToggle />
-                  <div className="shrink-0">
+                  <div className="relative shrink-0">
+                    {/* Mirror of the header fade, shorter: messages dissolve
+                        into the background instead of running into the
+                        composer. Unlayered for the same reason (see below). */}
+                    <div
+                      className="pointer-events-none absolute inset-x-0 bottom-full h-6"
+                      style={{
+                        background:
+                          'linear-gradient(to top, var(--background) 35%, rgb(from var(--background) r g b / 0) 100%)',
+                      }}
+                    />
                     <PendingQuestion />
                     <Composer />
                   </div>
