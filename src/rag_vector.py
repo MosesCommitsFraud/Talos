@@ -1639,6 +1639,21 @@ class VectorRAG:
                     ranked.append(c)
             if ranked:
                 self._last_rerank_error = ""
+                # Sort before truncating. A Cohere-style /rerank endpoint returns
+                # results already sorted by relevance, but a /score-style one
+                # returns them in INPUT order with scores attached — and then
+                # `[:k]` keeps the first k *retrieval* hits instead of the best k,
+                # silently turning the reranker into a no-op that only relabels
+                # scores. Everything downstream (rerank_min gate, emission order in
+                # ChatProcessor.retrieve) trusts this order, so normalize it here.
+                # None scores sort last: they carry no relevance signal.
+                ranked.sort(
+                    key=lambda c: (
+                        c.get("rerank_score") is not None,
+                        float(c.get("rerank_score") or 0.0),
+                    ),
+                    reverse=True,
+                )
                 return ranked[:k]
             self._last_rerank_error = "Rerank response contained no ranked results"
         except Exception as e:

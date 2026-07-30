@@ -1144,10 +1144,23 @@ async def do_search_knowledge(content: str, owner: Optional[str] = None) -> Dict
     # is not a licence to drop the marker.
     from src.prompt_security import UNTRUSTED_CONTEXT_HEADER
 
+    # The `[filename]` label on each section reads like a path, and the model has
+    # a read_file tool that takes paths — so it tries to open the document to get
+    # the parts retrieval didn't return, burns rounds on `not found`, and answers
+    # from the web instead of the knowledge base. Say plainly that the label is
+    # not a path, and point at the move that actually works. Adjacent to the data
+    # (like the figure-embed rule), because a distant system line doesn't hold.
+    # Outside the SUPPLIED_CONTEXT markers: this is our instruction, not
+    # retrieved text, and must not sit where untrusted content could imitate it.
     return {
         "output": (
             f"{UNTRUSTED_CONTEXT_HEADER}\n"
             "Source: retrieved documents\n\n"
+            "The [name] on each section identifies the indexed document it came "
+            "from. It is a label, NOT a file path: these documents live only in "
+            "the search index, so read_file/glob/ls cannot open them and will "
+            "report 'not found'. To see more of a document, call search_knowledge "
+            "again with wording aimed at the part you want.\n\n"
             "<<<SUPPLIED_CONTEXT>>>\n"
             f"{block}\n"
             "<<<END_SUPPLIED_CONTEXT>>>"
