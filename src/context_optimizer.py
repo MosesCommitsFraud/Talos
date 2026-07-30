@@ -52,6 +52,60 @@ PRESSURE_CEILING = 0.90
 RELAXED_COMPRESS_CHARS = 16_000
 RELAXED_TARGET_CHARS = 12_000
 
+# --- Tools whose output is never compressed ----------------------------------
+# Compression trades fidelity for room: head/tail cuts through the MIDDLE of an
+# output and the model only recovers it by spending a round on expand_output.
+# That trade is wrong for three kinds of tool:
+#
+#   1. Verbatim instructions (browse_skills, read_skill) — compressing the
+#      procedure strips the steps the tool exists to deliver.
+#   2. The recovery path itself (expand_output) — compressing it re-stores the
+#      expansion under a new id, so the model expands the expansion forever and
+#      never reaches the content.
+#   3. Retrieval (search_knowledge, web_fetch, web_search) — the retrieved text
+#      IS the answer's evidence, and the model cannot re-derive the dropped
+#      middle from anywhere. A truncated RAG hit reads as complete, so the model
+#      fills the hole with a plausible invention. search_knowledge matters most:
+#      it is the ONLY tool here with no upstream output cap (its size comes from
+#      top-k × parent-chunk size and routinely exceeds the relaxed 16k floor),
+#      which is exactly why it was the one that broke.
+#
+# Deliberately NOT exempt — for these, compression is the correct behaviour and
+# a flat exemption would trade a real overflow for a fidelity gain that isn't
+# needed:
+#   bash / python / run_cell / query_sql are capped at MAX_OUTPUT_CHARS (10k)
+#   before they get here, and read_file at MAX_READ_CHARS (20k). 10k is below
+#   the relaxed 16k floor, so they are only ever compressed once pressure is
+#   genuinely high and the floor has interpolated down — the point at which the
+#   alternative is overflowing the window. Their compressors also match their
+#   shape (log-run collapsing, JSON array crushing, both of which annotate what
+#   they removed), and the model can always re-run a narrower command, a LIMIT'd
+#   query, or a targeted grep. api_call is the JSON crusher's main case.
+NEVER_COMPRESS_TOOLS = frozenset(
+    {
+        "browse_skills",
+        "read_skill",
+        "expand_output",
+        "search_knowledge",
+        "web_fetch",
+        "web_search",
+    }
+)
+
+# Ceiling on the exemption. search_knowledge has no upstream cap at all — its
+# size is top-k × parent-chunk size, so a wide retrieval with large parents can
+# run to six figures of characters. Passing that through whole would trade a
+# truncated answer for a blown context window, which is worse. Above this,
+# exempt tools are compressed like anything else (still reversible via the
+# store). Set well clear of a normal multi-hit retrieval (~19k observed) so the
+# ordinary case is untouched.
+EXEMPTION_CEILING_CHARS = 48_000
+
+# expand_output is exempt without any ceiling: it is the recovery path, and
+# compressing it is the loop this list exists to prevent. Its own page size
+# (EXPAND_PAGE_CHARS) is what bounds it.
+ALWAYS_EXEMPT_TOOLS = frozenset({"expand_output"})
+
 # Reversible store: id -> {"text", "tool"}. Bounded so a long-running server
 # can't leak memory; oldest entries are evicted first.
 _STORE_MAX_ENTRIES = 200
@@ -60,8 +114,13 @@ _store: "OrderedDict[str, dict]" = OrderedDict()
 _store_total_chars = 0
 _store_lock = threading.Lock()
 
-# How much an expand_output call returns per page.
-EXPAND_PAGE_CHARS = 18_000
+# How much an expand_output call returns per page. Kept below
+# RELAXED_COMPRESS_CHARS as belt-and-braces: the exemption in
+# optimize_tool_output is what actually prevents an expansion from being
+# re-compressed, but a page that is smaller than the gentlest compression floor
+# cannot trigger it even if that exemption is ever lost. At the old 18_000 every
+# full page was guaranteed to exceed the 16_000 floor.
+EXPAND_PAGE_CHARS = 15_000
 
 
 def compression_enabled() -> bool:
@@ -250,10 +309,11 @@ def optimize_tool_output(
 
     if len(text) < min_compress_chars:
         return text
-    # Skill tools deliver the procedure the model is required to follow verbatim;
-    # compressing them (head/tail + summary) strips the very steps they exist to
-    # provide. Always pass skill output through in full.
-    if tool_name in ("browse_skills", "read_skill"):
+    # Instructions, the recovery path, and retrieved evidence are never
+    # compressed — see NEVER_COMPRESS_TOOLS for why each one is on the list.
+    if tool_name in ALWAYS_EXEMPT_TOOLS:
+        return text
+    if tool_name in NEVER_COMPRESS_TOOLS and len(text) <= EXEMPTION_CEILING_CHARS:
         return text
     if not compression_enabled():
         return text
@@ -286,6 +346,19 @@ def optimize_tool_output(
     return compressed + marker
 
 
+# A page request, however the model phrases it: "2", "page 2", "p2", "Seite 2",
+# "page: 2", "#2". The header tells it to "pass a page number", so `page 2` is
+# the natural thing to write — and it used to fall through to search mode and
+# come back "No lines matching 'page 1'", costing rounds for nothing.
+_PAGE_ARG_RE = re.compile(r"^(?:(?:page|pg|p|seite|s)\s*[:#]?\s*)?(\d+)$", re.IGNORECASE)
+
+
+def _page_number(arg: str) -> Optional[int]:
+    """Page number if `arg` requests one, else None (meaning: search term)."""
+    m = _PAGE_ARG_RE.match((arg or "").strip().strip("#"))
+    return int(m.group(1)) if m else None
+
+
 def do_expand_output(content: str) -> dict:
     """`expand_output` tool implementation.
 
@@ -310,15 +383,22 @@ def do_expand_output(content: str) -> dict:
         }
 
     text = entry["text"]
+    requested_page = _page_number(arg)
+    total_pages = max(1, -(-len(text) // EXPAND_PAGE_CHARS))
 
     # Search mode: return matching lines with a little context.
-    if arg and not arg.isdigit():
+    if arg and requested_page is None:
         needle = arg.lower()
         src_lines = text.split("\n")
         hits = [i for i, l in enumerate(src_lines) if needle in l.lower()]
         if not hits:
             return {
-                "output": f"No lines matching '{arg}' in stored output {oid} ({len(text):,} chars total).",
+                "output": (
+                    f"No lines matching '{arg}' in stored output {oid} "
+                    f"({len(text):,} chars total). It has {total_pages} page(s) — "
+                    f"put a page number on line 2 (e.g. `1`) to read it in full, "
+                    f"or try a different search term."
+                ),
                 "exit_code": 0,
             }
         chunks, last_end = [], -1
@@ -337,14 +417,18 @@ def do_expand_output(content: str) -> dict:
         }
 
     # Page mode.
-    page = max(1, int(arg)) if arg.isdigit() else 1
-    total_pages = max(1, -(-len(text) // EXPAND_PAGE_CHARS))
-    page = min(page, total_pages)
+    page = min(max(1, requested_page or 1), total_pages)
     start = (page - 1) * EXPAND_PAGE_CHARS
     body = text[start : start + EXPAND_PAGE_CHARS]
     header = f"Stored output {oid} ({entry.get('tool') or 'tool'}, {len(text):,} chars) — page {page}/{total_pages}:"
-    if total_pages > 1:
+    if page < total_pages:
+        # Name the exact next call. A model that is told only "pages exist" tends
+        # to treat one page as the whole document and fill the rest from
+        # guesswork; the remaining pages are content it has not read.
         header += (
-            f" (pass a page number 1-{total_pages} on line 2 for other pages, or a search term)"
+            f"\n[Page {page} of {total_pages}. This is PARTIAL — pages "
+            f"{page + 1}-{total_pages} are content you have NOT seen. To continue, "
+            f"call expand_output again with `{oid}` on line 1 and `{page + 1}` on "
+            f"line 2. Do not describe the unread pages until you have read them.]"
         )
     return {"output": f"{header}\n{body}", "exit_code": 0}

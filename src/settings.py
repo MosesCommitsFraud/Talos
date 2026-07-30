@@ -192,10 +192,37 @@ def load_settings() -> dict:
     return merged
 
 
+def _raw_saved_settings() -> dict:
+    """The settings file as written, WITHOUT defaults merged in."""
+    try:
+        with open(SETTINGS_FILE, "r", encoding="utf-8") as f:
+            saved = json.load(f)
+        return saved if isinstance(saved, dict) else {}
+    except (FileNotFoundError, PermissionError, json.JSONDecodeError, ValueError):
+        return {}
+
+
 def save_settings(settings: dict):
-    """Persist settings to disk (atomic; see core.atomic_io)."""
+    """Persist settings to disk (atomic; see core.atomic_io).
+
+    Default-valued keys that were not already in the file are dropped. Callers
+    overwhelmingly do ``settings = load_settings(); settings[k] = v;
+    save_settings(settings)``, and load_settings merges all of
+    DEFAULT_SETTINGS — so without this prune, every save rewrites the entire
+    default set into the file. That is how `agent_input_token_budget` ended up
+    persisted at its 6000 default by an unrelated RAG config save. Keys the
+    user really did set (present with a non-default value, or already in the
+    file) are preserved untouched.
+    """
     from core.atomic_io import atomic_write_json
 
+    if isinstance(settings, dict):
+        previously_saved = _raw_saved_settings()
+        settings = {
+            k: v
+            for k, v in settings.items()
+            if k in previously_saved or k not in DEFAULT_SETTINGS or v != DEFAULT_SETTINGS[k]
+        }
     atomic_write_json(SETTINGS_FILE, settings, indent=2)
     _invalidate_caches()
 
@@ -206,17 +233,29 @@ def get_setting(key: str, default: Any = None) -> Any:
 
 
 def is_setting_overridden(key: str) -> bool:
-    """True if ``key`` is explicitly present in the saved settings file.
+    """True if ``key`` is saved with a value that DIFFERS from its default.
 
     ``load_settings`` merges DEFAULT_SETTINGS with the saved file, so a value
     equal to its default is indistinguishable from "never set" via get_setting.
     Callers that need to treat an explicit user choice differently from the
     default (e.g. adaptive budgets) use this to read the raw saved file.
+
+    Presence alone is NOT enough, because it does not imply intent: several
+    routes persist settings as ``save_settings(load_settings())``, which writes
+    every merged DEFAULT_SETTINGS key to disk. Saving unrelated RAG or SQL
+    config therefore used to make `agent_input_token_budget` look explicit at
+    its 6000 default — which pinned the input budget to 6000 on a 262k model,
+    held tool-output compression at full aggression forever, and trimmed
+    history to 6000 tokens. A value equal to the default is treated as "not
+    overridden": it selects the same behaviour either way, so the only thing
+    lost is the false intent signal.
     """
     try:
         with open(SETTINGS_FILE, "r", encoding="utf-8") as f:
             saved = json.load(f)
-        return isinstance(saved, dict) and key in saved
+        if not isinstance(saved, dict) or key not in saved:
+            return False
+        return saved[key] != DEFAULT_SETTINGS.get(key)
     except (FileNotFoundError, json.JSONDecodeError):
         return False
 

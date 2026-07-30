@@ -386,6 +386,54 @@ async def maybe_compact(
     older = convo_msgs[:split_point]
     recent = convo_msgs[split_point:]
 
+    summary = await _summarize_older(older, system_msgs, endpoint_url, model, headers)
+    if summary is None:
+        return system_msgs + recent, context_length, False
+
+    compacted = system_msgs + [_summary_message(summary)] + recent
+
+    # Update persisted history using the conversation split point. Runtime
+    # messages may include transient preface system messages that are not in
+    # session.history, so _update_session_history maps by non-system messages.
+    # Pass the BARE summary — _update_session_history adds its own header.
+    _update_session_history(session, split_point, summary)
+
+    new_used = estimate_tokens(compacted)
+    logger.info(
+        f"Compacted: {used} -> {new_used} tokens "
+        f"({len(older)} messages summarized, {len(recent)} kept)"
+    )
+
+    return compacted, context_length, True
+
+
+def _summary_message(summary: str) -> Dict:
+    """Wrap a bare summary as the runtime system message.
+
+    Kept separate from the bare text because `_update_session_history` applies
+    its own `[Conversation summary]` header to what it persists — handing it the
+    already-wrapped content would nest two headers.
+    """
+    return {
+        "role": "system",
+        "content": f"[Conversation summary — earlier messages were compacted]\n{summary}",
+    }
+
+
+async def _summarize_older(
+    older: List[Dict],
+    system_msgs: List[Dict],
+    endpoint_url: str,
+    model: str,
+    headers: Optional[Dict] = None,
+) -> Optional[str]:
+    """Summarize `older` into bare summary text, or None on failure.
+
+    Shared by the between-turns path (`maybe_compact`) and the mid-turn path
+    (`compact_mid_turn`) so both summarize identically and the numbering of
+    successive summaries stays consistent. Returns the text, not a message:
+    the runtime message and the persisted history entry get different headers.
+    """
     # Build the text to summarize
     convo_text = "\n".join(
         f"{msg.get('role', 'user').upper()}: {_content_as_text(msg.get('content'))[:2000]}"
@@ -394,7 +442,7 @@ async def maybe_compact(
 
     # Count prior compactions from existing summary messages
     compaction_count = sum(
-        1 for m in system_msgs if "[Conversation summary" in m.get("content", "")
+        1 for m in system_msgs if "[Conversation summary" in str(m.get("content") or "")
     )
 
     # Use utility model if configured, otherwise fall back to session model
@@ -423,7 +471,7 @@ async def maybe_compact(
         )
     except Exception as e:
         logger.error(f"Compaction summary failed: {e}")
-        return system_msgs + recent, context_length, False
+        return None
 
     # Carry any figures the model showed in the summarized turns into the kept
     # summary verbatim, so they survive compaction instead of being flattened
@@ -434,25 +482,119 @@ async def maybe_compact(
             summary + "\n\n### Figures shown earlier (still relevant)\n" + "\n\n".join(figures)
         )
 
-    summary_msg = {
-        "role": "system",
-        "content": f"[Conversation summary — earlier messages were compacted]\n{summary}",
-    }
+    return summary
 
-    compacted = system_msgs + [summary_msg] + recent
 
-    # Update persisted history using the conversation split point. Runtime
-    # messages may include transient preface system messages that are not in
-    # session.history, so _update_session_history maps by non-system messages.
-    _update_session_history(session, split_point, summary)
+# ── Mid-turn compaction ──
+#
+# maybe_compact runs BETWEEN turns. A single agent turn can outgrow the window
+# on its own (a dozen rounds each pulling a large retrieval), and between-turn
+# compaction never gets a chance to help — the per-round trim in the agent loop
+# fires instead, which DROPS old messages rather than summarizing them. This is
+# the mid-turn equivalent: summarize and carry on with the same query.
 
-    new_used = estimate_tokens(compacted)
-    logger.info(
-        f"Compacted: {used} -> {new_used} tokens "
-        f"({len(older)} messages summarized, {len(recent)} kept)"
+# A turn may compact itself at most this many times. Without a cap, a turn whose
+# context stays above the threshold after compacting (because the recent half is
+# itself enormous) would compact every round, spending an LLM call each time.
+MAX_MID_TURN_COMPACTIONS = 3
+
+
+def _safe_split_index(msgs: List[Dict], preferred: int, result_prefix: str = "") -> Optional[int]:
+    """First index at or after `preferred` where the list can be cut without
+    orphaning a tool result from the assistant message that requested it.
+
+    Cutting mid-batch is what breaks the NEXT request: OpenAI-compatible servers
+    reject a `role:"tool"` message that does not follow an assistant message
+    carrying `tool_calls`. `_sanitize_tool_messages` can repair that after the
+    fact by DROPPING messages, but choosing a clean cut keeps the content.
+    """
+    for i in range(max(0, preferred), len(msgs)):
+        msg = msgs[i]
+        if msg.get("role") == "tool":
+            continue  # inside a tool batch
+        prev = msgs[i - 1] if i > 0 else None
+        if prev is not None and prev.get("role") == "assistant" and prev.get("tool_calls"):
+            continue  # would separate a batch from its parent
+        # Fenced-tool path: results arrive as a synthetic user message that
+        # belongs to the assistant message before it.
+        if result_prefix and str(msg.get("content") or "").startswith(result_prefix):
+            continue
+        return i
+    return None
+
+
+async def compact_mid_turn(
+    endpoint_url: str,
+    model: str,
+    messages: List[Dict],
+    headers: Optional[Dict] = None,
+    pinned: Optional[List[Dict]] = None,
+    result_prefix: str = "",
+) -> tuple:
+    """Summarize the older half of an in-flight turn. Returns (messages, did_compact).
+
+    Differs from `maybe_compact` in three ways that matter mid-turn:
+
+    * It does NOT touch ``session.history``. The current turn has not been
+      persisted yet, so the runtime-to-history index mapping that
+      ``_update_session_history`` relies on does not hold — writing through it
+      here would corrupt the stored conversation.
+    * It refuses to cut inside a tool batch (see `_safe_split_index`).
+    * ``pinned`` messages are kept verbatim. The caller pins the user's original
+      request, so a turn that compacts itself never loses the task it is working
+      on — the failure that would make this worse than trimming.
+
+    The caller owns the threshold decision; this function always compacts.
+    """
+    system_msgs: List[Dict] = []
+    convo_msgs: List[Dict] = []
+    pinned_ids = {id(m) for m in (pinned or [])}
+    for msg in messages:
+        if id(msg) in pinned_ids:
+            continue  # re-inserted below, never summarized
+        if msg.get("role") == "system":
+            system_msgs.append(msg)
+        else:
+            convo_msgs.append(msg)
+
+    if len(convo_msgs) < 4:
+        return messages, False
+
+    split_point = _safe_split_index(convo_msgs, len(convo_msgs) // 2, result_prefix)
+    # Nothing cuttable at or after the midpoint (e.g. the whole back half is one
+    # giant tool batch) — leave it to the caller's trim rather than cutting badly.
+    if split_point is None or split_point >= len(convo_msgs) or split_point == 0:
+        logger.info("[compact] mid-turn: no safe split point, skipping")
+        return messages, False
+
+    older = convo_msgs[:split_point]
+    recent = convo_msgs[split_point:]
+
+    summary = await _summarize_older(older, system_msgs, endpoint_url, model, headers)
+    if summary is None:
+        return messages, False
+
+    before = estimate_tokens(messages)
+    compacted = _sanitize_tool_messages(
+        system_msgs + [_summary_message(summary)] + list(pinned or []) + recent
     )
+    after = estimate_tokens(compacted)
+    if after >= before:
+        # Summarizing made it bigger (tiny history, verbose summary). Keep the
+        # original rather than paying tokens for nothing.
+        logger.info(
+            "[compact] mid-turn: summary was not smaller (%d -> %d), skipping", before, after
+        )
+        return messages, False
 
-    return compacted, context_length, True
+    logger.info(
+        "[compact] mid-turn: %d -> %d tokens (%d messages summarized, %d kept)",
+        before,
+        after,
+        len(older),
+        len(recent),
+    )
+    return compacted, True
 
 
 def _update_session_history(session, split_point: int, summary: str):

@@ -1,6 +1,7 @@
 """Tests for src/context_optimizer.py (headroom-style tool output compression)."""
 
 import json
+import re
 
 import pytest
 
@@ -130,6 +131,145 @@ def test_expand_output_full_and_search_and_paging():
 def test_expand_output_unknown_id():
     result = co.do_expand_output("out_doesnotexist")
     assert "error" in result
+
+
+# ── The expand_output recursion ──
+#
+# The regression: expanding a compressed output produced a result large enough
+# to be compressed and re-stored, so the model expanded the expansion — 8 rounds
+# of out_a41c8662 -> out_f4ef04cc -> out_3bffd6e5 before giving up and inventing
+# the content it never reached.
+
+
+def test_expand_output_is_never_recompressed():
+    text = "START\n" + "".join(f"retrieved line {i}\n" for i in range(4000)) + "END"
+    out = co.optimize_tool_output(
+        text, tool_name="expand_output", used_tokens=190_000, budget_tokens=200_000
+    )
+    assert out == text
+    assert "Output compressed" not in out
+
+
+def test_expand_page_cannot_reach_the_gentlest_compression_floor():
+    """Defence in depth: even if the exemption were lost, a full page must be
+    too small for the relaxed floor to catch it."""
+    assert co.EXPAND_PAGE_CHARS < co.RELAXED_COMPRESS_CHARS
+
+
+def test_expanding_a_compressed_output_round_trips_in_one_hop():
+    original = "HEAD-MARKER\n" + "".join(f"row {i}\n" for i in range(6000)) + "TAIL-MARKER"
+    compressed = co.optimize_tool_output(
+        original, tool_name="api_call", used_tokens=190_000, budget_tokens=200_000
+    )
+    oid = re.search(r"`(out_[0-9a-f]{8})`", compressed).group(1)
+
+    expanded = co.do_expand_output(oid)["output"]
+    # The expansion is real content, not another "Stored output" wrapper.
+    assert "HEAD-MARKER" in expanded
+    assert expanded.count("Stored output") == 1
+    # And it survives the optimizer untouched, so no second id is minted.
+    assert (
+        co.optimize_tool_output(
+            expanded, tool_name="expand_output", used_tokens=190_000, budget_tokens=200_000
+        )
+        == expanded
+    )
+
+
+# ── Which tools are exempt ──
+
+
+@pytest.mark.parametrize(
+    "tool", ["browse_skills", "read_skill", "expand_output", "search_knowledge", "web_fetch"]
+)
+def test_retrieval_and_instruction_tools_pass_through(tool):
+    text = "A\n" + "".join(f"passage line {i}\n" for i in range(1500)) + "Z"
+    assert co.RELAXED_COMPRESS_CHARS < len(text) < co.EXEMPTION_CEILING_CHARS
+    out = co.optimize_tool_output(
+        text, tool_name=tool, used_tokens=190_000, budget_tokens=200_000
+    )
+    assert out == text
+
+
+@pytest.mark.parametrize("tool", ["bash", "python", "run_cell", "query_sql", "api_call"])
+def test_capped_tools_still_compress_under_real_pressure(tool):
+    """These are capped upstream (10k), so they only reach compression when the
+    context is genuinely full — exactly when it's the right trade."""
+    text = "START-MARKER\n" + "".join(f"line {i}\n" for i in range(3000)) + "END-MARKER"
+    out = co.optimize_tool_output(
+        text, tool_name=tool, used_tokens=190_000, budget_tokens=200_000
+    )
+    assert len(out) < len(text)
+    assert "expand_output" in out
+
+
+def test_exemption_has_a_ceiling():
+    """search_knowledge has no upstream cap; an enormous retrieval must not
+    blow the window just because the tool is on the exempt list."""
+    text = "x" * (co.EXEMPTION_CEILING_CHARS + 50_000)
+    out = co.optimize_tool_output(
+        text, tool_name="search_knowledge", used_tokens=190_000, budget_tokens=200_000
+    )
+    assert len(out) < len(text)
+    assert "expand_output" in out
+
+
+def test_expand_output_has_no_ceiling():
+    text = "y" * (co.EXEMPTION_CEILING_CHARS + 50_000)
+    assert (
+        co.optimize_tool_output(
+            text, tool_name="expand_output", used_tokens=190_000, budget_tokens=200_000
+        )
+        == text
+    )
+
+
+# ── Page-argument parsing ──
+
+
+@pytest.mark.parametrize(
+    "arg,expected",
+    [
+        ("2", 2),
+        ("page 2", 2),
+        ("page2", 2),
+        ("p2", 2),
+        ("Seite 3", 3),
+        ("#4", 4),
+        ("page: 5", 5),
+        ("needle", None),
+        ("", None),
+        ("page", None),
+    ],
+)
+def test_page_argument_forms(arg, expected):
+    assert co._page_number(arg) == expected
+
+
+def test_page_word_is_not_treated_as_a_search_term():
+    """`page 1` used to fall through to search mode and return "No lines
+    matching 'page 1'", burning rounds while the content stayed unreachable."""
+    original = "\n".join(f"line {i}" for i in range(4000))
+    oid = co._store_original(original, "search_knowledge")
+    out = co.do_expand_output(f"{oid}\npage 1")["output"]
+    assert "No lines matching" not in out
+    assert "page 1/" in out
+
+
+def test_partial_page_says_so_and_names_the_next_call():
+    original = "\n".join(f"line {i}" for i in range(8000))
+    oid = co._store_original(original, "search_knowledge")
+    out = co.do_expand_output(f"{oid}\n1")["output"]
+    assert "PARTIAL" in out
+    assert oid in out
+    assert "`2`" in out
+
+
+def test_failed_search_points_at_paging():
+    original = "\n".join(f"line {i}" for i in range(4000))
+    oid = co._store_original(original, "search_knowledge")
+    out = co.do_expand_output(f"{oid}\nzzz-not-present")["output"]
+    assert "page" in out.lower()
 
 
 def test_store_eviction_bounded():

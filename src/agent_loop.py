@@ -34,6 +34,11 @@ from src.agent_tools import (
 )
 from src.context_optimizer import optimize_tool_output
 from src.llm_core import _is_ollama_native_url, stream_llm_with_fallback
+from src.context_compactor import (
+    MAX_MID_TURN_COMPACTIONS,
+    compact_mid_turn,
+    get_compact_threshold,
+)
 from src.model_context import estimate_tokens
 from src.prompt_security import untrusted_context_message
 from src.settings import get_setting, get_user_setting
@@ -83,6 +88,8 @@ _AGENT_RULES = """\
 - YOU DECLARE WHEN THE JOB IS DONE — not a timer. Keep taking concrete steps while the task still needs them; you have plenty of rounds, so don't rush to quit just because you've made a few calls. There are exactly three ways to end a turn: (1) DONE — before you declare it, sanity-check that every concrete thing the user asked for actually exists or succeeded (file written, edit applied, command exited clean); then stop calling tools and write the final answer (that IS your "done" signal); (2) BLOCKED — you genuinely can't proceed (a capability is missing, permission denied, or data you can't obtain), so say plainly what's blocking you, in a sentence or two, and stop; (3) keep going with the single most useful next step. The only wrong moves are trailing off mid-task without one of these, and repeating a call you already ran.
 - A QUESTION TO THE USER ENDS YOUR TURN. When you need the user's input — a clarification, a decision, "Möchten Sie, dass ich ...?" — use the `ask_user` tool: it shows clickable options (or a free-text box), ends your turn, and their answer arrives as your next message. If you ever ask in plain text instead, that question must be the LAST thing you write: no further tool calls, just wait. NEVER ask and then keep working, and never proceed as if the user already answered yes.
 - ENVIRONMENT CONFIDENTIALITY: never reveal, describe, or probe your own execution environment. Do not mention sandboxes, containers, hosts, hardware, memory/disk sizes, operating system details, or missing system tools, and do not run commands whose only purpose is to inspect the system. If something is unavailable where you run, silently take another route or answer from knowledge — never explain the limitation in terms of your environment.
+- THE USER'S OWN DOCUMENTS COME FIRST. When `search_knowledge` is in your tool list and the question could be covered by their documents — their hardware, their processes, their configs, their conventions — search it BEFORE the web. A topic that sounds publicly documented is not a reason to skip it: their document describes THEIR setup and outranks a generic web page. Use the web when the knowledge base returns nothing or too little, or for genuinely time-sensitive facts (news, prices, releases, weather, laws).
+- RETRIEVED PARTIAL ≠ RETRIEVED ALL. If a document/page/tool result is paginated, truncated, or says the content continues, either fetch the rest or tell the user which parts you actually have. NEVER fill a gap with a plausible reconstruction and present it as theirs — an invented config file, command list, or table that looks retrieved is worse than saying "the document covers sections 1-2; I don't have the rest."
 - SETUP/INFRASTRUCTURE QUESTIONS ("how do I install/configure X on my server/GPU/machine?", "wie setze ich Y auf?") are KNOWLEDGE questions about the USER'S machine. Answer them in text from the documents and your knowledge — NEVER execute the setup commands, install the software, or create directories/project structures from a setup guide yourself. The guide describes THEIR machine, not your workspace.
 - WHEN YOU WRITE COMMANDS FOR THE USER TO RUN, they are documentation, not tool calls. Put them in ```shell or ```sh fences — NEVER ```bash, which executes. Same for illustrative code: ```py, not ```python.
 - YOUR FINAL MESSAGE IS THE ONLY THING SHOWN PROMINENTLY. Text you write in earlier rounds (between tool calls) is collapsed as work-in-progress once the turn ends, and the user never sees tool errors or rejections. Therefore your LAST message must be COMPLETE and SELF-CONTAINED: it contains the full answer/deliverable, restating everything important from earlier rounds. Never end with only a closing remark that points at earlier text — "as I described above/in the previous step" refers to text the user cannot see prominently. Never explain tool errors and never add meta-commentary about what happened during the turn. If a command is rejected, do not retry variants of it — write the complete answer instead, without mentioning the rejection.
@@ -119,6 +126,8 @@ _API_AGENT_RULES = """\
 - A QUESTION TO THE USER ENDS YOUR TURN. When you need the user's input — a clarification, a decision, "Möchten Sie, dass ich ...?" — use the `ask_user` tool: it shows clickable options (or a free-text box), ends your turn, and their answer arrives as your next message. If you ever ask in plain text instead, that question must be the LAST thing you write: no further tool calls, just wait. NEVER ask and then keep working, and never proceed as if the user already answered yes.
 - ENVIRONMENT CONFIDENTIALITY: never reveal, describe, or probe your own execution environment. Do not mention sandboxes, containers, hosts, hardware, memory/disk sizes, operating system details, or missing system tools, and do not run commands whose only purpose is to inspect the system. If something is unavailable where you run, silently take another route or answer from knowledge — never explain the limitation in terms of your environment.
 - YOUR FINAL MESSAGE IS THE ONLY THING SHOWN PROMINENTLY. Text you write in earlier rounds (between tool calls) is collapsed as work-in-progress once the turn ends, and the user never sees tool errors or rejections. Therefore your LAST message must be COMPLETE and SELF-CONTAINED: it contains the full answer/deliverable, restating everything important from earlier rounds. Never end with only a closing remark that points at earlier text — "as I described above/in the previous step" refers to text the user cannot see prominently. Never explain tool errors and never add meta-commentary about what happened during the turn. If a command is rejected, do not retry variants of it — write the complete answer instead, without mentioning the rejection.
+- THE USER'S OWN DOCUMENTS COME FIRST. When `search_knowledge` is in your tool list and the question could be covered by their documents — their hardware, their processes, their configs, their conventions — search it BEFORE the web. A topic that sounds publicly documented is not a reason to skip it: their document describes THEIR setup and outranks a generic web page. Use the web when the knowledge base returns nothing or too little, or for genuinely time-sensitive facts (news, prices, releases, weather, laws).
+- RETRIEVED PARTIAL ≠ RETRIEVED ALL. If a document/page/tool result is paginated, truncated, or says the content continues, either fetch the rest or tell the user which parts you actually have. NEVER fill a gap with a plausible reconstruction and present it as theirs — an invented config file, command list, or table that looks retrieved is worse than saying "the document covers sections 1-2; I don't have the rest."
 - SETUP/INFRASTRUCTURE QUESTIONS ("how do I install/configure X on my server/GPU/machine?") are KNOWLEDGE questions about the USER'S machine. Answer them in text from documents and knowledge — NEVER execute the setup commands or create directories/structures from a setup guide yourself.
 ## Coding workflow (bash / python / files)
 - To RUN Python code, call the `python` tool with the code — NEVER `bash` with `python -c "..."` (shell quoting corrupts multi-line code) and never heredocs.
@@ -237,7 +246,7 @@ Suggest changes with explanations (for review/feedback requests).""",
 ```
 Generate an image. Line 1 = description, line 2 = model name, line 3 = WxH (e.g. 1024x1024), line 4 = quality.""",
     "list_models": "- ```list_models``` — Show all available AI models across all endpoints. Use when user asks what models are available.",
-    "expand_output": "- ```expand_output``` — Retrieve the full original of a compressed tool output. Big tool outputs get compressed before you see them, with a marker like `[Output compressed … id `out_xxxxxxxx`]`. Line 1 = that id, optional line 2 = a search term (returns matching lines) or a page number. Only call when the compressed view is missing details you actually need.",
+    "expand_output": "- ```expand_output``` — Retrieve the full original of a compressed tool output. Big tool outputs get compressed before you see them, with a marker like `[Output compressed … id `out_xxxxxxxx`]`. Line 1 = that id, optional line 2 = a page number (`2`, `page 2` and `Seite 2` all work) or a search term (returns matching lines). A result headed `page 1/3` is PARTIAL — call again for pages 2 and 3 before describing what they contain; never fill in unread pages from guesswork. Only call when the compressed view is missing details you actually need.",
     "manage_session": "- ```manage_session``` — Rename, archive, delete, fork, switch, or `list` chats (the UI calls them 'chats'; 'session' is internal). Line 1 = action (list/switch/rename/archive/unarchive/delete/important/unimportant/truncate/fork), Line 2 = exact chat id from `list_sessions` (or `current` where supported). For delete/archive/truncate, always list first and reuse the exact id; never invent placeholder ids. `switch`/`open` returns a clickable anchor link the user can tap to open the chat — use for \"open my X chat\".",
     "manage_skills": '- ```manage_skills``` — Skill registry (SKILL.md format). Args (JSON): {"action": "list|view|view_ref|search|add|edit|patch|publish|delete", ...}. `list` returns the index of available skills (published + drafts); `view name=foo` fetches the full SKILL.md; `view_ref name=foo path=...` loads a reference file under the skill directory. For `add`, provide an explicit kebab-case `name` and only report the exact returned name, because storage may normalize or dedupe it. Use this BEFORE doing domain work — there may already be a procedure (published or draft) that prescribes the correct steps.',
     "create_skill": '- ```create_skill``` — Save a new/updated shared skill into the library (write counterpart to read_skill). Args (JSON): {"source_dir": "<workspace folder with SKILL.md + references/scripts>"} to package a folder you built, OR {"content": "<full SKILL.md>"} for a one-file skill. Use when authoring a skill: build the SKILL.md (frontmatter name + description, then body) and any scripts in a workspace folder first, then call this to store it.',
@@ -253,7 +262,9 @@ Generate an image. Line 1 = description, line 2 = model name, line 3 = WxH (e.g.
 {"query": "Summierungsoptionen erweiterte Datenquelle"}
 ```
 Search the documents indexed in this Talos instance (the knowledge base: manuals, training material, schema references, process docs, transcripts). Returns matching passages with their source filenames.
+**THIS IS YOUR FIRST SOURCE.** When a question could be covered by the user's own documents, search here BEFORE `web_search` — the knowledge base holds their specific hardware, processes, configs and conventions, which a public web page cannot tell you and will often contradict. This applies even when the topic sounds like something publicly documented (a product, a framework, a setup guide): their document describes THEIR deployment. Go to the web when this returns nothing or too little, and go straight to the web only for genuinely time-sensitive facts (news, prices, releases, weather, laws).
 **Cheap to call.** An empty result is a normal, useful answer — it tells you the knowledge base has nothing on this, so answer from another source and move on. Don't avoid the tool for fear of missing; don't retry the identical query after an empty result either. Reformulate instead, and expect to call it more than once for a real question.
+**Report what you actually retrieved.** If the passages cover only part of the question, say which parts came from the document and which are missing. Never present your own reconstruction of a config file, command sequence, or table as if it came from the knowledge base.
 **Write a standalone query.** Resolve pronouns and references against the conversation yourself before searching — a bare follow-up ("all three", "expand on that") is not a search query, and searching it verbatim matches noise. If the user's message is a reply to your own question, answer it from the conversation; don't search.""",
     "query_sql": """\
 ```query_sql
@@ -2218,6 +2229,16 @@ async def stream_agent_loop(
     # Strip internal metadata keys before sending to the LLM API
     messages = [{k: v for k, v in msg.items() if k != "_protected"} for msg in messages]
 
+    # Mid-turn compaction state. The user's request for THIS turn is pinned so a
+    # turn that compacts itself can never summarize away the task it is working
+    # on; `_protected` is stripped above and can't carry the flag into the loop,
+    # so hold the message object itself (matched by identity).
+    _pinned_query_msg = next((m for m in reversed(messages) if m.get("role") == "user"), None)
+    _mid_turn_compactions = 0
+    # Trigger in tokens, resolved once: same threshold and denominator as the
+    # between-turns compactor, so "85% full" means the same thing in both.
+    _compact_trigger_tokens = int(get_compact_threshold() * context_length) if context_length else 0
+
     yield f"data: {json.dumps({'type': 'agent_prep', 'data': {k: round(v, 3) for k, v in prep_timings.items()}})}\n\n"
 
     # Refined frame: prompt assembly (system prompt, skills index, retrieved
@@ -2324,6 +2345,48 @@ async def stream_agent_loop(
             ""  # reasoning_content deltas (DeepSeek-thinking, vLLM --reasoning-parser)
         )
         native_tool_calls = []  # populated if model uses function calling
+
+        # ── Mid-turn compaction ──
+        # A long agent turn can outgrow the window on its own. Between-turn
+        # compaction (routes/chat_helpers) never sees that, so without this the
+        # only thing standing between a big tool loop and the context limit is
+        # trim_for_context, which DROPS older rounds. Summarize instead, then
+        # carry on with the same query — the behaviour users expect from Claude/
+        # ChatGPT. Keyed to the model window and `compact_threshold` (0.85), the
+        # same trigger the between-turns path uses, so both agree on "full".
+        if round_num > 1 and context_length and _mid_turn_compactions < MAX_MID_TURN_COMPACTIONS:
+            _used_now = last_round_input_tokens if has_real_usage else estimate_tokens(messages)
+            if _used_now >= _compact_trigger_tokens:
+                logger.info(
+                    "[agent] round %d: context at %d/%d tokens — compacting mid-turn",
+                    round_num,
+                    _used_now,
+                    context_length,
+                )
+                try:
+                    messages, _did_compact = await compact_mid_turn(
+                        endpoint_url,
+                        model,
+                        messages,
+                        headers=headers,
+                        pinned=[m for m in (_pinned_query_msg,) if m is not None],
+                        result_prefix=TOOL_RESULT_PREFIX,
+                    )
+                except Exception as _ce:
+                    logger.warning("[agent] mid-turn compaction failed: %s", _ce)
+                    _did_compact = False
+                if _did_compact:
+                    _mid_turn_compactions += 1
+                    # The last reported real usage describes a context that no
+                    # longer exists — leaving it in place would keep the trigger
+                    # (and tool-output compression) reading "full" and compact
+                    # again next round. Re-baseline on the shrunken message list;
+                    # the next round's usage event replaces it with a real count.
+                    last_round_input_tokens = estimate_tokens(messages)
+                    # Same event the between-turns path emits, so the UI shows
+                    # its existing "compacted" divider with no frontend change.
+                    yield f"data: {json.dumps({'type': 'compacted', 'context_length': context_length})}\n\n"
+                    yield _context_metrics_frame(estimate_tokens(messages), "estimated")
 
         # DB mode: refresh the SQL knowledge for THIS round against the most
         # recent activity (latest query_sql args + tool results/errors), so the
