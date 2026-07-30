@@ -558,6 +558,7 @@ def setup_session_routes(session_manager: SessionManager, config: dict):
         sid: str,
         name: str = Form(None),
         folder: str = Form(None),
+        clear_folder: str = Form(None),
         model: str = Form(None),
         endpoint_url: str = Form(None),
         endpoint_id: str = Form(None),
@@ -571,16 +572,21 @@ def setup_session_routes(session_manager: SessionManager, config: dict):
         if name is not None:
             session_manager.update_session_name(sid, name)
             result["name"] = name
-        # Update folder assignment
-        if folder is not None:
+        # Update folder assignment. Removal ("take this chat out of its folder")
+        # arrives as clear_folder=true rather than an empty `folder` value —
+        # empty form values are too easy to lose on the way here, which left the
+        # remove/delete actions doing nothing while assignment worked fine.
+        wants_clear = str(clear_folder or "").strip().lower() in ("1", "true", "yes", "on")
+        if wants_clear or folder is not None:
+            new_folder = None if (wants_clear or not folder) else folder
             db = SessionLocal()
             try:
                 db_session = db.query(DbSession).filter(DbSession.id == sid).first()
                 if db_session:
-                    db_session.folder = folder if folder else None
+                    db_session.folder = new_folder
                     db_session.updated_at = datetime.utcnow()
                     db.commit()
-                    result["folder"] = folder if folder else None
+                    result["folder"] = new_folder
             finally:
                 db.close()
         # Switch model/endpoint mid-session

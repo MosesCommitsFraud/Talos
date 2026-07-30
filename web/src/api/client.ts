@@ -81,7 +81,12 @@ export async function renameSession(id: string, name: string): Promise<void> {
 export async function setSessionFolder(id: string, folder: string | null): Promise<void> {
   const fd = new FormData();
   fd.set('folder', folder ?? '');
-  await fetch(`/api/session/${id}`, { method: 'PATCH', body: fd, credentials: 'same-origin' });
+  // Taking a chat out of its folder is sent as an explicit flag: an empty
+  // `folder` value is indistinguishable from "field not sent" by the time it
+  // has been through a form parser, so removal quietly did nothing.
+  if (!folder) fd.set('clear_folder', 'true');
+  const res = await fetch(`/api/session/${id}`, { method: 'PATCH', body: fd, credentials: 'same-origin' });
+  if (!res.ok) throw new Error(`setSessionFolder: ${res.status} ${await res.text()}`);
 }
 
 export async function deleteSession(id: string): Promise<void> {

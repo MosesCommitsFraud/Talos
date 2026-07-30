@@ -139,8 +139,12 @@ function SessionRow({ session, folders }: { session: Session; folders: string[] 
   const beginRename = () => { setDraft(session.name); setMode('rename'); };
   const beginNewFolder = () => { setDraft(''); setMode('folder'); };
 
+  // Refresh either way: on failure the list snaps back to what the server
+  // actually has, instead of showing a move that never happened.
   const moveToFolder = (folder: string | null) =>
-    void setSessionFolder(session.id, folder).then(refresh);
+    void setSessionFolder(session.id, folder)
+      .catch((err) => console.error('Talos: moving chat to folder failed', err))
+      .finally(refresh);
 
   const commit = async () => {
     const value = draft.trim();
@@ -148,7 +152,11 @@ function SessionRow({ session, folders }: { session: Session; folders: string[] 
     if (mode === 'rename') {
       if (value && value !== session.name) { await renameSession(session.id, value); refresh(); }
     } else if (mode === 'folder') {
-      if (value && value !== (session.folder ?? '')) { await setSessionFolder(session.id, value); refresh(); }
+      if (value && value !== (session.folder ?? '')) {
+        try { await setSessionFolder(session.id, value); }
+        catch (err) { console.error('Talos: creating folder failed', err); }
+        refresh();
+      }
     }
   };
 
@@ -301,9 +309,14 @@ function FolderGroup({
   // A folder has no row of its own on the server — it exists only as a label on
   // its chats, so renaming/deleting one is a batch update of its members.
   const setFolder = async (target: string | null) => {
-    await Promise.all(members.map((s) => setSessionFolder(s.id, target)));
-    renameFolderPref(name, target);
-    void queryClient.invalidateQueries({ queryKey: ['sessions'] });
+    try {
+      await Promise.all(members.map((s) => setSessionFolder(s.id, target)));
+      renameFolderPref(name, target);
+    } catch (err) {
+      console.error('Talos: updating folder failed', err);
+    } finally {
+      void queryClient.invalidateQueries({ queryKey: ['sessions'] });
+    }
   };
   // Collapsed folders hide their rows' own status labels, so the header carries
   // the most urgent one — otherwise a background turn goes unnoticed.
