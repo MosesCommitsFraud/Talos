@@ -395,8 +395,12 @@ async def maybe_compact(
     # Update persisted history using the conversation split point. Runtime
     # messages may include transient preface system messages that are not in
     # session.history, so _update_session_history maps by non-system messages.
+    # Replayed tool records are non-system runtime messages that have NO history
+    # counterpart either (they are reconstructed from an assistant message's
+    # metadata — see src/history_replay.py), so they must not be counted or the
+    # mapping lands past the real split and truncates stored history wrongly.
     # Pass the BARE summary — _update_session_history adds its own header.
-    _update_session_history(session, split_point, summary)
+    _update_session_history(session, split_point - _synthetic_count(older), summary)
 
     new_used = estimate_tokens(compacted)
     logger.info(
@@ -405,6 +409,22 @@ async def maybe_compact(
     )
 
     return compacted, context_length, True
+
+
+def _synthetic_count(msgs: List[Dict]) -> int:
+    """How many of `msgs` are runtime-only reconstructions with no counterpart
+    in `session.history` (replayed tool records — see src/history_replay.py).
+
+    Anything that counts prompt messages against stored history has to discount
+    these, or the index mapping drifts by however many were spliced in.
+    """
+    from src.history_replay import REPLAY_SOURCE
+
+    return sum(
+        1
+        for m in msgs
+        if isinstance(m, dict) and (m.get("metadata") or {}).get("source") == REPLAY_SOURCE
+    )
 
 
 def _summary_message(summary: str) -> Dict:

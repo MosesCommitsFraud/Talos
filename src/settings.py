@@ -92,6 +92,34 @@ DEFAULT_SETTINGS = {
     # `compute_input_token_budget` in src/context_budget.py.
     "agent_input_token_hard_max": 200_000,
     "agent_stream_timeout_seconds": 300,
+    # Replay past turns' tool calls and outputs into the prompt, so the model
+    # can see what it already did instead of only its own final prose. The data
+    # is already persisted in the assistant message's metadata.tool_events; these
+    # bound how much of it is fed back. See src/history_replay.py.
+    "history_tool_replay_enabled": True,
+    # All four replay caps default to 0 = UNBOUNDED, i.e. replay is lossless.
+    # Capping them is gradual, silent context loss — the thing compaction exists
+    # to replace. Growth is bounded instead by compaction at `compact_threshold`,
+    # which summarizes the older half of the conversation AND prunes those
+    # messages from stored history, so their tool records stop being replayed.
+    # Unbounded also keeps the prompt prefix append-only, which is friendlier to
+    # vLLM prefix caching than a newest-first budget whose contents shift as the
+    # conversation grows.
+    #
+    # Raise them off 0 only if prefill latency becomes the problem: a single
+    # heavy turn (20 rounds × 10k output) is ~200k chars ≈ 60k tokens of replay.
+    # Per generic tool call:
+    "history_tool_output_max_chars": 0,
+    # Per RETRIEVAL call (search_knowledge, web_fetch, web_search). Worth keeping
+    # at least as generous as the generic cap if you do set limits: this output
+    # is the evidence an answer rests on, and re-running a retrieval can return
+    # different passages, so a truncated head invites filling the gap from memory.
+    "history_retrieval_output_max_chars": 0,
+    # Per turn, across all of that turn's calls:
+    "history_tool_turn_max_chars": 0,
+    # Across the whole conversation. When set, it is spent newest-first: older
+    # tool records are dropped whole rather than everything shrinking evenly.
+    "history_tool_total_max_chars": 0,
     # Extra directory roots that read_file / write_file may access, in
     # addition to the built-in project data/ and system temp dirs. Each
     # entry is an absolute path. Sensitive subpaths (.ssh, .gnupg, shell
