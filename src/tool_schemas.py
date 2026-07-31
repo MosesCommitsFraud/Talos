@@ -96,7 +96,10 @@ FUNCTION_TOOL_SCHEMAS = [
                 "needed in the prompt. Results over 200 rows are saved to a CSV in your workspace "
                 "and only a preview is shown — read that file with pandas instead of re-running "
                 "the query to page through rows. Prefer aggregating in SQL (GROUP BY) over "
-                "pulling raw rows you intend to sum yourself."
+                "pulling raw rows you intend to sum yourself. When the same shape of data is "
+                "split across many similarly-named tables (one per year/region/tenant), combine "
+                "them in ONE query with UNION ALL and a literal column naming the source table "
+                "— do not issue one call per table."
             ),
             "parameters": {
                 "type": "object",

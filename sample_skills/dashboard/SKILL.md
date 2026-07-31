@@ -39,14 +39,69 @@ reads your data, renders the chart configs, and stitches the page together;
 when something is wrong you fix a few lines instead of regenerating 40 KB of
 markup.
 
+**ECharts option keys are camelCase** — `xAxis`, `yAxis`, `axisLabel`,
+`markPoint`, `areaStyle`. Writing them in Python tempts you into `xaxis` /
+`yaxis`, and that mistake is silent and total: ECharts ignores the unknown key,
+finds no axis for the series, and throws `TypeError: Cannot read properties of
+undefined (reading 'get')` out of `setOption`. The exception aborts the rest of
+the script, so **every chart after the first one is never created either** — the
+whole page is empty boxes. Validate before you write (see `check_option` below).
+
+A complete, correct option looks like this:
+
+```python
+option = {
+    "title": {"text": "Nettoumsatz — Ist / Plan / Prognose", "left": "center"},
+    "tooltip": {"trigger": "axis"},
+    "legend": {"data": ["Ist", "Prognose"], "top": 30},
+    "xAxis": {"type": "category", "data": ["2023", "2024", "2025"]},
+    "yAxis": {"type": "value", "name": "Mio. €"},
+    "series": [
+        {"name": "Ist", "type": "line", "data": [44.9, 45.0, 45.2],
+         "lineStyle": {"width": 3}},
+        {"name": "Prognose", "type": "line", "data": [None, None, 46.1],
+         "lineStyle": {"type": "dotted"}, "areaStyle": {"opacity": 0.1}},
+    ],
+    "grid": {"left": 80, "right": 30, "top": 80, "bottom": 50},
+}
+```
+
+Every series' `data` must be the same length as `xAxis.data`; pad the gaps with
+`None` (→ `null`), as the forecast series does above. A short array does not
+align to the right-hand end of the axis — it silently plots against the wrong
+years.
+
 ```python
 import json
 from pathlib import Path
 
 ECHARTS = Path('/opt/talos/vendor/echarts.min.js').read_text()
 
+_CARTESIAN = {"line", "bar", "scatter", "effectScatter", "candlestick", "boxplot"}
+
+def check_option(cid: str, opt: dict) -> None:
+    """Fail loudly in Python rather than silently in the browser."""
+    for wrong, right in (("xaxis", "xAxis"), ("yaxis", "yAxis")):
+        if wrong in opt:
+            raise ValueError(f"{cid}: {wrong!r} must be {right!r} (ECharts is camelCase)")
+    series = opt.get("series") or []
+    if any(s.get("type") in _CARTESIAN for s in series):
+        missing = [k for k in ("xAxis", "yAxis") if k not in opt]
+        if missing:
+            raise ValueError(f"{cid}: cartesian series needs {missing}")
+    cats = (opt.get("xAxis") or {}).get("data")
+    if cats:
+        for s in series:
+            if s.get("data") is not None and len(s["data"]) != len(cats):
+                raise ValueError(
+                    f"{cid}: series {s.get('name')!r} has {len(s['data'])} points "
+                    f"but xAxis has {len(cats)} categories — pad with None"
+                )
+
 def page(title: str, charts: list[dict], kpis: list[dict]) -> str:
     """charts: [{'id': 'revenue', 'title': 'Umsatz', 'option': {...}}, ...]"""
+    for c in charts:
+        check_option(c["id"], c["option"])
     tiles = "".join(
         f'<div class="kpi"><span class="kpi-label">{k["label"]}</span>'
         f'<span class="kpi-value">{k["value"]}</span>'
@@ -58,9 +113,15 @@ def page(title: str, charts: list[dict], kpis: list[dict]) -> str:
         f'<div class="chart" id="{c["id"]}"></div></section>'
         for c in charts
     )
+    # Each init is isolated: an exception in one setOption must not stop the
+    # ones after it, and the failure has to be visible in the page instead of
+    # showing up as a blank box.
     inits = "\n".join(
-        f'echarts.init(document.getElementById({c["id"]!r}), theme)'
-        f'.setOption({json.dumps(c["option"], ensure_ascii=False, default=str)});'
+        f'try {{ echarts.init(document.getElementById({c["id"]!r}), theme)'
+        f'.setOption({json.dumps(c["option"], ensure_ascii=False, default=str)}); }}'
+        f'catch (e) {{ console.error({c["id"]!r}, e);'
+        f' document.getElementById({c["id"]!r}).innerHTML ='
+        f' \'<p class="chart-error">Chart {c["id"]} failed: \' + e.message + \'</p>\'; }}'
         for c in charts
     )
     return f"""<!DOCTYPE html>
@@ -128,8 +189,30 @@ twice.
 - **Regenerating the whole HTML to fix one chart.** Edit the builder, re-run it.
 - **`json.dumps` on a DataFrame/Timestamp** raises. Convert first
   (`df.to_dict('records')`, `.strftime('%Y-%m-%d')`) or pass `default=str`.
+- **`xaxis` / `yaxis` instead of `xAxis` / `yAxis`.** The single most likely way
+  to ship a dashboard of empty boxes — and because the throw aborts the script,
+  one lowercase key blanks every chart on the page, not just its own. See
+  `check_option` above.
 - **Charts with zero height.** ECharts needs the container to have an explicit
   height before `init` — set one in CSS (`.chart { height: 320px }`).
-- **Forgetting to verify.** After writing the file, check it: the size is
-  plausible (ECharts alone is ~1 MB, so a 50 KB file means the library did not
-  get inlined) and `grep -c 'src="http' output/dashboard.html` returns 0.
+- **Series shorter than the axis.** Five values on a twelve-year axis plots the
+  first five years, not the last five. Pad with `None`.
+- **Repeated values across every period.** If your "per year" numbers come out
+  identical, the query is aggregating the same rows each time — a join or filter
+  is wrong. Sanity-check the frame before charting it; a dashboard makes wrong
+  numbers look authoritative.
+
+## Verify before you finish
+
+Checking the file exists is not verification — the failure modes above all
+produce a perfectly plausible file. Run these three:
+
+```bash
+grep -c 'src="http' output/dashboard.html   # must be 0 — no CDN
+ls -l output/dashboard.html                 # ~1 MB; 50 KB means ECharts is not inlined
+grep -o '"[xy]axis"' output/dashboard.html  # must print nothing
+```
+
+Then open the page in the preview panel and look at it. Every chart box should
+contain a drawn chart; an empty box means `setOption` threw, and the browser
+console says which one.
