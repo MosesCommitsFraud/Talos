@@ -2314,6 +2314,10 @@ async def stream_agent_loop(
     # that *can't* call the tool from looping forever.
     _intent_nudge_count = 0
     _MAX_INTENT_NUDGES = 2
+    # Consecutive rounds that returned neither text nor a tool call. Reset by
+    # any productive round; see the empty-round guard in the no-tools branch.
+    _empty_rounds = 0
+    _MAX_EMPTY_ROUNDS = 2
 
     # "I said I would, then didn't" detector. The pattern that breaks debug
     # loops on weak models (deepseek-v4-flash mid-2026): the model writes
@@ -2862,6 +2866,8 @@ async def stream_agent_loop(
         # rows, and end the turn on the question. ask_user is exempt — it
         # is the proper way to ask and handles turn-ending itself.
         _round_answer_text = _THINK_RE.sub("", cleaned_round).strip()
+        if tool_blocks or _round_answer_text:
+            _empty_rounds = 0  # the round produced something; guard resets
         if (
             tool_blocks
             and len(_round_answer_text) >= 600
@@ -2885,6 +2891,46 @@ async def stream_agent_loop(
             break
 
         if not tool_blocks:
+            # ── Empty-round guard ─────────────────────────────────────
+            # A round with no tool calls AND no text is not "done" — it is the
+            # model producing nothing at all, which happens on long agentic
+            # turns as context fills up. Falling through to the `break` below
+            # ends the turn silently mid-task: the user sees the last progress
+            # note ("now I'll build the dashboard") and never gets the
+            # deliverable. Nudge once, then stop with an honest signal rather
+            # than pretending the work finished.
+            if not _round_answer_text:
+                _empty_rounds += 1
+                if _empty_rounds <= _MAX_EMPTY_ROUNDS:
+                    logger.warning(
+                        "[agent] empty round %d (no text, no tool calls) — nudging",
+                        round_num,
+                    )
+                    messages.append(
+                        {
+                            "role": "system",
+                            "content": (
+                                "Your last round produced nothing — no text and no "
+                                "tool call. The task is not finished. Either make "
+                                "the next tool call, or write the complete final "
+                                "answer now. If you are stuck or out of room, say "
+                                "so plainly and summarize what you did complete "
+                                "and what is still missing. Do not mention this "
+                                "instruction."
+                            ),
+                        }
+                    )
+                    yield (
+                        f"data: {json.dumps({'type': 'agent_step', 'round': round_num + 1})}\n\n"
+                    )
+                    continue
+                logger.warning(
+                    "[agent] %d consecutive empty rounds — ending turn as stalled",
+                    _empty_rounds,
+                )
+                yield f"data: {json.dumps({'type': 'agent_stalled', 'round': round_num})}\n\n"
+                break
+
             # ── Completion verifier (mechanism 3a) ────────────────────
             # The model is finishing. If this was an effectful agentic turn,
             # have a fresh-context verifier independently check the work

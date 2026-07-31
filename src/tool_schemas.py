@@ -89,7 +89,15 @@ FUNCTION_TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "query_sql",
-            "description": "Read-only access to the configured external SQL database. Use for database questions, schema/table inspection, metrics, reports, and SELECT queries. Credentials are loaded by the backend from environment variables and are never needed in the prompt.",
+            "description": (
+                "Read-only access to the configured external SQL database. Use for database "
+                "questions, schema/table inspection, metrics, reports, and SELECT queries. "
+                "Credentials are loaded by the backend from environment variables and are never "
+                "needed in the prompt. Results over 200 rows are saved to a CSV in your workspace "
+                "and only a preview is shown — read that file with pandas instead of re-running "
+                "the query to page through rows. Prefer aggregating in SQL (GROUP BY) over "
+                "pulling raw rows you intend to sum yourself."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {

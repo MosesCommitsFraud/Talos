@@ -1797,7 +1797,7 @@ async def execute_tool_block(
         result = await do_manage_settings(content, owner=owner)
     elif tool == "query_sql":
         desc = "query_sql"
-        result = await do_query_sql(content, owner=owner)
+        result = await do_query_sql(content, owner=owner, session_id=session_id)
     elif tool == "search_knowledge":
         result = await do_search_knowledge(content, owner=owner)
         _hits = len(result.get("rag_sources") or [])
@@ -1876,6 +1876,14 @@ _FORMATTER_HANDLED_KEYS = {
     "applied",
     "error",
     "output",
+    # query_sql already renders its rows as a markdown table in `output`.
+    # Without these, the generic `**data:**` echo below re-serialized the SAME
+    # rows as indented JSON — every SQL call cost ~2x its rows in context, and
+    # a data-heavy turn burned the window on duplicated tables.
+    "rows",
+    "row_count",
+    "truncated",
+    "spill_path",
 }
 
 

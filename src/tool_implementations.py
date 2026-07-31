@@ -38,6 +38,12 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 _SQL_MAX_ROWS_DEFAULT = 100
+# Above this many rows, the result set is spilled to a workspace CSV instead of
+# being rendered into the model's context (see do_query_sql). Analysis queries
+# legitimately return thousands of rows; the model needs them in pandas, not in
+# its prompt.
+_SQL_SPILL_ROWS = 200
+_SQL_PREVIEW_ROWS = 25
 _SQL_ALLOWED_START = {"select", "with", "show", "describe", "desc", "explain", "pragma"}
 _SQL_FORBIDDEN_WORDS = re.compile(
     r"\b(insert|update|delete|merge|replace|upsert|drop|alter|create|truncate|grant|revoke|vacuum|attach|detach|copy|load|call|exec|execute)\b",
@@ -400,9 +406,32 @@ def _sql_json_value(value: Any) -> Any:
     return str(value)
 
 
-async def do_query_sql(content: str, owner: Optional[str] = None) -> Dict:
-    """Read-only SQL access using backend environment credentials."""
-    del owner
+def _spill_rows_to_csv(columns: List[str], rows: List[Dict[str, Any]]) -> str:
+    """Write a full result set to a temp CSV and return the local path."""
+    import csv
+    import tempfile
+
+    fd, path = tempfile.mkstemp(prefix="query_", suffix=".csv")
+    os.close(fd)
+    with open(path, "w", encoding="utf-8", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=columns, extrasaction="ignore")
+        w.writeheader()
+        for r in rows:
+            w.writerow({c: r.get(c) for c in columns})
+    return path
+
+
+async def do_query_sql(
+    content: str, owner: Optional[str] = None, session_id: Optional[str] = None
+) -> Dict:
+    """Read-only SQL access using backend environment credentials.
+
+    Result sets too large to show inline are written to a CSV in the session
+    workspace instead of being dumped into the context: the model gets a
+    preview plus a filename it can hand to pandas. Without this a "pull the
+    data, build a forecast" turn spends its whole context window on raw rows
+    and dies before it produces the deliverable.
+    """
     try:
         args = _parse_tool_args(content) if content.strip() else {}
     except ValueError as e:
@@ -522,16 +551,29 @@ async def do_query_sql(content: str, owner: Optional[str] = None) -> Dict:
                     if max_rows is None or len(rows) < max_rows:
                         rows.append({col: _sql_json_value(val) for col, val in zip(columns, row)})
                 truncated = max_rows is not None and row_count > max_rows
-                output = _format_sql_rows(rows)
-                if truncated:
-                    output += f"\n\nReturned first {max_rows} of {row_count} rows."
-                return {
-                    "output": output,
-                    "rows": rows,
+                out: Dict[str, Any] = {
                     "row_count": row_count,
                     "truncated": truncated,
                     "exit_code": 0,
                 }
+                # Big result sets go to a CSV rather than into the context. The
+                # model still sees the columns and a head preview, which is all
+                # it needs to write the pandas code that does the real work.
+                if len(rows) > _SQL_SPILL_ROWS:
+                    out["_spill_local"] = _spill_rows_to_csv(columns, rows)
+                    out["_spill_rows"] = len(rows)
+                    preview = _format_sql_rows(rows[:_SQL_PREVIEW_ROWS])
+                    out["output"] = (
+                        f"{len(rows)} rows x {len(columns)} columns. "
+                        f"First {min(_SQL_PREVIEW_ROWS, len(rows))} shown:\n\n{preview}"
+                    )
+                    out["rows"] = rows[:_SQL_PREVIEW_ROWS]
+                else:
+                    out["output"] = _format_sql_rows(rows)
+                    out["rows"] = rows
+                if truncated:
+                    out["output"] += f"\n\nReturned first {max_rows} of {row_count} rows."
+                return out
         except SQLAlchemyError as exc:
             return {
                 "error": f"SQL query failed: {exc.__class__.__name__}: {str(exc)[:500]}",
@@ -543,7 +585,37 @@ async def do_query_sql(content: str, owner: Optional[str] = None) -> Dict:
                 "exit_code": 1,
             }
 
-    return await asyncio.to_thread(_run)
+    result = await asyncio.to_thread(_run)
+
+    local = result.pop("_spill_local", None)
+    n_spilled = result.pop("_spill_rows", 0)
+    if local:
+        try:
+            from src.sandbox_client import upload_file_to_sandbox
+
+            up = await upload_file_to_sandbox(owner=owner, session_id=session_id, path=local)
+            name = up.get("sandbox_path") or os.path.basename(local)
+            result["spill_path"] = name
+            result["output"] += (
+                f"\n\nAll {n_spilled} rows were written to `{name}` in your workspace "
+                f"— the full result set is NOT in this message. Read it with "
+                f"`pd.read_csv('{name}')`; do not re-query to page through the rows."
+            )
+        except Exception as e:
+            # No workspace (no session_id, sandbox off, upload failed) — say so
+            # rather than implying a file exists.
+            logger.warning(f"query_sql spill upload failed: {e}")
+            result["output"] += (
+                f"\n\nOnly the preview above is shown ({n_spilled} rows matched) and the "
+                "full set could not be saved to your workspace. Narrow the query with "
+                "WHERE/GROUP BY, or aggregate in SQL instead of pulling raw rows."
+            )
+        finally:
+            try:
+                os.unlink(local)
+            except OSError:
+                pass
+    return result
 
 
 # ---------------------------------------------------------------------------

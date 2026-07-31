@@ -1081,6 +1081,7 @@ def setup_chat_routes(
                                     "doc_update",
                                     "doc_suggestions",
                                     "rounds_exhausted",
+                                    "agent_stalled",
                                     "ask_user",
                                     "plan_update",
                                 ):
