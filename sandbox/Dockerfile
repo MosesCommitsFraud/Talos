@@ -114,11 +114,25 @@ RUN printf 'export PATH=/opt/talos-sandbox-venv/bin:$PATH\n' > /etc/profile.d/zz
 #
 # ECharts: one UMD file, no build step, declarative option objects — the model
 # writes a small JSON-ish config instead of hand-rolling SVG or D3 scales.
-ARG ECHARTS_VERSION=5.6.0
+#
+# Three things get vendored, not just the library:
+#   echarts.min.js       the UMD build, inlined into every dashboard
+#   echarts-themes/      36 official themes (~290 KB). The default palette is
+#                        what makes generated dashboards look generic; a theme
+#                        is a one-line upgrade. Includes v5.js, the compat
+#                        theme that restores the pre-6.0 look.
+#   echarts.d.ts         the TypeScript option declarations (~470 KB). The
+#                        sandbox has no network, so this is the offline option
+#                        reference: grepping it for a key is how the model
+#                        confirms `xAxis` over `xaxis` without guessing.
+ARG ECHARTS_VERSION=6.1.0
 RUN set -eu; \
-    mkdir -p /opt/talos/vendor; \
+    mkdir -p /opt/talos/vendor/echarts-themes; \
     npm install --no-audit --no-fund --no-save --prefix /tmp/vendor "echarts@${ECHARTS_VERSION}"; \
     cp /tmp/vendor/node_modules/echarts/dist/echarts.min.js /opt/talos/vendor/echarts.min.js; \
+    cp /tmp/vendor/node_modules/echarts/theme/*.js /opt/talos/vendor/echarts-themes/; \
+    cp /tmp/vendor/node_modules/echarts/types/dist/echarts.d.ts /opt/talos/vendor/echarts.d.ts; \
+    printf '%s\n' "${ECHARTS_VERSION}" > /opt/talos/vendor/echarts.version; \
     rm -rf /tmp/vendor /root/.npm; \
     chmod -R a+rX /opt/talos
 
