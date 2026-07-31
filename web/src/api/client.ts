@@ -187,6 +187,12 @@ export const artifactDownloadUrl = (sessionId: string, path: string) =>
 export const artifactPreviewUrl = (sessionId: string, path: string) =>
   `/api/artifacts/${encodeURIComponent(sessionId)}/preview?path=${encodeURIComponent(path)}`;
 
+/** Serves an HTML artifact as a real page (not a download) so it can be shown
+ *  live in the preview iframe or opened in a new tab. The route sets a CSP that
+ *  blocks all network access from the page. */
+export const artifactRenderUrl = (sessionId: string, path: string) =>
+  `/api/artifacts/${encodeURIComponent(sessionId)}/render?path=${encodeURIComponent(path)}`;
+
 /** Fetch a workspace file's raw bytes — used by the preview panel to render
  *  Word/Excel/PDF (which need the binary) and text/markdown (decoded to text). */
 export async function fetchArtifactBlob(sessionId: string, path: string): Promise<Blob> {
@@ -399,6 +405,8 @@ export interface SharedSkill {
   updated_at?: string | null;
   enabled: boolean;
   mine: boolean;
+  /** Shipped with Talos (seeded from sample_skills), not uploaded by a user. */
+  bundled?: boolean;
 }
 
 export const fetchSharedSkills = () =>

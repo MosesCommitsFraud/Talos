@@ -628,6 +628,64 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
         logger.warning("artifact preview failed for %s (%s): %s", session_id, path, last_error)
         raise HTTPException(422, "Document preview conversion failed")
 
+    # ---- GET /api/artifacts/{session_id}/render?path= — serve an HTML artifact ----
+    # The download route sends HTML as an attachment, so a generated dashboard or
+    # report could only be read as source. This one serves it as a real page for
+    # the preview iframe and the "open in new tab" button.
+    #
+    # Safety: the file is model-generated and must be treated as untrusted. It is
+    # served under a CSP that forbids network access of any kind (no script src,
+    # no fetch, no remote images) and the iframe embeds it WITHOUT
+    # allow-same-origin, so its scripts run in an opaque origin with no access to
+    # the app's cookies, storage or DOM. Inline script/style are allowed because
+    # that is exactly what a self-contained dashboard is made of.
+    @router.get("/api/artifacts/{session_id}/render")
+    async def render_artifact_route(request: Request, session_id: str, path: str = Query(...)):
+        from fastapi.responses import Response
+
+        if not path.lower().endswith((".html", ".htm")):
+            raise HTTPException(400, "Only HTML artifacts can be rendered")
+        db = SessionLocal()
+        try:
+            owners = _workspace_owners(db, request, session_id)
+        finally:
+            db.close()
+        from src.sandbox_client import download_artifact, sandbox_enabled
+
+        if not sandbox_enabled():
+            raise HTTPException(404, "Sandbox not available")
+        last_error = None
+        for owner in owners:
+            try:
+                content, _ctype, _fname = await download_artifact(
+                    owner=owner, session_id=session_id, path=path
+                )
+                break
+            except Exception as exc:
+                last_error = exc
+        else:
+            logger.warning("artifact render failed for %s (%s): %s", session_id, path, last_error)
+            raise HTTPException(404, "File not found")
+        return Response(
+            content=content,
+            media_type="text/html; charset=utf-8",
+            headers={
+                "Content-Disposition": "inline",
+                "Cache-Control": "no-store",
+                "X-Content-Type-Options": "nosniff",
+                "Content-Security-Policy": (
+                    "default-src 'none'; "
+                    "script-src 'unsafe-inline' 'unsafe-eval'; "
+                    "style-src 'unsafe-inline'; "
+                    "img-src data: blob:; "
+                    "font-src data:; "
+                    "connect-src 'none'; "
+                    "form-action 'none'; "
+                    "base-uri 'none'"
+                ),
+            },
+        )
+
     # ---- DELETE /api/artifacts/{session_id}?path= — remove a workspace file ----
     @router.delete("/api/artifacts/{session_id}")
     async def delete_artifact_route(request: Request, session_id: str, path: str = Query(...)):

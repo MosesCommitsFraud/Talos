@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from 'react';
 import { useTranslation } from 'react-i18next';
-import { FileTextIcon, MousePointer2Icon, RotateCcwIcon } from 'lucide-react';
+import { CodeIcon, ExternalLinkIcon, EyeIcon, FileTextIcon, MousePointer2Icon, RotateCcwIcon } from 'lucide-react';
 import type { ArtifactSelectionTarget } from '@/api/types';
-import { downloadArtifact, fetchArtifactBlob, fetchArtifactPreviewBlob, fetchDocumentVersions, restoreDocumentVersion, updateDocument, type DocumentVersion } from '@/api/client';
+import { artifactRenderUrl, downloadArtifact, fetchArtifactBlob, fetchArtifactPreviewBlob, fetchDocumentVersions, restoreDocumentVersion, updateDocument, type DocumentVersion } from '@/api/client';
 import { fileExt, previewKind, type PreviewKind } from '@/lib/files';
 import { queryClient } from '@/lib/queryClient';
 import { useUi, type PreviewFile } from '@/state/ui';
@@ -25,6 +25,9 @@ type Loaded =
   | { kind: 'markdown'; text: string }
   | { kind: 'text'; text: string }
   | { kind: 'code'; text: string; lang: string }
+  // `url` renders the live page in an iframe; `text` backs the Code toggle, so
+  // both views are available without a second fetch.
+  | { kind: 'html'; text: string; url: string }
   | { kind: 'csv'; rows: string[][] }
   | { kind: 'excel'; sheets: { name: string; rows: string[][]; startRow: number; startCol: number }[] }
   | { kind: 'word'; blob: Blob }
@@ -112,6 +115,8 @@ export function PreviewContent({ preview }: { preview: PreviewFile | null }) {
   const selectionRoot = useRef<HTMLDivElement>(null);
   const committedElements = useRef<HTMLElement[]>([]);
   const [markMode, setMarkMode] = useState(false);
+  // HTML artifacts open as the rendered page; the toggle falls back to source.
+  const [htmlSource, setHtmlSource] = useState(false);
   const [selectionCandidates, setSelectionCandidates] = useState<BoxSelectionCandidate[]>([]);
   const selectionCandidatesRef = useRef<BoxSelectionCandidate[]>([]);
   const [groupRect, setGroupRect] = useState<DOMRect | null>(null);
@@ -136,6 +141,7 @@ export function PreviewContent({ preview }: { preview: PreviewFile | null }) {
     setSaveError(false);
     setViewedVersion('current');
     setMarkMode(false);
+    setHtmlSource(false);
     selectionCandidatesRef.current.forEach((candidate) => candidate.element.classList.remove('talos-selection-candidate', 'talos-selection-committed'));
     committedElements.current.forEach((element) => element.classList.remove('talos-selection-committed'));
     committedElements.current = [];
@@ -220,6 +226,12 @@ export function PreviewContent({ preview }: { preview: PreviewFile | null }) {
           if (!cancelled) {
             setCurrentText(text);
             setLoaded({ kind: 'code', text, lang: FENCE_LANG[fileExt(preview.name)] ?? '' });
+          }
+        } else if (kind === 'html') {
+          const text = await blob.text();
+          if (!cancelled) {
+            setCurrentText(text);
+            setLoaded({ kind: 'html', text, url: artifactRenderUrl(preview.sessionId, preview.path) });
           }
         } else {
           const text = await blob.text();
@@ -711,7 +723,22 @@ export function PreviewContent({ preview }: { preview: PreviewFile | null }) {
           )}
         </div>
       )}
-      {!loading && !error && !editing && loaded && (
+      {!loading && !error && !editing && loaded && loaded.kind === 'html' && (
+        // Element marking doesn't reach into the sandboxed iframe, so an HTML
+        // artifact gets its own toolbar: view toggle + escape hatch to a tab.
+        <div className="flex h-9 shrink-0 items-center gap-2 border-b bg-card px-2">
+          <button type="button" aria-pressed={!htmlSource} onClick={() => setHtmlSource(false)} className={`inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium ${!htmlSource ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:bg-accent hover:text-foreground'}`}>
+            <EyeIcon className="size-3.5" />{t('preview.htmlRendered')}
+          </button>
+          <button type="button" aria-pressed={htmlSource} onClick={() => setHtmlSource(true)} className={`inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium ${htmlSource ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:bg-accent hover:text-foreground'}`}>
+            <CodeIcon className="size-3.5" />{t('preview.htmlSource')}
+          </button>
+          <a href={loaded.url} target="_blank" rel="noreferrer noopener" className="ml-auto inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium text-muted-foreground hover:bg-accent hover:text-foreground">
+            <ExternalLinkIcon className="size-3.5" />{t('preview.openInTab')}
+          </a>
+        </div>
+      )}
+      {!loading && !error && !editing && loaded && loaded.kind !== 'html' && (
         <div className="flex h-9 shrink-0 items-center gap-2 border-b bg-card px-2">
           <button type="button" aria-pressed={markMode} onClick={() => setMarkMode((value) => !value)} className={`inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium ${markMode ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:bg-accent hover:text-foreground'}`}>
             <MousePointer2Icon className="size-3.5" />{t('preview.markElement')}
@@ -730,7 +757,7 @@ export function PreviewContent({ preview }: { preview: PreviewFile | null }) {
       {!loading && !error && editing && (
         <textarea value={draft} onChange={(e) => setDraft(e.target.value)} className="h-full min-h-96 w-full resize-none bg-background p-4 font-mono text-[13px] leading-relaxed outline-none" spellCheck={false} />
       )}
-       {!loading && !error && !editing && loaded && <PreviewBody loaded={loaded} preview={preview} markMode={markMode} onBoxCandidate={chooseCandidate} committedTargets={artifactSelection && artifactSelection.sessionId === preview.sessionId && artifactSelection.path === preview.path ? artifactSelection.targets ?? [artifactSelection.target] : []} />}
+       {!loading && !error && !editing && loaded && <PreviewBody loaded={loaded} preview={preview} markMode={markMode} htmlSource={htmlSource} onBoxCandidate={chooseCandidate} committedTargets={artifactSelection && artifactSelection.sessionId === preview.sessionId && artifactSelection.path === preview.path ? artifactSelection.targets ?? [artifactSelection.target] : []} />}
       </div>
       {groupRect && <div className="pointer-events-none fixed z-50 rounded-sm border-2 border-primary bg-primary/[0.03] shadow-[0_0_0_4px_color-mix(in_srgb,var(--primary)_14%,transparent)]" style={{ left: groupRect.left - 4, top: groupRect.top - 4, width: groupRect.width + 8, height: groupRect.height + 8 }} />}
       <div ref={dragOverlayRef} className="pointer-events-none fixed z-[60] hidden border border-dashed border-primary bg-primary/10" />
@@ -881,7 +908,7 @@ function WordDocument({ blob, markMode, onBoxCandidate, committedTargets }: { bl
   );
 }
 
-function PreviewBody({ loaded, preview, markMode, onBoxCandidate, committedTargets }: { loaded: Loaded; preview: PreviewFile; markMode: boolean; onBoxCandidate: (target: ArtifactSelectionTarget, element: HTMLElement, additive?: boolean) => void; committedTargets: ArtifactSelectionTarget[] }) {
+function PreviewBody({ loaded, preview, markMode, htmlSource, onBoxCandidate, committedTargets }: { loaded: Loaded; preview: PreviewFile; markMode: boolean; htmlSource: boolean; onBoxCandidate: (target: ArtifactSelectionTarget, element: HTMLElement, additive?: boolean) => void; committedTargets: ArtifactSelectionTarget[] }) {
   if (loaded.kind === 'markdown') {
     // Markdown stays a plain, pageless reader — it isn't a Word document. Only
     // real Office files (.docx/.xlsx/.pptx) get the paper-page / grid treatment.
@@ -892,6 +919,23 @@ function PreviewBody({ loaded, preview, markMode, onBoxCandidate, committedTarge
   }
   if (loaded.kind === 'code') {
     return <div className="p-4"><Markdown text={'```' + loaded.lang + '\n' + loaded.text + '\n```'} /></div>;
+  }
+  if (loaded.kind === 'html') {
+    if (htmlSource) {
+      return <div className="p-4"><Markdown text={'```html\n' + loaded.text + '\n```'} /></div>;
+    }
+    // `sandbox` without allow-same-origin puts the page in an opaque origin: its
+    // scripts run (charts need that) but it cannot read the app's cookies,
+    // storage or DOM. The route's CSP additionally cuts off all network access,
+    // so a model-generated page can only draw itself.
+    return (
+      <iframe
+        src={loaded.url}
+        title={preview.name}
+        sandbox="allow-scripts allow-popups allow-downloads"
+        className="h-full min-h-[32rem] w-full border-0 bg-white"
+      />
+    );
   }
   if (loaded.kind === 'csv') {
     return <div className="min-h-full bg-muted/40 p-3"><SpreadsheetGrid rows={loaded.rows} sheet="CSV" startRow={0} startCol={0} /></div>;

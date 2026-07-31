@@ -33,6 +33,6 @@ modell weiß nicht was es ist.
 switching chat when preview or artifact panel is open should close it automatically
 sometimes image not shown and still no artifact when create document
 light mode needs work
-analyse pro account
 detaillierter für websuche skills und account
-download chat button
+title does only appear once reloaded or switched chat
+on reloading it resets the working for timer

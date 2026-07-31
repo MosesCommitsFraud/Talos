@@ -57,6 +57,10 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
 
         # Tool render endpoints are served inside iframes — allow framing by self
         is_tool_render = path.startswith("/api/tools/") and path.endswith("/render")
+        # Same deal for HTML workspace artifacts (generated dashboards/reports):
+        # the route sets its own no-network CSP and the iframe omits
+        # allow-same-origin, so the default DENY headers must not clobber it.
+        is_artifact_render = path.startswith("/api/artifacts/") and path.endswith("/render")
         # Visual report pages are self-contained HTML — need inline scripts + external images
         is_report = path.startswith("/api/research/report/")
 
@@ -73,7 +77,7 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
                 "connect-src 'self'; "
                 "frame-ancestors 'none'"
             )
-        elif is_tool_render:
+        elif is_tool_render or is_artifact_render:
             # Tool iframe content: skip all framing headers — the iframe's
             # sandbox="allow-scripts" attribute provides isolation.
             # Don't overwrite the route's own restrictive CSP either.

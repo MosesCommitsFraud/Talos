@@ -1889,7 +1889,16 @@ function SharedSkillsPanel() {
         {skills.map((s) => (
           <Row
             key={s.name}
-            label={<span className="font-mono text-[13px]">{s.name}</span>}
+            label={
+              <span className="inline-flex items-center gap-1.5">
+                <span className="font-mono text-[13px]">{s.name}</span>
+                {s.bundled && (
+                  <span className="rounded-full border px-1.5 py-px text-[10px] font-medium text-muted-foreground">
+                    {t('settings.skills.bundled')}
+                  </span>
+                )}
+              </span>
+            }
             hint={
               <>
                 {s.description}

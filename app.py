@@ -1024,6 +1024,18 @@ async def _startup_event():
 
     _startup_tasks.append(asyncio.create_task(_keepalive_loop()))
 
+    # Ship the repo's sample skills into the shared library so they appear in
+    # Settings → Skills alongside user uploads. Non-destructive: a seeded skill
+    # the user edited or deleted is never overwritten or restored (see
+    # shared_skills.seed_sample_skills). Runs off the event loop — it touches
+    # the DB and the filesystem.
+    try:
+        from services.memory import shared_skills as _shared_skills
+
+        await asyncio.to_thread(_shared_skills.seed_sample_skills)
+    except Exception as e:
+        logger.warning(f"Sample-skill seeding skipped: {e}")
+
     # Disk-backed skills are not covered by the DB legacy-owner sweep. Repair
     # ownerless or deleted/test-owner SKILL.md files so strict owner filtering
     # does not make an existing library look empty after auth/account changes.

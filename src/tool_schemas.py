@@ -39,7 +39,7 @@ FUNCTION_TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "python",
-            "description": "Execute Python code to compute a result or check something in the isolated workspace. For charts, save the finished image to a relative workspace path and call `show_image`; images under `output/` are also shown automatically. Do not save deliverables under /tmp or absolute paths. The workspace has NO network access — urllib/requests/httpx calls to the internet always fail here; use the `web_search` and `web_fetch` tools instead.",
+            "description": "Execute Python code to compute a result or check something in the isolated workspace. For charts, save the finished image to a relative workspace path and call `show_image`; images under `output/` are also shown automatically. For a dashboard, write one self-contained HTML file under `output/` with the chart library inlined from /opt/talos/vendor/echarts.min.js — a CDN <script src> cannot load here. Do not save deliverables under /tmp or absolute paths. The workspace has NO network access — urllib/requests/httpx calls to the internet always fail here; use the `web_search` and `web_fetch` tools instead.",
             "parameters": {
                 "type": "object",
                 "properties": {"code": {"type": "string", "description": "Python code to execute"}},

@@ -1,7 +1,7 @@
 /** File-type classification shared by the artifact chips (which icon, whether a
  *  file can be previewed) and the preview panel (how to render it). */
 
-export type PreviewKind = 'markdown' | 'text' | 'code' | 'csv' | 'excel' | 'word' | 'presentation' | 'pdf' | 'image' | 'none';
+export type PreviewKind = 'markdown' | 'text' | 'code' | 'html' | 'csv' | 'excel' | 'word' | 'presentation' | 'pdf' | 'image' | 'none';
 
 const DOCUMENT_EXTENSIONS: Record<string, string> = {
   markdown: 'md', python: 'py', javascript: 'js', typescript: 'ts', html: 'html',
@@ -52,6 +52,9 @@ export function previewKind(path: string, mime?: string): PreviewKind {
   if (ext === 'pptx' || m.includes('presentationml')) return 'presentation';
   if (ext === 'xlsx' || ext === 'xls' || ext === 'xlsm' || m.includes('spreadsheetml')) return 'excel';
   if (ext === 'csv' || ext === 'tsv') return 'csv';
+  // Before CODE_EXTS: html is still listed there so the Code toggle can
+  // syntax-highlight it, but a dashboard/report should open as the live page.
+  if (ext === 'html' || ext === 'htm') return 'html';
   if (CODE_EXTS.has(ext)) return 'code';
   if (TEXT_EXTS.has(ext) || m.startsWith('text/')) return 'text';
   return 'none';

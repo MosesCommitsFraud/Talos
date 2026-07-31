@@ -173,7 +173,7 @@ NEVER pipe multi-line Python through `python -c "..."`. Use the dedicated `pytho
 ```python
 <python code>
 ```
-Execute Python code INLINE — use ONLY for short, throwaway computations (a quick calculation, a one-off check, a few lines). Each call is stateless and the code can't be edited, so do NOT write long scripts here: if it's more than ~15 lines or you'll likely need to fix/iterate on it, instead `write_file` it to a `.py` file ONCE, run it with `bash` (`python script.py`), and when it fails FIX the broken lines with `edit_file` (targeted edits) — never resend the whole script. That loop is far faster than regenerating inline code. NOT for writing code for the user (use create_document for that). For tabular data use pandas; read Excel with pandas.read_excel (openpyxl/xlrd as needed). WHEN THE USER WANTS AN EXCEL FILE / SPREADSHEET / `.xlsx` (or just "a sheet"), produce a REAL `.xlsx` — write it to a workspace-relative path with `df.to_excel("output.xlsx", index=False, engine="openpyxl")` (use `pd.ExcelWriter` for multiple sheets / formatting). The file then appears to the user as a downloadable artifact with an in-app preview. Do NOT fall back to CSV (and do NOT use create_document with language=csv) for an Excel request — only produce `.csv` when the user explicitly asks for CSV. For static charts prefer seaborn by default (with matplotlib savefig to a PNG). Use plotly when the user asks for interactive charts. For forecasting/statistics use statsmodels when appropriate; for ML/prediction use scikit-learn when appropriate. Runs with NO time limit — long/heavy work is fine. SHOWING AN IMAGE TO THE USER: your working directory is a private workspace. To display a finished chart/image: save it with a RELATIVE path in your workspace (e.g. `fig.savefig('chart.png', dpi=150, bbox_inches='tight')`), then call the `show_image` tool with that path. (Images you save under an `output/` directory are also shown automatically.) Never upload images via api_call, and do NOT save to `/tmp` or absolute paths — those won't show. Same workspace limits as bash — no TTY, no GUI, no `input()`; for anything the user should interact with, generate a single HTML file with inline JS instead.""",
+Execute Python code INLINE — use ONLY for short, throwaway computations (a quick calculation, a one-off check, a few lines). Each call is stateless and the code can't be edited, so do NOT write long scripts here: if it's more than ~15 lines or you'll likely need to fix/iterate on it, instead `write_file` it to a `.py` file ONCE, run it with `bash` (`python script.py`), and when it fails FIX the broken lines with `edit_file` (targeted edits) — never resend the whole script. That loop is far faster than regenerating inline code. NOT for writing code for the user (use create_document for that). For tabular data use pandas; read Excel with pandas.read_excel (openpyxl/xlrd as needed). WHEN THE USER WANTS AN EXCEL FILE / SPREADSHEET / `.xlsx` (or just "a sheet"), produce a REAL `.xlsx` — write it to a workspace-relative path with `df.to_excel("output.xlsx", index=False, engine="openpyxl")` (use `pd.ExcelWriter` for multiple sheets / formatting). The file then appears to the user as a downloadable artifact with an in-app preview. Do NOT fall back to CSV (and do NOT use create_document with language=csv) for an Excel request — only produce `.csv` when the user explicitly asks for CSV. For static charts prefer seaborn by default (with matplotlib savefig to a PNG). FOR A DASHBOARD / INTERACTIVE REPORT, write ONE self-contained `.html` file under `output/`: the workspace has no network and the page is served under a CSP that blocks all outbound requests, so a `<script src="https://cdn...">` renders permanently blank. Inline the pre-installed chart library instead — `Path('/opt/talos/vendor/echarts.min.js').read_text()` — along with the CSS and the data. Talos then shows the live page in the preview panel, not the source. For forecasting/statistics use statsmodels when appropriate; for ML/prediction use scikit-learn when appropriate. Runs with NO time limit — long/heavy work is fine. SHOWING AN IMAGE TO THE USER: your working directory is a private workspace. To display a finished chart/image: save it with a RELATIVE path in your workspace (e.g. `fig.savefig('chart.png', dpi=150, bbox_inches='tight')`), then call the `show_image` tool with that path. (Images you save under an `output/` directory are also shown automatically.) Never upload images via api_call, and do NOT save to `/tmp` or absolute paths — those won't show. Same workspace limits as bash — no TTY, no GUI, no `input()`; for anything the user should interact with, generate a single self-contained HTML file with inline JS instead.""",
     "run_cell": """\
 ```run_cell
 <python code>
@@ -1543,6 +1543,10 @@ _VERIFIER_EFFECTFUL_TOOLS = {
     "write_file",
 }
 _VERIFIER_MAX_ROUNDS = 2  # cap re-verify cycles per turn — never loop forever
+# Each SQL-knowledge refresh rewrites the consolidated system block and so costs
+# a full re-prefill of the conversation. Two is enough to recover from a wrong
+# first retrieval without turning the turn into a prefill loop.
+_SQL_KB_MAX_REFRESHES = 2
 
 
 def _build_actions_snapshot(tool_events: list, limit: int = 8000) -> str:
@@ -2133,21 +2137,47 @@ async def stream_agent_loop(
             )
         else:
             _db_list_note = ""
-        # Admin-uploaded SQL knowledge (Settings → SQL knowledge): schema docs,
-        # column meanings, join hints, etc., indexed as a small scoped RAG.
-        # The relevant chunks are injected fresh on EVERY round inside the loop
-        # below (see `force_db` block), re-queried against the model's latest
-        # activity so the knowledge tracks what it's currently probing — not
-        # just the opening question. Scoped to meta.scope=="sql".
+        # Cached schema card: the table/column map, built once per hour instead
+        # of rediscovered with list_tables + N × describe at the start of every
+        # DB turn. When it's available the model can go straight to the SELECT,
+        # which is worth ~20 rounds — and those rounds each carried the raw
+        # introspection dumps in context. Only for a single configured database;
+        # with several, which one to map is ambiguous and get_schema_card
+        # declines rather than guessing.
+        _schema_card = ""
+        try:
+            from src.tool_implementations import get_schema_card
+
+            _schema_card = await asyncio.wait_for(
+                asyncio.to_thread(get_schema_card, None),
+                timeout=20,
+            )
+        except Exception as _sc_err:
+            logger.debug("[db-mode] schema card unavailable: %s", _sc_err)
+        if _schema_card:
+            _schema_note = (
+                "\n\nSCHEMA MAP (cached, may be up to an hour stale — trust it to "
+                "navigate, verify with `describe` only if a query fails):\n"
+                + _schema_card
+                + "\nYou already have this map: do NOT open with action=list_tables. "
+                "Go to the SELECT that answers the question, and `describe` only the "
+                "specific table you still need columns for."
+            )
+            logger.info("[db-mode] schema card injected (%d chars)", len(_schema_card))
+        else:
+            _schema_note = (
+                " If you don't know the schema yet, start with `query_sql` "
+                "action=list_tables, then action=describe on the relevant tables, "
+                "then run the SELECT that answers the question."
+            )
         _db_note = (
             "## DATABASE MODE — READ FIRST\n"
             "The user activated the database button for this message: they want "
             "it answered FROM the configured external SQL database. You MUST "
             "call the `query_sql` tool before answering — do not answer from "
-            "general knowledge and do not use python/bash to reach the database. "
-            "If you don't know the schema yet, start with `query_sql` "
-            "action=list_tables, then action=describe on the relevant tables, "
-            "then run the SELECT that answers the question." + _db_list_note
+            "general knowledge and do not use python/bash to reach the database."
+            + _db_list_note
+            + _schema_note
         )
         if messages and messages[0].get("role") == "system":
             messages[0]["content"] = _db_note + "\n\n" + (messages[0].get("content") or "")
@@ -2306,11 +2336,13 @@ async def stream_agent_loop(
     # closing remark while the substantial answer sits in an earlier (folded)
     # round — the final message must be the complete deliverable.
     _final_restate_nudged = False
-    # DB mode: a single reference-material message holding sql-scoped RAG chunks,
-    # refreshed in place each round against the model's latest activity so the
-    # schema knowledge tracks what it's currently querying. Inserted lazily on
-    # the first round that finds a hit; updated (never duplicated) thereafter.
+    # DB mode: a single reference-material message holding sql-scoped RAG chunks.
+    # Inserted lazily on the first round that finds a hit, then left ALONE unless
+    # the model actually gets stuck on the schema — see the refresh block in the
+    # round loop for why rewriting it is so expensive.
     _sql_kb_msg = None
+    _sql_kb_attempted = False  # retrieval ran at least once (it may have found nothing)
+    _sql_kb_refreshes = 0
 
     # Document streaming state (persists across rounds)
     _doc_acc = ""  # accumulated tool-call JSON arguments
@@ -2371,22 +2403,54 @@ async def stream_agent_loop(
                     yield f"data: {json.dumps({'type': 'compacted', 'context_length': context_length})}\n\n"
                     yield _context_metrics_frame(estimate_tokens(messages), "estimated")
 
-        # DB mode: refresh the SQL knowledge for THIS round against the most
-        # recent activity (latest query_sql args + tool results/errors), so the
-        # reference tracks the table/column the model is now probing rather than
-        # staying frozen on the opening question.
+        # DB mode: SQL knowledge is retrieved ONCE and then held still.
+        #
+        # This message has role="system", and stream_llm consolidates every
+        # system message into one block at position 0 before sending. So
+        # rewriting it mid-turn changes the first few hundred tokens of the
+        # prompt, which invalidates the server-side prefix cache for the ENTIRE
+        # conversation — vLLM re-prefills the whole context from scratch. It
+        # used to refresh every round: a 39-round DB turn re-processed ~168k
+        # tokens per round (6.5M prompt tokens, ~2/3 of a 107-minute wall
+        # clock) for a reference that barely changed between rounds.
+        #
+        # Re-retrieving is only worth that price when the model is genuinely
+        # lost in the schema, so it is gated on a FAILED query_sql in the
+        # previous round and capped at _SQL_KB_MAX_REFRESHES per turn.
         if force_db:
-            _kb = _retrieve_sql_knowledge(_sql_kb_query(messages))
-            if _kb:
-                _kb_content = (
-                    "Reference material for this database (uploaded SQL knowledge, "
-                    "refreshed for the current step — use it to navigate the schema):\n" + _kb
+            # `_sql_kb_attempted`, not `_sql_kb_msg is None`: when no SQL
+            # knowledge is configured the retrieval returns nothing, and without
+            # this flag we'd run a fruitless vector search on every round.
+            _kb_stale = not _sql_kb_attempted or (
+                _sql_kb_refreshes < _SQL_KB_MAX_REFRESHES
+                and any(
+                    ev.get("round") == round_num - 1
+                    and ev.get("tool") == "query_sql"
+                    and ev.get("exit_code") not in (None, 0)
+                    for ev in tool_events
                 )
-                if _sql_kb_msg is None:
-                    _sql_kb_msg = {"role": "system", "content": _kb_content}
-                    messages.append(_sql_kb_msg)
-                else:
-                    _sql_kb_msg["content"] = _kb_content
+            )
+            if _kb_stale:
+                _sql_kb_attempted = True
+                _kb = _retrieve_sql_knowledge(_sql_kb_query(messages))
+                if _kb:
+                    _kb_content = (
+                        "Reference material for this database (uploaded SQL knowledge "
+                        "— use it to navigate the schema):\n" + _kb
+                    )
+                    if _sql_kb_msg is None:
+                        _sql_kb_msg = {"role": "system", "content": _kb_content}
+                        messages.append(_sql_kb_msg)
+                    elif _sql_kb_msg["content"] != _kb_content:
+                        _sql_kb_msg["content"] = _kb_content
+                        _sql_kb_refreshes += 1
+                        logger.info(
+                            "[db-mode] SQL knowledge refreshed after a failed query "
+                            "(round %d, refresh %d/%d) — prefix cache resets",
+                            round_num,
+                            _sql_kb_refreshes,
+                            _SQL_KB_MAX_REFRESHES,
+                        )
         # Reset doc streaming state per round
         _doc_acc = ""
         _doc_opened = False

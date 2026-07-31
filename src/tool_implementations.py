@@ -6,10 +6,12 @@ These handle the actual execution logic for each tool type.
 """
 
 import asyncio
+import hashlib
 import json
 import logging
 import os
 import re
+import time
 from typing import Any, Dict, List, Optional
 
 MAX_OUTPUT_CHARS = 10_000
@@ -127,6 +129,125 @@ def _resolve_conn_url(conn: dict) -> tuple[Optional[str], Optional[str]]:
     if conn.get("_url"):
         return conn["_url"], None
     return _build_sql_url_from_cfg(conn)
+
+
+# --- Schema card ------------------------------------------------------------
+# A compact, cached map of a database, injected into the system prompt at the
+# start of a DB-mode turn. Without it the model spends its first ~20 rounds on
+# list_tables + describe just to orient — and every one of those raw dumps then
+# rides along in the context of every later round. The card is built once per
+# TTL, so the cost is paid on one turn instead of every turn.
+_SCHEMA_CARD_TTL_SECONDS = 3600
+_SCHEMA_CARD_MAX_CHARS = 12_000
+# Tables we spell out column-by-column. The rest appear as names only; the model
+# can still `describe` them, it just doesn't have to guess that they exist.
+_SCHEMA_CARD_MAX_DETAILED = 40
+# A family (dim1, dim2, … dim3255) is collapsed to one line once it has at least
+# this many members — listing 218 near-identical names teaches nothing and costs
+# a few thousand tokens in every round of the turn.
+_SCHEMA_CARD_FAMILY_MIN = 4
+_schema_card_cache: dict[str, tuple[float, str]] = {}
+
+
+def _schema_card_family(name: str) -> Optional[str]:
+    """Stem of a numbered table family ('dbo.dim3255' -> 'dbo.dim<N>'), else None."""
+    m = re.match(r"^(.*?)(\d+)$", name)
+    return f"{m.group(1)}<N>" if m and len(m.group(1)) >= 2 else None
+
+
+def _build_schema_card_sync(url: str) -> str:
+    """Introspect `url` and render the compact schema card. Blocking; run in a thread."""
+    from sqlalchemy import create_engine, inspect
+
+    engine = create_engine(url, pool_pre_ping=True, connect_args={})
+    try:
+        inspector = inspect(engine)
+        tables: list[str] = []
+        for schema in inspector.get_schema_names():
+            if schema.lower() in {"information_schema", "pg_catalog", "sys"}:
+                continue
+            try:
+                for table in inspector.get_table_names(schema=schema):
+                    tables.append(f"{schema}.{table}" if schema else table)
+                for view in inspector.get_view_names(schema=schema):
+                    tables.append(f"{schema}.{view}" if schema else view)
+            except Exception:
+                continue
+        tables = sorted(dict.fromkeys(tables))
+        if not tables:
+            return ""
+
+        # Split into numbered families and standalone tables.
+        families: dict[str, list[str]] = {}
+        for name in tables:
+            stem = _schema_card_family(name)
+            if stem:
+                families.setdefault(stem, []).append(name)
+        collapsed = {
+            stem: members
+            for stem, members in families.items()
+            if len(members) >= _SCHEMA_CARD_FAMILY_MIN
+        }
+        in_family = {name for members in collapsed.values() for name in members}
+        standalone = [t for t in tables if t not in in_family]
+
+        # Names first, columns second. _truncate cuts the tail, and knowing that
+        # a table EXISTS is what saves a round — its columns are one `describe`
+        # away. So if anything has to go, let it be the column detail.
+        lines = [f"{len(tables)} tables/views."]
+        for stem, members in sorted(collapsed.items()):
+            sample = ", ".join(members[:3])
+            lines.append(f"- {stem} — {len(members)} tables ({sample}, …)")
+        if standalone:
+            lines.append("Tables: " + ", ".join(standalone))
+
+        detailed = standalone[:_SCHEMA_CARD_MAX_DETAILED]
+        if detailed:
+            lines.append("Columns:")
+        for name in detailed:
+            schema, table_name = name.rsplit(".", 1) if "." in name else (None, name)
+            try:
+                cols = inspector.get_columns(table_name, schema=schema)
+            except Exception:
+                continue
+            rendered = ", ".join(f"{c.get('name')}:{c.get('type')}" for c in cols)
+            lines.append(f"- {name}({rendered})")
+        return _truncate("\n".join(lines), _SCHEMA_CARD_MAX_CHARS)
+    finally:
+        engine.dispose()
+
+
+def get_schema_card(database: Optional[str] = None) -> str:
+    """Cached schema card for `database` (or the sole connection). "" when unavailable.
+
+    Blocking — callers on the event loop should wrap this in ``asyncio.to_thread``.
+    """
+    conns = _sql_connections()
+    if not conns:
+        return ""
+    if database:
+        conn = next((c for c in conns if c["name"].lower() == database.lower()), None)
+    elif len(conns) == 1:
+        conn = conns[0]
+    else:
+        conn = None
+    if conn is None:
+        return ""
+    url, err = _resolve_conn_url(conn)
+    if err or not url:
+        return ""
+
+    key = hashlib.sha256(url.encode("utf-8")).hexdigest()
+    hit = _schema_card_cache.get(key)
+    if hit and (time.time() - hit[0]) < _SCHEMA_CARD_TTL_SECONDS:
+        return hit[1]
+    try:
+        card = _build_schema_card_sync(url)
+    except Exception as exc:
+        logger.warning("schema card build failed for %s: %s", conn["name"], exc)
+        return ""
+    _schema_card_cache[key] = (time.time(), card)
+    return card
 
 
 def _build_external_sql_url() -> tuple[Optional[str], Optional[str]]:

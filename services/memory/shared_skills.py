@@ -193,6 +193,157 @@ def save_bundle(zip_bytes: bytes, uploader: Optional[str]) -> dict:
     return save_skill(skill_md, uploader, bundle_files=bundle_files)
 
 
+# ── Bundled sample skills ──
+# The skills shipped in the repo's `sample_skills/` folder are seeded into the
+# shared library on startup so they appear in Settings → Skills next to
+# everything users upload themselves. They are seeded, not special-cased: once
+# in the table they are ordinary shared skills the admin can edit or delete.
+#
+# Two things this must never do:
+#   1. Overwrite a copy the user has edited.
+#   2. Resurrect a copy the user deleted.
+# Both need memory of what we put there, which the table alone can't give us —
+# hence the ledger below, mapping skill name -> hash of the SKILL.md we seeded.
+# A row whose current content still hashes to the ledger value is an untouched
+# seed and may be refreshed when the shipped version changes; anything else is
+# the user's and is left alone.
+SEED_LEDGER_FILENAME = "seeded_skills.json"
+
+
+def _seed_ledger_path() -> str:
+    import os
+
+    from src.constants import DATA_DIR
+
+    return os.path.join(DATA_DIR, SEED_LEDGER_FILENAME)
+
+
+def _read_seed_ledger() -> dict:
+    import json
+    import os
+
+    path = _seed_ledger_path()
+    if not os.path.exists(path):
+        return {}
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def _write_seed_ledger(ledger: dict) -> None:
+    from core.atomic_io import atomic_write_json
+
+    atomic_write_json(_seed_ledger_path(), ledger, indent=2)
+
+
+def _content_hash(text: str) -> str:
+    import hashlib
+
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def _read_sample_skill(skill_dir: str) -> Optional[tuple]:
+    """(skill_md_text, {relpath: bytes}) for one sample-skill folder, or None."""
+    import os
+
+    md_path = os.path.join(skill_dir, "SKILL.md")
+    if not os.path.isfile(md_path):
+        return None
+    with open(md_path, encoding="utf-8") as f:
+        content = f.read()
+    bundle: dict = {}
+    total = 0
+    for root, _dirs, files in os.walk(skill_dir):
+        for fn in files:
+            full = os.path.join(root, fn)
+            rel = os.path.relpath(full, skill_dir).replace("\\", "/")
+            if rel.lower() == "skill.md":
+                continue
+            safe = _safe_bundle_path(rel)
+            if safe is None:
+                continue
+            size = os.path.getsize(full)
+            total += size
+            if (
+                size > MAX_BUNDLE_FILE_BYTES
+                or total > MAX_BUNDLE_TOTAL_BYTES
+                or len(bundle) >= MAX_BUNDLE_FILES
+            ):
+                logger.warning("sample skill %s exceeds bundle limits; truncating", skill_dir)
+                return content, bundle
+            with open(full, "rb") as bf:
+                bundle[safe] = bf.read()
+    return content, bundle
+
+
+def seed_sample_skills(source_dir: Optional[str] = None) -> int:
+    """Install the repo's bundled sample skills into the shared library.
+
+    Idempotent and non-destructive: a skill the user edited or deleted stays
+    that way. Returns the number of skills written.
+    """
+    import os
+
+    if source_dir is None:
+        from src.constants import BASE_DIR
+
+        source_dir = os.path.join(BASE_DIR, "sample_skills")
+    if not os.path.isdir(source_dir):
+        return 0
+
+    ledger = _read_seed_ledger()
+    written = 0
+    for entry in sorted(os.listdir(source_dir)):
+        skill_dir = os.path.join(source_dir, entry)
+        if not os.path.isdir(skill_dir):
+            continue
+        try:
+            read = _read_sample_skill(skill_dir)
+            if read is None:
+                continue
+            content, bundle = read
+            name = parse_frontmatter(content)["name"]
+        except Exception as e:
+            logger.warning("Skipping sample skill %s: %s", entry, e)
+            continue
+
+        shipped_hash = _content_hash(content)
+        with SessionLocal() as db:
+            row = db.get(SharedSkill, name)
+            existing = row.content if row is not None else None
+        seeded_hash = ledger.get(name)
+
+        if existing is None:
+            # Never seen in the table. Only install it if we have never seeded
+            # it — a name in the ledger with no row means the user deleted it.
+            if seeded_hash is not None:
+                continue
+        elif seeded_hash is None or _content_hash(existing) != seeded_hash:
+            # Either it predates the ledger or the user has changed it. Theirs.
+            continue
+        elif seeded_hash == shipped_hash:
+            continue  # already current
+
+        try:
+            save_skill(content, uploader=None, bundle_files=bundle)
+        except Exception as e:
+            logger.warning("Could not seed sample skill %s: %s", name, e)
+            continue
+        ledger[name] = shipped_hash
+        written += 1
+
+    if written:
+        try:
+            _write_seed_ledger(ledger)
+        except Exception as e:
+            logger.warning("Could not persist the sample-skill ledger: %s", e)
+        logger.info("Seeded %d sample skill(s) into the shared library", written)
+    return written
+
+
 def _file_counts(db) -> dict:
     from sqlalchemy import func as _func
 
@@ -204,10 +355,19 @@ def _file_counts(db) -> dict:
 
 
 def list_skills() -> List[dict]:
+    # `bundled` marks a skill that came from the repo's sample_skills folder, so
+    # the UI can label it without inferring from a missing uploader (skills from
+    # a pre-auth install also have no uploader and are NOT bundled).
+    seeded = set(_read_seed_ledger())
     with SessionLocal() as db:
         counts = _file_counts(db)
         rows = db.query(SharedSkill).order_by(SharedSkill.name).all()
-        return [_row_meta(r, counts.get(r.name, 0)) for r in rows]
+        out = []
+        for r in rows:
+            meta = _row_meta(r, counts.get(r.name, 0))
+            meta["bundled"] = r.name in seeded
+            out.append(meta)
+        return out
 
 
 def get_skill(name: str) -> Optional[dict]:

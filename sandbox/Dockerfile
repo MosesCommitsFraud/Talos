@@ -106,6 +106,22 @@ RUN printf 'export PATH=/opt/talos-sandbox-venv/bin:$PATH\n' > /etc/profile.d/zz
     && ln -sf /opt/talos-sandbox-venv/bin/pip     /usr/local/bin/pip \
     && ln -sf /opt/talos-sandbox-venv/bin/pip     /usr/local/bin/pip3
 
+# Vendored dashboard libraries. The sandbox has NO network access at runtime, so
+# a generated HTML dashboard cannot pull a chart library from a CDN — the page
+# would render blank in the preview iframe and in any browser without internet.
+# Baking the library in at build time (where there IS network) lets a dashboard
+# inline it and be genuinely self-contained.
+#
+# ECharts: one UMD file, no build step, declarative option objects — the model
+# writes a small JSON-ish config instead of hand-rolling SVG or D3 scales.
+ARG ECHARTS_VERSION=5.6.0
+RUN set -eu; \
+    mkdir -p /opt/talos/vendor; \
+    npm install --no-audit --no-fund --no-save --prefix /tmp/vendor "echarts@${ECHARTS_VERSION}"; \
+    cp /tmp/vendor/node_modules/echarts/dist/echarts.min.js /opt/talos/vendor/echarts.min.js; \
+    rm -rf /tmp/vendor /root/.npm; \
+    chmod -R a+rX /opt/talos
+
 COPY sandboxd.py ./sandboxd.py
 COPY entrypoint.sh ./entrypoint.sh
 
