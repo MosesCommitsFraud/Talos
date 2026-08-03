@@ -136,6 +136,14 @@ RUN set -eu; \
     rm -rf /tmp/vendor /root/.npm; \
     chmod -R a+rX /opt/talos
 
+# The dashboard scaffold: HTML shell, grid, KPI tiles, theming, per-chart error
+# isolation, plus a catalog of chart builders. All of it is identical for every
+# dashboard ever requested, so shipping it here means the model emits only the
+# chart choices and the data instead of regenerating ~400 lines of boilerplate
+# per request — the single largest latency cost of a dashboard turn.
+COPY vendor/talos_dash.py /opt/talos/vendor/talos_dash.py
+RUN chmod -R a+rX /opt/talos
+
 COPY sandboxd.py ./sandboxd.py
 COPY entrypoint.sh ./entrypoint.sh
 

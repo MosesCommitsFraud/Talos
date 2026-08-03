@@ -39,11 +39,39 @@ FUNCTION_TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "python",
-            "description": "Execute Python code to compute a result or check something in the isolated workspace. For charts, save the finished image to a relative workspace path and call `show_image`; images under `output/` are also shown automatically. For a dashboard, write one self-contained HTML file under `output/` with the chart library inlined from /opt/talos/vendor/echarts.min.js — a CDN <script src> cannot load here. Do not save deliverables under /tmp or absolute paths. The workspace has NO network access — urllib/requests/httpx calls to the internet always fail here; use the `web_search` and `web_fetch` tools instead.",
+            "description": "Execute Python code to compute a result or check something in the isolated workspace. IF A RUN FAILS, DO NOT RESEND THE WHOLE SCRIPT: call `python` again with `edits` (and no `code`) to patch the code you just ran — the body is kept in memory for you. Resending an entire script to change a few lines is slow and is almost never right. For charts, save the finished image to a relative workspace path and call `show_image`; images under `output/` are also shown automatically. For a dashboard, write one self-contained HTML file under `output/` with the chart library inlined from /opt/talos/vendor/echarts.min.js — a CDN <script src> cannot load here. Do not save deliverables under /tmp or absolute paths. The workspace has NO network access — urllib/requests/httpx calls to the internet always fail here; use the `web_search` and `web_fetch` tools instead.",
             "parameters": {
                 "type": "object",
-                "properties": {"code": {"type": "string", "description": "Python code to execute"}},
-                "required": ["code"],
+                "properties": {
+                    "code": {
+                        "type": "string",
+                        "description": "Python code to execute. Omit when using `edits`.",
+                    },
+                    "edits": {
+                        "type": "array",
+                        "description": "Repair mode: patch the code from the previous python run instead of resending it. Each item is {target, replacement} where target matches that code exactly. Use this to fix a traceback.",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "target": {
+                                    "type": "string",
+                                    "description": "Exact text from the previous run's code (including indentation)",
+                                },
+                                "replacement": {"type": "string", "description": "Replacement text"},
+                                "allow_multiple": {
+                                    "type": "boolean",
+                                    "description": "Allow replacing multiple matches of this target",
+                                },
+                            },
+                            "required": ["target", "replacement"],
+                        },
+                    },
+                    "code_id": {
+                        "type": "string",
+                        "description": "Optional: the code_id of the run to patch. Defaults to the most recent run.",
+                    },
+                },
+                "required": [],
             },
         },
     },
@@ -51,16 +79,39 @@ FUNCTION_TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "run_cell",
-            "description": "Run Python in a PERSISTENT session (like a Jupyter notebook): variables, imports, and loaded data PERSIST between calls. For one-off computations use the `python` tool; reach for run_cell only for MULTI-STEP data analysis where keeping data in memory between steps saves real work (load a dataset once, then explore/transform/plot it across cells without reloading). State persists until the chat ends or you reset it. For charts, save to an `output/` path or call show_image.",
+            "description": "Run Python in a PERSISTENT session (like a Jupyter notebook): variables, imports, and loaded data PERSIST between calls. For one-off computations use the `python` tool; reach for run_cell only for MULTI-STEP data analysis where keeping data in memory between steps saves real work (load a dataset once, then explore/transform/plot it across cells without reloading). State persists until the chat ends or you reset it. For charts, save to an `output/` path or call show_image. IF A CELL FAILS, DO NOT RESEND IT: call run_cell again with `edits` (and no `code`) to patch the cell you just ran.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "code": {
                         "type": "string",
-                        "description": "Python code to run in the persistent kernel",
-                    }
+                        "description": "Python code to run in the persistent kernel. Omit when using `edits`.",
+                    },
+                    "edits": {
+                        "type": "array",
+                        "description": "Repair mode: patch the previous cell's code instead of resending it. Each item is {target, replacement} where target matches that code exactly.",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "target": {
+                                    "type": "string",
+                                    "description": "Exact text from the previous cell (including indentation)",
+                                },
+                                "replacement": {"type": "string", "description": "Replacement text"},
+                                "allow_multiple": {
+                                    "type": "boolean",
+                                    "description": "Allow replacing multiple matches of this target",
+                                },
+                            },
+                            "required": ["target", "replacement"],
+                        },
+                    },
+                    "code_id": {
+                        "type": "string",
+                        "description": "Optional: the code_id of the cell to patch. Defaults to the most recent one.",
+                    },
                 },
-                "required": ["code"],
+                "required": [],
             },
         },
     },
@@ -1133,7 +1184,9 @@ def function_call_to_tool_block(name: str, arguments: str) -> Optional[ToolBlock
     if tool_type == "bash":
         content = args.get("command", "")
     elif tool_type == "python":
-        content = args.get("code", "")
+        # A repair call carries `edits` instead of `code`; keep the structure so
+        # the executor can forward the patch to the sandbox.
+        content = json.dumps(args) if args.get("edits") else args.get("code", "")
     elif tool_type == "read_file":
         # Plain path (back-compat) unless a line range is requested → JSON.
         if args.get("offset") or args.get("limit"):

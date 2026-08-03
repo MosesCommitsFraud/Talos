@@ -10,302 +10,146 @@ A dashboard here is **one self-contained `.html` file** in the workspace. Talos
 renders it live in the preview panel and behind an "open in new tab" button, so
 the user sees the working page, not the source.
 
-Self-contained is not a style preference — it is the hard constraint everything
-else follows from.
+**Do not hand-write the page.** The shell, CSS, grid, KPI tiles, ECharts
+inlining, dark mode, per-chart error isolation and resize handling are vendored
+in `/opt/talos/vendor/talos_dash.py` and are identical for every dashboard.
+Writing them out again costs a few hundred lines of output for zero information.
+Your job is the part that actually varies: **which charts, and what data.**
 
-## The constraint: no network, ever
-
-The workspace has **no internet access**, and the page is served under a Content
-Security Policy that blocks every outbound request: no script `src`, no
-stylesheet `href`, no remote fonts, no images by URL, no `fetch`.
-
-So a line like this produces a permanently blank dashboard:
-
-```html
-<!-- broken: the CDN is unreachable from the workspace AND blocked by the CSP -->
-<script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
-```
-
-Everything the page needs must be *inside* the file: the chart library inlined,
-CSS inlined, data inlined as a JS literal, images as `data:` URIs.
-
-## Build it with ECharts
-
-ECharts 6.1 is pre-installed in the sandbox. Inline it — don't try to install
-one, and don't reach for a CDN.
-
-| Path | What it is |
-| --- | --- |
-| `/opt/talos/vendor/echarts.min.js` | the UMD build — inline this into every page |
-| `/opt/talos/vendor/echarts-themes/*.js` | 36 official themes — inline one after the library |
-| `/opt/talos/vendor/echarts.d.ts` | the full option reference, offline and greppable |
-| `/opt/talos/vendor/echarts.version` | the exact version, when you need to check |
-
-Write a small Python builder rather than typing the HTML by hand. The builder
-reads your data, renders the chart configs, and stitches the page together;
-when something is wrong you fix a few lines instead of regenerating 40 KB of
-markup.
-
-**ECharts option keys are camelCase** — `xAxis`, `yAxis`, `axisLabel`,
-`markPoint`, `areaStyle`. Writing them in Python tempts you into `xaxis` /
-`yaxis`, and that mistake is silent and total: ECharts ignores the unknown key,
-finds no axis for the series, and throws `TypeError: Cannot read properties of
-undefined (reading 'get')` out of `setOption`. The exception aborts the rest of
-the script, so **every chart after the first one is never created either** — the
-whole page is empty boxes. Validate before you write (see `check_option` below).
-
-A complete, correct option looks like this:
+## The whole build
 
 ```python
-option = {
-    "title": {"text": "Nettoumsatz — Ist / Plan / Prognose", "left": "center"},
-    "tooltip": {"trigger": "axis"},
-    "legend": {"data": ["Ist", "Prognose"], "top": 30},
-    "xAxis": {"type": "category", "data": ["2023", "2024", "2025"]},
-    "yAxis": {"type": "value", "name": "Mio. €"},
-    "series": [
-        {"name": "Ist", "type": "line", "data": [44.9, 45.0, 45.2],
-         "lineStyle": {"width": 3}},
-        {"name": "Prognose", "type": "line", "data": [None, None, 46.1],
-         "lineStyle": {"type": "dotted"}, "areaStyle": {"opacity": 0.1}},
+import sys; sys.path.insert(0, "/opt/talos/vendor")
+from talos_dash import dashboard, chart, kpi, line, hbar, stacked_bar
+
+dashboard(
+    "output/dashboard.html",
+    title="Umsatz 2023–2025",
+    subtitle="Quartalszahlen · Stand 03/2026",
+    theme="macarons",                       # optional; None = built-in palette
+    kpis=[
+        kpi("Nettoumsatz", "45,2 Mio. €", "+3,1 % ggü. Vj.", "up"),
+        kpi("Marge", "18,4 %", "−0,6 pp", "down"),
     ],
-    "grid": {"left": 80, "right": 30, "top": 80, "bottom": 50},
-}
+    charts=[
+        chart("trend", "Entwicklung", line(quarters, {"Ist": ist, "Plan": plan}), span=2),
+        chart("mix",   "Umsatzmix",   stacked_bar(quarters, mix, percent=True)),
+        chart("top",   "Top-Kunden",  hbar(names, values, top=10)),
+    ],
+    footer="Prognosewerte ab Q2/2026 sind modelliert, nicht gemessen.",
+)
 ```
 
-Every series' `data` must be the same length as `xAxis.data`; pad the gaps with
-`None` (→ `null`), as the forecast series does above. A short array does not
-align to the right-hand end of the axis — it silently plots against the wrong
-years.
+That is the entire page. `dashboard()` validates every option, writes the file
+and returns the path. `span=2` makes a card full width; the grid collapses to
+one column on narrow screens.
+
+## Pick the chart that fits the question
+
+The builders below all return plain ECharts option dicts, pre-themed and
+consistent with each other. They exist so that a heatmap, a sankey or a
+waterfall costs you exactly as much to write as a bar chart — **a dashboard of
+three bar charts is a sign the alternatives were expensive, not that bars were
+right.** Read the data first, then choose.
+
+| The question the user is really asking | Builder |
+| --- | --- |
+| How did this change over time? | `line(categories, {"name": values})` |
+| One series over time, emphasised | `area(categories, name, values)` |
+| Which category is biggest? (few, short labels) | `bar(categories, values, sort=True, highlight=…)` |
+| Which category is biggest? (many or long labels) | `hbar(categories, values, top=10)` |
+| Same measure, several groups, side by side | `grouped_bar(categories, {"g": values})` |
+| How is the composition shifting? | `stacked_bar(categories, series, percent=True)` |
+| **What drove the change from A to B?** | `waterfall(labels, deltas, start=…)` |
+| Do these two measures move together? | `scatter(points, sizes=…, labels=…)` |
+| Two categorical dimensions, one measure | `heatmap(x_labels, y_labels, values)` |
+| Composition right now, ≤5 parts | `pie(labels, values)` / `donut(…)` |
+| Several metrics across a few entities | `radar(indicators, {"entity": values})` |
+| One ratio against a target | `gauge(value, target=…)` |
+| Where do people drop out? | `funnel(stages, values)` |
+| How spread out is it? | `boxplot(categories, groups)` / `histogram(values)` |
+| Hierarchy of parts | `treemap(nodes)` |
+| What flows from where to where? | `sankey(nodes, links)` |
+| A single headline number | `kpi(...)` — a tile, not a chart |
+
+Two that get underused and shouldn't: **`waterfall`** is almost always the right
+answer to "why is this number different from last year", and **`heatmap`** turns
+a table nobody reads into a pattern you can see at a glance.
+
+`python -c "import sys; sys.path.insert(0,'/opt/talos/vendor'); import talos_dash; help(talos_dash.waterfall)"`
+for any signature.
+
+## Going beyond the catalog
+
+Every builder returns a dict, so tune it in place:
 
 ```python
-import json
-from pathlib import Path
-
-VENDOR = Path('/opt/talos/vendor')
-ECHARTS = (VENDOR / 'echarts.min.js').read_text(encoding='utf-8')
-THEME_NAME = 'macarons'                     # ls VENDOR/'echarts-themes' for the set
-THEME = (VENDOR / 'echarts-themes' / f'{THEME_NAME}.js').read_text(encoding='utf-8')
-
-_CARTESIAN = {"line", "bar", "scatter", "effectScatter", "candlestick", "boxplot"}
-
-def check_option(cid: str, opt: dict) -> None:
-    """Fail loudly in Python rather than silently in the browser."""
-    for wrong, right in (("xaxis", "xAxis"), ("yaxis", "yAxis")):
-        if wrong in opt:
-            raise ValueError(f"{cid}: {wrong!r} must be {right!r} (ECharts is camelCase)")
-    series = opt.get("series") or []
-    if any(s.get("type") in _CARTESIAN for s in series):
-        missing = [k for k in ("xAxis", "yAxis") if k not in opt]
-        if missing:
-            raise ValueError(f"{cid}: cartesian series needs {missing}")
-    cats = (opt.get("xAxis") or {}).get("data")
-    if cats:
-        for s in series:
-            if s.get("data") is not None and len(s["data"]) != len(cats):
-                raise ValueError(
-                    f"{cid}: series {s.get('name')!r} has {len(s['data'])} points "
-                    f"but xAxis has {len(cats)} categories — pad with None"
-                )
-
-def page(title: str, charts: list[dict], kpis: list[dict]) -> str:
-    """charts: [{'id': 'revenue', 'title': 'Umsatz', 'option': {...}}, ...]"""
-    for c in charts:
-        check_option(c["id"], c["option"])
-    tiles = "".join(
-        f'<div class="kpi"><span class="kpi-label">{k["label"]}</span>'
-        f'<span class="kpi-value">{k["value"]}</span>'
-        f'<span class="kpi-delta {k.get("tone", "")}">{k.get("delta", "")}</span></div>'
-        for k in kpis
-    )
-    blocks = "".join(
-        f'<section class="card"><h2>{c["title"]}</h2>'
-        f'<div class="chart" id="{c["id"]}"></div></section>'
-        for c in charts
-    )
-    # Each init is isolated: an exception in one setOption must not stop the
-    # ones after it, and the failure has to be visible in the page instead of
-    # showing up as a blank box.
-    inits = "\n".join(
-        f'try {{ echarts.init(document.getElementById({c["id"]!r}), theme)'
-        f'.setOption({json.dumps(c["option"], ensure_ascii=False, default=str)}); }}'
-        f'catch (e) {{ console.error({c["id"]!r}, e);'
-        f' document.getElementById({c["id"]!r}).innerHTML ='
-        f' \'<p class="chart-error">Chart {c["id"]} failed: \' + e.message + \'</p>\'; }}'
-        for c in charts
-    )
-    return f"""<!DOCTYPE html>
-<html lang="de"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{title}</title>
-<style>{CSS}</style>
-<script>{ECHARTS}</script>
-<script>{THEME}</script>
-</head><body>
-<header><h1>{title}</h1></header>
-<div class="kpis">{tiles}</div>
-{blocks}
-<script>
-// Fail loudly if the library didn't survive being inlined. A blank dashboard
-// with a clean console is the hardest version of this to debug.
-if (typeof echarts !== 'object' || typeof echarts.init !== 'function') {{
-  document.body.insertAdjacentHTML('afterbegin',
-    '<p style="background:#fee;color:#900;padding:1rem">ECharts did not load: '
-    + 'window.echarts is ' + typeof echarts + '. The library must be inlined '
-    + 'verbatim, with nothing assigned to it.</p>');
-}}
-// 'dark' is built into ECharts (dark background, default palette); THEME_NAME
-// is the one inlined above. Inline a dark theme file too if you want a dark
-// palette rather than just a dark canvas.
-const theme = matchMedia('(prefers-color-scheme: dark)').matches
-  ? 'dark' : {THEME_NAME!r};
-{inits}
-addEventListener('resize', () => echarts.getInstanceByDom
-  && document.querySelectorAll('.chart').forEach(el => echarts.getInstanceByDom(el)?.resize()));
-</script>
-</body></html>"""
-
-Path('output/dashboard.html').write_text(page(...), encoding='utf-8')
+opt = line(months, {"Ist": ist})
+opt["yAxis"]["axisLabel"] = {"formatter": "{value} €"}
+opt["series"][0]["markLine"] = {"data": [{"type": "average", "name": "Ø"}]}
+charts.append(chart("rev", "Umsatz", opt))
 ```
 
-## Look it up instead of guessing
+Or pass a hand-written ECharts option straight to `chart()` — the catalog is a
+shortcut, not a fence.
 
-You do not have the option reference memorized, and ECharts has hundreds of
-keys. Two ways to check, both cheap:
+For a chart type that isn't in the table, don't guess at option keys:
 
-**Offline, from inside the sandbox** — the TypeScript declarations are vendored,
-so the authoritative list of keys is a grep away:
-
-```bash
-grep -n 'xAxis?:' /opt/talos/vendor/echarts.d.ts          # confirm a key exists
-grep -n 'interface SunburstSeriesOption' -A 40 /opt/talos/vendor/echarts.d.ts
-grep -c '"xaxis"' output/dashboard.html                    # must be 0
-```
-
-A case-sensitive grep is decisive here: the declarations contain `xAxis` 30
-times and lowercase `xaxis` zero times. If your key isn't in that file, it isn't
-a real option and ECharts will ignore it.
-
-**Online, from the agent side** — the *sandbox* has no network, but `web_fetch`
-runs outside it and does. Use it when you want a chart type you haven't built
-before, or when the default styling isn't good enough:
-
-- <https://echarts.apache.org/examples/en/index.html> — the example gallery.
-  Every example is a complete option object; find one close to what you want and
-  adapt it rather than inventing a config.
-- <https://echarts.apache.org/en/option.html> — the full option reference.
-- <https://echarts.apache.org/handbook/en/basics/release-note/v6-feature/> —
-  what 6.x added (chord diagrams, the matrix coordinate system, scatter
-  jittering, `dataMin`/`dataMax` axis extents).
-
-Fetching one gallery example before building an unfamiliar chart is almost
-always faster than three rounds of guessing at option keys.
-
-## Don't ship the default look
-
-The stock palette on a stock white card is what makes a generated dashboard look
-generated. It costs very little to do better:
-
-- **Use a theme.** Inline one of `/opt/talos/vendor/echarts-themes/*.js` after
-  the library, then `echarts.init(el, 'macarons')`. `macarons`, `shine`, `roma`,
-  `infographic`, `vintage` and `tech-blue` all read as deliberate; `dark`,
-  `dark-bold` or `dark-blue` handle a dark UI. (`v5` restores the pre-6.0 look
-  if you specifically want it.) `ls /opt/talos/vendor/echarts-themes/` for the
-  full set — the theme file registers itself, so inlining it is enough.
-- **One accent, not eight.** Give the series the user cares about the strong
-  colour and mute the rest to greys. A twelve-colour rainbow says "I did not
-  decide what matters".
-- **`smooth: true`** on trend lines, and an `areaStyle` with a gradient
-  (`echarts.graphic.LinearGradient`) under the primary series only.
-- **Kill the chart junk.** `yAxis.splitLine` light grey, `xAxis.axisLine` off,
-  no gridlines on the category axis. Let the data be the darkest thing.
-- **Label the ends, not every point.** `endLabel` on a line beats a legend the
-  eye has to bounce to.
-
-`echarts.init(el, 'dark')` gives you a working dark theme for free — use it, and
-match the surrounding CSS, so the page doesn't glare in a dark UI.
+- Offline: `grep -n 'interface SunburstSeriesOption' -A 40 /opt/talos/vendor/echarts.d.ts`
+- Online (the *agent* has network even though the sandbox doesn't): `web_fetch`
+  <https://echarts.apache.org/examples/en/index.html> — every example is a
+  complete option object. Fetching one is faster than three rounds of guessing.
 
 ## Requirements for every dashboard
 
-- **One file**, written to a workspace-relative path — `output/dashboard.html`.
-  Never `/tmp`, never an absolute path.
-- **Data inlined** as a JS literal or embedded JSON. The page must not read a
-  sibling `.csv` at runtime; the preview iframe cannot fetch it.
-- **Responsive**: a CSS grid that collapses to one column on narrow screens, and
-  charts that `resize()` with the window. The preview panel is narrow.
-- **Says what it is**: a title, the period covered, and — when figures are
-  projected rather than measured — a visible note saying so. A forecast that
-  looks like a measurement is the one failure the user cannot detect themselves.
-- **Readable without hovering.** Axis labels, units and a legend on every chart;
-  tooltips add detail, they don't carry it.
-
-## Choosing marks
-
-- Trend over time → line; add a shaded `confidence band` (an `'ES'`-styled area
-  series) when you are plotting a forecast interval.
-- Comparison across categories → bar, sorted by value unless the category order
-  carries meaning (months, stages).
-- Part-of-whole → stacked bar over time, or a single stacked bar. Reach for a
-  pie only with ≤5 slices.
-- A single headline number → a KPI tile, not a chart.
-- Distribution → boxplot or histogram; don't summarise it to a mean and hide the
-  spread.
-
-## Also produce the data
-
-When the user asked for a dashboard *and* data (the usual case), write the
-spreadsheet too — `df.to_excel('output/analysis.xlsx', ...)` — from the same
-computed frame the charts use, so the two can't disagree. Compute once, render
-twice.
+- **One file**, at a workspace-relative path (`output/dashboard.html`). Never
+  `/tmp`, never absolute.
+- **Data inlined.** The page must not read a sibling `.csv` at runtime — the
+  preview iframe cannot fetch it, and `dashboard()` embeds whatever you pass.
+- **Says what it is**: title, the period covered, and a visible note whenever
+  figures are projected rather than measured. A forecast that looks like a
+  measurement is the one failure the user cannot detect themselves — put it in
+  `footer=` or the chart's `note=`.
+- **Readable without hovering.** Units on the axis, a legend when there is more
+  than one series. Tooltips add detail; they don't carry it.
+- **Also produce the data** when the user asked for both — `df.to_excel(...)`
+  from the same frame the charts use, so the two cannot disagree. Compute once,
+  render twice.
 
 ## Pitfalls
 
-- **A CDN `<script src>`** gives a blank page with no error the user can see.
-  This is the most common way to get this wrong; grep your own output for
-  `src="http` before you finish.
-- **Regenerating the whole HTML to fix one chart.** Edit the builder, re-run it.
-- **`json.dumps` on a DataFrame/Timestamp** raises. Convert first
-  (`df.to_dict('records')`, `.strftime('%Y-%m-%d')`) or pass `default=str`.
-- **`xaxis` / `yaxis` instead of `xAxis` / `yAxis`.** The single most likely way
-  to ship a dashboard of empty boxes — and because the throw aborts the script,
-  one lowercase key blanks every chart on the page, not just its own. See
-  `check_option` above.
-- **Assigning the library to something.** `<script>echarts={...the file...}</script>`
-  looks harmless and destroys it. `echarts.min.js` is a UMD bundle that starts
-  with `!function(...)` and registers `window.echarts` itself; putting
-  `echarts=` in front assigns the IIFE's return value — `!undefined`, i.e.
-  `true` — over the object it just created. Every later `echarts.init(...)`
-  then dies on "not a function" and the first failure takes all the remaining
-  charts with it. **Inline the file verbatim**: no assignment, no `var`, no
-  wrapper, nothing before it inside the tag.
-- **A theme name that was never registered.** `echarts.init(el, 'macarons')`
-  when `macarons.js` wasn't inlined does *not* error — it silently falls back to
-  the default palette. If your dashboard still looks stock after you picked a
-  theme, that's why: check the theme file actually made it into the page
-  (`grep -c registerTheme output/dashboard.html`).
-- **Charts with zero height.** ECharts needs the container to have an explicit
-  height before `init` — set one in CSS (`.chart { height: 320px }`).
-- **Series shorter than the axis.** Five values on a twelve-year axis plots the
-  first five years, not the last five. Pad with `None`.
-- **Repeated values across every period.** If your "per year" numbers come out
-  identical, the query is aggregating the same rows each time — a join or filter
-  is wrong. Sanity-check the frame before charting it; a dashboard makes wrong
-  numbers look authoritative.
+- **Regenerating the whole script to fix one chart.** The `python` tool keeps
+  your last body in memory: call it again with `edits` to patch the broken
+  lines. Rewriting the file is the slow path and is almost never necessary.
+- **Reaching for a CDN.** The workspace has no network *and* the preview runs
+  under a CSP that blocks every outbound request. `<script src="https://…">`
+  gives a permanently blank page with nothing in the console the user can see.
+  `dashboard()` inlines ECharts for you — don't add a tag.
+- **`json.dumps` on a DataFrame or Timestamp** raises. Convert first
+  (`df.to_dict("records")`, `.strftime("%Y-%m-%d")`); the scaffold passes
+  `default=str` but a DataFrame still won't serialise usefully.
+- **Series shorter than the axis.** Five values on a twelve-quarter axis plot
+  against the *first* five quarters, not the last five. Pad with `None` —
+  `check_option` raises on a length mismatch, so this fails in Python instead of
+  silently lying in the browser.
+- **`xaxis` instead of `xAxis`** if you hand-write an option. ECharts ignores
+  unknown keys and then throws inside `setOption`; `check_option` catches the
+  common cases before the page is written.
+- **A theme name that doesn't exist.** `dashboard(theme=...)` raises with the
+  available list — `talos_dash.themes()` prints all 36.
+- **Repeated values across every period.** If your per-year numbers come out
+  identical, a join or filter is wrong. Sanity-check the frame before charting:
+  a dashboard makes wrong numbers look authoritative.
 
 ## Verify before you finish
 
-Checking the file exists is not verification — the failure modes above all
-produce a perfectly plausible file. Run these three:
+Checking that the file exists is not verification.
 
 ```bash
-grep -c 'src="http' output/dashboard.html    # must be 0 — no CDN
 ls -l output/dashboard.html                  # ~1.2 MB; 50 KB means ECharts is not inlined
-grep -o '"[xy]axis"' output/dashboard.html   # must print nothing
-grep -c registerTheme output/dashboard.html  # 1 if you inlined a theme
-grep -o '<script>[a-zA-Z_$]*=' output/dashboard.html   # must print nothing —
-                                             # nothing may be assigned the library
+grep -c 'src="http' output/dashboard.html    # must be 0
+grep -c 'chart-error' output/dashboard.html  # 1 (the CSS rule) — more means a chart threw
 ```
 
-Then open the page in the preview panel and look at it. Every chart box should
-contain a drawn chart; an empty box means `setOption` threw, and the browser
-console says which one.
+Then open the page in the preview panel and look at it. Every card should
+contain a drawn chart; a card showing "Chart … failed" names the one that threw.

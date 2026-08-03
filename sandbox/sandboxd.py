@@ -13,6 +13,7 @@ import time
 import uuid
 import fnmatch
 import re
+from collections import deque
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -68,6 +69,10 @@ class ExecRequest(BaseModel):
     command: str = ""
     code: str = ""
     timeout: int = 120
+    # Repair-in-place for `python`: instead of re-sending the whole body, patch
+    # the last body run in this session. See _resolve_cell_code.
+    edits: list[dict[str, Any]] = []
+    code_id: str = ""
 
 
 class ExecResponse(BaseModel):
@@ -84,6 +89,9 @@ class ExecResponse(BaseModel):
     images: list[dict[str, str]] = []
     image_note: str = ""
     created_artifacts: list[str] = []
+    # Handle for the code body this run executed, so a follow-up call can patch
+    # it with `edits` instead of re-transmitting it. Empty for bash.
+    code_id: str = ""
 
 
 class ExecuteRequest(BaseModel):
@@ -134,6 +142,8 @@ class MoveRequest(BaseModel):
 class CellRequest(BaseModel):
     code: str = ""
     timeout: int = 0
+    edits: list[dict[str, Any]] = []
+    code_id: str = ""
 
 
 class SearchRequest(BaseModel):
@@ -210,7 +220,7 @@ _kernels: dict[str, dict[str, Any]] = {}
 # persistent namespace between calls. Talks length-prefixed JSON over a Unix
 # socket in the workspace. argv: [sock_path, workdir].
 _KERNEL_SERVER_SRC = r'''
-import socket, sys, json, struct, io, contextlib, traceback, os, ast
+import socket, sys, json, struct, io, contextlib, traceback, os, ast, linecache
 sock_path, workdir = sys.argv[1], sys.argv[2]
 try:
     os.chdir(workdir)
@@ -258,24 +268,28 @@ while True:
             conn.close()
             continue
         code = msg.get("code", "")
+        # Register the cell under its own virtual filename so tracebacks print
+        # the offending source line instead of a blank.
+        name = msg.get("name") or "<cell>"
+        linecache.cache[name] = (len(code), None, code.splitlines(True), name)
         out, err, error = io.StringIO(), io.StringIO(), ""
         try:
             with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
                 try:
-                    tree = ast.parse(code, "<cell>", "exec")
+                    tree = ast.parse(code, name, "exec")
                 except SyntaxError:
-                    exec(compile(code, "<cell>", "exec"), ns)
+                    exec(compile(code, name, "exec"), ns)
                 else:
                     if tree.body and isinstance(tree.body[-1], ast.Expr):
                         last = ast.Expression(tree.body.pop().value)
                         ast.fix_missing_locations(last)
                         if tree.body:
-                            exec(compile(tree, "<cell>", "exec"), ns)
-                        val = eval(compile(last, "<cell>", "eval"), ns)
+                            exec(compile(tree, name, "exec"), ns)
+                        val = eval(compile(last, name, "eval"), ns)
                         if val is not None:
                             print(repr(val))
                     else:
-                        exec(compile(tree, "<cell>", "exec"), ns)
+                        exec(compile(tree, name, "exec"), ns)
         except Exception:
             error = traceback.format_exc()
         _send(conn, {"stdout": out.getvalue(), "stderr": err.getvalue(), "error": error})
@@ -627,6 +641,7 @@ def delete_workspace_route(user_id: str, chat_id: str) -> dict[str, Any]:
     _repaired_workspaces.discard(str(workspace.resolve()))
     # Drop any cached session cwd for this chat so a recreated workspace starts clean.
     _session_cwds.pop(_session_key(user_id, chat_id), None)
+    _cell_code.pop(_session_key(user_id, chat_id), None)
     return {"ok": True, "deleted": existed, "workspace": str(workspace)}
 
 
@@ -942,6 +957,91 @@ def _changed_artifacts(workspace: Path, before: dict[str, tuple[int, int]]) -> l
     return sorted(path for path, metadata in after.items() if before.get(path) != metadata)
 
 
+# Recent python/run_cell bodies, per session, held in MEMORY only. A failing run
+# can then be repaired with a small `edits` patch instead of the model re-emitting
+# the whole script — which is the dominant latency cost of a code-writing turn.
+# Deliberately never written to the workspace: the script is scaffolding, the
+# user asked for the result. Nothing to clean up, nothing in the artifacts list.
+_cell_code: dict[str, "deque[tuple[str, str]]"] = {}
+_CELL_HISTORY = 8          # bodies kept per session (only the latest is usually patched)
+_CELL_MAX_CHARS = 100_000  # env-var / argv ceiling; above this, use write_file + bash
+
+
+def _remember_cell_code(user_id: str, chat_id: str, src: str) -> str:
+    """Store a code body and return its handle."""
+    key = _session_key(user_id, chat_id)
+    code_id = f"cell-{uuid.uuid4().hex[:8]}"
+    history = _cell_code.setdefault(key, deque(maxlen=_CELL_HISTORY))
+    history.append((code_id, src))
+    return code_id
+
+
+def _lookup_cell_code(user_id: str, chat_id: str, code_id: str = "") -> str | None:
+    history = _cell_code.get(_session_key(user_id, chat_id))
+    if not history:
+        return None
+    if not code_id:
+        return history[-1][1]
+    for cid, src in history:
+        if cid == code_id:
+            return src
+    return None
+
+
+def _resolve_cell_code(
+    user_id: str, chat_id: str, code: str, edits: list[dict[str, Any]], code_id: str
+) -> tuple[str, str | None]:
+    """Resolve the source to run. Returns (source, error).
+
+    With `edits`, patch a previously-run body instead of taking `code` verbatim.
+    A miss (daemon restarted, history evicted, parallel run clobbered it) is a
+    plain error telling the model to send the full body — never a silent wrong patch.
+    """
+    if not edits:
+        return code, None
+    base = _lookup_cell_code(user_id, chat_id, code_id)
+    if base is None:
+        which = f"code_id {code_id!r}" if code_id else "the previous run"
+        return "", (
+            f"edits: {which} is no longer in memory. Send the full `code` for this run instead."
+        )
+    patched = base
+    for i, chunk in enumerate(edits):
+        patched, err = _apply_edit_chunk(patched, chunk, i)
+        if err is not None:
+            return "", f"edits: {err}. Match the code you last ran exactly, or send the full `code`."
+    if patched == base:
+        return "", "edits: produced no change to the previous code."
+    return patched, None
+
+
+# Bootstrap for the `python` tool. The body arrives via environment variable and
+# is registered in linecache under a virtual filename, so tracebacks show real
+# line numbers AND source lines without any file existing on disk (`python -c`
+# gives line numbers but renders every source line as blank).
+_PY_RUNNER_SRC = r'''
+import os, sys, linecache, traceback
+name = sys.argv[1] if len(sys.argv) > 1 else "<cell>"
+src = os.environ.pop("TALOS_CELL_SRC", "")
+linecache.cache[name] = (len(src), None, src.splitlines(True), name)
+sys.argv = [name]
+try:
+    _code = compile(src, name, "exec")
+except SyntaxError:
+    traceback.print_exc()
+    sys.exit(1)
+try:
+    exec(_code, {"__name__": "__main__", "__file__": name})
+except SystemExit:
+    raise
+except BaseException as exc:
+    # Drop this bootstrap's own frame so the trace starts at the user's code.
+    tb = exc.__traceback__
+    traceback.print_exception(type(exc), exc, tb.tb_next if tb and tb.tb_next else tb)
+    sys.exit(1)
+'''
+
+
 @app.post("/users/{user_id}/workspaces/{chat_id}/exec", response_model=ExecResponse)
 async def exec_route(user_id: str, chat_id: str, req: ExecRequest) -> ExecResponse:
     name, workspace = _workspace(user_id, chat_id)
@@ -950,12 +1050,23 @@ async def exec_route(user_id: str, chat_id: str, req: ExecRequest) -> ExecRespon
     # wall-clock budget in seconds, uncapped.
     _t = int(req.timeout or 0)
     timeout = _t if _t > 0 else None
+    code_id = ""
+    env: dict[str, str] | None = None
     if req.kind == "python":
-        command = f"/opt/talos-sandbox-venv/bin/python -c {shlex.quote(req.code or req.command)}"
+        src, err = _resolve_cell_code(
+            user_id, chat_id, req.code or req.command, req.edits, req.code_id
+        )
+        if err is not None:
+            return ExecResponse(user_id=user_id, chat_id=chat_id, linux_user=name, workspace=str(workspace), stdout="", stderr=err, exit_code=1)
+        if len(src) > _CELL_MAX_CHARS:
+            return ExecResponse(user_id=user_id, chat_id=chat_id, linux_user=name, workspace=str(workspace), stdout="", stderr=f"python: code is {len(src)} chars (limit {_CELL_MAX_CHARS}). Save it with write_file and run it with bash instead.", exit_code=1)
+        code_id = _remember_cell_code(user_id, chat_id, src)
+        command = f"/opt/talos-sandbox-venv/bin/python -c {shlex.quote(_PY_RUNNER_SRC)} {shlex.quote(code_id)}"
+        env = {"TALOS_CELL_SRC": src}
     else:
         command = req.command
     started_at = time.time()
-    proc = await _start_process(user_id, chat_id, ExecuteRequest(command=command))
+    proc = await _start_process(user_id, chat_id, ExecuteRequest(command=command, env=env))
     try:
         await asyncio.wait_for(asyncio.shield(proc.log_task), timeout=timeout)
     except asyncio.TimeoutError:
@@ -964,10 +1075,10 @@ async def exec_route(user_id: str, chat_id: str, req: ExecRequest) -> ExecRespon
         proc.exit_code = 124
         proc.finished_at = time.time()
         output, _next, _truncated = _read_process_log(proc.log_path, offset=0)
-        return ExecResponse(user_id=user_id, chat_id=chat_id, linux_user=name, workspace=str(workspace), stdout=output, stderr="", exit_code=124, timed_out=True, created_artifacts=_changed_artifacts(workspace, artifacts_before))
+        return ExecResponse(user_id=user_id, chat_id=chat_id, linux_user=name, workspace=str(workspace), stdout=output, stderr="", exit_code=124, timed_out=True, created_artifacts=_changed_artifacts(workspace, artifacts_before), code_id=code_id)
     output, _next, _truncated = _read_process_log(proc.log_path, offset=0)
     images, image_note = _collect_new_images(workspace, started_at)
-    return ExecResponse(user_id=user_id, chat_id=chat_id, linux_user=name, workspace=str(workspace), stdout=output, stderr="", exit_code=proc.exit_code or 0, images=images, image_note=image_note, created_artifacts=_changed_artifacts(workspace, artifacts_before))
+    return ExecResponse(user_id=user_id, chat_id=chat_id, linux_user=name, workspace=str(workspace), stdout=output, stderr="", exit_code=proc.exit_code or 0, images=images, image_note=image_note, created_artifacts=_changed_artifacts(workspace, artifacts_before), code_id=code_id)
 
 
 def _kernel_sock_path(workspace: Path) -> Path:
@@ -1020,7 +1131,7 @@ async def _ensure_kernel(user_id: str, chat_id: str) -> dict[str, Any]:
     return rec
 
 
-def _kernel_exec_sync(sock_path: str, code: str, timeout: int) -> dict[str, Any]:
+def _kernel_exec_sync(sock_path: str, code: str, timeout: int, name: str = "<cell>") -> dict[str, Any]:
     import socket as _socket
     import struct as _struct
 
@@ -1028,7 +1139,7 @@ def _kernel_exec_sync(sock_path: str, code: str, timeout: int) -> dict[str, Any]
     c.settimeout(timeout if timeout and timeout > 0 else None)
     try:
         c.connect(sock_path)
-        payload = json.dumps({"code": code}).encode("utf-8")
+        payload = json.dumps({"code": code, "name": name}).encode("utf-8")
         c.sendall(_struct.pack(">I", len(payload)) + payload)
 
         def _recvall(n: int) -> bytes | None:
@@ -1059,13 +1170,17 @@ def _kernel_exec_sync(sock_path: str, code: str, timeout: int) -> dict[str, Any]
 async def kernel_execute_route(user_id: str, chat_id: str, req: CellRequest) -> ExecResponse:
     name, workspace = _workspace(user_id, chat_id)
     artifacts_before = _artifact_snapshot(workspace)
+    src, err = _resolve_cell_code(user_id, chat_id, req.code, req.edits, req.code_id)
+    if err is not None:
+        return ExecResponse(user_id=user_id, chat_id=chat_id, linux_user=name, workspace=str(workspace), stdout="", stderr=err, exit_code=1)
     rec = await _ensure_kernel(user_id, chat_id)
     if not Path(rec["sock"]).exists():
         return ExecResponse(user_id=user_id, chat_id=chat_id, linux_user=name, workspace=str(workspace), stdout="", stderr="kernel: failed to start", exit_code=1)
+    code_id = _remember_cell_code(user_id, chat_id, src)
     started_at = time.time()
     timeout = int(req.timeout or 0)
     try:
-        result = await asyncio.to_thread(_kernel_exec_sync, rec["sock"], req.code, timeout)
+        result = await asyncio.to_thread(_kernel_exec_sync, rec["sock"], src, timeout, code_id)
     except Exception as exc:
         # Socket dead/stuck — drop the kernel so the next call respawns it.
         _stop_kernel(user_id, chat_id)
@@ -1080,7 +1195,7 @@ async def kernel_execute_route(user_id: str, chat_id: str, req: CellRequest) -> 
         user_id=user_id, chat_id=chat_id, linux_user=name, workspace=str(workspace),
         stdout=_truncate(stdout, MAX_OUTPUT_CHARS), stderr=_truncate(stderr, MAX_OUTPUT_CHARS),
         exit_code=1 if error else 0, images=images, image_note=image_note,
-        created_artifacts=_changed_artifacts(workspace, artifacts_before),
+        created_artifacts=_changed_artifacts(workspace, artifacts_before), code_id=code_id,
     )
 
 

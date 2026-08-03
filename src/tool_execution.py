@@ -704,6 +704,42 @@ def _split_bg_marker(content: str):
     return False, content
 
 
+def _parse_code_edits(content: str) -> tuple[list[dict], str]:
+    """Pull a repair patch out of a python/run_cell call.
+
+    Returns (edits, code_id). Empty edits means this is an ordinary run carrying
+    a full code body.
+    """
+    raw = (content or "").strip()
+    if not raw.startswith("{"):
+        return [], ""
+    try:
+        args = json.loads(raw)
+    except (json.JSONDecodeError, TypeError):
+        return [], ""
+    if not isinstance(args, dict):
+        return [], ""
+    edits = args.get("edits")
+    if not isinstance(edits, list) or not edits:
+        return [], ""
+    return [e for e in edits if isinstance(e, dict)], str(args.get("code_id") or "")
+
+
+def _repair_hint(tool: str, code_id: str) -> str:
+    """Nudge the model to patch the failing code instead of re-emitting it.
+
+    Without this in the observation, models default to rewriting the whole
+    script — which is the single biggest latency cost of a code-writing turn.
+    """
+    if not code_id:
+        return ""
+    return (
+        f"[The code you just ran is retained as {code_id}. To fix it, call `{tool}` again with "
+        f"`edits`: [{{\"target\": \"<exact snippet from that code>\", \"replacement\": \"<fixed>\"}}] "
+        f"and NO `code` field. Do not resend the whole script.]"
+    )
+
+
 async def _try_sandbox_exec(
     *,
     tool: str,
@@ -756,14 +792,17 @@ async def _try_sandbox_exec(
             "exit_code": 1,
             "sandboxed": True,
         }
+    edits, code_id = _parse_code_edits(content) if tool == "python" else ([], "")
     try:
         data = await exec_in_sandbox(
             owner=owner,
             session_id=session_id,
             kind=tool,
             command=content if tool == "bash" else "",
-            code=content if tool == "python" else "",
+            code="" if (tool != "python" or edits) else content,
             timeout=timeout,
+            edits=edits,
+            code_id=code_id,
         )
     except Exception as exc:
         logger.warning("Sandbox %s execution failed: %s", tool, exc)
@@ -793,6 +832,10 @@ async def _try_sandbox_exec(
         "workspace": data.get("workspace"),
         "sandboxed": True,
     }
+    if rc != 0 and data.get("code_id"):
+        result["code_id"] = data["code_id"]
+        hint = _repair_hint(tool, str(data["code_id"]))
+        result["output"] = f"{result['output'].rstrip()}\n{hint}" if hint else result["output"]
     if data.get("created_artifacts"):
         result["created_artifacts"] = data["created_artifacts"]
     # Images the run created (matplotlib plots, etc.) — forwarded so the chat can
@@ -977,6 +1020,7 @@ async def _do_run_cell(
     calls). Output + any created images are forwarded like the python tool."""
     raw = (content or "").strip()
     code = raw
+    edits, code_id = _parse_code_edits(raw)
     if raw.startswith("{"):
         try:
             args = json.loads(raw)
@@ -984,14 +1028,21 @@ async def _do_run_cell(
                 code = str(args.get("code") or "")
         except (json.JSONDecodeError, TypeError):
             code = raw
-    if not code.strip():
+    if not code.strip() and not edits:
         return {"error": "run_cell: code is required", "exit_code": 1}
     from src.sandbox_client import run_cell_in_sandbox, sandbox_enabled
 
     if not sandbox_enabled() or not session_id:
         return {"error": "run_cell: requires the sandbox (no session available)", "exit_code": 1}
     try:
-        data = await run_cell_in_sandbox(owner=owner, session_id=session_id, code=code, timeout=0)
+        data = await run_cell_in_sandbox(
+            owner=owner,
+            session_id=session_id,
+            code="" if edits else code,
+            timeout=0,
+            edits=edits,
+            code_id=code_id,
+        )
     except Exception as exc:
         logger.warning("run_cell failed: %s", exc)
         return {"error": f"run_cell: {exc}", "exit_code": 1}
@@ -1006,6 +1057,10 @@ async def _do_run_cell(
         "exit_code": rc,
         "sandboxed": True,
     }
+    if rc != 0 and data.get("code_id"):
+        result["code_id"] = data["code_id"]
+        hint = _repair_hint("run_cell", str(data["code_id"]))
+        result["output"] = f"{result['output'].rstrip()}\n{hint}" if hint else result["output"]
     if data.get("created_artifacts"):
         result["created_artifacts"] = data["created_artifacts"]
     imgs = data.get("images") or []

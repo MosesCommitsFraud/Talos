@@ -33,6 +33,8 @@ async def exec_in_sandbox(
     command: str = "",
     code: str = "",
     timeout: int = 120,
+    edits: list[dict[str, Any]] | None = None,
+    code_id: str = "",
 ) -> dict[str, Any]:
     if not session_id:
         raise RuntimeError("sandbox execution requires a session_id")
@@ -47,7 +49,14 @@ async def exec_in_sandbox(
     ) as client:
         resp = await client.post(
             f"{SANDBOX_URL}/users/{user_path}/workspaces/{session_path}/exec",
-            json={"kind": kind, "command": command, "code": code, "timeout": timeout},
+            json={
+                "kind": kind,
+                "command": command,
+                "code": code,
+                "timeout": timeout,
+                "edits": edits or [],
+                "code_id": code_id,
+            },
         )
         resp.raise_for_status()
         return resp.json()
@@ -107,7 +116,13 @@ async def upload_file_to_sandbox(
 
 
 async def run_cell_in_sandbox(
-    *, owner: str | None, session_id: str | None, code: str, timeout: int = 0
+    *,
+    owner: str | None,
+    session_id: str | None,
+    code: str,
+    timeout: int = 0,
+    edits: list[dict[str, Any]] | None = None,
+    code_id: str = "",
 ) -> dict[str, Any]:
     """Run code in the chat's PERSISTENT Python kernel (state survives between calls)."""
     if not session_id:
@@ -118,7 +133,7 @@ async def run_cell_in_sandbox(
     ) as client:
         resp = await client.post(
             f"{SANDBOX_URL}/users/{user_id}/workspaces/{session_id}/kernel/execute",
-            json={"code": code, "timeout": timeout},
+            json={"code": code, "timeout": timeout, "edits": edits or [], "code_id": code_id},
         )
         resp.raise_for_status()
         return resp.json()
