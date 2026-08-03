@@ -152,8 +152,8 @@ export function describeCall(call: ToolCall, t: Translate, tense: 'running' | 'p
   return splitVerb(t(key, { ...vars, verb: VERB_MARK }), verb);
 }
 
-/** How many times an action repeated, as a suffix: "" / "twice" / "3 times".
- *  The user-facing wording the request asked for ("Queried SQL twice"). */
+/** How many times an action repeated, as a suffix: "" / "twice" / "7 times".
+ *  Plain digits past two — the exact number is the useful part. */
 function repeatSuffix(count: number, t: Translate): string {
   if (count <= 1) return '';
   if (count === 2) return t('toolGroup.twice');

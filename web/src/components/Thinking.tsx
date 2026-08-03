@@ -22,8 +22,11 @@ export function Thinking({ text, streaming }: { text: string; streaming: boolean
         </span>
         <ChevronDownIcon className={`size-3.5 shrink-0 opacity-60 transition-transform ${open ? 'rotate-180' : ''}`} />
       </button>
+      {/* Reasoning stays on a quiet left rule rather than in a bordered panel:
+          it is a long prose read, and a box around it competes with the tool
+          groups' panels for attention. Only the header matches them. */}
       {open && (
-        <div className="mt-1.5 rounded-lg border px-3 py-2 text-[13px] leading-relaxed whitespace-pre-wrap text-muted-foreground">
+        <div className="mt-1.5 ml-1.5 border-l-2 pl-3.5 text-[13.5px] leading-relaxed whitespace-pre-wrap text-muted-foreground">
           {text}
         </div>
       )}
