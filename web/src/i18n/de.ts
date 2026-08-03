@@ -271,7 +271,10 @@ const de: typeof en = {
       // Zeilen-Formulierung, in der der Befehl selbst das Subjekt ist.
       runningNamed: 'Führt {{subject}} aus',
       pastNamed: '{{subject}} {{verb}}',
-      summary_one: 'Einen Befehl {{verb}}',
+      // Substantivisch, nicht "Einen Befehl …": deutsche Klauseln behalten in
+      // der Aufzählung ihren Großbuchstaben (siehe joinClauses), und ein groß
+      // geschriebener Artikel mitten im Satz wäre schlicht falsch.
+      summary_one: 'Befehl {{verb}}',
       summary_other: '{{count}} Befehle {{verb}}',
     },
     read: {

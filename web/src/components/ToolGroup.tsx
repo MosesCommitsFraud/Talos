@@ -41,21 +41,16 @@ export function ToolGroup({ entries }: { entries: GroupEntry[] }) {
   const thinkingNow = thoughts.some((e) => e.streaming);
   const active = [...calls].reverse().find((c) => c.status === 'running');
   const stat = groupDiffStat(calls);
-  // Reasoning gets its own clause so the collapsed line says the group holds
-  // some — otherwise the only hint is the panel, which costs a click to see.
-  // No verb part: thinking has no outcome, so nothing in it turns red.
-  const thoughtClause = thoughts.length
-    ? [{ before: t('toolGroup.thought'), verb: '', after: '', failed: false }]
-    : [];
+  // A settled summary names only what the agent DID — reasoning is a means, not
+  // an outcome, and "Thought, ran a command" spent the most prominent slot on
+  // the least informative word. Live thinking still takes the header (below),
+  // and a group that is nothing but reasoning renders as a plain Thinking block.
   const clauses =
     thinkingNow || active
       ? []
       : // Lower-casing the joins is an English convention; German clauses open
         // with a noun that keeps its capital.
-        joinClauses(
-          [...thoughtClause, ...summarizeCalls(calls, t)],
-          i18n.language.startsWith('en'),
-        );
+        joinClauses(summarizeCalls(calls, t), i18n.language.startsWith('en'));
   const live = !thinkingNow && active ? describeCall(active, t, 'running') : null;
   const running = thinkingNow || !!active;
   // Drives the roll animation: remounting on text change is what replays it.
@@ -63,7 +58,20 @@ export function ToolGroup({ entries }: { entries: GroupEntry[] }) {
     ? t('thinking.thinking')
     : live
       ? partsToString(live)
-      : clauses.map(partsToString).join(', ');
+      : clauses.map((c) => partsToString(c.segments)).join(', ');
+
+  // Nothing but reasoning: there is no summary to write ("Thought" alone says
+  // nothing), so it renders as the plain Thinking disclosure it would be on its
+  // own — which is also the only place a reader can still reach that text.
+  if (calls.length === 0) {
+    return (
+      <div className="my-1">
+        {thoughts.map((entry, i) => (
+          <Thinking key={i} text={entry.text} streaming={entry.streaming} />
+        ))}
+      </div>
+    );
+  }
 
   if (entries.length === 1) {
     const only = entries[0];
@@ -106,7 +114,7 @@ export function ToolGroup({ entries }: { entries: GroupEntry[] }) {
                 clauses.map((clause, i) => (
                   <span key={i}>
                     {i > 0 && ', '}
-                    <ToolLabel parts={clause} failed={clause.failed} />
+                    <ToolLabel parts={clause.segments} failed={clause.failed} />
                   </span>
                 ))
               )}
