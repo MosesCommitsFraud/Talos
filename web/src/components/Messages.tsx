@@ -1,8 +1,9 @@
-import { CheckIcon, ChevronDownIcon, ChevronRightIcon, CopyIcon, DownloadIcon, FileIcon, FileTextIcon, FoldVerticalIcon, ImageIcon, ListChecksIcon, PencilIcon, ScanSearchIcon, Trash2Icon } from 'lucide-react';
+import { CheckIcon, ChevronDownIcon, CopyIcon, DownloadIcon, FileIcon, FileTextIcon, FoldVerticalIcon, ImageIcon, ListChecksIcon, PencilIcon, ScanSearchIcon, Trash2Icon } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
-import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { downloadArtifact, fetchArtifacts, uploadDownloadUrl } from '@/api/client';
+import type { ToolCall } from '@/api/types';
 import { copyTextToClipboard } from '@/lib/utils';
 import { artifactSelectionLocator } from '@/lib/artifactSelection';
 import { artifactDisplayName, displayName, isPreviewable, previewKind } from '@/lib/files';
@@ -13,7 +14,8 @@ import { Markdown } from './Markdown';
 import { PlanCard } from './PlanCard';
 import { RagSources } from './RagSources';
 import { Thinking } from './Thinking';
-import { ImageGallery, ToolRow, toolImages } from './ToolRow';
+import { ToolGroup } from './ToolGroup';
+import { ImageGallery, toolImages } from './ToolRow';
 import { Tooltip } from './ui/misc';
 import { Button } from './ui/button';
 
@@ -83,44 +85,66 @@ function Working({ startedAt }: { startedAt?: number }) {
   );
 }
 
-/** Settled-turn fold: collapses everything a finished turn did — thinking, tool
- *  calls, and any interim commentary the model emitted between tool calls —
- *  behind a quiet "Worked for Xs" disclosure (t3code style). Only the answer
- *  bubbles' text renders outside the fold; `answerIds` marks them so their
- *  text isn't duplicated here. */
-function ActivityFold({ turn, answerIds, showThinking, durationMs }: { turn: UiMessage[]; answerIds: ReadonlySet<string>; showThinking: boolean; durationMs: number | null }) {
-  const { t } = useTranslation();
-  const [open, setOpen] = useState(false);
-  const label = durationMs != null ? t('messages.workedFor', { duration: formatDurationMs(durationMs) }) : t('messages.worked');
+type TurnSegment =
+  | { kind: 'thinking'; id: string; text: string; streaming: boolean }
+  | { kind: 'text'; msg: UiMessage }
+  | { kind: 'tools'; id: string; calls: ToolCall[] };
+
+/** Split a turn into the sequence a reader should see: what the model said, and
+ *  — bunched into one collapsible group between those — what it did.
+ *
+ *  Tool calls accumulate across rounds and only flush when the model speaks
+ *  again, so ten silent lookups collapse into a single "Ran 10 commands" line
+ *  instead of ten stacked rows. Within a round the order mirrors what actually
+ *  happened: the model thinks, says something, then calls its tools. */
+function buildSegments(turn: UiMessage[]): TurnSegment[] {
+  const out: TurnSegment[] = [];
+  let pending: ToolCall[] = [];
+  let pendingId = '';
+  const flush = () => {
+    if (pending.length === 0) return;
+    out.push({ kind: 'tools', id: pendingId, calls: pending });
+    pending = [];
+  };
+  for (const m of turn) {
+    if (m.thinking) {
+      flush();
+      out.push({ kind: 'thinking', id: m.id, text: m.thinking, streaming: !!m.streaming && !m.content });
+    }
+    if (m.content.trim()) {
+      flush();
+      out.push({ kind: 'text', msg: m });
+    }
+    if (m.tools?.length) {
+      if (pending.length === 0) pendingId = m.id;
+      pending.push(...m.tools);
+    }
+  }
+  flush();
+  return out;
+}
+
+/** Renders a turn's segments. Shared by the streaming and settled branches so a
+ *  turn doesn't visibly rearrange itself the moment it finishes — the tool
+ *  groups just switch from live labels to their past-tense recap.
+ *  `hideContentFor` suppresses one bubble's text (a proposed plan renders as a
+ *  chip instead of inline). */
+function TurnBody({ turn, showThinking, hideContentFor }: { turn: UiMessage[]; showThinking: boolean; hideContentFor?: string }) {
   return (
-    <div className="my-1 border-b border-border/50 pb-1.5">
-      <button
-        type="button"
-        aria-expanded={open}
-        onClick={() => setOpen((v) => !v)}
-        className="flex select-none items-center gap-1 rounded-md text-xs text-muted-foreground tabular-nums transition-colors hover:text-foreground"
-      >
-        <span>{label}</span>
-        <ChevronRightIcon className={`size-3.5 transition-transform ${open ? 'rotate-90' : ''}`} />
-      </button>
-      {open && (
-        <div className="mt-1.5 space-y-1">
-          {turn.map((m) => (
-            <Fragment key={m.id}>
-              {m.thinking && showThinking && <Thinking text={m.thinking} streaming={false} />}
-              {/* Interim commentary the model said between tool calls — folded
-                  away too; the answer bubbles' text shows below the fold. */}
-              {!answerIds.has(m.id) && m.content && (
-                <div className="text-sm text-muted-foreground">
-                  <Markdown text={m.content} />
-                </div>
-              )}
-              {m.tools?.map((call, i) => <ToolRow key={i} call={call} compact />)}
-            </Fragment>
-          ))}
-        </div>
-      )}
-    </div>
+    <>
+      {buildSegments(turn).map((seg) => {
+        if (seg.kind === 'thinking') {
+          return showThinking ? <Thinking key={`think-${seg.id}`} text={seg.text} streaming={seg.streaming} /> : null;
+        }
+        if (seg.kind === 'tools') return <ToolGroup key={`tools-${seg.id}`} calls={seg.calls} />;
+        if (seg.msg.id === hideContentFor) return null;
+        return (
+          <div key={seg.msg.id} className={seg.msg.error ? 'text-destructive-foreground' : ''}>
+            <Markdown text={seg.msg.content} streaming={!!seg.msg.streaming} />
+          </div>
+        );
+      })}
+    </>
   );
 }
 
@@ -352,11 +376,12 @@ function CompactionMarker() {
 }
 
 /** One assistant turn = the run of consecutive assistant bubbles after a user
- *  message. While streaming it renders live (thinking → tools → text, in order,
- *  plus the running indicator). Once settled, the thinking and tool calls fold
- *  into a single "Worked for Xs" disclosure and only the answer stays visible —
- *  matching t3code's finished-turn compaction. */
+ *  message. Streaming and settled render the same shape — commentary interleaved
+ *  with one collapsible group per batch of tool calls — so the turn doesn't
+ *  rearrange itself when it finishes. The live "Working for Xs" indicator is
+ *  swapped for the final elapsed time. */
 function AssistantTurn({ turn, containsLast, artifactFiles, sessionId }: { turn: UiMessage[]; containsLast: boolean; artifactFiles: ArtifactFile[]; sessionId: string | null }) {
+  const { t } = useTranslation();
   const showThinking = usePrefs((s) => s.visibility.showThinking);
   const showMetrics = usePrefs((s) => s.visibility.messageMetrics);
   const turnStartedAt = useChat((s) => s.turnStartedAt);
@@ -374,17 +399,7 @@ function AssistantTurn({ turn, containsLast, artifactFiles, sessionId }: { turn:
     return (
       <>
         {compacted && <CompactionMarker />}
-        {turn.map((m) => (
-          <Fragment key={m.id}>
-            {m.thinking && showThinking && <Thinking text={m.thinking} streaming={!!m.streaming && !m.content} />}
-            {m.tools?.map((call, i) => <ToolRow key={i} call={call} />)}
-            {m.content && (
-              <div className={m.error ? 'text-destructive-foreground' : ''}>
-                <Markdown text={m.content} streaming={!!m.streaming} />
-              </div>
-            )}
-          </Fragment>
-        ))}
+        <TurnBody turn={turn} showThinking={showThinking} />
         {/* Live plan checklist as the agent ticks steps off via update_plan. */}
         {planMsg && <PlanCard msg={planMsg} />}
         {/* Persistent "still running" indicator: shown for the whole streaming
@@ -394,16 +409,11 @@ function AssistantTurn({ turn, containsLast, artifactFiles, sessionId }: { turn:
     );
   }
 
-  // Settled turn: fold the work, keep only the final answer. The terminal
-  // message is the last bubble that produced text — everything before it
-  // (thinking, tools, and any interim commentary) folds into the disclosure.
-  // The agent loop guarantees the final round restates the complete answer
-  // (final-answer completeness nudge), so folding earlier text is lossless.
+  // Settled turn: same layout the stream produced — commentary interleaved with
+  // collapsed tool groups — so nothing jumps around when the turn ends. Only the
+  // live "Working for" indicator is replaced, by the elapsed-time label.
   const terminal = [...turn].reverse().find((m) => m.content.trim().length > 0);
-  const terminalId = terminal?.id ?? '';
-  const answerIds = new Set<string>(terminal ? [terminalId] : []);
-  const hasFoldedCommentary = turn.some((m) => !answerIds.has(m.id) && m.content.trim().length > 0);
-  const hasActivity = hasFoldedCommentary || turn.some((m) => (m.thinking && showThinking) || (m.tools?.length ?? 0) > 0);
+  const hasActivity = turn.some((m) => (m.thinking && showThinking) || (m.tools?.length ?? 0) > 0);
   const durationMs =
     last.turnElapsedMs ??
     (() => {
@@ -411,9 +421,8 @@ function AssistantTurn({ turn, containsLast, artifactFiles, sessionId }: { turn:
       return seconds > 0 ? seconds * 1000 : null;
     })();
 
-  // The tool rows (and any images they produced) fold away once the turn
-  // settles. Rather than re-rendering those images inline, surface a button that
-  // opens the artifacts sidebar — the canonical place for files the query made.
+  // Images a tool produced live inside a collapsed group, so re-surface them
+  // under the answer where they stay visible without opening anything.
   const createdImages = turn.flatMap((m) => (m.tools ?? []).flatMap(toolImages));
   const sources = turn.flatMap((m) => m.sources ?? []);
   // A plan-mode turn that actually proposed a plan (a checklist is present) gets
@@ -425,21 +434,20 @@ function AssistantTurn({ turn, containsLast, artifactFiles, sessionId }: { turn:
   return (
     <>
       {compacted && <CompactionMarker />}
-      {hasActivity && <ActivityFold turn={turn} answerIds={answerIds} showThinking={showThinking} durationMs={durationMs} />}
       {/* A proposed plan opens in the side panel; the message stream shows a
           compact chip rather than duplicating the whole plan inline. */}
-      {!proposalMsg &&
-        turn
-          .filter((m) => answerIds.has(m.id) && m.content.trim().length > 0)
-          .map((m) => (
-            <div key={m.id} className={m.error ? 'text-destructive-foreground' : ''}>
-              <Markdown text={m.content} />
-            </div>
-          ))}
+      <TurnBody turn={turn} showThinking={showThinking} hideContentFor={proposalMsg?.id} />
+      {/* How long the turn took — the settled counterpart to the live "Working
+          for Xs" indicator. Only for turns that actually did work; a plain reply
+          doesn't need a stopwatch. */}
+      {hasActivity && durationMs != null && (
+        <div className="mt-1 text-[11px] text-muted-foreground/70 tabular-nums">
+          {t('messages.workedFor', { duration: formatDurationMs(durationMs) })}
+        </div>
+      )}
       {proposalMsg && <PlanChip />}
       {planMsg && !proposalMsg && <PlanCard msg={planMsg} />}
-      {/* The tool rows (with their inline images) fold away once the turn
-          settles, so re-surface the images the turn produced here — between the
+      {/* Images produced inside a collapsed tool group, re-surfaced between the
           answer and the artifacts button. No subtitles: this is a recap. */}
       {createdImages.length > 0 && (
         <div className="mt-3">

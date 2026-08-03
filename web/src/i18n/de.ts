@@ -247,8 +247,65 @@ const de: typeof en = {
     thinking: 'Denkt nach…',
     view: 'Gedanken anzeigen',
   },
-  toolRow: {
-    running: 'läuft',
+  // Formulierungen für die gruppierten Toolcall-Zeilen. Die Klauseln werden im
+  // Deutschen NICHT klein zusammengefügt (siehe summarizeCalls/lowerJoin) — sie
+  // beginnen mit einem Substantiv, das seinen Großbuchstaben behalten muss.
+  toolGroup: {
+    twice: 'zweimal',
+    nTimes: '{{count}}×',
+    show: 'Toolaufrufe anzeigen',
+    hide: 'Toolaufrufe ausblenden',
+    command: {
+      running: 'Führt einen Befehl aus',
+      past: 'Befehl ausgeführt',
+      // Zeilen-Formulierung, in der der Befehl selbst das Subjekt ist.
+      runningNamed: 'Führt {{subject}} aus',
+      pastNamed: '{{subject}} ausgeführt',
+      summary_one: 'Einen Befehl ausgeführt',
+      summary_other: '{{count}} Befehle ausgeführt',
+    },
+    read: {
+      running: 'Liest {{subject}}',
+      past: '{{subject}} gelesen',
+      summary_one: '{{subject}} gelesen',
+      summary_other: '{{count}} Dateien gelesen',
+    },
+    write: {
+      running: 'Schreibt {{subject}}',
+      past: '{{subject}} geschrieben',
+      summary_one: '{{subject}} geschrieben',
+      summary_other: '{{count}} Dateien geschrieben',
+    },
+    edit: {
+      running: 'Bearbeitet {{subject}}',
+      past: '{{subject}} bearbeitet',
+      summary_one: '{{subject}} bearbeitet',
+      summary_other: '{{count}} Dateien bearbeitet',
+    },
+    // `pastN` setzt die Wiederholung ("zweimal", "4×") an die im Deutschen
+    // richtige Stelle — vor das Partizip, nicht dahinter.
+    document: {
+      running: 'Bearbeitet das Dokument',
+      past: 'Dokument bearbeitet',
+      pastN: 'Dokument {{times}} bearbeitet',
+    },
+    grep: { running: 'Sucht nach {{subject}}', past: 'Nach {{subject}} gesucht' },
+    glob: { running: 'Sucht Dateien', past: 'Dateien gefunden' },
+    ls: { running: 'Listet {{subject}}', past: '{{subject}} aufgelistet' },
+    sql: {
+      running: 'Fragt die Datenbank ab',
+      past: 'Datenbank abgefragt',
+      pastN: 'Datenbank {{times}} abgefragt',
+    },
+    knowledge: {
+      running: 'Durchsucht die Wissensdatenbank',
+      past: 'Wissensdatenbank durchsucht',
+      pastN: 'Wissensdatenbank {{times}} durchsucht',
+    },
+    web: { running: 'Durchsucht das Web', past: 'Web durchsucht', pastN: 'Web {{times}} durchsucht' },
+    fetch: { running: 'Lädt {{subject}}', past: '{{subject}} geladen' },
+    image: { running: 'Erzeugt ein Bild', past: 'Bild erzeugt', pastN: '{{count}} Bilder erzeugt' },
+    generic: { running: 'Führt {{tool}} aus', past: '{{tool}} ausgeführt', pastN: '{{tool}} {{times}} ausgeführt' },
   },
   palette: {
     newChat: 'Neuer Chat',

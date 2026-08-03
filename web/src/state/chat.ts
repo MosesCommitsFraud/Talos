@@ -740,6 +740,9 @@ export const useChat = create<ChatState>((set, get) => {
                         image_quality: ev.image_quality as string | undefined,
                         image_note: ev.image_note as string | undefined,
                         screenshot: ev.screenshot as string | undefined,
+                        // File edits ship a unified diff; ToolRow renders it as a
+                        // before/after view rather than dumping the raw output.
+                        diff: ev.diff as string | undefined,
                         created_images: Array.isArray(ev.created_images) ? ev.created_images as ToolCall['created_images'] : undefined,
                       }
                     : t,

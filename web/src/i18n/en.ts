@@ -245,8 +245,61 @@ const en = {
     thinking: 'Thinking…',
     view: 'View thinking',
   },
-  toolRow: {
-    running: 'running',
+  // Phrasing for the grouped tool-call rows. Each family has a live present
+  // participle (`running`), a settled past tense (`past`) and — where a plural
+  // reads better than a "twice" suffix — a counted `summary`.
+  toolGroup: {
+    twice: 'twice',
+    nTimes: '{{count}} times',
+    show: 'Show tool calls',
+    hide: 'Hide tool calls',
+    command: {
+      running: 'Running a command',
+      past: 'Ran a command',
+      // Row-level wording, where the command itself is the subject.
+      runningNamed: 'Running {{subject}}',
+      pastNamed: 'Ran {{subject}}',
+      summary_one: 'Ran a command',
+      summary_other: 'Ran {{count}} commands',
+    },
+    read: {
+      running: 'Reading {{subject}}',
+      past: 'Read {{subject}}',
+      summary_one: 'Read {{subject}}',
+      summary_other: 'Read {{count}} files',
+    },
+    write: {
+      running: 'Writing {{subject}}',
+      past: 'Wrote {{subject}}',
+      summary_one: 'Wrote {{subject}}',
+      summary_other: 'Wrote {{count}} files',
+    },
+    edit: {
+      running: 'Editing {{subject}}',
+      past: 'Edited {{subject}}',
+      summary_one: 'Edited {{subject}}',
+      summary_other: 'Edited {{count}} files',
+    },
+    // `pastN` places the repeat count ("twice", "4 times") inside the clause —
+    // see summarizeCalls, which cannot append it language-neutrally.
+    document: {
+      running: 'Editing the document',
+      past: 'Edited the document',
+      pastN: 'Edited the document {{times}}',
+    },
+    grep: { running: 'Searching for {{subject}}', past: 'Searched for {{subject}}' },
+    glob: { running: 'Finding files', past: 'Found files' },
+    ls: { running: 'Listing {{subject}}', past: 'Listed {{subject}}' },
+    sql: { running: 'Querying SQL', past: 'Queried SQL', pastN: 'Queried SQL {{times}}' },
+    knowledge: {
+      running: 'Searching the knowledge base',
+      past: 'Searched the knowledge base',
+      pastN: 'Searched the knowledge base {{times}}',
+    },
+    web: { running: 'Searching the web', past: 'Searched the web', pastN: 'Searched the web {{times}}' },
+    fetch: { running: 'Fetching {{subject}}', past: 'Fetched {{subject}}' },
+    image: { running: 'Generating an image', past: 'Generated an image', pastN: 'Generated {{count}} images' },
+    generic: { running: 'Running {{tool}}', past: 'Ran {{tool}}', pastN: 'Ran {{tool}} {{times}}' },
   },
   palette: {
     newChat: 'New chat',

@@ -129,6 +129,9 @@ export interface ToolCall {
   output?: string;
   exitCode?: number;
   status: 'running' | 'done' | 'error';
+  /** Unified diff emitted by the file-editing tools (edit_file / write_file),
+   *  rendered as a before/after view instead of raw output. */
+  diff?: string;
   image_url?: string;
   image_prompt?: string;
   image_model?: string;
