@@ -293,16 +293,36 @@ function artifactSelectionFromMetadata(metadata: Record<string, unknown> | undef
  *  can be split back into the per-round bubbles the live stream produced. */
 type RoundedToolCall = ToolCall & { round?: number };
 
+const asText = (value: unknown): string | undefined =>
+  typeof value === 'string' ? value : value == null ? undefined : String(value);
+
+/** Every field is coerced to the type the renderer expects — this is the ONE
+ *  boundary where arbitrary JSON out of the database becomes a typed ToolCall.
+ *  Spreading the raw row instead would let a field of the wrong shape reach a
+ *  component that assumes otherwise, and a `diff` that isn't a string crashes
+ *  the whole message list the moment its tool group renders (diff.split). Old
+ *  rows predate current writers, so nothing here may be taken on trust. */
 function mapToolEvent(item: Record<string, unknown>): RoundedToolCall {
   const exitCode = typeof item.exit_code === 'number' ? item.exit_code : typeof item.exitCode === 'number' ? item.exitCode : undefined;
   return {
-    ...item,
     tool: String(item.tool ?? 'tool'),
-    command: item.command != null ? String(item.command) : undefined,
-    output: item.output != null ? String(item.output) : undefined,
+    command: asText(item.command),
+    output: asText(item.output),
     exitCode,
     round: typeof item.round === 'number' ? item.round : undefined,
     status: exitCode == null || exitCode === 0 ? 'done' as const : 'error' as const,
+    diff: typeof item.diff === 'string' ? item.diff : undefined,
+    image_url: asText(item.image_url),
+    image_prompt: asText(item.image_prompt),
+    image_model: asText(item.image_model),
+    image_size: asText(item.image_size),
+    image_quality: asText(item.image_quality),
+    image_note: asText(item.image_note),
+    screenshot: asText(item.screenshot),
+    // `toolImages` iterates this with for..of, which throws on a non-array.
+    created_images: Array.isArray(item.created_images)
+      ? (item.created_images as ToolCall['created_images'])
+      : undefined,
   };
 }
 
@@ -742,7 +762,8 @@ export const useChat = create<ChatState>((set, get) => {
                         screenshot: ev.screenshot as string | undefined,
                         // File edits ship a unified diff; ToolRow renders it as a
                         // before/after view rather than dumping the raw output.
-                        diff: ev.diff as string | undefined,
+                        // Checked, not cast: a non-string here crashes the render.
+                        diff: typeof ev.diff === 'string' ? ev.diff : undefined,
                         created_images: Array.isArray(ev.created_images) ? ev.created_images as ToolCall['created_images'] : undefined,
                       }
                     : t,

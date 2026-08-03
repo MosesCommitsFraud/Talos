@@ -5,6 +5,7 @@ import type { ToolCall } from '@/api/types';
 import { describeCall, diffStat, partsToString } from '@/lib/toolLabels';
 import { useUi } from '@/state/ui';
 import { TOOL_FAIL_CLASS, TOOL_PASS_CLASS, ToolLabel } from './ToolLabel';
+import { Collapse } from './ui/collapse';
 
 export interface ToolImage {
   src: string;
@@ -127,7 +128,7 @@ export function ToolRow({ call, compact = false }: { call: ToolCall; compact?: b
         // readers, which get no colour.
         aria-label={`${partsToString(label)}${call.status === 'error' ? ` — ${t('toolGroup.failed')}` : ''}`}
         onClick={() => setOpen((v) => !v)}
-        className="flex w-full items-center gap-1.5 px-3 py-2 text-left text-[13px] font-medium text-muted-foreground transition-colors hover:text-foreground"
+        className="flex w-full items-center gap-1.5 px-3 py-2 text-left text-[15px] font-medium text-muted-foreground transition-colors hover:text-foreground"
       >
         <span className={`min-w-0 truncate ${running ? 'shimmer-text' : ''}`}>
           <ToolLabel parts={label} failed={call.status === 'error'} />
@@ -135,7 +136,7 @@ export function ToolRow({ call, compact = false }: { call: ToolCall; compact?: b
         {stat && <DiffStatBadge added={stat.added} removed={stat.removed} />}
         <ChevronRightIcon className={`size-3.5 shrink-0 opacity-60 transition-transform ${open ? 'rotate-90' : ''}`} />
       </button>
-      {open && (
+      <Collapse open={open}>
         <div className="space-y-1.5 px-3 pb-2.5">
           {call.command && (
             <pre className="max-h-56 overflow-auto rounded-lg border bg-muted px-3 py-2 font-mono text-[12.5px] leading-snug whitespace-pre-wrap">{call.command}</pre>
@@ -145,7 +146,7 @@ export function ToolRow({ call, compact = false }: { call: ToolCall; compact?: b
             <pre className="max-h-72 overflow-y-auto rounded-lg border bg-muted px-3 py-2 font-mono text-[12.5px] leading-snug whitespace-pre-wrap">{call.output}</pre>
           )}
         </div>
-      )}
+      </Collapse>
       {(call.image_note || (!compact && images.length > 0)) && (
         <div className="space-y-1.5 px-3 pb-2.5">
           {call.image_note && <div className="text-xs text-muted-foreground">{call.image_note}</div>}

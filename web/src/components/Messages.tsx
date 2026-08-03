@@ -3,7 +3,6 @@ import { useQuery } from '@tanstack/react-query';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { downloadArtifact, fetchArtifacts, uploadDownloadUrl } from '@/api/client';
-import type { ToolCall } from '@/api/types';
 import { copyTextToClipboard } from '@/lib/utils';
 import { artifactSelectionLocator } from '@/lib/artifactSelection';
 import { artifactDisplayName, displayName, isPreviewable, previewKind } from '@/lib/files';
@@ -13,9 +12,9 @@ import { useUi } from '@/state/ui';
 import { Markdown } from './Markdown';
 import { PlanCard } from './PlanCard';
 import { RagSources } from './RagSources';
-import { Thinking } from './Thinking';
-import { ToolGroup } from './ToolGroup';
+import { ToolGroup, type GroupEntry } from './ToolGroup';
 import { ImageGallery, toolImages } from './ToolRow';
+import { Collapse } from './ui/collapse';
 import { Tooltip } from './ui/misc';
 import { Button } from './ui/button';
 
@@ -86,39 +85,46 @@ function Working({ startedAt }: { startedAt?: number }) {
 }
 
 type TurnSegment =
-  | { kind: 'thinking'; id: string; text: string; streaming: boolean }
   | { kind: 'text'; msg: UiMessage }
-  | { kind: 'tools'; id: string; calls: ToolCall[] };
+  | { kind: 'activity'; id: string; entries: GroupEntry[] };
 
 /** Split a turn into the sequence a reader should see: what the model said, and
  *  — bunched into one collapsible group between those — what it did.
  *
- *  Tool calls accumulate across rounds and only flush when the model speaks
+ *  Reasoning and tool calls share that group. They are the same kind of thing to
+ *  a reader (steps taken between two remarks), and separating them stacked two
+ *  disclosures with a gap in the middle for what is really one stretch of work.
+ *
+ *  Activity accumulates across rounds and only flushes when the model speaks
  *  again, so ten silent lookups collapse into a single "Ran 10 commands" line
  *  instead of ten stacked rows. Within a round the order mirrors what actually
  *  happened: the model thinks, says something, then calls its tools. */
 function buildSegments(turn: UiMessage[]): TurnSegment[] {
   const out: TurnSegment[] = [];
-  let pending: ToolCall[] = [];
+  let pending: GroupEntry[] = [];
   let pendingId = '';
+  // One bubble can open two groups — its reasoning, then (after its text) its
+  // tool calls — so the message id alone is not a unique React key. The counter
+  // makes it one; duplicate keys let React drop siblings silently.
+  let seq = 0;
+  const add = (id: string, entry: GroupEntry) => {
+    if (pending.length === 0) pendingId = `${id}-${seq++}`;
+    pending.push(entry);
+  };
   const flush = () => {
     if (pending.length === 0) return;
-    out.push({ kind: 'tools', id: pendingId, calls: pending });
+    out.push({ kind: 'activity', id: pendingId, entries: pending });
     pending = [];
   };
   for (const m of turn) {
     if (m.thinking) {
-      flush();
-      out.push({ kind: 'thinking', id: m.id, text: m.thinking, streaming: !!m.streaming && !m.content });
+      add(m.id, { kind: 'thinking', id: m.id, text: m.thinking, streaming: !!m.streaming && !m.content });
     }
     if (m.content.trim()) {
       flush();
       out.push({ kind: 'text', msg: m });
     }
-    if (m.tools?.length) {
-      if (pending.length === 0) pendingId = m.id;
-      pending.push(...m.tools);
-    }
+    for (const call of m.tools ?? []) add(m.id, { kind: 'call', call });
   }
   flush();
   return out;
@@ -141,16 +147,16 @@ function ActivityFold({ turn, showThinking, durationMs, terminalId }: { turn: Ui
         type="button"
         aria-expanded={open}
         onClick={() => setOpen((v) => !v)}
-        className="flex max-w-full select-none items-center gap-1.5 text-[13px] font-medium text-muted-foreground tabular-nums transition-colors hover:text-foreground"
+        className="flex max-w-full select-none items-center gap-1.5 text-[15px] font-medium text-muted-foreground tabular-nums transition-colors hover:text-foreground"
       >
         <span className="min-w-0 truncate">{label}</span>
         <ChevronDownIcon className={`size-3.5 shrink-0 opacity-60 transition-transform ${open ? 'rotate-180' : ''}`} />
       </button>
-      {open && (
+      <Collapse open={open}>
         <div className="mt-1.5">
           <TurnBody turn={turn} showThinking={showThinking} hideContentFor={terminalId} />
         </div>
-      )}
+      </Collapse>
     </div>
   );
 }
@@ -164,10 +170,12 @@ function TurnBody({ turn, showThinking, hideContentFor }: { turn: UiMessage[]; s
   return (
     <>
       {buildSegments(turn).map((seg) => {
-        if (seg.kind === 'thinking') {
-          return showThinking ? <Thinking key={`think-${seg.id}`} text={seg.text} streaming={seg.streaming} /> : null;
+        if (seg.kind === 'activity') {
+          // Reasoning is opt-out; with it hidden the group keeps only its calls,
+          // and vanishes entirely if that leaves nothing.
+          const entries = showThinking ? seg.entries : seg.entries.filter((e) => e.kind === 'call');
+          return entries.length > 0 ? <ToolGroup key={`act-${seg.id}`} entries={entries} /> : null;
         }
-        if (seg.kind === 'tools') return <ToolGroup key={`tools-${seg.id}`} calls={seg.calls} />;
         if (seg.msg.id === hideContentFor) return null;
         return (
           <div key={seg.msg.id} className={seg.msg.error ? 'text-destructive-foreground' : ''}>

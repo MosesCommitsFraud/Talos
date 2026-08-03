@@ -1,6 +1,7 @@
 import { ChevronDownIcon } from 'lucide-react';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { Collapse } from './ui/collapse';
 
 /** Quiet disclosure for the model's reasoning, built like ToolGroup so the two
  *  kinds of "what the agent did" read as one control: a muted label with a
@@ -15,7 +16,7 @@ export function Thinking({ text, streaming }: { text: string; streaming: boolean
         type="button"
         aria-expanded={open}
         onClick={() => setOpen((v) => !v)}
-        className="flex max-w-full items-center gap-1.5 text-[13px] font-medium text-muted-foreground transition-colors hover:text-foreground"
+        className="flex max-w-full items-center gap-1.5 text-[15px] font-medium text-muted-foreground transition-colors hover:text-foreground"
       >
         <span className={`min-w-0 truncate ${streaming ? 'shimmer-text' : ''}`}>
           {streaming ? t('thinking.thinking') : t('thinking.view')}
@@ -25,11 +26,11 @@ export function Thinking({ text, streaming }: { text: string; streaming: boolean
       {/* Reasoning stays on a quiet left rule rather than in a bordered panel:
           it is a long prose read, and a box around it competes with the tool
           groups' panels for attention. Only the header matches them. */}
-      {open && (
-        <div className="mt-1.5 ml-1.5 border-l-2 pl-3.5 text-[13.5px] leading-relaxed whitespace-pre-wrap text-muted-foreground">
+      <Collapse open={open}>
+        <div className="mt-1.5 ml-1.5 border-l-2 pl-3.5 text-[15px] leading-relaxed whitespace-pre-wrap text-muted-foreground">
           {text}
         </div>
-      )}
+      </Collapse>
     </div>
   );
 }

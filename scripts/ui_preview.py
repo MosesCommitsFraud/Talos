@@ -349,6 +349,58 @@ def _entry(role: str, content: str, ts_offset: int = 0) -> dict:
     }
 
 
+def _cold_agent_turn(ts_offset: int) -> dict:
+    """A finished multi-round agent turn as the DB stores it: ONE assistant row
+    carrying `round_texts` plus per-round `tool_events`. The frontend rebuilds
+    the per-round bubbles from these (see coldLoadMessage), which is a different
+    code path from the live stream — reopening an old chat is the only way to
+    exercise it, so the preview needs one seeded."""
+    entry = _entry("assistant", "Done — the schema lines up with the report.", ts_offset)
+    entry["metadata"].update(
+        {
+            "round_texts": [
+                "<think>Erst die Tabellen ansehen, dann die Query bauen.</think>"
+                "Ich schaue mir zuerst das Schema an.",
+                "Die Spalten passen. Jetzt die Auswertung.",
+                "Done — the schema lines up with the report.",
+            ],
+            "tool_events": [
+                {
+                    "round": 1,
+                    "tool": "query_sql",
+                    "command": '{"action": "list_tables"}',
+                    "output": "orders\ncustomers\ninvoices",
+                    "exit_code": 0,
+                },
+                {
+                    "round": 1,
+                    "tool": "query_sql",
+                    "command": '{"action": "describe", "table": "orders"}',
+                    "output": "id, customer_id, total, created_at",
+                    "exit_code": 0,
+                },
+                {
+                    "round": 2,
+                    "tool": "query_sql",
+                    "command": '{"action": "query", "query": "SELECT count(*) FROM orders"}',
+                    "output": "No rows returned.",
+                    "exit_code": 1,
+                    "row_count": 0,
+                },
+                {
+                    "round": 2,
+                    "tool": "edit_file",
+                    "command": '{"path": "src/report.py"}',
+                    "output": "Edited src/report.py (1 replacement)",
+                    "exit_code": 0,
+                    "diff": "--- a/src/report.py\n+++ b/src/report.py\n-old = 1\n+new = 2\n+extra = 3",
+                },
+            ],
+        }
+    )
+    return entry
+
+
 def _history_for(session_id: str) -> list[dict]:
     """History for a session, seeding the canonical preview session on first use."""
     if session_id not in _HISTORY:
@@ -356,6 +408,8 @@ def _history_for(session_id: str) -> list[dict]:
             _HISTORY[session_id] = [
                 _entry("user", "Preview the Talos UI", -2 * 86400),
                 _entry("assistant", "This is mock content for local UI work.", -2 * 86400 + 12),
+                _entry("user", "Check the orders schema", -86400),
+                _cold_agent_turn(-86400 + 30),
             ]
         else:
             _HISTORY[session_id] = []

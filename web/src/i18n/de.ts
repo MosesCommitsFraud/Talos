@@ -259,6 +259,8 @@ const de: typeof en = {
   toolGroup: {
     twice: 'zweimal',
     nTimes: '{{count}}×',
+    // Header-Klausel, die anzeigt, dass die Gruppe Gedanken enthält.
+    thought: 'Nachgedacht',
     show: 'Toolaufrufe anzeigen',
     hide: 'Toolaufrufe ausblenden',
     failed: 'fehlgeschlagen',

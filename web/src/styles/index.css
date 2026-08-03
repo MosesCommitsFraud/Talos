@@ -404,6 +404,40 @@ body::after {
   .tool-label-roll { animation: none; }
 }
 
+/* ── Disclosure open/close ──
+   Grid rows go 0fr → 1fr, which animates to the content's natural height
+   without anyone measuring it. The inner element does the clipping; it also
+   flips to visibility:hidden once closed so the collapsed content leaves the
+   tab order (delayed by the duration, so it stays visible while closing). */
+.collapse-grid {
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  transition:
+    grid-template-rows 220ms cubic-bezier(0.2, 0, 0, 1),
+    opacity 160ms ease;
+}
+.collapse-grid > * {
+  min-height: 0;
+  overflow: hidden;
+  visibility: hidden;
+  transition: visibility 0s linear 220ms;
+}
+.collapse-grid.is-open {
+  grid-template-rows: 1fr;
+  opacity: 1;
+}
+.collapse-grid.is-open > * {
+  visibility: visible;
+  transition-delay: 0s;
+}
+@media (prefers-reduced-motion: reduce) {
+  .collapse-grid,
+  .collapse-grid > * {
+    transition: none;
+  }
+}
+
 /* ── Chat markdown (MIDA chat-markdown, hue-bridged) ── */
 .chat-markdown {
   min-width: 0;

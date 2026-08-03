@@ -172,19 +172,34 @@ function byFamily(calls: ToolCall[]): Array<{ family: string; calls: ToolCall[] 
   return out;
 }
 
-/** Past-tense summary for a settled group, Claude-style: one clause per action
- *  family joined by commas — "Edited agent_loop.py, ran a command".
- *
- *  `lowerJoin` de-capitalizes every clause after the first so the line reads as
- *  one sentence. That is an English convention: German clauses start with a
- *  noun ("Dateien gelesen"), which must keep its capital, so the caller passes
- *  false for those languages. */
 export interface Clause extends LabelParts {
   /** True when any call in the clause failed, so its verb reads red. */
   failed: boolean;
 }
 
-export function summarizeCalls(calls: ToolCall[], t: Translate, lowerJoin = false): Clause[] {
+/** De-capitalizes every clause after the first so the line reads as one
+ *  sentence. That is an English convention: German clauses start with a noun
+ *  ("Dateien gelesen"), which must keep its capital, so callers pass false for
+ *  those languages.
+ *
+ *  Kept separate from `summarizeCalls` because a caller may put its own clause
+ *  in front (the group header prepends "Thought"), and only the clause that
+ *  ends up FIRST may keep its capital. */
+export function joinClauses(clauses: Clause[], lowerJoin: boolean): Clause[] {
+  if (!lowerJoin || clauses.length < 2) return clauses;
+  return clauses.map((clause, i) => {
+    if (i === 0) return clause;
+    const lower = (s: string) => s.charAt(0).toLocaleLowerCase() + s.slice(1);
+    // The leading glyph may sit in the static text or in the verb, depending on
+    // word order — and never in a file name, whose case is meaningful.
+    return clause.before ? { ...clause, before: lower(clause.before) } : { ...clause, verb: lower(clause.verb) };
+  });
+}
+
+/** Past-tense summary for a settled group, Claude-style: one clause per action
+ *  family — "Edited agent_loop.py", "ran a command". Run the result through
+ *  `joinClauses` before rendering. */
+export function summarizeCalls(calls: ToolCall[], t: Translate): Clause[] {
   if (calls.length === 0) return [];
   const clauses: Clause[] = byFamily(calls).map(({ family, calls: group }) => {
     const count = group.length;
@@ -215,16 +230,7 @@ export function summarizeCalls(calls: ToolCall[], t: Translate, lowerJoin = fals
     return { ...base, after: `${base.after} ${times}`.trimEnd(), failed };
   });
 
-  if (!lowerJoin || clauses.length < 2) return clauses;
-  // Only the leading glyph of each follow-on clause changes, and it may sit in
-  // either the static text or the verb depending on word order.
-  return clauses.map((clause, i) => {
-    if (i === 0) return clause;
-    const lower = (s: string) => s.charAt(0).toLocaleLowerCase() + s.slice(1);
-    return clause.before
-      ? { ...clause, before: lower(clause.before) }
-      : { ...clause, verb: lower(clause.verb) };
-  });
+  return clauses;
 }
 
 export interface DiffStat {
@@ -235,7 +241,9 @@ export interface DiffStat {
 /** Count changed lines in a unified diff (the format `_unified_diff` emits).
  *  `+++`/`---` file headers are not changes and must not be counted. */
 export function diffStat(diff: string | undefined): DiffStat | null {
-  if (!diff) return null;
+  // Belt and braces: callers normalise persisted rows, but this is the function
+  // a bad `diff` would take the whole message list down through.
+  if (!diff || typeof diff !== 'string') return null;
   let added = 0;
   let removed = 0;
   for (const line of diff.split('\n')) {

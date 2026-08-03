@@ -257,6 +257,8 @@ const en = {
   toolGroup: {
     twice: 'twice',
     nTimes: '{{count}} times',
+    // Header clause announcing that the group holds reasoning.
+    thought: 'Thought',
     show: 'Show tool calls',
     hide: 'Hide tool calls',
     failed: 'failed',
