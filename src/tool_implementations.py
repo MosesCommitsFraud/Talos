@@ -161,6 +161,25 @@ def _schema_card_family(name: str) -> Optional[str]:
     return f"{m.group(1)}<N>" if m and len(m.group(1)) >= 2 else None
 
 
+# Row-limiting syntax is the one dialect difference that bites on the FIRST
+# query: `LIMIT 20` against SQL Server is a hard syntax error, and the model has
+# no way to know which engine it is talking to. Naming it in the schema card
+# costs one line and saves a round trip.
+_DIALECT_NOTES = {
+    "mssql": " SQL Server — row limit is `SELECT TOP n`, not `LIMIT n`.",
+    "postgresql": " PostgreSQL — row limit is `LIMIT n`.",
+    "mysql": " MySQL — row limit is `LIMIT n`.",
+    "sqlite": " SQLite — row limit is `LIMIT n`.",
+}
+
+
+def _dialect_note(engine: Any) -> str:
+    try:
+        return _DIALECT_NOTES.get(engine.dialect.name, "")
+    except Exception:
+        return ""
+
+
 def _build_schema_card_sync(url: str) -> str:
     """Introspect `url` and render the compact schema card. Blocking; run in a thread."""
     from sqlalchemy import create_engine, inspect
@@ -200,7 +219,7 @@ def _build_schema_card_sync(url: str) -> str:
         # Names first, columns second. _truncate cuts the tail, and knowing that
         # a table EXISTS is what saves a round — its columns are one `describe`
         # away. So if anything has to go, let it be the column detail.
-        lines = [f"{len(tables)} tables/views."]
+        lines = [f"{len(tables)} tables/views.{_dialect_note(engine)}"]
         for stem, members in sorted(collapsed.items()):
             sample = ", ".join(members[:3])
             lines.append(f"- {stem} — {len(members)} tables ({sample}, …)")

@@ -20,29 +20,72 @@ Your job is the part that actually varies: **which charts, and what data.**
 
 ```python
 import sys; sys.path.insert(0, "/opt/talos/vendor")
-from talos_dash import dashboard, chart, kpi, line, hbar, stacked_bar
+import talos_dash as td
 
-dashboard(
+td.dashboard(
     "output/dashboard.html",
-    title="Umsatz 2023–2025",
-    subtitle="Quartalszahlen · Stand 03/2026",
-    theme="macarons",                       # optional; None = built-in palette
+    title="Umsatz 2023-2025",
+    subtitle="Quartalszahlen - Stand 03/2026",
     kpis=[
-        kpi("Nettoumsatz", "45,2 Mio. €", "+3,1 % ggü. Vj.", "up"),
-        kpi("Marge", "18,4 %", "−0,6 pp", "down"),
+        td.kpi("Nettoumsatz", "45,2 Mio. EUR", "+3,1 % ggue. Vj.", "up"),
+        td.kpi("Marge", "18,4 %", "-0,6 pp", "down"),
     ],
     charts=[
-        chart("trend", "Entwicklung", line(quarters, {"Ist": ist, "Plan": plan}), span=2),
-        chart("mix",   "Umsatzmix",   stacked_bar(quarters, mix, percent=True)),
-        chart("top",   "Top-Kunden",  hbar(names, values, top=10)),
+        td.chart("trend", "Entwicklung", td.line(quarters, {"Ist": ist, "Plan": plan}), span=2),
+        td.chart("mix",   "Umsatzmix",   td.stacked_bar(quarters, mix, percent=True)),
+        td.chart("top",   "Top-Kunden",  td.hbar(names, values, top=10)),
     ],
     footer="Prognosewerte ab Q2/2026 sind modelliert, nicht gemessen.",
 )
 ```
 
+**Import the module, not names from it** (`import talos_dash as td`). A
+`from talos_dash import a, b, c` line means every builder you reach for later
+and forgot to list is a `NameError` and a wasted round trip.
+
 That is the entire page. `dashboard()` validates every option, writes the file
 and returns the path. `span=2` makes a card full width; the grid collapses to
 one column on narrow screens.
+
+### Arguments: one series or several
+
+Single-series builders (`bar`, `hbar`, `area`, `pie`, `histogram`) take a **flat
+sequence of numbers**. Multi-series builders (`line`, `grouped_bar`,
+`stacked_bar`, `radar`) take a **mapping** `{"Name": [numbers]}`.
+
+```python
+td.bar(gf_names, gf_marge)                       # right
+td.bar(gf_names, {"DB1-Marge": gf_marge})        # also fine - one key, unwrapped
+td.bar(gf_names, {"DB1": a, "Netto": b})         # TypeError -> use grouped_bar
+```
+
+Passing a dict where a flat list belongs used to iterate its **keys**, so the
+column names became the values and the chart drew nothing at all. That now
+raises, as does any string reaching a numeric series. If you see that error, you
+are one call away from `grouped_bar` / `stacked_bar`.
+
+## Colour is already decided
+
+Do not set colours. The scaffold ships the validated categorical palette - eight
+fixed hues in a fixed order, stepped separately for light and dark surfaces, and
+checked against colourblind-separation, normal-vision, lightness and contrast
+gates. Charts emit colour *tokens* that resolve in the browser against the mode
+the viewer is actually in, so the same file is correct on a white card and a
+dark one, and repaints when the theme is toggled.
+
+What that buys you, and what you must not undo:
+
+- **Never hardcode a hex** in an option. `"#2f6df6"` is wrong in dark mode by
+  construction. Use `td.ACCENT`, `td.MUTED`, `td.POSITIVE`, `td.NEGATIVE`,
+  `td.SURFACE` if you need a specific role.
+- **Magnitude is one hue, light to dark** (`heatmap` already does this). A
+  rainbow ramp invents category boundaries the data does not have.
+- **One accent, the rest muted.** `bar(..., highlight="Nord")` accents one
+  category and greys the others - far stronger than eight competing hues.
+- **Status colours are reserved.** `POSITIVE`/`NEGATIVE` mean good/bad, never
+  "series 3".
+- Legends appear automatically for two or more series and are suppressed for
+  one (the card title already names it).
 
 ## Pick the chart that fits the question
 
@@ -84,10 +127,10 @@ for any signature.
 Every builder returns a dict, so tune it in place:
 
 ```python
-opt = line(months, {"Ist": ist})
+opt = td.line(months, {"Ist": ist})
 opt["yAxis"]["axisLabel"] = {"formatter": "{value} €"}
 opt["series"][0]["markLine"] = {"data": [{"type": "average", "name": "Ø"}]}
-charts.append(chart("rev", "Umsatz", opt))
+charts.append(td.chart("rev", "Umsatz", opt))
 ```
 
 Or pass a hand-written ECharts option straight to `chart()` — the catalog is a
@@ -148,8 +191,13 @@ Checking that the file exists is not verification.
 ```bash
 ls -l output/dashboard.html                  # ~1.2 MB; 50 KB means ECharts is not inlined
 grep -c 'src="http' output/dashboard.html    # must be 0
-grep -c 'chart-error' output/dashboard.html  # 1 (the CSS rule) — more means a chart threw
+grep -c 'chart-error' output/dashboard.html  # 1 (the CSS rule) - more means a chart threw
+grep -oE '"#[0-9a-f]{6}"' output/dashboard.html | sort -u | head
 ```
 
+That last one lists the hex literals inside chart options: it should show only
+the palette the scaffold embeds. Anything else is a hardcoded colour that will
+be wrong in one of the two modes.
+
 Then open the page in the preview panel and look at it. Every card should
-contain a drawn chart; a card showing "Chart … failed" names the one that threw.
+contain a drawn chart; a card showing "Chart ... failed" names the one that threw.

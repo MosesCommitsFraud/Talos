@@ -11,18 +11,23 @@ options with the catalog below (or hand-write any ECharts option dict — the
 catalog returns plain dicts you can edit) and pass them to `dashboard()`.
 
     import sys; sys.path.insert(0, "/opt/talos/vendor")
-    from talos_dash import dashboard, chart, kpi, line, hbar, heatmap
-
-    dashboard(
+    import talos_dash as td          # import the module — a `from ... import a, b`
+                                     # list turns every builder you forgot into
+                                     # a NameError and a wasted round trip
+    td.dashboard(
         "output/dashboard.html",
         title="Umsatz 2023–2025",
         subtitle="Quartalszahlen, Stand 03/2026",
-        kpis=[kpi("Nettoumsatz", "45,2 Mio. €", "+3,1 %", "up")],
+        kpis=[td.kpi("Nettoumsatz", "45,2 Mio. €", "+3,1 %", "up")],
         charts=[
-            chart("trend", "Entwicklung", line(quarters, {"Ist": ist, "Plan": plan}), span=2),
-            chart("top", "Top-Kunden", hbar(names, values)),
+            td.chart("trend", "Entwicklung", td.line(quarters, {"Ist": ist, "Plan": plan}), span=2),
+            td.chart("top", "Top-Kunden", td.hbar(names, values)),
         ],
     )
+
+Single-series builders (bar, hbar, area, pie, histogram) take a flat sequence of
+numbers; multi-series builders (line, grouped_bar, stacked_bar, radar) take a
+{"name": [numbers]} mapping. Colour is not yours to set — see the Colour section.
 
 Everything is self-contained: the workspace has no network and the preview
 iframe runs under a CSP that blocks every outbound request, so a CDN <script
@@ -46,16 +51,50 @@ __all__ = [
 ]
 
 # --------------------------------------------------------------------------
-# Palette
+# Colour
 # --------------------------------------------------------------------------
-# One accent plus muted support colours. A twelve-colour rainbow says "I did not
-# decide what matters" — the first series gets the strong colour, the rest
-# recede. Override per chart with option["color"] when the data has its own
-# semantics (red = loss, etc.).
-ACCENT = "#2f6df6"
-PALETTE = [ACCENT, "#8aa0c8", "#f2a63b", "#3fb28f", "#c8577e", "#7b6cc4", "#9aa5b1"]
-POSITIVE = "#3fb28f"
-NEGATIVE = "#d1495b"
+# Colours are emitted as TOKENS ("@series1", "@critical", …) and resolved to hex
+# in the browser against the viewer's colour scheme. Baking hex here cannot work:
+# a palette stepped for a white card is wrong on a dark one, and the page does
+# not know which it will be rendered on until it loads.
+#
+# The hex behind each token is the validated categorical palette from the dataviz
+# reference — eight fixed hues in a fixed order, each mode stepped for its own
+# surface. Both columns clear the colourblind-separation, normal-vision,
+# lightness-band and chroma gates (`validate_palette.js`); the light column has
+# three slots under 3:1 contrast, which is why bar/pie marks carry direct labels.
+#
+# Rules that come with it, and that the builders below enforce:
+#   - categorical hues are assigned in fixed order and NEVER cycled;
+#   - magnitude uses one hue light->dark (`@seq*`), never a rainbow;
+#   - status colours (@good/@critical) are reserved and never used as "series 4";
+#   - text wears ink tokens, never the series colour.
+ACCENT = "@series1"
+MUTED = "@muted"
+POSITIVE = "@good"
+NEGATIVE = "@critical"
+SURFACE = "@surface"
+PALETTE = [f"@series{i}" for i in range(1, 9)]
+
+# Resolved in the page. Keep in sync with references/palette.md.
+_TOKENS = {
+    "light": {
+        "series": ["#2a78d6", "#eb6834", "#1baf7a", "#eda100",
+                   "#e87ba4", "#008300", "#4a3aa7", "#e34948"],
+        "seq": ["#cde2fb", "#9ec5f4", "#5598e7", "#2a78d6", "#184f95"],
+        "good": "#0ca30c", "warning": "#fab219", "critical": "#d03b3b",
+        "surface": "#fcfcfb", "ink": "#0b0b0b", "ink2": "#52514e",
+        "muted": "#898781", "grid": "#e1e0d9", "base": "#c3c2b7",
+    },
+    "dark": {
+        "series": ["#3987e5", "#d95926", "#199e70", "#c98500",
+                   "#d55181", "#008300", "#9085e9", "#e66767"],
+        "seq": ["#104281", "#1c5cab", "#2a78d6", "#5598e7", "#9ec5f4"],
+        "good": "#0ca30c", "warning": "#fab219", "critical": "#d03b3b",
+        "surface": "#1a1a19", "ink": "#ffffff", "ink2": "#c3c2b7",
+        "muted": "#898781", "grid": "#2c2c2a", "base": "#383835",
+    },
+}
 
 
 def themes() -> list[str]:
@@ -105,11 +144,60 @@ def check_option(cid: str, opt: Mapping[str, Any]) -> None:
                     f"{len(cats)} categories. Pad with None — a short array plots against the "
                     f"FIRST categories, it does not align to the right."
                 )
+    for s in series:
+        _check_numeric(cid, s.get("name"), s.get("data"))
+
+
+_NUMERIC_SERIES = {None, "line", "bar", "scatter", "effectScatter", "pie",
+                   "funnel", "gauge", "radar", "heatmap", "treemap"}
+
+
+def _check_numeric(cid: str, name: Any, data: Any) -> None:
+    """Reject string values in a numeric series.
+
+    ECharts does not error on `data: ["Umsatz", "DB1"]` — it draws nothing, and a
+    silently empty chart is the single hardest failure to notice. It happens when
+    a mapping is iterated where a flat sequence was expected (iterating a dict or
+    a DataFrame yields its KEYS), so the values become column names.
+    """
+    if not isinstance(data, (list, tuple)):
+        return
+    for v in data:
+        if isinstance(v, Mapping):
+            v = v.get("value")
+        if isinstance(v, (list, tuple)):
+            continue  # coordinate pair / box summary
+        if isinstance(v, str):
+            raise ValueError(
+                f"{cid}: series {name!r} has the string {v!r} where a number belongs. "
+                f"This usually means a dict or DataFrame was iterated instead of its "
+                f"values (that yields the KEYS) — pass the list of numbers, e.g. "
+                f"list(df['Umsatz']) or data['values']. ECharts would draw an empty "
+                f"chart without complaining."
+            )
 
 
 def _pad(values: Sequence[Any], n: int) -> list[Any]:
     out = list(values)
     return out + [None] * (n - len(out)) if len(out) < n else out
+
+
+def _flat(values: Any, *, who: str) -> list[Any]:
+    """Coerce a one-series argument to a flat list.
+
+    A mapping here is the commonest call-site mistake — `bar(names, {"Marge": xs})`
+    is a grouped_bar call. Unwrap the single-series case rather than silently
+    iterating the keys; refuse the ambiguous one.
+    """
+    if isinstance(values, Mapping):
+        if len(values) == 1:
+            return list(next(iter(values.values())))
+        raise TypeError(
+            f"{who}() takes one flat sequence of numbers, but got a mapping with "
+            f"{len(values)} series ({', '.join(map(str, values))}). Use grouped_bar() "
+            f"or stacked_bar() for several series."
+        )
+    return list(values)
 
 
 def _series_map(series: Mapping[str, Sequence[Any]] | Sequence[Mapping[str, Any]]):
@@ -147,33 +235,32 @@ def _series_map(series: Mapping[str, Sequence[Any]] | Sequence[Mapping[str, Any]
 
 
 def _axes(categories, y_name="", *, x_name=""):
+    # Axis ink, gridlines and tick marks come from the registered theme so every
+    # chart on the page recedes identically. Only structure lives here.
     return {
-        "xAxis": {
-            "type": "category",
-            "data": list(categories),
-            "name": x_name,
-            "boundaryGap": True,
-            "axisLine": {"show": False},
-            "axisTick": {"show": False},
-        },
-        "yAxis": {
-            "type": "value",
-            "name": y_name,
-            "splitLine": {"lineStyle": {"opacity": 0.25}},
-        },
+        "xAxis": {"type": "category", "data": list(categories), "name": x_name,
+                  "boundaryGap": True},
+        "yAxis": {"type": "value", "name": y_name},
     }
 
 
 def _base(title="", *, legend=True, trigger="axis"):
     opt: dict[str, Any] = {
-        "color": PALETTE,
         "tooltip": {"trigger": trigger},
-        "grid": {"left": 70, "right": 30, "top": 50, "bottom": 45, "containLabel": True},
+        "grid": {"left": 60, "right": 28, "top": 46, "bottom": 40, "containLabel": True},
     }
     if title:
         opt["title"] = {"text": title, "left": "center"}
     if legend:
-        opt["legend"] = {"top": 8}
+        opt["legend"] = {"top": 4, "icon": "roundRect", "itemHeight": 8, "itemWidth": 14}
+    return opt
+
+
+def _legend_if_multi(opt: dict, series: list) -> dict:
+    """A legend is mandatory for >=2 series and noise for one — the card title
+    already names a lone series."""
+    if len(series) < 2:
+        opt.pop("legend", None)
     return opt
 
 
@@ -183,74 +270,95 @@ def line(categories, series, *, y_name="", smooth=True, area_first=False):
     out = _base(legend=True) | _axes(categories, y_name)
     built = []
     for i, s in enumerate(_series_map(series)):
-        s = {"type": "line", "smooth": smooth, "symbolSize": 6, **s}
+        s = {"type": "line", "smooth": smooth, "symbolSize": 8, **s}
         s["data"] = _pad(s.get("data") or [], n)
-        s.setdefault("lineStyle", {"width": 3 if i == 0 else 2})
-        if i > 0:
-            s["lineStyle"] = {"width": 2, **s["lineStyle"]}
+        # 2px marks throughout: the data should not be the heaviest ink by weight,
+        # only by contrast.
+        s["lineStyle"] = {"width": 2, **s.get("lineStyle", {})}
         if area_first and i == 0:
-            s["areaStyle"] = {"opacity": 0.18}
+            s["areaStyle"] = {"opacity": 0.14}
         built.append(s)
     out["series"] = built
-    return out
+    return _legend_if_multi(out, built)
 
 
 def area(categories, name, values, *, y_name=""):
-    """One emphasised series over time, with a gradient fill."""
+    """One emphasised series over time, with a soft fill."""
     opt = _base(legend=False) | _axes(categories, y_name)
     opt["series"] = [{
         "name": name, "type": "line", "smooth": True, "showSymbol": False,
-        "data": _pad(values, len(list(categories))),
-        "lineStyle": {"width": 3},
-        "areaStyle": {"opacity": 0.25},
+        "data": _pad(_flat(values, who="area"), len(list(categories))),
+        "lineStyle": {"width": 2},
+        "areaStyle": {"opacity": 0.18},
     }]
     return opt
 
 
-def bar(categories, values, *, name="", y_name="", sort=False, highlight=None):
+def bar(categories, values, *, name="", y_name="", sort=False, highlight=None,
+        label=True):
     """Compare a measure across categories. `highlight` is an index or category
-    name to accent while the rest recede."""
-    cats, vals = list(categories), list(values)
+    name to accent while the rest recede to muted."""
+    cats, vals = list(categories), _flat(values, who="bar")
     if sort:
         pairs = sorted(zip(cats, vals), key=lambda p: (p[1] is None, -(p[1] or 0)))
         cats, vals = [p[0] for p in pairs], [p[1] for p in pairs]
     hi = cats.index(highlight) if isinstance(highlight, str) and highlight in cats else highlight
     data = [
-        {"value": v, "itemStyle": {"color": ACCENT if hi is None or i == hi else "#c3cbd8"}}
+        {"value": v, "itemStyle": {"color": ACCENT if hi is None or i == hi else MUTED}}
         for i, v in enumerate(vals)
     ]
     opt = _base(legend=False) | _axes(cats, y_name)
-    opt["series"] = [{"name": name, "type": "bar", "data": data, "barMaxWidth": 48}]
+    opt["series"] = [{
+        "name": name, "type": "bar", "data": data, "barMaxWidth": 44,
+        # Rounded data-end anchored to the baseline; the other two corners stay
+        # square so the bar still reads as measured from zero.
+        "itemStyle": {"borderRadius": [4, 4, 0, 0]},
+        # Direct labels are the relief for the light-mode slots that sit under
+        # 3:1 against the card — identity must not rest on colour alone.
+        "label": {"show": label, "position": "top", "color": "@ink2"},
+    }]
     return opt
 
 
 def hbar(categories, values, *, name="", x_name="", top=None):
     """Ranking with many or long labels — horizontal, largest at the top."""
-    pairs = sorted(zip(categories, values), key=lambda p: (p[1] is None, p[1] or 0))
+    pairs = sorted(zip(categories, _flat(values, who="hbar")),
+                   key=lambda p: (p[1] is None, p[1] or 0))
     if top:
         pairs = pairs[-top:]
     opt = _base(legend=False)
-    opt["xAxis"] = {"type": "value", "name": x_name,
-                    "splitLine": {"lineStyle": {"opacity": 0.25}}}
-    opt["yAxis"] = {"type": "category", "data": [p[0] for p in pairs],
-                    "axisLine": {"show": False}, "axisTick": {"show": False}}
+    opt["xAxis"] = {"type": "value", "name": x_name}
+    opt["yAxis"] = {"type": "category", "data": [p[0] for p in pairs]}
     opt["series"] = [{
         "name": name, "type": "bar", "data": [p[1] for p in pairs],
-        "barMaxWidth": 26, "itemStyle": {"color": ACCENT},
-        "label": {"show": True, "position": "right"},
+        "barMaxWidth": 22, "itemStyle": {"color": ACCENT, "borderRadius": [0, 4, 4, 0]},
+        "label": {"show": True, "position": "right", "color": "@ink2"},
     }]
-    opt["grid"]["left"] = 30
+    opt["grid"]["left"] = 24
     return opt
 
 
-def grouped_bar(categories, series, *, y_name=""):
-    n = len(list(categories))
-    opt = _base() | _axes(categories, y_name)
+def grouped_bar(categories, series, *, y_name="", sort=False):
+    """Same measure across categories, split into side-by-side groups.
+    `sort=True` orders the categories by the first series, descending."""
+    cats = list(categories)
+    built = _series_map(series)
+    n = len(cats)
+    for s in built:
+        s["data"] = _pad(s.get("data") or [], n)
+    if sort and built:
+        order = sorted(range(n), key=lambda i: (built[0]["data"][i] is None,
+                                                -(built[0]["data"][i] or 0)))
+        cats = [cats[i] for i in order]
+        for s in built:
+            s["data"] = [s["data"][i] for i in order]
+    opt = _base() | _axes(cats, y_name)
     opt["series"] = [
-        {"type": "bar", "barMaxWidth": 32, **s, "data": _pad(s.get("data") or [], n)}
-        for s in _series_map(series)
+        {"type": "bar", "barMaxWidth": 30,
+         "itemStyle": {"borderRadius": [4, 4, 0, 0]}, **s}
+        for s in built
     ]
-    return opt
+    return _legend_if_multi(opt, built)
 
 
 def stacked_bar(categories, series, *, y_name="", percent=False):
@@ -270,9 +378,13 @@ def stacked_bar(categories, series, *, y_name="", percent=False):
     if percent:
         opt["yAxis"]["max"] = 100
     opt["series"] = [
-        {"type": "bar", "stack": "total", "barMaxWidth": 48, **s} for s in built
+        # A 2px ring in the surface colour separates adjacent segments, so the
+        # boundary is structural rather than a hue change the eye has to find.
+        {"type": "bar", "stack": "total", "barMaxWidth": 44,
+         "itemStyle": {"borderColor": SURFACE, "borderWidth": 2}, **s}
+        for s in built
     ]
-    return opt
+    return _legend_if_multi(opt, built)
 
 
 def waterfall(labels, deltas, *, start=0.0, y_name="", total_label="Gesamt"):
@@ -322,13 +434,13 @@ def scatter(points, *, x_name="", y_name="", name="", sizes=None, labels=None):
             item["name"] = labels[i]
         data.append(item)
     opt = _base(legend=False, trigger="item")
-    opt["xAxis"] = {"type": "value", "name": x_name,
-                    "splitLine": {"lineStyle": {"opacity": 0.25}}}
-    opt["yAxis"] = {"type": "value", "name": y_name,
-                    "splitLine": {"lineStyle": {"opacity": 0.25}}}
+    opt["xAxis"] = {"type": "value", "name": x_name}
+    opt["yAxis"] = {"type": "value", "name": y_name}
     opt["series"] = [{"name": name, "type": "scatter", "data": data,
                       "symbolSize": 12 if sizes is None else None,
-                      "itemStyle": {"opacity": 0.75}}]
+                      # A surface-coloured ring keeps overlapping dots readable.
+                      "itemStyle": {"opacity": 0.85, "borderColor": SURFACE,
+                                    "borderWidth": 2}}]
     return opt
 
 
@@ -352,7 +464,10 @@ def heatmap(x_labels, y_labels, values, *, unit="", low=None, high=None):
             "max": high if high is not None else (max(flat) if flat else 1),
             "calculable": True, "orient": "horizontal", "left": "center", "bottom": 5,
             "text": [unit, ""],
-            "inRange": {"color": ["#eef2fb", "#9db6ee", ACCENT, "#1b3f9e"]},
+            "textStyle": {"color": "@ink2"},
+            # Magnitude is one hue, light -> dark. A rainbow ramp invents
+            # category boundaries the data does not have.
+            "inRange": {"color": ["@seq1", "@seq2", "@seq3", "@seq4", "@seq5"]},
         },
         "series": [{
             "type": "heatmap", "data": data,
@@ -365,18 +480,23 @@ def heatmap(x_labels, y_labels, values, *, unit="", low=None, high=None):
 
 def pie(labels, values, *, inner=False, name=""):
     """Composition at one moment. Keep it to <=5 slices; past that a bar wins."""
+    vals = _flat(values, who="pie")
+    if len(vals) > 6:
+        raise ValueError(
+            f"pie(): {len(vals)} slices. A pie stops being readable past ~5 — use "
+            f"hbar() for a ranking, or fold the tail into 'Sonstige'."
+        )
     return {
-        "color": PALETTE,
         "tooltip": {"trigger": "item", "formatter": "{b}: {c} ({d}%)"},
-        "legend": {"bottom": 0},
+        "legend": {"bottom": 0, "icon": "roundRect", "itemHeight": 8, "itemWidth": 14},
         "series": [{
             "name": name, "type": "pie",
-            "radius": ["45%", "70%"] if inner else "62%",
+            "radius": ["48%", "70%"] if inner else "64%",
             "center": ["50%", "46%"],
             "avoidLabelOverlap": True,
-            "itemStyle": {"borderColor": "#fff", "borderWidth": 2},
-            "label": {"formatter": "{b}\n{d}%"},
-            "data": [{"name": n, "value": v} for n, v in zip(labels, values)],
+            "itemStyle": {"borderColor": SURFACE, "borderWidth": 2},
+            "label": {"formatter": "{b}\n{d}%", "color": "@ink2"},
+            "data": [{"name": n, "value": v} for n, v in zip(labels, vals)],
         }],
     }
 
@@ -396,9 +516,8 @@ def radar(indicators, series, *, maxes=None):
             for i in range(len(names))
         ]
     return {
-        "color": PALETTE,
         "tooltip": {},
-        "legend": {"top": 8},
+        "legend": {"top": 4, "icon": "roundRect", "itemHeight": 8, "itemWidth": 14},
         "radar": {
             "indicator": [{"name": n, "max": m} for n, m in zip(names, maxes)],
             "splitArea": {"areaStyle": {"opacity": 0.05}},
@@ -420,11 +539,11 @@ def gauge(value, *, name="", target=100, unit="%"):
             "progress": {"show": True, "width": 16},
             "axisLine": {"lineStyle": {"width": 16}},
             "axisTick": {"show": False},
-            "splitLine": {"length": 10},
+            "splitLine": {"length": 10, "lineStyle": {"color": "@base"}},
             "pointer": {"width": 5},
             "detail": {"valueAnimation": True, "formatter": f"{{value}}{unit}",
-                       "fontSize": 28, "offsetCenter": [0, "70%"]},
-            "title": {"offsetCenter": [0, "95%"]},
+                       "fontSize": 28, "offsetCenter": [0, "70%"], "color": "@ink"},
+            "title": {"offsetCenter": [0, "95%"], "color": "@ink2"},
             "itemStyle": {"color": ACCENT},
             "data": [{"value": value, "name": name}],
         }],
@@ -434,12 +553,12 @@ def gauge(value, *, name="", target=100, unit="%"):
 def funnel(stages, values, *, name=""):
     """Stage-by-stage drop-off (pipeline, conversion)."""
     return {
-        "color": PALETTE,
         "tooltip": {"trigger": "item", "formatter": "{b}: {c}"},
-        "legend": {"bottom": 0},
+        "legend": {"bottom": 0, "icon": "roundRect", "itemHeight": 8, "itemWidth": 14},
         "series": [{
             "name": name, "type": "funnel", "left": "10%", "width": "80%",
             "top": 30, "bottom": 40, "sort": "descending", "gap": 3,
+            "itemStyle": {"borderColor": SURFACE, "borderWidth": 2},
             "label": {"position": "inside", "formatter": "{b}: {c}"},
             "data": [{"name": n, "value": v} for n, v in zip(stages, values)],
         }],
@@ -473,9 +592,9 @@ def boxplot(categories, groups, *, y_name=""):
     opt = _base(legend=False, trigger="item") | _axes(categories, y_name)
     opt["series"] = [
         {"name": "Verteilung", "type": "boxplot", "data": boxes,
-         "itemStyle": {"color": "#e8eefc", "borderColor": ACCENT}},
+         "itemStyle": {"color": SURFACE, "borderColor": ACCENT, "borderWidth": 2}},
         {"name": "Ausreißer", "type": "scatter", "data": outliers,
-         "symbolSize": 7, "itemStyle": {"color": NEGATIVE, "opacity": 0.7}},
+         "symbolSize": 8, "itemStyle": {"color": NEGATIVE, "opacity": 0.85}},
     ]
     return opt
 
@@ -496,7 +615,7 @@ def histogram(values, *, bins=20, y_name="Anzahl", x_name=""):
     opt = _base(legend=False) | _axes(labels, y_name, x_name=x_name)
     opt["xAxis"]["axisLabel"] = {"interval": max(bins // 10, 0)}
     opt["series"] = [{"type": "bar", "data": counts, "barCategoryGap": "2%",
-                      "itemStyle": {"color": ACCENT}}]
+                      "itemStyle": {"color": ACCENT, "borderRadius": [4, 4, 0, 0]}}]
     return opt
 
 
@@ -504,13 +623,12 @@ def treemap(nodes, *, name=""):
     """Hierarchy of parts. `nodes` is [{"name": .., "value": ..,
     "children": [...]}, ...] — nesting optional."""
     return {
-        "color": PALETTE,
         "tooltip": {"trigger": "item"},
         "series": [{
             "name": name, "type": "treemap", "roam": False, "width": "96%", "height": "90%",
             "breadcrumb": {"show": False},
             "label": {"show": True, "formatter": "{b}\n{c}"},
-            "itemStyle": {"borderColor": "#fff", "borderWidth": 2, "gapWidth": 2},
+            "itemStyle": {"borderColor": SURFACE, "borderWidth": 2, "gapWidth": 2},
             "data": list(nodes),
         }],
     }
@@ -521,7 +639,6 @@ def sankey(nodes, links):
     `links` is [(source, target, value), ...]."""
     node_dicts = [n if isinstance(n, Mapping) else {"name": n} for n in nodes]
     return {
-        "color": PALETTE,
         "tooltip": {"trigger": "item", "triggerOn": "mousemove"},
         "series": [{
             "type": "sankey", "data": node_dicts,
@@ -553,11 +670,18 @@ def kpi(label: str, value: Any, delta: str = "", tone: str = "") -> dict:
     return {"label": label, "value": value, "delta": delta, "tone": tone}
 
 
+# Surfaces and ink match the tokens the charts resolve against — the card colour
+# IS the validator's surface, so a palette that passes contrast on paper passes
+# on the page. `data-theme` (a viewer toggle) must beat the OS media query in
+# both directions, hence the :not() guard.
 CSS = """
-:root{--bg:#f4f6fa;--card:#fff;--fg:#141922;--muted:#5d6879;--line:#e2e7f0;
---accent:#2f6df6;--up:#2f8f6b;--down:#c23b52;--radius:14px}
-@media (prefers-color-scheme:dark){:root{--bg:#11141a;--card:#191e27;--fg:#e8ecf3;
---muted:#95a0b3;--line:#262d3a;--accent:#6f9bff}}
+:root{--bg:#f9f9f7;--card:#fcfcfb;--fg:#0b0b0b;--muted:#52514e;--line:#e1e0d9;
+--accent:#2a78d6;--up:#006300;--down:#d03b3b;--radius:14px}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+--bg:#0d0d0d;--card:#1a1a19;--fg:#ffffff;--muted:#c3c2b7;--line:#2c2c2a;
+--accent:#3987e5;--up:#0ca30c;--down:#d03b3b}}
+:root[data-theme="dark"]{--bg:#0d0d0d;--card:#1a1a19;--fg:#ffffff;--muted:#c3c2b7;
+--line:#2c2c2a;--accent:#3987e5;--up:#0ca30c;--down:#d03b3b}
 *{box-sizing:border-box}
 body{margin:0;padding:24px;background:var(--bg);color:var(--fg);
 font:15px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
@@ -570,7 +694,7 @@ grid-template-columns:repeat(auto-fit,minmax(190px,1fr))}
 .kpi{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);
 padding:16px 18px;display:flex;flex-direction:column;gap:4px}
 .kpi-label{color:var(--muted);font-size:.8rem;text-transform:uppercase;letter-spacing:.04em}
-.kpi-value{font-size:1.7rem;font-weight:600;letter-spacing:-.02em}
+.kpi-value{font-size:1.7rem;font-weight:600;letter-spacing:-.02em;color:var(--fg)}
 .kpi-delta{font-size:.85rem;color:var(--muted)}
 .kpi-delta.up{color:var(--up)}.kpi-delta.down{color:var(--down)}
 .grid{display:grid;gap:16px;grid-template-columns:repeat(2,minmax(0,1fr))}
@@ -654,22 +778,149 @@ if (typeof echarts !== 'object' || typeof echarts.init !== 'function') {{
     '<p style="background:#fee;color:#900;padding:1rem">ECharts did not load: window.echarts is '
     + typeof echarts + '. The library must be inlined verbatim, with nothing assigned to it.</p>');
 }} else {{
-  var dark = matchMedia('(prefers-color-scheme: dark)').matches;
-  var theme = {_js(theme)} || (dark ? 'dark' : null);
+  var TOKENS = {_js(_TOKENS)};
+  var VENDOR_THEME = {_js(theme)};
+  var SPECS = {specs};
   var instances = [];
-  ({specs}).forEach(function (spec) {{
+
+  function mode() {{
+    var stamped = document.documentElement.getAttribute('data-theme');
+    if (stamped === 'dark' || stamped === 'light') return stamped;
+    return matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+  }}
+
+  // Colours arrive as tokens ("@series1", "@surface") and are resolved here,
+  // against the mode the page is actually being viewed in. Baking hex at build
+  // time cannot work: a palette stepped for a white card is wrong on a dark one.
+  function resolve(value, t) {{
+    if (typeof value === 'string') {{
+      if (value.charAt(0) !== '@') return value;
+      var key = value.slice(1);
+      var m = /^series(\\d+)$/.exec(key);
+      if (m) return t.series[(parseInt(m[1], 10) - 1) % t.series.length];
+      m = /^seq(\\d+)$/.exec(key);
+      if (m) return t.seq[Math.min(parseInt(m[1], 10) - 1, t.seq.length - 1)];
+      return key in t ? t[key] : value;
+    }}
+    if (Array.isArray(value)) return value.map(function (v) {{ return resolve(v, t); }});
+    if (value && typeof value === 'object') {{
+      var out = {{}};
+      for (var k in value) if (Object.prototype.hasOwnProperty.call(value, k)) {{
+        out[k] = resolve(value[k], t);
+      }}
+      return out;
+    }}
+    return value;
+  }}
+
+  // Chart chrome (axis ink, gridlines, tooltip, legend) lives in a registered
+  // theme rather than in every option object: one definition, and the emitted
+  // JSON stays small.
+  function registerTheme(t) {{
+    echarts.registerTheme('talos', {{
+      color: t.series,
+      backgroundColor: 'transparent',
+      textStyle: {{fontFamily: 'system-ui,-apple-system,"Segoe UI",Roboto,sans-serif',
+                   color: t.ink2}},
+      title: {{textStyle: {{color: t.ink, fontWeight: 600}}}},
+      legend: {{textStyle: {{color: t.ink2}}}},
+      categoryAxis: {{
+        axisLine: {{lineStyle: {{color: t.base}}}},
+        axisTick: {{show: false}},
+        axisLabel: {{color: t.muted}},
+        splitLine: {{show: false}},
+        nameTextStyle: {{color: t.muted}}
+      }},
+      valueAxis: {{
+        axisLine: {{show: false}},
+        axisTick: {{show: false}},
+        axisLabel: {{color: t.muted}},
+        splitLine: {{lineStyle: {{color: t.grid}}}},
+        nameTextStyle: {{color: t.muted}}
+      }},
+      tooltip: {{
+        backgroundColor: t.surface, borderColor: t.grid, borderWidth: 1,
+        textStyle: {{color: t.ink}},
+        axisPointer: {{lineStyle: {{color: t.base}}, crossStyle: {{color: t.base}}}}
+      }}
+    }});
+  }}
+
+  var live = {{}};   // id -> instance, for charts that have actually been drawn
+
+  function drawOne(spec, t) {{
     var el = document.getElementById(spec.id);
-    if (!el) return;
+    // A container with no width yet (collapsed preview panel, hidden tab,
+    // display:none ancestor) cannot be laid out: some series types throw during
+    // layout and the chart stays dead for the life of the page. Wait for width
+    // instead — the ResizeObserver below calls back the moment it arrives.
+    if (!el || !el.clientWidth) return;
     try {{
-      var inst = echarts.init(el, theme, {{renderer: 'canvas'}});
-      inst.setOption(spec.option);
-      instances.push(inst);
+      if (live[spec.id]) {{ live[spec.id].dispose(); delete live[spec.id]; }}
+      var inst = echarts.init(el, VENDOR_THEME || 'talos', {{renderer: 'canvas'}});
+      var opt = resolve(spec.option, t);
+      // Entry animation is not decorative here, it is a correctness hazard: the
+      // first paint of an animated series is driven by animation frames, and a
+      // hidden iframe or background tab suspends those. Sankey in particular
+      // does its LAYOUT in that pass and throws asynchronously — past any
+      // try/catch — leaving a permanently blank card with no message. Rendering
+      // synchronously costs a fade nobody asked for and makes failures catchable.
+      if (opt.animation === undefined) opt.animation = false;
+      inst.setOption(opt);
+      live[spec.id] = inst;
+      instances = Object.keys(live).map(function (k) {{ return live[k]; }});
     }} catch (e) {{
       console.error(spec.id, e);
       el.innerHTML = '<p class="chart-error">Chart ' + spec.id + ' failed: ' + e.message + '</p>';
     }}
+  }}
+
+  function draw() {{
+    var t = TOKENS[mode()];
+    registerTheme(t);
+    SPECS.forEach(function (spec) {{ drawOne(spec, t); }});
+  }}
+
+  draw();
+
+  if (typeof ResizeObserver === 'function') {{
+    var ro = new ResizeObserver(function (entries) {{
+      var t = TOKENS[mode()];
+      entries.forEach(function (entry) {{
+        var id = entry.target.id;
+        if (!entry.contentRect.width) return;
+        if (live[id]) live[id].resize();
+        else drawOne(SPECS.filter(function (s) {{ return s.id === id; }})[0], t);
+      }});
+    }});
+    SPECS.forEach(function (s) {{
+      var el = document.getElementById(s.id);
+      if (el) ro.observe(el);
+    }});
+  }}
+
+  // Belt and braces for the deferred case. ResizeObserver delivery is tied to
+  // the rendering lifecycle, which a hidden iframe or a background tab can
+  // suspend entirely — so never let it be the ONLY thing that can start a
+  // chart. draw() only touches charts that aren't live yet, so re-running it is
+  // cheap and idempotent.
+  addEventListener('resize', function () {{
+    Object.keys(live).forEach(function (k) {{ live[k].resize(); }});
+    if (Object.keys(live).length < SPECS.length) draw();
   }});
-  addEventListener('resize', function () {{ instances.forEach(function (i) {{ i.resize(); }}); }});
+  addEventListener('load', draw);
+  document.addEventListener('visibilitychange', function () {{
+    if (!document.hidden) draw();
+  }});
+  [120, 500, 1500].forEach(function (ms) {{
+    setTimeout(function () {{ if (Object.keys(live).length < SPECS.length) draw(); }}, ms);
+  }});
+
+  // Dark mode is a redraw, not a CSS flip — the palette steps differ per surface.
+  var mq = matchMedia('(prefers-color-scheme: dark)');
+  (mq.addEventListener ? mq.addEventListener.bind(mq, 'change') : mq.addListener.bind(mq))(draw);
+  new MutationObserver(draw).observe(document.documentElement,
+    {{attributes: true, attributeFilter: ['data-theme']}});
 }}
 </script>
 </body></html>"""
