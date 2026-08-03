@@ -15,7 +15,7 @@ import os
 import re
 import tempfile
 import time
-from typing import AsyncGenerator, Dict, List, Optional, Set
+from typing import Any, AsyncGenerator, Dict, List, Optional, Set
 from urllib.parse import urlparse
 
 from src.agent_tools import (
@@ -642,7 +642,19 @@ def _sql_kb_query(messages: List[Dict], max_msgs: int = 4, max_chars: int = 1200
     return "\n".join(collected)[:max_chars]
 
 
-def _retrieve_sql_knowledge(query: str, k: int = 6, max_chars: int = 8000) -> str:
+# SQL knowledge is injected ONCE per turn (see the round loop), so the first
+# shot has to carry the whole orientation budget. Schema/catalog docs chunk into
+# many small pieces — one table per chunk is typical — and six of them rarely
+# cover the tables a real question touches. Widening the first retrieval is the
+# cheap lever: it costs context once, whereas retrieving again mid-turn costs a
+# full re-prefill of the conversation.
+_SQL_KB_K = 12
+_SQL_KB_MAX_CHARS = 16000
+
+
+def _retrieve_sql_knowledge(
+    query: str, k: int = _SQL_KB_K, max_chars: int = _SQL_KB_MAX_CHARS
+) -> str:
     """Search the sql-scoped RAG for chunks relevant to `query` and format them.
     Returns "" when nothing is configured/healthy or no query is given."""
     if not query:
@@ -1598,6 +1610,25 @@ def _tool_parallelism() -> int:
 _SQL_KB_MAX_REFRESHES = 2
 
 
+def _sql_call_missed(ev: Dict[str, Any]) -> bool:
+    """Did this query_sql event suggest the model is lost in the schema?
+
+    An outright error (exit_code != 0) is the obvious case. The subtler — and
+    more common — one is a syntactically valid query that returns ZERO rows:
+    that is what querying the wrong table, joining on the wrong key, or
+    filtering a column that holds different values than assumed looks like from
+    outside. Only the `query` action reports `row_count`, so describe/
+    list_tables events fall through to the exit-code check.
+
+    A genuinely empty answer ("no orders in 2026") also lands here, which is why
+    the caller caps refreshes at _SQL_KB_MAX_REFRESHES — a wasted retrieval is
+    far cheaper than a turn that never finds the right table.
+    """
+    if ev.get("exit_code") not in (None, 0):
+        return True
+    return ev.get("row_count") == 0
+
+
 def _build_actions_snapshot(tool_events: list, limit: int = 8000) -> str:
     """Compact record of what the agent actually did this turn, for the
     verifier to judge against. One block per tool execution: the command and
@@ -2468,8 +2499,9 @@ async def stream_agent_loop(
         # clock) for a reference that barely changed between rounds.
         #
         # Re-retrieving is only worth that price when the model is genuinely
-        # lost in the schema, so it is gated on a FAILED query_sql in the
-        # previous round and capped at _SQL_KB_MAX_REFRESHES per turn.
+        # lost in the schema, so it is gated on a query_sql MISS in the previous
+        # round (an error, or a valid query that came back empty — see
+        # _sql_call_missed) and capped at _SQL_KB_MAX_REFRESHES per turn.
         if force_db:
             # `_sql_kb_attempted`, not `_sql_kb_msg is None`: when no SQL
             # knowledge is configured the retrieval returns nothing, and without
@@ -2479,7 +2511,7 @@ async def stream_agent_loop(
                 and any(
                     ev.get("round") == round_num - 1
                     and ev.get("tool") == "query_sql"
-                    and ev.get("exit_code") not in (None, 0)
+                    and _sql_call_missed(ev)
                     for ev in tool_events
                 )
             )
@@ -2498,7 +2530,7 @@ async def stream_agent_loop(
                         _sql_kb_msg["content"] = _kb_content
                         _sql_kb_refreshes += 1
                         logger.info(
-                            "[db-mode] SQL knowledge refreshed after a failed query "
+                            "[db-mode] SQL knowledge refreshed after a missed query "
                             "(round %d, refresh %d/%d) — prefix cache resets",
                             round_num,
                             _sql_kb_refreshes,
@@ -3573,6 +3605,12 @@ async def stream_agent_loop(
             if result.get("doc_id"):
                 tool_event["doc_id"] = result["doc_id"]
                 tool_event["doc_title"] = result.get("title", "")
+            # query_sql reports how many rows the statement actually produced.
+            # A successful query that returns NOTHING is the signature of a model
+            # working from the wrong table/column, so the SQL-knowledge refresh
+            # gate reads this — see the `_kb_stale` block in the round loop.
+            if isinstance(result.get("row_count"), int):
+                tool_event["row_count"] = result["row_count"]
             # Persist the file-write/edit diff so it re-renders on reload — without
             # this the diff shows live but vanishes from saved history.
             if result.get("diff"):
