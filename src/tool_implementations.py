@@ -406,19 +406,31 @@ def _sql_json_value(value: Any) -> Any:
     return str(value)
 
 
-def _spill_rows_to_csv(columns: List[str], rows: List[Dict[str, Any]]) -> str:
-    """Write a full result set to a temp CSV and return the local path."""
-    import csv
-    import tempfile
+# Spilled result sets live here rather than at the workspace root. The sandbox
+# hides this directory from the artifacts list (SKIP_DIRS in sandboxd.py), so a
+# turn that runs ten queries doesn't hand the user ten CSVs they never asked
+# for — the deliverable stays the deliverable.
+_SQL_SPILL_DIR = ".talos-data"
 
-    fd, path = tempfile.mkstemp(prefix="query_", suffix=".csv")
-    os.close(fd)
-    with open(path, "w", encoding="utf-8", newline="") as f:
-        w = csv.DictWriter(f, fieldnames=columns, extrasaction="ignore")
-        w.writeheader()
-        for r in rows:
-            w.writerow({c: r.get(c) for c in columns})
-    return path
+
+def _spill_rows_to_csv(columns: List[str], rows: List[Dict[str, Any]]) -> str:
+    """Serialize a full result set as CSV text."""
+    import csv
+    import io
+
+    buf = io.StringIO()
+    w = csv.DictWriter(buf, fieldnames=columns, extrasaction="ignore", lineterminator="\n")
+    w.writeheader()
+    for r in rows:
+        w.writerow({c: r.get(c) for c in columns})
+    return buf.getvalue()
+
+
+def _spill_name(query: str) -> str:
+    """A stable filename per query, so re-running one overwrites its spill
+    instead of leaving query_1.csv … query_9.csv behind."""
+    digest = hashlib.sha1(query.encode("utf-8", "replace")).hexdigest()[:10]
+    return f"{_SQL_SPILL_DIR}/query_{digest}.csv"
 
 
 async def do_query_sql(
@@ -560,7 +572,8 @@ async def do_query_sql(
                 # model still sees the columns and a head preview, which is all
                 # it needs to write the pandas code that does the real work.
                 if len(rows) > _SQL_SPILL_ROWS:
-                    out["_spill_local"] = _spill_rows_to_csv(columns, rows)
+                    out["_spill_csv"] = _spill_rows_to_csv(columns, rows)
+                    out["_spill_name"] = _spill_name(query)
                     out["_spill_rows"] = len(rows)
                     preview = _format_sql_rows(rows[:_SQL_PREVIEW_ROWS])
                     out["output"] = (
@@ -587,34 +600,38 @@ async def do_query_sql(
 
     result = await asyncio.to_thread(_run)
 
-    local = result.pop("_spill_local", None)
+    csv_text = result.pop("_spill_csv", None)
+    name = result.pop("_spill_name", "")
     n_spilled = result.pop("_spill_rows", 0)
-    if local:
+    if csv_text:
         try:
-            from src.sandbox_client import upload_file_to_sandbox
+            from src.sandbox_client import file_tool_in_sandbox
 
-            up = await upload_file_to_sandbox(owner=owner, session_id=session_id, path=local)
-            name = up.get("sandbox_path") or os.path.basename(local)
+            written = await file_tool_in_sandbox(
+                owner=owner,
+                session_id=session_id,
+                operation="write",
+                payload={"path": name, "content": csv_text},
+            )
+            if written.get("exit_code") not in (0, None):
+                raise RuntimeError(written.get("error") or "write failed")
             result["spill_path"] = name
             result["output"] += (
-                f"\n\nAll {n_spilled} rows were written to `{name}` in your workspace "
-                f"— the full result set is NOT in this message. Read it with "
-                f"`pd.read_csv('{name}')`; do not re-query to page through the rows."
+                f"\n\nAll {n_spilled} rows were written to `{name}` — the full result "
+                f"set is NOT in this message. Read it with `pd.read_csv('{name}')`; do "
+                f"not re-query to page through the rows. This is working data, not a "
+                f"deliverable: it stays out of the user's file list, so write anything "
+                f"they should actually receive to `output/`."
             )
         except Exception as e:
-            # No workspace (no session_id, sandbox off, upload failed) — say so
+            # No workspace (no session_id, sandbox off, write failed) — say so
             # rather than implying a file exists.
-            logger.warning(f"query_sql spill upload failed: {e}")
+            logger.warning(f"query_sql spill write failed: {e}")
             result["output"] += (
                 f"\n\nOnly the preview above is shown ({n_spilled} rows matched) and the "
                 "full set could not be saved to your workspace. Narrow the query with "
                 "WHERE/GROUP BY, or aggregate in SQL instead of pulling raw rows."
             )
-        finally:
-            try:
-                os.unlink(local)
-            except OSError:
-                pass
     return result
 
 

@@ -151,7 +151,12 @@ class ListRequest(BaseModel):
 MAX_READ_CHARS = 20_000
 MAX_OUTPUT_CHARS = 10_000
 MAX_DIFF_LINES = 400
-SKIP_DIRS = {".git", ".talos-home", ".talos-preview", "node_modules", "__pycache__", ".venv", "venv", "dist", "build", ".pytest_cache", ".mypy_cache"}
+# .talos-data holds working data the agent spilled to disk to keep it out of the
+# model's context (large query_sql result sets). It is an implementation detail
+# of the tools, not something the user asked for, so it stays out of the
+# artifacts list — otherwise a data-heavy chat buries the actual deliverable
+# under a dozen intermediate CSVs.
+SKIP_DIRS = {".git", ".talos-home", ".talos-preview", ".talos-data", "node_modules", "__pycache__", ".venv", "venv", "dist", "build", ".pytest_cache", ".mypy_cache"}
 PROCESS_LOG_ROOT = STATE_PATH.parent / "processes"
 PROCESS_RETENTION_SECONDS = 3600
 SESSION_CWD_TTL_SECONDS = int(os.getenv("TALOS_SANDBOX_SESSION_CWD_TTL", "604800"))

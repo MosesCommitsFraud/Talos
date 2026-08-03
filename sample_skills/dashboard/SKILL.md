@@ -146,6 +146,14 @@ def page(title: str, charts: list[dict], kpis: list[dict]) -> str:
 <div class="kpis">{tiles}</div>
 {blocks}
 <script>
+// Fail loudly if the library didn't survive being inlined. A blank dashboard
+// with a clean console is the hardest version of this to debug.
+if (typeof echarts !== 'object' || typeof echarts.init !== 'function') {{
+  document.body.insertAdjacentHTML('afterbegin',
+    '<p style="background:#fee;color:#900;padding:1rem">ECharts did not load: '
+    + 'window.echarts is ' + typeof echarts + '. The library must be inlined '
+    + 'verbatim, with nothing assigned to it.</p>');
+}}
 // 'dark' is built into ECharts (dark background, default palette); THEME_NAME
 // is the one inlined above. Inline a dark theme file too if you want a dark
 // palette rather than just a dark canvas.
@@ -262,6 +270,14 @@ twice.
   to ship a dashboard of empty boxes — and because the throw aborts the script,
   one lowercase key blanks every chart on the page, not just its own. See
   `check_option` above.
+- **Assigning the library to something.** `<script>echarts={...the file...}</script>`
+  looks harmless and destroys it. `echarts.min.js` is a UMD bundle that starts
+  with `!function(...)` and registers `window.echarts` itself; putting
+  `echarts=` in front assigns the IIFE's return value — `!undefined`, i.e.
+  `true` — over the object it just created. Every later `echarts.init(...)`
+  then dies on "not a function" and the first failure takes all the remaining
+  charts with it. **Inline the file verbatim**: no assignment, no `var`, no
+  wrapper, nothing before it inside the tag.
 - **A theme name that was never registered.** `echarts.init(el, 'macarons')`
   when `macarons.js` wasn't inlined does *not* error — it silently falls back to
   the default palette. If your dashboard still looks stock after you picked a
@@ -286,6 +302,8 @@ grep -c 'src="http' output/dashboard.html    # must be 0 — no CDN
 ls -l output/dashboard.html                  # ~1.2 MB; 50 KB means ECharts is not inlined
 grep -o '"[xy]axis"' output/dashboard.html   # must print nothing
 grep -c registerTheme output/dashboard.html  # 1 if you inlined a theme
+grep -o '<script>[a-zA-Z_$]*=' output/dashboard.html   # must print nothing —
+                                             # nothing may be assigned the library
 ```
 
 Then open the page in the preview panel and look at it. Every chart box should
