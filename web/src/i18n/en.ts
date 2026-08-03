@@ -248,58 +248,81 @@ const en = {
   // Phrasing for the grouped tool-call rows. Each family has a live present
   // participle (`running`), a settled past tense (`past`) and — where a plural
   // reads better than a "twice" suffix — a counted `summary`.
+  //
+  // Every past-tense string carries {{verb}} where its action word belongs, and
+  // spells that word out in `verbPast`. The UI tints the verb by outcome (green
+  // passed / red failed), and it cannot just take the first word: English fronts
+  // the verb, German ends on the participle. Running strings have no {{verb}} —
+  // a call still in flight has no outcome to colour.
   toolGroup: {
     twice: 'twice',
     nTimes: '{{count}} times',
     show: 'Show tool calls',
     hide: 'Hide tool calls',
+    failed: 'failed',
     command: {
+      verbPast: 'Ran',
       running: 'Running a command',
-      past: 'Ran a command',
+      past: '{{verb}} a command',
       // Row-level wording, where the command itself is the subject.
       runningNamed: 'Running {{subject}}',
-      pastNamed: 'Ran {{subject}}',
-      summary_one: 'Ran a command',
-      summary_other: 'Ran {{count}} commands',
+      pastNamed: '{{verb}} {{subject}}',
+      summary_one: '{{verb}} a command',
+      summary_other: '{{verb}} {{count}} commands',
     },
     read: {
+      verbPast: 'Read',
       running: 'Reading {{subject}}',
-      past: 'Read {{subject}}',
-      summary_one: 'Read {{subject}}',
-      summary_other: 'Read {{count}} files',
+      past: '{{verb}} {{subject}}',
+      summary_one: '{{verb}} {{subject}}',
+      summary_other: '{{verb}} {{count}} files',
     },
     write: {
+      verbPast: 'Wrote',
       running: 'Writing {{subject}}',
-      past: 'Wrote {{subject}}',
-      summary_one: 'Wrote {{subject}}',
-      summary_other: 'Wrote {{count}} files',
+      past: '{{verb}} {{subject}}',
+      summary_one: '{{verb}} {{subject}}',
+      summary_other: '{{verb}} {{count}} files',
     },
     edit: {
+      verbPast: 'Edited',
       running: 'Editing {{subject}}',
-      past: 'Edited {{subject}}',
-      summary_one: 'Edited {{subject}}',
-      summary_other: 'Edited {{count}} files',
+      past: '{{verb}} {{subject}}',
+      summary_one: '{{verb}} {{subject}}',
+      summary_other: '{{verb}} {{count}} files',
     },
     // `pastN` places the repeat count ("twice", "4 times") inside the clause —
     // see summarizeCalls, which cannot append it language-neutrally.
     document: {
+      verbPast: 'Edited',
       running: 'Editing the document',
-      past: 'Edited the document',
-      pastN: 'Edited the document {{times}}',
+      past: '{{verb}} the document',
+      pastN: '{{verb}} the document {{times}}',
     },
-    grep: { running: 'Searching for {{subject}}', past: 'Searched for {{subject}}' },
-    glob: { running: 'Finding files', past: 'Found files' },
-    ls: { running: 'Listing {{subject}}', past: 'Listed {{subject}}' },
-    sql: { running: 'Querying SQL', past: 'Queried SQL', pastN: 'Queried SQL {{times}}' },
+    grep: { verbPast: 'Searched', running: 'Searching for {{subject}}', past: '{{verb}} for {{subject}}' },
+    glob: { verbPast: 'Found', running: 'Finding files', past: '{{verb}} files' },
+    ls: { verbPast: 'Listed', running: 'Listing {{subject}}', past: '{{verb}} {{subject}}' },
+    sql: { verbPast: 'Queried', running: 'Querying SQL', past: '{{verb}} SQL', pastN: '{{verb}} SQL {{times}}' },
     knowledge: {
+      verbPast: 'Searched',
       running: 'Searching the knowledge base',
-      past: 'Searched the knowledge base',
-      pastN: 'Searched the knowledge base {{times}}',
+      past: '{{verb}} the knowledge base',
+      pastN: '{{verb}} the knowledge base {{times}}',
     },
-    web: { running: 'Searching the web', past: 'Searched the web', pastN: 'Searched the web {{times}}' },
-    fetch: { running: 'Fetching {{subject}}', past: 'Fetched {{subject}}' },
-    image: { running: 'Generating an image', past: 'Generated an image', pastN: 'Generated {{count}} images' },
-    generic: { running: 'Running {{tool}}', past: 'Ran {{tool}}', pastN: 'Ran {{tool}} {{times}}' },
+    web: {
+      verbPast: 'Searched',
+      running: 'Searching the web',
+      past: '{{verb}} the web',
+      pastN: '{{verb}} the web {{times}}',
+    },
+    fetch: { verbPast: 'Fetched', running: 'Fetching {{subject}}', past: '{{verb}} {{subject}}' },
+    image: {
+      verbPast: 'Generated',
+      running: 'Generating an image',
+      past: '{{verb}} an image',
+      pastN: '{{verb}} {{count}} images',
+    },
+    generic: { verbPast: 'Ran', running: 'Running {{tool}}', past: '{{verb}} {{tool}}', pastN: '{{verb}} {{tool}} {{times}}' },
   },
   palette: {
     newChat: 'New chat',

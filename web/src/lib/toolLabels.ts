@@ -105,18 +105,51 @@ export function callSubject(call: ToolCall): string {
  *  they fall back to the generic tool-name phrasing instead. */
 const NEEDS_SUBJECT = new Set(['read', 'write', 'edit', 'ls', 'grep', 'glob', 'fetch']);
 
+/** A label split around its action verb, so the verb alone can be tinted by
+ *  outcome — green when the call succeeded, red when it failed. The verb is not
+ *  simply the first word: English fronts it ("Queried SQL"), German puts the
+ *  participle last ("Datenbank abgefragt"). */
+export interface LabelParts {
+  before: string;
+  /** Empty for a still-running call, which has no outcome to colour yet. */
+  verb: string;
+  after: string;
+}
+
+/** Placeholder interpolated in place of the verb, then split back out. A
+ *  control character can't collide with real content the way `*` would — glob
+ *  patterns are full of asterisks ("Searched *.md"). */
+const VERB_MARK = '\u0000';
+
+function splitVerb(rendered: string, verb: string): LabelParts {
+  const at = rendered.indexOf(VERB_MARK);
+  if (at < 0) return { before: rendered.trim(), verb: '', after: '' };
+  return {
+    before: rendered.slice(0, at).trimStart(),
+    verb,
+    after: rendered.slice(at + VERB_MARK.length).trimEnd(),
+  };
+}
+
+export function partsToString(parts: LabelParts): string {
+  return `${parts.before}${parts.verb}${parts.after}`.trim();
+}
+
 /** Label for ONE call. `tense: 'running'` yields the live present participle
- *  ("Reading TODO.md"), `'past'` the settled form ("Read TODO.md"). */
-export function describeCall(call: ToolCall, t: Translate, tense: 'running' | 'past'): string {
+ *  ("Reading TODO.md") and carries no verb split — a call in flight has no
+ *  pass/fail to show. `'past'` yields the settled form ("Read TODO.md"). */
+export function describeCall(call: ToolCall, t: Translate, tense: 'running' | 'past'): LabelParts {
   const family = toolFamily(call.tool);
   const subject = callSubject(call);
   // A shell/python call names the command it ran; without one it falls back to
   // the plain "Running a command" wording.
-  if (family === 'command' && subject) {
-    return t(`toolGroup.command.${tense}Named`, { subject }).trim();
-  }
-  const usable = subject || !NEEDS_SUBJECT.has(family) ? family : 'generic';
-  return t(`toolGroup.${usable}.${tense}`, { subject, tool: call.tool, count: 1 }).trim();
+  const named = family === 'command' && subject;
+  const usable = named || subject || !NEEDS_SUBJECT.has(family) ? family : 'generic';
+  const key = named ? `toolGroup.command.${tense}Named` : `toolGroup.${usable}.${tense}`;
+  const vars = { subject, tool: call.tool, count: 1 };
+  if (tense === 'running') return { before: t(key, vars).trim(), verb: '', after: '' };
+  const verb = t(`toolGroup.${usable}.verbPast`);
+  return splitVerb(t(key, { ...vars, verb: VERB_MARK }), verb);
 }
 
 /** How many times an action repeated, as a suffix: "" / "twice" / "3 times".
@@ -146,42 +179,52 @@ function byFamily(calls: ToolCall[]): Array<{ family: string; calls: ToolCall[] 
  *  one sentence. That is an English convention: German clauses start with a
  *  noun ("Dateien gelesen"), which must keep its capital, so the caller passes
  *  false for those languages. */
-export function summarizeCalls(calls: ToolCall[], t: Translate, lowerJoin = false): string {
-  if (calls.length === 0) return '';
-  const clauses = byFamily(calls).map(({ family, calls: group }) => {
+export interface Clause extends LabelParts {
+  /** True when any call in the clause failed, so its verb reads red. */
+  failed: boolean;
+}
+
+export function summarizeCalls(calls: ToolCall[], t: Translate, lowerJoin = false): Clause[] {
+  if (calls.length === 0) return [];
+  const clauses: Clause[] = byFamily(calls).map(({ family, calls: group }) => {
     const count = group.length;
     const subject = count === 1 ? callSubject(group[0]) : '';
+    const failed = group.some((c) => c.status === 'error');
+    const render = (key: string, extra: Record<string, unknown> = {}): string =>
+      t(key, { count, subject, tool: group[0].tool, verb: VERB_MARK, ...extra });
+
     // Commands and file edits read better with a real plural ("Ran 3 commands",
     // "Edited 2 files") than with a repeat suffix ("Ran a command 3 times").
     if (family === 'command' || family === 'read' || family === 'write' || family === 'edit') {
       const usable = subject || count > 1 || !NEEDS_SUBJECT.has(family) ? family : 'generic';
       const key = usable === 'generic' ? 'toolGroup.generic.past' : `toolGroup.${usable}.summary`;
-      return t(key, { count, subject, tool: group[0].tool }).trim();
+      return { ...splitVerb(render(key), t(`toolGroup.${usable}.verbPast`)), failed };
     }
+
     const usable = subject || !NEEDS_SUBJECT.has(family) ? family : 'generic';
+    const verb = t(`toolGroup.${usable}.verbPast`);
     const times = repeatSuffix(count, t);
     if (times) {
       // The repeat count cannot be appended language-neutrally: English puts it
       // last ("Queried SQL twice"), German before the participle ("Datenbank
       // zweimal abgefragt"). So the placement lives in the `pastN` phrasing.
-      const repeated = t(`toolGroup.${usable}.pastN`, {
-        subject,
-        tool: group[0].tool,
-        count,
-        times,
-        defaultValue: '',
-      }).trim();
-      if (repeated) return repeated;
+      const repeated = render(`toolGroup.${usable}.pastN`, { times, defaultValue: '' }).trim();
+      if (repeated) return { ...splitVerb(repeated, verb), failed };
     }
-    const base = t(`toolGroup.${usable}.past`, { subject, tool: group[0].tool, count }).trim();
-    return `${base} ${times}`.trim();
+    const base = splitVerb(render(`toolGroup.${usable}.past`), verb);
+    return { ...base, after: `${base.after} ${times}`.trimEnd(), failed };
   });
-  const [first, ...rest] = clauses;
-  if (rest.length === 0) return first;
-  const tail = lowerJoin
-    ? rest.map((clause) => clause.charAt(0).toLocaleLowerCase() + clause.slice(1))
-    : rest;
-  return [first, ...tail].join(', ');
+
+  if (!lowerJoin || clauses.length < 2) return clauses;
+  // Only the leading glyph of each follow-on clause changes, and it may sit in
+  // either the static text or the verb depending on word order.
+  return clauses.map((clause, i) => {
+    if (i === 0) return clause;
+    const lower = (s: string) => s.charAt(0).toLocaleLowerCase() + s.slice(1);
+    return clause.before
+      ? { ...clause, before: lower(clause.before) }
+      : { ...clause, verb: lower(clause.verb) };
+  });
 }
 
 export interface DiffStat {

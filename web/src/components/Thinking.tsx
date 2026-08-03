@@ -15,7 +15,7 @@ export function Thinking({ text, streaming }: { text: string; streaming: boolean
         type="button"
         aria-expanded={open}
         onClick={() => setOpen((v) => !v)}
-        className="flex max-w-full items-center gap-1.5 text-[13px] text-muted-foreground transition-colors hover:text-foreground"
+        className="flex max-w-full items-center gap-1.5 text-[13px] font-medium text-muted-foreground transition-colors hover:text-foreground"
       >
         <span className={`min-w-0 truncate ${streaming ? 'shimmer-text' : ''}`}>
           {streaming ? t('thinking.thinking') : t('thinking.view')}

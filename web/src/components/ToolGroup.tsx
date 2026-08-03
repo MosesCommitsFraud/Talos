@@ -2,7 +2,8 @@ import { ChevronDownIcon } from 'lucide-react';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { ToolCall } from '@/api/types';
-import { describeCall, groupDiffStat, summarizeCalls } from '@/lib/toolLabels';
+import { describeCall, groupDiffStat, partsToString, summarizeCalls } from '@/lib/toolLabels';
+import { ToolLabel } from './ToolLabel';
 import { DiffStatBadge, ToolRow } from './ToolRow';
 
 /** Every tool call the agent made between two pieces of assistant text, behind
@@ -25,11 +26,12 @@ export function ToolGroup({ calls }: { calls: ToolCall[] }) {
   // parallel), so the header follows the most recently started running one.
   const active = [...calls].reverse().find((c) => c.status === 'running');
   const stat = groupDiffStat(calls);
-  const label = active
-    ? describeCall(active, t, 'running')
-    // Joining clauses lower-cased is an English convention; German clauses open
-    // with a noun that keeps its capital.
-    : summarizeCalls(calls, t, i18n.language.startsWith('en'));
+  // Joining clauses lower-cased is an English convention; German clauses open
+  // with a noun that keeps its capital.
+  const clauses = active ? [] : summarizeCalls(calls, t, i18n.language.startsWith('en'));
+  const live = active ? describeCall(active, t, 'running') : null;
+  // Drives the roll animation: remounting on text change is what replays it.
+  const labelText = live ? partsToString(live) : clauses.map(partsToString).join(', ');
 
   if (calls.length === 1) {
     return (
@@ -44,9 +46,9 @@ export function ToolGroup({ calls }: { calls: ToolCall[] }) {
       <button
         type="button"
         aria-expanded={open}
-        aria-label={open ? t('toolGroup.hide') : t('toolGroup.show')}
+        aria-label={`${labelText} — ${open ? t('toolGroup.hide') : t('toolGroup.show')}`}
         onClick={() => setOpen((v) => !v)}
-        className="flex max-w-full items-center gap-1.5 text-[13px] text-muted-foreground transition-colors hover:text-foreground"
+        className="flex max-w-full items-center gap-1.5 text-[13px] font-medium text-muted-foreground transition-colors hover:text-foreground"
       >
         {/* Clipped so the outgoing label slides out of view rather than
             overlapping the incoming one. */}
@@ -55,8 +57,19 @@ export function ToolGroup({ calls }: { calls: ToolCall[] }) {
               animation every time the current action changes. The shimmer sits
               on a CHILD: both are `animation` shorthands, so sharing one element
               would let the roll silently cancel the sweep. */}
-          <span key={label} className="tool-label-roll block">
-            <span className={`block truncate ${active ? 'shimmer-text' : ''}`}>{label}</span>
+          <span key={labelText} className="tool-label-roll block">
+            <span className={`block truncate ${active ? 'shimmer-text' : ''}`}>
+              {live ? (
+                <ToolLabel parts={live} />
+              ) : (
+                clauses.map((clause, i) => (
+                  <span key={i}>
+                    {i > 0 && ', '}
+                    <ToolLabel parts={clause} failed={clause.failed} />
+                  </span>
+                ))
+              )}
+            </span>
           </span>
         </span>
         {stat && <DiffStatBadge added={stat.added} removed={stat.removed} />}

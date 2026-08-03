@@ -250,62 +250,91 @@ const de: typeof en = {
   // Formulierungen für die gruppierten Toolcall-Zeilen. Die Klauseln werden im
   // Deutschen NICHT klein zusammengefügt (siehe summarizeCalls/lowerJoin) — sie
   // beginnen mit einem Substantiv, das seinen Großbuchstaben behalten muss.
+  //
+  // Jede Vergangenheitsform trägt {{verb}} an der Stelle ihres Aktionsworts und
+  // nennt dieses Wort in `verbPast`. Die UI färbt nur das Verb ein (grün =
+  // erfolgreich, rot = fehlgeschlagen) — im Deutschen steht das Partizip am
+  // Ende, deshalb reicht "erstes Wort" als Regel nicht. Die `running`-Strings
+  // haben kein {{verb}}: ein laufender Aufruf hat noch kein Ergebnis.
   toolGroup: {
     twice: 'zweimal',
     nTimes: '{{count}}×',
     show: 'Toolaufrufe anzeigen',
     hide: 'Toolaufrufe ausblenden',
+    failed: 'fehlgeschlagen',
     command: {
+      verbPast: 'ausgeführt',
       running: 'Führt einen Befehl aus',
-      past: 'Befehl ausgeführt',
+      past: 'Befehl {{verb}}',
       // Zeilen-Formulierung, in der der Befehl selbst das Subjekt ist.
       runningNamed: 'Führt {{subject}} aus',
-      pastNamed: '{{subject}} ausgeführt',
-      summary_one: 'Einen Befehl ausgeführt',
-      summary_other: '{{count}} Befehle ausgeführt',
+      pastNamed: '{{subject}} {{verb}}',
+      summary_one: 'Einen Befehl {{verb}}',
+      summary_other: '{{count}} Befehle {{verb}}',
     },
     read: {
+      verbPast: 'gelesen',
       running: 'Liest {{subject}}',
-      past: '{{subject}} gelesen',
-      summary_one: '{{subject}} gelesen',
-      summary_other: '{{count}} Dateien gelesen',
+      past: '{{subject}} {{verb}}',
+      summary_one: '{{subject}} {{verb}}',
+      summary_other: '{{count}} Dateien {{verb}}',
     },
     write: {
+      verbPast: 'geschrieben',
       running: 'Schreibt {{subject}}',
-      past: '{{subject}} geschrieben',
-      summary_one: '{{subject}} geschrieben',
-      summary_other: '{{count}} Dateien geschrieben',
+      past: '{{subject}} {{verb}}',
+      summary_one: '{{subject}} {{verb}}',
+      summary_other: '{{count}} Dateien {{verb}}',
     },
     edit: {
+      verbPast: 'bearbeitet',
       running: 'Bearbeitet {{subject}}',
-      past: '{{subject}} bearbeitet',
-      summary_one: '{{subject}} bearbeitet',
-      summary_other: '{{count}} Dateien bearbeitet',
+      past: '{{subject}} {{verb}}',
+      summary_one: '{{subject}} {{verb}}',
+      summary_other: '{{count}} Dateien {{verb}}',
     },
     // `pastN` setzt die Wiederholung ("zweimal", "4×") an die im Deutschen
     // richtige Stelle — vor das Partizip, nicht dahinter.
     document: {
+      verbPast: 'bearbeitet',
       running: 'Bearbeitet das Dokument',
-      past: 'Dokument bearbeitet',
-      pastN: 'Dokument {{times}} bearbeitet',
+      past: 'Dokument {{verb}}',
+      pastN: 'Dokument {{times}} {{verb}}',
     },
-    grep: { running: 'Sucht nach {{subject}}', past: 'Nach {{subject}} gesucht' },
-    glob: { running: 'Sucht Dateien', past: 'Dateien gefunden' },
-    ls: { running: 'Listet {{subject}}', past: '{{subject}} aufgelistet' },
+    grep: { verbPast: 'gesucht', running: 'Sucht nach {{subject}}', past: 'Nach {{subject}} {{verb}}' },
+    glob: { verbPast: 'gefunden', running: 'Sucht Dateien', past: 'Dateien {{verb}}' },
+    ls: { verbPast: 'aufgelistet', running: 'Listet {{subject}}', past: '{{subject}} {{verb}}' },
     sql: {
+      verbPast: 'abgefragt',
       running: 'Fragt die Datenbank ab',
-      past: 'Datenbank abgefragt',
-      pastN: 'Datenbank {{times}} abgefragt',
+      past: 'Datenbank {{verb}}',
+      pastN: 'Datenbank {{times}} {{verb}}',
     },
     knowledge: {
+      verbPast: 'durchsucht',
       running: 'Durchsucht die Wissensdatenbank',
-      past: 'Wissensdatenbank durchsucht',
-      pastN: 'Wissensdatenbank {{times}} durchsucht',
+      past: 'Wissensdatenbank {{verb}}',
+      pastN: 'Wissensdatenbank {{times}} {{verb}}',
     },
-    web: { running: 'Durchsucht das Web', past: 'Web durchsucht', pastN: 'Web {{times}} durchsucht' },
-    fetch: { running: 'Lädt {{subject}}', past: '{{subject}} geladen' },
-    image: { running: 'Erzeugt ein Bild', past: 'Bild erzeugt', pastN: '{{count}} Bilder erzeugt' },
-    generic: { running: 'Führt {{tool}} aus', past: '{{tool}} ausgeführt', pastN: '{{tool}} {{times}} ausgeführt' },
+    web: {
+      verbPast: 'durchsucht',
+      running: 'Durchsucht das Web',
+      past: 'Web {{verb}}',
+      pastN: 'Web {{times}} {{verb}}',
+    },
+    fetch: { verbPast: 'geladen', running: 'Lädt {{subject}}', past: '{{subject}} {{verb}}' },
+    image: {
+      verbPast: 'erzeugt',
+      running: 'Erzeugt ein Bild',
+      past: 'Bild {{verb}}',
+      pastN: '{{count}} Bilder {{verb}}',
+    },
+    generic: {
+      verbPast: 'ausgeführt',
+      running: 'Führt {{tool}} aus',
+      past: '{{tool}} {{verb}}',
+      pastN: '{{tool}} {{times}} {{verb}}',
+    },
   },
   palette: {
     newChat: 'Neuer Chat',

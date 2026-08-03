@@ -124,11 +124,42 @@ function buildSegments(turn: UiMessage[]): TurnSegment[] {
   return out;
 }
 
+/** Settled-turn fold: collapses everything the turn did — thinking, tool groups
+ *  and the commentary between them — behind a quiet "Worked for Xs" line, with
+ *  only the final answer left standing outside it.
+ *
+ *  The fold is just the outer lid; what unfolds is the same interleaved body the
+ *  stream showed, tool groups and all. Styled like those groups (trailing
+ *  chevron, medium 13px, muted) so the whole stack reads as one family. */
+function ActivityFold({ turn, showThinking, durationMs, terminalId }: { turn: UiMessage[]; showThinking: boolean; durationMs: number | null; terminalId?: string }) {
+  const { t } = useTranslation();
+  const [open, setOpen] = useState(false);
+  const label = durationMs != null ? t('messages.workedFor', { duration: formatDurationMs(durationMs) }) : t('messages.worked');
+  return (
+    <div className="my-1">
+      <button
+        type="button"
+        aria-expanded={open}
+        onClick={() => setOpen((v) => !v)}
+        className="flex max-w-full select-none items-center gap-1.5 text-[13px] font-medium text-muted-foreground tabular-nums transition-colors hover:text-foreground"
+      >
+        <span className="min-w-0 truncate">{label}</span>
+        <ChevronDownIcon className={`size-3.5 shrink-0 opacity-60 transition-transform ${open ? 'rotate-180' : ''}`} />
+      </button>
+      {open && (
+        <div className="mt-1.5">
+          <TurnBody turn={turn} showThinking={showThinking} hideContentFor={terminalId} />
+        </div>
+      )}
+    </div>
+  );
+}
+
 /** Renders a turn's segments. Shared by the streaming and settled branches so a
  *  turn doesn't visibly rearrange itself the moment it finishes — the tool
  *  groups just switch from live labels to their past-tense recap.
- *  `hideContentFor` suppresses one bubble's text (a proposed plan renders as a
- *  chip instead of inline). */
+ *  `hideContentFor` suppresses one bubble's text (the final answer, which stays
+ *  outside the fold; or a proposed plan, which renders as a chip). */
 function TurnBody({ turn, showThinking, hideContentFor }: { turn: UiMessage[]; showThinking: boolean; hideContentFor?: string }) {
   return (
     <>
@@ -381,7 +412,6 @@ function CompactionMarker() {
  *  rearrange itself when it finishes. The live "Working for Xs" indicator is
  *  swapped for the final elapsed time. */
 function AssistantTurn({ turn, containsLast, artifactFiles, sessionId }: { turn: UiMessage[]; containsLast: boolean; artifactFiles: ArtifactFile[]; sessionId: string | null }) {
-  const { t } = useTranslation();
   const showThinking = usePrefs((s) => s.visibility.showThinking);
   const showMetrics = usePrefs((s) => s.visibility.messageMetrics);
   const turnStartedAt = useChat((s) => s.turnStartedAt);
@@ -409,11 +439,17 @@ function AssistantTurn({ turn, containsLast, artifactFiles, sessionId }: { turn:
     );
   }
 
-  // Settled turn: same layout the stream produced — commentary interleaved with
-  // collapsed tool groups — so nothing jumps around when the turn ends. Only the
-  // live "Working for" indicator is replaced, by the elapsed-time label.
+  // Settled turn: the work folds behind "Worked for Xs" and only the final
+  // answer stays out. The terminal message is the last bubble that produced
+  // text; everything before it — thinking, tool groups, interim commentary —
+  // goes inside the fold. The agent loop guarantees the last round restates the
+  // complete answer (final-answer completeness nudge), so folding the earlier
+  // text loses nothing.
   const terminal = [...turn].reverse().find((m) => m.content.trim().length > 0);
-  const hasActivity = turn.some((m) => (m.thinking && showThinking) || (m.tools?.length ?? 0) > 0);
+  const terminalId = terminal?.id;
+  const hasFoldedCommentary = turn.some((m) => m.id !== terminalId && m.content.trim().length > 0);
+  const hasActivity =
+    hasFoldedCommentary || turn.some((m) => (m.thinking && showThinking) || (m.tools?.length ?? 0) > 0);
   const durationMs =
     last.turnElapsedMs ??
     (() => {
@@ -434,15 +470,14 @@ function AssistantTurn({ turn, containsLast, artifactFiles, sessionId }: { turn:
   return (
     <>
       {compacted && <CompactionMarker />}
-      {/* A proposed plan opens in the side panel; the message stream shows a
-          compact chip rather than duplicating the whole plan inline. */}
-      <TurnBody turn={turn} showThinking={showThinking} hideContentFor={proposalMsg?.id} />
-      {/* How long the turn took — the settled counterpart to the live "Working
-          for Xs" indicator. Only for turns that actually did work; a plain reply
-          doesn't need a stopwatch. */}
-      {hasActivity && durationMs != null && (
-        <div className="mt-1 text-[11px] text-muted-foreground/70 tabular-nums">
-          {t('messages.workedFor', { duration: formatDurationMs(durationMs) })}
+      {hasActivity && (
+        <ActivityFold turn={turn} showThinking={showThinking} durationMs={durationMs} terminalId={terminalId} />
+      )}
+      {/* The answer itself stays outside the fold. A proposed plan opens in the
+          side panel instead, so the stream shows a compact chip. */}
+      {!proposalMsg && terminal && (
+        <div className={terminal.error ? 'text-destructive-foreground' : ''}>
+          <Markdown text={terminal.content} />
         </div>
       )}
       {proposalMsg && <PlanChip />}

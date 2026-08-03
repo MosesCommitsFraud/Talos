@@ -29,6 +29,8 @@
   --color-success: var(--success);
   --color-warning: var(--warning);
   --color-info: var(--info);
+  --color-tool-pass: var(--tool-pass);
+  --color-tool-fail: var(--tool-fail);
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
@@ -149,6 +151,14 @@
   --success: var(--color-emerald-500);
   --warning: var(--color-amber-500);
 
+  /* Tool-call outcome tint. Only the action verb of a tool label wears this, on
+   * a line that is otherwise --muted-foreground, so it is mixed well down
+   * towards that muted grey: enough hue to read as pass/fail at a glance,
+   * not enough to pull the eye away from the answer text. Deliberately quieter
+   * than --success / --destructive-foreground, which are for real alerts. */
+  --tool-pass: color-mix(in oklab, var(--success) 42%, var(--muted-foreground));
+  --tool-fail: color-mix(in oklab, var(--destructive-foreground) 48%, var(--muted-foreground));
+
   /* Glass surfaces (t3code): elevated popups tint their own --popover and blur
    * whatever sits behind them. */
   --glass-blur: 12px;
@@ -198,6 +208,10 @@
   --info: var(--color-blue-500);
   --success: var(--color-emerald-500);
   --warning: var(--color-amber-500);
+  /* Dark mode carries a touch more of the hue: the same mix reads flatter
+   * against a dark background than it does on white. */
+  --tool-pass: color-mix(in oklab, var(--success) 48%, var(--muted-foreground));
+  --tool-fail: color-mix(in oklab, var(--destructive-foreground) 52%, var(--muted-foreground));
   --glass-blur: 16px;
   --glass-saturation: 1.08;
 

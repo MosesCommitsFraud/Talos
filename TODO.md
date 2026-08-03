@@ -37,3 +37,4 @@ detaillierter für websuche skills und account
 title does only appear once reloaded or switched chat
 on reloading it resets the working for timer
 clicking on preview should open the only available artifact; if there are several open the list instead
+options ask user better deisgn needed

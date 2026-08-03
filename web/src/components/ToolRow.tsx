@@ -1,9 +1,10 @@
-import { ChevronRightIcon, CircleAlertIcon } from 'lucide-react';
+import { ChevronRightIcon } from 'lucide-react';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { ToolCall } from '@/api/types';
-import { describeCall, diffStat } from '@/lib/toolLabels';
+import { describeCall, diffStat, partsToString } from '@/lib/toolLabels';
 import { useUi } from '@/state/ui';
+import { TOOL_FAIL_CLASS, TOOL_PASS_CLASS, ToolLabel } from './ToolLabel';
 
 export interface ToolImage {
   src: string;
@@ -92,13 +93,16 @@ export function DiffView({ diff }: { diff: string }) {
   );
 }
 
-/** Small green/red changed-line counter — "+21 -2". */
+/** Changed-line counter — "+21 -2". Part of the label sentence, not a badge
+ *  bolted onto it: it inherits the label's size and typeface so the whole line
+ *  reads as one run of text, and only its digits carry the muted pass/fail
+ *  tints (the loud --success / --destructive are for alerts). */
 export function DiffStatBadge({ added, removed }: { added: number; removed: number }) {
   return (
-    <span className="shrink-0 font-mono text-[11px] tabular-nums">
-      {added > 0 && <span className="text-success">+{added}</span>}
+    <span className="shrink-0 tabular-nums">
+      {added > 0 && <span className={TOOL_PASS_CLASS}>+{added}</span>}
       {added > 0 && removed > 0 && ' '}
-      {removed > 0 && <span className="text-destructive-foreground">-{removed}</span>}
+      {removed > 0 && <span className={TOOL_FAIL_CLASS}>-{removed}</span>}
     </span>
   );
 }
@@ -119,11 +123,15 @@ export function ToolRow({ call, compact = false }: { call: ToolCall; compact?: b
       <button
         type="button"
         aria-expanded={open}
+        // The verb's colour carries pass/fail visually; spell it out for screen
+        // readers, which get no colour.
+        aria-label={`${partsToString(label)}${call.status === 'error' ? ` — ${t('toolGroup.failed')}` : ''}`}
         onClick={() => setOpen((v) => !v)}
-        className="flex w-full items-center gap-1.5 px-3 py-2 text-left text-[13px] text-muted-foreground transition-colors hover:text-foreground"
+        className="flex w-full items-center gap-1.5 px-3 py-2 text-left text-[13px] font-medium text-muted-foreground transition-colors hover:text-foreground"
       >
-        {call.status === 'error' && <CircleAlertIcon className="size-3.5 shrink-0 text-destructive-foreground" />}
-        <span className={`min-w-0 truncate ${running ? 'shimmer-text' : ''}`}>{label}</span>
+        <span className={`min-w-0 truncate ${running ? 'shimmer-text' : ''}`}>
+          <ToolLabel parts={label} failed={call.status === 'error'} />
+        </span>
         {stat && <DiffStatBadge added={stat.added} removed={stat.removed} />}
         <ChevronRightIcon className={`size-3.5 shrink-0 opacity-60 transition-transform ${open ? 'rotate-90' : ''}`} />
       </button>
