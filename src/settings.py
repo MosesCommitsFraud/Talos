@@ -77,6 +77,13 @@ DEFAULT_SETTINGS = {
     # Tune via Settings or by editing data/settings.json.
     "research_run_timeout_seconds": 1800,
     "agent_max_tool_calls": 0,
+    # How many independent tool calls from ONE round may run at the same time.
+    # The model regularly emits several unrelated lookups per round (three
+    # web_fetches, a knowledge search plus a SQL query); running them serially
+    # costs the sum of their latencies instead of the max. Only read-only,
+    # IO-bound tools are ever overlapped — see _PARALLEL_EXTERNAL_TOOLS in
+    # src/agent_loop.py. 1 = disabled (strictly sequential, the old behaviour).
+    "agent_tool_parallelism": 4,
     "agent_max_rounds": 20,  # per-message agent step cap (clamped 1..200)
     # DB-mode (query_sql button) round ceiling. Big schemas need many
     # list_tables/describe/SELECT round-trips to navigate, so DB turns raise

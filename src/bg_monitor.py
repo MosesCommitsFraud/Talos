@@ -113,12 +113,25 @@ async def _run_followup(rec: dict) -> bool:
     except Exception:
         pass
 
-    inject = (
-        f"[Background job {rec['id']} finished]\n\n"
-        f"{bg_jobs.result_text(rec)}\n\n"
-        "Continue the task using this output. Don't repeat work that's already done. "
-        "If the task is now complete, give the user the final result."
-    )
+    if rec.get("kind") == "agent":
+        # An agent task already DID the work and wrote a report. The job here
+        # is to deliver it, not to redo it — without this the parent model
+        # reads "continue the task" and runs the whole thing again.
+        inject = (
+            f"[Background task {rec['id']} finished]\n\n"
+            f"{bg_jobs.result_text(rec)}\n\n"
+            "This task ran in the background and the report above is its result. "
+            "Present it to the user now, in your own words and in their language — "
+            "they have not seen any of it. Do NOT redo the work. Only use tools if "
+            "the report itself calls for a concrete follow-up step."
+        )
+    else:
+        inject = (
+            f"[Background job {rec['id']} finished]\n\n"
+            f"{bg_jobs.result_text(rec)}\n\n"
+            "Continue the task using this output. Don't repeat work that's already done. "
+            "If the task is now complete, give the user the final result."
+        )
     context = sess.get_context_messages()
     context.append({"role": "user", "content": inject})
 

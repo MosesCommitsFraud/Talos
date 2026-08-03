@@ -874,6 +874,7 @@ def setup_chat_routes(
                         "search_chats",
                         "web_search",
                         "web_fetch",
+                        "background_task",  # spawns a whole agent turn
                     }
                 )
 

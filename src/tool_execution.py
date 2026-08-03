@@ -1776,6 +1776,11 @@ async def execute_tool_block(
 
         desc = f"web_fetch: {content.split(chr(10))[0].strip()[:80]}"
         result = await do_web_fetch(content, owner=owner)
+    elif tool == "background_task":
+        from src.tool_implementations import do_background_task
+
+        desc = f"background_task: {content.split(chr(10))[0].strip()[:80]}"
+        result = await do_background_task(content, session_id=session_id)
     elif tool == "api_call":
         first_line = content.split("\n")[0].strip()[:60]
         desc = f"api_call: {first_line}"

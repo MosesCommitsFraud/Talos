@@ -1,9 +1,19 @@
-"""Background job execution for the agent's `bash` tool.
+"""Background job execution for the agent's `bash` tool and for detached
+agent tasks (`background_task`).
 
 Long commands (installs, ffmpeg, model downloads) should NOT block the chat
 stream — a multi-minute held SSE connection is fragile (model-stops-early,
 timeouts, tab suspend). Instead we launch them **detached** and let an
 always-on monitor re-invoke the agent when they finish ("auto-continue").
+
+Two kinds of job share that machinery:
+  * ``kind="shell"``  — a detached OS process (the original case).
+  * ``kind="agent"``  — a whole nested agent turn ("research X and write it
+    up", "port this module and run the tests"). It runs in-process as an
+    asyncio task (it needs the session's endpoint/model and the tool stack),
+    and reports back through exactly the same log/exit-file contract, so
+    refresh() / pending_followups() / the monitor treat both identically.
+    See src/bg_agent_task.py for the runner.
 
 Design goals:
   * Restart-safe: status is derived from an on-disk exit-code file, not a live
@@ -21,6 +31,7 @@ in the caller (so this stays import-light and unit-testable).
 from __future__ import annotations
 
 import json
+import logging
 import os
 import shlex
 import subprocess
@@ -37,6 +48,8 @@ from core.platform_compat import (
     kill_process_tree,
     pid_alive,
 )
+
+logger = logging.getLogger(__name__)
 
 _DATA_DIR = Path(os.environ.get("DATA_DIR", "data"))
 _JOBS_DIR = _DATA_DIR / "bg_jobs"
@@ -144,6 +157,7 @@ def launch(
     rec = {
         "id": job_id,
         "session_id": session_id,
+        "kind": "shell",
         "command": command,
         "status": "running",  # running | done | failed
         "pid": proc.pid,
@@ -159,6 +173,72 @@ def launch(
     jobs[job_id] = rec
     _save(jobs)
     return rec
+
+
+def launch_agent(
+    task: str,
+    session_id: str,
+    label: str = "",
+    max_runtime_s: int = DEFAULT_MAX_RUNTIME_S,
+) -> Dict[str, Any]:
+    """Register an ``kind="agent"`` job and return its record (status='running').
+
+    State only — the caller (src/bg_agent_task.py) starts the actual nested
+    agent turn and calls complete_agent() when it finishes. The record uses
+    the same log/exit-file contract as a shell job so refresh() needs no
+    special case for completion.
+
+    ``owner_pid`` is what makes this restart-safe: an agent job lives in THIS
+    process's event loop, so if the store is later read by a process with a
+    different pid, that job can never finish and is reaped as failed (the
+    user still gets a follow-up saying so) instead of hanging on 'running'
+    forever.
+    """
+    _JOBS_DIR.mkdir(parents=True, exist_ok=True)
+    job_id = uuid.uuid4().hex[:12]
+    rec = {
+        "id": job_id,
+        "session_id": session_id,
+        "kind": "agent",
+        "command": (label or task.strip().split("\n")[0])[:200],
+        "task": task,
+        "status": "running",
+        "pid": None,  # in-process asyncio task, not an OS process
+        "owner_pid": os.getpid(),
+        "started_at": time.time(),
+        "ended_at": None,
+        "exit_code": None,
+        "max_runtime_s": max_runtime_s,
+        "followed_up": False,
+        "log_path": str(_JOBS_DIR / f"{job_id}.log"),
+        "exit_path": str(_JOBS_DIR / f"{job_id}.exit"),
+    }
+    jobs = _load()
+    jobs[job_id] = rec
+    _save(jobs)
+    return rec
+
+
+def complete_agent(job_id: str, report: str, exit_code: int = 0) -> None:
+    """Record an agent job's result. Writes the same log/exit files a shell
+    job produces, so refresh() reconciles it through the identical path.
+
+    Writing the log BEFORE the exit file matters: refresh() treats the exit
+    file as the completion signal, so the reverse order would let the monitor
+    observe a finished job whose output is still empty.
+    """
+    rec = _load().get(job_id)
+    if not rec:
+        logger.warning("complete_agent: unknown job %s", job_id)
+        return
+    try:
+        Path(rec["log_path"]).write_text(report or "", encoding="utf-8")
+    except Exception as e:
+        logger.warning("complete_agent: could not write log for %s: %s", job_id, e)
+    try:
+        Path(rec["exit_path"]).write_text(str(int(exit_code)), encoding="utf-8")
+    except Exception as e:
+        logger.warning("complete_agent: could not write exit file for %s: %s", job_id, e)
 
 
 def _read_output(rec: Dict[str, Any]) -> str:
@@ -213,12 +293,28 @@ def refresh() -> Dict[str, Dict[str, Any]]:
             changed = True
         elif (now - rec.get("started_at", now)) > rec.get("max_runtime_s", DEFAULT_MAX_RUNTIME_S):
             # Runaway / stuck — reap it but STILL surface a follow-up.
-            _kill(rec.get("pid"))
+            if rec.get("kind") == "agent":
+                _cancel_agent(rec["id"])
+            else:
+                _kill(rec.get("pid"))
             rec["status"] = "failed"
             rec["exit_code"] = -1
             rec["ended_at"] = now
             rec["timed_out"] = True
             changed = True
+        elif rec.get("kind") == "agent":
+            # An agent job has no OS process to probe — it lives in the event
+            # loop of the process that launched it. If that process is gone
+            # (server restart, crash), nothing will ever write its exit file,
+            # so reap it now rather than leave it 'running' forever. A live
+            # job in THIS process is simply left alone until it completes.
+            if rec.get("owner_pid") != os.getpid():
+                rec["status"] = "failed"
+                rec["exit_code"] = -1
+                rec["ended_at"] = now
+                rec["died"] = True
+                rec["restarted"] = True
+                changed = True
         elif not _pid_alive(rec.get("pid")) and not exit_path.exists():
             # Process vanished without writing an exit code (killed, OOM,
             # crash). Don't leave it "running" forever.
@@ -237,6 +333,25 @@ def refresh() -> Dict[str, Dict[str, Any]]:
 def _kill(pid: Optional[int]) -> None:
     # Cross-platform process-tree teardown (POSIX killpg / Windows taskkill /T).
     kill_process_tree(pid)
+
+
+# Live agent-job asyncio tasks, by job id. Only populated in the process that
+# launched them; used to actually stop a runaway job when refresh() reaps it.
+_agent_tasks: Dict[str, Any] = {}
+
+
+def register_agent_task(job_id: str, task: Any) -> None:
+    _agent_tasks[job_id] = task
+
+
+def unregister_agent_task(job_id: str) -> None:
+    _agent_tasks.pop(job_id, None)
+
+
+def _cancel_agent(job_id: str) -> None:
+    task = _agent_tasks.pop(job_id, None)
+    if task is not None and not task.done():
+        task.cancel()
 
 
 def pending_followups() -> List[Dict[str, Any]]:
@@ -273,6 +388,20 @@ def list_for_session(session_id: str) -> List[Dict[str, Any]]:
 def result_text(rec: Dict[str, Any]) -> str:
     """Human/agent-readable summary of a finished job, for the follow-up."""
     out = _read_output(rec)
+    if rec.get("kind") == "agent":
+        # An agent job's "output" is a written report, not a command's stdout;
+        # exit codes and stderr framing would only mislead the reading model.
+        if rec.get("timed_out"):
+            head = (
+                f"Background task ran past its {rec.get('max_runtime_s')}s limit and was stopped."
+            )
+        elif rec.get("restarted"):
+            head = "Background task was lost when the server restarted and did not finish."
+        elif rec.get("status") == "failed":
+            head = "Background task failed."
+        else:
+            head = "Background task finished."
+        return f"{head}\nTask: {rec.get('task') or rec.get('command')}\n\nReport:\n{out or '(no report)'}"
     if rec.get("timed_out"):
         head = f"Background job timed out after {rec.get('max_runtime_s')}s."
     elif rec.get("died"):

@@ -560,6 +560,7 @@ def setup_auth_routes(auth_manager: AuthManager) -> APIRouter:
             "agent_max_rounds": (1, 200),
             "agent_max_rounds_db": (1, 200),  # DB-mode round ceiling (huge schemas)
             "agent_max_tool_calls": (0, 1000),  # 0 = unlimited
+            "agent_tool_parallelism": (1, 8),  # 1 = sequential
         }
         for key in DEFAULT_SETTINGS:
             if key not in body:

@@ -264,6 +264,8 @@ _TOOL_NAME_MAP = {
     "create_document": "create_document",
     "edit": "edit_document",
     "edit_document": "edit_document",
+    "background_task": "background_task",
+    "background": "background_task",
     "search_chats": "search_chats",
     "search_conversations": "search_chats",
     "find_chat": "search_chats",

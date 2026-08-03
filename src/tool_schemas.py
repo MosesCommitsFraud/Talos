@@ -523,6 +523,39 @@ FUNCTION_TOOL_SCHEMAS = [
     {
         "type": "function",
         "function": {
+            "name": "background_task",
+            "description": (
+                "Run a whole task in the background and get the result delivered into this chat "
+                "when it is done. The task can be anything you could do yourself: research a "
+                "topic, write and test code, build and run a set of SQL queries, work through a "
+                "large file. It runs as its own agent with its own tools, so it can take minutes "
+                "without holding up this conversation. Returns immediately — never wait or poll "
+                "for the result. Use this when the work is slow AND the user does not need it in "
+                "this reply; do the work directly when they are waiting on it now."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "task": {
+                        "type": "string",
+                        "description": (
+                            "The complete task, written so it can be carried out with no further "
+                            "input: what to do, what to produce, and any constraints. Nobody can "
+                            "answer questions while it runs."
+                        ),
+                    },
+                    "label": {
+                        "type": "string",
+                        "description": "Short name for the task, shown to the user (optional).",
+                    },
+                },
+                "required": ["task"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "search_chats",
             "description": "Search the user's past chat conversations by keyword. Use when the user asks about previous chats, past conversations, or wants to find a discussion they had before. Returns matching sessions with clickable links.",
             "parameters": {

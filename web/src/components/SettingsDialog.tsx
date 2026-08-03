@@ -782,6 +782,7 @@ function AiDefaultsPanel() {
       <Section title={t('settings.ai.agent')}>
         <TextRow s={s} k="agent_max_tool_calls" label={t('settings.ai.toolCallLimit')} hint={t('settings.ai.toolCallLimitHint')} type="number" width="w-24" />
         <TextRow s={s} k="agent_max_rounds" label={t('settings.ai.maxSteps')} type="number" width="w-24" />
+        <TextRow s={s} k="agent_tool_parallelism" label={t('settings.ai.toolParallelism')} hint={t('settings.ai.toolParallelismHint')} type="number" width="w-24" />
       </Section>
 
       <SaveBar dirty={s.dirty} saving={s.save.isPending} error={s.save.isError ? (s.save.error as Error).message : undefined} onSave={() => s.save.mutate()} />
@@ -1164,6 +1165,7 @@ const TOOL_META: Record<string, { cat: string; ctx: string }> = {
   manage_skills: { cat: 'Knowledge', ctx: '~200' },
   manage_rag: { cat: 'Knowledge', ctx: '~150' },
   query_sql: { cat: 'Knowledge', ctx: '~200' },
+  background_task: { cat: 'Sessions', ctx: '~200' },
   send_to_session: { cat: 'Sessions', ctx: '~100' },
   create_session: { cat: 'Sessions', ctx: '~100' },
   list_sessions: { cat: 'Sessions', ctx: '~100' },

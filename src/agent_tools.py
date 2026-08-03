@@ -41,6 +41,7 @@ TOOL_TAGS = {
     "update_document",
     "edit_document",
     "search_chats",
+    "background_task",
     "create_session",
     "list_sessions",
     "send_to_session",

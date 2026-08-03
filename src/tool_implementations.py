@@ -1229,6 +1229,49 @@ async def do_suggest_document(
 # ---------------------------------------------------------------------------
 
 
+async def do_background_task(content: str, session_id: Optional[str] = None) -> Dict:
+    """`background_task` — run a whole task detached and report back later.
+
+    The agent's escape hatch for work that would otherwise hold the chat
+    stream open for minutes: a research sweep, a big refactor, a slow query
+    plus write-up. The task runs as its own nested agent turn with its own
+    tool budget; when it finishes, src/bg_monitor.py auto-continues THIS
+    conversation with the report, so the user hears back without asking.
+
+    Returns immediately — the point is that the current turn keeps going.
+    """
+    try:
+        args = _parse_tool_args(content)
+    except ValueError as e:
+        return {"error": f"Invalid JSON arguments: {e}", "exit_code": 1}
+    task = str((args or {}).get("task") or "").strip()
+    if not task:
+        return {"error": "background_task requires a non-empty 'task'.", "exit_code": 1}
+    if not session_id:
+        return {
+            "error": "background_task needs a chat to report back into; none is available here.",
+            "exit_code": 1,
+        }
+    label = str((args or {}).get("label") or "").strip()
+    try:
+        from src import bg_agent_task
+
+        rec = bg_agent_task.start(task, session_id, label=label)
+    except Exception as e:
+        logger.error(f"background_task launch failed: {e}")
+        return {"error": f"Could not start the background task: {e}", "exit_code": 1}
+
+    return {
+        "output": (
+            f"Background task {rec['id']} started: {rec['command']}\n"
+            "It runs on its own and its report will be delivered into this chat when it finishes. "
+            "Do NOT wait for it and do not poll for it — continue with (or finish) what you were "
+            "doing, and tell the user it is running in the background."
+        ),
+        "exit_code": 0,
+    }
+
+
 async def do_search_chats(query: str, limit: int = 20, owner: str | None = None) -> Dict:
     """Search past chat messages for the calling user's sessions only.
 
@@ -1333,7 +1376,12 @@ async def do_search_knowledge(content: str, owner: Optional[str] = None) -> Dict
     try:
         from src.chat_processor import ChatProcessor
 
-        sources, block = ChatProcessor(None).retrieve(query)
+        # retrieve() is fully synchronous (httpx.Client embed call + a Chroma
+        # query + rerank). Calling it directly pins the event loop for its
+        # whole duration, which stalls every other in-flight tool and the SSE
+        # stream itself — so it must run off-loop now that a round can have
+        # several tools in flight at once.
+        sources, block = await asyncio.to_thread(ChatProcessor(None).retrieve, query)
     except Exception as e:
         logger.error(f"search_knowledge failed: {e}")
         return {"error": str(e), "exit_code": 1}
