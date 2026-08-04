@@ -178,7 +178,7 @@ function TurnBody({ turn, showThinking, hideContentFor }: { turn: UiMessage[]; s
         }
         if (seg.msg.id === hideContentFor) return null;
         return (
-          <div key={seg.msg.id} className={seg.msg.error ? 'text-destructive-foreground' : ''}>
+          <div key={seg.msg.id} className={seg.msg.error ? 'text-destructive-foreground' : 'text-strong'}>
             <Markdown text={seg.msg.content} streaming={!!seg.msg.streaming} />
           </div>
         );
@@ -484,7 +484,7 @@ function AssistantTurn({ turn, containsLast, artifactFiles, sessionId }: { turn:
       {/* The answer itself stays outside the fold. A proposed plan opens in the
           side panel instead, so the stream shows a compact chip. */}
       {!proposalMsg && terminal && (
-        <div className={terminal.error ? 'text-destructive-foreground' : ''}>
+        <div className={terminal.error ? 'text-destructive-foreground' : 'text-strong'}>
           <Markdown text={terminal.content} />
         </div>
       )}
@@ -633,7 +633,7 @@ export function Messages() {
                 <EditBox msg={block.msg} onDone={() => setEditing(null)} />
               ) : (
                 <>
-                  <div className="rounded-lg rounded-br-sm bg-card px-3 py-1.5 text-[15px] leading-relaxed whitespace-pre-wrap">
+                  <div className="rounded-lg rounded-br-sm bg-bubble px-3 py-1.5 text-[15px] leading-relaxed whitespace-pre-wrap text-strong">
                     {block.msg.content}
                   </div>
                   <AttachmentList msg={block.msg} />
@@ -665,7 +665,7 @@ export function Messages() {
           type="button"
           onClick={scrollToBottom}
           aria-label={t('messages.scrollToBottom')}
-          className="pointer-events-auto flex items-center gap-1.5 rounded-full border border-border/60 bg-card px-3 py-1 text-xs text-muted-foreground shadow-sm transition-colors hover:cursor-pointer hover:border-border hover:text-foreground"
+          className="pointer-events-auto flex items-center gap-1.5 rounded-full border border-foreground/15 bg-card px-3 py-1 text-xs text-muted-foreground shadow-sm transition-colors hover:cursor-pointer hover:border-foreground/25 hover:text-foreground dark:border-border/60 dark:hover:border-border"
         >
           <ChevronDownIcon className="size-3.5" />
           {t('messages.scrollToBottom')}

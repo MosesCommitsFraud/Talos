@@ -139,7 +139,7 @@ export function ToolGroup({ entries }: { entries: GroupEntry[] }) {
             </div>
           ))}
           {calls.length > 0 && (
-            <div className="divide-y divide-border/60 overflow-hidden rounded-lg border">
+            <div className="divide-y divide-foreground/12 overflow-hidden rounded-lg border border-foreground/14 dark:divide-border/60 dark:border-border">
               {calls.map((call, i) => (
                 <ToolRow key={i} call={call} />
               ))}

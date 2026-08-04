@@ -135,6 +135,17 @@ const de: typeof en = {
     removeQueued: 'Wartende Nachricht entfernen',
     dropFiles: 'Dateien zum Anhängen ablegen',
     placeholder: 'Nachricht an Talos…',
+    /** Wechselnde Prompts für das leere Eingabefeld — bei jedem Leeren wird
+     *  einer zufällig gewählt. `placeholder` bleibt der Fallback. */
+    placeholders: [
+      'Nachricht an Talos…',
+      'Woran arbeiten wir?',
+      'Frag nach deinen Dokumenten…',
+      'Datenbank abfragen…',
+      'Beschreib, was du brauchst…',
+      'Stell eine Frage oder füg etwas ein…',
+      'Was soll Talos nachschlagen?',
+    ],
     messageInput: 'Nachrichteneingabe',
     removeFile: '{{name}} entfernen',
     removeArtifactSelection: 'Markierte Artefaktauswahl entfernen',

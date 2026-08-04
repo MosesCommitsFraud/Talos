@@ -188,7 +188,7 @@ function SessionRow({ session, folders }: { session: Session; folders: string[] 
           onDoubleClick={beginRename}
           className={cn(
             'group relative flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm transition-colors',
-            session.id === activeId ? 'bg-accent text-accent-foreground' : 'hover:bg-accent/70',
+            session.id === activeId ? 'bg-accent text-strong' : 'hover:bg-accent/70',
           )}
         >
           {pinned && <PinIcon className="size-3 shrink-0 -rotate-45 text-muted-foreground" />}
@@ -622,7 +622,7 @@ export function Sidebar({
       className={cn(
         // Inherited gray for all sidebar text; the selected chat row (and any
         // element with its own text color) opts back into a lighter shade.
-        'm-2 flex shrink-0 flex-col rounded-md border border-foreground/10 bg-card text-foreground/70 transition-[width] duration-200 ease-out',
+        'm-2 flex shrink-0 flex-col rounded-md border border-foreground/10 bg-sidebar text-foreground/70 transition-[width] duration-200 ease-out',
         collapsed ? 'relative z-30 w-[3.25rem] overflow-visible' : 'w-64 overflow-hidden',
       )}
       aria-label={t('sidebar.navLabel')}
@@ -740,7 +740,7 @@ export function Sidebar({
               type="button"
               onClick={onOpenTicketDialog}
               aria-label={t('tickets.report')}
-              className="flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+              className="flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground/65 transition-colors hover:bg-accent hover:text-foreground dark:text-muted-foreground"
             >
               <BugIcon className="size-4" />
             </button>
@@ -786,7 +786,7 @@ export function Sidebar({
                     <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-primary/15 text-[10px] font-semibold text-primary">
                       {initial}
                     </span>
-                    <span className="min-w-0 flex-1 truncate text-[13px]">{accountLabel ?? t('sidebar.user')}</span>
+                    <span className="min-w-0 flex-1 truncate text-[13px] text-foreground/95 dark:text-inherit">{accountLabel ?? t('sidebar.user')}</span>
                     <ChevronDownIcon className="size-3.5 shrink-0 text-muted-foreground" />
                   </button>
                 }
@@ -796,7 +796,7 @@ export function Sidebar({
                   type="button"
                   onClick={onOpenTicketDialog}
                   aria-label={t('tickets.report')}
-                  className="ml-auto flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                  className="ml-auto flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground/65 transition-colors hover:bg-accent hover:text-foreground dark:text-muted-foreground"
                 >
                   <BugIcon className="size-4" />
                 </button>

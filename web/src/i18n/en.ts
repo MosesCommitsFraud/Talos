@@ -133,6 +133,17 @@ const en = {
     removeQueued: 'Remove queued message',
     dropFiles: 'Drop files to attach',
     placeholder: 'Message Talos…',
+    /** Rotating prompts for the empty composer — one is picked at random every
+     *  time the input goes empty. `placeholder` stays the fallback. */
+    placeholders: [
+      'Message Talos…',
+      'What are we working on?',
+      'Ask about your documents…',
+      'Query the database…',
+      'Describe what you need…',
+      'Ask a question, or paste something in…',
+      'What should Talos look up?',
+    ],
     messageInput: 'Message input',
     removeFile: 'Remove {{name}}',
     removeArtifactSelection: 'Remove marked artifact selection',

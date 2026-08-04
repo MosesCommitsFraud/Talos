@@ -20,7 +20,7 @@ import {
   XIcon,
   ScanSearchIcon,
 } from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 import { fetchCapabilities, uploadFiles, type UploadedFile } from '@/api/client';
@@ -68,8 +68,10 @@ function ModeToggle({
         className={cn(
           'flex h-6 shrink-0 items-center pt-[2px] gap-1.5 rounded-[4.5px] border border-transparent px-1 text-xs font-medium whitespace-nowrap transition-colors sm:h-5 sm:px-1.5 [&_svg]:size-3.5 [&_svg]:shrink-0 [&_svg]:-translate-y-px',
           active
-            ? 'bg-blue-500/10 text-blue-400 hover:bg-blue-500/15 hover:text-blue-300'
-            : 'text-foreground/65 hover:bg-accent hover:text-foreground/90',
+            // Light mode needs a deeper blue and a denser tint — blue-400 on a
+            // 10% wash reads washed out against white.
+            ? 'bg-blue-500/15 text-blue-600 hover:bg-blue-500/20 hover:text-blue-700 dark:bg-blue-500/10 dark:text-blue-400 dark:hover:bg-blue-500/15 dark:hover:text-blue-300'
+            : 'text-foreground/80 hover:bg-accent hover:text-foreground/90 dark:text-foreground/65',
         )}
       >
         {face}
@@ -133,8 +135,10 @@ function ChatModeDropdown() {
           className={cn(
             'flex h-6 shrink-0 items-center pt-[2px] gap-1.5 rounded-[4.5px] border border-transparent px-1 text-xs font-medium whitespace-nowrap outline-none transition-colors focus:outline-none focus-visible:outline-none sm:h-5 sm:px-1.5 [&_svg]:size-3.5 [&_svg]:shrink-0 [&_svg]:-translate-y-px',
             mode === 'full'
-              ? 'bg-yellow-400/10 text-yellow-400 hover:bg-yellow-400/15 hover:text-yellow-200'
-              : 'text-foreground/65 hover:bg-accent hover:text-foreground/90',
+              // Same chip, two hues: a borderless warm-olive badge on white, the
+              // original bright yellow on dark, where olive would go muddy.
+              ? 'bg-[#f6f2e1] text-[#95843a] hover:bg-[#f1ebd3] hover:text-[#7e6e2c] dark:bg-yellow-400/10 dark:text-yellow-400 dark:hover:bg-yellow-400/15 dark:hover:text-yellow-200'
+              : 'text-foreground/80 hover:bg-accent hover:text-foreground/90 dark:text-foreground/65',
           )}
         >
           <span className="sr-only sm:not-sr-only">{active.label}</span>
@@ -232,7 +236,7 @@ function MicDeviceMenu() {
         <button
           type="button"
           aria-label={t('composer.micSelect')}
-          className="flex h-6 w-4 shrink-0 items-center pt-[2px] justify-center rounded-[4.5px] rounded-l-none border border-transparent text-foreground/65 outline-none transition-colors hover:bg-accent hover:text-foreground/90 focus:outline-none focus-visible:outline-none sm:h-5"
+          className="flex h-6 w-4 shrink-0 items-center pt-[2px] justify-center rounded-[4.5px] rounded-l-none border border-transparent text-foreground/80 outline-none dark:text-foreground/65 transition-colors hover:bg-accent hover:text-foreground/90 focus:outline-none focus-visible:outline-none sm:h-5"
         >
           <ChevronDownIcon className="size-3.5 -translate-y-px" />
         </button>
@@ -267,6 +271,17 @@ function MicDeviceMenu() {
 export function Composer() {
   const { t } = useTranslation();
   const [text, setText] = useState('');
+  // Empty-state prompt: one of a handful, re-rolled whenever the box goes empty
+  // (mount, send, clear) and held steady while there is text to type over.
+  const placeholders = useMemo(() => {
+    const list = t('composer.placeholders', { returnObjects: true });
+    return Array.isArray(list) && list.length > 0 ? (list as string[]) : [t('composer.placeholder')];
+  }, [t]);
+  const [placeholder, setPlaceholder] = useState(placeholders[0]);
+  const empty = text.length === 0;
+  useEffect(() => {
+    if (empty) setPlaceholder(placeholders[Math.floor(Math.random() * placeholders.length)]);
+  }, [empty, placeholders]);
   const [pending, setPending] = useState<UploadedFile[]>([]);
   const [uploading, setUploading] = useState(false);
   const [dragging, setDragging] = useState(false);
@@ -661,7 +676,13 @@ export function Composer() {
       )}
       <div
         className={cn(
-          'group/composer relative rounded-[10px] border border-foreground/10 bg-card transition-colors duration-200 focus-within:border-foreground/20',
+          // Light mode: the box shares the page background and is defined by its
+          // frame alone, which steps darker while focused. Dark mode keeps the
+          // raised --card panel, where a flush box would disappear.
+          // The faint lift in light mode: the box shares the page background, so
+          // a whisper of shadow is what separates it from the message stream.
+          // Dark mode drops it — the --card step already does that job there.
+          'group/composer relative rounded-[10px] border border-foreground/14 bg-background shadow-[0_1px_2px_rgba(0,0,0,0.03),0_6px_16px_-8px_rgba(0,0,0,0.07)] transition-colors duration-200 focus-within:border-foreground/32 dark:border-foreground/10 dark:bg-card dark:shadow-none dark:focus-within:border-foreground/20',
           dragging && 'border-primary/60 ring-2 ring-primary/30',
         )}
       >
@@ -747,7 +768,7 @@ export function Composer() {
             value={text}
             rows={1}
             autoFocus
-            placeholder={t('composer.placeholder')}
+            placeholder={placeholder}
             aria-label={t('composer.messageInput')}
             onChange={(e) => { setText(e.target.value); autoresize(); }}
             onKeyDown={(e) => {
@@ -773,7 +794,7 @@ export function Composer() {
               const files = Array.from(e.clipboardData.files);
               if (files.length) { e.preventDefault(); void attach(files); }
             }}
-            className="max-h-[200px] w-full resize-none bg-transparent text-[15px] leading-relaxed outline-none placeholder:text-muted-foreground"
+            className="max-h-[200px] w-full resize-none bg-transparent text-[15px] leading-relaxed text-strong outline-none placeholder:text-muted-foreground/65 dark:placeholder:text-muted-foreground"
           />
           {/* Right-edge adornment, Claude Code style: while streaming, a boxed
               stop button; otherwise an Enter glyph once there's something to
@@ -786,7 +807,10 @@ export function Composer() {
               // -my keeps the 28px hit target from adding height to the row
               // (the textarea line is 26px), so the box doesn't grow while
               // streaming.
-              className="-my-1 flex size-7 shrink-0 cursor-pointer items-center justify-center self-center rounded-sm text-foreground/65 transition-colors hover:bg-accent hover:text-foreground active:scale-95"
+              // Same treatment as the Enter glyph it replaces (plate-only hover,
+              // glyph tracking the composer frame), so the swap doesn't change
+              // the control's weight mid-turn.
+              className="-my-1 flex size-7 shrink-0 cursor-pointer items-center justify-center self-center rounded-sm text-foreground/20 transition-colors group-focus-within/composer:text-foreground/40 hover:bg-accent active:scale-95 dark:text-foreground/10 dark:group-focus-within/composer:text-foreground/20"
             >
               <svg width="14" height="14" viewBox="0 0 12 12" fill="none" aria-hidden="true">
                 <rect x="1.5" y="1.5" width="9" height="9" rx="2" stroke="currentColor" strokeWidth="1.4" />
@@ -804,8 +828,10 @@ export function Composer() {
               className={cn(
                 // Tracks the box border: foreground/10 resting, /20 while the
                 // composer is focused, so glyph and frame read as one control.
-                'ml-2 flex size-6 shrink-0 cursor-pointer items-center justify-center self-end rounded-sm text-foreground/10 transition-colors group-focus-within/composer:text-foreground/20 active:scale-95',
-                (text.trim().length > 0 || dictating) && 'hover:bg-accent hover:text-foreground',
+                // The hover plate is always there — a glyph with no hit feedback
+                // reads as decoration. Only the plate reacts: the glyph keeps
+                // tracking the composer frame so the two stay one control.
+                'ml-2 flex size-6 shrink-0 cursor-pointer items-center justify-center self-end rounded-sm text-foreground/20 transition-colors group-focus-within/composer:text-foreground/40 hover:bg-accent active:scale-95 dark:text-foreground/10 dark:group-focus-within/composer:text-foreground/20',
               )}
             >
               <CornerDownLeftIcon aria-hidden="true" className="size-4" />
@@ -852,7 +878,7 @@ export function Composer() {
                   <button
                     type="button"
                     aria-label={t('composer.add')}
-                    className="flex size-6 shrink-0 items-center pt-[2px] justify-center rounded-[4.5px] border border-transparent text-foreground/65 outline-none transition-colors hover:bg-accent hover:text-foreground/90 focus:outline-none focus-visible:outline-none sm:size-5 [&_svg]:size-3.5 [&_svg]:-translate-y-px"
+                    className="flex size-6 shrink-0 items-center pt-[2px] justify-center rounded-[4.5px] border border-transparent text-foreground/80 outline-none dark:text-foreground/65 transition-colors hover:bg-accent hover:text-foreground/90 focus:outline-none focus-visible:outline-none sm:size-5 [&_svg]:size-3.5 [&_svg]:-translate-y-px"
                   >
                     <PlusIcon className={uploading ? 'animate-pulse' : undefined} />
                   </button>
@@ -892,7 +918,7 @@ export function Composer() {
                       'flex h-6 w-7 shrink-0 items-center pt-[2px] justify-center rounded-[4.5px] rounded-r-none border border-transparent transition-colors sm:h-5 sm:w-6 [&_svg]:size-3.5 [&_svg]:-translate-y-px',
                       dictation.status === 'recording'
                         ? 'animate-pulse bg-red-500/10 text-red-500 hover:bg-red-500/20'
-                        : 'text-foreground/65 hover:bg-accent hover:text-foreground/90 disabled:opacity-50',
+                        : 'text-foreground/80 hover:bg-accent hover:text-foreground/90 dark:text-foreground/65 disabled:opacity-50',
                     )}
                   >
                     {dictation.status === 'finalizing' ? (
