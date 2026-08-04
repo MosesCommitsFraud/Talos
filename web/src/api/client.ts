@@ -1178,12 +1178,18 @@ export async function resumeChat(opts: {
   await readSse(res, opts.onEvent);
 }
 
-/** Session ids whose turn is still running server-side — asked once on page
- *  load so the UI can reattach to background runs it knows nothing about. */
-export async function fetchActiveRuns(): Promise<string[]> {
+/** Sessions whose turn is still running server-side — asked once on page load
+ *  so the UI can reattach to background runs it knows nothing about. `elapsedMs`
+ *  is how long that turn has already been going (server-measured span, rebased
+ *  on the local clock by the caller) so the working timer survives a reload. */
+export async function fetchActiveRuns(): Promise<{ sessionId: string; elapsedMs: number | null }[]> {
   try {
-    const data = await getJSON<{ sessions?: string[] }>('/api/chat/active_runs');
-    return Array.isArray(data.sessions) ? data.sessions : [];
+    const data = await getJSON<{ sessions?: string[]; elapsed_ms?: Record<string, number> }>('/api/chat/active_runs');
+    if (!Array.isArray(data.sessions)) return [];
+    return data.sessions.map((sessionId) => {
+      const ms = data.elapsed_ms?.[sessionId];
+      return { sessionId, elapsedMs: typeof ms === 'number' ? ms : null };
+    });
   } catch {
     return []; // older server without the endpoint — nothing to reattach to
   }

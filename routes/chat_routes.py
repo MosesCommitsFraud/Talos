@@ -1285,13 +1285,19 @@ def setup_chat_routes(
     @router.get("/api/chat/active_runs")
     async def chat_active_runs(request: Request) -> Dict[str, Any]:
         owned = []
+        elapsed: Dict[str, int] = {}
         for sid in agent_runs.active_sessions():
             try:
                 _verify_session_owner(request, sid)
             except HTTPException:
                 continue  # someone else's run — not visible to this caller
             owned.append(sid)
-        return {"sessions": owned}
+            # How long the turn has already been running, so the reattached UI
+            # resumes its "working for" timer instead of restarting it at 0.
+            ms = agent_runs.elapsed_ms(sid)
+            if ms is not None:
+                elapsed[sid] = ms
+        return {"sessions": owned, "elapsed_ms": elapsed}
 
     # ------------------------------------------------------------------ #
     # POST /api/chat/stop — cancel a detached run (Stop button). Closing the SSE

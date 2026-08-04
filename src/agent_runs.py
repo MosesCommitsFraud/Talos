@@ -18,13 +18,14 @@ close / navigation / refresh). It does NOT survive a server restart.
 import asyncio
 import json
 import logging
+import time
 from typing import AsyncGenerator, Dict, Optional
 
 logger = logging.getLogger(__name__)
 
 
 class _Run:
-    __slots__ = ("buffer", "subscribers", "status", "task", "evict_task")
+    __slots__ = ("buffer", "subscribers", "status", "task", "evict_task", "started_at")
 
     def __init__(self) -> None:
         self.buffer: list = []  # ordered SSE event strings (replay log)
@@ -32,6 +33,9 @@ class _Run:
         self.status: str = "running"  # running | done | error | stopped
         self.task: Optional[asyncio.Task] = None
         self.evict_task: Optional[asyncio.Task] = None
+        # Monotonic start stamp so a reconnecting client can restore the elapsed
+        # "working for" timer instead of restarting it from zero.
+        self.started_at: float = time.monotonic()
 
 
 _RUNS: Dict[str, _Run] = {}
@@ -85,6 +89,16 @@ def active_sessions() -> list:
     """Every session id with a run still in flight. Lets a freshly loaded page
     ask "what is still going?" and reconnect to each via subscribe()."""
     return [sid for sid, run in list(_RUNS.items()) if run.status == "running"]
+
+
+def elapsed_ms(session_id: str) -> Optional[int]:
+    """How long the run has been going, in ms. None if there's no such run.
+    Reported as an elapsed span (not a wall-clock stamp) so a client can rebase
+    it on its own clock without caring about server/client skew."""
+    r = _RUNS.get(session_id)
+    if r is None:
+        return None
+    return int((time.monotonic() - r.started_at) * 1000)
 
 
 def get_status(session_id: str) -> Optional[str]:

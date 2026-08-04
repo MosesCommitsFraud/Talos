@@ -96,10 +96,12 @@ interface ChatState {
   setPendingModel: (m: ChatState['pendingModel']) => void;
   newChat: () => void;
   openSession: (id: string) => Promise<void>;
-  send: (text: string, opts?: { attachments?: Attachment[]; artifactSelection?: ArtifactSelection; onSessionCreated?: (id: string) => void; approvedPlan?: string; planMode?: boolean; goalIteration?: boolean; targetSessionId?: string; resume?: boolean }) => Promise<void>;
+  send: (text: string, opts?: { attachments?: Attachment[]; artifactSelection?: ArtifactSelection; onSessionCreated?: (id: string) => void; approvedPlan?: string; planMode?: boolean; goalIteration?: boolean; targetSessionId?: string; resume?: boolean; resumeElapsedMs?: number | null }) => Promise<void>;
   /** Reattach to a turn that is still running server-side for `id` (after a
-   *  page reload). Loads the session's history first when we have none. */
-  attachRun: (id: string) => Promise<void>;
+   *  page reload). Loads the session's history first when we have none.
+   *  `elapsedMs` (how long the turn has already run) backdates the working
+   *  timer so it continues instead of restarting at 0. */
+  attachRun: (id: string, elapsedMs?: number | null) => Promise<void>;
   /** Reopen the chat that was on screen before the last reload. No-op when a
    *  session is already active or the remembered chat no longer exists. */
   restoreLastSession: () => Promise<void>;
@@ -512,7 +514,7 @@ export const useChat = create<ChatState>((set, get) => {
     writeRuntime(id, () => ({ ...emptyRuntime(), messages }));
   },
 
-  attachRun: async (id) => {
+  attachRun: async (id, elapsedMs) => {
     if (get().runtimes[id]?.streaming) return;
     // A freshly loaded page has no runtime for this chat: pull the history the
     // running turn is appending to first, so everything before the answer is on
@@ -533,7 +535,7 @@ export const useChat = create<ChatState>((set, get) => {
       }
     }
     const before = get().runtimes[id]?.messages.length ?? 0;
-    await get().send('', { targetSessionId: id, resume: true });
+    await get().send('', { targetSessionId: id, resume: true, resumeElapsedMs: elapsedMs });
     // Nothing replayed: the run finished (or was evicted) between discovery and
     // reconnect. Pull the saved history so the finished answer is on screen.
     if ((get().runtimes[id]?.messages.length ?? 0) <= before && !get().runtimes[id]?.streaming) {
@@ -568,8 +570,10 @@ export const useChat = create<ChatState>((set, get) => {
   },
 
   hydrateActiveRuns: async () => {
-    const ids = await fetchActiveRuns();
-    await Promise.all(ids.map((id) => get().attachRun(id).catch(() => { /* best-effort */ })));
+    const runs = await fetchActiveRuns();
+    await Promise.all(
+      runs.map((r) => get().attachRun(r.sessionId, r.elapsedMs).catch(() => { /* best-effort */ })),
+    );
   },
 
   send: async (text, opts) => {
@@ -632,7 +636,9 @@ export const useChat = create<ChatState>((set, get) => {
         aiMsg,
       ],
       streaming: true,
-      turnStartedAt: Date.now(),
+      // A resume rejoins a turn that started before this page did — backdate the
+      // start so the working timer picks up where it was instead of at 0.
+      turnStartedAt: Date.now() - (opts?.resume ? Math.max(0, opts.resumeElapsedMs ?? 0) : 0),
       awaitingInput: false,
       abort,
     }));
