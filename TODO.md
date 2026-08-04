@@ -29,12 +29,10 @@ system prompt needs to be better
 ragflow erwähnt in rag settings
 queueing gives grey screen
 artifact editing for markdown output
-modell weiß nicht was es ist.
 switching chat when preview or artifact panel is open should close it automatically
 sometimes image not shown and still no artifact when create document
-light mode needs work
 detaillierter für websuche skills und account
-title does only appear once reloaded or switched chat
-on reloading it resets the working for timer
 clicking on preview should open the only available artifact; if there are several open the list instead
 options ask user better deisgn needed
+skills should be perma selected
+usage thing rework

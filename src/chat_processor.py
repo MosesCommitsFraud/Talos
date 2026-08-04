@@ -832,7 +832,7 @@ class ChatProcessor:
             try:
                 from services.memory import shared_skills
 
-                enabled = shared_skills.enabled_skills_for(owner)
+                enabled = shared_skills.enabled_skills()
             except Exception as e:
                 logger.warning(f"Shared skills index unavailable: {e}")
                 enabled = []

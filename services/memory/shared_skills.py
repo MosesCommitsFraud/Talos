@@ -3,12 +3,13 @@
 
 Unlike the learned-skills library (services/memory/skills.py — per-owner,
 agent-authored, draft/publish lifecycle), these are plain SKILL.md files any
-user uploads once and every user can use. Storage is the `shared_skills` DB
+admins upload once and every user can use. Storage is the `shared_skills` DB
 table; the only required frontmatter is `name` and `description` — the body
 is free-form markdown the model must follow verbatim.
 
-Per-user enable/disable lives in user prefs under `shared_skills_disabled`
-(a list of skill names; skills default to enabled).
+Which skills are active is an admin decision for the whole deployment: the
+`enabled` column on the row. There is no per-user opt-in — every user's agent
+sees exactly the skills the admins have switched on.
 """
 
 from __future__ import annotations
@@ -30,10 +31,9 @@ MAX_BUNDLE_FILES = 100
 MAX_BUNDLE_FILE_BYTES = 5_000_000
 MAX_BUNDLE_TOTAL_BYTES = 25_000_000
 
-# Per-user OPT-IN list: a skill is active for a user only when its name is in
-# this pref. New/unknown skills therefore default to OFF for everyone (the
-# uploader gets their own upload auto-enabled at the route layer).
-ENABLED_PREF_KEY = "shared_skills_enabled"
+# Legacy per-user opt-in pref. Kept only as the key the one-time migration in
+# core.database reads; nothing writes it any more.
+LEGACY_ENABLED_PREF_KEY = "shared_skills_enabled"
 
 _FM_RE = re.compile(r"\A\s*---\s*\n(.*?)\n---\s*(?:\n|\Z)", re.S)
 _FM_FIELD_RE = re.compile(r"^([A-Za-z_][A-Za-z0-9_-]*)\s*:\s*(.*)$")
@@ -74,6 +74,7 @@ def _row_meta(row: SharedSkill, file_count: Optional[int] = None) -> dict:
         "name": row.name,
         "description": row.description or "",
         "uploaded_by": row.uploaded_by,
+        "enabled": bool(row.enabled),
         "size": len(row.content or ""),
         "files": file_count if file_count is not None else 0,
         "created_at": row.created_at.isoformat() if row.created_at else None,
@@ -99,8 +100,9 @@ def save_skill(content: str, uploader: Optional[str], bundle_files: Optional[dic
 
     `bundle_files` maps relative path -> bytes for multi-file bundles; when
     given (even empty) it REPLACES the skill's stored bundle files.
-    Updating an existing name is only allowed for its original uploader
-    (admins go through the route layer's delete-then-upload path).
+    Re-uploading an existing name overwrites it — every writer is an admin
+    curating one shared library, so there is no per-uploader ownership to
+    defend. `uploaded_by` keeps recording who last wrote it.
     Returns the stored skill's metadata dict.
     """
     if not isinstance(content, str) or not content.strip():
@@ -112,12 +114,10 @@ def save_skill(content: str, uploader: Optional[str], bundle_files: Optional[dic
     with SessionLocal() as db:
         row = db.get(SharedSkill, name)
         if row is None:
-            row = SharedSkill(name=name, uploaded_by=uploader)
+            row = SharedSkill(name=name, uploaded_by=uploader, enabled=False)
             db.add(row)
-        elif row.uploaded_by is not None and uploader is not None and row.uploaded_by != uploader:
-            raise PermissionError(
-                f"A skill named {name!r} already exists and belongs to another user."
-            )
+        elif uploader is not None:
+            row.uploaded_by = uploader
         row.description = fields["description"]
         row.content = content
         if bundle_files is not None:
@@ -445,42 +445,35 @@ def delete_skill(name: str, user: Optional[str], is_admin: bool = False) -> bool
         return True
 
 
-# ── Per-user enable/disable (prefs-backed, opt-in) ──
+# ── Global enable/disable (admin-controlled) ──
 
 
-def enabled_names_for(user: Optional[str]) -> set:
+def enabled_names() -> set:
+    """Names of the skills admins have switched on for this deployment."""
     try:
-        from routes.prefs_routes import _load_for_user
-
-        raw = (_load_for_user(user) or {}).get(ENABLED_PREF_KEY)
-        return {str(n) for n in raw} if isinstance(raw, list) else set()
+        with SessionLocal() as db:
+            return {
+                n for (n,) in db.query(SharedSkill.name).filter(SharedSkill.enabled.is_(True)).all()
+            }
     except Exception as e:
-        logger.debug(f"shared-skills prefs read failed: {e}")
+        logger.debug(f"shared-skills enabled read failed: {e}")
         return set()
 
 
-def set_enabled(user: Optional[str], name: str, enabled: bool) -> None:
-    from routes.prefs_routes import _load_for_user, _save_for_user
-
-    prefs = _load_for_user(user) or {}
-    raw = prefs.get(ENABLED_PREF_KEY)
-    active = {str(n) for n in raw} if isinstance(raw, list) else set()
-    name = slugify(name, fallback="")
-    if enabled:
-        active.add(name)
-    else:
-        active.discard(name)
-    prefs[ENABLED_PREF_KEY] = sorted(active)
-    _save_for_user(user, prefs)
+def set_enabled(name: str, enabled: bool) -> bool:
+    """Turn a skill on/off for everyone. False = no such skill."""
+    with SessionLocal() as db:
+        row = db.get(SharedSkill, slugify(name, fallback=""))
+        if row is None:
+            return False
+        row.enabled = bool(enabled)
+        db.commit()
+        return True
 
 
-def enabled_skills_for(user: Optional[str]) -> List[dict]:
-    """The `[{name, description}]` index of skills this user has enabled —
-    what gets silently injected into the agent's context. Opt-in: anything
-    the user never enabled stays invisible to their agent."""
-    active = enabled_names_for(user)
+def enabled_skills() -> List[dict]:
+    """The `[{name, description}]` index of active skills — what gets injected
+    into every agent's context. Skills an admin has not enabled stay invisible."""
     return [
-        {"name": s["name"], "description": s["description"]}
-        for s in list_skills()
-        if s["name"] in active
+        {"name": s["name"], "description": s["description"]} for s in list_skills() if s["enabled"]
     ]

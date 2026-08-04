@@ -685,7 +685,7 @@ const en = {
     saveChanges: 'Save changes',
     skills: {
       title: 'Skill library',
-      intro: 'Upload SKILL.md files (Claude format: frontmatter with name + description, then the instructions) or .zip bundles (SKILL.md plus references/scripts) and share them with every user. New skills are OFF for you until you enable them here; enabled skills are offered to the AI, which loads the full instructions on demand and follows them exactly.',
+      intro: 'Upload SKILL.md files (Claude format: frontmatter with name + description, then the instructions) or .zip bundles (SKILL.md plus references/scripts). The switches are deployment-wide: a new skill stays OFF until you enable it here, and enabling it offers it to every user\'s AI, which loads the full instructions on demand and follows them exactly.',
       upload: 'Upload skill',
       uploaded: 'Skill saved.',
       empty: 'No skills yet. Upload a SKILL.md to get started.',

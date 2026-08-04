@@ -536,6 +536,7 @@ async def _run_subprocess_streaming(
 
 
 _ADMIN_TOOLS = {
+    "create_skill",
     "manage_endpoints",
     "manage_mcp",
     "manage_tokens",

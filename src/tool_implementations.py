@@ -1500,7 +1500,7 @@ async def do_browse_skills(
     try:
         from services.memory import shared_skills
 
-        enabled = shared_skills.enabled_skills_for(owner)
+        enabled = shared_skills.enabled_skills()
     except Exception as e:
         logger.error(f"browse_skills failed: {e}")
         return {"error": f"Could not list skills: {e}", "exit_code": 1}
@@ -1587,7 +1587,7 @@ async def do_read_skill(
     Without `path`: returns the full SKILL.md, lists bundled files, and (when a
     workspace is available) materializes the whole bundle to disk so bash/python
     can run its scripts. With `path`: returns that bundled file's content.
-    Only skills the current user has ENABLED are readable — a disabled skill
+    Only skills the admins have ENABLED are readable — a disabled skill
     behaves as if it doesn't exist, matching the injected index.
     """
     raw = (content or "").strip()
@@ -1609,7 +1609,7 @@ async def do_read_skill(
     try:
         from services.memory import shared_skills
 
-        enabled = {s["name"] for s in shared_skills.enabled_skills_for(owner)}
+        enabled = {s["name"] for s in shared_skills.enabled_skills()}
         skill = shared_skills.get_skill(name)
     except Exception as e:
         logger.error(f"read_skill failed: {e}")
@@ -1686,10 +1686,11 @@ async def do_create_skill(
       - `content`: alternatively, the full SKILL.md text for a single-file skill.
       - `name`: optional; otherwise taken from the SKILL.md frontmatter.
 
-    The saved skill is auto-enabled for its author and becomes available to every
-    user (who each opt in). This is the write counterpart to read_skill/
-    browse_skills, so a skill that teaches skill authoring can actually produce a
-    new skill on Talos.
+    Admin-only (gated in tool_execution): the skill library is administered.
+    The saved skill lands in the library switched OFF — an admin turns it on in
+    Settings → Skills, which activates it for everyone. This is the write
+    counterpart to read_skill/browse_skills, so a skill that teaches skill
+    authoring can actually produce a new skill on Talos.
     """
     try:
         args = _parse_tool_args(content)
@@ -1765,16 +1766,11 @@ async def do_create_skill(
         logger.error(f"create_skill failed: {e}")
         return {"error": f"Could not save skill: {e}", "exit_code": 1}
 
-    try:
-        shared_skills.set_enabled(owner, meta["name"], True)
-    except Exception:
-        pass
     return {
         "results": (
             f"Saved shared skill `{meta['name']}` ({meta.get('files', 0)} bundled "
-            "file(s)) and enabled it for you. It is now in the skill library; other "
-            "users can enable it in Settings → Skills. Test it by starting a fresh "
-            "request that should trigger it."
+            "file(s)) into the skill library. It is switched OFF until an admin "
+            "enables it in Settings → Skills, which turns it on for every user."
         )
     }
 

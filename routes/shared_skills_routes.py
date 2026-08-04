@@ -1,9 +1,9 @@
 # routes/shared_skills_routes.py
-"""REST API for shared, user-uploaded skills (Claude-style SKILL.md files).
+"""REST API for shared skills (Claude-style SKILL.md files).
 
-Any authenticated user can upload a skill; it becomes visible to everyone.
-Each user chooses which skills are active for them (per-user pref); the
-enabled set is what the agent's context advertises for `read_skill`.
+The skill library is administered: only admins upload, delete, or switch a
+skill on. Enabling is global — an enabled skill is what every user's agent
+context advertises for `read_skill`.
 """
 
 import logging
@@ -38,37 +38,42 @@ def _is_admin(request: Request) -> bool:
         return False
 
 
+def _require_admin(request: Request) -> Optional[str]:
+    """Admin-only gate for every write on the shared skill library."""
+    if not _is_admin(request):
+        raise HTTPException(403, "Only admins can manage the skill library.")
+    return get_current_user(request)
+
+
 def setup_shared_skills_routes() -> APIRouter:
     router = APIRouter(prefix="/api/shared-skills", tags=["shared-skills"])
 
     @router.get("")
     async def list_skills(request: Request):
         user: Optional[str] = get_current_user(request)
-        active = shared_skills.enabled_names_for(user)
+        is_admin = _is_admin(request)
         out = []
         for s in shared_skills.list_skills():
-            s["enabled"] = s["name"] in active
             s["mine"] = user is None or s.get("uploaded_by") == user
             out.append(s)
-        return {"skills": out, "count": len(out)}
+        return {"skills": out, "count": len(out), "can_manage": is_admin}
 
     @router.post("")
     async def upload_skill(request: Request, body: SkillUploadRequest):
-        user = get_current_user(request)
+        user = _require_admin(request)
         try:
             meta = shared_skills.save_skill(body.content, uploader=user)
         except PermissionError as e:
             raise HTTPException(403, str(e))
         except ValueError as e:
             raise HTTPException(400, str(e))
-        shared_skills.set_enabled(user, meta["name"], True)
         return {"ok": True, "skill": meta}
 
     @router.post("/upload")
     async def upload_skill_file(request: Request, file: UploadFile = File(...)):
         """Multipart upload: a single SKILL.md, or a .zip bundle whose root
         (or single top-level folder) contains SKILL.md plus references/scripts."""
-        user = get_current_user(request)
+        user = _require_admin(request)
         data = await file.read()
         fname = (file.filename or "").lower()
         try:
@@ -82,9 +87,8 @@ def setup_shared_skills_routes() -> APIRouter:
             raise HTTPException(400, "Skill file must be UTF-8 markdown (or a .zip bundle).")
         except ValueError as e:
             raise HTTPException(400, str(e))
-        # Skills are opt-in; auto-enable the upload for its own uploader so
-        # they can try it immediately (everyone else stays opted out).
-        shared_skills.set_enabled(user, meta["name"], True)
+        # A fresh upload stays OFF: rolling it out to every user is a separate,
+        # deliberate flip of the switch next to it.
         return {"ok": True, "skill": meta}
 
     @router.get("/{name}")
@@ -96,9 +100,9 @@ def setup_shared_skills_routes() -> APIRouter:
 
     @router.delete("/{name}")
     async def delete_skill(name: str, request: Request):
-        user = get_current_user(request)
+        user = _require_admin(request)
         try:
-            ok = shared_skills.delete_skill(name, user, is_admin=_is_admin(request))
+            ok = shared_skills.delete_skill(name, user, is_admin=True)
         except PermissionError as e:
             raise HTTPException(403, str(e))
         if not ok:
@@ -107,10 +111,9 @@ def setup_shared_skills_routes() -> APIRouter:
 
     @router.put("/{name}/enabled")
     async def toggle_skill(name: str, request: Request, body: SkillToggleRequest):
-        user = get_current_user(request)
-        if shared_skills.get_skill(name) is None:
+        _require_admin(request)
+        if not shared_skills.set_enabled(name, body.enabled):
             raise HTTPException(404, "Skill not found")
-        shared_skills.set_enabled(user, name, body.enabled)
         return {"ok": True, "name": name, "enabled": body.enabled}
 
     return router

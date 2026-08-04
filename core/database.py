@@ -1136,6 +1136,75 @@ def _migrate_add_api_token_scopes_column():
         logging.getLogger(__name__).warning(f"api_tokens.scopes migration failed: {e}")
 
 
+def _prefs_enabled_skill_names() -> set:
+    """Every skill name any user had enabled under the old per-user prefs key.
+
+    Read straight off the prefs JSON (both the multi-user `_users` shape and
+    the legacy flat one) so the migration doesn't depend on the routes layer.
+    """
+    import json
+
+    names: set = set()
+    # prefs_routes opens this path relative to the CWD; prefer that, then fall
+    # back to the repo's data dir so the backfill still works off-tree.
+    from src.constants import DATA_DIR
+
+    candidates = (
+        os.path.join("data", "user_prefs.json"),
+        os.path.join(DATA_DIR, "user_prefs.json"),
+    )
+    data = None
+    for path in candidates:
+        try:
+            with open(path, encoding="utf-8") as f:
+                data = json.load(f)
+            break
+        except (OSError, json.JSONDecodeError):
+            continue
+    if data is None:
+        return names
+    if not isinstance(data, dict):
+        return names
+    buckets = data["_users"].values() if isinstance(data.get("_users"), dict) else [data]
+    for prefs in buckets:
+        raw = prefs.get("shared_skills_enabled") if isinstance(prefs, dict) else None
+        if isinstance(raw, list):
+            names.update(str(n) for n in raw)
+    return names
+
+
+def _migrate_add_shared_skill_enabled():
+    """Move shared-skill activation from per-user prefs to a global admin flag.
+
+    Skills used to be opt-in per user (prefs key `shared_skills_enabled`); they
+    are now switched on deployment-wide by an admin. The new column defaults to
+    OFF, so backfill it with the union of what users had enabled — otherwise an
+    upgrade would silently take everyone's working skills away.
+    """
+    import sqlite3
+
+    db_path = DATABASE_URL.replace("sqlite:///", "")
+    if not os.path.exists(db_path):
+        return
+    log = logging.getLogger(__name__)
+    try:
+        conn = sqlite3.connect(db_path)
+        columns = [row[1] for row in conn.execute("PRAGMA table_info(shared_skills)").fetchall()]
+        if columns and "enabled" not in columns:
+            conn.execute("ALTER TABLE shared_skills ADD COLUMN enabled BOOLEAN NOT NULL DEFAULT 0")
+            names = _prefs_enabled_skill_names()
+            if names:
+                conn.executemany(
+                    "UPDATE shared_skills SET enabled = 1 WHERE name = ?",
+                    [(n,) for n in sorted(names)],
+                )
+            conn.commit()
+            log.info("Migrated: added shared_skills.enabled (%d skill(s) carried over)", len(names))
+        conn.close()
+    except Exception as e:
+        log.warning(f"shared_skills.enabled migration failed: {e}")
+
+
 def _migrate_assign_legacy_owner():
     """Assign all null-owner data to the first (admin) user.
 
@@ -1499,8 +1568,9 @@ class SharedSkill(TimestampMixin, Base):
     """A user-uploaded SKILL.md shared with every user (Claude-style skills).
 
     The full markdown (YAML frontmatter with `name` + `description`, free-form
-    body) is stored verbatim in `content`. Which users have a skill enabled is
-    a per-user preference (prefs key `shared_skills_disabled`), not a column.
+    body) is stored verbatim in `content`. Whether a skill is active is a
+    deployment-wide decision made by admins (`enabled`), not a per-user
+    preference: an enabled skill is offered to every user's agent.
     """
 
     __tablename__ = "shared_skills"
@@ -1509,6 +1579,8 @@ class SharedSkill(TimestampMixin, Base):
     description = Column(String, nullable=False, default="")
     content = Column(Text, nullable=False)
     uploaded_by = Column(String, nullable=True, index=True)
+    # Admin-controlled, global. Skills stay OFF until an admin turns them on.
+    enabled = Column(Boolean, nullable=False, default=False)
 
     files = relationship("SharedSkillFile", cascade="all, delete-orphan", passive_deletes=True)
 
@@ -1682,6 +1754,7 @@ def init_db():
     _migrate_add_mode_column()
     _migrate_add_multiuser_owner_columns()
     _migrate_add_api_token_scopes_column()
+    _migrate_add_shared_skill_enabled()
     _migrate_backfill_document_owner_from_session()
     _migrate_assign_legacy_owner()
     _migrate_add_tidy_verdict()

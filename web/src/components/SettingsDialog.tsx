@@ -93,8 +93,9 @@ import { useAuth } from './auth/AuthGate';
 import { UsersPanel } from './settings/UsersPanel';
 
 export type Panel =
-  | 'appearance' | 'shortcuts' | 'account' | 'skills'
-  | 'models' | 'ai' | 'assistants' | 'integrations' | 'web' | 'tools' | 'rag' | 'users' | 'system';
+  | 'appearance' | 'shortcuts' | 'account'
+  | 'models' | 'ai' | 'assistants' | 'integrations' | 'web' | 'tools' | 'skills'
+  | 'rag' | 'users' | 'system';
 
 /* ── Shared layout (t3code settings design) ── */
 
@@ -1819,12 +1820,13 @@ function AssistantsPanel() {
   );
 }
 
-/* ── Shared skills (Claude-style SKILL.md library) ── */
+/* ── Shared skills (Claude-style SKILL.md library) ──
+ * Admin surface: the library is curated centrally and a skill's switch is
+ * global — flipping it on hands that skill to every user's agent. */
 
 function SharedSkillsPanel() {
   const { t } = useTranslation();
   const qc = useQueryClient();
-  const auth = useAuth();
   const fileRef = useRef<HTMLInputElement>(null);
   const [msg, setMsg] = useState('');
   const { data } = useQuery({ queryKey: ['sharedSkills'], queryFn: fetchSharedSkills });
@@ -1913,16 +1915,14 @@ function SharedSkillsPanel() {
               </>
             }
           >
-            {(s.mine || auth?.is_admin) && (
-              <Button
-                size="icon-sm"
-                variant="ghost"
-                title={t('settings.skills.delete')}
-                onClick={() => void onDelete(s)}
-              >
-                <Trash2Icon />
-              </Button>
-            )}
+            <Button
+              size="icon-sm"
+              variant="ghost"
+              title={t('settings.skills.delete')}
+              onClick={() => void onDelete(s)}
+            >
+              <Trash2Icon />
+            </Button>
             <Switch
               checked={s.enabled}
               onCheckedChange={(v: boolean) => toggle.mutate({ name: s.name, enabled: v })}
@@ -1978,7 +1978,6 @@ export function SettingsDialog({
     { id: 'appearance', label: t('settings.nav.appearance'), icon: <PaletteIcon /> },
     { id: 'shortcuts', label: t('settings.nav.shortcuts'), icon: <KeyboardIcon /> },
     { id: 'account', label: t('settings.nav.account'), icon: <UserIcon /> },
-    { id: 'skills', label: t('settings.nav.skills'), icon: <FileTextIcon /> },
   ];
   const adminNav: Array<{ id: Panel; label: string; icon: React.ReactNode }> = [
     { id: 'models', label: t('settings.nav.models'), icon: <ServerIcon /> },
@@ -1987,6 +1986,7 @@ export function SettingsDialog({
     { id: 'integrations', label: t('settings.nav.integrations'), icon: <Link2Icon /> },
     { id: 'web', label: t('settings.nav.web'), icon: <GlobeIcon /> },
     { id: 'tools', label: t('settings.nav.tools'), icon: <WrenchIcon /> },
+    { id: 'skills', label: t('settings.nav.skills'), icon: <FileTextIcon /> },
     { id: 'system', label: t('settings.nav.system'), icon: <SettingsIcon /> },
   ];
   // Advanced — entries that open a dedicated surface rather than an in-dialog
