@@ -18,9 +18,12 @@ export function RollingNumber({ value, className }: { value: number; className?:
     // characters, and the live value is polite: it changes far too often to be
     // worth interrupting a screen reader for.
     <span className={className} aria-label={text} role="img">
+      {/* No width on the cells: the count renders in a tabular-figures context,
+          so digits already occupy the same advance and nothing jitters as they
+          change. Forcing 1ch instead spaced them unlike the surrounding text. */}
       <span aria-hidden>
         {[...text].map((char, i) => (
-          <span key={i} className="digit-cell" style={{ width: /\d/.test(char) ? '1ch' : undefined }}>
+          <span key={i} className="digit-cell">
             <span key={char} className="digit-roll">
               {char}
             </span>

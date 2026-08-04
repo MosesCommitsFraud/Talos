@@ -255,8 +255,6 @@ const de: typeof en = {
   },
   thinking: {
     thinking: 'Denkt nach…',
-    view: 'Gedanken anzeigen',
-    hide: 'Gedanken ausblenden',
     // Live-Status neben der Arbeitsuhr. Welcher erscheint, hängt davon ab, wie
     // lange der aktuelle Denkabschnitt schon läuft — siehe THINKING_PHASE_SECONDS.
     // Die Reihenfolge zählt: erster Eintrag zum Auftakt, letzter bleibt stehen.
