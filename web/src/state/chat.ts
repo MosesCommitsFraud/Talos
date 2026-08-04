@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { compactSession, createSession, deleteMessages, editMessage, fetchActiveRuns, fetchArtifacts, fetchSession, resumeChat, streamChat } from '@/api/client';
 import type { Artifact, ArtifactSelection, Attachment, ChatEvent, Metrics, RagSource, ToolCall } from '@/api/types';
-import { documentFileName, isPreviewable, previewKind } from '@/lib/files';
+import { documentFileName, isPreviewable } from '@/lib/files';
 import { timestampMs } from '@/lib/utils';
 import { queryClient } from '@/lib/queryClient';
 import { usePrefs } from './prefs';
@@ -601,22 +601,11 @@ export const useChat = create<ChatState>((set, get) => {
     const sid = sessionId;
 
     const attachments = opts?.attachments ?? [];
-    const activePreview = useUi.getState().preview;
-    const implicitArtifactSelection: ArtifactSelection | undefined = !opts?.artifactSelection
-      && activePreview?.sessionId === sid
-      && !activePreview.path.startsWith('document:')
-      && !activePreview.path.startsWith('generated-image:')
-      ? {
-          sessionId: sid,
-          path: activePreview.path,
-          name: activePreview.name,
-          mime: activePreview.mime,
-          version: activePreview.version,
-          kind: previewKind(activePreview.name, activePreview.mime),
-          target: { type: 'element', element: 'open-artifact' },
-        }
-      : undefined;
-    const artifactSelection = opts?.artifactSelection ?? implicitArtifactSelection;
+    // Only a real selection travels with the message. Having the preview panel
+    // open is not one: it silently attached whatever file happened to be on
+    // screen to every turn, and the composer showed a selection chip for a
+    // selection the user never made.
+    const artifactSelection = opts?.artifactSelection;
     const userMsg: UiMessage = { id: uid(), role: 'user', content: text, attachments, artifactSelection, createdAt: Date.now() };
     const aiMsg: UiMessage = { id: uid(), role: 'assistant', content: '', streaming: true, createdAt: Date.now() };
     const abort = new AbortController();
@@ -697,6 +686,9 @@ export const useChat = create<ChatState>((set, get) => {
     };
 
     const prefs = usePrefs.getState();
+    // An open document is still the turn's edit target — that is about which
+    // file the agent writes to, not about what the user selected.
+    const activePreview = useUi.getState().preview;
     const activeDocId = activePreview?.sessionId === sid && activePreview.path.startsWith('document:')
       ? activePreview.path.slice('document:'.length)
       : undefined;

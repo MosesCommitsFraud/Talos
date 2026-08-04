@@ -238,7 +238,6 @@ const en = {
     generatedImage: 'Generated image {{n}}',
     toolImage: 'Tool image {{n}}',
     welcome: 'What can I help with?',
-    workingFor: 'Working for',
     working: 'Working…',
     workedFor: 'Worked for {{duration}}',
     worked: 'Worked',

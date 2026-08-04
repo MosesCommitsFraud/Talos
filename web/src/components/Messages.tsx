@@ -80,7 +80,9 @@ function Working({ startedAt }: { startedAt?: number }) {
         <span className="size-1 animate-pulse rounded-full bg-muted-foreground/40 [animation-delay:200ms]" />
         <span className="size-1 animate-pulse rounded-full bg-muted-foreground/40 [animation-delay:400ms]" />
       </span>
-      <span>{startedAt ? <>{t('messages.workingFor')} <WorkingTimer startedAt={startedAt} /></> : t('messages.working')}</span>
+      {/* The dots already say "still going" — the label only needs to say how
+          long, so the clock stands alone. */}
+      <span>{startedAt ? <WorkingTimer startedAt={startedAt} /> : t('messages.working')}</span>
     </div>
   );
 }

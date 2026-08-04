@@ -240,7 +240,6 @@ const de: typeof en = {
     generatedImage: 'Generiertes Bild {{n}}',
     toolImage: 'Werkzeugbild {{n}}',
     welcome: 'Womit kann ich helfen?',
-    workingFor: 'Arbeitet seit',
     working: 'Arbeitet…',
     workedFor: '{{duration}} gearbeitet',
     worked: 'Gearbeitet',
