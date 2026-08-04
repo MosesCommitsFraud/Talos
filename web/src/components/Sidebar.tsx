@@ -42,6 +42,7 @@ import type { Session } from '@/api/types';
 import { selectChatStatus, selectFolderStatus, useChat } from '@/state/chat';
 import { usePrefs, type SortMode } from '@/state/prefs';
 import { cn, formatRelativeTime, timestampMs } from '@/lib/utils';
+import { TalosLogo } from './TalosLogo';
 import { Tooltip } from './ui/misc';
 import { KeybindingPill } from './ui/kbd';
 import {
@@ -60,17 +61,6 @@ import {
   MenuSeparator,
   MenuTrigger,
 } from './ui/menu';
-
-/** The Talos mark (matches the favicon): two stacked sails over a wave. */
-function TalosLogo({ className }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 32 32" className={className} fill="none" aria-hidden="true">
-      <path d="M16 4L16 22L6 22Z" fill="currentColor" />
-      <path d="M16 8L16 22L24 22Z" fill="currentColor" opacity="0.6" />
-      <path d="M4 24Q10 20 16 24Q22 28 28 24" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" />
-    </svg>
-  );
-}
 
 const SORT_KEYS: Record<SortMode, string> = {
   active: 'sidebar.sortActive',

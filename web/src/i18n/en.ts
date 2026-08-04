@@ -253,6 +253,8 @@ const en = {
   },
   thinking: {
     thinking: 'Thinking…',
+    show: 'Show thinking',
+    hide: 'Hide thinking',
     // Live status beside the working timer. Which one shows depends on how long
     // the current stretch of reasoning has run — see THINKING_PHASE_SECONDS.
     // Order matters: first is the opening phrase, last is the one it settles on.

@@ -14,6 +14,7 @@ import { Markdown } from './Markdown';
 import { PlanCard } from './PlanCard';
 import { RagSources } from './RagSources';
 import { RollingNumber } from './RollingNumber';
+import { TalosLogo } from './TalosLogo';
 import { ToolGroup, type GroupEntry } from './ToolGroup';
 import { WorkingAnimation } from './WorkingAnimation';
 import { ImageGallery, toolImages } from './ToolRow';
@@ -85,10 +86,15 @@ const THINKING_ROTATE_SECONDS = 9;
  *  deltas are landing — a model that thinks, calls a tool and thinks again is
  *  doing one continuous thing, and a caption blinking in and out of the row was
  *  noisier than the work it described. Only the shimmer tracks whether the
- *  reasoning is streaming right now. Read-only: the text itself sits in the turn
- *  body where it happened. */
+ *  reasoning is streaming right now.
+ *
+ *  Clicking it shows or hides the reasoning text in the turn body. It is the
+ *  same preference the Settings panel exposes, put where a reader actually
+ *  wants it: next to the words telling them there is reasoning to read. */
 function ThinkingStatus({ since, live }: { since: number | null; live: boolean }) {
   const { t } = useTranslation();
+  const showThinking = usePrefs((s) => s.visibility.showThinking);
+  const setVisibility = usePrefs((s) => s.setVisibility);
   const [, force] = useState(0);
   useEffect(() => {
     const id = setInterval(() => force((n) => n + 1), 1000);
@@ -111,27 +117,39 @@ function ThinkingStatus({ since, live }: { since: number | null; live: boolean }
   const label = list[index];
 
   return (
-    // Clipped, and keyed on the text, so a phase change rolls up into place
-    // instead of swapping in flat — same idiom as the tool-group label.
-    <span className="block min-w-0 overflow-hidden">
+    <button
+      type="button"
+      aria-pressed={showThinking}
+      title={t(showThinking ? 'thinking.hide' : 'thinking.show')}
+      onClick={() => setVisibility('showThinking', !showThinking)}
+      // Clipped, and keyed on the text, so a phase change rolls up into place
+      // instead of swapping in flat — same idiom as the tool-group label.
+      className="block min-w-0 overflow-hidden text-left transition-colors hover:text-foreground"
+    >
       <span key={label} className="tool-label-roll block">
         <span className={`block truncate ${live ? 'shimmer-text' : ''}`}>{label}</span>
       </span>
-    </span>
+    </button>
   );
 }
+
+/** How long the animation takes to dissolve into the resting logo. Matches the
+ *  `duration-500` on both layers; the player is torn down once it has run. */
+const SETTLE_FADE_MS = 500;
 
 /** Persistent "still running" indicator shown for the whole assistant turn —
  *  the looping Talos mark, an elapsed timer, the running output-token count and
  *  the reasoning status, in that order.
  *
- *  Outlives the turn by up to one animation cycle: `running` goes false the
- *  moment the stream ends, which strips the row back to the mark alone (the
- *  settled turn states its own duration) and lets the loop play out to its end
- *  frame instead of being yanked mid-swing. `onFinished` fires there. */
+ *  It has three states, and never simply vanishes. `running` goes false the
+ *  moment the stream ends: the row strips back to the mark alone (the settled
+ *  turn states its own duration) while the loop plays out to its end frame
+ *  rather than being yanked mid-swing. There it cross-fades into the static
+ *  Talos logo, which stays as the quiet marker that the chat is idle — until
+ *  the next message starts a new turn and a new animation with it. */
 function Working({
   startedAt,
-  running = true,
+  phase,
   onFinished,
   tokens,
   thinking,
@@ -139,7 +157,10 @@ function Working({
   thinkingSince,
 }: {
   startedAt?: number;
-  running?: boolean;
+  /** running: the turn is streaming. settling: it ended, the loop is playing
+   *  out. rest: nothing is happening — the logo alone, and no player at all,
+   *  which is what a chat looks like when it is first opened. */
+  phase: 'running' | 'settling' | 'rest';
   onFinished?: () => void;
   tokens: number;
   thinking: boolean;
@@ -147,13 +168,64 @@ function Working({
   thinkingSince: number | null;
 }) {
   const { t } = useTranslation();
+  const running = phase === 'running';
+  // `faded` is this row's own view of the hand-off, so the dissolve can start
+  // the instant the loop ends rather than waiting on the parent. The player is
+  // dropped once it is over: nothing is looking at it, and it is by far the
+  // heaviest thing in the row.
+  const [faded, setFaded] = useState(false);
+  const [playerGone, setPlayerGone] = useState(false);
+  useEffect(() => {
+    if (running) {
+      setFaded(false);
+      setPlayerGone(false);
+    }
+  }, [running]);
+  useEffect(() => {
+    if (!faded) return;
+    const id = setTimeout(() => setPlayerGone(true), SETTLE_FADE_MS);
+    return () => clearTimeout(id);
+  }, [faded]);
+
+  // Latched during render, not in an effect: the parent drops to 'rest' in the
+  // same commit that starts the fade, and reading `phase` directly would tear
+  // the player out on that frame instead of dissolving it. Once a player has
+  // been mounted, only its own fade timer removes it.
+  const everPlayed = useRef(false);
+  if (phase !== 'rest') everPlayed.current = true;
+
+  const showLogo = phase === 'rest' || faded;
+  const showPlayer = everPlayed.current && !playerGone;
+
   return (
     <div
       className="flex items-center gap-2 py-1 text-[11px] text-muted-foreground/70 tabular-nums"
       aria-label={running ? t('messages.generating') : undefined}
       aria-hidden={!running}
     >
-      <WorkingAnimation className="size-5" playing={running} onFinished={onFinished} />
+      {/* Both marks share one box and cross-fade inside it, so the hand-off is
+          a dissolve in place rather than one element replacing another. */}
+      <span className="relative inline-block size-5 shrink-0">
+        {showPlayer && (
+          <WorkingAnimation
+            className={cn(
+              'absolute inset-0 size-full transition-opacity duration-500',
+              faded ? 'opacity-0' : 'opacity-100',
+            )}
+            playing={running}
+            onFinished={() => {
+              setFaded(true);
+              onFinished?.();
+            }}
+          />
+        )}
+        <TalosLogo
+          className={cn(
+            'absolute inset-0 size-full transition-opacity duration-500',
+            showLogo ? 'opacity-100' : 'opacity-0',
+          )}
+        />
+      </span>
       {/* The animation already says "still going" — the label only needs to
           say how long, so the clock stands alone. */}
       {running && <span>{startedAt ? <WorkingTimer startedAt={startedAt} /> : t('messages.working')}</span>}
@@ -610,7 +682,7 @@ function AssistantTurn({ turn, containsLast, artifactFiles, sessionId }: { turn:
   const streaming = turn.some((m) => m.streaming);
   // The indicator outlives the stream: when the turn settles the mark keeps its
   // place until it has played the cycle it was in out to the end frame, then
-  // Working reports back and the row goes. Only turns that were actually seen
+  // dissolves into the resting logo. Only turns that were actually seen
   // streaming wind down — reopening a session must not replay one per turn.
   const [windingDown, setWindingDown] = useState(false);
   const wasStreaming = useRef(false);
@@ -632,10 +704,12 @@ function AssistantTurn({ turn, containsLast, artifactFiles, sessionId }: { turn:
   if (hasThinking) thinkingSince.current ??= Date.now();
 
   const tokens = useSampledTokens(estimateOutputTokens(turn), tokenCheckpoint(turn));
-  const indicator = (streaming || windingDown) && (
+  // At rest the row is kept only under the newest turn, so the conversation
+  // ends in exactly one logo instead of stacking a spent one under every answer.
+  const indicator = (streaming || windingDown || containsLast) && (
     <Working
       startedAt={turnStartedAt ?? undefined}
-      running={streaming}
+      phase={streaming ? 'running' : windingDown ? 'settling' : 'rest'}
       onFinished={() => setWindingDown(false)}
       tokens={tokens}
       thinking={hasThinking}
