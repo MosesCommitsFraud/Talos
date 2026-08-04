@@ -425,6 +425,32 @@ body::after {
   .tool-label-roll { animation: none; }
 }
 
+/* ── Odometer digits ──
+   The live token count changes several times a second, and swapping the text
+   outright makes it flicker. Each character sits in its own clipped cell and
+   the new one scrolls up into place instead, the way a mechanical counter
+   turns. Same trick as the label roll above: the inner span is keyed on the
+   character, so React remounts it and replays the animation on every change.
+   Cells are fixed to one ch so the row doesn't jitter as digits change width —
+   the font is already tabular here, but the separator is not. */
+.digit-cell {
+  display: inline-block;
+  overflow: hidden;
+  vertical-align: bottom;
+  line-height: 1.15;
+}
+.digit-roll {
+  display: block;
+  animation: digit-roll 220ms cubic-bezier(0.2, 0, 0, 1);
+}
+@keyframes digit-roll {
+  from { transform: translateY(1.15em); }
+  to { transform: translateY(0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .digit-roll { animation: none; }
+}
+
 /* ── Disclosure open/close ──
    Grid rows go 0fr → 1fr, which animates to the content's natural height
    without anyone measuring it. The inner element does the clipping; it also

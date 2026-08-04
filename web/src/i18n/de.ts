@@ -256,6 +256,16 @@ const de: typeof en = {
   thinking: {
     thinking: 'Denkt nach…',
     view: 'Gedanken anzeigen',
+    hide: 'Gedanken ausblenden',
+    // Live-Status neben der Arbeitsuhr. Welcher erscheint, hängt davon ab, wie
+    // lange der aktuelle Denkabschnitt schon läuft — siehe THINKING_PHASE_SECONDS.
+    // Die Reihenfolge zählt: erster Eintrag zum Auftakt, letzter bleibt stehen.
+    phases: ['denkt nach', 'denkt weiter', 'denkt immer noch', 'denkt es durch', 'fast fertig mit Denken'],
+    // Von der Zahl getrennt: die Ziffern rollen einzeln (siehe RollingNumber),
+    // von hier kommt nur die Einheit.
+    tokensUnit: 'Token',
+    tokensUnit_other: 'Tokens',
+    tokensLabel: 'bisher {{count}} Ausgabe-Tokens',
   },
   // Formulierungen für die gruppierten Toolcall-Zeilen. Die Klauseln werden im
   // Deutschen NICHT klein zusammengefügt (siehe summarizeCalls/lowerJoin) — sie

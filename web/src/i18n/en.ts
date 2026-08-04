@@ -254,6 +254,16 @@ const en = {
   thinking: {
     thinking: 'Thinking…',
     view: 'View thinking',
+    hide: 'Hide thinking',
+    // Live status beside the working timer. Which one shows depends on how long
+    // the current stretch of reasoning has run — see THINKING_PHASE_SECONDS.
+    // Order matters: first is the opening phrase, last is the one it settles on.
+    phases: ['thinking', 'thinking more', 'still thinking', 'thinking it through', 'almost done thinking'],
+    // Split from the number itself: the count rolls digit by digit (see
+    // RollingNumber), so only the unit comes from here.
+    tokensUnit: 'token',
+    tokensUnit_other: 'tokens',
+    tokensLabel: '{{count}} output tokens so far',
   },
   // Phrasing for the grouped tool-call rows. Each family has a live present
   // participle (`running`), a settled past tense (`past`) and — where a plural

@@ -13,6 +13,7 @@ import { AttachmentTile, FilePreviewFace, hasVisualPreview, openUploadViewer } f
 import { Markdown } from './Markdown';
 import { PlanCard } from './PlanCard';
 import { RagSources } from './RagSources';
+import { RollingNumber } from './RollingNumber';
 import { ToolGroup, type GroupEntry } from './ToolGroup';
 import { WorkingAnimation } from './WorkingAnimation';
 import { ImageGallery, toolImages } from './ToolRow';
@@ -70,26 +71,112 @@ function MessageTime({ ts }: { ts?: number }) {
   return <span className="text-xs text-muted-foreground/70 tabular-nums">{label}</span>;
 }
 
+/** Seconds of continuous reasoning at which the status moves on to the next
+ *  phrase in `thinking.phases` ("thinking" → "thinking more" → …). The last one
+ *  holds however long the stretch runs; nothing here claims to know when the
+ *  model will stop, the phrasing just stops escalating. */
+const THINKING_PHASE_SECONDS = [0, 6, 15, 30, 50];
+
+/** Live reasoning status, and the way into the reasoning itself. While the model
+ *  is thinking this shimmers and walks through the phase phrases; once it stops
+ *  the button stays put as a plain "View thinking", because the reasoning is
+ *  reachable from nowhere else and the turn is usually still running. */
+function ThinkingStatus({ since, live, open, onToggle }: { since: number | null; live: boolean; open: boolean; onToggle: () => void }) {
+  const { t } = useTranslation();
+  const [, force] = useState(0);
+  useEffect(() => {
+    if (!live) return;
+    const id = setInterval(() => force((n) => n + 1), 1000);
+    return () => clearInterval(id);
+  }, [live]);
+
+  let label = open ? t('thinking.hide') : t('thinking.view');
+  if (live) {
+    const phases = t('thinking.phases', { returnObjects: true });
+    const list = Array.isArray(phases) && phases.length > 0 ? (phases as string[]) : [t('thinking.thinking')];
+    const seconds = since != null ? (Date.now() - since) / 1000 : 0;
+    const step = THINKING_PHASE_SECONDS.filter((s) => seconds >= s).length - 1;
+    label = list[Math.min(Math.max(step, 0), list.length - 1)];
+  }
+
+  return (
+    <button
+      type="button"
+      aria-expanded={open}
+      onClick={onToggle}
+      className="flex min-w-0 items-center gap-1 transition-colors hover:text-foreground"
+    >
+      {/* Clipped, and keyed on the text, so a phase change rolls up into place
+          instead of swapping in flat — same idiom as the tool-group label. */}
+      <span className="block overflow-hidden">
+        <span key={label} className="tool-label-roll block">
+          <span className={`block truncate ${live ? 'shimmer-text' : ''}`}>{label}</span>
+        </span>
+      </span>
+      <ChevronDownIcon className={`size-3 shrink-0 opacity-60 transition-transform ${open ? 'rotate-180' : ''}`} />
+    </button>
+  );
+}
+
 /** Persistent "still running" indicator shown for the whole assistant turn —
- *  the looping Talos mark plus an elapsed timer, ported from t3code's
- *  WorkingTimelineRow.
+ *  the looping Talos mark, an elapsed timer, the running output-token count and
+ *  the reasoning status, in that order.
  *
  *  Outlives the turn by up to one animation cycle: `running` goes false the
- *  moment the stream ends, which drops the clock (the settled turn states the
- *  final duration itself) and lets the mark play its loop out to the end frame
- *  instead of being yanked mid-swing. `onFinished` fires there. */
-function Working({ startedAt, running = true, onFinished }: { startedAt?: number; running?: boolean; onFinished?: () => void }) {
+ *  moment the stream ends, which strips the row back to the mark alone (the
+ *  settled turn states its own duration) and lets the loop play out to its end
+ *  frame instead of being yanked mid-swing. `onFinished` fires there. */
+function Working({
+  startedAt,
+  running = true,
+  onFinished,
+  tokens,
+  thinking,
+  thinkingLive,
+  thinkingSince,
+}: {
+  startedAt?: number;
+  running?: boolean;
+  onFinished?: () => void;
+  tokens: number;
+  thinking: string;
+  thinkingLive: boolean;
+  thinkingSince: number | null;
+}) {
   const { t } = useTranslation();
+  const [open, setOpen] = useState(false);
   return (
-    <div
-      className="flex items-center gap-2 py-1 text-[11px] text-muted-foreground/70 tabular-nums"
-      aria-label={running ? t('messages.generating') : undefined}
-      aria-hidden={!running}
-    >
-      <WorkingAnimation className="size-5" playing={running} onFinished={onFinished} />
-      {/* The animation already says "still going" — the label only needs to say
-          how long, so the clock stands alone. */}
-      {running && <span>{startedAt ? <WorkingTimer startedAt={startedAt} /> : t('messages.working')}</span>}
+    <div aria-label={running ? t('messages.generating') : undefined} aria-hidden={!running}>
+      <div className="flex items-center gap-2 py-1 text-[11px] text-muted-foreground/70 tabular-nums">
+        <WorkingAnimation className="size-5" playing={running} onFinished={onFinished} />
+        {/* The animation already says "still going" — the label only needs to
+            say how long, so the clock stands alone. */}
+        {running && <span>{startedAt ? <WorkingTimer startedAt={startedAt} /> : t('messages.working')}</span>}
+        {running && tokens > 0 && (
+          <>
+            <span aria-hidden>·</span>
+            <span className="flex items-center gap-1" aria-label={t('thinking.tokensLabel', { count: tokens })}>
+              <RollingNumber value={tokens} />
+              <span aria-hidden>{t('thinking.tokensUnit', { count: tokens })}</span>
+            </span>
+          </>
+        )}
+        {running && thinking && (
+          <>
+            <span aria-hidden>·</span>
+            <ThinkingStatus since={thinkingSince} live={thinkingLive} open={open} onToggle={() => setOpen((v) => !v)} />
+          </>
+        )}
+      </div>
+      {/* The reasoning itself: plain prose at message size, italic and muted so
+          it reads as an aside to the answer rather than as part of it. This is
+          the only place it is shown — it is deliberately absent from the turn
+          body and from the settled fold. */}
+      <Collapse open={open && running && !!thinking}>
+        <div className="mb-1 text-[15px] leading-relaxed whitespace-pre-wrap text-muted-foreground italic">
+          {thinking}
+        </div>
+      </Collapse>
     </div>
   );
 }
@@ -101,21 +188,22 @@ type TurnSegment =
 /** Split a turn into the sequence a reader should see: what the model said, and
  *  — bunched into one collapsible group between those — what it did.
  *
- *  Reasoning and tool calls share that group. They are the same kind of thing to
- *  a reader (steps taken between two remarks), and separating them stacked two
- *  disclosures with a gap in the middle for what is really one stretch of work.
+ *  Reasoning is NOT part of this. It lives beside the working timer instead (see
+ *  Working/ThinkingStatus), where the status says what the model is doing right
+ *  now and one click shows the text. Threading it through the turn body too gave
+ *  the same words two homes and put a disclosure between every remark.
  *
  *  Activity accumulates across rounds and only flushes when the model speaks
  *  again, so ten silent lookups collapse into a single "Ran 10 commands" line
  *  instead of ten stacked rows. Within a round the order mirrors what actually
- *  happened: the model thinks, says something, then calls its tools. */
+ *  happened: the model says something, then calls its tools. */
 function buildSegments(turn: UiMessage[]): TurnSegment[] {
   const out: TurnSegment[] = [];
   let pending: GroupEntry[] = [];
   let pendingId = '';
-  // One bubble can open two groups — its reasoning, then (after its text) its
-  // tool calls — so the message id alone is not a unique React key. The counter
-  // makes it one; duplicate keys let React drop siblings silently.
+  // One bubble can open a group per batch of calls, so the message id alone is
+  // not a unique React key. The counter makes it one; duplicate keys let React
+  // drop siblings silently.
   let seq = 0;
   const add = (id: string, entry: GroupEntry) => {
     if (pending.length === 0) pendingId = `${id}-${seq++}`;
@@ -127,9 +215,6 @@ function buildSegments(turn: UiMessage[]): TurnSegment[] {
     pending = [];
   };
   for (const m of turn) {
-    if (m.thinking) {
-      add(m.id, { kind: 'thinking', id: m.id, text: m.thinking, streaming: !!m.streaming && !m.content });
-    }
     if (m.content.trim()) {
       flush();
       out.push({ kind: 'text', msg: m });
@@ -140,14 +225,24 @@ function buildSegments(turn: UiMessage[]): TurnSegment[] {
   return out;
 }
 
-/** Settled-turn fold: collapses everything the turn did — thinking, tool groups
- *  and the commentary between them — behind a quiet "Worked for Xs" line, with
- *  only the final answer left standing outside it.
+/** Output tokens produced so far, estimated from what has streamed in.
+ *
+ *  The wire has no live count — `metrics.output_tokens` only lands in the final
+ *  event, once the turn is over and this row is already going away — so the
+ *  running number is chars/4, the usual rough ratio. Reasoning counts too: the
+ *  model is billed for it and it is most of the output while it thinks. */
+const estimateOutputTokens = (turn: UiMessage[]): number =>
+  Math.round(turn.reduce((acc, m) => acc + m.content.length + (m.thinking?.length ?? 0), 0) / 4);
+
+/** Settled-turn fold: collapses everything the turn did — tool groups and the
+ *  commentary between them — behind a quiet "Worked for Xs" line, with only the
+ *  final answer left standing outside it. Reasoning is not in here; it belongs
+ *  to the live working row and goes with it.
  *
  *  The fold is just the outer lid; what unfolds is the same interleaved body the
  *  stream showed, tool groups and all. Styled like those groups (trailing
  *  chevron, medium 13px, muted) so the whole stack reads as one family. */
-function ActivityFold({ turn, showThinking, durationMs, terminalId }: { turn: UiMessage[]; showThinking: boolean; durationMs: number | null; terminalId?: string }) {
+function ActivityFold({ turn, durationMs, terminalId }: { turn: UiMessage[]; durationMs: number | null; terminalId?: string }) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const label = durationMs != null ? t('messages.workedFor', { duration: formatDurationMs(durationMs) }) : t('messages.worked');
@@ -164,7 +259,7 @@ function ActivityFold({ turn, showThinking, durationMs, terminalId }: { turn: Ui
       </button>
       <Collapse open={open}>
         <div className="mt-1.5">
-          <TurnBody turn={turn} showThinking={showThinking} hideContentFor={terminalId} />
+          <TurnBody turn={turn} hideContentFor={terminalId} />
         </div>
       </Collapse>
     </div>
@@ -176,15 +271,12 @@ function ActivityFold({ turn, showThinking, durationMs, terminalId }: { turn: Ui
  *  groups just switch from live labels to their past-tense recap.
  *  `hideContentFor` suppresses one bubble's text (the final answer, which stays
  *  outside the fold; or a proposed plan, which renders as a chip). */
-function TurnBody({ turn, showThinking, hideContentFor }: { turn: UiMessage[]; showThinking: boolean; hideContentFor?: string }) {
+function TurnBody({ turn, hideContentFor }: { turn: UiMessage[]; hideContentFor?: string }) {
   return (
     <>
       {buildSegments(turn).map((seg) => {
         if (seg.kind === 'activity') {
-          // Reasoning is opt-out; with it hidden the group keeps only its calls,
-          // and vanishes entirely if that leaves nothing.
-          const entries = showThinking ? seg.entries : seg.entries.filter((e) => e.kind === 'call');
-          return entries.length > 0 ? <ToolGroup key={`act-${seg.id}`} entries={entries} /> : null;
+          return <ToolGroup key={`act-${seg.id}`} entries={seg.entries} />;
         }
         if (seg.msg.id === hideContentFor) return null;
         return (
@@ -488,11 +580,28 @@ function AssistantTurn({ turn, containsLast, artifactFiles, sessionId }: { turn:
     if (streaming) setWindingDown(false);
     wasStreaming.current = streaming;
   }, [streaming]);
+  // Reasoning, as one text: rounds are a mechanism, not something a reader
+  // asked about, so the view shows the turn's thinking end to end. `live` is
+  // the same test the turn body used to make: deltas are landing on a bubble
+  // that has not started its answer yet.
+  const thinking = turn.map((m) => m.thinking?.trim()).filter(Boolean).join('\n\n');
+  const thinkingLive = turn.some((m) => m.streaming && !!m.thinking && !m.content);
+  // When the CURRENT stretch of reasoning started, which is what the status
+  // phrases escalate on. Reset whenever thinking stops, so a second round of
+  // reasoning opens at "thinking" again rather than at "almost done".
+  const thinkingSince = useRef<number | null>(null);
+  if (thinkingLive) thinkingSince.current ??= Date.now();
+  else thinkingSince.current = null;
+
   const indicator = (streaming || windingDown) && (
     <Working
       startedAt={turnStartedAt ?? undefined}
       running={streaming}
       onFinished={() => setWindingDown(false)}
+      tokens={estimateOutputTokens(turn)}
+      thinking={showThinking ? thinking : ''}
+      thinkingLive={thinkingLive}
+      thinkingSince={thinkingSince.current}
     />
   );
 
@@ -508,7 +617,7 @@ function AssistantTurn({ turn, containsLast, artifactFiles, sessionId }: { turn:
     return (
       <>
         {compacted && <CompactionMarker />}
-        <TurnBody turn={turn} showThinking={showThinking} />
+        <TurnBody turn={turn} />
         {/* Live plan checklist as the agent ticks steps off via update_plan. */}
         {planMsg && <PlanCard msg={planMsg} />}
         {/* Persistent "still running" indicator: shown for the whole streaming
@@ -520,15 +629,14 @@ function AssistantTurn({ turn, containsLast, artifactFiles, sessionId }: { turn:
 
   // Settled turn: the work folds behind "Worked for Xs" and only the final
   // answer stays out. The terminal message is the last bubble that produced
-  // text; everything before it — thinking, tool groups, interim commentary —
-  // goes inside the fold. The agent loop guarantees the last round restates the
-  // complete answer (final-answer completeness nudge), so folding the earlier
-  // text loses nothing.
+  // text; everything before it — tool groups, interim commentary — goes inside
+  // the fold. The agent loop guarantees the last round restates the complete
+  // answer (final-answer completeness nudge), so folding the earlier text loses
+  // nothing.
   const terminal = [...turn].reverse().find((m) => m.content.trim().length > 0);
   const terminalId = terminal?.id;
   const hasFoldedCommentary = turn.some((m) => m.id !== terminalId && m.content.trim().length > 0);
-  const hasActivity =
-    hasFoldedCommentary || turn.some((m) => (m.thinking && showThinking) || (m.tools?.length ?? 0) > 0);
+  const hasActivity = hasFoldedCommentary || turn.some((m) => (m.tools?.length ?? 0) > 0);
   const durationMs =
     last.turnElapsedMs ??
     (() => {
@@ -550,7 +658,7 @@ function AssistantTurn({ turn, containsLast, artifactFiles, sessionId }: { turn:
     <>
       {compacted && <CompactionMarker />}
       {hasActivity && (
-        <ActivityFold turn={turn} showThinking={showThinking} durationMs={durationMs} terminalId={terminalId} />
+        <ActivityFold turn={turn} durationMs={durationMs} terminalId={terminalId} />
       )}
       {/* The answer itself stays outside the fold. A proposed plan opens in the
           side panel instead, so the stream shows a compact chip. */}
