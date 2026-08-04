@@ -1,4 +1,4 @@
-import { CheckIcon, ChevronDownIcon, CopyIcon, DownloadIcon, FileIcon, FileTextIcon, FoldVerticalIcon, ImageIcon, ListChecksIcon, PencilIcon, ScanSearchIcon, Trash2Icon } from 'lucide-react';
+import { CheckIcon, ChevronDownIcon, CopyIcon, DownloadIcon, FileTextIcon, FoldVerticalIcon, ImageIcon, ListChecksIcon, PencilIcon, ScanSearchIcon, Trash2Icon } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -9,6 +9,7 @@ import { artifactDisplayName, displayName, isPreviewable, previewKind } from '@/
 import { useChat, type UiMessage } from '@/state/chat';
 import { usePrefs } from '@/state/prefs';
 import { useUi } from '@/state/ui';
+import { AttachmentTile } from './AttachmentTile';
 import { Markdown } from './Markdown';
 import { PlanCard } from './PlanCard';
 import { RagSources } from './RagSources';
@@ -239,22 +240,30 @@ function formatSize(bytes?: number): string {
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 }
 
+/** What was sent with the message, as square preview tiles above the bubble:
+ *  images and PDFs show their own first face, everything else its type glyph.
+ *  Each tile downloads the file; the name and size live in the tooltip, where
+ *  they don't cost a line of chat width. */
 function AttachmentList({ msg }: { msg: UiMessage }) {
   if (!msg.attachments?.length) return null;
   return (
-    <div className="mt-1 flex max-w-full flex-wrap justify-end gap-1.5">
-      {msg.attachments.map((file) => (
-        <a
-          key={file.id}
-          href={uploadDownloadUrl(file.id)}
-          download
-          className="inline-flex max-w-full items-center gap-1.5 rounded-lg border bg-card px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-        >
-          <FileIcon className="size-3.5 shrink-0" />
-          <span className="max-w-48 truncate">{file.name || file.id}</span>
-          {file.size != null && <span className="shrink-0 opacity-70">{formatSize(file.size)}</span>}
-        </a>
-      ))}
+    <div className="mb-1 flex max-w-full flex-wrap justify-end gap-1.5">
+      {msg.attachments.map((file) => {
+        const name = file.name || file.id;
+        const label = file.size != null ? `${name} · ${formatSize(file.size)}` : name;
+        return (
+          <Tooltip key={file.id} label={label} side="top">
+            <a
+              href={uploadDownloadUrl(file.id)}
+              download
+              aria-label={label}
+              className="transition-opacity hover:opacity-80"
+            >
+              <AttachmentTile url={uploadDownloadUrl(file.id)} name={name} mime={file.mime} />
+            </a>
+          </Tooltip>
+        );
+      })}
     </div>
   );
 }
@@ -628,10 +637,12 @@ export function Messages() {
                 <EditBox msg={block.msg} onDone={() => setEditing(null)} />
               ) : (
                 <>
+                  {/* Attachments sit above the text, the way they were staged
+                      in the composer. */}
+                  <AttachmentList msg={block.msg} />
                   <div className="rounded-lg rounded-br-sm bg-bubble px-3 py-1.5 text-[15px] leading-relaxed whitespace-pre-wrap text-strong">
                     {block.msg.content}
                   </div>
-                  <AttachmentList msg={block.msg} />
                   <ArtifactSelectionChip msg={block.msg} />
                   <div className="flex items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
                     {/* Time trails the icons, matching the assistant row. */}
