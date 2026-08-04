@@ -199,7 +199,10 @@ function Working({
 
   return (
     <div
-      className="flex items-center gap-2 py-1 text-[11px] text-muted-foreground/70 tabular-nums"
+      // Sits low, with room above it: the row is a footer to the turn, not part
+      // of it. One box for all three states, so the resting logo occupies the
+      // exact spot the animation and its readouts had.
+      className="mt-3 flex items-center gap-2 pb-1 text-[11px] text-muted-foreground/70 tabular-nums"
       aria-label={running ? t('messages.generating') : undefined}
       aria-hidden={!running}
     >
