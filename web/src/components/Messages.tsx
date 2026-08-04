@@ -72,15 +72,24 @@ function MessageTime({ ts }: { ts?: number }) {
 
 /** Persistent "still running" indicator shown for the whole assistant turn —
  *  the looping Talos mark plus an elapsed timer, ported from t3code's
- *  WorkingTimelineRow. */
-function Working({ startedAt }: { startedAt?: number }) {
+ *  WorkingTimelineRow.
+ *
+ *  Outlives the turn by up to one animation cycle: `running` goes false the
+ *  moment the stream ends, which drops the clock (the settled turn states the
+ *  final duration itself) and lets the mark play its loop out to the end frame
+ *  instead of being yanked mid-swing. `onFinished` fires there. */
+function Working({ startedAt, running = true, onFinished }: { startedAt?: number; running?: boolean; onFinished?: () => void }) {
   const { t } = useTranslation();
   return (
-    <div className="flex items-center gap-2 py-1 text-[11px] text-muted-foreground/70 tabular-nums" aria-label={t('messages.generating')}>
-      <WorkingAnimation className="size-5" />
+    <div
+      className="flex items-center gap-2 py-1 text-[11px] text-muted-foreground/70 tabular-nums"
+      aria-label={running ? t('messages.generating') : undefined}
+      aria-hidden={!running}
+    >
+      <WorkingAnimation className="size-5" playing={running} onFinished={onFinished} />
       {/* The animation already says "still going" — the label only needs to say
           how long, so the clock stands alone. */}
-      <span>{startedAt ? <WorkingTimer startedAt={startedAt} /> : t('messages.working')}</span>
+      {running && <span>{startedAt ? <WorkingTimer startedAt={startedAt} /> : t('messages.working')}</span>}
     </div>
   );
 }
@@ -468,6 +477,25 @@ function AssistantTurn({ turn, containsLast, artifactFiles, sessionId }: { turn:
   const turnStartedAt = useChat((s) => s.turnStartedAt);
 
   const streaming = turn.some((m) => m.streaming);
+  // The indicator outlives the stream: when the turn settles the mark keeps its
+  // place until it has played the cycle it was in out to the end frame, then
+  // Working reports back and the row goes. Only turns that were actually seen
+  // streaming wind down — reopening a session must not replay one per turn.
+  const [windingDown, setWindingDown] = useState(false);
+  const wasStreaming = useRef(false);
+  useEffect(() => {
+    if (wasStreaming.current && !streaming) setWindingDown(true);
+    if (streaming) setWindingDown(false);
+    wasStreaming.current = streaming;
+  }, [streaming]);
+  const indicator = (streaming || windingDown) && (
+    <Working
+      startedAt={turnStartedAt ?? undefined}
+      running={streaming}
+      onFinished={() => setWindingDown(false)}
+    />
+  );
+
   const last = turn[turn.length - 1];
   const copyText = turn.map((m) => m.content.trim()).filter(Boolean).join('\n\n');
   // Interactive cards: a live/updated plan checklist, and (settled) a question
@@ -485,7 +513,7 @@ function AssistantTurn({ turn, containsLast, artifactFiles, sessionId }: { turn:
         {planMsg && <PlanCard msg={planMsg} />}
         {/* Persistent "still running" indicator: shown for the whole streaming
             turn — through thinking, tool calls, and text deltas. */}
-        <Working startedAt={turnStartedAt ?? undefined} />
+        {indicator}
       </>
     );
   }
@@ -555,6 +583,9 @@ function AssistantTurn({ turn, containsLast, artifactFiles, sessionId }: { turn:
       {/* RAG citations: last thing in the turn, only when the backend confirmed
           the knowledge was used. */}
       {sources.length > 0 && <RagSources sources={sources} />}
+      {/* Same spot it held while streaming — last in the turn — so the mark
+          stays put while it plays its final cycle out instead of jumping. */}
+      {indicator}
     </>
   );
 }
