@@ -14,6 +14,7 @@ import { Markdown } from './Markdown';
 import { PlanCard } from './PlanCard';
 import { RagSources } from './RagSources';
 import { ToolGroup, type GroupEntry } from './ToolGroup';
+import { WorkingAnimation } from './WorkingAnimation';
 import { ImageGallery, toolImages } from './ToolRow';
 import { Collapse } from './ui/collapse';
 import { Tooltip } from './ui/misc';
@@ -70,18 +71,15 @@ function MessageTime({ ts }: { ts?: number }) {
 }
 
 /** Persistent "still running" indicator shown for the whole assistant turn —
- *  pulsing dots plus an elapsed timer, ported from t3code's WorkingTimelineRow. */
+ *  the looping Talos mark plus an elapsed timer, ported from t3code's
+ *  WorkingTimelineRow. */
 function Working({ startedAt }: { startedAt?: number }) {
   const { t } = useTranslation();
   return (
     <div className="flex items-center gap-2 py-1 text-[11px] text-muted-foreground/70 tabular-nums" aria-label={t('messages.generating')}>
-      <span className="inline-flex items-center gap-[3px]">
-        <span className="size-1 animate-pulse rounded-full bg-muted-foreground/40" />
-        <span className="size-1 animate-pulse rounded-full bg-muted-foreground/40 [animation-delay:200ms]" />
-        <span className="size-1 animate-pulse rounded-full bg-muted-foreground/40 [animation-delay:400ms]" />
-      </span>
-      {/* The dots already say "still going" — the label only needs to say how
-          long, so the clock stands alone. */}
+      <WorkingAnimation className="size-5" />
+      {/* The animation already says "still going" — the label only needs to say
+          how long, so the clock stands alone. */}
       <span>{startedAt ? <WorkingTimer startedAt={startedAt} /> : t('messages.working')}</span>
     </div>
   );

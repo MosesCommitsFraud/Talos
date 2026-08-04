@@ -23,6 +23,7 @@
     "docx-preview": "^0.4.0",
     "i18next": "^26.3.4",
     "jszip": "^3.10.1",
+    "lottie-web": "^5.13.0",
     "lucide-react": "^1.23.0",
     "pdfjs-dist": "^6.1.200",
     "react": "^19.0.0",
