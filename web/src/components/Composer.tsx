@@ -8,7 +8,6 @@ import {
   ChevronDownIcon,
   CornerDownLeftIcon,
   DatabaseIcon,
-  FileTextIcon,
   ListChecksIcon,
   Loader2Icon,
   MicIcon,
@@ -23,7 +22,7 @@ import {
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
-import { fetchCapabilities, uploadFiles, type UploadedFile } from '@/api/client';
+import { fetchCapabilities, uploadDownloadUrl, uploadFiles, type UploadedFile } from '@/api/client';
 import type { ArtifactSelection } from '@/api/types';
 import { selectPendingPlan, useChat } from '@/state/chat';
 import { usePrefs, type ChatMode } from '@/state/prefs';
@@ -31,7 +30,9 @@ import { useUi } from '@/state/ui';
 import { cn } from '@/lib/utils';
 import { useDictation } from '@/lib/useDictation';
 import { artifactSelectionLocator } from '@/lib/artifactSelection';
+import { previewKind } from '@/lib/files';
 import { ContextMeter } from './ContextMeter';
+import { FileTypeIcon } from './FileTypeIcon';
 import { ModelPicker } from './ModelPicker';
 import { Button } from './ui/button';
 import { Menu, MenuItem, MenuLabel, MenuPopup, MenuTrigger } from './ui/menu';
@@ -714,25 +715,42 @@ export function Composer() {
             ))}
           </div>
         )}
+        {/* Staged attachments: an image shows itself, anything else shows the
+            glyph with its type baked in (PDF, XLSX, PY…) next to the name. The
+            remove button only surfaces on hover/focus, so a full strip reads as
+            content rather than as a row of close boxes. */}
         {pending.length > 0 && (
-          <div className="flex flex-wrap gap-1.5 px-3 pt-2.5">
-            {pending.map((f) => (
-              <span
-                key={f.id}
-                className="inline-flex items-center gap-1.5 rounded-lg border bg-muted px-2 py-1 text-xs"
-              >
-                <FileTextIcon className="size-3.5 text-muted-foreground" />
-                <span className="max-w-40 truncate">{String(f.name ?? f.id)}</span>
-                <button
-                  type="button"
-                  aria-label={t('composer.removeFile', { name: String(f.name ?? f.id) })}
-                  onClick={() => setPending((p) => p.filter((x) => x.id !== f.id))}
-                  className="text-muted-foreground hover:text-foreground"
-                >
-                  <XIcon className="size-3" />
-                </button>
-              </span>
-            ))}
+          <div className="flex flex-wrap gap-2 px-3 pt-2.5">
+            {pending.map((f) => {
+              const name = String(f.name ?? f.id);
+              const isImage = previewKind(name, f.mime) === 'image';
+              return (
+                <div key={f.id} className="group/att relative">
+                  <Tooltip label={name} side="top">
+                    {isImage ? (
+                      <img
+                        src={uploadDownloadUrl(f.id)}
+                        alt={name}
+                        className="size-12 rounded-lg border object-cover"
+                      />
+                    ) : (
+                      <div className="flex h-12 max-w-48 items-center gap-2 rounded-lg border bg-muted px-2.5 text-xs">
+                        <FileTypeIcon path={name} mime={f.mime} className="size-5 shrink-0 text-muted-foreground" />
+                        <span className="min-w-0 truncate">{name}</span>
+                      </div>
+                    )}
+                  </Tooltip>
+                  <button
+                    type="button"
+                    aria-label={t('composer.removeFile', { name })}
+                    onClick={() => setPending((p) => p.filter((x) => x.id !== f.id))}
+                    className="absolute -right-1.5 -top-1.5 flex size-4 items-center justify-center rounded-full border bg-background text-muted-foreground opacity-0 transition-opacity hover:text-foreground focus-visible:opacity-100 group-hover/att:opacity-100"
+                  >
+                    <XIcon className="size-2.5" />
+                  </button>
+                </div>
+              );
+            })}
           </div>
         )}
         {artifactSelection && (

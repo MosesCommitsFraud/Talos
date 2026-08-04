@@ -763,7 +763,7 @@ const en = {
         incognitoBtn: 'Incognito Mode',
         incognitoBtnHint: 'No history saved',
         messageMetrics: 'Response Metrics',
-        messageMetricsHint: 'tok/s & time under replies',
+        messageMetricsHint: 'Time under replies',
         composerAttach: 'Attach Files',
         composerPlan: 'Plan Toggle',
         composerDocs: 'Docs (RAG) Toggle',

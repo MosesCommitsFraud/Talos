@@ -19,7 +19,7 @@ import subprocess
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, unquote, urlparse
 
 ROOT = Path(__file__).resolve().parents[1]
 STATIC = ROOT / "static"
@@ -592,6 +592,9 @@ print(result)
 
 
 # In-memory shared-skills store for the settings panel preview.
+# Files posted to /api/upload during this preview run: id -> (name, mime, bytes).
+_UPLOADS: dict[str, tuple[str, str, bytes]] = {}
+
 _SHARED_SKILLS: list[dict] = [
     {
         "name": "pdf-report-builder",
@@ -969,6 +972,16 @@ class PreviewHandler(BaseHTTPRequestHandler):
             self._serve_file(STATIC / path[len("/static/") :])
             return
 
+        if path.startswith("/api/upload/"):
+            # Serves back whatever this run uploaded (see do_POST), which is what
+            # the composer's image thumbnails point at.
+            entry = _UPLOADS.get(unquote(path[len("/api/upload/") :]))
+            if entry is None:
+                self._send_json({"error": "not found"}, 404)
+                return
+            name, mime, data = entry
+            self._send(200, data, mime, {"Content-Disposition": f'inline; filename="{name}"'})
+            return
         if path == "/api/auth/settings":
             self._send_json({"auth_enabled": False, "user": "preview", "is_admin": True})
             return
@@ -1388,7 +1401,29 @@ class PreviewHandler(BaseHTTPRequestHandler):
             )
             return
         if path.startswith("/api/upload"):
-            self._send_json({"files": []})
+            # Echo the posted files back (and keep their bytes in memory, served
+            # from GET /api/upload/<id>) so the composer's attachment previews —
+            # image thumbnails included — are exercisable in the preview.
+            files = []
+            if "multipart/form-data" in ctype and "boundary=" in ctype:
+                boundary = ctype.split("boundary=")[1].split(";")[0].strip()
+                for part in body.split(b"--" + boundary.encode()):
+                    if b'filename="' not in part:
+                        continue
+                    header_blob, _, data = part.partition(b"\r\n\r\n")
+                    filename = header_blob.split(b'filename="')[1].split(b'"')[0].decode(
+                        "utf-8", errors="ignore"
+                    )
+                    if not filename:
+                        continue
+                    data = data.rstrip(b"\r\n-")
+                    file_id = f"up-{len(_UPLOADS) + 1}"
+                    mime = mimetypes.guess_type(filename)[0] or "application/octet-stream"
+                    _UPLOADS[file_id] = (filename, mime, data)
+                    files.append(
+                        {"id": file_id, "name": filename, "mime": mime, "size": len(data)}
+                    )
+            self._send_json({"files": files})
             return
         if path == "/api/shared-skills/upload":
             # Multipart bundle upload — the preview doesn't unzip; it just adds

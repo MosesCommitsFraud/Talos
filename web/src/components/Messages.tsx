@@ -506,12 +506,7 @@ function AssistantTurn({ turn, containsLast, artifactFiles, sessionId }: { turn:
       {copyText && (
         <div className="mt-2 flex items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
           <MessageActions msg={last} copyText={copyText} canDelete={false} />
-          {showMetrics && last.metrics?.tokens_per_second != null && (
-            <span className="text-xs text-muted-foreground/80">
-              {`${last.metrics.tokens_per_second} tok/s`}
-            </span>
-          )}
-          <MessageTime ts={last.createdAt} />
+          {showMetrics && <MessageTime ts={last.createdAt} />}
         </div>
       )}
       {/* RAG citations: last thing in the turn, only when the backend confirmed
@@ -639,8 +634,9 @@ export function Messages() {
                   <AttachmentList msg={block.msg} />
                   <ArtifactSelectionChip msg={block.msg} />
                   <div className="flex items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
-                    <MessageTime ts={block.msg.createdAt} />
+                    {/* Time trails the icons, matching the assistant row. */}
                     <MessageActions msg={block.msg} onEdit={() => setEditing(block.msg.id)} />
+                    <MessageTime ts={block.msg.createdAt} />
                   </div>
                 </>
               )}

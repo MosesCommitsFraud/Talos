@@ -778,7 +778,7 @@ const de: typeof en = {
         incognitoBtn: 'Inkognito-Modus',
         incognitoBtnHint: 'Kein Verlauf gespeichert',
         messageMetrics: 'Antwort-Metriken',
-        messageMetricsHint: 'Tok/s & Zeit unter den Antworten',
+        messageMetricsHint: 'Zeit unter den Antworten',
         composerAttach: 'Dateien anhängen',
         composerPlan: 'Plan-Umschalter',
         composerDocs: 'Dokumente (RAG)-Umschalter',
