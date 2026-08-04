@@ -193,6 +193,18 @@ export const artifactPreviewUrl = (sessionId: string, path: string) =>
 export const artifactRenderUrl = (sessionId: string, path: string) =>
   `/api/artifacts/${encodeURIComponent(sessionId)}/render?path=${encodeURIComponent(path)}`;
 
+/** Raw bytes from any same-origin URL — the preview panel's path for files that
+ *  aren't workspace artifacts (chat uploads, which live under /api/upload). */
+export async function fetchBlob(url: string): Promise<Blob> {
+  const res = await fetch(url, { credentials: 'same-origin', cache: 'no-store' });
+  if (res.status === 401) {
+    notifyUnauthenticated();
+    throw new Error('Not authenticated');
+  }
+  if (!res.ok) throw new Error(`${url}: ${res.status}`);
+  return res.blob();
+}
+
 /** Fetch a workspace file's raw bytes — used by the preview panel to render
  *  Word/Excel/PDF (which need the binary) and text/markdown (decoded to text). */
 export async function fetchArtifactBlob(sessionId: string, path: string): Promise<Blob> {
@@ -210,6 +222,24 @@ export async function fetchArtifactPreviewBlob(sessionId: string, path: string):
   if (res.status === 401) notifyUnauthenticated();
   if (!res.ok) throw new Error(`artifact preview ${path}: ${res.status}`);
   return res.blob();
+}
+
+/** Save a preview file: a workspace artifact by session+path, or (for chat
+ *  uploads, which carry their own URL) whatever that URL serves. */
+export async function downloadPreviewFile(file: { sessionId: string; path: string; name: string; url?: string }): Promise<void> {
+  if (!file.url) return downloadArtifact(file.sessionId, file.path, file.name);
+  const blob = await fetchBlob(file.url);
+  const url = URL.createObjectURL(blob);
+  try {
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = file.name;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+  } finally {
+    window.setTimeout(() => URL.revokeObjectURL(url), 1_000);
+  }
 }
 
 export async function downloadArtifact(sessionId: string, path: string, name: string): Promise<void> {

@@ -1,15 +1,15 @@
-import { CheckIcon, ChevronDownIcon, CopyIcon, DownloadIcon, FileTextIcon, FoldVerticalIcon, ImageIcon, ListChecksIcon, PencilIcon, ScanSearchIcon, Trash2Icon } from 'lucide-react';
+import { CheckIcon, ChevronDownIcon, CopyIcon, DownloadIcon, FoldVerticalIcon, ListChecksIcon, PencilIcon, ScanSearchIcon, Trash2Icon } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { downloadArtifact, fetchArtifacts, uploadDownloadUrl } from '@/api/client';
-import { copyTextToClipboard } from '@/lib/utils';
+import { artifactDownloadUrl, downloadArtifact, fetchArtifacts, uploadDownloadUrl } from '@/api/client';
+import { cn, copyTextToClipboard } from '@/lib/utils';
 import { artifactSelectionLocator } from '@/lib/artifactSelection';
-import { artifactDisplayName, displayName, isPreviewable, previewKind } from '@/lib/files';
+import { artifactDisplayName, displayName, fileExt, isPreviewable } from '@/lib/files';
 import { useChat, type UiMessage } from '@/state/chat';
 import { usePrefs } from '@/state/prefs';
 import { useUi } from '@/state/ui';
-import { AttachmentTile } from './AttachmentTile';
+import { AttachmentTile, FilePreviewFace, hasVisualPreview, openUploadViewer } from './AttachmentTile';
 import { Markdown } from './Markdown';
 import { PlanCard } from './PlanCard';
 import { RagSources } from './RagSources';
@@ -245,21 +245,27 @@ function formatSize(bytes?: number): string {
  *  Each tile downloads the file; the name and size live in the tooltip, where
  *  they don't cost a line of chat width. */
 function AttachmentList({ msg }: { msg: UiMessage }) {
+  const sessionId = useChat((s) => s.sessionId);
   if (!msg.attachments?.length) return null;
   return (
     <div className="mb-1 flex max-w-full flex-wrap justify-end gap-1.5">
       {msg.attachments.map((file) => {
         const name = file.name || file.id;
+        const url = uploadDownloadUrl(file.id);
         const label = file.size != null ? `${name} · ${formatSize(file.size)}` : name;
         return (
           <Tooltip key={file.id} label={label} side="top">
+            {/* An anchor, so a file with no viewer still downloads (and the
+                middle-click / "save as" affordances survive); the click handler
+                takes over for images and PDFs. */}
             <a
-              href={uploadDownloadUrl(file.id)}
+              href={url}
               download
               aria-label={label}
-              className="transition-opacity hover:opacity-80"
+              onClick={(e) => { if (openUploadViewer({ url, name, mime: file.mime, sessionId })) e.preventDefault(); }}
+              className="cursor-pointer transition-opacity hover:opacity-80"
             >
-              <AttachmentTile url={uploadDownloadUrl(file.id)} name={name} mime={file.mime} />
+              <AttachmentTile url={url} name={name} mime={file.mime} />
             </a>
           </Tooltip>
         );
@@ -351,15 +357,13 @@ function ArtifactChips({ sessionId, files }: { sessionId: string; files: Artifac
   const openPreview = useUi((s) => s.openPreview);
   if (files.length === 0) return null;
   return (
-    <div className="mt-3 flex flex-wrap gap-1.5">
+    <div className="mt-3 flex flex-wrap gap-2">
       {files.map((f) => {
         const previewable = isPreviewable(f.name, f.mime);
-        const isImage = previewKind(f.name, f.mime) === 'image';
+        const visual = hasVisualPreview(f.name, f.mime);
+        const ext = fileExt(f.name).toUpperCase();
         return (
-          <div
-            key={f.path}
-            className="group/chip inline-flex max-w-full items-center gap-1.5 rounded-lg border bg-card pl-2 pr-1 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-          >
+          <div key={f.path} className="group/chip relative">
             <button
               type="button"
               onClick={() => {
@@ -367,19 +371,49 @@ function ArtifactChips({ sessionId, files }: { sessionId: string; files: Artifac
                 else void downloadArtifact(sessionId, f.path, f.name);
               }}
               title={previewable ? t('messages.openPreview', { name: f.name }) : f.name}
-              className="flex min-w-0 items-center gap-1.5 py-1.5 text-left"
+              // A card, not a chip: the file's own first page/frame is the
+              // background for anything with a visual face, with the label
+              // block over a scrim so it stays readable on any image.
+              className="relative flex h-[132px] w-[168px] flex-col justify-end overflow-hidden rounded-xl border bg-card p-2.5 text-left transition-colors hover:border-foreground/25"
             >
-              {isImage ? <ImageIcon className="size-3.5 shrink-0" /> : <FileTextIcon className="size-3.5 shrink-0" />}
-              {/* Extension elided — the icon shows the type; the hover title
-                  keeps the full file name. */}
-              <span className="max-w-56 truncate">{displayName(f.name)}</span>
-              {f.size != null && <span className="shrink-0 opacity-70">{formatSize(f.size)}</span>}
+              {visual && (
+                <>
+                  <div className="absolute inset-0">
+                    <FilePreviewFace url={artifactDownloadUrl(sessionId, f.path)} name={f.name} mime={f.mime} width={168} height={132} />
+                  </div>
+                  <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/45 to-black/10" />
+                </>
+              )}
+              <span
+                className={cn(
+                  'absolute left-2.5 top-2.5 rounded-md px-1.5 py-0.5 text-[10px] font-semibold tracking-wide',
+                  visual ? 'bg-black/45 text-white/90' : 'bg-muted text-muted-foreground',
+                )}
+              >
+                {ext || t('artifacts.file')}
+              </span>
+              <span
+                className={cn(
+                  'relative line-clamp-2 text-[13px] font-medium leading-tight break-all',
+                  visual ? 'text-white' : 'text-foreground',
+                )}
+              >
+                {displayName(f.name)}
+              </span>
+              {f.size != null && (
+                <span className={cn('relative mt-1 text-[11px]', visual ? 'text-white/70' : 'text-muted-foreground')}>
+                  {formatSize(f.size)}
+                </span>
+              )}
             </button>
             <button
               type="button"
               onClick={() => { void downloadArtifact(sessionId, f.path, f.name); }}
               aria-label={t('artifacts.download', { name: f.name })}
-              className="flex size-6 shrink-0 items-center justify-center rounded-md transition-colors hover:bg-accent-foreground/10"
+              className={cn(
+                'absolute right-1.5 top-1.5 flex size-6 items-center justify-center rounded-md opacity-0 transition-opacity focus-visible:opacity-100 group-hover/chip:opacity-100',
+                visual ? 'bg-black/45 text-white hover:bg-black/65' : 'bg-muted text-muted-foreground hover:text-foreground',
+              )}
             >
               <DownloadIcon className="size-3.5" />
             </button>

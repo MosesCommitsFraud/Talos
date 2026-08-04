@@ -1225,7 +1225,10 @@ class PreviewHandler(BaseHTTPRequestHandler):
         if path.startswith("/api/artifacts/"):
             # Download endpoint: stream one of the sample files (so the preview
             # panel has real markdown/csv/text to render in dev).
-            if "/download" in path:
+            # Match the trailing segment, not a substring: the preview's own
+            # session is called "preview-session", which an `in path` test read
+            # as the /preview endpoint and 404'd the artifact list.
+            if path.endswith("/download"):
                 name = parse_qs(parsed.query).get("path", [""])[0]
                 content, ctype = _SAMPLE_ARTIFACTS.get(name, (b"", "application/octet-stream"))
                 disp = "inline" if ctype.startswith("image/") else "attachment"
@@ -1239,7 +1242,7 @@ class PreviewHandler(BaseHTTPRequestHandler):
             # Office preview (LibreOffice→PDF) isn't available in the mock, so
             # 404 like a backend without the sandbox. This forces the frontend's
             # client-side fallback (SheetJS for .xlsx), matching real setups.
-            if "/preview" in path:
+            if path.endswith("/preview"):
                 self._send_json({"detail": "Sandbox not available"}, 404)
                 return
             self._send_json(

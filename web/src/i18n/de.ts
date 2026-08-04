@@ -446,6 +446,7 @@ const de: typeof en = {
     noFiles: 'Noch keine Dateien. Hochgeladene Eingaben und vom Agenten erstellte Dateien erscheinen hier.',
     loadError: 'Die Artefakte dieses Chats konnten nicht geladen werden.',
     download: '{{name}} herunterladen',
+    file: 'DATEI',
   },
   login: {
     loginHeading: 'Willkommen zurück',

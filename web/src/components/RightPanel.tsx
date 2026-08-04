@@ -1,7 +1,7 @@
 import { useCallback, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { DownloadIcon, FolderArchiveIcon, XIcon } from 'lucide-react';
-import { downloadArtifact, downloadArtifactsZip } from '@/api/client';
+import { downloadArtifactsZip, downloadPreviewFile } from '@/api/client';
 import { useChat } from '@/state/chat';
 import { usePrefs } from '@/state/prefs';
 import { useUi } from '@/state/ui';
@@ -109,7 +109,7 @@ export function RightPanel() {
             <Tooltip label={t('preview.download')}>
               <button
                 type="button"
-                onClick={() => { void downloadArtifact(preview.sessionId, preview.path, preview.name); }}
+                onClick={() => { void downloadPreviewFile(preview); }}
                 aria-label={t('preview.download')}
                 className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
               >

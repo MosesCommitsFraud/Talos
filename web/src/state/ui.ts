@@ -13,6 +13,10 @@ export type AppView = 'chat' | 'rag' | 'users' | 'tickets';
 export interface PreviewFile {
   sessionId: string;
   path: string;
+  /** Fetch the bytes from here instead of the session-artifact endpoint. Set for
+   *  files that aren't workspace artifacts — chat uploads, which live under
+   *  /api/upload/<id> and belong to no session. */
+  url?: string;
   name: string;
   mime?: string;
   content?: string;

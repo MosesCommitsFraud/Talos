@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type P
 import { useTranslation } from 'react-i18next';
 import { CodeIcon, ExternalLinkIcon, EyeIcon, FileTextIcon, MousePointer2Icon, RotateCcwIcon } from 'lucide-react';
 import type { ArtifactSelectionTarget } from '@/api/types';
-import { artifactRenderUrl, downloadArtifact, fetchArtifactBlob, fetchArtifactPreviewBlob, fetchDocumentVersions, restoreDocumentVersion, updateDocument, type DocumentVersion } from '@/api/client';
+import { artifactRenderUrl, downloadPreviewFile, fetchArtifactBlob, fetchBlob, fetchArtifactPreviewBlob, fetchDocumentVersions, restoreDocumentVersion, updateDocument, type DocumentVersion } from '@/api/client';
 import { fileExt, previewKind, type PreviewKind } from '@/lib/files';
 import { queryClient } from '@/lib/queryClient';
 import { useUi, type PreviewFile } from '@/state/ui';
@@ -169,7 +169,7 @@ export function PreviewContent({ preview }: { preview: PreviewFile | null }) {
         // and the magic-byte check rejects a non-PDF body (e.g. an error page
         // returned with a 200); either way we fall through to the browser
         // renderers below.
-        if (kind === 'word') {
+        if (kind === 'word' && !preview.url) {
           try {
             const pdf = await fetchArtifactPreviewBlob(preview.sessionId, preview.path);
             if (cancelled) return;
@@ -184,7 +184,10 @@ export function PreviewContent({ preview }: { preview: PreviewFile | null }) {
             // the matching LibreOffice module while a sandbox is restarting.
           }
         }
-        const blob = await fetchArtifactBlob(preview.sessionId, preview.path);
+        // A chat upload isn't a workspace artifact — it carries its own URL.
+        const blob = preview.url
+          ? await fetchBlob(preview.url)
+          : await fetchArtifactBlob(preview.sessionId, preview.path);
         if (cancelled) return;
         if (kind === 'image' || kind === 'pdf') {
           if (kind === 'pdf') {
@@ -231,7 +234,7 @@ export function PreviewContent({ preview }: { preview: PreviewFile | null }) {
           const text = await blob.text();
           if (!cancelled) {
             setCurrentText(text);
-            setLoaded({ kind: 'html', text, url: artifactRenderUrl(preview.sessionId, preview.path) });
+            setLoaded({ kind: 'html', text, url: preview.url ?? artifactRenderUrl(preview.sessionId, preview.path) });
           }
         } else {
           const text = await blob.text();
@@ -970,7 +973,7 @@ function PreviewBody({ loaded, preview, markMode, htmlSource, onBoxCandidate, co
       <PdfViewer
         blob={loaded.blob}
         name={preview.name}
-        onDownload={() => { void downloadArtifact(preview.sessionId, preview.path, preview.name); }}
+        onDownload={() => { void downloadPreviewFile(preview); }}
       />
     );
   }
