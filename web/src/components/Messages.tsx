@@ -71,17 +71,23 @@ function MessageTime({ ts }: { ts?: number }) {
   return <span className="text-xs text-muted-foreground/70 tabular-nums">{label}</span>;
 }
 
-/** Seconds of continuous reasoning at which the status moves on to the next
- *  phrase in `thinking.phases` ("thinking" → "thinking more" → …). The last one
- *  holds however long the stretch runs; nothing here claims to know when the
- *  model will stop, the phrasing just stops escalating. */
+/** Seconds since the turn's first reasoning at which the status moves on to the
+ *  next phrase in `thinking.phases` ("thinking" → "thinking more" → …). */
 const THINKING_PHASE_SECONDS = [0, 6, 15, 30, 50];
+/** Once the ladder above runs out the phrases keep swapping on this beat, so a
+ *  long turn reads as alive rather than as a frozen caption. */
+const THINKING_ROTATE_SECONDS = 9;
 
-/** Live reasoning status: says that the model is thinking and, by escalating
- *  through the phase phrases, roughly how long it has been at it. Read-only —
- *  the reasoning itself streams into the turn body where it happened, so there
- *  is nothing here to open. */
-function ThinkingStatus({ since }: { since: number | null }) {
+/** Reasoning status: says the model is thinking and, by working through the
+ *  phrases, roughly how long it has been at it.
+ *
+ *  It stays for the whole turn once any reasoning has appeared, not just while
+ *  deltas are landing — a model that thinks, calls a tool and thinks again is
+ *  doing one continuous thing, and a caption blinking in and out of the row was
+ *  noisier than the work it described. Only the shimmer tracks whether the
+ *  reasoning is streaming right now. Read-only: the text itself sits in the turn
+ *  body where it happened. */
+function ThinkingStatus({ since, live }: { since: number | null; live: boolean }) {
   const { t } = useTranslation();
   const [, force] = useState(0);
   useEffect(() => {
@@ -93,14 +99,23 @@ function ThinkingStatus({ since }: { since: number | null }) {
   const list = Array.isArray(phases) && phases.length > 0 ? (phases as string[]) : [t('thinking.thinking')];
   const seconds = since != null ? (Date.now() - since) / 1000 : 0;
   const step = THINKING_PHASE_SECONDS.filter((s) => seconds >= s).length - 1;
-  const label = list[Math.min(Math.max(step, 0), list.length - 1)];
+  const last = list.length - 1;
+  let index = Math.min(Math.max(step, 0), last);
+  if (step >= last && list.length > 2) {
+    // Past the end of the ladder: cycle the phrases after the opening one. The
+    // first is skipped because coming back to a bare "thinking" after "almost
+    // done thinking" reads as the turn having restarted.
+    const overrun = seconds - THINKING_PHASE_SECONDS[last];
+    index = 1 + (Math.floor(overrun / THINKING_ROTATE_SECONDS) % last);
+  }
+  const label = list[index];
 
   return (
     // Clipped, and keyed on the text, so a phase change rolls up into place
     // instead of swapping in flat — same idiom as the tool-group label.
     <span className="block min-w-0 overflow-hidden">
       <span key={label} className="tool-label-roll block">
-        <span className="shimmer-text block truncate">{label}</span>
+        <span className={`block truncate ${live ? 'shimmer-text' : ''}`}>{label}</span>
       </span>
     </span>
   );
@@ -119,6 +134,7 @@ function Working({
   running = true,
   onFinished,
   tokens,
+  thinking,
   thinkingLive,
   thinkingSince,
 }: {
@@ -126,6 +142,7 @@ function Working({
   running?: boolean;
   onFinished?: () => void;
   tokens: number;
+  thinking: boolean;
   thinkingLive: boolean;
   thinkingSince: number | null;
 }) {
@@ -149,10 +166,10 @@ function Working({
           </span>
         </>
       )}
-      {running && thinkingLive && (
+      {running && thinking && (
         <>
           <span aria-hidden>·</span>
-          <ThinkingStatus since={thinkingSince} />
+          <ThinkingStatus since={thinkingSince} live={thinkingLive} />
         </>
       )}
     </div>
@@ -219,6 +236,29 @@ function buildSegments(turn: UiMessage[]): TurnSegment[] {
  *  model is billed for it and it is most of the output while it thinks. */
 const estimateOutputTokens = (turn: UiMessage[]): number =>
   Math.round(turn.reduce((acc, m) => acc + m.content.length + (m.thinking?.length ?? 0), 0) / 4);
+
+/** The tick the token count is sampled on. Recomputing per delta made the digits
+ *  churn constantly, so the number only moves when the turn reaches a checkpoint
+ *  the reader can actually point at: the turn opening, each tool call coming
+ *  back, and each new round of the agent loop. */
+const tokenCheckpoint = (turn: UiMessage[]): number =>
+  turn.length + turn.reduce((acc, m) => acc + (m.tools ?? []).filter((c) => c.status !== 'running').length, 0);
+
+/** Token count as the row should show it: the live estimate, resampled only when
+ *  `checkpoint` changes. */
+function useSampledTokens(estimate: number, checkpoint: number): number {
+  const [shown, setShown] = useState(estimate);
+  const lastCheckpoint = useRef(checkpoint);
+  useEffect(() => {
+    if (lastCheckpoint.current === checkpoint) return;
+    lastCheckpoint.current = checkpoint;
+    setShown(estimate);
+    // `estimate` is deliberately not a dependency — it changes on every delta,
+    // and reacting to it is exactly the churn this hook exists to prevent.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [checkpoint]);
+  return shown;
+}
 
 /** Settled-turn fold: collapses everything the turn did — reasoning, tool groups
  *  and the commentary between them — behind a quiet "Worked for Xs" line, with
@@ -580,21 +620,25 @@ function AssistantTurn({ turn, containsLast, artifactFiles, sessionId }: { turn:
     wasStreaming.current = streaming;
   }, [streaming]);
   // Reasoning deltas are landing on a bubble that has not started its answer
-  // yet — that is what "thinking right now" means on this wire.
+  // yet — that is what "thinking right now" means on this wire. `hasThinking`
+  // is what keeps the status in the row afterwards; only the shimmer follows
+  // `live`.
   const thinkingLive = turn.some((m) => m.streaming && !!m.thinking && !m.content);
-  // When the CURRENT stretch of reasoning started, which is what the status
-  // phrases escalate on. Reset whenever thinking stops, so a second round of
-  // reasoning opens at "thinking" again rather than at "almost done".
+  const hasThinking = turn.some((m) => !!m.thinking?.trim());
+  // When the turn's reasoning first appeared. Anchored once and left alone: the
+  // phrases describe one continuous stretch of thinking, so a second round
+  // should carry on down the ladder rather than reopen at "thinking".
   const thinkingSince = useRef<number | null>(null);
-  if (thinkingLive) thinkingSince.current ??= Date.now();
-  else thinkingSince.current = null;
+  if (hasThinking) thinkingSince.current ??= Date.now();
 
+  const tokens = useSampledTokens(estimateOutputTokens(turn), tokenCheckpoint(turn));
   const indicator = (streaming || windingDown) && (
     <Working
       startedAt={turnStartedAt ?? undefined}
       running={streaming}
       onFinished={() => setWindingDown(false)}
-      tokens={estimateOutputTokens(turn)}
+      tokens={tokens}
+      thinking={hasThinking}
       thinkingLive={thinkingLive}
       thinkingSince={thinkingSince.current}
     />

@@ -32,7 +32,10 @@ export const DEFAULT_VISIBILITY: Visibility = {
   sidebarSettingsBtn: true,
   chatHeader: true,
   welcomeText: true,
-  showThinking: true,
+  // Off by default: the reasoning is long, and the status beside the working
+  // timer already says the model is thinking. Readers who want the text turn it
+  // on in Settings → Visibility.
+  showThinking: false,
   incognitoBtn: true,
   messageMetrics: true,
   composerAttach: true,
