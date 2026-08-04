@@ -123,11 +123,15 @@ function ThinkingStatus({ since, live }: { since: number | null; live: boolean }
       title={t(showThinking ? 'thinking.hide' : 'thinking.show')}
       onClick={() => setVisibility('showThinking', !showThinking)}
       // Clipped, and keyed on the text, so a phase change rolls up into place
-      // instead of swapping in flat — same idiom as the tool-group label.
-      className="block min-w-0 overflow-hidden text-left transition-colors hover:text-foreground"
+      // instead of swapping in flat — same idiom as the tool-group label. The
+      // underline is the only affordance it has: nothing else in this row is
+      // clickable, and a caption that never changes on hover doesn't look it.
+      className="block min-w-0 overflow-hidden text-left underline-offset-2 transition-colors hover:text-foreground hover:underline"
     >
       <span key={label} className="tool-label-roll block">
-        <span className={`block truncate ${live ? 'shimmer-text' : ''}`}>{label}</span>
+        {/* Shimmers in its own muted colour, not the brand blue: this is a
+            caption on a quiet row, not something demanding attention. */}
+        <span className={`block truncate ${live ? 'shimmer-text-soft' : ''}`}>{label}</span>
       </span>
     </button>
   );

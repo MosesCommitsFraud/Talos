@@ -408,6 +408,26 @@ body::after {
   .shimmer-text { animation: none; }
 }
 
+/* Same sweep, in the element's own colour instead of the brand blue. For live
+   labels that sit inside quiet chrome — the reasoning status in the working row
+   — where a coloured word would read as an alert rather than as a caption. */
+.shimmer-text-soft {
+  background: linear-gradient(
+    100deg,
+    color-mix(in srgb, currentColor 45%, transparent) 35%,
+    currentColor 50%,
+    color-mix(in srgb, currentColor 45%, transparent) 65%
+  );
+  background-size: 200% 100%;
+  background-clip: text;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: shimmer-sweep 1.6s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .shimmer-text-soft { animation: none; }
+}
+
 /* ── Tool-group label roll ──
    When the running tool changes ("Running a command" → "Querying SQL") the new
    label rolls up into place from below. The element is keyed on its text in

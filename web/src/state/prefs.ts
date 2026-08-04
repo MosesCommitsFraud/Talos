@@ -46,6 +46,26 @@ export const DEFAULT_VISIBILITY: Visibility = {
   contextMeter: true,
 };
 
+/* ── showThinking's flipped default ──
+ * It used to default on, so every install that predates the change carries an
+ * explicit `true` — in localStorage and in the server-side copy — and would
+ * keep showing reasoning forever despite the new default. Until the reader
+ * expresses an opinion by toggling it (the status label in the working row, or
+ * Settings → Visibility), the default wins over both stored copies. After that
+ * their choice is theirs and is left alone. */
+const THINKING_CHOICE_KEY = 'talos-thinking-choice';
+
+const thinkingChosen = (): boolean => {
+  try { return localStorage.getItem(THINKING_CHOICE_KEY) === '1'; } catch { return false; }
+};
+
+const rememberThinkingChoice = (): void => {
+  try { localStorage.setItem(THINKING_CHOICE_KEY, '1'); } catch { /* storage disabled — the default just keeps applying */ }
+};
+
+const withThinkingDefault = (visibility: Visibility): Visibility =>
+  thinkingChosen() ? visibility : { ...visibility, showThinking: DEFAULT_VISIBILITY.showThinking };
+
 interface PrefsState {
   theme: Theme;
   density: Density;
@@ -113,7 +133,12 @@ export const usePrefs = create<PrefsState>()(
       setSortMode: (sortMode) => set({ sortMode }),
       setLang: (lang) => { void i18n.changeLanguage(lang); set({ lang }); },
       setLlmLang: (llmLang) => set({ llmLang }),
-      setVisibility: (key, value) => set((s) => ({ visibility: { ...s.visibility, [key]: value } })),
+      setVisibility: (key, value) => {
+        // Toggling it is the reader stating a preference, which from here on
+        // outranks the flipped default (see THINKING_CHOICE_KEY).
+        if (key === 'showThinking') rememberThinkingChoice();
+        set((s) => ({ visibility: { ...s.visibility, [key]: value } }));
+      },
       resetVisibility: () => set({ visibility: DEFAULT_VISIBILITY }),
       toggle: (key) => set((s) => ({ [key]: !s[key] }) as Partial<PrefsState>),
       setKnowledge: (useRag, useDb) => set({ useRag, useDb }),
@@ -136,7 +161,11 @@ export const usePrefs = create<PrefsState>()(
       // Old persisted states predate `visibility`; merge so new keys exist.
       merge: (persisted, current) => {
         const p = (persisted ?? {}) as Partial<PrefsState>;
-        return { ...current, ...p, visibility: { ...DEFAULT_VISIBILITY, ...(p.visibility ?? {}) } };
+        return {
+          ...current,
+          ...p,
+          visibility: withThinkingDefault({ ...DEFAULT_VISIBILITY, ...(p.visibility ?? {}) }),
+        };
       },
     },
   ),
@@ -197,7 +226,9 @@ export async function syncPrefsForUser(who: string): Promise<void> {
       for (const k of SYNCED_KEYS) {
         if (value[k] !== undefined) (patch as Record<string, unknown>)[k] = value[k];
       }
-      patch.visibility = { ...DEFAULT_VISIBILITY, ...(value.visibility ?? {}) };
+      // The server copy carries the old default too, so it gets the same
+      // treatment as the local one.
+      patch.visibility = withThinkingDefault({ ...DEFAULT_VISIBILITY, ...(value.visibility ?? {}) });
       usePrefs.setState(patch);
       if (patch.lang) void i18n.changeLanguage(patch.lang);
       hydrating = false;
