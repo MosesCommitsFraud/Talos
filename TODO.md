@@ -1,32 +1,16 @@
-themes
-scrolling während streaming bad
-besseres kontextmenu -> less icons more like claude
 sidebar für plan öffnet sich nicht
-account thing needs better
-contextmeter doesnt show correct thing - even more wrong???
-skills like .claude
 reset to defaults button
 save setting profile
 sources placement
 actual queue list
-Tage for left sidebar
 search expand on rag explorer
-rag explorer needs more keywords and example questions
-when sth has a lot of images in rag how do i get the ai to just show the important ones -> vlm
-/ commands like claude
 what if images are shown despite not being relevant
 queueing only
-"wahrscheinlich" nicht sicher in eigene angaben
 sharepoint devops anbindung
 zensierung von dokumenten
 rag video screenshots when important
 projects?
-reload breaks running chat
-running chat disappears when reloading
-rag cant find new documents
-websearch experimental
 system prompt needs to be better
-ragflow erwähnt in rag settings
 queueing gives grey screen
 artifact editing for markdown output
 switching chat when preview or artifact panel is open should close it automatically
@@ -34,5 +18,4 @@ sometimes image not shown and still no artifact when create document
 detaillierter für websuche skills und account
 clicking on preview should open the only available artifact; if there are several open the list instead
 options ask user better deisgn needed
-skills should be perma selected
-usage thing rework
+deep research

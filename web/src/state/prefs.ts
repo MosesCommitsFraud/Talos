@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import i18n, { type Lang } from '@/i18n';
+import i18n, { DEFAULT_LANG, pickLang, type Lang } from '@/i18n';
 
 export type Theme = 'dark' | 'light' | 'system';
 export type Density = 'compact' | 'comfortable' | 'spacious';
@@ -71,6 +71,8 @@ interface PrefsState {
   density: Density;
   sortMode: SortMode;
   lang: Lang;
+  /** False until the reader picks a language themselves — see pickLang. */
+  langChosen: boolean;
   llmLang: LlmLang;
   visibility: Visibility;
   /** Composer knowledge sources. The chat-input control (mode dropdown when
@@ -116,7 +118,8 @@ export const usePrefs = create<PrefsState>()(
       theme: 'dark',
       density: 'comfortable',
       sortMode: 'active',
-      lang: 'en',
+      lang: DEFAULT_LANG,
+      langChosen: false,
       llmLang: 'auto',
       visibility: DEFAULT_VISIBILITY,
       planMode: false,
@@ -131,7 +134,9 @@ export const usePrefs = create<PrefsState>()(
       setTheme: (theme) => set({ theme }),
       setDensity: (density) => set({ density }),
       setSortMode: (sortMode) => set({ sortMode }),
-      setLang: (lang) => { void i18n.changeLanguage(lang); set({ lang }); },
+      // Picking a language is the reader stating an opinion, which from here on
+      // outranks the flipped default (see pickLang in @/i18n).
+      setLang: (lang) => { void i18n.changeLanguage(lang); set({ lang, langChosen: true }); },
       setLlmLang: (llmLang) => set({ llmLang }),
       setVisibility: (key, value) => {
         // Toggling it is the reader stating a preference, which from here on
@@ -165,6 +170,7 @@ export const usePrefs = create<PrefsState>()(
           ...current,
           ...p,
           visibility: withThinkingDefault({ ...DEFAULT_VISIBILITY, ...(p.visibility ?? {}) }),
+          lang: pickLang(p.lang, p.langChosen),
         };
       },
     },
@@ -179,7 +185,7 @@ export const usePrefs = create<PrefsState>()(
  * incognito, plan mode, mic) intentionally stays local-only. */
 
 const SYNCED_KEYS = [
-  'theme', 'density', 'sortMode', 'lang', 'llmLang', 'visibility',
+  'theme', 'density', 'sortMode', 'lang', 'langChosen', 'llmLang', 'visibility',
   'useRag', 'useDb', 'reasoning',
 ] as const;
 type SyncedKey = (typeof SYNCED_KEYS)[number];
@@ -229,8 +235,12 @@ export async function syncPrefsForUser(who: string): Promise<void> {
       // The server copy carries the old default too, so it gets the same
       // treatment as the local one.
       patch.visibility = withThinkingDefault({ ...DEFAULT_VISIBILITY, ...(value.visibility ?? {}) });
+      // Server wins, so a blob predating `langChosen` counts as "never picked"
+      // and lands on the default even if this browser thinks otherwise.
+      patch.langChosen = !!value.langChosen;
+      patch.lang = pickLang(value.lang, value.langChosen);
       usePrefs.setState(patch);
-      if (patch.lang) void i18n.changeLanguage(patch.lang);
+      void i18n.changeLanguage(patch.lang);
       hydrating = false;
     } else {
       // First login on this account: seed the server with the local prefs.
