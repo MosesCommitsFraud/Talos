@@ -57,7 +57,10 @@ FUNCTION_TOOL_SCHEMAS = [
                                     "type": "string",
                                     "description": "Exact text from the previous run's code (including indentation)",
                                 },
-                                "replacement": {"type": "string", "description": "Replacement text"},
+                                "replacement": {
+                                    "type": "string",
+                                    "description": "Replacement text",
+                                },
                                 "allow_multiple": {
                                     "type": "boolean",
                                     "description": "Allow replacing multiple matches of this target",
@@ -97,7 +100,10 @@ FUNCTION_TOOL_SCHEMAS = [
                                     "type": "string",
                                     "description": "Exact text from the previous cell (including indentation)",
                                 },
-                                "replacement": {"type": "string", "description": "Replacement text"},
+                                "replacement": {
+                                    "type": "string",
+                                    "description": "Replacement text",
+                                },
                                 "allow_multiple": {
                                     "type": "boolean",
                                     "description": "Allow replacing multiple matches of this target",

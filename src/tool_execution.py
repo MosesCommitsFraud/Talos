@@ -736,7 +736,7 @@ def _repair_hint(tool: str, code_id: str) -> str:
         return ""
     return (
         f"[The code you just ran is retained as {code_id}. To fix it, call `{tool}` again with "
-        f"`edits`: [{{\"target\": \"<exact snippet from that code>\", \"replacement\": \"<fixed>\"}}] "
+        f'`edits`: [{{"target": "<exact snippet from that code>", "replacement": "<fixed>"}}] '
         f"and NO `code` field. Do not resend the whole script.]"
     )
 

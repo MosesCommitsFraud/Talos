@@ -1414,8 +1414,10 @@ class PreviewHandler(BaseHTTPRequestHandler):
                     if b'filename="' not in part:
                         continue
                     header_blob, _, data = part.partition(b"\r\n\r\n")
-                    filename = header_blob.split(b'filename="')[1].split(b'"')[0].decode(
-                        "utf-8", errors="ignore"
+                    filename = (
+                        header_blob.split(b'filename="')[1]
+                        .split(b'"')[0]
+                        .decode("utf-8", errors="ignore")
                     )
                     if not filename:
                         continue
@@ -1423,9 +1425,7 @@ class PreviewHandler(BaseHTTPRequestHandler):
                     file_id = f"up-{len(_UPLOADS) + 1}"
                     mime = mimetypes.guess_type(filename)[0] or "application/octet-stream"
                     _UPLOADS[file_id] = (filename, mime, data)
-                    files.append(
-                        {"id": file_id, "name": filename, "mime": mime, "size": len(data)}
-                    )
+                    files.append({"id": file_id, "name": filename, "mime": mime, "size": len(data)})
             self._send_json({"files": files})
             return
         if path == "/api/shared-skills/upload":

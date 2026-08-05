@@ -706,7 +706,9 @@ export function Sidebar({
               </MenuPopup>
             </Menu>
           </div>
-          <div className="min-h-0 flex-1 space-y-px overflow-y-auto px-2 pb-2">{chatList}</div>
+          {/* No bottom padding: the footer divider sits flush against the last
+              chat row, and the footer supplies the space below it instead. */}
+          <div className="min-h-0 flex-1 space-y-px overflow-y-auto px-2">{chatList}</div>
         </>
       )}
 
@@ -755,8 +757,8 @@ export function Sidebar({
           />
         </div>
       ) : (
-        <div className="px-2 pt-1.5 pb-1.5">
-          <div className="mx-1 mb-1 h-px bg-border" />
+        <div className="px-2 pb-3">
+          <div className="mx-1 mb-2 h-px bg-border" />
           {(visibility.sidebarUserBar || visibility.sidebarSettingsBtn) && (
             // Account row + the ticket button pinned to the right edge. The
             // account trigger sizes to its label (capped) instead of filling

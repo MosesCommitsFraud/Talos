@@ -140,5 +140,7 @@ def start(
     )
     t = asyncio.create_task(_run(rec["id"], task, session_id))
     bg_jobs.register_agent_task(rec["id"], t)
-    logger.info("background task %s started for session %s: %s", rec["id"], session_id, rec["command"])
+    logger.info(
+        "background task %s started for session %s: %s", rec["id"], session_id, rec["command"]
+    )
     return rec

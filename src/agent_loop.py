@@ -1604,6 +1604,8 @@ def _tool_parallelism() -> int:
     except (TypeError, ValueError):
         return 4
     return max(1, min(n, 8))
+
+
 # Each SQL-knowledge refresh rewrites the consolidated system block and so costs
 # a full re-prefill of the conversation. Two is enough to recover from a wrong
 # first retrieval without turning the turn into a prefill loop.
