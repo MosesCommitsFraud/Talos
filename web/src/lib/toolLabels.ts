@@ -9,8 +9,10 @@ export type Translate = (key: string, opts?: Record<string, unknown>) => string;
  *  MCP tool with an arbitrary name) still renders sensibly. */
 const FAMILY: Record<string, string> = {
   bash: 'command',
-  python: 'command',
-  run_cell: 'command',
+  // Not 'command': a shell line reads as a label, a Python block does not —
+  // "Ran import pandas as pd" is the first line of a 60-line script.
+  python: 'code',
+  run_cell: 'code',
   read_file: 'read',
   write_file: 'write',
   edit_file: 'edit',
@@ -27,7 +29,34 @@ const FAMILY: Record<string, string> = {
   web_fetch: 'fetch',
   generate_image: 'image',
   show_image: 'image',
+  browse_skills: 'skills',
+  read_skill: 'skills',
+  manage_skills: 'skillManage',
+  create_skill: 'skillNew',
+  search_chats: 'chats',
+  background_task: 'task',
+  expand_output: 'expand',
+  update_plan: 'plan',
+  ask_user: 'ask',
+  // The UI calls a session a "chat", so the labels must too.
+  create_session: 'chatNew',
+  list_sessions: 'chatsList',
+  send_to_session: 'chatSend',
+  manage_session: 'chatManage',
+  manage_documents: 'docsManage',
+  manage_settings: 'settings',
+  list_models: 'models',
+  api_call: 'api',
+  // The three server-admin tools share one phrasing: they are rare, and their
+  // `action` argument already says which knob was turned.
+  manage_endpoints: 'admin',
+  manage_mcp: 'admin',
+  manage_tokens: 'admin',
 };
+
+/** Families whose subject is their `action` argument ("Changed settings: set").
+ *  These tools are dispatchers — the action is the only part worth a label. */
+const ACTION_SUBJECT = new Set(['chatManage', 'docsManage', 'settings', 'skillManage', 'admin']);
 
 export function toolFamily(tool: string): string {
   return FAMILY[tool] ?? 'generic';
@@ -78,6 +107,26 @@ export function callSubject(call: ToolCall): string {
     // uses its own counted phrasing and stays clean.
     case 'command':
       return truncate(firstLine(raw), 64);
+    // Nothing worth naming: the family wording says it all, and the block
+    // itself is one click away in the row. `ask` and `chatSend` carry their
+    // text in a card of their own, so repeating it here would be noise.
+    case 'code':
+    case 'plan':
+    case 'ask':
+    case 'models':
+    case 'chatsList':
+    case 'chatSend':
+    case 'skillNew':
+      return '';
+    case 'skills':
+    case 'chats':
+      return pick('query', 'name', 'skill') || firstLine(raw);
+    case 'task':
+      return truncate(pick('description', 'prompt', 'task'), 56);
+    case 'chatNew':
+      return truncate(pick('title', 'name'), 48);
+    case 'api':
+      return truncate(pick('url', 'endpoint', 'name'), 56);
     case 'read':
     case 'write':
     case 'edit':
@@ -102,6 +151,9 @@ export function callSubject(call: ToolCall): string {
     case 'document':
       return truncate(pick('title', 'name', 'path'), 48);
     default: {
+      if (ACTION_SUBJECT.has(toolFamily(call.tool))) {
+        return truncate(pick('action', 'key', 'name').replace(/_/g, ' '), 48);
+      }
       // MCP tools and anything else the FAMILY map doesn't know: show the first
       // meaningful string argument so a live row says what it is working on
       // rather than just naming the tool.
@@ -279,15 +331,18 @@ export function summarizeCalls(calls: ToolCall[], t: Translate): Clause[] {
       };
     };
 
-    // Commands and file edits read better with a real plural ("Ran 3 commands",
-    // "Edited 2 files") than with a repeat suffix ("Ran a command 3 times").
-    if (family === 'command' || family === 'read' || family === 'write' || family === 'edit') {
-      const usable = subject || count > 1 || !NEEDS_SUBJECT.has(family) ? family : 'generic';
-      const key = usable === 'generic' ? 'toolGroup.generic.past' : `toolGroup.${usable}.summary`;
-      return build(key, usable);
+    // A batch has no single subject to name, so a subject-hungry family needs
+    // its own counted plural — without one, "Searched for {{subject}}" renders
+    // as a dangling "Searched for twice". `count > 1` therefore keeps the
+    // family alive here even when NEEDS_SUBJECT would drop it to 'generic'.
+    const usable = subject || count > 1 || !NEEDS_SUBJECT.has(family) ? family : 'generic';
+    // A real plural ("Ran 3 commands", "Listed 2 directories") reads better
+    // than a repeat suffix ("Ran a command 3 times"). Families without
+    // `summary` keys fall through to the suffix wording below.
+    if (t(`toolGroup.${usable}.summary`, { count, defaultValue: '' })) {
+      return build(`toolGroup.${usable}.summary`, usable);
     }
 
-    const usable = subject || !NEEDS_SUBJECT.has(family) ? family : 'generic';
     const times = repeatSuffix(count, t);
     if (times) {
       // The repeat count cannot be appended language-neutrally: English puts it

@@ -379,6 +379,23 @@ def _cold_agent_turn(ts_offset: int) -> dict:
                     "output": "id, customer_id, total, created_at",
                     "exit_code": 0,
                 },
+                # Two calls of a family whose wording wants a subject: the group
+                # header must fall back to the counted plural ("Listed 2
+                # directories") instead of naming one of the two paths.
+                {
+                    "round": 1,
+                    "tool": "ls",
+                    "command": '{"path": "src"}',
+                    "output": "report.py\nschema.sql",
+                    "exit_code": 0,
+                },
+                {
+                    "round": 1,
+                    "tool": "ls",
+                    "command": '{"path": "tests"}',
+                    "output": "test_report.py",
+                    "exit_code": 0,
+                },
                 {
                     "round": 2,
                     "tool": "query_sql",
