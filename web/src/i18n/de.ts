@@ -341,30 +341,42 @@ const de: typeof en = {
     },
     // `pastN` setzt die Wiederholung ("zweimal", "4×") an die im Deutschen
     // richtige Stelle — vor das Partizip, nicht dahinter.
+    // `runningNamed` ist die ausführliche Live-Formulierung — nur während der
+    // Aufruf läuft und nur, wenn er ein Subjekt mitbringt. Die abgeschlossene
+    // `past`-Fassung bleibt bewusst kurz.
     document: {
       verbPast: 'bearbeitet',
       running: 'Bearbeitet das Dokument',
+      runningNamed: 'Bearbeitet {{subject}}',
       past: 'Dokument {{verb}}',
       pastN: 'Dokument {{times}} {{verb}}',
     },
     grep: { verbPast: 'gesucht', running: 'Sucht nach {{subject}}', past: 'Nach {{subject}} {{verb}}' },
-    glob: { verbPast: 'gefunden', running: 'Sucht Dateien', past: 'Dateien {{verb}}' },
+    glob: {
+      verbPast: 'gefunden',
+      running: 'Sucht Dateien',
+      runningNamed: 'Sucht Dateien mit dem Muster {{subject}}',
+      past: 'Dateien {{verb}}',
+    },
     ls: { verbPast: 'aufgelistet', running: 'Listet {{subject}}', past: '{{subject}} {{verb}}' },
     sql: {
       verbPast: 'abgefragt',
       running: 'Fragt die Datenbank ab',
+      runningNamed: 'Fragt die Datenbank ab: {{subject}}',
       past: 'Datenbank {{verb}}',
       pastN: 'Datenbank {{times}} {{verb}}',
     },
     knowledge: {
       verbPast: 'durchsucht',
       running: 'Durchsucht die Wissensdatenbank',
+      runningNamed: 'Durchsucht die Wissensdatenbank nach {{subject}}',
       past: 'Wissensdatenbank {{verb}}',
       pastN: 'Wissensdatenbank {{times}} {{verb}}',
     },
     web: {
       verbPast: 'durchsucht',
       running: 'Durchsucht das Web',
+      runningNamed: 'Durchsucht das Web nach {{subject}}',
       past: 'Web {{verb}}',
       pastN: 'Web {{times}} {{verb}}',
     },
@@ -372,12 +384,14 @@ const de: typeof en = {
     image: {
       verbPast: 'erzeugt',
       running: 'Erzeugt ein Bild',
+      runningNamed: 'Erzeugt ein Bild von {{subject}}',
       past: 'Bild {{verb}}',
       pastN: '{{count}} Bilder {{verb}}',
     },
     generic: {
       verbPast: 'ausgeführt',
       running: 'Führt {{tool}} aus',
+      runningNamed: 'Führt {{tool}} aus für {{subject}}',
       past: '{{tool}} {{verb}}',
       pastN: '{{tool}} {{times}} {{verb}}',
     },

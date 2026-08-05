@@ -93,10 +93,24 @@ export function callSubject(call: ToolCall): string {
       return pick('url') || firstLine(raw);
     case 'sql': {
       const action = pick('action');
-      return action && action !== 'query' ? action.replace(/_/g, ' ') : '';
+      if (action && action !== 'query') return action.replace(/_/g, ' ');
+      const sql = pick('sql', 'query');
+      return sql ? truncate(sql.replace(/\s+/g, ' '), 56) : '';
     }
-    default:
-      return '';
+    case 'image':
+      return truncate(pick('prompt', 'description', 'caption'), 56);
+    case 'document':
+      return truncate(pick('title', 'name', 'path'), 48);
+    default: {
+      // MCP tools and anything else the FAMILY map doesn't know: show the first
+      // meaningful string argument so a live row says what it is working on
+      // rather than just naming the tool.
+      const first = Object.entries(args).find(
+        ([, value]) => typeof value === 'string' && value.trim().length > 0,
+      );
+      if (first) return truncate((first[1] as string).replace(/\s+/g, ' ').trim(), 56);
+      return raw.startsWith('{') ? '' : truncate(firstLine(raw), 56);
+    }
   }
 }
 
@@ -154,7 +168,13 @@ export function partsToString(parts: LabelParts): string {
 
 /** Label for ONE call. `tense: 'running'` yields the live present participle
  *  ("Reading TODO.md") and carries no verb segment — a call in flight has no
- *  pass/fail to show. `'past'` yields the settled form ("Read TODO.md"). */
+ *  pass/fail to show. `'past'` yields the settled form ("Read TODO.md").
+ *
+ *  A running label says as much as it can about what is happening right now
+ *  ("Searching the web for WM 2026 winner"); the settled one drops back to the
+ *  short recap ("Searched the web"), because once it is done the detail is one
+ *  click away in the row and would only clutter the timeline. That is why
+ *  `runningNamed` exists for families whose `past` carries no subject. */
 export function describeCall(call: ToolCall, t: Translate, tense: 'running' | 'past'): LabelParts {
   const family = toolFamily(call.tool);
   const subject = callSubject(call);
@@ -162,7 +182,14 @@ export function describeCall(call: ToolCall, t: Translate, tense: 'running' | 'p
   // the plain "Running a command" wording.
   const named = family === 'command' && subject;
   const usable = named || subject || !NEEDS_SUBJECT.has(family) ? family : 'generic';
-  const key = named ? `toolGroup.command.${tense}Named` : `toolGroup.${usable}.${tense}`;
+  let key = named ? `toolGroup.command.${tense}Named` : `toolGroup.${usable}.${tense}`;
+  // Live rows prefer the detailed phrasing when the family defines one and the
+  // call actually carries a subject. `defaultValue` keeps this optional: a
+  // family without `runningNamed` just keeps its plain wording.
+  if (tense === 'running' && subject && !named) {
+    const detailed = `toolGroup.${usable}.runningNamed`;
+    if (t(detailed, { defaultValue: '' })) key = detailed;
+  }
   const isFile = !!subject && FILE_SUBJECT.has(usable);
   const rendered = t(key, {
     subject: isFile ? NAME_MARK : subject,

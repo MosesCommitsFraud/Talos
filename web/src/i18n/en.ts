@@ -336,25 +336,42 @@ const en = {
     },
     // `pastN` places the repeat count ("twice", "4 times") inside the clause —
     // see summarizeCalls, which cannot append it language-neutrally.
+    // `runningNamed` is the live, detailed phrasing — used only while the call
+    // is in flight, when it actually has a subject to name. The settled `past`
+    // wording stays short on purpose.
     document: {
       verbPast: 'Edited',
       running: 'Editing the document',
+      runningNamed: 'Editing {{subject}}',
       past: '{{verb}} the document',
       pastN: '{{verb}} the document {{times}}',
     },
     grep: { verbPast: 'Searched', running: 'Searching for {{subject}}', past: '{{verb}} for {{subject}}' },
-    glob: { verbPast: 'Found', running: 'Finding files', past: '{{verb}} files' },
+    glob: {
+      verbPast: 'Found',
+      running: 'Finding files',
+      runningNamed: 'Finding files matching {{subject}}',
+      past: '{{verb}} files',
+    },
     ls: { verbPast: 'Listed', running: 'Listing {{subject}}', past: '{{verb}} {{subject}}' },
-    sql: { verbPast: 'Queried', running: 'Querying SQL', past: '{{verb}} SQL', pastN: '{{verb}} SQL {{times}}' },
+    sql: {
+      verbPast: 'Queried',
+      running: 'Querying SQL',
+      runningNamed: 'Querying SQL: {{subject}}',
+      past: '{{verb}} SQL',
+      pastN: '{{verb}} SQL {{times}}',
+    },
     knowledge: {
       verbPast: 'Searched',
       running: 'Searching the knowledge base',
+      runningNamed: 'Searching the knowledge base for {{subject}}',
       past: '{{verb}} the knowledge base',
       pastN: '{{verb}} the knowledge base {{times}}',
     },
     web: {
       verbPast: 'Searched',
       running: 'Searching the web',
+      runningNamed: 'Searching the web for {{subject}}',
       past: '{{verb}} the web',
       pastN: '{{verb}} the web {{times}}',
     },
@@ -362,10 +379,17 @@ const en = {
     image: {
       verbPast: 'Generated',
       running: 'Generating an image',
+      runningNamed: 'Generating an image of {{subject}}',
       past: '{{verb}} an image',
       pastN: '{{verb}} {{count}} images',
     },
-    generic: { verbPast: 'Ran', running: 'Running {{tool}}', past: '{{verb}} {{tool}}', pastN: '{{verb}} {{tool}} {{times}}' },
+    generic: {
+      verbPast: 'Ran',
+      running: 'Running {{tool}}',
+      runningNamed: 'Running {{tool}} on {{subject}}',
+      past: '{{verb}} {{tool}}',
+      pastN: '{{verb}} {{tool}} {{times}}',
+    },
   },
   palette: {
     newChat: 'New chat',

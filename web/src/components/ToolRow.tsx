@@ -1,5 +1,5 @@
 import { ChevronRightIcon } from 'lucide-react';
-import { useState } from 'react';
+import { type ReactNode, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { ToolCall } from '@/api/types';
 import { describeCall, diffStat, partsToString } from '@/lib/toolLabels';
@@ -58,11 +58,12 @@ export function toolImages(call: ToolCall): ToolImage[] {
 
 /** Line-coloured unified diff, the format `_unified_diff` emits on the backend
  *  for edit_file / write_file. Shown instead of the raw tool output so a code
- *  edit reads as a change rather than as a log line. */
+ *  edit reads as a change rather than as a log line. Renders as a bare section —
+ *  the surrounding `CallDetails` box supplies border, background and type. */
 export function DiffView({ diff }: { diff: string }) {
   const lines = diff.split('\n');
   return (
-    <pre className="max-h-80 overflow-auto rounded-lg border bg-muted/60 py-2 font-mono text-[12.5px] leading-snug">
+    <pre className="max-h-80 overflow-auto py-2">
       {lines.map((line, i) => {
         const kind = line.startsWith('+++') || line.startsWith('---')
           ? 'meta'
@@ -108,6 +109,39 @@ export function DiffStatBadge({ added, removed }: { added: number; removed: numb
   );
 }
 
+/** Command, diff and output as ONE box rather than three stacked ones: a single
+ *  border and background, sections split by hairlines. The command reads at
+ *  full brightness (it is the thing you scanned for), the output muted below
+ *  it, so the pair scans as input → result instead of as two equal blocks. */
+function CallDetails({ call }: { call: ToolCall }) {
+  const sections: ReactNode[] = [];
+  if (call.command) {
+    sections.push(
+      <pre key="cmd" className="max-h-56 overflow-auto bg-muted/70 px-3 py-2 whitespace-pre-wrap">{call.command}</pre>,
+    );
+  }
+  if (call.diff) sections.push(<DiffView key="diff" diff={call.diff} />);
+  if (call.output) {
+    sections.push(
+      <pre key="out" className="max-h-72 overflow-y-auto px-3 py-2 whitespace-pre-wrap text-muted-foreground">
+        {call.output}
+      </pre>,
+    );
+  }
+  if (sections.length === 0) return null;
+  return (
+    <div className="overflow-hidden rounded-lg border bg-muted/25 font-mono text-[12.5px] leading-snug">
+      {sections.map((section, i) => (
+        // Hairline between sections only — never above the first one, which
+        // would double up with the box's own border.
+        <div key={i} className={i > 0 ? 'border-t border-border/60' : undefined}>
+          {section}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 /** One tool-call row inside a ToolGroup: a readable label ("Read TODO.md"),
  *  expandable to the raw command, its output, and a diff when the call changed
  *  a file. `compact` suppresses the inline image gallery — those images
@@ -137,14 +171,8 @@ export function ToolRow({ call, compact = false }: { call: ToolCall; compact?: b
         <ChevronRightIcon className={`size-3.5 shrink-0 opacity-60 transition-transform ${open ? 'rotate-90' : ''}`} />
       </button>
       <Collapse open={open}>
-        <div className="space-y-1.5 px-3 pb-2.5">
-          {call.command && (
-            <pre className="max-h-56 overflow-auto rounded-lg border bg-muted px-3 py-2 font-mono text-[12.5px] leading-snug whitespace-pre-wrap">{call.command}</pre>
-          )}
-          {call.diff && <DiffView diff={call.diff} />}
-          {call.output && (
-            <pre className="max-h-72 overflow-y-auto rounded-lg border bg-muted px-3 py-2 font-mono text-[12.5px] leading-snug whitespace-pre-wrap">{call.output}</pre>
-          )}
+        <div className="px-3 pb-2.5">
+          <CallDetails call={call} />
         </div>
       </Collapse>
       {(call.image_note || (!compact && images.length > 0)) && (
