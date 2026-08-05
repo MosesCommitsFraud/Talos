@@ -260,8 +260,15 @@ type TurnSegment =
  *  Activity accumulates across rounds and only flushes when the model speaks
  *  again, so ten silent lookups collapse into a single "Ran 10 commands" line
  *  instead of ten stacked rows. Within a round the order mirrors what actually
- *  happened: the model thinks, says something, then calls its tools. */
-function buildSegments(turn: UiMessage[]): TurnSegment[] {
+ *  happened: the model thinks, says something, then calls its tools.
+ *
+ *  `showThinking` is taken here rather than at render time because reasoning
+ *  interrupts a run of tool calls: it flushes the group so the calls before it
+ *  and after it stay on the right sides. Dropping the block later but keeping
+ *  the split left two adjacent groups with nothing between them — visibly
+ *  further apart than the calls inside a single group, for a reason the reader
+ *  could not see. With the reasoning hidden it does not divide anything. */
+function buildSegments(turn: UiMessage[], showThinking: boolean): TurnSegment[] {
   const out: TurnSegment[] = [];
   let pending: GroupEntry[] = [];
   let pendingId = '';
@@ -282,7 +289,7 @@ function buildSegments(turn: UiMessage[]): TurnSegment[] {
     // Flushed first: the previous round's calls happened before this round's
     // reasoning, and a group that swallowed the boundary would print them the
     // other way round.
-    if (m.thinking?.trim()) {
+    if (showThinking && m.thinking?.trim()) {
       flush();
       out.push({ kind: 'thinking', id: m.id, text: m.thinking.trim() });
     }
@@ -377,22 +384,23 @@ function ActivityFold({ turn, showThinking, durationMs, terminalId }: { turn: Ui
 function TurnBody({ turn, showThinking, hideContentFor }: { turn: UiMessage[]; showThinking: boolean; hideContentFor?: string }) {
   return (
     <>
-      {buildSegments(turn).map((seg) => {
+      {buildSegments(turn, showThinking).map((seg) => {
         if (seg.kind === 'activity') {
           return <ToolGroup key={`act-${seg.id}`} entries={seg.entries} />;
         }
         if (seg.kind === 'thinking') {
-          // Reasoning is opt-out. Italic and muted at message size: an aside in
-          // the same voice as the answer, not a separate kind of object — which
-          // is why it carries no border, header or chevron.
-          return showThinking ? (
+          // Italic and muted at message size: an aside in the same voice as the
+          // answer, not a separate kind of object — which is why it carries no
+          // border, header or chevron. Reasoning is opt-out, but the opting out
+          // happens in buildSegments, which leaves no gap behind.
+          return (
             <div
               key={`think-${seg.id}`}
               className="my-1 text-[15px] leading-relaxed whitespace-pre-wrap text-muted-foreground italic"
             >
               {seg.text}
             </div>
-          ) : null;
+          );
         }
         if (seg.msg.id === hideContentFor) return null;
         return (
