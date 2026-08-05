@@ -8,11 +8,29 @@ import { useTranslation } from 'react-i18next';
  *  character so React remounts just that one and replays the animation; cells
  *  are keyed by position so the rest of the row sits still.
  *
- *  Grouping separators come from the active locale, so this renders 1,248 in
- *  English and 1.248 in German. */
-export function RollingNumber({ value, className }: { value: number; className?: string }) {
+ *  Plain numbers are locale-formatted (1,248 in English, 1.248 in German); the
+ *  abbreviated form is not — see `compact`. */
+export function RollingNumber({
+  value,
+  compact,
+  className,
+}: {
+  value: number;
+  /** Abbreviate from a thousand up: 999 → "999", 1500 → "1.5k", 12340 → "12.3k".
+   *
+   *  Written the same way in every language, decimal point and lower-case k
+   *  included. It is a unit of measure here rather than prose, and both of the
+   *  localised alternatives make it worse: Intl's compact notation shouts
+   *  "1.5K" and expands to "1,5 Tsd." in German, and a plain German decimal
+   *  comma turns "1,5k" into something that reads like a thousands separator. */
+  compact?: boolean;
+  className?: string;
+}) {
   const { i18n } = useTranslation();
-  const text = new Intl.NumberFormat(i18n.language).format(value);
+  const text =
+    compact && value >= 1000
+      ? `${Math.round(value / 100) / 10}k`
+      : new Intl.NumberFormat(i18n.language).format(value);
   return (
     // The digits are announced as one number rather than as a column of
     // characters, and the live value is polite: it changes far too often to be

@@ -257,10 +257,23 @@ const de: typeof en = {
     thinking: 'Denkt nach…',
     show: 'Gedanken anzeigen',
     hide: 'Gedanken ausblenden',
-    // Live-Status neben der Arbeitsuhr. Welcher erscheint, hängt davon ab, wie
-    // lange der aktuelle Denkabschnitt schon läuft — siehe THINKING_PHASE_SECONDS.
-    // Die Reihenfolge zählt: erster Eintrag zum Auftakt, letzter bleibt stehen.
-    phases: ['denkt nach', 'denkt weiter', 'denkt immer noch', 'denkt es durch', 'fast fertig mit Denken'],
+    // Live-Status neben der Arbeitsuhr. Eine Formulierung pro
+    // THINKING_PHRASE_SECONDS, der Reihe nach und danach ab dem zweiten Eintrag
+    // im Kreis. Die Reihenfolge zählt: der erste ist der Auftakt und kommt nie
+    // wieder, die folgenden steigern sich — sie heißen „das dauert“.
+    phases: [
+      'denkt nach',
+      'denkt weiter',
+      'denkt immer noch',
+      'denkt es durch',
+      'wälzt es hin und her',
+      'arbeitet es durch',
+      'grübelt',
+      'immer noch dabei',
+      'tief in Gedanken',
+      'gleich so weit',
+      'fast fertig mit Denken',
+    ],
     // Von der Zahl getrennt: die Ziffern rollen einzeln (siehe RollingNumber),
     // von hier kommt nur die Einheit.
     tokensUnit: 'Token',

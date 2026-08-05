@@ -255,10 +255,23 @@ const en = {
     thinking: 'Thinking…',
     show: 'Show thinking',
     hide: 'Hide thinking',
-    // Live status beside the working timer. Which one shows depends on how long
-    // the current stretch of reasoning has run — see THINKING_PHASE_SECONDS.
-    // Order matters: first is the opening phrase, last is the one it settles on.
-    phases: ['thinking', 'thinking more', 'still thinking', 'thinking it through', 'almost done thinking'],
+    // Live status beside the working timer. One phrase per THINKING_PHRASE_SECONDS,
+    // walked in order and then cycled from the second entry. Order matters: the
+    // first is the opening phrase and is never returned to, and the ones after
+    // it should escalate — they are read as "this is taking a while".
+    phases: [
+      'thinking',
+      'thinking more',
+      'still thinking',
+      'thinking it through',
+      'turning it over',
+      'working through it',
+      'mulling it over',
+      'still at it',
+      'deep in thought',
+      'nearly there',
+      'almost done thinking',
+    ],
     // Split from the number itself: the count rolls digit by digit (see
     // RollingNumber), so only the unit comes from here.
     tokensUnit: 'token',

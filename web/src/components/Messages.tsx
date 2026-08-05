@@ -72,12 +72,11 @@ function MessageTime({ ts }: { ts?: number }) {
   return <span className="text-xs text-muted-foreground/70 tabular-nums">{label}</span>;
 }
 
-/** Seconds since the turn's first reasoning at which the status moves on to the
- *  next phrase in `thinking.phases` ("thinking" → "thinking more" → …). */
-const THINKING_PHASE_SECONDS = [0, 6, 15, 30, 50];
-/** Once the ladder above runs out the phrases keep swapping on this beat, so a
- *  long turn reads as alive rather than as a frozen caption. */
-const THINKING_ROTATE_SECONDS = 9;
+/** How long each phrase in `thinking.phases` holds before the status moves on to
+ *  the next one. The list is walked in order and then cycled, so this is also
+ *  the beat a long turn keeps swapping on. Slow on purpose: the words are a
+ *  caption, and a caption that rewrites itself every few seconds is a fidget. */
+const THINKING_PHRASE_SECONDS = 18;
 
 /** Reasoning status: says the model is thinking and, by working through the
  *  phrases, roughly how long it has been at it.
@@ -85,13 +84,16 @@ const THINKING_ROTATE_SECONDS = 9;
  *  It stays for the whole turn once any reasoning has appeared, not just while
  *  deltas are landing — a model that thinks, calls a tool and thinks again is
  *  doing one continuous thing, and a caption blinking in and out of the row was
- *  noisier than the work it described. Only the shimmer tracks whether the
- *  reasoning is streaming right now.
+ *  noisier than the work it described.
+ *
+ *  Deliberately still: no shimmer, no roll on the phrase change. The words
+ *  themselves change often enough to show the turn is alive, and the animation
+ *  next to them is already doing that job.
  *
  *  Clicking it shows or hides the reasoning text in the turn body. It is the
  *  same preference the Settings panel exposes, put where a reader actually
  *  wants it: next to the words telling them there is reasoning to read. */
-function ThinkingStatus({ since, live }: { since: number | null; live: boolean }) {
+function ThinkingStatus({ since }: { since: number | null }) {
   const { t } = useTranslation();
   const showThinking = usePrefs((s) => s.visibility.showThinking);
   const setVisibility = usePrefs((s) => s.setVisibility);
@@ -104,17 +106,12 @@ function ThinkingStatus({ since, live }: { since: number | null; live: boolean }
   const phases = t('thinking.phases', { returnObjects: true });
   const list = Array.isArray(phases) && phases.length > 0 ? (phases as string[]) : [t('thinking.thinking')];
   const seconds = since != null ? (Date.now() - since) / 1000 : 0;
-  const step = THINKING_PHASE_SECONDS.filter((s) => seconds >= s).length - 1;
+  const step = Math.floor(Math.max(seconds, 0) / THINKING_PHRASE_SECONDS);
+  // Straight down the list, then round again from the second phrase. The first
+  // is skipped on the way round because returning to a bare "thinking" after
+  // "almost done thinking" reads as the turn having started over.
   const last = list.length - 1;
-  let index = Math.min(Math.max(step, 0), last);
-  if (step >= last && list.length > 2) {
-    // Past the end of the ladder: cycle the phrases after the opening one. The
-    // first is skipped because coming back to a bare "thinking" after "almost
-    // done thinking" reads as the turn having restarted.
-    const overrun = seconds - THINKING_PHASE_SECONDS[last];
-    index = 1 + (Math.floor(overrun / THINKING_ROTATE_SECONDS) % last);
-  }
-  const label = list[index];
+  const label = step <= last || last < 1 ? list[Math.min(step, last)] : list[1 + ((step - last - 1) % last)];
 
   return (
     <button
@@ -122,17 +119,11 @@ function ThinkingStatus({ since, live }: { since: number | null; live: boolean }
       aria-pressed={showThinking}
       title={t(showThinking ? 'thinking.hide' : 'thinking.show')}
       onClick={() => setVisibility('showThinking', !showThinking)}
-      // Clipped, and keyed on the text, so a phase change rolls up into place
-      // instead of swapping in flat — same idiom as the tool-group label. The
-      // underline is the only affordance it has: nothing else in this row is
-      // clickable, and a caption that never changes on hover doesn't look it.
-      className="block min-w-0 overflow-hidden text-left underline-offset-2 transition-colors hover:text-foreground hover:underline"
+      // Brightening on hover is the whole affordance: no underline, nothing that
+      // moves.
+      className="block min-w-0 truncate text-left transition-colors hover:text-foreground"
     >
-      <span key={label} className="tool-label-roll block">
-        {/* Shimmers in its own muted colour, not the brand blue: this is a
-            caption on a quiet row, not something demanding attention. */}
-        <span className={`block truncate ${live ? 'shimmer-text-soft' : ''}`}>{label}</span>
-      </span>
+      {label}
     </button>
   );
 }
@@ -157,7 +148,6 @@ function Working({
   onFinished,
   tokens,
   thinking,
-  thinkingLive,
   thinkingSince,
 }: {
   startedAt?: number;
@@ -168,7 +158,6 @@ function Working({
   onFinished?: () => void;
   tokens: number;
   thinking: boolean;
-  thinkingLive: boolean;
   thinkingSince: number | null;
 }) {
   const { t } = useTranslation();
@@ -240,7 +229,7 @@ function Working({
         <>
           <span aria-hidden>·</span>
           <span className="flex items-center gap-1" aria-label={t('thinking.tokensLabel', { count: tokens })}>
-            <RollingNumber value={tokens} />
+            <RollingNumber value={tokens} compact />
             <span aria-hidden>{t('thinking.tokensUnit', { count: tokens })}</span>
           </span>
         </>
@@ -248,7 +237,7 @@ function Working({
       {running && thinking && (
         <>
           <span aria-hidden>·</span>
-          <ThinkingStatus since={thinkingSince} live={thinkingLive} />
+          <ThinkingStatus since={thinkingSince} />
         </>
       )}
     </div>
@@ -309,12 +298,21 @@ function buildSegments(turn: UiMessage[]): TurnSegment[] {
 
 /** Output tokens produced so far, estimated from what has streamed in.
  *
+ *  Everything the model wrote counts: the answer, the reasoning, and the tool
+ *  calls it issued (their name and arguments). What comes BACK from a tool is
+ *  left out — a file read can run to tens of thousands of tokens, and none of
+ *  them were generated here; they arrive as input to the next round.
+ *
  *  The wire has no live count — `metrics.output_tokens` only lands in the final
  *  event, once the turn is over and this row is already going away — so the
- *  running number is chars/4, the usual rough ratio. Reasoning counts too: the
- *  model is billed for it and it is most of the output while it thinks. */
-const estimateOutputTokens = (turn: UiMessage[]): number =>
-  Math.round(turn.reduce((acc, m) => acc + m.content.length + (m.thinking?.length ?? 0), 0) / 4);
+ *  running number is chars/4, the usual rough ratio. */
+const estimateOutputTokens = (turn: UiMessage[]): number => {
+  const chars = turn.reduce((acc, m) => {
+    const calls = (m.tools ?? []).reduce((n, c) => n + c.tool.length + (c.command?.length ?? 0), 0);
+    return acc + m.content.length + (m.thinking?.length ?? 0) + calls;
+  }, 0);
+  return Math.round(chars / 4);
+};
 
 /** The tick the token count is sampled on. Recomputing per delta made the digits
  *  churn constantly, so the number only moves when the turn reaches a checkpoint
@@ -698,11 +696,8 @@ function AssistantTurn({ turn, containsLast, artifactFiles, sessionId }: { turn:
     if (streaming) setWindingDown(false);
     wasStreaming.current = streaming;
   }, [streaming]);
-  // Reasoning deltas are landing on a bubble that has not started its answer
-  // yet — that is what "thinking right now" means on this wire. `hasThinking`
-  // is what keeps the status in the row afterwards; only the shimmer follows
-  // `live`.
-  const thinkingLive = turn.some((m) => m.streaming && !!m.thinking && !m.content);
+  // Any reasoning at all in this turn keeps the status in the row, whether or
+  // not deltas are landing at this instant.
   const hasThinking = turn.some((m) => !!m.thinking?.trim());
   // When the turn's reasoning first appeared. Anchored once and left alone: the
   // phrases describe one continuous stretch of thinking, so a second round
@@ -720,7 +715,6 @@ function AssistantTurn({ turn, containsLast, artifactFiles, sessionId }: { turn:
       onFinished={() => setWindingDown(false)}
       tokens={tokens}
       thinking={hasThinking}
-      thinkingLive={thinkingLive}
       thinkingSince={thinkingSince.current}
     />
   );
