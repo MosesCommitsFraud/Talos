@@ -224,10 +224,18 @@ const de: typeof en = {
     funTokens: 'Du hast ~{{n}}× mehr Tokens verbraucht als {{book}}.',
     funMessages: 'Das sind schon {{count}} Nachrichten.',
     books: {
+      hamlet: 'Hamlet',
       gatsby: 'Der große Gatsby',
+      harryPotter: 'Harry Potter und der Stein der Weisen',
       hobbit: 'Der Hobbit',
+      dune: 'Der Wüstenplanet',
       mobyDick: 'Moby-Dick',
+      lotr: 'Der Herr der Ringe',
       warAndPeace: 'Krieg und Frieden',
+      bible: 'die Lutherbibel',
+      shakespeare: 'Shakespeares Gesamtwerk',
+      wheelOfTime: 'die komplette Rad-der-Zeit-Reihe',
+      britannica: 'die Encyclopædia Britannica',
     },
   },
   messages: {

@@ -222,10 +222,18 @@ const en = {
     funTokens: "You've used ~{{n}}× more tokens than {{book}}.",
     funMessages: "That's {{count}} messages and counting.",
     books: {
+      hamlet: 'Hamlet',
       gatsby: 'The Great Gatsby',
+      harryPotter: "Harry Potter and the Philosopher's Stone",
       hobbit: 'The Hobbit',
+      dune: 'Dune',
       mobyDick: 'Moby-Dick',
+      lotr: 'The Lord of the Rings',
       warAndPeace: 'War and Peace',
+      bible: 'the King James Bible',
+      shakespeare: "Shakespeare's complete works",
+      wheelOfTime: 'the entire Wheel of Time series',
+      britannica: 'the Encyclopædia Britannica',
     },
   },
   messages: {

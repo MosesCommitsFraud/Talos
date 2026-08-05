@@ -24,12 +24,22 @@ function firstNameOf(name?: string | null): string | null {
   return first.charAt(0).toUpperCase() + first.slice(1);
 }
 
-/** Token totals compared against well-known books (rough token counts). */
+/** Token totals compared against well-known works (rough token counts,
+ *  ~1.33 tokens per word). Ordered ascending — funFact picks the largest
+ *  one the user has comfortably outwritten. */
 const BOOKS: { key: string; tokens: number }[] = [
+  { key: 'hamlet', tokens: 40_000 },
   { key: 'gatsby', tokens: 63_000 },
+  { key: 'harryPotter', tokens: 100_000 },
   { key: 'hobbit', tokens: 127_000 },
+  { key: 'dune', tokens: 250_000 },
   { key: 'mobyDick', tokens: 285_000 },
-  { key: 'warAndPeace', tokens: 750_000 },
+  { key: 'lotr', tokens: 640_000 },
+  { key: 'warAndPeace', tokens: 780_000 },
+  { key: 'bible', tokens: 1_050_000 },
+  { key: 'shakespeare', tokens: 1_200_000 },
+  { key: 'wheelOfTime', tokens: 5_800_000 },
+  { key: 'britannica', tokens: 58_000_000 },
 ];
 
 function funFact(t: (k: string, o?: Record<string, unknown>) => string, stats: UsageStats): string | null {
@@ -54,8 +64,18 @@ function StatTile({ label, value }: { label: string; value: string }) {
   );
 }
 
-const CELL = 10; // px — fixed so the squares stay perfectly regular
-const GAP = 3;
+const GAP = 4;
+const CELL_MIN = 11; // px
+const CELL_MAX = 18;
+const GRID_WIDTH = 528; // panel max-width (560) minus its p-4 padding
+
+/** Largest square size that keeps `cols` columns inside GRID_WIDTH. */
+function cellSize(cols: number): number {
+  const fit = Math.floor((GRID_WIDTH - GAP * (cols - 1)) / cols);
+  return Math.max(CELL_MIN, Math.min(CELL_MAX, fit));
+}
+
+const EMPTY_BG = 'color-mix(in srgb, var(--foreground) 8%, transparent)';
 
 /** GitHub-style activity heatmap: one column per week (Monday-first),
  *  oldest→newest, with a shared hover tooltip showing date + count. */
@@ -68,8 +88,13 @@ function Heatmap({ daily }: { daily: UsageStats['daily'] }) {
   const warm = useRef(false);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const max = Math.max(1, ...daily.map((d) => d.count));
-  // Pad the first column so rows are true weekdays (Monday on top).
+  // Pad the first column so rows are true weekdays (Monday on top), and pad
+  // the last one so the grid is a full rectangle. Both paddings render as
+  // empty cells, which keeps every edge of the block straight.
   const lead = daily.length ? (new Date(`${daily[0].date}T00:00:00`).getDay() + 6) % 7 : 0;
+  const cols = Math.ceil((lead + daily.length) / 7);
+  const trail = cols * 7 - lead - daily.length;
+  const cell = cellSize(cols);
 
   return (
     <div
@@ -82,22 +107,24 @@ function Heatmap({ daily }: { daily: UsageStats['daily'] }) {
     >
       <div
         className="grid grid-flow-col"
-        style={{ gridTemplateRows: `repeat(7, ${CELL}px)`, gridAutoColumns: `${CELL}px`, gap: GAP }}
+        style={{ gridTemplateRows: `repeat(7, ${cell}px)`, gridAutoColumns: `${cell}px`, gap: GAP }}
         aria-hidden
       >
-        {Array.from({ length: lead }, (_, i) => <div key={`pad-${i}`} />)}
+        {Array.from({ length: lead }, (_, i) => (
+          <div key={`pad-${i}`} className="rounded-[3px]" style={{ background: EMPTY_BG }} />
+        ))}
         {daily.map((d, i) => (
           <div
             key={d.date}
-            className="rounded-[2px]"
+            className="rounded-[3px]"
             onMouseEnter={() => {
-              const cell = i + lead;
               const dateLabel = new Date(`${d.date}T00:00:00`).toLocaleDateString(i18n.language, {
                 weekday: 'short', day: 'numeric', month: 'short',
               });
+              const slot = i + lead;
               const next = {
-                x: Math.floor(cell / 7) * (CELL + GAP) + CELL / 2,
-                y: (cell % 7) * (CELL + GAP),
+                x: Math.floor(slot / 7) * (cell + GAP) + cell / 2,
+                y: (slot % 7) * (cell + GAP),
                 label: `${dateLabel} — ${t('home.heatmapCount', { count: d.count })}`,
               };
               if (timer.current) clearTimeout(timer.current);
@@ -112,10 +139,13 @@ function Heatmap({ daily }: { daily: UsageStats['daily'] }) {
             }}
             style={{
               background: d.count === 0
-                ? 'color-mix(in srgb, var(--foreground) 8%, transparent)'
+                ? EMPTY_BG
                 : `color-mix(in srgb, var(--primary) ${Math.round(35 + 65 * (d.count / max))}%, transparent)`,
             }}
           />
+        ))}
+        {Array.from({ length: trail }, (_, i) => (
+          <div key={`trail-${i}`} className="rounded-[3px]" style={{ background: EMPTY_BG }} />
         ))}
       </div>
       {hover && (
