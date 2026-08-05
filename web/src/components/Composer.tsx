@@ -32,7 +32,7 @@ import { useDictation } from '@/lib/useDictation';
 import { artifactSelectionLocator } from '@/lib/artifactSelection';
 import { previewKind } from '@/lib/files';
 import { ContextMeter } from './ContextMeter';
-import { hasVisualPreview, openUploadViewer } from './AttachmentTile';
+import { FilePreviewFace, hasVisualPreview, openUploadViewer } from './AttachmentTile';
 import { FileTypeIcon } from './FileTypeIcon';
 import { ModelPicker } from './ModelPicker';
 import { Button } from './ui/button';
@@ -739,11 +739,9 @@ export function Composer() {
                       )}
                     >
                       {isImage ? (
-                        <img
-                          src={uploadDownloadUrl(f.id)}
-                          alt={name}
-                          className="size-12 rounded-lg border object-cover"
-                        />
+                        <div className="size-12 overflow-hidden rounded-lg border bg-muted">
+                          <FilePreviewFace url={uploadDownloadUrl(f.id)} name={name} mime={f.mime} width={48} height={48} />
+                        </div>
                       ) : (
                         <div className="flex h-12 max-w-48 items-center gap-2 rounded-lg border bg-muted px-2.5 text-xs">
                           <FileTypeIcon path={name} mime={f.mime} className="size-5 shrink-0 text-muted-foreground" />

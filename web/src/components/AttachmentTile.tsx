@@ -1,6 +1,5 @@
-import { useEffect, useRef, useState } from 'react';
-import type { PDFDocumentLoadingTask } from 'pdfjs-dist';
 import { previewKind } from '@/lib/files';
+import { useThumbnail } from '@/lib/thumbnails';
 import { useUi } from '@/state/ui';
 import { FileTypeIcon } from './FileTypeIcon';
 
@@ -29,64 +28,6 @@ export function hasVisualPreview(name: string, mime?: string): boolean {
   return kind === 'image' || kind === 'pdf';
 }
 
-/** First page of a PDF, rendered to cover its box. pdf.js and its worker load
- *  lazily, so a chat with no PDFs never pays for them; any failure (offline,
- *  encrypted, not really a PDF) falls back to the type glyph. */
-function PdfThumb({ url, name, width, height }: { url: string; name: string; width: number; height: number }) {
-  const canvas = useRef<HTMLCanvasElement>(null);
-  const [failed, setFailed] = useState(false);
-
-  useEffect(() => {
-    let cancelled = false;
-    let task: PDFDocumentLoadingTask | null = null;
-    void (async () => {
-      try {
-        const [pdfjs, worker, res] = await Promise.all([
-          import('pdfjs-dist'),
-          import('pdfjs-dist/build/pdf.worker.min.mjs?url'),
-          fetch(url, { credentials: 'same-origin' }),
-        ]);
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const data = await res.arrayBuffer();
-        if (cancelled) return;
-        pdfjs.GlobalWorkerOptions.workerSrc = worker.default;
-        task = pdfjs.getDocument({ data });
-        const page = await (await task.promise).getPage(1);
-        const element = canvas.current;
-        if (cancelled || !element) return;
-        // Cover, not contain: a letterboxed page at thumbnail size is mostly
-        // margin and reads as a blank box, so scale past the box and let the
-        // parent's overflow crop it.
-        const pixelRatio = Math.min(window.devicePixelRatio || 1, 2);
-        const base = page.getViewport({ scale: 1 });
-        const viewport = page.getViewport({
-          scale: pixelRatio * Math.max(width / base.width, height / base.height),
-        });
-        element.width = Math.floor(viewport.width);
-        element.height = Math.floor(viewport.height);
-        element.style.width = `${viewport.width / pixelRatio}px`;
-        element.style.height = `${viewport.height / pixelRatio}px`;
-        const context = element.getContext('2d', { alpha: false });
-        if (!context) return;
-        await page.render({ canvas: element, canvasContext: context, viewport }).promise;
-      } catch {
-        if (!cancelled) setFailed(true);
-      }
-    })();
-    return () => {
-      cancelled = true;
-      if (task) void task.destroy();
-    };
-  }, [url, width, height]);
-
-  if (failed) return <GlyphFace name={name} />;
-  return (
-    <div className="flex size-full items-start justify-center overflow-hidden bg-white">
-      <canvas ref={canvas} />
-    </div>
-  );
-}
-
 /** The fallback face: the Bootstrap filetype glyph, which carries the format's
  *  name inside the sheet (PDF, XLSX, PY…). */
 function GlyphFace({ name, mime, className = 'size-6' }: { name: string; mime?: string; className?: string }) {
@@ -99,7 +40,9 @@ function GlyphFace({ name, mime, className = 'size-6' }: { name: string; mime?: 
 
 /** What a file looks like, filling whatever box it is given: an image shows
  *  itself, a PDF its first page, anything else its type glyph. `width`/`height`
- *  are the box's px size — used to pick the PDF render scale, not to lay out. */
+ *  are the box's px size — the thumbnail is rendered to exactly that, so a tile
+ *  never decodes a full-size photo or parses a whole PDF to fill 56 square
+ *  pixels (see lib/thumbnails). */
 export function FilePreviewFace({
   url,
   name,
@@ -113,10 +56,18 @@ export function FilePreviewFace({
   width: number;
   height: number;
 }) {
-  const kind = previewKind(name, mime);
-  if (kind === 'image') return <img src={url} alt="" className="size-full object-cover" />;
-  if (kind === 'pdf') return <PdfThumb url={url} name={name} width={width} height={height} />;
-  return <GlyphFace name={name} mime={mime} />;
+  const visual = hasVisualPreview(name, mime);
+  const thumb = useThumbnail(visual ? url : '', name, mime, width, height);
+  if (!visual) return <GlyphFace name={name} mime={mime} />;
+  if (thumb.failed) return <GlyphFace name={name} mime={mime} />;
+  return (
+    // The box stays mounted while the thumbnail is generated — it is what the
+    // observer watches, and it holds the tile's shape so nothing reflows when
+    // the image lands.
+    <div ref={thumb.ref} className="size-full bg-muted">
+      {thumb.src && <img src={thumb.src} alt="" decoding="async" className="size-full object-cover" />}
+    </div>
+  );
 }
 
 /** One attachment as a square tile — the composer strip and the sent-message

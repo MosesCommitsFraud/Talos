@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next';
 import { artifactDownloadUrl, downloadArtifact, fetchArtifacts, uploadDownloadUrl } from '@/api/client';
 import { useChat } from '@/state/chat';
 import { artifactDisplayName, displayName, fileTypeLabel, formatSize, isPreviewable, previewKind, type PreviewKind } from '@/lib/files';
+import { FilePreviewFace } from './AttachmentTile';
 import { FileTypeIcon } from './FileTypeIcon';
 
 type PreviewFile = { sessionId: string; path: string; name: string; mime?: string; version?: number };
@@ -12,7 +13,11 @@ type PreviewFile = { sessionId: string; path: string; name: string; mime?: strin
  *  data-type icon (Excel/Word/Python/PDF/… where one exists). */
 function FileThumb({ name, mime, src, kind, alt }: { name: string; mime?: string; src?: string; kind: PreviewKind; alt: string }) {
   if (kind === 'image' && src) {
-    return <img src={src} alt={alt} loading="lazy" className="size-9 shrink-0 rounded-md border bg-muted object-cover" />;
+    return (
+      <div aria-label={alt} className="size-9 shrink-0 overflow-hidden rounded-md border bg-muted">
+        <FilePreviewFace url={src} name={name} mime={mime} width={36} height={36} />
+      </div>
+    );
   }
   return (
     <div className="flex size-9 shrink-0 items-center justify-center rounded-md border bg-muted text-muted-foreground">
