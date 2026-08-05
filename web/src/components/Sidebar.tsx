@@ -757,7 +757,7 @@ export function Sidebar({
           />
         </div>
       ) : (
-        <div className="px-2 pb-3">
+        <div className="px-2 pb-2">
           <div className="mx-1 mb-2 h-px bg-border" />
           {(visibility.sidebarUserBar || visibility.sidebarSettingsBtn) && (
             // Account row + the ticket button pinned to the right edge. The
