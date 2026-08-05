@@ -336,14 +336,15 @@ const en = {
     },
     // `pastN` places the repeat count ("twice", "4 times") inside the clause —
     // see summarizeCalls, which cannot append it language-neutrally.
-    // `runningNamed` is the live, detailed phrasing — used only while the call
-    // is in flight, when it actually has a subject to name. The settled `past`
-    // wording stays short on purpose.
+    // `runningNamed` / `pastNamed` are the detailed row phrasings — used when
+    // the call actually has a subject to name. The plain `past` wording stays
+    // short and only serves the collapsed group summary.
     document: {
       verbPast: 'Edited',
       running: 'Editing the document',
       runningNamed: 'Editing {{subject}}',
       past: '{{verb}} the document',
+      pastNamed: '{{verb}} {{subject}}',
       pastN: '{{verb}} the document {{times}}',
     },
     grep: { verbPast: 'Searched', running: 'Searching for {{subject}}', past: '{{verb}} for {{subject}}' },
@@ -352,6 +353,7 @@ const en = {
       running: 'Finding files',
       runningNamed: 'Finding files matching {{subject}}',
       past: '{{verb}} files',
+      pastNamed: '{{verb}} files matching {{subject}}',
     },
     ls: { verbPast: 'Listed', running: 'Listing {{subject}}', past: '{{verb}} {{subject}}' },
     sql: {
@@ -359,6 +361,7 @@ const en = {
       running: 'Querying SQL',
       runningNamed: 'Querying SQL: {{subject}}',
       past: '{{verb}} SQL',
+      pastNamed: '{{verb}} SQL: {{subject}}',
       pastN: '{{verb}} SQL {{times}}',
     },
     knowledge: {
@@ -366,6 +369,7 @@ const en = {
       running: 'Searching the knowledge base',
       runningNamed: 'Searching the knowledge base for {{subject}}',
       past: '{{verb}} the knowledge base',
+      pastNamed: '{{verb}} the knowledge base for {{subject}}',
       pastN: '{{verb}} the knowledge base {{times}}',
     },
     web: {
@@ -373,6 +377,7 @@ const en = {
       running: 'Searching the web',
       runningNamed: 'Searching the web for {{subject}}',
       past: '{{verb}} the web',
+      pastNamed: '{{verb}} the web for {{subject}}',
       pastN: '{{verb}} the web {{times}}',
     },
     fetch: { verbPast: 'Fetched', running: 'Fetching {{subject}}', past: '{{verb}} {{subject}}' },
@@ -381,6 +386,7 @@ const en = {
       running: 'Generating an image',
       runningNamed: 'Generating an image of {{subject}}',
       past: '{{verb}} an image',
+      pastNamed: '{{verb}} an image of {{subject}}',
       pastN: '{{verb}} {{count}} images',
     },
     generic: {
@@ -388,6 +394,7 @@ const en = {
       running: 'Running {{tool}}',
       runningNamed: 'Running {{tool}} on {{subject}}',
       past: '{{verb}} {{tool}}',
+      pastNamed: '{{verb}} {{tool}} on {{subject}}',
       pastN: '{{verb}} {{tool}} {{times}}',
     },
   },

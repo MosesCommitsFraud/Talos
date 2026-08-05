@@ -341,14 +341,15 @@ const de: typeof en = {
     },
     // `pastN` setzt die Wiederholung ("zweimal", "4×") an die im Deutschen
     // richtige Stelle — vor das Partizip, nicht dahinter.
-    // `runningNamed` ist die ausführliche Live-Formulierung — nur während der
-    // Aufruf läuft und nur, wenn er ein Subjekt mitbringt. Die abgeschlossene
-    // `past`-Fassung bleibt bewusst kurz.
+    // `runningNamed` / `pastNamed` sind die ausführlichen Zeilen-Formulierungen
+    // — nur wenn der Aufruf ein Subjekt mitbringt. Die schlichte
+    // `past`-Fassung bleibt kurz und dient nur der Gruppen-Zusammenfassung.
     document: {
       verbPast: 'bearbeitet',
       running: 'Bearbeitet das Dokument',
       runningNamed: 'Bearbeitet {{subject}}',
       past: 'Dokument {{verb}}',
+      pastNamed: '{{subject}} {{verb}}',
       pastN: 'Dokument {{times}} {{verb}}',
     },
     grep: { verbPast: 'gesucht', running: 'Sucht nach {{subject}}', past: 'Nach {{subject}} {{verb}}' },
@@ -357,6 +358,7 @@ const de: typeof en = {
       running: 'Sucht Dateien',
       runningNamed: 'Sucht Dateien mit dem Muster {{subject}}',
       past: 'Dateien {{verb}}',
+      pastNamed: 'Dateien mit dem Muster {{subject}} {{verb}}',
     },
     ls: { verbPast: 'aufgelistet', running: 'Listet {{subject}}', past: '{{subject}} {{verb}}' },
     sql: {
@@ -364,6 +366,7 @@ const de: typeof en = {
       running: 'Fragt die Datenbank ab',
       runningNamed: 'Fragt die Datenbank ab: {{subject}}',
       past: 'Datenbank {{verb}}',
+      pastNamed: 'Datenbank {{verb}}: {{subject}}',
       pastN: 'Datenbank {{times}} {{verb}}',
     },
     knowledge: {
@@ -371,6 +374,7 @@ const de: typeof en = {
       running: 'Durchsucht die Wissensdatenbank',
       runningNamed: 'Durchsucht die Wissensdatenbank nach {{subject}}',
       past: 'Wissensdatenbank {{verb}}',
+      pastNamed: 'Wissensdatenbank nach {{subject}} {{verb}}',
       pastN: 'Wissensdatenbank {{times}} {{verb}}',
     },
     web: {
@@ -378,6 +382,7 @@ const de: typeof en = {
       running: 'Durchsucht das Web',
       runningNamed: 'Durchsucht das Web nach {{subject}}',
       past: 'Web {{verb}}',
+      pastNamed: 'Web nach {{subject}} {{verb}}',
       pastN: 'Web {{times}} {{verb}}',
     },
     fetch: { verbPast: 'geladen', running: 'Lädt {{subject}}', past: '{{subject}} {{verb}}' },
@@ -386,6 +391,7 @@ const de: typeof en = {
       running: 'Erzeugt ein Bild',
       runningNamed: 'Erzeugt ein Bild von {{subject}}',
       past: 'Bild {{verb}}',
+      pastNamed: 'Bild von {{subject}} {{verb}}',
       pastN: '{{count}} Bilder {{verb}}',
     },
     generic: {
@@ -393,6 +399,7 @@ const de: typeof en = {
       running: 'Führt {{tool}} aus',
       runningNamed: 'Führt {{tool}} aus für {{subject}}',
       past: '{{tool}} {{verb}}',
+      pastNamed: '{{tool}} für {{subject}} {{verb}}',
       pastN: '{{tool}} {{times}} {{verb}}',
     },
   },

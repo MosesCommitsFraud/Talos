@@ -170,11 +170,13 @@ export function partsToString(parts: LabelParts): string {
  *  ("Reading TODO.md") and carries no verb segment — a call in flight has no
  *  pass/fail to show. `'past'` yields the settled form ("Read TODO.md").
  *
- *  A running label says as much as it can about what is happening right now
- *  ("Searching the web for WM 2026 winner"); the settled one drops back to the
- *  short recap ("Searched the web"), because once it is done the detail is one
- *  click away in the row and would only clutter the timeline. That is why
- *  `runningNamed` exists for families whose `past` carries no subject. */
+ *  Both tenses say as much as they can about the call: "Searching the web for
+ *  WM 2026 winner" while it runs, "Searched the web for WM 2026 winner" once it
+ *  settles. A row is read one call at a time, so naming the subject is what
+ *  makes the list scannable — the short recap ("Searched the web") belongs to
+ *  the collapsed group header, which `summarizeCalls` builds instead. Families
+ *  whose plain `past` carries no subject supply that detail via `pastNamed`,
+ *  the mirror of `runningNamed`. */
 export function describeCall(call: ToolCall, t: Translate, tense: 'running' | 'past'): LabelParts {
   const family = toolFamily(call.tool);
   const subject = callSubject(call);
@@ -183,11 +185,11 @@ export function describeCall(call: ToolCall, t: Translate, tense: 'running' | 'p
   const named = family === 'command' && subject;
   const usable = named || subject || !NEEDS_SUBJECT.has(family) ? family : 'generic';
   let key = named ? `toolGroup.command.${tense}Named` : `toolGroup.${usable}.${tense}`;
-  // Live rows prefer the detailed phrasing when the family defines one and the
-  // call actually carries a subject. `defaultValue` keeps this optional: a
-  // family without `runningNamed` just keeps its plain wording.
-  if (tense === 'running' && subject && !named) {
-    const detailed = `toolGroup.${usable}.runningNamed`;
+  // Rows prefer the detailed phrasing when the family defines one and the call
+  // actually carries a subject. `defaultValue` keeps this optional: a family
+  // without `runningNamed` / `pastNamed` just keeps its plain wording.
+  if (subject && !named) {
+    const detailed = `toolGroup.${usable}.${tense}Named`;
     if (t(detailed, { defaultValue: '' })) key = detailed;
   }
   const isFile = !!subject && FILE_SUBJECT.has(usable);
