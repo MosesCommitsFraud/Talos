@@ -20,8 +20,9 @@ export type GroupEntry = { kind: 'call'; call: ToolCall };
  *  past-tense recap of the batch ("Ran 2 commands, queried SQL twice"). Clicking
  *  opens the list; each row opens further into its command/output/diff.
  *
- *  A group of exactly one entry skips the wrapper: the header IS the row, so a
- *  single lookup doesn't cost two clicks to read. */
+ *  A single-call group keeps the same two levels rather than promoting its row
+ *  to the header: the header is the recap ("Queried SQL"), the row inside it the
+ *  detailed reading ("Queried SQL: list tables"). */
 export function ToolGroup({ entries }: { entries: GroupEntry[] }) {
   const { t, i18n } = useTranslation();
   const [open, setOpen] = useState(false);
@@ -41,14 +42,6 @@ export function ToolGroup({ entries }: { entries: GroupEntry[] }) {
   const running = !!active;
   // Drives the roll animation: remounting on text change is what replays it.
   const labelText = live ? partsToString(live) : clauses.map((c) => partsToString(c.segments)).join(', ');
-
-  if (entries.length === 1) {
-    return (
-      <div className="my-1 -mx-3">
-        <ToolRow call={entries[0].call} />
-      </div>
-    );
-  }
 
   return (
     <div className="my-1">
