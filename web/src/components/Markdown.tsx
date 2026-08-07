@@ -1,9 +1,13 @@
 import { CheckIcon, CopyIcon, DownloadIcon } from 'lucide-react';
 import { memo, useState } from 'react';
-import ReactMarkdown from 'react-markdown';
+import ReactMarkdown, { type Options as MarkdownOptions } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import remarkMath from 'remark-math';
 import rehypeHighlight from 'rehype-highlight';
+import rehypeKatex from 'rehype-katex';
+import 'katex/dist/katex.min.css';
 import { copyTextToClipboard } from '@/lib/utils';
+import { normalizeMath } from '@/lib/math';
 import { useUi } from '@/state/ui';
 
 /* ── hast helpers: extract plain text/structure from the syntax tree the
@@ -155,9 +159,15 @@ function TableBlock({ node, children }: { node?: HastNode; children: React.React
 
 /* Stable plugin/component references so react-markdown doesn't see a fresh
    config object every render while a sibling message streams. */
-const REMARK_PLUGINS = [remarkGfm];
-const HIGHLIGHT_PLUGINS = [rehypeHighlight];
-const NO_PLUGINS: [] = [];
+const REMARK_PLUGINS = [remarkGfm, remarkMath];
+// `strict: false` keeps a slightly loose formula rendering instead of turning
+// the whole message red; errors render as the source text in place.
+const KATEX_OPTIONS = { throwOnError: false, strict: false as const, output: 'html' as const };
+const HIGHLIGHT_PLUGINS: MarkdownOptions['rehypePlugins'] = [rehypeHighlight, [rehypeKatex, KATEX_OPTIONS]];
+// Math still typesets while streaming: an unfinished `$$…` isn't math yet to
+// remark-math, so it stays literal text and settles into a formula when the
+// closing delimiter arrives — no flashing, unlike re-highlighting code.
+const MATH_ONLY_PLUGINS: MarkdownOptions['rehypePlugins'] = [[rehypeKatex, KATEX_OPTIONS]];
 
 // Inline images (e.g. RAG figures the model embeds) are constrained so a
 // high-DPI crop doesn't blow out the message width; click opens the in-app
@@ -206,10 +216,10 @@ export const Markdown = memo(function Markdown({ text, streaming = false }: { te
     <div className="chat-markdown text-[15px]">
       <ReactMarkdown
         remarkPlugins={REMARK_PLUGINS}
-        rehypePlugins={streaming ? NO_PLUGINS : HIGHLIGHT_PLUGINS}
+        rehypePlugins={streaming ? MATH_ONLY_PLUGINS : HIGHLIGHT_PLUGINS}
         components={MD_COMPONENTS}
       >
-        {text}
+        {normalizeMath(text)}
       </ReactMarkdown>
     </div>
   );

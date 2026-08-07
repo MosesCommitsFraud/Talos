@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { BracesIcon, DownloadIcon, FileTextIcon, PencilIcon, RotateCcwIcon, Trash2Icon } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { BracesIcon, DownloadIcon, FileDownIcon, FileTextIcon, PencilIcon, RotateCcwIcon, SearchIcon, Trash2Icon } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   deleteRagChunk,
@@ -8,6 +8,8 @@ import {
   fetchRagDocuments,
   type RagChunk,
   ragDocumentExportUrl,
+  ragDocumentOriginalUrl,
+  searchRagChunks,
   updateRagChunk,
 } from '@/api/client';
 import { cn } from '@/lib/utils';
@@ -19,16 +21,23 @@ import { Input, Textarea } from '../ui/misc';
 
 /** One chunk: rendered markdown by default, switches to a textarea editor that
  *  re-embeds the chunk in place on save. */
-function ChunkCard({ source, chunk }: { source: string; chunk: RagChunk }) {
+function ChunkCard({ source, chunk, highlight }: { source: string; chunk: RagChunk; highlight?: boolean }) {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
   const openLightbox = useUi((s) => s.openLightbox);
   const [editing, setEditing] = useState(false);
   const [showMeta, setShowMeta] = useState(false);
   const [draft, setDraft] = useState(chunk.content);
+  const cardRef = useRef<HTMLDivElement>(null);
 
   // Re-sync when the underlying chunk changes (e.g. after a save refetch).
   useEffect(() => { if (!editing) setDraft(chunk.content); }, [chunk.content, editing]);
+
+  // Arriving from a search hit: bring the matched chunk into view instead of
+  // making the reader hunt for it in a long document.
+  useEffect(() => {
+    if (highlight) cardRef.current?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  }, [highlight]);
 
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ['rag-chunks', source] });
   const save = useMutation({
@@ -52,7 +61,13 @@ function ChunkCard({ source, chunk }: { source: string; chunk: RagChunk }) {
   const imageUrl = typeof chunk.metadata?.image_url === 'string' ? chunk.metadata.image_url : undefined;
 
   return (
-    <div className="rounded-lg border border-border/60">
+    <div
+      ref={cardRef}
+      className={cn(
+        'rounded-lg border border-border/60 transition-colors',
+        highlight && 'border-primary/60 ring-1 ring-primary/40',
+      )}
+    >
       <div className="flex items-center gap-2 border-b px-3 py-1.5 text-[11px] text-muted-foreground">
         <span className="font-mono tabular-nums">#{chunk.seq}</span>
         {badges.map((b) => (
@@ -166,13 +181,27 @@ function ChunkCard({ source, chunk }: { source: string; chunk: RagChunk }) {
 export function RagExplorer({ open, onOpenChange }: { open: boolean; onOpenChange: (v: boolean) => void }) {
   const { t } = useTranslation();
   const [selected, setSelected] = useState<string | null>(null);
+  const [highlighted, setHighlighted] = useState<string | null>(null);
   const [filter, setFilter] = useState('');
+  // Content search hits Qdrant for every chunk, so it runs on a debounced copy
+  // of the box rather than on every keystroke; filenames filter instantly.
+  const [debounced, setDebounced] = useState('');
+
+  useEffect(() => {
+    const id = setTimeout(() => setDebounced(filter.trim()), 300);
+    return () => clearTimeout(id);
+  }, [filter]);
 
   const docs = useQuery({ queryKey: ['rag-documents'], queryFn: fetchRagDocuments, enabled: open });
   const chunks = useQuery({
     queryKey: ['rag-chunks', selected],
     queryFn: () => fetchRagChunks(selected as string),
     enabled: open && !!selected,
+  });
+  const search = useQuery({
+    queryKey: ['rag-chunk-search', debounced],
+    queryFn: () => searchRagChunks(debounced),
+    enabled: open && debounced.length >= 2,
   });
 
   const docList = docs.data?.documents ?? [];
@@ -181,6 +210,7 @@ export function RagExplorer({ open, onOpenChange }: { open: boolean; onOpenChang
     ? docList.filter((d) => d.filename.toLowerCase().includes(q) || d.source.toLowerCase().includes(q))
     : docList;
   const selectedDoc = docList.find((d) => d.source === selected);
+  const hits = debounced.length >= 2 ? (search.data?.hits ?? []) : [];
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -190,17 +220,21 @@ export function RagExplorer({ open, onOpenChange }: { open: boolean; onOpenChang
       >
         <div className="flex h-full min-h-0">
           {/* File list */}
-          <div className="flex w-72 shrink-0 flex-col border-r">
+          <div className="flex w-80 shrink-0 flex-col border-r">
             <div className="border-b px-3 py-2 text-[11px] font-semibold tracking-[0.08em] text-foreground/50 uppercase">
               {t('rag.explorer.files', { n: q ? filtered.length : docList.length })}
             </div>
             <div className="border-b p-1.5">
-              <Input
-                className="h-7 text-xs"
-                placeholder={t('rag.explorer.searchFiles')}
-                value={filter}
-                onChange={(e) => setFilter(e.target.value)}
-              />
+              <div className="relative">
+                <SearchIcon className="pointer-events-none absolute top-1/2 left-2 size-3 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  className="h-7 pl-6 text-xs"
+                  placeholder={t('rag.explorer.searchPlaceholder')}
+                  value={filter}
+                  onChange={(e) => setFilter(e.target.value)}
+                />
+              </div>
+              <p className="px-1 pt-1 text-[10px] text-muted-foreground">{t('rag.explorer.searchHint')}</p>
             </div>
             <div className="min-h-0 flex-1 overflow-y-auto p-1.5">
               {docs.data && docs.data.available === false ? (
@@ -214,7 +248,7 @@ export function RagExplorer({ open, onOpenChange }: { open: boolean; onOpenChang
                   <button
                     key={d.source}
                     type="button"
-                    onClick={() => setSelected(d.source)}
+                    onClick={() => { setSelected(d.source); setHighlighted(null); }}
                     className={cn(
                       'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs transition-colors',
                       d.source === selected ? 'bg-accent text-foreground' : 'text-muted-foreground hover:bg-accent/50 hover:text-foreground',
@@ -227,6 +261,43 @@ export function RagExplorer({ open, onOpenChange }: { open: boolean; onOpenChang
                 ))
               )}
             </div>
+
+            {/* Content matches — the same box searches inside the indexed text,
+                so a keyword finds the chunk even when no filename mentions it. */}
+            {debounced.length >= 2 && (
+              <div className="flex max-h-[45%] min-h-0 flex-col border-t">
+                <div className="flex items-center gap-2 px-3 py-2 text-[11px] font-semibold tracking-[0.08em] text-foreground/50 uppercase">
+                  {t('rag.explorer.matches', { n: hits.length })}
+                  {search.isFetching && <RotateCcwIcon className="size-3 animate-spin" />}
+                </div>
+                <div className="min-h-0 flex-1 overflow-y-auto px-1.5 pb-1.5">
+                  {search.isLoading ? (
+                    <p className="px-2 py-1 text-xs text-muted-foreground">{t('common.loading')}</p>
+                  ) : hits.length === 0 ? (
+                    <p className="px-2 py-1 text-xs text-muted-foreground">{t('rag.explorer.noHits')}</p>
+                  ) : (
+                    hits.map((h) => (
+                      <button
+                        key={h.id}
+                        type="button"
+                        onClick={() => { setSelected(h.source); setHighlighted(h.id); }}
+                        className={cn(
+                          'w-full rounded-md px-2 py-1.5 text-left transition-colors hover:bg-accent/50',
+                          h.id === highlighted && 'bg-accent',
+                        )}
+                      >
+                        <div className="flex items-center gap-1.5 text-[11px] text-foreground/80">
+                          <FileTextIcon className="size-3 shrink-0" />
+                          <span className="min-w-0 flex-1 truncate" title={h.source}>{h.filename}</span>
+                          <span className="shrink-0 font-mono tabular-nums opacity-60">#{h.seq}</span>
+                        </div>
+                        <p className="mt-0.5 line-clamp-3 text-[11px] leading-snug text-muted-foreground">{h.snippet}</p>
+                      </button>
+                    ))
+                  )}
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Chunk inspector */}
@@ -242,6 +313,15 @@ export function RagExplorer({ open, onOpenChange }: { open: boolean; onOpenChang
                   <span className="shrink-0 text-[11px] text-muted-foreground tabular-nums">
                     {t('settings.rag.chunksN', { n: chunks.data?.chunks?.length ?? selectedDoc?.chunks ?? 0 })}
                   </span>
+                  <a
+                    href={ragDocumentOriginalUrl(selected)}
+                    download
+                    aria-label={t('rag.explorer.downloadOriginal')}
+                    title={t('rag.explorer.downloadOriginal')}
+                    className="shrink-0 text-muted-foreground hover:text-foreground"
+                  >
+                    <FileDownIcon className="size-3.5" />
+                  </a>
                   <a
                     href={ragDocumentExportUrl(selected)}
                     download
@@ -267,7 +347,9 @@ export function RagExplorer({ open, onOpenChange }: { open: boolean; onOpenChang
                   ) : (chunks.data?.chunks?.length ?? 0) === 0 ? (
                     <p className="text-sm text-muted-foreground">{t('rag.explorer.noChunks')}</p>
                   ) : (
-                    chunks.data!.chunks.map((c) => <ChunkCard key={c.id} source={selected} chunk={c} />)
+                    chunks.data!.chunks.map((c) => (
+                      <ChunkCard key={c.id} source={selected} chunk={c} highlight={c.id === highlighted} />
+                    ))
                   )}
                 </div>
               </>

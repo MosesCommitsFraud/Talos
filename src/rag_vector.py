@@ -3681,6 +3681,78 @@ class VectorRAG:
             logger.error(f"get_document_chunks failed: {e}")
             return []
 
+    def grep_chunks(
+        self,
+        query: str,
+        *,
+        limit: int = 200,
+        scope: Optional[str] = None,
+        exclude_scopes: Optional[List[str]] = None,
+    ) -> List[Dict[str, Any]]:
+        """Literal (case-insensitive) keyword scan over every indexed chunk.
+
+        Backs the ``/rag`` explorer's search box. Deliberately *not* a vector
+        search: the explorer is an audit tool, so "does this term exist in the
+        index at all, and in which file" must answer exactly — a term the
+        embedder happens to place far away would silently go missing otherwise.
+        Filename, stored text and the embedded-but-hidden enrichment (context
+        blurb, aux terms) are all matched, since any of them can be the reason a
+        chunk retrieves.
+        """
+        needle = (query or "").strip().lower()
+        if not self.healthy or not needle:
+            return []
+        try:
+            _filters = self._build_filters(scope=scope, exclude_scopes=exclude_scopes)
+            docs = (
+                self._store.filter_documents(filters=_filters)
+                if _filters
+                else self._store.filter_documents()
+            )
+            hits: List[Dict[str, Any]] = []
+            for d in docs:
+                meta = dict(d.meta or {})
+                content = d.content or ""
+                source = str(meta.get("source") or meta.get("filename") or "unknown")
+                filename = str(meta.get("filename") or os.path.basename(source))
+                fields = (
+                    content,
+                    str(meta.get("context") or ""),
+                    str(meta.get("aux_terms") or ""),
+                    filename,
+                )
+                pos, matched = -1, ""
+                for field in fields:
+                    pos = field.lower().find(needle)
+                    if pos >= 0:
+                        matched = field
+                        break
+                if pos < 0:
+                    continue
+                start = max(0, pos - 90)
+                end = pos + len(needle) + 130
+                snippet = " ".join(matched[start:end].split())
+                hits.append(
+                    {
+                        "id": d.id,
+                        "source": source,
+                        "filename": filename,
+                        "seq": meta.get("seq", 0),
+                        "page": meta.get("page"),
+                        "modality": meta.get("modality", ""),
+                        "snippet": (
+                            ("…" if start > 0 else "")
+                            + snippet
+                            + ("…" if end < len(matched) else "")
+                        ),
+                    }
+                )
+            hits.sort(key=lambda h: (str(h["filename"]).lower(), h.get("seq") or 0))
+            return hits[: max(1, int(limit))]
+        except Exception as e:
+            logger.error(f"grep_chunks failed: {e}")
+            return []
+
     def update_chunk(self, source: str, chunk_id: str, content: str) -> bool:
         """Replace one chunk's text and re-embed it in place (same id + meta).
 

@@ -245,6 +245,18 @@ def setup_sql_routes():
             "status": (job or {}).get("status", "queued" if to_index else "idle"),
         }
 
+    @router.get("/knowledge/original")
+    def download_sql_knowledge(request: Request, source: str = Query(...)):
+        """Download an uploaded schema file exactly as it was ingested."""
+        require_admin(request)
+        from routes.rag_routes import original_file_response
+        from src.rag_singleton import get_rag_manager
+
+        rag = get_rag_manager()
+        if not rag or not getattr(rag, "healthy", False):
+            raise HTTPException(503, "RAG is not available")
+        return original_file_response(source, rag.list_documents(scope=SQL_KNOWLEDGE_SCOPE))
+
     @router.delete("/knowledge")
     def delete_sql_knowledge(request: Request, source: str = Query(...)):
         require_admin(request)

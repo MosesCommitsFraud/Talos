@@ -1,7 +1,6 @@
 sidebar für plan öffnet sich nicht
 reset to defaults button
 save setting profile
-sources placement
 actual queue list
 search expand on rag explorer
 what if images are shown despite not being relevant
@@ -19,3 +18,6 @@ detaillierter für websuche skills und account
 clicking on preview should open the only available artifact; if there are several open the list instead
 options ask user better deisgn needed
 deep research
+Umbenennen nur in kleinbuchstaben
+formeln anzeigen
+download original ingest files

@@ -3,6 +3,7 @@
 import asyncio
 import logging
 import os
+import re
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Request, Response
@@ -394,6 +395,16 @@ def setup_auth_routes(auth_manager: AuthManager) -> APIRouter:
         new_username = (body.username or "").strip().lower()
         if not new_username:
             raise HTTPException(400, "Username required")
+        # Usernames are compared lower-cased everywhere (login, owner columns,
+        # prefs keys), so an uppercase rename would not do what it looks like.
+        # Reject it instead of silently folding the case, and keep the charset
+        # to what is safe as a path segment (owner names become directories).
+        if not re.fullmatch(r"[a-z0-9._-]{1,64}", new_username):
+            raise HTTPException(
+                400,
+                "Username may only contain lowercase letters, digits, dot, dash "
+                "and underscore (max 64 characters)",
+            )
         if old_username == new_username:
             return {"ok": True, "username": new_username, "renamed_self": old_username == user}
         if old_username not in auth_manager.users:

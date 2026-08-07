@@ -706,6 +706,34 @@ def _usage_row(name: str, days: int) -> dict:
     }
 
 
+def _rag_chunks(source: str) -> list:
+    """Fake indexed chunks so the RAG explorer (list, inspector, search) is
+    clickable in the preview harness."""
+    base = os.path.basename(source or "document")
+    bodies = [
+        "Onboarding: every new employee receives a laptop and an ID badge on day one.",
+        "Travel expenses are reimbursed within 14 days once the receipt is uploaded.",
+        "The escalation path for production incidents is on-call → team lead → CTO.",
+    ]
+    return [
+        {
+            "id": f"{base}-{i}",
+            "content": f"## {base} · section {i + 1}\n\n{body}",
+            "seq": i,
+            "section_id": f"sec{i}",
+            "context": "Chapter 2, employee handbook" if i == 0 else "",
+            "context_error": "",
+            "aux_terms": "onboarding, laptop, badge" if i == 0 else "",
+            "aux_terms_error": "",
+            "symbol": "",
+            "language": "",
+            "modality": "text",
+            "metadata": {"source": source, "filename": base, "seq": i, "page": i + 1},
+        }
+        for i, body in enumerate(bodies)
+    ]
+
+
 def _usage_overview(days: int) -> dict:
     rows = [_usage_row(u["username"], days) for u in _PREVIEW_USERS]
     rows.sort(key=lambda r: r["total_tokens"], reverse=True)
@@ -1212,6 +1240,40 @@ class PreviewHandler(BaseHTTPRequestHandler):
                         },
                     ],
                 }
+            )
+            return
+        if path == "/api/rag/documents/chunks":
+            source = parse_qs(parsed.query).get("source", [""])[0]
+            self._send_json(
+                {"available": True, "source": source, "chunks": _rag_chunks(source)}
+            )
+            return
+        if path == "/api/rag/documents/search":
+            needle = parse_qs(parsed.query).get("q", [""])[0].lower()
+            hits = []
+            for src in ("/srv/uploads/handbook.pdf", "/srv/uploads/prices.xlsx"):
+                for c in _rag_chunks(src):
+                    if needle and needle in c["content"].lower():
+                        hits.append(
+                            {
+                                "id": c["id"],
+                                "source": src,
+                                "filename": os.path.basename(src),
+                                "seq": c["seq"],
+                                "page": None,
+                                "modality": c["modality"],
+                                "snippet": c["content"][:200],
+                            }
+                        )
+            self._send_json({"available": True, "query": needle, "count": len(hits), "hits": hits})
+            return
+        if path == "/api/rag/documents/original":
+            name = os.path.basename(parse_qs(parsed.query).get("source", ["document"])[0])
+            self._send(
+                200,
+                f"original bytes of {name}".encode("utf-8"),
+                content_type="application/octet-stream",
+                headers={"Content-Disposition": f'attachment; filename="{name}"'},
             )
             return
         if path == "/api/prefs/theme":

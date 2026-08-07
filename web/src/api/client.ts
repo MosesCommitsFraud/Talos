@@ -973,6 +973,23 @@ export interface RagChunk {
  *  file (ingest-quality audit; served as an attachment). */
 export const ragDocumentExportUrl = (source: string) =>
   `/api/rag/documents/export?source=${encodeURIComponent(source)}`;
+/** Download URL for the original, unmodified file that was ingested. */
+export const ragDocumentOriginalUrl = (source: string) =>
+  `/api/rag/documents/original?source=${encodeURIComponent(source)}`;
+export interface RagChunkHit {
+  id: string;
+  source: string;
+  filename: string;
+  seq: number;
+  page?: number | null;
+  modality: string;
+  snippet: string;
+}
+/** Literal keyword scan across every indexed chunk (explorer search box). */
+export const searchRagChunks = (q: string) =>
+  getJSON<{ available: boolean; query: string; count: number; hits: RagChunkHit[]; error?: string }>(
+    `/api/rag/documents/search?q=${encodeURIComponent(q)}`,
+  );
 export const fetchRagChunks = (source: string) =>
   getJSON<{ available: boolean; source: string; chunks: RagChunk[]; error?: string }>(
     `/api/rag/documents/chunks?source=${encodeURIComponent(source)}`,
@@ -1033,6 +1050,9 @@ export async function uploadSqlKnowledge(files: File[]): Promise<Record<string, 
   }
   return res.json();
 }
+/** Download URL for an uploaded schema file, exactly as it was ingested. */
+export const sqlKnowledgeOriginalUrl = (source: string) =>
+  `/api/sql/knowledge/original?source=${encodeURIComponent(source)}`;
 export async function deleteSqlKnowledge(source: string): Promise<void> {
   const res = await fetch(`/api/sql/knowledge?source=${encodeURIComponent(source)}`, {
     method: 'DELETE',

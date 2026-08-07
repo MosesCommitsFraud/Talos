@@ -3,6 +3,7 @@ import {
   BotIcon,
   ChevronRightIcon,
   DatabaseIcon,
+  DownloadIcon,
   FileTextIcon,
   GlobeIcon,
   KeyboardIcon,
@@ -53,6 +54,7 @@ import {
   fetchSqlKnowledge,
   uploadSqlKnowledge,
   deleteSqlKnowledge,
+  sqlKnowledgeOriginalUrl,
   saveAppSettings,
   saveDisabledTools,
   saveRagConfig,
@@ -934,6 +936,15 @@ function SqlContextSection() {
                   <div className="truncate text-sm">{d.filename}</div>
                   <div className="truncate text-xs text-muted-foreground">{t('settings.sql.knowledgeChunks', { count: d.chunks })}</div>
                 </div>
+                <a
+                  href={sqlKnowledgeOriginalUrl(d.source)}
+                  download
+                  aria-label={t('settings.sql.knowledgeDownload', { name: d.filename })}
+                  title={t('settings.sql.knowledgeDownload', { name: d.filename })}
+                  className="flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
+                >
+                  <DownloadIcon className="size-3.5" />
+                </a>
                 <button
                   type="button"
                   aria-label={t('settings.sql.knowledgeDelete', { name: d.filename })}

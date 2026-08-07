@@ -9,6 +9,36 @@ from core.middleware import require_admin
 from src.settings import load_settings, save_settings
 
 
+def original_file_response(source: str, indexed_documents: list[dict]):
+    """FileResponse for an indexed document's untouched original file.
+
+    ``indexed_documents`` is the authoritative allow-list (whatever
+    ``list_documents`` returned for the relevant scope): only a path that is
+    actually in the index can be served, so the caller-supplied ``source``
+    never reaches the filesystem unchecked. Shared with the SQL knowledge
+    routes, whose files are the same kind of scoped RAG upload.
+    """
+    from fastapi.responses import FileResponse
+
+    known = next((d for d in indexed_documents if d.get("source") == source), None)
+    if not known:
+        raise HTTPException(404, "Not an indexed document")
+    path = os.path.abspath(str(source))
+    if not os.path.isfile(path):
+        raise HTTPException(
+            404,
+            "The original file is no longer on disk — only the indexed text is "
+            "available (use the ingest dump instead).",
+        )
+    fname = str(known.get("filename") or os.path.basename(path) or "document")
+    # RFC 5987 filename* so non-ASCII upload names survive the header.
+    return FileResponse(
+        path,
+        media_type="application/octet-stream",
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(fname)}"},
+    )
+
+
 class RagPipelineConfig(BaseModel):
     enabled: bool = True
     provider: str = "internal"
@@ -586,6 +616,32 @@ def setup_rag_routes():
         if not rag or not getattr(rag, "healthy", False):
             return {"available": False, "chunks": [], "error": last_init_error()}
         return {"available": True, "source": source, "chunks": rag.get_document_chunks(source)}
+
+    @router.get("/documents/search")
+    def search_document_chunks(q: str, limit: int = 200):
+        """Keyword scan across every indexed chunk (explorer search box)."""
+        from src.rag_singleton import get_rag_manager, last_init_error
+
+        rag = get_rag_manager()
+        if not rag or not getattr(rag, "healthy", False):
+            return {"available": False, "hits": [], "error": last_init_error()}
+        hits = rag.grep_chunks(q, limit=max(1, min(int(limit or 200), 1000)))
+        return {"available": True, "query": q, "count": len(hits), "hits": hits}
+
+    @router.get("/documents/original")
+    def download_original_document(source: str):
+        """Download the file exactly as it was ingested (not the text dump).
+
+        Only files that are actually indexed can be fetched: the source string
+        is checked against the index before it ever reaches the filesystem, so
+        the query parameter can't be used to read arbitrary paths.
+        """
+        from src.rag_singleton import get_rag_manager
+
+        rag = get_rag_manager()
+        if not rag or not getattr(rag, "healthy", False):
+            raise HTTPException(503, "RAG is not available")
+        return original_file_response(source, rag.list_documents())
 
     @router.get("/documents/export")
     def export_document(source: str):

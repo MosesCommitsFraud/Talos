@@ -551,6 +551,18 @@ body::after {
   line-height: 1.55;
 }
 .chat-markdown pre code { border: none; background: transparent; padding: 0; }
+/* KaTeX — a long display formula scrolls inside its own box (same rule as code
+   blocks) instead of widening the message; inline math keeps the body's size. */
+.chat-markdown .katex { font-size: 1.05em; }
+.chat-markdown .katex-display {
+  margin: 0.7rem 0;
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-x: contain;
+  padding: 0.15rem 0;
+}
+.chat-markdown .katex-error { color: var(--destructive-foreground, inherit); }
 .chat-markdown table { width: 100%; border-collapse: collapse; font-size: 0.9em; }
 .chat-markdown th, .chat-markdown td { border: 1px solid var(--border); padding: 0.35rem 0.45rem; text-align: left; }
 
