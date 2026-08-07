@@ -106,6 +106,47 @@ def get_status(session_id: str) -> Optional[str]:
     return r.status if r else None
 
 
+def partial_text(session_id: str) -> Optional[str]:
+    """The answer text streamed so far, replayed out of the run buffer.
+
+    The assistant row is only written to the DB when the turn ENDS, so anything
+    that snapshots a session mid-run (ticket attachments) would otherwise show
+    the user's question with no answer under it — even though the reporter was
+    looking at a screen full of text. Reconstructs the visible answer the same
+    way the client does: content deltas concatenated, thinking deltas skipped,
+    `agent_step` starting a new round, `content_final` replacing the current
+    round's text. Returns None when there's nothing to show.
+    """
+    run = _RUNS.get(session_id)
+    if run is None:
+        return None
+    rounds: list = [""]
+    for ev in list(run.buffer):
+        _, _, payload = str(ev).partition("data: ")
+        payload = payload.strip()
+        if not payload or payload == "[DONE]":
+            continue
+        try:
+            obj = json.loads(payload)
+        except (ValueError, TypeError):
+            continue
+        if not isinstance(obj, dict):
+            continue
+        delta = obj.get("delta")
+        if isinstance(delta, str):
+            if not obj.get("thinking"):
+                rounds[-1] += delta
+            continue
+        kind = obj.get("type")
+        if kind == "agent_step":
+            if rounds[-1].strip():
+                rounds.append("")
+        elif kind == "content_final" and isinstance(obj.get("content"), str):
+            rounds[-1] = obj["content"]
+    text = "\n\n".join(r.strip() for r in rounds if r.strip())
+    return text or None
+
+
 async def _drain(
     session_id: str, agen: AsyncGenerator[str, None], prev_task: Optional[asyncio.Task] = None
 ) -> None:

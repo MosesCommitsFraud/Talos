@@ -827,6 +827,8 @@ const de: typeof en = {
       messages_other: '{{count}} Nachrichten',
       download: 'Herunterladen',
       empty: 'Diese Chat-Kopie ist leer.',
+      partial: 'läuft noch',
+      partialHint: 'Die Antwort wurde noch generiert, als das Ticket erstellt wurde — so weit war sie zu dem Zeitpunkt.',
     },
   },
   rag: {

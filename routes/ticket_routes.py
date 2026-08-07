@@ -85,6 +85,29 @@ def _snapshot_session(db, session_id: str, owner: str | None) -> dict[str, Any]:
                 "timestamp": _iso(m.timestamp),
             }
         )
+
+    # A turn's assistant row is written only when the run FINISHES. Reporting a
+    # problem while the agent is still working — the most common moment to file
+    # a ticket — would otherwise attach the question with no answer under it,
+    # even though the reporter was looking at a screen full of streamed text.
+    # Take the in-flight answer from the run buffer and mark it as partial.
+    try:
+        from src import agent_runs
+
+        if agent_runs.is_active(session_id):
+            partial = agent_runs.partial_text(session_id)
+            if partial:
+                transcript.append(
+                    {
+                        "role": "assistant",
+                        "content": partial,
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                        "partial": True,
+                    }
+                )
+    except Exception as e:  # never let a snapshot fail over the live extra
+        logger.warning("could not attach in-flight answer for %s: %s", session_id, e)
+
     return {
         "session_id": session_id,
         "session_name": row.name or "",
@@ -134,6 +157,10 @@ def _transcript_markdown(ticket: Ticket, attachment: TicketAttachment) -> str:
         stamp = msg.get("timestamp")
         lines.append(f"## {role}" + (f" — {stamp}" if stamp else ""))
         lines.append("")
+        if msg.get("partial"):
+            lines.append("> Still being generated when the ticket was filed — "
+                         "this is the answer as far as it had streamed.")
+            lines.append("")
         lines.append(str(msg.get("content", "")).strip())
         lines.append("")
     return "\n".join(lines)

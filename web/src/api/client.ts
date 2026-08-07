@@ -1096,6 +1096,9 @@ export interface TicketTranscriptMessage {
   role: string;
   content: string;
   timestamp: string | null;
+  /** The turn was still streaming when the ticket was filed — this is the
+   *  answer as far as it had come, not the finished one. */
+  partial?: boolean;
 }
 
 export interface TicketTranscript extends TicketAttachmentInfo {

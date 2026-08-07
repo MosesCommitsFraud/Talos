@@ -822,6 +822,8 @@ const en = {
       messages_other: '{{count}} messages',
       download: 'Download',
       empty: 'This chat snapshot is empty.',
+      partial: 'in progress',
+      partialHint: 'The answer was still being generated when the ticket was filed — this is how far it had come.',
     },
   },
   rag: {

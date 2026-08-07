@@ -54,6 +54,14 @@ export function TranscriptViewer({
               <span className="px-1 text-[10px] font-medium tracking-wide text-muted-foreground uppercase">
                 {msg.role}
                 {msg.timestamp && ` · ${formatRelativeTime(msg.timestamp)}`}
+                {msg.partial && (
+                  <span
+                    title={t('tickets.viewer.partialHint')}
+                    className="ml-1.5 rounded bg-primary/15 px-1.5 py-0.5 text-[9px] text-primary"
+                  >
+                    {t('tickets.viewer.partial')}
+                  </span>
+                )}
               </span>
               <div
                 className={cn(
