@@ -1244,9 +1244,7 @@ class PreviewHandler(BaseHTTPRequestHandler):
             return
         if path == "/api/rag/documents/chunks":
             source = parse_qs(parsed.query).get("source", [""])[0]
-            self._send_json(
-                {"available": True, "source": source, "chunks": _rag_chunks(source)}
-            )
+            self._send_json({"available": True, "source": source, "chunks": _rag_chunks(source)})
             return
         if path == "/api/rag/documents/search":
             needle = parse_qs(parsed.query).get("q", [""])[0].lower()

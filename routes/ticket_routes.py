@@ -158,8 +158,10 @@ def _transcript_markdown(ticket: Ticket, attachment: TicketAttachment) -> str:
         lines.append(f"## {role}" + (f" — {stamp}" if stamp else ""))
         lines.append("")
         if msg.get("partial"):
-            lines.append("> Still being generated when the ticket was filed — "
-                         "this is the answer as far as it had streamed.")
+            lines.append(
+                "> Still being generated when the ticket was filed — "
+                "this is the answer as far as it had streamed."
+            )
             lines.append("")
         lines.append(str(msg.get("content", "")).strip())
         lines.append("")
