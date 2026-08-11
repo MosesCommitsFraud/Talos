@@ -10,7 +10,6 @@ import {
   fetchAuthStatus,
   fetchModels,
   fetchUsers,
-  renameUser,
   setUserAdmin,
   setUserPrivileges,
   toggleSignup,
@@ -181,20 +180,6 @@ function UserRow({ user, currentUser, adminCount, onChanged }: {
   // Server blocks self-demote and last-admin demote; hiding the button is clearer.
   const canDemote = user.is_admin && !isSelf && adminCount > 1;
 
-  const rename = () => {
-    const typed = (window.prompt(t('settings.users.renamePrompt', { name: user.username }), user.username) ?? '').trim();
-    if (!typed) return;
-    // Usernames are lower-cased everywhere they're compared (login, data
-    // ownership), so the server only accepts lowercase. Fold the case here and
-    // confirm, rather than letting the admin believe they set "Meier".
-    const next = typed.toLowerCase();
-    if (!/^[a-z0-9._-]{1,64}$/.test(next)) { window.alert(t('settings.users.renameInvalid')); return; }
-    if (next === user.username) return;
-    if (next !== typed && !window.confirm(t('settings.users.renameLowercased', { name: next }))) return;
-    void renameUser(user.username, next)
-      .then((r) => { if (r.renamed_self) window.location.reload(); else onChanged(); })
-      .catch((e) => window.alert((e as Error).message));
-  };
   const setAdmin = (makeAdmin: boolean) => {
     const msg = makeAdmin
       ? t('settings.users.makeAdminConfirm', { name: user.username })
@@ -206,7 +191,11 @@ function UserRow({ user, currentUser, adminCount, onChanged }: {
     if (!window.confirm(t('settings.users.removeConfirm', { name: user.username }))) return;
     void deleteUser(user.username).then(onChanged).catch((e) => window.alert((e as Error).message));
   };
-  const editDisplayName = () => {
+  // "Rename" here means the display name only. The login username is an
+  // ownership key (session/document owner columns, prefs keys, sandbox
+  // workspace directories), so changing it is an account migration, not a
+  // relabel — it is deliberately not offered as a one-click admin action.
+  const rename = () => {
     const next = window.prompt(
       t('settings.users.displayNamePrompt', { name: user.username }),
       user.display_name ?? '',
@@ -247,9 +236,8 @@ function UserRow({ user, currentUser, adminCount, onChanged }: {
           </div>
         </div>
         <div className="flex shrink-0 items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
-          <Button variant="outline" size="sm" onClick={editDisplayName}>{t('settings.users.setName')}</Button>
-          <Button variant="outline" size="sm" onClick={resetPassword}>{t('settings.users.resetPassword')}</Button>
           <Button variant="outline" size="sm" onClick={rename}>{t('settings.users.rename')}</Button>
+          <Button variant="outline" size="sm" onClick={resetPassword}>{t('settings.users.resetPassword')}</Button>
           {user.is_admin
             ? canDemote && <Button variant="outline" size="sm" onClick={() => setAdmin(false)}>{t('settings.users.demote')}</Button>
             : <Button variant="outline" size="sm" onClick={() => setAdmin(true)}>{t('settings.users.makeAdmin')}</Button>}
