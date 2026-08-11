@@ -779,11 +779,11 @@ def setup_chat_routes(
 
         # Build disabled-tools set from frontend toggles + user privileges
         disabled_tools = set()
-        # bash/python/file tools are available to EVERYONE: code runs in an
-        # isolated per-chat sandbox, so the shell is always on (the file-based
-        # coding loop depends on `bash python script.py`). There is no per-user
-        # privilege gate for it — only the global `disabled_tools` admin setting
-        # below can withhold it instance-wide.
+        # The shell/file/MCP/management tool groups are gated by their own
+        # privileges (src/tool_security.TOOL_PRIVILEGE_GROUPS), applied in
+        # src/agent_loop.py where the owner is known. They are deliberately not
+        # repeated here — this block only handles the frontend toggles, the
+        # coarse feature privileges, and the global admin setting below.
         # Nobody/incognito mode: deny tools that would expose the user's
         # past chats or other identity-linked data.
         if incognito:
@@ -800,8 +800,8 @@ def setup_chat_routes(
         if _user and hasattr(request.app.state, "auth_manager") and request.app.state.auth_manager:
             _privs = request.app.state.auth_manager.get_privileges(_user)
         if _privs:
-            # Note: bash/python/file tools are intentionally NOT gated per-user
-            # (always available — see comment above).
+            # Note: the shell/file/MCP/management groups are applied in
+            # src/agent_loop.py — see comment above.
             if not _privs.get("can_use_browser", True):
                 disabled_tools.add("builtin_browser")
             if not _privs.get("can_use_documents", True):
@@ -819,9 +819,10 @@ def setup_chat_routes(
             if not _privs.get("can_use_agent", True):
                 # No chat/agent split anymore — this admin restriction now means
                 # "withhold the heavy browser/document tools" rather than
-                # flipping the request into a tool-less chat mode. bash/python/
-                # file tools are deliberately excluded: the shell is available to
-                # everyone (see comment above).
+                # flipping the request into a tool-less chat mode. The shell and
+                # file tools are deliberately excluded: they have their own
+                # privileges now (can_use_shell / can_use_files), so revoking
+                # this one must not silently take them away too.
                 disabled_tools.update(
                     {
                         "builtin_browser",

@@ -648,6 +648,12 @@ _ADMIN_PRIVS = {
     "can_use_research": True,
     "can_generate_images": True,
     "can_manage_memory": True,
+    "can_use_shell": True,
+    "can_use_files": True,
+    "can_search_chats": True,
+    "can_use_mcp": True,
+    "can_use_vault": True,
+    "can_manage_instance": True,
     "max_messages_per_day": 0,
     "allowed_models": [],
 }
@@ -663,7 +669,15 @@ _PREVIEW_USERS = [
         "username": "mara",
         "display_name": "Mara Kessler",
         "is_admin": False,
-        "privileges": {"can_use_agent": True, "max_messages_per_day": 40},
+        # Mixed tool grants so the preview shows the Tools section in both
+        # states rather than an all-off column.
+        "privileges": {
+            "can_use_agent": True,
+            "can_use_shell": True,
+            "can_use_files": True,
+            "can_search_chats": True,
+            "max_messages_per_day": 40,
+        },
     },
     {"username": "jonas", "display_name": None, "is_admin": False, "privileges": {}},
     {"username": "sam", "display_name": "Sam Ito", "is_admin": False, "privileges": {}},

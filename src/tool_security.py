@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import Optional, Set
+from typing import Optional, Set, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -407,31 +407,44 @@ def network_command_redirect(command: str) -> Optional[str]:
     return None
 
 
-# Tools regular/public users must not execute directly. These either expose
-# server/runtime access, sensitive user data, external messaging, persistent
-# state changes, or generic loopback/integration surfaces.
-NON_ADMIN_BLOCKED_TOOLS = {
-    "bash",
-    "python",
-    "run_cell",
-    "read_file",
-    "write_file",
-    "edit_file",
-    "grep",
-    "glob",
-    "ls",
-    "search_chats",
-    "manage_skills",
-    "manage_endpoints",
-    "manage_mcp",
-    "manage_tokens",
-    "manage_documents",
-    "manage_settings",
-    "api_call",
-    "vault_search",
-    "vault_get",
-    "vault_unlock",
+# Tool groups a regular user only gets when an admin grants the matching
+# privilege in the users panel. Keys must exist in core.auth.DEFAULT_PRIVILEGES,
+# which also decides what a freshly created account starts with.
+#
+# Admins are never filtered by this map (see blocked_tools_for_owner), and
+# neither is a single-user install with auth switched off.
+TOOL_PRIVILEGE_GROUPS: dict[str, Set[str]] = {
+    # Code execution. Runs in the per-chat sandbox when TALOS_SANDBOX_TOOLS is
+    # on; with the sandbox off it runs on the app container instead, which is
+    # why this is a decision an admin has to make per deployment.
+    "can_use_shell": {"bash", "python", "run_cell"},
+    # Workspace file access. Scoped to the caller's own chat workspace, and
+    # required for anything the model cannot read from inline context — a long
+    # PDF, a spreadsheet, a file too big for the attachment budget.
+    "can_use_files": {"read_file", "write_file", "edit_file", "grep", "glob", "ls"},
+    # Owner-scoped: only ever searches the caller's own chats.
+    "can_search_chats": {"search_chats"},
+    # Arbitrary outbound HTTP plus every connected MCP server. MCP tool names
+    # are namespaced dynamically, so the `mcp__` prefix is gated as a whole
+    # rather than enumerated (see is_tool_blocked_for_owner).
+    "can_use_mcp": {"api_call"},
+    # Stored third-party credentials.
+    "can_use_vault": {"vault_search", "vault_get", "vault_unlock"},
+    # Instance configuration: endpoints, MCP servers, API tokens, settings,
+    # shared skills and every user's documents.
+    "can_manage_instance": {
+        "manage_skills",
+        "manage_endpoints",
+        "manage_mcp",
+        "manage_tokens",
+        "manage_documents",
+        "manage_settings",
+    },
 }
+
+# Every tool under privilege control. Kept as a flat set because callers
+# (workspace_routes, tests) ask "is this tool privilege-gated at all?".
+NON_ADMIN_BLOCKED_TOOLS = {t for group in TOOL_PRIVILEGE_GROUPS.values() for t in group}
 
 
 # Plan mode allows investigation only. Mutating tools are blocked by converting
@@ -502,12 +515,13 @@ def plan_mode_disabled_tools() -> Set[str]:
 
 
 def is_public_blocked_tool(tool_name: Optional[str]) -> bool:
-    """Return True when a non-admin/public user must not execute this tool.
+    """Return True when `tool_name` is under privilege control at all.
 
-    This is a security gate, so it fails CLOSED: a malformed non-string tool
-    name can't be matched against the blocklist or the ``mcp__`` namespace, so
-    it is treated as blocked rather than silently allowed through. ``None`` /
-    empty string means there is no tool to gate.
+    Says nothing about a specific user — use `is_tool_blocked_for_owner` for
+    that. This is a security helper, so it fails CLOSED: a malformed non-string
+    tool name can't be matched against the group map or the ``mcp__``
+    namespace, so it is treated as gated rather than silently allowed through.
+    ``None`` / empty string means there is no tool to gate.
     """
     if tool_name is None or tool_name == "":
         return False
@@ -516,22 +530,84 @@ def is_public_blocked_tool(tool_name: Optional[str]) -> bool:
     return tool_name in NON_ADMIN_BLOCKED_TOOLS or tool_name.startswith("mcp__")
 
 
-def owner_is_admin_or_single_user(owner: Optional[str]) -> bool:
-    """Return True for admins, or when auth is not configured yet."""
+def _auth_snapshot(owner: Optional[str]) -> Tuple[bool, Optional[dict]]:
+    """One auth read: ``(unrestricted, privileges)`` for this owner.
+
+    ``unrestricted`` covers admins and the auth-not-configured single-user
+    install; ``privileges`` is then irrelevant and comes back None. For a
+    regular account ``privileges`` is the merged privilege dict, or None when
+    the lookup failed — the fail-closed signal, since a failed read tells us
+    nothing about what the account may do.
+
+    Constructing an AuthManager re-reads auth.json from disk, so every gate
+    below takes its snapshot exactly once rather than asking question by
+    question. This runs per tool call.
+    """
     try:
         from core.auth import AuthManager
 
         auth = AuthManager()
         if not auth.is_configured:
-            return True
-        return bool(owner and auth.is_admin(owner))
+            return True, None
+        normalized = (owner or "").strip().lower()
+        if normalized and auth.is_admin(normalized):
+            return True, None
+        return False, auth.get_privileges(normalized)
     except Exception as exc:
-        logger.warning("Unable to evaluate owner admin status: %s", exc)
-        return False
+        logger.warning("Unable to evaluate tool privileges for owner=%r: %s", owner, exc)
+        return False, None
+
+
+def owner_is_admin_or_single_user(owner: Optional[str]) -> bool:
+    """Return True for admins, or when auth is not configured yet."""
+    return _auth_snapshot(owner)[0]
+
+
+def _blocked_from_privileges(privs: Optional[dict]) -> Set[str]:
+    """Named tools withheld by this privilege dict (None ⇒ withhold all)."""
+    if privs is None:
+        return set(NON_ADMIN_BLOCKED_TOOLS)
+    return {
+        tool
+        for key, group in TOOL_PRIVILEGE_GROUPS.items()
+        if not privs.get(key, False)
+        for tool in group
+    }
 
 
 def blocked_tools_for_owner(owner: Optional[str]) -> Set[str]:
-    """Tools to hide/disable for this owner under public-user policy."""
-    if owner_is_admin_or_single_user(owner):
+    """Named tools this owner may not use, per their privilege toggles.
+
+    Does NOT cover the `mcp__` namespace — those names only exist at runtime.
+    Callers that build a tool list must additionally drop MCP schemas when
+    `mcp_blocked_for_owner` says so.
+    """
+    unrestricted, privs = _auth_snapshot(owner)
+    if unrestricted:
         return set()
-    return set(NON_ADMIN_BLOCKED_TOOLS)
+    return _blocked_from_privileges(privs)
+
+
+def mcp_blocked_for_owner(owner: Optional[str]) -> bool:
+    """Whether every MCP server should be hidden from this owner."""
+    unrestricted, privs = _auth_snapshot(owner)
+    if unrestricted:
+        return False
+    return not (privs or {}).get("can_use_mcp", False)
+
+
+def is_tool_blocked_for_owner(tool_name: Optional[str], owner: Optional[str]) -> bool:
+    """Execution-time gate: may `owner` run `tool_name`?
+
+    Fails closed on a malformed tool name, mirroring `is_public_blocked_tool`.
+    """
+    if tool_name is None or tool_name == "":
+        return False
+    if not isinstance(tool_name, str):
+        return True
+    unrestricted, privs = _auth_snapshot(owner)
+    if unrestricted:
+        return False
+    if tool_name.startswith("mcp__"):
+        return not (privs or {}).get("can_use_mcp", False)
+    return tool_name in _blocked_from_privileges(privs)

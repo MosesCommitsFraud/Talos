@@ -32,6 +32,20 @@ const PRIV_KEYS: Array<keyof UserPrivileges> = [
   'can_manage_memory',
 ];
 
+/* Tool-group privileges (src/tool_security.py TOOL_PRIVILEGE_GROUPS). Kept in
+   their own section because these hand out capability rather than switch a
+   feature on: the shell runs code, the vault holds credentials. Each carries a
+   hint naming the tools it covers, so an admin isn't guessing what a toggle
+   does. Order runs least to most privileged. */
+const TOOL_PRIV_KEYS: Array<keyof UserPrivileges> = [
+  'can_use_shell',
+  'can_use_files',
+  'can_search_chats',
+  'can_use_mcp',
+  'can_use_vault',
+  'can_manage_instance',
+];
+
 /** Compact row used inside an expanded user card's privileges sub-panel. */
 function MiniRow({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
   return (
@@ -138,6 +152,17 @@ function PrivilegesPanel({ user, onSaved, readOnly }: {
       <div className="pt-1 pb-0.5 text-[11px] font-medium tracking-wide text-muted-foreground uppercase">{t('settings.users.features')}</div>
       {PRIV_KEYS.map((key) => (
         <MiniRow key={key} label={t(`settings.users.priv.${key}`)}>
+          <Switch
+            checked={!!user.privileges?.[key]}
+            disabled={readOnly}
+            className={cn(readOnly && 'cursor-default opacity-70')}
+            onCheckedChange={(v) => savePriv({ [key]: v })}
+          />
+        </MiniRow>
+      ))}
+      <div className="pt-2 pb-0.5 text-[11px] font-medium tracking-wide text-muted-foreground uppercase">{t('settings.users.tools')}</div>
+      {TOOL_PRIV_KEYS.map((key) => (
+        <MiniRow key={key} label={t(`settings.users.priv.${key}`)} hint={t(`settings.users.privHint.${key}`)}>
           <Switch
             checked={!!user.privileges?.[key]}
             disabled={readOnly}

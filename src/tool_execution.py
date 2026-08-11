@@ -18,7 +18,7 @@ import sys
 import time
 from typing import Any, Awaitable, Callable, Dict, Optional, Tuple
 
-from src.tool_security import is_public_blocked_tool, owner_is_admin_or_single_user
+from src.tool_security import is_tool_blocked_for_owner, owner_is_admin_or_single_user
 
 # Persistent working directory for agent subprocesses.
 # Resolves to <repo_root>/data, which is the bind-mounted volume in Docker
@@ -1594,20 +1594,18 @@ async def execute_tool_block(
         logger.warning("Admin tool blocked for non-admin owner=%r tool=%s", owner, tool)
         return desc, result
 
-    if (
-        is_public_blocked_tool(tool)
-        and (not isinstance(tool, str) or tool not in (public_tool_exceptions or set()))
-        and not _owner_is_admin(owner)
+    if is_tool_blocked_for_owner(tool, owner) and (
+        not isinstance(tool, str) or tool not in (public_tool_exceptions or set())
     ):
         desc = f"{tool}: BLOCKED"
         result = {
             "error": (
-                f"Tool '{tool}' is restricted to admin users on this deployment. "
-                "Ask an admin to perform this action or grant the needed permission."
+                f"Tool '{tool}' is not enabled for this account. "
+                "Ask an admin to grant the matching permission in Settings → Users."
             ),
             "exit_code": 1,
         }
-        logger.warning("Public tool policy blocked owner=%r tool=%s", owner, tool)
+        logger.warning("Tool privilege policy blocked owner=%r tool=%s", owner, tool)
         return desc, result
 
     # ask_user: the agent poses a multiple-choice question to the user to get a

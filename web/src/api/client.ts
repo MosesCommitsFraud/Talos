@@ -509,6 +509,13 @@ export interface UserPrivileges {
   can_use_research?: boolean;
   can_generate_images?: boolean;
   can_manage_memory?: boolean;
+  /* Tool groups — see src/tool_security.py TOOL_PRIVILEGE_GROUPS. */
+  can_use_shell?: boolean;
+  can_use_files?: boolean;
+  can_search_chats?: boolean;
+  can_use_mcp?: boolean;
+  can_use_vault?: boolean;
+  can_manage_instance?: boolean;
   max_messages_per_day?: number;
   allowed_models?: string[];
 }

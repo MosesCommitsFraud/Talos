@@ -27,6 +27,22 @@ DEFAULT_PRIVILEGES = {
     "can_use_research": True,
     "can_generate_images": True,
     "can_manage_memory": True,
+    # Tool-group privileges. These replace what used to be a hard-coded
+    # admin-only blocklist (src/tool_security.NON_ADMIN_BLOCKED_TOOLS), so an
+    # admin can hand the shell or the file tools to a regular user from the
+    # users panel instead of having to promote them. The mapping from key to
+    # tool names lives in src/tool_security.TOOL_PRIVILEGE_GROUPS.
+    #
+    # The three defaulting to True run inside the per-chat sandbox and touch
+    # only the caller's own data; the three defaulting to False reach instance
+    # configuration, stored credentials, or arbitrary outbound calls, so they
+    # stay admin-only until someone deliberately grants them.
+    "can_use_shell": True,
+    "can_use_files": True,
+    "can_search_chats": True,
+    "can_use_mcp": False,
+    "can_use_vault": False,
+    "can_manage_instance": False,
     "max_messages_per_day": 0,
     "allowed_models": [],
 }

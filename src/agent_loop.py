@@ -42,7 +42,11 @@ from src.llm_core import _is_ollama_native_url, stream_llm_with_fallback
 from src.model_context import estimate_tokens
 from src.prompt_security import untrusted_context_message
 from src.settings import get_setting, get_user_setting
-from src.tool_security import blocked_tools_for_owner, plan_mode_disabled_tools
+from src.tool_security import (
+    blocked_tools_for_owner,
+    mcp_blocked_for_owner,
+    plan_mode_disabled_tools,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -1855,8 +1859,11 @@ async def stream_agent_loop(
         public_blocked_tools.difference_update(artifact_edit_tools)
     if public_blocked_tools:
         disabled_tools.update(public_blocked_tools)
-        # MCP tools are namespaced dynamically, so hide all MCP schemas for
-        # public/non-admin users rather than trying to enumerate every tool.
+    # MCP tools are namespaced dynamically, so the whole surface is hidden or
+    # shown as one unit rather than enumerated tool by tool. Checked separately
+    # from the named groups above: an account granted the shell but not MCP must
+    # still lose the MCP schemas, and vice versa.
+    if mcp_blocked_for_owner(owner):
         mcp_mgr = None
 
     if plan_mode:
