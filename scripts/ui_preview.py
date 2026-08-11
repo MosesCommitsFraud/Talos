@@ -404,6 +404,17 @@ def _cold_agent_turn(ts_offset: int) -> dict:
                     "exit_code": 1,
                     "row_count": 0,
                 },
+                # The table widget on the COLD path: a query_sql result rebuilt
+                # from storage, with the sortable table it carried.
+                {
+                    "round": 2,
+                    "tool": "query_sql",
+                    "command": '{"action": "query", "query": "SELECT ... FROM orders"}',
+                    "output": "60 rows x 6 columns. First 25 shown: …",
+                    "exit_code": 0,
+                    "row_count": 1284,
+                    "widget": _table_widget(),
+                },
                 {
                     "round": 2,
                     "tool": "edit_file",
@@ -536,6 +547,48 @@ def _weather_widget() -> dict:
                 }
                 for i in range(7)
             ],
+        },
+    }
+
+
+def _table_widget() -> dict:
+    """A query_sql table widget in the shape src/tool_implementations.py emits.
+
+    Deliberately awkward data, because a table that only ever sees tidy rows
+    looks fine right up until it doesn't: a NULL (which must read as NULL, not as
+    an empty cell), a mixed-type column (which must NOT right-align), a very long
+    text cell (which must truncate instead of stretching the card), and more rows
+    than fit so the scroll and the "showing N of M" footer are exercised.
+    """
+    rows = []
+    for i in range(1, 61):
+        rows.append(
+            [
+                1000 + i,
+                f"Kunde {i:03d}" if i % 7 else None,
+                ["DE", "AT", "CH", "NL"][i % 4],
+                round(1249.5 + i * 37.25, 2),
+                i % 5 if i % 11 else "n/a",
+                (
+                    "Sammelrechnung über mehrere Positionen inklusive Nachlass und "
+                    "abweichender Lieferanschrift"
+                    if i % 9 == 0
+                    else f"Bestellung {i}"
+                ),
+            ]
+        )
+    return {
+        "type": "table",
+        "version": 1,
+        "data": {
+            "columns": ["id", "kunde", "land", "umsatz", "retouren", "notiz"],
+            "rows": rows,
+            "rowCount": 1284,
+            "shown": len(rows),
+            "trimmed": False,
+            "label": "SELECT id, kunde, land, umsatz, retouren, notiz FROM orders ORDER BY umsatz DESC",
+            "database": "vertrieb",
+            "spillPath": "orders_query.csv",
         },
     }
 

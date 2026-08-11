@@ -34,6 +34,7 @@ WIDGET_TYPES = frozenset(
     {
         "weather",
         "news",
+        "table",
     }
 )
 
@@ -49,6 +50,46 @@ def make_widget(widget_type: str, data: Dict[str, Any], version: int = 1) -> Dic
     persisted turns after its payload shape changes — bump it there, branch on
     it in the component, never silently repurpose a field."""
     return {"type": widget_type, "version": version, "data": data}
+
+
+def trim_rows_to_budget(rows: list, overhead: int = 2_000) -> tuple:
+    """Cut `rows` down to what fits under MAX_WIDGET_BYTES. Returns (rows, cut).
+
+    A row-bearing widget is the one shape that can blow the cap by accident: the
+    caller has no idea how wide a table's cells are until they are encoded, and a
+    single TEXT column full of paragraphs can be worth more than a thousand
+    numeric rows. Trimming here beats letting `sanitize_widget` refuse the
+    payload — a table showing the first 200 rows is useful, and no table at all
+    is not.
+
+    `overhead` is the room left for everything else in the envelope (column
+    names, the query, counts).
+    """
+    budget = MAX_WIDGET_BYTES - max(overhead, 0)
+    if budget <= 0 or not rows:
+        return [], len(rows)
+
+    try:
+        encoded = len(json.dumps(rows, allow_nan=False, ensure_ascii=False).encode("utf-8"))
+    except (TypeError, ValueError):
+        return [], len(rows)
+    if encoded <= budget:
+        return rows, 0
+
+    # Average row size is a good enough first guess to land close, then walk down
+    # until it actually fits — cell widths vary far too much to trust one guess.
+    keep = max(1, int(len(rows) * budget / encoded))
+    while keep > 1:
+        candidate = rows[:keep]
+        try:
+            size = len(json.dumps(candidate, allow_nan=False, ensure_ascii=False).encode("utf-8"))
+        except (TypeError, ValueError):
+            return [], len(rows)
+        if size <= budget:
+            return candidate, len(rows) - keep
+        keep = keep * 3 // 4
+
+    return rows[:1], len(rows) - 1
 
 
 def sanitize_widget(widget: Any) -> Optional[Dict[str, Any]]:

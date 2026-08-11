@@ -82,6 +82,14 @@ const en = {
     title: 'Help',
     empty: 'Help content is coming soon.',
   },
+  // Result table (query_sql).
+  table: {
+    rows: '{{count}} rows',
+    rows_one: '{{count}} row',
+    showingOf: '{{shown}} of {{total}} rows',
+    fullSetIn: 'Full set in {{path}}',
+    downloadHint: 'Download the visible rows as CSV',
+  },
   // News cards (get_news).
   news: {
     title: 'News',

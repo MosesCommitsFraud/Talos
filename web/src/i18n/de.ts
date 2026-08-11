@@ -84,6 +84,14 @@ const de: typeof en = {
     title: 'Hilfe',
     empty: 'Hilfe-Inhalte folgen in Kürze.',
   },
+  // Ergebnistabelle (query_sql).
+  table: {
+    rows: '{{count}} Zeilen',
+    rows_one: '{{count}} Zeile',
+    showingOf: '{{shown}} von {{total}} Zeilen',
+    fullSetIn: 'Vollständig in {{path}}',
+    downloadHint: 'Sichtbare Zeilen als CSV herunterladen',
+  },
   // Nachrichten-Karten (get_news).
   news: {
     title: 'Nachrichten',

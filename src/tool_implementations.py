@@ -44,6 +44,13 @@ _SQL_MAX_ROWS_DEFAULT = 100
 # its prompt.
 _SQL_SPILL_ROWS = 200
 _SQL_PREVIEW_ROWS = 25
+# Rows carried to the TABLE WIDGET, which is a different budget from the model's.
+# The model gets a 25-row preview because rows in context are expensive and it
+# only needs the shape to write the pandas that does the real work. The user gets
+# a scrollable, sortable table, where more rows cost nothing but payload — so
+# this is deliberately an order of magnitude larger. `trim_rows_to_budget` cuts
+# it further if the cells turn out to be wide.
+_SQL_WIDGET_ROWS = 500
 _SQL_ALLOWED_START = {"select", "with", "show", "describe", "desc", "explain", "pragma"}
 _SQL_FORBIDDEN_WORDS = re.compile(
     r"\b(insert|update|delete|merge|replace|upsert|drop|alter|create|truncate|grant|revoke|vacuum|attach|detach|copy|load|call|exec|execute)\b",
@@ -559,7 +566,14 @@ async def do_query_sql(
                     }
                     for c in cols
                 ]
-                return {"output": _format_sql_rows(rows), "rows": rows, "exit_code": 0}
+                return {
+                    "output": _format_sql_rows(rows),
+                    "rows": rows,
+                    "_columns": ["name", "type", "nullable"],
+                    "_widget_rows": rows,
+                    "_widget_label": table,
+                    "exit_code": 0,
+                }
 
             if action != "query":
                 return {
@@ -586,6 +600,13 @@ async def do_query_sql(
                     "row_count": row_count,
                     "truncated": truncated,
                     "exit_code": 0,
+                    # Underscore keys are stripped before the result leaves this
+                    # function; they exist only to hand the widget builder the
+                    # columns (which an empty result set cannot supply from its
+                    # rows) and the wider row set the user's table gets.
+                    "_columns": columns,
+                    "_widget_rows": rows[:_SQL_WIDGET_ROWS],
+                    "_widget_label": query,
                 }
                 # Big result sets go to a CSV rather than into the context. The
                 # model still sees the columns and a head preview, which is all
@@ -619,6 +640,10 @@ async def do_query_sql(
 
     result = await asyncio.to_thread(_run)
 
+    widget_columns = result.pop("_columns", None)
+    widget_rows = result.pop("_widget_rows", None)
+    widget_label = result.pop("_widget_label", "")
+
     csv_text = result.pop("_spill_csv", None)
     name = result.pop("_spill_name", "")
     n_spilled = result.pop("_spill_rows", 0)
@@ -651,7 +676,56 @@ async def do_query_sql(
                 "full set could not be saved to your workspace. Narrow the query with "
                 "WHERE/GROUP BY, or aggregate in SQL instead of pulling raw rows."
             )
+
+    if widget_columns is not None and widget_rows is not None:
+        result["widget"] = _build_table_widget(
+            columns=widget_columns,
+            rows=widget_rows,
+            row_count=result.get("row_count", len(widget_rows)),
+            label=widget_label,
+            database=conn["name"] if len(conns) > 1 else "",
+            spill_path=result.get("spill_path", ""),
+        )
     return result
+
+
+def _build_table_widget(
+    columns: List[str],
+    rows: List[Dict[str, Any]],
+    row_count: int,
+    label: str,
+    database: str = "",
+    spill_path: str = "",
+) -> Dict[str, Any]:
+    """The user's copy of a result set: a sortable table.
+
+    Rows travel as ARRAYS, not as the dicts the model's formatter uses. A result
+    set repeats its column names once per row in dict form, which on a 20-column
+    query is most of the payload and buys nothing — the header carries the names
+    already.
+    """
+    from src.widgets import make_widget, trim_rows_to_budget
+
+    names = [str(c) for c in columns]
+    matrix = [[row.get(name) for name in names] for row in rows]
+    fitted, dropped = trim_rows_to_budget(matrix)
+
+    return make_widget(
+        "table",
+        {
+            "columns": names,
+            "rows": fitted,
+            # Three different numbers, and the table shows all three when they
+            # disagree: how many the query matched, how many are in this payload,
+            # and whether the rest went to a file the user can open.
+            "rowCount": int(row_count or 0),
+            "shown": len(fitted),
+            "trimmed": dropped > 0,
+            "label": str(label or "")[:300],
+            "database": database,
+            "spillPath": spill_path or "",
+        },
+    )
 
 
 # ---------------------------------------------------------------------------
