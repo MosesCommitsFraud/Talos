@@ -111,7 +111,15 @@ export function WeatherWidget({ data }: WidgetProps) {
   const isDay = current.isDay !== false;
   const label = (key: string) => t(`weather.conditions.${key}`, { defaultValue: t('weather.conditions.unknown') });
 
-  const place = [asStr(location.name), asStr(location.country)].filter(Boolean).join(', ');
+  // Lead with the name the user asked for. The geocoder answers in its own
+  // canonical spelling — "Zurich" for "Zürich", "Munich" for "München" — and a
+  // card headed by a name they did not type reads as the wrong city. The
+  // resolved place stays underneath, and only when it actually says something
+  // the heading doesn't: it is what confirms WHICH Springfield this is.
+  const resolved = [asStr(location.name), asStr(location.country)].filter(Boolean).join(', ');
+  const asked = asStr(location.query) || asStr(location.name);
+  const heading = asked || resolved;
+  const subtitle = resolved.toLowerCase() === heading.toLowerCase() ? '' : resolved;
 
   // One temperature scale for the whole week, so the range bars are comparable
   // between rows — scaling each row to itself would draw a 2-degree day and a
@@ -125,13 +133,16 @@ export function WeatherWidget({ data }: WidgetProps) {
   const sunrise = asStr(asDict(daily[0]).sunrise);
   const sunset = asStr(asDict(daily[0]).sunset);
 
+  // No outer margin here — `WidgetView` owns the spacing around every widget,
+  // so the gap stays the same whichever card is rendered.
   return (
-    <div className="mt-3 overflow-hidden rounded-xl border bg-card">
+    <div className="overflow-hidden rounded-xl border bg-card">
       {/* Current conditions */}
       <div className="flex items-start gap-4 p-4">
         <ConditionIcon condition={condition} night={!isDay} className="size-12 shrink-0 text-primary" />
         <div className="min-w-0 flex-1">
-          <div className="truncate text-sm font-medium">{place || t('weather.unknownPlace')}</div>
+          <div className="truncate text-sm font-medium">{heading || t('weather.unknownPlace')}</div>
+          {subtitle && <div className="truncate text-xs text-muted-foreground">{subtitle}</div>}
           <div className="flex items-baseline gap-2">
             <span className="text-4xl font-semibold tabular-nums">
               {round(asNum(current.temperature))}

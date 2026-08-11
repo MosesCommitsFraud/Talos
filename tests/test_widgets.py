@@ -117,6 +117,8 @@ def test_widget_data_shape(monkeypatch):
 
     assert data["location"]["name"] == "Berlin"
     assert data["location"]["timezone"] == "Europe/Berlin"
+    # No `query` when the caller never asked by name (coordinates path).
+    assert data["location"]["query"] == ""
     assert data["current"]["condition"] == "overcast"
     assert data["current"]["isDay"] is True
     # The strip starts at "now" (14:00), so 10 of the day's 24 hours remain.
@@ -190,6 +192,31 @@ def test_get_weather_builds_output_and_widget(monkeypatch):
     assert "Berlin" in result["output"]
     assert result["widget"]["type"] == "weather"
     assert result["widget"]["data"]["current"]["temperature"] == 21.4
+
+
+def test_the_asked_for_name_survives_geocoding(monkeypatch):
+    """The card leads with what the user typed. A geocoder that answers
+    "Zurich" for "Zürich" must not rename the card out from under them."""
+
+    async def _fake_geocode(name, language="en"):
+        return {
+            "name": "Zurich",
+            "country": "Switzerland",
+            "admin": "",
+            "latitude": 47.37,
+            "longitude": 8.54,
+        }
+
+    async def _fake_forecast(latitude, longitude, days):
+        return _forecast_payload()
+
+    monkeypatch.setattr(weather_mod, "geocode", _fake_geocode)
+    monkeypatch.setattr(weather_mod, "_forecast", _fake_forecast)
+
+    result = asyncio.run(weather_mod.get_weather(location="  Zürich  "))
+    location = result["widget"]["data"]["location"]
+    assert location["query"] == "Zürich"
+    assert location["name"] == "Zurich"
 
 
 def test_coordinates_skip_geocoding(monkeypatch):

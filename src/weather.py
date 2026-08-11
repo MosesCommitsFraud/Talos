@@ -236,6 +236,9 @@ def _build_widget_data(place: Dict[str, Any], payload: Dict[str, Any]) -> Dict[s
     current_key, _current_label = describe_code(current.get("weather_code"))
     return {
         "location": {
+            # `query` is what the user asked for, `name`/`country` what the
+            # geocoder resolved it to. The card leads with the former.
+            "query": place.get("query") or "",
             "name": place.get("name") or "",
             "admin": place.get("admin") or "",
             "country": place.get("country") or "",
@@ -367,6 +370,12 @@ async def get_weather(
                     "exit_code": 1,
                 }
             latitude, longitude = place["latitude"], place["longitude"]
+            # What the user actually asked for. The geocoder answers with its own
+            # canonical spelling ("Zurich" for "Zürich", "Munich" for "München"),
+            # and a card headed by a name the user did not type reads as the
+            # wrong city — so the asked-for name is what the card shows, with the
+            # resolved one kept alongside to confirm WHICH Springfield it found.
+            place["query"] = location.strip()
     else:
         place = {"name": location.strip() or f"{float(latitude):.4f}, {float(longitude):.4f}"}
 

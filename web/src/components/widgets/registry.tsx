@@ -30,7 +30,17 @@ export function WidgetView({ widget }: { widget: Widget | undefined }) {
   if (!widget) return null;
   const Component = WIDGET_REGISTRY[widget.type];
   if (!Component) return null;
-  return <Component data={widget.data} version={widget.version} />;
+  // The spacing lives here rather than in each card, for two reasons: every
+  // widget then sits at the same distance from the prose around it whichever
+  // one renders, and a new widget cannot forget to bring its own. A widget
+  // interrupts a run of text, so it needs more air than a block inside the text
+  // would — enough that the answer above and below reads as its own thought
+  // rather than as a caption for the card.
+  return (
+    <div className="my-5">
+      <Component data={widget.data} version={widget.version} />
+    </div>
+  );
 }
 
 export function hasWidget(widget: Widget | undefined): boolean {

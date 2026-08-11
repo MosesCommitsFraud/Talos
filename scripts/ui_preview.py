@@ -480,11 +480,15 @@ def _weather_widget() -> dict:
         "type": "weather",
         "version": 1,
         "data": {
+            # Asked-for vs resolved: the geocoder's canonical spelling differs
+            # from what the user typed, so the card must lead with "Zürich" and
+            # keep "Zurich, Switzerland" as the confirming subtitle.
             "location": {
-                "name": "Berlin",
-                "admin": "State of Berlin",
-                "country": "Germany",
-                "timezone": "Europe/Berlin",
+                "query": "Zürich",
+                "name": "Zurich",
+                "admin": "Zurich",
+                "country": "Switzerland",
+                "timezone": "Europe/Zurich",
             },
             "units": {"temperature": "°C", "wind": "km/h", "precipitation": "mm"},
             "current": {
@@ -635,12 +639,12 @@ print(result)
         # Widget flow: a tool result that carries a structured payload. The card
         # must render OUTSIDE the collapsed tool group (it is the answer, not a
         # log line) and exactly once — not again in the settled turn's recap.
-        {"type": "tool_start", "tool": "get_weather", "command": '{"location": "Berlin"}'},
+        {"type": "tool_start", "tool": "get_weather", "command": '{"location": "Zürich"}'},
         {
             "type": "tool_output",
             "tool": "get_weather",
-            "command": '{"location": "Berlin"}',
-            "output": "Weather for Berlin, Germany (local time 2026-08-11T15:00).\nNow: 21.5°C, feels like 19.2°C, mainly clear, wind 11.4 km/h, humidity 34%.",
+            "command": '{"location": "Zürich"}',
+            "output": "Weather for Zurich, Switzerland (local time 2026-08-11T15:00).\nNow: 21.5°C, feels like 19.2°C, mainly clear, wind 11.4 km/h, humidity 34%.",
             "exit_code": 0,
             "widget": _weather_widget(),
         },
