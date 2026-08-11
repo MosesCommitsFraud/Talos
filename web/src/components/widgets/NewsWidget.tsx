@@ -40,10 +40,17 @@ function relativeAge(iso: string, locale: string, t: (k: string, o?: Record<stri
  *  A thumbnail is decoration, so every way it can fail ends the same way — the
  *  card renders without it. The proxy legitimately refuses images (admin domain
  *  policy, a non-image response, a dead link), and a card that shows a broken-
- *  image glyph for that is worse than one that simply has no picture. */
-function Thumbnail({ url, alt }: { url: string; alt: string }) {
+ *  image glyph for that is worse than one that simply has no picture.
+ *
+ *  `reserve` keeps the slot when there is nothing to put in it. With the image
+ *  on the LEFT, a missing one would pull that row's text 76px out of line with
+ *  its neighbours, and a list whose left edge moves per row is hard to read. So
+ *  as soon as any article in the card has a picture, every row keeps the space —
+ *  including a row whose image fails to load after the fact, which would
+ *  otherwise make the text jump sideways while the user is looking at it. */
+function Thumbnail({ url, alt, reserve }: { url: string; alt: string; reserve: boolean }) {
   const [failed, setFailed] = useState(false);
-  if (!url || failed) return null;
+  if (!url || failed) return reserve ? <div className="size-16 shrink-0" aria-hidden /> : null;
   return (
     <img
       src={`/api/news/thumbnail?url=${encodeURIComponent(url)}`}
@@ -64,6 +71,11 @@ export function NewsWidget({ data }: WidgetProps) {
   const hidden = asNum(payload.hiddenByPolicy);
 
   if (articles.length === 0) return null;
+
+  // One column or none: the rows share a left edge only if they all reserve the
+  // image slot, and reserving it in a card where nothing has a picture would be
+  // an empty margin down the side for no reason.
+  const anyThumbnail = articles.some((article) => asStr(article.thumbnail));
 
   return (
     <div className="overflow-hidden rounded-xl border bg-card">
@@ -92,6 +104,9 @@ export function NewsWidget({ data }: WidgetProps) {
               className={`group block px-4 py-3 transition-colors hover:bg-accent ${i > 0 ? 'border-t border-border/40' : ''}`}
             >
               <div className="flex gap-3">
+                {/* Empty alt: the headline beside it already says what this is,
+                    so a screen reader announcing the image too is noise. */}
+                <Thumbnail url={asStr(article.thumbnail)} alt="" reserve={anyThumbnail} />
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
                     {source && <span className="min-w-0 truncate font-medium">{source}</span>}
@@ -99,8 +114,12 @@ export function NewsWidget({ data }: WidgetProps) {
                     {age && <span className="shrink-0">{age}</span>}
                     <ExternalLinkIcon className="ml-auto size-3 shrink-0 opacity-0 transition-opacity group-hover:opacity-60" />
                   </div>
-                  <div className="mt-0.5 text-sm font-medium text-strong group-hover:underline">
-                    {asStr(article.title)}
+                  {/* The underline is scoped to this span, not the row: a
+                      `text-decoration` set on a block box is drawn through every
+                      in-flow descendant, so putting it on a wrapper underlines
+                      the source line and the teaser along with the headline. */}
+                  <div className="mt-0.5 text-sm font-medium text-strong">
+                    <span className="group-hover:underline">{asStr(article.title)}</span>
                   </div>
                   {asStr(article.snippet) && (
                     <div className="mt-1 line-clamp-2 text-xs leading-relaxed text-muted-foreground">
@@ -108,9 +127,6 @@ export function NewsWidget({ data }: WidgetProps) {
                     </div>
                   )}
                 </div>
-                {/* Empty alt: the headline beside it already says what this is,
-                    so a screen reader announcing the image too is noise. */}
-                <Thumbnail url={asStr(article.thumbnail)} alt="" />
               </div>
             </a>
           );
