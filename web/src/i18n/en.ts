@@ -88,7 +88,8 @@ const en = {
     rows_one: '{{count}} row',
     showingOf: '{{shown}} of {{total}} rows',
     fullSetIn: 'Full set in {{path}}',
-    downloadHint: 'Download the visible rows as CSV',
+    showAll: 'Show all {{count}}',
+    downloadHint: 'Download the loaded rows as CSV',
   },
   // News cards (get_news).
   news: {

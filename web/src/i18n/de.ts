@@ -90,7 +90,8 @@ const de: typeof en = {
     rows_one: '{{count}} Zeile',
     showingOf: '{{shown}} von {{total}} Zeilen',
     fullSetIn: 'Vollständig in {{path}}',
-    downloadHint: 'Sichtbare Zeilen als CSV herunterladen',
+    showAll: 'Alle {{count}} anzeigen',
+    downloadHint: 'Geladene Zeilen als CSV herunterladen',
   },
   // Nachrichten-Karten (get_news).
   news: {

@@ -1,4 +1,4 @@
-import type { ComponentType } from 'react';
+import { memo, type ComponentType } from 'react';
 import type { Widget } from '@/api/types';
 import { NewsWidget } from './NewsWidget';
 import { TableWidget } from './TableWidget';
@@ -30,7 +30,16 @@ const WIDGET_REGISTRY: Record<string, ComponentType<WidgetProps>> = {
  *  an error box for something the user never asked to see. That is also what
  *  makes shipping widgets one at a time safe.
  */
-export function WidgetView({ widget }: { widget: Widget | undefined }) {
+/** Memoised. A widget hangs in the transcript while the turn above it keeps
+ *  streaming, and every delta re-renders the message list — so without this, a
+ *  settled table's few thousand cells are reconciled tens of times per second
+ *  for the rest of the turn, and the chat stops responding to input.
+ *
+ *  The comparison is safe because a settled tool call keeps its identity in the
+ *  chat store: `patchAi` rebuilds only the call that is still running, so the
+ *  `widget` object a finished call carries is the same object on every later
+ *  render. */
+export const WidgetView = memo(function WidgetView({ widget }: { widget: Widget | undefined }) {
   if (!widget) return null;
   const Component = WIDGET_REGISTRY[widget.type];
   if (!Component) return null;
@@ -45,7 +54,7 @@ export function WidgetView({ widget }: { widget: Widget | undefined }) {
       <Component data={widget.data} version={widget.version} />
     </div>
   );
-}
+});
 
 export function hasWidget(widget: Widget | undefined): boolean {
   return !!widget && widget.type in WIDGET_REGISTRY;

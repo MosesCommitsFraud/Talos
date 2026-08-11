@@ -410,7 +410,7 @@ def _cold_agent_turn(ts_offset: int) -> dict:
                     "round": 2,
                     "tool": "query_sql",
                     "command": '{"action": "query", "query": "SELECT ... FROM orders"}',
-                    "output": "60 rows x 6 columns. First 25 shown: …",
+                    "output": "500 rows x 6 columns. First 25 shown: …",
                     "exit_code": 0,
                     "row_count": 1284,
                     "widget": _table_widget(),
@@ -561,7 +561,9 @@ def _table_widget() -> dict:
     than fit so the scroll and the "showing N of M" footer are exercised.
     """
     rows = []
-    for i in range(1, 61):
+    # The real cap (_SQL_WIDGET_ROWS), not a token handful: a table that is only
+    # ever previewed with 60 rows looks fast right up until a real query lands.
+    for i in range(1, 501):
         rows.append(
             [
                 1000 + i,

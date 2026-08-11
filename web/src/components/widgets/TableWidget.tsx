@@ -62,6 +62,15 @@ function toCsv(columns: string[], rows: Cell[][]): string {
   return [columns.map(quote).join(','), ...rows.map((row) => row.map(quote).join(','))].join('\r\n');
 }
 
+/** Rows put into the DOM before the user asks for more.
+ *
+ *  The payload can carry 500, and mounting all of them costs thousands of cells
+ *  per table — with several tables in a transcript that is tens of thousands of
+ *  nodes the browser lays out on every resize and scroll. 50 fills the box twice
+ *  over, which is as much as anyone reads before scrolling, and sorting still
+ *  runs over the WHOLE set, so the top of a sorted table is the real top. */
+const INITIAL_ROWS = 50;
+
 export function TableWidget({ data }: WidgetProps) {
   const { t } = useTranslation();
   const payload = asDict(data);
@@ -80,6 +89,7 @@ export function TableWidget({ data }: WidgetProps) {
   );
 
   const [sort, setSort] = useState<{ column: number; desc: boolean } | null>(null);
+  const [expanded, setExpanded] = useState(false);
 
   const numeric = useMemo(() => numericColumns(rows, columns.length), [rows, columns.length]);
   const sorted = useMemo(() => {
@@ -90,6 +100,12 @@ export function TableWidget({ data }: WidgetProps) {
     copy.sort((a, b) => compare(a[sort.column], b[sort.column], sort.desc));
     return copy;
   }, [rows, sort]);
+
+  // Sorting happens over everything; only the mounting is windowed.
+  const visible = useMemo(
+    () => (expanded ? sorted : sorted.slice(0, INITIAL_ROWS)),
+    [sorted, expanded],
+  );
 
   if (columns.length === 0) return null;
 
@@ -172,8 +188,14 @@ export function TableWidget({ data }: WidgetProps) {
             </tr>
           </thead>
           <tbody>
-            {sorted.map((row, r) => (
-              <tr key={r} className="border-b border-border/40 last:border-0 hover:bg-accent/50">
+            {visible.map((row, r) => (
+              // `content-visibility: auto` lets the browser skip layout and paint
+              // for rows scrolled out of the box — the intrinsic size keeps the
+              // scrollbar honest so skipping one does not make the track jump.
+              <tr
+                key={r}
+                className="border-b border-border/40 [content-visibility:auto] [contain-intrinsic-size:auto_26px] last:border-0 hover:bg-accent/50"
+              >
                 {columns.map((_column, c) => {
                   const value = row[c];
                   return (
@@ -210,6 +232,18 @@ export function TableWidget({ data }: WidgetProps) {
             ? t('table.showingOf', { shown, total: rowCount })
             : t('table.rows', { count: rowCount })}
         </span>
+        {!expanded && sorted.length > INITIAL_ROWS && (
+          <>
+            <span aria-hidden>·</span>
+            <button
+              type="button"
+              onClick={() => setExpanded(true)}
+              className="rounded px-1 py-0.5 underline underline-offset-2 transition-colors hover:bg-accent hover:text-foreground"
+            >
+              {t('table.showAll', { count: sorted.length })}
+            </button>
+          </>
+        )}
         {spillPath && (
           <>
             <span aria-hidden>·</span>
