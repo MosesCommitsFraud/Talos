@@ -31,9 +31,8 @@ from fastapi.responses import Response
 from sqlalchemy import func
 
 from core.database import ChatMessage as DbChatMessage
-from core.database import Document, GalleryImage
+from core.database import Document, GalleryImage, Ticket, TicketAttachment, get_db_session
 from core.database import Session as DbSession
-from core.database import Ticket, TicketAttachment, get_db_session
 from core.middleware import require_admin
 from src.auth_helpers import effective_user
 
