@@ -268,9 +268,7 @@ async def _snapshot_session(
         snapshot_meta = {k: meta[k] for k in SNAPSHOT_META_KEYS if k in meta}
         if m.timestamp and "timestamp" not in snapshot_meta:
             snapshot_meta["timestamp"] = m.timestamp.isoformat() + "Z"
-        transcript.append(
-            {"role": m.role, "content": m.content or "", "metadata": snapshot_meta}
-        )
+        transcript.append({"role": m.role, "content": m.content or "", "metadata": snapshot_meta})
 
     partial = _partial_turn(session_id)
     if partial:
@@ -619,7 +617,9 @@ def setup_ticket_routes() -> APIRouter:
 
                 doc = (
                     db.query(Document)
-                    .filter(Document.id == value.split(":", 1)[1], Document.session_id == session_id)
+                    .filter(
+                        Document.id == value.split(":", 1)[1], Document.session_id == session_id
+                    )
                     .first()
                 )
                 if not doc:
