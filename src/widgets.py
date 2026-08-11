@@ -33,6 +33,7 @@ logger = logging.getLogger(__name__)
 WIDGET_TYPES = frozenset(
     {
         "weather",
+        "news",
     }
 )
 

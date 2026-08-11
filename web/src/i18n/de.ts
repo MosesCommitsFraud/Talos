@@ -84,6 +84,18 @@ const de: typeof en = {
     title: 'Hilfe',
     empty: 'Hilfe-Inhalte folgen in Kürze.',
   },
+  // Nachrichten-Karten (get_news).
+  news: {
+    title: 'Nachrichten',
+    count: '{{count}} Artikel',
+    count_one: '{{count}} Artikel',
+    justNow: 'gerade eben',
+    hoursAgo: 'vor {{count}} Std.',
+    daysAgo: 'vor {{count}} Tagen',
+    daysAgo_one: 'vor {{count}} Tag',
+    hiddenByPolicy: '{{count}} Treffer durch die Domain-Richtlinie ausgeblendet',
+    hiddenByPolicy_one: '{{count}} Treffer durch die Domain-Richtlinie ausgeblendet',
+  },
   // Wetterkarte (get_weather). Die `conditions`-Schlüssel stammen aus
   // src/weather.py, das die WMO-Codes darauf abbildet — beide Seiten müssen
   // gemeinsam geändert werden.
@@ -439,6 +451,14 @@ const de: typeof en = {
       past: '{{subject}} {{verb}}',
       summary_one: '{{subject}} {{verb}}',
       summary_other: '{{count}} Seiten {{verb}}',
+    },
+    news: {
+      verbPast: 'gesucht',
+      running: 'Sucht Nachrichten',
+      runningNamed: 'Sucht Nachrichten zu {{subject}}',
+      past: 'Nachrichten {{verb}}',
+      pastNamed: 'Nachrichten zu {{subject}} {{verb}}',
+      pastN: 'Nachrichten {{times}} {{verb}}',
     },
     weather: {
       verbPast: 'abgerufen',

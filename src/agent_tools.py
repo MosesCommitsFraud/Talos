@@ -71,6 +71,9 @@ TOOL_TAGS = {
     # Weather via Open-Meteo — answers with typed numbers and an inline card
     # instead of a scraped snippet (see src/weather.py)
     "get_weather",
+    # Headlines as cards — the same SearxNG instance as web_search, news
+    # category, rendered as articles (see src/news.py)
+    "get_news",
     # Retrieve the full original of a compressed tool output
     # (see src/context_optimizer.py)
     "expand_output",

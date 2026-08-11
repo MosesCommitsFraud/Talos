@@ -89,6 +89,10 @@ NEVER_COMPRESS_TOOLS = frozenset(
         "search_knowledge",
         "web_fetch",
         "web_search",
+        # Same shape as web_search: a list of headline + URL + snippet, where a
+        # compressor dropping the middle leaves entries that read complete but
+        # have lost their URL — and an invented news URL is worse than none.
+        "get_news",
     }
 )
 

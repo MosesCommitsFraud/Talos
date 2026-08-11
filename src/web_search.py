@@ -191,6 +191,37 @@ async def search(
     session_id: str = "",
 ) -> Dict[str, Any]:
     """Query SearxNG. Returns {"results": <markdown>} or {"error": ..., "exit_code": 1}."""
+    outcome = await _searx_request(
+        query=query,
+        max_results=max_results,
+        language=language,
+        category=category,
+        time_range=time_range,
+        page=page,
+        session_id=session_id,
+    )
+    if "error" in outcome:
+        return outcome
+    return {"results": _format_search_results(query, outcome["payload"], outcome["max_results"])}
+
+
+async def _searx_request(
+    query: str,
+    max_results: int,
+    language: str,
+    category: str,
+    time_range: str,
+    page: int,
+    session_id: str,
+) -> Dict[str, Any]:
+    """One SearxNG query: the transport, the leak guard and the error wording.
+
+    Split out from `search` because more than one tool needs the same request
+    with a different rendering on the other end — `web_search` wants markdown
+    for the model, `get_news` wants the results as structured items for a card.
+    Returns {"payload": <SearxNG JSON>, "max_results": n} or the usual
+    {"error": ..., "exit_code": 1}.
+    """
     import httpx
 
     query = (query or "").strip()
@@ -276,20 +307,20 @@ async def search(
             "exit_code": 1,
         }
 
-    return {"results": _format_search_results(query, payload, max_results)}
+    return {"payload": payload, "max_results": max_results}
 
 
-def _format_search_results(query: str, payload: Dict[str, Any], max_results: int) -> str:
-    """Render SearxNG's JSON into compact markdown for the model."""
-    raw = payload.get("results") or []
+def _pick_results(payload: Dict[str, Any], max_results: int) -> tuple:
+    """The results worth showing, plus how many the domain policy removed.
 
-    # SearxNG merges engines, so the same URL can appear more than once.
-    # Admin domain policy is applied here as well as in web_fetch: a blocked
-    # domain shouldn't even be offered to the model as something to open.
+    SearxNG merges engines, so the same URL can arrive more than once. The admin
+    domain policy is applied here as well as in web_fetch: a blocked domain
+    should not even be offered to the model as something to open.
+    """
     seen: set = set()
     picked: List[Dict[str, Any]] = []
     filtered = 0
-    for item in raw:
+    for item in payload.get("results") or []:
         url = (item.get("url") or "").strip()
         if not url or url in seen:
             continue
@@ -300,6 +331,12 @@ def _format_search_results(query: str, payload: Dict[str, Any], max_results: int
         picked.append(item)
         if len(picked) >= max_results:
             break
+    return picked, filtered
+
+
+def _format_search_results(query: str, payload: Dict[str, Any], max_results: int) -> str:
+    """Render SearxNG's JSON into compact markdown for the model."""
+    picked, filtered = _pick_results(payload, max_results)
 
     lines = [f'Web search: "{query}"']
 

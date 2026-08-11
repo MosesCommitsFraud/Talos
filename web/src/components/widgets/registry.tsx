@@ -1,5 +1,6 @@
 import type { ComponentType } from 'react';
 import type { Widget } from '@/api/types';
+import { NewsWidget } from './NewsWidget';
 import { WeatherWidget } from './WeatherWidget';
 
 /** Props every widget component receives. `data` is `unknown` on purpose — it
@@ -16,6 +17,7 @@ export interface WidgetProps {
  *  frontend; the backend counterpart is `WIDGET_TYPES` in `src/widgets.py`. */
 const WIDGET_REGISTRY: Record<string, ComponentType<WidgetProps>> = {
   weather: WeatherWidget,
+  news: NewsWidget,
 };
 
 /** Render a tool result's widget, or nothing.

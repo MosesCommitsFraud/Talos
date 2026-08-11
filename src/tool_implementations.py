@@ -2917,6 +2917,33 @@ async def do_get_weather(content: str, owner: Optional[str] = None) -> Dict:
     )
 
 
+async def do_get_news(
+    content: str, owner: Optional[str] = None, session_id: Optional[str] = None
+) -> Dict:
+    """Recent articles on a topic, rendered as cards (SearxNG news category)."""
+    del owner
+    try:
+        args = _parse_tool_args(content) if content.strip() else {}
+    except ValueError:
+        args = {"query": content.strip()}
+    if not isinstance(args, dict):
+        args = {"query": str(args)}
+    if not args.get("query") and content.strip() and not content.strip().startswith("{"):
+        args["query"] = content.strip()
+
+    from src.news import DEFAULT_ARTICLES, DEFAULT_TIME_RANGE, get_news
+
+    return await get_news(
+        query=str(args.get("query") or args.get("topic") or ""),
+        max_results=args.get("max_results") or args.get("num_results") or DEFAULT_ARTICLES,
+        language=str(args.get("language") or ""),
+        time_range=str(args.get("time_range") or args.get("recency") or DEFAULT_TIME_RANGE),
+        # Scopes the leak guard to the knowledge retrieved for THIS chat, same
+        # as web_search — a news query goes to public engines too.
+        session_id=session_id or "",
+    )
+
+
 async def do_web_fetch(content: str, owner: Optional[str] = None) -> Dict:
     """Fetch a public web page and return its readable text."""
     del owner

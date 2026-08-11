@@ -518,6 +518,70 @@ def _weather_widget() -> dict:
     }
 
 
+def _news_widget() -> dict:
+    """A get_news widget payload in the shape src/news.py emits.
+
+    The ages are computed off the current clock rather than hard-coded, so the
+    card's relative-time rendering ("gerade eben" / "vor 5 Std." / "vor 2 Tagen"
+    / an absolute date past a week) is actually exercised every time the preview
+    runs. One article deliberately carries no timestamp — engines vary, and a
+    card missing its age must still line up."""
+    import datetime as _dt
+
+    now = _dt.datetime.now(_dt.timezone.utc)
+
+    def _ago(**kwargs) -> str:
+        return (now - _dt.timedelta(**kwargs)).isoformat()
+
+    return {
+        "type": "news",
+        "version": 1,
+        "data": {
+            "query": "EU AI Act",
+            "timeRange": "week",
+            "hiddenByPolicy": 2,
+            "articles": [
+                {
+                    "title": "EU AI Act: Übergangsfristen für Hochrisiko-Systeme laufen aus",
+                    "url": "https://www.tagesschau.de/wirtschaft/eu-ai-act-102.html",
+                    "source": "tagesschau.de",
+                    "snippet": "Anbieter von Hochrisiko-KI müssen ab kommendem Monat eine Konformitätsbewertung vorlegen. Was das für Unternehmen bedeutet, die Modelle nur einkaufen.",
+                    "published": _ago(minutes=20),
+                },
+                {
+                    "title": "Was der AI Act für Entwickler konkret bedeutet",
+                    "url": "https://www.heise.de/news/ai-act-entwickler-9999999.html",
+                    "source": "heise.de",
+                    "snippet": "Dokumentationspflichten, Logging, Risikomanagement — eine Einordnung der Anforderungen für Teams, die eigene Modelle betreiben.",
+                    "published": _ago(hours=5),
+                },
+                {
+                    "title": "Kommission veröffentlicht Leitlinien zu General-Purpose-AI",
+                    "url": "https://netzpolitik.org/2026/gpai-leitlinien/",
+                    "source": "netzpolitik.org",
+                    "snippet": "Der Entwurf präzisiert, ab welcher Rechenleistung ein Modell als systemisches Risiko gilt.",
+                    "published": _ago(days=2),
+                },
+                {
+                    "title": "Analyse: Wer den AI Act tatsächlich durchsetzt",
+                    "url": "https://www.zeit.de/digital/ai-act-durchsetzung",
+                    "source": "zeit.de",
+                    "snippet": "Die nationalen Marktüberwachungsbehörden sind personell dünn besetzt.",
+                    "published": _ago(days=12),
+                },
+                {
+                    # No timestamp: the row must still align without an age.
+                    "title": "Hintergrund: Die Entstehung des AI Act",
+                    "url": "https://example.org/hintergrund-ai-act",
+                    "source": "example.org",
+                    "snippet": "Von der ersten Fassung bis zur Verabschiedung.",
+                    "published": "",
+                },
+            ],
+        },
+    }
+
+
 def _sse(event: dict | str) -> str:
     if event == "[DONE]":
         return "data: [DONE]\n\n"
@@ -647,6 +711,17 @@ print(result)
             "output": "Weather for Zurich, Switzerland (local time 2026-08-11T15:00).\nNow: 21.5°C, feels like 19.2°C, mainly clear, wind 11.4 km/h, humidity 34%.",
             "exit_code": 0,
             "widget": _weather_widget(),
+        },
+        # A second widget type in the SAME turn: both cards must render, each
+        # with its own spacing, in the order the tools ran.
+        {"type": "tool_start", "tool": "get_news", "command": '{"query": "EU AI Act"}'},
+        {
+            "type": "tool_output",
+            "tool": "get_news",
+            "command": '{"query": "EU AI Act"}',
+            "output": 'News: "EU AI Act" — 5 article(s).\n1. **EU AI Act: Übergangsfristen für Hochrisiko-Systeme laufen aus**',
+            "exit_code": 0,
+            "widget": _news_widget(),
         },
         # An unknown widget type must render as NOTHING rather than an error —
         # that is what keeps a backend ahead of the deployed bundle safe.

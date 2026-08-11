@@ -293,6 +293,55 @@ FUNCTION_TOOL_SCHEMAS = [
     {
         "type": "function",
         "function": {
+            "name": "get_news",
+            "description": (
+                "Recent news articles on a topic, from the same self-hosted search instance as "
+                "web_search but restricted to news sources and to a recent time window. Use it "
+                "when the user asks what is happening or what is new — 'was gibt es Neues zu…', "
+                "'aktuelle Nachrichten', 'Schlagzeilen', 'news about…', 'what's the latest on…', "
+                "'hat sich etwas getan bei…'. Prefer web_search when the question wants a FACT "
+                "that happens to be recent ('wie hoch ist der Leitzins') rather than coverage of "
+                "an unfolding story. The user is shown the headlines as clickable cards "
+                "automatically, so do not re-list them — say what the coverage adds up to, or "
+                "answer what they asked. Results are snippets, not articles: call web_fetch on a "
+                "URL before stating what a piece actually says. The query goes to public search "
+                "engines, so keep it to the public version of the question — never put document "
+                "content, customer or person names, or internal identifiers in one."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Topic to get headlines for. Keywords work better than a full sentence.",
+                    },
+                    "max_results": {
+                        "type": "integer",
+                        "description": "Number of articles (1-20, default 8).",
+                    },
+                    "language": {
+                        "type": "string",
+                        "description": (
+                            "Result language, e.g. 'de' or 'en'. Use the language the coverage "
+                            "lives in — German sources for German topics."
+                        ),
+                    },
+                    "time_range": {
+                        "type": "string",
+                        "enum": ["day", "week", "month", "year"],
+                        "description": (
+                            "How far back to look (default 'week'). Use 'day' for a breaking "
+                            "story, 'month'/'year' for a slow-moving one."
+                        ),
+                    },
+                },
+                "required": ["query"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "get_weather",
             "description": (
                 "Current weather and a multi-day forecast for one place, from a live weather "

@@ -1830,6 +1830,11 @@ async def execute_tool_block(
 
         desc = f"web_fetch: {content.split(chr(10))[0].strip()[:80]}"
         result = await do_web_fetch(content, owner=owner)
+    elif tool == "get_news":
+        from src.tool_implementations import do_get_news
+
+        desc = f"get_news: {content.split(chr(10))[0].strip()[:80]}"
+        result = await do_get_news(content, owner=owner, session_id=session_id)
     elif tool == "get_weather":
         from src.tool_implementations import do_get_weather
 

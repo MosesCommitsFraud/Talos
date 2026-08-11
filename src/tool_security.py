@@ -468,8 +468,9 @@ PLAN_MODE_READONLY_TOOLS = {
     # server and nothing the user owns.
     "web_search",
     "web_fetch",
-    # Read-only lookup against a public API, same as the two above.
+    # Read-only lookups against public APIs, same as the two above.
     "get_weather",
+    "get_news",
 }
 
 

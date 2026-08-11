@@ -82,6 +82,18 @@ const en = {
     title: 'Help',
     empty: 'Help content is coming soon.',
   },
+  // News cards (get_news).
+  news: {
+    title: 'News',
+    count: '{{count}} articles',
+    count_one: '{{count}} article',
+    justNow: 'just now',
+    hoursAgo: '{{count}}h ago',
+    daysAgo: '{{count}} days ago',
+    daysAgo_one: '{{count}} day ago',
+    hiddenByPolicy: '{{count}} results hidden by the domain policy',
+    hiddenByPolicy_one: '{{count}} result hidden by the domain policy',
+  },
   // Weather card (get_weather). The `conditions` keys come from src/weather.py,
   // which maps WMO codes onto them — the two sides change together.
   weather: {
@@ -433,6 +445,14 @@ const en = {
       past: '{{verb}} {{subject}}',
       summary_one: '{{verb}} {{subject}}',
       summary_other: '{{verb}} {{count}} pages',
+    },
+    news: {
+      verbPast: 'Checked',
+      running: 'Checking the news',
+      runningNamed: 'Checking the news on {{subject}}',
+      past: '{{verb}} the news',
+      pastNamed: '{{verb}} the news on {{subject}}',
+      pastN: '{{verb}} the news {{times}}',
     },
     weather: {
       verbPast: 'Checked',

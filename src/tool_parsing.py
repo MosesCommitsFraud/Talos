@@ -333,6 +333,10 @@ _TOOL_NAME_MAP = {
     "weather": "get_weather",
     "wetter": "get_weather",
     "forecast": "get_weather",
+    "get_news": "get_news",
+    "news": "get_news",
+    "nachrichten": "get_news",
+    "headlines": "get_news",
 }
 
 
