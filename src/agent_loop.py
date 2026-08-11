@@ -320,7 +320,13 @@ Hand a whole task off to run in the background, and get its report delivered int
 **Write the task so it can be done with nobody to ask.** State what to do, what to produce and any constraints; the background agent cannot ask a question and nobody will see its intermediate steps.
 Use it when the work is slow AND the user does not need it inside this reply — "look into X while we carry on", or a long build/refactor. When they are waiting on the answer right now, just do the work directly instead.""",
     "search_chats": "- ```search_chats``` — Search across all chat history. Use when user asks 'did we discuss X?' or 'find the conversation about Y'.",
-    "ask_user": '- ```ask_user``` — Ask the user a multiple-choice question when the task is genuinely ambiguous and the answer changes what you do next (pick an approach, confirm an assumption, choose a target). Args (JSON): {"question": "...", "options": [{"label": "...", "description": "..."?}, ...], "multi": false?}. 2-6 options. The user gets clickable buttons; calling this ENDS your turn and their choice comes back as your next message. Prefer sensible defaults — only ask when you truly can\'t proceed well without their input.',
+    "ask_user": """\
+```ask_user
+{"question": "...", "options": [{"label": "...", "description": "..."}], "multi": false}
+```
+Ask the user a multiple-choice question when the task is genuinely ambiguous and the answer changes what you do next (pick an approach, confirm an assumption, choose a target). 2-6 options. The user gets clickable buttons; calling this ENDS your turn and their choice comes back as your next message. Prefer sensible defaults — only ask when you truly can't proceed well without their input.
+**Offering a choice IS this tool.** The moment you decide to put a question to the user, it goes in an `ask_user` call — never written out in your prose. Ending a reply with "Was möchten Sie tun?" followed by a list, a row of bracketed choices like `[Option A · Option B · Option C]`, a numbered menu, or "sag mir welches" is the failure this rule exists to prevent: it LOOKS like buttons and does nothing. The user cannot click a sentence, so they have to retype an option you already knew — and you spent a turn to make them do it.
+So: either commit to a sensible default and carry on, or call `ask_user`. Those are the only two endings. Never a menu in text.""",
     "update_plan": '- ```update_plan``` — While executing an approved plan, write the full checklist back with completed steps marked `- [x]`. Args (JSON): {"plan": "- [x] done step\\n- [ ] next step"}. Always pass the COMPLETE checklist, not a diff.',
 }
 

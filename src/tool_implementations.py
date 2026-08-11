@@ -546,7 +546,23 @@ async def do_query_sql(
                 names = sorted(dict.fromkeys(names))
                 if max_rows is not None:
                     names = names[:max_rows]
-                return {"output": "\n".join(names) if names else "No tables found.", "exit_code": 0}
+                # A schema listing is a two-column table, and on a real database
+                # it is the LONGEST thing this tool ever returns — a BI schema
+                # runs to thousands of names. Splitting schema from table also
+                # makes the widget sortable by schema, which a newline-joined
+                # blob cannot be.
+                listed = [
+                    dict(zip(("schema", "table"), n.split(".", 1) if "." in n else ("", n)))
+                    for n in names
+                ]
+                return {
+                    "output": "\n".join(names) if names else "No tables found.",
+                    "_columns": ["schema", "table"],
+                    "_widget_rows": listed[:_SQL_WIDGET_ROWS],
+                    "_widget_label": f"{len(names)} tables",
+                    "_widget_total": len(names),
+                    "exit_code": 0,
+                }
 
             if action == "describe":
                 table = str(args.get("table") or "").strip()
@@ -643,6 +659,7 @@ async def do_query_sql(
     widget_columns = result.pop("_columns", None)
     widget_rows = result.pop("_widget_rows", None)
     widget_label = result.pop("_widget_label", "")
+    widget_total = result.pop("_widget_total", None)
 
     csv_text = result.pop("_spill_csv", None)
     name = result.pop("_spill_name", "")
@@ -681,7 +698,11 @@ async def do_query_sql(
         result["widget"] = _build_table_widget(
             columns=widget_columns,
             rows=widget_rows,
-            row_count=result.get("row_count", len(widget_rows)),
+            row_count=(
+                widget_total
+                if widget_total is not None
+                else result.get("row_count", len(widget_rows))
+            ),
             label=widget_label,
             database=conn["name"] if len(conns) > 1 else "",
             spill_path=result.get("spill_path", ""),

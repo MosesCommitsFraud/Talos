@@ -118,6 +118,26 @@ def test_empty_input_is_not_a_trim():
 # ── wiring ──
 
 
+def test_a_schema_listing_is_split_into_two_columns():
+    """`list_tables` is the LONGEST thing query_sql ever returns — a BI schema
+    runs to thousands of names. It reached the user as a newline-joined blob
+    because the widget was only wired to `query` and `describe`."""
+    rows = [
+        {"schema": "dbo", "table": "dim1"},
+        {"schema": "client_spark_user20", "table": "pivot_ctx_1234"},
+        {"schema": "", "table": "unqualified"},
+    ]
+    widget = _build_table_widget(["schema", "table"], rows, row_count=5800, label="5800 tables")
+    data = widget["data"]
+    assert data["columns"] == ["schema", "table"]
+    assert data["rows"][0] == ["dbo", "dim1"]
+    assert data["rows"][1] == ["client_spark_user20", "pivot_ctx_1234"]
+    # A name with no schema keeps its column rather than shifting left.
+    assert data["rows"][2] == ["", "unqualified"]
+    # The total is the whole schema, not the windowed payload.
+    assert data["rowCount"] == 5800
+
+
 def test_table_is_a_registered_widget_type():
     from src.widgets import WIDGET_TYPES
 

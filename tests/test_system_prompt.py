@@ -39,3 +39,24 @@ def test_protected_prompt_precedes_editable_prompt():
 
     assert preface[0] == {"role": "system", "content": TALOS_SYSTEM_PROMPT}
     assert preface[1] == {"role": "system", "content": "editable preset"}
+
+
+def test_ask_user_forbids_rendering_the_options_as_prose():
+    """A model that decides to ask, then writes `[Option A · Option B]` into its
+    reply, produces something that looks like buttons and does nothing — the
+    user has to retype a choice the model already had. Seen in the wild, so the
+    rule is pinned in all three places the model can read a tool from: the
+    agent-mode prompt section, the function schema, and the retrieval index.
+    """
+    from src.agent_loop import TOOL_SECTIONS
+    from src.tool_index import BUILTIN_TOOL_DESCRIPTIONS
+    from src.tool_schemas import FUNCTION_TOOL_SCHEMAS
+
+    section = TOOL_SECTIONS["ask_user"]
+    assert "Offering a choice IS this tool" in section
+    assert "Option A · Option B" in section
+
+    schema = next(s for s in FUNCTION_TOOL_SCHEMAS if s["function"]["name"] == "ask_user")
+    assert "OFFERING A CHOICE IS THIS TOOL, NOT PROSE" in schema["function"]["description"]
+
+    assert "look like buttons and do nothing" in BUILTIN_TOOL_DESCRIPTIONS["ask_user"]

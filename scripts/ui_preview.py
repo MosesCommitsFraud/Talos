@@ -838,6 +838,36 @@ print(result)
         },
         # A second widget type in the SAME turn: both cards must render, each
         # with its own spacing, in the order the tools ran.
+        # list_tables: the longest thing query_sql ever returns, and the case
+        # that reached the user as a wall of text because the widget was only
+        # wired to `query` and `describe`.
+        {"type": "tool_start", "tool": "query_sql", "command": '{"action": "list_tables"}'},
+        {
+            "type": "tool_output",
+            "tool": "query_sql",
+            "command": '{"action": "list_tables"}',
+            "output": "dbo.dim1\ndbo.dim2\n… (5800 tables)",
+            "exit_code": 0,
+            "widget": {
+                "type": "table",
+                "version": 1,
+                "data": {
+                    "columns": ["schema", "table"],
+                    "rows": (
+                        [["client_spark_user20", "pivot_ctx_1234"]]
+                        + [["dbo", f"dim{i}"] for i in range(1, 120)]
+                        + [["dbo", f"ent{200 + i}"] for i in range(0, 80)]
+                        + [["", "unqualified_legacy_table"]]
+                    ),
+                    "rowCount": 5800,
+                    "shown": 201,
+                    "trimmed": True,
+                    "label": "5800 tables",
+                    "database": "",
+                    "spillPath": "",
+                },
+            },
+        },
         {"type": "tool_start", "tool": "get_news", "command": '{"query": "EU AI Act"}'},
         {
             "type": "tool_output",
