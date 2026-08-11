@@ -1646,8 +1646,22 @@ class TicketAttachment(TimestampMixin, Base):
     session_id = Column(String, nullable=True)
     session_name = Column(String, nullable=False, default="")
     message_count = Column(Integer, nullable=False, default=0)
-    # JSON array of {role, content, timestamp?} — the snapshot itself.
+    # JSON array — the snapshot itself. Format 1 rows hold flat
+    # {role, content, timestamp?} entries; format 2 holds the full
+    # {role, content, metadata} shape the chat UI renders from, so an admin sees
+    # reasoning, tool calls and citations exactly as the reporter did.
     transcript = Column(Text, nullable=False, default="[]")
+    format_version = Column(Integer, nullable=False, default=1)
+    # Session owner at snapshot time — needed to fetch the chat's workspace
+    # artifacts, which live under the reporter's sandbox user.
+    owner = Column(String, nullable=True)
+    # JSON array: the artifact manifest frozen at submit time (name/path/size).
+    artifacts = Column(Text, nullable=False, default="[]")
+    # JSON object mapping opaque ref → resource descriptor. Every image or file
+    # the transcript points at is rewritten to a ticket-scoped URL carrying one
+    # of these refs, so serving it never needs to widen any other route's access
+    # rules: an admin can read exactly what this ticket froze, nothing else.
+    media = Column(Text, nullable=False, default="{}")
 
 
 def _migrate_seed_email_account():
@@ -1773,6 +1787,42 @@ def init_db():
     _migrate_encrypt_email_passwords()
     _migrate_encrypt_signatures()
     _migrate_encrypt_endpoint_keys()
+    _migrate_add_ticket_attachment_detail_columns()
+
+
+def _migrate_add_ticket_attachment_detail_columns():
+    """Add the columns a full-fidelity ticket snapshot needs.
+
+    Rows written before this keep format_version 1 (flat role/content/timestamp
+    transcripts) and are still rendered — the reader branches on the version
+    rather than assuming every snapshot carries reasoning and tool calls."""
+    import sqlite3
+
+    db_path = DATABASE_URL.replace("sqlite:///", "")
+    if not os.path.exists(db_path):
+        return
+    additions = {
+        "format_version": "ALTER TABLE ticket_attachments ADD COLUMN format_version INTEGER DEFAULT 1 NOT NULL",
+        "owner": "ALTER TABLE ticket_attachments ADD COLUMN owner TEXT",
+        "artifacts": "ALTER TABLE ticket_attachments ADD COLUMN artifacts TEXT DEFAULT '[]' NOT NULL",
+        "media": "ALTER TABLE ticket_attachments ADD COLUMN media TEXT DEFAULT '{}' NOT NULL",
+    }
+    try:
+        conn = sqlite3.connect(db_path)
+        cursor = conn.execute("PRAGMA table_info(ticket_attachments)")
+        columns = [row[1] for row in cursor.fetchall()]
+        if columns:
+            added = [name for name in additions if name not in columns]
+            for name in added:
+                conn.execute(additions[name])
+            if added:
+                conn.commit()
+                logging.getLogger(__name__).info(
+                    "Migrated: added %s to ticket_attachments", ", ".join(added)
+                )
+        conn.close()
+    except Exception as e:
+        logging.getLogger(__name__).warning(f"ticket_attachments detail migration failed: {e}")
 
 
 def _migrate_add_email_smtp_security():

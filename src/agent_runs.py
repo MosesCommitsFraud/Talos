@@ -106,21 +106,48 @@ def get_status(session_id: str) -> Optional[str]:
     return r.status if r else None
 
 
-def partial_text(session_id: str) -> Optional[str]:
-    """The answer text streamed so far, replayed out of the run buffer.
+# Fields a `tool_output` event carries through to the persisted tool event, so
+# an in-flight snapshot renders with the same detail a finished turn does.
+_TOOL_OUTPUT_FIELDS = (
+    "output",
+    "exit_code",
+    "diff",
+    "image_url",
+    "image_prompt",
+    "image_model",
+    "image_size",
+    "image_quality",
+    "image_note",
+    "screenshot",
+    "created_images",
+)
+
+
+def partial_snapshot(session_id: str) -> Optional[dict]:
+    """Everything the in-flight turn has produced so far, replayed out of the
+    run buffer in the shape a FINISHED assistant row is persisted in.
 
     The assistant row is only written to the DB when the turn ENDS, so anything
     that snapshots a session mid-run (ticket attachments) would otherwise show
     the user's question with no answer under it — even though the reporter was
-    looking at a screen full of text. Reconstructs the visible answer the same
-    way the client does: content deltas concatenated, thinking deltas skipped,
+    looking at a screen full of streamed text, tool rows and reasoning.
+
+    Reconstructs the turn the same way the client does: content deltas
+    concatenated, thinking deltas kept per round (re-wrapped in `<think>` tags,
+    which is how finished rounds persist reasoning inside `round_texts`),
     `agent_step` starting a new round, `content_final` replacing the current
-    round's text. Returns None when there's nothing to show.
+    round's text, and `tool_start`/`tool_output` pairs collected into
+    `tool_events` tagged with their 1-based round.
+
+    Returns None when the session has no run, and a dict with `content`,
+    `round_texts`, `thinking` and `tool_events` otherwise (any of which may be
+    empty — the caller decides whether that is worth showing).
     """
     run = _RUNS.get(session_id)
     if run is None:
         return None
-    rounds: list = [""]
+    rounds: list = [{"text": "", "thinking": ""}]
+    tool_events: list = []
     for ev in list(run.buffer):
         _, _, payload = str(ev).partition("data: ")
         payload = payload.strip()
@@ -134,17 +161,54 @@ def partial_text(session_id: str) -> Optional[str]:
             continue
         delta = obj.get("delta")
         if isinstance(delta, str):
-            if not obj.get("thinking"):
-                rounds[-1] += delta
+            rounds[-1]["thinking" if obj.get("thinking") else "text"] += delta
             continue
         kind = obj.get("type")
         if kind == "agent_step":
-            if rounds[-1].strip():
-                rounds.append("")
+            if rounds[-1]["text"].strip() or rounds[-1]["thinking"].strip():
+                rounds.append({"text": "", "thinking": ""})
         elif kind == "content_final" and isinstance(obj.get("content"), str):
-            rounds[-1] = obj["content"]
-    text = "\n\n".join(r.strip() for r in rounds if r.strip())
-    return text or None
+            rounds[-1]["text"] = obj["content"]
+        elif kind == "tool_start":
+            tool_events.append(
+                {
+                    "round": len(rounds),
+                    "tool": str(obj.get("tool") or "tool"),
+                    "command": obj.get("command"),
+                }
+            )
+        elif kind == "tool_output" and tool_events:
+            # Events arrive in order and a tool's output follows its start, so
+            # the open call is the last one that has no output yet.
+            open_call = next(
+                (e for e in reversed(tool_events) if "output" not in e and "exit_code" not in e),
+                None,
+            )
+            if open_call is not None:
+                for field in _TOOL_OUTPUT_FIELDS:
+                    if obj.get(field) is not None:
+                        open_call[field] = obj[field]
+
+    round_texts = []
+    for round_data in rounds:
+        thinking = round_data["thinking"].strip()
+        text = round_data["text"].strip()
+        if not thinking and not text:
+            continue
+        round_texts.append(f"<think>{thinking}</think>\n\n{text}".strip() if thinking else text)
+    texts = [r["text"].strip() for r in rounds if r["text"].strip()]
+    return {
+        "content": "\n\n".join(texts),
+        "round_texts": round_texts,
+        "thinking": "\n\n".join(r["thinking"].strip() for r in rounds if r["thinking"].strip()),
+        "tool_events": tool_events,
+    }
+
+
+def partial_text(session_id: str) -> Optional[str]:
+    """The answer text streamed so far. See :func:`partial_snapshot`."""
+    snapshot = partial_snapshot(session_id)
+    return (snapshot or {}).get("content") or None
 
 
 async def _drain(

@@ -366,13 +366,17 @@ function displayUserContent(content: string): string {
  *  reopened chat folds the same way it did right after finishing — one thinking
  *  block + tool rows per round, the final round's text as the answer — instead
  *  of collapsing into a single bubble with all thinking and tools merged. */
-interface HistoryMessage {
+export interface HistoryMessage {
   role: string;
   content: string;
   metadata?: Record<string, unknown>;
 }
 
-function coldLoadMessage(m: HistoryMessage, sessionId: string): UiMessage[] {
+/** Exported for the ticket transcript viewer: an admin triaging a report must
+ *  see the attached chat exactly as the reporter's own window rendered it, and
+ *  the only way to guarantee that is to build the messages with this same
+ *  function rather than a second, drifting copy of its rules. */
+export function coldLoadMessage(m: HistoryMessage, sessionId: string): UiMessage[] {
   const createdAt = timestampMs(m.metadata?.timestamp as string | undefined) || undefined;
   if (m.role !== 'assistant') {
     return [{

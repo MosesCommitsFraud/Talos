@@ -1073,6 +1073,11 @@ export interface TicketAttachmentInfo {
   session_id: string | null;
   session_name: string;
   message_count: number;
+  /** Files the chat produced, frozen with the transcript. */
+  artifact_count?: number;
+  /** 1 = the old text-only snapshot; 2 = full messages with reasoning, tool
+   *  calls and citations. Old tickets keep rendering, with less in them. */
+  format_version?: number;
 }
 
 export interface Ticket {
@@ -1095,14 +1100,31 @@ export interface TicketDetail extends Omit<Ticket, 'attachment_count'> {
 export interface TicketTranscriptMessage {
   role: string;
   content: string;
-  timestamp: string | null;
+  /** Format 2: the message's own metadata — thinking, tool_events, round_texts,
+   *  rag_sources, attachments — i.e. everything the chat UI renders a turn from.
+   *  Absent on format-1 snapshots, which carried a flat timestamp instead. */
+  metadata?: Record<string, unknown>;
+  timestamp?: string | null;
   /** The turn was still streaming when the ticket was filed — this is the
    *  answer as far as it had come, not the finished one. */
   partial?: boolean;
 }
 
+/** One file the attached chat produced. `media_ref` is this snapshot's own
+ *  handle on the bytes — see the ticket media route. */
+export interface TicketArtifact {
+  path: string;
+  name: string;
+  size?: number;
+  mime?: string;
+  is_image?: boolean;
+  source?: string;
+  media_ref?: string;
+}
+
 export interface TicketTranscript extends TicketAttachmentInfo {
   transcript: TicketTranscriptMessage[];
+  artifacts: TicketArtifact[];
 }
 
 /** File a ticket. Attached chats are snapshotted server-side at this moment. */
@@ -1122,6 +1144,17 @@ export const fetchTicketTranscript = (ticketId: string, attachmentId: string) =>
 
 export const ticketAttachmentDownloadUrl = (ticketId: string, attachmentId: string, format: 'md' | 'json' = 'md') =>
   `/api/tickets/${encodeURIComponent(ticketId)}/attachments/${encodeURIComponent(attachmentId)}/download?format=${format}`;
+
+/** Bytes of one frozen file: `inline` to view, `download` to save, `render` to
+ *  open an HTML artifact as a page. */
+export const ticketMediaUrl = (
+  ticketId: string,
+  attachmentId: string,
+  ref: string,
+  mode: 'inline' | 'download' | 'render' = 'inline',
+) =>
+  `/api/tickets/${encodeURIComponent(ticketId)}/attachments/${encodeURIComponent(attachmentId)}/media` +
+  `?ref=${encodeURIComponent(ref)}&mode=${mode}`;
 
 export const setTicketStatus = (id: string, status: 'open' | 'archived') =>
   postJSON<TicketDetail>(`/api/tickets/${encodeURIComponent(id)}`, { status }, 'PATCH');

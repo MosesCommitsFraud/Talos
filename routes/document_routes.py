@@ -48,6 +48,65 @@ from routes.document_helpers import (
 )
 
 
+def document_artifact(doc: Document) -> Dict[str, Any]:
+    """One living document as an artifact row (`document:<id>` pseudo-path).
+
+    Module level because the ticket snapshot freezes the same manifest the
+    artifacts panel shows — both must describe a document identically or an
+    admin reading a ticket sees different files than the reporter did."""
+    extensions = {
+        "markdown": ".md",
+        "python": ".py",
+        "javascript": ".js",
+        "typescript": ".ts",
+        "html": ".html",
+        "css": ".css",
+        "json": ".json",
+        "yaml": ".yaml",
+        "xml": ".xml",
+        "sql": ".sql",
+        "csv": ".csv",
+        "text": ".txt",
+        "email": ".eml",
+    }
+    title = (doc.title or "Untitled").strip() or "Untitled"
+    if re.match(r"^(?:untitled|document(?::|$)|code\s*\()", title, re.IGNORECASE):
+        derived = _derive_title(doc.current_content or "")
+        if derived != "Untitled":
+            title = derived
+    title = title.replace("/", "_").replace("\\", "_").replace('"', "'")
+    title = title.replace("\r", " ").replace("\n", " ")
+    if "." not in title.rsplit("/", 1)[-1]:
+        title += extensions.get((doc.language or "").lower(), ".txt")
+    mime = mimetypes.guess_type(title)[0] or "text/plain"
+    updated = doc.updated_at or doc.created_at
+    return {
+        "path": f"document:{doc.id}",
+        "name": title,
+        "size": len((doc.current_content or "").encode("utf-8")),
+        "mtime": updated.replace(tzinfo=timezone.utc).timestamp() if updated else 0,
+        "mime": mime,
+        "is_image": False,
+        "source": "document",
+        "version": doc.version_count or 1,
+    }
+
+
+def gallery_artifact(image: GalleryImage) -> Dict[str, Any]:
+    """One generated image as an artifact row (`generated-image:<id>`)."""
+    created = image.created_at
+    mime = mimetypes.guess_type(image.filename)[0] or "image/png"
+    return {
+        "path": f"generated-image:{image.id}",
+        "name": image.filename,
+        "size": image.file_size,
+        "mtime": created.replace(tzinfo=timezone.utc).timestamp() if created else 0,
+        "mime": mime,
+        "is_image": mime.startswith("image/"),
+        "source": "generated_image",
+    }
+
+
 def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
     router = APIRouter(tags=["documents"])
 
@@ -419,56 +478,8 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
             owners.append("anonymous")
         return owners
 
-    def _document_artifact(doc: Document) -> Dict[str, Any]:
-        extensions = {
-            "markdown": ".md",
-            "python": ".py",
-            "javascript": ".js",
-            "typescript": ".ts",
-            "html": ".html",
-            "css": ".css",
-            "json": ".json",
-            "yaml": ".yaml",
-            "xml": ".xml",
-            "sql": ".sql",
-            "csv": ".csv",
-            "text": ".txt",
-            "email": ".eml",
-        }
-        title = (doc.title or "Untitled").strip() or "Untitled"
-        if re.match(r"^(?:untitled|document(?::|$)|code\s*\()", title, re.IGNORECASE):
-            derived = _derive_title(doc.current_content or "")
-            if derived != "Untitled":
-                title = derived
-        title = title.replace("/", "_").replace("\\", "_").replace('"', "'")
-        title = title.replace("\r", " ").replace("\n", " ")
-        if "." not in title.rsplit("/", 1)[-1]:
-            title += extensions.get((doc.language or "").lower(), ".txt")
-        mime = mimetypes.guess_type(title)[0] or "text/plain"
-        updated = doc.updated_at or doc.created_at
-        return {
-            "path": f"document:{doc.id}",
-            "name": title,
-            "size": len((doc.current_content or "").encode("utf-8")),
-            "mtime": updated.replace(tzinfo=timezone.utc).timestamp() if updated else 0,
-            "mime": mime,
-            "is_image": False,
-            "source": "document",
-            "version": doc.version_count or 1,
-        }
-
-    def _gallery_artifact(image: GalleryImage) -> Dict[str, Any]:
-        created = image.created_at
-        mime = mimetypes.guess_type(image.filename)[0] or "image/png"
-        return {
-            "path": f"generated-image:{image.id}",
-            "name": image.filename,
-            "size": image.file_size,
-            "mtime": created.replace(tzinfo=timezone.utc).timestamp() if created else 0,
-            "mime": mime,
-            "is_image": mime.startswith("image/"),
-            "source": "generated_image",
-        }
+    _document_artifact = document_artifact
+    _gallery_artifact = gallery_artifact
 
     # ---- GET /api/artifacts/{session_id} — every output associated with the chat ----
     @router.get("/api/artifacts/{session_id}")

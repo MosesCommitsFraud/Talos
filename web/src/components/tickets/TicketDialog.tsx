@@ -187,6 +187,9 @@ export function TicketDialog({ open, onClose }: { open: boolean; onClose: () => 
                   {t('tickets.dialog.attachLabel')}
                 </span>
                 <ChatPicker sessions={sessions} selected={selected} onToggle={toggle} />
+                {/* An attached chat is copied whole — reasoning, tool calls and
+                    the files it produced — so say so before it is sent. */}
+                <p className="text-[11px] text-muted-foreground">{t('tickets.dialog.attachHint')}</p>
                 {selected.length > 0 && (
                   <div className="flex flex-wrap gap-1.5 pt-1">
                     {selected.map((id) => (

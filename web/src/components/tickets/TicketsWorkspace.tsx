@@ -220,6 +220,7 @@ export function TicketsWorkspace() {
                     <div className="truncate text-sm">{a.session_name || t('common.untitled')}</div>
                     <div className="text-[11px] text-muted-foreground">
                       {t('tickets.viewer.messages', { count: a.message_count })}
+                      {!!a.artifact_count && ` · ${t('tickets.viewer.artifacts', { count: a.artifact_count })}`}
                     </div>
                   </div>
                   <Button variant="outline" size="sm" onClick={() => setViewing(a.id)}>

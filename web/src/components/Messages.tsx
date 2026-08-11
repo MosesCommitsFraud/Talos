@@ -381,7 +381,7 @@ function ActivityFold({ turn, showThinking, durationMs, terminalId }: { turn: Ui
  *  groups just switch from live labels to their past-tense recap.
  *  `hideContentFor` suppresses one bubble's text (the final answer, which stays
  *  outside the fold; or a proposed plan, which renders as a chip). */
-function TurnBody({ turn, showThinking, hideContentFor }: { turn: UiMessage[]; showThinking: boolean; hideContentFor?: string }) {
+export function TurnBody({ turn, showThinking, hideContentFor }: { turn: UiMessage[]; showThinking: boolean; hideContentFor?: string }) {
   return (
     <>
       {buildSegments(turn, showThinking).map((seg) => {
