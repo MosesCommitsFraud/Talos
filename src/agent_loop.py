@@ -3564,6 +3564,7 @@ async def stream_agent_loop(
             # copied — the payload is about to be JSON-encoded into this SSE
             # frame and persisted with the turn, so an unserialisable or
             # oversized one has to be dropped here, not break the stream.
+            widget = None
             if result.get("widget"):
                 from src.widgets import sanitize_widget
 
@@ -3654,6 +3655,14 @@ async def stream_agent_loop(
             # this the diff shows live but vanishes from saved history.
             if result.get("diff"):
                 tool_event["diff"] = result["diff"]
+            # Same for the widget, and the same failure if it is missed: the card
+            # renders while the turn streams and is gone the next time the
+            # session is opened. `tool_output_data` above is the live SSE frame;
+            # THIS is what ends up in metadata.tool_events and is replayed on
+            # load. Reuses the value already sanitised above rather than
+            # re-validating — the two copies must not be able to disagree.
+            if widget:
+                tool_event["widget"] = widget
             tool_events.append(tool_event)
             if block.tool_type in _VERIFIER_EFFECTFUL_TOOLS:
                 _effectful_used = True

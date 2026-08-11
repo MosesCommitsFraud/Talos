@@ -63,15 +63,20 @@ async def _drain_agent(sess, messages):
             round_num = d.get("round", round_num)
         elif d.get("type") == "tool_output":
             # Mirror the live chat's tool_event shape (chat_routes / chatRenderer).
-            tool_events.append(
-                {
-                    "round": round_num,
-                    "tool": d.get("tool"),
-                    "command": d.get("command"),
-                    "output": d.get("output"),
-                    "exit_code": d.get("exit_code"),
-                }
-            )
+            event = {
+                "round": round_num,
+                "tool": d.get("tool"),
+                "command": d.get("command"),
+                "output": d.get("output"),
+                "exit_code": d.get("exit_code"),
+            }
+            # Structured UI payload (see src/widgets.py), already sanitised
+            # upstream. Without it a background follow-up that checks the
+            # weather or the news delivers its card once and loses it on the
+            # next load, like any other unpersisted field.
+            if d.get("widget"):
+                event["widget"] = d["widget"]
+            tool_events.append(event)
     return full, tool_events
 
 

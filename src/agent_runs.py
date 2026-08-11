@@ -120,6 +120,9 @@ _TOOL_OUTPUT_FIELDS = (
     "image_note",
     "screenshot",
     "created_images",
+    # Structured UI payload (see src/widgets.py). Already sanitised by the time
+    # it reaches the stream, so it is copied as-is.
+    "widget",
 )
 
 

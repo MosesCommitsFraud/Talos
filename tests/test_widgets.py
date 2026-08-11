@@ -332,10 +332,64 @@ def test_widget_payload_is_not_echoed_into_model_context():
     assert "widget" not in text
 
 
-def test_weather_is_the_only_registered_widget_type_so_far():
+# ── persistence ──
+#
+# A widget has to be written into metadata.tool_events as well as onto the live
+# SSE frame. Miss that and the card renders while the turn streams and is gone
+# the next time the chat is opened — which is exactly how it was found, after a
+# container restart. These pin the paths that rebuild a turn from storage.
+
+
+def test_the_stream_and_the_persisted_event_carry_the_same_fields():
+    """`agent_loop` builds two dicts per tool call: `tool_output_data` for the
+    stream and `tool_event` for storage. Anything the card needs must be in
+    both."""
+    import inspect
+
+    from src import agent_loop
+
+    source = inspect.getsource(agent_loop)
+    assert 'tool_output_data["widget"] = widget' in source
+    assert 'tool_event["widget"] = widget' in source
+
+
+def test_snapshot_replay_carries_the_widget(monkeypatch):
+    """The in-flight/ticket replay path rebuilds tool_events from the raw SSE
+    buffer, through its own field allowlist."""
+    import json as _json
+
+    from src import agent_runs
+
+    run = agent_runs._Run()
+    monkeypatch.setitem(agent_runs._RUNS, "sid", run)
+    widget = make_widget("weather", {"current": {"temperature": 21.4}})
+    run.buffer = [
+        f"data: {_json.dumps({'type': 'tool_start', 'tool': 'get_weather', 'command': 'Berlin'})}\n\n",
+        f"data: {_json.dumps({'type': 'tool_output', 'output': 'ok', 'exit_code': 0, 'widget': widget})}\n\n",
+    ]
+    events = agent_runs.partial_snapshot("sid")["tool_events"]
+    assert events[0]["widget"] == widget
+
+
+def test_snapshot_field_allowlist_includes_the_widget():
+    from src import agent_runs
+
+    assert "widget" in agent_runs._TOOL_OUTPUT_FIELDS
+
+
+def test_background_monitor_persists_the_widget():
+    """The headless follow-up runner builds its own tool_event shape."""
+    import inspect
+
+    from src import bg_monitor
+
+    assert 'event["widget"] = d["widget"]' in inspect.getsource(bg_monitor)
+
+
+def test_registered_widget_types_match_the_frontend_registry():
     """Guards the registry contract: a type added here without a component in
     web/src/components/widgets/registry.tsx renders as nothing."""
-    assert WIDGET_TYPES == frozenset({"weather"})
+    assert WIDGET_TYPES == frozenset({"weather", "news"})
 
 
 @pytest.mark.parametrize("tool", ["get_weather"])

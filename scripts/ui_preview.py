@@ -412,6 +412,28 @@ def _cold_agent_turn(ts_offset: int) -> dict:
                     "exit_code": 0,
                     "diff": "--- a/src/report.py\n+++ b/src/report.py\n-old = 1\n+new = 2\n+extra = 3",
                 },
+                # Widgets on the COLD path. A widget only reaches the card if it
+                # was written into metadata.tool_events as well as onto the live
+                # SSE frame — miss that and the card renders while the turn
+                # streams and is gone the next time the chat is opened, which is
+                # exactly how this was found. Both types are seeded so the
+                # registry is exercised on reload, not just mid-stream.
+                {
+                    "round": 2,
+                    "tool": "get_weather",
+                    "command": '{"location": "Zürich"}',
+                    "output": "Weather for Zurich, Switzerland.",
+                    "exit_code": 0,
+                    "widget": _weather_widget(),
+                },
+                {
+                    "round": 2,
+                    "tool": "get_news",
+                    "command": '{"query": "EU AI Act"}',
+                    "output": 'News: "EU AI Act" — 5 article(s).',
+                    "exit_code": 0,
+                    "widget": _news_widget(),
+                },
             ],
         }
     )
