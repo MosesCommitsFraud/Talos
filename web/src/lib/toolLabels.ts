@@ -27,6 +27,7 @@ const FAMILY: Record<string, string> = {
   search_knowledge: 'knowledge',
   web_search: 'web',
   web_fetch: 'fetch',
+  get_weather: 'weather',
   generate_image: 'image',
   show_image: 'image',
   browse_skills: 'skills',
@@ -140,6 +141,8 @@ export function callSubject(call: ToolCall): string {
       return pick('query', 'q') || firstLine(raw);
     case 'fetch':
       return pick('url') || firstLine(raw);
+    case 'weather':
+      return truncate(pick('location', 'place', 'city') || firstLine(raw), 48);
     case 'sql': {
       const action = pick('action');
       if (action && action !== 'query') return action.replace(/_/g, ' ');

@@ -84,6 +84,32 @@ const de: typeof en = {
     title: 'Hilfe',
     empty: 'Hilfe-Inhalte folgen in Kürze.',
   },
+  // Wetterkarte (get_weather). Die `conditions`-Schlüssel stammen aus
+  // src/weather.py, das die WMO-Codes darauf abbildet — beide Seiten müssen
+  // gemeinsam geändert werden.
+  weather: {
+    feelsLike: 'Gefühlt {{value}}',
+    today: 'Heute',
+    unknownPlace: 'Unbekannter Ort',
+    source: 'Quelle: Open-Meteo',
+    conditions: {
+      clear: 'Klar',
+      'mainly-clear': 'Überwiegend klar',
+      'partly-cloudy': 'Teils bewölkt',
+      overcast: 'Bedeckt',
+      fog: 'Nebel',
+      drizzle: 'Nieselregen',
+      rain: 'Regen',
+      'freezing-rain': 'Gefrierender Regen',
+      snow: 'Schnee',
+      'snow-grains': 'Schneegriesel',
+      showers: 'Regenschauer',
+      'snow-showers': 'Schneeschauer',
+      thunderstorm: 'Gewitter',
+      'thunderstorm-hail': 'Gewitter mit Hagel',
+      unknown: 'Unbekannt',
+    },
+  },
   askUser: {
     placeholder: 'Antwort eingeben…',
     send: 'Senden',
@@ -413,6 +439,14 @@ const de: typeof en = {
       past: '{{subject}} {{verb}}',
       summary_one: '{{subject}} {{verb}}',
       summary_other: '{{count}} Seiten {{verb}}',
+    },
+    weather: {
+      verbPast: 'abgerufen',
+      running: 'Ruft das Wetter ab',
+      runningNamed: 'Ruft das Wetter für {{subject}} ab',
+      past: 'Wetter {{verb}}',
+      pastNamed: 'Wetter für {{subject}} {{verb}}',
+      pastN: 'Wetter {{times}} {{verb}}',
     },
     image: {
       verbPast: 'erzeugt',

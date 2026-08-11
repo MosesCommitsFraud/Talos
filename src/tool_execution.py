@@ -1830,6 +1830,11 @@ async def execute_tool_block(
 
         desc = f"web_fetch: {content.split(chr(10))[0].strip()[:80]}"
         result = await do_web_fetch(content, owner=owner)
+    elif tool == "get_weather":
+        from src.tool_implementations import do_get_weather
+
+        desc = f"get_weather: {content.split(chr(10))[0].strip()[:60]}"
+        result = await do_get_weather(content, owner=owner)
     elif tool == "background_task":
         from src.tool_implementations import do_background_task
 
@@ -1943,6 +1948,11 @@ _FORMATTER_HANDLED_KEYS = {
     "row_count",
     "truncated",
     "spill_path",
+    # A widget is the USER's copy of the answer (see src/widgets.py); `output`
+    # already carries the model's. Echoing the payload here would put the same
+    # forecast in context twice — once as prose, once as raw JSON — and the JSON
+    # copy is the one the model would start reading numbers out of.
+    "widget",
 }
 
 

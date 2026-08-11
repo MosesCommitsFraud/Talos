@@ -1,0 +1,233 @@
+import type { ComponentType } from 'react';
+import { useTranslation } from 'react-i18next';
+import {
+  CloudDrizzleIcon,
+  CloudFogIcon,
+  CloudHailIcon,
+  CloudIcon,
+  CloudLightningIcon,
+  CloudMoonIcon,
+  CloudRainIcon,
+  CloudSnowIcon,
+  CloudSunIcon,
+  DropletsIcon,
+  MoonIcon,
+  SunIcon,
+  SunriseIcon,
+  SunsetIcon,
+  WindIcon,
+} from 'lucide-react';
+import { cn } from '@/lib/utils';
+import type { WidgetProps } from './registry';
+
+// ── payload narrowing ──
+// Everything below arrives as `unknown`: off the SSE stream on a live turn, out
+// of a `tool_events` row on a cold load. A turn persisted by an older backend is
+// a normal input, not an error case, so every field is read defensively and a
+// missing one renders as a gap rather than taking the message list down with it.
+
+type Dict = Record<string, unknown>;
+
+const asDict = (value: unknown): Dict => (value && typeof value === 'object' && !Array.isArray(value) ? (value as Dict) : {});
+const asList = (value: unknown): Dict[] => (Array.isArray(value) ? value.filter((v): v is Dict => !!v && typeof v === 'object') : []);
+const asNum = (value: unknown): number | undefined => (typeof value === 'number' && Number.isFinite(value) ? value : undefined);
+const asStr = (value: unknown): string => (typeof value === 'string' ? value : '');
+
+/** Condition key -> icon. The keys are the backend's (`src/weather.py` maps WMO
+ *  codes onto them); several codes share a key where the difference isn't
+ *  visible on a card. `clear` and `mainly-clear` swap for their night variants —
+ *  a sun over a 3 a.m. reading reads as a bug. */
+const ICONS: Record<string, ComponentType<{ className?: string }>> = {
+  clear: SunIcon,
+  'mainly-clear': CloudSunIcon,
+  'partly-cloudy': CloudSunIcon,
+  overcast: CloudIcon,
+  fog: CloudFogIcon,
+  drizzle: CloudDrizzleIcon,
+  rain: CloudRainIcon,
+  'freezing-rain': CloudHailIcon,
+  snow: CloudSnowIcon,
+  'snow-grains': CloudSnowIcon,
+  showers: CloudRainIcon,
+  'snow-showers': CloudSnowIcon,
+  thunderstorm: CloudLightningIcon,
+  'thunderstorm-hail': CloudLightningIcon,
+  unknown: CloudIcon,
+};
+
+const NIGHT_ICONS: Record<string, ComponentType<{ className?: string }>> = {
+  clear: MoonIcon,
+  'mainly-clear': CloudMoonIcon,
+  'partly-cloudy': CloudMoonIcon,
+};
+
+function ConditionIcon({ condition, night = false, className }: { condition: string; night?: boolean; className?: string }) {
+  const Icon = (night ? NIGHT_ICONS[condition] : undefined) ?? ICONS[condition] ?? ICONS.unknown;
+  return <Icon className={className} />;
+}
+
+/** Open-Meteo timestamps are already in the LOCATION's local time and carry no
+ *  offset ("2026-08-11T14:00"). Parsing them with `new Date()` would have the
+ *  browser read them as the VIEWER's local time, which is wrong the moment the
+ *  two differ — and someone asking about Tokyo from Germany is exactly the case
+ *  the card exists for. So the fields are sliced out of the string instead. */
+function hourOf(stamp: string): string {
+  return stamp.slice(11, 16);
+}
+
+/** Weekday for a "YYYY-MM-DD" date, in the UI's language. Constructed from the
+ *  parts rather than parsed, for the same reason as `hourOf`. */
+function weekdayOf(date: string, locale: string): string {
+  const [y, m, d] = date.split('-').map(Number);
+  if (!y || !m || !d) return date;
+  return new Date(Date.UTC(y, m - 1, d)).toLocaleDateString(locale, { weekday: 'short', timeZone: 'UTC' });
+}
+
+const round = (value: number | undefined): string => (value == null ? '–' : `${Math.round(value)}`);
+
+/** Probability of precipitation, shown only when it's worth looking at. A row of
+ *  "0%" on a clear week is noise that makes the one rainy day harder to spot. */
+function Pop({ value }: { value: number | undefined }) {
+  if (value == null || value < 10) return null;
+  return (
+    <span className="flex items-center gap-0.5 text-xs tabular-nums text-sky-600 dark:text-sky-400">
+      <DropletsIcon className="size-3" />
+      {Math.round(value)}%
+    </span>
+  );
+}
+
+export function WeatherWidget({ data }: WidgetProps) {
+  const { t, i18n } = useTranslation();
+  const payload = asDict(data);
+  const location = asDict(payload.location);
+  const units = asDict(payload.units);
+  const current = asDict(payload.current);
+  const hourly = asList(payload.hourly);
+  const daily = asList(payload.daily);
+
+  const degree = asStr(units.temperature) || '°C';
+  const condition = asStr(current.condition) || 'unknown';
+  const isDay = current.isDay !== false;
+  const label = (key: string) => t(`weather.conditions.${key}`, { defaultValue: t('weather.conditions.unknown') });
+
+  const place = [asStr(location.name), asStr(location.country)].filter(Boolean).join(', ');
+
+  // One temperature scale for the whole week, so the range bars are comparable
+  // between rows — scaling each row to itself would draw a 2-degree day and a
+  // 15-degree day as the same bar.
+  const lows = daily.map((day) => asNum(day.min)).filter((v): v is number => v != null);
+  const highs = daily.map((day) => asNum(day.max)).filter((v): v is number => v != null);
+  const weekMin = lows.length ? Math.min(...lows) : 0;
+  const weekMax = highs.length ? Math.max(...highs) : 1;
+  const span = Math.max(weekMax - weekMin, 1);
+
+  const sunrise = asStr(asDict(daily[0]).sunrise);
+  const sunset = asStr(asDict(daily[0]).sunset);
+
+  return (
+    <div className="mt-3 overflow-hidden rounded-xl border bg-card">
+      {/* Current conditions */}
+      <div className="flex items-start gap-4 p-4">
+        <ConditionIcon condition={condition} night={!isDay} className="size-12 shrink-0 text-primary" />
+        <div className="min-w-0 flex-1">
+          <div className="truncate text-sm font-medium">{place || t('weather.unknownPlace')}</div>
+          <div className="flex items-baseline gap-2">
+            <span className="text-4xl font-semibold tabular-nums">
+              {round(asNum(current.temperature))}
+              <span className="text-2xl text-muted-foreground">{degree}</span>
+            </span>
+            <span className="truncate text-sm text-muted-foreground">{label(condition)}</span>
+          </div>
+          {asNum(current.apparent) != null && (
+            <div className="text-xs text-muted-foreground">
+              {t('weather.feelsLike', { value: `${round(asNum(current.apparent))}${degree}` })}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Wind / humidity / sun */}
+      <div className="flex flex-wrap gap-x-4 gap-y-1 border-t px-4 py-2 text-xs text-muted-foreground">
+        {asNum(current.wind) != null && (
+          <span className="flex items-center gap-1">
+            <WindIcon className="size-3.5" />
+            <span className="tabular-nums">{round(asNum(current.wind))} {asStr(units.wind) || 'km/h'}</span>
+          </span>
+        )}
+        {asNum(current.humidity) != null && (
+          <span className="flex items-center gap-1">
+            <DropletsIcon className="size-3.5" />
+            <span className="tabular-nums">{round(asNum(current.humidity))}%</span>
+          </span>
+        )}
+        {sunrise && (
+          <span className="flex items-center gap-1">
+            <SunriseIcon className="size-3.5" />
+            <span className="tabular-nums">{hourOf(sunrise)}</span>
+          </span>
+        )}
+        {sunset && (
+          <span className="flex items-center gap-1">
+            <SunsetIcon className="size-3.5" />
+            <span className="tabular-nums">{hourOf(sunset)}</span>
+          </span>
+        )}
+      </div>
+
+      {/* Next 24 hours. Scrolls inside its own track — the message column must
+          never scroll sideways because a widget is wider than it is. */}
+      {hourly.length > 0 && (
+        <div className="flex gap-1 overflow-x-auto border-t px-3 py-2.5">
+          {hourly.map((hour, i) => (
+            <div key={asStr(hour.time) || i} className="flex min-w-11 flex-col items-center gap-1">
+              <span className="text-[11px] tabular-nums text-muted-foreground">{hourOf(asStr(hour.time))}</span>
+              <ConditionIcon condition={asStr(hour.condition) || 'unknown'} className="size-4 text-muted-foreground" />
+              <span className="text-xs font-medium tabular-nums">{round(asNum(hour.temperature))}°</span>
+              <Pop value={asNum(hour.precipitationProbability)} />
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Daily forecast */}
+      {daily.length > 0 && (
+        <div className="border-t">
+          {daily.map((day, i) => {
+            const min = asNum(day.min);
+            const max = asNum(day.max);
+            const left = min == null ? 0 : ((min - weekMin) / span) * 100;
+            const width = min == null || max == null ? 0 : Math.max(((max - min) / span) * 100, 4);
+            return (
+              <div
+                key={asStr(day.date) || i}
+                className={cn('flex items-center gap-3 px-4 py-1.5 text-sm', i > 0 && 'border-t border-border/40')}
+              >
+                <span className="w-9 shrink-0 text-xs text-muted-foreground">
+                  {i === 0 ? t('weather.today') : weekdayOf(asStr(day.date), i18n.language)}
+                </span>
+                <ConditionIcon
+                  condition={asStr(day.condition) || 'unknown'}
+                  className="size-4 shrink-0 text-muted-foreground"
+                />
+                <span className="w-10 shrink-0">
+                  <Pop value={asNum(day.precipitationProbability)} />
+                </span>
+                <span className="w-8 shrink-0 text-right text-xs tabular-nums text-muted-foreground">{round(min)}°</span>
+                <span className="relative h-1 min-w-8 flex-1 rounded-full bg-muted">
+                  <span
+                    className="absolute inset-y-0 rounded-full bg-gradient-to-r from-sky-400 to-amber-400"
+                    style={{ left: `${left}%`, width: `${width}%` }}
+                  />
+                </span>
+                <span className="w-8 shrink-0 text-xs font-medium tabular-nums">{round(max)}°</span>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      <div className="border-t px-4 py-1.5 text-[11px] text-muted-foreground">{t('weather.source')}</div>
+    </div>
+  );
+}

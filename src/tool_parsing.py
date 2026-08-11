@@ -326,6 +326,13 @@ _TOOL_NAME_MAP = {
     "read_url": "web_fetch",
     "browse": "web_fetch",
     "visit": "web_fetch",
+    # Weather. The bare noun in either language is what a model emits when it
+    # half-remembers the tool name, and German prompts produce "wetter" often
+    # enough to be worth the entry.
+    "get_weather": "get_weather",
+    "weather": "get_weather",
+    "wetter": "get_weather",
+    "forecast": "get_weather",
 }
 
 

@@ -122,6 +122,21 @@ export interface SessionDetail {
   history: HistoryMessage[];
 }
 
+/** A structured UI payload a tool attached to its result — rendered as a real
+ *  component (a weather card, a chart) instead of the monospace output block.
+ *  See `src/widgets.py` for the emitting side and
+ *  `components/widgets/registry.tsx` for the components.
+ *
+ *  `data` is deliberately `unknown`: it arrives from the backend and from old
+ *  persisted turns, so each component narrows its own payload rather than
+ *  trusting a type that was true when the turn was written. `version` is how a
+ *  component keeps rendering payloads written before its shape changed. */
+export interface Widget {
+  type: string;
+  version: number;
+  data: unknown;
+}
+
 /** One tool invocation inside an assistant turn. */
 export interface ToolCall {
   tool: string;
@@ -146,6 +161,7 @@ export interface ToolCall {
     url?: string;
     [key: string]: unknown;
   }>;
+  widget?: Widget;
 }
 
 export interface Metrics {

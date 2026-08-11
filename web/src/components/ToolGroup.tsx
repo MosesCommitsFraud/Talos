@@ -6,6 +6,7 @@ import { describeCall, groupDiffStat, joinClauses, partsToString, summarizeCalls
 import { ToolLabel } from './ToolLabel';
 import { DiffStatBadge, ToolRow } from './ToolRow';
 import { Collapse } from './ui/collapse';
+import { WidgetView } from './widgets/registry';
 
 /** One item on a group's timeline. Only tool calls: the model's reasoning is
  *  shown beside the working timer instead of on this track. */
@@ -22,8 +23,14 @@ export type GroupEntry = { kind: 'call'; call: ToolCall };
  *
  *  A single-call group keeps the same two levels rather than promoting its row
  *  to the header: the header is the recap ("Queried SQL"), the row inside it the
- *  detailed reading ("Queried SQL: list tables"). */
-export function ToolGroup({ entries }: { entries: GroupEntry[] }) {
+ *  detailed reading ("Queried SQL: list tables").
+ *
+ *  Widgets are the exception to the fold: a weather card is the answer, not a
+ *  log line, so it sits under the header where it needs no click. `showWidgets`
+ *  turns that off for the one caller that re-surfaces them itself — a settled
+ *  turn shows the cards under the answer, and drawing them again inside the
+ *  reopened fold would show the same card twice on one screen. */
+export function ToolGroup({ entries, showWidgets = true }: { entries: GroupEntry[]; showWidgets?: boolean }) {
   const { t, i18n } = useTranslation();
   const [open, setOpen] = useState(false);
   if (entries.length === 0) return null;
@@ -86,6 +93,8 @@ export function ToolGroup({ entries }: { entries: GroupEntry[] }) {
           </div>
         </div>
       </Collapse>
+      {showWidgets &&
+        calls.map((call, i) => call.widget && <WidgetView key={`w-${i}`} widget={call.widget} />)}
     </div>
   );
 }

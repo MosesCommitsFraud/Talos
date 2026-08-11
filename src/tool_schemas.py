@@ -293,6 +293,51 @@ FUNCTION_TOOL_SCHEMAS = [
     {
         "type": "function",
         "function": {
+            "name": "get_weather",
+            "description": (
+                "Current weather and a multi-day forecast for one place, from a live weather "
+                "service (Open-Meteo). Use this — never web_search — for ANY weather question: "
+                "'wie wird das Wetter', 'regnet es morgen', 'weather in Tokyo', 'brauche ich eine "
+                "Jacke', temperature, rain, wind, sunrise/sunset. Give `location` as a plain "
+                "place name ('Berlin', 'Freiburg im Breisgau', 'Tokyo'); pass latitude+longitude "
+                "instead only when you already have exact coordinates. The user is shown a "
+                "weather card with the full forecast automatically, so answer their actual "
+                "question in a sentence or two rather than repeating the whole table."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "location": {
+                        "type": "string",
+                        "description": (
+                            "Place name, e.g. 'Berlin' or 'Freiburg im Breisgau'. Add the country "
+                            "when the name is ambiguous ('Springfield, US')."
+                        ),
+                    },
+                    "latitude": {
+                        "type": "number",
+                        "description": "Latitude in degrees. Only when you have exact coordinates.",
+                    },
+                    "longitude": {
+                        "type": "number",
+                        "description": "Longitude in degrees. Only when you have exact coordinates.",
+                    },
+                    "days": {
+                        "type": "integer",
+                        "description": "Forecast days, 1-14 (default 7).",
+                    },
+                    "language": {
+                        "type": "string",
+                        "description": "Language for place-name matching, e.g. 'de' or 'en' (default 'en').",
+                    },
+                },
+                "required": ["location"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "read_file",
             "description": "Read a file from disk. Optionally read a line range with offset/limit for large files.",
             "parameters": {

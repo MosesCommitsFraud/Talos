@@ -68,6 +68,9 @@ TOOL_TAGS = {
     # Internet access via the self-hosted SearxNG instance
     "web_search",
     "web_fetch",
+    # Weather via Open-Meteo — answers with typed numbers and an inline card
+    # instead of a scraped snippet (see src/weather.py)
+    "get_weather",
     # Retrieve the full original of a compressed tool output
     # (see src/context_optimizer.py)
     "expand_output",

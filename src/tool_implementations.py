@@ -2882,6 +2882,41 @@ async def do_web_search(
     )
 
 
+async def do_get_weather(content: str, owner: Optional[str] = None) -> Dict:
+    """Current conditions and forecast for a place (Open-Meteo)."""
+    del owner
+    try:
+        args = _parse_tool_args(content) if content.strip() else {}
+    except ValueError:
+        # A bare "Berlin" is the overwhelmingly common call shape for this
+        # tool — models reach for the shortest thing that could work. Accept it
+        # rather than spending a round trip on a JSON-syntax complaint.
+        args = {"location": content.strip()}
+    if not isinstance(args, dict):
+        args = {"location": str(args)}
+    if not args.get("location") and content.strip() and not content.strip().startswith("{"):
+        args["location"] = content.strip()
+
+    from src.weather import DEFAULT_DAYS, get_weather
+
+    def _coord(key: str) -> Optional[float]:
+        value = args.get(key)
+        if value is None or value == "":
+            return None
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return None
+
+    return await get_weather(
+        location=str(args.get("location") or args.get("place") or args.get("city") or ""),
+        latitude=_coord("latitude") if "latitude" in args else _coord("lat"),
+        longitude=_coord("longitude") if "longitude" in args else _coord("lon"),
+        days=args.get("days") or DEFAULT_DAYS,
+        language=str(args.get("language") or "en"),
+    )
+
+
 async def do_web_fetch(content: str, owner: Optional[str] = None) -> Dict:
     """Fetch a public web page and return its readable text."""
     del owner

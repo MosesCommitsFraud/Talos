@@ -64,6 +64,11 @@ ALWAYS_AVAILABLE = frozenset(
         # not in whether the tool is present.
         "web_search",
         "web_fetch",
+        # Same reasoning as web_search, plus a sharper failure mode: if this is
+        # missing when a weather question arrives, the model doesn't ask for it,
+        # it silently falls back to web_search and answers from a scraped
+        # snippet — a worse answer with no signal that a better tool existed.
+        "get_weather",
     }
 )
 
@@ -119,6 +124,7 @@ BUILTIN_TOOL_DESCRIPTIONS: Dict[str, str] = {
     "search_chats": "Search through chat history across all sessions.",
     "ask_user": "Ask the user a question to get a decision, clarification, or input. Use this when the task is genuinely ambiguous and the answer changes what you do next — pick between approaches, confirm an assumption, choose among options, gather a missing detail — instead of guessing. Provide a clear `question` plus either 2-6 `options` (each with a short `label`, optional `description`) for clickable buttons, or no options for an open free-text answer. Calling this ENDS your turn: the user's answer arrives as your next message. Don't use it for things you can decide from context or sensible defaults, or for irreversible-action confirmation if a dedicated flow exists.",
     "web_search": "Search the live internet via the self-hosted SearxNG instance (Google/Bing/DuckDuckGo/Wikipedia results, no API key). For current events, news, prices, releases, versions, documentation, laws, people, companies — anything newer than training data or absent from the user's own documents. Also for any explicit request to search, look up, google, or research something, in English or German (suche, recherchiere, nachschlagen, aktuelle Informationen). Check the user's own documents first — `search_knowledge` when it's available, plus any retrieved knowledge already in context; use the web when that doesn't answer. Multiple calls per task are expected.",
+    "get_weather": "Live weather and forecast for a place: temperature, rain, wind, humidity, sunrise/sunset, several days ahead. The tool for every weather question in any language — Wetter, Temperatur, Regen, regnet es morgen, wie warm wird es, Vorhersage, Wettervorhersage, forecast, will it rain, how cold, do I need a jacket, umbrella. Takes a plain place name (Berlin, Freiburg im Breisgau, Tokyo) or coordinates. Shows the user a weather card automatically. Use instead of web_search for weather.",
     "web_fetch": "Open a public web page URL and return its readable text. Follow-up to web_search when snippets are too thin, or direct read of a link the user provided. Public http(s) HTML/text pages only.",
     "search_knowledge": "Search the documents indexed in this Talos instance — the uploaded knowledge base (manuals, training material, schema references, process docs, transcripts). Returns matching passages with their source filenames, or nothing when the base has no match. Cheap to call and an empty result is a normal outcome, so reach for it whenever a lookup might help rather than guessing. Multiple calls with different wording are expected. Deutsch: Wissensdatenbank, Dokumente, Handbuch, Schulung, Unterlagen, Doku durchsuchen.",
     "query_sql": "Read-only SQL access to the configured external database using backend .env credentials. Use when the user asks for database data, SQL, tables, schema, rows, metrics, reports, counts, customers, orders, products, invoices, or anything stored in the DB. Supports list_tables, describe table, and read-only SELECT/WITH/SHOW/DESCRIBE/EXPLAIN/PRAGMA queries with optional max_rows; omit max_rows or pass 0 for no row limit. The model never needs DB passwords.",

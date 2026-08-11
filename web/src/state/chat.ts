@@ -298,6 +298,23 @@ type RoundedToolCall = ToolCall & { round?: number };
 const asText = (value: unknown): string | undefined =>
   typeof value === 'string' ? value : value == null ? undefined : String(value);
 
+/** Coerce a tool result's `widget` into the envelope the registry dispatches on.
+ *  Only the envelope is checked here — `data` stays `unknown` and is narrowed by
+ *  whichever component claims the type, which is the only place that knows what
+ *  the payload should look like. An envelope missing its `type` is dropped: the
+ *  registry has nothing to look up, and a widget that renders nothing is the
+ *  designed outcome anyway (the tool row still shows the text result). */
+const asWidget = (value: unknown): ToolCall['widget'] => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const raw = value as Record<string, unknown>;
+  if (typeof raw.type !== 'string' || !raw.type) return undefined;
+  return {
+    type: raw.type,
+    version: typeof raw.version === 'number' ? raw.version : 1,
+    data: raw.data,
+  };
+};
+
 /** Every field is coerced to the type the renderer expects — this is the ONE
  *  boundary where arbitrary JSON out of the database becomes a typed ToolCall.
  *  Spreading the raw row instead would let a field of the wrong shape reach a
@@ -325,6 +342,7 @@ function mapToolEvent(item: Record<string, unknown>): RoundedToolCall {
     created_images: Array.isArray(item.created_images)
       ? (item.created_images as ToolCall['created_images'])
       : undefined,
+    widget: asWidget(item.widget),
   };
 }
 
@@ -767,6 +785,7 @@ export const useChat = create<ChatState>((set, get) => {
                         // Checked, not cast: a non-string here crashes the render.
                         diff: typeof ev.diff === 'string' ? ev.diff : undefined,
                         created_images: Array.isArray(ev.created_images) ? ev.created_images as ToolCall['created_images'] : undefined,
+                        widget: asWidget(ev.widget),
                       }
                     : t,
                 ),

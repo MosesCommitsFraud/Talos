@@ -452,6 +452,68 @@ def _record_turn(session_id: str, message: str) -> None:
     )
 
 
+def _weather_widget() -> dict:
+    """A get_weather widget payload in the shape src/weather.py emits, so the
+    preview exercises the widget channel and the weather card.
+
+    Deliberately not flat weather: the hours cross into night (the card swaps to
+    its moon icons), and one forecast day is wet while the rest are dry (the
+    precipitation figures only render above 10%, and the range bars are scaled
+    across the whole week, so a mixed week is the case worth looking at)."""
+    hours = []
+    for i in range(24):
+        hour = (15 + i) % 24
+        night = hour >= 21 or hour < 6
+        hours.append(
+            {
+                "time": f"2026-08-{11 + (15 + i) // 24:02d}T{hour:02d}:00",
+                "temperature": round(21.5 - abs(hour - 15) * 0.6, 1),
+                "condition": "partly-cloudy" if not night else "clear",
+                "precipitationProbability": 70 if 8 <= hour <= 13 else 0,
+            }
+        )
+    conditions = ["mainly-clear", "partly-cloudy", "rain", "showers", "overcast", "clear", "clear"]
+    highs = [23.4, 22.1, 18.6, 19.8, 21.0, 24.6, 26.1]
+    lows = [14.2, 13.8, 12.1, 12.9, 13.5, 15.0, 16.4]
+    pops = [0, 20, 85, 60, 15, 0, 0]
+    return {
+        "type": "weather",
+        "version": 1,
+        "data": {
+            "location": {
+                "name": "Berlin",
+                "admin": "State of Berlin",
+                "country": "Germany",
+                "timezone": "Europe/Berlin",
+            },
+            "units": {"temperature": "°C", "wind": "km/h", "precipitation": "mm"},
+            "current": {
+                "time": "2026-08-11T15:00",
+                "temperature": 21.5,
+                "apparent": 19.2,
+                "humidity": 34,
+                "wind": 11.4,
+                "precipitation": 0.0,
+                "condition": "mainly-clear",
+                "isDay": True,
+            },
+            "hourly": hours,
+            "daily": [
+                {
+                    "date": f"2026-08-{11 + i:02d}",
+                    "condition": conditions[i],
+                    "max": highs[i],
+                    "min": lows[i],
+                    "precipitationProbability": pops[i],
+                    "sunrise": f"2026-08-{11 + i:02d}T05:4{i}",
+                    "sunset": f"2026-08-{11 + i:02d}T20:4{8 - i}",
+                }
+                for i in range(7)
+            ],
+        },
+    }
+
+
 def _sse(event: dict | str) -> str:
     if event == "[DONE]":
         return "data: [DONE]\n\n"
@@ -569,6 +631,29 @@ print(result)
                     ),
                 }
             ],
+        },
+        # Widget flow: a tool result that carries a structured payload. The card
+        # must render OUTSIDE the collapsed tool group (it is the answer, not a
+        # log line) and exactly once — not again in the settled turn's recap.
+        {"type": "tool_start", "tool": "get_weather", "command": '{"location": "Berlin"}'},
+        {
+            "type": "tool_output",
+            "tool": "get_weather",
+            "command": '{"location": "Berlin"}',
+            "output": "Weather for Berlin, Germany (local time 2026-08-11T15:00).\nNow: 21.5°C, feels like 19.2°C, mainly clear, wind 11.4 km/h, humidity 34%.",
+            "exit_code": 0,
+            "widget": _weather_widget(),
+        },
+        # An unknown widget type must render as NOTHING rather than an error —
+        # that is what keeps a backend ahead of the deployed bundle safe.
+        {"type": "tool_start", "tool": "bash", "command": "echo future"},
+        {
+            "type": "tool_output",
+            "tool": "bash",
+            "command": "echo future",
+            "output": "future",
+            "exit_code": 0,
+            "widget": {"type": "not-yet-implemented", "version": 1, "data": {"x": 1}},
         },
         {"delta": "Second-round reply: the calculation checks out, **B** stays on top."},
         {
