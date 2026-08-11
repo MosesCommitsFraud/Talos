@@ -114,12 +114,19 @@ export function NewsWidget({ data }: WidgetProps) {
                     {age && <span className="shrink-0">{age}</span>}
                     <ExternalLinkIcon className="ml-auto size-3 shrink-0 opacity-0 transition-opacity group-hover:opacity-60" />
                   </div>
-                  {/* The underline is scoped to this span, not the row: a
-                      `text-decoration` set on a block box is drawn through every
-                      in-flow descendant, so putting it on a wrapper underlines
-                      the source line and the teaser along with the headline. */}
+                  {/* `hover:` on the headline itself, not `group-hover:` on the
+                      row. The whole row is one link, so a row-scoped underline
+                      fires while the pointer is over the teaser, the source or
+                      the picture — the text reacts to a hover that is nowhere
+                      near it, which reads as the entire item underlining. The
+                      row still answers the pointer with its background, so it
+                      is still visibly one click target.
+
+                      Scoped to a span rather than the block: `text-decoration`
+                      on a block box is painted through every in-flow descendant,
+                      so a wrapper carrying it would take the teaser with it. */}
                   <div className="mt-0.5 text-sm font-medium text-strong">
-                    <span className="group-hover:underline">{asStr(article.title)}</span>
+                    <span className="hover:underline">{asStr(article.title)}</span>
                   </div>
                   {asStr(article.snippet) && (
                     <div className="mt-1 line-clamp-2 text-xs leading-relaxed text-muted-foreground">
