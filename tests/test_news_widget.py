@@ -78,6 +78,34 @@ def test_build_articles_normalises_rows():
     assert articles[1]["published"] == ""
 
 
+def test_thumbnail_prefers_the_small_variant():
+    """Engines disagree on the field name; `thumbnail` is the pre-scaled one."""
+    assert (
+        news_mod._thumbnail(
+            {"thumbnail": "https://e.com/small.jpg", "img_src": "https://e.com/huge.jpg"}
+        )
+        == "https://e.com/small.jpg"
+    )
+    assert news_mod._thumbnail({"img_src": "https://e.com/huge.jpg"}) == "https://e.com/huge.jpg"
+    assert news_mod._thumbnail({}) == ""
+
+
+def test_only_http_thumbnails_are_carried():
+    """A data: URL would inline the bytes into the payload, which is size-capped
+    for good reasons; anything else has no proxy path."""
+    assert news_mod._thumbnail({"img_src": "data:image/png;base64,AAAA"}) == ""
+    assert news_mod._thumbnail({"img_src": "//cdn.example.com/x.jpg"}) == ""
+    assert news_mod._thumbnail({"img_src": "javascript:alert(1)"}) == ""
+    assert news_mod._thumbnail({"img_src": None}) == ""
+
+
+def test_articles_carry_the_thumbnail_url():
+    articles = news_mod.build_articles(
+        [{"url": "https://e.com/a", "title": "T", "img_src": "https://e.com/pic.jpg"}]
+    )
+    assert articles[0]["thumbnail"] == "https://e.com/pic.jpg"
+
+
 def test_rows_without_a_url_are_dropped():
     articles = news_mod.build_articles([{"title": "Headline with nowhere to go", "url": ""}])
     assert articles == []

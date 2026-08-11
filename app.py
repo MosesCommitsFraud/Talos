@@ -717,6 +717,11 @@ from routes.font_routes import setup_font_routes
 
 app.include_router(setup_font_routes())
 
+# News-card thumbnails, proxied so the browser never hits the publishers directly
+from routes.news_routes import setup_news_routes
+
+app.include_router(setup_news_routes())
+
 
 # MCP (Model Context Protocol)
 from routes.mcp_routes import setup_mcp_routes

@@ -8,11 +8,12 @@ piece. That split is the whole reason this is its own tool rather than a flag on
 web_search — a widget has to be attached at the point where the caller knows the
 result IS a set of articles, and "search the news" is exactly that point.
 
-What the cards deliberately do NOT carry is thumbnails. SearxNG hands back
-`img_src` for many news results, and rendering those would make the user's
-browser fetch an image straight from each publisher — an outbound request per
-card, from the user's own IP, to a site they have not chosen to visit. The
-source name and host are enough to tell the cards apart.
+Thumbnails ride along where SearxNG offers one, but only as a URL for the app's
+own proxy to resolve (`routes/news_routes.py`). Handing the raw `img_src` to the
+page would make the user's browser fetch an image straight from each publisher —
+one outbound request per card, from their IP, to sites they have not chosen to
+visit. The proxy moves that request to the server, so a card can show a picture
+without a chat topic turning into hits in five publishers' logs.
 """
 
 import logging
@@ -60,6 +61,27 @@ def _collapse(text: str, limit: int) -> str:
     return out if len(out) <= limit else out[:limit].rstrip() + "…"
 
 
+def _thumbnail(item: Dict[str, Any]) -> str:
+    """The article image URL, or "".
+
+    Engines disagree on the field name — `thumbnail` is the small one where an
+    engine bothers to make one, `img_src` the full-size original. Prefer the
+    thumbnail; the proxy caps the size either way.
+
+    Only the URL is carried, and it is NOT validated here: it is validated at
+    the moment of fetching, by the proxy, against the admin domain policy and
+    the SSRF guard as they are THEN. Sanitising it into the payload would bake a
+    verdict into a card that gets replayed weeks later.
+    """
+    for key in ("thumbnail", "thumbnail_src", "img_src"):
+        value = str(item.get(key) or "").strip()
+        # Data URLs would defeat the whole point — the bytes would be inlined
+        # into the payload, and the payload has a size cap for good reasons.
+        if value.startswith(("http://", "https://")):
+            return value
+    return ""
+
+
 def build_articles(picked: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """SearxNG result rows -> the card payload."""
     articles = []
@@ -74,6 +96,7 @@ def build_articles(picked: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
                 "source": source_name(url, str(item.get("engine") or "")),
                 "snippet": _collapse(item.get("content") or "", SNIPPET_LIMIT),
                 "published": _published(item),
+                "thumbnail": _thumbnail(item),
             }
         )
     return articles

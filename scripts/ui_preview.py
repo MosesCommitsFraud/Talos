@@ -540,6 +540,45 @@ def _weather_widget() -> dict:
     }
 
 
+def _placeholder_png(seed: str) -> bytes:
+    """A 1×1 PNG in a colour derived from `seed`, built by hand.
+
+    The news cards crop their thumbnail with `object-cover`, so a single pixel
+    fills the frame as a flat colour — enough to check the layout, the lazy
+    loading and the failure path without the preview needing Pillow or a folder
+    of binary fixtures. Deriving the colour from the URL makes the cards
+    visually distinct, which is the point of having pictures at all.
+    """
+    import binascii
+    import struct
+    import zlib
+
+    digest = binascii.crc32(seed.encode("utf-8"))
+    rgb = bytes(
+        (
+            ((digest >> 16) & 0x7F) + 0x60,
+            ((digest >> 8) & 0x7F) + 0x60,
+            (digest & 0x7F) + 0x60,
+        )
+    )
+
+    def _chunk(tag: bytes, payload: bytes) -> bytes:
+        return (
+            struct.pack(">I", len(payload))
+            + tag
+            + payload
+            + struct.pack(">I", zlib.crc32(tag + payload) & 0xFFFFFFFF)
+        )
+
+    header = struct.pack(">IIBBBBB", 1, 1, 8, 2, 0, 0, 0)  # 1×1, 8-bit, truecolour
+    return (
+        b"\x89PNG\r\n\x1a\n"
+        + _chunk(b"IHDR", header)
+        + _chunk(b"IDAT", zlib.compress(b"\x00" + rgb))
+        + _chunk(b"IEND", b"")
+    )
+
+
 def _news_widget() -> dict:
     """A get_news widget payload in the shape src/news.py emits.
 
@@ -569,6 +608,7 @@ def _news_widget() -> dict:
                     "source": "tagesschau.de",
                     "snippet": "Anbieter von Hochrisiko-KI müssen ab kommendem Monat eine Konformitätsbewertung vorlegen. Was das für Unternehmen bedeutet, die Modelle nur einkaufen.",
                     "published": _ago(minutes=20),
+                    "thumbnail": "https://www.tagesschau.de/img/ai-act-102.jpg",
                 },
                 {
                     "title": "Was der AI Act für Entwickler konkret bedeutet",
@@ -576,6 +616,7 @@ def _news_widget() -> dict:
                     "source": "heise.de",
                     "snippet": "Dokumentationspflichten, Logging, Risikomanagement — eine Einordnung der Anforderungen für Teams, die eigene Modelle betreiben.",
                     "published": _ago(hours=5),
+                    "thumbnail": "https://www.heise.de/scale/ai-act.jpg",
                 },
                 {
                     "title": "Kommission veröffentlicht Leitlinien zu General-Purpose-AI",
@@ -583,6 +624,11 @@ def _news_widget() -> dict:
                     "source": "netzpolitik.org",
                     "snippet": "Der Entwurf präzisiert, ab welcher Rechenleistung ein Modell als systemisches Risiko gilt.",
                     "published": _ago(days=2),
+                    # Refused by the proxy (the mock 403s anything with "broken"
+                    # in the URL, as the real one does for a blocked domain or a
+                    # non-image response). The row must render WITHOUT a picture
+                    # rather than showing a broken-image glyph.
+                    "thumbnail": "https://netzpolitik.org/broken-image.jpg",
                 },
                 {
                     "title": "Analyse: Wer den AI Act tatsächlich durchsetzt",
@@ -590,6 +636,7 @@ def _news_widget() -> dict:
                     "source": "zeit.de",
                     "snippet": "Die nationalen Marktüberwachungsbehörden sind personell dünn besetzt.",
                     "published": _ago(days=12),
+                    "thumbnail": "https://img.zeit.de/digital/ai-act-durchsetzung.jpg",
                 },
                 {
                     # No timestamp: the row must still align without an age.
@@ -1226,6 +1273,18 @@ class PreviewHandler(BaseHTTPRequestHandler):
                 return
             name, mime, data = entry
             self._send(200, data, mime, {"Content-Disposition": f'inline; filename="{name}"'})
+            return
+        if path == "/api/news/thumbnail":
+            # Stands in for routes/news_routes.py — the news cards point their
+            # <img> at this path, so without it the preview only ever exercises
+            # the "thumbnail failed, render without it" branch. One URL is left
+            # deliberately unresolvable in the fixture so that branch is covered
+            # too; see _news_widget.
+            source = parse_qs(parsed.query).get("url", [""])[0]
+            if "broken" in source:
+                self._send_json({"error": "refused"}, 403)
+                return
+            self._send(200, _placeholder_png(source), "image/png")
             return
         if path == "/api/auth/settings":
             self._send_json({"auth_enabled": False, "user": "preview", "is_admin": True})

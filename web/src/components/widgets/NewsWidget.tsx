@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ExternalLinkIcon, NewspaperIcon } from 'lucide-react';
 import type { WidgetProps } from './registry';
@@ -27,6 +28,32 @@ function relativeAge(iso: string, locale: string, t: (k: string, o?: Record<stri
   const days = Math.round(minutes / (60 * 24));
   if (days <= 7) return t('news.daysAgo', { count: days });
   return new Date(then).toLocaleDateString(locale, { day: 'numeric', month: 'short', year: 'numeric' });
+}
+
+/** Article image, served through the app's own proxy.
+ *
+ *  The `src` is never the publisher's URL: that would put the request back in
+ *  the user's browser, which is the thing the proxy exists to prevent. The
+ *  publisher URL is a parameter, and the backend fetches, validates and
+ *  re-serves the bytes from this origin (see routes/news_routes.py).
+ *
+ *  A thumbnail is decoration, so every way it can fail ends the same way — the
+ *  card renders without it. The proxy legitimately refuses images (admin domain
+ *  policy, a non-image response, a dead link), and a card that shows a broken-
+ *  image glyph for that is worse than one that simply has no picture. */
+function Thumbnail({ url, alt }: { url: string; alt: string }) {
+  const [failed, setFailed] = useState(false);
+  if (!url || failed) return null;
+  return (
+    <img
+      src={`/api/news/thumbnail?url=${encodeURIComponent(url)}`}
+      alt={alt}
+      loading="lazy"
+      decoding="async"
+      onError={() => setFailed(true)}
+      className="size-16 shrink-0 rounded-md border bg-muted object-cover"
+    />
+  );
 }
 
 export function NewsWidget({ data }: WidgetProps) {
@@ -64,20 +91,27 @@ export function NewsWidget({ data }: WidgetProps) {
               rel="noopener noreferrer"
               className={`group block px-4 py-3 transition-colors hover:bg-accent ${i > 0 ? 'border-t border-border/40' : ''}`}
             >
-              <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                {source && <span className="min-w-0 truncate font-medium">{source}</span>}
-                {source && age && <span aria-hidden>·</span>}
-                {age && <span className="shrink-0">{age}</span>}
-                <ExternalLinkIcon className="ml-auto size-3 shrink-0 opacity-0 transition-opacity group-hover:opacity-60" />
-              </div>
-              <div className="mt-0.5 text-sm font-medium text-strong group-hover:underline">
-                {asStr(article.title)}
-              </div>
-              {asStr(article.snippet) && (
-                <div className="mt-1 line-clamp-2 text-xs leading-relaxed text-muted-foreground">
-                  {asStr(article.snippet)}
+              <div className="flex gap-3">
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                    {source && <span className="min-w-0 truncate font-medium">{source}</span>}
+                    {source && age && <span aria-hidden>·</span>}
+                    {age && <span className="shrink-0">{age}</span>}
+                    <ExternalLinkIcon className="ml-auto size-3 shrink-0 opacity-0 transition-opacity group-hover:opacity-60" />
+                  </div>
+                  <div className="mt-0.5 text-sm font-medium text-strong group-hover:underline">
+                    {asStr(article.title)}
+                  </div>
+                  {asStr(article.snippet) && (
+                    <div className="mt-1 line-clamp-2 text-xs leading-relaxed text-muted-foreground">
+                      {asStr(article.snippet)}
+                    </div>
+                  )}
                 </div>
-              )}
+                {/* Empty alt: the headline beside it already says what this is,
+                    so a screen reader announcing the image too is noise. */}
+                <Thumbnail url={asStr(article.thumbnail)} alt="" />
+              </div>
             </a>
           );
         })}
