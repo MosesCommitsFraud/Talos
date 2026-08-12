@@ -505,10 +505,37 @@ def _weather_widget() -> dict:
                 "precipitationProbability": 70 if 8 <= hour <= 13 else 0,
             }
         )
-    conditions = ["mainly-clear", "partly-cloudy", "rain", "showers", "overcast", "clear", "clear"]
-    highs = [23.4, 22.1, 18.6, 19.8, 21.0, 24.6, 26.1]
-    lows = [14.2, 13.8, 12.1, 12.9, 13.5, 15.0, 16.4]
-    pops = [0, 20, 85, 60, 15, 0, 0]
+    # A 16-day forecast: "more than one week" is now askable, and the range bars
+    # have to stay comparable across a fortnight rather than a week.
+    total_days = 16
+    conditions = [
+        "mainly-clear", "partly-cloudy", "rain", "showers", "overcast", "clear", "clear",
+        "thunderstorm", "drizzle", "partly-cloudy", "clear", "fog", "rain", "overcast",
+        "clear", "snow",
+    ]
+    highs = [23.4, 22.1, 18.6, 19.8, 21.0, 24.6, 26.1, 25.2, 20.4, 22.8, 27.3, 19.1, 17.5, 18.9, 23.0, 4.2]
+    lows = [14.2, 13.8, 12.1, 12.9, 13.5, 15.0, 16.4, 15.8, 12.6, 13.1, 16.9, 11.4, 10.8, 11.2, 13.7, -2.1]
+    pops = [0, 20, 85, 60, 15, 0, 0, 90, 45, 10, 0, 30, 75, 25, 5, 55]
+
+    def _day_hours(index: int) -> list:
+        """Hourly readings for one forecast day — but only inside the window the
+        backend still sends them for (HOURLY_DAYS). Past that a day opens to its
+        daily figures alone, and the card must say so rather than look broken."""
+        if index >= 7:
+            return []
+        out = []
+        for hour in range(24):
+            night = hour >= 21 or hour < 6
+            out.append(
+                {
+                    "time": f"2026-08-{11 + index:02d}T{hour:02d}:00",
+                    "temperature": round(lows[index] + (highs[index] - lows[index]) * (1 - abs(hour - 15) / 15), 1),
+                    "condition": conditions[index] if 8 <= hour <= 18 else ("clear" if night else conditions[index]),
+                    "precipitationProbability": pops[index] if 8 <= hour <= 16 else max(0, pops[index] - 40),
+                    "wind": round(6 + (hour % 7) * 1.8, 1),
+                }
+            )
+        return out
     return {
         "type": "weather",
         "version": 1,
@@ -541,11 +568,17 @@ def _weather_widget() -> dict:
                     "condition": conditions[i],
                     "max": highs[i],
                     "min": lows[i],
+                    "apparentMax": round(highs[i] - 1.4, 1),
+                    "apparentMin": round(lows[i] - 2.1, 1),
                     "precipitationProbability": pops[i],
-                    "sunrise": f"2026-08-{11 + i:02d}T05:4{i}",
-                    "sunset": f"2026-08-{11 + i:02d}T20:4{8 - i}",
+                    "precipitation": round(pops[i] / 12, 1),
+                    "wind": round(9 + i * 1.3, 1),
+                    "uvIndex": round(max(0.5, 7.2 - i * 0.3), 1),
+                    "sunrise": f"2026-08-{11 + i:02d}T05:{40 + (i % 10):02d}",
+                    "sunset": f"2026-08-{11 + i:02d}T20:{40 + ((8 - i) % 10):02d}",
+                    "hours": _day_hours(i),
                 }
-                for i in range(7)
+                for i in range(total_days)
             ],
         },
     }

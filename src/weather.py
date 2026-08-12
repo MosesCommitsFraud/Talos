@@ -30,11 +30,17 @@ FORECAST_URL = "https://api.open-meteo.com/v1/forecast"
 TIMEOUT = 15.0
 
 DEFAULT_DAYS = 7
-MAX_DAYS = 14
-# One full day-and-night of hourly points. Enough for the card's strip and for
-# "will it rain this evening"; more would cost context and card width for
-# nothing.
+# Open-Meteo's own ceiling. Ask for more and the API does not stretch — it
+# refuses — so this is a hard limit of the data, not a policy choice.
+MAX_DAYS = 16
+# One full day-and-night of hourly points for the card's strip at the top:
+# "what does the rest of today look like".
 HOURLY_POINTS = 24
+# Hourly readings are ALSO kept per day, for the expanded day view. Not for
+# every day though: 16 days of hourly is ~380 readings, which is most of the
+# widget's byte budget spent on days whose hour-by-hour detail is meteorological
+# fiction anyway. A week out is where hourly stops meaning anything.
+HOURLY_DAYS = 7
 
 # WMO 4677 weather codes -> (condition key, English label).
 #
@@ -145,10 +151,15 @@ async def _forecast(latitude: float, longitude: float, days: int) -> Dict[str, A
             "temperature_2m,relative_humidity_2m,apparent_temperature,is_day,"
             "precipitation,weather_code,wind_speed_10m"
         ),
-        "hourly": "temperature_2m,weather_code,precipitation_probability",
+        "hourly": "temperature_2m,weather_code,precipitation_probability,wind_speed_10m",
+        # The extra fields are what the expanded day view shows. They cost one
+        # number per day each, so they ride along on every call rather than
+        # being a second request when someone opens a day.
         "daily": (
             "weather_code,temperature_2m_max,temperature_2m_min,"
-            "precipitation_probability_max,sunrise,sunset"
+            "apparent_temperature_max,apparent_temperature_min,"
+            "precipitation_probability_max,precipitation_sum,"
+            "wind_speed_10m_max,uv_index_max,sunrise,sunset"
         ),
         "forecast_days": days,
         # Everything comes back in the location's OWN local time. A forecast
@@ -196,25 +207,41 @@ def _build_widget_data(place: Dict[str, Any], payload: Dict[str, Any]) -> Dict[s
     hourly_temps = _series(hourly, "temperature_2m")
     hourly_codes = _series(hourly, "weather_code")
     hourly_pop = _series(hourly, "precipitation_probability")
+    hourly_wind = _series(hourly, "wind_speed_10m")
     start = _current_hour_index(hourly_times, current.get("time"))
 
-    hours: List[Dict[str, Any]] = []
-    for i in range(start, min(start + HOURLY_POINTS, len(hourly_times))):
+    def _hour(i: int) -> Dict[str, Any]:
         key, _label = describe_code(_at(hourly_codes, i))
-        hours.append(
-            {
-                "time": hourly_times[i],
-                "temperature": _at(hourly_temps, i),
-                "condition": key,
-                "precipitationProbability": _at(hourly_pop, i),
-            }
-        )
+        return {
+            "time": hourly_times[i],
+            "temperature": _at(hourly_temps, i),
+            "condition": key,
+            "precipitationProbability": _at(hourly_pop, i),
+            "wind": _at(hourly_wind, i),
+        }
+
+    # The strip at the top of the card: the next 24 hours from NOW.
+    hours = [_hour(i) for i in range(start, min(start + HOURLY_POINTS, len(hourly_times)))]
+
+    # The same readings grouped by calendar day, for the expanded day view.
+    # Grouped here rather than filtered in the component: the timestamps are in
+    # the LOCATION's local time with no offset, so splitting them by date is a
+    # string operation that belongs next to the code that knows that.
+    by_date: Dict[str, List[Dict[str, Any]]] = {}
+    for i in range(len(hourly_times)):
+        date_key = str(hourly_times[i])[:10]
+        by_date.setdefault(date_key, []).append(_hour(i))
 
     daily_dates = _series(daily, "time")
     daily_codes = _series(daily, "weather_code")
     daily_max = _series(daily, "temperature_2m_max")
     daily_min = _series(daily, "temperature_2m_min")
+    daily_apparent_max = _series(daily, "apparent_temperature_max")
+    daily_apparent_min = _series(daily, "apparent_temperature_min")
     daily_pop = _series(daily, "precipitation_probability_max")
+    daily_precip = _series(daily, "precipitation_sum")
+    daily_wind = _series(daily, "wind_speed_10m_max")
+    daily_uv = _series(daily, "uv_index_max")
     daily_sunrise = _series(daily, "sunrise")
     daily_sunset = _series(daily, "sunset")
 
@@ -227,9 +254,18 @@ def _build_widget_data(place: Dict[str, Any], payload: Dict[str, Any]) -> Dict[s
                 "condition": key,
                 "max": _at(daily_max, i),
                 "min": _at(daily_min, i),
+                "apparentMax": _at(daily_apparent_max, i),
+                "apparentMin": _at(daily_apparent_min, i),
                 "precipitationProbability": _at(daily_pop, i),
+                "precipitation": _at(daily_precip, i),
+                "wind": _at(daily_wind, i),
+                "uvIndex": _at(daily_uv, i),
                 "sunrise": _at(daily_sunrise, i),
                 "sunset": _at(daily_sunset, i),
+                # Only where hourly still says something. Beyond that the day
+                # opens to its daily figures alone, which is honest: the card
+                # cannot show an hour-by-hour line it does not have.
+                "hours": by_date.get(str(date)[:10], []) if i < HOURLY_DAYS else [],
             }
         )
 
@@ -335,10 +371,16 @@ async def get_weather(
     from src.widgets import make_widget
 
     try:
-        days = int(days)
+        requested_days = int(days)
     except (TypeError, ValueError):
-        days = DEFAULT_DAYS
-    days = max(1, min(days, MAX_DAYS))
+        requested_days = DEFAULT_DAYS
+    days = max(1, min(requested_days, MAX_DAYS))
+    # Asking beyond the model's horizon is not an error — the first 16 days are
+    # still the best answer available, and refusing them to punish the question
+    # would leave the user with nothing. The card shows what exists; the note
+    # below tells the model to go to the web for the rest rather than
+    # extrapolating a number the forecast never contained.
+    over_horizon = requested_days > MAX_DAYS
 
     place: Dict[str, Any] = {}
     if latitude is None or longitude is None:
@@ -389,8 +431,17 @@ async def get_weather(
         return {"error": f"Invalid coordinates: {e}", "exit_code": 1}
 
     data = _build_widget_data(place, payload)
+    summary = _summary(place, data)
+    if over_horizon:
+        summary += (
+            f"\n\n[The user asked for {requested_days} days. Numerical forecasts do not "
+            f"exist beyond {MAX_DAYS} days, so the card above stops there — that is a "
+            "limit of weather modelling, not of this tool. Say so plainly. If they want "
+            "something about the period after that, `web_search` for a seasonal outlook "
+            "or climate averages and label it as such. Never extend the table yourself.]"
+        )
     return {
-        "output": _summary(place, data),
+        "output": summary,
         "widget": make_widget("weather", data),
         "exit_code": 0,
     }

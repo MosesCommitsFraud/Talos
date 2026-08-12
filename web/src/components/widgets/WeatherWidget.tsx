@@ -1,6 +1,7 @@
-import type { ComponentType } from 'react';
+import { useState, type ComponentType } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
+  ChevronDownIcon,
   CloudDrizzleIcon,
   CloudFogIcon,
   CloudHailIcon,
@@ -97,6 +98,78 @@ function Pop({ value }: { value: number | undefined }) {
   );
 }
 
+/** One reading in the expanded day's hourly strip. */
+function HourCell({ hour, degree }: { hour: Dict; degree: string }) {
+  return (
+    <div className="flex min-w-11 flex-col items-center gap-1">
+      <span className="text-[11px] tabular-nums text-muted-foreground">{hourOf(asStr(hour.time))}</span>
+      <ConditionIcon condition={asStr(hour.condition) || 'unknown'} className="size-4 text-muted-foreground" />
+      <span className="text-xs font-medium tabular-nums">
+        {round(asNum(hour.temperature))}
+        {degree.replace('C', '').replace('F', '')}
+      </span>
+      <Pop value={asNum(hour.precipitationProbability)} />
+    </div>
+  );
+}
+
+/** A single figure in the expanded day's stat grid. Rendered only when the value
+ *  exists — a grid of dashes tells the reader nothing and costs a row. */
+function Stat({ label, value }: { label: string; value: string | null }) {
+  if (value === null) return null;
+  return (
+    <div className="min-w-0">
+      <div className="truncate text-[11px] text-muted-foreground">{label}</div>
+      <div className="tabular-nums">{value}</div>
+    </div>
+  );
+}
+
+/** What a day opens into: the numbers that don't fit on its one-line summary,
+ *  plus its hourly curve where one exists.
+ *
+ *  Beyond a week the payload carries no hours — an hour-by-hour line that far out
+ *  is fiction, and the backend deliberately stops sending it. The day still
+ *  opens; it just shows its daily figures, which is the honest amount of detail
+ *  available for it. */
+function DayDetail({ day, degree, units }: { day: Dict; degree: string; units: Dict }) {
+  const { t } = useTranslation();
+  const hours = asList(day.hours);
+  const windUnit = asStr(units.wind) || 'km/h';
+  const precipUnit = asStr(units.precipitation) || 'mm';
+
+  const num = (value: unknown, suffix: string) => {
+    const parsed = asNum(value);
+    return parsed == null ? null : `${Math.round(parsed * 10) / 10}${suffix}`;
+  };
+
+  return (
+    <div className="bg-muted/30 px-4 py-3">
+      <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-xs sm:grid-cols-4">
+        <Stat label={t('weather.feels')} value={
+          asNum(day.apparentMin) != null && asNum(day.apparentMax) != null
+            ? `${round(asNum(day.apparentMin))}–${round(asNum(day.apparentMax))}${degree}`
+            : null
+        } />
+        <Stat label={t('weather.precipitation')} value={num(day.precipitation, ` ${precipUnit}`)} />
+        <Stat label={t('weather.wind')} value={num(day.wind, ` ${windUnit}`)} />
+        <Stat label={t('weather.uvIndex')} value={num(day.uvIndex, '')} />
+        <Stat label={t('weather.sunrise')} value={asStr(day.sunrise) ? hourOf(asStr(day.sunrise)) : null} />
+        <Stat label={t('weather.sunset')} value={asStr(day.sunset) ? hourOf(asStr(day.sunset)) : null} />
+      </div>
+      {hours.length > 0 ? (
+        <div className="mt-3 flex gap-1 overflow-x-auto border-t border-border/50 pt-2.5">
+          {hours.map((hour, i) => (
+            <HourCell key={asStr(hour.time) || i} hour={hour} degree={degree} />
+          ))}
+        </div>
+      ) : (
+        <div className="mt-2 text-[11px] text-muted-foreground">{t('weather.noHourly')}</div>
+      )}
+    </div>
+  );
+}
+
 export function WeatherWidget({ data }: WidgetProps) {
   const { t, i18n } = useTranslation();
   const payload = asDict(data);
@@ -105,6 +178,9 @@ export function WeatherWidget({ data }: WidgetProps) {
   const current = asDict(payload.current);
   const hourly = asList(payload.hourly);
   const daily = asList(payload.daily);
+  // One day open at a time: the detail is tall, and several expanded at once
+  // turns the card into a page you have to scroll to compare two days.
+  const [openDay, setOpenDay] = useState<string | null>(null);
 
   const degree = asStr(units.temperature) || '°C';
   const condition = asStr(current.condition) || 'unknown';
@@ -209,29 +285,46 @@ export function WeatherWidget({ data }: WidgetProps) {
             const max = asNum(day.max);
             const left = min == null ? 0 : ((min - weekMin) / span) * 100;
             const width = min == null || max == null ? 0 : Math.max(((max - min) / span) * 100, 4);
+            const date = asStr(day.date);
+            const open = openDay === date;
             return (
-              <div
-                key={asStr(day.date) || i}
-                className={cn('flex items-center gap-3 px-4 py-1.5 text-sm', i > 0 && 'border-t border-border/40')}
-              >
-                <span className="w-9 shrink-0 text-xs text-muted-foreground">
-                  {i === 0 ? t('weather.today') : weekdayOf(asStr(day.date), i18n.language)}
-                </span>
-                <ConditionIcon
-                  condition={asStr(day.condition) || 'unknown'}
-                  className="size-4 shrink-0 text-muted-foreground"
-                />
-                <span className="w-10 shrink-0">
-                  <Pop value={asNum(day.precipitationProbability)} />
-                </span>
-                <span className="w-8 shrink-0 text-right text-xs tabular-nums text-muted-foreground">{round(min)}°</span>
-                <span className="relative h-1 min-w-8 flex-1 rounded-full bg-muted">
-                  <span
-                    className="absolute inset-y-0 rounded-full bg-gradient-to-r from-sky-400 to-amber-400"
-                    style={{ left: `${left}%`, width: `${width}%` }}
+              <div key={date || i} className={cn(i > 0 && 'border-t border-border/40')}>
+                <button
+                  type="button"
+                  aria-expanded={open}
+                  onClick={() => setOpenDay(open ? null : date)}
+                  className={cn(
+                    'flex w-full items-center gap-3 px-4 py-1.5 text-left text-sm transition-colors hover:bg-accent/60',
+                    open && 'bg-accent/40',
+                  )}
+                >
+                  <span className="w-9 shrink-0 text-xs text-muted-foreground">
+                    {i === 0 ? t('weather.today') : weekdayOf(date, i18n.language)}
+                  </span>
+                  <ConditionIcon
+                    condition={asStr(day.condition) || 'unknown'}
+                    className="size-4 shrink-0 text-muted-foreground"
                   />
-                </span>
-                <span className="w-8 shrink-0 text-xs font-medium tabular-nums">{round(max)}°</span>
+                  <span className="w-10 shrink-0">
+                    <Pop value={asNum(day.precipitationProbability)} />
+                  </span>
+                  <span className="w-8 shrink-0 text-right text-xs tabular-nums text-muted-foreground">
+                    {round(min)}°
+                  </span>
+                  <span className="relative h-1 min-w-8 flex-1 rounded-full bg-muted">
+                    <span
+                      className="absolute inset-y-0 rounded-full bg-gradient-to-r from-sky-400 to-amber-400"
+                      style={{ left: `${left}%`, width: `${width}%` }}
+                    />
+                  </span>
+                  <span className="w-8 shrink-0 text-xs font-medium tabular-nums">{round(max)}°</span>
+                  <ChevronDownIcon
+                    className={cn('size-3.5 shrink-0 opacity-40 transition-transform', open && 'rotate-180')}
+                  />
+                </button>
+                {/* Mounted only while open: sixteen days of hourly strips built
+                    up front is a lot of DOM for detail nobody has asked to see. */}
+                {open && <DayDetail day={day} degree={degree} units={units} />}
               </div>
             );
           })}

@@ -113,6 +113,14 @@ const de: typeof en = {
     today: 'Heute',
     unknownPlace: 'Unbekannter Ort',
     source: 'Quelle: Open-Meteo',
+    // Aufgeklappte Tagesansicht.
+    feels: 'Gefühlt',
+    precipitation: 'Niederschlag',
+    wind: 'Wind',
+    uvIndex: 'UV-Index',
+    sunrise: 'Sonnenaufgang',
+    sunset: 'Sonnenuntergang',
+    noHourly: 'So weit im Voraus gibt es keine Stundenwerte — nur die Tageswerte oben.',
     conditions: {
       clear: 'Klar',
       'mainly-clear': 'Überwiegend klar',

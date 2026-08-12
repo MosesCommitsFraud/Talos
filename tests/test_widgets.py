@@ -194,6 +194,82 @@ def test_get_weather_builds_output_and_widget(monkeypatch):
     assert result["widget"]["data"]["current"]["temperature"] == 21.4
 
 
+def test_forecast_horizon_is_clamped_and_the_overflow_is_explained(monkeypatch):
+    """16 days is where numerical forecasting stops, not where this tool does.
+    Asking for more still returns the 16 that exist — refusing them to punish the
+    question would leave the user with nothing — plus an instruction to go to the
+    web for the period after, rather than extending the table from memory."""
+    asked = {}
+
+    async def _fake_forecast(latitude, longitude, days):
+        asked["days"] = days
+        return _forecast_payload()
+
+    monkeypatch.setattr(weather_mod, "_forecast", _fake_forecast)
+
+    result = asyncio.run(weather_mod.get_weather(latitude=52.52, longitude=13.41, days=30))
+    assert asked["days"] == weather_mod.MAX_DAYS == 16
+    assert result["exit_code"] == 0
+    assert "widget" in result
+    assert "30 days" in result["output"]
+    assert "web_search" in result["output"]
+
+    # A request inside the horizon says nothing about it.
+    asyncio.run(weather_mod.get_weather(latitude=52.52, longitude=13.41, days=10))
+    assert asked["days"] == 10
+    inside = asyncio.run(weather_mod.get_weather(latitude=52.52, longitude=13.41, days=10))
+    assert "web_search" not in inside["output"]
+
+
+def test_days_carry_their_own_hours_for_the_expanded_view(monkeypatch):
+    """Each forecast day gets its hourly readings grouped onto it, so opening a
+    day needs no second request. Grouped on the backend because the timestamps
+    are location-local with no offset — splitting them by date is a string
+    operation that belongs next to the code that knows that."""
+
+    async def _fake_forecast(latitude, longitude, days):
+        return _forecast_payload()
+
+    monkeypatch.setattr(weather_mod, "_forecast", _fake_forecast)
+    data = asyncio.run(weather_mod.get_weather(latitude=52.52, longitude=13.41))["widget"]["data"]
+
+    first = data["daily"][0]
+    assert first["hours"], "the first day must carry its hourly readings"
+    assert all(h["time"].startswith(first["date"]) for h in first["hours"])
+    # The detail fields the expanded view shows ride along on every call.
+    for key in ("apparentMax", "apparentMin", "precipitation", "wind", "uvIndex"):
+        assert key in first
+
+
+def test_hourly_stops_past_the_window():
+    """Sixteen days of hourly is most of the byte budget spent on detail that is
+    meteorological fiction. Past the window a day opens to its daily figures."""
+    payload = _forecast_payload()
+    times = []
+    for day in range(10):
+        times.extend([f"2026-08-{11 + day:02d}T{hour:02d}:00" for hour in range(24)])
+    payload["hourly"] = {
+        "time": times,
+        "temperature_2m": [20.0] * len(times),
+        "weather_code": [3] * len(times),
+        "precipitation_probability": [10] * len(times),
+        "wind_speed_10m": [8.0] * len(times),
+    }
+    payload["daily"] = {
+        "time": [f"2026-08-{11 + d:02d}" for d in range(10)],
+        "weather_code": [3] * 10,
+        "temperature_2m_max": [22.0] * 10,
+        "temperature_2m_min": [12.0] * 10,
+        "precipitation_probability_max": [10] * 10,
+        "sunrise": [f"2026-08-{11 + d:02d}T05:40" for d in range(10)],
+        "sunset": [f"2026-08-{11 + d:02d}T20:40" for d in range(10)],
+    }
+
+    days = weather_mod._build_widget_data({"name": "Berlin"}, payload)["daily"]
+    assert all(day["hours"] for day in days[: weather_mod.HOURLY_DAYS])
+    assert all(day["hours"] == [] for day in days[weather_mod.HOURLY_DAYS :])
+
+
 def test_the_asked_for_name_survives_geocoding(monkeypatch):
     """The card leads with what the user typed. A geocoder that answers
     "Zurich" for "Zürich" must not rename the card out from under them."""
@@ -389,7 +465,7 @@ def test_background_monitor_persists_the_widget():
 def test_registered_widget_types_match_the_frontend_registry():
     """Guards the registry contract: a type added here without a component in
     web/src/components/widgets/registry.tsx renders as nothing."""
-    assert WIDGET_TYPES == frozenset({"weather", "news"})
+    assert WIDGET_TYPES == frozenset({"weather", "news", "table"})
 
 
 @pytest.mark.parametrize("tool", ["get_weather"])

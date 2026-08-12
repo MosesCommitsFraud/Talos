@@ -110,6 +110,14 @@ const en = {
     today: 'Today',
     unknownPlace: 'Unknown place',
     source: 'Source: Open-Meteo',
+    // Expanded day view.
+    feels: 'Feels like',
+    precipitation: 'Precipitation',
+    wind: 'Wind',
+    uvIndex: 'UV index',
+    sunrise: 'Sunrise',
+    sunset: 'Sunset',
+    noHourly: 'No hourly readings exist this far ahead — only the daily figures above.',
     conditions: {
       clear: 'Clear',
       'mainly-clear': 'Mainly clear',

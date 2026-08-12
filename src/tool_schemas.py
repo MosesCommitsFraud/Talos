@@ -351,7 +351,11 @@ FUNCTION_TOOL_SCHEMAS = [
                 "place name ('Berlin', 'Freiburg im Breisgau', 'Tokyo'); pass latitude+longitude "
                 "instead only when you already have exact coordinates. The user is shown a "
                 "weather card with the full forecast automatically, so answer their actual "
-                "question in a sentence or two rather than repeating the whole table."
+                "question in a sentence or two rather than repeating the whole table. Reach for "
+                "it freely — one fast call, no API key, no quota — whenever weather is part of "
+                "the answer at all (trip planning, outdoor activities, somewhere the user is "
+                "travelling to). Two places means two calls; prefer calling it over hedging "
+                "without the numbers."
             ),
             "parameters": {
                 "type": "object",
@@ -373,7 +377,11 @@ FUNCTION_TOOL_SCHEMAS = [
                     },
                     "days": {
                         "type": "integer",
-                        "description": "Forecast days, 1-14 (default 7).",
+                        "description": (
+                            "Forecast days, 1-16 (default 7). 16 is the end of the numerical "
+                            "forecast horizon, not a tool limit — for anything beyond it, say so "
+                            "and use web_search for a seasonal outlook."
+                        ),
                     },
                     "language": {
                         "type": "string",

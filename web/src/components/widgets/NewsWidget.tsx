@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ExternalLinkIcon, NewspaperIcon } from 'lucide-react';
+import { cn } from '@/lib/utils';
 import type { WidgetProps } from './registry';
 
 type Dict = Record<string, unknown>;
@@ -47,19 +48,44 @@ function relativeAge(iso: string, locale: string, t: (k: string, o?: Record<stri
  *  its neighbours, and a list whose left edge moves per row is hard to read. So
  *  as soon as any article in the card has a picture, every row keeps the space —
  *  including a row whose image fails to load after the fact, which would
- *  otherwise make the text jump sideways while the user is looking at it. */
+ *  otherwise make the text jump sideways while the user is looking at it.
+ *
+ *  The empty slot is drawn, not left blank: a bordered tile with a newspaper
+ *  glyph reads as "this article has no picture", where 64px of nothing reads as
+ *  a rendering bug. */
+function ThumbnailFallback() {
+  return (
+    <div
+      aria-hidden
+      className="flex size-16 shrink-0 items-center justify-center rounded-md border border-dashed bg-muted/40"
+    >
+      <NewspaperIcon className="size-5 text-muted-foreground/30" />
+    </div>
+  );
+}
+
 function Thumbnail({ url, alt, reserve }: { url: string; alt: string; reserve: boolean }) {
   const [failed, setFailed] = useState(false);
-  if (!url || failed) return reserve ? <div className="size-16 shrink-0" aria-hidden /> : null;
+  const [loaded, setLoaded] = useState(false);
+  if (!url || failed) return reserve ? <ThumbnailFallback /> : null;
   return (
-    <img
-      src={`/api/news/thumbnail?url=${encodeURIComponent(url)}`}
-      alt={alt}
-      loading="lazy"
-      decoding="async"
-      onError={() => setFailed(true)}
-      className="size-16 shrink-0 rounded-md border bg-muted object-cover"
-    />
+    // The image sits ON the placeholder rather than replacing it, so the tile is
+    // there from the first paint and the row never reflows when the bytes land.
+    <div className="relative size-16 shrink-0">
+      <ThumbnailFallback />
+      <img
+        src={`/api/news/thumbnail?url=${encodeURIComponent(url)}`}
+        alt={alt}
+        loading="lazy"
+        decoding="async"
+        onLoad={() => setLoaded(true)}
+        onError={() => setFailed(true)}
+        className={cn(
+          'absolute inset-0 size-16 rounded-md border bg-muted object-cover transition-opacity',
+          loaded ? 'opacity-100' : 'opacity-0',
+        )}
+      />
+    </div>
   );
 }
 
