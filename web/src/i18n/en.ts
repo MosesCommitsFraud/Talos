@@ -90,6 +90,16 @@ const en = {
     fullSetIn: 'Full set in {{path}}',
     showAll: 'Show all {{count}}',
     downloadHint: 'Download the loaded rows as CSV',
+    view: {
+      table: 'Table view',
+      chart: 'Chart view',
+    },
+  },
+  // Chart view over the same query data (see ChartView).
+  chart: {
+    by: 'by',
+    showAllBars: 'Show all {{count}}',
+    showTop: 'Top {{count}} only',
   },
   // News cards (get_news).
   news: {

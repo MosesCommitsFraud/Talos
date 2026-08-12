@@ -415,6 +415,17 @@ def _cold_agent_turn(ts_offset: int) -> dict:
                     "row_count": 1284,
                     "widget": _table_widget(),
                 },
+                # The chart view's other branch: a date label column, so the
+                # toggle opens on a line rather than bars.
+                {
+                    "round": 2,
+                    "tool": "query_sql",
+                    "command": '{"action": "query", "query": "SELECT monat, SUM(umsatz) ..."}',
+                    "output": "24 rows x 3 columns",
+                    "exit_code": 0,
+                    "row_count": 24,
+                    "widget": _timeseries_widget(),
+                },
                 {
                     "round": 2,
                     "tool": "edit_file",
@@ -624,6 +635,39 @@ def _table_widget() -> dict:
             "label": "SELECT id, kunde, land, umsatz, retouren, notiz FROM orders ORDER BY umsatz DESC",
             "database": "vertrieb",
             "spillPath": "orders_query.csv",
+        },
+    }
+
+
+def _timeseries_widget() -> dict:
+    """A query_sql result whose label column is a DATE.
+
+    Exercises the chart view's other branch: a temporal axis makes the reader's
+    job "trend", which a row of dated bars answers worse than a line does. Also
+    the case where values are not readable off the mark, so the hover crosshair
+    is the only way to get a number out of the chart — and the table tab is the
+    ungated twin that proves it isn't the only way overall.
+    """
+    rows = []
+    for month in range(1, 25):
+        year = 2025 + (month - 1) // 12
+        m = (month - 1) % 12 + 1
+        # A seasonal shape with a visible dip, so the line has something to say.
+        base = 84000 + month * 2400
+        seasonal = -14000 if m in (1, 2) else (9000 if m in (6, 7, 11) else 0)
+        rows.append([f"{year}-{m:02d}", base + seasonal, 120 + month * 3])
+    return {
+        "type": "table",
+        "version": 1,
+        "data": {
+            "columns": ["monat", "umsatz", "auftraege"],
+            "rows": rows,
+            "rowCount": len(rows),
+            "shown": len(rows),
+            "trimmed": False,
+            "label": "SELECT monat, SUM(umsatz) umsatz, COUNT(*) auftraege FROM orders GROUP BY monat",
+            "database": "vertrieb",
+            "spillPath": "",
         },
     }
 

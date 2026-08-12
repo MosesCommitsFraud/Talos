@@ -92,6 +92,16 @@ const de: typeof en = {
     fullSetIn: 'Vollständig in {{path}}',
     showAll: 'Alle {{count}} anzeigen',
     downloadHint: 'Geladene Zeilen als CSV herunterladen',
+    view: {
+      table: 'Als Tabelle',
+      chart: 'Als Diagramm',
+    },
+  },
+  // Diagramm-Ansicht derselben Abfragedaten (siehe ChartView).
+  chart: {
+    by: 'nach',
+    showAllBars: 'Alle {{count}} anzeigen',
+    showTop: 'Nur Top {{count}}',
   },
   // Nachrichten-Karten (get_news).
   news: {

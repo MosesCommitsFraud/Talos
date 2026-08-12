@@ -1,7 +1,8 @@
 import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { ArrowDownIcon, ArrowUpIcon, DownloadIcon, TableIcon } from 'lucide-react';
+import { ArrowDownIcon, ArrowUpIcon, BarChart3Icon, DownloadIcon, TableIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { ChartView, chartable } from './ChartView';
 import type { WidgetProps } from './registry';
 
 type Dict = Record<string, unknown>;
@@ -90,6 +91,7 @@ export function TableWidget({ data }: WidgetProps) {
 
   const [sort, setSort] = useState<{ column: number; desc: boolean } | null>(null);
   const [expanded, setExpanded] = useState(false);
+  const [view, setView] = useState<'table' | 'chart'>('table');
 
   const numeric = useMemo(() => numericColumns(rows, columns.length), [rows, columns.length]);
   const sorted = useMemo(() => {
@@ -108,6 +110,12 @@ export function TableWidget({ data }: WidgetProps) {
   );
 
   if (columns.length === 0) return null;
+
+  // The chart draws from exactly the rows already in the payload — no second
+  // request, no extra bytes. It also satisfies the rule that every chart has a
+  // table-view twin: here the twin is literally the other tab.
+  const source = { columns, rows, numeric };
+  const canChart = chartable(source) !== null;
 
   const rowCount = asNum(payload.rowCount);
   const shown = rows.length;
@@ -141,6 +149,28 @@ export function TableWidget({ data }: WidgetProps) {
         <span className="min-w-0 flex-1 truncate font-mono" title={label}>
           {label}
         </span>
+        {canChart && (
+          <div className="flex shrink-0 items-center rounded border p-0.5">
+            {(['table', 'chart'] as const).map((mode) => {
+              const Icon = mode === 'table' ? TableIcon : BarChart3Icon;
+              return (
+                <button
+                  key={mode}
+                  type="button"
+                  aria-pressed={view === mode}
+                  onClick={() => setView(mode)}
+                  title={t(`table.view.${mode}`)}
+                  className={cn(
+                    'rounded px-1.5 py-0.5 transition-colors',
+                    view === mode ? 'bg-accent text-foreground' : 'hover:text-foreground',
+                  )}
+                >
+                  <Icon className="size-3.5" />
+                </button>
+              );
+            })}
+          </div>
+        )}
         <button
           type="button"
           onClick={download}
@@ -152,9 +182,11 @@ export function TableWidget({ data }: WidgetProps) {
         </button>
       </div>
 
+      {view === 'chart' && <ChartView source={source} />}
+
       {/* The table scrolls inside this box in both directions. A wide result set
           must never make the message column itself scroll sideways. */}
-      <div className="max-h-96 overflow-auto">
+      <div className={cn('max-h-96 overflow-auto', view === 'chart' && 'hidden')}>
         <table className="w-full border-collapse text-xs">
           <thead className="sticky top-0 z-10 bg-card">
             <tr>
