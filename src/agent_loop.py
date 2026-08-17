@@ -781,10 +781,19 @@ def _build_system_prompt(
 
     # Current date/time for every agent request. This is user-local when the
     # browser provided timezone headers, with a server-local fallback.
+    #
+    # It goes LAST, and that placement is load-bearing. The block carries the
+    # clock to the minute, so its text differs on almost every request, while
+    # everything above it — base prompt plus tool schemas, the bulk of the
+    # system message — is byte-identical from turn to turn. vLLM's prefix cache
+    # matches from token 0 forward and stops at the first difference, so
+    # prepending this cost a full re-prefill of the whole system prompt every
+    # minute. Appending leaves the stable part cacheable and confines the miss
+    # to the tail.
     try:
         from src.user_time import current_datetime_prompt
 
-        agent_prompt = current_datetime_prompt() + agent_prompt
+        agent_prompt = agent_prompt.rstrip() + "\n\n" + current_datetime_prompt()
     except Exception:
         pass
 
