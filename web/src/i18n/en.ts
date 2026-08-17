@@ -248,7 +248,6 @@ const en = {
     effort: {
       label: 'Effort',
       tooltip: 'How long the model thinks before answering',
-      tooltipOff: 'Only available while reasoning is on',
       faster: 'Faster',
       smarter: 'Smarter',
       help: 'Higher effort means longer thinking: better on hard problems, slower and more tokens on easy ones.',

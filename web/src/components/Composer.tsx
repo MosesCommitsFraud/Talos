@@ -201,23 +201,9 @@ function KnowledgeControl() {
   );
 }
 
-/** One-click reasoning switch: Thinking ↔ No Thinking. Drives the `reasoning`
- *  flag; when off the backend sends vLLM enable_thinking:false. */
-function ThinkingToggle() {
-  const { t } = useTranslation();
-  const reasoning = usePrefs((s) => s.reasoning);
-  const toggle = usePrefs((s) => s.toggle);
-  return (
-    <ModeToggle
-      active={reasoning}
-      onClick={() => toggle('reasoning')}
-      icon={null}
-      label={t('composer.reasoning.on')}
-      inactiveLabel={t('composer.reasoning.off')}
-      tooltip={reasoning ? t('composer.reasoning.onDesc') : t('composer.reasoning.offDesc')}
-    />
-  );
-}
+/* The reasoning on/off switch used to be a separate toggle here. It now lives
+ * inside EffortPicker, together with the effort slider it gates — one control
+ * for one decision. */
 
 /** Microphone picker beside the dictate button: enumerates audio inputs on
  *  open (labels appear once mic permission has been granted) and persists the
@@ -974,13 +960,11 @@ export function Composer() {
             )}
           </div>
 
-          {/* Right cluster: effort · model · thinking · context meter */}
+          {/* Right cluster: model · reasoning (switch + effort) · context meter */}
           <div className="flex shrink-0 flex-nowrap items-center justify-end gap-1">
-            <EffortPicker />
-
             <ModelPicker visible={prefs.visibility.composerModelPicker} />
 
-            <ThinkingToggle />
+            <EffortPicker />
 
             {prefs.visibility.contextMeter && <ContextMeter />}
           </div>

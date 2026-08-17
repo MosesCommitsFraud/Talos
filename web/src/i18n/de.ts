@@ -251,7 +251,6 @@ const de: typeof en = {
     effort: {
       label: 'Aufwand',
       tooltip: 'Wie lange das Modell vor der Antwort nachdenkt',
-      tooltipOff: 'Nur verfügbar, wenn das Denken eingeschaltet ist',
       faster: 'Schneller',
       smarter: 'Klüger',
       help: 'Mehr Aufwand heißt längeres Nachdenken: besser bei schweren Aufgaben, langsamer und teurer bei leichten.',
