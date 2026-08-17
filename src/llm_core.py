@@ -1075,6 +1075,84 @@ def normalize_model_id(
     return None
 
 
+# ── Qwen3-style reasoning control ──
+# Qwen3.8 (and the 3.6 hybrids before it) take a `reasoning_effort` chat-template
+# kwarg that scales how long the model thinks before answering. It rides the same
+# vLLM/SGLang `chat_template_kwargs` extension as `enable_thinking`, so it only
+# goes out on the OpenAI-compatible path and only for Qwen models — an upstream
+# that doesn't know the kwarg would reject the request.
+QWEN_REASONING_EFFORTS = ("low", "medium", "xhigh")
+DEFAULT_REASONING_EFFORT = "medium"
+
+# Qwen publishes two sampling profiles and warns against mixing them: thinking
+# mode wants a wide, unpenalised distribution, non-thinking mode needs a real
+# presence penalty or it loops. The whole profile is applied per mode, so on a
+# Qwen model the preset's temperature is deliberately overruled — the two
+# recommended values differ by mode, and a single preset can't be both.
+# min_p and repetition_penalty match vLLM's own defaults, but they are sent
+# anyway: vLLM reads generation_config.json out of the model directory, so the
+# effective default is whatever the checkpoint ships, not the library's.
+_QWEN_SAMPLING_THINKING = {
+    "temperature": 1.0,
+    "top_p": 0.95,
+    "top_k": 20,
+    "min_p": 0.0,
+    "presence_penalty": 0.0,
+    "repetition_penalty": 1.0,
+}
+_QWEN_SAMPLING_INSTRUCT = {
+    "temperature": 0.7,
+    "top_p": 0.80,
+    "top_k": 20,
+    "min_p": 0.0,
+    "presence_penalty": 1.5,
+    "repetition_penalty": 1.0,
+}
+
+
+def _is_qwen_model(model: str) -> bool:
+    return "qwen" in (model or "").lower()
+
+
+def _reasoning_payload_extras(
+    provider: str,
+    model: str,
+    enable_thinking: bool,
+    reasoning_effort: Optional[str] = None,
+    with_sampling: bool = False,
+) -> Dict[str, Any]:
+    """Payload additions that carry the reasoning mode to the upstream.
+
+    For Qwen served over vLLM this is the effort kwarg, plus — on the streaming
+    chat path — the mode's sampling profile. For everything else it stays what
+    it always was: an `enable_thinking: false` when the user turned thinking off.
+
+    `with_sampling` is off for the one-shot helpers on purpose. Title
+    generation, classification and document work pick a deliberate low
+    temperature for near-deterministic output; Qwen's conversational profile
+    (0.7 with a presence penalty of 1.5) would undo exactly that.
+    """
+    if not (provider == "openai" and _is_qwen_model(model)):
+        return {} if enable_thinking else {"chat_template_kwargs": {"enable_thinking": False}}
+
+    extras: Dict[str, Any] = {}
+    if with_sampling:
+        extras.update(_QWEN_SAMPLING_THINKING if enable_thinking else _QWEN_SAMPLING_INSTRUCT)
+        # The caller strips temperature before this merge, so putting it back
+        # here would undo that. No Qwen model is in that set today, but the
+        # guard keeps the merge order from mattering.
+        if _restricts_temperature(model):
+            extras.pop("temperature", None)
+    kwargs: Dict[str, Any] = {}
+    if not enable_thinking:
+        kwargs["enable_thinking"] = False
+    elif reasoning_effort in QWEN_REASONING_EFFORTS:
+        kwargs["reasoning_effort"] = reasoning_effort
+    if kwargs:
+        extras["chat_template_kwargs"] = kwargs
+    return extras
+
+
 def llm_call(
     url: str,
     model: str,
@@ -1085,6 +1163,7 @@ def llm_call(
     timeout: int = LLMConfig.DEFAULT_TIMEOUT,
     prompt_type: Optional[str] = None,
     enable_thinking: bool = True,
+    reasoning_effort: Optional[str] = None,
 ) -> str:
     """Synchronous LLM call with optional prompt type enhancement."""
     h = _provider_headers(_detect_provider(url))
@@ -1147,11 +1226,9 @@ def llm_call(
             "messages": messages_copy,
             "temperature": temperature,
         }
-        # vLLM/SGLang OpenAI extension to gate reasoning on Qwen3-style hybrid
-        # models; harmless to omit elsewhere, so only send when disabling
-        # (mirrors llm_call_async).
-        if not enable_thinking:
-            payload["chat_template_kwargs"] = {"enable_thinking": False}
+        payload.update(
+            _reasoning_payload_extras(provider, model, enable_thinking, reasoning_effort)
+        )
         if _restricts_temperature(model):
             payload.pop("temperature", None)
         if max_tokens and max_tokens > 0:
@@ -1257,6 +1334,7 @@ async def llm_call_async(
     max_retries: int = LLMConfig.MAX_RETRIES,
     prompt_type: Optional[str] = None,
     enable_thinking: bool = True,
+    reasoning_effort: Optional[str] = None,
 ) -> str:
     """Asynchronous LLM call using httpx with connection pooling, timeout, retry logic, and performance logging."""
     provider = _detect_provider(url)
@@ -1318,10 +1396,9 @@ async def llm_call_async(
                 "max_completion_tokens" if _uses_max_completion_tokens(model) else "max_tokens"
             )
             payload[tok_key] = max_tokens
-        # vLLM/SGLang OpenAI extension to gate reasoning on Qwen3-style hybrid
-        # models; harmless to omit elsewhere, so only send when disabling.
-        if not enable_thinking:
-            payload["chat_template_kwargs"] = {"enable_thinking": False}
+        payload.update(
+            _reasoning_payload_extras(provider, model, enable_thinking, reasoning_effort)
+        )
 
     if _is_host_dead(target_url):
         raise HTTPException(
@@ -1401,6 +1478,7 @@ async def stream_llm(
     tools: Optional[List[Dict]] = None,
     tool_choice: Optional[Any] = None,
     enable_thinking: bool = True,
+    reasoning_effort: Optional[str] = None,
 ):
     """Stream LLM responses with improved error handling.
 
@@ -1477,11 +1555,11 @@ async def stream_llm(
             # supported by vLLM's server; only meaningful when tools are sent.
             if tool_choice is not None:
                 payload["tool_choice"] = tool_choice
-        # Disable reasoning on Qwen3-style hybrid models served via vLLM. This is
-        # a vLLM/SGLang extension to the OpenAI API; harmless to omit elsewhere,
-        # so we only send it when the user explicitly turned thinking off.
-        if not enable_thinking:
-            payload["chat_template_kwargs"] = {"enable_thinking": False}
+        payload.update(
+            _reasoning_payload_extras(
+                provider, model, enable_thinking, reasoning_effort, with_sampling=True
+            )
+        )
         h = _provider_headers(provider, headers)
         if provider == "copilot":
             from src.copilot import apply_request_headers

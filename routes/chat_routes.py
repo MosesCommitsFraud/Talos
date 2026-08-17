@@ -42,7 +42,12 @@ from src.auth_helpers import get_current_user
 from src.chat_helpers import coerce_message_and_session
 from src.endpoint_resolver import build_chat_url
 from src.endpoint_resolver import normalize_base as _normalize_base
-from src.llm_core import llm_call_async, stream_llm
+from src.llm_core import (
+    DEFAULT_REASONING_EFFORT,
+    QWEN_REASONING_EFFORTS,
+    llm_call_async,
+    stream_llm,
+)
 from src.prompt_security import untrusted_context_message
 from src.request_models import ChatRequest
 from src.usage_tracking import record_turn
@@ -390,6 +395,12 @@ def setup_chat_routes(
         # Model reasoning/thinking. Default on; only an explicit "false" disables
         # it (tells vLLM enable_thinking:false for Qwen3-style hybrid models).
         reasoning = str(form_data.get("reasoning", "true")).lower() != "false"
+        # How hard it thinks when reasoning is on (Qwen3.8 `reasoning_effort`).
+        # Anything unrecognised falls back to the default rather than being
+        # forwarded — an unknown value makes the chat template raise.
+        reasoning_effort = str(form_data.get("reasoning_effort") or "").strip().lower()
+        if reasoning_effort not in QWEN_REASONING_EFFORTS:
+            reasoning_effort = DEFAULT_REASONING_EFFORT
         # Single unified mode. Every request runs the full agent loop with all
         # tools available — there is no longer a chat/agent split or any intent
         # detection. `chat_mode` is kept as a constant so the few downstream
@@ -1060,6 +1071,7 @@ def setup_chat_routes(
                         force_db=use_db,
                         use_rag=str(use_rag).lower() == "true",
                         reasoning=reasoning,
+                        reasoning_effort=reasoning_effort,
                     ):
                         if chunk.startswith("data: ") and not chunk.startswith("data: [DONE]"):
                             try:

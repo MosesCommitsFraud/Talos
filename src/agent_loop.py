@@ -1851,6 +1851,7 @@ async def stream_agent_loop(
     force_db: bool = False,
     use_rag: bool = False,
     reasoning: bool = True,
+    reasoning_effort: Optional[str] = None,
 ) -> AsyncGenerator[str, None]:
     """Streaming agent loop generator.
 
@@ -2655,6 +2656,7 @@ async def stream_agent_loop(
             tool_choice=_round_tool_choice,
             timeout=agent_stream_timeout,
             enable_thinking=reasoning,
+            reasoning_effort=reasoning_effort,
         ):
             if time.time() > _round_deadline:
                 logger.warning(

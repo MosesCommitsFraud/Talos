@@ -7,6 +7,10 @@ export type Density = 'compact' | 'comfortable' | 'spacious';
 export type SortMode = 'active' | 'newest' | 'name';
 export type ChatMode = 'chat' | 'knowledge' | 'sql' | 'full';
 export type LlmLang = 'auto' | Lang;
+/** Qwen3.8 thinking budget, cheapest first. Mirrors the model's
+ *  `reasoning_effort` chat-template kwarg. */
+export type ReasoningEffort = 'low' | 'medium' | 'xhigh';
+export const REASONING_EFFORTS: ReasoningEffort[] = ['low', 'medium', 'xhigh'];
 export type { Lang };
 
 /** Per-surface visibility toggles — the new-UI equivalent of legacy's
@@ -85,6 +89,9 @@ interface PrefsState {
   /** Model reasoning/thinking. Maps to the `reasoning` request flag; when off,
    *  the backend tells vLLM `enable_thinking: false`. Default on. */
   reasoning: boolean;
+  /** How long the model may think while reasoning is on. Maps to the
+   *  `reasoning_effort` request flag; ignored when reasoning is off. */
+  reasoningEffort: ReasoningEffort;
   incognito: boolean;
   /** Preferred microphone for voice dictation; null = system default. */
   micDeviceId: string | null;
@@ -99,6 +106,7 @@ interface PrefsState {
   setSortMode: (m: SortMode) => void;
   setLang: (l: Lang) => void;
   setLlmLang: (l: LlmLang) => void;
+  setReasoningEffort: (e: ReasoningEffort) => void;
   setVisibility: (key: keyof Visibility, value: boolean) => void;
   resetVisibility: () => void;
   toggle: (key: 'planMode' | 'useRag' | 'useDb' | 'reasoning' | 'incognito') => void;
@@ -126,6 +134,7 @@ export const usePrefs = create<PrefsState>()(
       useRag: true,
       useDb: true,
       reasoning: true,
+      reasoningEffort: 'medium',
       incognito: false,
       micDeviceId: null,
       sidebarCollapsed: false,
@@ -138,6 +147,7 @@ export const usePrefs = create<PrefsState>()(
       // outranks the flipped default (see pickLang in @/i18n).
       setLang: (lang) => { void i18n.changeLanguage(lang); set({ lang, langChosen: true }); },
       setLlmLang: (llmLang) => set({ llmLang }),
+      setReasoningEffort: (reasoningEffort) => set({ reasoningEffort }),
       setVisibility: (key, value) => {
         // Toggling it is the reader stating a preference, which from here on
         // outranks the flipped default (see THINKING_CHOICE_KEY).
@@ -186,7 +196,7 @@ export const usePrefs = create<PrefsState>()(
 
 const SYNCED_KEYS = [
   'theme', 'density', 'sortMode', 'lang', 'langChosen', 'llmLang', 'visibility',
-  'useRag', 'useDb', 'reasoning',
+  'useRag', 'useDb', 'reasoning', 'reasoningEffort',
 ] as const;
 type SyncedKey = (typeof SYNCED_KEYS)[number];
 type SyncedPrefs = Pick<PrefsState, SyncedKey>;

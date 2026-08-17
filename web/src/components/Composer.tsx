@@ -34,6 +34,7 @@ import { previewKind } from '@/lib/files';
 import { ContextMeter } from './ContextMeter';
 import { FilePreviewFace, hasVisualPreview, openUploadViewer } from './AttachmentTile';
 import { FileTypeIcon } from './FileTypeIcon';
+import { EffortPicker } from './EffortPicker';
 import { ModelPicker } from './ModelPicker';
 import { Button } from './ui/button';
 import { Menu, MenuItem, MenuLabel, MenuPopup, MenuTrigger } from './ui/menu';
@@ -973,8 +974,10 @@ export function Composer() {
             )}
           </div>
 
-          {/* Right cluster: model · thinking · context meter */}
+          {/* Right cluster: effort · model · thinking · context meter */}
           <div className="flex shrink-0 flex-nowrap items-center justify-end gap-1">
+            <EffortPicker />
+
             <ModelPicker visible={prefs.visibility.composerModelPicker} />
 
             <ThinkingToggle />

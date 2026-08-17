@@ -1187,6 +1187,9 @@ export interface StreamFlags {
   /** Model reasoning/thinking. When false the backend disables it (vLLM
    *  `enable_thinking: false`). Omitted/true leaves the model's default on. */
   reasoning?: boolean;
+  /** How long the model may think when reasoning is on — Qwen3.8's
+   *  `reasoning_effort` chat-template kwarg. Ignored when reasoning is off. */
+  reasoningEffort?: 'low' | 'medium' | 'xhigh';
   incognito?: boolean;
   attachments?: string[];
   /** UI language ("de"/"en") — the backend writes auto-generated session
@@ -1220,6 +1223,7 @@ export async function streamChat(opts: {
   if (f.useRag) fd.set('use_rag', 'true');
   if (f.useDb) fd.set('use_db', 'true');
   if (f.reasoning === false) fd.set('reasoning', 'false');
+  if (f.reasoningEffort) fd.set('reasoning_effort', f.reasoningEffort);
   if (f.incognito) fd.set('incognito', 'true');
   if (f.lang) fd.set('lang', f.lang);
   if (f.llmLanguage) fd.set('llm_language', f.llmLanguage);
