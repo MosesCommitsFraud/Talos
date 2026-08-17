@@ -4,6 +4,7 @@ import type { Artifact, ArtifactSelection, Attachment, ChatEvent, Metrics, RagSo
 import { documentFileName, isPreviewable } from '@/lib/files';
 import { timestampMs } from '@/lib/utils';
 import { queryClient } from '@/lib/queryClient';
+import { StreamSmoother } from '@/lib/streamSmoother';
 import { usePrefs } from './prefs';
 import { useUi } from './ui';
 
@@ -666,6 +667,12 @@ export const useChat = create<ChatState>((set, get) => {
         ),
       }));
     };
+    // Deltas arrive in clumps (a dense model emits a few tokens at a time); the
+    // smoother releases them per frame so letters appear one after another.
+    const smoother = new StreamSmoother((chunk, thinking) => {
+      if (thinking) patchAi((m) => ({ thinking: (m.thinking ?? '') + chunk }));
+      else patchAi((m) => ({ content: m.content + chunk }));
+    });
     const startNewRound = () => {
       const current = get().runtimes[sid]?.messages.find((m) => m.id === aiId);
       // Nothing rendered yet — reuse the empty bubble instead of stacking one.
@@ -748,9 +755,15 @@ export const useChat = create<ChatState>((set, get) => {
             });
       await consume((ev) => {
           if ('delta' in ev && typeof ev.delta === 'string') {
-            if (ev.thinking) patchAi((m) => ({ thinking: (m.thinking ?? '') + ev.delta }));
-            else patchAi((m) => ({ content: m.content + ev.delta }));
+            smoother.push(ev.delta, !!ev.thinking);
             return;
+          }
+          // Everything else either starts a new bubble, appends a row after the
+          // text, or replaces the text outright — so the queued characters have
+          // to be on screen first. Document/metric events don't touch the
+          // message body and can stream past without interrupting the reveal.
+          if (ev.type !== 'doc_stream_delta' && ev.type !== 'doc_stream_open' && ev.type !== 'metrics') {
+            smoother.flush();
           }
           switch (ev.type) {
             case 'agent_step':
@@ -908,6 +921,9 @@ export const useChat = create<ChatState>((set, get) => {
             }
           }
       });
+      // The stream is over — show whatever is still queued instead of animating
+      // into a bubble the UI already considers settled.
+      smoother.flush();
       // Catch workspace outputs from older servers/tools that do not emit an
       // explicit artifact event. Active queries refetch immediately; closed
       // sessions are marked stale for their next open.
@@ -924,6 +940,8 @@ export const useChat = create<ChatState>((set, get) => {
         }
       } catch { /* best-effort */ }
     } catch (err) {
+      // Aborted or failed mid-reveal: keep the text that actually arrived.
+      smoother.flush();
       if (!abort.signal.aborted) {
         patchAi((m) => ({
           content: m.content || (err instanceof Error ? err.message : 'Request failed'),
@@ -931,6 +949,7 @@ export const useChat = create<ChatState>((set, get) => {
         }));
       }
     } finally {
+      smoother.flush();
       // Stamp the turn's wall-clock onto the terminal bubble before the start
       // time is cleared, so the settled "Worked for Xs" fold has a duration.
       const startedAt = get().runtimes[sid]?.turnStartedAt;
