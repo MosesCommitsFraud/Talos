@@ -756,6 +756,19 @@ export const fetchCapabilities = () =>
     '/api/capabilities',
   );
 
+/** The effort levels Qwen3.8's chat template branches on. `high` is accepted by
+ *  the served checkpoint but aliases to `xhigh`, so it is not offered. */
+export type ReasoningEffortLevel = 'low' | 'medium' | 'xhigh';
+
+/** Which reasoning-effort levels a model actually honours. Empty means the model
+ *  only has the thinking on/off switch (Qwen3.6 and older), so the composer
+ *  shows that toggle instead of the effort slider. Probed per model because the
+ *  served name stays the same across checkpoint swaps. */
+export const fetchReasoningEfforts = (endpointId: string, model: string) =>
+  getJSON<{ efforts: ReasoningEffortLevel[] }>(
+    `/api/capabilities/reasoning?endpoint_id=${encodeURIComponent(endpointId)}&model=${encodeURIComponent(model)}`,
+  );
+
 /** Send a dictation clip to the backend ASR proxy; returns the transcript. */
 export async function transcribeVoice(blob: Blob, signal?: AbortSignal): Promise<string> {
   const ext = blob.type.includes('ogg') ? 'ogg' : blob.type.includes('mp4') ? 'mp4' : 'webm';
@@ -1189,7 +1202,7 @@ export interface StreamFlags {
   reasoning?: boolean;
   /** How long the model may think when reasoning is on — Qwen3.8's
    *  `reasoning_effort` chat-template kwarg. Ignored when reasoning is off. */
-  reasoningEffort?: 'low' | 'medium' | 'xhigh';
+  reasoningEffort?: ReasoningEffortLevel;
   incognito?: boolean;
   attachments?: string[];
   /** UI language ("de"/"en") — the backend writes auto-generated session

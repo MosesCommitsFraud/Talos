@@ -34,7 +34,7 @@ import { previewKind } from '@/lib/files';
 import { ContextMeter } from './ContextMeter';
 import { FilePreviewFace, hasVisualPreview, openUploadViewer } from './AttachmentTile';
 import { FileTypeIcon } from './FileTypeIcon';
-import { EffortPicker } from './EffortPicker';
+import { EffortPicker, useReasoningEfforts } from './EffortPicker';
 import { ModelPicker } from './ModelPicker';
 import { Button } from './ui/button';
 import { Menu, MenuItem, MenuLabel, MenuPopup, MenuTrigger } from './ui/menu';
@@ -201,9 +201,38 @@ function KnowledgeControl() {
   );
 }
 
-/* The reasoning on/off switch used to be a separate toggle here. It now lives
- * inside EffortPicker, together with the effort slider it gates — one control
- * for one decision. */
+/** One-click reasoning switch: Thinking ↔ No Thinking. Drives the `reasoning`
+ *  flag; when off the backend sends vLLM `enable_thinking: false`.
+ *
+ *  The fallback for models without an effort knob (Qwen3.6 and older). Where the
+ *  knob exists the switch lives inside EffortPicker instead, together with the
+ *  slider it gates — one control for one decision. */
+function ThinkingToggle() {
+  const { t } = useTranslation();
+  const reasoning = usePrefs((s) => s.reasoning);
+  const toggle = usePrefs((s) => s.toggle);
+  return (
+    <ModeToggle
+      active={reasoning}
+      onClick={() => toggle('reasoning')}
+      icon={null}
+      label={t('composer.reasoning.on')}
+      inactiveLabel={t('composer.reasoning.off')}
+      tooltip={reasoning ? t('composer.reasoning.onDesc') : t('composer.reasoning.offDesc')}
+    />
+  );
+}
+
+/** Reasoning control for the composer: the effort slider when the selected model
+ *  has effort levels, the plain Thinking/No-Thinking toggle when it doesn't.
+ *  Which one applies is probed per model — see `useReasoningEfforts`. */
+function ReasoningControl() {
+  const efforts = useReasoningEfforts();
+  // A single level is not a choice, and an empty list means "unknown or
+  // unsupported" — both land on the toggle, so nothing flickers into view while
+  // the probe is still running.
+  return efforts.length > 1 ? <EffortPicker /> : <ThinkingToggle />;
+}
 
 /** Microphone picker beside the dictate button: enumerates audio inputs on
  *  open (labels appear once mic permission has been granted) and persists the
@@ -964,7 +993,7 @@ export function Composer() {
           <div className="flex shrink-0 flex-nowrap items-center justify-end gap-1">
             <ModelPicker visible={prefs.visibility.composerModelPicker} />
 
-            <EffortPicker />
+            <ReasoningControl />
 
             {prefs.visibility.contextMeter && <ContextMeter />}
           </div>

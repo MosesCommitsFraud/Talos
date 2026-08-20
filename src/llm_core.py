@@ -1076,11 +1076,15 @@ def normalize_model_id(
 
 
 # ── Qwen3-style reasoning control ──
-# Qwen3.8 (and the 3.6 hybrids before it) take a `reasoning_effort` chat-template
-# kwarg that scales how long the model thinks before answering. It rides the same
-# vLLM/SGLang `chat_template_kwargs` extension as `enable_thinking`, so it only
-# goes out on the OpenAI-compatible path and only for Qwen models — an upstream
-# that doesn't know the kwarg would reject the request.
+# Qwen3.8 takes a `reasoning_effort` chat-template kwarg that scales how long the
+# model thinks before answering. It rides the same vLLM/SGLang
+# `chat_template_kwargs` extension as `enable_thinking`, so it only goes out on
+# the OpenAI-compatible path and only for Qwen models.
+#
+# Qwen3.6 does NOT have it — its chat template only knows `enable_thinking` and
+# `preserve_thinking`. Sending the kwarg there is harmless (Jinja drops the
+# unknown variable) but has no effect, which is why the UI asks
+# `supported_reasoning_efforts()` below before it offers the slider.
 QWEN_REASONING_EFFORTS = ("low", "medium", "xhigh")
 DEFAULT_REASONING_EFFORT = "medium"
 
@@ -1151,6 +1155,99 @@ def _reasoning_payload_extras(
     if kwargs:
         extras["chat_template_kwargs"] = kwargs
     return extras
+
+
+# ── Effort capability probe ──
+# Not every Qwen generation has the effort knob: Qwen3.8's chat template renders
+# a reasoning instruction per level, Qwen3.6's only knows `enable_thinking`. An
+# unknown kwarg is not an error in Jinja — it renders as undefined and vanishes —
+# so asking the upstream "do you accept `reasoning_effort`?" always says yes. The
+# only honest question is whether the levels render *differently*, which
+# `prompt_tokens` on a one-token completion answers without generating anything.
+#
+# The served name is no help either: the same `qwen3-llm` alias has pointed at
+# both generations, so this has to be measured per endpoint, not looked up.
+_EFFORT_PROBE_TTL = 900  # seconds; endpoints get re-pointed at new checkpoints
+# (url, model) → (probed_at, levels, ttl)
+_effort_probe_cache: Dict[Tuple[str, str], Tuple[float, Tuple[str, ...], int]] = {}
+_effort_probe_lock = threading.Lock()
+
+
+def _probe_prompt_tokens(
+    url: str, model: str, headers: Optional[Dict], effort: str, timeout: int
+) -> Optional[int]:
+    """Prompt-token count for a one-token completion at `effort`, or None if the
+    upstream rejected it."""
+    payload = {
+        "model": model,
+        "messages": [{"role": "user", "content": "hi"}],
+        "max_tokens": 1,
+        "chat_template_kwargs": {"reasoning_effort": effort},
+    }
+    try:
+        from src.tls_overrides import llm_verify
+
+        r = httpx.post(
+            url,
+            headers={**(headers or {}), "Content-Type": "application/json"},
+            json=payload,
+            timeout=timeout,
+            verify=llm_verify(),
+        )
+        if not r.is_success:
+            return None
+        return int(r.json()["usage"]["prompt_tokens"])
+    except Exception as e:
+        logger.debug("effort probe failed for %s (%s): %s", model, effort, e)
+        return None
+
+
+def supported_reasoning_efforts(
+    url: str,
+    model: str,
+    headers: Optional[Dict] = None,
+    timeout: int = 15,
+    refresh: bool = False,
+) -> Tuple[str, ...]:
+    """The effort levels this (url, model) actually honours — empty when the
+    model only has the thinking on/off switch.
+
+    Empty is the safe answer: callers hide the effort control and fall back to
+    the binary toggle, which every Qwen generation understands.
+    """
+    provider = _detect_provider(url)
+    if not (provider == "openai" and _is_qwen_model(model)):
+        return ()
+
+    key = (url, model)
+    now = time.time()
+    if not refresh:
+        with _effort_probe_lock:
+            hit = _effort_probe_cache.get(key)
+        if hit and now - hit[0] < hit[2]:
+            return hit[1]
+
+    counts = {
+        e: _probe_prompt_tokens(url, model, headers, e, timeout) for e in QWEN_REASONING_EFFORTS
+    }
+    accepted = {e: c for e, c in counts.items() if c is not None}
+    # Distinct renderings mean the template branches on the level. Identical
+    # ones mean it ignored the kwarg, so the slider would be a dead control.
+    result = QWEN_REASONING_EFFORTS if len(set(accepted.values())) > 1 else ()
+    # Only a full set of answers is a measurement. A partial one means the
+    # upstream was down or rejecting, and that verdict shouldn't outlive the
+    # outage — so it gets a short TTL and re-probes soon.
+    conclusive = len(accepted) == len(QWEN_REASONING_EFFORTS)
+    logger.info(
+        "[effort-probe] %s @ %s → %s (prompt_tokens %s)",
+        model,
+        url,
+        list(result) or "unsupported",
+        counts,
+    )
+    with _effort_probe_lock:
+        _effort_probe_cache[key] = (now, result, _EFFORT_PROBE_TTL if conclusive else 60)
+    return result
 
 
 def llm_call(

@@ -25,3 +25,9 @@ vorschau tut nicht
 verlinkung im chat tut nicht wenn ki das gibt
 vision funktioniert
 system prompt für user
+skill download
+mcp settings in talos
+rag nach außen geben
+mcp für websuche skills
+almost done thinking change
+running task should be shown

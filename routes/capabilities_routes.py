@@ -6,9 +6,13 @@ when only one is, or nothing when neither is. User-level (not admin) — every
 signed-in user needs it to render the composer.
 """
 
-from fastapi import APIRouter, Request
+import logging
+
+from fastapi import APIRouter, Query, Request
 
 from src.auth_helpers import get_current_user
+
+logger = logging.getLogger(__name__)
 
 
 def _rag_configured() -> bool:
@@ -57,5 +61,36 @@ def setup_capabilities_routes():
             "voice": voice_configured(),
             "voice_streaming": voice_streaming_available(),
         }
+
+    @router.get("/capabilities/reasoning")
+    def reasoning_capabilities(
+        request: Request,
+        endpoint_id: str = Query(""),
+        model: str = Query(""),
+        refresh: bool = Query(False),
+    ):
+        """Effort levels the given model honours — `[]` when it only has the
+        thinking on/off switch, so the composer can drop the slider.
+
+        Per model, not global: the same endpoint alias has served both a
+        generation with the effort knob and one without.
+        """
+        user = get_current_user(request)  # username, used for endpoint ownership
+        efforts: list = []
+        try:
+            from src.endpoint_resolver import resolve_endpoint_by_id
+            from src.llm_core import supported_reasoning_efforts
+
+            resolved = resolve_endpoint_by_id(endpoint_id, model, owner=user)
+            if resolved:
+                url, resolved_model, headers = resolved
+                efforts = list(
+                    supported_reasoning_efforts(url, resolved_model, headers, refresh=refresh)
+                )
+        except Exception as e:
+            # A probe that can't run must not break the composer: no levels
+            # means the binary toggle, which every model understands.
+            logger.debug("reasoning capability probe failed: %s", e)
+        return {"efforts": efforts}
 
     return router

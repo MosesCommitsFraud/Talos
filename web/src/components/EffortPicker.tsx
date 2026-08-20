@@ -1,19 +1,46 @@
+import { useQuery } from '@tanstack/react-query';
 import { HelpCircleIcon } from 'lucide-react';
 import { useCallback, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
+import { fetchReasoningEfforts } from '@/api/client';
+import { useChat } from '@/state/chat';
 import { REASONING_EFFORTS, usePrefs, type ReasoningEffort } from '@/state/prefs';
 import { cn } from '@/lib/utils';
 import { Menu, MenuPopup, MenuTrigger } from './ui/menu';
 import { Switch, Tooltip } from './ui/misc';
 
+/** The effort levels the currently selected model honours — `[]` while the probe
+ *  is in flight, for a model without the knob, or when the probe can't run.
+ *
+ *  Not every Qwen generation has it: Qwen3.8's chat template renders a per-level
+ *  reasoning instruction, Qwen3.6's only knows `enable_thinking`. The served
+ *  model name doesn't distinguish them (the same alias has pointed at both), so
+ *  the backend measures it against the endpoint and caches the answer. Callers
+ *  fall back to the plain thinking toggle, which every generation understands. */
+export function useReasoningEfforts(): ReasoningEffort[] {
+  const pendingModel = useChat((s) => s.pendingModel);
+  const { data } = useQuery({
+    queryKey: ['reasoning-efforts', pendingModel?.endpointId, pendingModel?.model],
+    queryFn: () => fetchReasoningEfforts(pendingModel!.endpointId, pendingModel!.model),
+    enabled: !!pendingModel,
+    // The probe costs three one-token completions upstream; the answer only
+    // changes when the endpoint is re-pointed at another checkpoint.
+    staleTime: 15 * 60_000,
+    retry: false,
+  });
+  return data?.efforts ?? [];
+}
+
 /** Reasoning control beside the model picker — one button for both halves of the
  *  same decision: a switch that turns thinking on or off, and a slider from
  *  "Faster" to "Smarter" over the levels the model actually accepts.
  *
- *  The levels are Qwen3.8's whole set: vLLM validates `reasoning_effort` against
- *  low · medium · xhigh and 400s on anything else, so REASONING_EFFORTS mirrors
- *  llm_core.QWEN_REASONING_EFFORTS exactly. With thinking off the model never
- *  opens a <think> block, so the slider greys out but stays readable. */
+ *  Only rendered for models that have the effort knob; Composer shows a plain
+ *  Thinking/No-Thinking toggle for the ones that don't. The stops come from the
+ *  probe rather than the constant, so a model with a different set still lines
+ *  up; REASONING_EFFORTS is the fallback and mirrors
+ *  llm_core.QWEN_REASONING_EFFORTS. With thinking off the model never opens a
+ *  <think> block, so the slider greys out but stays readable. */
 export function EffortPicker() {
   const { t } = useTranslation();
   const reasoning = usePrefs((s) => s.reasoning);
@@ -22,8 +49,11 @@ export function EffortPicker() {
   const setEffort = usePrefs((s) => s.setReasoningEffort);
   const trackRef = useRef<HTMLDivElement>(null);
 
-  const index = Math.max(0, REASONING_EFFORTS.indexOf(effort));
-  const last = REASONING_EFFORTS.length - 1;
+  const probed = useReasoningEfforts();
+  const levels = probed.length > 1 ? probed : REASONING_EFFORTS;
+
+  const index = Math.max(0, levels.indexOf(effort));
+  const last = levels.length - 1;
   const name = (e: ReasoningEffort) => t(`composer.effort.levels.${e}`);
   const label = name(effort);
 
@@ -37,9 +67,9 @@ export function EffortPicker() {
       const span = rect.width - inset * 2;
       if (span <= 0) return;
       const ratio = Math.min(1, Math.max(0, (clientX - rect.left - inset) / span));
-      setEffort(REASONING_EFFORTS[Math.round(ratio * last)]);
+      setEffort(levels[Math.round(ratio * last)]);
     },
-    [last, setEffort],
+    [last, levels, setEffort],
   );
 
   return (
@@ -79,7 +109,7 @@ export function EffortPicker() {
             e.stopPropagation();
             if (!reasoning) return;
             const next = index + (e.key === 'ArrowRight' ? 1 : -1);
-            if (next >= 0 && next <= last) setEffort(REASONING_EFFORTS[next]);
+            if (next >= 0 && next <= last) setEffort(levels[next]);
           }
         }}
       >
@@ -134,7 +164,7 @@ export function EffortPicker() {
                 handle can actually reach them. */}
             <div className="absolute inset-y-0 left-3 right-3">
               <div className="flex h-full items-center justify-between">
-                {REASONING_EFFORTS.map((level, i) => (
+                {levels.map((level, i) => (
                   <span
                     key={level}
                     aria-hidden="true"
