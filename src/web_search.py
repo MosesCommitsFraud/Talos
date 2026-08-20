@@ -45,9 +45,16 @@ KNOWN_CATEGORIES = {"general", "news", "science", "it", "images", "videos", "map
 KNOWN_TIME_RANGES = {"day", "week", "month", "year"}
 
 
-def get_searxng_url() -> str:
-    """Resolve the SearxNG base URL: admin setting first, then env, then the
-    bundled compose service."""
+def get_searxng_url(policy: Optional[Dict[str, Any]] = None) -> str:
+    """Resolve the SearxNG base URL: caller policy, then admin setting, then
+    env, then the bundled compose service.
+
+    `policy` is the caller-specific override described in `search`.
+    """
+    if policy:
+        override = str(policy.get("searxng_url") or "").strip()
+        if override:
+            return override.rstrip("/")
     try:
         from src.settings import get_setting
 
@@ -112,8 +119,23 @@ def _normalize_domain(entry: str) -> str:
     return e
 
 
-def _load_domain_lists() -> tuple:
-    """(allowlist, blocklist) of normalized hosts from admin settings."""
+def _clean_domains(raw) -> list:
+    """Normalize one raw allow/block list entry set into bare hosts."""
+    if isinstance(raw, str):
+        raw = re.split(r"[\s,;]+", raw)
+    if not isinstance(raw, (list, tuple)):
+        return []
+    return [d for d in (_normalize_domain(x) for x in raw) if d]
+
+
+def _load_domain_lists(policy: Optional[Dict[str, Any]] = None) -> tuple:
+    """(allowlist, blocklist) of normalized hosts.
+
+    From the caller's `policy` when it carries one, otherwise from the admin
+    settings the web UI edits.
+    """
+    if policy:
+        return _clean_domains(policy.get("allowlist")), _clean_domains(policy.get("blocklist"))
     try:
         from src.settings import get_setting
 
@@ -123,14 +145,7 @@ def _load_domain_lists() -> tuple:
         logger.debug("domain list lookup failed: %s", e)
         return [], []
 
-    def _clean(raw):
-        if isinstance(raw, str):
-            raw = re.split(r"[\s,;]+", raw)
-        if not isinstance(raw, (list, tuple)):
-            return []
-        return [d for d in (_normalize_domain(x) for x in raw) if d]
-
-    return _clean(raw_allow), _clean(raw_block)
+    return _clean_domains(raw_allow), _clean_domains(raw_block)
 
 
 def _host_matches(host: str, domain: str) -> bool:
@@ -139,8 +154,8 @@ def _host_matches(host: str, domain: str) -> bool:
     return host == domain or host.endswith("." + domain)
 
 
-def check_domain(host: str) -> Optional[str]:
-    """Return a refusal message if admin policy forbids `host`, else None.
+def check_domain(host: str, policy: Optional[Dict[str, Any]] = None) -> Optional[str]:
+    """Return a refusal message if policy forbids `host`, else None.
 
     Blocklist always wins. A non-empty allowlist flips the tool into
     allowlist-only mode: nothing outside it is fetched or shown.
@@ -148,7 +163,7 @@ def check_domain(host: str) -> Optional[str]:
     host = (host or "").lower()
     if not host:
         return "URL has no host."
-    allow, block = _load_domain_lists()
+    allow, block = _load_domain_lists(policy)
     for d in block:
         if _host_matches(host, d):
             return f"'{host}' is on the administrator's blocked-domain list."
@@ -160,14 +175,14 @@ def check_domain(host: str) -> Optional[str]:
     return None
 
 
-def _validate_fetch_url(url: str) -> Optional[str]:
+def _validate_fetch_url(url: str, policy: Optional[Dict[str, Any]] = None) -> Optional[str]:
     """Return an error message if `url` must not be fetched, else None."""
     parsed = urlparse(url)
     if parsed.scheme not in ("http", "https"):
         return f"Only http/https URLs can be fetched (got '{parsed.scheme or 'no scheme'}')."
     if not parsed.hostname:
         return "URL has no host."
-    domain_error = check_domain(parsed.hostname)
+    domain_error = check_domain(parsed.hostname, policy)
     if domain_error:
         return domain_error
     if not _is_public_host(parsed.hostname):
@@ -189,8 +204,17 @@ async def search(
     time_range: str = "",
     page: int = 1,
     session_id: str = "",
+    policy: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
-    """Query SearxNG. Returns {"results": <markdown>} or {"error": ..., "exit_code": 1}."""
+    """Query SearxNG. Returns {"results": <markdown>} or {"error": ..., "exit_code": 1}.
+
+    `policy` overrides the admin web settings for this one call, as
+    ``{"searxng_url": str, "allowlist": [...], "blocklist": [...]}``. None (the
+    default) means the admin settings apply — that is the browser agent's path.
+    Talos's outward MCP server passes its own policy here so an external bearer
+    token can be held to a different domain list than the logged-in UI; see
+    src/mcp_settings.py.
+    """
     outcome = await _searx_request(
         query=query,
         max_results=max_results,
@@ -199,10 +223,15 @@ async def search(
         time_range=time_range,
         page=page,
         session_id=session_id,
+        policy=policy,
     )
     if "error" in outcome:
         return outcome
-    return {"results": _format_search_results(query, outcome["payload"], outcome["max_results"])}
+    return {
+        "results": _format_search_results(
+            query, outcome["payload"], outcome["max_results"], policy
+        )
+    }
 
 
 async def _searx_request(
@@ -213,6 +242,7 @@ async def _searx_request(
     time_range: str,
     page: int,
     session_id: str,
+    policy: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """One SearxNG query: the transport, the leak guard and the error wording.
 
@@ -236,7 +266,7 @@ async def _searx_request(
     if leak:
         return {"error": leak, "exit_code": 1}
 
-    base = get_searxng_url()
+    base = get_searxng_url(policy)
     try:
         max_results = max(1, min(int(max_results or DEFAULT_RESULTS), MAX_RESULTS))
     except (TypeError, ValueError):
@@ -310,7 +340,9 @@ async def _searx_request(
     return {"payload": payload, "max_results": max_results}
 
 
-def _pick_results(payload: Dict[str, Any], max_results: int) -> tuple:
+def _pick_results(
+    payload: Dict[str, Any], max_results: int, policy: Optional[Dict[str, Any]] = None
+) -> tuple:
     """The results worth showing, plus how many the domain policy removed.
 
     SearxNG merges engines, so the same URL can arrive more than once. The admin
@@ -325,7 +357,7 @@ def _pick_results(payload: Dict[str, Any], max_results: int) -> tuple:
         if not url or url in seen:
             continue
         seen.add(url)
-        if check_domain(urlparse(url).hostname or ""):
+        if check_domain(urlparse(url).hostname or "", policy):
             filtered += 1
             continue
         picked.append(item)
@@ -334,9 +366,14 @@ def _pick_results(payload: Dict[str, Any], max_results: int) -> tuple:
     return picked, filtered
 
 
-def _format_search_results(query: str, payload: Dict[str, Any], max_results: int) -> str:
+def _format_search_results(
+    query: str,
+    payload: Dict[str, Any],
+    max_results: int,
+    policy: Optional[Dict[str, Any]] = None,
+) -> str:
     """Render SearxNG's JSON into compact markdown for the model."""
-    picked, filtered = _pick_results(payload, max_results)
+    picked, filtered = _pick_results(payload, max_results, policy)
 
     lines = [f'Web search: "{query}"']
 
@@ -395,8 +432,15 @@ def _collapse(text: str, limit: int) -> str:
 # ── Fetch a page ──
 
 
-async def fetch(url: str, max_chars: int = DEFAULT_FETCH_CHARS) -> Dict[str, Any]:
-    """Fetch a public web page and return its readable text."""
+async def fetch(
+    url: str,
+    max_chars: int = DEFAULT_FETCH_CHARS,
+    policy: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Fetch a public web page and return its readable text.
+
+    `policy` overrides the admin domain lists for this call — see `search`.
+    """
     import httpx
 
     url = (url or "").strip()
@@ -428,7 +472,7 @@ async def fetch(url: str, max_chars: int = DEFAULT_FETCH_CHARS) -> Dict[str, Any
             timeout=FETCH_TIMEOUT, verify=llm_verify(), follow_redirects=False
         ) as client:
             for _ in range(MAX_REDIRECTS + 1):
-                err = _validate_fetch_url(current)
+                err = _validate_fetch_url(current, policy)
                 if err:
                     return {"error": err, "exit_code": 1}
                 resp = await client.get(current, headers=headers)

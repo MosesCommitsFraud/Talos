@@ -97,8 +97,8 @@ caller to guess.
 - **`web_fetch`** — one page's readable text, chrome stripped. HTML, text,
   JSON and XML only; `max_chars` is 500–20000, default 8000.
 
-Both wrap `src/web_search.py` unchanged, so everything that guards the agent's
-own web access guards this endpoint too:
+Both wrap `src/web_search.py`, so everything that guards the agent's own web
+access guards this endpoint too:
 
 - the administrator's **domain allow/deny policy** — filtered results are
   reported as filtered, not silently dropped;
@@ -114,6 +114,32 @@ session, so there is no such context to leak.
 !!! warning "This is outbound internet from your server"
     `web:read` lets a token holder drive requests out of your infrastructure.
     Grant it deliberately — that's why it isn't in the plain `mcp` profile.
+
+## Settings (Settings → MCP Server)
+
+Scopes decide what one *token* may reach; this page decides what the *instance*
+hands out at all. It is deliberately separate from Settings → Web Access: a
+long-lived bearer token on someone else's machine is not the same trust level
+as a logged-in browser session, so the two get their own policy.
+
+| Setting | Effect |
+| --- | --- |
+| `mcp_web_enabled` | Off removes `web_search` / `web_fetch` from the catalogue, whatever the token's scopes say. The in-app agent is unaffected. |
+| `mcp_web_inherit` | On (default) = the Web Access policy applies verbatim. Off = the `mcp_web_*` values below apply and the web-UI policy is ignored for `/mcp`. |
+| `mcp_web_searxng_url` | A different SearxNG for MCP callers. Empty = the same one the UI uses. |
+| `mcp_web_domain_allowlist` / `_blocklist` | The MCP-only domain policy. Same semantics as the web-UI lists: blocklist always wins, a non-empty allowlist is allowlist-only. |
+| `mcp_web_max_results` / `mcp_web_max_fetch_chars` | Defaults for callers that don't name a size. A caller's own request still wins, bounded by the hard caps in `src/web_search.py`. |
+| `mcp_skills_enabled` | Off removes the whole `skills_*` family. |
+| `mcp_skills_inherit` | On (default) = exactly the library enabled in Settings → Skills goes out. Off = only `mcp_skills_allowed` does. |
+| `mcp_skills_allowed` | Skill names shared in selected mode. Gated names are refused with "not shared over MCP" so a client stops re-spelling them. |
+
+There is **one** skill library. Selected mode narrows which of the existing
+published skills leave the instance — it never introduces a second copy, and it
+can't widen access to drafts or another user's skills, because `index_for` /
+`published_only` still run first.
+
+RAG has no section here: its pipeline is configured in Settings → RAG and the
+MCP tools read that config directly.
 
 ## Client setup
 
@@ -164,10 +190,12 @@ curl -sS https://<talos-host>/mcp -H "Authorization: Bearer ody_..." -H "Content
 | File | Role |
 | --- | --- |
 | `src/mcp_public.py` | tool catalogue, scope gating, dispatch — transport-free and unit-tested |
+| `src/mcp_settings.py` | the administrator's policy: which tools are offered, and whether web/skills inherit the web-UI settings |
 | `routes/mcp_public_routes.py` | JSON-RPC / HTTP shell |
 | `routes/api_token_routes.py` | mints the `rag:read` / `skills:read` / `web:read` scopes |
 | `src/web_search.py` | SearxNG client, domain policy, SSRF guard — wrapped, not reimplemented |
 | `tests/test_mcp_public.py` | scope gating, tool contracts, JSON-RPC framing |
+| `tests/test_mcp_settings.py` | policy separation: MCP domain lists vs the web UI's, skill gating |
 
 The split keeps the tools callable without a server, so a stdio wrapper could
 reuse `src/mcp_public.py` verbatim if a local-only client ever needs one.

@@ -147,6 +147,30 @@ DEFAULT_SETTINGS = {
     # subdomains) may be used at all. Entries may be bare hosts or full URLs.
     "web_domain_allowlist": [],
     "web_domain_blocklist": [],
+    # Outward MCP server (/mcp), i.e. what external clients (Claude Desktop,
+    # MACS, other agents) may reach through an API token. Deliberately its own
+    # block rather than reusing the settings above: the agent running inside a
+    # logged-in browser session and a long-lived bearer token sitting on some
+    # other machine are different trust levels, so they get different policy.
+    # See src/mcp_settings.py for how these are resolved.
+    "mcp_web_enabled": True,
+    # True = the web_* settings above apply to MCP callers verbatim. False =
+    # the mcp_web_* values below apply instead, and the web-UI policy is
+    # ignored for /mcp.
+    "mcp_web_inherit": True,
+    "mcp_web_searxng_url": "",
+    "mcp_web_domain_allowlist": [],
+    "mcp_web_domain_blocklist": [],
+    # Defaults an MCP caller gets when it doesn't ask for a specific size.
+    # Its own request still wins, bounded by src/web_search.py's hard caps.
+    "mcp_web_max_results": 6,
+    "mcp_web_max_fetch_chars": 8000,
+    "mcp_skills_enabled": True,
+    # True = expose exactly the published library the web UI serves (one
+    # library, no second copy). False = only the skills named in
+    # mcp_skills_allowed leave the instance.
+    "mcp_skills_inherit": True,
+    "mcp_skills_allowed": [],
     "rag_pipeline": {},
     "disabled_tools": [
         "generate_image",

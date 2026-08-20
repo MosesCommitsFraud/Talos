@@ -572,6 +572,9 @@ def setup_auth_routes(auth_manager: AuthManager) -> APIRouter:
             "agent_max_rounds_db": (1, 200),  # DB-mode round ceiling (huge schemas)
             "agent_max_tool_calls": (0, 1000),  # 0 = unlimited
             "agent_tool_parallelism": (1, 8),  # 1 = sequential
+            # Outward MCP defaults; the hard caps live in src/web_search.py.
+            "mcp_web_max_results": (1, 20),
+            "mcp_web_max_fetch_chars": (500, 20000),
         }
         for key in DEFAULT_SETTINGS:
             if key not in body:

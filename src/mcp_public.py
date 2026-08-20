@@ -357,13 +357,18 @@ _TOOL_DEFS: List[Dict[str, Any]] = [
 def list_tools(granted_scopes) -> List[Dict[str, Any]]:
     """Tool definitions visible to a caller holding `granted_scopes`.
 
-    Scope filtering happens at *list* time as well as at call time: a client
-    that can't use a tool shouldn't see it in its palette at all.
+    Two gates, both applied at *list* time as well as at call time: the token's
+    scopes, and the administrator's MCP settings (src/mcp_settings.py). A
+    client that can't use a tool shouldn't see it in its palette at all.
     """
+    from src import mcp_settings
+
     granted = set(granted_scopes or ())
     out = []
     for spec in _TOOL_DEFS:
         if spec["_scope"] not in granted:
+            continue
+        if not mcp_settings.tool_enabled(spec["name"]):
             continue
         out.append({k: v for k, v in spec.items() if not k.startswith("_")})
     return out
@@ -593,6 +598,30 @@ def _skills(skills_manager=None):
         return None
 
 
+def _skill_filter():
+    """The administrator's MCP skill gate — see src/mcp_settings.py.
+
+    Applied on top of `index_for` / `published_only`, never instead of them:
+    the MCP setting narrows what leaves the instance, it can't widen it into
+    drafts or another user's skills.
+    """
+    from src import mcp_settings
+
+    return mcp_settings.skill_filter()
+
+
+def _gate_note() -> str:
+    """Explain a name that exists but isn't shared over MCP.
+
+    Without this an external client sees the same "no such skill" it gets for
+    a typo and retries the spelling forever.
+    """
+    return (
+        "\n\n_(This Talos instance shares only selected skills over MCP. "
+        "Ask an administrator to add it in Settings → MCP.)_"
+    )
+
+
 def _owner_note(owner: Optional[str]) -> str:
     """Explain an empty skills result rather than leaving the caller guessing.
 
@@ -614,6 +643,8 @@ def _tool_skills_list(args: Dict[str, Any], owner: Optional[str], sm) -> str:
     # index_for() is the same view the agent gets in its system prompt:
     # published skills only (plus platform/toolset gating), never raw drafts.
     idx = sm.index_for(owner=owner) or []
+    allowed = _skill_filter()
+    idx = [s for s in idx if allowed(s.get("name"))]
     if category:
         idx = [s for s in idx if str(s.get("category", "")).lower() == category]
     if not idx:
@@ -644,9 +675,11 @@ def _tool_skills_search(args: Dict[str, Any], owner: Optional[str], sm) -> str:
     # published_only: this result reaches a model that will follow it as a
     # proven procedure, and a draft is by definition unreviewed. Same rule the
     # in-app skill search applies (src/tool_implementations.py).
-    results = sm.get_relevant_skills(
-        query, sm.load(owner=owner), max_items=max_items, published_only=True
-    )
+    allowed = _skill_filter()
+    # Filtered before the rerank budget is spent, so a gated skill can't push a
+    # shareable one out of the max_items window.
+    pool = [s for s in sm.load(owner=owner) if allowed(s.get("name"))]
+    results = sm.get_relevant_skills(query, pool, max_items=max_items, published_only=True)
     if not results:
         return f"No published skills match {query!r}." + _owner_note(owner)
 
@@ -670,6 +703,9 @@ def _tool_skills_get(args: Dict[str, Any], owner: Optional[str], sm) -> str:
     if sm is None:
         raise ToolError("The skills library is not available on this Talos instance.")
 
+    if not _skill_filter()(name):
+        raise ToolError(f"Skill {name!r} is not shared over MCP." + _gate_note())
+
     md = sm.read_skill_md(name, owner=owner)
     if md is None:
         raise ToolError(f"No skill named {name!r}." + _owner_note(owner))
@@ -685,6 +721,9 @@ def _tool_skills_read_reference(args: Dict[str, Any], owner: Optional[str], sm) 
     sm = _skills(sm)
     if sm is None:
         raise ToolError("The skills library is not available on this Talos instance.")
+
+    if not _skill_filter()(name):
+        raise ToolError(f"Skill {name!r} is not shared over MCP." + _gate_note())
 
     # read_skill_reference refuses traversal outside the skill directory and
     # returns None for anything it won't serve, so no path check is needed here.
@@ -717,13 +756,15 @@ def _tool_web_search(args: Dict[str, Any]) -> str:
     if not query:
         raise ToolError("`query` is required and must not be empty.")
 
-    from src.web_search import DEFAULT_RESULTS, search
+    from src import mcp_settings
+    from src.web_search import search
 
     # A missing or zero max_results means "unspecified", not "zero results" —
-    # fall back to the backend's own default rather than clamping up to 1.
+    # fall back to the administrator's MCP default rather than clamping up to 1.
+    default_results = mcp_settings.web_max_results()
     requested = args.get("max_results")
     max_results = (
-        _clamp_limit(requested, default=DEFAULT_RESULTS, hi=20) if requested else DEFAULT_RESULTS
+        _clamp_limit(requested, default=default_results, hi=20) if requested else default_results
     )
 
     outcome = _run_async(
@@ -738,6 +779,8 @@ def _tool_web_search(args: Dict[str, Any]) -> str:
             # documents. An MCP caller has no such session, so there is no
             # context to leak and nothing to scope to.
             session_id="",
+            # None when the admin left MCP inheriting the web-UI policy.
+            policy=mcp_settings.web_policy(),
         )
     )
     return _unwrap(outcome)
@@ -748,15 +791,19 @@ def _tool_web_fetch(args: Dict[str, Any]) -> str:
     if not url:
         raise ToolError("`url` is required. Get one from web_search.")
 
-    from src.web_search import DEFAULT_FETCH_CHARS, MAX_FETCH_CHARS, fetch
+    from src import mcp_settings
+    from src.web_search import MAX_FETCH_CHARS, fetch
 
+    default_chars = mcp_settings.web_max_fetch_chars()
     max_chars = args.get("max_chars")
     try:
         max_chars = max(500, min(int(max_chars), MAX_FETCH_CHARS))
     except (TypeError, ValueError):
-        max_chars = DEFAULT_FETCH_CHARS
+        max_chars = default_chars
 
-    return _unwrap(_run_async(fetch(url=url, max_chars=max_chars)))
+    return _unwrap(
+        _run_async(fetch(url=url, max_chars=max_chars, policy=mcp_settings.web_policy()))
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -801,6 +848,14 @@ def call_tool(
             f"Tool {name!r} requires the {required!r} scope, which this API token does not carry.",
             True,
         )
+
+    # A tool the administrator switched off in Settings → MCP. Checked here as
+    # well as in `list_tools`, because a client may have cached an older list
+    # or simply call a name it knows.
+    from src import mcp_settings
+
+    if not mcp_settings.tool_enabled(name):
+        return (f"Tool {name!r} is disabled on this Talos instance.", True)
 
     try:
         if name == "rag_search":

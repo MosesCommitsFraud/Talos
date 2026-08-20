@@ -9,6 +9,7 @@ import {
   KeyboardIcon,
   Link2Icon,
   LogOutIcon,
+  NetworkIcon,
   PaletteIcon,
   PlugIcon,
   PlusIcon,
@@ -84,7 +85,7 @@ import { UsersPanel } from './settings/UsersPanel';
 
 export type Panel =
   | 'appearance' | 'shortcuts' | 'account'
-  | 'models' | 'ai' | 'assistants' | 'integrations' | 'web' | 'tools' | 'skills'
+  | 'models' | 'ai' | 'assistants' | 'integrations' | 'web' | 'mcp' | 'tools' | 'skills'
   | 'rag' | 'users' | 'system';
 
 /* ── Shared layout (t3code settings design) ── */
@@ -1144,6 +1145,124 @@ function WebPanel() {
   );
 }
 
+/* ── MCP (Talos's own outward server at /mcp) ──
+ * What an external client — Claude Desktop, MACS, another agent — reaches with
+ * an API token. Separate from the Web panel above on purpose: same tools, but a
+ * long-lived bearer token on someone else's machine is not the same trust level
+ * as a logged-in browser session, so it gets its own domain policy.
+ *
+ * Skills are NOT duplicated here. There is one library (Settings → Skills);
+ * this page only decides which of it leaves the instance. */
+
+function McpPanel() {
+  const { t } = useTranslation();
+  const s = useSettingsDraft();
+  // Same query key the Skills panel uses, so the library is served from the
+  // react-query cache instead of being fetched a second time.
+  const { data: skillData } = useQuery({ queryKey: ['sharedSkills'], queryFn: fetchSharedSkills });
+  if (!s.ready) return <Page><p className="text-sm text-muted-foreground">{t('common.loading')}</p></Page>;
+
+  const asText = (k: string) => {
+    const v = s.value(k);
+    return Array.isArray(v) ? v.join('\n') : String(v ?? '');
+  };
+  const setFromText = (k: string, text: string) =>
+    s.setValue(k, text.split('\n').map((l) => l.trim()).filter(Boolean));
+
+  const webOn = !!s.value('mcp_web_enabled');
+  const webInherit = !!s.value('mcp_web_inherit');
+  const skillsOn = !!s.value('mcp_skills_enabled');
+  const skillsInherit = !!s.value('mcp_skills_inherit');
+
+  // Library skills that are switched on for the agent — the only ones worth
+  // offering here, since a disabled skill never reaches any caller.
+  const library = (skillData?.skills ?? []).filter((sk) => sk.enabled);
+  const allowed: string[] = Array.isArray(s.value('mcp_skills_allowed'))
+    ? (s.value('mcp_skills_allowed') as string[])
+    : [];
+  const isAllowed = (name: string) => allowed.some((n) => n.toLowerCase() === name.toLowerCase());
+  const toggleSkill = (name: string, on: boolean) =>
+    s.setValue(
+      'mcp_skills_allowed',
+      on ? [...allowed, name] : allowed.filter((n) => n.toLowerCase() !== name.toLowerCase()),
+    );
+
+  return (
+    <Page>
+      <Section title={t('settings.mcp.endpoint')} padded>
+        <p className="text-xs text-muted-foreground/80">{t('settings.mcp.endpointHint')}</p>
+        <code className="mt-2 block w-fit rounded border bg-muted/40 px-2 py-1 font-mono text-[13px]">
+          POST {window.location.origin}/mcp
+        </code>
+      </Section>
+
+      <Section title={t('settings.mcp.web')}>
+        <BoolRow s={s} k="mcp_web_enabled" label={t('settings.mcp.webEnabled')} hint={t('settings.mcp.webEnabledHint')} />
+        {webOn && (
+          <BoolRow s={s} k="mcp_web_inherit" label={t('settings.mcp.webInherit')} hint={t('settings.mcp.webInheritHint')} />
+        )}
+        {webOn && !webInherit && (
+          <>
+            <TextRow s={s} k="mcp_web_searxng_url" label={t('settings.mcp.searxng')} hint={t('settings.mcp.searxngHint')} placeholder="http://searxng:8080" width="w-72" />
+            <TextRow s={s} k="mcp_web_max_results" label={t('settings.mcp.maxResults')} hint={t('settings.mcp.maxResultsHint')} type="number" width="w-24" />
+            <TextRow s={s} k="mcp_web_max_fetch_chars" label={t('settings.mcp.maxChars')} hint={t('settings.mcp.maxCharsHint')} type="number" width="w-28" />
+          </>
+        )}
+      </Section>
+
+      {webOn && !webInherit && (
+        <>
+          <Section title={t('settings.mcp.allowlist')} padded>
+            <p className="mb-2.5 text-xs text-muted-foreground/80">{t('settings.mcp.allowlistHint')}</p>
+            <Textarea
+              className="min-h-[110px] font-mono text-[13px]"
+              placeholder={'wikipedia.org\ndocs.python.org'}
+              value={asText('mcp_web_domain_allowlist')}
+              onChange={(e) => setFromText('mcp_web_domain_allowlist', e.target.value)}
+            />
+          </Section>
+          <Section title={t('settings.mcp.blocklist')} padded>
+            <p className="mb-2.5 text-xs text-muted-foreground/80">{t('settings.mcp.blocklistHint')}</p>
+            <Textarea
+              className="min-h-[110px] font-mono text-[13px]"
+              placeholder={'facebook.com\npastebin.com'}
+              value={asText('mcp_web_domain_blocklist')}
+              onChange={(e) => setFromText('mcp_web_domain_blocklist', e.target.value)}
+            />
+          </Section>
+        </>
+      )}
+
+      <Section
+        title={t('settings.mcp.skills')}
+        action={skillsOn && !skillsInherit && library.length > 0 ? (
+          <Button size="sm" variant="ghost" onClick={() => s.setValue('mcp_skills_allowed', library.map((sk) => sk.name))}>
+            {t('settings.mcp.skillsSelectAll')}
+          </Button>
+        ) : undefined}
+      >
+        <BoolRow s={s} k="mcp_skills_enabled" label={t('settings.mcp.skillsEnabled')} hint={t('settings.mcp.skillsEnabledHint')} />
+        {skillsOn && (
+          <BoolRow s={s} k="mcp_skills_inherit" label={t('settings.mcp.skillsInherit')} hint={t('settings.mcp.skillsInheritHint')} />
+        )}
+        {skillsOn && !skillsInherit && (
+          library.length === 0 ? (
+            <Row label={t('settings.mcp.skillsEmpty')} />
+          ) : (
+            library.map((sk) => (
+              <Row key={sk.name} label={sk.name} hint={sk.description}>
+                <Switch checked={isAllowed(sk.name)} onCheckedChange={(v) => toggleSkill(sk.name, v)} />
+              </Row>
+            ))
+          )
+        )}
+      </Section>
+
+      <SaveBar dirty={s.dirty} saving={s.save.isPending} error={s.save.isError ? (s.save.error as Error).message : undefined} onSave={() => s.save.mutate()} />
+    </Page>
+  );
+}
+
 /* ── Agent Tools (built-in tool toggles, grouped by category like legacy) ── */
 
 /** Category + approximate context cost per tool. Display name & description
@@ -1681,6 +1800,7 @@ export function SettingsDialog({
     { id: 'assistants', label: t('settings.nav.assistants'), icon: <PlugIcon /> },
     { id: 'integrations', label: t('settings.nav.integrations'), icon: <Link2Icon /> },
     { id: 'web', label: t('settings.nav.web'), icon: <GlobeIcon /> },
+    { id: 'mcp', label: t('settings.nav.mcp'), icon: <NetworkIcon /> },
     { id: 'tools', label: t('settings.nav.tools'), icon: <WrenchIcon /> },
     { id: 'skills', label: t('settings.nav.skills'), icon: <FileTextIcon /> },
     { id: 'system', label: t('settings.nav.system'), icon: <SettingsIcon /> },
@@ -1780,6 +1900,7 @@ export function SettingsDialog({
             {panel === 'assistants' && <AssistantsPanel />}
             {panel === 'integrations' && <IntegrationsPanel />}
             {panel === 'web' && <WebPanel />}
+            {panel === 'mcp' && <McpPanel />}
             {panel === 'tools' && <ToolsPanel />}
             {panel === 'users' && <UsersPanel currentUser={auth?.username} />}
             {panel === 'system' && <SystemPanel />}
