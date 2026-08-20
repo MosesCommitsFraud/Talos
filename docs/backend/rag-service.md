@@ -43,6 +43,23 @@ The `default` base is seeded automatically and pinned to the historical
 `talos_rag` collection, so everything indexed before this existed stays where it
 was and Talos chat is unaffected. It cannot be deleted.
 
+## Purpose-bound sub-indexes ("mini RAGs")
+
+Some Talos features keep a small set of documents inside a knowledge base for
+their own use, tagged with `meta.scope` so ordinary retrieval never returns
+them. Today there is exactly one: the SQL schema files, injected only while the
+SQL knowledge source is active.
+
+They are **not** part of the corpus and are reported separately everywhere —
+`content_count`/`chunk_count` cover the searchable documents, and a `scopes`
+array carries each sub-index with its own counts, its purpose, and where the
+owning feature is administered. `GET /api/rag/documents?scope=sql` lists one.
+
+The catalogue lives in `src/rag_scopes.py`; adding a scope means adding an entry
+there and tagging the documents on ingest. Every exclusion — the document list,
+the explorer's keyword scan, the test search box, the MCP tools and this REST
+service — derives from that one list.
+
 ## Per-base pipeline settings
 
 Each base can run its own pipeline. Talos's `rag_pipeline` settings block is the

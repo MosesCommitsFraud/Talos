@@ -952,6 +952,25 @@ const de: typeof en = {
       tryRetrieval: 'Suche ausprobieren',
       noHits: 'Keine Passage gefunden.',
     },
+    scopes: {
+      title: 'Zweckgebundene Teil-Indizes',
+      badge: 'Mini-RAG',
+      intro:
+        'Kleine Indizes, die eine Talos-Funktion in dieser Wissensdatenbank für ihren eigenen Zweck hält. Sie tauchen in der normalen Suche nie auf und zählen oben nicht als Dokumente mit.',
+      empty: 'leer',
+      managedAt: 'Verwaltet unter {{where}}',
+      plusMini: 'zusätzlich Mini-RAG: {{names}}',
+      where: {
+        'sql-settings': 'Einstellungen → SQL',
+      },
+      item: {
+        sql: {
+          name: 'SQL-Schema',
+          purpose:
+            'Schema-Dateien der verbundenen SQL-Datenbanken. Werden nur abgerufen, solange die SQL-Wissensquelle aktiv ist, damit sich das Modell in der Datenbank zurechtfindet — nie in normale Wissens-Antworten gemischt.',
+        },
+      },
+    },
     settings: {
       inherited: 'geerbt',
       overridden: 'geändert',

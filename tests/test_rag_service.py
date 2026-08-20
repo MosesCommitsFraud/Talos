@@ -9,7 +9,7 @@ bases, and the fact that an unknown base is a 404 rather than a 503.
 import pytest
 from fastapi.testclient import TestClient
 
-from src import rag_api, rag_config, rag_registry
+from src import rag_api, rag_config, rag_registry, rag_scopes
 
 
 # ---------------------------------------------------------------------------
@@ -31,7 +31,14 @@ class FakeRag:
         return self._results
 
     def list_documents(self, scope=None, exclude_scopes=None):
-        return list(self._documents)
+        """Mirrors VectorRAG: `scope` pins one namespace, `exclude_scopes`
+        removes them while keeping documents that carry no scope at all."""
+        docs = list(self._documents)
+        if scope is not None:
+            return [d for d in docs if d.get("scope") == scope]
+        if exclude_scopes:
+            return [d for d in docs if d.get("scope") not in exclude_scopes]
+        return docs
 
     def get_document_chunks(self, source):
         return [{"content": f"body of {source}"}] if source == "a.pdf" else []
@@ -332,3 +339,62 @@ def test_changing_a_global_default_propagates_to_inheriting_bases(global_cfg, mo
     cfg = rag_config.effective_config(entry["id"])
     assert cfg["rerank_url"] == "http://new:8002"  # inherited → follows
     assert cfg["search_top_k"] == 12  # overridden → pinned
+
+
+# ---------------------------------------------------------------------------
+# Purpose-bound sub-indexes ("mini RAGs", src/rag_scopes.py)
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def base_with_sql_docs(monkeypatch):
+    """A base holding two ordinary documents and one SQL schema file."""
+    rag = FakeRag(
+        documents=[
+            {"filename": "handbuch.pdf", "source": "a.pdf", "chunks": 42},
+            {"filename": "notizen.md", "source": "b.md", "chunks": 7},
+            {"filename": "schema.sql", "source": "s.sql", "chunks": 18, "scope": "sql"},
+        ]
+    )
+    monkeypatch.setattr("src.rag_singleton.get_rag_manager", lambda base_id=None: rag)
+    monkeypatch.setattr("src.mcp_public._rag", lambda base_id=None: rag)
+    return rag
+
+
+def test_scoped_documents_are_not_counted_as_knowledge_base_content(base_with_sql_docs):
+    """The SQL schema files are not part of the corpus a user can search, so
+    counting them makes the base look bigger than it answers from."""
+    row = rag_registry.describe(rag_registry.get_base(None))
+    assert row["content_count"] == 2
+    assert row["chunk_count"] == 49
+
+
+def test_the_scope_is_reported_separately_with_its_own_counts(base_with_sql_docs):
+    row = rag_registry.describe(rag_registry.get_base(None))
+    sql = next(s for s in row["scopes"] if s["id"] == "sql")
+    assert sql["content_count"] == 1
+    assert sql["chunk_count"] == 18
+    assert sql["name"] and sql["purpose"] and sql["managed_at"]
+
+
+def test_an_empty_scope_is_still_listed(bases):
+    """"The SQL schema index is empty" is the answer someone wondering why SQL
+    answers are thin actually needs."""
+    row = rag_registry.describe(rag_registry.get_base(None))
+    assert [s["id"] for s in row["scopes"]] == rag_scopes.SCOPE_IDS
+    assert all(s["content_count"] == 0 for s in row["scopes"])
+
+
+def test_the_outward_document_list_excludes_scoped_documents(base_with_sql_docs):
+    c = TestClient(rag_api.create_app())
+    body = c.get("/v1/rags/default/documents").json()
+    assert body["total"] == 2
+    assert all("schema.sql" != d["filename"] for d in body["documents"])
+
+
+def test_a_scope_id_never_collides_with_the_i18n_separators():
+    """`managed_at` is used to build a translation key; ':' would be read as an
+    i18next namespace separator and silently fall back to the raw token."""
+    for meta in rag_scopes.SCOPES:
+        assert ":" not in meta["managed_at"]
+        assert "." not in meta["managed_at"]

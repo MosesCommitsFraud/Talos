@@ -364,12 +364,23 @@ def _counts(entry: Dict[str, Any]) -> Dict[str, Any]:
             "available": False,
             "error": last_init_error() or "RAG backend unavailable",
         }
+    from src.rag_scopes import SCOPE_IDS, describe_scopes
+
     try:
-        docs = rag.list_documents()
+        # Purpose-bound sub-indexes (the SQL schema files) are excluded: they
+        # are not part of the corpus a user searches, and counting them makes
+        # the base look bigger than what it can actually answer from. They are
+        # reported separately as ``scopes``.
+        docs = rag.list_documents(exclude_scopes=SCOPE_IDS)
         # ``list_documents`` returns one row per source file with a ``chunks``
         # tally, so the two counts come out of a single scroll.
         chunks = sum(int(d.get("chunks") or 0) for d in docs)
-        row = {"content_count": len(docs), "chunk_count": chunks, "available": True}
+        row = {
+            "content_count": len(docs),
+            "chunk_count": chunks,
+            "available": True,
+            "scopes": describe_scopes(rag),
+        }
         # Only successes are cached — a backend that just came back should show
         # up on the next poll, not 30 seconds later.
         _count_cache[key] = (time.monotonic(), dict(row))

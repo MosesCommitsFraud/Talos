@@ -946,6 +946,25 @@ const en = {
       tryRetrieval: 'Try a search',
       noHits: 'No passage matched.',
     },
+    scopes: {
+      title: 'Purpose-bound sub-indexes',
+      badge: 'mini RAG',
+      intro:
+        'Small indexes a Talos feature keeps in this knowledge base for its own use. They are never returned by ordinary search and are not counted as documents above.',
+      empty: 'empty',
+      managedAt: 'Managed in {{where}}',
+      plusMini: 'plus mini RAG: {{names}}',
+      where: {
+        'sql-settings': 'Settings → SQL',
+      },
+      item: {
+        sql: {
+          name: 'SQL schema',
+          purpose:
+            'Schema files for the connected SQL databases. Retrieved only while the SQL knowledge source is active, so the model can navigate the database — never mixed into ordinary knowledge-base answers.',
+        },
+      },
+    },
     settings: {
       inherited: 'inherited',
       overridden: 'changed',

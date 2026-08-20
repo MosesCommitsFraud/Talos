@@ -811,6 +811,21 @@ export interface RagBase {
   error?: string;
   /** How many pipeline settings this base changes vs. the global defaults. */
   override_count?: number;
+  /** Purpose-bound sub-indexes inside this base (see RagScope). */
+  scopes?: RagScope[];
+}
+
+/** A "mini RAG": documents a Talos feature keeps in the base for its own use,
+ *  tagged with a scope so ordinary retrieval never returns them. Read-only
+ *  here — each one is administered by the feature that owns it. */
+export interface RagScope {
+  id: string;
+  name: string;
+  purpose: string;
+  /** Where the owning feature is administered, e.g. "settings:sql". */
+  managed_at: string;
+  content_count: number;
+  chunk_count: number;
 }
 
 /** Append `rag_id` only when a base is actually named, so the URLs a plain
@@ -1059,9 +1074,20 @@ export async function deleteRagJob(id: string): Promise<void> {
   const res = await fetch(`/api/rag/jobs/${id}`, { method: 'DELETE', credentials: 'same-origin' });
   if (!res.ok) throw new Error(`Delete failed (HTTP ${res.status})`);
 }
-export const fetchRagDocuments = (ragId?: string) =>
-  getJSON<{ available: boolean; documents: RagDocument[]; error?: string }>(
-    withRag('/api/rag/documents', ragId),
+/** The base's ordinary corpus. Purpose-bound sub-indexes are excluded and
+ *  reported under `scopes`; pass `scope` to list one of them instead. */
+export const fetchRagDocuments = (ragId?: string, scope?: string) =>
+  getJSON<{
+    available: boolean;
+    documents: RagDocument[];
+    scopes?: RagScope[];
+    scope?: string;
+    error?: string;
+  }>(
+    withRag(
+      scope ? `/api/rag/documents?scope=${encodeURIComponent(scope)}` : '/api/rag/documents',
+      ragId,
+    ),
   );
 
 /** One indexed chunk, as stored in Qdrant — the ground truth the retriever

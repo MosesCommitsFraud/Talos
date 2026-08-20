@@ -26,6 +26,8 @@ import logging
 import os
 from typing import Any, Dict, List, Optional, Tuple
 
+from src.rag_scopes import SCOPE_IDS
+
 logger = logging.getLogger(__name__)
 
 # Token scopes gating the three tool families. Mirrored in
@@ -42,11 +44,12 @@ MAX_TEXT_CHARS = 24_000
 # `rag_get_document` when it needs the surrounding text.
 SNIPPET_CHARS = 800
 
-# The SQL schema files live in their own knowledge namespace and are injected
-# separately when the SQL source is active (see src/chat_processor.py). They
-# are noise in ordinary retrieval, so the default search excludes them exactly
-# as the chat pipeline does.
-DEFAULT_EXCLUDE_SCOPES = ["sql"]
+# Purpose-bound sub-indexes (the SQL schema files) are injected separately by
+# the feature that owns them — see src/rag_scopes.py. They are noise in ordinary
+# retrieval, so the default search excludes them exactly as the chat pipeline
+# does. Derived from the scope catalogue so a new scope is excluded everywhere
+# by adding one entry there.
+DEFAULT_EXCLUDE_SCOPES = list(SCOPE_IDS)
 
 
 def _truncate(text: str, limit: int = MAX_TEXT_CHARS) -> str:

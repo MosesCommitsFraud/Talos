@@ -283,6 +283,7 @@ function BaseCard({
 }) {
   const { t } = useTranslation();
   const isDefault = base.id === DEFAULT_RAG_BASE;
+  const nonEmptyScopes = (base.scopes ?? []).filter((s) => s.content_count > 0);
   return (
     <div className="group flex flex-col overflow-hidden rounded-md border bg-card text-card-foreground transition-colors hover:border-ring/50">
       <button type="button" onClick={onOpen} className="flex-1 px-4 py-3.5 text-left">
@@ -308,6 +309,17 @@ function BaseCard({
                 chunks: base.chunk_count ?? 0,
               })}
         </span>
+        {/* Sub-indexes are counted separately from the corpus above, so say so
+            rather than letting the card look like it is missing documents. */}
+        {nonEmptyScopes.length > 0 && (
+          <span className="mt-1 block text-[11px] text-muted-foreground/80">
+            {t('rag.scopes.plusMini', {
+              names: nonEmptyScopes
+                .map((s) => t(`rag.scopes.item.${s.id}.name`, s.name))
+                .join(', '),
+            })}
+          </span>
+        )}
       </button>
       <div className="flex items-center gap-1 border-t border-border/60 px-2 py-1.5">
         <code className="min-w-0 flex-1 truncate px-1 font-mono text-[10px] text-muted-foreground">

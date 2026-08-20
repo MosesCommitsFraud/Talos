@@ -723,7 +723,18 @@ def setup_rag_routes():
         cfg = effective_config(rag_id)
         final_k = _clamp_k(k if k is not None else cfg.get("search_top_k", 5))
         candidate_k = max(final_k, _clamp_candidate_k(cfg.get("candidate_top_k", 40)))
-        results = rag.search(q, k=final_k, owner=None, candidate_k=candidate_k)
+        # Exclude the purpose-bound sub-indexes, exactly as the chat pipeline
+        # does — otherwise this test box returns schema chunks that a real
+        # answer would never be built from.
+        from src.rag_scopes import SCOPE_IDS
+
+        results = rag.search(
+            q,
+            k=final_k,
+            owner=None,
+            candidate_k=candidate_k,
+            exclude_scopes=SCOPE_IDS,
+        )
         return {
             "ok": True,
             "count": len(results),
@@ -785,14 +796,30 @@ def setup_rag_routes():
         return {"deleted": rag_worker.delete_job(job_id)}
 
     @router.get("/documents")
-    def list_documents(rag_id: str | None = None):
+    def list_documents(rag_id: str | None = None, scope: str | None = None):
+        """The base's documents, or one purpose-bound sub-index.
+
+        Without ``scope`` this is the ordinary corpus — the sub-indexes some
+        Talos feature manages for itself (the SQL schema files) are excluded and
+        reported separately under ``scopes``, because listing them here made
+        them look like documents a user had uploaded and could delete.
+        """
+        from src.rag_scopes import SCOPE_IDS, describe_scopes
         from src.rag_singleton import get_rag_manager, last_init_error
 
         rag = _resolve_rag(rag_id, get_rag_manager)
         if not rag or not getattr(rag, "healthy", False):
             # Don't 503 — the UI shows a friendly state with the real reason.
-            return {"available": False, "documents": [], "error": last_init_error()}
-        return {"available": True, "documents": rag.list_documents()}
+            return {"available": False, "documents": [], "scopes": [], "error": last_init_error()}
+        if scope:
+            if scope not in SCOPE_IDS:
+                raise HTTPException(404, f"Unknown sub-index '{scope}'")
+            return {"available": True, "scope": scope, "documents": rag.list_documents(scope=scope)}
+        return {
+            "available": True,
+            "documents": rag.list_documents(exclude_scopes=SCOPE_IDS),
+            "scopes": describe_scopes(rag),
+        }
 
     @router.get("/documents/chunks")
     def list_document_chunks(source: str, rag_id: str | None = None):
@@ -809,10 +836,16 @@ def setup_rag_routes():
         """Keyword scan across every indexed chunk (explorer search box)."""
         from src.rag_singleton import get_rag_manager, last_init_error
 
+        from src.rag_scopes import SCOPE_IDS
+
         rag = _resolve_rag(rag_id, get_rag_manager)
         if not rag or not getattr(rag, "healthy", False):
             return {"available": False, "hits": [], "error": last_init_error()}
-        hits = rag.grep_chunks(q, limit=max(1, min(int(limit or 200), 1000)))
+        # Same exclusion as the document list: the explorer inspects the corpus,
+        # not the sub-indexes other features own.
+        hits = rag.grep_chunks(
+            q, limit=max(1, min(int(limit or 200), 1000)), exclude_scopes=SCOPE_IDS
+        )
         return {"available": True, "query": q, "count": len(hits), "hits": hits}
 
     @router.get("/documents/original")
@@ -823,12 +856,15 @@ def setup_rag_routes():
         is checked against the index before it ever reaches the filesystem, so
         the query parameter can't be used to read arbitrary paths.
         """
+        from src.rag_scopes import SCOPE_IDS
         from src.rag_singleton import get_rag_manager
 
         rag = _resolve_rag(rag_id, get_rag_manager)
         if not rag or not getattr(rag, "healthy", False):
             raise HTTPException(503, "RAG is not available")
-        return original_file_response(source, rag.list_documents())
+        # Sub-index files are served by the feature that owns them (the SQL
+        # panel), so they are not in this screen's allow-list.
+        return original_file_response(source, rag.list_documents(exclude_scopes=SCOPE_IDS))
 
     @router.get("/documents/export")
     def export_document(source: str, rag_id: str | None = None):

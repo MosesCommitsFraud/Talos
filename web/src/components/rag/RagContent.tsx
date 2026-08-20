@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { FileTextIcon, FolderOpenIcon, SearchIcon, UploadCloudIcon } from 'lucide-react';
+import { BoxesIcon, FileTextIcon, FolderOpenIcon, SearchIcon, UploadCloudIcon } from 'lucide-react';
 import { useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
@@ -206,6 +206,48 @@ export function RagContent({ baseId }: { baseId: string }) {
           </div>
         )}
       </Section>
+
+      {/* Purpose-bound sub-indexes. Listed apart from the corpus above, and
+          read-only: they belong to the feature that fills them, and deleting
+          one from here would silently break that feature. */}
+      {(docs.data?.scopes ?? []).length > 0 && (
+        <Section title={t('rag.scopes.title')} padded>
+          <p className="pb-2 text-xs text-muted-foreground/80">{t('rag.scopes.intro')}</p>
+          <div className="space-y-2">
+            {(docs.data?.scopes ?? []).map((s) => (
+              <div key={s.id} className="rounded-lg border border-border/60 px-3 py-2.5">
+                <div className="flex flex-wrap items-center gap-2">
+                  <BoxesIcon className="size-3.5 shrink-0 text-muted-foreground" />
+                  {/* Server-side catalogue is English; fall back to it when a
+                      locale has no wording of its own for this scope. */}
+                  <span className="text-[13px] font-semibold">
+                    {t(`rag.scopes.item.${s.id}.name`, s.name)}
+                  </span>
+                  <span className="rounded bg-muted px-1.5 py-px font-mono text-[10px] text-muted-foreground">
+                    {t('rag.scopes.badge')}
+                  </span>
+                  <span className="ml-auto shrink-0 text-[11px] text-muted-foreground tabular-nums">
+                    {s.content_count === 0
+                      ? t('rag.scopes.empty')
+                      : t('rag.bases.counts', {
+                          docs: s.content_count,
+                          chunks: s.chunk_count,
+                        })}
+                  </span>
+                </div>
+                <p className="mt-1 text-xs text-muted-foreground/80">
+                  {t(`rag.scopes.item.${s.id}.purpose`, s.purpose)}
+                </p>
+                <p className="mt-1 text-[11px] text-muted-foreground">
+                  {t('rag.scopes.managedAt', {
+                    where: t(`rag.scopes.where.${s.managed_at}`, s.managed_at),
+                  })}
+                </p>
+              </div>
+            ))}
+          </div>
+        </Section>
+      )}
 
       <Section title={t('rag.content.tryRetrieval')} padded>
         <div className="space-y-2">
