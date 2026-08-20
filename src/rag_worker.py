@@ -91,13 +91,17 @@ def _queue():
     return Queue(QUEUE_NAME, connection=_redis())
 
 
-def _snapshot() -> Dict[str, Any]:
-    """Capture the current UI-configured RAG settings to hand to the worker."""
-    try:
-        from src.settings import get_setting
+def _snapshot(base_id: Optional[str] = None) -> Dict[str, Any]:
+    """Capture the RAG settings **of one knowledge base** to hand to the worker.
 
-        cfg = get_setting("rag_pipeline", {})
-        return cfg if isinstance(cfg, dict) else {}
+    Resolved (global defaults + that base's overrides, see src/rag_config.py) at
+    enqueue time, so a job ingests with the pipeline the base was configured
+    with when it was queued — not with whatever an admin saves while it waits.
+    """
+    try:
+        from src.rag_config import effective_config
+
+        return effective_config(base_id)
     except Exception:
         return {}
 
@@ -128,9 +132,13 @@ def _apply_snapshot(snap: Optional[Dict[str, Any]]) -> None:
     os.environ["VIDEO_FRAMES_MAX"] = str(int(snap.get("video_frames_max") or 300))
 
 
-def _fresh_rag(base_id: Optional[str] = None):
+def _fresh_rag(base_id: Optional[str] = None, snapshot: Optional[Dict[str, Any]] = None):
     """Reset and rebuild the RAG instance for one knowledge base inside the
     worker process.
+
+    The job's snapshot is passed through as the instance config, so the ingest
+    runs with the settings captured when the job was enqueued rather than
+    re-reading the catalogue mid-queue.
 
     Raises with the *actual* init failure (missing deps / Qdrant unreachable /
     embedding endpoint down) so the reason shows up in the job's error instead
@@ -139,7 +147,7 @@ def _fresh_rag(base_id: Optional[str] = None):
     import src.rag_singleton as rs
 
     rs.reset()
-    rag = rs.get_rag_manager(base_id)
+    rag = rs.get_rag_manager(base_id, config=snapshot)
     if rag is None:
         raise RuntimeError(
             rs.last_init_error() or "RAG system is not available (check Qdrant / embedding config)"
@@ -227,7 +235,7 @@ def ingest_directory_job(
 
     _apply_snapshot(config_snapshot)
     job = get_current_job()
-    rag = _fresh_rag(base_id)
+    rag = _fresh_rag(base_id, config_snapshot)
     if not rag:
         raise RuntimeError("RAG system is not available (check Qdrant / embedding config)")
     result = rag.index_personal_documents(directory, owner=owner, progress_cb=_progress_saver(job))
@@ -244,7 +252,7 @@ def ingest_files_job(
 
     _apply_snapshot(config_snapshot)
     job = get_current_job()
-    rag = _fresh_rag(base_id)
+    rag = _fresh_rag(base_id, config_snapshot)
     if not rag:
         raise RuntimeError("RAG system is not available (check Qdrant / embedding config)")
     result = rag.index_files([(p, m) for p, m in files], progress_cb=_progress_saver(job))
@@ -264,7 +272,7 @@ def start_index_directory(
         "src.rag_worker.ingest_directory_job",
         directory,
         owner,
-        _snapshot(),
+        _snapshot(base_id),
         base_id,
         job_timeout=_JOB_TIMEOUT,
         meta={
@@ -289,7 +297,7 @@ def start_index_files(
     job = _queue().enqueue(
         "src.rag_worker.ingest_files_job",
         list(files),
-        _snapshot(),
+        _snapshot(base_id),
         base_id,
         job_timeout=_JOB_TIMEOUT,
         meta={

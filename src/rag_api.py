@@ -334,7 +334,7 @@ def create_app() -> FastAPI:
             raise HTTPException(400, "`query` is required and must not be empty.")
 
         rag = _rag_or_503(rag_id)
-        cfg = _search_config()
+        cfg = _search_config(rag_id)
         k = _clamp_k(body.k if body.k is not None else cfg.get("search_top_k", 5))
         try:
             candidate_k = max(k, min(int(cfg.get("candidate_top_k", 40)), 100))

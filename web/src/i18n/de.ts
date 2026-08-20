@@ -933,9 +933,32 @@ const de: typeof en = {
     },
   },
   rag: {
-    title: 'Wissensdatenbank',
+    title: 'Wissensdatenbanken',
+    globalTitle: 'Globale Standardwerte',
+    globalSettings: 'Globale Standardwerte',
     subtitle: 'Dokumente, Code und Bilder reinziehen — danach im Chat durchsuchbar.',
     backToChat: 'Zurück zum Chat',
+    backToOverview: 'Zurück zur Übersicht',
+    tab: {
+      content: 'Inhalt',
+      settings: 'Einstellungen',
+    },
+    overview: {
+      intro: 'Jede Wissensdatenbank ist ein eigener Index mit eigenen Pipeline-Einstellungen.',
+    },
+    content: {
+      add: 'Inhalte hinzufügen',
+      empty: 'Noch nichts indexiert — Dateien hochladen oder ein Verzeichnis hinzufügen.',
+      tryRetrieval: 'Suche ausprobieren',
+      noHits: 'Keine Passage gefunden.',
+    },
+    settings: {
+      inherited: 'geerbt',
+      overridden: 'geändert',
+      resetField: 'Auf globalen Standardwert zurücksetzen',
+      baseIntro:
+        'Diese Einstellungen gelten nur für diese Wissensdatenbank. Mit „geerbt" markierte Felder folgen den globalen Standardwerten — sobald du eines änderst, wird es zur Überschreibung für diese Datenbank.',
+    },
     dropTitle: 'Dateien zum Indexieren ablegen',
     dropHint: 'oder klicken zum Auswählen — Dokumente, Code, Bilder',
     dropHintAv: 'oder klicken zum Auswählen — Dokumente, Code, Bilder, Audio & Video',
@@ -976,6 +999,8 @@ const de: typeof en = {
       idPlaceholder: 'wird aus dem Namen abgeleitet',
       idFixed: 'ID: {{id}} — fest, externe Aufrufer adressieren die Datenbank darüber.',
       defaultBadge: 'Standard',
+      noDescription: 'Noch keine Beschreibung.',
+      overridesHint: 'Pipeline-Einstellungen, die von den globalen Standardwerten abweichen',
       counts: '{{docs}} Dokumente · {{chunks}} Chunks',
       docCount: '{{n}} Dok.',
       unavailable: 'Backend nicht erreichbar',

@@ -9,7 +9,7 @@ bases, and the fact that an unknown base is a 404 rather than a 503.
 import pytest
 from fastapi.testclient import TestClient
 
-from src import rag_api, rag_registry
+from src import rag_api, rag_config, rag_registry
 
 
 # ---------------------------------------------------------------------------
@@ -260,3 +260,75 @@ def test_directory_ingest_refuses_paths_outside_the_allowed_roots(
     monkeypatch.setenv("RAG_API_INGEST_DIRS", str(allowed))
     resp = client.post("/v1/rags/default/directory", data={"directory": str(outside)})
     assert resp.status_code == 403
+
+
+# ---------------------------------------------------------------------------
+# Per-base pipeline settings (src/rag_config.py)
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def global_cfg(monkeypatch):
+    """Stand in for the saved `rag_pipeline` block."""
+    cfg = {
+        "enabled": True,
+        "provider": "internal",
+        "qdrant_url": "http://qdrant:6333",
+        "embedding_model": "qwen3-embed",
+        "rerank_url": "http://rerank:8002/v1/rerank",
+        "search_top_k": 5,
+        "pdf_vlm_enabled": False,
+    }
+    monkeypatch.setattr(rag_config, "global_config", lambda: dict(cfg))
+    return cfg
+
+
+def test_a_base_with_no_overrides_gets_the_global_config(global_cfg):
+    entry = rag_registry.create_base("Docs")
+    assert rag_config.effective_config(entry["id"]) == global_cfg
+
+
+def test_overrides_layer_on_top_of_the_global_defaults(global_cfg):
+    entry = rag_registry.create_base("Scans")
+    rag_config.set_overrides(entry["id"], {"pdf_vlm_enabled": True, "search_top_k": 12})
+    cfg = rag_config.effective_config(entry["id"])
+    assert cfg["pdf_vlm_enabled"] is True
+    assert cfg["search_top_k"] == 12
+    # Untouched keys still come from global.
+    assert cfg["rerank_url"] == global_cfg["rerank_url"]
+
+
+def test_one_bases_overrides_do_not_leak_into_another(global_cfg):
+    a = rag_registry.create_base("A")
+    b = rag_registry.create_base("B")
+    rag_config.set_overrides(a["id"], {"search_top_k": 12})
+    assert rag_config.effective_config(a["id"])["search_top_k"] == 12
+    assert rag_config.effective_config(b["id"])["search_top_k"] == 5
+
+
+def test_a_value_equal_to_the_global_default_is_not_stored_as_an_override(global_cfg):
+    """Otherwise the base would freeze at today's value and stop following a
+    later change to the global default."""
+    entry = rag_registry.create_base("Docs")
+    rag_config.set_overrides(entry["id"], {"search_top_k": 5, "pdf_vlm_enabled": True})
+    assert set(rag_config.overrides_for(entry["id"])) == {"pdf_vlm_enabled"}
+
+
+def test_infrastructure_keys_cannot_be_overridden(global_cfg):
+    """One Qdrant per deployment — a per-base value would silently split the
+    index across stores."""
+    entry = rag_registry.create_base("Docs")
+    rag_config.set_overrides(entry["id"], {"qdrant_url": "http://elsewhere:6333"})
+    assert rag_config.overrides_for(entry["id"]) == {}
+    assert rag_config.effective_config(entry["id"])["qdrant_url"] == "http://qdrant:6333"
+
+
+def test_changing_a_global_default_propagates_to_inheriting_bases(global_cfg, monkeypatch):
+    entry = rag_registry.create_base("Docs")
+    rag_config.set_overrides(entry["id"], {"search_top_k": 12})
+    monkeypatch.setattr(
+        rag_config, "global_config", lambda: {**global_cfg, "rerank_url": "http://new:8002"}
+    )
+    cfg = rag_config.effective_config(entry["id"])
+    assert cfg["rerank_url"] == "http://new:8002"  # inherited → follows
+    assert cfg["search_top_k"] == 12  # overridden → pinned

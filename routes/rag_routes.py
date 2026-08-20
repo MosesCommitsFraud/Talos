@@ -135,6 +135,19 @@ class RagBaseUpdate(BaseModel):
     language: str | None = None
 
 
+class RagBaseConfigUpdate(BaseModel):
+    """Per-knowledge-base pipeline settings.
+
+    ``config`` is the full config the client is showing; ``inherit`` names the
+    keys it wants to hand back to the global defaults. Sending the whole config
+    keeps the payload identical in shape to the global settings PUT, so the UI
+    can reuse one form for both.
+    """
+
+    config: RagPipelineConfig
+    inherit: list[str] = []
+
+
 class RagEndpointTest(BaseModel):
     """One endpoint probe from the settings UI. `api_key` may be empty even
     when a key is saved (keys are never echoed to the client), so the route
@@ -181,6 +194,62 @@ def _clamp_chars(value, default: int = 10000) -> int:
         return max(500, min(int(value), 100000))
     except Exception:
         return default
+
+
+def _normalize(body, current: dict) -> dict:
+    """Validate + clamp a submitted pipeline config into its stored shape.
+
+    Shared by the global settings and the per-knowledge-base overrides so both
+    surfaces clamp identically. ``current`` supplies the secrets, which are
+    never echoed to a client and therefore come back empty on save.
+    """
+    return {
+        "enabled": bool(body.enabled),
+        "provider": (body.provider or "internal").strip().lower(),
+        "external_url": body.external_url.strip(),
+        "external_api_key": body.external_api_key or current.get("external_api_key", ""),
+        "external_dataset_id": body.external_dataset_id.strip(),
+        "external_top_k": _clamp_k(body.external_top_k),
+        "embedding_url": body.embedding_url.strip(),
+        "embedding_model": body.embedding_model.strip(),
+        "qdrant_url": body.qdrant_url.strip(),
+        "qdrant_api_key": body.qdrant_api_key or current.get("qdrant_api_key", ""),
+        "rerank_url": body.rerank_url.strip(),
+        "rerank_model": body.rerank_model.strip(),
+        "rerank_api_key": body.rerank_api_key or current.get("rerank_api_key", ""),
+        "sparse_model": body.sparse_model.strip(),
+        "chat_top_k": _clamp_k(body.chat_top_k),
+        "search_top_k": _clamp_k(body.search_top_k),
+        "candidate_top_k": _clamp_candidate_k(body.candidate_top_k),
+        "similarity_threshold": _clamp_float(body.similarity_threshold, 0.0),
+        "rerank_min_score": _clamp_float(body.rerank_min_score, 0.30),
+        "max_context_chars": _clamp_chars(body.max_context_chars),
+        "query_prefix": body.query_prefix.strip(),
+        "context_prompt": body.context_prompt.strip(),
+        "auto_inject_enabled": bool(body.auto_inject_enabled),
+        "video_asr_enabled": bool(body.video_asr_enabled),
+        "video_asr_url": body.video_asr_url.strip(),
+        "video_asr_language": (body.video_asr_language or "auto").strip(),
+        "video_asr_prompt": body.video_asr_prompt.strip(),
+        "video_asr_correct_enabled": bool(body.video_asr_correct_enabled),
+        "image_pixel_enabled": bool(body.image_pixel_enabled),
+        "image_embed_url": body.image_embed_url.strip(),
+        "image_embed_model": body.image_embed_model.strip(),
+        "code_lane_enabled": bool(body.code_lane_enabled),
+        "query_rewrite_enabled": bool(body.query_rewrite_enabled),
+        "contextual_retrieval_enabled": bool(body.contextual_retrieval_enabled),
+        "llm_url": body.llm_url.strip(),
+        "llm_model": body.llm_model.strip(),
+        "pdf_vlm_enabled": bool(body.pdf_vlm_enabled),
+        "vlm_url": body.vlm_url.strip(),
+        "vlm_model": body.vlm_model.strip(),
+        "caption_language": body.caption_language.strip(),
+        "redact_pii_enabled": bool(body.redact_pii_enabled),
+        "auto_keywords_n": _clamp_aux(body.auto_keywords_n),
+        "auto_questions_n": _clamp_aux(body.auto_questions_n),
+        "expand_to_parent_enabled": bool(body.expand_to_parent_enabled),
+        "parent_max_chars": max(0, min(int(body.parent_max_chars or 2000), 20000)),
+    }
 
 
 def _public(cfg: dict) -> dict:
@@ -331,6 +400,68 @@ def setup_rag_routes():
             raise HTTPException(400, str(e))
         return {"deleted": entry.get("id"), "dropped_data": bool(drop_data)}
 
+    @router.get("/bases/{base_id}/config")
+    def get_base_config(base_id: str):
+        """One base's effective pipeline settings, plus what it overrides.
+
+        ``config`` is what the base actually runs with, ``inherited`` the global
+        defaults behind it, and ``overridden`` the keys this base sets itself —
+        enough for the UI to mark each field as inherited or changed without a
+        second request.
+        """
+        from src.rag_config import GLOBAL_KEYS, effective_config, global_config, overrides_for
+        from src.rag_registry import RagNotFound, get_base
+
+        try:
+            get_base(base_id)
+        except RagNotFound:
+            raise HTTPException(404, f"Unknown knowledge base '{base_id}'")
+        return {
+            "rag_id": base_id,
+            "config": _public(effective_config(base_id)),
+            "inherited": _public(global_config()),
+            "overridden": sorted(overrides_for(base_id).keys()),
+            # Infrastructure the base cannot change; the UI renders these
+            # read-only with a pointer to the global page.
+            "global_keys": sorted(GLOBAL_KEYS),
+        }
+
+    @router.put("/bases/{base_id}/config")
+    def set_base_config(base_id: str, body: RagBaseConfigUpdate):
+        """Replace one base's overrides.
+
+        The client submits the full config it is showing plus ``inherit`` — the
+        keys it wants handed back to the global defaults. Anything that merely
+        equals the global value is stored as inherited rather than as an
+        override, so a later change to the global default still propagates.
+        """
+        from src.rag_config import (
+            effective_config,
+            global_config,
+            overrides_for,
+            set_overrides,
+        )
+        from src.rag_registry import RagNotFound, get_base
+
+        try:
+            get_base(base_id)
+        except RagNotFound:
+            raise HTTPException(404, f"Unknown knowledge base '{base_id}'")
+
+        # Secrets are never echoed, so an empty field means "unchanged" — take
+        # the base's current effective value rather than wiping the key.
+        normalized = _normalize(body.config, effective_config(base_id))
+        inherit = set(body.inherit or ())
+        patch = {k: v for k, v in normalized.items() if k not in inherit}
+        set_overrides(base_id, patch)
+        _reset_rag()
+        return {
+            "rag_id": base_id,
+            "config": _public(effective_config(base_id)),
+            "inherited": _public(global_config()),
+            "overridden": sorted(overrides_for(base_id).keys()),
+        }
+
     @router.get("/config")
     def get_config():
         settings = load_settings()
@@ -349,53 +480,7 @@ def setup_rag_routes():
             if isinstance(settings.get("rag_pipeline"), dict)
             else {}
         )
-        cfg = {
-            "enabled": bool(body.enabled),
-            "provider": (body.provider or "internal").strip().lower(),
-            "external_url": body.external_url.strip(),
-            "external_api_key": body.external_api_key or current.get("external_api_key", ""),
-            "external_dataset_id": body.external_dataset_id.strip(),
-            "external_top_k": _clamp_k(body.external_top_k),
-            "embedding_url": body.embedding_url.strip(),
-            "embedding_model": body.embedding_model.strip(),
-            "qdrant_url": body.qdrant_url.strip(),
-            "qdrant_api_key": body.qdrant_api_key or current.get("qdrant_api_key", ""),
-            "rerank_url": body.rerank_url.strip(),
-            "rerank_model": body.rerank_model.strip(),
-            "rerank_api_key": body.rerank_api_key or current.get("rerank_api_key", ""),
-            "sparse_model": body.sparse_model.strip(),
-            "chat_top_k": _clamp_k(body.chat_top_k),
-            "search_top_k": _clamp_k(body.search_top_k),
-            "candidate_top_k": _clamp_candidate_k(body.candidate_top_k),
-            "similarity_threshold": _clamp_float(body.similarity_threshold, 0.0),
-            "rerank_min_score": _clamp_float(body.rerank_min_score, 0.30),
-            "max_context_chars": _clamp_chars(body.max_context_chars),
-            "query_prefix": body.query_prefix.strip(),
-            "context_prompt": body.context_prompt.strip(),
-            "auto_inject_enabled": bool(body.auto_inject_enabled),
-            "video_asr_enabled": bool(body.video_asr_enabled),
-            "video_asr_url": body.video_asr_url.strip(),
-            "video_asr_language": (body.video_asr_language or "auto").strip(),
-            "video_asr_prompt": body.video_asr_prompt.strip(),
-            "video_asr_correct_enabled": bool(body.video_asr_correct_enabled),
-            "image_pixel_enabled": bool(body.image_pixel_enabled),
-            "image_embed_url": body.image_embed_url.strip(),
-            "image_embed_model": body.image_embed_model.strip(),
-            "code_lane_enabled": bool(body.code_lane_enabled),
-            "query_rewrite_enabled": bool(body.query_rewrite_enabled),
-            "contextual_retrieval_enabled": bool(body.contextual_retrieval_enabled),
-            "llm_url": body.llm_url.strip(),
-            "llm_model": body.llm_model.strip(),
-            "pdf_vlm_enabled": bool(body.pdf_vlm_enabled),
-            "vlm_url": body.vlm_url.strip(),
-            "vlm_model": body.vlm_model.strip(),
-            "caption_language": body.caption_language.strip(),
-            "redact_pii_enabled": bool(body.redact_pii_enabled),
-            "auto_keywords_n": _clamp_aux(body.auto_keywords_n),
-            "auto_questions_n": _clamp_aux(body.auto_questions_n),
-            "expand_to_parent_enabled": bool(body.expand_to_parent_enabled),
-            "parent_max_chars": max(0, min(int(body.parent_max_chars or 2000), 20000)),
-        }
+        cfg = _normalize(body, current)
         if not cfg["enabled"]:
             settings["rag_pipeline"] = cfg
             save_settings(settings)
@@ -631,12 +716,11 @@ def setup_rag_routes():
             raise HTTPException(
                 503, "RAG is not available. Check embedding, Qdrant, and dependencies."
             )
-        settings = load_settings()
-        cfg = (
-            settings.get("rag_pipeline", {})
-            if isinstance(settings.get("rag_pipeline"), dict)
-            else {}
-        )
+        from src.rag_config import effective_config
+
+        # Tuning comes from the base being searched, not the global block —
+        # a base may set its own top-k.
+        cfg = effective_config(rag_id)
         final_k = _clamp_k(k if k is not None else cfg.get("search_top_k", 5))
         candidate_k = max(final_k, _clamp_candidate_k(cfg.get("candidate_top_k", 40)))
         results = rag.search(q, k=final_k, owner=None, candidate_k=candidate_k)

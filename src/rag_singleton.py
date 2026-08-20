@@ -73,7 +73,7 @@ def _default_id() -> str:
     return DEFAULT_ID
 
 
-def get_rag_manager(base_id: Optional[str] = None):
+def get_rag_manager(base_id: Optional[str] = None, config: Optional[dict] = None):
     """Lazy Qdrant/Haystack-backed VectorRAG initializer for one knowledge base.
 
     Returns the VectorRAG instance on first successful init, None if Qdrant /
@@ -85,9 +85,15 @@ def get_rag_manager(base_id: Optional[str] = None):
     ``base_id`` is a knowledge-base id from ``src/rag_registry.py``; omit it for
     the default base. An unknown id raises ``RagNotFound`` — that is a caller
     error (a bad URL), not a backend outage, and must not look like one.
+
+    ``config`` overrides the resolved pipeline settings. The ingest worker
+    passes the snapshot captured when the job was *enqueued*, so a job runs with
+    the configuration it was queued under rather than whatever was saved while
+    it sat in the queue.
     """
     global rag_instance, _last_error
 
+    from src.rag_config import effective_config
     from src.rag_registry import DEFAULT_ID, collection_for
 
     key = (base_id or DEFAULT_ID).strip() or DEFAULT_ID
@@ -112,7 +118,11 @@ def get_rag_manager(base_id: Optional[str] = None):
             base_dir, "data", "rag"
         )
 
-        candidate = VectorRAG(persist_directory=persist_dir, collection_name=collection)
+        candidate = VectorRAG(
+            persist_directory=persist_dir,
+            collection_name=collection,
+            config=config if config is not None else effective_config(key),
+        )
         if not candidate.healthy:
             _last_error = candidate.last_error or "RAG init failed (no detail)"
             logger.warning("VectorRAG not healthy for base '%s': %s", key, _last_error)

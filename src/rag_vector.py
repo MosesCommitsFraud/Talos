@@ -1090,20 +1090,27 @@ def _extract_imports(source: str) -> List[str]:
     return [m.group(0).strip() for m in _IMPORT_RE.finditer(source)][:50]
 
 
-def _apply_saved_rag_config() -> None:
-    """Bridge the UI-configured ``rag_pipeline`` settings onto env vars.
+def _apply_saved_rag_config(cfg: Optional[Dict[str, Any]] = None) -> None:
+    """Bridge a RAG pipeline config onto env vars.
 
-    Lets the admin set every endpoint/model from the Settings → RAG panel
-    instead of hardcoding them in the compose file. The separate ingest worker
-    receives the same values as a snapshot in the job payload (see
-    ``src.rag_worker``) so it stays in sync without reading the app DB.
+    Lets the admin set every endpoint/model from the settings UI instead of
+    hardcoding them in the compose file. The separate ingest worker receives the
+    values as a snapshot in the job payload (see ``src.rag_worker``) so it stays
+    in sync without reading the app DB.
+
+    ``cfg`` is the configuration to apply — for a VectorRAG instance that is
+    **its knowledge base's** effective config, not the global block. Passing it
+    explicitly matters in the ingest worker: the job has already applied its
+    snapshot to the process env, and re-reading the global settings here would
+    silently undo every per-base override the job was queued with.
     """
-    try:
-        from src.settings import get_setting
+    if cfg is None:
+        try:
+            from src.settings import get_setting
 
-        cfg = get_setting("rag_pipeline", {})
-    except Exception:
-        cfg = {}
+            cfg = get_setting("rag_pipeline", {})
+        except Exception:
+            cfg = {}
     if not isinstance(cfg, dict):
         return
     mapping = {
@@ -1204,8 +1211,15 @@ class VectorRAG:
         persist_directory: str = "data/rag",
         recreate_index: bool = False,
         collection_name: Optional[str] = None,
+        config: Optional[Dict[str, Any]] = None,
     ):
         self.persist_directory = persist_directory
+        # This base's effective pipeline settings (global defaults + the base's
+        # overrides; see src/rag_config.py). Held per instance rather than
+        # bridged onto process env, because several bases live in one app
+        # process and would otherwise overwrite each other's endpoints. Env
+        # stays the fallback — that is what the ingest worker sets per job.
+        self._cfg: Dict[str, Any] = dict(config or {})
         # Which Qdrant collection this instance owns. One instance per
         # knowledge base; the default base keeps the historical name so no
         # existing data needs migrating.
@@ -1241,7 +1255,9 @@ class VectorRAG:
 
     def _initialize_system(self, recreate_index: bool = False) -> bool:
         try:
-            _apply_saved_rag_config()
+            # This instance's config, so the lane gates and ingest-side helpers
+            # that still read env see *this base's* settings.
+            _apply_saved_rag_config(self._cfg or None)
 
             qdrant_url = os.getenv("QDRANT_URL", "").strip()
             if not qdrant_url:
@@ -1250,7 +1266,9 @@ class VectorRAG:
                 self._healthy = False
                 return False
 
-            self._sparse_model = os.getenv("RAG_SPARSE_MODEL", "").strip() or _DEFAULT_SPARSE_MODEL
+            self._sparse_model = (
+                self._conf("sparse_model", "RAG_SPARSE_MODEL") or _DEFAULT_SPARSE_MODEL
+            )
 
             # Probe the embedding dimension with the SAME Haystack dense embedder
             # that ingestion/search use. Using a separate client (src.embeddings)
@@ -1264,8 +1282,8 @@ class VectorRAG:
                 self._dim = len(probe["embedding"])
             except Exception as e:
                 raise RuntimeError(
-                    f"embedding endpoint unreachable at {_embed_base_url()} "
-                    f"(model={os.getenv('EMBEDDING_MODEL', '')}): {e}"
+                    f"embedding endpoint unreachable at {self._embed_base()} "
+                    f"(model={self._embed_model()}): {e}"
                 ) from e
             if not self._dim:
                 raise RuntimeError("embedding endpoint returned an empty vector")
@@ -1297,7 +1315,7 @@ class VectorRAG:
                         raise RuntimeError(
                             f"Embedding dimension mismatch: the '{name}' collection was "
                             f"created with a different vector size than the current "
-                            f"embedding model ({os.getenv('EMBEDDING_MODEL', '')}, "
+                            f"embedding model ({self._embed_model()}, "
                             f"dim={self._dim}) returns. Use 'Rebuild index' (or delete "
                             f"the '{name}' collection in Qdrant) and re-index. Detail: {e}"
                         ) from e
@@ -1324,6 +1342,53 @@ class VectorRAG:
             logger.error(f"VectorRAG init failed: {self._last_error}")
             self._healthy = False
             return False
+
+    # ------------------------------------------------------------------
+    # Per-base configuration
+    # ------------------------------------------------------------------
+    # Every read below prefers this instance's config and falls back to the
+    # process env. The fallback is what keeps the ingest worker working
+    # unchanged: it runs one job at a time and applies that job's snapshot to
+    # its own env before building the RAG.
+
+    def _conf(self, key: str, env: str, default: str = "") -> str:
+        value = self._cfg.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+        return (os.getenv(env, "") or default).strip() or default
+
+    def _conf_bool(self, key: str, env: str) -> bool:
+        if key in self._cfg:
+            return bool(self._cfg[key])
+        return bool(os.getenv(env, "").strip())
+
+    def _conf_int(self, key: str, env: str, default: int) -> int:
+        try:
+            if key in self._cfg and self._cfg[key] is not None:
+                return int(self._cfg[key])
+            return int(os.getenv(env, str(default)) or default)
+        except (TypeError, ValueError):
+            return default
+
+    def _embed_base(self) -> str:
+        """This base's OpenAI-style ``/v1`` embedding base URL."""
+        url = self._conf("embedding_url", "EMBEDDING_URL").rstrip("/")
+        if url.endswith("/embeddings"):
+            url = url[: -len("/embeddings")]
+        return url or "http://localhost:8001/v1"
+
+    def _embed_model(self) -> str:
+        return self._conf("embedding_model", "EMBEDDING_MODEL") or "qwen3-embed"
+
+    def _image_on(self) -> bool:
+        """Pixel-embedding lane, for this base. Needs both the toggle and an
+        endpoint — same rule as the module-level ``_image_active``."""
+        return self._conf_bool("image_pixel_enabled", "IMAGE_PIXEL_ENABLED") and bool(
+            self._conf("image_embed_url", "IMAGE_EMBED_URL")
+        )
+
+    def _expand_on(self) -> bool:
+        return self._conf_bool("expand_to_parent_enabled", "EXPAND_TO_PARENT_ENABLED")
 
     @property
     def last_error(self) -> str:
@@ -1357,8 +1422,8 @@ class VectorRAG:
 
             self._dense_q = OpenAITextEmbedder(
                 api_key=Secret.from_token(os.getenv("EMBEDDING_API_KEY") or "not-needed"),
-                api_base_url=_embed_base_url(),
-                model=os.getenv("EMBEDDING_MODEL", "") or "qwen3-embed",
+                api_base_url=self._embed_base(),
+                model=self._embed_model(),
             )
         return self._dense_q
 
@@ -1369,8 +1434,8 @@ class VectorRAG:
 
             self._dense_d = OpenAIDocumentEmbedder(
                 api_key=Secret.from_token(os.getenv("EMBEDDING_API_KEY") or "not-needed"),
-                api_base_url=_embed_base_url(),
-                model=os.getenv("EMBEDDING_MODEL", "") or "qwen3-embed",
+                api_base_url=self._embed_base(),
+                model=self._embed_model(),
                 progress_bar=False,
             )
         return self._dense_d
@@ -1460,7 +1525,7 @@ class VectorRAG:
             # (e.g. "Instruct: Given a query, retrieve relevant passages\nQuery: ")
             # while documents are embedded without one. Applied to the dense
             # query only; the sparse/BM25 side stays on the raw query terms.
-            prefix = os.getenv("RAG_QUERY_PREFIX", "")
+            prefix = self._conf("query_prefix", "RAG_QUERY_PREFIX")
             dense = self._dense_text_embedder().run(text=(prefix + query) if prefix else query)[
                 "embedding"
             ]
@@ -1495,7 +1560,7 @@ class VectorRAG:
             # Pixel lane (Phase 5): when enabled, fan out to the visual collection
             # and let the cross-encoder reranker merge image hits with text hits.
             # Inert (returns []) when the lane is off — text retrieval unchanged.
-            if _image_active():
+            if self._image_on():
                 candidates.extend(self._visual_search(query, fetch_k))
             top = self._rerank(query, candidates, k)
             # Small-to-big (Phase 10): attach each hit's surrounding section for
@@ -1642,20 +1707,20 @@ class VectorRAG:
         return out
 
     def _rerank(self, query: str, candidates: List[Dict[str, Any]], k: int) -> List[Dict[str, Any]]:
-        url = os.getenv("RERANK_URL", "").strip()
+        url = self._conf("rerank_url", "RERANK_URL")
         if not url or not candidates:
             return candidates[:k]
         try:
             import httpx
 
-            model = os.getenv("RERANK_MODEL", "")
+            model = self._conf("rerank_model", "RERANK_MODEL")
             docs = [c.get("_retrieval_document") or c.get("document", "") for c in candidates]
             payload: Dict[str, Any] = {"query": query, "documents": docs}
             if model:
                 payload["model"] = model
             headers = (
-                {"Authorization": f"Bearer {os.getenv('RERANK_API_KEY')}"}
-                if os.getenv("RERANK_API_KEY")
+                {"Authorization": f"Bearer {self._conf('rerank_api_key', 'RERANK_API_KEY')}"}
+                if self._conf("rerank_api_key", "RERANK_API_KEY")
                 else {}
             )
             resp = httpx.post(url, json=payload, headers=headers, timeout=20)
@@ -1697,13 +1762,13 @@ class VectorRAG:
         return candidates[:k]
 
     def test_reranker(self) -> Dict[str, Any]:
-        url = os.getenv("RERANK_URL", "").strip()
+        url = self._conf("rerank_url", "RERANK_URL")
         if not url:
             return {"configured": False, "ok": False, "message": "RERANK_URL is not configured"}
         try:
             import httpx
 
-            model = os.getenv("RERANK_MODEL", "")
+            model = self._conf("rerank_model", "RERANK_MODEL")
             payload: Dict[str, Any] = {
                 "query": "alpha",
                 "documents": ["alpha beta", "unrelated gamma"],
@@ -1711,8 +1776,8 @@ class VectorRAG:
             if model:
                 payload["model"] = model
             headers = (
-                {"Authorization": f"Bearer {os.getenv('RERANK_API_KEY')}"}
-                if os.getenv("RERANK_API_KEY")
+                {"Authorization": f"Bearer {self._conf('rerank_api_key', 'RERANK_API_KEY')}"}
+                if self._conf("rerank_api_key", "RERANK_API_KEY")
                 else {}
             )
             resp = httpx.post(url, json=payload, headers=headers, timeout=20)
@@ -1732,7 +1797,7 @@ class VectorRAG:
             return {
                 "configured": True,
                 "ok": False,
-                "model": os.getenv("RERANK_MODEL", ""),
+                "model": self._conf("rerank_model", "RERANK_MODEL"),
                 "message": str(e),
             }
 
@@ -1930,9 +1995,9 @@ class VectorRAG:
         whole section (sibling chunks with the same ``section_id``, in ``seq``
         order, capped). The matched chunk stays the citation; only the *injected*
         context grows. No-op (no ``expanded`` key) when disabled."""
-        if not _expand_active() or not results or self._store is None:
+        if not self._expand_on() or not results or self._store is None:
             return results
-        cap = _env_int("RAG_PARENT_MAX_CHARS") or 2000
+        cap = self._conf_int("parent_max_chars", "RAG_PARENT_MAX_CHARS", 0) or 2000
         section_cache: Dict[Tuple[str, str], str] = {}
         for r in results:
             meta = r.get("metadata") or {}
@@ -2032,7 +2097,7 @@ class VectorRAG:
         # Pixel lane (Phase 5): for images, ADDITIONALLY embed the pixels into
         # the visual collection — on top of the OCR/text docs above, not instead.
         # Uses the OCR text as the visual point's caption. No-op unless enabled.
-        if ext in _IMAGE_EXTS and _image_active():
+        if ext in _IMAGE_EXTS and self._image_on():
             caption = " ".join((d.content or "") for d in docs)[:2000]
             self._write_image_pixel(path, meta, caption)
 
@@ -3161,8 +3226,8 @@ class VectorRAG:
         """
         import httpx
 
-        url = os.getenv("IMAGE_EMBED_URL", "").strip()
-        model = os.getenv("IMAGE_EMBED_MODEL", "").strip()
+        url = self._conf("image_embed_url", "IMAGE_EMBED_URL")
+        model = self._conf("image_embed_model", "IMAGE_EMBED_MODEL")
         if isinstance(value, str) and value.startswith("data:"):
             payload: Dict[str, Any] = {
                 "messages": [
@@ -3215,7 +3280,7 @@ class VectorRAG:
         import io
         import json as _json
 
-        model = os.getenv("IMAGE_EMBED_MODEL", "").strip()
+        model = self._conf("image_embed_model", "IMAGE_EMBED_MODEL")
         sidecar = image_path + ".vec.json"
         try:
             with open(sidecar, "r", encoding="utf-8") as fh:
@@ -3254,7 +3319,7 @@ class VectorRAG:
         reflected in the generated prose.
         Returns None when the VL embed endpoint is unconfigured or either
         embed fails; callers must treat None as "cannot tell" (fail-open)."""
-        if not os.getenv("IMAGE_EMBED_URL", "").strip():
+        if not self._conf("image_embed_url", "IMAGE_EMBED_URL"):
             return None
         text = (text or "").strip()[:1500]
         if not text:
@@ -3297,7 +3362,7 @@ class VectorRAG:
     def _write_image_pixel(self, path: str, meta: Dict[str, Any], caption: str = "") -> bool:
         """Embed an image's pixels and upsert one point into the visual
         collection. Best-effort: a failure must never break text ingest."""
-        if not _image_active():
+        if not self._image_on():
             return False
         try:
             import uuid as _uuid
@@ -3326,7 +3391,7 @@ class VectorRAG:
         """Embed the text query with the VL model and search the visual
         collection. Returns candidate dicts in the same shape as hybrid hits so
         the reranker can merge them. Best-effort: errors yield no visual hits."""
-        if not _image_active():
+        if not self._image_on():
             return []
         try:
             existing = {c.name for c in self._visual_qdrant().get_collections().collections}
@@ -3608,14 +3673,14 @@ class VectorRAG:
             count = self._store.count_documents()
             return {
                 "document_count": count,
-                "embedding_model": f"{os.getenv('EMBEDDING_MODEL', '')} @ {_embed_base_url()}",
+                "embedding_model": f"{self._embed_model()} @ {self._embed_base()}",
                 "persist_directory": self.persist_directory,
                 "collection_name": self.collection_name,
                 "vector_backend": self._backend,
                 "sparse_model": self._sparse_model,
                 "embedding_dim": self._dim,
-                "rerank_enabled": bool(os.getenv("RERANK_URL", "").strip()),
-                "rerank_model": os.getenv("RERANK_MODEL", ""),
+                "rerank_enabled": bool(self._conf("rerank_url", "RERANK_URL")),
+                "rerank_model": self._conf("rerank_model", "RERANK_MODEL"),
                 "last_rerank_error": self._last_rerank_error,
                 "healthy": True,
             }

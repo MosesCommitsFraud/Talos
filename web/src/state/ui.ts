@@ -29,7 +29,10 @@ export interface PreviewFile {
  *  their workspaces directly. */
 function viewFromHash(): AppView {
   if (typeof location === 'undefined') return 'chat';
-  const slug = location.hash.replace(/^#\/?/, '');
+  // First segment only: the knowledge-base workspace uses deeper hashes
+  // (`#/rag/<id>`, `#/rag/global`) to deep-link one base, and all of them still
+  // resolve to the `rag` view.
+  const slug = location.hash.replace(/^#\/?/, '').split('/')[0];
   return slug === 'rag' || slug === 'users' || slug === 'tickets' ? slug : 'chat';
 }
 

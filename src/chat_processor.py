@@ -295,21 +295,21 @@ class ChatProcessor:
 
     def _rag_k_setting(self, key: str, default: int) -> int:
         try:
-            from src.settings import get_setting
-
-            cfg = get_setting("rag_pipeline", {})
-            if isinstance(cfg, dict):
-                return max(1, min(int(cfg.get(key) or default), 100))
+            return max(1, min(int(self._rag_cfg().get(key) or default), 100))
         except Exception:
-            pass
-        return default
+            return default
 
     def _rag_cfg(self) -> dict:
-        try:
-            from src.settings import get_setting
+        """Retrieval settings for the base chat searches — the default one.
 
-            cfg = get_setting("rag_pipeline", {})
-            return cfg if isinstance(cfg, dict) else {}
+        Resolved rather than read raw, so overrides set on the default base in
+        the knowledge-base UI actually reach the chat pipeline (see
+        src/rag_config.py).
+        """
+        try:
+            from src.rag_config import effective_config
+
+            return effective_config(None)
         except Exception:
             return {}
 

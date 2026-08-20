@@ -1,5 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { AlertTriangleIcon, DatabaseIcon, PencilIcon, PlusIcon, Trash2Icon } from 'lucide-react';
+import {
+  AlertTriangleIcon,
+  DatabaseIcon,
+  PencilIcon,
+  PlusIcon,
+  SlidersHorizontalIcon,
+  Trash2Icon,
+} from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
@@ -30,29 +37,41 @@ export function useRagBases() {
  *  beats rendering every panel against a 404. */
 export function useActiveRagBase(): { baseId: string; base?: RagBase; bases: RagBase[] } {
   const { baseId, setBaseId } = useRagBase();
-  const { data } = useRagBases();
+  const { data, isFetching } = useRagBases();
   const bases = data?.bases ?? [];
   const known = bases.some((b) => b.id === baseId);
+  // Only fall back once the catalogue has settled. A base created a moment ago
+  // is legitimately absent from the last response, and resetting on that stale
+  // list would bounce the user out of the base they just made.
+  const stale = isFetching || bases.length === 0;
   useEffect(() => {
-    if (bases.length > 0 && !known) setBaseId(DEFAULT_RAG_BASE);
-  }, [bases.length, known, setBaseId]);
-  const effective = known || bases.length === 0 ? baseId : DEFAULT_RAG_BASE;
+    if (!stale && !known) setBaseId(DEFAULT_RAG_BASE);
+  }, [stale, known, setBaseId]);
+  const effective = known || stale ? baseId : DEFAULT_RAG_BASE;
   return { baseId: effective, base: bases.find((b) => b.id === effective), bases };
 }
 
-/** Compact base picker for the workspace header — everything below it (docs,
- *  uploads, explorer, search) is scoped to whatever is selected here. */
-export function RagBaseSelect({ className }: { className?: string }) {
+/** Compact base picker, for surfaces that act on one base but aren't the
+ *  overview (the activity rail's context, mainly). */
+export function RagBaseSelect({
+  value,
+  onChange,
+  className,
+}: {
+  value: string;
+  onChange: (id: string) => void;
+  className?: string;
+}) {
   const { t } = useTranslation();
-  const setBaseId = useRagBase((s) => s.setBaseId);
-  const { baseId, bases } = useActiveRagBase();
+  const { data } = useRagBases();
+  const bases = data?.bases ?? [];
   if (bases.length <= 1) return null;
   return (
     <Select
       className={cn('max-w-[16rem]', className)}
       size="sm"
-      value={baseId}
-      onChange={setBaseId}
+      value={value}
+      onChange={onChange}
       options={bases.map((b) => ({
         value: b.id,
         label:
@@ -80,10 +99,12 @@ function BaseFormDialog({
   open,
   onOpenChange,
   editing,
+  onCreated,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   editing: RagBase | null;
+  onCreated?: (base: RagBase) => void;
 }) {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
@@ -118,9 +139,15 @@ function BaseFormDialog({
             language: form.language,
             id: form.id.trim() || undefined,
           }),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ['rag-bases'] });
+    onSuccess: async (base) => {
+      // Refetch before navigating, not just invalidate: the target base has to
+      // be in the catalogue by the time the workspace renders its header, or
+      // it briefly shows the previously selected base's name.
+      await queryClient.refetchQueries({ queryKey: ['rag-bases'] });
       onOpenChange(false);
+      // Newly created bases are empty, so drop the user straight into them —
+      // the next thing they want is to put something in.
+      if (!editing && base?.id) onCreated?.(base);
     },
     onError: (e) => setError((e as Error).message),
   });
@@ -185,10 +212,7 @@ function BaseFormDialog({
             <Button variant="outline" onClick={() => onOpenChange(false)}>
               {t('common.cancel')}
             </Button>
-            <Button
-              disabled={!form.name.trim() || save.isPending}
-              onClick={() => save.mutate()}
-            >
+            <Button disabled={!form.name.trim() || save.isPending} onClick={() => save.mutate()}>
               {save.isPending ? t('common.saving') : t('common.save')}
             </Button>
           </div>
@@ -234,11 +258,7 @@ function DeleteDialog({
             <Button variant="outline" onClick={() => onOpenChange(false)}>
               {t('common.cancel')}
             </Button>
-            <Button
-              variant="destructive"
-              disabled={remove.isPending}
-              onClick={() => remove.mutate()}
-            >
+            <Button variant="destructive" disabled={remove.isPending} onClick={() => remove.mutate()}>
               {t('rag.bases.deleteAction')}
             </Button>
           </div>
@@ -248,76 +268,70 @@ function DeleteDialog({
   );
 }
 
-/** One row in the catalogue. Clicking it makes that base the active one for the
- *  whole workspace; the buttons edit or delete it. */
-function BaseRow({
+/** One knowledge base as a card: what it holds, in which language, and how far
+ *  its pipeline differs from the global defaults. */
+function BaseCard({
   base,
-  active,
-  onSelect,
+  onOpen,
   onEdit,
   onDelete,
 }: {
   base: RagBase;
-  active: boolean;
-  onSelect: () => void;
+  onOpen: () => void;
   onEdit: () => void;
   onDelete: () => void;
 }) {
   const { t } = useTranslation();
   const isDefault = base.id === DEFAULT_RAG_BASE;
   return (
-    <div
-      className={cn(
-        'flex items-start gap-3 border-t border-border/60 px-4 py-3 first:border-t-0 sm:px-5',
-        active && 'bg-accent/40',
-      )}
-    >
-      <button
-        type="button"
-        onClick={onSelect}
-        aria-pressed={active}
-        className="flex min-w-0 flex-1 items-start gap-3 text-left"
-      >
-        <DatabaseIcon
-          className={cn('mt-0.5 size-4 shrink-0', active ? 'text-primary' : 'text-muted-foreground')}
-        />
-        <span className="min-w-0 flex-1 space-y-0.5">
-          <span className="flex flex-wrap items-center gap-2">
-            <span className="text-[13px] font-semibold tracking-[-0.01em]">{base.name}</span>
-            {base.language && (
-              <span className="rounded bg-muted px-1.5 py-px font-mono text-[10px] uppercase text-muted-foreground">
-                {base.language}
-              </span>
-            )}
-            {isDefault && (
-              <span className="rounded bg-muted px-1.5 py-px text-[10px] text-muted-foreground">
-                {t('rag.bases.defaultBadge')}
-              </span>
-            )}
+    <div className="group flex flex-col overflow-hidden rounded-md border bg-card text-card-foreground transition-colors hover:border-ring/50">
+      <button type="button" onClick={onOpen} className="flex-1 px-4 py-3.5 text-left">
+        <span className="flex items-center gap-2">
+          <DatabaseIcon className="size-4 shrink-0 text-muted-foreground" />
+          <span className="min-w-0 flex-1 truncate text-sm font-semibold tracking-[-0.01em]">
+            {base.name}
           </span>
-          {base.description && (
-            <span className="block truncate text-xs text-muted-foreground/80">
-              {base.description}
+          {base.language && (
+            <span className="shrink-0 rounded bg-muted px-1.5 py-px font-mono text-[10px] uppercase text-muted-foreground">
+              {base.language}
             </span>
           )}
-          <span className="block text-[11px] text-muted-foreground tabular-nums">
-            {base.available === false
-              ? (base.error ?? t('rag.bases.unavailable'))
-              : t('rag.bases.counts', {
-                  docs: base.content_count ?? 0,
-                  chunks: base.chunk_count ?? 0,
-                })}
-            {' · '}
-            <code className="font-mono text-[10px]">{base.id}</code>
-          </span>
+        </span>
+        <span className="mt-1.5 line-clamp-2 block min-h-[2rem] text-xs text-muted-foreground/80">
+          {base.description || t('rag.bases.noDescription')}
+        </span>
+        <span className="mt-2 block text-[11px] text-muted-foreground tabular-nums">
+          {base.available === false
+            ? (base.error ?? t('rag.bases.unavailable'))
+            : t('rag.bases.counts', {
+                docs: base.content_count ?? 0,
+                chunks: base.chunk_count ?? 0,
+              })}
         </span>
       </button>
-      <div className="flex shrink-0 items-center gap-1">
-        <Button size="icon" variant="ghost" aria-label={t('common.edit')} onClick={onEdit}>
+      <div className="flex items-center gap-1 border-t border-border/60 px-2 py-1.5">
+        <code className="min-w-0 flex-1 truncate px-1 font-mono text-[10px] text-muted-foreground">
+          {base.id}
+        </code>
+        {isDefault && (
+          <span className="shrink-0 rounded bg-muted px-1.5 py-px text-[10px] text-muted-foreground">
+            {t('rag.bases.defaultBadge')}
+          </span>
+        )}
+        {(base.override_count ?? 0) > 0 && (
+          <span
+            className="shrink-0 rounded bg-primary/10 px-1.5 py-px text-[10px] text-primary"
+            title={t('rag.bases.overridesHint')}
+          >
+            <SlidersHorizontalIcon className="mr-1 inline size-2.5" />
+            {base.override_count}
+          </span>
+        )}
+        <Button size="icon-sm" variant="ghost" aria-label={t('common.edit')} onClick={onEdit}>
           <PencilIcon className="size-3.5" />
         </Button>
         {!isDefault && (
-          <Button size="icon" variant="ghost" aria-label={t('common.delete')} onClick={onDelete}>
+          <Button size="icon-sm" variant="ghost" aria-label={t('common.delete')} onClick={onDelete}>
             <Trash2Icon className="size-3.5" />
           </Button>
         )}
@@ -326,27 +340,26 @@ function BaseRow({
   );
 }
 
-/** The knowledge-base catalogue: which bases exist, what is in them, and the
- *  create/edit/delete actions. Rendered at the top of the /rag workspace, since
- *  every panel under it is scoped to the base selected here. */
-export function RagBases() {
+/** The knowledge-base overview — its own space in the /rag workspace.
+ *
+ *  Deliberately separate from the pipeline settings: this answers "which
+ *  knowledge bases exist and what is in them", while a base's own space
+ *  answers "what is inside this one and how is it tuned".
+ */
+export function RagOverview({ onOpen }: { onOpen: (id: string) => void }) {
   const { t } = useTranslation();
-  const setBaseId = useRagBase((s) => s.setBaseId);
-  const { baseId, bases } = useActiveRagBase();
+  const { data, isLoading } = useRagBases();
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<RagBase | null>(null);
   const [deleting, setDeleting] = useState<RagBase | null>(null);
+  const bases = data?.bases ?? [];
 
   return (
-    <section className="space-y-2.5">
-      <header className="flex min-h-5 items-center justify-between px-1">
-        <h2 className="flex items-center gap-2 text-[11px] font-semibold tracking-[0.08em] text-foreground/50 uppercase">
-          <span className="inline-block h-px w-3 bg-border" aria-hidden="true" />
-          {t('rag.bases.title')}
-        </h2>
+    <div className="space-y-3">
+      <div className="flex items-center justify-between gap-3">
+        <p className="min-w-0 text-sm text-muted-foreground">{t('rag.overview.intro')}</p>
         <Button
           size="sm"
-          variant="outline"
           onClick={() => {
             setEditing(null);
             setFormOpen(true);
@@ -354,30 +367,34 @@ export function RagBases() {
         >
           <PlusIcon className="size-3.5" /> {t('rag.bases.new')}
         </Button>
-      </header>
-      <div className="overflow-hidden rounded-md border bg-card text-card-foreground">
-        {bases.length === 0 ? (
-          <p className="px-4 py-3 text-xs text-muted-foreground sm:px-5">{t('common.loading')}</p>
-        ) : (
-          bases.map((b) => (
-            <BaseRow
+      </div>
+
+      {isLoading ? (
+        <p className="text-xs text-muted-foreground">{t('common.loading')}</p>
+      ) : (
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+          {bases.map((b) => (
+            <BaseCard
               key={b.id}
               base={b}
-              active={b.id === baseId}
-              onSelect={() => setBaseId(b.id)}
+              onOpen={() => onOpen(b.id)}
               onEdit={() => {
                 setEditing(b);
                 setFormOpen(true);
               }}
               onDelete={() => setDeleting(b)}
             />
-          ))
-        )}
-      </div>
-      <p className="px-1 text-xs text-muted-foreground/80">{t('rag.bases.hint')}</p>
+          ))}
+        </div>
+      )}
 
-      <BaseFormDialog open={formOpen} onOpenChange={setFormOpen} editing={editing} />
+      <BaseFormDialog
+        open={formOpen}
+        onOpenChange={setFormOpen}
+        editing={editing}
+        onCreated={(b) => onOpen(b.id)}
+      />
       <DeleteDialog base={deleting} onOpenChange={(open) => !open && setDeleting(null)} />
-    </section>
+    </div>
   );
 }

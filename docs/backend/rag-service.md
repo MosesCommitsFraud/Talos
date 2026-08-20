@@ -43,6 +43,43 @@ The `default` base is seeded automatically and pinned to the historical
 `talos_rag` collection, so everything indexed before this existed stays where it
 was and Talos chat is unaffected. It cannot be deleted.
 
+## Per-base pipeline settings
+
+Each base can run its own pipeline. Talos's `rag_pipeline` settings block is the
+set of **defaults**; a base stores only the keys it deliberately changes
+(`src/rag_config.py`), and inherits the rest. Change the global reranker and
+every base that never overrode it follows along.
+
+| | |
+| --- | --- |
+| **Global only** | `enabled`, `provider`, `qdrant_url`, `qdrant_api_key` and the external-retrieval fields. There is one vector store per deployment; a per-base value would let a settings mistake split the index across two of them. |
+| **Per base** | Embedding model, reranker, sparse model, every top-k/threshold, the query prefix and context prompt, and all ingest lanes (ASR, VLM, contextual retrieval, keywords, PII redaction, code, images). |
+
+A base of scanned PDFs can therefore run the per-page VLM lane that a base of
+Markdown notes would only be slowed down by.
+
+Overrides live in the same `data/rag/registry.json` as the catalogue, for the
+same reason: the ingest worker shares the data volume, not the app database. A
+value that merely equals the global default is stored as *inherited* rather than
+as an override, so it keeps following later changes to that default.
+
+Two places consume the resolved config, and both are per base:
+
+* **Retrieval** — `VectorRAG` holds its base's config on the instance and reads
+  the query path from it. Several bases live in one app process, so bridging
+  the config onto process env (as Talos used to) would have them overwrite each
+  other's endpoints.
+* **Ingest** — the job carries a snapshot of its base's config, captured when it
+  was *enqueued*, and applies it to the worker process env. A job therefore
+  ingests with the pipeline it was queued under, not with whatever an admin
+  saved while it waited in the queue.
+
+The management UI for this is the `/rag` workspace: an overview of the bases,
+each base with its own **Content** and **Settings** tabs, and a separate page
+for the global defaults. `GET`/`PUT /api/rag/bases/{id}/config` is the endpoint
+behind it, returning the effective config, the inherited defaults and the list
+of overridden keys in one response.
+
 ## Permissions
 
 There are none per base, deliberately. `GET /v1/rags` is the catalogue the

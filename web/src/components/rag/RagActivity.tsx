@@ -13,11 +13,11 @@ import {
   type RagJob,
 } from '@/api/client';
 import { cn } from '@/lib/utils';
-import { ragIdParam } from '@/state/ragBase';
+import { ragIdParam, useRagBase } from '@/state/ragBase';
 import { useRagConsole } from '@/state/ragConsole';
 import { Button } from '../ui/button';
 import { Dialog, DialogContent } from '../ui/dialog';
-import { useActiveRagBase } from './RagBases';
+import { RagBaseSelect, useActiveRagBase } from './RagBases';
 import { RagExplorer } from './RagExplorer';
 
 const TERMINAL = ['completed', 'failed', 'cancelled'];
@@ -72,6 +72,7 @@ export function RagActivity() {
   // Drops and rebuilds act on the base selected in the workspace, not always
   // the default one.
   const { baseId, base } = useActiveRagBase();
+  const setBaseId = useRagBase((s) => s.setBaseId);
   const ragId = ragIdParam(baseId);
 
   const jobs = useQuery({ queryKey: ['rag-jobs'], queryFn: fetchRagJobs, refetchInterval: 1500 });
@@ -145,10 +146,20 @@ export function RagActivity() {
         <div className="text-sm font-medium">{t('rag.dropTitle')}</div>
         <div className="text-[11px] text-muted-foreground">{t('rag.dropHint')}</div>
         {/* Name the target base explicitly — dropping into the wrong index is
-            expensive to undo (re-ingest), and the picker is in the header. */}
+            expensive to undo (re-ingest). */}
         {base && <div className="text-[11px] font-medium text-foreground/70">{t('rag.dropTarget', { name: base.name })}</div>}
         <input ref={fileInput} type="file" multiple hidden
           onChange={(e) => { if (e.target.files?.length) upload.mutate(Array.from(e.target.files)); e.target.value = ''; }} />
+      </div>
+
+      {/* The rail is visible from every space, including the overview where no
+          base is open — so the target is switchable here rather than only by
+          navigating into a base. Hidden while only one base exists. */}
+      <div
+        className="shrink-0"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <RagBaseSelect className="w-full max-w-none" value={baseId} onChange={setBaseId} />
       </div>
 
       <div className="grid shrink-0 grid-cols-1 gap-2">

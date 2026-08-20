@@ -927,9 +927,32 @@ const en = {
     },
   },
   rag: {
-    title: 'Knowledge base',
+    title: 'Knowledge bases',
+    globalTitle: 'Global defaults',
+    globalSettings: 'Global defaults',
     subtitle: 'Drop in documents, code, and images to make them searchable in chat.',
     backToChat: 'Back to chat',
+    backToOverview: 'Back to the overview',
+    tab: {
+      content: 'Content',
+      settings: 'Settings',
+    },
+    overview: {
+      intro: 'Each knowledge base is its own index with its own pipeline settings.',
+    },
+    content: {
+      add: 'Add content',
+      empty: 'Nothing indexed yet — upload files or add a directory.',
+      tryRetrieval: 'Try a search',
+      noHits: 'No passage matched.',
+    },
+    settings: {
+      inherited: 'inherited',
+      overridden: 'changed',
+      resetField: 'Reset to the global default',
+      baseIntro:
+        'These settings apply to this knowledge base only. Fields marked "inherited" follow the global defaults — change one and it becomes an override for this base.',
+    },
     dropTitle: 'Drop files to index',
     dropHint: 'or click to choose — documents, code, images',
     dropHintAv: 'or click to choose — documents, code, images, audio & video',
@@ -970,6 +993,8 @@ const en = {
       idPlaceholder: 'derived from the name',
       idFixed: 'ID: {{id}} — fixed, external callers address this base by it.',
       defaultBadge: 'Default',
+      noDescription: 'No description yet.',
+      overridesHint: 'Pipeline settings that differ from the global defaults',
       counts: '{{docs}} documents · {{chunks}} chunks',
       docCount: '{{n}} docs',
       unavailable: 'Backend unavailable',

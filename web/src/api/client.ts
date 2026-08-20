@@ -809,6 +809,8 @@ export interface RagBase {
   /** False when Qdrant/the embedder can't be reached for this base. */
   available?: boolean;
   error?: string;
+  /** How many pipeline settings this base changes vs. the global defaults. */
+  override_count?: number;
 }
 
 /** Append `rag_id` only when a base is actually named, so the URLs a plain
@@ -842,6 +844,33 @@ export async function deleteRagBase(id: string, dropData = true): Promise<void> 
     throw new Error(detail || `Delete failed (HTTP ${res.status})`);
   }
 }
+
+/** One knowledge base's pipeline settings.
+ *
+ *  `config` is what the base actually runs with, `inherited` the global
+ *  defaults behind it, and `overridden` the keys this base sets itself — so a
+ *  field can be marked "inherited" or "changed" without a second request.
+ *  `global_keys` are infrastructure a base cannot override (one Qdrant). */
+export interface RagBaseConfig {
+  rag_id: string;
+  config: RagConfig;
+  inherited: RagConfig;
+  overridden: string[];
+  global_keys: string[];
+}
+
+export const fetchRagBaseConfig = (id: string) =>
+  getJSON<RagBaseConfig>(`/api/rag/bases/${encodeURIComponent(id)}/config`);
+
+/** Replace a base's overrides. `inherit` names the keys to hand back to the
+ *  global defaults; everything else in `config` that differs from global is
+ *  stored as an override. */
+export const saveRagBaseConfig = (id: string, config: RagConfig, inherit: string[]) =>
+  postJSON<RagBaseConfig>(
+    `/api/rag/bases/${encodeURIComponent(id)}/config`,
+    { config, inherit },
+    'PUT',
+  );
 
 export const fetchRagConfig = () => getJSON<RagConfig>('/api/rag/config');
 

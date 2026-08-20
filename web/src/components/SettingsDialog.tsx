@@ -40,29 +40,19 @@ import {
   fetchIntegrationPresets,
   fetchIntegrations,
   fetchModels,
-  fetchRagConfig,
   fetchSqlConfig,
   fetchTotpStatus,
   importData,
   logout,
-  personalAddDirectory,
-  personalReload,
-  personalUpload,
-  ragSearch,
-  fetchRagDocuments,
-  deleteRagDocument,
   fetchSqlKnowledge,
   uploadSqlKnowledge,
   deleteSqlKnowledge,
   sqlKnowledgeOriginalUrl,
   saveAppSettings,
   saveDisabledTools,
-  saveRagConfig,
   saveSqlConfig,
   testSqlConfig,
   testModelEndpoint,
-  testRagConfig,
-  testRagEndpoint,
   totpConfirm,
   totpDisable,
   totpSetup,
@@ -77,14 +67,10 @@ import {
   setSharedSkillEnabled,
   type SharedSkill,
   type AppSettings,
-  type RagConfig,
   type SqlConfig,
 } from '@/api/client';
 import type { AssistantEndpoint } from '@/api/types';
 import { applyDensity, applyLang, applyTheme, usePrefs, type Density, type Lang, type LlmLang, type Theme, type Visibility } from '@/state/prefs';
-import { useRagConsole } from '@/state/ragConsole';
-import { ragIdParam } from '@/state/ragBase';
-import { RagBases, useActiveRagBase } from './rag/RagBases';
 import { LANGUAGES } from '@/i18n';
 import { cn } from '@/lib/utils';
 import { Button } from './ui/button';
@@ -1270,326 +1256,6 @@ function ToolsPanel() {
   );
 }
 
-/* ── RAG (config + documents) ── */
-
-/** Per-URL-field endpoint probe: which backend test to run and which sibling
- *  draft fields (model/key/dataset) to send along. */
-interface EndpointTest { kind: string; modelKey?: keyof RagConfig; apiKeyKey?: keyof RagConfig; datasetKey?: keyof RagConfig }
-
-/** Compact disclosure for optional processing lanes. The feature state remains
- *  visible without rendering every explanatory row at once. */
-function RagDisclosure({ title, enabled, children }: { title: string; enabled?: boolean; children: React.ReactNode }) {
-  const [open, setOpen] = useState(false);
-  const { t } = useTranslation();
-  return (
-    <div className={cn('overflow-hidden rounded-md border border-border/60 bg-background/40', open && 'sm:col-span-2')}>
-      <button
-        type="button"
-        aria-expanded={open}
-        onClick={() => setOpen((v) => !v)}
-        className="flex w-full items-center gap-2.5 px-3 py-2.5 text-left transition-colors hover:bg-accent/40"
-      >
-        <ChevronRightIcon className={cn('size-3.5 shrink-0 text-muted-foreground transition-transform', open && 'rotate-90')} />
-        <span className="min-w-0 flex-1 truncate text-[13px] font-semibold">{title}</span>
-        {enabled !== undefined && (
-          <span className={cn(
-            'rounded-full px-2 py-0.5 text-[10px] font-medium',
-            enabled ? 'bg-success/10 text-success' : 'bg-muted text-muted-foreground',
-          )}>
-            {t(enabled ? 'settings.rag.active' : 'settings.rag.inactive')}
-          </span>
-        )}
-      </button>
-      {open && <div className="border-t border-border/60">{children}</div>}
-    </div>
-  );
-}
-
-export function RagPanel() {
-  const { t } = useTranslation();
-  const { data } = useQuery({ queryKey: ['rag-config'], queryFn: fetchRagConfig });
-  const [draft, setDraft] = useState<RagConfig | null>(null);
-  const [searchQ, setSearchQ] = useState('');
-  const [searchK, setSearchK] = useState(5);
-  const [searchOut, setSearchOut] = useState('');
-  const [dir, setDir] = useState('');
-  const [docMsg, setDocMsg] = useState<{ text: string; ok: boolean } | null>(null);
-  // Per-upload PII-redaction override: null = follow the global toggle.
-  const [uploadRedact, setUploadRedact] = useState<boolean | null>(null);
-  const [testingEp, setTestingEp] = useState<keyof RagConfig | null>(null);
-  const pushConsole = useRagConsole((s) => s.push);
-  const queryClient = useQueryClient();
-  // Everything document-shaped below is scoped to the selected knowledge base;
-  // the pipeline settings above it are global (one embedder, one Qdrant).
-  const { baseId } = useActiveRagBase();
-  const ragId = ragIdParam(baseId);
-  useEffect(() => { if (data && !draft) setDraft(data); }, [data, draft]);
-  const save = useMutation({
-    mutationFn: (cfg: RagConfig) => saveRagConfig(cfg),
-    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ['rag-config'] }),
-  });
-  const test = useMutation({ mutationFn: testRagConfig });
-  // Indexed-documents view polls while open. The live ingest queue + worker
-  // status now live in the /rag activity rail (RagActivity), not here.
-  const docs = useQuery({
-    // The base is part of the key so switching bases refetches instead of
-    // showing the previous base's documents.
-    queryKey: ['rag-documents', baseId],
-    queryFn: () => fetchRagDocuments(ragId),
-    refetchInterval: 5000,
-  });
-  const refreshIngest = () => {
-    void queryClient.invalidateQueries({ queryKey: ['rag-jobs'] });
-    void queryClient.invalidateQueries({ queryKey: ['rag-documents'] });
-    void queryClient.invalidateQueries({ queryKey: ['rag-bases'] });
-  };
-  const removeDoc = (source: string) =>
-    deleteRagDocument(source, ragId).then(() => {
-      void queryClient.invalidateQueries({ queryKey: ['rag-documents'] });
-      void queryClient.invalidateQueries({ queryKey: ['rag-bases'] });
-    });
-  if (!draft) return <Page><p className="text-sm text-muted-foreground">{t('common.loading')}</p></Page>;
-  const set = (k: keyof RagConfig, v: unknown) => setDraft({ ...draft, [k]: v } as RagConfig);
-  const str = (k: keyof RagConfig) => String(draft[k] ?? '');
-  const testEndpoint = (k: keyof RagConfig, label: string, ep: EndpointTest) => {
-    setTestingEp(k);
-    testRagEndpoint({
-      kind: ep.kind,
-      url: str(k),
-      model: ep.modelKey ? str(ep.modelKey) : undefined,
-      api_key: ep.apiKeyKey ? str(ep.apiKeyKey) : undefined,
-      dataset_id: ep.datasetKey ? str(ep.datasetKey) : undefined,
-    })
-      .then((r) => pushConsole(`${label}: ${t('settings.rag.endpointOk')}${r.detail ? ` (${r.detail})` : ''}`, 'ok'))
-      .catch((e) => pushConsole(`${label}: ${(e as Error).message}`, 'error'))
-      .finally(() => setTestingEp(null));
-  };
-  const field = (
-    k: keyof RagConfig,
-    label: string,
-    opts: { type?: string; hint?: string; def?: string | number; test?: EndpointTest } = {},
-  ) => {
-    const type = opts.type ?? 'text';
-    const hint = (opts.hint || opts.def !== undefined) ? (
-      <>
-        {opts.hint}
-        {opts.def !== undefined && (
-          <>
-            {opts.hint ? ' · ' : ''}
-            {t('settings.rag.defaultLabel')}: <code className="rounded bg-muted px-1 font-mono text-[11px]">{String(opts.def) || '—'}</code>
-          </>
-        )}
-      </>
-    ) : undefined;
-    return (
-      <Row label={label} hint={hint} stacked>
-        {type === 'textarea' ? (
-          <Textarea className="min-h-[64px] w-full xl:w-56" value={String(draft[k] ?? '')} onChange={(e) => set(k, e.target.value)} />
-        ) : (
-          <div className={cn(
-            'flex w-full gap-2 xl:w-auto',
-            opts.test ? 'flex-col items-stretch xl:flex-row xl:items-center' : 'items-center',
-          )}>
-            <Input className="min-w-0 flex-1 xl:w-48 xl:flex-none" type={type} step={type === 'number' ? 'any' : undefined} value={String(draft[k] ?? '')}
-              onChange={(e) => set(k, type === 'number' ? Number(e.target.value) : e.target.value)} />
-            {opts.test && (
-              <Button className="self-end xl:self-auto" size="sm" variant="outline" disabled={!str(k).trim() || testingEp !== null}
-                onClick={() => testEndpoint(k, label, opts.test!)}>
-                {testingEp === k ? t('settings.rag.testing') : t('settings.rag.test')}
-              </Button>
-            )}
-          </div>
-        )}
-      </Row>
-    );
-  };
-  const doc = (fn: () => Promise<unknown>, ok: string) => {
-    setDocMsg(null);
-    fn().then(() => setDocMsg({ text: ok, ok: true })).catch((e) => setDocMsg({ text: (e as Error).message, ok: false }));
-  };
-  return (
-    <Page className="gap-5 p-0 [&_.settings-row-hint]:line-clamp-2 [&_.settings-row-hint:hover]:line-clamp-none">
-      {/* Which bases exist, and which one the document sections below act on.
-          First, because everything under it is scoped to that choice. */}
-      <RagBases />
-      <Section title={t('settings.rag.pipeline')}>
-        <Row label={t('settings.rag.ragEnabled')} hint={t('settings.rag.hint.enabled')}><Switch checked={draft.enabled} onCheckedChange={(v) => set('enabled', v)} /></Row>
-        <Row label={t('settings.rag.provider')} hint={t('settings.rag.hint.provider')} stacked>
-          <Select
-            className="w-full xl:w-48"
-            value={(draft.provider || 'internal')}
-            onChange={(v) => set('provider', v)}
-            options={[
-              { value: 'internal', label: t('settings.rag.providerInternal') },
-              { value: 'external', label: t('settings.rag.providerExternal') },
-            ]}
-          />
-        </Row>
-        {(draft.provider || 'internal') === 'external' ? (
-          <>
-            {field('external_url', t('settings.rag.externalUrl'), { hint: t('settings.rag.hint.externalUrl'), def: 'http://ragflow/api/v1/retrieval', test: { kind: 'external', apiKeyKey: 'external_api_key', datasetKey: 'external_dataset_id' } })}
-            {field('external_api_key', t('settings.rag.externalApiKey'), { type: 'password', hint: t('settings.rag.hint.externalApiKey') })}
-            {field('external_dataset_id', t('settings.rag.externalDatasetId'), { hint: t('settings.rag.hint.externalDatasetId') })}
-            {field('external_top_k', t('settings.rag.externalTopK'), { type: 'number', hint: t('settings.rag.hint.externalTopK'), def: 5 })}
-          </>
-        ) : (
-          <>
-            {field('embedding_url', t('settings.rag.embeddingUrl'), { hint: t('settings.rag.hint.embeddingUrl'), def: 'http://host:8001/v1/embeddings', test: { kind: 'embedding', modelKey: 'embedding_model' } })}
-            {field('embedding_model', t('settings.rag.embeddingModel'), { hint: t('settings.rag.hint.embeddingModel'), def: 'qwen3-embed' })}
-            {field('qdrant_url', t('settings.rag.qdrantUrl'), { hint: t('settings.rag.hint.qdrantUrl'), def: 'http://qdrant:6333', test: { kind: 'qdrant', apiKeyKey: 'qdrant_api_key' } })}
-            {field('qdrant_api_key', t('settings.rag.qdrantApiKey'), { type: 'password', hint: t('settings.rag.hint.qdrantApiKey') })}
-            {field('rerank_url', t('settings.rag.rerankUrl'), { hint: t('settings.rag.hint.rerankUrl'), def: 'http://host:8002/v1/rerank', test: { kind: 'rerank', modelKey: 'rerank_model', apiKeyKey: 'rerank_api_key' } })}
-            {field('rerank_model', t('settings.rag.rerankModel'), { hint: t('settings.rag.hint.rerankModel'), def: 'qwen3-reranker' })}
-            {field('rerank_api_key', t('settings.rag.rerankApiKey'), { type: 'password', hint: t('settings.rag.hint.rerankApiKey') })}
-            {field('sparse_model', t('settings.rag.sparseModel'), { hint: t('settings.rag.hint.sparseModel'), def: 'Qdrant/bm25' })}
-          </>
-        )}
-      </Section>
-
-      {(draft.provider || 'internal') !== 'external' && (
-        <Section title={t('settings.rag.searchTuning')}>
-          {field('chat_top_k', t('settings.rag.chatTopK'), { type: 'number', hint: t('settings.rag.hint.chatTopK'), def: 5 })}
-          {field('search_top_k', t('settings.rag.searchTopK'), { type: 'number', hint: t('settings.rag.hint.searchTopK'), def: 5 })}
-          {field('candidate_top_k', t('settings.rag.candidateTopK'), { type: 'number', hint: t('settings.rag.hint.candidateTopK'), def: 40 })}
-          {field('rerank_min_score', t('settings.rag.rerankMinScore'), { type: 'number', hint: t('settings.rag.hint.rerankMinScore'), def: 0.3 })}
-          {field('similarity_threshold', t('settings.rag.similarityThreshold'), { type: 'number', hint: t('settings.rag.hint.similarityThreshold'), def: 0 })}
-          {field('max_context_chars', t('settings.rag.maxContextChars'), { type: 'number', hint: t('settings.rag.hint.maxContextChars'), def: 10000 })}
-          {field('query_prefix', t('settings.rag.queryPrefix'), { type: 'textarea', hint: t('settings.rag.hint.queryPrefix'), def: '' })}
-          {field('context_prompt', t('settings.rag.contextPrompt'), { type: 'textarea', hint: t('settings.rag.hint.contextPrompt'), def: '' })}
-          <Row label={t('settings.rag.autoInjectEnabled')} hint={t('settings.rag.hint.autoInjectEnabled')}><Switch checked={draft.auto_inject_enabled !== false} onCheckedChange={(v) => set('auto_inject_enabled', v)} /></Row>
-        <div className="flex flex-wrap items-center gap-3 border-t border-border/60 px-4 py-3.5 sm:px-5">
-          <Button size="sm" disabled={save.isPending} onClick={() => save.mutate(draft)}>{save.isPending ? t('common.saving') : t('common.save')}</Button>
-          <Button size="sm" variant="outline" disabled={test.isPending} onClick={() => test.mutate()}>{test.isPending ? t('settings.rag.testing') : t('settings.rag.testConnection')}</Button>
-          {test.isSuccess && (
-            <span className={cn('text-xs', test.data?.ok === false ? 'text-destructive-foreground' : 'text-success')}>
-              {test.data?.ok === false ? t('settings.rag.testFailed') : t('settings.rag.ok')}
-            </span>
-          )}
-        </div>
-      </Section>
-      )}
-
-      {(draft.provider || 'internal') !== 'external' && (
-        <Section title={t('settings.rag.processing')} padded>
-          <div className="grid gap-2 sm:grid-cols-2">
-            <RagDisclosure title={t('settings.rag.asrTitle')} enabled={!!draft.video_asr_enabled}>
-              <Row label={t('settings.rag.asrEnabled')} hint={t('settings.rag.hint.asrEnabled')}><Switch checked={!!draft.video_asr_enabled} onCheckedChange={(v) => set('video_asr_enabled', v)} /></Row>
-              {draft.video_asr_enabled && <>
-                {field('video_asr_url', t('settings.rag.asrUrl'), { hint: t('settings.rag.hint.asrUrl'), def: 'http://host:8003/v1/audio/transcriptions', test: { kind: 'asr' } })}
-                {field('video_asr_language', t('settings.rag.asrLanguage'), { hint: t('settings.rag.hint.asrLanguage'), def: 'auto' })}
-                {field('video_asr_prompt', t('settings.rag.asrPrompt'), { type: 'textarea', hint: t('settings.rag.hint.asrPrompt') })}
-                <Row label={t('settings.rag.asrCorrect')} hint={t('settings.rag.hint.asrCorrect')}><Switch checked={!!draft.video_asr_correct_enabled} onCheckedChange={(v) => set('video_asr_correct_enabled', v)} /></Row>
-                <Row label={t('settings.rag.videoFramesEnabled')} hint={t('settings.rag.hint.videoFramesEnabled')}><Switch checked={!!draft.video_frames_enabled} onCheckedChange={(v) => set('video_frames_enabled', v)} /></Row>
-                {draft.video_frames_enabled && <>
-                  {field('video_frames_interval_sec', t('settings.rag.videoFramesInterval'), { type: 'number', hint: t('settings.rag.hint.videoFramesInterval'), def: 8 })}
-                  {field('video_frames_max', t('settings.rag.videoFramesMax'), { type: 'number', hint: t('settings.rag.hint.videoFramesMax'), def: 300 })}
-                </>}
-              </>}
-            </RagDisclosure>
-            <RagDisclosure title={t('settings.rag.imageTitle')} enabled={!!draft.image_pixel_enabled}>
-              <Row label={t('settings.rag.imageEnabled')} hint={t('settings.rag.hint.imageEnabled')}><Switch checked={!!draft.image_pixel_enabled} onCheckedChange={(v) => set('image_pixel_enabled', v)} /></Row>
-              {draft.image_pixel_enabled && <>
-                {field('image_embed_url', t('settings.rag.imageUrl'), { hint: t('settings.rag.hint.imageUrl'), def: 'http://host:8004/v1/embeddings', test: { kind: 'image_embed', modelKey: 'image_embed_model' } })}
-                {field('image_embed_model', t('settings.rag.imageModel'), { hint: t('settings.rag.hint.imageModel'), def: 'qwen3-vl-embed' })}
-              </>}
-            </RagDisclosure>
-            <RagDisclosure title={t('settings.rag.codeTitle')} enabled={!!draft.code_lane_enabled}>
-              <Row label={t('settings.rag.codeEnabled')} hint={t('settings.rag.hint.codeEnabled')}><Switch checked={!!draft.code_lane_enabled} onCheckedChange={(v) => set('code_lane_enabled', v)} /></Row>
-            </RagDisclosure>
-            <RagDisclosure title={t('settings.rag.queryTitle')} enabled={!!draft.query_rewrite_enabled}>
-              <Row label={t('settings.rag.queryRewriteEnabled')} hint={t('settings.rag.hint.queryRewriteEnabled')}><Switch checked={!!draft.query_rewrite_enabled} onCheckedChange={(v) => set('query_rewrite_enabled', v)} /></Row>
-            </RagDisclosure>
-            <RagDisclosure title={t('settings.rag.contextualTitle')} enabled={!!draft.contextual_retrieval_enabled || (draft.auto_keywords_n || 0) > 0 || (draft.auto_questions_n || 0) > 0}>
-              <Row label={t('settings.rag.contextualEnabled')} hint={t('settings.rag.hint.contextualEnabled')}><Switch checked={!!draft.contextual_retrieval_enabled} onCheckedChange={(v) => set('contextual_retrieval_enabled', v)} /></Row>
-              {field('auto_keywords_n', t('settings.rag.autoKeywords'), { type: 'number', hint: t('settings.rag.hint.autoKeywords'), def: 0 })}
-              {field('auto_questions_n', t('settings.rag.autoQuestions'), { type: 'number', hint: t('settings.rag.hint.autoQuestions'), def: 0 })}
-              {(draft.contextual_retrieval_enabled || (draft.auto_keywords_n || 0) > 0 || (draft.auto_questions_n || 0) > 0) && <>
-                {field('llm_url', t('settings.rag.llmUrl'), { hint: t('settings.rag.hint.llmUrl'), def: 'http://host:8000/v1/chat/completions', test: { kind: 'llm', modelKey: 'llm_model' } })}
-                {field('llm_model', t('settings.rag.llmModel'), { hint: t('settings.rag.hint.llmModel'), def: 'qwen3-llm' })}
-              </>}
-            </RagDisclosure>
-            <RagDisclosure title={t('settings.rag.parentTitle')} enabled={!!draft.expand_to_parent_enabled}>
-              <Row label={t('settings.rag.expandToParent')} hint={t('settings.rag.hint.expandToParent')}><Switch checked={!!draft.expand_to_parent_enabled} onCheckedChange={(v) => set('expand_to_parent_enabled', v)} /></Row>
-              {draft.expand_to_parent_enabled && field('parent_max_chars', t('settings.rag.parentMaxChars'), { type: 'number', hint: t('settings.rag.hint.parentMaxChars'), def: 2000 })}
-            </RagDisclosure>
-            <RagDisclosure title={t('settings.rag.pdfVlmTitle')} enabled={!!draft.pdf_vlm_enabled}>
-              <Row label={t('settings.rag.pdfVlmEnabled')} hint={t('settings.rag.hint.pdfVlmEnabled')}><Switch checked={!!draft.pdf_vlm_enabled} onCheckedChange={(v) => set('pdf_vlm_enabled', v)} /></Row>
-              {draft.pdf_vlm_enabled && <>
-                {field('vlm_url', t('settings.rag.vlmUrl'), { hint: t('settings.rag.hint.vlmUrl'), def: 'http://host:8000/v1/chat/completions', test: { kind: 'vlm', modelKey: 'vlm_model' } })}
-                {field('vlm_model', t('settings.rag.vlmModel'), { hint: t('settings.rag.hint.vlmModel'), def: 'qwen3-llm' })}
-                {field('caption_language', t('settings.rag.captionLanguage'), { hint: t('settings.rag.hint.captionLanguage'), def: '' })}
-              </>}
-            </RagDisclosure>
-            <RagDisclosure title={t('settings.rag.redactTitle')} enabled={!!draft.redact_pii_enabled}>
-              <Row label={t('settings.rag.redactEnabled')} hint={t('settings.rag.hint.redactEnabled')}><Switch checked={!!draft.redact_pii_enabled} onCheckedChange={(v) => set('redact_pii_enabled', v)} /></Row>
-            </RagDisclosure>
-          </div>
-        </Section>
-      )}
-
-      <Section title={t('settings.rag.documents')} padded>
-      <div className="space-y-2">
-        <label className="flex flex-wrap items-center gap-2">
-          <Button size="sm" variant="outline" onClick={() => document.getElementById('rag-upload-input')?.click()}>{t('settings.rag.uploadFiles')}</Button>
-          <input
-            id="rag-upload-input" type="file" multiple hidden
-            onChange={(e) => { if (e.target.files?.length) doc(() => personalUpload(Array.from(e.target.files!), { redactPii: uploadRedact, ragId }).then((r) => { refreshIngest(); return r; }), t('settings.rag.uploadQueued')); e.target.value = ''; }}
-          />
-          <Button size="sm" variant="outline" onClick={() => doc(() => personalReload().then((r) => { refreshIngest(); return r; }), t('settings.rag.reindexStarted'))}>{t('settings.rag.reloadIndex')}</Button>
-        </label>
-        {/* Per-upload PII-redaction choice; travels with the files being uploaded
-            and overrides the global toggle for exactly those documents. */}
-        <div className="flex items-center gap-2">
-          <span className="text-xs text-muted-foreground">{t('settings.rag.uploadRedact')}</span>
-          <Select
-            className="w-40 text-xs"
-            value={uploadRedact === null ? 'default' : uploadRedact ? 'on' : 'off'}
-            onChange={(value) => setUploadRedact(value === 'default' ? null : value === 'on')}
-            options={[
-              { value: 'default', label: t('settings.rag.uploadRedactDefault') },
-              { value: 'on', label: t('settings.rag.uploadRedactOn') },
-              { value: 'off', label: t('settings.rag.uploadRedactOff') },
-            ]}
-          />
-        </div>
-        <div className="flex gap-2">
-          <Input placeholder={t('settings.rag.addDirectory')} value={dir} onChange={(e) => setDir(e.target.value)} />
-          <Button size="sm" variant="outline" disabled={!dir.trim()} onClick={() => doc(() => personalAddDirectory(dir, ragId).then((r) => { refreshIngest(); return r; }), t('settings.rag.directoryAdded'))}>{t('common.add')}</Button>
-        </div>
-        {docMsg && <p className={cn('text-xs', docMsg.ok ? 'text-success' : 'text-destructive-foreground')}>{docMsg.text}</p>}
-        <div className="flex gap-2 pt-1">
-          <Input placeholder={t('settings.rag.testSearch')} value={searchQ} onChange={(e) => setSearchQ(e.target.value)} />
-          <Input type="number" className="w-16" value={searchK} onChange={(e) => setSearchK(Number(e.target.value) || 5)} />
-          <Button size="sm" variant="outline" disabled={!searchQ.trim()} onClick={() => {
-            void ragSearch(searchQ, searchK, ragId).then((r) => setSearchOut(JSON.stringify(r, null, 2))).catch((e) => setSearchOut((e as Error).message));
-          }}>{t('settings.rag.search')}</Button>
-        </div>
-        {searchOut && <pre className="max-h-48 overflow-y-auto rounded-lg border bg-muted px-3 py-2 font-mono text-[11px] whitespace-pre-wrap">{searchOut}</pre>}
-      </div>
-      </Section>
-
-      <Section title={t('settings.rag.indexedDocs')} padded>
-        {docs.data && docs.data.available === false ? (
-          <p className="text-xs text-destructive-foreground">{docs.data.error || t('settings.rag.ragUnavailable')}</p>
-        ) : !docs.data?.documents || docs.data.documents.length === 0 ? (
-          <p className="text-xs text-muted-foreground">{t('settings.rag.noDocs')}</p>
-        ) : (
-          <div className="space-y-1">
-            <p className="pb-1 text-[11px] text-muted-foreground">{t('settings.rag.docCount', { n: docs.data.documents.length })}</p>
-            {docs.data.documents.map((d) => (
-              <div key={d.source} className="flex items-center gap-2 rounded-lg border border-border/60 px-3 py-1.5 text-xs">
-                <span className="truncate" title={d.source}>{d.filename}</span>
-                <span className="ml-auto shrink-0 tabular-nums text-muted-foreground">{t('settings.rag.chunksN', { n: d.chunks })}</span>
-                <button className="shrink-0 text-muted-foreground hover:text-destructive-foreground"
-                  onClick={() => void removeDoc(d.source)}>{t('common.delete')}</button>
-              </div>
-            ))}
-          </div>
-        )}
-      </Section>
-    </Page>
-  );
-}
 
 /* ── System (backup + danger zone) ── */
 

@@ -197,6 +197,26 @@ def create_base(
     return entry
 
 
+def set_overrides(rag_id: str, overrides: Dict[str, Any]) -> Dict[str, Any]:
+    """Store the pipeline settings this base deliberately changes.
+
+    Written into the catalogue file rather than settings.json so the ingest
+    worker — a separate container that shares the data volume, not the app DB —
+    resolves the same configuration the app does. See ``src/rag_config.py`` for
+    what may be overridden.
+    """
+    with _lock:
+        entries = _read()
+        entry = entries.get((rag_id or "").strip())
+        if entry is None:
+            raise RagNotFound(rag_id)
+        entry["overrides"] = dict(overrides or {})
+        entry["updated_at"] = time.time()
+        entries[entry["id"]] = entry
+        _write(entries)
+    return entry
+
+
 def update_base(
     rag_id: str,
     name: Optional[str] = None,
@@ -292,6 +312,10 @@ def describe(entry: Dict[str, Any], *, with_counts: bool = True) -> Dict[str, An
         "collection": entry.get("collection"),
         "created_at": entry.get("created_at") or 0.0,
         "updated_at": entry.get("updated_at") or 0.0,
+        # How many pipeline settings this base changes vs. the global defaults —
+        # enough for the catalogue to show "inherits everything" without
+        # shipping the whole (partly secret) config on a list call.
+        "override_count": len(entry.get("overrides") or {}),
     }
     if not with_counts:
         return row

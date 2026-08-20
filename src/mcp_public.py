@@ -403,13 +403,13 @@ def _rag_unavailable_text() -> str:
     return f"The Talos knowledge base is currently unavailable ({reason})."
 
 
-def _search_config() -> Dict[str, Any]:
-    """The saved RAG pipeline config, or {} when settings can't be read."""
+def _search_config(base_id: Optional[str] = None) -> Dict[str, Any]:
+    """The RAG pipeline config for one knowledge base (global defaults plus that
+    base's overrides), or {} when settings can't be read."""
     try:
-        from src.settings import load_settings
+        from src.rag_config import effective_config
 
-        cfg = load_settings().get("rag_pipeline")
-        return cfg if isinstance(cfg, dict) else {}
+        return effective_config(base_id)
     except Exception:
         return {}
 
@@ -423,7 +423,7 @@ def _tool_rag_search(args: Dict[str, Any]) -> str:
     if rag is None:
         raise ToolError(_rag_unavailable_text())
 
-    cfg = _search_config()
+    cfg = _search_config(args.get("rag_id"))
     k = _clamp_k(args.get("k") if args.get("k") is not None else cfg.get("search_top_k", 5))
     # Retrieve a wider candidate set than we return so the reranker has
     # something to work with — same ratio the /api/rag/search route uses.
