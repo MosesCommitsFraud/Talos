@@ -215,11 +215,26 @@ def _public(cfg: dict) -> dict:
     }
 
 
+def _resolve_rag(rag_id, getter):
+    """Fetch the VectorRAG for one knowledge base, 404-ing on an unknown id.
+
+    An unregistered id is a caller mistake (bad URL / stale UI), not a backend
+    outage, so it must not surface as the 503 an unreachable Qdrant produces.
+    """
+    from src.rag_registry import RagNotFound
+
+    try:
+        return getter(rag_id)
+    except RagNotFound:
+        raise HTTPException(404, f"Unknown knowledge base '{rag_id}'")
+
+
 def _reset_rag():
     import src.rag_singleton as _rs
 
-    _rs.rag_instance = None
-    _rs._last_attempt = 0
+    # Clear every knowledge base, not just the default one — an embedding or
+    # Qdrant config change invalidates all of them equally.
+    _rs.reset()
     try:
         from src.embeddings import reset_http_embed_state
 
@@ -232,6 +247,18 @@ def setup_rag_routes():
     router = APIRouter(prefix="/api/rag", tags=["rag"], dependencies=[Depends(require_admin)])
     # Ingest runs in the separate rag-ingest-worker container (RQ). No in-process
     # worker to start here — the app only enqueues and reads job status.
+
+    @router.get("/bases")
+    def list_bases():
+        """The registered knowledge bases (name, description, language, counts).
+
+        The same catalogue the outward REST service serves at ``/v1/rags``
+        (src/rag_api.py) — exposed here too so the Talos UI can offer a picker
+        without going through the other port.
+        """
+        from src.rag_registry import describe, list_bases as _list
+
+        return {"bases": [describe(e) for e in _list()]}
 
     @router.get("/config")
     def get_config():
@@ -458,7 +485,7 @@ def setup_rag_routes():
             raise HTTPException(503, str(e) or e.__class__.__name__)
 
     @router.post("/rebuild")
-    def rebuild_index():
+    def rebuild_index(rag_id: str | None = None):
         """Recreate the Qdrant collection (drops all vectors) AND delete the
         stored RAG uploads so no orphaned big files (videos/PDFs) linger.
 
@@ -467,21 +494,26 @@ def setup_rag_routes():
         never has to touch Qdrant directly. The text + visual collections are
         recreated and every managed upload file is removed (external indexed
         directories are left untouched); re-upload to re-ingest.
+
+        ``rag_id`` picks the knowledge base to rebuild; omitted means the
+        default one.
         """
         _reset_rag()
         from src.rag_singleton import get_rag_manager, last_init_error
 
-        rag = get_rag_manager()
+        rag = _resolve_rag(rag_id, get_rag_manager)
         if not rag or not hasattr(rag, "rebuild_index"):
             from pathlib import Path
 
             import src.rag_singleton as _rs
+            from src.rag_registry import collection_for
             from src.rag_vector import VectorRAG
 
             base_dir = Path(__file__).parent.parent
             rag = VectorRAG(
                 persist_directory=str(base_dir / "data" / "rag"),
                 recreate_index=True,
+                collection_name=collection_for(rag_id),
             )
             if not getattr(rag, "healthy", False):
                 detail = rag.last_error or last_init_error()
@@ -489,7 +521,7 @@ def setup_rag_routes():
                     503,
                     f"RAG rebuild failed: {detail or 'check embedding, Qdrant, and dependencies.'}",
                 )
-            _rs.rag_instance = rag
+            _rs.set_instance(rag_id, rag)
             _rs._last_error = ""
         else:
             ok = rag.rebuild_index()
@@ -520,10 +552,10 @@ def setup_rag_routes():
         }
 
     @router.get("/search")
-    def test_search(q: str, k: int | None = None):
+    def test_search(q: str, k: int | None = None, rag_id: str | None = None):
         from src.rag_singleton import get_rag_manager
 
-        rag = get_rag_manager()
+        rag = _resolve_rag(rag_id, get_rag_manager)
         if not rag or not getattr(rag, "healthy", False):
             raise HTTPException(
                 503, "RAG is not available. Check embedding, Qdrant, and dependencies."
@@ -598,38 +630,38 @@ def setup_rag_routes():
         return {"deleted": rag_worker.delete_job(job_id)}
 
     @router.get("/documents")
-    def list_documents():
+    def list_documents(rag_id: str | None = None):
         from src.rag_singleton import get_rag_manager, last_init_error
 
-        rag = get_rag_manager()
+        rag = _resolve_rag(rag_id, get_rag_manager)
         if not rag or not getattr(rag, "healthy", False):
             # Don't 503 — the UI shows a friendly state with the real reason.
             return {"available": False, "documents": [], "error": last_init_error()}
         return {"available": True, "documents": rag.list_documents()}
 
     @router.get("/documents/chunks")
-    def list_document_chunks(source: str):
+    def list_document_chunks(source: str, rag_id: str | None = None):
         """Every indexed chunk for one source file (explorer/debug view)."""
         from src.rag_singleton import get_rag_manager, last_init_error
 
-        rag = get_rag_manager()
+        rag = _resolve_rag(rag_id, get_rag_manager)
         if not rag or not getattr(rag, "healthy", False):
             return {"available": False, "chunks": [], "error": last_init_error()}
         return {"available": True, "source": source, "chunks": rag.get_document_chunks(source)}
 
     @router.get("/documents/search")
-    def search_document_chunks(q: str, limit: int = 200):
+    def search_document_chunks(q: str, limit: int = 200, rag_id: str | None = None):
         """Keyword scan across every indexed chunk (explorer search box)."""
         from src.rag_singleton import get_rag_manager, last_init_error
 
-        rag = get_rag_manager()
+        rag = _resolve_rag(rag_id, get_rag_manager)
         if not rag or not getattr(rag, "healthy", False):
             return {"available": False, "hits": [], "error": last_init_error()}
         hits = rag.grep_chunks(q, limit=max(1, min(int(limit or 200), 1000)))
         return {"available": True, "query": q, "count": len(hits), "hits": hits}
 
     @router.get("/documents/original")
-    def download_original_document(source: str):
+    def download_original_document(source: str, rag_id: str | None = None):
         """Download the file exactly as it was ingested (not the text dump).
 
         Only files that are actually indexed can be fetched: the source string
@@ -638,13 +670,13 @@ def setup_rag_routes():
         """
         from src.rag_singleton import get_rag_manager
 
-        rag = get_rag_manager()
+        rag = _resolve_rag(rag_id, get_rag_manager)
         if not rag or not getattr(rag, "healthy", False):
             raise HTTPException(503, "RAG is not available")
         return original_file_response(source, rag.list_documents())
 
     @router.get("/documents/export")
-    def export_document(source: str):
+    def export_document(source: str, rag_id: str | None = None):
         """Download everything indexed for one source file as a Markdown dump.
 
         Ingest-quality audit: the file shows exactly the text the retriever sees,
@@ -656,7 +688,7 @@ def setup_rag_routes():
 
         from src.rag_singleton import get_rag_manager
 
-        rag = get_rag_manager()
+        rag = _resolve_rag(rag_id, get_rag_manager)
         if not rag or not getattr(rag, "healthy", False):
             raise HTTPException(503, "RAG is not available")
         chunks = rag.get_document_chunks(source)
@@ -712,11 +744,11 @@ def setup_rag_routes():
         content: str
 
     @router.put("/documents/chunks/{chunk_id}")
-    def update_document_chunk(chunk_id: str, body: ChunkUpdate):
+    def update_document_chunk(chunk_id: str, body: ChunkUpdate, rag_id: str | None = None):
         """Edit one chunk's text and re-embed it in place (same id + meta)."""
         from src.rag_singleton import get_rag_manager
 
-        rag = get_rag_manager()
+        rag = _resolve_rag(rag_id, get_rag_manager)
         if not rag or not getattr(rag, "healthy", False):
             raise HTTPException(503, "RAG is not available")
         if not body.content.strip():
@@ -727,11 +759,11 @@ def setup_rag_routes():
         return {"ok": True, "id": chunk_id}
 
     @router.delete("/documents/chunks/{chunk_id}")
-    def delete_document_chunk(chunk_id: str, source: str):
+    def delete_document_chunk(chunk_id: str, source: str, rag_id: str | None = None):
         """Delete a single indexed chunk (explorer debug action)."""
         from src.rag_singleton import get_rag_manager
 
-        rag = get_rag_manager()
+        rag = _resolve_rag(rag_id, get_rag_manager)
         if not rag or not getattr(rag, "healthy", False):
             raise HTTPException(503, "RAG is not available")
         ok = rag.delete_chunk(source, chunk_id)
@@ -740,10 +772,10 @@ def setup_rag_routes():
         return {"ok": True, "id": chunk_id}
 
     @router.delete("/documents")
-    def delete_document(source: str):
+    def delete_document(source: str, rag_id: str | None = None):
         from src.rag_singleton import get_rag_manager
 
-        rag = get_rag_manager()
+        rag = _resolve_rag(rag_id, get_rag_manager)
         if not rag or not getattr(rag, "healthy", False):
             raise HTTPException(503, "RAG is not available")
         removed = rag.delete_by_source(source)

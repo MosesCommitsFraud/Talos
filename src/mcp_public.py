@@ -379,11 +379,18 @@ def scope_for_tool(name: str) -> Optional[str]:
 # ---------------------------------------------------------------------------
 
 
-def _rag():
-    """The shared VectorRAG instance, or None when Qdrant/deps are unreachable."""
+def _rag(base_id: Optional[str] = None):
+    """The VectorRAG instance for one knowledge base, or None when Qdrant/deps
+    are unreachable.
+
+    ``base_id`` names a knowledge base from ``src/rag_registry.py``; omitted
+    means the default one, which is what the MCP tools use. The outward REST
+    service (``src/rag_api.py``) passes a base so it can reuse these exact tool
+    bodies and hand its callers byte-identical text.
+    """
     from src.rag_singleton import get_rag_manager
 
-    rag = get_rag_manager()
+    rag = get_rag_manager(base_id)
     if not rag or not getattr(rag, "healthy", False):
         return None
     return rag
@@ -412,7 +419,7 @@ def _tool_rag_search(args: Dict[str, Any]) -> str:
     if not query:
         raise ToolError("`query` is required and must not be empty.")
 
-    rag = _rag()
+    rag = _rag(args.get("rag_id"))
     if rag is None:
         raise ToolError(_rag_unavailable_text())
 
@@ -439,6 +446,17 @@ def _tool_rag_search(args: Dict[str, Any]) -> str:
         scope=scope,
         exclude_scopes=exclude,
     )
+    return render_search_results(query, results)
+
+
+def render_search_results(query: str, results: List[Dict[str, Any]]) -> str:
+    """Render search hits as the answer block a model receives.
+
+    Split out of `_tool_rag_search` so the REST service (`src/rag_api.py`) can
+    return byte-identical text *and* the structured hits from a single
+    retrieval — reranking is a remote call, so searching twice to get both
+    views would double the latency of every query.
+    """
     if not results:
         return f"No passages found for {query!r}."
 
@@ -474,23 +492,37 @@ def _tool_rag_search(args: Dict[str, Any]) -> str:
 
 
 def _tool_rag_list_documents(args: Dict[str, Any]) -> str:
-    rag = _rag()
+    rag = _rag(args.get("rag_id"))
     if rag is None:
         raise ToolError(_rag_unavailable_text())
 
     limit = _clamp_limit(args.get("limit"), default=100, hi=500)
     needle = str(args.get("filter") or "").strip().lower()
 
-    docs = rag.list_documents(exclude_scopes=DEFAULT_EXCLUDE_SCOPES) or []
-    if needle:
-        docs = [
-            d
-            for d in docs
-            if needle in str(d.get("filename", "")).lower()
-            or needle in str(d.get("source", "")).lower()
-        ]
+    docs = filter_documents(rag.list_documents(exclude_scopes=DEFAULT_EXCLUDE_SCOPES) or [], needle)
+    return render_document_list(docs, limit, filtered=bool(needle))
+
+
+def filter_documents(docs: List[Dict[str, Any]], needle: str) -> List[Dict[str, Any]]:
+    """Case-insensitive substring match on filename or source path."""
+    needle = (needle or "").strip().lower()
+    if not needle:
+        return docs
+    return [
+        d
+        for d in docs
+        if needle in str(d.get("filename", "")).lower()
+        or needle in str(d.get("source", "")).lower()
+    ]
+
+
+def render_document_list(
+    docs: List[Dict[str, Any]], limit: int, filtered: bool = False
+) -> str:
+    """Render a document listing as the block a model receives. Shared with the
+    REST service so both surfaces describe an index identically."""
     if not docs:
-        return "No indexed documents match." if needle else "No documents are indexed."
+        return "No indexed documents match." if filtered else "No documents are indexed."
 
     total = len(docs)
     shown = docs[:limit]
@@ -512,7 +544,7 @@ def _tool_rag_get_document(args: Dict[str, Any]) -> str:
     if not source:
         raise ToolError("`source` is required. Get it from rag_search or rag_list_documents.")
 
-    rag = _rag()
+    rag = _rag(args.get("rag_id"))
     if rag is None:
         raise ToolError(_rag_unavailable_text())
 

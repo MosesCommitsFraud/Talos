@@ -67,6 +67,7 @@ nav:
   - Backend:
       - API reference: backend/api.md
       - MCP server: backend/mcp-server.md
+      - RAG service (REST): backend/rag-service.md
       - Modules: backend/modules.md
   - Frontend:
       - Overview: frontend/overview.md

@@ -87,7 +87,7 @@ class FakeSkills:
 @pytest.fixture
 def fake_rag(monkeypatch):
     rag = FakeRag()
-    monkeypatch.setattr(mcp_public, "_rag", lambda: rag)
+    monkeypatch.setattr(mcp_public, "_rag", lambda *_: rag)
     monkeypatch.setattr(mcp_public, "_search_config", lambda: {})
     return rag
 
@@ -200,7 +200,7 @@ def test_rag_search_formats_hits_with_source_and_score(monkeypatch):
             }
         ]
     )
-    monkeypatch.setattr(mcp_public, "_rag", lambda: rag)
+    monkeypatch.setattr(mcp_public, "_rag", lambda *_: rag)
     monkeypatch.setattr(mcp_public, "_search_config", lambda: {})
 
     text, is_error = call("rag_search", {"query": "urlaub"})
@@ -220,7 +220,7 @@ def test_rag_search_reports_an_empty_index_without_erroring(fake_rag):
 
 
 def test_rag_tools_report_an_unavailable_index_as_a_tool_error(monkeypatch):
-    monkeypatch.setattr(mcp_public, "_rag", lambda: None)
+    monkeypatch.setattr(mcp_public, "_rag", lambda *_: None)
     monkeypatch.setattr(mcp_public, "_rag_unavailable_text", lambda: "KB down (qdrant refused)")
 
     for tool, args in [
@@ -240,7 +240,7 @@ def test_rag_list_documents_filters_case_insensitively(monkeypatch):
             {"filename": "preisliste.xlsx", "source": "/data/preisliste.xlsx", "chunks": 3},
         ]
     )
-    monkeypatch.setattr(mcp_public, "_rag", lambda: rag)
+    monkeypatch.setattr(mcp_public, "_rag", lambda *_: rag)
 
     text, is_error = call("rag_list_documents", {"filter": "handbuch"})
     assert is_error is False
@@ -249,7 +249,7 @@ def test_rag_list_documents_filters_case_insensitively(monkeypatch):
 
 
 def test_rag_get_document_rejects_an_unindexed_source(monkeypatch):
-    monkeypatch.setattr(mcp_public, "_rag", lambda: FakeRag(chunks=[]))
+    monkeypatch.setattr(mcp_public, "_rag", lambda *_: FakeRag(chunks=[]))
     text, is_error = call("rag_get_document", {"source": "/etc/passwd"})
     assert is_error is True
     assert "No indexed document" in text
@@ -257,7 +257,7 @@ def test_rag_get_document_rejects_an_unindexed_source(monkeypatch):
 
 def test_rag_get_document_joins_chunks_in_order(monkeypatch):
     rag = FakeRag(chunks=[{"content": "erster teil"}, {"content": "zweiter teil"}])
-    monkeypatch.setattr(mcp_public, "_rag", lambda: rag)
+    monkeypatch.setattr(mcp_public, "_rag", lambda *_: rag)
 
     text, is_error = call("rag_get_document", {"source": "/data/doc.pdf"})
     assert is_error is False
@@ -266,7 +266,7 @@ def test_rag_get_document_joins_chunks_in_order(monkeypatch):
 
 def test_rag_get_document_notes_when_chunks_are_capped(monkeypatch):
     rag = FakeRag(chunks=[{"content": f"chunk {i}"} for i in range(10)])
-    monkeypatch.setattr(mcp_public, "_rag", lambda: rag)
+    monkeypatch.setattr(mcp_public, "_rag", lambda *_: rag)
 
     text, _ = call("rag_get_document", {"source": "/data/doc.pdf", "max_chunks": 3})
     assert "Showing 3 of 10 chunks" in text
@@ -275,7 +275,7 @@ def test_rag_get_document_notes_when_chunks_are_capped(monkeypatch):
 
 def test_tool_output_is_truncated(monkeypatch):
     rag = FakeRag(chunks=[{"content": "x" * (mcp_public.MAX_TEXT_CHARS * 2)}])
-    monkeypatch.setattr(mcp_public, "_rag", lambda: rag)
+    monkeypatch.setattr(mcp_public, "_rag", lambda *_: rag)
 
     text, is_error = call("rag_get_document", {"source": "/data/big.pdf"})
     assert is_error is False
@@ -616,7 +616,7 @@ def test_a_browser_session_gets_the_full_read_catalogue():
 
 
 def test_tools_call_wraps_output_in_mcp_content(monkeypatch):
-    monkeypatch.setattr(mcp_public, "_rag", lambda: FakeRag(results=[]))
+    monkeypatch.setattr(mcp_public, "_rag", lambda *_: FakeRag(results=[]))
     monkeypatch.setattr(mcp_public, "_search_config", lambda: {})
 
     out = handle(

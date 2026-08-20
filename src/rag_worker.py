@@ -128,8 +128,9 @@ def _apply_snapshot(snap: Optional[Dict[str, Any]]) -> None:
     os.environ["VIDEO_FRAMES_MAX"] = str(int(snap.get("video_frames_max") or 300))
 
 
-def _fresh_rag():
-    """Reset and rebuild the RAG singleton inside the worker process.
+def _fresh_rag(base_id: Optional[str] = None):
+    """Reset and rebuild the RAG instance for one knowledge base inside the
+    worker process.
 
     Raises with the *actual* init failure (missing deps / Qdrant unreachable /
     embedding endpoint down) so the reason shows up in the job's error instead
@@ -137,9 +138,8 @@ def _fresh_rag():
     """
     import src.rag_singleton as rs
 
-    rs.rag_instance = None
-    rs._last_attempt = 0
-    rag = rs.get_rag_manager()
+    rs.reset()
+    rag = rs.get_rag_manager(base_id)
     if rag is None:
         raise RuntimeError(
             rs.last_init_error() or "RAG system is not available (check Qdrant / embedding config)"
@@ -215,13 +215,19 @@ def _finalize(job, result: Dict[str, Any]) -> None:
 
 
 def ingest_directory_job(
-    directory: str, owner: Optional[str], config_snapshot: Dict[str, Any]
+    directory: str,
+    owner: Optional[str],
+    config_snapshot: Dict[str, Any],
+    base_id: Optional[str] = None,
 ) -> Dict[str, Any]:
+    # ``base_id`` is last and optional so jobs enqueued by an older app version
+    # (three positional args) still run after a deploy — they land in the
+    # default knowledge base, which is where they were headed anyway.
     from rq import get_current_job
 
     _apply_snapshot(config_snapshot)
     job = get_current_job()
-    rag = _fresh_rag()
+    rag = _fresh_rag(base_id)
     if not rag:
         raise RuntimeError("RAG system is not available (check Qdrant / embedding config)")
     result = rag.index_personal_documents(directory, owner=owner, progress_cb=_progress_saver(job))
@@ -230,13 +236,15 @@ def ingest_directory_job(
 
 
 def ingest_files_job(
-    files: List[Tuple[str, Dict[str, Any]]], config_snapshot: Dict[str, Any]
+    files: List[Tuple[str, Dict[str, Any]]],
+    config_snapshot: Dict[str, Any],
+    base_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     from rq import get_current_job
 
     _apply_snapshot(config_snapshot)
     job = get_current_job()
-    rag = _fresh_rag()
+    rag = _fresh_rag(base_id)
     if not rag:
         raise RuntimeError("RAG system is not available (check Qdrant / embedding config)")
     result = rag.index_files([(p, m) for p, m in files], progress_cb=_progress_saver(job))
@@ -249,17 +257,21 @@ def ingest_files_job(
 # ---------------------------------------------------------------------------
 
 
-def start_index_directory(directory: str, owner: Optional[str] = None) -> Dict[str, Any]:
+def start_index_directory(
+    directory: str, owner: Optional[str] = None, base_id: Optional[str] = None
+) -> Dict[str, Any]:
     job = _queue().enqueue(
         "src.rag_worker.ingest_directory_job",
         directory,
         owner,
         _snapshot(),
+        base_id,
         job_timeout=_JOB_TIMEOUT,
         meta={
             "type": "index_directory",
             "directory": directory,
             "owner": owner,
+            "base_id": base_id or "default",
             "indexed_count": 0,
             "failed_count": 0,
             "current_file": "",
@@ -270,17 +282,21 @@ def start_index_directory(directory: str, owner: Optional[str] = None) -> Dict[s
 
 
 def start_index_files(
-    files: List[Tuple[str, Dict[str, Any]]], owner: Optional[str] = None
+    files: List[Tuple[str, Dict[str, Any]]],
+    owner: Optional[str] = None,
+    base_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     job = _queue().enqueue(
         "src.rag_worker.ingest_files_job",
         list(files),
         _snapshot(),
+        base_id,
         job_timeout=_JOB_TIMEOUT,
         meta={
             "type": "index_files",
             "directory": "",
             "owner": owner,
+            "base_id": base_id or "default",
             "file_count": len(files),
             "indexed_count": 0,
             "failed_count": 0,

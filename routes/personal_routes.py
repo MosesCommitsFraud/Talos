@@ -292,6 +292,7 @@ def setup_personal_routes(personal_docs_manager, rag_manager, rag_available):
         request: Request,
         files: List[UploadFile] = File(...),
         redact_pii: Optional[str] = Form(None),
+        rag_id: Optional[str] = Form(None),
         _admin: None = Depends(require_admin),
     ):
         """Admin-only upload into the global RAG knowledge base.
@@ -306,8 +307,19 @@ def setup_personal_routes(personal_docs_manager, rag_manager, rag_available):
         redaction: it is stamped into each file's metadata and wins over the
         global Settings → RAG toggle in either direction; omitted/empty means
         "use the global default".
+
+        ``rag_id`` picks which knowledge base to ingest into; omitted means the
+        default one, which is what the UI has always uploaded to.
         """
-        upload_dir = _personal_upload_dir_for_owner("global")
+        base_id = (rag_id or "").strip() or None
+        if base_id:
+            from src.rag_registry import RagNotFound, get_base
+
+            try:
+                get_base(base_id)
+            except RagNotFound:
+                raise HTTPException(404, f"Unknown knowledge base '{base_id}'")
+        upload_dir = _personal_upload_dir_for_owner("kb-" + base_id if base_id else "global")
         redact_override: Optional[bool] = None
         if redact_pii is not None and redact_pii.strip() != "":
             redact_override = redact_pii.strip().lower() in ("true", "1", "on", "yes")
@@ -381,7 +393,7 @@ def setup_personal_routes(personal_docs_manager, rag_manager, rag_available):
             from src import rag_worker
 
             try:
-                job = rag_worker.start_index_files(to_index, owner=None)
+                job = rag_worker.start_index_files(to_index, owner=None, base_id=base_id)
             except Exception as e:
                 logger.error(f"Failed to enqueue ingest job: {e}")
                 raise HTTPException(

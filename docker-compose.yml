@@ -11,6 +11,12 @@ services:
     container_name: talos
     ports:
       - "${APP_BIND:-127.0.0.1}:${APP_PORT:-7000}:7000"
+      # Outward-facing RAG service (src/rag_api.py) — the knowledge bases as a
+      # plain REST API, separate from the web UI's port. Inside the container it
+      # always listens on 7010; these two vars are host-side only. Bound to
+      # loopback like the app: widen RAG_API_BIND in .env to reach it from the
+      # LAN/VPN, and set RAG_API_KEY when you do — it is otherwise open.
+      - "${RAG_API_BIND:-127.0.0.1}:${RAG_API_PORT:-7010}:7010"
     volumes:
       - ./data:/app/data:z
       - ./logs:/app/logs:z
@@ -42,6 +48,10 @@ services:
       # field (Settings → RAG); the worker receives them as a job snapshot.
       - QDRANT_URL=${QDRANT_URL:-http://qdrant:6333}
       - RAG_SPARSE_MODEL=${RAG_SPARSE_MODEL:-Qdrant/bm25}
+      # Outward RAG service. Empty key = no auth (fine behind the loopback bind
+      # above); set it to a long random string before widening RAG_API_BIND.
+      - RAG_API_ENABLED=${RAG_API_ENABLED:-true}
+      - RAG_API_KEY=${RAG_API_KEY:-}
       # Opt-in audio/video transcription. Harmless when unset: the lane only
       # activates when the admin turns on "Video / ASR" in Advanced settings AND
       # VIDEO_ASR_URL points at a Talos /transcribe endpoint or an OpenAI/vLLM

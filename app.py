@@ -968,6 +968,17 @@ async def _startup_event():
     except Exception as _e:
         logger.warning("Failed to start background-job monitor: %s", _e)
 
+    # Outward-facing RAG service on its own port (src/rag_api.py). Shares this
+    # process so it reuses the warm embedders and Qdrant clients; listens
+    # separately so callers address the knowledge bases as their own service.
+    try:
+        from src import rag_api
+
+        if rag_api.enabled():
+            _startup_tasks.append(asyncio.create_task(rag_api.serve()))
+    except Exception as _e:
+        logger.warning("Failed to start RAG service (non-critical): %s", _e)
+
     # MCP servers can be slow or blocked by local tooling. Connect them after
     # the web server is accepting traffic instead of delaying the whole UI.
     async def _startup_mcp_connections():
@@ -1128,6 +1139,12 @@ async def _startup_event():
 
 async def _shutdown_event():
     logger.info("Application shutting down...")
+    try:
+        from src import rag_api
+
+        rag_api.stop()
+    except Exception as e:
+        logger.warning(f"RAG service shutdown error: {e}")
     if upload_cleanup_task:
         upload_cleanup_task.cancel()
         try:

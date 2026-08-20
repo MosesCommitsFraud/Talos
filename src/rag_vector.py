@@ -30,6 +30,7 @@ import hashlib
 import logging
 import os
 import re
+import threading
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
@@ -86,9 +87,14 @@ DEFAULT_FILE_EXTENSIONS: Set[str] = {
     ".ogg",
 }
 
+# Default text collection — the knowledge base every un-targeted caller gets.
+# Other knowledge bases (src/rag_registry.py) each get their own collection and
+# pass it to VectorRAG as ``collection_name``.
 COLLECTION_NAME = "talos_rag"
 # Separate collection for true pixel embeddings (Phase 5). Kept apart from the
 # text collection because VL image vectors live in a different space/dimension.
+# Per-instance name is ``<text collection>_visual``; this constant is the
+# default base's, kept for callers that reference it by name.
 VISUAL_COLLECTION_NAME = "talos_rag_visual"
 _DEFAULT_SPARSE_MODEL = "Qdrant/bm25"
 
@@ -1160,11 +1166,51 @@ def _embed_base_url() -> str:
     return url or "http://localhost:8001/v1"
 
 
+# FastEmbed sparse embedders are the one *local* model in the pipeline (dense
+# embedding and reranking are remote HTTP calls). With one VectorRAG per
+# knowledge base they would otherwise be loaded once per base, so they are
+# cached per (kind, model) and shared across instances. They are stateless
+# w.r.t. the collection, so sharing is safe.
+_SPARSE_EMBEDDERS: Dict[Tuple[str, str], Any] = {}
+_SPARSE_LOCK = threading.Lock()
+
+
+def _shared_sparse_embedder(kind: str, model: str):
+    key = (kind, model)
+    emb = _SPARSE_EMBEDDERS.get(key)
+    if emb is not None:
+        return emb
+    with _SPARSE_LOCK:
+        emb = _SPARSE_EMBEDDERS.get(key)
+        if emb is not None:
+            return emb
+        from haystack_integrations.components.embedders.fastembed import (
+            FastembedSparseDocumentEmbedder,
+            FastembedSparseTextEmbedder,
+        )
+
+        cls = FastembedSparseTextEmbedder if kind == "text" else FastembedSparseDocumentEmbedder
+        emb = cls(model=model)
+        emb.warm_up()
+        _SPARSE_EMBEDDERS[key] = emb
+        return emb
+
+
 class VectorRAG:
     """Haystack + Qdrant hybrid RAG. Public API kept stable for callers."""
 
-    def __init__(self, persist_directory: str = "data/rag", recreate_index: bool = False):
+    def __init__(
+        self,
+        persist_directory: str = "data/rag",
+        recreate_index: bool = False,
+        collection_name: Optional[str] = None,
+    ):
         self.persist_directory = persist_directory
+        # Which Qdrant collection this instance owns. One instance per
+        # knowledge base; the default base keeps the historical name so no
+        # existing data needs migrating.
+        self.collection_name = (collection_name or COLLECTION_NAME).strip() or COLLECTION_NAME
+        self.visual_collection_name = self.collection_name + "_visual"
         self._store = None
         self._dim: Optional[int] = None
         self._healthy = False
@@ -1247,12 +1293,13 @@ class VectorRAG:
                     # not a connection issue, retrying won't help. Tell the user
                     # exactly what to do.
                     if "vector size" in msg or "already exists" in msg:
+                        name = self.collection_name
                         raise RuntimeError(
-                            f"Embedding dimension mismatch: the '{COLLECTION_NAME}' collection was "
-                            f"created with a different vector size than the current embedding model "
-                            f"({os.getenv('EMBEDDING_MODEL', '')}, dim={self._dim}) returns. Use "
-                            f"'Rebuild index' (or delete the '{COLLECTION_NAME}' collection in Qdrant) "
-                            f"and re-index. Detail: {e}"
+                            f"Embedding dimension mismatch: the '{name}' collection was "
+                            f"created with a different vector size than the current "
+                            f"embedding model ({os.getenv('EMBEDDING_MODEL', '')}, "
+                            f"dim={self._dim}) returns. Use 'Rebuild index' (or delete "
+                            f"the '{name}' collection in Qdrant) and re-index. Detail: {e}"
                         ) from e
                     last_exc = e
                     logger.warning("Qdrant connect attempt %s/6 failed: %s", attempt + 1, e)
@@ -1290,7 +1337,7 @@ class VectorRAG:
         return QdrantDocumentStore(
             url=os.getenv("QDRANT_URL", "").strip(),
             api_key=Secret.from_token(api_key) if api_key else None,
-            index=COLLECTION_NAME,
+            index=self.collection_name,
             embedding_dim=self._dim or 1024,
             use_sparse_embeddings=True,
             sparse_idf=True,  # IDF modifier — required for BM25-style sparse
@@ -1330,24 +1377,12 @@ class VectorRAG:
 
     def _sparse_text_embedder(self):
         if self._sparse_q is None:
-            from haystack_integrations.components.embedders.fastembed import (
-                FastembedSparseTextEmbedder,
-            )
-
-            emb = FastembedSparseTextEmbedder(model=self._sparse_model)
-            emb.warm_up()
-            self._sparse_q = emb
+            self._sparse_q = _shared_sparse_embedder("text", self._sparse_model)
         return self._sparse_q
 
     def _sparse_doc_embedder(self):
         if self._sparse_d is None:
-            from haystack_integrations.components.embedders.fastembed import (
-                FastembedSparseDocumentEmbedder,
-            )
-
-            emb = FastembedSparseDocumentEmbedder(model=self._sparse_model)
-            emb.warm_up()
-            self._sparse_d = emb
+            self._sparse_d = _shared_sparse_embedder("doc", self._sparse_model)
         return self._sparse_d
 
     def _hybrid_retriever(self):
@@ -3252,9 +3287,9 @@ class VectorRAG:
 
         client = self._visual_qdrant()
         existing = {c.name for c in client.get_collections().collections}
-        if VISUAL_COLLECTION_NAME not in existing:
+        if self.visual_collection_name not in existing:
             client.create_collection(
-                VISUAL_COLLECTION_NAME,
+                self.visual_collection_name,
                 vectors_config=VectorParams(size=dim, distance=Distance.COSINE),
             )
         self._visual_dim = dim
@@ -3279,7 +3314,8 @@ class VectorRAG:
             # Stable id per source so re-ingest overwrites rather than duplicates.
             pid = str(_uuid.uuid5(_uuid.NAMESPACE_URL, str(meta.get("source") or path)))
             self._visual_qdrant().upsert(
-                VISUAL_COLLECTION_NAME, points=[PointStruct(id=pid, vector=vec, payload=payload)]
+                self.visual_collection_name,
+                points=[PointStruct(id=pid, vector=vec, payload=payload)],
             )
             return True
         except Exception as e:
@@ -3294,12 +3330,12 @@ class VectorRAG:
             return []
         try:
             existing = {c.name for c in self._visual_qdrant().get_collections().collections}
-            if VISUAL_COLLECTION_NAME not in existing:
+            if self.visual_collection_name not in existing:
                 return []
             vec = self._vl_embed(query)
             hits = (
                 self._visual_qdrant()
-                .query_points(VISUAL_COLLECTION_NAME, query=vec, limit=k, with_payload=True)
+                .query_points(self.visual_collection_name, query=vec, limit=k, with_payload=True)
                 .points
             )
             out: List[Dict[str, Any]] = []
@@ -3553,8 +3589,8 @@ class VectorRAG:
             try:
                 client = self._visual_qdrant()
                 existing = {c.name for c in client.get_collections().collections}
-                if VISUAL_COLLECTION_NAME in existing:
-                    client.delete_collection(VISUAL_COLLECTION_NAME)
+                if self.visual_collection_name in existing:
+                    client.delete_collection(self.visual_collection_name)
                 self._visual_dim = None
             except Exception as e:
                 logger.warning("visual collection rebuild cleanup failed: %s", e)
@@ -3574,7 +3610,7 @@ class VectorRAG:
                 "document_count": count,
                 "embedding_model": f"{os.getenv('EMBEDDING_MODEL', '')} @ {_embed_base_url()}",
                 "persist_directory": self.persist_directory,
-                "collection_name": COLLECTION_NAME,
+                "collection_name": self.collection_name,
                 "vector_backend": self._backend,
                 "sparse_model": self._sparse_model,
                 "embedding_dim": self._dim,
@@ -3858,9 +3894,9 @@ class VectorRAG:
 
                 client = self._visual_qdrant()
                 existing = {c.name for c in client.get_collections().collections}
-                if VISUAL_COLLECTION_NAME in existing:
+                if self.visual_collection_name in existing:
                     client.delete(
-                        VISUAL_COLLECTION_NAME,
+                        self.visual_collection_name,
                         points_selector=Filter(
                             must=[FieldCondition(key="source", match=MatchValue(value=source))]
                         ),
