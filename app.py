@@ -757,6 +757,15 @@ app.include_router(setup_api_token_routes())
 
 logger.info("API token routes initialized")
 
+# Outward-facing MCP server (POST /mcp) — exposes RAG + skills to external MCP
+# clients. Gated by the rag:read / skills:read token scopes above, so it must be
+# registered after the API-token routes that mint them.
+from routes.mcp_public_routes import setup_mcp_public_routes
+
+app.include_router(setup_mcp_public_routes(skills_manager))
+
+logger.info("Public MCP server initialized at /mcp")
+
 # Support tickets (user-filed, admin-triaged)
 from routes.ticket_routes import setup_ticket_routes
 

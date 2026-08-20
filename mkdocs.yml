@@ -66,6 +66,7 @@ nav:
       - RAG pipeline: architecture/rag-pipeline.md
   - Backend:
       - API reference: backend/api.md
+      - MCP server: backend/mcp-server.md
       - Modules: backend/modules.md
   - Frontend:
       - Overview: frontend/overview.md

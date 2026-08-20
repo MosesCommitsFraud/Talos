@@ -25,11 +25,23 @@ ALLOWED_SCOPES = {
     "calendar:write",
     "memory:read",
     "memory:write",
+    # Outward-facing MCP server (POST /mcp). Read-only by design — see
+    # src/mcp_public.py for why there are no matching :write scopes.
+    "rag:read",
+    "skills:read",
+    # Outbound internet through Talos's SearxNG. Separate from rag/skills so a
+    # token can be given knowledge access without also being handed a route to
+    # the public web.
+    "web:read",
 }
 TOKEN_PROFILES = {
     "chat": ["chat"],
     "codex_todos": ["todos:read", "todos:write"],
     "codex_email_drafts": ["email:read", "email:draft", "documents:read", "documents:write"],
+    # One-click profiles for an external MCP client (Claude Desktop/Code, MACS).
+    # `mcp` is knowledge-only; `mcp_web` adds outbound internet on top.
+    "mcp": ["rag:read", "skills:read"],
+    "mcp_web": ["rag:read", "skills:read", "web:read"],
 }
 
 

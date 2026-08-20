@@ -21,3 +21,7 @@ deep research
 Umbenennen nur in kleinbuchstaben
 formeln anzeigen
 download original ingest files
+vorschau tut nicht
+verlinkung im chat tut nicht wenn ki das gibt
+vision funktioniert
+system prompt für user
