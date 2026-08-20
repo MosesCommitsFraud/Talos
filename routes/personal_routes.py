@@ -206,6 +206,14 @@ def setup_personal_routes(personal_docs_manager, rag_manager, rag_available):
             JSON response with indexing results
         """
         directory = directory_request.directory
+        base_id = (directory_request.rag_id or "").strip() or None
+        if base_id:
+            from src.rag_registry import RagNotFound, get_base
+
+            try:
+                get_base(base_id)
+            except RagNotFound:
+                raise HTTPException(404, f"Unknown knowledge base '{base_id}'")
         try:
             directory = _resolve_allowed_personal_dir(directory)
 
@@ -223,7 +231,7 @@ def setup_personal_routes(personal_docs_manager, rag_manager, rag_available):
                 from src import rag_worker
 
                 personal_docs_manager.add_directory(directory, index=False)
-                job = rag_worker.start_index_directory(directory, owner=None)
+                job = rag_worker.start_index_directory(directory, owner=None, base_id=base_id)
                 return {
                     "success": True,
                     "message": f"Started RAG indexing job for {directory}",

@@ -60,6 +60,9 @@ class DirectoryRequest(BaseModel):
     """Request model for directory operations."""
 
     directory: str = Field(..., min_length=1, max_length=500, description="Path to the directory")
+    rag_id: str | None = Field(
+        None, description="Knowledge base to index into; omitted means the default one"
+    )
 
 
 # Response Models

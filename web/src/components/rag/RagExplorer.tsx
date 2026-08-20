@@ -13,15 +13,17 @@ import {
   updateRagChunk,
 } from '@/api/client';
 import { cn } from '@/lib/utils';
+import { ragIdParam } from '@/state/ragBase';
 import { useUi } from '@/state/ui';
 import { Markdown } from '../Markdown';
 import { Button } from '../ui/button';
 import { Dialog, DialogContent } from '../ui/dialog';
 import { Input, Textarea } from '../ui/misc';
+import { useActiveRagBase } from './RagBases';
 
 /** One chunk: rendered markdown by default, switches to a textarea editor that
  *  re-embeds the chunk in place on save. */
-function ChunkCard({ source, chunk, highlight }: { source: string; chunk: RagChunk; highlight?: boolean }) {
+function ChunkCard({ source, chunk, highlight, ragId }: { source: string; chunk: RagChunk; highlight?: boolean; ragId?: string }) {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
   const openLightbox = useUi((s) => s.openLightbox);
@@ -39,13 +41,15 @@ function ChunkCard({ source, chunk, highlight }: { source: string; chunk: RagChu
     if (highlight) cardRef.current?.scrollIntoView({ block: 'center', behavior: 'smooth' });
   }, [highlight]);
 
-  const invalidate = () => queryClient.invalidateQueries({ queryKey: ['rag-chunks', source] });
+  // Prefix-match invalidation: the key now carries the base id, so drop the
+  // trailing segments and let react-query match every base/source variant.
+  const invalidate = () => queryClient.invalidateQueries({ queryKey: ['rag-chunks'] });
   const save = useMutation({
-    mutationFn: () => updateRagChunk(source, chunk.id, draft),
+    mutationFn: () => updateRagChunk(source, chunk.id, draft, ragId),
     onSuccess: () => { setEditing(false); void invalidate(); },
   });
   const remove = useMutation({
-    mutationFn: () => deleteRagChunk(source, chunk.id),
+    mutationFn: () => deleteRagChunk(source, chunk.id, ragId),
     onSuccess: () => { void invalidate(); void queryClient.invalidateQueries({ queryKey: ['rag-documents'] }); },
   });
 
@@ -180,9 +184,19 @@ function ChunkCard({ source, chunk, highlight }: { source: string; chunk: RagChu
  *  a single chunk in place. */
 export function RagExplorer({ open, onOpenChange }: { open: boolean; onOpenChange: (v: boolean) => void }) {
   const { t } = useTranslation();
+  // The explorer inspects whichever knowledge base the workspace is on.
+  const { baseId } = useActiveRagBase();
+  const ragId = ragIdParam(baseId);
   const [selected, setSelected] = useState<string | null>(null);
   const [highlighted, setHighlighted] = useState<string | null>(null);
   const [filter, setFilter] = useState('');
+
+  // A file selected in one base means nothing in another — clear it on switch
+  // so the inspector doesn't sit on a source the new base has never seen.
+  useEffect(() => {
+    setSelected(null);
+    setHighlighted(null);
+  }, [baseId]);
   // Content search hits Qdrant for every chunk, so it runs on a debounced copy
   // of the box rather than on every keystroke; filenames filter instantly.
   const [debounced, setDebounced] = useState('');
@@ -192,15 +206,15 @@ export function RagExplorer({ open, onOpenChange }: { open: boolean; onOpenChang
     return () => clearTimeout(id);
   }, [filter]);
 
-  const docs = useQuery({ queryKey: ['rag-documents'], queryFn: fetchRagDocuments, enabled: open });
+  const docs = useQuery({ queryKey: ['rag-documents', baseId], queryFn: () => fetchRagDocuments(ragId), enabled: open });
   const chunks = useQuery({
-    queryKey: ['rag-chunks', selected],
-    queryFn: () => fetchRagChunks(selected as string),
+    queryKey: ['rag-chunks', baseId, selected],
+    queryFn: () => fetchRagChunks(selected as string, ragId),
     enabled: open && !!selected,
   });
   const search = useQuery({
-    queryKey: ['rag-chunk-search', debounced],
-    queryFn: () => searchRagChunks(debounced),
+    queryKey: ['rag-chunk-search', baseId, debounced],
+    queryFn: () => searchRagChunks(debounced, ragId),
     enabled: open && debounced.length >= 2,
   });
 
@@ -314,7 +328,7 @@ export function RagExplorer({ open, onOpenChange }: { open: boolean; onOpenChang
                     {t('settings.rag.chunksN', { n: chunks.data?.chunks?.length ?? selectedDoc?.chunks ?? 0 })}
                   </span>
                   <a
-                    href={ragDocumentOriginalUrl(selected)}
+                    href={ragDocumentOriginalUrl(selected, ragId)}
                     download
                     aria-label={t('rag.explorer.downloadOriginal')}
                     title={t('rag.explorer.downloadOriginal')}
@@ -323,7 +337,7 @@ export function RagExplorer({ open, onOpenChange }: { open: boolean; onOpenChang
                     <FileDownIcon className="size-3.5" />
                   </a>
                   <a
-                    href={ragDocumentExportUrl(selected)}
+                    href={ragDocumentExportUrl(selected, ragId)}
                     download
                     aria-label={t('rag.explorer.download')}
                     title={t('rag.explorer.download')}
@@ -348,7 +362,7 @@ export function RagExplorer({ open, onOpenChange }: { open: boolean; onOpenChang
                     <p className="text-sm text-muted-foreground">{t('rag.explorer.noChunks')}</p>
                   ) : (
                     chunks.data!.chunks.map((c) => (
-                      <ChunkCard key={c.id} source={selected} chunk={c} highlight={c.id === highlighted} />
+                      <ChunkCard key={c.id} source={selected} chunk={c} highlight={c.id === highlighted} ragId={ragId} />
                     ))
                   )}
                 </div>

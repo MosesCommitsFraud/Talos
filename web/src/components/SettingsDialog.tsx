@@ -83,6 +83,8 @@ import {
 import type { AssistantEndpoint } from '@/api/types';
 import { applyDensity, applyLang, applyTheme, usePrefs, type Density, type Lang, type LlmLang, type Theme, type Visibility } from '@/state/prefs';
 import { useRagConsole } from '@/state/ragConsole';
+import { ragIdParam } from '@/state/ragBase';
+import { RagBases, useActiveRagBase } from './rag/RagBases';
 import { LANGUAGES } from '@/i18n';
 import { cn } from '@/lib/utils';
 import { Button } from './ui/button';
@@ -1317,6 +1319,10 @@ export function RagPanel() {
   const [testingEp, setTestingEp] = useState<keyof RagConfig | null>(null);
   const pushConsole = useRagConsole((s) => s.push);
   const queryClient = useQueryClient();
+  // Everything document-shaped below is scoped to the selected knowledge base;
+  // the pipeline settings above it are global (one embedder, one Qdrant).
+  const { baseId } = useActiveRagBase();
+  const ragId = ragIdParam(baseId);
   useEffect(() => { if (data && !draft) setDraft(data); }, [data, draft]);
   const save = useMutation({
     mutationFn: (cfg: RagConfig) => saveRagConfig(cfg),
@@ -1325,13 +1331,23 @@ export function RagPanel() {
   const test = useMutation({ mutationFn: testRagConfig });
   // Indexed-documents view polls while open. The live ingest queue + worker
   // status now live in the /rag activity rail (RagActivity), not here.
-  const docs = useQuery({ queryKey: ['rag-documents'], queryFn: fetchRagDocuments, refetchInterval: 5000 });
+  const docs = useQuery({
+    // The base is part of the key so switching bases refetches instead of
+    // showing the previous base's documents.
+    queryKey: ['rag-documents', baseId],
+    queryFn: () => fetchRagDocuments(ragId),
+    refetchInterval: 5000,
+  });
   const refreshIngest = () => {
     void queryClient.invalidateQueries({ queryKey: ['rag-jobs'] });
     void queryClient.invalidateQueries({ queryKey: ['rag-documents'] });
+    void queryClient.invalidateQueries({ queryKey: ['rag-bases'] });
   };
   const removeDoc = (source: string) =>
-    deleteRagDocument(source).then(() => queryClient.invalidateQueries({ queryKey: ['rag-documents'] }));
+    deleteRagDocument(source, ragId).then(() => {
+      void queryClient.invalidateQueries({ queryKey: ['rag-documents'] });
+      void queryClient.invalidateQueries({ queryKey: ['rag-bases'] });
+    });
   if (!draft) return <Page><p className="text-sm text-muted-foreground">{t('common.loading')}</p></Page>;
   const set = (k: keyof RagConfig, v: unknown) => setDraft({ ...draft, [k]: v } as RagConfig);
   const str = (k: keyof RagConfig) => String(draft[k] ?? '');
@@ -1393,6 +1409,9 @@ export function RagPanel() {
   };
   return (
     <Page className="gap-5 p-0 [&_.settings-row-hint]:line-clamp-2 [&_.settings-row-hint:hover]:line-clamp-none">
+      {/* Which bases exist, and which one the document sections below act on.
+          First, because everything under it is scoped to that choice. */}
+      <RagBases />
       <Section title={t('settings.rag.pipeline')}>
         <Row label={t('settings.rag.ragEnabled')} hint={t('settings.rag.hint.enabled')}><Switch checked={draft.enabled} onCheckedChange={(v) => set('enabled', v)} /></Row>
         <Row label={t('settings.rag.provider')} hint={t('settings.rag.hint.provider')} stacked>
@@ -1514,7 +1533,7 @@ export function RagPanel() {
           <Button size="sm" variant="outline" onClick={() => document.getElementById('rag-upload-input')?.click()}>{t('settings.rag.uploadFiles')}</Button>
           <input
             id="rag-upload-input" type="file" multiple hidden
-            onChange={(e) => { if (e.target.files?.length) doc(() => personalUpload(Array.from(e.target.files!), { redactPii: uploadRedact }).then((r) => { refreshIngest(); return r; }), t('settings.rag.uploadQueued')); e.target.value = ''; }}
+            onChange={(e) => { if (e.target.files?.length) doc(() => personalUpload(Array.from(e.target.files!), { redactPii: uploadRedact, ragId }).then((r) => { refreshIngest(); return r; }), t('settings.rag.uploadQueued')); e.target.value = ''; }}
           />
           <Button size="sm" variant="outline" onClick={() => doc(() => personalReload().then((r) => { refreshIngest(); return r; }), t('settings.rag.reindexStarted'))}>{t('settings.rag.reloadIndex')}</Button>
         </label>
@@ -1535,14 +1554,14 @@ export function RagPanel() {
         </div>
         <div className="flex gap-2">
           <Input placeholder={t('settings.rag.addDirectory')} value={dir} onChange={(e) => setDir(e.target.value)} />
-          <Button size="sm" variant="outline" disabled={!dir.trim()} onClick={() => doc(() => personalAddDirectory(dir).then((r) => { refreshIngest(); return r; }), t('settings.rag.directoryAdded'))}>{t('common.add')}</Button>
+          <Button size="sm" variant="outline" disabled={!dir.trim()} onClick={() => doc(() => personalAddDirectory(dir, ragId).then((r) => { refreshIngest(); return r; }), t('settings.rag.directoryAdded'))}>{t('common.add')}</Button>
         </div>
         {docMsg && <p className={cn('text-xs', docMsg.ok ? 'text-success' : 'text-destructive-foreground')}>{docMsg.text}</p>}
         <div className="flex gap-2 pt-1">
           <Input placeholder={t('settings.rag.testSearch')} value={searchQ} onChange={(e) => setSearchQ(e.target.value)} />
           <Input type="number" className="w-16" value={searchK} onChange={(e) => setSearchK(Number(e.target.value) || 5)} />
           <Button size="sm" variant="outline" disabled={!searchQ.trim()} onClick={() => {
-            void ragSearch(searchQ, searchK).then((r) => setSearchOut(JSON.stringify(r, null, 2))).catch((e) => setSearchOut((e as Error).message));
+            void ragSearch(searchQ, searchK, ragId).then((r) => setSearchOut(JSON.stringify(r, null, 2))).catch((e) => setSearchOut((e as Error).message));
           }}>{t('settings.rag.search')}</Button>
         </div>
         {searchOut && <pre className="max-h-48 overflow-y-auto rounded-lg border bg-muted px-3 py-2 font-mono text-[11px] whitespace-pre-wrap">{searchOut}</pre>}

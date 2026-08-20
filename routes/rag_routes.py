@@ -117,6 +117,24 @@ class RagPipelineConfig(BaseModel):
     parent_max_chars: int = 2000
 
 
+class RagBaseCreate(BaseModel):
+    """A new knowledge base. `id` is derived from the name when left empty and
+    is immutable afterwards — external callers address bases by it."""
+
+    name: str
+    description: str = ""
+    language: str = ""
+    id: str = ""
+
+
+class RagBaseUpdate(BaseModel):
+    """Descriptive edits only; omitted fields are left as they are."""
+
+    name: str | None = None
+    description: str | None = None
+    language: str | None = None
+
+
 class RagEndpointTest(BaseModel):
     """One endpoint probe from the settings UI. `api_key` may be empty even
     when a key is saved (keys are never echoed to the client), so the route
@@ -253,12 +271,65 @@ def setup_rag_routes():
         """The registered knowledge bases (name, description, language, counts).
 
         The same catalogue the outward REST service serves at ``/v1/rags``
-        (src/rag_api.py) — exposed here too so the Talos UI can offer a picker
+        (src/rag_api.py) — exposed here too so the Talos UI can manage the bases
         without going through the other port.
         """
         from src.rag_registry import describe, list_bases as _list
 
         return {"bases": [describe(e) for e in _list()]}
+
+    @router.post("/bases")
+    def create_base(body: RagBaseCreate):
+        """Register a knowledge base. Its Qdrant collection is created on first
+        use, sized by the embedding model live at that moment."""
+        from src.rag_registry import RagConflict, create_base as _create, describe
+
+        try:
+            entry = _create(
+                name=body.name,
+                description=body.description,
+                language=body.language,
+                rag_id=body.id or None,
+            )
+        except RagConflict as e:
+            raise HTTPException(409, f"A knowledge base with id '{e.args[0]}' already exists")
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+        return describe(entry)
+
+    @router.patch("/bases/{base_id}")
+    def update_base(base_id: str, body: RagBaseUpdate):
+        """Edit a base's name, description or language. Id and collection are
+        immutable — external callers address bases by id."""
+        from src.rag_registry import RagNotFound, describe, update_base as _update
+
+        try:
+            entry = _update(
+                base_id,
+                name=body.name,
+                description=body.description,
+                language=body.language,
+            )
+        except RagNotFound:
+            raise HTTPException(404, f"Unknown knowledge base '{base_id}'")
+        return describe(entry)
+
+    @router.delete("/bases/{base_id}")
+    def delete_base(base_id: str, drop_data: bool = True):
+        """Unregister a base and, unless ``drop_data=false``, drop its vectors.
+
+        The default base cannot be deleted — every un-targeted caller, including
+        Talos chat, resolves to it.
+        """
+        from src.rag_registry import RagNotFound, delete_base as _delete
+
+        try:
+            entry = _delete(base_id, drop_collection=drop_data)
+        except RagNotFound:
+            raise HTTPException(404, f"Unknown knowledge base '{base_id}'")
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+        return {"deleted": entry.get("id"), "dropped_data": bool(drop_data)}
 
     @router.get("/config")
     def get_config():

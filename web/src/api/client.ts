@@ -789,6 +789,60 @@ export async function transcribeVoice(blob: Blob, signal?: AbortSignal): Promise
   return (data.text ?? '').trim();
 }
 
+/* ── Knowledge bases (RAG DBs) ──
+ *  Several named indexes, each backed by its own Qdrant collection. Everything
+ *  document-shaped below takes an optional `ragId`; omitting it targets the
+ *  `default` base, which is what Talos chat itself searches. */
+
+export interface RagBase {
+  id: string;
+  name: string;
+  description: string;
+  language: string;
+  collection: string;
+  created_at: number;
+  updated_at: number;
+  /** Indexed source files. Absent when the row was fetched without counts. */
+  content_count?: number;
+  /** Embedded passages behind those files. */
+  chunk_count?: number;
+  /** False when Qdrant/the embedder can't be reached for this base. */
+  available?: boolean;
+  error?: string;
+}
+
+/** Append `rag_id` only when a base is actually named, so the URLs a plain
+ *  default-base install produces stay exactly what they were before. */
+function withRag(url: string, ragId?: string): string {
+  if (!ragId) return url;
+  return `${url}${url.includes('?') ? '&' : '?'}rag_id=${encodeURIComponent(ragId)}`;
+}
+
+export const fetchRagBases = () => getJSON<{ bases: RagBase[] }>('/api/rag/bases');
+
+export const createRagBase = (body: {
+  name: string;
+  description?: string;
+  language?: string;
+  id?: string;
+}) => postJSON<RagBase>('/api/rag/bases', body);
+
+export const updateRagBase = (
+  id: string,
+  body: { name?: string; description?: string; language?: string },
+) => postJSON<RagBase>(`/api/rag/bases/${encodeURIComponent(id)}`, body, 'PATCH');
+
+export async function deleteRagBase(id: string, dropData = true): Promise<void> {
+  const res = await fetch(
+    `/api/rag/bases/${encodeURIComponent(id)}?drop_data=${dropData ? 'true' : 'false'}`,
+    { method: 'DELETE', credentials: 'same-origin' },
+  );
+  if (!res.ok) {
+    const detail = await res.json().then((j) => j?.detail).catch(() => null);
+    throw new Error(detail || `Delete failed (HTTP ${res.status})`);
+  }
+}
+
 export const fetchRagConfig = () => getJSON<RagConfig>('/api/rag/config');
 
 export async function saveRagConfig(cfg: RagConfig): Promise<void> {
@@ -812,7 +866,8 @@ export const testRagEndpoint = (body: { kind: string; url: string; model?: strin
 
 /** Recreate the Qdrant collection (drops vectors, keeps uploaded files). Used
  *  after an embedding-model change alters the vector dimension. */
-export const ragRebuildIndex = () => postJSON<{ ok?: boolean; message?: string }>('/api/rag/rebuild');
+export const ragRebuildIndex = (ragId?: string) =>
+  postJSON<{ ok?: boolean; message?: string }>(withRag('/api/rag/rebuild', ragId));
 
 export interface Integration { id?: string; name?: string; enabled?: boolean; [key: string]: unknown }
 export const fetchIntegrations = async () =>
@@ -901,19 +956,24 @@ export const deleteIntegration = (id: string) =>
   postJSON(`/api/auth/integrations/${encodeURIComponent(id)}`, undefined, 'DELETE');
 
 /* ── RAG documents ── */
-export const ragSearch = (q: string, k: number) =>
-  getJSON<Record<string, unknown>>(`/api/rag/search?q=${encodeURIComponent(q)}&k=${k}`);
-export const personalAddDirectory = (directory: string) => postJSON('/api/personal/add_directory', { directory });
+export const ragSearch = (q: string, k: number, ragId?: string) =>
+  getJSON<Record<string, unknown>>(
+    withRag(`/api/rag/search?q=${encodeURIComponent(q)}&k=${k}`, ragId),
+  );
+export const personalAddDirectory = (directory: string, ragId?: string) =>
+  postJSON('/api/personal/add_directory', { directory, rag_id: ragId });
 export const personalReload = () => postJSON('/api/personal/reload');
 
 export async function personalUpload(
   files: File[],
-  opts?: { redactPii?: boolean | null },
+  opts?: { redactPii?: boolean | null; ragId?: string },
 ): Promise<Record<string, unknown>> {
   const fd = new FormData();
   for (const f of files) fd.append('files', f, f.name);
   // Explicit per-upload PII-redaction choice; omitted → server uses the global toggle.
   if (opts?.redactPii != null) fd.append('redact_pii', String(opts.redactPii));
+  // Which knowledge base receives the files; omitted → the default base.
+  if (opts?.ragId) fd.append('rag_id', opts.ragId);
   const res = await fetch('/api/personal/upload', { method: 'POST', body: fd, credentials: 'same-origin' });
   if (!res.ok) {
     const detail = await res.json().then((j) => j?.detail).catch(() => null);
@@ -970,8 +1030,10 @@ export async function deleteRagJob(id: string): Promise<void> {
   const res = await fetch(`/api/rag/jobs/${id}`, { method: 'DELETE', credentials: 'same-origin' });
   if (!res.ok) throw new Error(`Delete failed (HTTP ${res.status})`);
 }
-export const fetchRagDocuments = () =>
-  getJSON<{ available: boolean; documents: RagDocument[]; error?: string }>('/api/rag/documents');
+export const fetchRagDocuments = (ragId?: string) =>
+  getJSON<{ available: boolean; documents: RagDocument[]; error?: string }>(
+    withRag('/api/rag/documents', ragId),
+  );
 
 /** One indexed chunk, as stored in Qdrant — the ground truth the retriever
  *  sees. Used by the /rag explorer's debug/edit view. */
@@ -991,11 +1053,11 @@ export interface RagChunk {
 }
 /** Download URL for the Markdown dump of everything indexed for one source
  *  file (ingest-quality audit; served as an attachment). */
-export const ragDocumentExportUrl = (source: string) =>
-  `/api/rag/documents/export?source=${encodeURIComponent(source)}`;
+export const ragDocumentExportUrl = (source: string, ragId?: string) =>
+  withRag(`/api/rag/documents/export?source=${encodeURIComponent(source)}`, ragId);
 /** Download URL for the original, unmodified file that was ingested. */
-export const ragDocumentOriginalUrl = (source: string) =>
-  `/api/rag/documents/original?source=${encodeURIComponent(source)}`;
+export const ragDocumentOriginalUrl = (source: string, ragId?: string) =>
+  withRag(`/api/rag/documents/original?source=${encodeURIComponent(source)}`, ragId);
 export interface RagChunkHit {
   id: string;
   source: string;
@@ -1006,32 +1068,35 @@ export interface RagChunkHit {
   snippet: string;
 }
 /** Literal keyword scan across every indexed chunk (explorer search box). */
-export const searchRagChunks = (q: string) =>
+export const searchRagChunks = (q: string, ragId?: string) =>
   getJSON<{ available: boolean; query: string; count: number; hits: RagChunkHit[]; error?: string }>(
-    `/api/rag/documents/search?q=${encodeURIComponent(q)}`,
+    withRag(`/api/rag/documents/search?q=${encodeURIComponent(q)}`, ragId),
   );
-export const fetchRagChunks = (source: string) =>
+export const fetchRagChunks = (source: string, ragId?: string) =>
   getJSON<{ available: boolean; source: string; chunks: RagChunk[]; error?: string }>(
-    `/api/rag/documents/chunks?source=${encodeURIComponent(source)}`,
+    withRag(`/api/rag/documents/chunks?source=${encodeURIComponent(source)}`, ragId),
   );
-export const updateRagChunk = (source: string, id: string, content: string) =>
+export const updateRagChunk = (source: string, id: string, content: string, ragId?: string) =>
   postJSON<{ ok: boolean; id: string }>(
-    `/api/rag/documents/chunks/${encodeURIComponent(id)}`,
+    withRag(`/api/rag/documents/chunks/${encodeURIComponent(id)}`, ragId),
     { source, content },
     'PUT',
   );
-export async function deleteRagChunk(source: string, id: string): Promise<void> {
+export async function deleteRagChunk(source: string, id: string, ragId?: string): Promise<void> {
   const res = await fetch(
-    `/api/rag/documents/chunks/${encodeURIComponent(id)}?source=${encodeURIComponent(source)}`,
+    withRag(
+      `/api/rag/documents/chunks/${encodeURIComponent(id)}?source=${encodeURIComponent(source)}`,
+      ragId,
+    ),
     { method: 'DELETE', credentials: 'same-origin' },
   );
   if (!res.ok) throw new Error(`Delete failed (HTTP ${res.status})`);
 }
-export async function deleteRagDocument(source: string): Promise<void> {
-  const res = await fetch(`/api/rag/documents?source=${encodeURIComponent(source)}`, {
-    method: 'DELETE',
-    credentials: 'same-origin',
-  });
+export async function deleteRagDocument(source: string, ragId?: string): Promise<void> {
+  const res = await fetch(
+    withRag(`/api/rag/documents?source=${encodeURIComponent(source)}`, ragId),
+    { method: 'DELETE', credentials: 'same-origin' },
+  );
   if (!res.ok) throw new Error(`Delete failed (HTTP ${res.status})`);
 }
 

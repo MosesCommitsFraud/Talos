@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { useUi } from '@/state/ui';
 import { RagPanel } from '../SettingsDialog';
 import { RagActivity } from './RagActivity';
+import { RagBaseSelect } from './RagBases';
 
 /** The /rag workspace. The left column has a pinned title bar above its
  *  scrollable settings; the activity rail remains fixed on the right. */
@@ -24,6 +25,10 @@ export function RagWorkspace() {
               <ArrowLeftIcon className="size-4" />
             </button>
             <h1 className="min-w-0 truncate text-xl font-semibold tracking-tight">{t('rag.title')}</h1>
+            {/* Which knowledge base the whole workspace is pointed at. Hidden
+                while only the default base exists, so a single-base install
+                sees no extra chrome. */}
+            <RagBaseSelect className="ml-auto" />
           </div>
         </header>
         <div className="min-h-0 flex-1 overflow-y-auto [-webkit-mask-image:linear-gradient(to_bottom,transparent_0,black_24px)] [mask-image:linear-gradient(to_bottom,transparent_0,black_24px)]">

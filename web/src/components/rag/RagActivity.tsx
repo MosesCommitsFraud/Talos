@@ -13,9 +13,11 @@ import {
   type RagJob,
 } from '@/api/client';
 import { cn } from '@/lib/utils';
+import { ragIdParam } from '@/state/ragBase';
 import { useRagConsole } from '@/state/ragConsole';
 import { Button } from '../ui/button';
 import { Dialog, DialogContent } from '../ui/dialog';
+import { useActiveRagBase } from './RagBases';
 import { RagExplorer } from './RagExplorer';
 
 const TERMINAL = ['completed', 'failed', 'cancelled'];
@@ -67,15 +69,21 @@ export function RagActivity() {
   const [explorerOpen, setExplorerOpen] = useState(false);
   const [rebuildConfirmOpen, setRebuildConfirmOpen] = useState(false);
 
+  // Drops and rebuilds act on the base selected in the workspace, not always
+  // the default one.
+  const { baseId, base } = useActiveRagBase();
+  const ragId = ragIdParam(baseId);
+
   const jobs = useQuery({ queryKey: ['rag-jobs'], queryFn: fetchRagJobs, refetchInterval: 1500 });
   const diag = useQuery({ queryKey: ['rag-worker-diag'], queryFn: fetchRagWorkerDiag, refetchInterval: 5000 });
   const refresh = () => {
     void queryClient.invalidateQueries({ queryKey: ['rag-jobs'] });
     void queryClient.invalidateQueries({ queryKey: ['rag-documents'] });
+    void queryClient.invalidateQueries({ queryKey: ['rag-bases'] });
   };
 
   const upload = useMutation({
-    mutationFn: (files: File[]) => personalUpload(files),
+    mutationFn: (files: File[]) => personalUpload(files, { ragId }),
     onSuccess: (r, files) => {
       const failed = Number((r as { failed_count?: number })?.failed_count ?? 0);
       const errs = (r as { errors?: string[] })?.errors;
@@ -89,7 +97,7 @@ export function RagActivity() {
     onError: (e) => setMsg({ text: (e as Error).message, ok: false }),
   });
   const rebuild = useMutation({
-    mutationFn: ragRebuildIndex,
+    mutationFn: () => ragRebuildIndex(ragId),
     onSuccess: (r) => { setMsg({ text: r.message || t('rag.rebuildDone'), ok: true }); refresh(); },
     onError: (e) => setMsg({ text: (e as Error).message, ok: false }),
   });
@@ -136,6 +144,9 @@ export function RagActivity() {
         <UploadCloudIcon className="size-6 text-muted-foreground" />
         <div className="text-sm font-medium">{t('rag.dropTitle')}</div>
         <div className="text-[11px] text-muted-foreground">{t('rag.dropHint')}</div>
+        {/* Name the target base explicitly — dropping into the wrong index is
+            expensive to undo (re-ingest), and the picker is in the header. */}
+        {base && <div className="text-[11px] font-medium text-foreground/70">{t('rag.dropTarget', { name: base.name })}</div>}
         <input ref={fileInput} type="file" multiple hidden
           onChange={(e) => { if (e.target.files?.length) upload.mutate(Array.from(e.target.files)); e.target.value = ''; }} />
       </div>

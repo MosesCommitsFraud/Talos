@@ -332,6 +332,9 @@ def _job_to_dict(job) -> Dict[str, Any]:
         "status": mapped,
         "directory": meta.get("directory", ""),
         "owner": meta.get("owner"),
+        # Which knowledge base this job ingests into, so the queue view can
+        # label rows once more than one base exists.
+        "base_id": meta.get("base_id") or "default",
         "indexed_count": int(meta.get("indexed_count") or 0),
         "failed_count": int(meta.get("failed_count") or 0),
         # Files done / total (uploads carry a known total → a real % bar; dir
