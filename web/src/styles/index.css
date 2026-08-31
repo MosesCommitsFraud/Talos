@@ -408,29 +408,33 @@ body::after {
   .shimmer-text { animation: none; }
 }
 
-/* ── Tool-group label roll ──
-   When the running tool changes ("Running a command" → "Querying SQL") the new
-   label rolls up into place from below. The element is keyed on its text in
-   ToolGroup, so React remounts it and the animation replays on every change.
-   The parent clips overflow, so the motion reads as a scroll rather than as
-   text drifting over its neighbours. */
-.tool-label-roll {
-  animation: tool-label-roll 260ms cubic-bezier(0.2, 0, 0, 1);
-}
-@keyframes tool-label-roll {
-  from { opacity: 0; transform: translateY(0.85em); }
-  to { opacity: 1; transform: translateY(0); }
+/* ── Title skeleton ──
+   Placeholder bar standing in for a session title until the model has written
+   one. A soft highlight sweeps across a muted base (same keyframes as the
+   "Working" shimmer) so the row reads as loading rather than as empty. */
+.skeleton-bar {
+  border-radius: 4px;
+  background-color: color-mix(in srgb, var(--muted-foreground) 20%, transparent);
+  background-image: linear-gradient(
+    100deg,
+    transparent 35%,
+    color-mix(in srgb, var(--muted-foreground) 26%, transparent) 50%,
+    transparent 65%
+  );
+  background-size: 200% 100%;
+  background-repeat: no-repeat;
+  animation: shimmer-sweep 1.6s linear infinite;
 }
 @media (prefers-reduced-motion: reduce) {
-  .tool-label-roll { animation: none; }
+  .skeleton-bar { animation: none; }
 }
 
 /* ── Odometer digits ──
    The live token count changes several times a second, and swapping the text
    outright makes it flicker. Each character sits in its own clipped cell and
    the new one scrolls up into place instead, the way a mechanical counter
-   turns. Same trick as the label roll above: the inner span is keyed on the
-   character, so React remounts it and replays the animation on every change.
+   turns. The inner span is keyed on the character, so React remounts it and
+   replays the animation on every change.
 
    Everything about the type is inherited — font, size, weight, line-height —
    so the digits are the same text as the words beside them. Clipping is what

@@ -8,7 +8,8 @@ import { useChat } from '@/state/chat';
 import { usePrefs } from '@/state/prefs';
 import { useUi } from '@/state/ui';
 import { cn } from '@/lib/utils';
-import { Tooltip } from './ui/misc';
+import { isTitlePending } from '@/lib/sessionTitle';
+import { Skeleton, Tooltip } from './ui/misc';
 import { Menu, MenuItem, MenuPopup, MenuSeparator, MenuTrigger } from './ui/menu';
 
 /** Floating chat header (where the old solid header used to sit): the session
@@ -32,7 +33,14 @@ export function IncognitoToggle() {
   const [dumping, setDumping] = useState(false);
 
   const { data: sessions } = useQuery({ queryKey: ['sessions'], queryFn: fetchSessions });
-  const title = sessions?.find((s) => s.id === sessionId)?.name ?? '';
+  const session = sessions?.find((s) => s.id === sessionId);
+  const title = session?.name ?? '';
+  // Placeholder name → the naming model is still working; show a skeleton
+  // rather than a title that will be swapped out a second later.
+  // (While the list itself is loading there is no name to judge, so the header
+  // waits with a skeleton too; a session missing from a loaded list — e.g. an
+  // archived one — keeps the old blank-title behaviour.)
+  const titlePending = !!sessionId && (sessions === undefined || isTitlePending(session));
 
   const { data: artifacts } = useQuery({
     queryKey: ['artifacts', sessionId],
@@ -91,9 +99,15 @@ export function IncognitoToggle() {
         <div className="min-w-0 flex-1">
           {/* pointer-events only on the text itself, so the empty space next to
               a short title doesn't swallow clicks meant for the chat. */}
-          <span className="pointer-events-auto inline-block max-w-full truncate align-middle text-sm font-medium leading-7 text-foreground">
-            {title}
-          </span>
+          {titlePending ? (
+            <div className="flex h-7 items-center">
+              <Skeleton className="h-3.5 w-40 min-w-0" label={t('chatHeader.titlePending')} />
+            </div>
+          ) : (
+            <span className="pointer-events-auto inline-block max-w-full truncate align-middle text-sm font-medium leading-7 text-foreground">
+              {title}
+            </span>
+          )}
         </div>
         <div className="pointer-events-auto flex shrink-0 items-center gap-1">
           {hasArtifacts && (() => {

@@ -42,8 +42,9 @@ import type { Session } from '@/api/types';
 import { selectChatStatus, selectFolderStatus, useChat } from '@/state/chat';
 import { usePrefs, type SortMode } from '@/state/prefs';
 import { cn, formatRelativeTime, timestampMs } from '@/lib/utils';
+import { anyTitlePending, isTitlePending } from '@/lib/sessionTitle';
 import { TalosLogo } from './TalosLogo';
-import { Tooltip } from './ui/misc';
+import { Skeleton, Tooltip } from './ui/misc';
 import { KeybindingPill } from './ui/kbd';
 import {
   ContextMenu,
@@ -125,6 +126,7 @@ function SessionRow({ session, folders }: { session: Session; folders: string[] 
   const [mode, setMode] = useState<'idle' | 'rename' | 'folder'>('idle');
   const [draft, setDraft] = useState('');
   const pinned = !!session.is_important;
+  const titlePending = isTitlePending(session);
 
   const refresh = () => queryClient.invalidateQueries({ queryKey: ['sessions'] });
 
@@ -182,19 +184,31 @@ function SessionRow({ session, folders }: { session: Session; folders: string[] 
           )}
         >
           {pinned && <PinIcon className="size-3 shrink-0 -rotate-45 text-muted-foreground" />}
-          {/* When the hover timestamp overlays the row (idle only — status
-              labels reserve their own space), mask the title's tail to
-              transparent so the text fades out under the time, regardless
-              of the row's background color. */}
-          <ScrollableSessionTitle
-            className={
-              status
-                ? undefined
-                : 'group-hover:[mask-image:linear-gradient(to_right,black_calc(100%-7rem),transparent_calc(100%-2rem))]'
-            }
-          >
-            {session.name || t('common.untitled')}
-          </ScrollableSessionTitle>
+          {/* Until the model has written a title, the row shows a skeleton
+              instead of the placeholder ("Chat: <first words>") the backend
+              parks on the session — a title that changes under the user reads
+              worse than one that is visibly still loading. */}
+          {titlePending ? (
+            /* flex-1 like the real title, so the status label / hover timestamp
+               keep sitting at the right edge of the row. */
+            <div className="min-w-0 flex-1">
+              <Skeleton className="my-[3px] h-3.5 w-28 max-w-full" label={t('sidebar.titlePending')} />
+            </div>
+          ) : (
+            /* When the hover timestamp overlays the row (idle only — status
+               labels reserve their own space), mask the title's tail to
+               transparent so the text fades out under the time, regardless
+               of the row's background color. */
+            <ScrollableSessionTitle
+              className={
+                status
+                  ? undefined
+                  : 'group-hover:[mask-image:linear-gradient(to_right,black_calc(100%-7rem),transparent_calc(100%-2rem))]'
+              }
+            >
+              {session.name || t('common.untitled')}
+            </ScrollableSessionTitle>
+          )}
           {status === 'working' ? (
             // Running turn — a shimmering "Working" label, shown even when this
             // chat isn't the one on screen so background turns are visible.
@@ -542,7 +556,14 @@ export function Sidebar({
   onOpenTicketDialog: () => void;
 }) {
   const { t } = useTranslation();
-  const { data: sessions } = useQuery({ queryKey: ['sessions'], queryFn: fetchSessions, refetchInterval: 30_000 });
+  // While a chat is still waiting for its generated title, poll fast so the
+  // skeleton is replaced the moment the backend's naming task finishes;
+  // otherwise the list only needs the lazy 30s refresh.
+  const { data: sessions } = useQuery({
+    queryKey: ['sessions'],
+    queryFn: fetchSessions,
+    refetchInterval: (query) => (anyTitlePending(query.state.data) ? 2_000 : 30_000),
+  });
   const auth = useAuth();
   const newChat = useChat((s) => s.newChat);
 

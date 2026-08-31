@@ -65,3 +65,19 @@ export function Textarea({ className, ...props }: React.TextareaHTMLAttributes<H
     />
   );
 }
+
+/* ── Skeleton ──
+   Loading placeholder for a piece of text that has not arrived yet (today: the
+   auto-generated session title, in the sidebar and the chat header). Sized by
+   the caller via className; `w-*` and `h-*` decide the bar's footprint. */
+export function Skeleton({ className, label, ...props }: React.HTMLAttributes<HTMLDivElement> & { label?: string }) {
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      aria-label={label}
+      className={cn('skeleton-bar h-3.5 w-32', className)}
+      {...props}
+    />
+  );
+}
