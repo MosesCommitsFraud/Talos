@@ -1,4 +1,4 @@
-import { ChevronDownIcon } from 'lucide-react';
+import { ChevronRightIcon } from 'lucide-react';
 import { type ReactNode, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { ToolCall } from '@/api/types';
@@ -118,7 +118,7 @@ export function ToolGroup({ entries, showWidgets = true }: { entries: GroupEntry
         </span>
         <span ref={extrasRef} className="flex shrink-0 items-center gap-1.5">
           {stat && <DiffStatBadge added={stat.added} removed={stat.removed} />}
-          <ChevronDownIcon className={`size-3.5 shrink-0 opacity-60 transition-transform ${open ? 'rotate-180' : ''}`} />
+          <ChevronRightIcon className={`size-3.5 shrink-0 opacity-60 transition-transform ${open ? 'rotate-90' : ''}`} />
         </span>
       </button>
       <Collapse open={open}>
