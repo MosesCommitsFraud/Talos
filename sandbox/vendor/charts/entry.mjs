@@ -32,11 +32,10 @@ import {
   ruleY,
   stack,
   text,
+  boxY,
 } from '@tanstack/charts'
-import { boxY } from '@tanstack/charts'
 import { scaleBand } from '@tanstack/charts/scales/band'
 import { scaleLinear } from '@tanstack/charts/scales/linear'
-import { scaleOrdinal } from '@tanstack/charts/scales/ordinal'
 import { scalePoint } from '@tanstack/charts/scales/point'
 import { tooltip } from '@tanstack/charts/tooltip'
 import {
@@ -437,7 +436,12 @@ BUILD.heatmap = (spec, ctx) => {
         y: 'y',
         text: (row) => ctx.value(row.v),
         fontSize: 10,
-        fill: VAR.ink2,
+        // The ramp runs light-to-dark on a white card and dark-to-light on a
+        // black one, so a fixed ink colour is unreadable in exactly one of the
+        // two modes. The top half of the ramp always takes the card colour and
+        // the bottom half always takes the ink — one rule, correct in both.
+        fill: (row) =>
+          row.v != null && high > low && (row.v - low) / (high - low) >= 0.5 ? VAR.surface : VAR.ink,
       }),
     )
   }

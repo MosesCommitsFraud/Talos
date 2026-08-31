@@ -137,11 +137,7 @@ function ChatModeDropdown() {
           aria-label={t('composer.mode.label')}
           className={cn(
             'flex h-6 shrink-0 items-center pt-[2px] gap-1.5 rounded-[4.5px] border border-transparent px-1 text-xs font-medium whitespace-nowrap outline-none transition-colors focus:outline-none focus-visible:outline-none sm:h-5 sm:px-1.5 [&_svg]:size-3.5 [&_svg]:shrink-0 [&_svg]:-translate-y-px',
-            mode === 'full'
-              // Same chip, two hues: a borderless warm-olive badge on white, the
-              // original bright yellow on dark, where olive would go muddy.
-              ? 'bg-[#f6f2e1] text-[#95843a] hover:bg-[#f1ebd3] hover:text-[#7e6e2c] dark:bg-yellow-400/10 dark:text-yellow-400 dark:hover:bg-yellow-400/15 dark:hover:text-yellow-200'
-              : 'text-foreground/80 hover:bg-accent hover:text-foreground/90 dark:text-foreground/65',
+            'text-foreground/80 hover:bg-accent hover:text-foreground/90 dark:text-foreground/65',
           )}
         >
           <span className="sr-only sm:not-sr-only">{active.label}</span>
