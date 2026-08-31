@@ -254,6 +254,23 @@ def _read_output(rec: Dict[str, Any]) -> str:
     return txt
 
 
+def output_tail(rec: Dict[str, Any], limit: int) -> str:
+    """Last `limit` characters of a job's captured output.
+
+    The UI's task tray polls this every couple of seconds while a job runs, so
+    it takes the TAIL rather than `_read_output`'s head+tail: someone watching a
+    live log is watching the bottom of it, and the head stopped changing minutes
+    ago.
+    """
+    try:
+        txt = Path(rec["log_path"]).read_text(encoding="utf-8", errors="replace")
+    except Exception:
+        return ""
+    if len(txt) <= limit:
+        return txt
+    return "…[earlier output trimmed]…\n" + txt[-limit:]
+
+
 def _prune(jobs: Dict[str, Dict[str, Any]], now: float) -> bool:
     """Drop records (and their on-disk files) for jobs that finished, were
     followed up, and are older than the retention window. Mutates `jobs`."""
