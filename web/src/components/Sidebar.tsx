@@ -42,7 +42,7 @@ import type { Session } from '@/api/types';
 import { selectChatStatus, selectFolderStatus, useChat } from '@/state/chat';
 import { usePrefs, type SortMode } from '@/state/prefs';
 import { cn, formatRelativeTime, timestampMs } from '@/lib/utils';
-import { anyTitlePending, isTitlePending } from '@/lib/sessionTitle';
+import { anyTitlePending, isTitlePending, placeholderTitleText } from '@/lib/sessionTitle';
 import { TalosLogo } from './TalosLogo';
 import { Skeleton, Tooltip } from './ui/misc';
 import { KeybindingPill } from './ui/kbd';
@@ -192,7 +192,11 @@ function SessionRow({ session, folders }: { session: Session; folders: string[] 
             /* flex-1 like the real title, so the status label / hover timestamp
                keep sitting at the right edge of the row. */
             <div className="min-w-0 flex-1">
-              <Skeleton className="my-[3px] h-3.5 w-28 max-w-full" label={t('sidebar.titlePending')} />
+              <Skeleton
+                className="my-[3px] h-3.5"
+                text={placeholderTitleText(session.name)}
+                label={t('sidebar.titlePending')}
+              />
             </div>
           ) : (
             /* When the hover timestamp overlays the row (idle only — status

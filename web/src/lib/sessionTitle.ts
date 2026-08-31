@@ -29,6 +29,16 @@ export function isTitlePending(session: Pick<Session, 'name' | 'updated_at' | 'c
   return Date.now() - started < TITLE_GRACE_MS;
 }
 
+/** The placeholder text the skeleton stands in for — the backend's "Chat: …"
+ *  name without its marker prefix. Used to size the bar, so each chat's
+ *  skeleton is as wide as the title it is holding a place for instead of every
+ *  row showing the same generic stub. Empty when there is nothing to measure. */
+export function placeholderTitleText(name: string | null | undefined): string {
+  const value = (name ?? '').trim();
+  if (!value || value === 'Chat' || !isPlaceholderName(value)) return '';
+  return value.startsWith('Chat:') ? value.slice('Chat:'.length).trim() : value;
+}
+
 /** True when any session in the list is waiting for its generated title — used
  *  to poll the session list faster until the title lands. */
 export function anyTitlePending(sessions: Session[] | undefined): boolean {

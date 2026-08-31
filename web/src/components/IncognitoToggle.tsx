@@ -8,7 +8,7 @@ import { useChat } from '@/state/chat';
 import { usePrefs } from '@/state/prefs';
 import { useUi } from '@/state/ui';
 import { cn } from '@/lib/utils';
-import { isTitlePending } from '@/lib/sessionTitle';
+import { isTitlePending, placeholderTitleText } from '@/lib/sessionTitle';
 import { Skeleton, Tooltip } from './ui/misc';
 import { Menu, MenuItem, MenuPopup, MenuSeparator, MenuTrigger } from './ui/menu';
 
@@ -100,8 +100,12 @@ export function IncognitoToggle() {
           {/* pointer-events only on the text itself, so the empty space next to
               a short title doesn't swallow clicks meant for the chat. */}
           {titlePending ? (
-            <div className="flex h-7 items-center">
-              <Skeleton className="h-3.5 w-40 min-w-0" label={t('chatHeader.titlePending')} />
+            <div className="flex h-7 items-center text-sm font-medium">
+              <Skeleton
+                className="h-3.5"
+                text={placeholderTitleText(session?.name)}
+                label={t('chatHeader.titlePending')}
+              />
             </div>
           ) : (
             <span className="pointer-events-auto inline-block max-w-full truncate align-middle text-sm font-medium leading-7 text-foreground">

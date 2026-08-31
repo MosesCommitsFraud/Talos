@@ -428,20 +428,34 @@ body::after {
    one. A soft highlight sweeps across a muted base (same keyframes as the
    "Working" shimmer) so the row reads as loading rather than as empty. */
 .skeleton-bar {
+  position: relative;
+  overflow: hidden;
   border-radius: 4px;
   background-color: color-mix(in srgb, var(--muted-foreground) 20%, transparent);
+}
+/* The highlight is its own full-width layer sliding across the bar, rather than
+   an oversized background whose position is animated — a background-position
+   sweep is sized against the element, so on a short bar the lit band only ever
+   covered part of it. Sliding a band as wide as the bar itself from one edge to
+   the other lights up every pixel on the way past. */
+.skeleton-bar::after {
+  content: '';
+  position: absolute;
+  inset: 0;
   background-image: linear-gradient(
-    100deg,
-    transparent 35%,
-    color-mix(in srgb, var(--muted-foreground) 26%, transparent) 50%,
-    transparent 65%
+    90deg,
+    transparent 0%,
+    color-mix(in srgb, var(--muted-foreground) 30%, transparent) 50%,
+    transparent 100%
   );
-  background-size: 200% 100%;
-  background-repeat: no-repeat;
-  animation: shimmer-sweep 1.6s linear infinite;
+  transform: translateX(-100%);
+  animation: skeleton-sweep 1.6s ease-in-out infinite;
+}
+@keyframes skeleton-sweep {
+  to { transform: translateX(100%); }
 }
 @media (prefers-reduced-motion: reduce) {
-  .skeleton-bar { animation: none; }
+  .skeleton-bar::after { animation: none; content: none; }
 }
 
 /* ── Odometer digits ──

@@ -68,16 +68,26 @@ export function Textarea({ className, ...props }: React.TextareaHTMLAttributes<H
 
 /* ── Skeleton ──
    Loading placeholder for a piece of text that has not arrived yet (today: the
-   auto-generated session title, in the sidebar and the chat header). Sized by
-   the caller via className; `w-*` and `h-*` decide the bar's footprint. */
-export function Skeleton({ className, label, ...props }: React.HTMLAttributes<HTMLDivElement> & { label?: string }) {
+   auto-generated session title, in the sidebar and the chat header).
+
+   Pass `text` to size the bar off the words it stands in for: the text is laid
+   out invisibly inside the bar (in the inherited font), so the placeholder
+   inherits its real width and every row gets a bar of its own length instead of
+   a uniform stub. Without it the bar falls back to a fixed width; `w-*` / `h-*`
+   from the caller override either. A floor on the width keeps a one-word
+   placeholder from rendering as a stub that reads like a glitch. */
+export function Skeleton({ className, label, text, ...props }: React.HTMLAttributes<HTMLDivElement> & { label?: string; text?: string }) {
   return (
     <div
       role="status"
       aria-live="polite"
       aria-label={label}
-      className={cn('skeleton-bar h-3.5 w-32', className)}
+      className={cn('skeleton-bar h-3.5', text ? 'inline-block min-w-16 max-w-full align-middle' : 'w-32', className)}
       {...props}
-    />
+    >
+      {/* Clipped by the bar's own overflow, so the taller line box of the text
+          doesn't stretch it past the bar height. */}
+      {text ? <span className="invisible whitespace-pre">{text}</span> : null}
+    </div>
   );
 }
