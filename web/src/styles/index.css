@@ -408,6 +408,21 @@ body::after {
   .shimmer-text { animation: none; }
 }
 
+/* ── Toast ──
+   The bottom-left confirmation pill. It rises from below the corner it lives
+   in, so the motion reads as the toast arriving rather than as the layout
+   shifting. */
+.animate-toast-in {
+  animation: toast-in 180ms ease-out;
+}
+@keyframes toast-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .animate-toast-in { animation: none; }
+}
+
 /* ── Title skeleton ──
    Placeholder bar standing in for a session title until the model has written
    one. A soft highlight sweeps across a muted base (same keyframes as the

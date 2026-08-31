@@ -181,6 +181,16 @@ export async function fetchArtifacts(sessionId: string): Promise<import('./types
   return data.artifacts ?? [];
 }
 
+/** Detached background jobs belonging to a session — running and recently
+ *  finished alike, oldest first. Polled by the task tray; the message stream
+ *  says nothing about a job once the turn that launched it has ended. */
+export async function fetchBgTasks(sessionId: string): Promise<import('./types').BgTask[]> {
+  const data = await getJSON<{ tasks?: import('./types').BgTask[] }>(
+    `/api/bg-tasks?session_id=${encodeURIComponent(sessionId)}`,
+  );
+  return data.tasks ?? [];
+}
+
 export const artifactDownloadUrl = (sessionId: string, path: string) =>
   `/api/artifacts/${encodeURIComponent(sessionId)}/download?path=${encodeURIComponent(path)}`;
 

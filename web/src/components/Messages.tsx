@@ -1,11 +1,13 @@
-import { CheckIcon, ChevronDownIcon, CopyIcon, DownloadIcon, FoldVerticalIcon, ListChecksIcon, PencilIcon, ScanSearchIcon, Trash2Icon } from 'lucide-react';
+import { CheckIcon, ChevronDownIcon, CopyIcon, DownloadIcon, FoldVerticalIcon, ListChecksIcon, LoaderIcon, PencilIcon, ScanSearchIcon, TerminalIcon, Trash2Icon } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { artifactDownloadUrl, downloadArtifact, fetchArtifacts, uploadDownloadUrl } from '@/api/client';
-import { cn, copyTextToClipboard } from '@/lib/utils';
+import { cn, copyTextToClipboard, formatDurationMs } from '@/lib/utils';
 import { artifactSelectionLocator } from '@/lib/artifactSelection';
 import { artifactDisplayName, displayName, fileExt, isPreviewable } from '@/lib/files';
+import { describeCall, partsToString, type LabelParts } from '@/lib/toolLabels';
+import { isRunning, useBgTasks } from '@/lib/useBgTasks';
 import { useChat, type UiMessage } from '@/state/chat';
 import { usePrefs } from '@/state/prefs';
 import { useUi } from '@/state/ui';
@@ -22,19 +24,6 @@ import { WidgetView } from './widgets/registry';
 import { Collapse } from './ui/collapse';
 import { Tooltip } from './ui/misc';
 import { Button } from './ui/button';
-
-/** Compact elapsed label in h/m/s: "12s", "3m 5s", "1h 4m 5s". */
-function formatDurationMs(ms: number): string {
-  const elapsed = Math.max(0, Math.floor(ms / 1000));
-  const hours = Math.floor(elapsed / 3600);
-  const minutes = Math.floor((elapsed % 3600) / 60);
-  const seconds = elapsed % 60;
-  const parts: string[] = [];
-  if (hours > 0) parts.push(`${hours}h`);
-  if (minutes > 0) parts.push(`${minutes}m`);
-  if (seconds > 0 || parts.length === 0) parts.push(`${seconds}s`);
-  return parts.join(' ');
-}
 
 const formatWorkingElapsed = (startMs: number, nowMs: number) => formatDurationMs(nowMs - startMs);
 
@@ -79,22 +68,85 @@ function MessageTime({ ts }: { ts?: number }) {
  *  caption, and a caption that rewrites itself every few seconds is a fidget. */
 const THINKING_PHRASE_SECONDS = 18;
 
-/** Reasoning status: says the model is thinking and, by working through the
- *  phrases, roughly how long it has been at it.
+/** How long the reasoning text may sit unchanged before the status stops
+ *  calling it thinking. Generous enough to ride out the gaps between deltas on
+ *  a slow endpoint, short enough that the caption has moved on to the tool call
+ *  by the time the first tool output lands. */
+const THINKING_IDLE_MS = 2500;
+
+/** True while reasoning tokens are actually arriving — not merely while the
+ *  turn HAS reasoning. The distinction is the whole point of the caption: a
+ *  turn that thought once and has spent the last two minutes running builds is
+ *  not thinking, and saying so was the row's oldest lie. */
+function useThinkingLive(text: string): boolean {
+  const [live, setLive] = useState(false);
+  const previous = useRef(text);
+  useEffect(() => {
+    // Mount with text already present (a cold-loaded turn, or a re-mount
+    // mid-stream) is not a delta — only a change from here on counts.
+    if (text === previous.current) return;
+    previous.current = text;
+    setLive(true);
+    const id = setTimeout(() => setLive(false), THINKING_IDLE_MS);
+    return () => clearTimeout(id);
+  }, [text]);
+  return live;
+}
+
+/** Phrase for a stretch of reasoning, picked by how long it has been going:
+ *  straight down `thinking.phases`, then cycled from the second entry. The
+ *  first is skipped on the way round because returning to a bare "thinking"
+ *  after "almost done thinking" reads as the turn having started over. */
+function thinkingPhrase(t: ReturnType<typeof useTranslation>['t'], since: number | null): string {
+  const phases = t('thinking.phases', { returnObjects: true });
+  const list = Array.isArray(phases) && phases.length > 0 ? (phases as string[]) : [t('thinking.thinking')];
+  const seconds = since != null ? (Date.now() - since) / 1000 : 0;
+  const step = Math.floor(Math.max(seconds, 0) / THINKING_PHRASE_SECONDS);
+  const last = list.length - 1;
+  return step <= last || last < 1 ? list[Math.min(step, last)] : list[1 + ((step - last - 1) % last)];
+}
+
+/** Lower-cases a tool label's leading glyph so it reads as a caption in the
+ *  row rather than as the start of a sentence — "running a command", to match
+ *  the reasoning phrases it alternates with. Never touches a filename segment:
+ *  "Test.py" is not the same file as "test.py". */
+function asCaption(parts: LabelParts): string {
+  const at = parts.findIndex((s) => s.kind !== 'name');
+  if (at < 0) return partsToString(parts);
+  return partsToString(
+    parts.map((s, i) => (i === at ? { ...s, text: s.text.charAt(0).toLocaleLowerCase() + s.text.slice(1) } : s)),
+  );
+}
+
+/** Live status beside the working timer: what the agent is doing *right now*.
  *
- *  It stays for the whole turn once any reasoning has appeared, not just while
- *  deltas are landing — a model that thinks, calls a tool and thinks again is
- *  doing one continuous thing, and a caption blinking in and out of the row was
- *  noisier than the work it described.
+ *  It used to say "thinking" for the whole turn, which was only true for the
+ *  first few seconds of it — the rest was spent running commands and waiting
+ *  on the endpoint. So the caption follows the work instead, in priority
+ *  order: a tool call in flight names itself ("running a command", "reading
+ *  agent_loop.py"), reasoning gets the thinking phrases but ONLY while its
+ *  tokens are still arriving, and the quiet stretches say what they are —
+ *  waiting for the model, or writing the answer.
  *
- *  Deliberately still: no shimmer, no roll on the phrase change. The words
- *  themselves change often enough to show the turn is alive, and the animation
- *  next to them is already doing that job.
+ *  Deliberately still: no shimmer, no roll on the change. The words change
+ *  often enough to show the turn is alive, and the animation next to them is
+ *  already doing that job.
  *
- *  Clicking it shows or hides the reasoning text in the turn body. It is the
- *  same preference the Settings panel exposes, put where a reader actually
- *  wants it: next to the words telling them there is reasoning to read. */
-function ThinkingStatus({ since }: { since: number | null }) {
+ *  Clicking it shows or hides the reasoning text in the turn body — the same
+ *  preference Settings exposes, put where a reader wants it. Only clickable
+ *  once the turn has reasoning to reveal; before that there is nothing behind
+ *  the switch and it renders as plain text. */
+function ActivityStatus({
+  turn,
+  thinkingLive,
+  thinkingSince,
+  hasThinking,
+}: {
+  turn: UiMessage[];
+  thinkingLive: boolean;
+  thinkingSince: number | null;
+  hasThinking: boolean;
+}) {
   const { t } = useTranslation();
   const showThinking = usePrefs((s) => s.visibility.showThinking);
   const setVisibility = usePrefs((s) => s.setVisibility);
@@ -104,16 +156,23 @@ function ThinkingStatus({ since }: { since: number | null }) {
     return () => clearInterval(id);
   }, []);
 
-  const phases = t('thinking.phases', { returnObjects: true });
-  const list = Array.isArray(phases) && phases.length > 0 ? (phases as string[]) : [t('thinking.thinking')];
-  const seconds = since != null ? (Date.now() - since) / 1000 : 0;
-  const step = Math.floor(Math.max(seconds, 0) / THINKING_PHRASE_SECONDS);
-  // Straight down the list, then round again from the second phrase. The first
-  // is skipped on the way round because returning to a bare "thinking" after
-  // "almost done thinking" reads as the turn having started over.
-  const last = list.length - 1;
-  const label = step <= last || last < 1 ? list[Math.min(step, last)] : list[1 + ((step - last - 1) % last)];
+  // The newest call still in flight. Newest rather than first: a round that
+  // fires three calls resolves them in order, and the caption should track the
+  // one the reader is still waiting on.
+  const running = [...turn].reverse().flatMap((m) => [...(m.tools ?? [])].reverse()).find((c) => c.status === 'running');
+  const last = turn[turn.length - 1];
 
+  let label: string;
+  if (running) label = asCaption(describeCall(running, t, 'running'));
+  else if (thinkingLive) label = thinkingPhrase(t, thinkingSince);
+  // Text is landing in the bubble — the answer is being written, which is a
+  // different wait from the one before the first token.
+  else if (last?.streaming && last.content.trim()) label = t('thinking.writing');
+  else label = t('thinking.waiting');
+
+  if (!hasThinking) {
+    return <span className="block min-w-0 truncate">{label}</span>;
+  }
   return (
     <button
       type="button"
@@ -129,26 +188,68 @@ function ThinkingStatus({ since }: { since: number | null }) {
   );
 }
 
+/** Background-job chip, sitting beside the status caption: how many detached
+ *  jobs are still running, and a way into their output.
+ *
+ *  It is shown whenever there are jobs, streaming or not — that is the point of
+ *  a background job. A ten-minute build launched by a turn that ended two
+ *  minutes ago was previously invisible until its follow-up landed. */
+function TasksChip() {
+  const { t } = useTranslation();
+  const tasks = useBgTasks();
+  const setOpen = useUi((s) => s.setTasksPanelOpen);
+  const open = useUi((s) => s.tasksPanelOpen);
+  const running = tasks.filter(isRunning).length;
+  if (tasks.length === 0) return null;
+  const label = running > 0 ? t('tasks.chipRunning', { count: running }) : t('tasks.chipDone', { count: tasks.length });
+  return (
+    <>
+      <span aria-hidden>·</span>
+      <button
+        type="button"
+        aria-expanded={open}
+        title={t('tasks.openPanel')}
+        onClick={() => setOpen(!open)}
+        className="flex min-w-0 items-center gap-1 truncate text-left transition-colors hover:text-foreground"
+      >
+        {/* Only a live job gets the spinner; a tray of finished ones is a log,
+            not an activity. */}
+        {running > 0 ? (
+          <LoaderIcon className="size-3 shrink-0 animate-spin text-primary" />
+        ) : (
+          <TerminalIcon className="size-3 shrink-0" />
+        )}
+        <span className="truncate">{label}</span>
+      </button>
+    </>
+  );
+}
+
 /** How long the animation takes to dissolve into the resting logo. Matches the
  *  `duration-500` on both layers; the player is torn down once it has run. */
 const SETTLE_FADE_MS = 500;
 
 /** Persistent "still running" indicator shown for the whole assistant turn —
- *  the looping Talos mark, an elapsed timer, the running output-token count and
- *  the reasoning status, in that order.
+ *  the looping Talos mark, an elapsed timer, the running output-token count,
+ *  the activity status and the background-task chip, in that order.
  *
  *  It has three states, and never simply vanishes. `running` goes false the
  *  moment the stream ends: the row strips back to the mark alone (the settled
  *  turn states its own duration) while the loop plays out to its end frame
  *  rather than being yanked mid-swing. There it cross-fades into the static
  *  Talos logo, which stays as the quiet marker that the chat is idle — until
- *  the next message starts a new turn and a new animation with it. */
+ *  the next message starts a new turn and a new animation with it.
+ *
+ *  The task chip is the one part that outlives the stream: a detached job runs
+ *  precisely so the turn can end without it. */
 function Working({
   startedAt,
   phase,
   onFinished,
   tokens,
+  turn,
   thinking,
+  thinkingLive,
   thinkingSince,
 }: {
   startedAt?: number;
@@ -158,7 +259,9 @@ function Working({
   phase: 'running' | 'settling' | 'rest';
   onFinished?: () => void;
   tokens: number;
+  turn: UiMessage[];
   thinking: boolean;
+  thinkingLive: boolean;
   thinkingSince: number | null;
 }) {
   const { t } = useTranslation();
@@ -198,11 +301,13 @@ function Working({
       // exact spot the animation and its readouts had.
       className="mt-3 flex items-center gap-2 pb-1 text-[11px] text-muted-foreground/70 tabular-nums"
       aria-label={running ? t('messages.generating') : undefined}
-      aria-hidden={!running}
     >
       {/* Both marks share one box and cross-fade inside it, so the hand-off is
-          a dissolve in place rather than one element replacing another. */}
-      <span className="relative inline-block size-5 shrink-0">
+          a dissolve in place rather than one element replacing another.
+          `aria-hidden` sits here rather than on the row: at rest the row holds
+          nothing but this mark, but it may still hold the task chip, which is
+          the one thing in it a screen reader must not lose. */}
+      <span aria-hidden className="relative inline-block size-5 shrink-0">
         {showPlayer && (
           <WorkingAnimation
             className={cn(
@@ -235,12 +340,20 @@ function Working({
           </span>
         </>
       )}
-      {running && thinking && (
+      {/* No longer gated on the turn having reasoning: the caption now covers
+          every kind of wait, and "thinking" is only one of them. */}
+      {running && (
         <>
           <span aria-hidden>·</span>
-          <ThinkingStatus since={thinkingSince} />
+          <ActivityStatus
+            turn={turn}
+            thinkingLive={thinkingLive}
+            thinkingSince={thinkingSince}
+            hasThinking={thinking}
+          />
         </>
       )}
+      <TasksChip />
     </div>
   );
 }
@@ -707,9 +820,14 @@ function AssistantTurn({ turn, containsLast, artifactFiles, sessionId }: { turn:
     if (streaming) setWindingDown(false);
     wasStreaming.current = streaming;
   }, [streaming]);
-  // Any reasoning at all in this turn keeps the status in the row, whether or
-  // not deltas are landing at this instant.
+  // Any reasoning at all in this turn keeps the caption clickable (there is
+  // something behind the switch), whether or not deltas are landing right now.
   const hasThinking = turn.some((m) => !!m.thinking?.trim());
+  // Whether reasoning is arriving *at this instant* — what decides between the
+  // thinking phrases and the plainer waits. Joined across the turn's bubbles
+  // because a round boundary is not a pause in the thinking.
+  const thinkingText = turn.map((m) => m.thinking ?? '').join('');
+  const thinkingLive = useThinkingLive(thinkingText);
   // When the turn's reasoning first appeared. Anchored once and left alone: the
   // phrases describe one continuous stretch of thinking, so a second round
   // should carry on down the ladder rather than reopen at "thinking".
@@ -725,7 +843,9 @@ function AssistantTurn({ turn, containsLast, artifactFiles, sessionId }: { turn:
       phase={streaming ? 'running' : windingDown ? 'settling' : 'rest'}
       onFinished={() => setWindingDown(false)}
       tokens={tokens}
+      turn={turn}
       thinking={hasThinking}
+      thinkingLive={thinkingLive}
       thinkingSince={thinkingSince.current}
     />
   );

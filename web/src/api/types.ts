@@ -213,3 +213,24 @@ export interface ChatEvent {
   data?: Metrics;
   [key: string]: unknown;
 }
+
+/** One detached job from `src/bg_jobs.py` — a shell command launched with the
+ *  chat's `bash` tool in background mode (`kind: 'shell'`), or a whole nested
+ *  agent turn spawned by `background_task` (`kind: 'agent'`). Both outlive the
+ *  turn that started them, which is why the UI polls for them separately from
+ *  the message stream. */
+export interface BgTask {
+  id: string;
+  kind: 'shell' | 'agent';
+  /** The command line, or the agent task's label / first line. */
+  label: string;
+  status: 'running' | 'done' | 'failed';
+  /** Unix seconds (the backend's `time.time()`), not JS milliseconds. */
+  started_at?: number;
+  ended_at?: number | null;
+  exit_code?: number | null;
+  timed_out?: boolean;
+  /** Tail of the captured log — stdout+stderr for a shell job, the written
+   *  report for an agent job. */
+  output: string;
+}

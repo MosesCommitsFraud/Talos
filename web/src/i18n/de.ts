@@ -344,6 +344,15 @@ const de: typeof en = {
     thinking: 'Denkt nach…',
     show: 'Gedanken anzeigen',
     hide: 'Gedanken ausblenden',
+    // Bestätigung unten links, wenn der Gedankentext ein- oder ausgeschaltet
+    // wird. Der Schalter sitzt am Fuß eines langen Turns, das Umgeschaltete
+    // kann mehrere Bildschirme weiter oben liegen — also sagt er, was er tat.
+    shownToast: 'Gedanken werden angezeigt',
+    hiddenToast: 'Gedanken ausgeblendet',
+    // Die Wartezeiten, die weder Nachdenken noch ein Toolaufruf sind: vor dem
+    // ersten Token einer Runde und während die Antwort geschrieben wird.
+    waiting: 'wartet auf Antwort',
+    writing: 'schreibt die Antwort',
     // Live-Status neben der Arbeitsuhr. Eine Formulierung pro
     // THINKING_PHRASE_SECONDS, der Reihe nach und danach ab dem zweiten Eintrag
     // im Kreis. Die Reihenfolge zählt: der erste ist der Auftakt und kommt nie
@@ -366,6 +375,32 @@ const de: typeof en = {
     tokensUnit: 'Token',
     tokensUnit_other: 'Tokens',
     tokensLabel: 'bisher {{count}} Ausgabe-Tokens',
+  },
+  // Hintergrund-Jobs: abgekoppelte Shell-Befehle und verschachtelte Agent-Turns,
+  // die den startenden Turn überleben (src/bg_jobs.py). Der Chip steht neben dem
+  // Aktivitätsstatus; ein Klick öffnet die Ablage.
+  tasks: {
+    title: 'Hintergrund-Aufgaben',
+    panelLabel: 'Hintergrund-Aufgaben',
+    openPanel: 'Hintergrund-Aufgaben anzeigen',
+    closePanel: 'Hintergrund-Aufgaben schließen',
+    // Chip-Text. Die laufende Anzahl ist die nützliche Zahl; sind alle fertig,
+    // sagt der Chip nur noch, dass die Ablage etwas enthält.
+    chipRunning_one: '{{count}} Aufgabe läuft',
+    chipRunning_other: '{{count}} Aufgaben laufen',
+    chipDone_one: '{{count}} erledigte Aufgabe',
+    chipDone_other: '{{count}} erledigte Aufgaben',
+    runningCount_one: '{{count}} läuft',
+    runningCount_other: '{{count}} laufen',
+    kindShell: 'Befehl',
+    kindAgent: 'Agent-Aufgabe',
+    untitled: 'Aufgabe ohne Titel',
+    empty: 'Keine Hintergrund-Aufgaben in diesem Chat.',
+    noOutputYet: 'Noch keine Ausgabe…',
+    noOutput: 'Diese Aufgabe hat keine Ausgabe erzeugt.',
+    copyOutput: 'Ausgabe kopieren',
+    exitCode: 'Exit {{code}}',
+    timedOut: 'Zeitüberschreitung',
   },
   // Formulierungen für die gruppierten Toolcall-Zeilen. Die Klauseln werden im
   // Deutschen NICHT klein zusammengefügt (siehe summarizeCalls/lowerJoin) — sie

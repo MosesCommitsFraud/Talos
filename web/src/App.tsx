@@ -16,9 +16,11 @@ import { TicketsWorkspace } from './components/tickets/TicketsWorkspace';
 import { TicketDialog } from './components/tickets/TicketDialog';
 import { Lightbox } from './components/Lightbox';
 import { PlanPanel } from './components/PlanPanel';
+import { TasksPanel } from './components/TasksPanel';
 import { PendingQuestion } from './components/AskUser';
 import { AuthGate } from './components/auth/AuthGate';
 import { TooltipProvider } from './components/ui/misc';
+import { Toaster } from './components/ui/toast';
 import { applyDensity, applyLang, applyTheme, usePrefs } from './state/prefs';
 import { selectPendingPlan, useChat } from './state/chat';
 import { useUi } from './state/ui';
@@ -147,6 +149,7 @@ export default function App() {
                   </div>
                 </main>
                 <PlanPanel />
+                <TasksPanel />
                 <RightPanel />
               </>
             )}
@@ -171,6 +174,7 @@ export default function App() {
           <HelpDialog open={helpOpen} onClose={() => setHelpOpen(false)} />
           <TicketDialog open={ticketOpen} onClose={() => setTicketOpen(false)} />
           <Lightbox />
+          <Toaster />
         </AuthGate>
       </TooltipProvider>
     </QueryClientProvider>

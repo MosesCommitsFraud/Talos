@@ -50,6 +50,11 @@ interface UiState {
    *  a plan is proposed; the user can collapse it and reopen from the approval bar. */
   planPanelOpen: boolean;
   setPlanPanelOpen: (open: boolean) => void;
+  /** Right-side drawer listing the session's background jobs and their live
+   *  output. Opened from the task chip in the working row; never auto-opens —
+   *  a job runs precisely so the reader can carry on with something else. */
+  tasksPanelOpen: boolean;
+  setTasksPanelOpen: (open: boolean) => void;
   /** Full-screen image viewer. Set to open a zoomable/downloadable lightbox over
    *  any image (tool output, generated image, artifact); null when closed. */
   lightbox: { src: string; label?: string } | null;
@@ -85,6 +90,8 @@ export const useUi = create<UiState>((set) => ({
   setPanelMode: (panelMode) => set({ panelMode }),
   planPanelOpen: false,
   setPlanPanelOpen: (planPanelOpen) => set({ planPanelOpen }),
+  tasksPanelOpen: false,
+  setTasksPanelOpen: (tasksPanelOpen) => set({ tasksPanelOpen }),
   lightbox: null,
   openLightbox: (lightbox) => set({ lightbox }),
   closeLightbox: () => set({ lightbox: null }),

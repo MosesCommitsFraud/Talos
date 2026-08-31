@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="de"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Runtime probe</title>
+<style>
+:root{--bg:#f9f9f7;--card:#fcfcfb;--fg:#0b0b0b;--muted:#52514e;--line:#e1e0d9;--radius:14px;
+--td-s1:#2a78d6;--td-s2:#eb6834;--td-s3:#1baf7a;--td-s4:#eda100;--td-s5:#e87ba4;--td-s6:#008300;--td-s7:#4a3aa7;--td-s8:#e34948;
+--td-q1:#cde2fb;--td-q2:#9ec5f4;--td-q3:#5598e7;--td-q4:#2a78d6;--td-q5:#184f95;
+--td-good:#0ca30c;--td-warning:#fab219;--td-critical:#d03b3b;--td-surface:#fcfcfb;
+--td-ink:#0b0b0b;--td-ink2:#52514e;--td-muted:#898781;--td-grid:#e1e0d9;--td-base:#c3c2b7}
+:root[data-theme="dark"]{--bg:#0d0d0d;--card:#1a1a19;--fg:#fff;--muted:#c3c2b7;--line:#2c2c2a;
+--td-s1:#3987e5;--td-s2:#d95926;--td-s3:#199e70;--td-s4:#c98500;--td-s5:#d55181;--td-s6:#008300;--td-s7:#9085e9;--td-s8:#e66767;
+--td-q1:#104281;--td-q2:#1c5cab;--td-q3:#2a78d6;--td-q4:#5598e7;--td-q5:#9ec5f4;
+--td-surface:#1a1a19;--td-ink:#fff;--td-ink2:#c3c2b7;--td-muted:#898781;--td-grid:#2c2c2a;--td-base:#383835}
+*{box-sizing:border-box}
+body{margin:0;padding:24px;background:var(--bg);color:var(--fg);font:15px/1.5 system-ui,sans-serif}
+.grid{display:grid;gap:16px;grid-template-columns:repeat(2,minmax(0,1fr));max-width:1400px;margin:0 auto}
+.card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:16px 18px 10px;min-width:0}
+.card h2{margin:0 0 6px;font-size:1rem}
+.chart-error{color:#d03b3b;font-size:.85rem;white-space:pre-wrap}
+</style>
+<script src="talos-charts.js"></script>
+</head><body>
+<div class="grid" id="grid"></div>
+<script>
+const Q = ['Q1/25','Q2/25','Q3/25','Q4/25','Q1/26','Q2/26'];
+const ist = [42,48,53,59,61,66], plan = [40,46,52,58,64,70];
+const names = ['Meier GmbH','Sammelrechnung über mehrere Positionen','Nord AG','Schmidt & Co','Walter KG','Ostwerk','Lehmann','Brandt'];
+const vals = [412000,318000,266000,201000,187000,142000,98000,64000];
+
+const SPECS = [
+  {id:'line', title:'line', height:300, spec:{type:'line', categories:Q, series:[{name:'Ist',data:ist},{name:'Plan',data:plan}], y:{label:'Mio. €'}}},
+  {id:'area', title:'area', height:300, spec:{type:'area', categories:Q, values:ist, y:{label:'Mio. €'}}},
+  {id:'bar', title:'bar', height:300, spec:{type:'bar', categories:['Nord','Süd','Ost','West'], values:[42,31,18,27], highlight:'Nord'}},
+  {id:'hbar', title:'hbar', height:340, spec:{type:'hbar', categories:names, values:vals, value_format:{compact:true,unit:'€'}}},
+  {id:'gbar', title:'grouped_bar', height:300, spec:{type:'grouped_bar', categories:['Nord','Süd','Ost'], series:[{name:'2025',data:[42,31,18]},{name:'2026',data:[46,29,24]}]}},
+  {id:'sbar', title:'stacked_bar', height:300, spec:{type:'stacked_bar', categories:Q, series:[{name:'Core',data:[42,48,53,59,61,66]},{name:'Services',data:[18,24,31,38,40,44]},{name:'Sonstige',data:[6,7,5,9,8,11]}]}},
+  {id:'wf', title:'waterfall', height:300, spec:{type:'waterfall', bars:[
+      {label:'2025',y1:0,y2:120,delta:120,role:'total'},
+      {label:'Preis',y1:120,y2:138,delta:18,role:'rise'},
+      {label:'Menge',y1:138,y2:126,delta:-12,role:'fall'},
+      {label:'Neu',y1:126,y2:149,delta:23,role:'rise'},
+      {label:'2026',y1:0,y2:149,delta:149,role:'total'}]}},
+  {id:'sc', title:'scatter', height:300, spec:{type:'scatter', points:[[1,4],[2,7],[3,6],[4,11],[5,9],[6,14],[7,13]], sizes:[4,6,8,10,7,12,9]}},
+  {id:'hm', title:'heatmap', height:300, spec:{type:'heatmap', x_labels:['Mo','Di','Mi','Do','Fr'], y_labels:['Nord','Süd','Ost'],
+      cells:[[0,0,12],[1,0,18],[2,0,9],[3,0,22],[4,0,31],[0,1,7],[1,1,11],[2,1,15],[3,1,8],[4,1,19],[0,2,3],[1,2,6],[2,2,14],[3,2,21],[4,2,26]], unit:'Aufträge'}},
+  {id:'pie', title:'pie', height:300, spec:{type:'pie', labels:['Core','Services','Lizenzen','Sonstige'], values:[42,28,18,12]}},
+  {id:'donut', title:'donut', height:300, spec:{type:'donut', labels:['Core','Services','Lizenzen','Sonstige'], values:[42,28,18,12]}},
+  {id:'radar', title:'radar', height:320, spec:{type:'radar', indicators:['Umsatz','Marge','Wachstum','Qualität','Service'],
+      series:[{name:'Nord',data:[80,62,71,90,55]},{name:'Süd',data:[60,88,45,70,80]}], maxes:[100,100,100,100,100]}},
+  {id:'gauge', title:'gauge', height:300, spec:{type:'gauge', value:72, target:100, unit:'%', name:'Zielerreichung'}},
+  {id:'funnel', title:'funnel', height:300, spec:{type:'funnel', stages:['Leads','Qualifiziert','Angebot','Abschluss'], values:[1200,640,310,128]}},
+  {id:'box', title:'boxplot', height:300, spec:{type:'boxplot', categories:['Nord','Süd','Ost'], groups:[
+      [12,15,14,18,22,19,17,40],[9,11,10,13,12,14,11,10],[20,25,22,28,31,24,27,26]]}},
+  {id:'hist', title:'histogram', height:300, spec:{type:'histogram', bins:[[80,100,2],[100,120,5],[120,140,6],[140,160,3],[160,180,1],[180,200,1]], x:{label:'ms'}, y:{label:'Anzahl'}}},
+  {id:'tm', title:'treemap', height:320, spec:{type:'treemap', nodes:[
+      {path:'Konzern/Nord/Handel', name:'Handel', value:42},{path:'Konzern/Nord/Service', name:'Service', value:18},
+      {path:'Konzern/Süd/Handel', name:'Handel', value:31},{path:'Konzern/Süd/Service', name:'Service', value:24},
+      {path:'Konzern/Ost/Handel', name:'Handel', value:19}]}},
+  {id:'sk', title:'sankey', height:320, spec:{type:'sankey',
+      nodes:[{id:'lead',label:'Leads'},{id:'q',label:'Qualifiziert'},{id:'lost',label:'Verloren'},{id:'won',label:'Gewonnen'}],
+      links:[{source:'lead',target:'q',value:640},{source:'lead',target:'lost',value:560},{source:'q',target:'won',value:310},{source:'q',target:'lost',value:330}]}},
+];
+
+document.getElementById('grid').innerHTML = SPECS.map(s =>
+  `<section class="card"><h2>${s.title}</h2><div id="${s.id}" style="height:${s.height}px"></div></section>`).join('');
+window.HOSTS = TalosCharts.mountAll(SPECS, {locale:'de-DE'});
+</script>
+</body></html>

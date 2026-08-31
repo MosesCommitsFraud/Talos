@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import i18n, { DEFAULT_LANG, pickLang, type Lang } from '@/i18n';
+import { toast } from '@/components/ui/toast';
 
 export type Theme = 'dark' | 'light' | 'system';
 export type Density = 'compact' | 'comfortable' | 'spacious';
@@ -122,7 +123,7 @@ interface PrefsState {
 
 export const usePrefs = create<PrefsState>()(
   persist(
-    (set) => ({
+    (set, get) => ({
       theme: 'dark',
       density: 'comfortable',
       sortMode: 'active',
@@ -151,7 +152,17 @@ export const usePrefs = create<PrefsState>()(
       setVisibility: (key, value) => {
         // Toggling it is the reader stating a preference, which from here on
         // outranks the flipped default (see THINKING_CHOICE_KEY).
-        if (key === 'showThinking') rememberThinkingChoice();
+        if (key === 'showThinking') {
+          rememberThinkingChoice();
+          // The status caption that flips this sits at the very bottom of a
+          // long turn, and what it flips can be several screens up — so the
+          // switch confirms itself in the corner instead of leaving the reader
+          // to scroll and check. Fired here rather than in the caption so the
+          // same confirmation appears when Settings flips it too.
+          if (value !== get().visibility.showThinking) {
+            toast(value ? 'thinking.shownToast' : 'thinking.hiddenToast');
+          }
+        }
         set((s) => ({ visibility: { ...s.visibility, [key]: value } }));
       },
       resetVisibility: () => set({ visibility: DEFAULT_VISIBILITY }),

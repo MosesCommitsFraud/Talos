@@ -15,6 +15,21 @@ export function timestampMs(value: number | string | null | undefined): number {
   return 0;
 }
 
+/** Compact elapsed label in h/m/s: "12s", "3m 5s", "1h 4m 5s". Shared by the
+ *  turn's "Worked for Xs" fold and the background-task tray, which measure the
+ *  same kind of stretch and must read the same way. */
+export function formatDurationMs(ms: number): string {
+  const elapsed = Math.max(0, Math.floor(ms / 1000));
+  const hours = Math.floor(elapsed / 3600);
+  const minutes = Math.floor((elapsed % 3600) / 60);
+  const seconds = elapsed % 60;
+  const parts: string[] = [];
+  if (hours > 0) parts.push(`${hours}h`);
+  if (minutes > 0) parts.push(`${minutes}m`);
+  if (seconds > 0 || parts.length === 0) parts.push(`${seconds}s`);
+  return parts.join(' ');
+}
+
 /** Clipboard write that also works in insecure contexts (plain-HTTP LAN
  *  hosts), where navigator.clipboard is undefined. */
 export async function copyTextToClipboard(text: string): Promise<void> {

@@ -703,6 +703,11 @@ from routes.stats_routes import setup_stats_routes
 
 app.include_router(setup_stats_routes())
 
+# Background tasks (the chat's task tray)
+from routes.bg_task_routes import setup_bg_task_routes
+
+app.include_router(setup_bg_task_routes())
+
 # Voice dictation (mic → ASR endpoint proxy)
 from routes.voice_routes import setup_voice_routes
 

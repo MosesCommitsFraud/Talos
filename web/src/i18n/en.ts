@@ -341,6 +341,15 @@ const en = {
     thinking: 'Thinking…',
     show: 'Show thinking',
     hide: 'Hide thinking',
+    // Bottom-left confirmation when the reasoning text is switched on or off.
+    // The switch lives at the foot of a long turn and what it moves can be
+    // several screens up, so it says what it did.
+    shownToast: 'Thinking shown',
+    hiddenToast: 'Thinking hidden',
+    // The waits that are not thinking and not a tool call: before the first
+    // token of a round, and while the answer itself is being written.
+    waiting: 'waiting for an answer',
+    writing: 'writing the answer',
     // Live status beside the working timer. One phrase per THINKING_PHRASE_SECONDS,
     // walked in order and then cycled from the second entry. Order matters: the
     // first is the opening phrase and is never returned to, and the ones after
@@ -363,6 +372,32 @@ const en = {
     tokensUnit: 'token',
     tokensUnit_other: 'tokens',
     tokensLabel: '{{count}} output tokens so far',
+  },
+  // Background jobs: detached shell commands and nested agent turns that
+  // outlive the turn which launched them (src/bg_jobs.py). The chip sits beside
+  // the activity status; clicking it opens the tray.
+  tasks: {
+    title: 'Background tasks',
+    panelLabel: 'Background tasks',
+    openPanel: 'Show background tasks',
+    closePanel: 'Close background tasks',
+    // Chip wording. A running count is the useful number; once everything has
+    // landed the chip only says the tray has something in it.
+    chipRunning_one: '{{count}} task running',
+    chipRunning_other: '{{count}} tasks running',
+    chipDone_one: '{{count}} finished task',
+    chipDone_other: '{{count}} finished tasks',
+    runningCount_one: '{{count}} running',
+    runningCount_other: '{{count}} running',
+    kindShell: 'Command',
+    kindAgent: 'Agent task',
+    untitled: 'Untitled task',
+    empty: 'No background tasks in this chat.',
+    noOutputYet: 'No output yet…',
+    noOutput: 'This task produced no output.',
+    copyOutput: 'Copy output',
+    exitCode: 'exit {{code}}',
+    timedOut: 'timed out',
   },
   // Phrasing for the grouped tool-call rows. Each family has a live present
   // participle (`running`), a settled past tense (`past`) and — where a plural
