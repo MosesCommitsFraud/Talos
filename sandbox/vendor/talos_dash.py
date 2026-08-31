@@ -55,6 +55,8 @@ __all__ = [
     "line", "area", "bar", "hbar", "grouped_bar", "stacked_bar", "waterfall",
     "scatter", "heatmap", "pie", "donut", "radar", "gauge", "funnel",
     "boxplot", "histogram", "treemap", "sankey", "fmt",
+    "lollipop", "dumbbell", "slope", "stacked_area", "range_area", "timeline",
+    "calendar", "mosaic", "waffle", "violin",
 ]
 
 # --------------------------------------------------------------------------
@@ -132,6 +134,8 @@ _TYPES = {
     "line", "area", "bar", "hbar", "grouped_bar", "stacked_bar", "waterfall",
     "scatter", "heatmap", "pie", "donut", "radar", "gauge", "funnel",
     "boxplot", "histogram", "treemap", "sankey",
+    "lollipop", "dumbbell", "slope", "stacked_area", "range_area", "timeline",
+    "calendar", "mosaic", "waffle", "violin",
 }
 
 # Keys any spec may carry, on top of the ones its own type defines. Unknown keys
@@ -140,14 +144,14 @@ _TYPES = {
 _COMMON = {"type", "x", "y", "legend", "value_format", "note"}
 
 _OWN = {
-    "line": {"categories", "series", "smooth", "area_first"},
+    "line": {"categories", "series", "smooth", "area_first", "rolling"},
     "area": {"categories", "values", "name"},
     "bar": {"categories", "values", "name", "highlight", "label"},
     "hbar": {"categories", "values", "name"},
     "grouped_bar": {"categories", "series"},
     "stacked_bar": {"categories", "series", "percent"},
     "waterfall": {"bars"},
-    "scatter": {"points", "sizes", "labels", "name"},
+    "scatter": {"points", "sizes", "labels", "name", "trend"},
     "heatmap": {"x_labels", "y_labels", "cells", "unit", "low", "high"},
     "pie": {"labels", "values", "name"},
     "donut": {"labels", "values", "name"},
@@ -158,6 +162,16 @@ _OWN = {
     "histogram": {"bins"},
     "treemap": {"nodes", "name"},
     "sankey": {"nodes", "links"},
+    "lollipop": {"categories", "values"},
+    "dumbbell": {"categories", "series"},
+    "slope": {"labels", "before", "after", "before_name", "after_name"},
+    "stacked_area": {"categories", "series", "percent", "stream"},
+    "range_area": {"categories", "low", "high", "line"},
+    "timeline": {"tasks"},
+    "calendar": {"days", "unit", "low", "high"},
+    "mosaic": {"cells", "y_order"},
+    "waffle": {"labels", "values", "unit"},
+    "violin": {"categories", "groups"},
 }
 
 _AXIS_KEYS = {"label", "format", "ticks", "rotate", "min", "max", "min_gap"}
@@ -209,6 +223,19 @@ def check_spec(cid: str, spec: Mapping[str, Any]) -> None:
             raise ValueError(
                 f"{cid}: {len(spec['values'])} values for {len(cats)} categories."
             )
+    for band in ("low", "high", "line"):
+        if cats is not None and isinstance(spec.get(band), list) \
+                and len(spec[band]) != len(cats):
+            raise ValueError(
+                f"{cid}: {band!r} has {len(spec[band])} values for {len(cats)} categories."
+            )
+    if kind == "range_area":
+        for i, (lo, hi) in enumerate(zip(spec["low"], spec["high"])):
+            if lo is not None and hi is not None and hi < lo:
+                raise ValueError(
+                    f"{cid}: range_area low > high at index {i} ({lo} > {hi}). The band "
+                    f"would be drawn inside out — the arguments are (low, high)."
+                )
 
 
 # The old name. The scaffold used to emit ECharts option dicts and the check ran
@@ -319,10 +346,15 @@ def _axis(label: str = "", **rest) -> dict:
 
 
 def line(categories, series, *, y_name="", x_name="", smooth=True,
-         area_first=False, value_format=None):
-    """Trend over an ordered axis. `series` is {"name": [values]}."""
+         area_first=False, rolling=None, value_format=None):
+    """Trend over an ordered axis. `series` is {"name": [values]}.
+
+    `rolling=7` adds a moving average over each series and fades the raw line
+    behind it — the right answer for noisy daily data, where the raw line is
+    unreadable and a smoothed line alone hides how noisy it was.
+    """
     cats = [str(c) for c in categories]
-    return {
+    spec = {
         "type": "line",
         "categories": cats,
         "series": _series_map(series, len(cats)),
@@ -331,6 +363,9 @@ def line(categories, series, *, y_name="", x_name="", smooth=True,
         "smooth": bool(smooth),
         "area_first": bool(area_first),
     }
+    if rolling:
+        spec["rolling"] = int(rolling)
+    return spec
 
 
 def area(categories, name, values, *, y_name="", x_name="", value_format=None):
@@ -461,14 +496,21 @@ def waterfall(labels, deltas, *, start=0.0, y_name="", total_label="Gesamt",
     }
 
 
-def scatter(points, *, x_name="", y_name="", name="", sizes=None, labels=None):
-    """Relationship between two measures. `points` is [(x, y), ...]."""
+def scatter(points, *, x_name="", y_name="", name="", sizes=None, labels=None,
+            trend=False):
+    """Relationship between two measures. `points` is [(x, y), ...].
+
+    `sizes=` turns it into a bubble chart (a third measure per point).
+    `trend=True` overlays a least-squares fit with a 95 % band — say so in the
+    card `note=` when you do: a fit line is a claim, not a measurement.
+    """
     return {
         "type": "scatter",
         "points": [[float(x), float(y)] for x, y in points],
         "sizes": [float(s) for s in sizes] if sizes is not None else None,
         "labels": [str(v) for v in labels] if labels is not None else None,
         "name": str(name),
+        "trend": bool(trend),
         "x": _axis(x_name),
         "y": _axis(y_name),
     }
@@ -605,6 +647,193 @@ def histogram(values, *, bins=20, y_name="Anzahl", x_name=""):
         "x": _axis(x_name),
         "y": _axis(y_name),
     }
+
+
+def lollipop(categories, values, *, x_name="", top=None, value_format=None):
+    """A ranking with more categories than bars can carry. Same baseline and the
+    same endpoint, a fraction of the ink — reach for it past ~15 rows, where
+    stacked bars turn the card into a solid block."""
+    spec = hbar(categories, values, x_name=x_name, top=top, value_format=value_format)
+    spec["type"] = "lollipop"
+    del spec["name"]
+    return spec
+
+
+def dumbbell(categories, series, *, x_name="", sort=True, value_format=None):
+    """Two values per category with the GAP as the subject: Ist vs. Plan, 2024
+    vs. 2025, vorher vs. nachher. `series` is exactly two {"name": [values]}."""
+    cats = [str(c) for c in categories]
+    built = _series_map(series, len(cats))
+    if len(built) != 2:
+        raise ValueError(
+            f"dumbbell() compares exactly two values per category, got {len(built)} "
+            f"series. Use grouped_bar() for three or more."
+        )
+    if sort:
+        # Ordered by the gap, so the categories that moved most are together at
+        # one end — otherwise the reader hunts for them.
+        gaps = [abs((built[1]["data"][i] or 0) - (built[0]["data"][i] or 0))
+                for i in range(len(cats))]
+        order = sorted(range(len(cats)), key=lambda i: -gaps[i])
+        cats = [cats[i] for i in order]
+        for s in built:
+            s["data"] = [s["data"][i] for i in order]
+    return {
+        "type": "dumbbell",
+        "categories": cats,
+        "series": built,
+        "x": _axis(x_name, format=value_format),
+        "y": _axis(),
+    }
+
+
+def slope(labels, before, after, *, before_name="Vorher", after_name="Nachher",
+          value_format=None):
+    """Level and rank change between exactly two moments. Crossing lines are the
+    point — it answers "who overtook whom", which two bar charts side by side
+    make the reader work out for themselves."""
+    names = [str(v) for v in labels]
+    a, b = _num(list(before)), _num(list(after))
+    if not (len(a) == len(b) == len(names)):
+        raise ValueError(
+            f"slope(): {len(names)} labels, {len(a)} before and {len(b)} after values."
+        )
+    return {
+        "type": "slope",
+        "labels": names,
+        "before": a,
+        "after": b,
+        "before_name": str(before_name),
+        "after_name": str(after_name),
+        "y": _axis(format=value_format),
+    }
+
+
+def stacked_area(categories, series, *, y_name="", x_name="", percent=False,
+                 stream=False, value_format=None):
+    """Composition over a continuous axis. `stacked_bar` is the discrete twin —
+    use this one when the x axis is time and the shape of the change matters
+    more than any single period. `stream=True` drops the shared baseline for
+    readable band thicknesses; only do that when no band's level has to be read
+    off the axis."""
+    cats = [str(c) for c in categories]
+    return {
+        "type": "stacked_area",
+        "categories": cats,
+        "series": _series_map(series, len(cats)),
+        "percent": bool(percent),
+        "stream": bool(stream),
+        "x": _axis(x_name),
+        "y": _axis("" if percent else y_name,
+                   format=fmt(percent=True) if percent else value_format),
+    }
+
+
+def range_area(categories, low, high, *, line=None, y_name="", x_name="",
+               value_format=None):
+    """A band between two bounds: forecast ranges, min/max, confidence, best and
+    worst case. **This is the honest way to draw a projection** — a single line
+    into the future claims a precision the model does not have."""
+    cats = [str(c) for c in categories]
+    spec = {
+        "type": "range_area",
+        "categories": cats,
+        "low": _num(_pad(_flat(low, who="range_area"), len(cats))),
+        "high": _num(_pad(_flat(high, who="range_area"), len(cats))),
+        "x": _axis(x_name),
+        "y": _axis(y_name, format=value_format),
+    }
+    if line is not None:
+        spec["line"] = _num(_pad(_flat(line, who="range_area"), len(cats)))
+    return spec
+
+
+def timeline(tasks, *, legend=True):
+    """Phases, projects or bookings on a real date axis (a Gantt without the
+    dependency arrows). `tasks` is [{"label": .., "start": "2026-01-01",
+    "end": "2026-03-15", "group": ..}] — ISO dates, `group` optional and used
+    only for colour."""
+    built = []
+    for t in tasks:
+        start, end = str(t["start"]), str(t["end"])
+        if end < start:
+            raise ValueError(
+                f"timeline(): {t.get('label')!r} ends {end} before it starts {start}. "
+                f"A zero-or-negative interval draws nothing."
+            )
+        built.append({"label": str(t["label"]), "start": start, "end": end,
+                      "group": str(t.get("group") or t["label"])})
+    return {"type": "timeline", "tasks": built, "legend": bool(legend)}
+
+
+def calendar(dates, values, *, unit="", low=None, high=None, value_format=None):
+    """Daily activity over weeks or a year — tickets, Umsatz, Fehler pro Tag.
+    Weekday-vs-week layout, so weekly rhythms and quiet periods show up as
+    stripes. `dates` are ISO "YYYY-MM-DD" strings."""
+    import datetime as _dt
+
+    vals = _num(_flat(values, who="calendar"))
+    if len(vals) != len(list(dates)):
+        raise ValueError("calendar(): one value per date, please.")
+    days = []
+    for iso, v in zip(dates, vals):
+        d = _dt.date.fromisoformat(str(iso))
+        year, week, weekday = d.isocalendar()
+        # The week key carries the year so a multi-year range does not fold
+        # week 3 of 2025 onto week 3 of 2026; the label shown is the month, so
+        # the reader gets a calendar rather than week numbers.
+        days.append([f"{year}-{week:02d}", weekday - 1, v, d.isoformat()])
+    return {
+        "type": "calendar",
+        "days": days,
+        "unit": unit,
+        "low": low,
+        "high": high,
+        "value_format": value_format,
+    }
+
+
+def mosaic(cells, *, y_order=None, value_format=None):
+    """Marimekko: column WIDTH is each segment's size, segment HEIGHT is its
+    share. One rectangle's area is its absolute contribution — exactly what a
+    100 %-stacked bar throws away. Reach for it when "big share of a small
+    segment" must not look like "big".
+
+    `cells` is [(segment, part, value), ...]."""
+    built = [[str(a), str(b), float(v)] for a, b, v in cells]
+    parts = []
+    for _, b, _v in built:
+        if b not in parts:
+            parts.append(b)
+    return {
+        "type": "mosaic",
+        "cells": built,
+        "y_order": [str(p) for p in (y_order or parts)],
+        "value_format": value_format,
+    }
+
+
+def waffle(labels, values, *, unit=1, value_format=None):
+    """Part-to-whole in countable squares. Better than a pie whenever the
+    quantity is a count of things (Mitarbeiter, Störungen, Aufträge): the reader
+    sees "roughly one in five" without estimating an angle. `unit` is the value
+    one square stands for."""
+    return {
+        "type": "waffle",
+        "labels": [str(v) for v in labels],
+        "values": _num(_flat(values, who="waffle")),
+        "unit": float(unit),
+        "value_format": value_format,
+    }
+
+
+def violin(categories, groups, *, y_name="", value_format=None):
+    """The shape of a distribution, not just its quartiles — bimodality, a long
+    tail, a pile-up at zero. `boxplot` is the safer default; use this when the
+    *form* of the spread is the finding. Same input: raw observations."""
+    spec = boxplot(categories, groups, y_name=y_name, value_format=value_format)
+    spec["type"] = "violin"
+    return spec
 
 
 def treemap(nodes, *, name=""):

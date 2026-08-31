@@ -26,13 +26,20 @@ import {
   dot,
   group,
   lineY,
+  linearRegressionY,
   link,
+  mosaicY,
   mountChart,
   rect,
+  rollingWindow,
   ruleY,
   stack,
   text,
+  violinY,
+  waffleY,
   boxY,
+  binY,
+  normalize,
 } from '@tanstack/charts'
 import { scaleBand } from '@tanstack/charts/scales/band'
 import { scaleLinear } from '@tanstack/charts/scales/linear'
@@ -50,7 +57,7 @@ import {
 } from '@tanstack/charts/polar'
 import { treemap as treemapMark } from '@tanstack/charts/hierarchy/treemap'
 import { sankeyDiagram } from '@tanstack/charts/network/sankey'
-import { scaleQuantize } from 'd3-scale'
+import { scaleQuantize, scaleUtc } from 'd3-scale'
 import { curveLinearClosed, curveMonotoneX } from 'd3-shape'
 
 /* ── Colour ──────────────────────────────────────────────────────────────
@@ -118,6 +125,23 @@ function formatter(spec, locale) {
     const text = nf.format(Number(value))
     return unit ? `${text} ${unit}` : text
   }
+}
+
+const fmtDate = (value, locale) =>
+  value instanceof Date ? value.toLocaleDateString(locale) : String(value)
+
+/** Tick text for a date axis, at the granularity the span deserves. */
+function dateTicks(rows, locale) {
+  const times = rows.flatMap((r) => [r.start.getTime(), r.end.getTime()])
+  const days = (Math.max(...times) - Math.min(...times)) / 86400000
+  const opts =
+    days > 730
+      ? { year: 'numeric', month: 'short' }
+      : days > 45
+        ? { month: 'short', year: '2-digit' }
+        : { day: '2-digit', month: 'short' }
+  const df = new Intl.DateTimeFormat(locale, { ...opts, timeZone: 'UTC' })
+  return (value) => (value instanceof Date ? df.format(value) : String(value))
 }
 
 /** The axis a reader can hold in their head: one unit for the whole axis,
@@ -189,9 +213,12 @@ const seriesList = (spec) =>
  *  so it wants the plotted measure and not every number in the spec. */
 function numbersOf(spec) {
   if (spec.values) return spec.values
+  if (spec.low && spec.high) return spec.low.concat(spec.high)
+  if (spec.before && spec.after) return spec.before.concat(spec.after)
   if (spec.series) return spec.series.flatMap((s) => s.data || [])
   if (spec.bars) return spec.bars.flatMap((b) => [b.y1, b.y2])
   if (spec.cells) return spec.cells.map((c) => c[2])
+  if (spec.days) return spec.days.map((d) => d[2])
   if (spec.bins) return spec.bins.map((b) => b[2])
   if (spec.points) return spec.points.map((p) => p[1])
   if (spec.groups) return spec.groups.flat()
@@ -229,9 +256,31 @@ BUILD.line = (spec, ctx) => {
       z: 's',
       color: 's',
       strokeWidth: 2,
+      // A rolling mean is drawn over the raw line, never instead of it: the
+      // point of the smoothing is the contrast between the two.
+      strokeOpacity: spec.rolling ? 0.35 : 1,
       curve: spec.smooth === false ? undefined : d3Curve(curveMonotoneX),
     }),
   )
+  if (spec.rolling) {
+    const smoothed = rollingWindow(rows, {
+      by: 's',
+      size: spec.rolling,
+      anchor: 'end',
+      partial: true,
+      outputs: { mean: { reduce: 'mean', value: 'v' } },
+    })
+    marks.push(
+      lineY(smoothed, {
+        x: 'c',
+        y: 'mean',
+        z: 's',
+        color: 's',
+        strokeWidth: 2.5,
+        curve: d3Curve(curveMonotoneX),
+      }),
+    )
+  }
   return definition(spec, ctx, {
     marks,
     scales: {
@@ -399,19 +448,33 @@ BUILD.scatter = (spec, ctx) => {
     label: spec.labels ? spec.labels[i] : undefined,
     i,
   }))
-  return definition(spec, ctx, {
-    marks: [
-      dot(rows, {
+  const marks = [
+    dot(rows, {
+      x: 'x',
+      y: 'y',
+      r: spec.sizes ? 'r' : 6,
+      fill: color('@series1'),
+      fillOpacity: 0.85,
+      // A surface-coloured ring keeps overlapping dots countable.
+      stroke: VAR.surface,
+      strokeWidth: 2,
+    }),
+  ]
+  if (spec.trend) {
+    // The fit goes *under* nothing and over the dots: it is a claim about the
+    // cloud, and the reader has to be able to see the cloud disagree with it.
+    marks.push(
+      linearRegressionY(rows, {
         x: 'x',
         y: 'y',
-        r: spec.sizes ? 'r' : 6,
-        fill: color('@series1'),
-        fillOpacity: 0.85,
-        // A surface-coloured ring keeps overlapping dots countable.
-        stroke: VAR.surface,
+        ci: 0.95,
+        stroke: color('@series2'),
         strokeWidth: 2,
       }),
-    ],
+    )
+  }
+  return definition(spec, ctx, {
+    marks,
     scales: {
       x: { scale: scaleLinear, nice: true, grid: true, axis: axisFrom(spec.x, ctx.locale) },
       y: { ...linearScale(spec.y, ctx.numbers), grid: true, axis: axisFrom(spec.y, ctx.locale, ctx.numberFormat) },
@@ -757,6 +820,349 @@ BUILD.sankey = (spec, ctx) =>
     margin: 0,
   })
 
+BUILD.lollipop = (spec, ctx) => {
+  const cats = spec.categories.map(String)
+  const rows = wideRows(cats, spec.values)
+  return definition(spec, ctx, {
+    marks: [
+      // The stem keeps the common baseline that makes lengths comparable; the
+      // dot carries the value. Far less ink than a bar for the same reading,
+      // which is what makes forty categories survivable.
+      link(rows, { x1: () => 0, x2: 'v', y1: 'c', y2: 'c', stroke: VAR.base, strokeWidth: 1.5 }),
+      dot(rows, { x: 'v', y: 'c', r: 5, fill: color('@series1') }),
+      text(rows, {
+        x: 'v',
+        y: 'c',
+        text: (row) => ctx.value(row.v),
+        anchor: 'start',
+        dx: 10,
+        fontSize: 11,
+        fill: VAR.ink2,
+      }),
+    ],
+    scales: {
+      y: { scale: bandScale(cats, 0.3), axis: { line: false, ticks: { size: 0 } } },
+      x: { ...linearScale(spec.x, ctx.numbers), grid: true, axis: axisFrom(spec.x, ctx.locale, ctx.numberFormat) },
+    },
+  })
+}
+
+BUILD.dumbbell = (spec, ctx) => {
+  const cats = spec.categories.map(String)
+  const series = seriesList(spec)
+  const [a, b] = series
+  const pairs = cats.map((c, i) => ({ c, a: a.data[i], b: b.data[i] }))
+  const points = longRows(cats, series)
+  return definition(spec, ctx, {
+    marks: [
+      // The connector is the chart: its length is the gap, which is the number
+      // the reader came for. Two bars side by side make them measure it twice.
+      link(pairs, { x1: 'a', x2: 'b', y1: 'c', y2: 'c', stroke: VAR.base, strokeWidth: 2 }),
+      dot(points, { x: 'v', y: 'c', color: 's', r: 6, stroke: VAR.surface, strokeWidth: 2 }),
+    ],
+    scales: {
+      y: { scale: bandScale(cats, 0.4), axis: { line: false, ticks: { size: 0 } } },
+      x: { ...linearScale(spec.x, ctx.numbers), grid: true, axis: axisFrom(spec.x, ctx.locale, ctx.numberFormat) },
+    },
+    color: { domain: series.map((s) => s.name), range: SERIES, legend: legendFor(spec, 2) },
+  })
+}
+
+BUILD.slope = (spec, ctx) => {
+  const ends = [String(spec.before_name), String(spec.after_name)]
+  const rows = []
+  spec.labels.forEach((label, i) => {
+    rows.push({ e: ends[0], label: String(label), v: spec.before[i] })
+    rows.push({ e: ends[1], label: String(label), v: spec.after[i] })
+  })
+  return definition(spec, ctx, {
+    marks: [
+      lineY(rows, { x: 'e', y: 'v', z: 'label', color: 'label', strokeWidth: 2 }),
+      dot(rows, { x: 'e', y: 'v', z: 'label', color: 'label', r: 4 }),
+      // Names live at the ends of their own line, so a slopegraph needs no
+      // legend: crossing lines are the message, and a legend would make the
+      // reader match colours across the crossings.
+      text(rows, {
+        x: 'e',
+        y: 'v',
+        text: (row) => `${row.label}  ${ctx.value(row.v)}`,
+        anchor: (row) => (row.e === ends[0] ? 'end' : 'start'),
+        dx: (row) => (row.e === ends[0] ? -8 : 8),
+        fontSize: 11,
+        fill: VAR.ink2,
+      }),
+    ],
+    scales: {
+      x: { scale: scalePoint().domain(ends).padding(0.5), axis: { line: false, ticks: { size: 0 } } },
+      y: { ...linearScale(spec.y, ctx.numbers), grid: false, axis: false },
+    },
+    color: { domain: spec.labels.map(String), range: SERIES },
+    legend: false,
+  })
+}
+
+BUILD.stacked_area = (spec, ctx) => {
+  const cats = spec.categories.map(String)
+  const series = seriesList(spec)
+  const rows = longRows(cats, series)
+  const order = series.map((s) => s.name)
+  // A streamgraph gives up the shared baseline for readable band thicknesses:
+  // right when the question is "how did the mix evolve", wrong when any single
+  // band's level has to be read off an axis.
+  const layout = spec.stream
+    ? stack({ offset: 'wiggle', order: 'inside-out' })
+    : stack({ order, offset: spec.percent ? 'normalize' : undefined })
+  return definition(spec, ctx, {
+    marks: [
+      areaY(rows, {
+        x: 'c',
+        y: 'v',
+        z: 's',
+        color: 's',
+        layout,
+        fillOpacity: 0.9,
+        curve: d3Curve(curveMonotoneX),
+      }),
+    ],
+    scales: {
+      x: { scale: scalePoint().domain(cats).padding(0.02), axis: axisFrom(spec.x, ctx.locale) },
+      y: {
+        ...linearScale(spec.y, ctx.numbers),
+        grid: !spec.stream,
+        axis: spec.stream ? false : axisFrom(spec.y, ctx.locale, ctx.numberFormat),
+      },
+    },
+    color: { domain: order, range: SERIES, legend: legendFor(spec, series.length) },
+    focus: 'group-x',
+  })
+}
+
+BUILD.range_area = (spec, ctx) => {
+  const cats = spec.categories.map(String)
+  const rows = cats.map((c, i) => ({
+    c,
+    low: spec.low[i],
+    high: spec.high[i],
+    v: spec.line ? spec.line[i] : null,
+  }))
+  const marks = [
+    areaY(rows, {
+      x: 'c',
+      y1: 'low',
+      y2: 'high',
+      fill: color('@series1'),
+      fillOpacity: 0.18,
+      curve: d3Curve(curveMonotoneX),
+    }),
+  ]
+  if (spec.line) {
+    marks.push(
+      lineY(rows, { x: 'c', y: 'v', stroke: color('@series1'), strokeWidth: 2, curve: d3Curve(curveMonotoneX) }),
+    )
+  }
+  return definition(spec, ctx, {
+    marks,
+    scales: {
+      x: { scale: scalePoint().domain(cats).padding(0.02), axis: axisFrom(spec.x, ctx.locale) },
+      y: { ...linearScale(spec.y, ctx.numbers), grid: true, axis: axisFrom(spec.y, ctx.locale, ctx.numberFormat) },
+    },
+    focus: 'group-x',
+  })
+}
+
+BUILD.timeline = (spec, ctx) => {
+  const rows = spec.tasks.map((t, i) => ({
+    label: String(t.label),
+    start: new Date(t.start),
+    end: new Date(t.end),
+    group: t.group == null ? String(t.label) : String(t.group),
+    i,
+  }))
+  const lanes = []
+  rows.forEach((r) => {
+    if (!lanes.includes(r.label)) lanes.push(r.label)
+  })
+  return definition(spec, ctx, {
+    marks: [
+      rect(rows, {
+        y: 'label',
+        x1: 'start',
+        x2: 'end',
+        color: 'group',
+        key: (row) => `${row.label}-${row.i}`,
+        radius: 3,
+        inset: 4,
+      }),
+    ],
+    scales: {
+      // A real time scale, not a category per bar: the gap between two phases
+      // is information, and evenly spaced bands would erase it.
+      x: {
+        scale: scaleUtc,
+        nice: true,
+        grid: true,
+        // The library's default tick text is English. Granularity follows the
+        // span, so a two-week plan reads in days and a three-year programme in
+        // months, both in the reader's locale.
+        axis: { line: false, ticks: { format: dateTicks(rows, ctx.locale) } },
+      },
+      y: { scale: bandScale(lanes, 0.25), axis: { line: false, ticks: { size: 0 } } },
+    },
+    color: { range: SERIES, legend: spec.legend === false ? undefined : colorLegend({}) },
+  })
+}
+
+BUILD.calendar = (spec, ctx) => {
+  const rows = spec.days.map((d) => ({
+    week: String(d[0]),
+    day: WEEKDAYS[d[1]],
+    v: d[2],
+    date: d[3],
+  }))
+  const weeks = []
+  // Week -> month name, taken from the first day seen in that week. The domain
+  // has to stay one entry per week (that is the column), but "2026-07" as a
+  // tick label is a week number nobody counts in; the month is what a reader
+  // navigates a calendar by.
+  const months = new Map()
+  rows.forEach((r) => {
+    if (!weeks.includes(r.week)) weeks.push(r.week)
+    if (!months.has(r.week)) {
+      months.set(r.week, new Date(`${r.date}T00:00:00Z`))
+    }
+  })
+  const monthName = new Intl.DateTimeFormat(ctx.locale, {
+    month: 'short',
+    year: '2-digit',
+    timeZone: 'UTC',
+  })
+  // Only the first week of each month carries the name. Without this every
+  // surviving tick in a month repeats it — "März 26 · März 26 · März 26" reads
+  // as three months rather than one.
+  const labelled = new Set()
+  let lastMonth = null
+  weeks.forEach((week) => {
+    const key = monthName.format(months.get(week))
+    if (key !== lastMonth) {
+      labelled.add(week)
+      lastMonth = key
+    }
+  })
+  const values = rows.map((r) => r.v).filter((v) => v != null)
+  const low = spec.low != null ? spec.low : Math.min(...values, 0)
+  const high = spec.high != null ? spec.high : Math.max(...values, 1)
+  return definition(spec, ctx, {
+    marks: [cell(rows, { x: 'week', y: 'day', color: 'v', inset: 1, radius: 2 })],
+    scales: {
+      x: {
+        scale: bandScale(weeks, 0.06),
+        // Thinned month names, not 52 week numbers: a grey band of "2026-07"
+        // under a year of cells is something nobody reads.
+        axis: {
+          line: false,
+          ticks: {
+            size: 0,
+            format: (week) => (labelled.has(week) ? monthName.format(months.get(week)) : ''),
+          },
+          tickLabels: { thin: { minGap: 12, priority: 'ends' } },
+        },
+      },
+      y: { scale: bandScale(WEEKDAYS, 0.06), axis: { line: false, ticks: { size: 0 } } },
+    },
+    color: {
+      scale: scaleQuantize().domain([low, high]).range(SEQ),
+      legend: spec.legend === false ? undefined : colorGradientLegend({ label: spec.unit || '' }),
+    },
+  })
+}
+
+const WEEKDAYS = ['Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So']
+
+BUILD.mosaic = (spec, ctx) => {
+  const rows = spec.cells.map((c) => ({ x: String(c[0]), y: String(c[1]), v: c[2] }))
+  const cells = mosaicY(rows, { x: 'x', y: 'y', value: 'v', yOrder: spec.y_order })
+  return definition(spec, ctx, {
+    marks: [
+      // Column width is the segment's size and segment height is its share, so
+      // one rectangle's area is its absolute contribution — the thing a
+      // 100 % stacked bar deliberately throws away.
+      // `color: 'yValue'`, not `'y'`: the transform's `y` is the normalised
+      // centre of the cell, so colouring by it gives every rectangle its own
+      // hue instead of one hue per part.
+      rect(cells, {
+        x: 'x',
+        x1: 'x1',
+        x2: 'x2',
+        y: 'y',
+        y1: 'y1',
+        y2: 'y2',
+        color: 'yValue',
+        inset: 1,
+        stroke: VAR.surface,
+        strokeWidth: 1,
+      }),
+    ],
+    scales: {
+      x: { scale: scaleLinear().domain([0, 1]), axis: false },
+      y: { scale: scaleLinear().domain([0, 1]), axis: false },
+    },
+    color: { domain: spec.y_order, range: SERIES, legend: legendFor(spec, 2) },
+  })
+}
+
+BUILD.waffle = (spec, ctx) => {
+  const rows = spec.labels.map((label, i) => ({ label: String(label), v: spec.values[i] }))
+  return definition(spec, ctx, {
+    marks: [
+      // Countable squares instead of angles: a reader can see "roughly one in
+      // five" without estimating an arc, which is the one thing a pie is bad at.
+      waffleY(rows, { y: 'v', color: 'label', unit: spec.unit, round: true, gap: 2, radius: 2 }),
+    ],
+    scales: { x: null, y: null },
+    color: { domain: rows.map((r) => r.label), range: SERIES, legend: legendFor(spec, rows.length) },
+    // `guides: false` but no `margin: 0`: the cells should fill the card, and
+    // the legend still needs its own band above them or it prints over the
+    // first row of squares.
+    guides: false,
+  })
+}
+
+BUILD.violin = (spec, ctx) => {
+  const rows = []
+  spec.groups.forEach((values, i) => {
+    values.forEach((v, j) => rows.push({ c: String(spec.categories[i]), v, k: `${i}-${j}` }))
+  })
+  // `violinY` mirrors *prepared* widths — it does not estimate a density. The
+  // binning and the per-category normalisation are the caller's job, and doing
+  // them here is what keeps the Python side able to hand over raw observations.
+  const all = rows.map((r) => r.v)
+  const lo = Math.min(...all)
+  const hi = Math.max(...all)
+  const step = (hi - lo) / 18 || 1
+  const thresholds = Array.from({ length: 19 }, (_, i) => lo + i * step)
+  const profiles = normalize(
+    binY(rows, { value: 'v', by: 'c', thresholds, outputs: { count: { reduce: 'count' } } }),
+    { value: 'count', by: 'c', basis: 'max', as: 'width' },
+  )
+  return definition(spec, ctx, {
+    marks: [
+      violinY(profiles, {
+        x: 'c',
+        y: 'y',
+        width: 'width',
+        span: 0.8,
+        fill: color('@seq2'),
+        stroke: color('@series1'),
+        strokeWidth: 1.5,
+      }),
+    ],
+    scales: {
+      x: { scale: bandScale(spec.categories.map(String), 0.2), axis: axisFrom(spec.x, ctx.locale) },
+      y: { ...linearScale(spec.y, ctx.numbers), grid: true, axis: axisFrom(spec.y, ctx.locale, ctx.numberFormat) },
+    },
+  })
+}
+
 /** Everything every chart shares: the theme, the tooltip, and the animation
  *  policy. `svgAnimation` stays off — the first paint of an animated scene is
  *  driven by animation frames, and a hidden iframe or a background tab suspends
@@ -794,10 +1200,20 @@ export function mount(el, spec, options) {
     numbers: numbersOf(spec),
     tip: (point) => {
       const d = point.datum || {}
-      const label = d.label ?? d.c ?? d.axis ?? d.x ?? point.xValue
-      const number = d.v ?? d.value ?? d.count ?? point.yValue
+      const label = d.label ?? d.c ?? d.axis ?? d.day ?? d.x ?? point.xValue
       const series = d.s ? `${d.s} · ` : ''
-      return `${series}${label ?? ''}: ${value(number)}`
+      // A band has no single value — reporting one endpoint as "the" number is
+      // worse than reporting neither.
+      if (d.low != null && d.high != null) {
+        const mid = d.v != null ? `${value(d.v)} ` : ''
+        return `${label ?? ''}: ${mid}(${value(d.low)} – ${value(d.high)})`
+      }
+      if (d.start && d.end) {
+        return `${label ?? ''}: ${fmtDate(d.start, locale)} – ${fmtDate(d.end, locale)}`
+      }
+      const number = d.v ?? d.mean ?? d.value ?? d.count ?? point.yValue
+      const when = d.date ? ` (${d.date})` : ''
+      return `${series}${label ?? ''}${when}: ${value(number)}`
     },
   }
   const build = BUILD[spec.type]
