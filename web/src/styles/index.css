@@ -138,10 +138,9 @@
    * user's own turns read as clearly grey blocks against the white page; dark
    * mode has enough separation from --card already and just reuses it. */
   --bubble: color-mix(in srgb, var(--color-white) 93.5%, var(--color-black));
-  /* The sidebar is a large flat panel, so it sits a step lighter than the
-   * smaller --card surfaces — enough to read as its own plane without the
-   * whole left edge going grey. */
-  --sidebar: color-mix(in srgb, var(--color-white) 98.4%, var(--color-black));
+  /* The sidebar recedes behind the chat: a step *down* from the page, so the
+   * conversation is the lit surface and the navigation is the frame around it. */
+  --sidebar: color-mix(in srgb, var(--color-white) 95.5%, var(--color-black));
   /* Reading text — the message stream, the composer, the selected chat. One
    * step darker than --foreground: chrome and labels stay at neutral-800, the
    * words you actually read sit closer to black. */
@@ -206,7 +205,9 @@
   --card: color-mix(in srgb, var(--background) 96%, var(--color-white));
   --card-foreground: var(--color-neutral-100);
   --bubble: var(--card);
-  --sidebar: var(--card);
+  /* Unlike the other panels the sidebar goes the other way — darker than the
+   * page — so the chat reads as the lit surface and the nav as its frame. */
+  --sidebar: color-mix(in srgb, var(--background) 88%, var(--color-black));
   /* Dark mode already runs its text near-white; no second step needed. */
   --strong: var(--foreground);
   /* Kept in step with --card so menus never read darker than the panel
@@ -409,33 +410,28 @@ body::after {
 }
 
 /* ── Sidebar nav icons ──
-   New / Projects / Artifacts / Customize sit next to each other and are told
-   apart mostly by their icon, so each one moves in its own way on hover: the
-   plus turns into the gesture of opening something, the archive lid lifts, the
-   shapes rotate, the case tips. Short and single-shot — this is a hint that the
-   row is live, not an attention grab. */
-.nav-row [class*='nav-anim-'] {
-  transition: transform 220ms cubic-bezier(0.2, 0.8, 0.3, 1);
+   Projects / Artifacts / Customize each answer the hover with one small move —
+   the box lid lifts off, the shapes turn a few degrees, the case tips. A couple
+   of pixels is the whole point: it says the row is live without pulling the eye
+   away from what the reader was doing. */
+.nav-row [class*='nav-anim-'] > svg {
+  transition: transform 200ms cubic-bezier(0.2, 0.8, 0.3, 1);
 }
-.nav-row:hover .nav-anim-plus { transform: rotate(90deg); }
-.nav-row:hover .nav-anim-lift { animation: nav-lift 520ms cubic-bezier(0.2, 0.8, 0.3, 1); }
-.nav-row:hover .nav-anim-shapes { transform: rotate(120deg); }
-.nav-row:hover .nav-anim-tilt { animation: nav-tilt 560ms cubic-bezier(0.2, 0.8, 0.3, 1); }
-@keyframes nav-lift {
-  0% { transform: none; }
-  35% { transform: translateY(-3px); }
-  65% { transform: translateY(1px); }
-  100% { transform: none; }
+/* The archive icon's lid is its first path — moving only that leaves the box
+   itself planted, so the gesture reads as opening rather than as a jump. */
+.nav-row .nav-anim-lift > svg > :first-child {
+  transition: transform 200ms cubic-bezier(0.2, 0.8, 0.3, 1);
+  transform-box: fill-box;
+  transform-origin: center;
 }
-@keyframes nav-tilt {
-  0% { transform: none; }
-  30% { transform: rotate(-10deg) scale(1.05); }
-  60% { transform: rotate(7deg) scale(1.02); }
-  100% { transform: none; }
-}
+.nav-row:hover .nav-anim-lift > svg > :first-child { transform: translateY(-1.5px); }
+.nav-row:hover .nav-anim-shapes > svg { transform: rotate(15deg); }
+.nav-row:hover .nav-anim-tilt > svg { transform: rotate(-7deg); }
 @media (prefers-reduced-motion: reduce) {
-  .nav-row [class*='nav-anim-'] { transition: none; }
-  .nav-row:hover [class*='nav-anim-'] { animation: none; transform: none; }
+  .nav-row [class*='nav-anim-'] > svg,
+  .nav-row .nav-anim-lift > svg > :first-child { transition: none; }
+  .nav-row:hover [class*='nav-anim-'] > svg,
+  .nav-row:hover .nav-anim-lift > svg > :first-child { transform: none; }
 }
 
 /* ── Toast ──

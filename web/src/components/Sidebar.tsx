@@ -415,9 +415,9 @@ function ProjectRow({
 }
 
 /** Primary nav row (New / Projects / Artifacts / Customize). `anim` names the
- *  keyframe the icon plays while the row is hovered — see `.nav-row` in
- *  index.css; the motion is what distinguishes the three destinations at a
- *  glance, so each icon animates in its own way. */
+ *  small move the icon makes while the row is hovered — see `.nav-row` in
+ *  index.css. "New" takes none: it is the row people hit without looking, and
+ *  the one that should read as a plain button. */
 function NavRow({
   icon,
   label,
@@ -427,7 +427,7 @@ function NavRow({
 }: {
   icon: React.ReactNode;
   label: string;
-  anim: 'plus' | 'lift' | 'shapes' | 'tilt';
+  anim?: 'lift' | 'shapes' | 'tilt';
   onClick?: () => void;
   /** The "New" row sits a shade brighter — it is the sidebar's primary action. */
   emphasis?: boolean;
@@ -437,13 +437,13 @@ function NavRow({
       type="button"
       onClick={onClick}
       className={cn(
-        'nav-row flex h-9 w-full items-center gap-2.5 rounded-lg px-2 text-sm transition-colors [&_svg]:size-[18px] [&_svg]:shrink-0',
+        'nav-row flex h-8 w-full items-center gap-2.5 rounded-lg px-2 text-sm transition-colors [&_svg]:size-[18px] [&_svg]:shrink-0',
         emphasis
           ? 'bg-accent/70 text-strong hover:bg-accent'
           : 'text-foreground/80 hover:bg-accent/70 hover:text-foreground',
       )}
     >
-      <span className={cn('flex size-5 shrink-0 items-center justify-center', `nav-anim-${anim}`)}>{icon}</span>
+      <span className={cn('flex size-5 shrink-0 items-center justify-center', anim && `nav-anim-${anim}`)}>{icon}</span>
       <span className="min-w-0 flex-1 truncate text-left">{label}</span>
     </button>
   );
@@ -598,8 +598,8 @@ function SidebarBody({ onOpenPalette, account, onOpenTicketDialog, preview }: Si
       </div>
 
       {/* Primary nav. */}
-      <div className="space-y-0.5 px-2">
-        <NavRow emphasis anim="plus" icon={<PlusIcon />} label={t('sidebar.new')} onClick={newChat} />
+      <div className="px-2">
+        <NavRow emphasis icon={<PlusIcon />} label={t('sidebar.new')} onClick={newChat} />
         <NavRow
           anim="lift"
           icon={<ArchiveIcon />}
@@ -674,7 +674,13 @@ function SidebarBody({ onOpenPalette, account, onOpenTicketDialog, preview }: Si
       <div className="mt-3 flex min-h-0 flex-1 flex-col">
         <div className="flex items-center justify-between px-4 pb-1">
           {openProject === null ? (
-            <span className="text-xs font-medium text-muted-foreground">{t('sidebar.chats')}</span>
+            // Names whichever group comes first in the list below — pinned
+            // chats float to the top, and the rest get their own "Chats"
+            // heading further down.
+            <span className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+              {pinned.length > 0 && <PinIcon className="size-3 -rotate-45" />}
+              {t(pinned.length > 0 ? 'sidebar.pinned' : 'sidebar.chats')}
+            </span>
           ) : (
             <button
               type="button"
@@ -712,17 +718,13 @@ function SidebarBody({ onOpenPalette, account, onOpenTicketDialog, preview }: Si
         <div className="min-h-0 flex-1 space-y-px overflow-y-auto px-2">
           {pinned.length > 0 && (
             <>
-              <div className="flex items-center gap-1.5 px-2 pt-1 pb-0.5 text-xs font-medium text-muted-foreground">
-                <PinIcon className="size-3 -rotate-45" /> {t('sidebar.pinned')}
-              </div>
+              {/* No heading of its own — the section header above already reads
+                  "Pinned" whenever these rows are present. */}
               {pinned.map((s) => (
                 <SessionRow key={s.id} session={s} projects={projectNames} />
               ))}
-              {/* "Recents", not a second "Chats": the section header above
-                  already says Chats, and this only separates the pinned rows
-                  from the rest of them. */}
               {rows.length > 0 && (
-                <div className="px-2 pt-2 pb-0.5 text-xs font-medium text-muted-foreground">{t('sidebar.recents')}</div>
+                <div className="px-2 pt-2 pb-0.5 text-xs font-medium text-muted-foreground">{t('sidebar.chats')}</div>
               )}
             </>
           )}
@@ -754,12 +756,14 @@ function SidebarBody({ onOpenPalette, account, onOpenTicketDialog, preview }: Si
                 <button
                   type="button"
                   aria-label={t('sidebar.account')}
-                  className="flex min-w-0 flex-1 items-center gap-1.5 rounded-sm px-2 py-1 text-left transition-colors outline-none hover:bg-accent/70 focus-visible:outline-none data-[state=open]:bg-accent/70"
+                  // Sized to its own label (capped so a long name can't crowd
+                  // the icons out), not stretched across the row.
+                  className="flex min-w-0 max-w-[calc(100%-6rem)] items-center gap-1.5 rounded-sm px-2 py-1 text-left transition-colors outline-none hover:bg-accent/70 focus-visible:outline-none data-[state=open]:bg-accent/70"
                 >
                   <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-primary/15 text-[10px] font-semibold text-primary">
                     {initial}
                   </span>
-                  <span className="min-w-0 flex-1 truncate text-[13px] text-foreground/95 dark:text-inherit">{accountLabel ?? t('sidebar.user')}</span>
+                  <span className="min-w-0 truncate text-[13px] text-foreground/95 dark:text-inherit">{accountLabel ?? t('sidebar.user')}</span>
                   <ChevronDownIcon className="size-3.5 shrink-0 text-muted-foreground" />
                 </button>
               }
@@ -834,10 +838,12 @@ export function Sidebar(props: SidebarProps) {
   }
 
   return (
-    <nav className="relative w-12 shrink-0 border-r border-border bg-sidebar" aria-label={t('sidebar.navLabel')}>
-      {/* The rail itself: only the expand button, above the preview so it keeps
-          its own hover state (and its tooltip) while the preview is showing. */}
-      <div className="relative z-50 flex h-12 items-center justify-center">
+    // Zero width: collapsed leaves no panel behind at all, just the button
+    // floating over the top-left corner of the chat.
+    <nav className="relative w-0 shrink-0" aria-label={t('sidebar.navLabel')}>
+      {/* Above the preview, so it keeps its own hover state (and its tooltip)
+          while the preview is showing. */}
+      <div className="absolute left-2.5 top-2.5 z-50">
         <Tooltip label={<span className="flex items-center gap-1.5">{t('sidebar.expandSidebar')}<KeybindingPill value="mod+b" /></span>} side="right">
           <button
             type="button"
