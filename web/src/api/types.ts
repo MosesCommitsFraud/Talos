@@ -93,6 +93,15 @@ export interface Artifact {
   [key: string]: unknown;
 }
 
+/** An artifact as the library page sees it: the same row the per-session list
+ *  returns, plus the chat it was created in (null once that chat is deleted —
+ *  the document itself is owner-stamped and outlives it). */
+export interface LibraryArtifact extends Artifact {
+  session_id?: string | null;
+  session_name?: string | null;
+  mtime?: number;
+}
+
 export interface ArtifactSelectionTarget {
   type: 'text' | 'element';
   quote?: string;

@@ -7,8 +7,9 @@ import type { ArtifactSelection } from '@/api/types';
 /** Top-level surface shown in the main column. `chat` is the default; `rag`
  *  swaps in the full-screen knowledge-base workspace (deep-linkable at `#/rag`),
  *  `users` in the admin user/usage workspace (`#/users`), `tickets` in the
- *  admin support-ticket workspace (`#/tickets`). */
-export type AppView = 'chat' | 'rag' | 'users' | 'tickets';
+ *  admin support-ticket workspace (`#/tickets`), and `projects` / `artifacts` /
+ *  `customize` in the three pages the sidebar's primary nav opens. */
+export type AppView = 'chat' | 'rag' | 'users' | 'tickets' | 'projects' | 'artifacts' | 'customize';
 
 export interface PreviewFile {
   sessionId: string;
@@ -33,7 +34,9 @@ function viewFromHash(): AppView {
   // (`#/rag/<id>`, `#/rag/global`) to deep-link one base, and all of them still
   // resolve to the `rag` view.
   const slug = location.hash.replace(/^#\/?/, '').split('/')[0];
-  return slug === 'rag' || slug === 'users' || slug === 'tickets' ? slug : 'chat';
+  return slug === 'rag' || slug === 'users' || slug === 'tickets' || slug === 'projects' || slug === 'artifacts' || slug === 'customize'
+    ? slug
+    : 'chat';
 }
 
 interface UiState {
@@ -68,6 +71,15 @@ interface UiState {
   closePreview: () => void;
   artifactSelection: ArtifactSelection | null;
   setArtifactSelection: (selection: ArtifactSelection | null) => void;
+  /** Project whose chats the sidebar list is narrowed to; null = loose chats.
+   *  Shared state rather than the sidebar's own, because the Projects page
+   *  opens a project too. */
+  openProject: string | null;
+  setOpenProject: (name: string | null) => void;
+  /** The "Create a project" modal — opened from the sidebar's + and from the
+   *  Projects page's "New project" button. */
+  createProjectOpen: boolean;
+  setCreateProjectOpen: (open: boolean) => void;
 }
 
 export const useUi = create<UiState>((set) => ({
@@ -104,4 +116,8 @@ export const useUi = create<UiState>((set) => ({
   closePreview: () => set({ preview: null, panelMode: 'files' }),
   artifactSelection: null,
   setArtifactSelection: (artifactSelection) => set({ artifactSelection }),
+  openProject: null,
+  setOpenProject: (openProject) => set({ openProject }),
+  createProjectOpen: false,
+  setCreateProjectOpen: (createProjectOpen) => set({ createProjectOpen }),
 }));

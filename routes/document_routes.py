@@ -481,6 +481,48 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
     _document_artifact = document_artifact
     _gallery_artifact = gallery_artifact
 
+    # ---- GET /api/artifacts — everything this user has created, all chats ----
+    @router.get("/api/artifacts")
+    async def list_all_artifacts_route(
+        request: Request, limit: int = Query(default=300, ge=1, le=1000)
+    ) -> Dict[str, Any]:
+        """The Artifacts page: one library of every document and generated image
+        the user owns, newest first, each tagged with the chat it came from.
+
+        Deliberately DB-only. The per-session route above also asks the sandbox
+        for workspace files, which costs one call per chat — fine for the one
+        session on screen, not for a library spanning every chat the user has.
+        Workspace files stay reachable from the chat's own files panel.
+        """
+        user = effective_user(request)
+        db = SessionLocal()
+        try:
+            session_names = dict(
+                db.query(DbSession.id, DbSession.name).filter(DbSession.owner == user).all()
+            )
+
+            def _with_session(artifact: Dict[str, Any], session_id: Optional[str]):
+                artifact["session_id"] = session_id
+                artifact["session_name"] = session_names.get(session_id) if session_id else None
+                return artifact
+
+            rows = [
+                _with_session(document_artifact(doc), doc.session_id)
+                for doc in _owner_session_filter(db.query(Document), user)
+                .filter(Document.is_active == True)  # noqa: E712 — SQLAlchemy needs ==
+                .all()
+            ]
+            rows.extend(
+                _with_session(gallery_artifact(image), image.session_id)
+                for image in db.query(GalleryImage)
+                .filter(GalleryImage.owner == user, GalleryImage.is_active == True)  # noqa: E712
+                .all()
+            )
+        finally:
+            db.close()
+        rows.sort(key=lambda item: float(item.get("mtime") or 0), reverse=True)
+        return {"artifacts": rows[:limit], "count": len(rows)}
+
     # ---- GET /api/artifacts/{session_id} — every output associated with the chat ----
     @router.get("/api/artifacts/{session_id}")
     async def list_artifacts_route(request: Request, session_id: str) -> Dict[str, Any]:

@@ -11,6 +11,15 @@ export type LlmLang = 'auto' | Lang;
 /** Qwen3.8 thinking budget, cheapest first. Mirrors the model's
  *  `reasoning_effort` chat-template kwarg. */
 export type ReasoningEffort = 'low' | 'medium' | 'xhigh';
+
+/** A sidebar/Projects-page project. `name` is the folder label the server
+ *  stores on each member chat; everything else exists only here. */
+export interface Project {
+  name: string;
+  description?: string;
+  /** ISO timestamp — the date the project cards show. */
+  createdAt?: string;
+}
 export const REASONING_EFFORTS: ReasoningEffort[] = ['low', 'medium', 'xhigh'];
 export type { Lang };
 
@@ -101,8 +110,9 @@ interface PrefsState {
   /** Projects listed in the sidebar. A project is only a label carried by its
    *  chats, so the server knows about the ones that already have a member —
    *  this list is what keeps a freshly created, still-empty project on screen
-   *  until the first chat moves into it. */
-  projects: string[];
+   *  until the first chat moves into it, and the only place a project's
+   *  description lives. */
+  projects: Project[];
   /** Width (px) of the resizable artifact preview panel. */
   previewWidth: number;
   setTheme: (t: Theme) => void;
@@ -118,7 +128,7 @@ interface PrefsState {
   setKnowledge: (useRag: boolean, useDb: boolean) => void;
   setMicDeviceId: (id: string | null) => void;
   toggleSidebar: () => void;
-  addProject: (name: string) => void;
+  addProject: (name: string, description?: string) => void;
   /** Follow a project through a rename; `to === null` drops it from the list. */
   renameProjectPref: (from: string, to: string | null) => void;
   setPreviewWidth: (px: number) => void;
@@ -173,10 +183,26 @@ export const usePrefs = create<PrefsState>()(
       setKnowledge: (useRag, useDb) => set({ useRag, useDb }),
       setMicDeviceId: (micDeviceId) => set({ micDeviceId }),
       toggleSidebar: () => set((s) => ({ sidebarCollapsed: !s.sidebarCollapsed })),
-      addProject: (name) => set((s) => (s.projects.includes(name) ? {} : { projects: [...s.projects, name] })),
+      addProject: (name, description) => set((s) => {
+        const existing = s.projects.find((p) => p.name === name);
+        // Re-adding a known name only fills in a description it was missing —
+        // creating a project whose folder already has chats must not wipe it.
+        if (existing) {
+          if (!description || existing.description === description) return {};
+          return {
+            projects: s.projects.map((p) => (p.name === name ? { ...p, description } : p)),
+          };
+        }
+        return {
+          projects: [...s.projects, { name, description, createdAt: new Date().toISOString() }],
+        };
+      }),
       renameProjectPref: (from, to) => set((s) => {
-        const rest = s.projects.filter((n) => n !== from && n !== to);
-        return { projects: to ? [...rest, to] : rest };
+        const moved = s.projects.find((p) => p.name === from);
+        const rest = s.projects.filter((p) => p.name !== from && p.name !== to);
+        // Carry the description across a rename; dropping it on delete is the
+        // point — the project is gone, not renamed.
+        return { projects: to ? [...rest, { ...moved, name: to }] : rest };
       }),
       setPreviewWidth: (previewWidth) => set({ previewWidth }),
     }),
@@ -190,6 +216,10 @@ export const usePrefs = create<PrefsState>()(
           ...p,
           visibility: withThinkingDefault({ ...DEFAULT_VISIBILITY, ...(p.visibility ?? {}) }),
           lang: pickLang(p.lang, p.langChosen),
+          // Projects were bare names before they gained a description.
+          projects: ((p.projects ?? []) as Array<string | Project>).map((entry) =>
+            typeof entry === 'string' ? { name: entry } : entry,
+          ),
         };
       },
     },

@@ -428,6 +428,7 @@ function NavRow({
   anim,
   onClick,
   emphasis,
+  active,
 }: {
   icon: React.ReactNode;
   label: string;
@@ -435,14 +436,17 @@ function NavRow({
   onClick?: () => void;
   /** The "New" row sits a shade brighter — it is the sidebar's primary action. */
   emphasis?: boolean;
+  /** This row's page is the one on screen. */
+  active?: boolean;
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
+      aria-current={active ? 'page' : undefined}
       className={cn(
         'nav-row my-px flex h-[30px] w-full items-center gap-2.5 rounded-lg px-2 text-sm transition-colors [&_svg]:size-[18px] [&_svg]:shrink-0',
-        emphasis
+        emphasis || active
           ? 'bg-sidebar-active text-strong hover:bg-sidebar-active'
           : 'text-foreground/80 hover:bg-sidebar-accent hover:text-foreground',
       )}
@@ -548,20 +552,19 @@ function SidebarBody({ onOpenPalette, account, onOpenTicketDialog, preview }: Si
   });
   const auth = useAuth();
   const newChat = useChat((s) => s.newChat);
-  const setArtifactsOpen = useUi((s) => s.setArtifactsOpen);
-  const setPanelMode = useUi((s) => s.setPanelMode);
+  const view = useUi((s) => s.view);
+  const setView = useUi((s) => s.setView);
+  const setCreateProjectOpen = useUi((s) => s.setCreateProjectOpen);
+  /** Which project's chats the list is showing; null = every loose chat. Shared
+   *  state: the Projects page opens a project into this same list. */
+  const openProject = useUi((s) => s.openProject);
+  const setOpenProject = useUi((s) => s.setOpenProject);
 
   const sortMode = usePrefs((s) => s.sortMode);
   const setSortMode = usePrefs((s) => s.setSortMode);
   const visibility = usePrefs((s) => s.visibility);
   const storedProjects = usePrefs((s) => s.projects);
-  const addProject = usePrefs((s) => s.addProject);
   const toggleSidebar = usePrefs((s) => s.toggleSidebar);
-
-  /** Which project's chats the list is showing; null = every loose chat. */
-  const [openProject, setOpenProject] = useState<string | null>(null);
-  const [newProject, setNewProject] = useState(false);
-  const [projectDraft, setProjectDraft] = useState('');
 
   const sorter = (a: Session, b: Session) => {
     if (sortMode === 'newest') return timestampMs(b.created_at) - timestampMs(a.created_at);
@@ -573,7 +576,10 @@ function SidebarBody({ onOpenPalette, account, onOpenTicketDialog, preview }: Si
   // Projects are the union of the labels the server knows about (a label exists
   // as long as a chat carries it) and the ones created here but still empty.
   const projectNames = [
-    ...new Set([...active.map((s) => s.folder).filter((f): f is string => !!f), ...storedProjects]),
+    ...new Set([
+      ...active.map((s) => s.folder).filter((f): f is string => !!f),
+      ...storedProjects.map((p) => p.name),
+    ]),
   ].sort((a, b) => a.localeCompare(b));
   // An open project narrows the list to its chats; otherwise the list is the
   // loose chats, with pinned ones floated into their own section on top.
@@ -583,13 +589,6 @@ function SidebarBody({ onOpenPalette, account, onOpenTicketDialog, preview }: Si
   const rows = openProject === null ? loose.filter((s) => !s.is_important).sort(sorter) : inProject.slice().sort(sorter);
   const accountLabel = auth?.display_name || auth?.username;
   const initial = (accountLabel ?? 'U').slice(0, 1).toUpperCase();
-
-  const commitNewProject = () => {
-    const value = projectDraft.trim();
-    setNewProject(false);
-    setProjectDraft('');
-    if (value) { addProject(value); setOpenProject(value); }
-  };
 
   return (
     <div className="flex h-full w-full flex-col bg-sidebar text-foreground/70">
@@ -601,26 +600,35 @@ function SidebarBody({ onOpenPalette, account, onOpenTicketDialog, preview }: Si
         )}
       </div>
 
-      {/* Primary nav. */}
+      {/* Primary nav — each row below "New" opens its full-page view, and shows
+          as selected while that view is the one on screen. */}
       <div className="px-2">
-        <NavRow emphasis icon={<PlusIcon />} label={t('sidebar.new')} onClick={newChat} />
+        <NavRow
+          emphasis
+          icon={<PlusIcon />}
+          label={t('sidebar.new')}
+          onClick={() => { newChat(); setView('chat'); }}
+        />
         <NavRow
           anim="lift"
           icon={<ArchiveIcon />}
           label={t('sidebar.projects')}
-          onClick={() => setOpenProject(null)}
+          active={view === 'projects'}
+          onClick={() => setView('projects')}
         />
         <NavRow
           anim="shapes"
           icon={<ShapesIcon />}
           label={t('sidebar.artifacts')}
-          onClick={() => { setPanelMode('files'); setArtifactsOpen(true); }}
+          active={view === 'artifacts'}
+          onClick={() => setView('artifacts')}
         />
         <NavRow
           anim="tilt"
           icon={<BriefcaseIcon />}
           label={t('sidebar.customize')}
-          onClick={account.onOpenSettings}
+          active={view === 'customize'}
+          onClick={() => setView('customize')}
         />
       </div>
 
@@ -632,7 +640,7 @@ function SidebarBody({ onOpenPalette, account, onOpenTicketDialog, preview }: Si
           <Tooltip label={t('sidebar.newProject')}>
             <button
               type="button"
-              onClick={() => { setProjectDraft(''); setNewProject(true); }}
+              onClick={() => setCreateProjectOpen(true)}
               aria-label={t('sidebar.newProject')}
               className="-mr-1.5 flex size-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-foreground"
             >
@@ -641,30 +649,21 @@ function SidebarBody({ onOpenPalette, account, onOpenTicketDialog, preview }: Si
           </Tooltip>
         </div>
         <div className="max-h-44 overflow-y-auto">
-          {newProject && (
-            <input
-              autoFocus
-              value={projectDraft}
-              placeholder={t('sidebar.projectPlaceholder')}
-              onChange={(e) => setProjectDraft(e.target.value)}
-              onBlur={commitNewProject}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') commitNewProject();
-                if (e.key === 'Escape') { setNewProject(false); setProjectDraft(''); }
-              }}
-              className="mx-0.5 my-px w-[calc(100%-4px)] rounded-lg border border-ring bg-transparent px-2 py-1.5 text-sm outline-none"
-            />
-          )}
           {projectNames.map((name) => (
             <ProjectRow
               key={name}
               name={name}
               members={active.filter((s) => s.folder === name)}
               active={name === openProject}
-              onSelect={() => setOpenProject(name === openProject ? null : name)}
+              // Selecting a project also leaves whichever page was open: the
+              // chats it holds are in the list below, not on that page.
+              onSelect={() => {
+                setOpenProject(name === openProject ? null : name);
+                setView('chat');
+              }}
             />
           ))}
-          {projectNames.length === 0 && !newProject && (
+          {projectNames.length === 0 && (
             <div className="flex items-center gap-2 px-2 py-1.5 text-sm text-muted-foreground/80">
               <PinIcon className="size-3.5 shrink-0 -rotate-45" />
               <span className="min-w-0 truncate">{t('sidebar.noProjects')}</span>

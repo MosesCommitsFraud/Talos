@@ -11,6 +11,10 @@ import { ArchiveDialog } from './components/ArchiveDialog';
 import { HelpDialog } from './components/HelpDialog';
 import { RightPanel } from './components/RightPanel';
 import { RagWorkspace } from './components/rag/RagWorkspace';
+import { ProjectsWorkspace } from './components/pages/ProjectsWorkspace';
+import { ArtifactsWorkspace } from './components/pages/ArtifactsWorkspace';
+import { CustomizeWorkspace } from './components/pages/CustomizeWorkspace';
+import { CreateProjectDialog } from './components/CreateProjectDialog';
 import { UsersWorkspace } from './components/users/UsersWorkspace';
 import { TicketsWorkspace } from './components/tickets/TicketsWorkspace';
 import { TicketDialog } from './components/tickets/TicketDialog';
@@ -120,6 +124,12 @@ export default function App() {
               <UsersWorkspace />
             ) : view === 'tickets' ? (
               <TicketsWorkspace />
+            ) : view === 'projects' ? (
+              <ProjectsWorkspace />
+            ) : view === 'artifacts' ? (
+              <ArtifactsWorkspace />
+            ) : view === 'customize' ? (
+              <CustomizeWorkspace />
             ) : (
               <>
                 <main className="relative flex min-w-0 flex-1 flex-col">
@@ -173,6 +183,7 @@ export default function App() {
           <ArchiveDialog open={archiveOpen} onClose={() => setArchiveOpen(false)} />
           <HelpDialog open={helpOpen} onClose={() => setHelpOpen(false)} />
           <TicketDialog open={ticketOpen} onClose={() => setTicketOpen(false)} />
+          <CreateProjectDialog />
           <Lightbox />
           <Toaster />
         </AuthGate>

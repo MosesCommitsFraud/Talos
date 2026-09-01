@@ -181,6 +181,14 @@ export async function fetchArtifacts(sessionId: string): Promise<import('./types
   return data.artifacts ?? [];
 }
 
+/** Every artifact the user owns, across all their chats — the Artifacts page.
+ *  Documents and generated images only (see the route: workspace files would
+ *  cost one sandbox call per chat); each row carries the chat it came from. */
+export async function fetchAllArtifacts(): Promise<import('./types').LibraryArtifact[]> {
+  const data = await getJSON<{ artifacts?: import('./types').LibraryArtifact[] }>('/api/artifacts');
+  return data.artifacts ?? [];
+}
+
 /** Detached background jobs belonging to a session — running and recently
  *  finished alike, oldest first. Polled by the task tray; the message stream
  *  says nothing about a job once the turn that launched it has ended. */
