@@ -227,6 +227,11 @@ const de: typeof en = {
     micSelect: 'Mikrofon',
     micDefault: 'Systemstandard',
     micUnnamed: 'Mikrofon {{n}}',
+    webSearch: 'Websuche',
+    skills: {
+      none: 'Noch keine Skills hochgeladen',
+      manage: 'Skills verwalten',
+    },
     plan: 'Plan',
     work: 'Arbeit',
     planTooltipActive: 'Planmodus — klicken, um zum Arbeitsmodus zurückzukehren',

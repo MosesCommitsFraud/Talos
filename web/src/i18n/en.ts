@@ -224,6 +224,11 @@ const en = {
     micSelect: 'Microphone',
     micDefault: 'System default',
     micUnnamed: 'Microphone {{n}}',
+    webSearch: 'Web search',
+    skills: {
+      none: 'No skills uploaded yet',
+      manage: 'Manage skills',
+    },
     plan: 'Plan',
     work: 'Work',
     planTooltipActive: 'Plan mode — click to return to work mode',

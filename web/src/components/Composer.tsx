@@ -5,7 +5,6 @@ import {
   CirclePauseIcon,
   CircleStopIcon,
   CheckIcon,
-  ChevronDownIcon,
   CornerDownLeftIcon,
   DatabaseIcon,
   ListChecksIcon,
@@ -14,7 +13,6 @@ import {
   PaperclipIcon,
   PencilRulerIcon,
   PlayIcon,
-  PlusIcon,
   WrenchIcon,
   XIcon,
   ScanSearchIcon,
@@ -34,10 +32,10 @@ import { previewKind } from '@/lib/files';
 import { ContextMeter } from './ContextMeter';
 import { FilePreviewFace, hasVisualPreview, openUploadViewer } from './AttachmentTile';
 import { FileTypeIcon } from './FileTypeIcon';
-import { EffortPicker, useReasoningEfforts } from './EffortPicker';
-import { ModelPicker } from './ModelPicker';
+import { ComposerAddMenu } from './ComposerAddMenu';
+import { ModelEffortPicker } from './ModelEffortPicker';
 import { Button } from './ui/button';
-import { Menu, MenuItem, MenuLabel, MenuPopup, MenuTrigger } from './ui/menu';
+import { Menu, MenuItem, MenuPopup, MenuTrigger } from './ui/menu';
 import { Tooltip } from './ui/misc';
 
 /** t3code plan-toggle style: labeled ghost button, blue tint when active.
@@ -197,88 +195,80 @@ function KnowledgeControl() {
   );
 }
 
-/** One-click reasoning switch: Thinking ↔ No Thinking. Drives the `reasoning`
- *  flag; when off the backend sends vLLM `enable_thinking: false`.
- *
- *  The fallback for models without an effort knob (Qwen3.6 and older). Where the
- *  knob exists the switch lives inside EffortPicker instead, together with the
- *  slider it gates — one control for one decision. */
-function ThinkingToggle() {
+/** Plan ↔ Work switch; drives the per-turn `planMode` flag. */
+function PlanToggle() {
   const { t } = useTranslation();
-  const reasoning = usePrefs((s) => s.reasoning);
+  const planMode = usePrefs((s) => s.planMode);
   const toggle = usePrefs((s) => s.toggle);
   return (
     <ModeToggle
-      active={reasoning}
-      onClick={() => toggle('reasoning')}
-      icon={null}
-      label={t('composer.reasoning.on')}
-      inactiveLabel={t('composer.reasoning.off')}
-      tooltip={reasoning ? t('composer.reasoning.onDesc') : t('composer.reasoning.offDesc')}
+      active={planMode}
+      onClick={() => toggle('planMode')}
+      icon={<PencilRulerIcon />}
+      label={t('composer.plan')}
+      inactiveIcon={<WrenchIcon />}
+      inactiveLabel={t('composer.work')}
+      tooltip={planMode ? t('composer.planTooltipActive') : t('composer.planTooltipInactive')}
     />
   );
 }
 
-/** Reasoning control for the composer: the effort slider when the selected model
- *  has effort levels, the plain Thinking/No-Thinking toggle when it doesn't.
- *  Which one applies is probed per model — see `useReasoningEfforts`. */
-function ReasoningControl() {
-  const efforts = useReasoningEfforts();
-  // A single level is not a choice, and an empty list means "unknown or
-  // unsupported" — both land on the toggle, so nothing flickers into view while
-  // the probe is still running.
-  return efforts.length > 1 ? <EffortPicker /> : <ThinkingToggle />;
+/** Dictate button, now inside the input box beside the send control. The
+ *  microphone chooser that used to sit next to it moved into the add menu. */
+function MicButton({
+  status,
+  onClick,
+  hero,
+}: {
+  status: 'idle' | 'recording' | 'finalizing';
+  onClick: () => void;
+  hero?: boolean;
+}) {
+  const { t } = useTranslation();
+  const label = status === 'recording' ? t('composer.dictateStop') : t('composer.dictate');
+  return (
+    <Tooltip label={label} side="top">
+      <button
+        type="button"
+        onClick={onClick}
+        disabled={status === 'finalizing'}
+        aria-label={label}
+        className={cn(
+          'flex shrink-0 cursor-pointer items-center justify-center rounded-full transition-colors active:scale-95',
+          hero ? 'size-8 [&_svg]:size-4' : 'size-7 [&_svg]:size-3.5',
+          status === 'recording'
+            ? 'animate-pulse bg-red-500/10 text-red-500 hover:bg-red-500/20'
+            : 'text-foreground/45 hover:bg-accent hover:text-foreground/70 disabled:opacity-50 dark:text-foreground/35 dark:hover:text-foreground/60',
+        )}
+      >
+        {status === 'finalizing' ? <Loader2Icon className="animate-spin" /> : <MicIcon />}
+      </button>
+    </Tooltip>
+  );
 }
 
-/** Microphone picker beside the dictate button: enumerates audio inputs on
- *  open (labels appear once mic permission has been granted) and persists the
- *  choice; "System default" clears it. Takes effect on the next recording. */
-function MicDeviceMenu() {
+/** Stop control shown while a turn streams: a solid disc with a square, so it
+ *  reads as the one button that interrupts rather than as another ghost glyph. */
+function StopButton({ onClick, hero }: { onClick: () => void; hero?: boolean }) {
   const { t } = useTranslation();
-  const micDeviceId = usePrefs((s) => s.micDeviceId);
-  const setMicDeviceId = usePrefs((s) => s.setMicDeviceId);
-  const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
-  const loadDevices = () => {
-    navigator.mediaDevices
-      ?.enumerateDevices()
-      .then((list) => setDevices(list.filter((d) => d.kind === 'audioinput' && d.deviceId)))
-      .catch(() => setDevices([]));
-  };
   return (
-    <Menu onOpenChange={(open) => { if (open) loadDevices(); }}>
-      <MenuTrigger asChild>
-        <button
-          type="button"
-          aria-label={t('composer.micSelect')}
-          className="flex h-6 w-4 shrink-0 items-center pt-[2px] justify-center rounded-[4.5px] rounded-l-none border border-transparent text-foreground/80 outline-none dark:text-foreground/65 transition-colors hover:bg-accent hover:text-foreground/90 focus:outline-none focus-visible:outline-none sm:h-5"
-        >
-          <ChevronDownIcon className="size-3.5 -translate-y-px" />
-        </button>
-      </MenuTrigger>
-      {/* Compact rows matching the knowledge-mode dropdown. */}
-      <MenuPopup align="start">
-        <MenuLabel>{t('composer.micSelect')}</MenuLabel>
-        <MenuItem
-          onSelect={() => setMicDeviceId(null)}
-        >
-          <MicIcon />
-          <span className="min-w-0 flex-1 truncate">{t('composer.micDefault')}</span>
-          {micDeviceId === null && <CheckIcon className="size-3.5 shrink-0 text-primary opacity-100" />}
-        </MenuItem>
-        {devices.map((d, i) => (
-          <MenuItem
-            key={d.deviceId}
-            onSelect={() => setMicDeviceId(d.deviceId)}
-          >
-            <MicIcon />
-            <span className="min-w-0 max-w-56 flex-1 truncate">
-              {d.label || t('composer.micUnnamed', { n: i + 1 })}
-            </span>
-            {micDeviceId === d.deviceId && <CheckIcon className="size-3.5 shrink-0 text-primary opacity-100" />}
-          </MenuItem>
-        ))}
-      </MenuPopup>
-    </Menu>
+    <Tooltip label={t('composer.stop')} side="top">
+      <button
+        type="button"
+        onClick={onClick}
+        aria-label={t('composer.stop')}
+        className={cn(
+          'flex shrink-0 cursor-pointer items-center justify-center transition-colors active:scale-95',
+          hero
+            ? 'size-8 rounded-[10px] bg-primary text-primary-foreground hover:bg-primary/90'
+            : 'size-7 rounded-full bg-foreground text-background hover:bg-foreground/85',
+        )}
+      >
+        <svg width={hero ? 12 : 10} height={hero ? 12 : 10} viewBox="0 0 12 12" aria-hidden="true">
+          <rect x="1.5" y="1.5" width="9" height="9" rx="2.5" fill="currentColor" />
+        </svg>
+      </button>
+    </Tooltip>
   );
 }
 
@@ -331,6 +321,13 @@ export function Composer() {
   const prefs = usePrefs();
   const queryClient = useQueryClient();
   const { data: caps } = useQuery({ queryKey: ['capabilities'], queryFn: fetchCapabilities, staleTime: 60_000 });
+
+  // A draft with no session yet is the new-chat screen: the box grows into the
+  // hero layout that carries its own control row.
+  const hero = sessionId === null;
+  // Typing during a turn queues the message, so the send control stays a send
+  // control; the stop disc only replaces it while there is nothing to queue.
+  const showStop = streaming && !text.trim() && pending.length === 0;
 
   const slashMatch = text.match(/^\/([^\s]*)$/);
   const slashItems = slashMatch
@@ -785,7 +782,7 @@ export function Composer() {
           </div>
         )}
 
-        <div className="flex items-start py-2.5 pl-2.5 pr-2">
+        <div className={cn('flex items-start', hero ? 'px-3 pb-1 pt-3' : 'py-2.5 pl-2.5 pr-2')}>
           {dictating && (
             <div
               aria-live="polite"
@@ -836,48 +833,92 @@ export function Composer() {
             }}
             className="max-h-[200px] w-full resize-none bg-transparent text-[15px] leading-relaxed text-strong outline-none placeholder:text-muted-foreground/65 dark:placeholder:text-muted-foreground"
           />
-          {/* Right-edge adornment, Claude Code style: while streaming, a boxed
-              stop button; otherwise an Enter glyph once there's something to
-              send (or while dictating, where Enter stops the recording). */}
-          {streaming && !text.trim() && pending.length === 0 ? (
-            <button
-              type="button"
-              onClick={stop}
-              aria-label={t('composer.stop')}
-              // -my keeps the 28px hit target from adding height to the row
-              // (the textarea line is 26px), so the box doesn't grow while
-              // streaming.
-              // Same treatment as the Enter glyph it replaces (plate-only hover,
-              // glyph tracking the composer frame), so the swap doesn't change
-              // the control's weight mid-turn.
-              className="-my-1 flex size-7 shrink-0 cursor-pointer items-center justify-center self-center rounded-sm text-foreground/20 transition-colors group-focus-within/composer:text-foreground/40 hover:bg-accent active:scale-95 dark:text-foreground/10 dark:group-focus-within/composer:text-foreground/20"
-            >
-              <svg width="14" height="14" viewBox="0 0 12 12" fill="none" aria-hidden="true">
-                <rect x="1.5" y="1.5" width="9" height="9" rx="2" stroke="currentColor" strokeWidth="1.4" />
-              </svg>
-            </button>
-          ) : (
-            <button
-              type="button"
-              aria-label={t('composer.send')}
-              onClick={() => {
-                // Mirrors the Enter key: confirm a running dictation, send otherwise.
-                if (dictation.status === 'recording') dictation.confirm();
-                else void submit();
-              }}
-              className={cn(
-                // Tracks the box border: foreground/10 resting, /20 while the
-                // composer is focused, so glyph and frame read as one control.
-                // The hover plate is always there — a glyph with no hit feedback
-                // reads as decoration. Only the plate reacts: the glyph keeps
-                // tracking the composer frame so the two stay one control.
-                'ml-2 flex size-6 shrink-0 cursor-pointer items-center justify-center self-end rounded-sm text-foreground/20 transition-colors group-focus-within/composer:text-foreground/40 hover:bg-accent active:scale-95 dark:text-foreground/10 dark:group-focus-within/composer:text-foreground/20',
+          {/* Right-edge adornment (conversation layout only — the new-chat box
+              carries its controls in the inner row below): the mic, then a stop
+              disc while streaming or an Enter glyph to send. */}
+          {!hero && (
+            <div className="-my-0.5 ml-2 flex shrink-0 items-center gap-1 self-end">
+              {caps?.voice && (
+                <MicButton
+                  status={dictation.status}
+                  onClick={() => {
+                    if (dictation.status === 'recording') dictation.confirm();
+                    else if (dictation.status === 'idle') void dictation.start();
+                  }}
+                />
               )}
-            >
-              <CornerDownLeftIcon aria-hidden="true" className="size-4" />
-            </button>
+              {showStop ? (
+                <StopButton onClick={stop} />
+              ) : (
+                <button
+                  type="button"
+                  aria-label={t('composer.send')}
+                  onClick={() => {
+                    // Mirrors the Enter key: confirm a running dictation, send otherwise.
+                    if (dictation.status === 'recording') dictation.confirm();
+                    else void submit();
+                  }}
+                  className={cn(
+                    // Tracks the box border: foreground/10 resting, /20 while the
+                    // composer is focused, so glyph and frame read as one control.
+                    // The hover plate is always there — a glyph with no hit feedback
+                    // reads as decoration. Only the plate reacts: the glyph keeps
+                    // tracking the composer frame so the two stay one control.
+                    'flex size-7 shrink-0 cursor-pointer items-center justify-center rounded-sm text-foreground/20 transition-colors group-focus-within/composer:text-foreground/40 hover:bg-accent active:scale-95 dark:text-foreground/10 dark:group-focus-within/composer:text-foreground/20',
+                  )}
+                >
+                  <CornerDownLeftIcon aria-hidden="true" className="size-4" />
+                </button>
+              )}
+            </div>
           )}
         </div>
+
+        {/* New-chat layout: every control sits inside the box, Claude-style —
+            add menu and the knowledge/plan switches on the left, model+effort
+            and the send control on the right. */}
+        {hero && (
+          <div className="flex min-w-0 items-center gap-1 px-2 pb-2">
+            <input
+              ref={fileInput}
+              type="file"
+              multiple
+              hidden
+              onChange={(e) => { if (e.target.files) void attach(e.target.files); e.target.value = ''; }}
+            />
+            <div className="-m-1 flex min-w-0 flex-1 items-center gap-1 overflow-x-auto p-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+              {prefs.visibility.composerAttach && (
+                <ComposerAddMenu
+                  onAttach={() => fileInput.current?.click()}
+                  uploading={uploading}
+                  showMic={!!caps?.voice}
+                />
+              )}
+              <KnowledgeControl />
+              {prefs.visibility.composerPlan && <PlanToggle />}
+            </div>
+            <div className="flex shrink-0 items-center gap-1.5">
+              <ModelEffortPicker visible={prefs.visibility.composerModelPicker} />
+              {showStop ? (
+                <StopButton hero onClick={stop} />
+              ) : empty && pending.length === 0 && caps?.voice && !dictating ? (
+                <MicButton hero status={dictation.status} onClick={() => void dictation.start()} />
+              ) : (
+                <button
+                  type="button"
+                  aria-label={t('composer.send')}
+                  onClick={() => {
+                    if (dictation.status === 'recording') dictation.confirm();
+                    else void submit();
+                  }}
+                  className="flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-[10px] bg-primary text-primary-foreground transition-colors hover:bg-primary/90 active:scale-95"
+                >
+                  <ArrowUpIcon aria-hidden="true" className="size-4" />
+                </button>
+              )}
+            </div>
+          </div>
+        )}
       </div>
 
       {goal && !['completed', 'cancelled'].includes(goal.status) && (
@@ -896,104 +937,42 @@ export function Composer() {
       )}
       {commandError && <p className="mt-1 text-center text-xs text-destructive">{commandError}</p>}
 
-      {/* Control row — outside the input card, Claude Code style: knowledge/add/mic
-          on the left, model/thinking/context on the right. Enter sends; a stop
-          button appears at the far right only while a response is streaming. */}
-      <div className="mt-2.5 flex min-w-0 flex-nowrap items-center justify-between gap-2">
-        <input
-          ref={fileInput}
-          type="file"
-          multiple
-          hidden
-          onChange={(e) => { if (e.target.files) void attach(e.target.files); e.target.value = ''; }}
-        />
+      {/* Control row — under the input card once a conversation is running:
+          knowledge/add/plan on the left, model+effort and the context meter on
+          the right. The mic and the send/stop control live inside the box. */}
+      {!hero && (
+        <div className="mt-2.5 flex min-w-0 flex-nowrap items-center justify-between gap-2">
+          <input
+            ref={fileInput}
+            type="file"
+            multiple
+            hidden
+            onChange={(e) => { if (e.target.files) void attach(e.target.files); e.target.value = ''; }}
+          />
 
-        {/* Left cluster: knowledge mode · add · mic + device picker · plan */}
-        <div className="-m-1 flex min-w-0 flex-1 items-center gap-1 overflow-x-auto p-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-          <KnowledgeControl />
+          {/* Left cluster: knowledge mode · add · plan */}
+          <div className="-m-1 flex min-w-0 flex-1 items-center gap-1 overflow-x-auto p-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+            <KnowledgeControl />
 
-          {prefs.visibility.composerAttach && (
-              <Menu>
-                <MenuTrigger asChild>
-                  <button
-                    type="button"
-                    aria-label={t('composer.add')}
-                    className="flex size-6 shrink-0 items-center pt-[2px] justify-center rounded-[4.5px] border border-transparent text-foreground/80 outline-none dark:text-foreground/65 transition-colors hover:bg-accent hover:text-foreground/90 focus:outline-none focus-visible:outline-none sm:size-5 [&_svg]:size-3.5 [&_svg]:-translate-y-px"
-                  >
-                    <PlusIcon className={uploading ? 'animate-pulse' : undefined} />
-                  </button>
-                </MenuTrigger>
-                <MenuPopup align="start">
-                  <MenuItem onSelect={() => fileInput.current?.click()}>
-                    <PaperclipIcon />
-                    {t('composer.attachFiles')}
-                  </MenuItem>
-                </MenuPopup>
-              </Menu>
-            )}
-
-            {caps?.voice && (
-              <div className="flex shrink-0 items-center">
-                <Tooltip
-                  label={
-                    dictation.status === 'recording'
-                      ? t('composer.dictateStop')
-                      : t('composer.dictate')
-                  }
-                  side="top"
-                >
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (dictation.status === 'recording') dictation.confirm();
-                      else if (dictation.status === 'idle') void dictation.start();
-                    }}
-                    disabled={dictation.status === 'finalizing'}
-                    aria-label={
-                      dictation.status === 'recording'
-                        ? t('composer.dictateStop')
-                        : t('composer.dictate')
-                    }
-                    className={cn(
-                      'flex h-6 w-7 shrink-0 items-center pt-[2px] justify-center rounded-[4.5px] rounded-r-none border border-transparent transition-colors sm:h-5 sm:w-6 [&_svg]:size-3.5 [&_svg]:-translate-y-px',
-                      dictation.status === 'recording'
-                        ? 'animate-pulse bg-red-500/10 text-red-500 hover:bg-red-500/20'
-                        : 'text-foreground/80 hover:bg-accent hover:text-foreground/90 dark:text-foreground/65 disabled:opacity-50',
-                    )}
-                  >
-                    {dictation.status === 'finalizing' ? (
-                      <Loader2Icon className="animate-spin" />
-                    ) : (
-                      <MicIcon />
-                    )}
-                  </button>
-                </Tooltip>
-                <MicDeviceMenu />
-              </div>
-            )}
-
-            {prefs.visibility.composerPlan && (
-              <ModeToggle
-                active={prefs.planMode}
-                onClick={() => prefs.toggle('planMode')}
-                icon={<PencilRulerIcon />}
-                label={t('composer.plan')}
-                inactiveIcon={<WrenchIcon />}
-                inactiveLabel={t('composer.work')}
-                tooltip={prefs.planMode ? t('composer.planTooltipActive') : t('composer.planTooltipInactive')}
+            {prefs.visibility.composerAttach && (
+              <ComposerAddMenu
+                onAttach={() => fileInput.current?.click()}
+                uploading={uploading}
+                showMic={!!caps?.voice}
               />
             )}
+
+            {prefs.visibility.composerPlan && <PlanToggle />}
           </div>
 
-          {/* Right cluster: model · reasoning (switch + effort) · context meter */}
+          {/* Right cluster: model + reasoning effort · context meter */}
           <div className="flex shrink-0 flex-nowrap items-center justify-end gap-1">
-            <ModelPicker visible={prefs.visibility.composerModelPicker} />
-
-            <ReasoningControl />
+            <ModelEffortPicker visible={prefs.visibility.composerModelPicker} />
 
             {prefs.visibility.contextMeter && <ContextMeter />}
           </div>
         </div>
+      )}
       {dictation.error && !dictating && (
         <p className="mt-1 text-center text-[11px] leading-tight text-red-500">
           {dictation.error === 'mic-denied'

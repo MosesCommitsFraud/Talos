@@ -5,6 +5,7 @@ import { IncognitoToggle } from './components/IncognitoToggle';
 import { Messages } from './components/Messages';
 import { Welcome } from './components/Welcome';
 import { Composer } from './components/Composer';
+import { OPEN_SETTINGS_EVENT } from './components/ComposerAddMenu';
 import { CommandPalette } from './components/CommandPalette';
 import { SettingsDialog, type Panel, type SettingsScope } from './components/SettingsDialog';
 import { ArchiveDialog } from './components/ArchiveDialog';
@@ -97,6 +98,18 @@ export default function App() {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
+  // The settings dialog is owned here, so surfaces that only want to jump to a
+  // panel (the composer's Skills menu) ask for it by event instead of threading
+  // a callback through.
+  useEffect(() => {
+    const onOpen = (e: Event) => {
+      const detail = (e as CustomEvent<{ panel?: Panel; scope?: SettingsScope }>).detail ?? {};
+      setSettings({ panel: detail.panel, scope: detail.scope ?? 'admin' });
+    };
+    window.addEventListener(OPEN_SETTINGS_EVENT, onOpen);
+    return () => window.removeEventListener(OPEN_SETTINGS_EVENT, onOpen);
   }, []);
 
   return (

@@ -391,6 +391,10 @@ def setup_chat_routes(
         compare_mode = str(form_data.get("compare_mode", "")).lower() == "true"
         incognito = str(form_data.get("incognito", "")).lower() == "true"
         use_db = str(form_data.get("use_db", "")).lower() == "true"
+        # Web access for this turn. Default on so an older client (or any other
+        # caller) keeps whatever the admin configured; only an explicit "false"
+        # — the composer's web-search toggle — withholds the web tools below.
+        use_web = str(form_data.get("use_web", "true")).lower() != "false"
         plan_mode = str(form_data.get("plan_mode", "")).lower() == "true"
         # Model reasoning/thinking. Default on; only an explicit "false" disables
         # it (tells vLLM enable_thinking:false for Qwen3-style hybrid models).
@@ -804,6 +808,11 @@ def setup_chat_routes(
                     "manage_skills",  # skill presets tied to user
                 }
             )
+
+        # Web search turned off in the composer: the model answers without
+        # reaching the internet for this turn.
+        if not use_web:
+            disabled_tools.update({"web_search", "web_fetch"})
 
         # Enforce per-user privileges
         _privs = {}

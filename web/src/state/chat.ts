@@ -741,6 +741,7 @@ export const useChat = create<ChatState>((set, get) => {
                 approvedPlan: opts?.approvedPlan,
                 useRag: prefs.useRag,
                 useDb: prefs.useDb,
+                useWeb: prefs.useWeb,
                 reasoning: prefs.reasoning,
                 reasoningEffort: prefs.reasoningEffort,
                 incognito: prefs.incognito,

@@ -1335,6 +1335,10 @@ export interface StreamFlags {
   approvedPlan?: string;
   useRag?: boolean;
   useDb?: boolean;
+  /** Whether the turn may reach the web. `false` makes the backend withhold
+   *  the web_search / web_fetch tools for this turn; omitted/true leaves the
+   *  admin-configured toolset alone. */
+  useWeb?: boolean;
   /** Model reasoning/thinking. When false the backend disables it (vLLM
    *  `enable_thinking: false`). Omitted/true leaves the model's default on. */
   reasoning?: boolean;
@@ -1373,6 +1377,7 @@ export async function streamChat(opts: {
   if (f.approvedPlan) fd.set('approved_plan', f.approvedPlan);
   if (f.useRag) fd.set('use_rag', 'true');
   if (f.useDb) fd.set('use_db', 'true');
+  if (f.useWeb === false) fd.set('use_web', 'false');
   if (f.reasoning === false) fd.set('reasoning', 'false');
   if (f.reasoningEffort) fd.set('reasoning_effort', f.reasoningEffort);
   if (f.incognito) fd.set('incognito', 'true');

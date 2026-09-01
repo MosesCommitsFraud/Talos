@@ -96,6 +96,10 @@ interface PrefsState {
   planMode: boolean;
   useRag: boolean;
   useDb: boolean;
+  /** Whether the turn may reach the web. Maps to the `use_web` request flag;
+   *  when off the backend withholds web_search / web_fetch for that turn.
+   *  Default on — the composer's add menu toggles it. */
+  useWeb: boolean;
   /** Model reasoning/thinking. Maps to the `reasoning` request flag; when off,
    *  the backend tells vLLM `enable_thinking: false`. Default on. */
   reasoning: boolean;
@@ -123,7 +127,7 @@ interface PrefsState {
   setReasoningEffort: (e: ReasoningEffort) => void;
   setVisibility: (key: keyof Visibility, value: boolean) => void;
   resetVisibility: () => void;
-  toggle: (key: 'planMode' | 'useRag' | 'useDb' | 'reasoning' | 'incognito') => void;
+  toggle: (key: 'planMode' | 'useRag' | 'useDb' | 'useWeb' | 'reasoning' | 'incognito') => void;
   /** Set both knowledge flags at once (used by the mode dropdown). */
   setKnowledge: (useRag: boolean, useDb: boolean) => void;
   setMicDeviceId: (id: string | null) => void;
@@ -147,6 +151,7 @@ export const usePrefs = create<PrefsState>()(
       planMode: false,
       useRag: true,
       useDb: true,
+      useWeb: true,
       reasoning: true,
       reasoningEffort: 'medium',
       incognito: false,
@@ -235,7 +240,7 @@ export const usePrefs = create<PrefsState>()(
 
 const SYNCED_KEYS = [
   'theme', 'density', 'sortMode', 'lang', 'langChosen', 'llmLang', 'visibility',
-  'useRag', 'useDb', 'reasoning', 'reasoningEffort',
+  'useRag', 'useDb', 'useWeb', 'reasoning', 'reasoningEffort',
 ] as const;
 type SyncedKey = (typeof SYNCED_KEYS)[number];
 type SyncedPrefs = Pick<PrefsState, SyncedKey>;
