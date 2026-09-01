@@ -1068,7 +1068,7 @@ export function Messages() {
                   {/* Attachments sit above the text, the way they were staged
                       in the composer. */}
                   <AttachmentList msg={block.msg} />
-                  <div className="rounded-lg rounded-br-sm bg-bubble px-3 py-1.5 text-[15px] leading-relaxed whitespace-pre-wrap text-strong">
+                  <div className="rounded-lg rounded-br-sm bg-bubble px-3 py-1 text-[15px] leading-relaxed whitespace-pre-wrap text-strong">
                     {block.msg.content}
                   </div>
                   <ArtifactSelectionChip msg={block.msg} />
