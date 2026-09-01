@@ -569,7 +569,7 @@ export function Composer() {
   }
 
   return (
-    <div className="mx-auto w-full max-w-[800px] px-4 pb-1">
+    <div className="mx-auto w-full max-w-[800px] px-4 pb-2">
       {/* Drop overlay — covers only the chat area (portaled into <main>, which is
           position:relative), so the sidebar and side panels stay clear. Shown
           while dragging files anywhere over the chat column. */}
@@ -839,7 +839,7 @@ export function Composer() {
           // px-1.5 rather than px-3: the button plate insets its glyph by 6px,
           // so this is what puts the + glyph on the same left edge as the text
           // above it, with the same 12px to the bottom of the box.
-          <div className="flex min-w-0 items-center gap-1 ps-1.5 pe-3 pb-1">
+          <div className="flex min-w-0 items-center gap-1 ps-1.5 pe-2 pb-2">
             <input
               ref={fileInput}
               type="file"
@@ -857,7 +857,7 @@ export function Composer() {
                 />
               )}
             </div>
-            <div className="flex shrink-0 items-center gap-3">
+            <div className="flex shrink-0 items-center gap-2">
               <ModelEffortPicker visible={prefs.visibility.composerModelPicker} />
               {showStop ? (
                 <StopButton hero onClick={stop} />
@@ -902,7 +902,7 @@ export function Composer() {
           left half is free for the AI disclaimer and the right holds the
           model+effort picker with the context meter, all on one centre line. */}
       {!hero && (
-        <div className="mt-1 flex min-w-0 flex-nowrap items-center justify-between gap-3">
+        <div className="mt-2 flex min-w-0 flex-nowrap items-center justify-between gap-3">
           <input
             ref={fileInput}
             type="file"

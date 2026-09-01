@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { CheckIcon, ChevronDownIcon } from 'lucide-react';
+import { CheckIcon } from 'lucide-react';
 import { useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { fetchAppSettings, fetchModels } from '@/api/client';
@@ -84,10 +84,6 @@ export function ModelEffortPicker({
           <span className={cn('shrink-0 font-normal', reasoning ? 'text-muted-foreground' : 'text-muted-foreground/70')}>
             {effortLabel}
           </span>
-          <ChevronDownIcon
-            className={cn('shrink-0 opacity-60', placement === 'inside' ? 'size-3.5' : 'size-3')}
-            aria-hidden="true"
-          />
         </button>
       </MenuTrigger>
 
