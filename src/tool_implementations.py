@@ -459,6 +459,48 @@ def _spill_name(query: str) -> str:
     return f"{_SQL_SPILL_DIR}/query_{digest}.csv"
 
 
+# Aliases models reach for instead of the four real query_sql actions. Echoing
+# the tool's own name back as the action is the single most common one.
+_SQL_ACTION_ALIASES = {
+    "query_sql": "query",
+    "sql": "query",
+    "select": "query",
+    "run_query": "query",
+    "execute": "query",
+    "list_dbs": "list_databases",
+    "databases": "list_databases",
+    "list_db": "list_databases",
+    "tables": "list_tables",
+    "list": "list_tables",
+    "show_tables": "list_tables",
+    "describe_table": "describe",
+    "schema": "describe",
+}
+
+_SQL_ACTIONS = {"query", "list_databases", "list_tables", "describe"}
+
+
+def _normalize_sql_action(raw: str, args: Dict) -> str:
+    """Map an action alias onto one of the four real actions.
+
+    A wrong `action` used to hard-fail a call whose intent was unambiguous
+    (`{"query": "SELECT ...", "action": "query_sql"}`), costing the model a
+    whole round to rediscover a name the payload already implied.
+    """
+    action = raw.strip().lower()
+    if action in _SQL_ACTIONS:
+        return action
+    action = _SQL_ACTION_ALIASES.get(action, action)
+    if action in _SQL_ACTIONS:
+        return action
+    # Still unknown: let the payload decide, since the keys say what was meant.
+    if str(args.get("query") or "").strip():
+        return "query"
+    if str(args.get("table") or "").strip():
+        return "describe"
+    return action
+
+
 async def do_query_sql(
     content: str, owner: Optional[str] = None, session_id: Optional[str] = None
 ) -> Dict:
@@ -477,7 +519,7 @@ async def do_query_sql(
     if not isinstance(args, dict):
         return {"error": "query_sql expects JSON arguments.", "exit_code": 1}
 
-    action = str(args.get("action") or "query").strip().lower()
+    action = _normalize_sql_action(str(args.get("action") or "query"), args)
     max_rows = None
     if "max_rows" in args and args.get("max_rows") not in (None, "", 0, "0", "all", "ALL"):
         try:
@@ -593,7 +635,11 @@ async def do_query_sql(
 
             if action != "query":
                 return {
-                    "error": "Unknown action. Use list_databases, list_tables, describe, or query.",
+                    "error": (
+                        f'Unknown action {action!r}. Use one of: "query" (with a "query" '
+                        'field), "list_databases", "list_tables", "describe" (with a '
+                        '"table" field). Omit "action" entirely to run a query.'
+                    ),
                     "exit_code": 1,
                 }
 

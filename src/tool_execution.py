@@ -705,6 +705,12 @@ def _split_bg_marker(content: str):
     return False, content
 
 
+# JSON keys that mark a ```python``` block as a legitimate repair patch rather
+# than a misformatted tool call. Kept next to the parser that consumes them so
+# the two never drift apart — see the guard in `execute_tool_block`.
+_CODE_PATCH_KEYS = frozenset({"edits"})
+
+
 def _parse_code_edits(content: str) -> tuple[list[dict], str]:
     """Pull a repair patch out of a python/run_cell call.
 
@@ -1154,6 +1160,18 @@ async def _direct_fallback(
             )
             if sandbox_result is not None:
                 return sandbox_result
+            # Sandbox off (dev): there is no retained cell to patch, so an
+            # `edits` payload would otherwise be executed as code and die on a
+            # SyntaxError that tells the model nothing.
+            if _parse_code_edits(content)[0]:
+                return {
+                    "error": (
+                        "python: `edits` needs the retained cell from a previous "
+                        "sandboxed run, which isn't available here. Send the full "
+                        "corrected code instead."
+                    ),
+                    "exit_code": 1,
+                }
             # Run user code in a subprocess so an infinite loop or crash
             # can't take the whole server down. -I = isolated mode (skip
             # user site, no PYTHONPATH inheritance) for hygiene.
@@ -1561,7 +1579,14 @@ async def execute_tool_block(
             import json as _json
 
             parsed = _json.loads(content.strip())
-            if isinstance(parsed, dict):
+            # `{"edits": [...]}` in a ```python``` block is NOT misformatted —
+            # it is the repair patch format `_repair_hint` explicitly asks for
+            # after a failed run. Blocking it here made that hint a dead end:
+            # the model patches, gets told the patch is not a tool call, and
+            # burns the rest of the round budget rewriting whole scripts.
+            if isinstance(parsed, dict) and (
+                tool != "python" or not (_CODE_PATCH_KEYS & parsed.keys())
+            ):
                 desc = f"{tool}: misformatted tool call"
                 result = {
                     "error": (
