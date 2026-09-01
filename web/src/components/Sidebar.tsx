@@ -834,7 +834,16 @@ export function Sidebar(props: SidebarProps) {
       {/* Above the preview, so it keeps its own hover state (and its tooltip)
           while the preview is showing. */}
       <div className="absolute left-2.5 top-2.5 z-50">
-        <Tooltip label={<span className="flex items-center gap-1.5">{t('sidebar.expandSidebar')}<KeybindingPill value="mod+b" /></span>} side="right">
+        {/* Hovering this button opens the peek preview, which fills the whole
+            left column — so the tooltip's 400ms delay lands it on top of the
+            preview it just triggered. Suppressed while previewing: the preview
+            says more than the label does, and the ⌘B hint still lives on the
+            collapse button inside it. */}
+        <Tooltip
+          open={peek ? false : undefined}
+          label={<span className="flex items-center gap-1.5">{t('sidebar.expandSidebar')}<KeybindingPill value="mod+b" /></span>}
+          side="right"
+        >
           <button
             type="button"
             onClick={toggleSidebar}
