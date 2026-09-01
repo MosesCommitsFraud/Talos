@@ -35,6 +35,11 @@ import { Tooltip } from './ui/misc';
 /** How tall the input may grow before it starts scrolling. */
 const MAX_INPUT_HEIGHT = 220;
 
+/** Plate size for the controls pinned inside the input box. It matches the
+ *  input's line box (text-base × leading-relaxed = 1.625rem), so a plate sits
+ *  exactly on the text line it belongs to instead of a pixel above it. */
+const INLINE_CONTROL = 'size-[1.625rem]';
+
 /** Gap the text keeps from the controls pinned inside the box (matches the
  *  box's own 8px inset, so the add button is evenly spaced all round). */
 const CONTROL_GAP = 8;
@@ -91,7 +96,7 @@ function MicButton({
         aria-label={label}
         className={cn(
           'flex shrink-0 cursor-pointer items-center justify-center rounded-full transition-colors active:scale-95',
-          hero ? 'size-8 [&_svg]:size-4' : 'size-7 [&_svg]:size-3.5',
+          hero ? 'size-8 [&_svg]:size-4' : `${INLINE_CONTROL} [&_svg]:size-4`,
           status === 'recording'
             ? 'animate-pulse bg-red-500/10 text-red-500 hover:bg-red-500/20'
             : 'text-foreground/45 hover:bg-accent hover:text-foreground/70 disabled:opacity-50 dark:text-foreground/35 dark:hover:text-foreground/60',
@@ -116,10 +121,10 @@ function StopButton({ onClick, hero }: { onClick: () => void; hero?: boolean }) 
         aria-label={t('composer.stop')}
         className={cn(
           'flex shrink-0 cursor-pointer items-center justify-center rounded-sm text-foreground/20 transition-colors hover:bg-accent active:scale-95 group-focus-within/composer:text-foreground/40 dark:text-foreground/10 dark:group-focus-within/composer:text-foreground/20',
-          hero ? 'size-8' : 'size-7',
+          hero ? 'size-8' : INLINE_CONTROL,
         )}
       >
-        <svg width={hero ? 16 : 14} height={hero ? 16 : 14} viewBox="0 0 12 12" fill="none" aria-hidden="true">
+        <svg width={hero ? 16 : 15} height={hero ? 16 : 15} viewBox="0 0 12 12" fill="none" aria-hidden="true">
           <rect x="1.5" y="1.5" width="9" height="9" rx="2" stroke="currentColor" strokeWidth="1.4" />
         </svg>
       </button>
@@ -784,6 +789,7 @@ export function Composer() {
                 uploading={uploading}
                 showMic={!!caps?.voice}
                 showPlan={prefs.visibility.composerPlan}
+                className={INLINE_CONTROL}
               />
             </div>
           )}
@@ -815,7 +821,8 @@ export function Composer() {
                     // The hover plate is always there — a glyph with no hit feedback
                     // reads as decoration. Only the plate reacts: the glyph keeps
                     // tracking the composer frame so the two stay one control.
-                    'flex size-7 shrink-0 cursor-pointer items-center justify-center rounded-sm text-foreground/20 transition-colors group-focus-within/composer:text-foreground/40 hover:bg-accent active:scale-95 dark:text-foreground/10 dark:group-focus-within/composer:text-foreground/20',
+                    'flex shrink-0 cursor-pointer items-center justify-center rounded-sm text-foreground/20 transition-colors group-focus-within/composer:text-foreground/40 hover:bg-accent active:scale-95 dark:text-foreground/10 dark:group-focus-within/composer:text-foreground/20',
+                    INLINE_CONTROL,
                   )}
                 >
                   <CornerDownLeftIcon aria-hidden="true" className="size-4" />
