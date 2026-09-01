@@ -517,6 +517,11 @@ export const useChat = create<ChatState>((set, get) => {
   },
 
   openSession: async (id) => {
+    // Opening a chat means going to the chat. A workspace that was on screen
+    // (Artifacts, Projects, Customize, RAG…) covers the whole column, so
+    // without this the click would look like it did nothing. Deep links on
+    // load are unaffected: restoreLastSession activates directly.
+    useUi.getState().setView('chat');
     // Instant switch to whatever we already have in memory (no blank flash).
     activate(id);
     // A runtime we built this page session — whether mid-stream or finished —

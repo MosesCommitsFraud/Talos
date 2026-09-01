@@ -80,6 +80,21 @@ const rememberThinkingChoice = (): void => {
 const withThinkingDefault = (visibility: Visibility): Visibility =>
   thinkingChosen() ? visibility : { ...visibility, showThinking: DEFAULT_VISIBILITY.showThinking };
 
+/* ── Web search defaults on ──
+ * Same treatment as showThinking, for the opposite reason: the flag is new, so
+ * a stored `false` is far more likely to be a stray click than a decision.
+ * Until the user actually flips it in the composer's add menu, the `true`
+ * default wins over both the local and the server-side copy. */
+const WEB_CHOICE_KEY = 'talos-web-choice';
+
+const webChosen = (): boolean => {
+  try { return localStorage.getItem(WEB_CHOICE_KEY) === '1'; } catch { return false; }
+};
+
+const rememberWebChoice = (): void => {
+  try { localStorage.setItem(WEB_CHOICE_KEY, '1'); } catch { /* storage disabled — the default just keeps applying */ }
+};
+
 interface PrefsState {
   theme: Theme;
   density: Density;
@@ -184,7 +199,12 @@ export const usePrefs = create<PrefsState>()(
         set((s) => ({ visibility: { ...s.visibility, [key]: value } }));
       },
       resetVisibility: () => set({ visibility: DEFAULT_VISIBILITY }),
-      toggle: (key) => set((s) => ({ [key]: !s[key] }) as Partial<PrefsState>),
+      toggle: (key) => {
+        // Flipping web search is the user stating an opinion, which from here
+        // on outranks the on-by-default rule (see WEB_CHOICE_KEY).
+        if (key === 'useWeb') rememberWebChoice();
+        set((s) => ({ [key]: !s[key] }) as Partial<PrefsState>);
+      },
       setKnowledge: (useRag, useDb) => set({ useRag, useDb }),
       setMicDeviceId: (micDeviceId) => set({ micDeviceId }),
       toggleSidebar: () => set((s) => ({ sidebarCollapsed: !s.sidebarCollapsed })),
@@ -220,6 +240,7 @@ export const usePrefs = create<PrefsState>()(
           ...current,
           ...p,
           visibility: withThinkingDefault({ ...DEFAULT_VISIBILITY, ...(p.visibility ?? {}) }),
+          useWeb: webChosen() ? (p.useWeb ?? true) : true,
           lang: pickLang(p.lang, p.langChosen),
           // Projects were bare names before they gained a description.
           projects: ((p.projects ?? []) as Array<string | Project>).map((entry) =>
@@ -289,6 +310,9 @@ export async function syncPrefsForUser(who: string): Promise<void> {
       // The server copy carries the old default too, so it gets the same
       // treatment as the local one.
       patch.visibility = withThinkingDefault({ ...DEFAULT_VISIBILITY, ...(value.visibility ?? {}) });
+      // Same for web search: a server blob written before the user ever flipped
+      // it doesn't get to turn the tool off.
+      if (!webChosen()) patch.useWeb = true;
       // Server wins, so a blob predating `langChosen` counts as "never picked"
       // and lands on the default even if this browser thinks otherwise.
       patch.langChosen = !!value.langChosen;
