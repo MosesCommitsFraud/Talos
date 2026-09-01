@@ -13,6 +13,8 @@
   --color-card-foreground: var(--card-foreground);
   --color-bubble: var(--bubble);
   --color-sidebar: var(--sidebar);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-active: var(--sidebar-active);
   --color-strong: var(--strong);
   --color-popover: var(--popover);
   --color-popover-foreground: var(--popover-foreground);
@@ -141,6 +143,14 @@
   /* The sidebar recedes behind the chat: a step *down* from the page, so the
    * conversation is the lit surface and the navigation is the frame around it. */
   --sidebar: color-mix(in srgb, var(--color-white) 95.5%, var(--color-black));
+  /* Because the panel sits below the page, its rows have to highlight *up*
+   * towards it — the generic --accent darkens, which on this surface reads as
+   * the row sinking rather than lighting up. Selected goes one step further
+   * than hover so an open chat still stands out from the one under the mouse. */
+  --sidebar-accent: color-mix(in srgb, var(--sidebar) 55%, var(--color-white));
+  /* Selected lands exactly on the page white, so an open chat reads as sitting
+   * on the same plane as the conversation it opened. */
+  --sidebar-active: var(--color-white);
   /* Reading text — the message stream, the composer, the selected chat. One
    * step darker than --foreground: chrome and labels stay at neutral-800, the
    * words you actually read sit closer to black. */
@@ -208,6 +218,9 @@
   /* Unlike the other panels the sidebar goes the other way — darker than the
    * page — so the chat reads as the lit surface and the nav as its frame. */
   --sidebar: color-mix(in srgb, var(--background) 88%, var(--color-black));
+  /* Same idea as light mode: highlights lift the row off the panel. */
+  --sidebar-accent: color-mix(in srgb, var(--sidebar) 93%, var(--color-white));
+  --sidebar-active: color-mix(in srgb, var(--sidebar) 87%, var(--color-white));
   /* Dark mode already runs its text near-white; no second step needed. */
   --strong: var(--foreground);
   /* Kept in step with --card so menus never read darker than the panel
