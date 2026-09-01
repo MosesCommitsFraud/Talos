@@ -207,9 +207,11 @@ export function ContextMeter() {
         type="button"
         onClick={() => setOpen((o) => !o)}
         aria-label={t('contextMeter.used', { percent: formatPercent(percent) })}
-        className="mr-1 flex size-6 shrink-0 cursor-pointer items-center pt-[2px] justify-center rounded-[4.5px] border border-transparent text-foreground/65 outline-none transition-colors hover:bg-accent hover:text-foreground/90 focus:outline-none focus-visible:outline-none sm:size-5"
+        // Sized and centred to sit level with the model picker beside it — no
+        // pt nudge, so the ring's middle lands on the button's middle.
+        className="flex size-5 shrink-0 cursor-pointer items-center justify-center rounded-md border border-transparent text-foreground/65 outline-none transition-colors hover:bg-accent hover:text-foreground/90 focus:outline-none focus-visible:outline-none"
       >
-        <span className="relative flex size-3 items-center justify-center">
+        <span className="relative flex size-3.5 items-center justify-center">
           <svg
             viewBox="0 0 24 24"
             className="absolute inset-0 size-full -rotate-90 transform-gpu"

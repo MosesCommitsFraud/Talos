@@ -228,6 +228,7 @@ const de: typeof en = {
     micDefault: 'Systemstandard',
     micUnnamed: 'Mikrofon {{n}}',
     webSearch: 'Websuche',
+    aiDisclaimer: 'Talos ist KI und kann Fehler machen. Bitte Antworten prüfen.',
     skills: {
       none: 'Noch keine Skills hochgeladen',
       manage: 'Skills verwalten',

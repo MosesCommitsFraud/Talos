@@ -1,19 +1,14 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
-  BookOpenIcon,
   ArrowUpIcon,
   CirclePauseIcon,
   CircleStopIcon,
-  CheckIcon,
   CornerDownLeftIcon,
-  DatabaseIcon,
   ListChecksIcon,
   Loader2Icon,
   MicIcon,
   PaperclipIcon,
-  PencilRulerIcon,
   PlayIcon,
-  WrenchIcon,
   XIcon,
   ScanSearchIcon,
 } from 'lucide-react';
@@ -23,7 +18,7 @@ import { useTranslation } from 'react-i18next';
 import { fetchCapabilities, uploadDownloadUrl, uploadFiles, type UploadedFile } from '@/api/client';
 import type { ArtifactSelection } from '@/api/types';
 import { selectPendingPlan, useChat } from '@/state/chat';
-import { usePrefs, type ChatMode } from '@/state/prefs';
+import { usePrefs } from '@/state/prefs';
 import { useUi } from '@/state/ui';
 import { cn } from '@/lib/utils';
 import { useDictation } from '@/lib/useDictation';
@@ -35,55 +30,18 @@ import { FileTypeIcon } from './FileTypeIcon';
 import { ComposerAddMenu } from './ComposerAddMenu';
 import { ModelEffortPicker } from './ModelEffortPicker';
 import { Button } from './ui/button';
-import { Menu, MenuItem, MenuPopup, MenuTrigger } from './ui/menu';
 import { Tooltip } from './ui/misc';
 
-/** t3code plan-toggle style: labeled ghost button, blue tint when active.
- *  Pass inactiveIcon/inactiveLabel to swap the face by state (Plan ↔ Work). */
-function ModeToggle({
-  active,
-  onClick,
-  icon,
-  label,
-  tooltip,
-  inactiveIcon,
-  inactiveLabel,
-}: {
-  active: boolean;
-  onClick: () => void;
-  icon: React.ReactNode;
-  label: string;
-  tooltip: string;
-  inactiveIcon?: React.ReactNode;
-  inactiveLabel?: string;
-}) {
-  const face = active ? icon : (inactiveIcon ?? icon);
-  const text = active ? label : (inactiveLabel ?? label);
-  return (
-    <Tooltip label={tooltip} side="top">
-      <button
-        type="button"
-        onClick={onClick}
-        aria-pressed={active}
-        aria-label={tooltip}
-        className={cn(
-          'flex h-6 shrink-0 items-center pt-[2px] gap-1.5 rounded-[4.5px] border border-transparent px-1 text-xs font-medium whitespace-nowrap transition-colors sm:h-5 sm:px-1.5 [&_svg]:size-3.5 [&_svg]:shrink-0 [&_svg]:-translate-y-px',
-          active
-            // Light mode needs a deeper blue and a denser tint — blue-400 on a
-            // 10% wash reads washed out against white.
-            ? 'bg-blue-500/15 text-blue-600 hover:bg-blue-500/20 hover:text-blue-700 dark:bg-blue-500/10 dark:text-blue-400 dark:hover:bg-blue-500/15 dark:hover:text-blue-300'
-            : 'text-foreground/80 hover:bg-accent hover:text-foreground/90 dark:text-foreground/65',
-        )}
-      >
-        {face}
-        {/* Without an icon the label is the whole face, so it must stay visible on mobile too. */}
-        <span className={face ? 'sr-only sm:not-sr-only' : undefined}>{text}</span>
-      </button>
-    </Tooltip>
-  );
-}
+/** How tall the input may grow before it starts scrolling. */
+const MAX_INPUT_HEIGHT = 220;
 
-type ModeOpt = { key: ChatMode; rag: boolean; db: boolean; label: string; desc: string };
+/** Gap the text keeps from the controls pinned inside the box (matches the
+ *  box's own 8px inset, so the add button is evenly spaced all round). */
+const CONTROL_GAP = 8;
+
+/** Typography shared by the input and its measuring twin — they have to wrap
+ *  identically or the animated height lands on the wrong line count. */
+const INPUT_TEXT = 'text-base leading-relaxed';
 
 type SlashCommand = {
   name: string;
@@ -110,108 +68,6 @@ const SLASH_COMMANDS: SlashCommand[] = [
   { name: 'export', description: 'Prepare the result as a local export', takesText: true },
   { name: 'skill', description: 'Create a reusable skill from a workflow or description', takesText: true },
 ];
-
-/** Knowledge-mode dropdown styled like t3code's runtime-mode picker (ghost
- *  trigger, rich items with a description line). Shown only when both RAG and
- *  SQL are configured; drives use_rag/use_db. */
-function ChatModeDropdown() {
-  const { t } = useTranslation();
-  const useRag = usePrefs((s) => s.useRag);
-  const useDb = usePrefs((s) => s.useDb);
-  const setKnowledge = usePrefs((s) => s.setKnowledge);
-  const mode: ChatMode = useRag ? (useDb ? 'full' : 'knowledge') : (useDb ? 'sql' : 'chat');
-  const modes: ModeOpt[] = [
-    { key: 'chat', rag: false, db: false, label: t('composer.mode.chat'), desc: t('composer.mode.chatDesc') },
-    { key: 'knowledge', rag: true, db: false, label: t('composer.mode.knowledge'), desc: t('composer.mode.knowledgeDesc') },
-    { key: 'sql', rag: false, db: true, label: t('composer.mode.sql'), desc: t('composer.mode.sqlDesc') },
-    { key: 'full', rag: true, db: true, label: t('composer.mode.full'), desc: t('composer.mode.fullDesc') },
-  ];
-  const active = modes.find((m) => m.key === mode) ?? modes[0];
-  return (
-    <Menu>
-      <MenuTrigger asChild>
-        <button
-          type="button"
-          aria-label={t('composer.mode.label')}
-          className={cn(
-            'flex h-6 shrink-0 items-center pt-[2px] gap-1.5 rounded-[4.5px] border border-transparent px-1 text-xs font-medium whitespace-nowrap outline-none transition-colors focus:outline-none focus-visible:outline-none sm:h-5 sm:px-1.5 [&_svg]:size-3.5 [&_svg]:shrink-0 [&_svg]:-translate-y-px',
-            'text-foreground/80 hover:bg-accent hover:text-foreground/90 dark:text-foreground/65',
-          )}
-        >
-          <span className="sr-only sm:not-sr-only">{active.label}</span>
-        </button>
-      </MenuTrigger>
-      <MenuPopup align="start" className="min-w-36">
-        {modes.map((m) => (
-          <MenuItem
-            key={m.key}
-            onSelect={() => setKnowledge(m.rag, m.db)}
-          >
-            <span className="min-w-0 flex-1 truncate">{m.label}</span>
-            {m.key === mode && <CheckIcon className="size-3.5 shrink-0 text-primary opacity-100" />}
-          </MenuItem>
-        ))}
-      </MenuPopup>
-    </Menu>
-  );
-}
-
-/** Picks the right knowledge control for the chat input based on what's
- *  configured: the 3-mode dropdown when both RAG and SQL are set up, a single
- *  toggle when only one is, nothing when neither. Also clamps persisted flags
- *  so a stale toggle can't enable an unconfigured source. */
-function KnowledgeControl() {
-  const { t } = useTranslation();
-  const { data: caps } = useQuery({ queryKey: ['capabilities'], queryFn: fetchCapabilities, staleTime: 60_000 });
-  const useRag = usePrefs((s) => s.useRag);
-  const useDb = usePrefs((s) => s.useDb);
-  const setKnowledge = usePrefs((s) => s.setKnowledge);
-
-  useEffect(() => {
-    if (!caps) return;
-    const r = caps.rag && useRag;
-    const d = caps.sql && useDb;
-    if (r !== useRag || d !== useDb) setKnowledge(r, d);
-  }, [caps, useRag, useDb, setKnowledge]);
-
-  if (!caps || (!caps.rag && !caps.sql)) return null;
-  if (caps.rag && caps.sql) return <ChatModeDropdown />;
-  return caps.rag ? (
-    <ModeToggle
-      active={useRag}
-      onClick={() => setKnowledge(!useRag, false)}
-      icon={<BookOpenIcon />}
-      label={t('composer.rag')}
-      tooltip={t('composer.ragTooltip')}
-    />
-  ) : (
-    <ModeToggle
-      active={useDb}
-      onClick={() => setKnowledge(false, !useDb)}
-      icon={<DatabaseIcon />}
-      label={t('composer.sql')}
-      tooltip={t('composer.sqlTooltip')}
-    />
-  );
-}
-
-/** Plan ↔ Work switch; drives the per-turn `planMode` flag. */
-function PlanToggle() {
-  const { t } = useTranslation();
-  const planMode = usePrefs((s) => s.planMode);
-  const toggle = usePrefs((s) => s.toggle);
-  return (
-    <ModeToggle
-      active={planMode}
-      onClick={() => toggle('planMode')}
-      icon={<PencilRulerIcon />}
-      label={t('composer.plan')}
-      inactiveIcon={<WrenchIcon />}
-      inactiveLabel={t('composer.work')}
-      tooltip={planMode ? t('composer.planTooltipActive') : t('composer.planTooltipInactive')}
-    />
-  );
-}
 
 /** Dictate button, now inside the input box beside the send control. The
  *  microphone chooser that used to sit next to it moved into the add menu. */
@@ -247,8 +103,9 @@ function MicButton({
   );
 }
 
-/** Stop control shown while a turn streams: a solid disc with a square, so it
- *  reads as the one button that interrupts rather than as another ghost glyph. */
+/** Stop control shown while a turn streams. Same treatment as the send glyph it
+ *  replaces — plate-only hover, glyph tracking the composer frame — so the swap
+ *  doesn't change the control's weight mid-turn. */
 function StopButton({ onClick, hero }: { onClick: () => void; hero?: boolean }) {
   const { t } = useTranslation();
   return (
@@ -258,14 +115,12 @@ function StopButton({ onClick, hero }: { onClick: () => void; hero?: boolean }) 
         onClick={onClick}
         aria-label={t('composer.stop')}
         className={cn(
-          'flex shrink-0 cursor-pointer items-center justify-center transition-colors active:scale-95',
-          hero
-            ? 'size-8 rounded-[10px] bg-primary text-primary-foreground hover:bg-primary/90'
-            : 'size-7 rounded-full bg-foreground text-background hover:bg-foreground/85',
+          'flex shrink-0 cursor-pointer items-center justify-center rounded-sm text-foreground/20 transition-colors hover:bg-accent active:scale-95 group-focus-within/composer:text-foreground/40 dark:text-foreground/10 dark:group-focus-within/composer:text-foreground/20',
+          hero ? 'size-8' : 'size-7',
         )}
       >
-        <svg width={hero ? 12 : 10} height={hero ? 12 : 10} viewBox="0 0 12 12" aria-hidden="true">
-          <rect x="1.5" y="1.5" width="9" height="9" rx="2.5" fill="currentColor" />
+        <svg width={hero ? 16 : 14} height={hero ? 16 : 14} viewBox="0 0 12 12" fill="none" aria-hidden="true">
+          <rect x="1.5" y="1.5" width="9" height="9" rx="2" stroke="currentColor" strokeWidth="1.4" />
         </svg>
       </button>
     </Tooltip>
@@ -273,18 +128,28 @@ function StopButton({ onClick, hero }: { onClick: () => void; hero?: boolean }) 
 }
 
 export function Composer() {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const [text, setText] = useState('');
   // Empty-state prompt: one of a handful, re-rolled whenever the box goes empty
   // (mount, send, clear) and held steady while there is text to type over.
   const placeholders = useMemo(() => {
     const list = t('composer.placeholders', { returnObjects: true });
     return Array.isArray(list) && list.length > 0 ? (list as string[]) : [t('composer.placeholder')];
-  }, [t]);
-  const [placeholder, setPlaceholder] = useState(placeholders[0]);
+    // Keyed on the language, not on `t`: `t` gets a new identity on unrelated
+    // i18n activity, and a fresh array here used to re-roll the prompt.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [i18n.language]);
+  const [placeholder, setPlaceholder] = useState(() => placeholders[Math.floor(Math.random() * placeholders.length)]);
   const empty = text.length === 0;
+  // One roll per emptying, not one per render while empty — otherwise every
+  // unrelated re-render (streaming ticks, menu opens) swaps the prompt, which
+  // reads as the box changing its mind while you look at it.
+  const wasEmpty = useRef(true);
   useEffect(() => {
-    if (empty) setPlaceholder(placeholders[Math.floor(Math.random() * placeholders.length)]);
+    if (empty && !wasEmpty.current) {
+      setPlaceholder(placeholders[Math.floor(Math.random() * placeholders.length)]);
+    }
+    wasEmpty.current = empty;
   }, [empty, placeholders]);
   const [pending, setPending] = useState<UploadedFile[]>([]);
   const [uploading, setUploading] = useState(false);
@@ -300,6 +165,11 @@ export function Composer() {
   }>>([]);
   const dragDepth = useRef(0);
   const textarea = useRef<HTMLTextAreaElement>(null);
+  const mirror = useRef<HTMLDivElement>(null);
+  const inputRow = useRef<HTMLDivElement>(null);
+  const inputBox = useRef<HTMLDivElement>(null);
+  const inputLead = useRef<HTMLDivElement>(null);
+  const inputTrail = useRef<HTMLDivElement>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const slashMenu = useRef<HTMLDivElement>(null);
   const previousSlashIndex = useRef(0);
@@ -451,12 +321,62 @@ export function Composer() {
     return () => document.removeEventListener('keydown', onKey, true);
   }, [dictating, dictation]);
 
+  // Height is measured on a hidden twin rather than by resetting the textarea
+  // to `height:auto`: that reset forces a layout at the content height, which
+  // becomes the transition's starting point and kills the growth animation.
+  // The twin carries the same width, font and wrapping, so its height is the
+  // one the textarea should animate to.
   const autoresize = () => {
     const el = textarea.current;
+    const twin = mirror.current;
+    const row = inputRow.current;
+    const box = inputBox.current;
     if (!el) return;
-    el.style.height = 'auto';
-    el.style.height = `${Math.min(el.scrollHeight, 200)}px`;
+    if (!twin || !row || !box) {
+      el.style.height = 'auto';
+      el.style.height = `${Math.min(el.scrollHeight, MAX_INPUT_HEIGHT)}px`;
+      return;
+    }
+    // The trailing newline keeps a just-opened line from collapsing away.
+    twin.textContent = `${el.value}\n`;
+    const pad = getComputedStyle(row);
+    const inner = row.clientWidth - parseFloat(pad.paddingLeft) - parseFloat(pad.paddingRight);
+    const lead = inputLead.current?.offsetWidth ?? 0;
+    const trail = inputTrail.current?.offsetWidth ?? 0;
+    const measure = (width: number) => {
+      twin.style.width = `${Math.max(1, width)}px`;
+      return twin.scrollHeight;
+    };
+    // Two widths: the narrow lane between the pinned controls, and the full
+    // box. Whether the text has outgrown its lane is decided at the NARROW
+    // width only — deciding it at whatever width is currently applied would
+    // oscillate, since widening can drop the very line that caused the switch.
+    const lanePad = (lead ? lead + CONTROL_GAP : 0) + (trail ? trail + CONTROL_GAP : 0);
+    const laneHeight = measure(inner - lanePad);
+    const lineHeight = parseFloat(getComputedStyle(twin).lineHeight) || laneHeight;
+    const overflows = laneHeight > lineHeight + 1;
+    const height = Math.min(overflows ? measure(inner) : laneHeight, MAX_INPUT_HEIGHT);
+    // Margins, not a re-render: this runs on every keystroke, and CSS animates
+    // the text sliding over the controls for free.
+    box.style.marginInlineStart = overflows || !lead ? '0px' : `${lead + CONTROL_GAP}px`;
+    box.style.marginInlineEnd = overflows || !trail ? '0px' : `${trail + CONTROL_GAP}px`;
+    const controlRow = Math.max(inputLead.current?.offsetHeight ?? 0, inputTrail.current?.offsetHeight ?? 0);
+    box.style.marginBottom = overflows && controlRow ? `${controlRow + CONTROL_GAP}px` : '0px';
+    el.style.height = `${height}px`;
+    // A scrollbar while the box is still growing is just the animation lagging
+    // the content; only a genuinely capped input scrolls.
+    el.style.overflowY = height >= MAX_INPUT_HEIGHT ? 'auto' : 'hidden';
   };
+
+  // Widths change without the text changing: mount, viewport resize, and the
+  // control set itself (mic appearing once capabilities load, send ↔ stop).
+  useEffect(() => {
+    autoresize();
+    const onResize = () => autoresize();
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hero, caps?.voice, showStop, dictating, prefs.visibility.composerAttach]);
 
   const attach = async (files: FileList | File[]) => {
     const list = Array.from(files);
@@ -644,7 +564,7 @@ export function Composer() {
   }
 
   return (
-    <div className="mx-auto w-full max-w-[800px] px-4 pb-2.5">
+    <div className="mx-auto w-full max-w-[800px] px-4 pb-1">
       {/* Drop overlay — covers only the chat area (portaled into <main>, which is
           position:relative), so the sidebar and side panels stay clear. Shown
           while dragging files anywhere over the chat column. */}
@@ -782,11 +702,17 @@ export function Composer() {
           </div>
         )}
 
-        <div className={cn('flex items-start', hero ? 'px-3 pb-1 pt-3' : 'py-2.5 pl-2.5 pr-2')}>
+        <div ref={inputRow} className={cn('relative', hero ? 'px-3 pb-1 pt-2' : 'p-2')}>
+          {/* Text block. In the conversation layout it starts out inset between
+              the pinned controls below and widens over them once it wraps —
+              autoresize animates those margins, so the text flows into the full
+              width instead of stranding a gutter beside the growing box. */}
+          <div ref={inputBox} className="relative min-w-0 transition-[margin] duration-150 ease-out">
           {dictating && (
             <div
               aria-live="polite"
-              className="max-h-[200px] w-full overflow-y-auto text-[15px] leading-relaxed break-words whitespace-pre-wrap"
+              className={cn('w-full overflow-y-auto break-words whitespace-pre-wrap', INPUT_TEXT)}
+              style={{ maxHeight: MAX_INPUT_HEIGHT }}
             >
               {text.trim() && <span>{text.replace(/\s+$/, '')} </span>}
               <span className="text-muted-foreground italic">
@@ -798,6 +724,15 @@ export function Composer() {
               <span className="ml-0.5 inline-block h-[1em] w-[2px] translate-y-[0.15em] animate-pulse rounded-full bg-muted-foreground/70" />
             </div>
           )}
+          {/* Hidden twin the height animation measures against — see autoresize. */}
+          <div
+            ref={mirror}
+            aria-hidden="true"
+            className={cn(
+              'pointer-events-none invisible absolute left-0 top-0 break-words whitespace-pre-wrap',
+              INPUT_TEXT,
+            )}
+          />
           <textarea
             hidden={dictating}
             ref={textarea}
@@ -831,13 +766,29 @@ export function Composer() {
               const files = Array.from(e.clipboardData.files);
               if (files.length) { e.preventDefault(); void attach(files); }
             }}
-            className="max-h-[200px] w-full resize-none bg-transparent text-[15px] leading-relaxed text-strong outline-none placeholder:text-muted-foreground/65 dark:placeholder:text-muted-foreground"
+            className={cn(
+              'relative block w-full resize-none bg-transparent text-strong outline-none transition-[height] duration-150 ease-out placeholder:text-muted-foreground/65 dark:placeholder:text-muted-foreground',
+              INPUT_TEXT,
+            )}
+            style={{ maxHeight: MAX_INPUT_HEIGHT }}
           />
-          {/* Right-edge adornment (conversation layout only — the new-chat box
-              carries its controls in the inner row below): the mic, then a stop
-              disc while streaming or an Enter glyph to send. */}
+          </div>
+          {/* Conversation layout: the controls are pinned to the bottom of the
+              box — add on the left, mic and send/stop on the right — so a
+              growing text block can slide over them instead of pushing them
+              around. The new-chat box carries its controls in the row below. */}
+          {!hero && prefs.visibility.composerAttach && (
+            <div ref={inputLead} className="absolute bottom-2 start-2">
+              <ComposerAddMenu
+                onAttach={() => fileInput.current?.click()}
+                uploading={uploading}
+                showMic={!!caps?.voice}
+                showPlan={prefs.visibility.composerPlan}
+              />
+            </div>
+          )}
           {!hero && (
-            <div className="-my-0.5 ml-2 flex shrink-0 items-center gap-1 self-end">
+            <div ref={inputTrail} className="absolute bottom-2 end-2 flex items-center gap-1">
               {caps?.voice && (
                 <MicButton
                   status={dictation.status}
@@ -875,10 +826,13 @@ export function Composer() {
         </div>
 
         {/* New-chat layout: every control sits inside the box, Claude-style —
-            add menu and the knowledge/plan switches on the left, model+effort
-            and the send control on the right. */}
+            the add menu (which carries the knowledge and plan switches) on the
+            left, model+effort and the send control on the right. */}
         {hero && (
-          <div className="flex min-w-0 items-center gap-1 px-2 pb-2">
+          // px-1.5 rather than px-3: the button plate insets its glyph by 6px,
+          // so this is what puts the + glyph on the same left edge as the text
+          // above it, with the same 12px to the bottom of the box.
+          <div className="flex min-w-0 items-center gap-1 ps-1.5 pe-3 pb-1">
             <input
               ref={fileInput}
               type="file"
@@ -886,18 +840,17 @@ export function Composer() {
               hidden
               onChange={(e) => { if (e.target.files) void attach(e.target.files); e.target.value = ''; }}
             />
-            <div className="-m-1 flex min-w-0 flex-1 items-center gap-1 overflow-x-auto p-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+            <div className="flex min-w-0 flex-1 items-center gap-1">
               {prefs.visibility.composerAttach && (
                 <ComposerAddMenu
                   onAttach={() => fileInput.current?.click()}
                   uploading={uploading}
                   showMic={!!caps?.voice}
+                  showPlan={prefs.visibility.composerPlan}
                 />
               )}
-              <KnowledgeControl />
-              {prefs.visibility.composerPlan && <PlanToggle />}
             </div>
-            <div className="flex shrink-0 items-center gap-1.5">
+            <div className="flex shrink-0 items-center gap-3">
               <ModelEffortPicker visible={prefs.visibility.composerModelPicker} />
               {showStop ? (
                 <StopButton hero onClick={stop} />
@@ -937,11 +890,12 @@ export function Composer() {
       )}
       {commandError && <p className="mt-1 text-center text-xs text-destructive">{commandError}</p>}
 
-      {/* Control row — under the input card once a conversation is running:
-          knowledge/add/plan on the left, model+effort and the context meter on
-          the right. The mic and the send/stop control live inside the box. */}
+      {/* Control row — under the input card once a conversation is running.
+          Everything else moved inside the box or into the add menu, so the
+          left half is free for the AI disclaimer and the right holds the
+          model+effort picker with the context meter, all on one centre line. */}
       {!hero && (
-        <div className="mt-2.5 flex min-w-0 flex-nowrap items-center justify-between gap-2">
+        <div className="mt-1 flex min-w-0 flex-nowrap items-center justify-between gap-3">
           <input
             ref={fileInput}
             type="file"
@@ -950,24 +904,10 @@ export function Composer() {
             onChange={(e) => { if (e.target.files) void attach(e.target.files); e.target.value = ''; }}
           />
 
-          {/* Left cluster: knowledge mode · add · plan */}
-          <div className="-m-1 flex min-w-0 flex-1 items-center gap-1 overflow-x-auto p-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-            <KnowledgeControl />
+          <p className="min-w-0 truncate ps-1 text-xs text-muted-foreground/70">{t('composer.aiDisclaimer')}</p>
 
-            {prefs.visibility.composerAttach && (
-              <ComposerAddMenu
-                onAttach={() => fileInput.current?.click()}
-                uploading={uploading}
-                showMic={!!caps?.voice}
-              />
-            )}
-
-            {prefs.visibility.composerPlan && <PlanToggle />}
-          </div>
-
-          {/* Right cluster: model + reasoning effort · context meter */}
-          <div className="flex shrink-0 flex-nowrap items-center justify-end gap-1">
-            <ModelEffortPicker visible={prefs.visibility.composerModelPicker} />
+          <div className="me-2 flex shrink-0 flex-nowrap items-center justify-end gap-1">
+            <ModelEffortPicker visible={prefs.visibility.composerModelPicker} placement="outside" />
 
             {prefs.visibility.contextMeter && <ContextMeter />}
           </div>

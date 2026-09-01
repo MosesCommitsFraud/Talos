@@ -20,7 +20,14 @@ import { useReasoningEfforts } from './EffortPicker';
  *  shows "Reasoning"/"No Reasoning" in the effort slot.
  *
  *  Stays mounted while hidden so the default-model effect keeps running. */
-export function ModelEffortPicker({ visible = true }: { visible?: boolean }) {
+export function ModelEffortPicker({
+  visible = true,
+  placement = 'inside',
+}: {
+  visible?: boolean;
+  /** Inside the input box (new-chat bar) or in the quieter row beneath it. */
+  placement?: 'inside' | 'outside';
+}) {
   const { t } = useTranslation();
   const { data: endpoints } = useQuery({ queryKey: ['models'], queryFn: fetchModels });
   const pendingModel = useChat((s) => s.pendingModel);
@@ -64,15 +71,23 @@ export function ModelEffortPicker({ visible = true }: { visible?: boolean }) {
         <button
           type="button"
           aria-label={t('modelPicker.switchModel')}
-          className="flex h-6 min-w-0 shrink items-center gap-1.5 whitespace-nowrap rounded-[4.5px] border border-transparent px-1 pt-[2px] text-xs font-medium text-foreground/80 outline-none transition-colors hover:bg-accent hover:text-foreground/90 focus:outline-none focus-visible:outline-none dark:text-foreground/65 sm:h-5 sm:px-1.5"
+          // Roomier than the old ghost pickers, but it steps down outside the
+          // box, where it sits next to the disclaimer rather than the send key.
+          className={cn(
+            'flex min-w-0 shrink items-center whitespace-nowrap rounded-lg border border-transparent font-medium text-foreground/80 outline-none transition-colors hover:bg-accent hover:text-foreground focus:outline-none focus-visible:outline-none dark:text-foreground/70',
+            placement === 'inside' ? 'h-7 gap-1.5 px-2.5 text-sm' : 'h-6 gap-1.5 px-2 text-xs',
+          )}
         >
-          <QwenIcon className="size-3.5 shrink-0" />
+          <QwenIcon className={cn('shrink-0', placement === 'inside' ? 'size-4' : 'size-3.5')} />
           <span className="min-w-0 max-w-32 truncate text-left md:max-w-56">{modelLabel}</span>
           {/* The effort reads as a qualifier of the model, not a second control. */}
           <span className={cn('shrink-0 font-normal', reasoning ? 'text-muted-foreground' : 'text-muted-foreground/70')}>
             {effortLabel}
           </span>
-          <ChevronDownIcon className="size-3 shrink-0 -translate-y-px opacity-60" aria-hidden="true" />
+          <ChevronDownIcon
+            className={cn('shrink-0 opacity-60', placement === 'inside' ? 'size-3.5' : 'size-3')}
+            aria-hidden="true"
+          />
         </button>
       </MenuTrigger>
 

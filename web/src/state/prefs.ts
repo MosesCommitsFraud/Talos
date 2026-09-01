@@ -314,7 +314,9 @@ export function applyTheme(theme: Theme) {
 
 /** Everything is rem-based, so density is one root font-size. */
 export function applyDensity(density: Density) {
-  document.documentElement.style.fontSize = { compact: '14px', comfortable: '16px', spacious: '17px' }[density];
+  // The whole UI is sized in rem, so this root step is what "slightly bigger
+  // text everywhere" means — each density keeps its relative footing.
+  document.documentElement.style.fontSize = { compact: '15px', comfortable: '17px', spacious: '18px' }[density];
 }
 
 /** Sync i18next + <html lang> with the stored language. */

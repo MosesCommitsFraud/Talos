@@ -225,6 +225,7 @@ const en = {
     micDefault: 'System default',
     micUnnamed: 'Microphone {{n}}',
     webSearch: 'Web search',
+    aiDisclaimer: 'Talos is AI and can make mistakes. Please double-check responses.',
     skills: {
       none: 'No skills uploaded yet',
       manage: 'Manage skills',

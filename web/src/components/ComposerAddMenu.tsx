@@ -1,17 +1,20 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
+  BookOpenIcon,
   CheckIcon,
+  DatabaseIcon,
   GlobeIcon,
   MicIcon,
   PaperclipIcon,
+  PencilRulerIcon,
   PlusIcon,
   SettingsIcon,
   SparklesIcon,
 } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { fetchSharedSkills, setSharedSkillEnabled } from '@/api/client';
-import { usePrefs } from '@/state/prefs';
+import { fetchCapabilities, fetchSharedSkills, setSharedSkillEnabled } from '@/api/client';
+import { usePrefs, type ChatMode } from '@/state/prefs';
 import { cn } from '@/lib/utils';
 import { useAuth } from './auth/AuthGate';
 import {
@@ -117,20 +120,90 @@ function MicSubmenu() {
   );
 }
 
+/** Knowledge sources, as a submenu: the 4-way mode when both RAG and SQL are
+ *  configured, a single on/off row when only one is, nothing when neither.
+ *  Also clamps the persisted flags so a stale toggle can't enable a source the
+ *  deployment doesn't have. */
+function KnowledgeItems() {
+  const { t } = useTranslation();
+  const { data: caps } = useQuery({ queryKey: ['capabilities'], queryFn: fetchCapabilities, staleTime: 60_000 });
+  const useRag = usePrefs((s) => s.useRag);
+  const useDb = usePrefs((s) => s.useDb);
+  const setKnowledge = usePrefs((s) => s.setKnowledge);
+
+  useEffect(() => {
+    if (!caps) return;
+    const r = caps.rag && useRag;
+    const d = caps.sql && useDb;
+    if (r !== useRag || d !== useDb) setKnowledge(r, d);
+  }, [caps, useRag, useDb, setKnowledge]);
+
+  if (!caps || (!caps.rag && !caps.sql)) return null;
+
+  // Only one source configured: a plain switch beats a one-choice submenu.
+  if (!caps.rag || !caps.sql) {
+    const on = caps.rag ? useRag : useDb;
+    return (
+      <MenuItem
+        onSelect={(e) => {
+          e.preventDefault();
+          setKnowledge(caps.rag ? !useRag : false, caps.sql ? !useDb : false);
+        }}
+      >
+        {caps.rag ? <BookOpenIcon /> : <DatabaseIcon />}
+        <span className="min-w-0 flex-1 truncate">{caps.rag ? t('composer.rag') : t('composer.sql')}</span>
+        <CheckIcon className={cn('size-3.5 shrink-0 text-primary', on ? 'opacity-100' : 'opacity-0')} />
+      </MenuItem>
+    );
+  }
+
+  const mode: ChatMode = useRag ? (useDb ? 'full' : 'knowledge') : useDb ? 'sql' : 'chat';
+  const modes: Array<{ key: ChatMode; rag: boolean; db: boolean; label: string }> = [
+    { key: 'chat', rag: false, db: false, label: t('composer.mode.chat') },
+    { key: 'knowledge', rag: true, db: false, label: t('composer.mode.knowledge') },
+    { key: 'sql', rag: false, db: true, label: t('composer.mode.sql') },
+    { key: 'full', rag: true, db: true, label: t('composer.mode.full') },
+  ];
+  const active = modes.find((m) => m.key === mode) ?? modes[0];
+
+  return (
+    <MenuSub>
+      <MenuSubTrigger>
+        <BookOpenIcon />
+        <span className="min-w-0 flex-1 truncate">{t('composer.mode.label')}</span>
+        <span className="shrink-0 text-muted-foreground">{active.label}</span>
+      </MenuSubTrigger>
+      <MenuSubPopup className="min-w-40">
+        {modes.map((m) => (
+          <MenuItem key={m.key} onSelect={() => setKnowledge(m.rag, m.db)}>
+            <span className="min-w-0 flex-1 truncate">{m.label}</span>
+            <CheckIcon className={cn('size-3.5 shrink-0 text-primary', m.key === mode ? 'opacity-100' : 'opacity-0')} />
+          </MenuItem>
+        ))}
+      </MenuSubPopup>
+    </MenuSub>
+  );
+}
+
 /** The composer's "+" menu: attachments, the skill library, the microphone
- *  chooser, and the per-turn web-search switch. */
+ *  chooser, and the per-turn switches (knowledge sources, plan mode, web). */
 export function ComposerAddMenu({
   onAttach,
   uploading,
   showMic,
+  showPlan,
+  className,
 }: {
   onAttach: () => void;
   uploading?: boolean;
   showMic?: boolean;
+  showPlan?: boolean;
+  className?: string;
 }) {
   const { t } = useTranslation();
   const auth = useAuth();
   const useWeb = usePrefs((s) => s.useWeb);
+  const planMode = usePrefs((s) => s.planMode);
   const toggle = usePrefs((s) => s.toggle);
 
   return (
@@ -139,7 +212,10 @@ export function ComposerAddMenu({
         <button
           type="button"
           aria-label={t('composer.add')}
-          className="flex size-6 shrink-0 items-center justify-center rounded-[4.5px] border border-transparent pt-[2px] text-foreground/80 outline-none transition-colors hover:bg-accent hover:text-foreground/90 focus:outline-none focus-visible:outline-none dark:text-foreground/65 sm:size-5 [&_svg]:size-3.5 [&_svg]:-translate-y-px"
+          className={cn(
+            'flex size-7 shrink-0 items-center justify-center rounded-lg border border-transparent text-foreground/70 outline-none transition-colors hover:bg-accent hover:text-foreground focus:outline-none focus-visible:outline-none dark:text-foreground/60 [&_svg]:size-4',
+            className,
+          )}
         >
           <PlusIcon className={uploading ? 'animate-pulse' : undefined} />
         </button>
@@ -152,6 +228,21 @@ export function ComposerAddMenu({
         {auth?.is_admin && <SkillsSubmenu />}
         {showMic && <MicSubmenu />}
         <MenuSeparator />
+        <KnowledgeItems />
+        {showPlan && (
+          // Plan mode is a per-turn switch like the others, so it reads as a
+          // checked row rather than the old Plan/Work face swap.
+          <MenuItem
+            onSelect={(e) => {
+              e.preventDefault();
+              toggle('planMode');
+            }}
+          >
+            <PencilRulerIcon />
+            <span className="min-w-0 flex-1 truncate">{t('composer.plan')}</span>
+            <CheckIcon className={cn('size-3.5 shrink-0 text-primary', planMode ? 'opacity-100' : 'opacity-0')} />
+          </MenuItem>
+        )}
         {/* Per-turn, not a deployment setting: with it off the backend withholds
             web_search / web_fetch for the messages that follow. */}
         <MenuItem

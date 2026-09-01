@@ -185,20 +185,7 @@ function SessionRow({ session, projects }: { session: Session; projects: string[
             session.id === activeId ? 'bg-sidebar-active text-strong' : 'hover:bg-sidebar-accent',
           )}
         >
-          {/* Bullet marker: a hairline ring that fills in on the open chat, so
-              the list reads as a list even where every row is one line of text. */}
-          {pinned ? (
-            <PinIcon className="size-3 shrink-0 -rotate-45 text-muted-foreground" />
-          ) : (
-            <span
-              className={cn(
-                'size-1.5 shrink-0 rounded-full border transition-colors',
-                session.id === activeId
-                  ? 'border-primary bg-primary'
-                  : 'border-muted-foreground/50 group-hover:border-foreground/70',
-              )}
-            />
-          )}
+          {pinned && <PinIcon className="size-3 shrink-0 -rotate-45 text-muted-foreground" />}
           {/* Until the model has written a title, the row shows a skeleton
               instead of the placeholder ("Chat: <first words>") the backend
               parks on the session — a title that changes under the user reads
