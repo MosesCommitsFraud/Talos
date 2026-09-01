@@ -98,8 +98,11 @@ interface PrefsState {
   micDeviceId: string | null;
   /** Compact (icon-only) sidebar mode. */
   sidebarCollapsed: boolean;
-  /** Names of sidebar folders the user has collapsed. */
-  collapsedFolders: string[];
+  /** Projects listed in the sidebar. A project is only a label carried by its
+   *  chats, so the server knows about the ones that already have a member —
+   *  this list is what keeps a freshly created, still-empty project on screen
+   *  until the first chat moves into it. */
+  projects: string[];
   /** Width (px) of the resizable artifact preview panel. */
   previewWidth: number;
   setTheme: (t: Theme) => void;
@@ -115,9 +118,9 @@ interface PrefsState {
   setKnowledge: (useRag: boolean, useDb: boolean) => void;
   setMicDeviceId: (id: string | null) => void;
   toggleSidebar: () => void;
-  toggleFolder: (name: string) => void;
-  /** Keep a folder's collapsed state with it when it's renamed or deleted. */
-  renameFolderPref: (from: string, to: string | null) => void;
+  addProject: (name: string) => void;
+  /** Follow a project through a rename; `to === null` drops it from the list. */
+  renameProjectPref: (from: string, to: string | null) => void;
   setPreviewWidth: (px: number) => void;
 }
 
@@ -139,7 +142,7 @@ export const usePrefs = create<PrefsState>()(
       incognito: false,
       micDeviceId: null,
       sidebarCollapsed: false,
-      collapsedFolders: [],
+      projects: [],
       previewWidth: 480,
       setTheme: (theme) => set({ theme }),
       setDensity: (density) => set({ density }),
@@ -170,15 +173,10 @@ export const usePrefs = create<PrefsState>()(
       setKnowledge: (useRag, useDb) => set({ useRag, useDb }),
       setMicDeviceId: (micDeviceId) => set({ micDeviceId }),
       toggleSidebar: () => set((s) => ({ sidebarCollapsed: !s.sidebarCollapsed })),
-      toggleFolder: (name) => set((s) => ({
-        collapsedFolders: s.collapsedFolders.includes(name)
-          ? s.collapsedFolders.filter((n) => n !== name)
-          : [...s.collapsedFolders, name],
-      })),
-      renameFolderPref: (from, to) => set((s) => {
-        if (!s.collapsedFolders.includes(from)) return {};
-        const rest = s.collapsedFolders.filter((n) => n !== from && n !== to);
-        return { collapsedFolders: to ? [...rest, to] : rest };
+      addProject: (name) => set((s) => (s.projects.includes(name) ? {} : { projects: [...s.projects, name] })),
+      renameProjectPref: (from, to) => set((s) => {
+        const rest = s.projects.filter((n) => n !== from && n !== to);
+        return { projects: to ? [...rest, to] : rest };
       }),
       setPreviewWidth: (previewWidth) => set({ previewWidth }),
     }),

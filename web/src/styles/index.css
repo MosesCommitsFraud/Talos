@@ -408,6 +408,36 @@ body::after {
   .shimmer-text { animation: none; }
 }
 
+/* ── Sidebar nav icons ──
+   New / Projects / Artifacts / Customize sit next to each other and are told
+   apart mostly by their icon, so each one moves in its own way on hover: the
+   plus turns into the gesture of opening something, the archive lid lifts, the
+   shapes rotate, the case tips. Short and single-shot — this is a hint that the
+   row is live, not an attention grab. */
+.nav-row [class*='nav-anim-'] {
+  transition: transform 220ms cubic-bezier(0.2, 0.8, 0.3, 1);
+}
+.nav-row:hover .nav-anim-plus { transform: rotate(90deg); }
+.nav-row:hover .nav-anim-lift { animation: nav-lift 520ms cubic-bezier(0.2, 0.8, 0.3, 1); }
+.nav-row:hover .nav-anim-shapes { transform: rotate(120deg); }
+.nav-row:hover .nav-anim-tilt { animation: nav-tilt 560ms cubic-bezier(0.2, 0.8, 0.3, 1); }
+@keyframes nav-lift {
+  0% { transform: none; }
+  35% { transform: translateY(-3px); }
+  65% { transform: translateY(1px); }
+  100% { transform: none; }
+}
+@keyframes nav-tilt {
+  0% { transform: none; }
+  30% { transform: rotate(-10deg) scale(1.05); }
+  60% { transform: rotate(7deg) scale(1.02); }
+  100% { transform: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .nav-row [class*='nav-anim-'] { transition: none; }
+  .nav-row:hover [class*='nav-anim-'] { animation: none; transform: none; }
+}
+
 /* ── Toast ──
    The bottom-left confirmation pill. It rises from below the corner it lives
    in, so the motion reads as the toast arriving rather than as the layout

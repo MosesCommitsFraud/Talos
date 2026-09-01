@@ -70,8 +70,16 @@ function firstLine(text: string): string {
   return text.split('\n', 1)[0]?.trim() ?? '';
 }
 
-function truncate(text: string, max: number): string {
-  return text.length > max ? `${text.slice(0, max - 1)}…` : text;
+/** A subject is only elided when the LINE is too wide for the chat column,
+ *  which is a CSS question the label box answers with `text-overflow`. Cutting
+ *  at a character count here instead put an ellipsis on labels that had room to
+ *  spare. This cap exists purely so a pathological argument — a pasted file, a
+ *  minified blob — cannot put kilobytes of text into the DOM to be measured; it
+ *  sits far past anything a chat column can show. */
+const SUBJECT_MAX = 300;
+
+function clip(text: string): string {
+  return text.length > SUBJECT_MAX ? `${text.slice(0, SUBJECT_MAX - 1)}…` : text;
 }
 
 function basename(path: string): string {
@@ -108,7 +116,7 @@ export function callSubject(call: ToolCall): string {
     // command" would be unreadable. Show the command itself — the group summary
     // uses its own counted phrasing and stays clean.
     case 'command':
-      return truncate(firstLine(raw), 64);
+      return clip(firstLine(raw));
     // Nothing worth naming: the family wording says it all, and the block
     // itself is one click away in the row. `ask` and `chatSend` carry their
     // text in a card of their own, so repeating it here would be noise.
@@ -124,11 +132,11 @@ export function callSubject(call: ToolCall): string {
     case 'chats':
       return pick('query', 'name', 'skill') || firstLine(raw);
     case 'task':
-      return truncate(pick('description', 'prompt', 'task'), 56);
+      return clip(pick('description', 'prompt', 'task'));
     case 'chatNew':
-      return truncate(pick('title', 'name'), 48);
+      return clip(pick('title', 'name'));
     case 'api':
-      return truncate(pick('url', 'endpoint', 'name'), 56);
+      return clip(pick('url', 'endpoint', 'name'));
     case 'read':
     case 'write':
     case 'edit':
@@ -144,20 +152,20 @@ export function callSubject(call: ToolCall): string {
     case 'fetch':
       return pick('url') || firstLine(raw);
     case 'weather':
-      return truncate(pick('location', 'place', 'city') || firstLine(raw), 48);
+      return clip(pick('location', 'place', 'city') || firstLine(raw));
     case 'sql': {
       const action = pick('action');
       if (action && action !== 'query') return action.replace(/_/g, ' ');
       const sql = pick('sql', 'query');
-      return sql ? truncate(sql.replace(/\s+/g, ' '), 56) : '';
+      return sql ? clip(sql.replace(/\s+/g, ' ')) : '';
     }
     case 'image':
-      return truncate(pick('prompt', 'description', 'caption'), 56);
+      return clip(pick('prompt', 'description', 'caption'));
     case 'document':
-      return truncate(pick('title', 'name', 'path'), 48);
+      return clip(pick('title', 'name', 'path'));
     default: {
       if (ACTION_SUBJECT.has(toolFamily(call.tool))) {
-        return truncate(pick('action', 'key', 'name').replace(/_/g, ' '), 48);
+        return clip(pick('action', 'key', 'name').replace(/_/g, ' '));
       }
       // MCP tools and anything else the FAMILY map doesn't know: show the first
       // meaningful string argument so a live row says what it is working on
@@ -165,8 +173,8 @@ export function callSubject(call: ToolCall): string {
       const first = Object.entries(args).find(
         ([, value]) => typeof value === 'string' && value.trim().length > 0,
       );
-      if (first) return truncate((first[1] as string).replace(/\s+/g, ' ').trim(), 56);
-      return raw.startsWith('{') ? '' : truncate(firstLine(raw), 56);
+      if (first) return clip((first[1] as string).replace(/\s+/g, ' ').trim());
+      return raw.startsWith('{') ? '' : clip(firstLine(raw));
     }
   }
 }

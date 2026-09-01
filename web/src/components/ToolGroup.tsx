@@ -153,6 +153,10 @@ function useLabelHandover(key: string, label: ReactNode) {
   const latest = useRef<ReactNode>(label);
   latest.current = label;
 
+  // True from the first beat to the last: the handover owns the width while it
+  // runs, so measurements triggered by anything else stand aside.
+  const settling = useRef(false);
+
   const [shown, setShown] = useState<{ key: string; node: ReactNode }>({ key, node: label });
   const [width, setWidth] = useState<number | null>(null);
   const [visible, setVisible] = useState(true);
@@ -162,22 +166,37 @@ function useLabelHandover(key: string, label: ReactNode) {
     const twin = measureRef.current;
     const wrap = wrapRef.current;
     if (!twin || !wrap) return null;
-    const natural = Math.ceil(twin.scrollWidth);
+    // Text lays out on fractional pixels and `scrollWidth` rounds that down, so
+    // a box a third of a pixel too narrow clips text that actually fits — that
+    // was the stray ellipsis. Round up, plus a pixel of slack for subpixel
+    // glyph overhang, so the label only ever truncates when it genuinely
+    // outgrows the chat column.
+    const natural = Math.ceil(twin.getBoundingClientRect().width) + 1;
     // 6px is the button's gap between the label box and the badge/chevron.
     // A zero container means we are measuring while the group is off-screen or
     // hidden; clamping to that would pin the label shut, so take the natural
     // width and let the next resize correct it.
-    const avail = wrap.clientWidth - (extrasRef.current?.offsetWidth ?? 0) - 6;
+    const avail = Math.floor(wrap.clientWidth - (extrasRef.current?.offsetWidth ?? 0) - 6);
     return avail > 0 ? Math.min(natural, avail) : natural;
   }, []);
 
-  // First paint and container resizes: take the width straight, no travel.
+  // First paint, container resizes and font swaps: take the width straight, no
+  // travel. The twin is watched as well as the column, because the first layout
+  // happens in the fallback font — every label gets wider once the webfont
+  // lands, and a box still holding the fallback measurement would clip text
+  // that now fits. A handover is excluded: while one is running the width is
+  // the animation's to set, and a resize firing mid-flight would teleport the
+  // arrow.
   useLayoutEffect(() => {
     setWidth(measure());
-    const wrap = wrapRef.current;
-    if (!wrap || typeof ResizeObserver === 'undefined') return;
-    const ro = new ResizeObserver(() => setWidth(measure()));
-    ro.observe(wrap);
+    if (typeof ResizeObserver === 'undefined') return;
+    const restat = () => {
+      if (!settling.current) setWidth(measure());
+    };
+    const ro = new ResizeObserver(restat);
+    if (wrapRef.current) ro.observe(wrapRef.current);
+    if (measureRef.current) ro.observe(measureRef.current);
+    document.fonts?.ready.then(restat).catch(() => {});
     return () => ro.disconnect();
   }, [measure]);
 
@@ -189,6 +208,7 @@ function useLabelHandover(key: string, label: ReactNode) {
       setWidth(measure());
       return;
     }
+    settling.current = true;
     setVisible(false); // beat 1: the old label fades out
     const timers = [
       window.setTimeout(() => {
@@ -199,13 +219,17 @@ function useLabelHandover(key: string, label: ReactNode) {
         setWidth(measure());
         timers.push(
           window.setTimeout(() => {
+            settling.current = false;
             setAnimating(false);
             setVisible(true); // beat 3: the new label fades in
           }, SHIFT_MS),
         );
       }, FADE_OUT_MS),
     ];
-    return () => timers.forEach(window.clearTimeout);
+    return () => {
+      settling.current = false;
+      timers.forEach(window.clearTimeout);
+    };
     // `shown.key` is the comparison target, not a trigger; re-running on it
     // would restart the sequence half-way through.
     // eslint-disable-next-line react-hooks/exhaustive-deps

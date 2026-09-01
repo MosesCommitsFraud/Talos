@@ -1,27 +1,28 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   ArchiveIcon,
-  ArrowUpDownIcon,
+  ArrowLeftIcon,
+  BriefcaseIcon,
   BugIcon,
   CheckIcon,
-  ChevronRightIcon,
   ChevronDownIcon,
-  DatabaseIcon,
   FolderIcon,
   FolderMinusIcon,
   FolderPlusIcon,
   HelpCircleIcon,
-  HistoryIcon,
+  ListFilterIcon,
   LogOutIcon,
   MessageSquareIcon,
   PanelLeftIcon,
   PencilIcon,
   PinIcon,
   PinOffIcon,
+  PlusIcon,
   SearchIcon,
   SettingsIcon,
+  ShapesIcon,
   ShieldIcon,
-  SquarePenIcon,
+  DatabaseIcon,
   TicketIcon,
   Trash2Icon,
   UserIcon,
@@ -41,9 +42,9 @@ import { useAuth } from './auth/AuthGate';
 import type { Session } from '@/api/types';
 import { selectChatStatus, selectFolderStatus, useChat } from '@/state/chat';
 import { usePrefs, type SortMode } from '@/state/prefs';
+import { useUi } from '@/state/ui';
 import { cn, formatRelativeTime, timestampMs } from '@/lib/utils';
 import { anyTitlePending, isTitlePending, placeholderTitleText } from '@/lib/sessionTitle';
-import { TalosLogo } from './TalosLogo';
 import { Skeleton, Tooltip } from './ui/misc';
 import { KeybindingPill } from './ui/kbd';
 import {
@@ -115,29 +116,30 @@ function ScrollableSessionTitle({ children, className }: { children: string; cla
   );
 }
 
-function SessionRow({ session, folders }: { session: Session; folders: string[] }) {
+function SessionRow({ session, projects }: { session: Session; projects: string[] }) {
   const { t } = useTranslation();
   const activeId = useChat((s) => s.sessionId);
   const status = useChat(selectChatStatus(session.id));
   const openSession = useChat((s) => s.openSession);
   const newChat = useChat((s) => s.newChat);
   const queryClient = useQueryClient();
-  // 'rename' edits the chat name; 'folder' types a new folder to move into.
-  const [mode, setMode] = useState<'idle' | 'rename' | 'folder'>('idle');
+  // 'rename' edits the chat name; 'project' types a new project to move into.
+  const [mode, setMode] = useState<'idle' | 'rename' | 'project'>('idle');
   const [draft, setDraft] = useState('');
+  const addProject = usePrefs((s) => s.addProject);
   const pinned = !!session.is_important;
   const titlePending = isTitlePending(session);
 
   const refresh = () => queryClient.invalidateQueries({ queryKey: ['sessions'] });
 
   const beginRename = () => { setDraft(session.name); setMode('rename'); };
-  const beginNewFolder = () => { setDraft(''); setMode('folder'); };
+  const beginNewProject = () => { setDraft(''); setMode('project'); };
 
   // Refresh either way: on failure the list snaps back to what the server
   // actually has, instead of showing a move that never happened.
-  const moveToFolder = (folder: string | null) =>
-    void setSessionFolder(session.id, folder)
-      .catch((err) => console.error('Talos: moving chat to folder failed', err))
+  const moveToProject = (project: string | null) =>
+    void setSessionFolder(session.id, project)
+      .catch((err) => console.error('Talos: moving chat to project failed', err))
       .finally(refresh);
 
   const commit = async () => {
@@ -145,10 +147,10 @@ function SessionRow({ session, folders }: { session: Session; folders: string[] 
     setMode('idle');
     if (mode === 'rename') {
       if (value && value !== session.name) { await renameSession(session.id, value); refresh(); }
-    } else if (mode === 'folder') {
+    } else if (mode === 'project') {
       if (value && value !== (session.folder ?? '')) {
-        try { await setSessionFolder(session.id, value); }
-        catch (err) { console.error('Talos: creating folder failed', err); }
+        try { await setSessionFolder(session.id, value); addProject(value); }
+        catch (err) { console.error('Talos: creating project failed', err); }
         refresh();
       }
     }
@@ -159,7 +161,7 @@ function SessionRow({ session, folders }: { session: Session; folders: string[] 
       <input
         autoFocus
         value={draft}
-        placeholder={mode === 'folder' ? t('sidebar.folderPlaceholder') : undefined}
+        placeholder={mode === 'project' ? t('sidebar.projectPlaceholder') : undefined}
         onChange={(e) => setDraft(e.target.value)}
         onBlur={() => void commit()}
         onKeyDown={(e) => {
@@ -183,7 +185,20 @@ function SessionRow({ session, folders }: { session: Session; folders: string[] 
             session.id === activeId ? 'bg-accent text-strong' : 'hover:bg-accent/70',
           )}
         >
-          {pinned && <PinIcon className="size-3 shrink-0 -rotate-45 text-muted-foreground" />}
+          {/* Bullet marker: a hairline ring that fills in on the open chat, so
+              the list reads as a list even where every row is one line of text. */}
+          {pinned ? (
+            <PinIcon className="size-3 shrink-0 -rotate-45 text-muted-foreground" />
+          ) : (
+            <span
+              className={cn(
+                'size-1.5 shrink-0 rounded-full border transition-colors',
+                session.id === activeId
+                  ? 'border-primary bg-primary'
+                  : 'border-muted-foreground/50 group-hover:border-foreground/70',
+              )}
+            />
+          )}
           {/* Until the model has written a title, the row shows a skeleton
               instead of the placeholder ("Chat: <first words>") the backend
               parks on the session — a title that changes under the user reads
@@ -247,31 +262,31 @@ function SessionRow({ session, folders }: { session: Session; folders: string[] 
           {pinned ? <PinOffIcon /> : <PinIcon />} {t(pinned ? 'sidebar.unpin' : 'sidebar.pin')}
         </ContextMenuItem>
         {/* Getting a chat back out has its own row: burying it at the bottom of
-            the "Move to folder" submenu made it look like a one-way trip. */}
+            the "Move to project" submenu made it look like a one-way trip. */}
         {session.folder && (
-          <ContextMenuItem onSelect={() => moveToFolder(null)}>
-            <FolderMinusIcon /> {t('sidebar.removeFromFolder')}
+          <ContextMenuItem onSelect={() => moveToProject(null)}>
+            <FolderMinusIcon /> {t('sidebar.removeFromProject')}
           </ContextMenuItem>
         )}
         <ContextMenuSub>
           <ContextMenuSubTrigger>
-            <FolderIcon /> {t('sidebar.moveToFolder')}
+            <FolderIcon /> {t('sidebar.moveToProject')}
           </ContextMenuSubTrigger>
           <ContextMenuSubPopup>
-            {folders.map((name) => (
-              <ContextMenuItem key={name} onSelect={() => moveToFolder(name)}>
+            {projects.map((name) => (
+              <ContextMenuItem key={name} onSelect={() => moveToProject(name)}>
                 <CheckIcon className={name === session.folder ? '' : 'invisible'} />
                 <span className="truncate">{name}</span>
               </ContextMenuItem>
             ))}
             {session.folder && (
-              <ContextMenuItem onSelect={() => moveToFolder(null)}>
-                <CheckIcon className="invisible" /> {t('sidebar.noFolder')}
+              <ContextMenuItem onSelect={() => moveToProject(null)}>
+                <CheckIcon className="invisible" /> {t('sidebar.noProject')}
               </ContextMenuItem>
             )}
-            {folders.length > 0 && <ContextMenuSeparator />}
-            <ContextMenuItem onSelect={beginNewFolder}>
-              <FolderPlusIcon /> {t('sidebar.newFolder')}
+            {projects.length > 0 && <ContextMenuSeparator />}
+            <ContextMenuItem onSelect={beginNewProject}>
+              <FolderPlusIcon /> {t('sidebar.newProject')}
             </ContextMenuItem>
           </ContextMenuSubPopup>
         </ContextMenuSub>
@@ -295,42 +310,40 @@ function SessionRow({ session, folders }: { session: Session; folders: string[] 
   );
 }
 
-function FolderGroup({
+/** One row in the Projects section. Selecting it filters the chat list below;
+ *  the context menu renames or deletes the project. A project has no row of its
+ *  own on the server — it exists as a label on its chats plus an entry in prefs
+ *  (which is what lets an empty one exist at all), so both operations are a
+ *  batch update of its members. */
+function ProjectRow({
   name,
-  sessions,
   members,
-  folders,
+  active,
+  onSelect,
 }: {
   name: string;
-  /** Rows shown under this header (pinned chats render in their own section). */
-  sessions: Session[];
-  /** Every chat carrying this folder label, pinned ones included — renaming or
-   *  deleting the folder has to move all of them, not just the visible rows. */
+  /** Every chat carrying this project label, pinned ones included. */
   members: Session[];
-  folders: string[];
+  active: boolean;
+  onSelect: () => void;
 }) {
   const { t } = useTranslation();
-  const collapsed = usePrefs((s) => s.collapsedFolders.includes(name));
-  const toggleFolder = usePrefs((s) => s.toggleFolder);
-  const renameFolderPref = usePrefs((s) => s.renameFolderPref);
+  const renameProjectPref = usePrefs((s) => s.renameProjectPref);
   const queryClient = useQueryClient();
   const [renaming, setRenaming] = useState(false);
   const [draft, setDraft] = useState(name);
-  // A folder has no row of its own on the server — it exists only as a label on
-  // its chats, so renaming/deleting one is a batch update of its members.
+  const status = useChat(selectFolderStatus(members.map((s) => s.id)));
+
   const setFolder = async (target: string | null) => {
     try {
       await Promise.all(members.map((s) => setSessionFolder(s.id, target)));
-      renameFolderPref(name, target);
+      renameProjectPref(name, target);
     } catch (err) {
-      console.error('Talos: updating folder failed', err);
+      console.error('Talos: updating project failed', err);
     } finally {
       void queryClient.invalidateQueries({ queryKey: ['sessions'] });
     }
   };
-  // Collapsed folders hide their rows' own status labels, so the header carries
-  // the most urgent one — otherwise a background turn goes unnoticed.
-  const status = useChat(selectFolderStatus(sessions.map((s) => s.id)));
 
   const commitRename = async () => {
     const value = draft.trim();
@@ -338,164 +351,124 @@ function FolderGroup({
     if (value && value !== name) await setFolder(value);
   };
 
-  // Only the header turns into an input — the folder's chats stay put, so
-  // renaming doesn't make the list jump around underneath.
+  if (renaming) {
+    return (
+      <input
+        autoFocus
+        value={draft}
+        placeholder={t('sidebar.projectPlaceholder')}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={() => void commitRename()}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') void commitRename();
+          if (e.key === 'Escape') { setDraft(name); setRenaming(false); }
+        }}
+        className="mx-0.5 my-px w-[calc(100%-4px)] rounded-lg border border-ring bg-transparent px-2 py-1.5 text-sm outline-none"
+      />
+    );
+  }
+
   return (
-    <div>
-      {renaming ? (
-        <input
-          autoFocus
-          value={draft}
-          placeholder={t('sidebar.folderPlaceholder')}
-          onChange={(e) => setDraft(e.target.value)}
-          onBlur={() => void commitRename()}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') void commitRename();
-            if (e.key === 'Escape') { setDraft(name); setRenaming(false); }
-          }}
-          className="mx-0.5 my-px w-[calc(100%-4px)] rounded-lg border border-ring bg-transparent px-2 py-1.5 text-sm outline-none"
-        />
-      ) : (
-      <ContextMenu>
-        <ContextMenuTrigger asChild>
-          <button
-            type="button"
-            onClick={() => toggleFolder(name)}
-            onDoubleClick={() => { setDraft(name); setRenaming(true); }}
-            className="group flex w-full items-center gap-1.5 rounded-lg px-2 py-1.5 text-left text-xs font-medium text-muted-foreground transition-colors hover:bg-accent/70"
-          >
-            <ChevronRightIcon className={cn('size-3.5 shrink-0 transition-transform', !collapsed && 'rotate-90')} />
-            <FolderIcon className="size-3.5 shrink-0" />
-            <span className="min-w-0 flex-1 truncate">{name}</span>
-            {collapsed && status === 'working' ? (
-              <span className="shimmer-text shrink-0 text-[11px] font-medium" title={t('sidebar.folderWorking')}>
-                {t('sidebar.working')}
-              </span>
-            ) : collapsed && status ? (
-              // Quieter than a label: a dot in the same palette the rows use.
-              <span
-                title={t(status === 'awaiting' ? 'sidebar.folderAwaiting' : 'sidebar.folderCompleted')}
-                className={cn(
-                  'size-1.5 shrink-0 rounded-full',
-                  status === 'awaiting' ? 'bg-warning' : 'bg-success',
-                )}
-              />
-            ) : null}
-            <span className="shrink-0 tabular-nums opacity-70">{sessions.length}</span>
-          </button>
-        </ContextMenuTrigger>
-        <ContextMenuPopup>
-          <ContextMenuItem onSelect={() => { setDraft(name); setRenaming(true); }}>
-            <PencilIcon /> {t('sidebar.renameFolder')}
-          </ContextMenuItem>
-          <ContextMenuItem onSelect={() => toggleFolder(name)}>
-            <ChevronRightIcon className={cn('transition-transform', !collapsed && 'rotate-90')} />
-            {t(collapsed ? 'sidebar.expandFolder' : 'sidebar.collapseFolder')}
-          </ContextMenuItem>
-          <ContextMenuSeparator />
-          {/* Deletes the folder only — its chats move back to the flat list. */}
-          <ContextMenuItem variant="destructive" onSelect={() => void setFolder(null)}>
-            <FolderMinusIcon /> {t('sidebar.deleteFolder')}
-            <span className="ms-auto ps-2 text-[11px] text-muted-foreground">{t('sidebar.deleteFolderHint')}</span>
-          </ContextMenuItem>
-        </ContextMenuPopup>
-      </ContextMenu>
-      )}
-      {!collapsed && (
-        <div className="space-y-px pl-2">
-          {sessions.map((s) => (
-            <SessionRow key={s.id} session={s} folders={folders} />
-          ))}
-        </div>
-      )}
-    </div>
+    <ContextMenu>
+      <ContextMenuTrigger asChild>
+        <button
+          type="button"
+          onClick={onSelect}
+          onDoubleClick={() => { setDraft(name); setRenaming(true); }}
+          className={cn(
+            'group flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm transition-colors',
+            active ? 'bg-accent text-strong' : 'hover:bg-accent/70',
+          )}
+        >
+          <FolderIcon className="size-3.5 shrink-0 text-muted-foreground" />
+          <span className="min-w-0 flex-1 truncate">{name}</span>
+          {status === 'working' ? (
+            <span className="shimmer-text shrink-0 text-[11px] font-medium" title={t('sidebar.projectWorking')}>
+              {t('sidebar.working')}
+            </span>
+          ) : status ? (
+            // Quieter than a label: a dot in the same palette the rows use.
+            <span
+              title={t(status === 'awaiting' ? 'sidebar.projectAwaiting' : 'sidebar.projectCompleted')}
+              className={cn(
+                'size-1.5 shrink-0 rounded-full',
+                status === 'awaiting' ? 'bg-warning' : 'bg-success',
+              )}
+            />
+          ) : null}
+          <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground">{members.length}</span>
+        </button>
+      </ContextMenuTrigger>
+      <ContextMenuPopup>
+        <ContextMenuItem onSelect={() => { setDraft(name); setRenaming(true); }}>
+          <PencilIcon /> {t('sidebar.renameProject')}
+        </ContextMenuItem>
+        <ContextMenuSeparator />
+        {/* Deletes the project only — its chats move back to the flat list. */}
+        <ContextMenuItem variant="destructive" onSelect={() => void setFolder(null)}>
+          <FolderMinusIcon /> {t('sidebar.deleteProject')}
+          <span className="ms-auto ps-2 text-[11px] text-muted-foreground">{t('sidebar.deleteProjectHint')}</span>
+        </ContextMenuItem>
+      </ContextMenuPopup>
+    </ContextMenu>
   );
 }
 
-/** Primary nav row. Fixed height with the icon at a fixed left offset, so the
- *  icon stays put whether the sidebar is expanded or compact — only the label
- *  appears/disappears. When compact, the label moves into a tooltip. */
-function NavButton({
+/** Primary nav row (New / Projects / Artifacts / Customize). `anim` names the
+ *  keyframe the icon plays while the row is hovered — see `.nav-row` in
+ *  index.css; the motion is what distinguishes the three destinations at a
+ *  glance, so each icon animates in its own way. */
+function NavRow({
   icon,
   label,
-  trailing,
+  anim,
   onClick,
-  collapsed,
-  muteIcon = true,
+  emphasis,
 }: {
   icon: React.ReactNode;
   label: string;
-  trailing?: React.ReactNode;
+  anim: 'plus' | 'lift' | 'shapes' | 'tilt';
   onClick?: () => void;
-  collapsed?: boolean;
-  muteIcon?: boolean;
+  /** The "New" row sits a shade brighter — it is the sidebar's primary action. */
+  emphasis?: boolean;
 }) {
-  // Compact rail: a size-7 square icon button that mirrors the header
-  // collapse/logo toggle exactly (same box, radius, muted→foreground hover),
-  // so New chat / Search / Recents line up vertically with the logo + avatar.
-  if (collapsed) {
-    return (
-      <Tooltip label={label} side="right">
-        <button
-          type="button"
-          onClick={onClick}
-          aria-label={label}
-          className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground [&_svg]:size-[18px] [&_svg]:shrink-0"
-        >
-          {icon}
-        </button>
-      </Tooltip>
-    );
-  }
   return (
     <button
       type="button"
       onClick={onClick}
       className={cn(
-        'flex h-9 w-full items-center gap-2 rounded-lg px-2 text-sm transition-colors hover:bg-accent hover:text-foreground [&_svg]:size-[18px] [&_svg]:shrink-0',
-        muteIcon && '[&_svg]:text-muted-foreground hover:[&_svg]:text-foreground',
+        'nav-row flex h-9 w-full items-center gap-2.5 rounded-lg px-2 text-sm transition-colors [&_svg]:size-[18px] [&_svg]:shrink-0',
+        emphasis
+          ? 'bg-accent/70 text-strong hover:bg-accent'
+          : 'text-foreground/80 hover:bg-accent/70 hover:text-foreground',
       )}
     >
-      <span className="flex size-5 shrink-0 items-center justify-center">{icon}</span>
+      <span className={cn('flex size-5 shrink-0 items-center justify-center', `nav-anim-${anim}`)}>{icon}</span>
       <span className="min-w-0 flex-1 truncate text-left">{label}</span>
-      {trailing}
     </button>
   );
 }
 
 /** The account dropdown anchored to the footer avatar. Holds the entries that
  *  used to be a single Settings button: scoped Settings / Admin panel / Help /
- *  Archive / Account / Log out. `trigger` is the clickable avatar (full or
- *  compact); the menu opens upward from the bottom of the sidebar. */
+ *  Archive / Account / Log out. */
 function AccountMenu({
   trigger,
-  tooltip,
   isAdmin,
   authEnabled,
   username,
   actions,
 }: {
   trigger: React.ReactNode;
-  /** When set, the trigger gets a tooltip (used in the compact rail). */
-  tooltip?: string;
   isAdmin: boolean;
   authEnabled: boolean;
   username: string;
   actions: AccountActions;
 }) {
   const { t } = useTranslation();
-  // Tooltip must wrap MenuTrigger (not the other way around) so the dropdown's
-  // click handler reaches the button — otherwise it won't open in compact mode.
-  const triggerNode = <MenuTrigger asChild>{trigger}</MenuTrigger>;
   return (
     <Menu>
-      {tooltip ? (
-        <Tooltip label={tooltip} side="right">
-          {triggerNode}
-        </Tooltip>
-      ) : (
-        triggerNode
-      )}
+      <MenuTrigger asChild>{trigger}</MenuTrigger>
       <MenuPopup side="top" align="start" sideOffset={6} className="w-60">
         <MenuLabel className="truncate text-foreground/70">{username}</MenuLabel>
         <MenuItem onSelect={actions.onOpenSettings}>
@@ -548,17 +521,18 @@ interface AccountActions {
   onOpenTickets: () => void;
 }
 
-export function Sidebar({
-  onOpenPalette,
-  account,
-  onOpenTicketDialog,
-}: {
+interface SidebarProps {
   onOpenPalette: () => void;
   account: AccountActions;
-  /** Opens the "report a problem" modal — the ticket button next to the
-   *  account row, available to every user (admins triage in /tickets). */
+  /** Opens the "report a problem" modal — the ticket button in the account
+   *  row, available to every user (admins triage in /tickets). */
   onOpenTicketDialog: () => void;
-}) {
+}
+
+/** The full-width sidebar contents. Rendered twice: once as the real sidebar,
+ *  and once, dimmed and inert, as the hover preview of the collapsed rail —
+ *  hence `preview`, which drops the wordmark the rail's expand button covers. */
+function SidebarBody({ onOpenPalette, account, onOpenTicketDialog, preview }: SidebarProps & { preview?: boolean }) {
   const { t } = useTranslation();
   // While a chat is still waiting for its generated title, poll fast so the
   // skeleton is replaced the moment the backend's naming task finishes;
@@ -570,12 +544,20 @@ export function Sidebar({
   });
   const auth = useAuth();
   const newChat = useChat((s) => s.newChat);
+  const setArtifactsOpen = useUi((s) => s.setArtifactsOpen);
+  const setPanelMode = useUi((s) => s.setPanelMode);
 
   const sortMode = usePrefs((s) => s.sortMode);
   const setSortMode = usePrefs((s) => s.setSortMode);
   const visibility = usePrefs((s) => s.visibility);
-  const collapsed = usePrefs((s) => s.sidebarCollapsed);
+  const storedProjects = usePrefs((s) => s.projects);
+  const addProject = usePrefs((s) => s.addProject);
   const toggleSidebar = usePrefs((s) => s.toggleSidebar);
+
+  /** Which project's chats the list is showing; null = every loose chat. */
+  const [openProject, setOpenProject] = useState<string | null>(null);
+  const [newProject, setNewProject] = useState(false);
+  const [projectDraft, setProjectDraft] = useState('');
 
   const sorter = (a: Session, b: Session) => {
     if (sortMode === 'newest') return timestampMs(b.created_at) - timestampMs(a.created_at);
@@ -584,244 +566,314 @@ export function Sidebar({
   };
 
   const active = (sessions ?? []).filter((s) => !s.archived);
-  // Every folder that exists anywhere — drives the "Move to folder" submenu.
-  const folderNames = [...new Set(active.map((s) => s.folder).filter((f): f is string => !!f))]
-    .sort((a, b) => a.localeCompare(b));
-  // Pinned chats float to their own section, independent of folder.
-  const pinned = active.filter((s) => s.is_important).sort(sorter);
-  const rest = active.filter((s) => !s.is_important);
-  const grouped = folderNames
-    .map((name) => ({
-      name,
-      items: rest.filter((s) => s.folder === name).sort(sorter),
-      members: active.filter((s) => s.folder === name),
-    }))
-    .filter((g) => g.items.length > 0);
-  const ungrouped = rest.filter((s) => !s.folder).sort(sorter);
+  // Projects are the union of the labels the server knows about (a label exists
+  // as long as a chat carries it) and the ones created here but still empty.
+  const projectNames = [
+    ...new Set([...active.map((s) => s.folder).filter((f): f is string => !!f), ...storedProjects]),
+  ].sort((a, b) => a.localeCompare(b));
+  // An open project narrows the list to its chats; otherwise the list is the
+  // loose chats, with pinned ones floated into their own section on top.
+  const inProject = openProject !== null ? active.filter((s) => s.folder === openProject) : [];
+  const loose = active.filter((s) => !s.folder);
+  const pinned = openProject === null ? loose.filter((s) => s.is_important).sort(sorter) : [];
+  const rows = openProject === null ? loose.filter((s) => !s.is_important).sort(sorter) : inProject.slice().sort(sorter);
   const accountLabel = auth?.display_name || auth?.username;
   const initial = (accountLabel ?? 'U').slice(0, 1).toUpperCase();
 
-  // The scrolling chat list — shared by the full sidebar and the compact recents flyout.
-  const chatList = (
-    <>
-      {pinned.length > 0 && (
-        <>
-          <div className="flex items-center gap-1.5 px-2 pt-1 pb-0.5 text-xs font-medium text-muted-foreground">
-            <PinIcon className="size-3 -rotate-45" /> {t('sidebar.pinned')}
-          </div>
-          {pinned.map((s) => (
-            <SessionRow key={s.id} session={s} folders={folderNames} />
-          ))}
-        </>
-      )}
-      {grouped.map((g) => (
-        <FolderGroup key={g.name} name={g.name} sessions={g.items} members={g.members} folders={folderNames} />
-      ))}
-      {(pinned.length > 0 || grouped.length > 0) && ungrouped.length > 0 && (
-        <div className="px-2 pt-2 pb-0.5 text-xs font-medium text-muted-foreground">{t('sidebar.chats')}</div>
-      )}
-      {ungrouped.map((s) => (
-        <SessionRow key={s.id} session={s} folders={folderNames} />
-      ))}
-      {active.length === 0 && (
-        <div className="flex flex-col items-center gap-1.5 px-2 py-6 text-center text-xs text-muted-foreground">
-          <MessageSquareIcon className="size-4 opacity-60" />
-          {t('sidebar.noChats')}
-        </div>
-      )}
-    </>
-  );
+  const commitNewProject = () => {
+    const value = projectDraft.trim();
+    setNewProject(false);
+    setProjectDraft('');
+    if (value) { addProject(value); setOpenProject(value); }
+  };
 
   return (
-    <nav
-      className={cn(
-        // Inherited gray for all sidebar text; the selected chat row (and any
-        // element with its own text color) opts back into a lighter shade.
-        'm-2 flex shrink-0 flex-col rounded-md border border-foreground/10 bg-sidebar text-foreground/70 transition-[width] duration-200 ease-out',
-        collapsed ? 'relative z-30 w-[3.25rem] overflow-visible' : 'w-64 overflow-hidden',
-      )}
-      aria-label={t('sidebar.navLabel')}
-    >
-      {/* Header — fixed height in both modes so the nav rows below never shift.
-          Expanded: wordmark + collapse toggle. Compact: logo that turns into the
-          toggle icon on hover. */}
-      <div className={cn('flex h-12 shrink-0 items-center', collapsed ? 'justify-center' : 'px-2')}>
-        {collapsed ? (
-          <Tooltip label={t('sidebar.expandSidebar')} side="right">
+    <div className="flex h-full w-full flex-col bg-sidebar text-foreground/70">
+      {/* Header — the wordmark, at the same height as the rail's expand button
+          so nothing below shifts when the sidebar collapses. */}
+      <div className="flex h-12 shrink-0 items-center px-3">
+        {!preview && (
+          <span className="truncate text-xl font-semibold tracking-tight text-primary">Talos</span>
+        )}
+      </div>
+
+      {/* Primary nav. */}
+      <div className="space-y-0.5 px-2">
+        <NavRow emphasis anim="plus" icon={<PlusIcon />} label={t('sidebar.new')} onClick={newChat} />
+        <NavRow
+          anim="lift"
+          icon={<ArchiveIcon />}
+          label={t('sidebar.projects')}
+          onClick={() => setOpenProject(null)}
+        />
+        <NavRow
+          anim="shapes"
+          icon={<ShapesIcon />}
+          label={t('sidebar.artifacts')}
+          onClick={() => { setPanelMode('files'); setArtifactsOpen(true); }}
+        />
+        <NavRow
+          anim="tilt"
+          icon={<BriefcaseIcon />}
+          label={t('sidebar.customize')}
+          onClick={account.onOpenSettings}
+        />
+      </div>
+
+      {/* Projects — a short, non-scrolling section; the chat list below takes
+          the remaining height. */}
+      <div className="mt-4 px-2">
+        <div className="flex items-center justify-between px-2 pb-1">
+          <span className="text-xs font-medium text-muted-foreground">{t('sidebar.projects')}</span>
+          <Tooltip label={t('sidebar.newProject')}>
             <button
               type="button"
-              onClick={toggleSidebar}
-              aria-label={t('sidebar.expandSidebar')}
-              className="group flex size-7 items-center justify-center rounded-md text-primary transition-colors hover:bg-accent/70"
+              onClick={() => { setProjectDraft(''); setNewProject(true); }}
+              aria-label={t('sidebar.newProject')}
+              className="-mr-1.5 flex size-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
             >
-              <TalosLogo className="size-5 group-hover:hidden" />
-              <PanelLeftIcon className="hidden size-4 text-muted-foreground group-hover:block" />
+              <PlusIcon className="size-3.5" />
             </button>
           </Tooltip>
-        ) : (
-          <>
-            <span className="flex-1 truncate pl-2 text-xl font-semibold tracking-tight text-primary">Talos</span>
-            <Tooltip label={t('sidebar.collapseSidebar')}>
-              <button
-                type="button"
-                onClick={toggleSidebar}
-                aria-label={t('sidebar.collapseSidebar')}
-                className="flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-              >
-                <PanelLeftIcon className="size-4" />
-              </button>
-            </Tooltip>
-          </>
-        )}
+        </div>
+        <div className="max-h-44 space-y-px overflow-y-auto">
+          {newProject && (
+            <input
+              autoFocus
+              value={projectDraft}
+              placeholder={t('sidebar.projectPlaceholder')}
+              onChange={(e) => setProjectDraft(e.target.value)}
+              onBlur={commitNewProject}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') commitNewProject();
+                if (e.key === 'Escape') { setNewProject(false); setProjectDraft(''); }
+              }}
+              className="mx-0.5 my-px w-[calc(100%-4px)] rounded-lg border border-ring bg-transparent px-2 py-1.5 text-sm outline-none"
+            />
+          )}
+          {projectNames.map((name) => (
+            <ProjectRow
+              key={name}
+              name={name}
+              members={active.filter((s) => s.folder === name)}
+              active={name === openProject}
+              onSelect={() => setOpenProject(name === openProject ? null : name)}
+            />
+          ))}
+          {projectNames.length === 0 && !newProject && (
+            <div className="flex items-center gap-2 px-2 py-1.5 text-sm text-muted-foreground/80">
+              <PinIcon className="size-3.5 shrink-0 -rotate-45" />
+              <span className="min-w-0 truncate">{t('sidebar.noProjects')}</span>
+            </div>
+          )}
+        </div>
       </div>
 
-      {/* Primary nav — identical structure in both modes, so the icons hold their place. */}
-      <div className={cn('space-y-0.5 pt-1', collapsed ? 'flex flex-col items-center px-0' : 'px-2')}>
-        <NavButton collapsed={collapsed} icon={<SquarePenIcon />} label={t('sidebar.newChat')} onClick={newChat} />
-        <NavButton
-          collapsed={collapsed}
-          icon={<SearchIcon />}
-          label={t('sidebar.search')}
-          onClick={onOpenPalette}
-          trailing={<KeybindingPill value="mod+k" />}
-        />
-        {collapsed && (
-          // Recents — hover to reveal a flyout list of chats.
-          <div className="group/recents relative">
+      {/* Chats — the scrolling remainder. Its header doubles as the way back out
+          of an open project. */}
+      <div className="mt-3 flex min-h-0 flex-1 flex-col">
+        <div className="flex items-center justify-between px-4 pb-1">
+          {openProject === null ? (
+            <span className="text-xs font-medium text-muted-foreground">{t('sidebar.chats')}</span>
+          ) : (
             <button
               type="button"
-              aria-label={t('sidebar.recents')}
-              className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground [&_svg]:size-[18px] [&_svg]:shrink-0"
+              onClick={() => setOpenProject(null)}
+              className="-ml-1 flex min-w-0 items-center gap-1 rounded px-1 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
             >
-              <HistoryIcon />
+              <ArrowLeftIcon className="size-3 shrink-0" />
+              <span className="truncate">{openProject}</span>
             </button>
-            <div className="invisible absolute left-full top-0 z-40 pl-2 opacity-0 transition-opacity group-hover/recents:visible group-hover/recents:opacity-100 group-focus-within/recents:visible group-focus-within/recents:opacity-100">
-              <div className="dropdown-glass flex max-h-[70vh] w-64 flex-col overflow-hidden rounded-lg">
-                <div className="px-3 pt-2.5 pb-1 text-xs font-medium text-muted-foreground">{t('sidebar.recents')}</div>
-                <div className="min-h-0 flex-1 space-y-px overflow-y-auto px-1.5 pb-2">{chatList}</div>
+          )}
+          <Menu>
+            <Tooltip label={t('sidebar.sortLabel', { mode: t(SORT_KEYS[sortMode]) })}>
+              <MenuTrigger asChild>
+                <button
+                  type="button"
+                  aria-label={t('sidebar.sortChats')}
+                  className="-mr-1.5 flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                >
+                  <ListFilterIcon className="size-3.5" />
+                </button>
+              </MenuTrigger>
+            </Tooltip>
+            <MenuPopup align="start">
+              {(Object.keys(SORT_KEYS) as SortMode[]).map((mode) => (
+                <MenuItem key={mode} onSelect={() => setSortMode(mode)}>
+                  <CheckIcon className={mode === sortMode ? '' : 'invisible'} />
+                  {t(SORT_KEYS[mode])}
+                </MenuItem>
+              ))}
+            </MenuPopup>
+          </Menu>
+        </div>
+        {/* No bottom padding: the footer divider sits flush against the last
+            chat row, and the footer supplies the space below it instead. */}
+        <div className="min-h-0 flex-1 space-y-px overflow-y-auto px-2">
+          {pinned.length > 0 && (
+            <>
+              <div className="flex items-center gap-1.5 px-2 pt-1 pb-0.5 text-xs font-medium text-muted-foreground">
+                <PinIcon className="size-3 -rotate-45" /> {t('sidebar.pinned')}
               </div>
+              {pinned.map((s) => (
+                <SessionRow key={s.id} session={s} projects={projectNames} />
+              ))}
+              {/* "Recents", not a second "Chats": the section header above
+                  already says Chats, and this only separates the pinned rows
+                  from the rest of them. */}
+              {rows.length > 0 && (
+                <div className="px-2 pt-2 pb-0.5 text-xs font-medium text-muted-foreground">{t('sidebar.recents')}</div>
+              )}
+            </>
+          )}
+          {rows.map((s) => (
+            <SessionRow key={s.id} session={s} projects={projectNames} />
+          ))}
+          {rows.length === 0 && pinned.length === 0 && (
+            <div className="flex flex-col items-center gap-1.5 px-2 py-6 text-center text-xs text-muted-foreground">
+              <MessageSquareIcon className="size-4 opacity-60" />
+              {t('sidebar.noChats')}
             </div>
-          </div>
-        )}
+          )}
+        </div>
       </div>
 
-      {!collapsed && (
-        <>
-          <div className="flex items-center justify-between px-4 pt-4 pb-1">
-            <span className="text-xs font-medium text-muted-foreground">{t('sidebar.chats')}</span>
-            <Menu>
-              <Tooltip label={t('sidebar.sortLabel', { mode: t(SORT_KEYS[sortMode]) })}>
-                <MenuTrigger asChild>
-                  <button
-                    type="button"
-                    aria-label={t('sidebar.sortChats')}
-                    className="-mr-1.5 flex size-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-                  >
-                    <ArrowUpDownIcon className="size-3.5" />
-                  </button>
-                </MenuTrigger>
-              </Tooltip>
-              <MenuPopup align="start">
-                {(Object.keys(SORT_KEYS) as SortMode[]).map((mode) => (
-                  <MenuItem key={mode} onSelect={() => setSortMode(mode)}>
-                    <CheckIcon className={mode === sortMode ? '' : 'invisible'} />
-                    {t(SORT_KEYS[mode])}
-                  </MenuItem>
-                ))}
-              </MenuPopup>
-            </Menu>
-          </div>
-          {/* No bottom padding: the footer divider sits flush against the last
-              chat row, and the footer supplies the space below it instead. */}
-          <div className="min-h-0 flex-1 space-y-px overflow-y-auto px-2">{chatList}</div>
-        </>
-      )}
-
-      {/* The empty area below the nav is itself a click target to expand. */}
-      {collapsed && (
-        <button
-          type="button"
-          onClick={toggleSidebar}
-          aria-label={t('sidebar.expandSidebar')}
-          className="flex-1 cursor-pointer"
-        />
-      )}
-
-      {/* Footer — the account avatar opens a dropdown (Settings / Admin /
-          Help / Archive / Account / Log out) instead of the old settings cog. */}
-      {collapsed ? (
-        // Centered in the rail, matching the header logo + nav icon column.
-        <div className="flex flex-col items-center gap-1 pb-2">
-          <Tooltip label={t('tickets.report')} side="right">
+      {/* Footer — the account avatar opens a dropdown (Settings / Admin / Help /
+          Archive / Account / Log out); search and the collapse toggle sit beside
+          it as icon buttons. */}
+      <div className="px-2 pb-2">
+        <div className="mx-1 mb-2 h-px bg-border" />
+        <div className="flex items-center gap-1">
+          {(visibility.sidebarUserBar || visibility.sidebarSettingsBtn) && (
+            <AccountMenu
+              isAdmin={!!auth?.is_admin}
+              authEnabled={auth?.auth_enabled !== false}
+              username={accountLabel ?? t('sidebar.user')}
+              actions={account}
+              trigger={
+                <button
+                  type="button"
+                  aria-label={t('sidebar.account')}
+                  className="flex min-w-0 flex-1 items-center gap-1.5 rounded-sm px-2 py-1 text-left transition-colors outline-none hover:bg-accent/70 focus-visible:outline-none data-[state=open]:bg-accent/70"
+                >
+                  <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-primary/15 text-[10px] font-semibold text-primary">
+                    {initial}
+                  </span>
+                  <span className="min-w-0 flex-1 truncate text-[13px] text-foreground/95 dark:text-inherit">{accountLabel ?? t('sidebar.user')}</span>
+                  <ChevronDownIcon className="size-3.5 shrink-0 text-muted-foreground" />
+                </button>
+              }
+            />
+          )}
+          <Tooltip label={t('tickets.report')}>
             <button
               type="button"
               onClick={onOpenTicketDialog}
               aria-label={t('tickets.report')}
-              className="flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground/65 transition-colors hover:bg-accent hover:text-foreground dark:text-muted-foreground"
+              className="ml-auto flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground/65 transition-colors hover:bg-accent hover:text-foreground dark:text-muted-foreground"
             >
               <BugIcon className="size-4" />
             </button>
           </Tooltip>
-          <AccountMenu
-            isAdmin={!!auth?.is_admin}
-            authEnabled={auth?.auth_enabled !== false}
-            username={accountLabel ?? t('sidebar.user')}
-            actions={account}
-            tooltip={accountLabel ?? t('sidebar.account')}
-            trigger={
-              <button
-                type="button"
-                aria-label={t('sidebar.account')}
-                className="flex size-7 shrink-0 items-center justify-center rounded-md transition-colors hover:bg-accent"
-              >
-                <span className="flex size-5 items-center justify-center rounded-full bg-primary/15 text-[10px] font-semibold text-primary">
-                  {initial}
-                </span>
-              </button>
-            }
-          />
+          <Tooltip label={<span className="flex items-center gap-1.5">{t('sidebar.search')}<KeybindingPill value="mod+k" /></span>}>
+            <button
+              type="button"
+              onClick={onOpenPalette}
+              aria-label={t('sidebar.search')}
+              className="flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+            >
+              <SearchIcon className="size-4" />
+            </button>
+          </Tooltip>
+          <Tooltip label={<span className="flex items-center gap-1.5">{t('sidebar.collapseSidebar')}<KeybindingPill value="mod+b" /></span>}>
+            <button
+              type="button"
+              onClick={toggleSidebar}
+              aria-label={t('sidebar.collapseSidebar')}
+              className="flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+            >
+              <PanelLeftIcon className="size-4" />
+            </button>
+          </Tooltip>
         </div>
-      ) : (
-        <div className="px-2 pb-2">
-          <div className="mx-1 mb-2 h-px bg-border" />
-          {(visibility.sidebarUserBar || visibility.sidebarSettingsBtn) && (
-            // Account row + the ticket button pinned to the right edge. The
-            // account trigger sizes to its label (capped) instead of filling
-            // the row, so the two never crowd each other.
-            <div className="flex items-center gap-2">
-              <AccountMenu
-                isAdmin={!!auth?.is_admin}
-                authEnabled={auth?.auth_enabled !== false}
-                username={accountLabel ?? t('sidebar.user')}
-                actions={account}
-                trigger={
-                  <button
-                    type="button"
-                    aria-label={t('sidebar.account')}
-                    className="flex min-w-0 max-w-[calc(100%-2.5rem)] items-center gap-1.5 rounded-sm px-2 py-1 text-left transition-colors outline-none hover:bg-accent/70 focus-visible:outline-none data-[state=open]:bg-accent/70"
-                  >
-                    <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-primary/15 text-[10px] font-semibold text-primary">
-                      {initial}
-                    </span>
-                    <span className="min-w-0 flex-1 truncate text-[13px] text-foreground/95 dark:text-inherit">{accountLabel ?? t('sidebar.user')}</span>
-                    <ChevronDownIcon className="size-3.5 shrink-0 text-muted-foreground" />
-                  </button>
-                }
-              />
-              <Tooltip label={t('tickets.report')}>
-                <button
-                  type="button"
-                  onClick={onOpenTicketDialog}
-                  aria-label={t('tickets.report')}
-                  className="ml-auto flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground/65 transition-colors hover:bg-accent hover:text-foreground dark:text-muted-foreground"
-                >
-                  <BugIcon className="size-4" />
-                </button>
-              </Tooltip>
-            </div>
-          )}
+      </div>
+    </div>
+  );
+}
+
+/** Left navigation. Expanded it is a flush panel separated from the chat by a
+ *  divider; collapsed it shrinks to a rail holding nothing but the expand
+ *  button — hovering that button previews the whole sidebar, dimmed, and a
+ *  click anywhere in the preview commits to it. */
+export function Sidebar(props: SidebarProps) {
+  const { t } = useTranslation();
+  const collapsed = usePrefs((s) => s.sidebarCollapsed);
+  const toggleSidebar = usePrefs((s) => s.toggleSidebar);
+  const [peek, setPeek] = useState(false);
+
+  // Ctrl/⌘-B mirrors the footer toggle, matching the tooltip's hint.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'b') {
+        e.preventDefault();
+        toggleSidebar();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [toggleSidebar]);
+
+  useEffect(() => { if (!collapsed) setPeek(false); }, [collapsed]);
+
+  if (!collapsed) {
+    return (
+      <nav className="w-64 shrink-0 border-r border-border" aria-label={t('sidebar.navLabel')}>
+        <SidebarBody {...props} />
+      </nav>
+    );
+  }
+
+  return (
+    <nav className="relative w-12 shrink-0 border-r border-border bg-sidebar" aria-label={t('sidebar.navLabel')}>
+      {/* The rail itself: only the expand button, above the preview so it keeps
+          its own hover state (and its tooltip) while the preview is showing. */}
+      <div className="relative z-50 flex h-12 items-center justify-center">
+        <Tooltip label={<span className="flex items-center gap-1.5">{t('sidebar.expandSidebar')}<KeybindingPill value="mod+b" /></span>} side="right">
+          <button
+            type="button"
+            onClick={toggleSidebar}
+            onMouseEnter={() => setPeek(true)}
+            onFocus={() => setPeek(true)}
+            onBlur={() => setPeek(false)}
+            aria-label={t('sidebar.expandSidebar')}
+            aria-expanded={peek}
+            className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+          >
+            <PanelLeftIcon className="size-4" />
+          </button>
+        </Tooltip>
+      </div>
+      {/* Hover preview: the expanded sidebar at reduced contrast, laid over the
+          chat. It is a picture of what expanding gives you, not a working copy —
+          the contents are inert and a click anywhere commits to expanding. */}
+      <div
+        onMouseEnter={() => setPeek(true)}
+        onMouseLeave={() => setPeek(false)}
+        className={cn(
+          'absolute inset-y-0 left-0 z-40 w-64 border-r border-border bg-sidebar shadow-lg transition-opacity duration-150',
+          peek ? 'opacity-100' : 'pointer-events-none opacity-0',
+        )}
+      >
+        <div className="pointer-events-none h-full opacity-55 saturate-[0.9]" aria-hidden>
+          <SidebarBody {...props} preview />
         </div>
-      )}
+        <button
+          type="button"
+          onClick={toggleSidebar}
+          aria-label={t('sidebar.expandSidebar')}
+          className="absolute inset-0 cursor-pointer"
+        />
+      </div>
     </nav>
   );
 }
