@@ -41,8 +41,8 @@ may call:
 
 | Scope | Unlocks |
 | --- | --- |
-| `rag:read` | `rag_search`, `rag_list_documents`, `rag_get_document` |
-| `skills:read` | `skills_list`, `skills_search`, `skills_get`, `skills_read_reference` |
+| `rag:read` | `rag_query`, `rag_list_collections`, `rag_list_documents`, `rag_get_document` |
+| `skills:read` | `skills_list`, `skills_search`, `skills_get`, `skills_read_reference`, plus one `skill_<slug>` tool per published skill |
 | `web:read` | `web_search`, `web_fetch` |
 
 Two token profiles cover the common cases: `mcp` grants the two knowledge
@@ -55,24 +55,46 @@ read catalogue — it can already read all of this in the UI.
 
 ## Tools
 
-All nine tools are **read-only**. There is no ingest, no delete, no skill
-authoring. An outward-facing endpoint held open by a long-lived bearer token is
-the wrong place to accept mutations, and skills in particular have a deliberate
+Every tool is **read-only**. There is no ingest, no delete, no skill authoring.
+An outward-facing endpoint held open by a long-lived bearer token is the wrong
+place to accept mutations, and skills in particular have a deliberate
 publish/audit review step (`routes/skills_routes.py`) that a write tool would
 route around.
 
+The static catalogue is ten tools; the per-skill tools below are appended to it,
+so the exact list depends on the token's owner.
+
 ### RAG (`rag:read`)
 
-- **`rag_search`** — hybrid dense+sparse Qdrant retrieval followed by the
-  cross-encoder rerank. Arguments: `query` (required), `k` (1–20, default from
-  the saved `search_top_k`), `owner`, `scope`. By default the `sql` knowledge
+- **`rag_query`** — hybrid dense+sparse Qdrant retrieval followed by the
+  cross-encoder rerank. Arguments: `query` (required), `collections` (a list of
+  knowledge-base ids — several are searched together and their hits merged by
+  rerank score; omit for the default base), `topK` (1–20, default from the saved
+  `search_top_k`), `language`, `owner`, `scope`. By default the `sql` knowledge
   namespace is excluded, exactly as the chat pipeline does; passing an explicit
   `scope` overrides that.
+
+    Each hit carries the matched chunk's **whole section** (the `expanded`
+    field the retrieval pipeline already produces for small-to-big injection),
+    not an 800-character snippet, so one call is normally enough to answer
+    from — a client driving its own agent loop cannot be relied upon to make a
+    second `rag_get_document` call. The passage budget is shared across the
+    hits, so 20 results still fit inside `MAX_TEXT_CHARS`.
+
+    `language` is accepted because agent frameworks send it; it does not change
+    retrieval, which is multilingual on both the embedder and the reranker.
+    `rag_search`, the pre-rename name, is still accepted but no longer listed.
+
+- **`rag_list_collections`** — the knowledge bases this instance serves (id,
+  name, description, language, document count), from `src/rag_registry.py`.
+  Registry-driven, so it still answers when Qdrant is down.
 - **`rag_list_documents`** — one row per indexed source file with its chunk
-  count. `filter` matches filename or path, case-insensitively.
+  count. `filter` matches filename or path, case-insensitively; `collection`
+  picks the base.
 - **`rag_get_document`** — the indexed text of one document in reading order.
-  Reads from Qdrant only, never from the filesystem, so an unindexed `source`
-  simply doesn't resolve.
+  Pass the `collection` from the `rag_query` hit when the document lives outside
+  the default base. Reads from Qdrant only, never from the filesystem, so an
+  unindexed `source` simply doesn't resolve.
 
 ### Skills (`skills:read`)
 
@@ -84,10 +106,23 @@ route around.
 - **`skills_get`** — the full `SKILL.md`.
 - **`skills_read_reference`** — a supporting file under the skill's directory.
   Traversal outside it is refused by `SkillsManager`.
+- **`skill_<slug>`** — one tool per published skill, taking no arguments and
+  returning that skill's `SKILL.md`. Same content as `skills_get`, reachable
+  without the model first having to search: a client whose agent framework
+  filters tools *by name* (MACS does) can grant a role its skills through the
+  tool list itself. A skill is a written procedure, not something Talos
+  executes — the tool description says so, so a model doesn't sit waiting for
+  side effects. Capped at `MAX_SKILL_TOOLS` (60) so a large library can't bury
+  a client's palette; past the cap `skills_search` remains the way in. Names are
+  lowercased and non-`[a-z0-9_-]` characters become underscores; a name that
+  collides with an earlier one is skipped rather than shadowing it.
 
-Skills are owner-scoped on disk, so a token only sees skills owned by the user
-who created it. An empty result says so explicitly rather than leaving the
-caller to guess.
+Both shapes obey the same two gates: the skills are owner-scoped on disk, so a
+token only sees skills owned by the user who created it, and the administrator's
+allowlist (**Settings → MCP**) narrows the tool list as well as the search. An
+empty result says so explicitly rather than leaving the caller to guess, and a
+`skill_*` name this caller was never offered comes back as an unknown tool —
+never as "not allowed", which would confirm the skill exists.
 
 ### Web (`web:read`)
 

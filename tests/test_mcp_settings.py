@@ -143,8 +143,12 @@ def test_web_max_fetch_chars_is_clamped(settings, configured, expected):
 
 
 def test_tools_are_all_offered_by_default(settings):
-    assert {t["name"] for t in mcp_public.list_tools(ALL)} == {
-        "rag_search",
+    # Empty skills manager: the per-skill tools are covered in
+    # tests/test_mcp_public.py, and reading this machine's skills here would
+    # make the catalogue non-deterministic.
+    assert {t["name"] for t in mcp_public.list_tools(ALL, skills_manager=FakeSkills())} == {
+        "rag_query",
+        "rag_list_collections",
         "rag_list_documents",
         "rag_get_document",
         "skills_list",
@@ -158,18 +162,35 @@ def test_tools_are_all_offered_by_default(settings):
 
 def test_disabling_web_hides_both_web_tools(settings):
     settings["mcp_web_enabled"] = False
-    names = {t["name"] for t in mcp_public.list_tools(ALL)}
+    names = {t["name"] for t in mcp_public.list_tools(ALL, skills_manager=FakeSkills())}
 
     assert "web_search" not in names and "web_fetch" not in names
-    assert "rag_search" in names  # other families untouched
+    assert "rag_query" in names  # other families untouched
 
 
 def test_disabling_skills_hides_the_whole_family(settings):
     settings["mcp_skills_enabled"] = False
-    names = {t["name"] for t in mcp_public.list_tools(ALL)}
+    sm = FakeSkills(index=[{"name": "deploy", "description": "Ship it", "category": "ops"}])
+    names = {t["name"] for t in mcp_public.list_tools(ALL, skills_manager=sm)}
 
-    assert not any(n.startswith("skills_") for n in names)
+    # Both halves of the family: the skills_* tools and the per-skill tools.
+    assert not any(n.startswith("skill") for n in names)
     assert "web_search" in names
+
+
+def test_selected_mode_also_narrows_the_per_skill_tools(settings):
+    """The allowlist is one gate over both shapes of the same library."""
+    settings.update({"mcp_skills_inherit": False, "mcp_skills_allowed": ["deploy"]})
+    sm = FakeSkills(
+        index=[
+            {"name": "deploy", "description": "", "category": "ops"},
+            {"name": "invoice", "description": "", "category": "finance"},
+        ]
+    )
+    names = {t["name"] for t in mcp_public.list_tools(ALL, skills_manager=sm)}
+
+    assert "skill_deploy" in names
+    assert "skill_invoice" not in names
 
 
 def test_a_disabled_tool_is_refused_even_with_the_scope(settings):

@@ -9,7 +9,7 @@ Talos's knowledge bases used to be reachable from outside only as MCP tools on
 agent framework: it wants to enumerate the available knowledge bases, decide
 for itself who may touch which one, and then call them like any other HTTP
 service. So the same three retrieval operations the MCP tools expose
-(``rag_search`` / ``rag_list_documents`` / ``rag_get_document``) are served here
+(``rag_query`` / ``rag_list_documents`` / ``rag_get_document``) are served here
 as ordinary REST endpoints, plus the CRUD needed to manage the bases themselves.
 
 The tool *bodies* are literally the ones in ``src/mcp_public.py`` — every
@@ -314,7 +314,7 @@ def create_app() -> FastAPI:
 
     @app.post("/v1/rags/{rag_id}/search", tags=["retrieval"], dependencies=guard)
     def search(rag_id: str, body: SearchRequest) -> Dict[str, Any]:
-        """Hybrid search over one knowledge base — the ``rag_search`` tool.
+        """Hybrid search over one knowledge base — the ``rag_query`` tool.
 
         Dense + sparse retrieval in Qdrant, merged by RRF, then a cross-encoder
         rerank. ``text`` is the rendered answer block (identical to what the MCP

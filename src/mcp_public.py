@@ -40,9 +40,28 @@ SCOPE_WEB_READ = "web:read"
 # Per-tool output budget. Generous enough for a full SKILL.md, small enough
 # that a wide `rag_get_document` can't blow up the client's context window.
 MAX_TEXT_CHARS = 24_000
-# Per-result snippet in rag_search. The client re-queries with
-# `rag_get_document` when it needs the surrounding text.
+# Per-passage budget in the rendered search answer. Big enough that one
+# `rag_query` answers the question on its own: the old 800-char snippet forced a
+# second `rag_get_document` round trip for anything longer than a paragraph, and
+# a client driving its own agent loop can't be relied on to make it. Divided
+# across the hits so a wide topK can't blow the per-tool budget — each passage
+# gets MAX_TEXT_CHARS/len(results), floored at MIN_PASSAGE_CHARS.
+PASSAGE_CHARS = 4_000
+MIN_PASSAGE_CHARS = 800
+# Room reserved per hit for its header block (filename, source, collection,
+# score) so the passages plus their headers stay inside MAX_TEXT_CHARS and the
+# last hit isn't lopped off by the outer cap.
+HEADER_ALLOWANCE = 200
+# Snippet length in the *structured* payload of the REST service
+# (src/rag_api.py), which carries the rendered text beside it and so does not
+# need the full passage twice.
 SNIPPET_CHARS = 800
+
+# One MCP tool per published skill, alongside the skills_* family. Capped so an
+# instance with hundreds of skills can't bury a client's tool palette (and its
+# model's attention) — past the cap, skills_search stays the way in.
+SKILL_TOOL_PREFIX = "skill_"
+MAX_SKILL_TOOLS = 60
 
 # Purpose-bound sub-indexes (the SQL schema files) are injected separately by
 # the feature that owns them — see src/rag_scopes.py. They are noise in ordinary
@@ -103,14 +122,17 @@ def _run_async(coro):
 _TOOL_DEFS: List[Dict[str, Any]] = [
     {
         "_scope": SCOPE_RAG_READ,
-        "name": "rag_search",
-        "title": "Search the Talos knowledge base",
+        "name": "rag_query",
+        "title": "Query the Talos knowledge bases",
         "description": (
-            "Hybrid semantic + keyword search over the Talos RAG index (Qdrant "
-            "dense+sparse retrieval followed by a cross-encoder rerank). Returns "
-            "the most relevant document passages with their source file and "
-            "score. Use this to answer questions from the organisation's indexed "
-            "documents. Call rag_get_document afterwards to read a hit in full."
+            "Hybrid semantic + keyword search over one or more Talos knowledge "
+            "bases (Qdrant dense+sparse retrieval followed by a cross-encoder "
+            "rerank). Returns the most relevant passages with their source file, "
+            "knowledge base and score — each with enough surrounding text to "
+            "answer from directly, so a second call is rarely needed. Pass "
+            "`collections` to search specific knowledge bases; list them with "
+            "rag_list_collections. Call rag_get_document only when you need a "
+            "whole file."
         ),
         "inputSchema": {
             "type": "object",
@@ -119,11 +141,29 @@ _TOOL_DEFS: List[Dict[str, Any]] = [
                     "type": "string",
                     "description": "Natural-language question or search phrase.",
                 },
-                "k": {
+                "collections": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": (
+                        "Knowledge-base ids to search, as returned by "
+                        "rag_list_collections. Several are searched together and "
+                        "their hits merged by relevance. Omit to search the "
+                        "default knowledge base."
+                    ),
+                },
+                "topK": {
                     "type": "integer",
                     "description": "Number of passages to return (1–20, default 5).",
                     "minimum": 1,
                     "maximum": 20,
+                },
+                "language": {
+                    "type": "string",
+                    "description": (
+                        "Language hint (e.g. 'de'). Accepted for interface "
+                        "compatibility; retrieval is multilingual, so it does not "
+                        "change which passages come back."
+                    ),
                 },
                 "owner": {
                     "type": "string",
@@ -143,6 +183,18 @@ _TOOL_DEFS: List[Dict[str, Any]] = [
             },
             "required": ["query"],
         },
+    },
+    {
+        "_scope": SCOPE_RAG_READ,
+        "name": "rag_list_collections",
+        "title": "List the knowledge bases",
+        "description": (
+            "List the knowledge bases ('collections') this Talos instance serves "
+            "— id, name, description, declared language and document count. The "
+            "ids are what rag_query takes in `collections`, and what "
+            "rag_list_documents / rag_get_document take in `collection`."
+        ),
+        "inputSchema": {"type": "object", "properties": {}},
     },
     {
         "_scope": SCOPE_RAG_READ,
@@ -167,6 +219,10 @@ _TOOL_DEFS: List[Dict[str, Any]] = [
                     "minimum": 1,
                     "maximum": 500,
                 },
+                "collection": {
+                    "type": "string",
+                    "description": "Knowledge-base id to list. Omit for the default base.",
+                },
             },
         },
     },
@@ -176,7 +232,7 @@ _TOOL_DEFS: List[Dict[str, Any]] = [
         "title": "Read an indexed document",
         "description": (
             "Return the indexed text of one document, in reading order. Pass the "
-            "`source` value exactly as returned by rag_search or "
+            "`source` value exactly as returned by rag_query or "
             "rag_list_documents. Only indexed documents can be read — this does "
             "not touch the filesystem."
         ),
@@ -185,13 +241,21 @@ _TOOL_DEFS: List[Dict[str, Any]] = [
             "properties": {
                 "source": {
                     "type": "string",
-                    "description": "The document's `source` identifier from rag_search.",
+                    "description": "The document's `source` identifier from rag_query.",
                 },
                 "max_chunks": {
                     "type": "integer",
                     "description": "Maximum chunks to include (1–200, default 50).",
                     "minimum": 1,
                     "maximum": 200,
+                },
+                "collection": {
+                    "type": "string",
+                    "description": (
+                        "Knowledge-base id the document lives in — the "
+                        "`collection` shown on the rag_query hit. Omit for the "
+                        "default base."
+                    ),
                 },
             },
             "required": ["source"],
@@ -354,12 +418,27 @@ _TOOL_DEFS: List[Dict[str, Any]] = [
 ]
 
 
-def list_tools(granted_scopes) -> List[Dict[str, Any]]:
+_STATIC_TOOL_NAMES = {spec["name"] for spec in _TOOL_DEFS}
+
+# Retired tool names that still resolve, so a client holding an older config
+# keeps working. Not listed in the catalogue — this is a landing pad, not a
+# second supported spelling.
+_TOOL_ALIASES = {"rag_search": "rag_query"}
+
+
+def list_tools(
+    granted_scopes, owner: Optional[str] = None, skills_manager=None
+) -> List[Dict[str, Any]]:
     """Tool definitions visible to a caller holding `granted_scopes`.
 
     Two gates, both applied at *list* time as well as at call time: the token's
     scopes, and the administrator's MCP settings (src/mcp_settings.py). A
     client that can't use a tool shouldn't see it in its palette at all.
+
+    The static catalogue above is followed by one tool per published skill (see
+    `skill_tools`), which is why this needs `owner` and the skills manager: the
+    skill list is per-owner, so unlike the static tools the catalogue is not the
+    same for every caller.
     """
     from src import mcp_settings
 
@@ -371,14 +450,25 @@ def list_tools(granted_scopes) -> List[Dict[str, Any]]:
         if not mcp_settings.tool_enabled(spec["name"]):
             continue
         out.append({k: v for k, v in spec.items() if not k.startswith("_")})
+
+    if SCOPE_SKILLS_READ in granted:
+        out.extend(skill_tools(owner=owner, skills_manager=skills_manager))
     return out
 
 
 def scope_for_tool(name: str) -> Optional[str]:
-    """The scope a tool requires, or None if there is no such tool."""
+    """The scope a tool requires, or None if there is no such tool.
+
+    Per-skill tools answer `skills:read` from their prefix alone — whether the
+    *particular* skill exists is settled in `call_tool`, which has the owner and
+    the skills manager this function does not.
+    """
+    wanted = _TOOL_ALIASES.get(name, name)
     for spec in _TOOL_DEFS:
-        if spec["name"] == name:
+        if spec["name"] == wanted:
             return spec["_scope"]
+    if isinstance(name, str) and name.startswith(SKILL_TOOL_PREFIX):
+        return SCOPE_SKILLS_READ
     return None
 
 
@@ -422,23 +512,80 @@ def _search_config(base_id: Optional[str] = None) -> Dict[str, Any]:
         return {}
 
 
-def _tool_rag_search(args: Dict[str, Any]) -> str:
+def _collection_arg(args: Dict[str, Any]) -> Optional[str]:
+    """The single knowledge base a document tool addresses, or None for default.
+
+    ``rag_id`` is the older spelling — kept because it is what `src/rag_api.py`
+    and existing clients pass.
+    """
+    for key in ("collection", "rag_id"):
+        value = str(args.get(key) or "").strip()
+        if value:
+            return value
+    return None
+
+
+def _collections_arg(args: Dict[str, Any]) -> List[Optional[str]]:
+    """The knowledge bases `rag_query` should search.
+
+    Returns ``[None]`` — the default base — when the caller named none, so the
+    fan-out below has exactly one shape to handle. A bare string is accepted
+    alongside the array: a model that has been told "a list" will still
+    occasionally send one id.
+    """
+    raw = args.get("collections")
+    if raw is None:
+        single = _collection_arg(args)
+        return [single] if single else [None]
+    if isinstance(raw, str):
+        raw = [raw]
+    if not isinstance(raw, list):
+        raise ToolError("`collections` must be a list of knowledge-base ids.")
+    ids = [str(x).strip() for x in raw if str(x or "").strip()]
+    return ids or [None]
+
+
+def _known_collection_ids() -> List[str]:
+    from src.rag_registry import list_bases
+
+    return [str(b.get("id")) for b in (list_bases() or [])]
+
+
+def _validate_collections(ids: List[Optional[str]]) -> None:
+    """Reject an unknown id with the list of real ones.
+
+    An unknown base is a caller mistake, and the fix is always the same: look at
+    what exists. Saying so costs one registry read and saves a round trip.
+    """
+    named = [i for i in ids if i]
+    if not named:
+        return
+    known = set(_known_collection_ids())
+    unknown = [i for i in named if i not in known]
+    if unknown:
+        raise ToolError(
+            f"Unknown knowledge base(s): {', '.join(repr(u) for u in unknown)}. "
+            f"Available: {', '.join(sorted(known)) or '(none)'}. "
+            "Call rag_list_collections for their names and descriptions."
+        )
+
+
+def _tool_rag_query(args: Dict[str, Any]) -> str:
     query = str(args.get("query") or "").strip()
     if not query:
         raise ToolError("`query` is required and must not be empty.")
 
-    rag = _rag(args.get("rag_id"))
-    if rag is None:
-        raise ToolError(_rag_unavailable_text())
+    collections = _collections_arg(args)
+    _validate_collections(collections)
 
-    cfg = _search_config(args.get("rag_id"))
-    k = _clamp_k(args.get("k") if args.get("k") is not None else cfg.get("search_top_k", 5))
-    # Retrieve a wider candidate set than we return so the reranker has
-    # something to work with — same ratio the /api/rag/search route uses.
-    try:
-        candidate_k = max(k, min(int(cfg.get("candidate_top_k", 40)), 100))
-    except (TypeError, ValueError):
-        candidate_k = max(k, 40)
+    # `topK` is the documented name; `k` is what the old rag_search tool took
+    # and what src/rag_api.py passes through.
+    requested = args.get("topK")
+    if requested is None:
+        requested = args.get("k")
+    if requested is None:
+        requested = _search_config(collections[0]).get("search_top_k", 5)
+    k = _clamp_k(requested)
 
     owner = str(args.get("owner") or "").strip() or None
     scope = str(args.get("scope") or "").strip() or None
@@ -446,27 +593,105 @@ def _tool_rag_search(args: Dict[str, Any]) -> str:
     # default sql exclusion when they didn't ask for one.
     exclude = None if scope else DEFAULT_EXCLUDE_SCOPES
 
-    results = rag.search(
-        query,
-        k=k,
-        owner=owner,
-        candidate_k=candidate_k,
-        scope=scope,
-        exclude_scopes=exclude,
-    )
-    return render_search_results(query, results)
+    language = str(args.get("language") or "").strip()
+    if language:
+        # Accepted so the call signature matches what agent frameworks send,
+        # but the embedder and reranker are multilingual — filtering or
+        # rewriting by language here would only remove correct hits.
+        logger.debug("rag_query language hint %r (not used for retrieval)", language)
+
+    hits: List[Dict[str, Any]] = []
+    failures: List[str] = []
+    for cid in collections:
+        label = cid or _default_collection_id()
+        rag = _rag(cid)
+        if rag is None:
+            failures.append(label)
+            continue
+        cfg = _search_config(cid)
+        # Retrieve a wider candidate set than we return so the reranker has
+        # something to work with — same ratio the /api/rag/search route uses.
+        try:
+            candidate_k = max(k, min(int(cfg.get("candidate_top_k", 40)), 100))
+        except (TypeError, ValueError):
+            candidate_k = max(k, 40)
+        results = (
+            rag.search(
+                query,
+                k=k,
+                owner=owner,
+                candidate_k=candidate_k,
+                scope=scope,
+                exclude_scopes=exclude,
+            )
+            or []
+        )
+        for r in results:
+            # Which base a hit came from — the model needs it to pass
+            # `collection` back to rag_get_document.
+            r["collection"] = label
+        hits.extend(results)
+
+    if failures and not hits:
+        raise ToolError(
+            _rag_unavailable_text()
+            + (f" (unreachable: {', '.join(failures)})" if len(collections) > 1 else "")
+        )
+
+    if len(collections) > 1:
+        # Each base reranked its own candidates with the same cross-encoder, so
+        # the scores are comparable and one merged ordering is meaningful.
+        hits.sort(key=_hit_rank, reverse=True)
+        hits = hits[:k]
+
+    text = render_search_results(query, hits)
+    if failures:
+        text += (
+            "\n\n_(Not searched — currently unavailable: "
+            + ", ".join(sorted(failures))
+            + ".)_"
+        )
+    return text
+
+
+def _default_collection_id() -> str:
+    from src.rag_registry import DEFAULT_ID
+
+    return DEFAULT_ID
+
+
+def _hit_rank(hit: Dict[str, Any]) -> float:
+    """Sort key for merging hits from several bases. Reranked score wins;
+    similarity is the fallback for a pipeline with reranking switched off."""
+    for key in ("rerank_score", "similarity"):
+        value = hit.get(key)
+        if value is not None:
+            try:
+                return float(value)
+            except (TypeError, ValueError):
+                continue
+    return 0.0
 
 
 def render_search_results(query: str, results: List[Dict[str, Any]]) -> str:
     """Render search hits as the answer block a model receives.
 
-    Split out of `_tool_rag_search` so the REST service (`src/rag_api.py`) can
+    Split out of `_tool_rag_query` so the REST service (`src/rag_api.py`) can
     return byte-identical text *and* the structured hits from a single
     retrieval — reranking is a remote call, so searching twice to get both
     views would double the latency of every query.
     """
     if not results:
         return f"No passages found for {query!r}."
+
+    # Share the per-tool budget across the hits rather than cutting every
+    # passage at a fixed snippet length: one hit at topK=1 can carry a whole
+    # section, twenty hits still fit in the same envelope. Headers and a safety
+    # margin come off the top so `call_tool`'s outer cap never has to truncate
+    # the last passage away.
+    n = max(1, len(results))
+    share = (int(MAX_TEXT_CHARS * 0.95) - HEADER_ALLOWANCE * n) // n
+    budget = max(MIN_PASSAGE_CHARS, min(PASSAGE_CHARS, share))
 
     lines = [f"{len(results)} passage(s) for {query!r}:\n"]
     for i, r in enumerate(results, 1):
@@ -485,6 +710,8 @@ def render_search_results(query: str, results: List[Dict[str, Any]]) -> str:
             header += f" (page {int(page)})"
         lines.append(header)
         lines.append(f"- source: `{source}`")
+        if r.get("collection"):
+            lines.append(f"- collection: `{r['collection']}`")
         if score is not None:
             try:
                 lines.append(f"- {score_label}: {float(score):.4f}")
@@ -492,15 +719,61 @@ def render_search_results(query: str, results: List[Dict[str, Any]]) -> str:
                 pass
         if meta.get("modality") and meta.get("modality") != "text":
             lines.append(f"- modality: {meta['modality']}")
-        snippet = (r.get("document") or "").strip()
+        # `expanded` is small-to-big: the matched chunk's whole section, which
+        # the retrieval pipeline already fetched (src/rag_vector.py). It is what
+        # Talos's own chat injects, so an external client gets the same context
+        # the in-app model reasons over — and usually needs no follow-up call.
+        # The citation still points at the matched chunk.
+        passage = (r.get("expanded") or r.get("document") or "").strip()
+        if r.get("expanded"):
+            lines.append("- context: full section")
         lines.append("")
-        lines.append(_truncate(snippet, SNIPPET_CHARS))
+        lines.append(_truncate(passage, budget))
         lines.append("")
     return "\n".join(lines)
 
 
+def _tool_rag_list_collections() -> str:
+    """The knowledge-base catalogue, so a client can address bases by id.
+
+    Driven by the registry, not by Qdrant: an unreachable backend must still be
+    able to say which bases *exist*, so the document counts (which do hit
+    Qdrant, behind the registry's cache) degrade to "no count" rather than
+    failing the call.
+    """
+    from src.rag_registry import DEFAULT_ID, describe, list_bases
+
+    bases = list_bases() or []
+    if not bases:
+        return "No knowledge bases are registered."
+
+    lines = [f"{len(bases)} knowledge base(s):", ""]
+    for entry in bases:
+        try:
+            row = describe(entry, with_counts=True)
+        except Exception:
+            row = describe(entry, with_counts=False)
+        rid = str(row.get("id") or "")
+        head = f"- **{rid}** — {row.get('name') or rid}"
+        if rid == DEFAULT_ID:
+            head += " _(default — used when `collections` is omitted)_"
+        lines.append(head)
+        if row.get("description"):
+            lines.append(f"  {row['description']}")
+        facts = []
+        if row.get("language"):
+            facts.append(f"language: {row['language']}")
+        if row.get("content_count") is not None:
+            facts.append(f"documents: {row['content_count']}")
+        if facts:
+            lines.append("  " + " · ".join(facts))
+    return "\n".join(lines)
+
+
 def _tool_rag_list_documents(args: Dict[str, Any]) -> str:
-    rag = _rag(args.get("rag_id"))
+    collection = _collection_arg(args)
+    _validate_collections([collection])
+    rag = _rag(collection)
     if rag is None:
         raise ToolError(_rag_unavailable_text())
 
@@ -550,9 +823,11 @@ def render_document_list(
 def _tool_rag_get_document(args: Dict[str, Any]) -> str:
     source = str(args.get("source") or "").strip()
     if not source:
-        raise ToolError("`source` is required. Get it from rag_search or rag_list_documents.")
+        raise ToolError("`source` is required. Get it from rag_query or rag_list_documents.")
 
-    rag = _rag(args.get("rag_id"))
+    collection = _collection_arg(args)
+    _validate_collections([collection])
+    rag = _rag(collection)
     if rag is None:
         raise ToolError(_rag_unavailable_text())
 
@@ -560,8 +835,10 @@ def _tool_rag_get_document(args: Dict[str, Any]) -> str:
     chunks = rag.get_document_chunks(source) or []
     if not chunks:
         raise ToolError(
-            f"No indexed document with source {source!r}. "
-            "Use rag_list_documents to see the exact source strings."
+            f"No indexed document with source {source!r} in knowledge base "
+            f"{collection or _default_collection_id()!r}. Use rag_list_documents "
+            "to see the exact source strings, and check the `collection` shown "
+            "on the rag_query hit."
         )
 
     shown = chunks[:max_chunks]
@@ -712,6 +989,122 @@ def _tool_skills_get(args: Dict[str, Any], owner: Optional[str], sm) -> str:
     return md
 
 
+def _skill_tool_name(slug: Any) -> Optional[str]:
+    """MCP tool name for a skill slug, or None if it can't be represented.
+
+    Tool names have to survive a client that treats them as identifiers, so
+    anything outside ``[a-z0-9_-]`` becomes an underscore. The mapping is
+    lossy — two slugs can collide — which is why `skill_tools` keeps the first
+    and `_resolve_skill_tool` re-derives names from the same list rather than
+    trying to invert this.
+    """
+    slug = str(slug or "").strip().lower()
+    if not slug:
+        return None
+    safe = "".join(c if (c.isalnum() and c.isascii()) or c in "-_" else "_" for c in slug)
+    safe = safe.strip("_")
+    if not safe:
+        return None
+    return (SKILL_TOOL_PREFIX + safe)[:64]
+
+
+def _visible_skills(owner: Optional[str], skills_manager) -> List[Dict[str, Any]]:
+    """The skills this caller may see, as (name, description, when_to_use).
+
+    `index_for` is the same view Talos's own agent gets — published skills only
+    (plus platform/toolset gating) — narrowed further by the administrator's
+    MCP skill gate. `load` is consulted only to enrich the entries with
+    `when_to_use`, which the index doesn't carry but a tool description wants.
+    """
+    sm = _skills(skills_manager)
+    if sm is None:
+        return []
+    try:
+        idx = sm.index_for(owner=owner) or []
+    except Exception:
+        logger.warning("skills index unavailable for MCP", exc_info=True)
+        return []
+    allowed = _skill_filter()
+    idx = [s for s in idx if allowed(s.get("name"))]
+    try:
+        detail = {str(s.get("name")): s for s in (sm.load(owner=owner) or [])}
+    except Exception:
+        detail = {}
+    out = []
+    for s in idx:
+        full = detail.get(str(s.get("name"))) or {}
+        out.append(
+            {
+                "name": s.get("name"),
+                "description": s.get("description") or full.get("description") or "",
+                "when_to_use": full.get("when_to_use") or "",
+            }
+        )
+    return out
+
+
+def skill_tools(owner: Optional[str] = None, skills_manager=None) -> List[Dict[str, Any]]:
+    """One MCP tool per published skill.
+
+    A caller whose agent framework filters tools by name (MACS does) can then
+    grant a role its skills through the tool list itself, instead of hoping the
+    model reaches for skills_search. Calling one returns that skill's SKILL.md —
+    the same text skills_get gives — because a Talos skill *is* a written
+    procedure, not an executable: the model still carries it out with its own
+    tools. The description says so, so a model doesn't wait for side effects
+    that are never coming.
+    """
+    from src import mcp_settings
+
+    if not mcp_settings.skills_enabled():
+        return []
+
+    out: List[Dict[str, Any]] = []
+    seen = set()
+    for skill in _visible_skills(owner, skills_manager):
+        tool_name = _skill_tool_name(skill["name"])
+        if not tool_name or tool_name in seen or tool_name in _STATIC_TOOL_NAMES:
+            continue
+        seen.add(tool_name)
+        parts = []
+        if skill["description"]:
+            parts.append(str(skill["description"]).strip())
+        if skill["when_to_use"]:
+            parts.append(f"When to use: {str(skill['when_to_use']).strip()}")
+        parts.append(
+            "Returns the full written procedure for this skill; carry it out "
+            "with your own tools."
+        )
+        out.append(
+            {
+                "name": tool_name,
+                "title": f"Skill: {skill['name']}",
+                "description": " ".join(parts),
+                "inputSchema": {"type": "object", "properties": {}},
+            }
+        )
+        if len(out) >= MAX_SKILL_TOOLS:
+            logger.info(
+                "MCP skill tools capped at %s; the rest stay reachable via skills_search",
+                MAX_SKILL_TOOLS,
+            )
+            break
+    return out
+
+
+def _resolve_skill_tool(tool_name: str, owner: Optional[str], skills_manager) -> Optional[str]:
+    """The skill slug behind a ``skill_*`` tool name, or None.
+
+    Re-derived from the caller's own visible-skill list, so a name that was
+    never offered to *this* caller — a gated skill, another owner's — resolves
+    to nothing and is reported as an unknown tool.
+    """
+    for skill in _visible_skills(owner, skills_manager):
+        if _skill_tool_name(skill["name"]) == tool_name:
+            return str(skill["name"])
+    return None
+
+
 def _tool_skills_read_reference(args: Dict[str, Any], owner: Optional[str], sm) -> str:
     name = str(args.get("name") or "").strip()
     path = str(args.get("path") or "").strip()
@@ -858,8 +1251,23 @@ def call_tool(
         return (f"Tool {name!r} is disabled on this Talos instance.", True)
 
     try:
-        if name == "rag_search":
-            return _truncate(_tool_rag_search(args)), False
+        # A per-skill tool (see `skill_tools`). Resolved against this caller's
+        # own visible skills, then answered exactly as skills_get would.
+        if name.startswith(SKILL_TOOL_PREFIX):
+            slug = _resolve_skill_tool(name, owner, skills_manager)
+            if slug is None:
+                return (
+                    f"Unknown tool: {name!r}. Call skills_list to see the "
+                    "skills this token can reach." + _owner_note(owner),
+                    True,
+                )
+            return _truncate(_tool_skills_get({"name": slug}, owner, skills_manager)), False
+        # `rag_search` is the pre-`rag_query` name. Still accepted — an
+        # external client may have it in a saved config — but no longer listed.
+        if name in ("rag_query", "rag_search"):
+            return _truncate(_tool_rag_query(args)), False
+        if name == "rag_list_collections":
+            return _truncate(_tool_rag_list_collections()), False
         if name == "rag_list_documents":
             return _truncate(_tool_rag_list_documents(args)), False
         if name == "rag_get_document":

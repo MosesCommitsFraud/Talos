@@ -133,6 +133,8 @@ def tool_enabled(name: str) -> bool:
     """
     if name in ("web_search", "web_fetch"):
         return web_enabled()
-    if name.startswith("skills_"):
+    # Both the skills_* family and the per-skill `skill_<slug>` tools
+    # (mcp_public.skill_tools) hang off the same switch.
+    if name.startswith("skills_") or name.startswith("skill_"):
         return skills_enabled()
     return True

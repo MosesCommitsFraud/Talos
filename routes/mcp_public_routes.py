@@ -151,12 +151,15 @@ async def _handle_message(
                     "version": _server_version(),
                 },
                 "instructions": (
-                    "Talos exposes its organisational knowledge base, its "
+                    "Talos exposes its organisational knowledge bases, its "
                     "library of reviewed procedures ('skills'), and web access "
-                    "through a self-hosted search engine. Use rag_search for "
-                    "questions the organisation's own documents answer, "
-                    "skills_search to find a proven procedure before improvising "
-                    "one, and web_search/web_fetch for anything public. All "
+                    "through a self-hosted search engine. Use rag_query for "
+                    "questions the organisation's own documents answer "
+                    "(rag_list_collections names the knowledge bases it can "
+                    "search), skills_search to find a proven procedure before "
+                    "improvising one — each published skill is also offered as "
+                    "its own skill_* tool, which returns that procedure to "
+                    "follow — and web_search/web_fetch for anything public. All "
                     "tools are read-only."
                 ),
             },
@@ -166,7 +169,9 @@ async def _handle_message(
         return _result(request_id, {})
 
     if method == "tools/list":
-        tools = mcp_public.list_tools(scopes)
+        # owner + manager because the catalogue now ends in one tool per
+        # published skill, which is per-caller (mcp_public.skill_tools).
+        tools = mcp_public.list_tools(scopes, owner=owner, skills_manager=skills_manager)
         return _result(request_id, {"tools": tools})
 
     if method == "tools/call":

@@ -88,7 +88,7 @@ class FakeSkills:
 def fake_rag(monkeypatch):
     rag = FakeRag()
     monkeypatch.setattr(mcp_public, "_rag", lambda *_: rag)
-    monkeypatch.setattr(mcp_public, "_search_config", lambda: {})
+    monkeypatch.setattr(mcp_public, "_search_config", lambda *_: {})
     return rag
 
 
@@ -102,11 +102,19 @@ def call(name, args, scopes=ALL, owner=None, sm=None):
 
 
 def test_list_tools_filters_by_scope():
-    rag_only = {t["name"] for t in mcp_public.list_tools({RAG})}
-    skills_only = {t["name"] for t in mcp_public.list_tools({SKILLS})}
-    web_only = {t["name"] for t in mcp_public.list_tools({WEB})}
+    # An empty skills manager, so the per-skill tools (which are per-owner and
+    # would otherwise be read off this machine's disk) don't make this flaky.
+    empty = FakeSkills(index=[])
+    rag_only = {t["name"] for t in mcp_public.list_tools({RAG}, skills_manager=empty)}
+    skills_only = {t["name"] for t in mcp_public.list_tools({SKILLS}, skills_manager=empty)}
+    web_only = {t["name"] for t in mcp_public.list_tools({WEB}, skills_manager=empty)}
 
-    assert rag_only == {"rag_search", "rag_list_documents", "rag_get_document"}
+    assert rag_only == {
+        "rag_query",
+        "rag_list_collections",
+        "rag_list_documents",
+        "rag_get_document",
+    }
     assert skills_only == {
         "skills_list",
         "skills_search",
@@ -120,20 +128,21 @@ def test_list_tools_filters_by_scope():
 
 def test_web_scope_is_independent_of_the_knowledge_scopes():
     """A knowledge token must not come with a route to the public internet."""
-    assert {t["name"] for t in mcp_public.list_tools({RAG, SKILLS})}.isdisjoint(
-        {"web_search", "web_fetch"}
-    )
+    assert {
+        t["name"]
+        for t in mcp_public.list_tools({RAG, SKILLS}, skills_manager=FakeSkills(index=[]))
+    }.isdisjoint({"web_search", "web_fetch"})
 
 
 def test_list_tools_strips_internal_scope_metadata():
-    for tool in mcp_public.list_tools(ALL):
+    for tool in mcp_public.list_tools(ALL, skills_manager=FakeSkills(index=[])):
         assert "_scope" not in tool
         assert set(tool) <= {"name", "title", "description", "inputSchema"}
         assert tool["inputSchema"]["type"] == "object"
 
 
 def test_call_tool_refuses_out_of_scope_tool(fake_rag):
-    text, is_error = call("rag_search", {"query": "x"}, scopes={SKILLS})
+    text, is_error = call("rag_query", {"query": "x"}, scopes={SKILLS})
     assert is_error is True
     assert "rag:read" in text
     # The tool must not have run at all.
@@ -160,32 +169,32 @@ def test_scopes_match_the_mintable_token_scopes():
 # ---------------------------------------------------------------------------
 
 
-def test_rag_search_excludes_the_sql_namespace_by_default(fake_rag):
-    call("rag_search", {"query": "urlaubsantrag"})
+def test_rag_query_excludes_the_sql_namespace_by_default(fake_rag):
+    call("rag_query", {"query": "urlaubsantrag"})
     assert fake_rag.search_calls[0]["exclude_scopes"] == ["sql"]
     assert fake_rag.search_calls[0]["scope"] is None
 
 
-def test_rag_search_with_explicit_scope_drops_the_default_exclusion(fake_rag):
-    call("rag_search", {"query": "schema", "scope": "sql"})
+def test_rag_query_with_explicit_scope_drops_the_default_exclusion(fake_rag):
+    call("rag_query", {"query": "schema", "scope": "sql"})
     assert fake_rag.search_calls[0]["scope"] == "sql"
     assert fake_rag.search_calls[0]["exclude_scopes"] is None
 
 
 @pytest.mark.parametrize("requested,expected", [(0, 1), (99, 20), (7, 7), ("nonsense", 5)])
-def test_rag_search_clamps_k(fake_rag, requested, expected):
-    call("rag_search", {"query": "q", "k": requested})
+def test_rag_query_clamps_k(fake_rag, requested, expected):
+    call("rag_query", {"query": "q", "k": requested})
     assert fake_rag.search_calls[-1]["k"] == expected
 
 
-def test_rag_search_requires_a_query(fake_rag):
-    text, is_error = call("rag_search", {"query": "   "})
+def test_rag_query_requires_a_query(fake_rag):
+    text, is_error = call("rag_query", {"query": "   "})
     assert is_error is True
     assert "query" in text
     assert fake_rag.search_calls == []
 
 
-def test_rag_search_formats_hits_with_source_and_score(monkeypatch):
+def test_rag_query_formats_hits_with_source_and_score(monkeypatch):
     rag = FakeRag(
         results=[
             {
@@ -201,9 +210,9 @@ def test_rag_search_formats_hits_with_source_and_score(monkeypatch):
         ]
     )
     monkeypatch.setattr(mcp_public, "_rag", lambda *_: rag)
-    monkeypatch.setattr(mcp_public, "_search_config", lambda: {})
+    monkeypatch.setattr(mcp_public, "_search_config", lambda *_: {})
 
-    text, is_error = call("rag_search", {"query": "urlaub"})
+    text, is_error = call("rag_query", {"query": "urlaub"})
     assert is_error is False
     assert "handbuch.pdf" in text
     assert "page 12" in text
@@ -213,8 +222,150 @@ def test_rag_search_formats_hits_with_source_and_score(monkeypatch):
     assert "Personalabteilung" in text
 
 
-def test_rag_search_reports_an_empty_index_without_erroring(fake_rag):
-    text, is_error = call("rag_search", {"query": "nichts"})
+def test_rag_query_returns_the_whole_section_not_a_snippet(monkeypatch):
+    """One call has to be enough.
+
+    The retrieval pipeline attaches the matched chunk's whole section as
+    ``expanded`` (small-to-big). Rendering the chunk alone forced every caller
+    into a second rag_get_document round trip.
+    """
+    section = "Abschnitt 4.2 — " + ("Urlaub muss schriftlich beantragt werden. " * 40)
+    rag = FakeRag(
+        results=[
+            {
+                "document": "Urlaub muss schriftlich beantragt werden.",
+                "expanded": section,
+                "rerank_score": 0.9,
+                "metadata": {"source": "/data/hr.pdf", "filename": "hr.pdf"},
+            }
+        ]
+    )
+    monkeypatch.setattr(mcp_public, "_rag", lambda *_: rag)
+    monkeypatch.setattr(mcp_public, "_search_config", lambda *_: {})
+
+    text, is_error = call("rag_query", {"query": "urlaub"})
+    assert is_error is False
+    assert "Abschnitt 4.2" in text
+    assert len(text) > mcp_public.SNIPPET_CHARS
+    assert "full section" in text
+
+
+def test_rag_query_passage_budget_shrinks_as_hits_grow(monkeypatch):
+    """Twenty long hits must still fit inside the per-tool output budget."""
+    long_text = "x" * 20_000
+    rag = FakeRag(
+        results=[
+            {
+                "document": long_text,
+                "rerank_score": 0.5,
+                "metadata": {"source": f"/data/{i}.pdf", "filename": f"{i}.pdf"},
+            }
+            for i in range(20)
+        ]
+    )
+    monkeypatch.setattr(mcp_public, "_rag", lambda *_: rag)
+    monkeypatch.setattr(mcp_public, "_search_config", lambda *_: {})
+
+    text, is_error = call("rag_query", {"query": "q", "topK": 20})
+    assert is_error is False
+    # Every hit is represented — none dropped off the end by the outer cap.
+    assert "19.pdf" in text
+    # Inside the per-tool budget, so the outer cap never had to cut the tail.
+    assert len(text) <= mcp_public.MAX_TEXT_CHARS
+
+
+def test_rag_query_accepts_topk_as_well_as_k(fake_rag):
+    call("rag_query", {"query": "q", "topK": 9})
+    assert fake_rag.search_calls[-1]["k"] == 9
+
+
+def test_rag_search_is_still_accepted_as_the_old_name(fake_rag):
+    """A client with the pre-rename name in its config keeps working, even
+    though the catalogue no longer advertises it."""
+    text, is_error = call("rag_search", {"query": "q"})
+    assert is_error is False
+    assert fake_rag.search_calls
+    listed = {t["name"] for t in mcp_public.list_tools({RAG}, skills_manager=FakeSkills(index=[]))}
+    assert "rag_search" not in listed
+
+
+def test_rag_query_searches_every_named_collection_and_merges_by_score(monkeypatch):
+    calls = []
+
+    def fake_rag_for(cid=None):
+        rag = FakeRag(
+            results=[
+                {
+                    "document": f"treffer aus {cid}",
+                    "rerank_score": 0.9 if cid == "technik" else 0.4,
+                    "metadata": {"source": f"/data/{cid}.pdf", "filename": f"{cid}.pdf"},
+                }
+            ]
+        )
+        calls.append(cid)
+        return rag
+
+    monkeypatch.setattr(mcp_public, "_rag", fake_rag_for)
+    monkeypatch.setattr(mcp_public, "_search_config", lambda *_: {})
+    monkeypatch.setattr(mcp_public, "_known_collection_ids", lambda: ["hr", "technik"])
+
+    text, is_error = call("rag_query", {"query": "q", "collections": ["hr", "technik"]})
+    assert is_error is False
+    assert calls == ["hr", "technik"]
+    # Merged across bases by score, and each hit says where it came from — the
+    # id rag_get_document needs.
+    assert text.index("technik.pdf") < text.index("hr.pdf")
+    assert "collection: `technik`" in text
+
+
+def test_rag_query_names_the_real_collections_when_one_is_unknown(monkeypatch):
+    monkeypatch.setattr(mcp_public, "_known_collection_ids", lambda: ["hr", "technik"])
+    text, is_error = call("rag_query", {"query": "q", "collections": ["tippfehler"]})
+    assert is_error is True
+    assert "tippfehler" in text and "hr" in text and "technik" in text
+
+
+def test_rag_query_survives_one_unreachable_collection(monkeypatch):
+    def maybe_rag(cid=None):
+        if cid == "kaputt":
+            return None
+        return FakeRag(
+            results=[
+                {
+                    "document": "treffer",
+                    "rerank_score": 0.8,
+                    "metadata": {"source": "/data/hr.pdf", "filename": "hr.pdf"},
+                }
+            ]
+        )
+
+    monkeypatch.setattr(mcp_public, "_rag", maybe_rag)
+    monkeypatch.setattr(mcp_public, "_search_config", lambda *_: {})
+    monkeypatch.setattr(mcp_public, "_known_collection_ids", lambda: ["hr", "kaputt"])
+
+    text, is_error = call("rag_query", {"query": "q", "collections": ["hr", "kaputt"]})
+    assert is_error is False
+    assert "hr.pdf" in text
+    assert "kaputt" in text  # the caller is told what was skipped
+
+
+def test_rag_get_document_reads_from_the_named_collection(monkeypatch):
+    seen = []
+
+    def fake_rag_for(cid=None):
+        seen.append(cid)
+        return FakeRag(chunks=[{"content": "inhalt"}])
+
+    monkeypatch.setattr(mcp_public, "_rag", fake_rag_for)
+    monkeypatch.setattr(mcp_public, "_known_collection_ids", lambda: ["technik"])
+
+    text, is_error = call("rag_get_document", {"source": "/data/x.pdf", "collection": "technik"})
+    assert is_error is False
+    assert seen == ["technik"]
+
+
+def test_rag_query_reports_an_empty_index_without_erroring(fake_rag):
+    text, is_error = call("rag_query", {"query": "nichts"})
     assert is_error is False
     assert "No passages found" in text
 
@@ -224,7 +375,7 @@ def test_rag_tools_report_an_unavailable_index_as_a_tool_error(monkeypatch):
     monkeypatch.setattr(mcp_public, "_rag_unavailable_text", lambda: "KB down (qdrant refused)")
 
     for tool, args in [
-        ("rag_search", {"query": "q"}),
+        ("rag_query", {"query": "q"}),
         ("rag_list_documents", {}),
         ("rag_get_document", {"source": "/x"}),
     ]:
@@ -284,11 +435,11 @@ def test_tool_output_is_truncated(monkeypatch):
 
 
 def test_unexpected_tool_exception_becomes_a_tool_error(monkeypatch):
-    def boom():
+    def boom(*_):
         raise RuntimeError("qdrant exploded")
 
     monkeypatch.setattr(mcp_public, "_rag", boom)
-    text, is_error = call("rag_search", {"query": "q"})
+    text, is_error = call("rag_query", {"query": "q"})
     assert is_error is True
     assert "RuntimeError" in text
 
@@ -373,6 +524,99 @@ def test_skills_read_reference_refuses_traversal():
     )
     assert is_error is True
     assert ".env" not in text or "No reference" in text
+
+
+# ---------------------------------------------------------------------------
+# Per-skill tools
+# ---------------------------------------------------------------------------
+# One MCP tool per published skill, so a client that gates tools by name can
+# hand a role its skills through the tool list itself.
+
+
+def _sm_with(*names):
+    return FakeSkills(
+        index=[{"name": n, "description": f"{n} beschreibung", "category": "ops"} for n in names],
+        skills=[{"name": n, "when_to_use": f"wenn {n}"} for n in names],
+        md={n: f"# {n}\n\nSchritte..." for n in names},
+    )
+
+
+def test_each_published_skill_becomes_its_own_tool():
+    tools = mcp_public.list_tools({SKILLS}, owner="moritz", skills_manager=_sm_with("deploy"))
+    by_name = {t["name"]: t for t in tools}
+
+    assert "skill_deploy" in by_name
+    tool = by_name["skill_deploy"]
+    assert "deploy beschreibung" in tool["description"]
+    assert "wenn deploy" in tool["description"]
+    # A skill is a procedure to follow, not something Talos executes — the
+    # description has to say so or the model waits for side effects.
+    assert "own tools" in tool["description"]
+    assert tool["inputSchema"] == {"type": "object", "properties": {}}
+
+
+def test_calling_a_skill_tool_returns_that_skills_markdown():
+    text, is_error = call("skill_deploy", {}, owner="moritz", sm=_sm_with("deploy"))
+    assert is_error is False
+    assert text.startswith("# deploy")
+
+
+def test_skill_tools_need_the_skills_scope():
+    tools = mcp_public.list_tools({RAG}, skills_manager=_sm_with("deploy"))
+    assert not any(t["name"].startswith("skill_") for t in tools)
+
+    text, is_error = call("skill_deploy", {}, scopes={RAG}, sm=_sm_with("deploy"))
+    assert is_error is True
+    assert "skills:read" in text
+
+
+def test_a_skill_tool_this_caller_cannot_see_is_an_unknown_tool():
+    """Never 'permission denied' — a name that was never offered to this token
+    must not confirm that the skill exists somewhere else."""
+    text, is_error = call("skill_geheim", {}, owner="moritz", sm=_sm_with("deploy"))
+    assert is_error is True
+    assert "Unknown tool" in text
+
+
+def test_skill_tool_names_are_sanitised_and_collision_free():
+    tools = mcp_public.list_tools(
+        {SKILLS}, skills_manager=_sm_with("Rechnung prüfen", "rechnung-prüfen")
+    )
+    names = [t["name"] for t in tools if t["name"].startswith("skill_")]
+    assert len(names) == len(set(names))  # a name can only mean one skill
+    # Safe as an identifier in any client: ASCII alphanumerics, - and _ only.
+    assert all(
+        (c.isalnum() and c.isascii()) or c in "-_" for name in names for c in name
+    ), names
+
+
+def test_the_skill_tool_list_is_capped(monkeypatch):
+    monkeypatch.setattr(mcp_public, "MAX_SKILL_TOOLS", 3)
+    tools = mcp_public.list_tools(
+        {SKILLS}, skills_manager=_sm_with(*[f"skill{i}" for i in range(10)])
+    )
+    assert len([t for t in tools if t["name"].startswith("skill_")]) == 3
+
+
+def test_skill_tools_disappear_when_skills_are_switched_off(monkeypatch):
+    from src import mcp_settings
+
+    monkeypatch.setattr(mcp_settings, "skills_enabled", lambda: False)
+    tools = mcp_public.list_tools({SKILLS}, skills_manager=_sm_with("deploy"))
+    assert tools == []
+
+    text, is_error = call("skill_deploy", {}, sm=_sm_with("deploy"))
+    assert is_error is True
+    assert "disabled" in text
+
+
+def test_a_gated_skill_gets_no_tool(monkeypatch):
+    """The administrator's MCP skill allowlist narrows the tool list too."""
+    monkeypatch.setattr(mcp_public, "_skill_filter", lambda: (lambda name: name != "geheim"))
+    tools = mcp_public.list_tools({SKILLS}, skills_manager=_sm_with("deploy", "geheim"))
+    names = {t["name"] for t in tools}
+    assert "skill_deploy" in names
+    assert "skill_geheim" not in names
 
 
 # ---------------------------------------------------------------------------
@@ -602,29 +846,61 @@ def test_tools_list_reflects_the_tokens_scopes():
     out = handle(
         {"jsonrpc": "2.0", "id": 2, "method": "tools/list"},
         request=_request(scopes=(SKILLS,)),
+        sm=FakeSkills(index=[]),
     )
     names = {t["name"] for t in out["result"]["tools"]}
     assert names == {"skills_list", "skills_search", "skills_get", "skills_read_reference"}
 
 
+def test_tools_list_carries_the_per_skill_tools(monkeypatch):
+    """The route has to hand the catalogue the caller's owner and manager —
+    without them the skill tools silently vanish from the palette."""
+    sm = _sm_with("deploy")
+    out = handle(
+        {"jsonrpc": "2.0", "id": 2, "method": "tools/list"},
+        request=_request(scopes=(SKILLS,), owner="moritz"),
+        sm=sm,
+    )
+    assert "skill_deploy" in {t["name"] for t in out["result"]["tools"]}
+    assert "moritz" in sm.owners_seen
+
+
+def test_a_skill_tool_is_callable_over_jsonrpc():
+    out = handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 7,
+            "method": "tools/call",
+            "params": {"name": "skill_deploy", "arguments": {}},
+        },
+        sm=_sm_with("deploy"),
+    )
+    assert out["result"]["isError"] is False
+    assert out["result"]["content"][0]["text"].startswith("# deploy")
+
+
 def test_a_browser_session_gets_the_full_read_catalogue():
+    sm = FakeSkills(index=[])
     out = handle(
         {"jsonrpc": "2.0", "id": 3, "method": "tools/list"},
         request=_request(api_token=False, user="moritz"),
+        sm=sm,
     )
-    assert len(out["result"]["tools"]) == len(mcp_public.list_tools(ALL))
+    assert len(out["result"]["tools"]) == len(
+        mcp_public.list_tools(ALL, owner="moritz", skills_manager=sm)
+    )
 
 
 def test_tools_call_wraps_output_in_mcp_content(monkeypatch):
     monkeypatch.setattr(mcp_public, "_rag", lambda *_: FakeRag(results=[]))
-    monkeypatch.setattr(mcp_public, "_search_config", lambda: {})
+    monkeypatch.setattr(mcp_public, "_search_config", lambda *_: {})
 
     out = handle(
         {
             "jsonrpc": "2.0",
             "id": 4,
             "method": "tools/call",
-            "params": {"name": "rag_search", "arguments": {"query": "hallo"}},
+            "params": {"name": "rag_query", "arguments": {"query": "hallo"}},
         }
     )
     result = out["result"]

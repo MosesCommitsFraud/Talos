@@ -124,7 +124,7 @@ loopback or a trusted network. `/health` is always reachable.
 
 | Method | Path | Equivalent tool |
 | --- | --- | --- |
-| `POST` / `GET` | `/v1/rags/{id}/search` | `rag_search` |
+| `POST` / `GET` | `/v1/rags/{id}/search` | `rag_query` |
 | `GET` | `/v1/rags/{id}/documents` | `rag_list_documents` |
 | `GET` | `/v1/rags/{id}/document?source=…` | `rag_get_document` |
 
