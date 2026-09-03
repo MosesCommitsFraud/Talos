@@ -372,8 +372,8 @@ def test_json_arguments_are_accepted(monkeypatch):
 
 
 def test_get_weather_is_registered_end_to_end():
-    from src.agent_tools import TOOL_TAGS
     from src.agent_loop import TOOL_SECTIONS
+    from src.agent_tools import TOOL_TAGS
     from src.tool_index import ALWAYS_AVAILABLE, BUILTIN_TOOL_DESCRIPTIONS
     from src.tool_parsing import _TOOL_NAME_MAP
     from src.tool_schemas import FUNCTION_TOOL_SCHEMAS

@@ -50,7 +50,11 @@ class _Store:
         return list(self._docs)
 
 
-class _RagLike:
+class _RagLike(rv.VectorRAG):
+    """Only the store is real. Subclassing (without running ``__init__``) keeps
+    the per-base config helpers — ``_expand_on`` and friends — the production
+    ones, so the gate under test is the gate that ships."""
+
     def __init__(self, store):
         self._store = store
 

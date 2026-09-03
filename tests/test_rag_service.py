@@ -11,7 +11,6 @@ from fastapi.testclient import TestClient
 
 from src import rag_api, rag_config, rag_registry, rag_scopes
 
-
 # ---------------------------------------------------------------------------
 # Fakes / fixtures
 # ---------------------------------------------------------------------------

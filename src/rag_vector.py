@@ -1206,6 +1206,13 @@ def _shared_sparse_embedder(kind: str, model: str):
 class VectorRAG:
     """Haystack + Qdrant hybrid RAG. Public API kept stable for callers."""
 
+    # Class-level fallback so the config readers below never depend on
+    # ``__init__`` having run — several helpers are also called on instances
+    # built with ``object.__new__``. Empty means "no per-base override", so
+    # every read falls through to process env. Never mutated in place;
+    # ``__init__`` rebinds it per instance.
+    _cfg: Dict[str, Any] = {}
+
     def __init__(
         self,
         persist_directory: str = "data/rag",

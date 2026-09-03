@@ -343,7 +343,8 @@ def setup_rag_routes():
         (src/rag_api.py) — exposed here too so the Talos UI can manage the bases
         without going through the other port.
         """
-        from src.rag_registry import describe, list_bases as _list
+        from src.rag_registry import describe
+        from src.rag_registry import list_bases as _list
 
         return {"bases": [describe(e) for e in _list()]}
 
@@ -351,7 +352,8 @@ def setup_rag_routes():
     def create_base(body: RagBaseCreate):
         """Register a knowledge base. Its Qdrant collection is created on first
         use, sized by the embedding model live at that moment."""
-        from src.rag_registry import RagConflict, create_base as _create, describe
+        from src.rag_registry import RagConflict, describe
+        from src.rag_registry import create_base as _create
 
         try:
             entry = _create(
@@ -370,7 +372,8 @@ def setup_rag_routes():
     def update_base(base_id: str, body: RagBaseUpdate):
         """Edit a base's name, description or language. Id and collection are
         immutable — external callers address bases by id."""
-        from src.rag_registry import RagNotFound, describe, update_base as _update
+        from src.rag_registry import RagNotFound, describe
+        from src.rag_registry import update_base as _update
 
         try:
             entry = _update(
@@ -390,7 +393,8 @@ def setup_rag_routes():
         The default base cannot be deleted — every un-targeted caller, including
         Talos chat, resolves to it.
         """
-        from src.rag_registry import RagNotFound, delete_base as _delete
+        from src.rag_registry import RagNotFound
+        from src.rag_registry import delete_base as _delete
 
         try:
             entry = _delete(base_id, drop_collection=drop_data)
@@ -834,9 +838,8 @@ def setup_rag_routes():
     @router.get("/documents/search")
     def search_document_chunks(q: str, limit: int = 200, rag_id: str | None = None):
         """Keyword scan across every indexed chunk (explorer search box)."""
-        from src.rag_singleton import get_rag_manager, last_init_error
-
         from src.rag_scopes import SCOPE_IDS
+        from src.rag_singleton import get_rag_manager, last_init_error
 
         rag = _resolve_rag(rag_id, get_rag_manager)
         if not rag or not getattr(rag, "healthy", False):

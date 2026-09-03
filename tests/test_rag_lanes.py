@@ -14,7 +14,7 @@ import pytest
 rv = importlib.import_module("src.rag_vector")
 
 
-class _Router:
+class _Router(rv.VectorRAG):
     """Minimal stand-in so we can call the unbound ``_documents_for_file`` and
     record which lane it dispatches to, without building a real VectorRAG (which
     would require a live Qdrant + embedding endpoint)."""
@@ -101,7 +101,7 @@ def test_av_lane_skips_when_disabled(monkeypatch):
     monkeypatch.setenv("VIDEO_ASR_ENABLED", "")
     monkeypatch.delenv("VIDEO_ASR_URL", raising=False)
 
-    class _Dummy:
+    class _Dummy(rv.VectorRAG):
         pass
 
     with pytest.raises(RuntimeError, match="ASR is disabled"):
@@ -217,7 +217,7 @@ def test_vlm_doc_exts_cover_pdf_and_office():
 
 
 def test_vlm_chat_url_normalizes_base_and_full(monkeypatch):
-    class _Dummy:
+    class _Dummy(rv.VectorRAG):
         pass
 
     monkeypatch.setenv("VLM_URL", "http://host:8000/v1")
@@ -403,7 +403,7 @@ def test_pixel_write_is_noop_when_disabled(monkeypatch):
     monkeypatch.setenv("IMAGE_PIXEL_ENABLED", "")
     monkeypatch.delenv("IMAGE_EMBED_URL", raising=False)
 
-    class _Dummy:
+    class _Dummy(rv.VectorRAG):
         pass
 
     assert rv.VectorRAG._write_image_pixel(_Dummy(), "shot.png", {}, "") is False
@@ -423,7 +423,7 @@ def test_vl_embed_parses_openai_shape(monkeypatch):
 
     monkeypatch.setattr(httpx, "post", lambda *a, **k: _Resp())
 
-    class _Dummy:
+    class _Dummy(rv.VectorRAG):
         pass
 
     assert rv.VectorRAG._vl_embed(_Dummy(), "a query") == [0.1, 0.2, 0.3]
