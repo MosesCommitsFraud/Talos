@@ -199,31 +199,19 @@ def test_unauthenticated_callers_are_rejected(monkeypatch):
     assert r.status_code == 401
 
 
-def _mounted_paths(routes, prefix=""):
-    """Every path the app can serve, flattened.
-
-    FastAPI used to copy an included router's routes onto the app, so
-    `app.routes` was a flat list of endpoints. Newer versions keep the router
-    itself in the list — it has a `prefix` and its own `routes`, but no `path` —
-    so the table is a tree and a flat comprehension sees an empty string for
-    every router that was ever included.
-    """
-    for route in routes:
-        path = getattr(route, "path", None)
-        if path is None:  # an APIRouter, not an endpoint
-            path = getattr(route, "prefix", "")
-        # A router's children already carry its prefix (APIRouter applies it at
-        # decoration time), so only prepend when they don't.
-        full = path if path.startswith(prefix) else prefix + path
-        nested = getattr(route, "routes", None)
-        if nested:
-            yield from _mounted_paths(nested, full)
-        else:
-            yield full
-
-
 def test_route_is_mounted_on_the_app():
+    """Mounted on the real app, not just on the throwaway one the fixture builds.
+
+    Asked of the app rather than of `app.routes`: what matters is that the URL
+    resolves to this handler, and the shape of the route table is a FastAPI
+    implementation detail that has already changed underneath this test once
+    (included routers stopped being flattened into `app.routes`). Unauthenticated,
+    so a mounted route answers 401 from `require_user` — anything but 404 proves
+    it resolved.
+    """
     import app as app_module
 
-    paths = set(_mounted_paths(app_module.app.routes))
-    assert "/api/news/thumbnail" in paths, f"{len(paths)} routes mounted: {sorted(paths)}"
+    client = TestClient(app_module.app, raise_server_exceptions=False)
+    r = client.get("/api/news/thumbnail", params={"url": "https://pub.example/img.png"})
+    table = [(type(x).__name__, getattr(x, "path", None)) for x in app_module.app.routes]
+    assert r.status_code != 404, f"route did not resolve ({r.status_code}); app.routes = {table}"
