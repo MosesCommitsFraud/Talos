@@ -164,14 +164,20 @@ as a logged-in browser session, so the two get their own policy.
 | `mcp_web_searxng_url` | A different SearxNG for MCP callers. Empty = the same one the UI uses. |
 | `mcp_web_domain_allowlist` / `_blocklist` | The MCP-only domain policy. Same semantics as the web-UI lists: blocklist always wins, a non-empty allowlist is allowlist-only. |
 | `mcp_web_max_results` / `mcp_web_max_fetch_chars` | Defaults for callers that don't name a size. A caller's own request still wins, bounded by the hard caps in `src/web_search.py`. |
+| `mcp_web_tools` | Which web tools are offered. Dropping `web_fetch` leaves a caller able to see what exists without using this instance to read it. |
+| `mcp_web_safesearch` | SearxNG's own filter level (0/1/2) for MCP searches. MCP-only: it is passed beside `policy`, so an instance can inherit the web-UI domain lists and still filter differently here. The in-app agent always searches at 0. |
 | `mcp_rag_enabled` | Off removes the whole `rag_*` family, whatever the token's scopes say. The in-app agent keeps its full retrieval. |
 | `mcp_rag_inherit` | On (default) = every knowledge base in the registry is reachable. Off = only `mcp_rag_allowed` is. |
 | `mcp_rag_allowed` | Base ids shared in selected mode. A withheld base is missing from `rag_list_collections` and refused by name, with the allowed ids in the error. A caller that names no base searches the allowed ones rather than falling through to `default`. |
 | `mcp_rag_tools` | Which `rag_*` tools are offered. Default is all four; dropping `rag_get_document` leaves a caller able to search and cite passages but not to pull whole documents out of the instance. |
 | `mcp_rag_max_results` | Ceiling on the passages one `rag_query` returns (1–20). A smaller request, or a smaller pipeline default, still wins. |
+| `mcp_rag_allowed_scopes` | Sub-index namespaces (`src/rag_scopes.py`) an MCP caller may name in `rag_query`'s `scope`. **Empty by default, and empty means none** — the SQL schema index is not reachable from outside unless it is named here. Asking for a withheld scope is refused, not silently downgraded to an ordinary search. |
 | `mcp_skills_enabled` | Off removes the whole `skills_*` family. |
 | `mcp_skills_inherit` | On (default) = exactly the library enabled in Settings → Skills goes out. Off = only `mcp_skills_allowed` does. |
 | `mcp_skills_allowed` | Skill names shared in selected mode. Gated names are refused with "not shared over MCP" so a client stops re-spelling them. |
+| `mcp_skills_tools` | Which `skills_*` tools are offered. |
+| `mcp_skills_per_skill_tools` | On (default) = each published skill is also its own `skill_<slug>` tool. Off keeps the `skills_*` tools but stops a large library filling a client's palette — and stops the catalogue listing every procedure by name. |
+| `mcp_rate_limit_per_minute` | `tools/call` ceiling per API token; 0 (default) = no limit. In-process and per worker — it exists to stop one token walking the index in a loop, not as a distributed quota. Over the limit the caller gets a tool result saying so, not a transport error, so the model waits instead of treating the session as broken. |
 
 There is **one** skill library. Selected mode narrows which of the existing
 published skills leave the instance — it never introduces a second copy, and it
@@ -187,6 +193,13 @@ The policy is applied in `mcp_public.call_tool`, on a copy of the call's
 arguments, and never inside the tool bodies: `src/rag_api.py` (the outward REST
 service) and the in-app agent share those bodies and must keep reaching every
 base.
+
+Every family follows the same two-step shape — a family switch, then a tool
+allow-list — and every allow-list means *all of them* when the key is absent
+(so an upgrade never removes a working tool) but *none of them* when it is
+explicitly empty (so unticking everything in the UI does what it looks like).
+The handshake's `instructions` string is assembled from the tools that survive
+those gates, so a client is never told to reach for a tool it cannot see.
 
 ## Client setup
 

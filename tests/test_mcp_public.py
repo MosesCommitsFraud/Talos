@@ -176,13 +176,22 @@ def test_rag_query_excludes_the_sql_namespace_by_default(fake_rag):
 
 
 def test_rag_query_with_explicit_scope_drops_the_default_exclusion(fake_rag):
-    call("rag_query", {"query": "schema", "scope": "sql"})
+    """The tool body's own contract, which the REST service shares.
+
+    Whether an *MCP* caller may name a scope at all is a separate question,
+    answered by `mcp_rag_allowed_scopes` — see tests/test_mcp_settings.py.
+    """
+    mcp_public._tool_rag_query({"query": "schema", "scope": "sql"})
     assert fake_rag.search_calls[0]["scope"] == "sql"
     assert fake_rag.search_calls[0]["exclude_scopes"] is None
 
 
-@pytest.mark.parametrize("requested,expected", [(0, 1), (99, 20), (7, 7), ("nonsense", 5)])
-def test_rag_query_clamps_k(fake_rag, requested, expected):
+# 99 lands on 10, not 20: `mcp_rag_max_results` caps an MCP caller before
+# `_clamp_k`'s own 1–20 bound is reached. Pinned to the shipped default rather
+# than read from this machine's settings.json.
+@pytest.mark.parametrize("requested,expected", [(0, 1), (99, 10), (7, 7), ("nonsense", 5)])
+def test_rag_query_clamps_k(fake_rag, monkeypatch, requested, expected):
+    monkeypatch.setattr("src.mcp_settings.rag_max_results", lambda: 10)
     call("rag_query", {"query": "q", "k": requested})
     assert fake_rag.search_calls[-1]["k"] == expected
 

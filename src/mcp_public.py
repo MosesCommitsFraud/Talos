@@ -571,7 +571,10 @@ def _validate_collections(ids: List[Optional[str]]) -> None:
 
 
 def _apply_rag_policy(
-    args: Dict[str, Any], allowed: Optional[Set[str]], max_results: int
+    args: Dict[str, Any],
+    allowed: Optional[Set[str]],
+    max_results: int,
+    allowed_scopes: Optional[Set[str]] = None,
 ) -> Dict[str, Any]:
     """Bend one MCP call's arguments to the administrator's RAG policy.
 
@@ -579,7 +582,7 @@ def _apply_rag_policy(
     bodies stay policy-free so `src/rag_api.py` and the in-app agent keep
     reaching every base.
 
-    Two things happen here:
+    Three things happen here:
 
     * **Bases.** Any id the caller named must be on the allow-list; naming one
       that isn't is refused by name, the same way an unknown base is, so the
@@ -587,11 +590,28 @@ def _apply_rag_policy(
       A caller that named *none* would otherwise fall through to the `default`
       base — which may be exactly the one being withheld — so the search is
       pointed at the allowed set instead.
+    * **Scopes.** `scope` addresses a sub-index a Talos feature manages for
+      itself (the SQL schema files — see `src/rag_scopes.py`), which ordinary
+      retrieval never returns. Unless the administrator named that scope, the
+      argument is refused rather than quietly dropped: a caller that thinks it
+      is reading the schema index should not be handed ordinary passages that
+      look like an answer.
     * **Size.** `topK` is capped. A caller asking for fewer passages still gets
       fewer, and an instance whose pipeline default is smaller keeps it — this
       is a ceiling, not a default.
     """
     out = dict(args)
+
+    scope = str(out.get("scope") or "").strip()
+    if scope and scope not in (allowed_scopes or set()):
+        raise ToolError(
+            f"The {scope!r} namespace is not available over MCP. "
+            + (
+                f"Available: {', '.join(sorted(allowed_scopes))}."
+                if allowed_scopes
+                else "This instance shares no sub-index namespaces externally."
+            )
+        )
 
     if allowed is not None:
         named = [i for i in _collections_arg(out) if i]
@@ -1124,7 +1144,10 @@ def skill_tools(owner: Optional[str] = None, skills_manager=None) -> List[Dict[s
     """
     from src import mcp_settings
 
-    if not mcp_settings.skills_enabled():
+    # Two switches: the family, and this shape of it. An administrator with a
+    # large library may want skills_search without a hundred tools in every
+    # client's palette.
+    if not mcp_settings.skills_enabled() or not mcp_settings.skills_per_skill_tools():
         return []
 
     out: List[Dict[str, Any]] = []
@@ -1242,6 +1265,8 @@ def _tool_web_search(args: Dict[str, Any]) -> str:
             session_id="",
             # None when the admin left MCP inheriting the web-UI policy.
             policy=mcp_settings.web_policy(),
+            # MCP-only: the in-app agent always searches at 0.
+            safesearch=mcp_settings.web_safesearch(),
         )
     )
     return _unwrap(outcome)
@@ -1328,7 +1353,12 @@ def call_tool(
         # filtered where it is dispatched below. Refusing it when nothing is
         # shared would deny the client the one call that says so.
         if name.startswith("rag_") and name != "rag_list_collections":
-            args = _apply_rag_policy(args, rag_bases, mcp_settings.rag_max_results())
+            args = _apply_rag_policy(
+                args,
+                rag_bases,
+                mcp_settings.rag_max_results(),
+                mcp_settings.rag_allowed_scopes(),
+            )
         # A per-skill tool (see `skill_tools`). Resolved against this caller's
         # own visible skills, then answered exactly as skills_get would.
         if name.startswith(SKILL_TOOL_PREFIX):

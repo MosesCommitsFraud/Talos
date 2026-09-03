@@ -165,6 +165,12 @@ DEFAULT_SETTINGS = {
     # Its own request still wins, bounded by src/web_search.py's hard caps.
     "mcp_web_max_results": 6,
     "mcp_web_max_fetch_chars": 8000,
+    # Which web tools go out. Dropping web_fetch leaves a caller able to see
+    # what exists without turning this instance into a proxy for reading it.
+    "mcp_web_tools": ["web_search", "web_fetch"],
+    # SearxNG's safe-search level for MCP callers only (0 off, 1 moderate,
+    # 2 strict). The in-app agent always searches at 0.
+    "mcp_web_safesearch": 0,
     # RAG over MCP. `mcp_rag_enabled` is the family switch; the two lists below
     # narrow *what* goes out once it is on.
     "mcp_rag_enabled": True,
@@ -190,12 +196,31 @@ DEFAULT_SETTINGS = {
     # own still wins, as does a smaller pipeline default — this only stops an
     # external client asking for twenty passages a call.
     "mcp_rag_max_results": 10,
+    # Sub-index namespaces (src/rag_scopes.py) an MCP caller may address with
+    # rag_query's `scope` argument. Empty — the default — means none: the SQL
+    # schema files and any later scope stay out of reach, exactly as they are
+    # for ordinary in-app retrieval. Naming one here opens it deliberately.
+    "mcp_rag_allowed_scopes": [],
     "mcp_skills_enabled": True,
     # True = expose exactly the published library the web UI serves (one
     # library, no second copy). False = only the skills named in
     # mcp_skills_allowed leave the instance.
     "mcp_skills_inherit": True,
     "mcp_skills_allowed": [],
+    # Which of the skills_* tools go out.
+    "mcp_skills_tools": [
+        "skills_list",
+        "skills_search",
+        "skills_get",
+        "skills_read_reference",
+    ],
+    # Each published skill is ALSO offered as its own skill_<slug> tool. Off
+    # leaves the skills_* tools alone but stops a large library from filling a
+    # client's tool palette (and from listing every procedure by name).
+    "mcp_skills_per_skill_tools": True,
+    # Calls one API token may make to /mcp per minute. 0 = no limit, which is
+    # the default so an upgrade cannot throttle a working integration.
+    "mcp_rate_limit_per_minute": 0,
     "rag_pipeline": {},
     "disabled_tools": [
         "generate_image",

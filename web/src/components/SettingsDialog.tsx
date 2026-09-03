@@ -1156,9 +1156,36 @@ function WebPanel() {
  * (Settings → Skills) and one registry (Settings → RAG); this page only decides
  * which of them leaves the instance, and through which tools. */
 
-/** The rag_* tools that can be offered over /mcp. Mirrors
- *  src/mcp_settings.py RAG_TOOLS — a name missing from one is unreachable. */
+/** The tools each family can offer over /mcp. Mirrors RAG_TOOLS / WEB_TOOLS /
+ *  SKILLS_TOOLS in src/mcp_settings.py — a name missing from one is
+ *  unreachable, and a name here that the backend doesn't know is ignored. */
 const RAG_MCP_TOOLS = ['rag_query', 'rag_list_collections', 'rag_list_documents', 'rag_get_document'];
+const WEB_MCP_TOOLS = ['web_search', 'web_fetch'];
+const SKILLS_MCP_TOOLS = ['skills_list', 'skills_search', 'skills_get', 'skills_read_reference'];
+
+/** Purpose-bound sub-indexes a caller could ask for by name. Mirrors SCOPES in
+ *  src/rag_scopes.py; listed statically rather than fetched, because the live
+ *  list only comes attached to a base's whole document listing. */
+const RAG_MCP_SCOPES = ['sql'];
+
+/** Tick-list over one family's tools. An unset setting means every tool, the
+ *  same fallback src/mcp_settings.py applies to a pre-upgrade settings file. */
+function ToolRows({ s, k, tools }: { s: Draft; k: string; tools: string[] }) {
+  const { t } = useTranslation();
+  const on: string[] = Array.isArray(s.value(k)) ? (s.value(k) as string[]) : tools;
+  return (
+    <>
+      {tools.map((name) => (
+        <Row key={name} label={name} hint={t(`settings.mcp.toolHints.${name}`)}>
+          <Switch
+            checked={on.includes(name)}
+            onCheckedChange={(v) => s.setValue(k, v ? [...on, name] : on.filter((n) => n !== name))}
+          />
+        </Row>
+      ))}
+    </>
+  );
+}
 
 function McpPanel() {
   const { t } = useTranslation();
@@ -1191,16 +1218,9 @@ function McpPanel() {
   const toggleBase = (id: string, on: boolean) =>
     s.setValue('mcp_rag_allowed', on ? [...ragAllowed, id] : ragAllowed.filter((b) => b !== id));
 
-  // Missing key (settings written before this existed) means "all four", the
-  // same fallback src/mcp_settings.py applies.
-  const ragTools: string[] = Array.isArray(s.value('mcp_rag_tools'))
-    ? (s.value('mcp_rag_tools') as string[])
-    : RAG_MCP_TOOLS;
-  const toggleRagTool = (name: string, on: boolean) =>
-    s.setValue(
-      'mcp_rag_tools',
-      on ? [...ragTools, name] : ragTools.filter((n) => n !== name),
-    );
+  const ragScopes: string[] = Array.isArray(s.value('mcp_rag_allowed_scopes'))
+    ? (s.value('mcp_rag_allowed_scopes') as string[])
+    : [];
 
   // Library skills that are switched on for the agent — the only ones worth
   // offering here, since a disabled skill never reaches any caller.
@@ -1236,7 +1256,27 @@ function McpPanel() {
             <TextRow s={s} k="mcp_web_max_fetch_chars" label={t('settings.mcp.maxChars')} hint={t('settings.mcp.maxCharsHint')} type="number" width="w-28" />
           </>
         )}
+        {webOn && (
+          <Row label={t('settings.mcp.safesearch')} hint={t('settings.mcp.safesearchHint')}>
+            <Select
+              className="w-40"
+              value={String(s.value('mcp_web_safesearch') ?? 0)}
+              onChange={(v) => s.setValue('mcp_web_safesearch', Number(v))}
+              options={[
+                { value: '0', label: t('settings.mcp.safesearchOff') },
+                { value: '1', label: t('settings.mcp.safesearchModerate') },
+                { value: '2', label: t('settings.mcp.safesearchStrict') },
+              ]}
+            />
+          </Row>
+        )}
       </Section>
+
+      {webOn && (
+        <Section title={t('settings.mcp.webTools')}>
+          <ToolRows s={s} k="mcp_web_tools" tools={WEB_MCP_TOOLS} />
+        </Section>
+      )}
 
       {webOn && !webInherit && (
         <>
@@ -1291,9 +1331,18 @@ function McpPanel() {
 
       {ragOn && (
         <Section title={t('settings.mcp.ragTools')}>
-          {RAG_MCP_TOOLS.map((name) => (
-            <Row key={name} label={name} hint={t(`settings.mcp.ragToolHints.${name}`)}>
-              <Switch checked={ragTools.includes(name)} onCheckedChange={(v) => toggleRagTool(name, v)} />
+          <ToolRows s={s} k="mcp_rag_tools" tools={RAG_MCP_TOOLS} />
+          {RAG_MCP_SCOPES.map((id) => (
+            <Row key={id} label={t(`settings.mcp.ragScopes.${id}`)} hint={t('settings.mcp.ragScopesHint')}>
+              <Switch
+                checked={ragScopes.includes(id)}
+                onCheckedChange={(v) =>
+                  s.setValue(
+                    'mcp_rag_allowed_scopes',
+                    v ? [...ragScopes, id] : ragScopes.filter((x) => x !== id),
+                  )
+                }
+              />
             </Row>
           ))}
         </Section>
@@ -1322,6 +1371,17 @@ function McpPanel() {
             ))
           )
         )}
+      </Section>
+
+      {skillsOn && (
+        <Section title={t('settings.mcp.skillsTools')}>
+          <ToolRows s={s} k="mcp_skills_tools" tools={SKILLS_MCP_TOOLS} />
+          <BoolRow s={s} k="mcp_skills_per_skill_tools" label={t('settings.mcp.perSkillTools')} hint={t('settings.mcp.perSkillToolsHint')} />
+        </Section>
+      )}
+
+      <Section title={t('settings.mcp.limits')}>
+        <TextRow s={s} k="mcp_rate_limit_per_minute" label={t('settings.mcp.rateLimit')} hint={t('settings.mcp.rateLimitHint')} type="number" width="w-24" />
       </Section>
 
       <SaveBar dirty={s.dirty} saving={s.save.isPending} error={s.save.isError ? (s.save.error as Error).message : undefined} onSave={() => s.save.mutate()} />

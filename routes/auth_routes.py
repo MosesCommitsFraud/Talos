@@ -578,6 +578,8 @@ def setup_auth_routes(auth_manager: AuthManager) -> APIRouter:
             # Ceiling on passages one MCP rag_query returns; src/mcp_public.py
             # clamps again, this keeps the stored value sane.
             "mcp_rag_max_results": (1, 20),
+            "mcp_web_safesearch": (0, 2),  # SearxNG's own levels
+            "mcp_rate_limit_per_minute": (0, 10000),  # 0 = no limit
         }
         for key in DEFAULT_SETTINGS:
             if key not in body:

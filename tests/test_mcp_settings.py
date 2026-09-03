@@ -193,6 +193,37 @@ def test_selected_mode_also_narrows_the_per_skill_tools(settings):
     assert "skill_invoice" not in names
 
 
+def test_a_deselected_web_tool_leaves_the_other_one(settings):
+    settings["mcp_web_tools"] = ["web_search"]
+    names = {t["name"] for t in mcp_public.list_tools(ALL, skills_manager=FakeSkills())}
+
+    assert "web_search" in names
+    assert "web_fetch" not in names
+
+
+def test_a_deselected_skills_tool_leaves_the_rest_of_the_family(settings):
+    settings["mcp_skills_tools"] = ["skills_list", "skills_search"]
+    sm = FakeSkills(index=[{"name": "deploy", "description": "", "category": "ops"}])
+    names = {t["name"] for t in mcp_public.list_tools(ALL, skills_manager=sm)}
+
+    assert {"skills_list", "skills_search"} <= names
+    assert "skills_get" not in names
+    # The per-skill tools are a separate switch, so they are still there.
+    assert "skill_deploy" in names
+
+
+def test_per_skill_tools_can_be_dropped_without_losing_the_family(settings):
+    settings["mcp_skills_per_skill_tools"] = False
+    sm = FakeSkills(index=[{"name": "deploy", "description": "", "category": "ops"}])
+    names = {t["name"] for t in mcp_public.list_tools(ALL, skills_manager=sm)}
+
+    assert "skill_deploy" not in names
+    assert "skills_search" in names
+    text, is_error = call("skill_deploy", {}, sm=sm)
+    assert is_error is True
+    assert "disabled" in text.lower()
+
+
 def test_a_disabled_tool_is_refused_even_with_the_scope(settings):
     """A client may have cached an older tool list — listing isn't the gate."""
     settings["mcp_web_enabled"] = False
@@ -249,6 +280,43 @@ def test_the_retired_rag_search_name_obeys_the_same_switch(settings):
 
 def test_settings_from_before_the_setting_existed_offer_every_rag_tool(settings):
     assert mcp_settings.rag_tools() == set(mcp_settings.RAG_TOOLS)
+
+
+def test_unticking_every_tool_means_none_not_all(settings):
+    """The empty list is an administrator's decision, not a missing value."""
+    settings["mcp_rag_tools"] = []
+    names = {t["name"] for t in mcp_public.list_tools(ALL, skills_manager=FakeSkills())}
+
+    assert not any(n.startswith("rag_") for n in names)
+
+
+def test_an_unknown_tool_name_cannot_widen_the_catalogue(settings):
+    settings["mcp_rag_tools"] = ["rag_query", "rag_delete_everything"]
+    assert mcp_settings.rag_tools() == {"rag_query"}
+
+
+def test_a_scope_is_refused_unless_the_admin_named_it(settings, registry):
+    """`scope` was the one argument that reached past the default exclusions."""
+    text, is_error = call("rag_query", {"query": "orders", "scope": "sql"})
+
+    assert is_error is True
+    assert "sql" in text
+
+
+def test_an_allowed_scope_reaches_the_tool(settings, registry):
+    settings["mcp_rag_allowed_scopes"] = ["sql"]
+    seen = {}
+
+    def fake_query(args):
+        seen.update(args)
+        return "ok"
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(mcp_public, "_tool_rag_query", fake_query)
+        _, is_error = call("rag_query", {"query": "orders", "scope": "sql"})
+
+    assert is_error is False
+    assert seen["scope"] == "sql"
 
 
 def test_inheriting_lists_every_registered_base(settings, registry):
@@ -321,6 +389,51 @@ def test_the_cap_does_not_leak_into_the_rest_service(settings, registry):
     settings.update({"mcp_rag_inherit": False, "mcp_rag_allowed": ["default"]})
 
     assert mcp_public._tool_rag_list_collections().count("- **") == 2
+
+
+# ---------------------------------------------------------------------------
+# Rate limit
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def rate_state():
+    """A clean per-caller window; the counter is module state by design."""
+    from routes import mcp_public_routes
+
+    mcp_public_routes._rate_calls.clear()
+    yield mcp_public_routes
+    mcp_public_routes._rate_calls.clear()
+
+
+def test_no_limit_by_default(settings, rate_state):
+    assert all(rate_state._rate_limited("token:a") is None for _ in range(50))
+
+
+def test_calls_are_refused_past_the_limit(settings, rate_state):
+    settings["mcp_rate_limit_per_minute"] = 2
+
+    assert rate_state._rate_limited("token:a") is None
+    assert rate_state._rate_limited("token:a") is None
+    assert rate_state._rate_limited("token:a") == 2
+
+
+def test_the_limit_is_counted_per_caller(settings, rate_state):
+    settings["mcp_rate_limit_per_minute"] = 1
+    rate_state._rate_limited("token:a")
+
+    assert rate_state._rate_limited("token:b") is None
+
+
+def test_the_window_slides(settings, rate_state, monkeypatch):
+    settings["mcp_rate_limit_per_minute"] = 1
+    now = [1000.0]
+    monkeypatch.setattr(rate_state.time, "monotonic", lambda: now[0])
+
+    assert rate_state._rate_limited("token:a") is None
+    assert rate_state._rate_limited("token:a") == 1
+    now[0] += 61
+    assert rate_state._rate_limited("token:a") is None
 
 
 # ---------------------------------------------------------------------------

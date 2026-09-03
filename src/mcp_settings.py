@@ -62,6 +62,27 @@ def _int(key: str, default: int, lo: int, hi: int) -> int:
         return default
 
 
+def _allowed_tools(key: str, known: tuple) -> Set[str]:
+    """Resolve one tool-family allow-list against the tools that exist.
+
+    Names outside `known` are dropped rather than trusted: the setting is an
+    allow-list of things that exist, so a typo narrows the catalogue instead of
+    silently inventing a tool.
+
+    The default is every tool in `known`, which is also what an instance
+    upgraded from before the setting existed gets — `get_setting` merges
+    DEFAULT_SETTINGS, and `_get` falls back to the same list if settings can't
+    be read at all. An *explicitly* empty list therefore means what it says:
+    none of them.
+    """
+    configured = _get(key, list(known))
+    if isinstance(configured, str):
+        configured = configured.split()
+    if not isinstance(configured, (list, tuple)):
+        return set(known)
+    return {str(n).strip() for n in configured} & set(known)
+
+
 def _list(key: str) -> List[str]:
     val = _get(key, [])
     if isinstance(val, str):
@@ -106,11 +127,29 @@ def web_max_fetch_chars() -> int:
     return _int("mcp_web_max_fetch_chars", 8000, 500, 20_000)
 
 
+# The web tools that exist, and the default allow-set — see `rag_tools` for why
+# an empty or unknown-only setting falls back to all of them.
+WEB_TOOLS = ("web_search", "web_fetch")
+
+
+def web_tools() -> Set[str]:
+    """The web_* tools this instance hands out."""
+    return _allowed_tools("mcp_web_tools", WEB_TOOLS)
+
+
+def web_safesearch() -> int:
+    """SearxNG safe-search level for MCP callers (0 off, 1 moderate, 2 strict).
+
+    MCP-only by design: the in-app agent searches at 0, and a bearer token on
+    someone else's machine is the case where an administrator may want
+    otherwise.
+    """
+    return _int("mcp_web_safesearch", 0, 0, 2)
+
+
 # ── RAG ──
 
-# The rag_* tools that exist. Also the default allow-set: an instance whose
-# settings predate `mcp_rag_tools` keeps offering all four, so an upgrade
-# changes nothing.
+# The rag_* tools that exist, and the default allow-set.
 RAG_TOOLS = (
     "rag_query",
     "rag_list_collections",
@@ -125,14 +164,8 @@ def rag_enabled() -> bool:
 
 
 def rag_tools() -> Set[str]:
-    """The rag_* tools this instance hands out.
-
-    Names outside `RAG_TOOLS` are dropped rather than trusted: the setting is
-    an allow-list of things that exist, so a typo narrows the catalogue instead
-    of silently inventing a tool.
-    """
-    names = {n.strip() for n in _list("mcp_rag_tools")} or set(RAG_TOOLS)
-    return {n for n in names if n in RAG_TOOLS}
+    """The rag_* tools this instance hands out."""
+    return _allowed_tools("mcp_rag_tools", RAG_TOOLS)
 
 
 def rag_bases() -> Optional[Set[str]]:
@@ -152,12 +185,41 @@ def rag_max_results() -> int:
     return _int("mcp_rag_max_results", 10, 1, 20)
 
 
+def rag_allowed_scopes() -> Set[str]:
+    """Sub-index namespaces (src/rag_scopes.py) an MCP caller may ask for.
+
+    Empty by default, and empty means none. A scope is a set of documents a
+    Talos *feature* manages for itself — the SQL schema files today — which
+    ordinary retrieval deliberately never returns; `rag_query`'s `scope`
+    argument was the one way past that from outside. Opening one is now a
+    decision an administrator makes by name.
+    """
+    return {s.strip() for s in _list("mcp_rag_allowed_scopes") if s.strip()}
+
+
 # ── Skills ──
 
 
 def skills_enabled() -> bool:
     """Whether the skills_* tools are offered over MCP at all."""
     return _bool("mcp_skills_enabled", True)
+
+
+# The skills_* tools that exist, and the default allow-set. The per-skill
+# `skill_<slug>` tools are governed separately by `skills_per_skill_tools`:
+# they are the same library in a different shape, and a client's palette is
+# where the difference is felt.
+SKILLS_TOOLS = ("skills_list", "skills_search", "skills_get", "skills_read_reference")
+
+
+def skills_tools() -> Set[str]:
+    """The skills_* tools this instance hands out."""
+    return _allowed_tools("mcp_skills_tools", SKILLS_TOOLS)
+
+
+def skills_per_skill_tools() -> bool:
+    """Whether each published skill is also offered as its own skill_* tool."""
+    return _bool("mcp_skills_per_skill_tools", True)
 
 
 def skill_filter() -> Callable[[Any], bool]:
@@ -174,21 +236,34 @@ def skill_filter() -> Callable[[Any], bool]:
     return lambda name: str(name or "").strip().lower() in allowed
 
 
+def rate_limit_per_minute() -> int:
+    """Calls one API token may make to /mcp per minute; 0 = no limit.
+
+    Enforced in `routes/mcp_public_routes.py`, which is where a caller identity
+    exists. Zero is the default so an upgrade cannot throttle an integration
+    that was working the day before.
+    """
+    return _int("mcp_rate_limit_per_minute", 0, 0, 10_000)
+
+
 def tool_enabled(name: str) -> bool:
     """Whether one MCP tool is switched on for this instance.
 
-    Tools outside the two configurable families are always on — their gate is
+    Two gates per family: the family switch, then that family's own tool
+    allow-list. Anything outside the three families is always on — its gate is
     the token scope, which is checked separately in `mcp_public.call_tool`.
+
+    Retired spellings (`rag_search`) are resolved to the current name before
+    this is reached — see `mcp_public._TOOL_ALIASES` — so only real names are
+    matched here.
     """
-    if name in ("web_search", "web_fetch"):
-        return web_enabled()
-    # `rag_search` is the retired spelling of rag_query and is resolved to it
-    # before this is reached (mcp_public._TOOL_ALIASES), so only the real names
-    # are checked against the allow-list.
+    if name in WEB_TOOLS:
+        return web_enabled() and name in web_tools()
     if name in RAG_TOOLS:
         return rag_enabled() and name in rag_tools()
-    # Both the skills_* family and the per-skill `skill_<slug>` tools
-    # (mcp_public.skill_tools) hang off the same switch.
-    if name.startswith("skills_") or name.startswith("skill_"):
-        return skills_enabled()
+    if name in SKILLS_TOOLS:
+        return skills_enabled() and name in skills_tools()
+    # A per-skill `skill_<slug>` tool: the library in its other shape.
+    if name.startswith("skill_"):
+        return skills_enabled() and skills_per_skill_tools()
     return True

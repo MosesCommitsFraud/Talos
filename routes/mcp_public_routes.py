@@ -28,6 +28,9 @@ import asyncio
 import json
 import logging
 import os
+import threading
+import time
+from collections import defaultdict, deque
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 from fastapi import APIRouter, Request
@@ -71,6 +74,41 @@ def _server_version() -> str:
         return os.getenv("TALOS_VERSION", "dev")
 
 
+# Per-caller tools/call timestamps for the rate limit (`mcp_rate_limit_per_minute`).
+# In-process and best-effort by design: it exists to stop one token walking the
+# whole index in a loop, not to be a distributed quota. Behind several workers
+# each holds its own window, so the effective ceiling is per worker — which is
+# the honest trade for keeping a stateless endpoint stateless.
+_RATE_WINDOW_SECONDS = 60.0
+_rate_calls: Dict[str, deque] = defaultdict(deque)
+_rate_lock = threading.Lock()
+
+
+def _rate_limited(label: str) -> Optional[int]:
+    """Record one call by `label`; returns the limit if it is over, else None."""
+    from src import mcp_settings
+
+    limit = mcp_settings.rate_limit_per_minute()
+    if limit <= 0:
+        return None
+
+    now = time.monotonic()
+    with _rate_lock:
+        window = _rate_calls[label]
+        cutoff = now - _RATE_WINDOW_SECONDS
+        while window and window[0] < cutoff:
+            window.popleft()
+        if len(window) >= limit:
+            return limit
+        window.append(now)
+        # Callers come and go (one token per client, re-minted, revoked); without
+        # this the map grows for the life of the process.
+        if len(_rate_calls) > 1000:
+            for key in [k for k, v in _rate_calls.items() if not v or v[-1] < cutoff]:
+                del _rate_calls[key]
+    return None
+
+
 def _error(request_id: Any, code: int, message: str) -> Dict[str, Any]:
     return {"jsonrpc": "2.0", "id": request_id, "error": {"code": code, "message": message}}
 
@@ -104,6 +142,58 @@ def _caller_context(request: Request) -> Tuple[set, Optional[str], str]:
     }
     user = getattr(request.state, "current_user", None)
     return all_scopes, user, f"session:{user or 'anonymous'}"
+
+
+def _instructions() -> str:
+    """The handshake's description of what this instance is for.
+
+    Assembled from the families that are actually switched on: telling a client
+    to reach for web_search on an instance where the administrator removed it
+    is how a model ends up burning turns on a tool that isn't in its list.
+    """
+    from src import mcp_settings
+
+    parts = [
+        "Talos exposes "
+        + ", ".join(
+            filter(
+                None,
+                [
+                    "its organisational knowledge bases" if mcp_settings.rag_enabled() else "",
+                    (
+                        "its library of reviewed procedures ('skills')"
+                        if mcp_settings.skills_enabled()
+                        else ""
+                    ),
+                    (
+                        "web access through a self-hosted search engine"
+                        if mcp_settings.web_enabled()
+                        else ""
+                    ),
+                ],
+            )
+        )
+        or "a read-only tool catalogue"
+    ]
+    on = mcp_settings.tool_enabled
+    if on("rag_query"):
+        rag_note = "Use rag_query for questions the organisation's own documents answer"
+        if on("rag_list_collections"):
+            rag_note += "; rag_list_collections names the knowledge bases it can search"
+        parts.append(rag_note + ".")
+    if on("skills_search"):
+        skill_note = "Use skills_search to find a proven procedure before improvising one"
+        if mcp_settings.skills_enabled() and mcp_settings.skills_per_skill_tools():
+            skill_note += (
+                " — each published skill is also offered as its own skill_* tool, "
+                "which returns that procedure to follow"
+            )
+        parts.append(skill_note + ".")
+    web = "/".join(n for n in mcp_settings.WEB_TOOLS if on(n))
+    if web:
+        parts.append(f"Use {web} for anything public.")
+    parts.append("All tools are read-only.")
+    return " ".join(p if p.endswith(".") else p + "." for p in parts)
 
 
 def _negotiate_version(params: Dict[str, Any]) -> str:
@@ -150,18 +240,7 @@ async def _handle_message(
                     "title": SERVER_TITLE,
                     "version": _server_version(),
                 },
-                "instructions": (
-                    "Talos exposes its organisational knowledge bases, its "
-                    "library of reviewed procedures ('skills'), and web access "
-                    "through a self-hosted search engine. Use rag_query for "
-                    "questions the organisation's own documents answer "
-                    "(rag_list_collections names the knowledge bases it can "
-                    "search), skills_search to find a proven procedure before "
-                    "improvising one — each published skill is also offered as "
-                    "its own skill_* tool, which returns that procedure to "
-                    "follow — and web_search/web_fetch for anything public. All "
-                    "tools are read-only."
-                ),
+                "instructions": _instructions(),
             },
         )
 
@@ -179,6 +258,28 @@ async def _handle_message(
         if not isinstance(name, str) or not name:
             return _error(request_id, INVALID_PARAMS, "tools/call requires a 'name'")
         arguments = params.get("arguments")
+
+        over = _rate_limited(label)
+        if over is not None:
+            logger.warning("MCP rate limit hit by %s (%s calls/min)", label, over)
+            # A tool result rather than a JSON-RPC error: the model reads it and
+            # waits, instead of the client treating the whole session as broken.
+            return _result(
+                request_id,
+                {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": (
+                                f"Rate limit reached: this token may make {over} tool "
+                                "call(s) per minute on this Talos instance. Wait and retry."
+                            ),
+                        }
+                    ],
+                    "isError": True,
+                },
+            )
+
         try:
             # The tools block on Qdrant/rerank HTTP and on disk reads, so keep
             # them off the event loop.

@@ -205,6 +205,7 @@ async def search(
     page: int = 1,
     session_id: str = "",
     policy: Optional[Dict[str, Any]] = None,
+    safesearch: int = 0,
 ) -> Dict[str, Any]:
     """Query SearxNG. Returns {"results": <markdown>} or {"error": ..., "exit_code": 1}.
 
@@ -214,6 +215,11 @@ async def search(
     Talos's outward MCP server passes its own policy here so an external bearer
     token can be held to a different domain list than the logged-in UI; see
     src/mcp_settings.py.
+
+    `safesearch` is SearxNG's own filter level (0/1/2). Passed separately from
+    `policy` because it is not an inheritable web-UI setting: only the MCP
+    server sets it, and a policy of None still has to keep meaning "inherit the
+    admin domain lists".
     """
     outcome = await _searx_request(
         query=query,
@@ -224,6 +230,7 @@ async def search(
         page=page,
         session_id=session_id,
         policy=policy,
+        safesearch=safesearch,
     )
     if "error" in outcome:
         return outcome
@@ -243,6 +250,7 @@ async def _searx_request(
     page: int,
     session_id: str,
     policy: Optional[Dict[str, Any]] = None,
+    safesearch: int = 0,
 ) -> Dict[str, Any]:
     """One SearxNG query: the transport, the leak guard and the error wording.
 
@@ -275,7 +283,8 @@ async def _searx_request(
     params: Dict[str, Any] = {
         "q": query,
         "format": "json",
-        "safesearch": 0,
+        # 0 unless the caller asked otherwise — today only the MCP server does.
+        "safesearch": max(0, min(int(safesearch or 0), 2)),
         "pageno": max(1, int(page or 1)),
     }
     category = (category or "").strip().lower()
