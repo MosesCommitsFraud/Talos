@@ -62,6 +62,7 @@ import {
   fetchUserPref,
   saveUserPref,
   fetchSharedSkills,
+  fetchRagBases,
   uploadSharedSkill,
   uploadSharedSkillBundle,
   deleteSharedSkill,
@@ -1151,8 +1152,13 @@ function WebPanel() {
  * long-lived bearer token on someone else's machine is not the same trust level
  * as a logged-in browser session, so it gets its own domain policy.
  *
- * Skills are NOT duplicated here. There is one library (Settings → Skills);
- * this page only decides which of it leaves the instance. */
+ * Skills and knowledge bases are NOT duplicated here. There is one library
+ * (Settings → Skills) and one registry (Settings → RAG); this page only decides
+ * which of them leaves the instance, and through which tools. */
+
+/** The rag_* tools that can be offered over /mcp. Mirrors
+ *  src/mcp_settings.py RAG_TOOLS — a name missing from one is unreachable. */
+const RAG_MCP_TOOLS = ['rag_query', 'rag_list_collections', 'rag_list_documents', 'rag_get_document'];
 
 function McpPanel() {
   const { t } = useTranslation();
@@ -1160,6 +1166,8 @@ function McpPanel() {
   // Same query key the Skills panel uses, so the library is served from the
   // react-query cache instead of being fetched a second time.
   const { data: skillData } = useQuery({ queryKey: ['sharedSkills'], queryFn: fetchSharedSkills });
+  // Same key the RAG pages use, so the base list comes from the cache.
+  const { data: baseData } = useQuery({ queryKey: ['rag-bases'], queryFn: fetchRagBases });
   if (!s.ready) return <Page><p className="text-sm text-muted-foreground">{t('common.loading')}</p></Page>;
 
   const asText = (k: string) => {
@@ -1173,6 +1181,26 @@ function McpPanel() {
   const webInherit = !!s.value('mcp_web_inherit');
   const skillsOn = !!s.value('mcp_skills_enabled');
   const skillsInherit = !!s.value('mcp_skills_inherit');
+  const ragOn = !!s.value('mcp_rag_enabled');
+  const ragInherit = !!s.value('mcp_rag_inherit');
+
+  const bases = baseData?.bases ?? [];
+  const ragAllowed: string[] = Array.isArray(s.value('mcp_rag_allowed'))
+    ? (s.value('mcp_rag_allowed') as string[])
+    : [];
+  const toggleBase = (id: string, on: boolean) =>
+    s.setValue('mcp_rag_allowed', on ? [...ragAllowed, id] : ragAllowed.filter((b) => b !== id));
+
+  // Missing key (settings written before this existed) means "all four", the
+  // same fallback src/mcp_settings.py applies.
+  const ragTools: string[] = Array.isArray(s.value('mcp_rag_tools'))
+    ? (s.value('mcp_rag_tools') as string[])
+    : RAG_MCP_TOOLS;
+  const toggleRagTool = (name: string, on: boolean) =>
+    s.setValue(
+      'mcp_rag_tools',
+      on ? [...ragTools, name] : ragTools.filter((n) => n !== name),
+    );
 
   // Library skills that are switched on for the agent — the only ones worth
   // offering here, since a disabled skill never reaches any caller.
@@ -1231,6 +1259,44 @@ function McpPanel() {
             />
           </Section>
         </>
+      )}
+
+      <Section
+        title={t('settings.mcp.rag')}
+        action={ragOn && !ragInherit && bases.length > 0 ? (
+          <Button size="sm" variant="ghost" onClick={() => s.setValue('mcp_rag_allowed', bases.map((b) => b.id))}>
+            {t('settings.mcp.skillsSelectAll')}
+          </Button>
+        ) : undefined}
+      >
+        <BoolRow s={s} k="mcp_rag_enabled" label={t('settings.mcp.ragEnabled')} hint={t('settings.mcp.ragEnabledHint')} />
+        {ragOn && (
+          <>
+            <BoolRow s={s} k="mcp_rag_inherit" label={t('settings.mcp.ragInherit')} hint={t('settings.mcp.ragInheritHint')} />
+            {!ragInherit && (
+              bases.length === 0 ? (
+                <Row label={t('settings.mcp.ragEmpty')} />
+              ) : (
+                bases.map((b) => (
+                  <Row key={b.id} label={b.name || b.id} hint={b.description || b.id}>
+                    <Switch checked={ragAllowed.includes(b.id)} onCheckedChange={(v) => toggleBase(b.id, v)} />
+                  </Row>
+                ))
+              )
+            )}
+            <TextRow s={s} k="mcp_rag_max_results" label={t('settings.mcp.ragMaxResults')} hint={t('settings.mcp.ragMaxResultsHint')} type="number" width="w-24" />
+          </>
+        )}
+      </Section>
+
+      {ragOn && (
+        <Section title={t('settings.mcp.ragTools')}>
+          {RAG_MCP_TOOLS.map((name) => (
+            <Row key={name} label={name} hint={t(`settings.mcp.ragToolHints.${name}`)}>
+              <Switch checked={ragTools.includes(name)} onCheckedChange={(v) => toggleRagTool(name, v)} />
+            </Row>
+          ))}
+        </Section>
       )}
 
       <Section

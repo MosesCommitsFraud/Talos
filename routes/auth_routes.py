@@ -575,6 +575,9 @@ def setup_auth_routes(auth_manager: AuthManager) -> APIRouter:
             # Outward MCP defaults; the hard caps live in src/web_search.py.
             "mcp_web_max_results": (1, 20),
             "mcp_web_max_fetch_chars": (500, 20000),
+            # Ceiling on passages one MCP rag_query returns; src/mcp_public.py
+            # clamps again, this keeps the stored value sane.
+            "mcp_rag_max_results": (1, 20),
         }
         for key in DEFAULT_SETTINGS:
             if key not in body:

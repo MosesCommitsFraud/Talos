@@ -24,7 +24,7 @@ import asyncio
 import concurrent.futures
 import logging
 import os
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from src.rag_scopes import SCOPE_IDS
 
@@ -570,6 +570,66 @@ def _validate_collections(ids: List[Optional[str]]) -> None:
         )
 
 
+def _apply_rag_policy(
+    args: Dict[str, Any], allowed: Optional[Set[str]], max_results: int
+) -> Dict[str, Any]:
+    """Bend one MCP call's arguments to the administrator's RAG policy.
+
+    Returns a new dict — the caller's arguments are never mutated, and the tool
+    bodies stay policy-free so `src/rag_api.py` and the in-app agent keep
+    reaching every base.
+
+    Two things happen here:
+
+    * **Bases.** Any id the caller named must be on the allow-list; naming one
+      that isn't is refused by name, the same way an unknown base is, so the
+      client learns what it may address instead of silently getting nothing.
+      A caller that named *none* would otherwise fall through to the `default`
+      base — which may be exactly the one being withheld — so the search is
+      pointed at the allowed set instead.
+    * **Size.** `topK` is capped. A caller asking for fewer passages still gets
+      fewer, and an instance whose pipeline default is smaller keeps it — this
+      is a ceiling, not a default.
+    """
+    out = dict(args)
+
+    if allowed is not None:
+        named = [i for i in _collections_arg(out) if i]
+        refused = [i for i in named if i not in allowed]
+        if refused:
+            raise ToolError(
+                f"Knowledge base(s) not available over MCP: "
+                f"{', '.join(repr(r) for r in refused)}. "
+                f"Available: {', '.join(sorted(allowed)) or '(none)'}. "
+                "Call rag_list_collections to see them."
+            )
+        if not named:
+            if not allowed:
+                raise ToolError(
+                    "No knowledge bases are shared with external clients on "
+                    "this Talos instance."
+                )
+            out.pop("rag_id", None)
+            out["collections"] = sorted(allowed)
+            # The single-base tools take one id, not a list.
+            out["collection"] = sorted(allowed)[0]
+
+    for key in ("topK", "k"):
+        value = out.get(key)
+        if value is None:
+            continue
+        try:
+            out[key] = min(int(value), max_results)
+        except (TypeError, ValueError):
+            continue
+    if out.get("topK") is None and out.get("k") is None:
+        # No size named: the base's own pipeline default applies, held to the
+        # same ceiling rather than replaced by it.
+        configured = _search_config(_collections_arg(out)[0]).get("search_top_k", 5)
+        out["topK"] = min(_clamp_k(configured), max_results)
+    return out
+
+
 def _tool_rag_query(args: Dict[str, Any]) -> str:
     query = str(args.get("query") or "").strip()
     if not query:
@@ -733,17 +793,25 @@ def render_search_results(query: str, results: List[Dict[str, Any]]) -> str:
     return "\n".join(lines)
 
 
-def _tool_rag_list_collections() -> str:
+def _tool_rag_list_collections(allowed: Optional[Set[str]] = None) -> str:
     """The knowledge-base catalogue, so a client can address bases by id.
 
     Driven by the registry, not by Qdrant: an unreachable backend must still be
     able to say which bases *exist*, so the document counts (which do hit
     Qdrant, behind the registry's cache) degrade to "no count" rather than
     failing the call.
+
+    ``allowed`` restricts the listing to those base ids (the administrator's
+    MCP setting — see `src/mcp_settings.py`); None lists everything, which is
+    what the in-app and REST callers get.
     """
     from src.rag_registry import DEFAULT_ID, describe, list_bases
 
     bases = list_bases() or []
+    if allowed is not None:
+        bases = [b for b in bases if str(b.get("id")) in allowed]
+        if not bases:
+            return "No knowledge bases are shared with external clients on this Talos instance."
     if not bases:
         return "No knowledge bases are registered."
 
@@ -1247,10 +1315,20 @@ def call_tool(
     # or simply call a name it knows.
     from src import mcp_settings
 
-    if not mcp_settings.tool_enabled(name):
+    if not mcp_settings.tool_enabled(_TOOL_ALIASES.get(name, name)):
         return (f"Tool {name!r} is disabled on this Talos instance.", True)
 
     try:
+        # The administrator's knowledge-base and result-size policy. Applied to
+        # a *copy* of the arguments here rather than inside the tool bodies,
+        # which the REST service (src/rag_api.py) shares and which must stay
+        # unrestricted for in-instance callers.
+        rag_bases = mcp_settings.rag_bases()
+        # rag_list_collections is left out: it takes no arguments, and it is
+        # filtered where it is dispatched below. Refusing it when nothing is
+        # shared would deny the client the one call that says so.
+        if name.startswith("rag_") and name != "rag_list_collections":
+            args = _apply_rag_policy(args, rag_bases, mcp_settings.rag_max_results())
         # A per-skill tool (see `skill_tools`). Resolved against this caller's
         # own visible skills, then answered exactly as skills_get would.
         if name.startswith(SKILL_TOOL_PREFIX):
@@ -1267,7 +1345,7 @@ def call_tool(
         if name in ("rag_query", "rag_search"):
             return _truncate(_tool_rag_query(args)), False
         if name == "rag_list_collections":
-            return _truncate(_tool_rag_list_collections()), False
+            return _truncate(_tool_rag_list_collections(rag_bases)), False
         if name == "rag_list_documents":
             return _truncate(_tool_rag_list_documents(args)), False
         if name == "rag_get_document":

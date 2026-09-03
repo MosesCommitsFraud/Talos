@@ -165,6 +165,31 @@ DEFAULT_SETTINGS = {
     # Its own request still wins, bounded by src/web_search.py's hard caps.
     "mcp_web_max_results": 6,
     "mcp_web_max_fetch_chars": 8000,
+    # RAG over MCP. `mcp_rag_enabled` is the family switch; the two lists below
+    # narrow *what* goes out once it is on.
+    "mcp_rag_enabled": True,
+    # True = every knowledge base in the registry (src/rag_registry.py) is
+    # reachable over /mcp. False = only the base ids in mcp_rag_allowed: a base
+    # left out is missing from rag_list_collections and refused by name, so an
+    # external token can hold a narrower view of the instance than the browser
+    # agent does.
+    "mcp_rag_inherit": True,
+    "mcp_rag_allowed": [],
+    # Which rag_* tools external clients may call at all. Default is all four;
+    # dropping rag_get_document, for instance, leaves a caller able to search
+    # and cite passages but not to pull whole documents out of the instance.
+    # A tool not named here never leaves — including one added in a later
+    # version, which has to be enabled deliberately.
+    "mcp_rag_tools": [
+        "rag_query",
+        "rag_list_collections",
+        "rag_list_documents",
+        "rag_get_document",
+    ],
+    # Ceiling on rag_query's topK for MCP callers. A smaller request of their
+    # own still wins, as does a smaller pipeline default — this only stops an
+    # external client asking for twenty passages a call.
+    "mcp_rag_max_results": 10,
     "mcp_skills_enabled": True,
     # True = expose exactly the published library the web UI serves (one
     # library, no second copy). False = only the skills named in

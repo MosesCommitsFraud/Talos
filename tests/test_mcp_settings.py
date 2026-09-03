@@ -203,6 +203,127 @@ def test_a_disabled_tool_is_refused_even_with_the_scope(settings):
 
 
 # ---------------------------------------------------------------------------
+# RAG gating
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def registry(monkeypatch):
+    """Two registered knowledge bases, with no Qdrant behind them."""
+    bases = [
+        {"id": "default", "name": "Talos", "description": "everything"},
+        {"id": "hr", "name": "HR", "description": "personnel files"},
+    ]
+    monkeypatch.setattr("src.rag_registry.list_bases", lambda: bases)
+    monkeypatch.setattr("src.rag_registry.describe", lambda e, with_counts=True: dict(e))
+    return bases
+
+
+def test_disabling_rag_hides_the_whole_family(settings):
+    settings["mcp_rag_enabled"] = False
+    names = {t["name"] for t in mcp_public.list_tools(ALL, skills_manager=FakeSkills())}
+
+    assert not any(n.startswith("rag_") for n in names)
+    assert "web_search" in names  # other families untouched
+
+
+def test_a_deselected_rag_tool_is_neither_listed_nor_callable(settings):
+    settings["mcp_rag_tools"] = ["rag_query", "rag_list_collections"]
+    names = {t["name"] for t in mcp_public.list_tools(ALL, skills_manager=FakeSkills())}
+
+    assert names >= {"rag_query", "rag_list_collections"}
+    assert "rag_get_document" not in names
+    text, is_error = call("rag_get_document", {"source": "/x.pdf"})
+    assert is_error is True
+    assert "disabled" in text.lower()
+
+
+def test_the_retired_rag_search_name_obeys_the_same_switch(settings):
+    """`rag_search` resolves to rag_query — including for the allow-list."""
+    settings["mcp_rag_tools"] = ["rag_list_collections"]
+    text, is_error = call("rag_search", {"query": "anything"})
+
+    assert is_error is True
+    assert "disabled" in text.lower()
+
+
+def test_settings_from_before_the_setting_existed_offer_every_rag_tool(settings):
+    assert mcp_settings.rag_tools() == set(mcp_settings.RAG_TOOLS)
+
+
+def test_inheriting_lists_every_registered_base(settings, registry):
+    text, is_error = call("rag_list_collections", {})
+
+    assert is_error is False
+    assert "default" in text and "hr" in text
+
+
+def test_selected_mode_hides_the_other_bases_from_the_catalogue(settings, registry):
+    settings.update({"mcp_rag_inherit": False, "mcp_rag_allowed": ["default"]})
+    text, _ = call("rag_list_collections", {})
+
+    assert "default" in text
+    assert "personnel files" not in text
+
+
+def test_naming_a_withheld_base_is_refused(settings, registry):
+    settings.update({"mcp_rag_inherit": False, "mcp_rag_allowed": ["default"]})
+    text, is_error = call("rag_query", {"query": "salaries", "collections": ["hr"]})
+
+    assert is_error is True
+    assert "'hr'" in text
+    # The refusal names what the caller *may* use, so it stops guessing.
+    assert "default" in text
+
+
+def test_omitting_the_base_searches_the_allowed_ones_not_the_default(settings, registry):
+    """The default base may be exactly the one being withheld."""
+    settings.update({"mcp_rag_inherit": False, "mcp_rag_allowed": ["hr"]})
+    seen = {}
+
+    def fake_query(args):
+        seen.update(args)
+        return "ok"
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(mcp_public, "_tool_rag_query", fake_query)
+        call("rag_query", {"query": "leave policy"})
+
+    assert seen["collections"] == ["hr"]
+
+
+def test_sharing_nothing_refuses_every_query(settings, registry):
+    settings.update({"mcp_rag_inherit": False, "mcp_rag_allowed": []})
+    text, is_error = call("rag_query", {"query": "anything"})
+
+    assert is_error is True
+    assert "no knowledge bases" in text.lower()
+
+
+def test_topk_is_capped_but_a_smaller_request_survives(settings, registry):
+    settings["mcp_rag_max_results"] = 3
+    seen = []
+
+    def fake_query(args):
+        seen.append(args.get("topK"))
+        return "ok"
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(mcp_public, "_tool_rag_query", fake_query)
+        call("rag_query", {"query": "a", "topK": 20})
+        call("rag_query", {"query": "a", "topK": 2})
+
+    assert seen == [3, 2]
+
+
+def test_the_cap_does_not_leak_into_the_rest_service(settings, registry):
+    """src/rag_api.py calls the tool bodies directly; policy lives above them."""
+    settings.update({"mcp_rag_inherit": False, "mcp_rag_allowed": ["default"]})
+
+    assert mcp_public._tool_rag_list_collections().count("- **") == 2
+
+
+# ---------------------------------------------------------------------------
 # Skills gating
 # ---------------------------------------------------------------------------
 

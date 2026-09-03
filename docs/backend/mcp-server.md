@@ -164,6 +164,11 @@ as a logged-in browser session, so the two get their own policy.
 | `mcp_web_searxng_url` | A different SearxNG for MCP callers. Empty = the same one the UI uses. |
 | `mcp_web_domain_allowlist` / `_blocklist` | The MCP-only domain policy. Same semantics as the web-UI lists: blocklist always wins, a non-empty allowlist is allowlist-only. |
 | `mcp_web_max_results` / `mcp_web_max_fetch_chars` | Defaults for callers that don't name a size. A caller's own request still wins, bounded by the hard caps in `src/web_search.py`. |
+| `mcp_rag_enabled` | Off removes the whole `rag_*` family, whatever the token's scopes say. The in-app agent keeps its full retrieval. |
+| `mcp_rag_inherit` | On (default) = every knowledge base in the registry is reachable. Off = only `mcp_rag_allowed` is. |
+| `mcp_rag_allowed` | Base ids shared in selected mode. A withheld base is missing from `rag_list_collections` and refused by name, with the allowed ids in the error. A caller that names no base searches the allowed ones rather than falling through to `default`. |
+| `mcp_rag_tools` | Which `rag_*` tools are offered. Default is all four; dropping `rag_get_document` leaves a caller able to search and cite passages but not to pull whole documents out of the instance. |
+| `mcp_rag_max_results` | Ceiling on the passages one `rag_query` returns (1–20). A smaller request, or a smaller pipeline default, still wins. |
 | `mcp_skills_enabled` | Off removes the whole `skills_*` family. |
 | `mcp_skills_inherit` | On (default) = exactly the library enabled in Settings → Skills goes out. Off = only `mcp_skills_allowed` does. |
 | `mcp_skills_allowed` | Skill names shared in selected mode. Gated names are refused with "not shared over MCP" so a client stops re-spelling them. |
@@ -173,8 +178,15 @@ published skills leave the instance — it never introduces a second copy, and i
 can't widen access to drafts or another user's skills, because `index_for` /
 `published_only` still run first.
 
-RAG has no section here: its pipeline is configured in Settings → RAG and the
-MCP tools read that config directly.
+The same holds for knowledge bases: there is **one** registry (Settings → RAG),
+and this page only narrows which of it leaves the instance. The retrieval
+pipeline itself is still configured there and read by the MCP tools directly —
+this page never re-tunes it.
+
+The policy is applied in `mcp_public.call_tool`, on a copy of the call's
+arguments, and never inside the tool bodies: `src/rag_api.py` (the outward REST
+service) and the in-app agent share those bodies and must keep reaching every
+base.
 
 ## Client setup
 
@@ -225,12 +237,12 @@ curl -sS https://<talos-host>/mcp -H "Authorization: Bearer ody_..." -H "Content
 | File | Role |
 | --- | --- |
 | `src/mcp_public.py` | tool catalogue, scope gating, dispatch — transport-free and unit-tested |
-| `src/mcp_settings.py` | the administrator's policy: which tools are offered, and whether web/skills inherit the web-UI settings |
+| `src/mcp_settings.py` | the administrator's policy: which tools are offered, and whether web / RAG / skills inherit the web-UI settings |
 | `routes/mcp_public_routes.py` | JSON-RPC / HTTP shell |
 | `routes/api_token_routes.py` | mints the `rag:read` / `skills:read` / `web:read` scopes |
 | `src/web_search.py` | SearxNG client, domain policy, SSRF guard — wrapped, not reimplemented |
 | `tests/test_mcp_public.py` | scope gating, tool contracts, JSON-RPC framing |
-| `tests/test_mcp_settings.py` | policy separation: MCP domain lists vs the web UI's, skill gating |
+| `tests/test_mcp_settings.py` | policy separation: MCP domain lists vs the web UI's, knowledge-base and skill gating |
 
 The split keeps the tools callable without a server, so a stdio wrapper could
 reuse `src/mcp_public.py` verbatim if a local-only client ever needs one.

@@ -6,25 +6,28 @@ Policy resolution for Talos's *outward-facing* MCP server (mounted at ``/mcp``).
 `src/mcp_public.py` holds the tools; this module answers the one question that
 sits in front of every one of them: what is this instance willing to hand to an
 external client at all? The web-UI settings (`searxng_url`, the domain lists,
-the skill library) describe what the agent may do for a user who is logged into
-the browser. An MCP caller is a bearer token on someone else's machine — same
-capabilities, different trust level — so each area carries an ``inherit`` flag:
+the skill library, the knowledge-base registry) describe what the agent may do
+for a user who is logged into the browser. An MCP caller is a bearer token on
+someone else's machine — same capabilities, different trust level — so each of
+the three areas (web, RAG, skills) carries an ``inherit`` flag:
 
   * inherit ON  → the web-UI setting applies verbatim (the default, so an
                   upgrade changes nothing).
   * inherit OFF → the ``mcp_*`` values apply and the web-UI policy is ignored
                   for /mcp.
 
-Skills deliberately have no second library: inherit OFF narrows which of the
-*existing* published skills go out, it never introduces a separate copy that
-would then have to be kept in sync.
+Skills and RAG deliberately have no second library: inherit OFF narrows which
+of the *existing* published skills, or registered knowledge bases, go out — it
+never introduces a separate copy that would then have to be kept in sync. RAG
+additionally has a per-tool allow-list, because "may search, may not download
+whole documents" is a distinction worth drawing for an outside caller.
 
 Every lookup goes through `get_setting`, which is cached and re-read on save,
 so this stays a plain function call — no state, no reload hook.
 """
 
 import logging
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Set
 
 logger = logging.getLogger(__name__)
 
@@ -103,6 +106,52 @@ def web_max_fetch_chars() -> int:
     return _int("mcp_web_max_fetch_chars", 8000, 500, 20_000)
 
 
+# ── RAG ──
+
+# The rag_* tools that exist. Also the default allow-set: an instance whose
+# settings predate `mcp_rag_tools` keeps offering all four, so an upgrade
+# changes nothing.
+RAG_TOOLS = (
+    "rag_query",
+    "rag_list_collections",
+    "rag_list_documents",
+    "rag_get_document",
+)
+
+
+def rag_enabled() -> bool:
+    """Whether the rag_* tools are offered over MCP at all."""
+    return _bool("mcp_rag_enabled", True)
+
+
+def rag_tools() -> Set[str]:
+    """The rag_* tools this instance hands out.
+
+    Names outside `RAG_TOOLS` are dropped rather than trusted: the setting is
+    an allow-list of things that exist, so a typo narrows the catalogue instead
+    of silently inventing a tool.
+    """
+    names = {n.strip() for n in _list("mcp_rag_tools")} or set(RAG_TOOLS)
+    return {n for n in names if n in RAG_TOOLS}
+
+
+def rag_bases() -> Optional[Set[str]]:
+    """Knowledge-base ids reachable over MCP, or None to expose all of them.
+
+    None is the inherit case and means "don't filter" — distinct from an empty
+    set, which is an administrator who switched inheritance off and then picked
+    nothing, and so must expose nothing.
+    """
+    if _bool("mcp_rag_inherit", True):
+        return None
+    return {b.strip() for b in _list("mcp_rag_allowed")}
+
+
+def rag_max_results() -> int:
+    """Ceiling on the number of passages one MCP rag_query may return."""
+    return _int("mcp_rag_max_results", 10, 1, 20)
+
+
 # ── Skills ──
 
 
@@ -133,6 +182,11 @@ def tool_enabled(name: str) -> bool:
     """
     if name in ("web_search", "web_fetch"):
         return web_enabled()
+    # `rag_search` is the retired spelling of rag_query and is resolved to it
+    # before this is reached (mcp_public._TOOL_ALIASES), so only the real names
+    # are checked against the allow-list.
+    if name in RAG_TOOLS:
+        return rag_enabled() and name in rag_tools()
     # Both the skills_* family and the per-skill `skill_<slug>` tools
     # (mcp_public.skill_tools) hang off the same switch.
     if name.startswith("skills_") or name.startswith("skill_"):
