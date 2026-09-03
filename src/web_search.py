@@ -235,9 +235,7 @@ async def search(
     if "error" in outcome:
         return outcome
     return {
-        "results": _format_search_results(
-            query, outcome["payload"], outcome["max_results"], policy
-        )
+        "results": _format_search_results(query, outcome["payload"], outcome["max_results"], policy)
     }
 
 

@@ -256,9 +256,7 @@ def test_directory_ingest_is_off_unless_roots_are_configured(client, tmp_path):
     assert resp.status_code == 403
 
 
-def test_directory_ingest_refuses_paths_outside_the_allowed_roots(
-    client, tmp_path, monkeypatch
-):
+def test_directory_ingest_refuses_paths_outside_the_allowed_roots(client, tmp_path, monkeypatch):
     allowed = tmp_path / "allowed"
     outside = tmp_path / "outside"
     allowed.mkdir()
@@ -377,7 +375,7 @@ def test_the_scope_is_reported_separately_with_its_own_counts(base_with_sql_docs
 
 
 def test_an_empty_scope_is_still_listed(bases):
-    """"The SQL schema index is empty" is the answer someone wondering why SQL
+    """ "The SQL schema index is empty" is the answer someone wondering why SQL
     answers are thin actually needs."""
     row = rag_registry.describe(rag_registry.get_base(None))
     assert [s["id"] for s in row["scopes"]] == rag_scopes.SCOPE_IDS

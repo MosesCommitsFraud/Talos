@@ -129,8 +129,7 @@ def test_list_tools_filters_by_scope():
 def test_web_scope_is_independent_of_the_knowledge_scopes():
     """A knowledge token must not come with a route to the public internet."""
     assert {
-        t["name"]
-        for t in mcp_public.list_tools({RAG, SKILLS}, skills_manager=FakeSkills(index=[]))
+        t["name"] for t in mcp_public.list_tools({RAG, SKILLS}, skills_manager=FakeSkills(index=[]))
     }.isdisjoint({"web_search", "web_fetch"})
 
 
@@ -594,9 +593,7 @@ def test_skill_tool_names_are_sanitised_and_collision_free():
     names = [t["name"] for t in tools if t["name"].startswith("skill_")]
     assert len(names) == len(set(names))  # a name can only mean one skill
     # Safe as an identifier in any client: ASCII alphanumerics, - and _ only.
-    assert all(
-        (c.isalnum() and c.isascii()) or c in "-_" for name in names for c in name
-    ), names
+    assert all((c.isalnum() and c.isascii()) or c in "-_" for name in names for c in name), names
 
 
 def test_the_skill_tool_list_is_capped(monkeypatch):

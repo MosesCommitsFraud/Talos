@@ -202,5 +202,8 @@ def test_unauthenticated_callers_are_rejected(monkeypatch):
 def test_route_is_mounted_on_the_app():
     import app as app_module
 
-    paths = {getattr(r, "path", "") for r in app_module.app.routes}
-    assert "/api/news/thumbnail" in paths
+    paths = sorted(getattr(r, "path", "") for r in app_module.app.routes)
+    # The failure message carries the whole route table: the useful question
+    # when this breaks is not "is /api/news/thumbnail there" but "which routers
+    # made it onto the app at all".
+    assert "/api/news/thumbnail" in paths, f"{len(paths)} routes mounted: {paths}"

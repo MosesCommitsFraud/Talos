@@ -103,7 +103,7 @@ _COORD_RE = re.compile(r"^\s*(-?\d{1,3}(?:\.\d+)?)\s*[,;/ ]\s*(-?\d{1,3}(?:\.\d+
 
 
 def parse_coordinates(text: str) -> Optional[Tuple[float, float]]:
-    """"52.52, 13.41" -> (52.52, 13.41). None when it isn't a coordinate pair.
+    """ "52.52, 13.41" -> (52.52, 13.41). None when it isn't a coordinate pair.
 
     Bounds are checked, so "10, 20" (a plausible pair) is accepted but a stray
     "2024, 2025" is not — a wrong-but-valid coordinate silently reports the

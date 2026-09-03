@@ -520,12 +520,59 @@ def _weather_widget() -> dict:
     # have to stay comparable across a fortnight rather than a week.
     total_days = 16
     conditions = [
-        "mainly-clear", "partly-cloudy", "rain", "showers", "overcast", "clear", "clear",
-        "thunderstorm", "drizzle", "partly-cloudy", "clear", "fog", "rain", "overcast",
-        "clear", "snow",
+        "mainly-clear",
+        "partly-cloudy",
+        "rain",
+        "showers",
+        "overcast",
+        "clear",
+        "clear",
+        "thunderstorm",
+        "drizzle",
+        "partly-cloudy",
+        "clear",
+        "fog",
+        "rain",
+        "overcast",
+        "clear",
+        "snow",
     ]
-    highs = [23.4, 22.1, 18.6, 19.8, 21.0, 24.6, 26.1, 25.2, 20.4, 22.8, 27.3, 19.1, 17.5, 18.9, 23.0, 4.2]
-    lows = [14.2, 13.8, 12.1, 12.9, 13.5, 15.0, 16.4, 15.8, 12.6, 13.1, 16.9, 11.4, 10.8, 11.2, 13.7, -2.1]
+    highs = [
+        23.4,
+        22.1,
+        18.6,
+        19.8,
+        21.0,
+        24.6,
+        26.1,
+        25.2,
+        20.4,
+        22.8,
+        27.3,
+        19.1,
+        17.5,
+        18.9,
+        23.0,
+        4.2,
+    ]
+    lows = [
+        14.2,
+        13.8,
+        12.1,
+        12.9,
+        13.5,
+        15.0,
+        16.4,
+        15.8,
+        12.6,
+        13.1,
+        16.9,
+        11.4,
+        10.8,
+        11.2,
+        13.7,
+        -2.1,
+    ]
     pops = [0, 20, 85, 60, 15, 0, 0, 90, 45, 10, 0, 30, 75, 25, 5, 55]
 
     def _day_hours(index: int) -> list:
@@ -540,13 +587,20 @@ def _weather_widget() -> dict:
             out.append(
                 {
                     "time": f"2026-08-{11 + index:02d}T{hour:02d}:00",
-                    "temperature": round(lows[index] + (highs[index] - lows[index]) * (1 - abs(hour - 15) / 15), 1),
-                    "condition": conditions[index] if 8 <= hour <= 18 else ("clear" if night else conditions[index]),
-                    "precipitationProbability": pops[index] if 8 <= hour <= 16 else max(0, pops[index] - 40),
+                    "temperature": round(
+                        lows[index] + (highs[index] - lows[index]) * (1 - abs(hour - 15) / 15), 1
+                    ),
+                    "condition": conditions[index]
+                    if 8 <= hour <= 18
+                    else ("clear" if night else conditions[index]),
+                    "precipitationProbability": pops[index]
+                    if 8 <= hour <= 16
+                    else max(0, pops[index] - 40),
                     "wind": round(6 + (hour % 7) * 1.8, 1),
                 }
             )
         return out
+
     return {
         "type": "weather",
         "version": 1,

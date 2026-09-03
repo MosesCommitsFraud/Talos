@@ -114,9 +114,7 @@ def get_rag_manager(base_id: Optional[str] = None, config: Optional[dict] = None
         from src.rag_vector import VectorRAG
 
         base_dir = Path(__file__).parent.parent
-        persist_dir = os.getenv("RAG_DATA_DIR", "").strip() or os.path.join(
-            base_dir, "data", "rag"
-        )
+        persist_dir = os.getenv("RAG_DATA_DIR", "").strip() or os.path.join(base_dir, "data", "rag")
 
         candidate = VectorRAG(
             persist_directory=persist_dir,

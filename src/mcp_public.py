@@ -626,8 +626,7 @@ def _apply_rag_policy(
         if not named:
             if not allowed:
                 raise ToolError(
-                    "No knowledge bases are shared with external clients on "
-                    "this Talos instance."
+                    "No knowledge bases are shared with external clients on this Talos instance."
                 )
             out.pop("rag_id", None)
             out["collections"] = sorted(allowed)
@@ -726,11 +725,7 @@ def _tool_rag_query(args: Dict[str, Any]) -> str:
 
     text = render_search_results(query, hits)
     if failures:
-        text += (
-            "\n\n_(Not searched — currently unavailable: "
-            + ", ".join(sorted(failures))
-            + ".)_"
-        )
+        text += "\n\n_(Not searched — currently unavailable: " + ", ".join(sorted(failures)) + ".)_"
     return text
 
 
@@ -885,9 +880,7 @@ def filter_documents(docs: List[Dict[str, Any]], needle: str) -> List[Dict[str, 
     ]
 
 
-def render_document_list(
-    docs: List[Dict[str, Any]], limit: int, filtered: bool = False
-) -> str:
+def render_document_list(docs: List[Dict[str, Any]], limit: int, filtered: bool = False) -> str:
     """Render a document listing as the block a model receives. Shared with the
     REST service so both surfaces describe an index identically."""
     if not docs:
@@ -1163,8 +1156,7 @@ def skill_tools(owner: Optional[str] = None, skills_manager=None) -> List[Dict[s
         if skill["when_to_use"]:
             parts.append(f"When to use: {str(skill['when_to_use']).strip()}")
         parts.append(
-            "Returns the full written procedure for this skill; carry it out "
-            "with your own tools."
+            "Returns the full written procedure for this skill; carry it out with your own tools."
         )
         out.append(
             {
