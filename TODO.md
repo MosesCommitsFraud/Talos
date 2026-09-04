@@ -33,3 +33,8 @@ almost done thinking change
 running task should be shown
 tanstack charts
 skeleton instead of sample title
+hardware requirements
+pipeline zur schema erstellung
+sandbox exposen per mcp
+better dashboard
+tables need to be inside the dropdown

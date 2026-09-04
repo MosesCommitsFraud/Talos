@@ -848,6 +848,47 @@ def test_ping_returns_an_empty_result():
     assert out == {"jsonrpc": "2.0", "id": "p", "result": {}}
 
 
+def test_an_anonymous_caller_gets_the_full_read_catalogue(monkeypatch):
+    """The token-free path exists so an agent on the LAN can use the instance as
+    it stands — a half-catalogue would only move the surprise to the first
+    web_search call."""
+    from routes.mcp_public_routes import _caller_context
+
+    monkeypatch.delenv("MCP_OPEN_SCOPES", raising=False)
+    monkeypatch.delenv("MCP_OPEN_OWNER", raising=False)
+    scopes, owner, label = _caller_context(_request(api_token=False))
+
+    assert scopes == {RAG, SKILLS, WEB}
+    assert owner is None
+    assert label == "anonymous"
+
+
+def test_anonymous_scopes_and_owner_are_configurable(monkeypatch):
+    """For an instance that wants the convenience but not the whole catalogue."""
+    from routes.mcp_public_routes import _caller_context
+
+    monkeypatch.setenv("MCP_OPEN_SCOPES", "rag:read")
+    monkeypatch.setenv("MCP_OPEN_OWNER", "moritz")
+    scopes, owner, label = _caller_context(_request(api_token=False))
+
+    assert scopes == {RAG}
+    # Pins the skills view to one user instead of exposing everyone's.
+    assert owner == "moritz"
+    assert "moritz" in label
+
+
+def test_a_token_still_wins_over_the_anonymous_default(monkeypatch):
+    """MCP_OPEN removes the requirement; it must not override a presented
+    identity, or a narrow token would silently gain scopes."""
+    from routes.mcp_public_routes import _caller_context
+
+    monkeypatch.delenv("MCP_OPEN_SCOPES", raising=False)
+    scopes, owner, _ = _caller_context(_request(scopes=(RAG,), owner="moritz"))
+
+    assert scopes == {RAG}
+    assert owner == "moritz"
+
+
 def test_tools_list_reflects_the_tokens_scopes():
     out = handle(
         {"jsonrpc": "2.0", "id": 2, "method": "tools/list"},

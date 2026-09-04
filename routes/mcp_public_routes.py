@@ -135,13 +135,51 @@ def _caller_context(request: Request) -> Tuple[set, Optional[str], str]:
         owner = getattr(request.state, "api_token_owner", None)
         return scopes, owner, f"token:{getattr(request.state, 'api_token_id', '?')}"
 
-    all_scopes = {
-        mcp_public.SCOPE_RAG_READ,
-        mcp_public.SCOPE_SKILLS_READ,
-        mcp_public.SCOPE_WEB_READ,
-    }
     user = getattr(request.state, "current_user", None)
-    return all_scopes, user, f"session:{user or 'anonymous'}"
+    if user:
+        # Browser session: they can read all of this in the UI anyway.
+        return (
+            {
+                mcp_public.SCOPE_RAG_READ,
+                mcp_public.SCOPE_SKILLS_READ,
+                mcp_public.SCOPE_WEB_READ,
+            },
+            user,
+            f"session:{user}",
+        )
+
+    return _anonymous_context()
+
+
+def _anonymous_scopes() -> set:
+    """Scopes for a caller that presented no identity at all.
+
+    Two ways to get here: AUTH_ENABLED=false, or the token-free path letting a
+    client on the local network reach `/mcp`. Defaults to the full read
+    catalogue — knowledge, skills and web — because that path exists so an agent
+    on the LAN can use the instance as it stands, and a half-catalogue would
+    just move the surprise to the first `web_search` call. `MCP_OPEN_SCOPES`
+    narrows it; Settings → MCP can switch the web tools off for everyone.
+    """
+    raw = os.getenv("MCP_OPEN_SCOPES", "").strip()
+    if not raw:
+        return {
+            mcp_public.SCOPE_RAG_READ,
+            mcp_public.SCOPE_SKILLS_READ,
+            mcp_public.SCOPE_WEB_READ,
+        }
+    return {s.strip() for s in raw.replace(" ", ",").split(",") if s.strip()}
+
+
+def _anonymous_context() -> Tuple[set, Optional[str], str]:
+    """(scopes, owner, label) for an unauthenticated caller.
+
+    ``MCP_OPEN_OWNER`` pins the skills view to one user. Unset, the caller sees
+    every skill on the instance — including other users' personal ones — because
+    without a token there is no owner to scope by.
+    """
+    owner = os.getenv("MCP_OPEN_OWNER", "").strip() or None
+    return _anonymous_scopes(), owner, f"anonymous{f' as {owner}' if owner else ''}"
 
 
 def _instructions() -> str:

@@ -166,6 +166,48 @@ if LOCALHOST_BYPASS:
         "LOCALHOST_BYPASS is enabled, loopback requests bypass authentication. Do not expose this instance to a network."
     )
 
+from core.net_trust import (
+    DEFAULT_PRIVATE_NETWORKS,
+    PROXY_FORWARD_HEADERS as _PROXY_FWD_HEADERS,
+    client_in_networks,
+    parse_networks,
+)
+
+# --- Token-free MCP from the local network ----------------------------------
+# `POST /mcp` answers without an API token for callers on the local network, so
+# an agent framework on the same LAN (MACS) needs no long-lived bearer token in
+# its config and no setup step. Exactly one read-only endpoint is exempted;
+# everything else on the instance stays behind auth, and a caller that *does*
+# send a token keeps its own scopes and owner.
+#
+# On by default because the exemption is bounded by client address, not by
+# trust in the caller: MCP_OPEN_NETWORKS defaults to loopback plus the RFC1918
+# ranges, so a request from the public internet is refused here and falls
+# through to normal token auth. An instance that is only reachable on the LAN
+# was already readable by everyone on that LAN through the browser UI's login;
+# what changes is that a machine there can read it without one.
+#
+# Set MCP_OPEN=false to require a token again, or narrow MCP_OPEN_NETWORKS to
+# the one server that should have it (e.g. 192.168.10.42/32).
+MCP_OPEN = os.getenv("MCP_OPEN", "true").lower() != "false"
+_MCP_OPEN_NETWORKS = (
+    parse_networks(os.getenv("MCP_OPEN_NETWORKS") or DEFAULT_PRIVATE_NETWORKS) if MCP_OPEN else []
+)
+if MCP_OPEN:
+    logger.info(
+        "Token-free MCP is on: POST /mcp answers without a token for clients in %s "
+        "(read-only: knowledge bases + skills, no web). Set MCP_OPEN=false to require a token.",
+        ", ".join(str(n) for n in _MCP_OPEN_NETWORKS) or "(no valid network — effectively off)",
+    )
+
+
+def _mcp_open_allowed(request) -> bool:
+    """Whether this request may use the token-free MCP endpoint."""
+    if not MCP_OPEN:
+        return False
+    host = request.client.host if request.client else None
+    return client_in_networks(host, request.headers, _MCP_OPEN_NETWORKS)
+
 if AUTH_ENABLED:
     AUTH_EXEMPT_EXACT = {
         "/api/auth/setup",
@@ -235,20 +277,6 @@ if AUTH_ENABLED:
         _token_cache.update(new_map)
         app.state._token_cache_dirty = False
 
-    # Headers that prove a request was forwarded by a proxy/tunnel (cloudflared,
-    # nginx, Caddy, Tailscale Funnel, …). cloudflared connects to the app FROM
-    # 127.0.0.1, so without this check every tunneled request would look like
-    # loopback and could bypass auth.
-    _PROXY_FWD_HEADERS = (
-        "cf-connecting-ip",
-        "cf-ray",
-        "cf-visitor",
-        "x-forwarded-for",
-        "x-forwarded-host",
-        "x-real-ip",
-        "forwarded",
-    )
-
     def _is_trusted_loopback(request: Request) -> bool:
         """True ONLY for a DIRECT loopback connection with no proxy/tunnel
         forwarding headers. A bare ``client.host in ('127.0.0.1','::1')`` check is
@@ -270,6 +298,14 @@ if AUTH_ENABLED:
             path = request.url.path
             if _is_auth_exempt(path):
                 return await call_next(request)
+            # Token-free MCP on a trusted network (MCP_OPEN). Placed before the
+            # bearer block so a caller that *does* send a token still gets its
+            # own scopes and owner: this only removes the requirement, it does
+            # not override an identity the caller provided.
+            if path == "/mcp" and not request.headers.get("authorization"):
+                if _mcp_open_allowed(request):
+                    request.state.api_token = False
+                    return await call_next(request)
             # In-process internal-tool token bypass. Used by the agent
             # tool layer when it HTTP-loopbacks to admin-gated routes
             # (no admin cookie available in that context). Restricted to

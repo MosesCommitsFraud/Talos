@@ -53,6 +53,43 @@ get a route out to the public internet through your SearxNG.
 A logged-in browser session reaching `/mcp` from the same origin gets the full
 read catalogue — it can already read all of this in the UI.
 
+### Token-free access from the local network
+
+**On by default.** `POST /mcp` answers without any token for callers on the
+local network, so an agent framework on the same LAN (MACS) needs no bearer
+token in its config and no setup step. It exempts that one read-only endpoint;
+everything else on the instance stays behind auth, and a caller that *does* send
+a token keeps its own scopes and owner.
+
+The default is defensible because the exemption is bounded by **client address**
+rather than by trust in the caller: a request from the public internet is
+refused here and falls through to normal token auth. An instance reachable only
+on the LAN was already readable by everyone there via the login screen; what
+changes is that a machine can read it without one.
+
+| Variable | Default | Effect |
+| --- | --- | --- |
+| `MCP_OPEN` | `true` | `false` requires a token again. |
+| `MCP_OPEN_NETWORKS` | loopback + RFC1918 | CIDRs that may use it. Narrow it to the calling server (`192.168.10.42/32`) when you can. |
+| `MCP_OPEN_SCOPES` | all three read scopes | What an anonymous caller may reach — knowledge, skills and web by default. Narrow it (e.g. `rag:read,skills:read`) to keep the web tools behind a token. |
+| `MCP_OPEN_OWNER` | unset | Pins the skills view to one user. Unset means the caller sees every skill on the instance, including other users' personal ones — without a token there is no owner to scope by. |
+
+The address check judges the **transport peer** and refuses outright when
+proxy/tunnel headers are present (`core/net_trust.py`): behind Caddy or a
+cloudflared tunnel every forwarded request would otherwise look local. Behind a
+proxy, restrict there or issue a token.
+
+The same anonymous defaults apply when `AUTH_ENABLED=false`.
+
+What it costs: anyone who can reach the port from an allowed network can read
+every knowledge base and every shared skill, with no audit trail per caller —
+the log line says `anonymous` instead of a token id. On a flat office network
+that is everyone in the building. Two ways to tighten without giving up the
+convenience: narrow `MCP_OPEN_NETWORKS` to the one calling server, and set
+`MCP_OPEN_OWNER` so the skills view is one user's library rather than all of
+them. A token per client stays the stricter option, and is what the profiles
+above exist for.
+
 ## Tools
 
 Every tool is **read-only**. There is no ingest, no delete, no skill authoring.
