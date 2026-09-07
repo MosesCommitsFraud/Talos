@@ -210,6 +210,7 @@ def _mcp_open_allowed(request) -> bool:
     host = request.client.host if request.client else None
     return client_in_networks(host, request.headers, _MCP_OPEN_NETWORKS)
 
+
 if AUTH_ENABLED:
     AUTH_EXEMPT_EXACT = {
         "/api/auth/setup",

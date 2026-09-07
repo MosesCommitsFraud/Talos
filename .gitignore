@@ -108,3 +108,7 @@ TODO.md
 docker-file/
 scripts/publish-company.ps1
 docs/company-release.md
+tmp/talos-guide-qa/
+tmp/build_talos_guide.py
+output/Talos_Setup_Guide.docx
+output/Talos_Setup_Guide.md
