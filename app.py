@@ -168,9 +168,11 @@ if LOCALHOST_BYPASS:
 
 from core.net_trust import (
     DEFAULT_PRIVATE_NETWORKS,
-    PROXY_FORWARD_HEADERS as _PROXY_FWD_HEADERS,
     client_in_networks,
     parse_networks,
+)
+from core.net_trust import (
+    PROXY_FORWARD_HEADERS as _PROXY_FWD_HEADERS,
 )
 
 # --- Token-free MCP from the local network ----------------------------------
