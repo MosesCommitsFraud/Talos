@@ -91,6 +91,7 @@ dev-docs/
 docs/windows-port/
 
 # Local config
+/docker-file/
 compound.config.json
 *.error.log
 _scratch/
@@ -104,3 +105,6 @@ tmp/build_current_setup_guide.py
 DGX_Spark_Talos_Setup_Guide_Aktuelle_Modelle.docx
 Talos_Hardware_Requirements_v0.1.docx
 TODO.md
+docker-file/
+scripts/publish-company.ps1
+docs/company-release.md
