@@ -1,12 +1,9 @@
-/* Offline presentation sizing and downloads. Toolbar is outside the artwork. */
+/* Offline presentation sizing and PNG rendering; download controls live in Talos. */
 window.TalosDashboard = {
-  init(config, originalHTML) {
+  init(config) {
     const art = document.getElementById('td-artboard');
     const stage = document.getElementById('td-stage');
-    const status = document.getElementById('td-export-status');
-    const pngButton = document.getElementById('td-save-png');
     const size = config.size;
-    const filename = (config.title || 'dashboard').replace(/[^\p{L}\p{N}_-]+/gu, '-').slice(0, 100);
     document.body.dataset.pageFormat = config.format;
     if (size) {
       art.style.width = `${size[0]}px`;
@@ -27,17 +24,6 @@ window.TalosDashboard = {
     fit();
     window.addEventListener('resize', fit);
     new ResizeObserver(fit).observe(document.body);
-    function save(blob, extension) {
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = `${filename}.${extension}`;
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      setTimeout(() => URL.revokeObjectURL(url), 10000);
-    }
-    document.getElementById('td-save-html').onclick = () => save(new Blob([originalHTML], {type: 'text/html;charset=utf-8'}), 'html');
 
     async function png() {
       if (typeof htmlToImage !== 'object') throw new Error('PNG-Laufzeit fehlt. Sandbox-Image aktualisieren.');
@@ -94,15 +80,5 @@ window.TalosDashboard = {
       } finally { for (const img of overlays) img.remove(); }
     }
     window.TALOS_EXPORT = {png};
-    if (pngButton) pngButton.onclick = async () => {
-      pngButton.disabled = true;
-      status.textContent = 'PNG wird erstellt …';
-      try {
-        save(await png(), 'png');
-        status.textContent = 'PNG heruntergeladen.';
-      } catch (error) {
-        status.textContent = `Export fehlgeschlagen: ${error.message || error}`;
-      } finally { pngButton.disabled = false; }
-    };
   }
 };

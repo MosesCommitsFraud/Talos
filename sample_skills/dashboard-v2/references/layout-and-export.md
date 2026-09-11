@@ -1,9 +1,11 @@
 # Design, formats and downloads
 
-HTML is always the deliverable, with working charts and interactions. Include
-`download_png=True` in `td.dashboard(...)` to add HTML and PNG download buttons.
-Both work offline; the toolbar is excluded from the PNG. It exports the whole
-dashboard (text, background, figures and charts), not just one ECharts canvas.
+HTML is always the deliverable, with working charts and interactions. Use
+`td.compose(...)`; it enables PNG rendering without inserting controls.
+HTML and PNG download buttons belong to the Talos preview toolbar. Never author
+download controls in the HTML. PNG includes the entire composition, not just
+one ECharts canvas. Standalone HTML stays interactive; reopen it in Talos to use
+the UI export, or call `window.TALOS_EXPORT.png()` in a rendering/test workflow.
 
 ## Choose a canvas
 
@@ -17,8 +19,8 @@ dashboard (text, background, figures and charts), not just one ECharts canvas.
 Fixed formats retain their composition and scale down as a whole in a narrow
 preview; they do not reflow into a long page. PNG output stays at the specified
 resolution regardless of preview zoom. These are single canvases. If the story
-needs more space, reduce the content or create additional HTML pages with their
-own downloads. The exporter rejects overflowing fixed pages instead of silently
+needs more space, reduce the content or create additional HTML pages, each
+exportable through Talos. The exporter rejects overflowing fixed pages instead of silently
 cropping. A4 pixel dimensions do not imply embedded printer DPI metadata.
 
 ## Compose the page, not a wall of tiles
@@ -35,8 +37,8 @@ every dashboard. Keep the user's branding and desired visual tone.
 therefore include the visible title, period, units, notes and sources yourself.
 Every chart must appear exactly once as `{{chart:id}}`. The scaffold inserts
 only its chart host; put headings/notes around it in the authored layout.
-`css` is appended after scaffold CSS; scope rules under `#td-artboard` to avoid
-restyling download controls. Escape data-derived text with `html.escape`.
+`css` is appended after scaffold CSS; scope rules under `#td-artboard` to keep
+the outer preview-sizing wrapper intact. Escape data-derived text with `html.escape`.
 
 This small example demonstrates the API; vary the design for the actual story:
 
@@ -79,9 +81,9 @@ style = """
 #td-artboard .plot .chart {height:100%;}
 #td-artboard .source {position:absolute;bottom:32px;font:12px system-ui;color:var(--muted);}
 """
-td.dashboard("output/dashboard.html", title="Geschäftsentwicklung 2026",
+td.compose("output/dashboard.html", title="Geschäftsentwicklung 2026",
     charts=[td.chart("trend", "Quartalsumsatz in Mio. EUR", trend, height=None)],
-    page_format="16:9", layout_html=layout, css=style, download_png=True)
+    page_format="16:9", layout_html=layout, css=style)
 ```
 
 Give CSS-sized chart hosts a definite container height. Fixed-size charts can

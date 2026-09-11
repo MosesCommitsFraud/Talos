@@ -1518,8 +1518,7 @@ async def do_search_knowledge(content: str, owner: Optional[str] = None) -> Dict
     Both paths go through ``ChatProcessor.retrieve()``, so the relevance gates
     (rerank floor, lexical evidence, companion figures, pixel gate) live in
     exactly one place. ``ChatProcessor(None)`` is fine here: ``retrieve()``
-    falls back to the process-wide ``get_rag_manager()`` singleton, which is the
-    same manager the injection path uses.
+    searches the registry's chat-enabled bases, just as the injection path does.
 
     Returns the retrieved sections under ``output`` plus the citation dicts
     under ``rag_sources`` so the caller can merge them into the turn's sources

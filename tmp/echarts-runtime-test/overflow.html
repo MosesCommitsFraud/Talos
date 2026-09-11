@@ -33,10 +33,6 @@ footer{max-width:1400px;margin:22px auto 0;color:var(--muted);font-size:.82rem}
 @media(max-width:900px){.grid{grid-template-columns:1fr}.card.span2{grid-column:auto}
 body{padding:14px}}
 
-#td-downloads{display:flex;align-items:center;flex-wrap:wrap;gap:10px;margin:0 auto 18px;max-width:1400px}
-#td-downloads button{font:inherit;color:var(--fg);background:var(--card);border:1px solid var(--line);border-radius:7px;padding:8px 14px;cursor:pointer}
-#td-downloads button:disabled{opacity:.6;cursor:wait}
-#td-export-status{font-size:13px;color:var(--muted)}
 #td-stage{margin:0 auto;position:relative}
 #td-artboard{background:var(--bg);padding:32px;position:relative;transform-origin:top left}
 #td-artboard .chart{position:relative}
@@ -44,7 +40,7 @@ body[data-page-format]:not([data-page-format="web"]) #td-artboard{overflow:hidde
 body[data-page-format]:not([data-page-format="web"]) #td-stage{overflow:hidden}
 body[data-page-format]:not([data-page-format="web"]) .grid{grid-template-columns:repeat(2,minmax(0,1fr))}
 body[data-page-format="web"] #td-stage{max-width:1464px}
-@media print{body{padding:0!important}#td-downloads{display:none}#td-stage{width:auto!important;height:auto!important}
+@media print{body{padding:0!important}#td-stage{width:auto!important;height:auto!important}
 #td-artboard{transform:none!important;box-shadow:none!important}}
 
 </style>
@@ -52,15 +48,12 @@ body[data-page-format="web"] #td-stage{max-width:1464px}
 //# sourceMappingURL=html-to-image.js.map
 
 ;
-/* Offline presentation sizing and downloads. Toolbar is outside the artwork. */
+/* Offline presentation sizing and PNG rendering; download controls live in Talos. */
 window.TalosDashboard = {
-  init(config, originalHTML) {
+  init(config) {
     const art = document.getElementById('td-artboard');
     const stage = document.getElementById('td-stage');
-    const status = document.getElementById('td-export-status');
-    const pngButton = document.getElementById('td-save-png');
     const size = config.size;
-    const filename = (config.title || 'dashboard').replace(/[^\p{L}\p{N}_-]+/gu, '-').slice(0, 100);
     document.body.dataset.pageFormat = config.format;
     if (size) {
       art.style.width = `${size[0]}px`;
@@ -81,17 +74,6 @@ window.TalosDashboard = {
     fit();
     window.addEventListener('resize', fit);
     new ResizeObserver(fit).observe(document.body);
-    function save(blob, extension) {
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = `${filename}.${extension}`;
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      setTimeout(() => URL.revokeObjectURL(url), 10000);
-    }
-    document.getElementById('td-save-html').onclick = () => save(new Blob([originalHTML], {type: 'text/html;charset=utf-8'}), 'html');
 
     async function png() {
       if (typeof htmlToImage !== 'object') throw new Error('PNG-Laufzeit fehlt. Sandbox-Image aktualisieren.');
@@ -148,24 +130,13 @@ window.TalosDashboard = {
       } finally { for (const img of overlays) img.remove(); }
     }
     window.TALOS_EXPORT = {png};
-    if (pngButton) pngButton.onclick = async () => {
-      pngButton.disabled = true;
-      status.textContent = 'PNG wird erstellt …';
-      try {
-        save(await png(), 'png');
-        status.textContent = 'PNG heruntergeladen.';
-      } catch (error) {
-        status.textContent = `Export fehlgeschlagen: ${error.message || error}`;
-      } finally { pngButton.disabled = false; }
-    };
   }
 };
 </script>
 </head><body>
-<nav id="td-downloads" aria-label="Downloads"><button type="button" id="td-save-html">HTML herunterladen</button><button type="button" id="td-save-png">PNG herunterladen</button><span id="td-export-status" role="status" aria-live="polite"></span></nav><div id="td-stage"><main id="td-artboard"><div style="height:900px">Too tall</div></main></div>
+<div id="td-stage"><main id="td-artboard"><div style="height:900px">Too tall</div></main></div>
 <script>
-const originalHTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
-TalosDashboard.init({"format":"16:9","size":[1280,720,1920,1080],"title":"Overflow"}, originalHTML);
+TalosDashboard.init({"format":"16:9","size":[1280,720,1920,1080],"title":"Overflow"});
 // Fail loudly if the runtime didn't survive being inlined. A blank dashboard
 // with a clean console is the hardest version of this to debug.
 const specs = [];

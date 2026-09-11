@@ -1,0 +1,2038 @@
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import {
+  BotIcon,
+  ChevronRightIcon,
+  DatabaseIcon,
+  DownloadIcon,
+  FileTextIcon,
+  GlobeIcon,
+  KeyboardIcon,
+  Link2Icon,
+  LogOutIcon,
+  NetworkIcon,
+  PaletteIcon,
+  PlugIcon,
+  PlusIcon,
+  ServerIcon,
+  SettingsIcon,
+  Trash2Icon,
+  UserIcon,
+  UsersIcon,
+  WrenchIcon,
+  XIcon,
+} from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
+import {
+  addModelEndpoint,
+  fetchAssistants,
+  createAssistant,
+  updateAssistant,
+  deleteAssistant,
+  changePassword,
+  fetchBuildInfo,
+  fetchVersionUpdates,
+  setDisplayName,
+  createIntegration,
+  deleteIntegration,
+  discoverEndpoints,
+  fetchAppSettings,
+  fetchBuiltinTools,
+  fetchIntegrationPresets,
+  fetchIntegrations,
+  fetchModels,
+  fetchSqlConfig,
+  fetchTotpStatus,
+  importData,
+  logout,
+  fetchSqlKnowledge,
+  uploadSqlKnowledge,
+  deleteSqlKnowledge,
+  sqlKnowledgeOriginalUrl,
+  saveAppSettings,
+  saveDisabledTools,
+  saveSqlConfig,
+  testSqlConfig,
+  testModelEndpoint,
+  totpConfirm,
+  totpDisable,
+  totpSetup,
+  updateIntegration,
+  wipeData,
+  fetchUserPref,
+  saveUserPref,
+  fetchSharedSkills,
+  fetchRagBases,
+  uploadSharedSkill,
+  uploadSharedSkillBundle,
+  deleteSharedSkill,
+  setSharedSkillEnabled,
+  type SharedSkill,
+  type AppSettings,
+  type SqlConfig,
+} from '@/api/client';
+import type { AssistantEndpoint } from '@/api/types';
+import { applyDensity, applyLang, applyTheme, usePrefs, type Density, type Lang, type LlmLang, type Theme, type Visibility } from '@/state/prefs';
+import { LANGUAGES } from '@/i18n';
+import { cn } from '@/lib/utils';
+import { Button } from './ui/button';
+import { Dialog, DialogContent } from './ui/dialog';
+import { Input, Switch, Textarea } from './ui/misc';
+import { Select } from './ui/select';
+import { KeybindingPill } from './ui/kbd';
+import { SearchInput } from './ui/search';
+import { useAuth } from './auth/AuthGate';
+import { UsersPanel } from './settings/UsersPanel';
+
+export type Panel =
+  | 'appearance' | 'shortcuts' | 'account'
+  | 'models' | 'ai' | 'assistants' | 'integrations' | 'web' | 'mcp' | 'tools' | 'skills'
+  | 'rag' | 'users' | 'system';
+
+/* ── Shared layout (t3code settings design) ── */
+
+/** Scrollable page body: stacks sections with generous spacing. */
+export function Page({ children, className }: { children: React.ReactNode; className?: string }) {
+  return <div className={cn('flex flex-col gap-7 p-5 sm:p-6', className)}>{children}</div>;
+}
+
+/** A titled card group. Rows go inside as direct children (self-bordered);
+ *  free-form content can opt into padding with `padded`. */
+export function Section({ title, action, padded, children }: { title: string; action?: React.ReactNode; padded?: boolean; children: React.ReactNode }) {
+  return (
+    <section className="space-y-2.5">
+      <header className="flex min-h-5 items-center justify-between px-1">
+        <h2 className="flex items-center gap-2 text-[11px] font-semibold tracking-[0.08em] text-foreground/50 uppercase">
+          <span className="inline-block h-px w-3 bg-border" aria-hidden="true" />
+          {title}
+        </h2>
+        {action && <div className="flex items-center">{action}</div>}
+      </header>
+      <div className={cn('overflow-hidden rounded-md border bg-card text-card-foreground', padded && 'p-4 sm:p-5')}>
+        {children}
+      </div>
+    </section>
+  );
+}
+
+/** Just the section header (uppercase tracked label), for panels that render
+ *  their own cards instead of using a Section wrapper. */
+function SectionHeader({ children }: { children: React.ReactNode }) {
+  return (
+    <h2 className="flex items-center gap-2 px-1 text-[11px] font-semibold tracking-[0.08em] text-foreground/50 uppercase">
+      <span className="inline-block h-px w-3 bg-border" aria-hidden="true" />
+      {children}
+    </h2>
+  );
+}
+
+/** A single setting row: title + description on the left, control on the right.
+ *  Rows separate themselves with a top border so they read as a grouped list. */
+export function Row({ label, hint, children, stacked }: { label: React.ReactNode; hint?: React.ReactNode; children?: React.ReactNode; stacked?: boolean }) {
+  return (
+    <div className={cn(
+      'flex flex-col gap-3 border-t border-border/60 px-4 py-3.5 first:border-t-0 sm:px-5',
+      stacked ? 'xl:flex-row xl:items-center xl:justify-between' : 'sm:flex-row sm:items-center sm:justify-between',
+    )}>
+      <div className="min-w-0 flex-1 space-y-0.5">
+        <div className="text-[13px] font-semibold tracking-[-0.01em] text-foreground">{label}</div>
+        {hint && <p className="settings-row-hint text-xs text-muted-foreground/80">{hint}</p>}
+      </div>
+      {children && <div className={cn(
+        'flex w-full shrink-0 items-center gap-2',
+        stacked ? 'xl:w-auto xl:justify-end' : 'sm:w-auto sm:justify-end',
+      )}>{children}</div>}
+    </div>
+  );
+}
+
+function SaveBar({ dirty, saving, error, onSave }: { dirty: boolean; saving: boolean; error?: string; onSave: () => void }) {
+  const { t } = useTranslation();
+  if (!dirty && !error) return null;
+  return (
+    <div className="sticky bottom-0 -mx-5 -mb-5 mt-1 flex items-center justify-end gap-3 border-t bg-popover/95 px-5 py-3 backdrop-blur-sm sm:-mx-6 sm:-mb-6 sm:px-6">
+      {error && <span className="min-w-0 flex-1 truncate text-xs text-destructive-foreground">{error}</span>}
+      <Button size="sm" disabled={saving || !dirty} onClick={onSave}>
+        {saving ? t('common.saving') : t('settings.saveChanges')}
+      </Button>
+    </div>
+  );
+}
+
+/** Draft editing over the flat /api/auth/settings dict; Save POSTs changed keys. */
+function useSettingsDraft() {
+  const { data } = useQuery({ queryKey: ['app-settings'], queryFn: fetchAppSettings });
+  const [draft, setDraft] = useState<AppSettings>({});
+  const queryClient = useQueryClient();
+  const value = (key: string) => (key in draft ? draft[key] : data?.[key]);
+  const setValue = (key: string, v: unknown) => setDraft((d) => ({ ...d, [key]: v }));
+  const dirty = Object.keys(draft).some((k) => JSON.stringify(draft[k]) !== JSON.stringify(data?.[k]));
+  const save = useMutation({
+    mutationFn: () => saveAppSettings(draft),
+    onSuccess: () => {
+      setDraft({});
+      void queryClient.invalidateQueries({ queryKey: ['app-settings'] });
+    },
+  });
+  return { ready: !!data, value, setValue, dirty, save };
+}
+type Draft = ReturnType<typeof useSettingsDraft>;
+
+function BoolRow({ s, k, label, hint }: { s: Draft; k: string; label: string; hint?: string }) {
+  return (
+    <Row label={label} hint={hint}>
+      <Switch checked={!!s.value(k)} onCheckedChange={(v) => s.setValue(k, v)} />
+    </Row>
+  );
+}
+
+function TextRow({ s, k, label, hint, placeholder, type, width }: { s: Draft; k: string; label: string; hint?: string; placeholder?: string; type?: string; width?: string }) {
+  return (
+    <Row label={label} hint={hint}>
+      <Input
+        type={type}
+        className={width ?? 'w-56'}
+        placeholder={placeholder}
+        value={String(s.value(k) ?? '')}
+        onChange={(e) => s.setValue(k, type === 'number' ? Number(e.target.value) : e.target.value)}
+      />
+    </Row>
+  );
+}
+
+/* ── Endpoint + model pickers (Default/Utility models) ── */
+
+function useEndpoints() {
+  const { data } = useQuery({ queryKey: ['models'], queryFn: fetchModels });
+  return (data ?? []).filter((e) => e.is_enabled && e.model_type !== 'embedding');
+}
+
+function EndpointModelRows({ s, epKey, modelKey, label }: { s: Draft; epKey: string; modelKey: string; label: string }) {
+  const { t } = useTranslation();
+  const endpoints = useEndpoints();
+  const epId = String(s.value(epKey) ?? '');
+  const models = endpoints.find((e) => e.id === epId)?.models ?? endpoints.flatMap((e) => e.models);
+  return (
+    <>
+      <Row label={t('settings.ai.endpoint', { label })}>
+        <Select
+          className="w-56"
+          value={epId}
+          onChange={(v) => s.setValue(epKey, v)}
+          options={[{ value: '', label: '—' }, ...endpoints.map((e) => ({ value: e.id, label: e.name }))]}
+        />
+      </Row>
+      <Row label={t('settings.ai.model', { label })}>
+        <Select
+          className="w-56"
+          value={String(s.value(modelKey) ?? '')}
+          onChange={(v) => s.setValue(modelKey, v)}
+          options={[{ value: '', label: '—' }, ...models.map((m) => ({ value: m }))]}
+        />
+      </Row>
+    </>
+  );
+}
+
+/** Vision model — legacy offers "Auto-detect" ('' value) plus every model. */
+function VisionModelRow({ s }: { s: Draft }) {
+  const { t } = useTranslation();
+  const endpoints = useEndpoints();
+  const models = endpoints.flatMap((e) => e.models);
+  return (
+    <Row label={t('settings.ai.visionModel')}>
+      <Select
+        className="w-56"
+        value={String(s.value('vision_model') ?? '')}
+        onChange={(v) => s.setValue('vision_model', v)}
+        options={[{ value: '', label: t('settings.ai.autoDetect') }, ...models.map((m) => ({ value: m }))]}
+      />
+    </Row>
+  );
+}
+
+interface Fallback { endpoint_id: string; model: string }
+
+function FallbacksEditor({ s, k }: { s: Draft; k: string }) {
+  const { t } = useTranslation();
+  const endpoints = useEndpoints();
+  const list: Fallback[] = Array.isArray(s.value(k)) ? (s.value(k) as Fallback[]) : [];
+  const allModels = endpoints.flatMap((e) => e.models.map((model) => ({ endpoint_id: e.id, model, name: e.name })));
+  return (
+    <div className="space-y-1.5 border-t border-border/60 px-4 py-3.5 first:border-t-0 sm:px-5">
+      <div className="text-xs text-muted-foreground">{t('settings.ai.fallbacks')}</div>
+      {list.map((f, i) => (
+        <div key={`${f.endpoint_id}:${f.model}:${i}`} className="flex items-center gap-2">
+          <span className="min-w-0 flex-1 truncate rounded-lg border bg-card px-2.5 py-1 text-xs">
+            {f.model} <span className="text-muted-foreground">· {endpoints.find((e) => e.id === f.endpoint_id)?.name ?? f.endpoint_id}</span>
+          </span>
+          <button
+            type="button"
+            aria-label={t('settings.ai.removeFallback')}
+            onClick={() => s.setValue(k, list.filter((_, j) => j !== i))}
+            className="flex size-6 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
+          >
+            <XIcon className="size-3.5" />
+          </button>
+        </div>
+      ))}
+      <Select
+        className="w-full"
+        value=""
+        onChange={(v) => {
+          const found = allModels.find((m) => `${m.endpoint_id}:${m.model}` === v);
+          if (found) s.setValue(k, [...list, { endpoint_id: found.endpoint_id, model: found.model }]);
+        }}
+        options={[
+          { value: '', label: t('settings.ai.addFallback') },
+          ...allModels.map((m) => ({ value: `${m.endpoint_id}:${m.model}`, label: `${m.model} · ${m.name}` })),
+        ]}
+      />
+    </div>
+  );
+}
+
+/* ── Appearance (theme/density + UI visibility, mirrors legacy sections) ── */
+
+/** Visibility toggles keyed for i18n: secKey → settings.appearance.sec.*,
+ *  item key → settings.appearance.vis.<key> (+ "<key>Hint" when present). */
+const VISIBILITY_SECTIONS: Array<{ secKey: string; items: Array<{ key: keyof Visibility; hint?: boolean }> }> = [
+  {
+    secKey: 'sidebar',
+    items: [
+      { key: 'sidebarUserBar', hint: true },
+      { key: 'sidebarSettingsBtn', hint: true },
+    ],
+  },
+  {
+    secKey: 'chatArea',
+    items: [
+      { key: 'chatHeader', hint: true },
+      { key: 'welcomeText', hint: true },
+      { key: 'showThinking', hint: true },
+      { key: 'incognitoBtn', hint: true },
+      { key: 'messageMetrics', hint: true },
+    ],
+  },
+  {
+    secKey: 'chatBar',
+    items: [
+      { key: 'composerAttach' },
+      { key: 'composerPlan' },
+      { key: 'composerModelPicker' },
+      { key: 'contextMeter' },
+    ],
+  },
+];
+
+function AppearancePanel() {
+  const { t } = useTranslation();
+  const prefs = usePrefs();
+  return (
+    <Page>
+      {/* Theme / language / density as compact dropdown rows (t3code General
+          settings style) rather than three stacked cards of giant buttons. */}
+      <Section title={t('settings.appearance.title')}>
+        <Row label={t('settings.appearance.theme')} hint={t('settings.appearance.themeHint')}>
+          <Select
+            className="w-44"
+            value={prefs.theme}
+            onChange={(v) => { prefs.setTheme(v as Theme); applyTheme(v as Theme); }}
+            options={[
+              { value: 'system', label: t('settings.appearance.system') },
+              { value: 'light', label: t('settings.appearance.light') },
+              { value: 'dark', label: t('settings.appearance.dark') },
+            ]}
+          />
+        </Row>
+        <Row label={t('settings.appearance.language')} hint={t('settings.appearance.languageHint')}>
+          <Select
+            className="w-44"
+            value={prefs.lang}
+            onChange={(v) => { prefs.setLang(v as Lang); applyLang(v as Lang); }}
+            options={LANGUAGES.map((l) => ({ value: l.value, label: l.label }))}
+          />
+        </Row>
+        <Row label={t('settings.appearance.llmLanguage')} hint={t('settings.appearance.llmLanguageHint')}>
+          <Select
+            className="w-44"
+            value={prefs.llmLang}
+            onChange={(v) => prefs.setLlmLang(v as LlmLang)}
+            options={[
+              { value: 'auto', label: t('settings.appearance.languageAuto') },
+              ...LANGUAGES.map((l) => ({ value: l.value, label: l.label })),
+            ]}
+          />
+        </Row>
+        <Row label={t('settings.appearance.density')} hint={t('settings.appearance.densityHint')}>
+          <Select
+            className="w-44"
+            value={prefs.density}
+            onChange={(v) => { prefs.setDensity(v as Density); applyDensity(v as Density); }}
+            options={[
+              { value: 'compact', label: t('settings.appearance.compact') },
+              { value: 'comfortable', label: t('settings.appearance.comfortable') },
+              { value: 'spacious', label: t('settings.appearance.spacious') },
+            ]}
+          />
+        </Row>
+      </Section>
+      {VISIBILITY_SECTIONS.map((sec) => (
+        <Section key={sec.secKey} title={t(`settings.appearance.sec.${sec.secKey}`)}>
+          {sec.items.map((it) => (
+            <Row
+              key={it.key}
+              label={t(`settings.appearance.vis.${it.key}`)}
+              hint={it.hint ? t(`settings.appearance.vis.${it.key}Hint`) : undefined}
+            >
+              <Switch checked={prefs.visibility[it.key]} onCheckedChange={(v) => prefs.setVisibility(it.key, v)} />
+            </Row>
+          ))}
+        </Section>
+      ))}
+      <div>
+        <Button variant="outline" size="sm" onClick={prefs.resetVisibility}>{t('settings.appearance.resetVisibility')}</Button>
+      </div>
+    </Page>
+  );
+}
+
+/* ── Shortcuts (editable keybinds from settings.keybinds) ── */
+
+const KEYBIND_KEYS = [
+  'search', 'toggle_sidebar', 'new_session', 'star_session',
+  'delete_session', 'admin_panel', 'cancel',
+];
+
+/** Build a "ctrl+meta+alt+shift+key" binding string from a keyboard event. */
+function bindingFromEvent(e: React.KeyboardEvent): string | null {
+  const k = e.key.toLowerCase();
+  if (['control', 'meta', 'alt', 'shift'].includes(k)) return null;
+  const parts = [
+    e.ctrlKey && 'ctrl', e.metaKey && 'meta', e.altKey && 'alt', e.shiftKey && 'shift',
+  ].filter(Boolean) as string[];
+  parts.push(k === ' ' ? 'space' : k);
+  return parts.join('+');
+}
+
+/** t3code-style keybind control: shows the binding as keycap pills; click to
+ *  re-record, then capture the next combination pressed. */
+function KeybindRecorder({ value, onChange }: { value?: string; onChange: (next: string) => void }) {
+  const { t } = useTranslation();
+  const [recording, setRecording] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  if (recording) {
+    return (
+      <input
+        ref={inputRef}
+        autoFocus
+        readOnly
+        value=""
+        placeholder={t('settings.shortcuts.recording')}
+        aria-label={t('settings.shortcuts.recording')}
+        className="h-7 w-44 rounded-md border border-primary/70 bg-primary/5 px-2 text-center font-mono text-xs text-foreground outline-none placeholder:text-muted-foreground"
+        onBlur={() => setRecording(false)}
+        onKeyDown={(e) => {
+          if (e.key === 'Tab') return;
+          e.preventDefault();
+          // Stop the combo from reaching window-level shortcut handlers (e.g. ⌘K).
+          e.stopPropagation();
+          if (e.key === 'Escape') { setRecording(false); return; }
+          const next = bindingFromEvent(e);
+          if (!next) return;
+          onChange(next);
+          setRecording(false);
+        }}
+      />
+    );
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={() => setRecording(true)}
+      aria-label={t('settings.shortcuts.edit')}
+      className="group inline-flex h-7 min-w-44 items-center justify-center gap-2 rounded-md border border-transparent px-2 outline-none transition-colors hover:border-border hover:bg-accent focus-visible:border-ring"
+    >
+      {value
+        ? <KeybindingPill value={value} />
+        : <span className="font-mono text-xs text-muted-foreground">{t('settings.shortcuts.unset')}</span>}
+      <span className="text-[10px] uppercase tracking-[0.08em] text-muted-foreground/0 transition-colors group-hover:text-muted-foreground/70">
+        {t('settings.shortcuts.edit')}
+      </span>
+    </button>
+  );
+}
+
+function ShortcutsPanel() {
+  const { t } = useTranslation();
+  const qc = useQueryClient();
+  // Per-user storage: each user records their own bindings (was a single
+  // global settings.json entry shared by everyone).
+  const { data, isSuccess } = useQuery({
+    queryKey: ['userPref', 'keybinds'],
+    queryFn: () => fetchUserPref<Record<string, string>>('keybinds'),
+  });
+  const binds = data ?? {};
+  const save = useMutation({
+    mutationFn: (next: Record<string, string>) => saveUserPref('keybinds', next),
+    onSettled: () => qc.invalidateQueries({ queryKey: ['userPref', 'keybinds'] }),
+  });
+  if (!isSuccess) return <Page><p className="text-sm text-muted-foreground">{t('common.loading')}</p></Page>;
+  return (
+    <Page>
+      <Section title={t('settings.shortcuts.title')}>
+        {KEYBIND_KEYS.map((key) => (
+          <Row key={key} label={t(`settings.shortcuts.labels.${key}`)}>
+            <KeybindRecorder
+              value={binds[key]}
+              onChange={(next) => save.mutate({ ...binds, [key]: next })}
+            />
+          </Row>
+        ))}
+      </Section>
+      <p className="-mt-3 px-1 text-xs text-muted-foreground">{t('settings.shortcuts.hint')}</p>
+      {save.isError && <p className="px-1 text-xs text-destructive">{(save.error as Error).message}</p>}
+    </Page>
+  );
+}
+
+/* ── Account: password change + 2FA + logout ── */
+
+function AccountPanel() {
+  const { t } = useTranslation();
+  const auth = useAuth();
+  const qc = useQueryClient();
+  const { data: totp, refetch: refetchTotp } = useQuery({ queryKey: ['totp'], queryFn: fetchTotpStatus });
+  const [name, setName] = useState(auth?.display_name ?? '');
+  const [nameMsg, setNameMsg] = useState('');
+  const [pw, setPw] = useState({ current: '', next: '', confirm: '' });
+  const [pwMsg, setPwMsg] = useState('');
+  const [setup, setSetup] = useState<{ secret: string; qr_code: string } | null>(null);
+  const [code, setCode] = useState('');
+  const [backupCodes, setBackupCodes] = useState<string[] | null>(null);
+  const [disablePw, setDisablePw] = useState('');
+  const [totpMsg, setTotpMsg] = useState('');
+
+  const savePassword = async () => {
+    setPwMsg('');
+    if (!pw.next || pw.next !== pw.confirm) { setPwMsg(t('settings.account.passwordMismatch')); return; }
+    try {
+      await changePassword(pw.current, pw.next);
+      setPw({ current: '', next: '', confirm: '' });
+      setPwMsg(t('settings.account.passwordChanged'));
+    } catch (e) { setPwMsg((e as Error).message); }
+  };
+
+  const saveName = async () => {
+    setNameMsg('');
+    try {
+      await setDisplayName(name.trim());
+      await qc.invalidateQueries({ queryKey: ['auth'] });
+      setNameMsg(t('settings.account.nameSaved'));
+    } catch (e) { setNameMsg((e as Error).message); }
+  };
+
+  return (
+    <Page>
+      <Section title={t('settings.account.title')} padded>
+      <div className="flex items-center gap-3">
+        <div className="flex size-10 items-center justify-center rounded-full bg-primary/15 text-sm font-semibold text-primary">
+          {(auth?.display_name || auth?.username || 'U').slice(0, 1).toUpperCase()}
+        </div>
+        <div className="flex-1">
+          <div className="text-sm font-medium">{auth?.display_name || (auth?.username ?? t('sidebar.user'))}</div>
+          <div className="text-xs text-muted-foreground">
+            {auth?.display_name ? `${auth.username} · ` : ''}
+            {auth?.is_admin ? t('settings.account.administrator') : t('settings.account.member')}
+            {auth?.auth_enabled === false && ` · ${t('settings.account.authDisabled')}`}
+          </div>
+        </div>
+        {auth?.auth_enabled !== false && (
+          <Button variant="outline" size="sm" onClick={() => void logout()}>
+            <LogOutIcon /> {t('settings.account.logOut')}
+          </Button>
+        )}
+      </div>
+      {auth?.auth_enabled !== false && (
+        <div className="pt-3">
+          <div className="pb-1 text-xs text-muted-foreground">{t('settings.account.displayName')}</div>
+          <div className="flex items-center gap-2">
+            <Input placeholder={t('settings.account.displayNamePlaceholder')} value={name} onChange={(e) => setName(e.target.value)} className="max-w-64" />
+            <Button size="sm" variant="outline" disabled={(name.trim() || '') === (auth?.display_name ?? '')} onClick={() => void saveName()}>
+              {t('common.save')}
+            </Button>
+            {nameMsg && <span className={cn('text-xs', nameMsg === t('settings.account.nameSaved') ? 'text-success' : 'text-destructive-foreground')}>{nameMsg}</span>}
+          </div>
+        </div>
+      )}
+      </Section>
+
+      <Section title={t('settings.account.changePassword')} padded>
+      <div className="space-y-2">
+        <Input type="password" placeholder={t('settings.account.currentPassword')} value={pw.current} onChange={(e) => setPw({ ...pw, current: e.target.value })} />
+        <Input type="password" placeholder={t('settings.account.newPassword')} value={pw.next} onChange={(e) => setPw({ ...pw, next: e.target.value })} />
+        <Input type="password" placeholder={t('settings.account.confirmPassword')} value={pw.confirm} onChange={(e) => setPw({ ...pw, confirm: e.target.value })} />
+        <div className="flex items-center gap-3">
+          <Button size="sm" disabled={!pw.current || !pw.next} onClick={() => void savePassword()}>{t('settings.account.changeBtn')}</Button>
+          {pwMsg && <span className={cn('text-xs', pwMsg === t('settings.account.passwordChanged') ? 'text-success' : 'text-destructive-foreground')}>{pwMsg}</span>}
+        </div>
+      </div>
+      </Section>
+
+      <Section title={t('settings.account.twoFactor')} padded>
+      {totp?.enabled ? (
+        <div className="space-y-2">
+          <p className="text-xs text-success">{t('settings.account.twoFactorEnabled')}</p>
+          <div className="flex items-center gap-2">
+            <Input type="password" placeholder={t('settings.account.passwordToDisable')} className="w-56" value={disablePw} onChange={(e) => setDisablePw(e.target.value)} />
+            <Button size="sm" variant="destructive" disabled={!disablePw} onClick={() => {
+              void totpDisable(disablePw).then(() => { setDisablePw(''); setTotpMsg(''); void refetchTotp(); }).catch((e) => setTotpMsg((e as Error).message));
+            }}>{t('settings.account.disable')}</Button>
+          </div>
+        </div>
+      ) : setup ? (
+        <div className="space-y-2">
+          <img src={setup.qr_code} alt={t('settings.account.qrAlt')} className="size-40 rounded-lg border bg-white p-1.5" />
+          <p className="text-xs text-muted-foreground">{t('settings.account.scanHint')} <code className="font-mono">{setup.secret}</code></p>
+          <div className="flex items-center gap-2">
+            <Input placeholder={t('settings.account.sixDigit')} className="w-32" value={code} onChange={(e) => setCode(e.target.value)} />
+            <Button size="sm" disabled={code.length < 6} onClick={() => {
+              void totpConfirm(code).then((r) => { setBackupCodes(r.backup_codes); setSetup(null); setCode(''); void refetchTotp(); }).catch((e) => setTotpMsg((e as Error).message));
+            }}>{t('common.confirm')}</Button>
+          </div>
+        </div>
+      ) : backupCodes ? (
+        <div className="space-y-1.5">
+          <p className="text-xs text-success">{t('settings.account.enableSaveCodes')}</p>
+          <pre className="rounded-lg border bg-muted px-3 py-2 font-mono text-xs">{backupCodes.join('\n')}</pre>
+          <Button size="sm" variant="outline" onClick={() => setBackupCodes(null)}>{t('common.done')}</Button>
+        </div>
+      ) : (
+        <Button size="sm" variant="outline" onClick={() => { void totpSetup().then(setSetup).catch((e) => setTotpMsg((e as Error).message)); }}>
+          {t('settings.account.enable2fa')}
+        </Button>
+      )}
+      {totpMsg && <p className="pt-1 text-xs text-destructive-foreground">{totpMsg}</p>}
+      </Section>
+    </Page>
+  );
+}
+
+/* ── Add Models (legacy "services") ── */
+
+function AddModelsPanel() {
+  const { t } = useTranslation();
+  const [url, setUrl] = useState('');
+  const [kind, setKind] = useState('llm');
+  const [apiKey, setApiKey] = useState('');
+  const [msg, setMsg] = useState<{ text: string; ok: boolean } | null>(null);
+  const queryClient = useQueryClient();
+  const { data: endpoints } = useQuery({ queryKey: ['models'], queryFn: fetchModels });
+  const refresh = () => void queryClient.invalidateQueries({ queryKey: ['models'] });
+
+  const run = async (fn: () => Promise<unknown>, ok: string) => {
+    setMsg(null);
+    try { await fn(); setMsg({ text: ok, ok: true }); refresh(); } catch (e) { setMsg({ text: (e as Error).message, ok: false }); }
+  };
+
+  return (
+    <Page>
+      <Section title={t('settings.models.addEndpoint')} padded>
+        <div className="space-y-2.5">
+          <div className="flex gap-2">
+            <Input placeholder={t('settings.models.baseUrlPlaceholder')} value={url} onChange={(e) => setUrl(e.target.value)} />
+            <Select value={kind} onChange={setKind} options={[{ value: 'llm', label: t('settings.models.llm') }, { value: 'image', label: t('settings.models.image') }]} />
+          </div>
+          <Input placeholder={t('settings.models.apiKeyOptional')} type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} />
+          <div className="flex flex-wrap items-center gap-2">
+            <Button size="sm" disabled={!url.trim()} onClick={() => void run(() => addModelEndpoint({ baseUrl: url, apiKey: apiKey || undefined, modelType: kind }), t('settings.models.endpointAdded'))}>
+              <PlusIcon /> {t('common.add')}
+            </Button>
+            <Button size="sm" variant="outline" disabled={!url.trim()} onClick={() => void run(() => testModelEndpoint(url, apiKey || undefined), t('settings.models.connectionOk'))}>
+              {t('common.test')}
+            </Button>
+            <Button size="sm" variant="outline" onClick={() => void run(() => discoverEndpoints(), t('settings.models.discoveryFinished'))}>
+              {t('settings.models.discover')}
+            </Button>
+            <Button size="sm" variant="outline" onClick={() => { setUrl('http://localhost:11434'); setKind('llm'); }}>
+              {t('settings.models.ollamaPreset')}
+            </Button>
+          </div>
+          {msg && <p className={cn('text-xs', msg.ok ? 'text-success' : 'text-destructive-foreground')}>{msg.text}</p>}
+        </div>
+      </Section>
+
+      <Section title={t('settings.models.configured')} padded>
+        <div className="space-y-1.5">
+          {(endpoints ?? []).map((e) => (
+            <div key={e.id} className="flex items-center justify-between rounded-lg border bg-background px-3 py-2">
+              <div className="min-w-0">
+                <div className="truncate text-sm">{e.name}</div>
+                <div className="truncate text-xs text-muted-foreground">{e.base_url} · {t('settings.models.models', { count: e.models.length })}</div>
+              </div>
+              <span className={cn('text-xs', e.is_enabled ? 'text-success' : 'text-muted-foreground')}>
+                {e.is_enabled ? t('settings.models.enabled') : t('settings.models.disabled')}
+              </span>
+            </div>
+          ))}
+          {(endpoints ?? []).length === 0 && <p className="text-xs text-muted-foreground">{t('settings.models.noEndpoints')}</p>}
+        </div>
+      </Section>
+
+      <ModelDisplayNamesSection />
+    </Page>
+  );
+}
+
+/** Admin-set, global custom display names for models. Persisted in app
+ *  settings (model_display_names), so it applies for every user. */
+function ModelDisplayNamesSection() {
+  const { t } = useTranslation();
+  const s = useSettingsDraft();
+  const { data: endpoints } = useQuery({ queryKey: ['models'], queryFn: fetchModels });
+  const names = (s.value('model_display_names') ?? {}) as Record<string, string>;
+  const models = Array.from(
+    new Set(
+      (endpoints ?? [])
+        .filter((e) => e.is_enabled && e.model_type !== 'embedding')
+        .flatMap((e) => e.models),
+    ),
+  );
+  const setName = (model: string, v: string) => {
+    const next = { ...names };
+    if (v.trim()) next[model] = v;
+    else delete next[model];
+    s.setValue('model_display_names', next);
+  };
+
+  return (
+    <>
+      <Section title={t('settings.models.displayNames')}>
+        {models.length === 0 && <Row label={<span className="font-normal text-muted-foreground">{t('settings.models.noModels')}</span>} />}
+        {models.map((model) => (
+          <Row key={model} label={model}>
+            <Input
+              className="w-56"
+              placeholder={model}
+              value={names[model] ?? ''}
+              onChange={(e) => setName(model, e.target.value)}
+            />
+          </Row>
+        ))}
+      </Section>
+      <p className="-mt-3 px-1 text-xs text-muted-foreground">
+        {t('settings.models.displayNamesHintPre')}<span className="font-medium text-foreground/80">{t('settings.models.displayNamesHintEm')}</span>{t('settings.models.displayNamesHintPost')}
+      </p>
+      <SaveBar dirty={s.dirty} saving={s.save.isPending} error={s.save.isError ? (s.save.error as Error).message : undefined} onSave={() => s.save.mutate()} />
+    </>
+  );
+}
+
+/* ── AI Defaults (full legacy AI tab) ── */
+
+function AiDefaultsPanel() {
+  const { t } = useTranslation();
+  const s = useSettingsDraft();
+  if (!s.ready) return <Page><p className="text-sm text-muted-foreground">{t('common.loading')}</p></Page>;
+  return (
+    <Page>
+      <Section title={t('settings.ai.systemPrompt')} padded>
+        <p className="mb-2.5 text-xs text-muted-foreground/80">
+          {t('settings.ai.systemPromptHint')}
+        </p>
+        <Textarea
+          className="min-h-[140px] font-mono text-[13px]"
+          placeholder={t('settings.ai.systemPromptPlaceholder')}
+          value={String(s.value('custom_system_prompt') ?? '')}
+          onChange={(e) => s.setValue('custom_system_prompt', e.target.value)}
+        />
+      </Section>
+
+      <Section title={t('settings.ai.defaultModel')}>
+        <EndpointModelRows s={s} epKey="default_endpoint_id" modelKey="default_model" label={t('settings.ai.defaultLabel')} />
+        <FallbacksEditor s={s} k="default_model_fallbacks" />
+      </Section>
+
+      <Section title={t('settings.ai.utilityModel')}>
+        <Row label={t('settings.ai.utilityRow')} hint={t('settings.ai.utilityHint')} />
+        <EndpointModelRows s={s} epKey="utility_endpoint_id" modelKey="utility_model" label={t('settings.ai.utilityLabel')} />
+        <FallbacksEditor s={s} k="utility_model_fallbacks" />
+      </Section>
+
+      <Section title={t('settings.ai.contextMgmt')}>
+        <TextRow s={s} k="compact_threshold" label={t('settings.ai.autoCompact')} hint={t('settings.ai.autoCompactHint')} width="w-24" />
+        <BoolRow s={s} k="context_compression" label={t('settings.ai.toolCompression')} hint={t('settings.ai.toolCompressionHint')} />
+      </Section>
+
+      <Section title={t('settings.ai.vision')}>
+        <BoolRow s={s} k="vision_enabled" label={t('settings.ai.visionEnabled')} />
+        <VisionModelRow s={s} />
+        <FallbacksEditor s={s} k="vision_model_fallbacks" />
+      </Section>
+
+      <Section title={t('settings.ai.agent')}>
+        <TextRow s={s} k="agent_max_tool_calls" label={t('settings.ai.toolCallLimit')} hint={t('settings.ai.toolCallLimitHint')} type="number" width="w-24" />
+        <TextRow s={s} k="agent_max_rounds" label={t('settings.ai.maxSteps')} type="number" width="w-24" />
+        <TextRow s={s} k="agent_tool_parallelism" label={t('settings.ai.toolParallelism')} hint={t('settings.ai.toolParallelismHint')} type="number" width="w-24" />
+      </Section>
+
+      <SaveBar dirty={s.dirty} saving={s.save.isPending} error={s.save.isError ? (s.save.error as Error).message : undefined} onSave={() => s.save.mutate()} />
+    </Page>
+  );
+}
+
+/* ── Integrations (web search + integration CRUD) ── */
+
+function IntegrationsPanel() {
+  const { t } = useTranslation();
+  const { data: integrations } = useQuery({ queryKey: ['integrations'], queryFn: fetchIntegrations });
+  const { data: presets } = useQuery({ queryKey: ['intg-presets'], queryFn: fetchIntegrationPresets });
+  const [preset, setPreset] = useState('');
+  const [form, setForm] = useState({ name: '', base_url: '', api_key: '' });
+  const [msg, setMsg] = useState('');
+  const queryClient = useQueryClient();
+  const refresh = () => void queryClient.invalidateQueries({ queryKey: ['integrations'] });
+
+  const presetEntries = Object.entries(presets ?? {});
+
+  const add = async () => {
+    setMsg('');
+    try {
+      await createIntegration({ ...(preset ? { preset } : {}), ...form });
+      setForm({ name: '', base_url: '', api_key: '' });
+      setPreset('');
+      refresh();
+    } catch (e) { setMsg((e as Error).message); }
+  };
+
+  return (
+    <Page>
+      <Section title={t('settings.integrations.title')} padded>
+        <p className="pb-2 text-xs text-muted-foreground">{t('settings.integrations.hint')}</p>
+        <div className="space-y-1.5">
+          {(integrations ?? []).map((it, i) => {
+            const id = String(it.id ?? i);
+            return (
+              <div key={id} className="flex items-center gap-3 rounded-lg border bg-background px-3 py-2">
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-sm">{String(it.name ?? id)}</div>
+                  {typeof it.base_url === 'string' && it.base_url && <div className="truncate text-xs text-muted-foreground">{it.base_url}</div>}
+                </div>
+                <Switch
+                  checked={!!it.enabled}
+                  onCheckedChange={(v) => void updateIntegration(id, { enabled: v }).then(refresh).catch((e) => setMsg((e as Error).message))}
+                />
+                <button
+                  type="button"
+                  aria-label={t('settings.integrations.deleteItem', { name: String(it.name ?? id) })}
+                  onClick={() => void deleteIntegration(id).then(refresh).catch((e) => setMsg((e as Error).message))}
+                  className="flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-destructive-foreground"
+                >
+                  <Trash2Icon className="size-3.5" />
+                </button>
+              </div>
+            );
+          })}
+          {(integrations ?? []).length === 0 && <p className="text-xs text-muted-foreground">{t('settings.integrations.none')}</p>}
+        </div>
+
+        <div className="space-y-2 border-t border-border/60 pt-3 mt-3">
+          <div className="text-sm font-medium">{t('settings.integrations.addIntegration')}</div>
+          {presetEntries.length > 0 && (
+            <Select
+              className="w-full"
+              value={preset}
+              onChange={(v) => {
+                setPreset(v);
+                const p = (presets ?? {})[v];
+                if (p) setForm((f) => ({ ...f, name: String(p.name ?? v), base_url: String(p.base_url ?? '') }));
+              }}
+              options={[{ value: '', label: t('settings.integrations.custom') }, ...presetEntries.map(([k, p]) => ({ value: k, label: String(p.name ?? k) }))]}
+            />
+          )}
+          <Input placeholder={t('settings.integrations.name')} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
+          <Input placeholder={t('settings.integrations.baseUrl')} value={form.base_url} onChange={(e) => setForm({ ...form, base_url: e.target.value })} />
+          <Input placeholder={t('settings.integrations.apiKey')} type="password" value={form.api_key} onChange={(e) => setForm({ ...form, api_key: e.target.value })} />
+          <Button size="sm" disabled={!form.name.trim()} onClick={() => void add()}><PlusIcon /> {t('common.add')}</Button>
+          {msg && <p className="text-xs text-destructive-foreground">{msg}</p>}
+        </div>
+      </Section>
+
+      <SqlDatabaseSection />
+      <SqlContextSection />
+    </Page>
+  );
+}
+
+/** Upload schema/navigation files for the SQL databases. They're indexed as a
+ *  small scoped RAG (meta.scope="sql"); whenever the SQL source is on in chat,
+ *  the chunks most relevant to the question are retrieved and injected so the
+ *  model can navigate the database (see agent_loop force_db note). */
+function SqlContextSection() {
+  const { t } = useTranslation();
+  const queryClient = useQueryClient();
+  const fileInput = useRef<HTMLInputElement>(null);
+  const [msg, setMsg] = useState<{ text: string; ok: boolean } | null>(null);
+  const { data } = useQuery({ queryKey: ['sql-knowledge'], queryFn: fetchSqlKnowledge });
+  const refresh = () => void queryClient.invalidateQueries({ queryKey: ['sql-knowledge'] });
+
+  const upload = useMutation({
+    mutationFn: (files: File[]) => uploadSqlKnowledge(files),
+    onSuccess: (r) => {
+      const names = Array.isArray((r as { uploaded?: unknown }).uploaded) ? (r as { uploaded: string[] }).uploaded : [];
+      setMsg({ text: t('settings.sql.knowledgeQueued', { count: names.length }), ok: true });
+      refresh();
+    },
+    onError: (e) => setMsg({ text: (e as Error).message, ok: false }),
+  });
+  const remove = useMutation({
+    mutationFn: (source: string) => deleteSqlKnowledge(source),
+    onSuccess: refresh,
+    onError: (e) => setMsg({ text: (e as Error).message, ok: false }),
+  });
+
+  const docs = data?.documents ?? [];
+  return (
+    <Section title={t('settings.sql.contextTitle')} padded>
+      <p className="mb-3 text-xs text-muted-foreground/80">{t('settings.sql.contextHint')}</p>
+
+      {data && !data.available ? (
+        <p className="text-xs text-destructive-foreground">{data.error || t('settings.sql.knowledgeUnavailable')}</p>
+      ) : (
+        <>
+          <input
+            ref={fileInput}
+            type="file"
+            multiple
+            hidden
+            onChange={(e) => { if (e.target.files?.length) upload.mutate(Array.from(e.target.files)); e.target.value = ''; }}
+          />
+          <div className="flex flex-wrap items-center gap-2">
+            <Button size="sm" disabled={upload.isPending} onClick={() => fileInput.current?.click()}>
+              <PlusIcon /> {upload.isPending ? t('settings.sql.knowledgeUploading') : t('settings.sql.knowledgeUpload')}
+            </Button>
+            <Button size="sm" variant="outline" onClick={refresh}>{t('common.refresh')}</Button>
+            {msg && <span className={cn('text-xs', msg.ok ? 'text-success' : 'text-destructive-foreground')}>{msg.text}</span>}
+          </div>
+
+          <div className="mt-3 space-y-1.5">
+            {docs.length === 0 && <p className="text-xs text-muted-foreground">{t('settings.sql.knowledgeEmpty')}</p>}
+            {docs.map((d) => (
+              <div key={d.source} className="flex items-center gap-3 rounded-lg border bg-background px-3 py-2">
+                <FileTextIcon className="size-4 shrink-0 text-muted-foreground" />
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-sm">{d.filename}</div>
+                  <div className="truncate text-xs text-muted-foreground">{t('settings.sql.knowledgeChunks', { count: d.chunks })}</div>
+                </div>
+                <a
+                  href={sqlKnowledgeOriginalUrl(d.source)}
+                  download
+                  aria-label={t('settings.sql.knowledgeDownload', { name: d.filename })}
+                  title={t('settings.sql.knowledgeDownload', { name: d.filename })}
+                  className="flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
+                >
+                  <DownloadIcon className="size-3.5" />
+                </a>
+                <button
+                  type="button"
+                  aria-label={t('settings.sql.knowledgeDelete', { name: d.filename })}
+                  disabled={remove.isPending}
+                  onClick={() => remove.mutate(d.source)}
+                  className="flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-destructive-foreground"
+                >
+                  <Trash2Icon className="size-3.5" />
+                </button>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+    </Section>
+  );
+}
+
+const SQL_DEFAULT_PORTS: Record<string, string> = { mssql: '1433', postgresql: '5432', mysql: '3306', sqlite: '' };
+
+let _sqlRowSeq = 0;
+const newSqlRow = (): SqlConfig => ({
+  id: `new-${++_sqlRowSeq}`,
+  name: '',
+  enabled: true,
+  db_type: 'mssql',
+  host: '',
+  port: '',
+  database: '',
+  username: '',
+  password: '',
+  odbc_driver: '',
+});
+
+/** Stacked label-above-control field. Full-width controls below the label
+ *  stay readable when translations (e.g. German) run long, unlike a
+ *  fixed-width control crammed beside the label. */
+function SqlField({ label, className, children }: { label: string; className?: string; children: React.ReactNode }) {
+  return (
+    <label className={cn('flex min-w-0 flex-col gap-1.5', className)}>
+      <span className="text-xs font-medium text-muted-foreground">{label}</span>
+      {children}
+    </label>
+  );
+}
+
+function SqlDatabaseSection() {
+  const { t } = useTranslation();
+  const { data } = useQuery({ queryKey: ['sql-config'], queryFn: fetchSqlConfig });
+  const [draft, setDraft] = useState<SqlConfig[] | null>(null);
+  const [msg, setMsg] = useState<{ text: string; ok: boolean } | null>(null);
+  const queryClient = useQueryClient();
+  useEffect(() => {
+    if (data && !draft) setDraft(data.map((c) => ({ ...c, db_type: c.db_type || 'mssql', password: '' })));
+  }, [data, draft]);
+  if (!draft) return <Section title={t('settings.sql.title')} padded><p className="text-sm text-muted-foreground">{t('common.loading')}</p></Section>;
+
+  const setRow = (i: number, k: keyof SqlConfig, v: unknown) =>
+    setDraft(draft.map((row, idx) => (idx === i ? ({ ...row, [k]: v } as SqlConfig) : row)));
+  const run = (fn: () => Promise<unknown>, ok: string) => {
+    setMsg(null);
+    fn()
+      .then(() => { setMsg({ text: ok, ok: true }); void queryClient.invalidateQueries({ queryKey: ['sql-config'] }); })
+      .catch((e) => setMsg({ text: (e as Error).message, ok: false }));
+  };
+  const save = () => run(async () => {
+    await saveSqlConfig(draft);
+    setDraft(null); // re-seed from the refetched server state (resolves ids, password_set)
+  }, t('settings.sql.saved'));
+
+  return (
+    <Section title={t('settings.sql.title')}>
+      <div className="px-4 pt-3.5 text-xs text-muted-foreground sm:px-5">
+        {t('settings.sql.intro')}
+      </div>
+      <div className="flex flex-col gap-3 px-4 py-3.5 sm:px-5">
+        {draft.length === 0 && <p className="text-sm text-muted-foreground">{t('settings.sql.empty')}</p>}
+        {draft.map((row, i) => {
+          const saved = data?.find((d) => d.id === row.id);
+          return (
+            <div key={row.id ?? i} className="rounded-lg border border-border/60 p-3">
+              <div className="flex flex-wrap items-center gap-2">
+                <Input
+                  className="min-w-[10rem] flex-1" placeholder={t('settings.sql.namePlaceholder')}
+                  value={row.name} onChange={(e) => setRow(i, 'name', e.target.value)}
+                />
+                <Switch checked={row.enabled} onCheckedChange={(v) => setRow(i, 'enabled', v)} />
+                <Button
+                  size="sm" variant="outline"
+                  onClick={() => run(
+                    // /api/sql/test reports failures as HTTP 200 + {ok:false, error}.
+                    () => testSqlConfig(row.id).then((r) => { if (!r.ok) throw new Error(r.error || t('settings.sql.connectionFailed')); }),
+                    t('settings.sql.connectionOk'),
+                  )}
+                >{t('common.test')}</Button>
+                <Button
+                  size="sm" variant="destructive-outline"
+                  onClick={() => setDraft(draft.filter((_, idx) => idx !== i))}
+                >{t('common.remove')}</Button>
+              </div>
+              <div className="mt-3 grid grid-cols-1 gap-x-4 gap-y-3 sm:grid-cols-2">
+                <SqlField label={t('settings.sql.type')}>
+                  <Select
+                    className="w-full" value={row.db_type} onChange={(v) => setRow(i, 'db_type', v)}
+                    options={[
+                      { value: 'mssql', label: 'MSSQL' },
+                      { value: 'postgresql', label: 'PostgreSQL' },
+                      { value: 'mysql', label: 'MySQL/MariaDB' },
+                      { value: 'sqlite', label: 'SQLite' },
+                    ]}
+                  />
+                </SqlField>
+                <SqlField label={t('settings.sql.host')}>
+                  <Input placeholder="db.example.local" value={row.host} onChange={(e) => setRow(i, 'host', e.target.value)} />
+                </SqlField>
+                <SqlField label={t('settings.sql.port')}>
+                  <Input placeholder={SQL_DEFAULT_PORTS[row.db_type] ?? ''} value={row.port} onChange={(e) => setRow(i, 'port', e.target.value)} />
+                </SqlField>
+                <SqlField label={t('settings.sql.database')}>
+                  <Input placeholder={t('settings.sql.databasePlaceholder')} value={row.database} onChange={(e) => setRow(i, 'database', e.target.value)} />
+                </SqlField>
+                <SqlField label={t('settings.sql.readonlyUser')}>
+                  <Input autoComplete="off" value={row.username} onChange={(e) => setRow(i, 'username', e.target.value)} />
+                </SqlField>
+                <SqlField label={t('settings.sql.password')}>
+                  <Input
+                    type="password" autoComplete="new-password"
+                    placeholder={saved?.password_set ? t('settings.sql.passwordSaved') : ''}
+                    value={row.password ?? ''} onChange={(e) => setRow(i, 'password', e.target.value)}
+                  />
+                </SqlField>
+                <SqlField label={t('settings.sql.odbcDriver')} className="sm:col-span-2">
+                  <Input placeholder="ODBC Driver 18 for SQL Server" value={row.odbc_driver} onChange={(e) => setRow(i, 'odbc_driver', e.target.value)} />
+                </SqlField>
+              </div>
+            </div>
+          );
+        })}
+        <div>
+          <Button size="sm" variant="outline" onClick={() => setDraft([...draft, newSqlRow()])}><PlusIcon /> {t('settings.sql.addDatabase')}</Button>
+        </div>
+      </div>
+      <div className="flex items-center gap-2 border-t border-border/60 px-4 py-3.5 sm:px-5">
+        <Button size="sm" onClick={save}>{t('common.save')}</Button>
+        {msg && <span className={cn('text-xs', msg.ok ? 'text-success' : 'text-destructive-foreground')}>{msg.text}</span>}
+      </div>
+    </Section>
+  );
+}
+
+/* ── Web access (SearxNG backend, leak guard, domain policy) ── */
+
+function WebPanel() {
+  const { t } = useTranslation();
+  const s = useSettingsDraft();
+  if (!s.ready) return <Page><p className="text-sm text-muted-foreground">{t('common.loading')}</p></Page>;
+
+  // Both lists are stored as string arrays but edited as one-per-line text —
+  // admins paste domains, they don't manage rows.
+  const asText = (k: string) => {
+    const v = s.value(k);
+    return Array.isArray(v) ? v.join('\n') : String(v ?? '');
+  };
+  const setFromText = (k: string, text: string) =>
+    s.setValue(k, text.split('\n').map((l) => l.trim()).filter(Boolean));
+
+  return (
+    <Page>
+      <Section title={t('settings.web.backend')}>
+        <TextRow
+          s={s} k="searxng_url"
+          label={t('settings.web.instance')}
+          hint={t('settings.web.instanceHint')}
+          placeholder="http://searxng:8080"
+          width="w-72"
+        />
+      </Section>
+
+      <Section title={t('settings.web.privacy')}>
+        <BoolRow
+          s={s} k="web_leak_guard"
+          label={t('settings.web.leakGuard')}
+          hint={t('settings.web.leakGuardHint')}
+        />
+      </Section>
+
+      <Section title={t('settings.web.allowlist')} padded>
+        <p className="mb-2.5 text-xs text-muted-foreground/80">{t('settings.web.allowlistHint')}</p>
+        <Textarea
+          className="min-h-[110px] font-mono text-[13px]"
+          placeholder={'wikipedia.org\ndocs.python.org\nheise.de'}
+          value={asText('web_domain_allowlist')}
+          onChange={(e) => setFromText('web_domain_allowlist', e.target.value)}
+        />
+      </Section>
+
+      <Section title={t('settings.web.blocklist')} padded>
+        <p className="mb-2.5 text-xs text-muted-foreground/80">{t('settings.web.blocklistHint')}</p>
+        <Textarea
+          className="min-h-[110px] font-mono text-[13px]"
+          placeholder={'facebook.com\npastebin.com'}
+          value={asText('web_domain_blocklist')}
+          onChange={(e) => setFromText('web_domain_blocklist', e.target.value)}
+        />
+      </Section>
+
+      <SaveBar dirty={s.dirty} saving={s.save.isPending} error={s.save.isError ? (s.save.error as Error).message : undefined} onSave={() => s.save.mutate()} />
+    </Page>
+  );
+}
+
+/* ── MCP (Talos's own outward server at /mcp) ──
+ * What an external client — Claude Desktop, MACS, another agent — reaches with
+ * an API token. Separate from the Web panel above on purpose: same tools, but a
+ * long-lived bearer token on someone else's machine is not the same trust level
+ * as a logged-in browser session, so it gets its own domain policy.
+ *
+ * Skills and knowledge bases are NOT duplicated here. There is one library
+ * (Settings → Skills) and one registry (Settings → RAG); this page only decides
+ * which of them leaves the instance, and through which tools. */
+
+/** The tools each family can offer over /mcp. Mirrors RAG_TOOLS / WEB_TOOLS /
+ *  SKILLS_TOOLS in src/mcp_settings.py — a name missing from one is
+ *  unreachable, and a name here that the backend doesn't know is ignored. */
+const RAG_MCP_TOOLS = ['rag_query', 'rag_list_collections', 'rag_list_documents', 'rag_get_document'];
+const WEB_MCP_TOOLS = ['web_search', 'web_fetch'];
+const SKILLS_MCP_TOOLS = ['skills_list', 'skills_search', 'skills_get', 'skills_read_reference'];
+
+/** Purpose-bound sub-indexes a caller could ask for by name. Mirrors SCOPES in
+ *  src/rag_scopes.py; listed statically rather than fetched, because the live
+ *  list only comes attached to a base's whole document listing. */
+const RAG_MCP_SCOPES = ['sql'];
+
+/** Tick-list over one family's tools. An unset setting means every tool, the
+ *  same fallback src/mcp_settings.py applies to a pre-upgrade settings file. */
+function ToolRows({ s, k, tools }: { s: Draft; k: string; tools: string[] }) {
+  const { t } = useTranslation();
+  const on: string[] = Array.isArray(s.value(k)) ? (s.value(k) as string[]) : tools;
+  return (
+    <>
+      {tools.map((name) => (
+        <Row key={name} label={name} hint={t(`settings.mcp.toolHints.${name}`)}>
+          <Switch
+            checked={on.includes(name)}
+            onCheckedChange={(v) => s.setValue(k, v ? [...on, name] : on.filter((n) => n !== name))}
+          />
+        </Row>
+      ))}
+    </>
+  );
+}
+
+function McpPanel() {
+  const { t } = useTranslation();
+  const s = useSettingsDraft();
+  // Same query key the Skills panel uses, so the library is served from the
+  // react-query cache instead of being fetched a second time.
+  const { data: skillData } = useQuery({ queryKey: ['sharedSkills'], queryFn: fetchSharedSkills });
+  // Same key the RAG pages use, so the base list comes from the cache.
+  const { data: baseData } = useQuery({ queryKey: ['rag-bases'], queryFn: fetchRagBases });
+  if (!s.ready) return <Page><p className="text-sm text-muted-foreground">{t('common.loading')}</p></Page>;
+
+  const asText = (k: string) => {
+    const v = s.value(k);
+    return Array.isArray(v) ? v.join('\n') : String(v ?? '');
+  };
+  const setFromText = (k: string, text: string) =>
+    s.setValue(k, text.split('\n').map((l) => l.trim()).filter(Boolean));
+
+  const webOn = !!s.value('mcp_web_enabled');
+  const webInherit = !!s.value('mcp_web_inherit');
+  const skillsOn = !!s.value('mcp_skills_enabled');
+  const skillsInherit = !!s.value('mcp_skills_inherit');
+  const ragOn = !!s.value('mcp_rag_enabled');
+  const ragInherit = !!s.value('mcp_rag_inherit');
+
+  const bases = baseData?.bases ?? [];
+  const ragAllowed: string[] = Array.isArray(s.value('mcp_rag_allowed'))
+    ? (s.value('mcp_rag_allowed') as string[])
+    : [];
+  const toggleBase = (id: string, on: boolean) =>
+    s.setValue('mcp_rag_allowed', on ? [...ragAllowed, id] : ragAllowed.filter((b) => b !== id));
+
+  const ragScopes: string[] = Array.isArray(s.value('mcp_rag_allowed_scopes'))
+    ? (s.value('mcp_rag_allowed_scopes') as string[])
+    : [];
+
+  // Library skills that are switched on for the agent — the only ones worth
+  // offering here, since a disabled skill never reaches any caller.
+  const library = (skillData?.skills ?? []).filter((sk) => sk.enabled);
+  const allowed: string[] = Array.isArray(s.value('mcp_skills_allowed'))
+    ? (s.value('mcp_skills_allowed') as string[])
+    : [];
+  const isAllowed = (name: string) => allowed.some((n) => n.toLowerCase() === name.toLowerCase());
+  const toggleSkill = (name: string, on: boolean) =>
+    s.setValue(
+      'mcp_skills_allowed',
+      on ? [...allowed, name] : allowed.filter((n) => n.toLowerCase() !== name.toLowerCase()),
+    );
+
+  return (
+    <Page>
+      <Section title={t('settings.mcp.endpoint')} padded>
+        <p className="text-xs text-muted-foreground/80">{t('settings.mcp.endpointHint')}</p>
+        <code className="mt-2 block w-fit rounded border bg-muted/40 px-2 py-1 font-mono text-[13px]">
+          POST {window.location.origin}/mcp
+        </code>
+      </Section>
+
+      <Section title={t('settings.mcp.web')}>
+        <BoolRow s={s} k="mcp_web_enabled" label={t('settings.mcp.webEnabled')} hint={t('settings.mcp.webEnabledHint')} />
+        {webOn && (
+          <BoolRow s={s} k="mcp_web_inherit" label={t('settings.mcp.webInherit')} hint={t('settings.mcp.webInheritHint')} />
+        )}
+        {webOn && !webInherit && (
+          <>
+            <TextRow s={s} k="mcp_web_searxng_url" label={t('settings.mcp.searxng')} hint={t('settings.mcp.searxngHint')} placeholder="http://searxng:8080" width="w-72" />
+            <TextRow s={s} k="mcp_web_max_results" label={t('settings.mcp.maxResults')} hint={t('settings.mcp.maxResultsHint')} type="number" width="w-24" />
+            <TextRow s={s} k="mcp_web_max_fetch_chars" label={t('settings.mcp.maxChars')} hint={t('settings.mcp.maxCharsHint')} type="number" width="w-28" />
+          </>
+        )}
+        {webOn && (
+          <Row label={t('settings.mcp.safesearch')} hint={t('settings.mcp.safesearchHint')}>
+            <Select
+              className="w-40"
+              value={String(s.value('mcp_web_safesearch') ?? 0)}
+              onChange={(v) => s.setValue('mcp_web_safesearch', Number(v))}
+              options={[
+                { value: '0', label: t('settings.mcp.safesearchOff') },
+                { value: '1', label: t('settings.mcp.safesearchModerate') },
+                { value: '2', label: t('settings.mcp.safesearchStrict') },
+              ]}
+            />
+          </Row>
+        )}
+      </Section>
+
+      {webOn && (
+        <Section title={t('settings.mcp.webTools')}>
+          <ToolRows s={s} k="mcp_web_tools" tools={WEB_MCP_TOOLS} />
+        </Section>
+      )}
+
+      {webOn && !webInherit && (
+        <>
+          <Section title={t('settings.mcp.allowlist')} padded>
+            <p className="mb-2.5 text-xs text-muted-foreground/80">{t('settings.mcp.allowlistHint')}</p>
+            <Textarea
+              className="min-h-[110px] font-mono text-[13px]"
+              placeholder={'wikipedia.org\ndocs.python.org'}
+              value={asText('mcp_web_domain_allowlist')}
+              onChange={(e) => setFromText('mcp_web_domain_allowlist', e.target.value)}
+            />
+          </Section>
+          <Section title={t('settings.mcp.blocklist')} padded>
+            <p className="mb-2.5 text-xs text-muted-foreground/80">{t('settings.mcp.blocklistHint')}</p>
+            <Textarea
+              className="min-h-[110px] font-mono text-[13px]"
+              placeholder={'facebook.com\npastebin.com'}
+              value={asText('mcp_web_domain_blocklist')}
+              onChange={(e) => setFromText('mcp_web_domain_blocklist', e.target.value)}
+            />
+          </Section>
+        </>
+      )}
+
+      <Section
+        title={t('settings.mcp.rag')}
+        action={ragOn && !ragInherit && bases.length > 0 ? (
+          <Button size="sm" variant="ghost" onClick={() => s.setValue('mcp_rag_allowed', bases.map((b) => b.id))}>
+            {t('settings.mcp.skillsSelectAll')}
+          </Button>
+        ) : undefined}
+      >
+        <BoolRow s={s} k="mcp_rag_enabled" label={t('settings.mcp.ragEnabled')} hint={t('settings.mcp.ragEnabledHint')} />
+        {ragOn && (
+          <>
+            <BoolRow s={s} k="mcp_rag_inherit" label={t('settings.mcp.ragInherit')} hint={t('settings.mcp.ragInheritHint')} />
+            {!ragInherit && (
+              bases.length === 0 ? (
+                <Row label={t('settings.mcp.ragEmpty')} />
+              ) : (
+                bases.map((b) => (
+                  <Row key={b.id} label={b.name || b.id} hint={b.description || b.id}>
+                    <Switch checked={ragAllowed.includes(b.id)} onCheckedChange={(v) => toggleBase(b.id, v)} />
+                  </Row>
+                ))
+              )
+            )}
+            <TextRow s={s} k="mcp_rag_max_results" label={t('settings.mcp.ragMaxResults')} hint={t('settings.mcp.ragMaxResultsHint')} type="number" width="w-24" />
+          </>
+        )}
+      </Section>
+
+      {ragOn && (
+        <Section title={t('settings.mcp.ragTools')}>
+          <ToolRows s={s} k="mcp_rag_tools" tools={RAG_MCP_TOOLS} />
+          {RAG_MCP_SCOPES.map((id) => (
+            <Row key={id} label={t(`settings.mcp.ragScopes.${id}`)} hint={t('settings.mcp.ragScopesHint')}>
+              <Switch
+                checked={ragScopes.includes(id)}
+                onCheckedChange={(v) =>
+                  s.setValue(
+                    'mcp_rag_allowed_scopes',
+                    v ? [...ragScopes, id] : ragScopes.filter((x) => x !== id),
+                  )
+                }
+              />
+            </Row>
+          ))}
+        </Section>
+      )}
+
+      <Section
+        title={t('settings.mcp.skills')}
+        action={skillsOn && !skillsInherit && library.length > 0 ? (
+          <Button size="sm" variant="ghost" onClick={() => s.setValue('mcp_skills_allowed', library.map((sk) => sk.name))}>
+            {t('settings.mcp.skillsSelectAll')}
+          </Button>
+        ) : undefined}
+      >
+        <BoolRow s={s} k="mcp_skills_enabled" label={t('settings.mcp.skillsEnabled')} hint={t('settings.mcp.skillsEnabledHint')} />
+        {skillsOn && (
+          <BoolRow s={s} k="mcp_skills_inherit" label={t('settings.mcp.skillsInherit')} hint={t('settings.mcp.skillsInheritHint')} />
+        )}
+        {skillsOn && !skillsInherit && (
+          library.length === 0 ? (
+            <Row label={t('settings.mcp.skillsEmpty')} />
+          ) : (
+            library.map((sk) => (
+              <Row key={sk.name} label={sk.name} hint={sk.description}>
+                <Switch checked={isAllowed(sk.name)} onCheckedChange={(v) => toggleSkill(sk.name, v)} />
+              </Row>
+            ))
+          )
+        )}
+      </Section>
+
+      {skillsOn && (
+        <Section title={t('settings.mcp.skillsTools')}>
+          <ToolRows s={s} k="mcp_skills_tools" tools={SKILLS_MCP_TOOLS} />
+          <BoolRow s={s} k="mcp_skills_per_skill_tools" label={t('settings.mcp.perSkillTools')} hint={t('settings.mcp.perSkillToolsHint')} />
+        </Section>
+      )}
+
+      <Section title={t('settings.mcp.limits')}>
+        <TextRow s={s} k="mcp_rate_limit_per_minute" label={t('settings.mcp.rateLimit')} hint={t('settings.mcp.rateLimitHint')} type="number" width="w-24" />
+      </Section>
+
+      <SaveBar dirty={s.dirty} saving={s.save.isPending} error={s.save.isError ? (s.save.error as Error).message : undefined} onSave={() => s.save.mutate()} />
+    </Page>
+  );
+}
+
+/* ── Agent Tools (built-in tool toggles, grouped by category like legacy) ── */
+
+/** Category + approximate context cost per tool. Display name & description
+ *  come from i18n (settings.toolMeta.<id>.name/desc). */
+const TOOL_META: Record<string, { cat: string; ctx: string }> = {
+  bash: { cat: 'Code', ctx: '~200' },
+  python: { cat: 'Code', ctx: '~200' },
+  read_file: { cat: 'Code', ctx: '~150' },
+  write_file: { cat: 'Code', ctx: '~150' },
+  search_chats: { cat: 'Search', ctx: '~150' },
+  web_search: { cat: 'Search', ctx: '~250' },
+  web_fetch: { cat: 'Search', ctx: '~150' },
+  create_document: { cat: 'Documents', ctx: '~200' },
+  update_document: { cat: 'Documents', ctx: '~200' },
+  edit_document: { cat: 'Documents', ctx: '~200' },
+  suggest_document: { cat: 'Documents', ctx: '~200' },
+  manage_documents: { cat: 'Documents', ctx: '~150' },
+  generate_image: { cat: 'Media', ctx: '~150' },
+  manage_skills: { cat: 'Knowledge', ctx: '~200' },
+  manage_rag: { cat: 'Knowledge', ctx: '~150' },
+  query_sql: { cat: 'Knowledge', ctx: '~200' },
+  background_task: { cat: 'Sessions', ctx: '~200' },
+  send_to_session: { cat: 'Sessions', ctx: '~100' },
+  create_session: { cat: 'Sessions', ctx: '~100' },
+  list_sessions: { cat: 'Sessions', ctx: '~100' },
+  manage_session: { cat: 'Sessions', ctx: '~100' },
+  list_models: { cat: 'System', ctx: '~100' },
+  api_call: { cat: 'System', ctx: '~200' },
+  manage_endpoints: { cat: 'System', ctx: '~100' },
+  manage_mcp: { cat: 'System', ctx: '~100' },
+  manage_tokens: { cat: 'System', ctx: '~100' },
+  manage_settings: { cat: 'System', ctx: '~100' },
+};
+const TOOL_CAT_ORDER = ['Code', 'Search', 'Documents', 'Media', 'Knowledge', 'Sessions', 'System', 'Other'];
+
+function ToolsPanel() {
+  const { t } = useTranslation();
+  const { data: tools } = useQuery({ queryKey: ['builtin-tools'], queryFn: fetchBuiltinTools });
+  const [openCats, setOpenCats] = useState<Record<string, boolean>>({});
+  const queryClient = useQueryClient();
+  const save = useMutation({
+    mutationFn: saveDisabledTools,
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ['builtin-tools'] }),
+  });
+
+  if (!tools) return <Page><p className="text-sm text-muted-foreground">{t('common.loading')}</p></Page>;
+  if (tools.length === 0) return <Page><p className="text-sm text-muted-foreground">{t('settings.tools.noTools')}</p></Page>;
+
+  // Resolve display name/desc from i18n; fall back to the raw id for unknowns.
+  const toolName = (id: string) => TOOL_META[id] ? t(`settings.toolMeta.${id}.name`) : id;
+  const toolDesc = (id: string) => TOOL_META[id] ? t(`settings.toolMeta.${id}.desc`) : '';
+
+  const setEnabled = (changes: Record<string, boolean>) => {
+    const disabled = tools
+      .filter((tool) => !(changes[tool.id] ?? tool.enabled))
+      .map((tool) => tool.id);
+    save.mutate(disabled);
+  };
+
+  const groups = new Map<string, Array<{ id: string; enabled: boolean; ctx: string }>>();
+  for (const tool of tools) {
+    const meta = TOOL_META[tool.id] ?? { cat: 'Other', ctx: '?' };
+    if (!groups.has(meta.cat)) groups.set(meta.cat, []);
+    groups.get(meta.cat)!.push({ id: tool.id, enabled: tool.enabled, ctx: meta.ctx });
+  }
+
+  return (
+    <Page className="gap-2.5">
+      <SectionHeader>{t('settings.tools.title')}</SectionHeader>
+      <p className="-mt-1.5 px-1 text-xs text-muted-foreground">{t('settings.tools.hint')}</p>
+      {TOOL_CAT_ORDER.filter((c) => groups.has(c)).map((cat) => {
+        const items = groups.get(cat)!;
+        const enabledCount = items.filter((i) => i.enabled).length;
+        const open = !!openCats[cat];
+        return (
+          <div key={cat} className="overflow-hidden rounded-md border bg-card">
+            <div className="flex w-full items-center gap-2 px-3 py-2">
+              <button
+                type="button"
+                onClick={() => setOpenCats((o) => ({ ...o, [cat]: !o[cat] }))}
+                className="flex min-w-0 flex-1 items-center gap-2 text-left text-sm font-medium"
+              >
+                <ChevronRightIcon className={cn('size-3.5 text-muted-foreground transition-transform', open && 'rotate-90')} />
+                {t(`settings.tools.cats.${cat}`)}
+                <span className="text-[11px] text-muted-foreground">{enabledCount}/{items.length}</span>
+              </button>
+              <Switch
+                checked={enabledCount === items.length}
+                onCheckedChange={(v) => setEnabled(Object.fromEntries(items.map((i) => [i.id, v])))}
+              />
+            </div>
+            {open && (
+              <div className="border-t">
+                {items.map((item) => (
+                  <div key={item.id} className="flex items-center gap-3 px-3 py-2 not-last:border-b">
+                    <div className="min-w-0 flex-1">
+                      <div className="text-sm">{toolName(item.id)}</div>
+                      <div className="truncate text-xs text-muted-foreground">{toolDesc(item.id)}</div>
+                    </div>
+                    <span className="shrink-0 font-mono text-[10px] text-muted-foreground" title={t('settings.tools.ctxTitle')}>{item.ctx}</span>
+                    <Switch checked={item.enabled} onCheckedChange={(v) => setEnabled({ [item.id]: v })} />
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </Page>
+  );
+}
+
+
+/* ── System (backup + danger zone) ── */
+
+const WIPE_KINDS = ['chats', 'skills', 'notes', 'documents', 'gallery', 'calendar'];
+
+/** Version + update status.
+ *
+ *  Both queries are deliberately quiet: /api/version/updates answers
+ *  latest === current whenever the check is off or GitHub is unreachable, so
+ *  there is no error branch to render — the row just reads "up to date". */
+function AboutSection() {
+  const { t } = useTranslation();
+  const build = useQuery({ queryKey: ['build-info'], queryFn: fetchBuildInfo });
+  const updates = useQuery({
+    queryKey: ['version-updates'],
+    queryFn: fetchVersionUpdates,
+    // The answer changes at most a few times a week; don't re-hit GitHub every
+    // time the dialog is reopened.
+    staleTime: 60 * 60 * 1000,
+  });
+
+  const current = build.data?.version ?? updates.data?.current ?? '';
+  // Anything not built from a release tag: main builds, local builds, running
+  // from source. There's no release to compare against, so don't pretend.
+  const isDev = updates.data?.dev ?? !current.startsWith('v');
+  const latest = updates.data?.latest ?? '';
+  const outdated = !isDev && Boolean(latest && current && latest !== current);
+  // "dev-build" means a locally built image rather than one CI published, so
+  // the sha would be noise.
+  const sha = build.data?.build && build.data.build !== 'dev-build' ? build.data.build.slice(0, 7) : '';
+
+  return (
+    <Section title={t('settings.system.about')}>
+      <Row label={t('settings.system.version')} hint={sha ? t('settings.system.buildHint', { sha }) : undefined}>
+        <span className="font-mono text-sm tabular-nums">
+          {isDev ? t('settings.system.devBuild') : current || '—'}
+        </span>
+      </Row>
+      <Row label={t('settings.system.updates')} hint={outdated ? t('settings.system.updateHint') : undefined}>
+        {outdated ? (
+          <a
+            href={`https://github.com/MosesCommitsFraud/Talos/releases/tag/${latest}`}
+            target="_blank"
+            rel="noreferrer"
+            className="rounded-md px-2 py-1 text-sm font-medium text-primary underline-offset-4 hover:underline focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+          >
+            {t('settings.system.updateAvailable', { version: latest })}
+          </a>
+        ) : (
+          <span className="text-sm text-muted-foreground">
+            {updates.isPending
+              ? t('settings.system.checking')
+              : isDev
+                ? t('settings.system.devHint')
+                : t('settings.system.upToDate')}
+          </span>
+        )}
+      </Row>
+    </Section>
+  );
+}
+
+function SystemPanel() {
+  const { t } = useTranslation();
+  const [msg, setMsg] = useState('');
+  return (
+    <Page>
+      <AboutSection />
+
+      <Section title={t('settings.system.dataBackup')} padded>
+        <p className="pb-2 text-xs text-muted-foreground">
+          {t('settings.system.backupHint')}
+        </p>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" size="sm" onClick={() => { window.location.href = '/api/export'; }}>{t('settings.system.exportData')}</Button>
+          <Button variant="outline" size="sm" onClick={() => document.getElementById('sys-import-input')?.click()}>{t('settings.system.importData')}</Button>
+          <input
+            id="sys-import-input" type="file" accept=".json" hidden
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              e.target.value = '';
+              if (!file) return;
+              void file.text()
+                .then((txt) => importData(JSON.parse(txt)))
+                .then((r) => setMsg(r.message ?? t('settings.system.importSuccess')))
+                .catch((err) => setMsg((err as Error).message));
+            }}
+          />
+        </div>
+      </Section>
+
+      <Section title={t('settings.system.dangerZone')}>
+        <div className="px-4 pt-3.5 text-xs text-muted-foreground sm:px-5">
+          {t('settings.system.dangerHint')}
+        </div>
+        {WIPE_KINDS.map((kind) => {
+          const label = t(`settings.system.rows.${kind}.label`);
+          return (
+            <Row key={kind} label={label} hint={t(`settings.system.rows.${kind}.sub`)}>
+              <Button
+                variant="destructive-outline"
+                size="sm"
+                className="shrink-0"
+                onClick={() => {
+                  if (window.confirm(t('settings.system.wipeConfirm', { label }))) {
+                    void wipeData(kind).then(() => setMsg(t('settings.system.wiped', { kind }))).catch((e) => setMsg((e as Error).message));
+                  }
+                }}
+              >
+                {t('settings.system.wipe')}
+              </Button>
+            </Row>
+          );
+        })}
+      </Section>
+      {msg && <p className="px-1 text-xs text-muted-foreground">{msg}</p>}
+    </Page>
+  );
+}
+
+/* ── Named AI endpoints (assistant profiles) ── */
+
+const EMPTY_ASSISTANT: Partial<AssistantEndpoint> = {
+  name: '', endpoint_id: '', model: '', system_prompt: '',
+  temperature: 0.3, max_tokens: 4096,
+  use_rag: false, use_sql: false, reasoning: true, require_auth: true, is_enabled: true,
+};
+
+/** Create/edit form for a single named endpoint. */
+function AssistantEditor({ initial, onDone, onCancel }: { initial: Partial<AssistantEndpoint>; onDone: () => void; onCancel: () => void }) {
+  const { t } = useTranslation();
+  const endpoints = useEndpoints();
+  const [draft, setDraft] = useState<Partial<AssistantEndpoint>>(initial);
+  const [err, setErr] = useState('');
+  const [saving, setSaving] = useState(false);
+  const set = (k: keyof AssistantEndpoint, v: unknown) => setDraft((d) => ({ ...d, [k]: v }));
+  const models = endpoints.find((e) => e.id === draft.endpoint_id)?.models ?? [];
+
+  const save = async () => {
+    setErr(''); setSaving(true);
+    try {
+      if (initial.id) await updateAssistant(initial.id, draft);
+      else await createAssistant(draft);
+      onDone();
+    } catch (e) { setErr((e as Error).message); } finally { setSaving(false); }
+  };
+
+  return (
+    <div className="space-y-3 rounded-md border bg-card p-4">
+      <Row label={t('settings.assistants.enabled')}>
+        <Switch checked={draft.is_enabled !== false} onCheckedChange={(v) => set('is_enabled', v)} />
+      </Row>
+      <Row label={t('settings.assistants.name')}>
+        <Input className="w-56" value={String(draft.name ?? '')} onChange={(e) => set('name', e.target.value)} placeholder={t('settings.assistants.namePlaceholder')} />
+      </Row>
+      <Row label={t('settings.assistants.endpoint')}>
+        <Select className="w-56" value={String(draft.endpoint_id ?? '')} onChange={(v) => { set('endpoint_id', v); set('model', ''); }}
+          options={[{ value: '', label: '—' }, ...endpoints.map((e) => ({ value: e.id, label: e.name }))]} />
+      </Row>
+      <Row label={t('settings.assistants.model')} hint={t('settings.assistants.modelHint')}>
+        <Select className="w-56" value={String(draft.model ?? '')} onChange={(v) => set('model', v)}
+          options={[{ value: '', label: t('settings.assistants.autoModel') }, ...models.map((m) => ({ value: m }))]} />
+      </Row>
+      <Row label={t('settings.assistants.systemPrompt')}>
+        <Textarea className="w-full" rows={3} value={String(draft.system_prompt ?? '')} onChange={(e) => set('system_prompt', e.target.value)} placeholder={t('settings.assistants.systemPromptPlaceholder')} />
+      </Row>
+      <Row label={t('settings.assistants.temperature')}>
+        <Input type="number" step="0.1" min="0" max="2" className="w-24" value={String(draft.temperature ?? 0.3)} onChange={(e) => set('temperature', Number(e.target.value))} />
+      </Row>
+      <Row label={t('settings.assistants.maxTokens')}>
+        <Input type="number" min="1" className="w-28" value={String(draft.max_tokens ?? 4096)} onChange={(e) => set('max_tokens', Number(e.target.value))} />
+      </Row>
+      <Row label={t('settings.assistants.useRag')} hint={t('settings.assistants.useRagHint')}>
+        <Switch checked={!!draft.use_rag} onCheckedChange={(v) => set('use_rag', v)} />
+      </Row>
+      <Row label={t('settings.assistants.useSql')} hint={t('settings.assistants.useSqlHint')}>
+        <Switch checked={!!draft.use_sql} onCheckedChange={(v) => set('use_sql', v)} />
+      </Row>
+      <Row label={t('settings.assistants.reasoning')} hint={t('settings.assistants.reasoningHint')}>
+        <Switch checked={!!draft.reasoning} onCheckedChange={(v) => set('reasoning', v)} />
+      </Row>
+      <Row label={t('settings.assistants.requireAuth')} hint={t('settings.assistants.requireAuthHint')}>
+        <Switch checked={draft.require_auth !== false} onCheckedChange={(v) => set('require_auth', v)} />
+      </Row>
+      {draft.require_auth === false && (
+        <p className="rounded-md bg-destructive/10 px-2.5 py-1.5 text-xs text-destructive-foreground">
+          {t('settings.assistants.openWarning')}
+        </p>
+      )}
+      {err && <p className="px-1 text-xs text-destructive-foreground">{err}</p>}
+      <div className="flex justify-end gap-2">
+        <Button size="sm" variant="outline" onClick={onCancel}>{t('common.cancel')}</Button>
+        <Button size="sm" disabled={saving || !draft.name?.trim() || !draft.endpoint_id} onClick={() => void save()}>
+          {saving ? t('common.saving') : t('settings.saveChanges')}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function AssistantsPanel() {
+  const { t } = useTranslation();
+  const queryClient = useQueryClient();
+  const { data: assistants } = useQuery({ queryKey: ['assistants'], queryFn: fetchAssistants });
+  const [editing, setEditing] = useState<Partial<AssistantEndpoint> | null>(null);
+  const refresh = () => void queryClient.invalidateQueries({ queryKey: ['assistants'] });
+  const done = () => { setEditing(null); refresh(); };
+  const origin = typeof window !== 'undefined' ? window.location.origin : 'http://<lan-ip>:7000';
+
+  return (
+    <Page>
+      <Section
+        title={t('settings.assistants.title')}
+        action={!editing && <Button size="sm" onClick={() => setEditing({ ...EMPTY_ASSISTANT })}><PlusIcon /> {t('settings.assistants.new')}</Button>}
+        padded
+      >
+        <p className="mb-3 text-xs text-muted-foreground">{t('settings.assistants.intro')}</p>
+        {editing && <AssistantEditor initial={editing} onDone={done} onCancel={() => setEditing(null)} />}
+        {!editing && (
+          <div className="space-y-1.5">
+            {(assistants ?? []).map((a) => (
+              <div key={a.id} className="flex items-center justify-between gap-2 rounded-lg border bg-background px-3 py-2">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2 truncate text-sm">
+                    {a.name}
+                    <code className="rounded bg-muted px-1 text-[11px] text-muted-foreground">{a.slug}</code>
+                  </div>
+                  <div className="truncate text-xs text-muted-foreground">
+                    {a.endpoint_name ?? a.endpoint_id} · {a.model || t('settings.assistants.autoModel')}
+                    {a.use_rag && ' · RAG'}{a.use_sql && ' · SQL'}{a.reasoning && ' · ' + t('settings.assistants.reasoning')}{!a.require_auth && ' · ' + t('settings.assistants.openBadge')}
+                  </div>
+                </div>
+                <div className="flex shrink-0 items-center gap-1.5">
+                  <Switch
+                    checked={!!a.is_enabled}
+                    onCheckedChange={(v) => void updateAssistant(a.id, { is_enabled: v }).then(refresh)}
+                    aria-label={a.is_enabled ? t('settings.models.enabled') : t('settings.models.disabled')}
+                  />
+                  <Button size="icon-sm" variant="ghost" onClick={() => setEditing(a)} aria-label={t('common.edit')}><WrenchIcon /></Button>
+                  <Button size="icon-sm" variant="ghost" onClick={() => { if (window.confirm(t('settings.assistants.deleteConfirm', { name: a.name }))) void deleteAssistant(a.id).then(refresh); }} aria-label={t('common.delete')}><Trash2Icon /></Button>
+                </div>
+              </div>
+            ))}
+            {(assistants ?? []).length === 0 && <p className="text-xs text-muted-foreground">{t('settings.assistants.empty')}</p>}
+          </div>
+        )}
+      </Section>
+
+      <Section title={t('settings.assistants.usageTitle')} padded>
+        <p className="mb-2 text-xs text-muted-foreground">{t('settings.assistants.usageIntro')}</p>
+        <pre className="overflow-x-auto rounded-lg border bg-muted/40 p-3 text-[11px] leading-relaxed">{`curl ${origin}/v1/chat/completions \\
+  -H "Authorization: Bearer ody_..." \\
+  -H "Content-Type: application/json" \\
+  -d '{"model": "<slug>", "messages": [{"role":"user","content":"hi"}]}'`}</pre>
+        <p className="mt-2 text-xs text-muted-foreground">{t('settings.assistants.usageModels', { origin })}</p>
+      </Section>
+    </Page>
+  );
+}
+
+/* ── Shared skills (Claude-style SKILL.md library) ──
+ * Admin surface: the library is curated centrally and a skill's switch is
+ * global — flipping it on hands that skill to every user's agent. */
+
+function SharedSkillsPanel() {
+  const { t } = useTranslation();
+  const qc = useQueryClient();
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [msg, setMsg] = useState('');
+  const { data } = useQuery({ queryKey: ['sharedSkills'], queryFn: fetchSharedSkills });
+  const skills = data?.skills ?? [];
+  const invalidate = () => qc.invalidateQueries({ queryKey: ['sharedSkills'] });
+
+  const toggle = useMutation({
+    mutationFn: ({ name, enabled }: { name: string; enabled: boolean }) =>
+      setSharedSkillEnabled(name, enabled),
+    onSettled: invalidate,
+  });
+
+  const onUpload = async (file: File) => {
+    setMsg('');
+    try {
+      if (file.name.toLowerCase().endsWith('.zip')) {
+        await uploadSharedSkillBundle(file);
+      } else {
+        await uploadSharedSkill(await file.text());
+      }
+      setMsg(t('settings.skills.uploaded'));
+      invalidate();
+    } catch (e) { setMsg((e as Error).message); }
+  };
+
+  const onDelete = async (s: SharedSkill) => {
+    setMsg('');
+    try {
+      await deleteSharedSkill(s.name);
+      invalidate();
+    } catch (e) { setMsg((e as Error).message); }
+  };
+
+  return (
+    <Page>
+      <Section
+        title={t('settings.skills.title')}
+        action={
+          <>
+            <input
+              ref={fileRef}
+              type="file"
+              accept=".md,.zip,text/markdown,application/zip"
+              className="hidden"
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (f) void onUpload(f);
+                e.target.value = '';
+              }}
+            />
+            <Button size="sm" variant="outline" onClick={() => fileRef.current?.click()}>
+              <PlusIcon /> {t('settings.skills.upload')}
+            </Button>
+          </>
+        }
+      >
+        <div className="px-4 pt-3 text-xs text-muted-foreground sm:px-5">{t('settings.skills.intro')}</div>
+        {msg && <div className="px-4 pt-2 text-xs text-muted-foreground sm:px-5">{msg}</div>}
+        {skills.length === 0 && (
+          <div className="px-4 py-6 text-center text-xs text-muted-foreground sm:px-5">
+            {t('settings.skills.empty')}
+          </div>
+        )}
+        {skills.map((s) => (
+          <Row
+            key={s.name}
+            label={
+              <span className="inline-flex items-center gap-1.5">
+                <span className="font-mono text-[13px]">{s.name}</span>
+                {s.bundled && (
+                  <span className="rounded-full border px-1.5 py-px text-[10px] font-medium text-muted-foreground">
+                    {t('settings.skills.bundled')}
+                  </span>
+                )}
+              </span>
+            }
+            hint={
+              <>
+                {s.description}
+                {s.uploaded_by && (
+                  <span className="opacity-70"> · {t('settings.skills.by', { user: s.uploaded_by })}</span>
+                )}
+                {s.files > 0 && (
+                  <span className="opacity-70"> · {t('settings.skills.files', { count: s.files })}</span>
+                )}
+              </>
+            }
+          >
+            <Button
+              size="icon-sm"
+              variant="ghost"
+              title={t('settings.skills.delete')}
+              onClick={() => void onDelete(s)}
+            >
+              <Trash2Icon />
+            </Button>
+            <Switch
+              checked={s.enabled}
+              onCheckedChange={(v: boolean) => toggle.mutate({ name: s.name, enabled: v })}
+            />
+          </Row>
+        ))}
+      </Section>
+    </Page>
+  );
+}
+
+/* ── Dialog shell ── */
+
+/** Scope controls which settings groups are shown. 'user' hides every admin
+ *  panel (the "Settings" menu entry); 'admin' shows only admin panels (the
+ *  "Admin panel" entry); undefined shows both. */
+export type SettingsScope = 'user' | 'admin';
+
+export function SettingsDialog({
+  open,
+  onClose,
+  initialPanel,
+  scope,
+  onOpenRag,
+  onOpenUsers,
+}: {
+  open: boolean;
+  onClose: () => void;
+  initialPanel?: Panel;
+  scope?: SettingsScope;
+  /** Route the user to the dedicated `/rag` workspace instead of rendering the
+   *  RAG panel inline (Advanced settings → `/rag`). */
+  onOpenRag?: () => void;
+  /** Same idea for Users: the panel outgrew the dialog once it grew usage
+   *  analytics and storage management, so it lives at `/users`. */
+  onOpenUsers?: () => void;
+}) {
+  const { t } = useTranslation();
+  const [panel, setPanel] = useState<Panel>(initialPanel ?? 'appearance');
+  const auth = useAuth();
+
+  // Each time the dialog opens, jump to the requested panel (or the first one
+  // available in the active scope) so menu entries land where they should.
+  const [query, setQuery] = useState('');
+  useEffect(() => {
+    if (open) {
+      setPanel(initialPanel ?? (scope === 'admin' ? 'models' : 'appearance'));
+      setQuery('');
+    }
+  }, [open, initialPanel, scope]);
+
+  const userNav: Array<{ id: Panel; label: string; icon: React.ReactNode }> = [
+    { id: 'appearance', label: t('settings.nav.appearance'), icon: <PaletteIcon /> },
+    { id: 'shortcuts', label: t('settings.nav.shortcuts'), icon: <KeyboardIcon /> },
+    { id: 'account', label: t('settings.nav.account'), icon: <UserIcon /> },
+  ];
+  const adminNav: Array<{ id: Panel; label: string; icon: React.ReactNode }> = [
+    { id: 'models', label: t('settings.nav.models'), icon: <ServerIcon /> },
+    { id: 'ai', label: t('settings.nav.ai'), icon: <BotIcon /> },
+    { id: 'assistants', label: t('settings.nav.assistants'), icon: <PlugIcon /> },
+    { id: 'integrations', label: t('settings.nav.integrations'), icon: <Link2Icon /> },
+    { id: 'web', label: t('settings.nav.web'), icon: <GlobeIcon /> },
+    { id: 'mcp', label: t('settings.nav.mcp'), icon: <NetworkIcon /> },
+    { id: 'tools', label: t('settings.nav.tools'), icon: <WrenchIcon /> },
+    { id: 'skills', label: t('settings.nav.skills'), icon: <FileTextIcon /> },
+    { id: 'system', label: t('settings.nav.system'), icon: <SettingsIcon /> },
+  ];
+  // Advanced — entries that open a dedicated surface rather than an in-dialog
+  // panel. Both route to full-screen workspaces (no in-dialog panel).
+  const advancedNav: Array<{ id: Panel; label: string; icon: React.ReactNode }> = [
+    { id: 'rag', label: t('settings.nav.rag'), icon: <DatabaseIcon /> },
+    { id: 'users', label: t('settings.nav.users'), icon: <UsersIcon /> },
+  ];
+
+  // These two entries route to their dedicated workspaces instead of swapping
+  // an in-dialog panel; everything else selects a panel as before.
+  const navClick = (id: Panel) => {
+    if (id === 'rag' && onOpenRag) {
+      onOpenRag();
+      onClose();
+    } else if (id === 'users' && onOpenUsers) {
+      onOpenUsers();
+      onClose();
+    } else {
+      setPanel(id);
+    }
+  };
+  const NavButton = ({ n }: { n: { id: Panel; label: string; icon: React.ReactNode } }) => (
+    <button
+      type="button"
+      onClick={() => navClick(n.id)}
+      title={n.label}
+      className={cn(
+        'flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm transition-colors [&_svg]:size-[18px] [&_svg]:shrink-0 [&_svg]:text-muted-foreground',
+        panel === n.id ? 'bg-accent font-medium' : 'hover:bg-accent/60',
+      )}
+    >
+      {n.icon}
+      <span className="min-w-0 truncate">{n.label}</span>
+    </button>
+  );
+  const GroupLabel = ({ children }: { children: React.ReactNode }) => (
+    <div className="px-2.5 pt-3 pb-1 text-[11px] font-medium tracking-wide text-muted-foreground uppercase first:pt-1">
+      {children}
+    </div>
+  );
+
+  // Filter the nav by the search box; group headers hide when their group is empty.
+  const q = query.trim().toLowerCase();
+  const matches = (n: { label: string }) => !q || n.label.toLowerCase().includes(q);
+  const userItems = scope === 'admin' ? [] : userNav.filter(matches);
+  const adminItems = auth?.is_admin && scope !== 'user' ? adminNav.filter(matches) : [];
+  const advancedItems = auth?.is_admin && scope !== 'user' ? advancedNav.filter(matches) : [];
+  const noResults = userItems.length === 0 && adminItems.length === 0 && advancedItems.length === 0;
+
+  return (
+    <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
+      <DialogContent title={t('settings.title')} className="w-[min(1080px,95vw)]">
+        <div className="flex h-[min(760px,86vh)]">
+          <div className="flex w-60 shrink-0 flex-col border-r">
+            <div className="p-2.5">
+              <SearchInput
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder={t('settings.searchPlaceholder')}
+                aria-label={t('settings.searchPlaceholder')}
+              />
+            </div>
+            <div className="min-h-0 flex-1 space-y-0.5 overflow-y-auto px-2 pb-2">
+              {userItems.length > 0 && (
+                <>
+                  <GroupLabel>{t('settings.general')}</GroupLabel>
+                  {userItems.map((n) => <NavButton key={n.id} n={n} />)}
+                </>
+              )}
+              {adminItems.length > 0 && (
+                <>
+                  <GroupLabel>{t('settings.admin')}</GroupLabel>
+                  {adminItems.map((n) => <NavButton key={n.id} n={n} />)}
+                </>
+              )}
+              {advancedItems.length > 0 && (
+                <>
+                  <GroupLabel>{t('settings.advanced')}</GroupLabel>
+                  {advancedItems.map((n) => <NavButton key={n.id} n={n} />)}
+                </>
+              )}
+              {noResults && (
+                <div className="px-2.5 py-8 text-center text-xs text-muted-foreground">{t('settings.noResults')}</div>
+              )}
+            </div>
+          </div>
+          <div className="min-w-0 flex-1 overflow-y-auto">
+            {panel === 'appearance' && <AppearancePanel />}
+            {panel === 'shortcuts' && <ShortcutsPanel />}
+            {panel === 'account' && <AccountPanel />}
+            {panel === 'skills' && <SharedSkillsPanel />}
+            {panel === 'models' && <AddModelsPanel />}
+            {panel === 'ai' && <AiDefaultsPanel />}
+            {panel === 'assistants' && <AssistantsPanel />}
+            {panel === 'integrations' && <IntegrationsPanel />}
+            {panel === 'web' && <WebPanel />}
+            {panel === 'mcp' && <McpPanel />}
+            {panel === 'tools' && <ToolsPanel />}
+            {panel === 'users' && <UsersPanel currentUser={auth?.username} />}
+            {panel === 'system' && <SystemPanel />}
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}

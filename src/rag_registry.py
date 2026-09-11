@@ -139,6 +139,11 @@ def list_bases() -> List[Dict[str, Any]]:
     return rows
 
 
+def chat_enabled(entry: Dict[str, Any]) -> bool:
+    """Preserve historical default-only retrieval for existing catalogues."""
+    return bool(entry.get("chat_enabled", entry.get("id") == DEFAULT_ID))
+
+
 def get_base(rag_id: Optional[str]) -> Dict[str, Any]:
     """One base by id. ``None``/empty resolves to the default base."""
     wanted = (rag_id or DEFAULT_ID).strip() or DEFAULT_ID
@@ -222,8 +227,9 @@ def update_base(
     name: Optional[str] = None,
     description: Optional[str] = None,
     language: Optional[str] = None,
+    chat_enabled: Optional[bool] = None,
 ) -> Dict[str, Any]:
-    """Edit a base's descriptive fields. Id and collection are immutable."""
+    """Edit descriptive fields and chat participation. Id and collection are immutable."""
     with _lock:
         entries = _read()
         entry = entries.get((rag_id or "").strip())
@@ -235,6 +241,8 @@ def update_base(
             entry["description"] = description.strip()
         if language is not None:
             entry["language"] = language.strip()
+        if chat_enabled is not None:
+            entry["chat_enabled"] = chat_enabled
         entry["updated_at"] = time.time()
         entries[entry["id"]] = entry
         _write(entries)
@@ -310,6 +318,7 @@ def describe(entry: Dict[str, Any], *, with_counts: bool = True) -> Dict[str, An
         "description": entry.get("description") or "",
         "language": entry.get("language") or "",
         "collection": entry.get("collection"),
+        "chat_enabled": chat_enabled(entry),
         "created_at": entry.get("created_at") or 0.0,
         "updated_at": entry.get("updated_at") or 0.0,
         # How many pipeline settings this base changes vs. the global defaults —

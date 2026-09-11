@@ -1,0 +1,654 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:is(.dark, .dark *));
+
+/* ── Semantic token bridge (MIDA-style) ──
+   Visual system adapted from MIDA (~/DEV/MIDA apps/web): semantic
+   surface/foreground pairs, alpha-based borders, radius scale derived from
+   one base radius. Primary/ring swapped to the Talos blue. */
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-bubble: var(--bubble);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-active: var(--sidebar-active);
+  --color-strong: var(--strong);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-info: var(--info);
+  --color-tool-pass: var(--tool-pass);
+  --color-tool-fail: var(--tool-fail);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --radius-2xl: calc(var(--radius) + 8px);
+  --radius-3xl: calc(var(--radius) + 12px);
+  --font-sans: "DM Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  --font-mono: "Fira Code", ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+/* PDF.js text overlay keeps preview text selectable without importing the
+   browser viewer's own visual chrome. */
+.talos-pdf-text-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  overflow: clip;
+  color: transparent;
+  line-height: 1;
+  text-align: initial;
+  transform-origin: 0 0;
+  forced-color-adjust: none;
+  text-size-adjust: none;
+}
+
+.talos-pdf-text-layer :is(span, br) {
+  position: absolute;
+  color: transparent;
+  white-space: pre;
+  cursor: text;
+  transform-origin: 0 0;
+  user-select: text;
+}
+
+.talos-pdf-text-layer {
+  --min-font-size: 1;
+  --text-scale-factor: calc(var(--total-scale-factor) * var(--min-font-size));
+  --min-font-size-inv: calc(1 / var(--min-font-size));
+}
+
+.talos-pdf-text-layer > :not(.markedContent),
+.talos-pdf-text-layer .markedContent span:not(.markedContent) {
+  z-index: 1;
+  --scale-x: 1;
+  --rotate: 0deg;
+  font-size: calc(var(--text-scale-factor) * var(--font-height));
+  transform: rotate(var(--rotate)) scaleX(var(--scale-x)) scale(var(--min-font-size-inv));
+}
+
+.talos-pdf-text-layer .markedContent {
+  display: contents;
+}
+
+.talos-pdf-text-layer[data-main-rotation="90"] {
+  transform: rotate(90deg) translateY(-100%);
+}
+
+.talos-pdf-text-layer[data-main-rotation="180"] {
+  transform: rotate(180deg) translate(-100%, -100%);
+}
+
+.talos-pdf-text-layer[data-main-rotation="270"] {
+  transform: rotate(270deg) translateX(-100%);
+}
+
+.talos-pdf-text-layer ::selection {
+  color: transparent;
+  background: rgb(29 78 216 / 28%);
+}
+
+.talos-selection-candidate {
+  outline: 2px solid color-mix(in srgb, var(--primary) 78%, transparent) !important;
+  outline-offset: 2px;
+}
+
+.talos-selection-committed {
+  outline: 2px solid var(--primary) !important;
+  outline-offset: 2px;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 16%, transparent);
+}
+
+.talos-mark-mode :is([data-selection-box], [data-cell], td, th, [data-artifact-element], p, h1, h2, h3, h4, h5, h6, li, blockquote, pre, img, table, figure):hover {
+  outline: 2px solid color-mix(in srgb, var(--primary) 48%, transparent);
+  outline-offset: 2px;
+}
+
+.talos-mark-mode .talos-pdf-selection-box {
+  pointer-events: auto;
+}
+
+:root {
+  color-scheme: light;
+  --radius: 0.625rem;
+  --background: var(--color-white);
+  --foreground: var(--color-neutral-800);
+  /* Shared raised-surface color: sidebar, composer, user bubble. Light mode
+   * can't go lighter than the white background, so the panel step is a
+   * subtle gray instead. */
+  --card: color-mix(in srgb, var(--color-white) 96.2%, var(--color-black));
+  --card-foreground: var(--color-neutral-800);
+  /* Sent-message bubble. Light mode steps it further down than --card so the
+   * user's own turns read as clearly grey blocks against the white page; dark
+   * mode has enough separation from --card already and just reuses it. */
+  --bubble: color-mix(in srgb, var(--color-white) 93.5%, var(--color-black));
+  /* The sidebar recedes behind the chat: a step *down* from the page, so the
+   * conversation is the lit surface and the navigation is the frame around it. */
+  --sidebar: color-mix(in srgb, var(--color-white) 95.5%, var(--color-black));
+  /* Because the panel sits below the page, its rows have to highlight *up*
+   * towards it — the generic --accent darkens, which on this surface reads as
+   * the row sinking rather than lighting up. Selected goes one step further
+   * than hover so an open chat still stands out from the one under the mouse. */
+  --sidebar-accent: color-mix(in srgb, var(--sidebar) 55%, var(--color-white));
+  /* Selected lands exactly on the page white, so an open chat reads as sitting
+   * on the same plane as the conversation it opened. */
+  --sidebar-active: var(--color-white);
+  /* Reading text — the message stream, the composer, the selected chat. One
+   * step darker than --foreground: chrome and labels stay at neutral-800, the
+   * words you actually read sit closer to black. */
+  --strong: var(--color-neutral-900);
+  --popover: var(--color-white);
+  --popover-foreground: var(--color-neutral-800);
+  /* Talos blue (#3d87cb) as oklch so hover shades derive cleanly */
+  --primary: oklch(0.6 0.118 251);
+  --primary-foreground: var(--color-white);
+  --secondary: --alpha(var(--color-black) / 4%);
+  --secondary-foreground: var(--color-neutral-800);
+  --muted: --alpha(var(--color-black) / 4%);
+  --muted-foreground: color-mix(in srgb, var(--color-neutral-500) 90%, var(--color-black));
+  --accent: --alpha(var(--color-black) / 4%);
+  --accent-foreground: var(--color-neutral-800);
+  --destructive: var(--color-red-500);
+  /* Light mode reads red-700 as brown against white — red-600 keeps the same
+   * contrast but stays recognisably red for failure states. */
+  --destructive-foreground: var(--color-red-600);
+  --border: --alpha(var(--color-black) / 8%);
+  --input: --alpha(var(--color-black) / 10%);
+  --ring: oklch(0.6 0.118 251);
+  --info: var(--color-blue-500);
+  --success: var(--color-emerald-500);
+  --warning: var(--color-amber-500);
+
+  /* Tool-call outcome tint. Only the action verb of a tool label wears this, on
+   * a line that is otherwise --muted-foreground, so it is mixed well down
+   * towards that muted grey: enough hue to read as pass/fail at a glance,
+   * not enough to pull the eye away from the answer text. Deliberately quieter
+   * than --success / --destructive-foreground, which are for real alerts. */
+  --tool-pass: color-mix(in oklab, var(--success) 42%, var(--muted-foreground));
+  --tool-fail: color-mix(in oklab, var(--destructive-foreground) 66%, var(--muted-foreground));
+
+  /* Glass surfaces (t3code): elevated popups tint their own --popover and blur
+   * whatever sits behind them. */
+  --glass-blur: 12px;
+  --glass-opacity: 80%;
+  --glass-saturation: 1.14;
+
+  /* Context-meter ramp: one hue (Talos blue) fading to lighter tints, so the
+   * stacked bar reads as a single quantity split into parts rather than five
+   * unrelated categories. Ordered densest → lightest; the meter assigns them
+   * in category order. Light mode fades toward white. */
+  --ctx-1: var(--primary);
+  --ctx-2: color-mix(in oklab, var(--primary) 82%, var(--color-white));
+  --ctx-3: color-mix(in oklab, var(--primary) 66%, var(--color-white));
+  --ctx-4: color-mix(in oklab, var(--primary) 52%, var(--color-white));
+  --ctx-5: color-mix(in oklab, var(--primary) 40%, var(--color-white));
+  --ctx-6: color-mix(in oklab, var(--primary) 30%, var(--color-white));
+  --ctx-7: color-mix(in oklab, var(--primary) 22%, var(--color-white));
+  --ctx-8: color-mix(in oklab, var(--primary) 14%, var(--color-white));
+}
+
+.dark {
+  color-scheme: dark;
+  --background: color-mix(in srgb, var(--color-neutral-950) 93%, var(--color-white));
+  --foreground: var(--color-neutral-100);
+  /* Shared raised-surface color: sidebar, composer, user bubble. A clear
+   * step lighter than the page background so bordered surfaces read as
+   * distinct panels. */
+  --card: color-mix(in srgb, var(--background) 96%, var(--color-white));
+  --card-foreground: var(--color-neutral-100);
+  --bubble: var(--card);
+  /* Unlike the other panels the sidebar goes the other way — darker than the
+   * page — so the chat reads as the lit surface and the nav as its frame. */
+  --sidebar: color-mix(in srgb, var(--background) 88%, var(--color-black));
+  /* Same idea as light mode: highlights lift the row off the panel. */
+  --sidebar-accent: color-mix(in srgb, var(--sidebar) 93%, var(--color-white));
+  --sidebar-active: color-mix(in srgb, var(--sidebar) 87%, var(--color-white));
+  /* Dark mode already runs its text near-white; no second step needed. */
+  --strong: var(--foreground);
+  /* Kept in step with --card so menus never read darker than the panel
+   * they open from. */
+  --popover: color-mix(in srgb, var(--background) 95%, var(--color-white));
+  --popover-foreground: var(--color-neutral-100);
+  --primary: oklch(0.64 0.118 251);
+  --primary-foreground: var(--color-white);
+  --secondary: --alpha(var(--color-white) / 4%);
+  --secondary-foreground: var(--color-neutral-100);
+  --muted: --alpha(var(--color-white) / 4%);
+  --muted-foreground: color-mix(in srgb, var(--color-neutral-500) 90%, var(--color-white));
+  --accent: --alpha(var(--color-white) / 4%);
+  --accent-foreground: var(--color-neutral-100);
+  --destructive: color-mix(in srgb, var(--color-red-500) 90%, var(--color-white));
+  --destructive-foreground: var(--color-red-400);
+  --border: --alpha(var(--color-white) / 6%);
+  --input: --alpha(var(--color-white) / 8%);
+  --ring: oklch(0.64 0.118 251);
+  --info: var(--color-blue-500);
+  --success: var(--color-emerald-500);
+  --warning: var(--color-amber-500);
+  /* Dark mode carries a touch more of the hue: the same mix reads flatter
+   * against a dark background than it does on white. */
+  --tool-pass: color-mix(in oklab, var(--success) 48%, var(--muted-foreground));
+  --tool-fail: color-mix(in oklab, var(--destructive-foreground) 52%, var(--muted-foreground));
+  --glass-blur: 16px;
+  --glass-saturation: 1.08;
+
+  /* Dark mode fades the same hue toward white too — lighter tints stay legible
+   * against the dark track, where fading toward the background would make the
+   * tail segments vanish. Held at a higher floor than light mode for contrast. */
+  --ctx-1: var(--primary);
+  --ctx-2: color-mix(in oklab, var(--primary) 84%, var(--color-white));
+  --ctx-3: color-mix(in oklab, var(--primary) 70%, var(--color-white));
+  --ctx-4: color-mix(in oklab, var(--primary) 58%, var(--color-white));
+  --ctx-5: color-mix(in oklab, var(--primary) 48%, var(--color-white));
+  --ctx-6: color-mix(in oklab, var(--primary) 40%, var(--color-white));
+  --ctx-7: color-mix(in oklab, var(--primary) 32%, var(--color-white));
+  --ctx-8: color-mix(in oklab, var(--primary) 26%, var(--color-white));
+}
+
+/* Self-hosted DM Sans (variable, 300–800) + Fira Code for code */
+@font-face {
+  font-family: "DM Sans";
+  font-style: normal;
+  font-weight: 300 800;
+  font-display: swap;
+  src: url("/fonts/DMSans-Variable.woff2") format("woff2");
+}
+@font-face { font-family: "Fira Code"; font-weight: 400; font-style: normal; font-display: swap; src: url("/static/fonts/FiraCode-Regular.woff2") format("woff2"); }
+@font-face { font-family: "Fira Code"; font-weight: 600; font-style: normal; font-display: swap; src: url("/static/fonts/FiraCode-SemiBold.woff2") format("woff2"); }
+
+@layer base {
+  * {
+    border-color: var(--border);
+  }
+  html, body, #root {
+    height: 100%;
+    width: 100%;
+    overflow: hidden;
+    overscroll-behavior-y: none;
+  }
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+  }
+}
+
+/* Film-grain overlay — the MIDA texture that keeps large flat surfaces alive */
+body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.035;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  background-repeat: repeat;
+  background-size: 256px 256px;
+}
+
+/* Custom scrollbars — wider and higher-contrast than the OS overlay bars
+   (which auto-hide and are near-invisible on some browsers). The thumb is a
+   rounded pill with a transparent border + padding-box clip so it reads as a
+   ~7px bar floating inside a 11px track, and stays visible (not only while
+   actively scrolling). Colours are foreground-mixed so they adapt to the
+   active theme without separate dark-mode rules. */
+::-webkit-scrollbar { width: 11px; height: 11px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--foreground) 28%, transparent);
+  border-radius: 9999px;
+  border: 3px solid transparent;
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, var(--foreground) 45%, transparent);
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-thumb:active {
+  background: color-mix(in srgb, var(--foreground) 55%, transparent);
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-corner { background: transparent; }
+/* Firefox: no ::-webkit support, so style via the standard properties. */
+* { scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--foreground) 32%, transparent) transparent; }
+
+@layer base {
+  :where(:focus-visible) {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+  }
+}
+
+/* ── Elevated glass surface (t3code) ──
+   The single chrome shared by every dropdown, context menu and flyout: a
+   translucent, blurred tint of --popover with an alpha border and a deep,
+   tight shadow. Nesting the opacity mix inside an 18% popover tint keeps
+   high-contrast page content from blooming through the menu. */
+@layer components {
+  .dropdown-glass {
+    background: color-mix(
+      in srgb,
+      var(--popover) 18%,
+      color-mix(in srgb, var(--popover) var(--glass-opacity), transparent)
+    );
+    -webkit-backdrop-filter: blur(var(--glass-blur));
+    backdrop-filter: blur(var(--glass-blur));
+    border: 1px solid color-mix(in srgb, var(--foreground) 10%, transparent);
+    box-shadow: 0 16px 40px -18px rgb(0 0 0 / 55%);
+  }
+
+  .dark .dropdown-glass {
+    border-color: color-mix(in srgb, var(--color-white) 8%, transparent);
+    box-shadow: 0 18px 44px -18px rgb(0 0 0 / 80%);
+  }
+
+  /* Overlay surfaces (command palette, dialogs): a broader, less dense tint
+     than a menu, since they cover more of the page and sit over a dimmed
+     backdrop rather than directly on content. */
+  .dialog-glass {
+    background: color-mix(in srgb, var(--background) var(--glass-opacity), transparent);
+    -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturation));
+    backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturation));
+    border: 1px solid color-mix(in srgb, var(--foreground) 10%, transparent);
+    box-shadow: 0 24px 64px -24px rgb(0 0 0 / 65%);
+  }
+
+  .dark .dialog-glass {
+    border-color: color-mix(in srgb, var(--color-white) 8%, transparent);
+    box-shadow:
+      inset 0 1px rgb(255 255 255 / 4%),
+      0 24px 72px -20px rgb(0 0 0 / 90%);
+  }
+
+  .dialog-backdrop {
+    background: color-mix(in srgb, var(--background) 60%, transparent);
+    -webkit-backdrop-filter: blur(4px);
+    backdrop-filter: blur(4px);
+  }
+
+  .dark .dialog-backdrop {
+    background: color-mix(in srgb, var(--background) 64%, transparent);
+  }
+
+  /* Browsers without backdrop-filter get the opaque surface instead of a
+     washed-out translucent one. */
+  @supports not ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
+    .dropdown-glass {
+      background: var(--popover);
+    }
+    .dialog-glass {
+      background: var(--background);
+    }
+  }
+}
+
+/* ── Sidebar "Working" shimmer ──
+   A light sweep travelling across the label text while a turn streams. The
+   gradient is clipped to the glyphs (transparent fill) so only the text shimmers,
+   not a box. Falls back to a steady accent tint if reduced-motion is requested. */
+.shimmer-text {
+  color: var(--primary);
+  background: linear-gradient(
+    100deg,
+    color-mix(in srgb, var(--primary) 55%, transparent) 35%,
+    var(--primary) 50%,
+    color-mix(in srgb, var(--primary) 55%, transparent) 65%
+  );
+  background-size: 200% 100%;
+  background-clip: text;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: shimmer-sweep 1.6s linear infinite;
+}
+@keyframes shimmer-sweep {
+  to { background-position: -200% 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .shimmer-text { animation: none; }
+}
+
+/* ── Sidebar nav icons ──
+   Projects / Artifacts / Customize each answer the hover with one small move —
+   the box lid lifts off, the shapes turn a few degrees, the case tips. A couple
+   of pixels is the whole point: it says the row is live without pulling the eye
+   away from what the reader was doing. */
+.nav-row [class*='nav-anim-'] > svg {
+  transition: transform 200ms cubic-bezier(0.2, 0.8, 0.3, 1);
+}
+/* The archive icon's lid is its first path — moving only that leaves the box
+   itself planted, so the gesture reads as opening rather than as a jump. */
+.nav-row .nav-anim-lift > svg > :first-child {
+  transition: transform 200ms cubic-bezier(0.2, 0.8, 0.3, 1);
+  transform-box: fill-box;
+  transform-origin: center;
+}
+.nav-row:hover .nav-anim-lift > svg > :first-child { transform: translateY(-1.5px); }
+.nav-row:hover .nav-anim-shapes > svg { transform: rotate(15deg); }
+.nav-row:hover .nav-anim-tilt > svg { transform: rotate(-7deg); }
+@media (prefers-reduced-motion: reduce) {
+  .nav-row [class*='nav-anim-'] > svg,
+  .nav-row .nav-anim-lift > svg > :first-child { transition: none; }
+  .nav-row:hover [class*='nav-anim-'] > svg,
+  .nav-row:hover .nav-anim-lift > svg > :first-child { transform: none; }
+}
+
+/* ── Toast ──
+   The bottom-left confirmation pill. It rises from below the corner it lives
+   in, so the motion reads as the toast arriving rather than as the layout
+   shifting. */
+.animate-toast-in {
+  animation: toast-in 180ms ease-out;
+}
+@keyframes toast-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .animate-toast-in { animation: none; }
+}
+
+/* ── Title skeleton ──
+   Placeholder bar standing in for a session title until the model has written
+   one. A soft highlight sweeps across a muted base (same keyframes as the
+   "Working" shimmer) so the row reads as loading rather than as empty. */
+.skeleton-bar {
+  position: relative;
+  overflow: hidden;
+  border-radius: 4px;
+  background-color: color-mix(in srgb, var(--muted-foreground) 20%, transparent);
+}
+/* The highlight is its own full-width layer sliding across the bar, rather than
+   an oversized background whose position is animated — a background-position
+   sweep is sized against the element, so on a short bar the lit band only ever
+   covered part of it. Sliding a band as wide as the bar itself from one edge to
+   the other lights up every pixel on the way past. */
+.skeleton-bar::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image: linear-gradient(
+    90deg,
+    transparent 0%,
+    color-mix(in srgb, var(--muted-foreground) 30%, transparent) 50%,
+    transparent 100%
+  );
+  transform: translateX(-100%);
+  animation: skeleton-sweep 1.6s ease-in-out infinite;
+}
+@keyframes skeleton-sweep {
+  to { transform: translateX(100%); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .skeleton-bar::after { animation: none; content: none; }
+}
+
+/* ── Odometer digits ──
+   The live token count changes several times a second, and swapping the text
+   outright makes it flicker. Each character sits in its own clipped cell and
+   the new one scrolls up into place instead, the way a mechanical counter
+   turns. The inner span is keyed on the character, so React remounts it and
+   replays the animation on every change.
+
+   Everything about the type is inherited — font, size, weight, line-height —
+   so the digits are the same text as the words beside them. Clipping is what
+   makes that delicate: an inline-block with overflow:hidden takes its baseline
+   from its bottom margin edge, so the cells would sit low against the label
+   next to them. Aligning the cell boxes at the top of the line box instead,
+   with the same line-height inside, puts the glyphs back on the shared
+   baseline. */
+.digit-cell {
+  display: inline-block;
+  overflow: hidden;
+  vertical-align: top;
+  line-height: inherit;
+}
+.digit-roll {
+  display: block;
+  animation: digit-roll 420ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+/* Deliberately gentle: a short lift and a fade, not a full-height throw. The
+   count sits in the corner of the eye while the reader is reading something
+   else, and a digit flinging itself up a whole line pulls attention it does
+   not deserve. */
+@keyframes digit-roll {
+  from { transform: translateY(0.4em); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .digit-roll { animation: none; }
+}
+
+/* ── Disclosure open/close ──
+   Grid rows go 0fr → 1fr, which animates to the content's natural height
+   without anyone measuring it. The inner element does the clipping; it also
+   flips to visibility:hidden once closed so the collapsed content leaves the
+   tab order (delayed by the duration, so it stays visible while closing). */
+.collapse-grid {
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  transition:
+    grid-template-rows 220ms cubic-bezier(0.2, 0, 0, 1),
+    opacity 160ms ease;
+}
+.collapse-grid > * {
+  min-height: 0;
+  overflow: hidden;
+  visibility: hidden;
+  transition: visibility 0s linear 220ms;
+}
+.collapse-grid.is-open {
+  grid-template-rows: 1fr;
+  opacity: 1;
+}
+.collapse-grid.is-open > * {
+  visibility: visible;
+  transition-delay: 0s;
+}
+@media (prefers-reduced-motion: reduce) {
+  .collapse-grid,
+  .collapse-grid > * {
+    transition: none;
+  }
+}
+
+/* ── Chat markdown (MIDA chat-markdown, hue-bridged) ── */
+.chat-markdown {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  line-height: 1.65;
+}
+.chat-markdown > :first-child { margin-top: 0; }
+.chat-markdown > :last-child { margin-bottom: 0; }
+.chat-markdown p, .chat-markdown ul, .chat-markdown ol,
+.chat-markdown blockquote, .chat-markdown pre, .chat-markdown table { margin: 0.65rem 0; }
+.chat-markdown h1, .chat-markdown h2, .chat-markdown h3, .chat-markdown h4 { font-weight: 600; margin: 1.1em 0 0.4em; }
+.chat-markdown h1 { font-size: 1.35em; }
+.chat-markdown h2 { font-size: 1.2em; }
+.chat-markdown h3 { font-size: 1.05em; }
+.chat-markdown ul { padding-left: 1.25rem; list-style-type: disc; }
+.chat-markdown ol { padding-left: 1.25rem; list-style-type: decimal; }
+.chat-markdown ul ul { list-style-type: circle; }
+.chat-markdown li + li { margin-top: 0.25rem; }
+.chat-markdown a {
+  color: var(--primary);
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, var(--primary) 40%, transparent);
+}
+.chat-markdown a:hover { opacity: 0.8; }
+.chat-markdown blockquote {
+  border-left: 2px solid var(--border);
+  padding-left: 0.8rem;
+  color: var(--muted-foreground);
+}
+.chat-markdown :not(pre) > code {
+  /* No border: inline mentions (table names, paths) sit mid-sentence, and a
+     framed chip every few words broke the line up more than it clarified. The
+     tint alone marks them; the padding is just enough to keep it off the glyphs. */
+  border-radius: 0.3rem;
+  background: var(--muted);
+  padding: 0.05rem 0.2rem;
+  color: var(--foreground);
+  font-family: var(--font-mono);
+  font-size: 0.8em;
+}
+.chat-markdown pre {
+  max-width: 100%;
+  overflow-x: auto;
+  /* Keep sideways scrolling inside the code box — don't let it bubble up to
+     scroll the page or trigger back/forward navigation. */
+  overscroll-behavior-x: contain;
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  background: var(--muted);
+  padding: 0.8rem 0.9rem;
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  line-height: 1.55;
+}
+.chat-markdown pre code { border: none; background: transparent; padding: 0; }
+/* KaTeX — a long display formula scrolls inside its own box (same rule as code
+   blocks) instead of widening the message; inline math keeps the body's size. */
+.chat-markdown .katex { font-size: 1.05em; }
+.chat-markdown .katex-display {
+  margin: 0.7rem 0;
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-x: contain;
+  padding: 0.15rem 0;
+}
+.chat-markdown .katex-error { color: var(--destructive-foreground, inherit); }
+.chat-markdown table { width: 100%; border-collapse: collapse; font-size: 0.9em; }
+.chat-markdown th, .chat-markdown td { border: 1px solid var(--border); padding: 0.35rem 0.45rem; text-align: left; }
+
+
+/* highlight.js — one set per scheme */
+.hljs-keyword, .hljs-selector-tag { color: #a626a4; }
+.hljs-string, .hljs-attr { color: #986801; }
+.hljs-comment, .hljs-quote { color: #a0a1a7; font-style: italic; }
+.hljs-title, .hljs-title.function_ { color: #4078f2; }
+.hljs-number, .hljs-literal { color: #b76b01; }
+.hljs-built_in, .hljs-type { color: #0184bc; }
+.dark .hljs-keyword, .dark .hljs-selector-tag { color: #c678dd; }
+.dark .hljs-string, .dark .hljs-attr { color: #e5c07b; }
+.dark .hljs-comment, .dark .hljs-quote { color: #828997; }
+.dark .hljs-title, .dark .hljs-title.function_ { color: #61afef; }
+.dark .hljs-number, .dark .hljs-literal { color: #d19a66; }
+.dark .hljs-built_in, .dark .hljs-type { color: #56b6c2; }

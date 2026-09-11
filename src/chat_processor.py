@@ -279,9 +279,10 @@ def _add_surviving_anchor_companions(
 
 
 class ChatProcessor:
-    def __init__(self, personal_docs_manager, skills_manager=None):
+    def __init__(self, personal_docs_manager, skills_manager=None, *, rag_base_id=None):
         self.personal_docs_manager = personal_docs_manager
         self.skills_manager = skills_manager
+        self.rag_base_id = rag_base_id
 
     # OpenWebUI-style RAG: inject the top retrieved/reranked chunks instead of
     # dropping everything behind a hard similarity gate. Embedding/reranker
@@ -300,7 +301,7 @@ class ChatProcessor:
             return default
 
     def _rag_cfg(self) -> dict:
-        """Retrieval settings for the base chat searches — the default one.
+        """Retrieval settings for the current base (default for the outer chat).
 
         Resolved rather than read raw, so overrides set on the default base in
         the knowledge-base UI actually reach the chat pipeline (see
@@ -309,7 +310,7 @@ class ChatProcessor:
         try:
             from src.rag_config import effective_config
 
-            return effective_config(None)
+            return effective_config(self.rag_base_id)
         except Exception:
             return {}
 
@@ -393,6 +394,7 @@ class ChatProcessor:
         *,
         prefix: str = "",
         max_chars: Optional[int] = None,
+        _manager: Any = None,
     ) -> Tuple[List[Dict[str, Any]], str]:
         """Search the knowledge base and build the injectable context block.
 
@@ -421,13 +423,58 @@ class ChatProcessor:
                 if not rag_manager.configured:
                     rag_manager = None
             else:
-                rag_manager = getattr(self.personal_docs_manager, "rag_manager", None)
-                if not rag_manager:
+                if _manager is None:
+                    from src.rag_registry import chat_enabled, list_bases
                     from src.rag_singleton import get_rag_manager
 
-                    rag_manager = get_rag_manager()
-                    if rag_manager and self.personal_docs_manager is not None:
-                        self.personal_docs_manager.rag_manager = rag_manager
+                    bases = [b for b in list_bases() if chat_enabled(b)]
+                    if not bases:
+                        return [], ""
+                    limit = max_chars
+                    if limit is None:
+                        limit = int(self._rag_cfg().get("max_context_chars") or 10000)
+                    limit = max(500, min(limit, 100000))
+                    blocks, sources = [], []
+                    used = len(prefix) + 2 if prefix else 0
+                    for index, base in enumerate(bases):
+                        try:
+                            manager = get_rag_manager(base["id"])
+                            if manager is None:
+                                continue
+                            # Apply relevance and pixel gates within each base:
+                            # different bases may use different embedding spaces.
+                            header = f"Knowledge base: {base['name']}\n" if len(bases) > 1 else ""
+                            share = (limit - used) // (len(bases) - index) - len(header) - 7
+                            if share < 500:
+                                share = limit - used - len(header) - 7
+                            if share <= 0:
+                                break
+                            processor = ChatProcessor(None, rag_base_id=base["id"])
+                            found, block = processor.retrieve(
+                                search_query,
+                                max_chars=share,
+                                _manager=manager,
+                            )
+                            if not block:
+                                continue
+                            block = header + block
+                            if used + len(block) + (7 if blocks else 0) > limit:
+                                continue
+                            for source in found:
+                                source["rag_id"] = base["id"]
+                                source["rag_name"] = base["name"]
+                                for key in ("_id", "_anchor_id", "_source"):
+                                    if source.get(key) is not None:
+                                        source[key] = f"{base['id']}:{source[key]}"
+                            used += len(block) + (7 if blocks else 0)
+                            blocks.append(block)
+                            sources.extend(found)
+                        except Exception as error:
+                            logger.warning("Chat retrieval failed for base %s: %s", base["id"], error)
+                    if not blocks:
+                        return [], ""
+                    return sources, ((prefix + "\n\n") if prefix else "") + "\n\n---\n\n".join(blocks)
+                rag_manager = _manager
             if not rag_manager:
                 return [], ""
 

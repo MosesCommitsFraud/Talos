@@ -88,7 +88,7 @@ def echarts(option, *, setup=None, data=None, extensions=()) -> dict:
     return spec
 
 __all__ = [
-    "dashboard", "render", "chart", "kpi", "check_spec", "check_option",
+    "dashboard", "compose", "render", "chart", "kpi", "check_spec", "check_option",
     "line", "area", "bar", "hbar", "grouped_bar", "stacked_bar", "waterfall",
     "scatter", "heatmap", "pie", "donut", "radar", "gauge", "funnel",
     "boxplot", "histogram", "treemap", "sankey", "fmt",
@@ -1009,10 +1009,6 @@ body{padding:14px}}
 
 
 _VIEW_CSS = """
-#td-downloads{display:flex;align-items:center;flex-wrap:wrap;gap:10px;margin:0 auto 18px;max-width:1400px}
-#td-downloads button{font:inherit;color:var(--fg);background:var(--card);border:1px solid var(--line);border-radius:7px;padding:8px 14px;cursor:pointer}
-#td-downloads button:disabled{opacity:.6;cursor:wait}
-#td-export-status{font-size:13px;color:var(--muted)}
 #td-stage{margin:0 auto;position:relative}
 #td-artboard{background:var(--bg);padding:32px;position:relative;transform-origin:top left}
 #td-artboard .chart{position:relative}
@@ -1020,7 +1016,7 @@ body[data-page-format]:not([data-page-format="web"]) #td-artboard{overflow:hidde
 body[data-page-format]:not([data-page-format="web"]) #td-stage{overflow:hidden}
 body[data-page-format]:not([data-page-format="web"]) .grid{grid-template-columns:repeat(2,minmax(0,1fr))}
 body[data-page-format="web"] #td-stage{max-width:1464px}
-@media print{body{padding:0!important}#td-downloads{display:none}#td-stage{width:auto!important;height:auto!important}
+@media print{body{padding:0!important}#td-stage{width:auto!important;height:auto!important}
 #td-artboard{transform:none!important;box-shadow:none!important}}
 """
 
@@ -1113,11 +1109,7 @@ def render(title: str, charts: Sequence[Mapping[str, Any]],
                 + f'<div class="grid">{cards}</div></div>'
                 + (f'<footer>{_esc(footer)}</footer>' if footer else ""))
     if enhanced:
-        toolbar = ('<nav id="td-downloads" aria-label="Downloads">'
-                   '<button type="button" id="td-save-html">HTML herunterladen</button>'
-                   + ('<button type="button" id="td-save-png">PNG herunterladen</button>' if download_png else "")
-                   + '<span id="td-export-status" role="status" aria-live="polite"></span></nav>')
-        body = toolbar + '<div id="td-stage"><main id="td-artboard">' + body + '</main></div>'
+        body = '<div id="td-stage"><main id="td-artboard">' + body + '</main></div>'
     specs = _js([
         {"id": c["id"], "title": c["title"], "height": c.get("height", 340),
          "spec": c["spec"]}
@@ -1137,7 +1129,7 @@ def render(title: str, charts: Sequence[Mapping[str, Any]],
         "__LOCALE__": _js(locale),
         "__BODY__": body,
         "__VIEW_INIT__": ("TalosDashboard.init(" + _js({"format": page_format,
-                          "size": PAGE_FORMATS[page_format], "title": title}) + ", originalHTML);" if enhanced else ""),
+                          "size": PAGE_FORMATS[page_format], "title": title}) + ");" if enhanced else ""),
     }
     html = _PAGE_TEMPLATE
     # The runtime goes in last and its own text is never scanned for markers:
@@ -1161,7 +1153,6 @@ _PAGE_TEMPLATE = """<!DOCTYPE html>
 </head><body>
 __BODY__
 <script>
-const originalHTML = '<!DOCTYPE html>\\n' + document.documentElement.outerHTML;
 __VIEW_INIT__
 // Fail loudly if the runtime didn't survive being inlined. A blank dashboard
 // with a clean console is the hardest version of this to debug.
@@ -1209,3 +1200,17 @@ def dashboard(path: str, title: str, charts: Sequence[Mapping[str, Any]],
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(html, encoding="utf-8")
     return str(out)
+
+
+def compose(path: str, title: str, charts: Sequence[Mapping[str, Any]], *,
+            layout_html: str, css: str, page_format: str = "web",
+            lang: str = "de", locale: str = "de-DE") -> str:
+    """Dashboard v2 entrypoint: authored composition required, no tile fallback.
+
+    PNG rendering is exposed to Talos; the artifact contains no download UI.
+    The legacy dashboard() entrypoint retains its automatic card layout.
+    """
+    if not layout_html.strip() or not css.strip():
+        raise ValueError("compose() needs an authored layout_html and css; design the page first")
+    return dashboard(path, title, charts, layout_html=layout_html, css=css,
+                     page_format=page_format, lang=lang, locale=locale, download_png=True)

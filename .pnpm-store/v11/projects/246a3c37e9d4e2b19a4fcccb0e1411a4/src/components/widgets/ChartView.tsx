@@ -1,0 +1,348 @@
+import { useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
+import { barX, crosshair, defineChart, lineY, text } from '@tanstack/charts';
+import { Chart } from '@tanstack/charts/react';
+import { scaleBand } from '@tanstack/charts/scales/band';
+import { scaleLinear } from '@tanstack/charts/scales/linear';
+import { scalePoint } from '@tanstack/charts/scales/point';
+import { tooltip } from '@tanstack/charts/tooltip';
+import { cn } from '@/lib/utils';
+
+type Cell = string | number | boolean | null;
+
+/** Bars stay one hue — the app's accent — for every category.
+ *
+ *  Not a darker-where-bigger ramp: that double-encodes bar length as colour,
+ *  spends the only free channel on information the chart already shows, and is
+ *  wrong outright when the categories have no natural order (customers, tables,
+ *  products), which is what a SQL GROUP BY usually returns. One series, one
+ *  colour. Both light and dark steps of `--primary` were checked against their
+ *  own card surface for lightness band, chroma and 3:1 contrast. */
+const SERIES = 'var(--primary)';
+
+/** TanStack Charts paints scene text and grids from theme tokens rather than
+ *  from a stylesheet, so the app's own tokens are handed over once here. The
+ *  library's default is `currentColor` for all three, which would put axis
+ *  labels and gridlines at full foreground weight — a grid as loud as the data.
+ *  `background` stays transparent: the card behind the chart is the surface. */
+const THEME = {
+  foreground: 'var(--muted-foreground)',
+  muted: 'var(--muted-foreground)',
+  grid: 'var(--border)',
+  background: 'transparent',
+} as const;
+
+/** Bars drawn before the chart switches to "top N". Past this the bars are
+ *  thinner than the gap between them and the labels stop being readable, so
+ *  more bars means less chart, not more. */
+const MAX_BARS = 25;
+
+/** One bar's share of the chart height, and the floor/ceiling around it. Bars
+ *  are laid out down the page, so the chart's height is data-dependent — a
+ *  fixed height would squash 25 bars into hairlines or strand four in white
+ *  space. */
+const BAR_ROW_HEIGHT = 24;
+const BAR_AXIS_HEIGHT = 34;
+
+/** Category names out of a database run long ("Sammelrechnung über mehrere
+ *  Positionen…"). The axis margin is measured from the rendered tick labels, so
+ *  an untruncated one silently eats the plot: the label column grows until the
+ *  bars have nowhere left to be. Truncating in the tick formatter caps that
+ *  margin; the tooltip still carries the full name. */
+const MAX_LABEL_CHARS = 24;
+
+const isNum = (value: Cell): value is number => typeof value === 'number' && Number.isFinite(value);
+
+const truncate = (value: string): string =>
+  value.length > MAX_LABEL_CHARS ? `${value.slice(0, MAX_LABEL_CHARS - 1)}…` : value;
+
+/** Does this column read as a point in time? Decides bar vs line: a time axis
+ *  makes the reader's job "trend", and a row of dated bars answers that worse
+ *  than a line does. Deliberately strict — an ISO-ish prefix, nothing cleverer,
+ *  because a false positive turns unordered categories into a fake trend. */
+function looksTemporal(values: Cell[]): boolean {
+  const strings = values.filter((v): v is string => typeof v === 'string');
+  if (strings.length < 3) return false;
+  return strings.every((v) => /^\d{4}-\d{2}(-\d{2})?([T ]\d{2}:\d{2})?/.test(v.trim()));
+}
+
+function formatNumber(value: number, locale: string): string {
+  const abs = Math.abs(value);
+  if (abs >= 1_000_000) return `${(value / 1_000_000).toLocaleString(locale, { maximumFractionDigits: 1 })}M`;
+  if (abs >= 10_000) return `${(value / 1_000).toLocaleString(locale, { maximumFractionDigits: 1 })}k`;
+  return value.toLocaleString(locale, { maximumFractionDigits: 2 });
+}
+
+/** One unit for the whole axis, chosen from its largest value.
+ *
+ *  Formatting each tick on its own magnitude gives an axis reading "0 · 5.000 ·
+ *  10k · 15k" — the same quantity spelled two ways, four pixels apart. The
+ *  reader then has to convert in their head to compare gridlines, which is
+ *  exactly the work an axis exists to remove. */
+function axisFormatter(max: number, locale: string): (value: number) => string {
+  const abs = Math.abs(max);
+  const [divisor, suffix] = abs >= 1_000_000 ? [1_000_000, 'M'] : abs >= 10_000 ? [1_000, 'k'] : [1, ''];
+  return (value) =>
+    // Zero is the one tick that keeps its bare form: "0k" is a unit on nothing,
+    // and the baseline should read as the baseline.
+    value === 0
+      ? '0'
+      : `${(value / divisor).toLocaleString(locale, { maximumFractionDigits: divisor === 1 ? 2 : 1 })}${suffix}`;
+}
+
+export interface ChartSource {
+  columns: string[];
+  rows: Cell[][];
+  numeric: boolean[];
+}
+
+/** One plotted observation.
+ *
+ *  `key` exists because both positional scales here are discrete (a band for
+ *  bars, a point scale for the time axis) and a discrete domain de-duplicates:
+ *  two rows sharing a label would collapse into one bar. The row index is the
+ *  key, so every observation keeps its own domain entry, and the tick
+ *  formatters look the label back up. */
+interface Point {
+  key: string;
+  label: string;
+  value: number;
+}
+
+/** key -> label for one set of points, for the axis tick formatters. The key is
+ *  opaque on purpose: encoding the label into it would mean parsing it back out
+ *  of a string a database wrote, which is a separator waiting to collide. */
+const labels = (points: Point[]): Map<string, string> =>
+  new Map(points.map((p) => [p.key, p.label]));
+
+/** Can this result set be charted at all, and with which columns?
+ *
+ *  Needs one column to name the bars and one to size them. A result set of pure
+ *  numbers (an id column and three measures) has nothing to label an axis with,
+ *  and a result set of pure text has nothing to plot — in both cases the table
+ *  is the answer and the chart tab stays hidden rather than rendering nonsense.
+ */
+export function chartable(source: ChartSource): { label: number; values: number[] } | null {
+  const values = source.numeric.map((n, i) => (n ? i : -1)).filter((i) => i >= 0);
+  const label = source.numeric.findIndex((n) => !n);
+  if (label < 0 || values.length === 0 || source.rows.length < 2) return null;
+  // Identifiers are numbers that are not quantities. A SELECT almost always
+  // leads with one, so plotting the first numeric column by default would open
+  // the chart on a bar per row id — a staircase that means nothing. They stay
+  // selectable (someone may want to see an id gap), just never the default.
+  const ordered = [...values].sort((a, b) => idLike(source.columns[a]) - idLike(source.columns[b]));
+  return { label, values: ordered };
+}
+
+const idLike = (name: string): number =>
+  /^(id|nr|no|num|index|key|pk)$|_(id|nr|no|key)$|^(id|key)_/i.test((name || '').trim()) ? 1 : 0;
+
+export function ChartView({ source }: { source: ChartSource }) {
+  const { t, i18n } = useTranslation();
+  const locale = i18n.language;
+  const spec = chartable(source);
+  const [valueColumn, setValueColumn] = useState<number | null>(null);
+
+  const active = valueColumn ?? spec?.values[0] ?? -1;
+
+  const points = useMemo<Point[]>(() => {
+    if (!spec || active < 0) return [];
+    return source.rows
+      .map((row, i) => ({
+        key: String(i),
+        label: String(row[spec.label] ?? ''),
+        value: row[active],
+      }))
+      .filter((p): p is Point => isNum(p.value));
+  }, [source.rows, spec, active]);
+
+  if (!spec || points.length === 0) return null;
+
+  const temporal = looksTemporal(points.map((p) => p.label));
+
+  const picker =
+    spec.values.length > 1 ? (
+      <div className="flex flex-wrap items-center gap-1">
+        {spec.values.map((index) => (
+          <button
+            key={index}
+            type="button"
+            onClick={() => setValueColumn(index)}
+            className={cn(
+              'rounded px-1.5 py-0.5 text-[11px] transition-colors',
+              index === active ? 'bg-accent text-foreground' : 'text-muted-foreground hover:bg-accent/60',
+            )}
+          >
+            {source.columns[index]}
+          </button>
+        ))}
+      </div>
+    ) : null;
+
+  const title = `${source.columns[active]} ${t('chart.by')} ${source.columns[spec.label]}`;
+
+  return (
+    <div className="px-4 py-3">
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+        {/* A single series needs no legend box — one colour, and this line
+            already names what is plotted. */}
+        <span className="text-xs text-muted-foreground">{title}</span>
+        {picker}
+      </div>
+      {temporal ? (
+        <LineChart points={points} locale={locale} title={title} />
+      ) : (
+        <BarChart points={points} locale={locale} title={title} />
+      )}
+    </div>
+  );
+}
+
+/** Horizontal bars.
+ *
+ *  Category names out of a database are long and arbitrary, which is the case
+ *  that breaks a column chart: rotated x-labels, or clipped ones. Horizontally
+ *  the label is ordinary axis text that can truncate honestly, and the value
+ *  rides at the bar's tip as a `text` mark — automatic margins reserve room for
+ *  it — so no value is gated behind a tooltip. */
+function BarChart({ points, locale, title }: { points: Point[]; locale: string; title: string }) {
+  const { t } = useTranslation();
+  const [showAll, setShowAll] = useState(false);
+  // Biggest first: the reader's question at a bar chart is almost always "which
+  // is largest", and it makes the "top N" cut meaningful rather than arbitrary.
+  const ordered = useMemo(() => [...points].sort((a, b) => b.value - a.value), [points]);
+  const visible = useMemo(() => (showAll ? ordered : ordered.slice(0, MAX_BARS)), [ordered, showAll]);
+
+  const definition = useMemo(() => {
+    const max = Math.max(...visible.map((p) => p.value), 0);
+    const axisLabel = axisFormatter(max, locale);
+    const names = labels(visible);
+    return defineChart({
+      marks: [
+        barX(visible, {
+          x: 'value',
+          y: 'key',
+          fill: SERIES,
+          // Square where it leaves the baseline is not available per-corner, so
+          // a small uniform radius stands in: enough to soften the tip, too
+          // little to round the baseline into a lozenge.
+          radius: 2,
+        }),
+        text(visible, {
+          x: 'value',
+          y: 'key',
+          text: (point: Point) => formatNumber(point.value, locale),
+          anchor: 'start',
+          dx: 6,
+          fontSize: 11,
+        }),
+      ],
+      scales: {
+        y: {
+          // A configured instance, not a factory: a factory hands domain
+          // inference to Charts, and the domain here *is* the ranking — the
+          // sort order the reader is meant to see.
+          scale: scaleBand<string>()
+            .domain(visible.map((p) => p.key))
+            .padding(0.28),
+          axis: { line: false, ticks: { size: 0, format: (key: string) => truncate(names.get(key) ?? key) } },
+        },
+        x: {
+          scale: scaleLinear,
+          nice: true,
+          grid: true,
+          axis: { line: false, ticks: { format: axisLabel } },
+        },
+      },
+      theme: THEME,
+      tooltip: {
+        use: tooltip,
+        format: (point: { datum: Point }) =>
+          `${point.datum.label}: ${formatNumber(point.datum.value, locale)}`,
+      },
+    });
+  }, [visible, locale]);
+
+  return (
+    <div>
+      <Chart
+        definition={definition}
+        height={visible.length * BAR_ROW_HEIGHT + BAR_AXIS_HEIGHT}
+        ariaLabel={title}
+      />
+
+      {ordered.length > MAX_BARS && (
+        <button
+          type="button"
+          onClick={() => setShowAll((v) => !v)}
+          className="mt-2 rounded px-1 py-0.5 text-[11px] text-muted-foreground underline underline-offset-2 transition-colors hover:bg-accent hover:text-foreground"
+        >
+          {showAll
+            ? t('chart.showTop', { count: MAX_BARS })
+            : t('chart.showAllBars', { count: ordered.length })}
+        </button>
+      )}
+    </div>
+  );
+}
+
+/** Line chart for a time axis.
+ *
+ *  Values are not readable off a line the way they are off a labelled bar, so
+ *  the crosshair and tooltip are not decoration — they are how the reader gets
+ *  a number. The table tab is still the ungated twin.
+ *
+ *  The x scale is a point scale over the row order, not a time scale: the rows
+ *  arrive already ordered from SQL, and spacing them by parsed timestamp would
+ *  need a D3 scale plus a date parser for whatever shape the column happens to
+ *  be in. Even spacing of ordered periods is what the previous chart did and
+ *  what a GROUP BY per month actually means. */
+function LineChart({ points, locale, title }: { points: Point[]; locale: string; title: string }) {
+  const definition = useMemo(() => {
+    const max = Math.max(...points.map((p) => p.value), 0);
+    const min = Math.min(...points.map((p) => p.value), 0);
+    const axisLabel = axisFormatter(max, locale);
+    const names = labels(points);
+    return defineChart({
+      marks: [
+        lineY(points, { x: 'key', y: 'value', stroke: SERIES, strokeWidth: 2 }),
+        // Rule plus marker at the focused point, in the app's border colour —
+        // never dashed: a dashed rule reads as a threshold or a projection.
+        crosshair({ y: false, stroke: 'var(--border)', marker: { fill: SERIES, stroke: 'var(--card)', strokeWidth: 2, radius: 4 } }),
+      ],
+      scales: {
+        x: {
+          scale: scalePoint<string>()
+            .domain(points.map((p) => p.key))
+            .padding(0.2),
+          axis: {
+            line: false,
+            // A date under every point is chaos and goes unread. Thinning keeps
+            // the two labels that frame the period and then drops whatever
+            // cannot hold the minimum gap, so the survivors are readable rather
+            // than merely present.
+            ticks: { format: (key: string) => (names.get(key) ?? key).slice(0, 10) },
+            tickLabels: { thin: { minGap: 64, priority: 'ends' } },
+          },
+        },
+        y: {
+          // Anchored at zero, not at the data's own floor: a line that starts
+          // its axis at the minimum turns a 4% drift into a cliff, and these
+          // are business quantities where the distance to nothing is part of
+          // the reading.
+          scale: scaleLinear().domain([min, max || 1]).nice(),
+          grid: true,
+          axis: { line: false, ticks: { format: axisLabel } },
+        },
+      },
+      theme: THEME,
+      tooltip: {
+        use: tooltip,
+        format: (point: { datum: Point }) =>
+          `${point.datum.label.slice(0, 16)}: ${formatNumber(point.datum.value, locale)}`,
+      },
+    });
+  }, [points, locale]);
+
+  return <Chart definition={definition} height={180} ariaLabel={title} />;
+}

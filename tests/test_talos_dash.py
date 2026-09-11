@@ -83,8 +83,9 @@ class DashboardTests(unittest.TestCase):
                 self.assertIn('<h1>Story</h1><div class="chart"', html)
                 self.assertNotIn('<section class="card', html)
                 self.assertIn('"size":[794,1123,2480,3508]', html)
-                self.assertIn('id="td-save-png"', html)
-                self.assertIn('id="td-save-html"', html)
+                self.assertNotIn('id="td-save-png"', html)
+                self.assertNotIn('id="td-save-html"', html)
+                self.assertNotIn('id="td-downloads"', html)
                 self.assertNotIn("{{chart:", html)
                 old = td.render("Existing", [])
                 self.assertNotIn('id="td-save-png"', old)
@@ -96,6 +97,17 @@ class DashboardTests(unittest.TestCase):
         chart = td.chart("same", "Same", td.echarts({}))
         with self.assertRaisesRegex(ValueError, "distinct"):
             td.render("Duplicate", [chart, chart])
+
+    def test_v2_requires_authored_composition(self):
+        with self.assertRaises(TypeError):
+            td.compose("unused.html", "No layout", [])
+        with self.assertRaisesRegex(ValueError, "authored"):
+            td.compose("unused.html", "No layout", [], layout_html="", css="")
+        with patch.object(td, "dashboard", return_value="composed.html") as render:
+            self.assertEqual(td.compose("composed.html", "Story", [],
+                             layout_html="<h1>Story</h1>", css="h1{color:navy}"), "composed.html")
+            self.assertTrue(render.call_args.kwargs["download_png"])
+            self.assertEqual(render.call_args.kwargs["layout_html"], "<h1>Story</h1>")
 
     def test_index_covers_all_sources_and_dependency_hints(self):
         with tempfile.TemporaryDirectory() as tmp:

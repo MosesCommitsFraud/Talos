@@ -128,11 +128,12 @@ class RagBaseCreate(BaseModel):
 
 
 class RagBaseUpdate(BaseModel):
-    """Descriptive edits only; omitted fields are left as they are."""
+    """Base metadata and chat participation; omitted fields stay unchanged."""
 
     name: str | None = None
     description: str | None = None
     language: str | None = None
+    chat_enabled: bool | None = None
 
 
 class RagBaseConfigUpdate(BaseModel):
@@ -381,6 +382,7 @@ def setup_rag_routes():
                 name=body.name,
                 description=body.description,
                 language=body.language,
+                chat_enabled=body.chat_enabled,
             )
         except RagNotFound:
             raise HTTPException(404, f"Unknown knowledge base '{base_id}'")

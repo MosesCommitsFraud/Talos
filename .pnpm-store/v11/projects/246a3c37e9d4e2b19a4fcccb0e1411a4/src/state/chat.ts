@@ -1,0 +1,1112 @@
+import { create } from 'zustand';
+import { compactSession, createSession, deleteMessages, editMessage, fetchActiveRuns, fetchArtifacts, fetchSession, resumeChat, streamChat } from '@/api/client';
+import type { Artifact, ArtifactSelection, Attachment, ChatEvent, Metrics, RagSource, ToolCall } from '@/api/types';
+import { documentFileName, isPreviewable } from '@/lib/files';
+import { timestampMs } from '@/lib/utils';
+import { queryClient } from '@/lib/queryClient';
+import { StreamSmoother } from '@/lib/streamSmoother';
+import { usePrefs } from './prefs';
+import { useUi } from './ui';
+
+export interface UiMessage {
+  id: string;
+  /** Backend row id (metadata._db_id / message_saved) — needed for edit/delete. */
+  dbId?: string;
+  role: 'user' | 'assistant';
+  content: string;
+  /** Wall-clock (ms) the message was created — drives the relative timestamp
+   *  shown under the bubble. Stamped live on send; cold-loaded turns read it
+   *  from the backend's metadata.timestamp. */
+  createdAt?: number;
+  thinking?: string;
+  tools?: ToolCall[];
+  attachments?: Attachment[];
+  artifactSelection?: ArtifactSelection;
+  metrics?: Metrics;
+  /** RAG knowledge-base chunks cited for this answer. */
+  sources?: RagSource[];
+  streaming?: boolean;
+  error?: boolean;
+  /** Wall-clock the whole turn took, stamped on the terminal assistant bubble
+   *  when streaming ends. Drives the settled "Worked for Xs" fold (t3code style);
+   *  turns loaded cold from history fall back to summed metrics.response_time. */
+  turnElapsedMs?: number;
+  /** An `ask_user` tool call ended the turn with a question — rendered as an
+   *  interactive card. Free-text when `options` is empty, else multiple-choice. */
+  pendingQuestion?: { question: string; options: { label: string; description?: string }[]; multi: boolean };
+  /** Latest `update_plan` checklist (markdown) emitted during this turn. */
+  plan?: string;
+  /** This turn ran in plan mode and proposed a plan — its content gets an
+   *  "Implement plan" / "Revise" approval card. */
+  planProposed?: boolean;
+  /** Set once the user answers a pendingQuestion or acts on a plan card, so the
+   *  card goes inert (a new turn has started from it). */
+  answered?: boolean;
+  /** Auto-compaction ran before this turn — earlier messages were summarized
+   *  to fit the context window. Renders a marker above the bubble. */
+  compacted?: { contextLength?: number };
+}
+
+/** Live runtime for one session, kept in the store keyed by session id so it
+ *  survives switching chats. A turn that is mid-flight keeps streaming into its
+ *  own runtime even while a different session (or a fresh draft) is on screen —
+ *  the top-level mirror fields below only ever reflect the *active* session. */
+interface SessionRuntime {
+  messages: UiMessage[];
+  streaming: boolean;
+  turnStartedAt: number | null;
+  abort: AbortController | null;
+  /** True between an `ask_user` turn ending and the user's answer — drives the
+   *  sidebar "Needs you" status and suppresses the "Done" badge. */
+  awaitingInput: boolean;
+  goal: GoalRun | null;
+}
+
+export interface GoalRun {
+  objective: string;
+  status: 'running' | 'paused' | 'completed' | 'cancelled';
+  iteration: number;
+}
+
+const emptyRuntime = (): SessionRuntime => ({ messages: [], streaming: false, turnStartedAt: null, abort: null, awaitingInput: false, goal: null });
+
+interface ChatState {
+  /** Per-session live state. Outlives chat switches so background turns keep
+   *  accumulating thinking/tool/delta events into the right session. */
+  runtimes: Record<string, SessionRuntime>;
+
+  /** Sessions whose last turn finished while the user was looking elsewhere and
+   *  that haven't been opened since — surfaced as "Done" in the sidebar. Cleared
+   *  when the chat is opened. */
+  completed: Record<string, true>;
+
+  sessionId: string | null;
+  // ── Mirror of runtimes[sessionId] for the active session ──────────────────
+  // These exist so every view selector (s.messages, s.streaming, …) keeps
+  // working unchanged; they are recomputed on every runtime write.
+  messages: UiMessage[];
+  streaming: boolean;
+  /** ms epoch when the current turn began (set on send, cleared when it ends).
+   *  Drives the "Working for Xs" timer so it counts from send through every
+   *  agent round, t3code-style, instead of resetting per assistant bubble. */
+  turnStartedAt: number | null;
+  goal: GoalRun | null;
+  /** Model used when the next send has to create a session first. */
+  pendingModel: { endpointId: string; model: string } | null;
+
+  setPendingModel: (m: ChatState['pendingModel']) => void;
+  newChat: () => void;
+  openSession: (id: string) => Promise<void>;
+  send: (text: string, opts?: { attachments?: Attachment[]; artifactSelection?: ArtifactSelection; onSessionCreated?: (id: string) => void; approvedPlan?: string; planMode?: boolean; goalIteration?: boolean; targetSessionId?: string; resume?: boolean; resumeElapsedMs?: number | null }) => Promise<void>;
+  /** Reattach to a turn that is still running server-side for `id` (after a
+   *  page reload). Loads the session's history first when we have none.
+   *  `elapsedMs` (how long the turn has already run) backdates the working
+   *  timer so it continues instead of restarting at 0. */
+  attachRun: (id: string, elapsedMs?: number | null) => Promise<void>;
+  /** Reopen the chat that was on screen before the last reload. No-op when a
+   *  session is already active or the remembered chat no longer exists. */
+  restoreLastSession: () => Promise<void>;
+  /** Page-load bootstrap: reattach to every run still in flight so a refresh
+   *  mid-turn keeps streaming instead of silently dropping the turn. */
+  hydrateActiveRuns: () => Promise<void>;
+  stop: () => void;
+  startGoal: (objective: string) => Promise<void>;
+  pauseGoal: () => void;
+  resumeGoal: (sessionId?: string) => Promise<void>;
+  cancelGoal: () => void;
+  compact: () => Promise<void>;
+  edit: (msgId: string, content: string) => Promise<void>;
+  remove: (msgId: string) => Promise<void>;
+  /** Dismiss the active session's pending proposed plan without executing it
+   *  (the "Cancel" action on the approval bar). */
+  cancelPlan: () => void;
+}
+
+const PLAN_CHECKLIST_RE = /[-*]\s*\[[ xX]\]/;
+
+/** True iff a turn is currently streaming for `id`. Used by the sidebar to
+ *  render a running indicator on chats other than the one on screen. */
+export const selectIsStreaming = (id: string | null | undefined) => (s: ChatState) =>
+  !!id && !!s.runtimes[id]?.streaming;
+
+/** The active session's proposed plan (a plan-mode turn that produced a
+ *  checklist), or null. Drives the side plan panel and the approval bar. */
+export const selectActivePlan = (s: ChatState): UiMessage | null => {
+  for (let i = s.messages.length - 1; i >= 0; i -= 1) {
+    const m = s.messages[i];
+    if (m.role === 'assistant' && m.planProposed && PLAN_CHECKLIST_RE.test(m.content)) return m;
+  }
+  return null;
+};
+/** The active plan only while it still needs a decision (not yet accepted or
+ *  cancelled) — drives the composer's approval bar. */
+export const selectPendingPlan = (s: ChatState): UiMessage | null => {
+  const p = selectActivePlan(s);
+  return p && !p.answered ? p : null;
+};
+
+/** The active session's unanswered `ask_user` question, or null — rendered as a
+ *  card docked above the composer rather than inline in the transcript. */
+export const selectPendingQuestion = (s: ChatState): UiMessage | null => {
+  for (let i = s.messages.length - 1; i >= 0; i -= 1) {
+    const m = s.messages[i];
+    if (m.role === 'assistant' && m.pendingQuestion && !m.answered) return m;
+  }
+  return null;
+};
+
+/** Sidebar status for a chat row: 'working' while a turn streams, 'awaiting'
+ *  when a turn ended on a question and needs the user, 'completed' once it
+ *  finishes in the background until the chat is opened, else null. */
+export type ChatStatus = 'working' | 'awaiting' | 'completed' | null;
+export const selectChatStatus = (id: string | null | undefined) => (s: ChatState): ChatStatus => {
+  if (!id) return null;
+  const rt = s.runtimes[id];
+  if (rt?.streaming) return 'working';
+  if (rt?.awaitingInput) return 'awaiting';
+  return s.completed[id] ? 'completed' : null;
+};
+
+/** The most urgent status among a folder's chats, so a collapsed folder still
+ *  shows that something inside it is running / waiting / just finished.
+ *  Returns a primitive, so it's safe to pass a fresh id array every render. */
+export const selectFolderStatus = (ids: string[]) => (s: ChatState): ChatStatus => {
+  let best: ChatStatus = null;
+  for (const id of ids) {
+    const status = selectChatStatus(id)(s);
+    if (status === 'working') return 'working';
+    if (status === 'awaiting') best = 'awaiting';
+    else if (status === 'completed' && best !== 'awaiting') best = 'completed';
+  }
+  return best;
+};
+
+let nextId = 0;
+const uid = () => `m${Date.now()}-${nextId++}`;
+
+/** The chat that was on screen, remembered across reloads so a refresh returns
+ *  to the conversation (and to its running turn) instead of a blank draft. */
+const LAST_SESSION_KEY = 'talos.lastSession';
+const rememberLastSession = (id: string | null) => {
+  try {
+    if (id) localStorage.setItem(LAST_SESSION_KEY, id);
+    else localStorage.removeItem(LAST_SESSION_KEY);
+  } catch { /* storage disabled — restoring is a nicety, not a requirement */ }
+};
+/** Trailing assistant bubbles that were never persisted — the partial output of
+ *  a stream connection that dropped mid-turn. The run kept going server-side and
+ *  replays from the start on reconnect, so these get rebuilt. */
+const dropUnsavedTail = (messages: UiMessage[]): UiMessage[] => {
+  let end = messages.length;
+  while (end > 0 && messages[end - 1].role === 'assistant' && !messages[end - 1].dbId) end -= 1;
+  return end === messages.length ? messages : messages.slice(0, end);
+};
+
+export const lastSessionId = (): string | null => {
+  try { return localStorage.getItem(LAST_SESSION_KEY); } catch { return null; }
+};
+
+function metricsFromMetadata(metadata: Record<string, unknown> | undefined): Metrics | undefined {
+  if (!metadata) return undefined;
+  const keys: Array<keyof Metrics> = [
+    'model',
+    'response_time',
+    'tokens_per_second',
+    'output_tokens',
+    'input_tokens',
+    'context_percent',
+    'context_length',
+    'context_tokens',
+    'usage_source',
+    'context_breakdown',
+  ];
+  const metrics: Metrics = {};
+  for (const key of keys) {
+    const value = metadata[key];
+    if (value != null) (metrics as Record<string, unknown>)[key] = value;
+  }
+  return Object.keys(metrics).length > 0 ? metrics : undefined;
+}
+
+function thinkingFromMetadata(metadata: Record<string, unknown> | undefined): string | undefined {
+  const thinking = metadata?.thinking;
+  return typeof thinking === 'string' && thinking.trim() ? thinking : undefined;
+}
+
+function ragSourcesFromMetadata(metadata: Record<string, unknown> | undefined): RagSource[] | undefined {
+  const raw = metadata?.rag_sources;
+  if (!Array.isArray(raw)) return undefined;
+  const sources = raw
+    .filter((item): item is Record<string, unknown> => !!item && typeof item === 'object')
+    .map((item) => ({
+      filename: String(item.filename ?? item.source ?? 'unknown'),
+      snippet: typeof item.snippet === 'string' ? item.snippet : '',
+      similarity: typeof item.similarity === 'number' ? item.similarity : 0,
+      // Media fields must survive a cold load, or reopened chats lose their
+      // image previews / video deeplinks that the live stream showed.
+      modality: item.modality === 'image' || item.modality === 'video' ? (item.modality as 'image' | 'video') : undefined,
+      image_url: typeof item.image_url === 'string' ? item.image_url : undefined,
+      image_caption: typeof item.image_caption === 'string' ? item.image_caption : undefined,
+      video_url: typeof item.video_url === 'string' ? item.video_url : undefined,
+      deeplink: typeof item.deeplink === 'string' ? item.deeplink : undefined,
+      start: typeof item.start === 'number' ? item.start : undefined,
+      end: typeof item.end === 'number' ? item.end : undefined,
+    }));
+  return sources.length > 0 ? sources : undefined;
+}
+
+function attachmentsFromMetadata(metadata: Record<string, unknown> | undefined): Attachment[] | undefined {
+  const raw = metadata?.attachments;
+  if (!Array.isArray(raw)) return undefined;
+  const attachments = raw
+    .filter((item): item is Record<string, unknown> => !!item && typeof item === 'object')
+    .map((item) => ({
+      ...item,
+      id: String(item.id ?? item.file_id ?? ''),
+      name: item.name != null ? String(item.name) : item.original_name != null ? String(item.original_name) : undefined,
+      mime: item.mime != null ? String(item.mime) : undefined,
+      size: typeof item.size === 'number' ? item.size : undefined,
+      sandbox_path: item.sandbox_path != null ? String(item.sandbox_path) : undefined,
+    }))
+    .filter((item) => item.id);
+  return attachments.length > 0 ? attachments : undefined;
+}
+
+function artifactSelectionFromMetadata(metadata: Record<string, unknown> | undefined, sessionId: string): ArtifactSelection | undefined {
+  const raw = metadata?.artifact_selection;
+  if (!raw || typeof raw !== 'object') return undefined;
+  const item = raw as Record<string, unknown>;
+  const target = item.target;
+  if (!target || typeof target !== 'object' || typeof item.path !== 'string') return undefined;
+  return {
+    sessionId,
+    path: item.path,
+    name: typeof item.name === 'string' ? item.name : item.path,
+    mime: typeof item.mime === 'string' ? item.mime : undefined,
+    version: typeof item.version === 'number' ? item.version : undefined,
+    kind: typeof item.kind === 'string' ? item.kind : 'text',
+    target: target as ArtifactSelection['target'],
+    targets: Array.isArray(item.targets)
+      ? item.targets.filter((entry): entry is ArtifactSelection['target'] => !!entry && typeof entry === 'object')
+      : undefined,
+  };
+}
+
+/** A persisted tool event keeps its 1-based agent `round` so cold-loaded turns
+ *  can be split back into the per-round bubbles the live stream produced. */
+type RoundedToolCall = ToolCall & { round?: number };
+
+const asText = (value: unknown): string | undefined =>
+  typeof value === 'string' ? value : value == null ? undefined : String(value);
+
+/** Coerce a tool result's `widget` into the envelope the registry dispatches on.
+ *  Only the envelope is checked here — `data` stays `unknown` and is narrowed by
+ *  whichever component claims the type, which is the only place that knows what
+ *  the payload should look like. An envelope missing its `type` is dropped: the
+ *  registry has nothing to look up, and a widget that renders nothing is the
+ *  designed outcome anyway (the tool row still shows the text result). */
+const asWidget = (value: unknown): ToolCall['widget'] => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const raw = value as Record<string, unknown>;
+  if (typeof raw.type !== 'string' || !raw.type) return undefined;
+  return {
+    type: raw.type,
+    version: typeof raw.version === 'number' ? raw.version : 1,
+    data: raw.data,
+  };
+};
+
+/** Every field is coerced to the type the renderer expects — this is the ONE
+ *  boundary where arbitrary JSON out of the database becomes a typed ToolCall.
+ *  Spreading the raw row instead would let a field of the wrong shape reach a
+ *  component that assumes otherwise, and a `diff` that isn't a string crashes
+ *  the whole message list the moment its tool group renders (diff.split). Old
+ *  rows predate current writers, so nothing here may be taken on trust. */
+function mapToolEvent(item: Record<string, unknown>): RoundedToolCall {
+  const exitCode = typeof item.exit_code === 'number' ? item.exit_code : typeof item.exitCode === 'number' ? item.exitCode : undefined;
+  return {
+    tool: String(item.tool ?? 'tool'),
+    command: asText(item.command),
+    output: asText(item.output),
+    exitCode,
+    round: typeof item.round === 'number' ? item.round : undefined,
+    status: exitCode == null || exitCode === 0 ? 'done' as const : 'error' as const,
+    diff: typeof item.diff === 'string' ? item.diff : undefined,
+    image_url: asText(item.image_url),
+    image_prompt: asText(item.image_prompt),
+    image_model: asText(item.image_model),
+    image_size: asText(item.image_size),
+    image_quality: asText(item.image_quality),
+    image_note: asText(item.image_note),
+    screenshot: asText(item.screenshot),
+    // `toolImages` iterates this with for..of, which throws on a non-array.
+    created_images: Array.isArray(item.created_images)
+      ? (item.created_images as ToolCall['created_images'])
+      : undefined,
+    widget: asWidget(item.widget),
+  };
+}
+
+function toolCallsFromMetadata(metadata: Record<string, unknown> | undefined): RoundedToolCall[] | undefined {
+  const raw = metadata?.tool_events;
+  if (!Array.isArray(raw)) return undefined;
+  const tools = raw
+    .filter((item): item is Record<string, unknown> => !!item && typeof item === 'object')
+    .map(mapToolEvent);
+  return tools.length > 0 ? tools : undefined;
+}
+
+const THINK_RE = /<think(?:ing)?>([\s\S]*?)<\/think(?:ing)?>/gi;
+
+/** Pull inline `<think>` blocks (persisted in round_texts) out of a round's text
+ *  into a separate thinking string, matching how the live stream routes thinking
+ *  deltas into their own field rather than the message body. */
+function splitThinking(text: string): { thinking?: string; content: string } {
+  const thinks: string[] = [];
+  const content = text.replace(THINK_RE, (_match, inner: string) => {
+    const trimmed = inner.trim();
+    if (trimmed) thinks.push(trimmed);
+    return '';
+  }).trim();
+  return { thinking: thinks.join('\n\n') || undefined, content };
+}
+
+function displayUserContent(content: string): string {
+  return content
+    .split(/\n\s*\[Attachment file available to tools:/)[0]
+    .split(/\n\s*\[Attached document:/)[0]
+    .trimEnd();
+}
+
+/** A cold-loaded history message. The backend persists a whole multi-round
+ *  agent turn as one assistant row, but keeps `round_texts` (cleaned text per
+ *  round, with inline `<think>`) and tags each tool event with its `round`. We
+ *  use those to rebuild the per-round bubbles the live stream produced, so a
+ *  reopened chat folds the same way it did right after finishing — one thinking
+ *  block + tool rows per round, the final round's text as the answer — instead
+ *  of collapsing into a single bubble with all thinking and tools merged. */
+export interface HistoryMessage {
+  role: string;
+  content: string;
+  metadata?: Record<string, unknown>;
+}
+
+/** Exported for the ticket transcript viewer: an admin triaging a report must
+ *  see the attached chat exactly as the reporter's own window rendered it, and
+ *  the only way to guarantee that is to build the messages with this same
+ *  function rather than a second, drifting copy of its rules. */
+export function coldLoadMessage(m: HistoryMessage, sessionId: string): UiMessage[] {
+  const createdAt = timestampMs(m.metadata?.timestamp as string | undefined) || undefined;
+  if (m.role !== 'assistant') {
+    return [{
+      id: uid(),
+      dbId: m.metadata?._db_id as string | undefined,
+      role: 'user',
+      createdAt,
+      content: displayUserContent(m.content),
+      attachments: attachmentsFromMetadata(m.metadata),
+      artifactSelection: artifactSelectionFromMetadata(m.metadata, sessionId),
+    }];
+  }
+
+  const dbId = m.metadata?._db_id as string | undefined;
+  const metrics = metricsFromMetadata(m.metadata);
+  const sources = ragSourcesFromMetadata(m.metadata);
+  const tools = toolCallsFromMetadata(m.metadata);
+  const roundTexts = m.metadata?.round_texts;
+
+  // Single-round / no-tool replies don't persist round_texts — keep the flat
+  // one-bubble shape the live stream also produced for them.
+  if (!Array.isArray(roundTexts) || roundTexts.length <= 1) {
+    return [{
+      id: uid(),
+      dbId,
+      role: 'assistant',
+      createdAt,
+      content: m.content,
+      thinking: thinkingFromMetadata(m.metadata),
+      metrics,
+      tools,
+      sources,
+    }];
+  }
+
+  // Multi-round turn: one bubble per round, mirroring the live agent loop. Each
+  // round carries its own thinking + interim text and the tools it ran; the
+  // terminal fields (db id, metrics, RAG sources) land on the last bubble, which
+  // AssistantTurn treats as the turn's answer.
+  const rounds = roundTexts.map((rt) => splitThinking(String(rt ?? '')));
+  const lastIdx = rounds.length - 1;
+  return rounds.map((round, i) => {
+    const roundNum = i + 1;
+    const roundTools = tools?.filter((t) => t.round === roundNum);
+    const terminal = i === lastIdx;
+    return {
+      id: uid(),
+      dbId: terminal ? dbId : undefined,
+      role: 'assistant' as const,
+      createdAt,
+      content: round.content,
+      thinking: round.thinking,
+      tools: roundTools?.length ? roundTools : undefined,
+      metrics: terminal ? metrics : undefined,
+      sources: terminal ? sources : undefined,
+    };
+  });
+}
+
+declare global {
+  interface Window { __talosChat?: typeof useChat }
+}
+
+export const useChat = create<ChatState>((set, get) => {
+  /** Write into one session's runtime, keyed by id rather than "the active
+   *  session", and mirror to the top-level fields when that session is the one
+   *  on screen. This is the single mutation path so a background turn and the
+   *  visible view never fight over the same `messages` array. */
+  const writeRuntime = (id: string, updater: (rt: SessionRuntime) => Partial<SessionRuntime>) => {
+    set((s) => {
+      const prev = s.runtimes[id] ?? emptyRuntime();
+      const next: SessionRuntime = { ...prev, ...updater(prev) };
+      const runtimes = { ...s.runtimes, [id]: next };
+      return s.sessionId === id
+        ? { runtimes, messages: next.messages, streaming: next.streaming, turnStartedAt: next.turnStartedAt, goal: next.goal }
+        : { runtimes };
+    });
+  };
+
+  /** Point the view at a session and mirror its runtime (or a blank draft for
+   *  the null/new-chat case). Never tears down a runtime, so the previous
+   *  session keeps streaming in the background. */
+  const activate = (id: string | null) => {
+    const rt = (id && get().runtimes[id]) || emptyRuntime();
+    rememberLastSession(id);
+    set((s) => {
+      // Opening a chat clears its "Done" badge.
+      const completed = id && s.completed[id] ? { ...s.completed } : s.completed;
+      if (id && completed !== s.completed) delete completed[id];
+      return { sessionId: id, messages: rt.messages, streaming: rt.streaming, turnStartedAt: rt.turnStartedAt, goal: rt.goal, completed };
+    });
+    const preview = useUi.getState().preview;
+    const artifactSelection = useUi.getState().artifactSelection;
+    if (artifactSelection && artifactSelection.sessionId !== id) {
+      useUi.getState().setArtifactSelection(null);
+    }
+    if (preview && preview.sessionId !== id) {
+      useUi.getState().closePreview();
+      useUi.getState().setArtifactsOpen(false);
+    }
+  };
+
+  return {
+  runtimes: {},
+  completed: {},
+  sessionId: null,
+  messages: [],
+  streaming: false,
+  turnStartedAt: null,
+  goal: null,
+  pendingModel: null,
+
+  setPendingModel: (pendingModel) => set({ pendingModel }),
+
+  newChat: () => {
+    // Switch to a fresh draft without aborting any in-flight turn — that turn
+    // keeps streaming into its own runtime and can be returned to.
+    activate(null);
+  },
+
+  openSession: async (id) => {
+    // Opening a chat means going to the chat. A workspace that was on screen
+    // (Artifacts, Projects, Customize, RAG…) covers the whole column, so
+    // without this the click would look like it did nothing. Deep links on
+    // load are unaffected: restoreLastSession activates directly.
+    useUi.getState().setView('chat');
+    // Instant switch to whatever we already have in memory (no blank flash).
+    activate(id);
+    // A runtime we built this page session — whether mid-stream or finished —
+    // is authoritative and richer than a refetch (it holds the live-streamed
+    // thinking/tool detail). Only cold-load from the server when we have none;
+    // a full reload (runtimes empty) is what re-syncs from the backend.
+    if (get().runtimes[id]) return;
+
+    const detail = await fetchSession(id);
+    // A later click may have switched sessions while we were fetching.
+    if (get().sessionId !== id) return;
+    // Guard against a turn that started streaming into this id meanwhile.
+    if (get().runtimes[id]?.streaming) return;
+
+    const messages = (detail.history ?? [])
+      .filter((m) => m.role === 'user' || m.role === 'assistant')
+      .flatMap((m) => coldLoadMessage(m as HistoryMessage, id));
+    writeRuntime(id, () => ({ ...emptyRuntime(), messages }));
+  },
+
+  attachRun: async (id, elapsedMs) => {
+    if (get().runtimes[id]?.streaming) return;
+    // A freshly loaded page has no runtime for this chat: pull the history the
+    // running turn is appending to first, so everything before the answer is on
+    // screen while the replayed deltas stream into a new assistant bubble.
+    if (!get().runtimes[id]) {
+      try {
+        const detail = await fetchSession(id);
+        const rt = get().runtimes[id];
+        if (rt?.streaming) return; // a real send claimed this session meanwhile
+        if (!rt) {
+          const messages = (detail.history ?? [])
+            .filter((m) => m.role === 'user' || m.role === 'assistant')
+            .flatMap((m) => coldLoadMessage(m as HistoryMessage, id));
+          writeRuntime(id, () => ({ ...emptyRuntime(), messages }));
+        }
+      } catch {
+        return; // session gone or not ours — nothing to reattach to
+      }
+    }
+    const before = get().runtimes[id]?.messages.length ?? 0;
+    await get().send('', { targetSessionId: id, resume: true, resumeElapsedMs: elapsedMs });
+    // Nothing replayed: the run finished (or was evicted) between discovery and
+    // reconnect. Pull the saved history so the finished answer is on screen.
+    if ((get().runtimes[id]?.messages.length ?? 0) <= before && !get().runtimes[id]?.streaming) {
+      try {
+        const detail = await fetchSession(id);
+        if (get().runtimes[id]?.streaming) return;
+        const messages = (detail.history ?? [])
+          .filter((m) => m.role === 'user' || m.role === 'assistant')
+          .flatMap((m) => coldLoadMessage(m as HistoryMessage, id));
+        if (messages.length) writeRuntime(id, () => ({ messages }));
+      } catch { /* best-effort */ }
+    }
+  },
+
+  restoreLastSession: async () => {
+    const id = lastSessionId();
+    if (!id || get().sessionId) return;
+    // Already have live state for it (a background run was reattached first) —
+    // just point the view at it rather than clobbering it with cold history.
+    if (get().runtimes[id]) { activate(id); return; }
+    try {
+      const detail = await fetchSession(id);
+      if (get().sessionId || get().runtimes[id]) return;
+      const messages = (detail.history ?? [])
+        .filter((m) => m.role === 'user' || m.role === 'assistant')
+        .flatMap((m) => coldLoadMessage(m as HistoryMessage, id));
+      writeRuntime(id, () => ({ ...emptyRuntime(), messages }));
+      activate(id);
+    } catch {
+      rememberLastSession(null); // deleted or no longer ours
+    }
+  },
+
+  hydrateActiveRuns: async () => {
+    const runs = await fetchActiveRuns();
+    await Promise.all(
+      runs.map((r) => get().attachRun(r.sessionId, r.elapsedMs).catch(() => { /* best-effort */ })),
+    );
+  },
+
+  send: async (text, opts) => {
+    const state = get();
+    // Block re-entry only for the session we'd send into, not globally — a
+    // different chat may legitimately be streaming.
+    const requestedSessionId = opts?.targetSessionId ?? state.sessionId;
+    const activeRt = requestedSessionId ? state.runtimes[requestedSessionId] : undefined;
+    if (activeRt?.streaming) return;
+    // A resume carries no new user text — it reattaches to a turn already
+    // running on the server, so the empty-message guard doesn't apply.
+    if (!opts?.resume && !text.trim() && !opts?.attachments?.length) return;
+
+    let sessionId = requestedSessionId;
+    if (!sessionId) {
+      const pm = state.pendingModel;
+      if (!pm) throw new Error('No model selected');
+      const session = await createSession({ endpointId: pm.endpointId, model: pm.model });
+      sessionId = session.id;
+      // Seed an empty runtime and activate it before the user message lands.
+      writeRuntime(sessionId, () => emptyRuntime());
+      activate(sessionId);
+      opts?.onSessionCreated?.(sessionId);
+    }
+    const sid = sessionId;
+
+    const attachments = opts?.attachments ?? [];
+    // Only a real selection travels with the message. Having the preview panel
+    // open is not one: it silently attached whatever file happened to be on
+    // screen to every turn, and the composer showed a selection chip for a
+    // selection the user never made.
+    const artifactSelection = opts?.artifactSelection;
+    const userMsg: UiMessage = { id: uid(), role: 'user', content: text, attachments, artifactSelection, createdAt: Date.now() };
+    const aiMsg: UiMessage = { id: uid(), role: 'assistant', content: '', streaming: true, createdAt: Date.now() };
+    const abort = new AbortController();
+    // A new turn supersedes any open question/plan card: mark them answered so
+    // they go inert, and clear the "needs you" flag.
+    writeRuntime(sid, (rt) => ({
+      messages: [
+        // A resume replays the run's whole event log, so any assistant bubbles
+        // left behind by the connection it replaces (never persisted, hence no
+        // dbId) would be duplicated — drop them and let the replay rebuild.
+        ...(opts?.resume ? dropUnsavedTail(rt.messages) : rt.messages).map((m) =>
+          m.pendingQuestion || m.planProposed ? { ...m, answered: true } : m,
+        ),
+        // On a resume the user message is already in the loaded history — only
+        // the assistant bubble the replayed events stream into is new.
+        ...(opts?.resume ? [] : [userMsg]),
+        aiMsg,
+      ],
+      streaming: true,
+      // A resume rejoins a turn that started before this page did — backdate the
+      // start so the working timer picks up where it was instead of at 0.
+      turnStartedAt: Date.now() - (opts?.resume ? Math.max(0, opts.resumeElapsedMs ?? 0) : 0),
+      awaitingInput: false,
+      abort,
+    }));
+
+    // The agent loop emits multiple assistant rounds per turn, delimited by
+    // agent_step events. Each round gets its own message bubble (with its own
+    // thinking block and tool rows), so this tracks the bubble currently
+    // receiving deltas rather than closing over aiMsg.
+    let aiId = aiMsg.id;
+    const patchAi = (patch: Partial<UiMessage> | ((m: UiMessage) => Partial<UiMessage>)) => {
+      writeRuntime(sid, (rt) => ({
+        messages: rt.messages.map((m) =>
+          m.id === aiId ? { ...m, ...(typeof patch === 'function' ? patch(m) : patch) } : m,
+        ),
+      }));
+    };
+    // Deltas arrive in clumps (a dense model emits a few tokens at a time); the
+    // smoother releases them per frame so letters appear one after another.
+    const smoother = new StreamSmoother((chunk, thinking) => {
+      if (thinking) patchAi((m) => ({ thinking: (m.thinking ?? '') + chunk }));
+      else patchAi((m) => ({ content: m.content + chunk }));
+    });
+    const startNewRound = () => {
+      const current = get().runtimes[sid]?.messages.find((m) => m.id === aiId);
+      // Nothing rendered yet — reuse the empty bubble instead of stacking one.
+      if (current && !current.content && !current.thinking && !current.tools?.length) return;
+      patchAi({ streaming: false });
+      const next: UiMessage = { id: uid(), role: 'assistant', content: '', streaming: true, createdAt: Date.now() };
+      aiId = next.id;
+      writeRuntime(sid, (rt) => ({ messages: [...rt.messages, next] }));
+    };
+    const revealArtifacts = (preferredPaths: string[] = []) => {
+      void queryClient.invalidateQueries({ queryKey: ['artifacts', sid] });
+      if (get().sessionId !== sid) return;
+      useUi.getState().setPanelMode('files');
+      useUi.getState().setArtifactsOpen(true);
+      void queryClient.fetchQuery({
+        queryKey: ['artifacts', sid],
+        queryFn: () => fetchArtifacts(sid),
+        staleTime: 0,
+      }).then((artifacts: Artifact[]) => {
+        if (get().sessionId !== sid) return;
+        const normalized = (path: string) => path.replace(/\\/g, '/').replace(/^\.\//, '');
+        const preferred = preferredPaths
+          .map((path) => artifacts.find((artifact) => (
+            normalized(String(artifact.path ?? '')) === normalized(path)
+          )))
+          .find((artifact): artifact is Artifact => !!artifact);
+        const currentPreview = useUi.getState().preview;
+        const currentArtifact = currentPreview?.sessionId === sid
+          ? artifacts.find((artifact) => normalized(String(artifact.path ?? '')) === normalized(currentPreview.path))
+          : undefined;
+        const toPreview = preferred ?? currentArtifact;
+        if (!toPreview) return;
+        const path = String(toPreview.path ?? toPreview.name ?? '');
+        const name = String(toPreview.name ?? path);
+        const mime = typeof toPreview.mime === 'string' ? toPreview.mime : undefined;
+        if (path && isPreviewable(name, mime)) {
+          useUi.getState().openPreview({ sessionId: sid, path, name, mime, version: typeof toPreview.version === 'number' ? toPreview.version : undefined });
+        }
+      }).catch(() => { /* Files tab remains available if preview lookup fails. */ });
+    };
+
+    const prefs = usePrefs.getState();
+    // An open document is still the turn's edit target — that is about which
+    // file the agent writes to, not about what the user selected.
+    const activePreview = useUi.getState().preview;
+    const activeDocId = activePreview?.sessionId === sid && activePreview.path.startsWith('document:')
+      ? activePreview.path.slice('document:'.length)
+      : undefined;
+    // Plan-mode applies to this turn unless the caller overrides it (e.g. an
+    // "Implement plan" approval forces it off and passes the approved checklist).
+    // A resumed turn inherits whatever mode it was started in; only a fresh
+    // send decides plan mode here.
+    const planMode = opts?.resume ? false : (opts?.planMode ?? prefs.planMode);
+    try {
+      // Two transports, one event handler: a new turn POSTs and reads the
+      // response stream, a resume subscribes to the detached server-side run
+      // (which replays everything it has emitted so far, then goes live).
+      const consume = (onEvent: (ev: ChatEvent) => void) =>
+        opts?.resume
+          ? resumeChat({ sessionId: sid, signal: abort.signal, onEvent })
+          : streamChat({
+              message: text,
+              sessionId: sid,
+              flags: {
+                planMode,
+                approvedPlan: opts?.approvedPlan,
+                useRag: prefs.useRag,
+                useDb: prefs.useDb,
+                useWeb: prefs.useWeb,
+                reasoning: prefs.reasoning,
+                reasoningEffort: prefs.reasoningEffort,
+                incognito: prefs.incognito,
+                lang: prefs.lang,
+                llmLanguage: prefs.llmLang,
+                activeDocId,
+                artifactSelection,
+                attachments: attachments.map((file) => file.id),
+              },
+              signal: abort.signal,
+              onEvent,
+            });
+      await consume((ev) => {
+          if ('delta' in ev && typeof ev.delta === 'string') {
+            smoother.push(ev.delta, !!ev.thinking);
+            return;
+          }
+          // Everything else either starts a new bubble, appends a row after the
+          // text, or replaces the text outright — so the queued characters have
+          // to be on screen first. Document/metric events don't touch the
+          // message body and can stream past without interrupting the reveal.
+          if (ev.type !== 'doc_stream_delta' && ev.type !== 'doc_stream_open' && ev.type !== 'metrics') {
+            smoother.flush();
+          }
+          switch (ev.type) {
+            case 'agent_step':
+              startNewRound();
+              break;
+            case 'tool_start':
+              patchAi((m) => ({
+                tools: [...(m.tools ?? []), { tool: String(ev.tool), command: ev.command as string | undefined, status: 'running' }],
+              }));
+              if (['create_document', 'write_file', 'generate_image'].includes(String(ev.tool)) && get().sessionId === sid) {
+                useUi.getState().setPanelMode('files');
+                useUi.getState().setArtifactsOpen(true);
+              }
+              break;
+            case 'tool_output':
+              patchAi((m) => ({
+                tools: (m.tools ?? []).map((t, i, arr) =>
+                  i === arr.length - 1 && t.status === 'running'
+                    ? {
+                        ...t,
+                        output: ev.output as string | undefined,
+                        exitCode: ev.exit_code as number | undefined,
+                        status: (ev.exit_code ?? 0) === 0 ? 'done' : 'error',
+                        image_url: ev.image_url as string | undefined,
+                        image_prompt: ev.image_prompt as string | undefined,
+                        image_model: ev.image_model as string | undefined,
+                        image_size: ev.image_size as string | undefined,
+                        image_quality: ev.image_quality as string | undefined,
+                        image_note: ev.image_note as string | undefined,
+                        screenshot: ev.screenshot as string | undefined,
+                        // File edits ship a unified diff; ToolRow renders it as a
+                        // before/after view rather than dumping the raw output.
+                        // Checked, not cast: a non-string here crashes the render.
+                        diff: typeof ev.diff === 'string' ? ev.diff : undefined,
+                        created_images: Array.isArray(ev.created_images) ? ev.created_images as ToolCall['created_images'] : undefined,
+                        widget: asWidget(ev.widget),
+                      }
+                    : t,
+                ),
+              }));
+              if (ev.artifacts_changed) {
+                const created = Array.isArray(ev.created_artifacts)
+                  ? ev.created_artifacts.map(String)
+                  : [];
+                revealArtifacts(created);
+              }
+              break;
+            case 'doc_stream_open': {
+              if (get().sessionId !== sid) break;
+              const current = useUi.getState().preview;
+              const title = typeof ev.title === 'string' ? ev.title : '';
+              const language = typeof ev.language === 'string' ? ev.language : '';
+              const keepCurrent = current?.sessionId === sid && current.path.startsWith('document:');
+              useUi.getState().openPreview({
+                sessionId: sid,
+                path: keepCurrent ? current.path : `streaming-document:${sid}`,
+                name: title ? documentFileName(title, language) : (current?.name ?? 'Document.md'),
+                mime: language === 'markdown' ? 'text/markdown' : 'text/plain',
+                content: keepCurrent ? current.content : '',
+                language: language || current?.language,
+                version: current?.version,
+                streaming: true,
+              });
+              break;
+            }
+            case 'doc_stream_delta':
+              if (get().sessionId === sid && typeof ev.content === 'string') {
+                const current = useUi.getState().preview;
+                const language = current?.language || (/^#{1,6}\s|\*\*[^*]+\*\*|^[-*]\s/m.test(ev.content) ? 'markdown' : undefined);
+                useUi.getState().updatePreview({
+                  content: ev.content,
+                  name: current ? documentFileName(current.name, language, ev.content) : undefined,
+                  language,
+                  mime: language === 'markdown' ? 'text/markdown' : current?.mime,
+                  streaming: true,
+                });
+              }
+              break;
+            case 'doc_update': {
+              if (typeof ev.doc_id !== 'string') break;
+              const language = typeof ev.language === 'string' ? ev.language : '';
+              const title = typeof ev.title === 'string' ? ev.title : '';
+              if (get().sessionId === sid) {
+                useUi.getState().openPreview({
+                  sessionId: sid,
+                  path: `document:${ev.doc_id}`,
+                  name: documentFileName(title, language, typeof ev.content === 'string' ? ev.content : ''),
+                  mime: language === 'markdown' ? 'text/markdown' : 'text/plain',
+                  content: typeof ev.content === 'string' ? ev.content : '',
+                  language,
+                  version: typeof ev.version === 'number' ? ev.version : undefined,
+                  streaming: false,
+                });
+              }
+              const docContent = typeof ev.content === 'string' ? ev.content : '';
+              const docArtifact: Artifact = {
+                path: `document:${ev.doc_id}`,
+                name: documentFileName(title, language, docContent),
+                size: new TextEncoder().encode(docContent).byteLength,
+                mime: language === 'markdown' ? 'text/markdown' : 'text/plain',
+                source: 'document',
+                version: typeof ev.version === 'number' ? ev.version : 1,
+                mtime: Date.now() / 1000,
+              };
+              queryClient.setQueryData<Artifact[]>(['artifacts', sid], (current = []) => [
+                docArtifact,
+                ...current.filter((artifact) => artifact.path !== docArtifact.path),
+              ]);
+              void queryClient.invalidateQueries({ queryKey: ['artifacts', sid] });
+              break;
+            }
+            case 'metrics':
+              // Merge rather than replace: per-round events carry only the live
+              // context fields, while the final event fills in the rest.
+              patchAi((m) => ({ metrics: { ...m.metrics, ...(ev.data as Metrics) } }));
+              break;
+            case 'compacted':
+              // Auto-compaction ran before this turn streamed — surface it so
+              // the user knows older messages were summarized to fit context.
+              patchAi({ compacted: { contextLength: ev.context_length as number | undefined } });
+              break;
+            case 'content_final':
+              // The server-side anti-hallucination guard can strip fabricated
+              // figure URLs that already streamed as deltas — replace the
+              // accumulated content with the authoritative text that gets
+              // persisted.
+              if (typeof ev.content === 'string') patchAi({ content: ev.content });
+              break;
+            case 'rag_sources':
+              if (Array.isArray(ev.data)) patchAi({ sources: ev.data as RagSource[] });
+              break;
+            case 'message_saved':
+              if (typeof ev.id === 'string') patchAi({ dbId: ev.id });
+              break;
+            case 'ask_user': {
+              // The agent posed a question and ended the turn — render the card
+              // and flag the session as needing the user.
+              const q = ev.data as UiMessage['pendingQuestion'];
+              if (q && q.question) {
+                patchAi({
+                  pendingQuestion: {
+                    question: q.question,
+                    options: Array.isArray(q.options) ? q.options : [],
+                    multi: !!q.multi,
+                  },
+                });
+                writeRuntime(sid, () => ({ awaitingInput: true }));
+              }
+              break;
+            }
+            case 'plan_update': {
+              const plan = (ev.data as { plan?: string } | undefined)?.plan;
+              if (typeof plan === 'string' && plan.trim()) patchAi({ plan });
+              break;
+            }
+          }
+      });
+      // The stream is over — show whatever is still queued instead of animating
+      // into a bubble the UI already considers settled.
+      smoother.flush();
+      // Catch workspace outputs from older servers/tools that do not emit an
+      // explicit artifact event. Active queries refetch immediately; closed
+      // sessions are marked stale for their next open.
+      void queryClient.invalidateQueries({ queryKey: ['artifacts', sid] });
+      // Quiet re-sync: the stream only reports the assistant row id; pull
+      // history once so the user message gets its db id too (enables
+      // edit/delete without a manual reload).
+      try {
+        const detail = await fetchSession(sid);
+        const hist = (detail.history ?? []).filter((m) => m.role === 'user' || m.role === 'assistant');
+        const msgs = get().runtimes[sid]?.messages ?? [];
+        if (hist.length === msgs.length) {
+          writeRuntime(sid, () => ({ messages: msgs.map((m, i) => ({ ...m, dbId: hist[i]?.metadata?._db_id ?? m.dbId })) }));
+        }
+      } catch { /* best-effort */ }
+    } catch (err) {
+      // Aborted or failed mid-reveal: keep the text that actually arrived.
+      smoother.flush();
+      if (!abort.signal.aborted) {
+        patchAi((m) => ({
+          content: m.content || (err instanceof Error ? err.message : 'Request failed'),
+          error: true,
+        }));
+      }
+    } finally {
+      smoother.flush();
+      // Stamp the turn's wall-clock onto the terminal bubble before the start
+      // time is cleared, so the settled "Worked for Xs" fold has a duration.
+      const startedAt = get().runtimes[sid]?.turnStartedAt;
+      patchAi((m) => ({
+        streaming: false,
+        turnElapsedMs: startedAt != null ? Date.now() - startedAt : m.turnElapsedMs,
+        // A plan-mode turn proposes a plan — its terminal bubble gets an approval card.
+        planProposed: planMode || m.planProposed,
+      }));
+      // Clear only this session's turn flags — a different chat may be active.
+      writeRuntime(sid, () => ({ streaming: false, turnStartedAt: null, abort: null }));
+      // A resume that reconnected to an already-finished run replays nothing —
+      // drop the bubble it would have streamed into instead of leaving a blank
+      // one in the transcript (attachRun reloads the history in that case).
+      if (opts?.resume) {
+        writeRuntime(sid, (rt) => {
+          const last = rt.messages[rt.messages.length - 1];
+          const empty = last && last.id === aiId && !last.content && !last.thinking && !last.tools?.length;
+          return empty ? { messages: rt.messages.slice(0, -1) } : {};
+        });
+      }
+      // Badge it "Done" if it finished in the background (user is elsewhere) — but
+      // not when it ended on a question; that's surfaced as "Needs you" instead.
+      const awaiting = get().runtimes[sid]?.awaitingInput;
+      if (!awaiting && get().sessionId !== sid) set((s) => ({ completed: { ...s.completed, [sid]: true } }));
+
+      // A goal is a bounded Ralph-style loop: after each completed turn, inspect
+      // the explicit completion signal and otherwise schedule another turn.
+      // setTimeout avoids re-entering send() before this turn's cleanup settles.
+      const rt = get().runtimes[sid];
+      const goal = rt?.goal;
+      if (goal?.status === 'running' && !rt.awaitingInput) {
+        const answer = [...rt.messages].reverse().find((m) => m.role === 'assistant' && m.content.trim())?.content ?? '';
+        if (/\[GOAL_COMPLETE\]/i.test(answer)) {
+          writeRuntime(sid, () => ({
+            goal: { ...goal, status: 'completed' },
+            messages: rt.messages.map((m) => ({ ...m, content: m.content.replace(/\s*\[GOAL_COMPLETE\]\s*/gi, '') })),
+          }));
+        } else {
+          setTimeout(() => { void get().resumeGoal(sid); }, 0);
+        }
+      }
+    }
+  },
+
+  startGoal: async (objective) => {
+    const clean = objective.trim();
+    if (!clean) return;
+    // Ensure a session exists through the normal send path, then attach goal
+    // state as soon as onSessionCreated fires (or immediately for an open chat).
+    const install = (sid: string) => writeRuntime(sid, () => ({
+      goal: { objective: clean, status: 'running', iteration: 1 },
+    }));
+    const sid = get().sessionId;
+    if (sid) install(sid);
+    await get().send(
+      `GOAL: ${clean}\n\nWork autonomously toward this objective. Check your result before stopping. If the objective is fully satisfied, end with [GOAL_COMPLETE]. Otherwise state concrete progress and the next action; the goal runner will continue you. Ask the user only when genuinely blocked.`,
+      { planMode: false, goalIteration: true, onSessionCreated: install },
+    );
+  },
+
+  pauseGoal: () => {
+    const { sessionId } = get();
+    if (!sessionId) return;
+    writeRuntime(sessionId, (rt) => rt.goal ? ({ goal: { ...rt.goal, status: 'paused' } }) : ({}));
+  },
+
+  resumeGoal: async (requestedSessionId) => {
+    const sessionId = requestedSessionId ?? get().sessionId;
+    if (!sessionId) return;
+    const rt = get().runtimes[sessionId];
+    const goal = rt?.goal;
+    if (!goal || rt.streaming || ['completed', 'cancelled'].includes(goal.status)) return;
+    const next = { ...goal, status: 'running' as const, iteration: goal.iteration + 1 };
+    writeRuntime(sessionId, () => ({ goal: next }));
+    await get().send(
+      `Continue goal (iteration ${next.iteration}): ${next.objective}\n\nReview all progress so far, perform the next useful work, and verify it. End with [GOAL_COMPLETE] only when the objective is fully satisfied. Ask the user only if genuinely blocked.`,
+      { planMode: false, goalIteration: true, targetSessionId: sessionId },
+    );
+  },
+
+  cancelGoal: () => {
+    const { sessionId, runtimes } = get();
+    if (!sessionId) return;
+    const goal = runtimes[sessionId]?.goal;
+    if (goal) writeRuntime(sessionId, () => ({ goal: { ...goal, status: 'cancelled' } }));
+    runtimes[sessionId]?.abort?.abort();
+    fetch(`/api/chat/stop/${sessionId}`, { method: 'POST', credentials: 'same-origin' }).catch(() => {});
+  },
+
+  compact: async () => {
+    const { sessionId, streaming } = get();
+    if (!sessionId || streaming) return;
+    await compactSession(sessionId);
+    const detail = await fetchSession(sessionId);
+    const messages = (detail.history ?? [])
+      .filter((m) => m.role === 'user' || m.role === 'assistant')
+      .flatMap((m) => coldLoadMessage(m as HistoryMessage, sessionId));
+    writeRuntime(sessionId, (rt) => ({ messages, goal: rt.goal }));
+  },
+
+  stop: () => {
+    const { sessionId, runtimes } = get();
+    if (!sessionId) return;
+    runtimes[sessionId]?.abort?.abort();
+    fetch(`/api/chat/stop/${sessionId}`, { method: 'POST', credentials: 'same-origin' }).catch(() => {});
+  },
+
+  edit: async (msgId, content) => {
+    const { sessionId, messages, streaming } = get();
+    if (streaming) return;
+    const idx = messages.findIndex((m) => m.id === msgId);
+    const msg = messages[idx];
+    if (!sessionId || !msg?.dbId) throw new Error('Message not editable yet');
+
+    if (msg.role !== 'user') {
+      // Assistant rows are edited in place (no resend semantics).
+      await editMessage(sessionId, msg.dbId, content);
+      writeRuntime(sessionId, (rt) => ({ messages: rt.messages.map((m) => (m.id === msgId ? { ...m, content } : m)) }));
+      return;
+    }
+
+    // Editing a user message resends the conversation from that point:
+    // drop the old turn and every later message, then send the edited text
+    // through the normal stream path with the original attachments.
+    const dropIds = messages.slice(idx).map((m) => m.dbId).filter((id): id is string => !!id);
+    await deleteMessages(sessionId, dropIds);
+    writeRuntime(sessionId, () => ({ messages: messages.slice(0, idx) }));
+    await get().send(content, { attachments: msg.attachments, artifactSelection: msg.artifactSelection });
+  },
+
+  remove: async (msgId) => {
+    const { sessionId, messages } = get();
+    const msg = messages.find((m) => m.id === msgId);
+    if (!sessionId || !msg?.dbId) throw new Error('Message not deletable yet');
+    await deleteMessages(sessionId, [msg.dbId]);
+    writeRuntime(sessionId, (rt) => ({ messages: rt.messages.filter((m) => m.id !== msgId) }));
+  },
+
+  cancelPlan: () => {
+    const { sessionId, messages } = get();
+    if (!sessionId) return;
+    const p = [...messages].reverse().find((m) => m.role === 'assistant' && m.planProposed && !m.answered);
+    if (!p) return;
+    writeRuntime(sessionId, (rt) => ({
+      messages: rt.messages.map((m) => (m.id === p.id ? { ...m, answered: true } : m)),
+    }));
+  },
+  };
+});
+
+// Dev-only handle so the store can be driven from the console / preview evals
+// (dynamic import() in DevTools resolves a second module instance under HMR).
+if (import.meta.env.DEV) window.__talosChat = useChat;

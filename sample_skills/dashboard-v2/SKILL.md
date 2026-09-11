@@ -7,14 +7,16 @@ license: MIT
 # Dashboard v2 in Talos — Apache ECharts
 
 Produce one self-contained HTML file using `/opt/talos/vendor/talos_dash.py`.
-The scaffold supplies inline runtimes, theme/resize handling, optional page
-formats and HTML/PNG downloads. You design the composition with `layout_html`
+The scaffold supplies inline runtimes, theme/resize handling, page
+formats and PNG rendering for Talos. You design the composition with `layout_html`
 and `css`; charts do not have to sit in cards or a uniform tile grid.
 
-**Read [layout-and-export.md](references/layout-and-export.md) before designing
-the page.** HTML always remains the interactive original. Set
-`download_png=True` for v2 dashboards so the whole composition can be downloaded
-as PNG as well. Choose `page_format="web"` by default, `"16:9"` for a slide,
+**Read [design-direction.md](references/design-direction.md) and
+[layout-and-export.md](references/layout-and-export.md) before designing
+the page.** HTML always remains the interactive original. Use `td.compose`,
+which requires authored HTML and CSS and exposes PNG rendering to Talos.
+Downloads belong in the Talos preview toolbar, never inside the artifact.
+Choose `page_format="web"` by default, `"16:9"` for a slide,
 `"a4"` for A4 portrait or `"a4-landscape"` for A4 landscape when requested.
 Design for that canvas from the start; do not squeeze a long web page onto it.
 
@@ -36,7 +38,7 @@ Before building a new dashboard or adding a materially different chart:
    first familiar example or limit selection to this skill's snippets.
 4. Inspect dependencies and `since`. Adapt the example's data and interaction
    to the question and the offline constraints below. Explain the useful
-   insight in the card title/note, rather than the technical chart name.
+   insight in the heading or annotation, rather than the technical chart name.
 
 ```bash
 cat /opt/talos/vendor/echarts.version
@@ -60,45 +62,43 @@ If uncertain about an option, search `/opt/talos/vendor/echarts-types/`.
 
 ## Build
 
+Use `td.compose` for Dashboard v2. It has no automatic card-layout fallback:
+you must supply the composition. `td.dashboard` is the old entrypoint for the
+original dashboard skill; do not copy that skill's tile examples into v2.
+
+Before coding, establish the audience, decision, headline finding and supporting
+evidence. Compare two plausible spatial arrangements and choose the one that
+makes this particular story clear. Set typography, palette, spacing and the
+dominant visual deliberately. This is design work, not selecting a different
+border radius for a grid of identical panels.
+
 ```python
 import sys
 sys.path.insert(0, "/opt/talos/vendor")
 import talos_dash as td
 
-portfolio = {
-    "tooltip": {"trigger": "item"},
-    "series": [{
-        "type": "sunburst", "radius": [0, "90%"],
-        "data": [
-            {"name": "Services", "children": [
-                {"name": "Support", "value": 42},
-                {"name": "Beratung", "value": 28}]},
-            {"name": "Lizenzen", "value": 30}
-        ],
-        "emphasis": {"focus": "ancestor"},
-        "label": {"rotate": "radial"}
-    }]
-}
-td.dashboard("output/dashboard.html", title="Umsatzstruktur",
-    subtitle="2026 — Beispieldaten",
-    download_png=True,
-    charts=[td.chart("portfolio", "Wo entsteht der Umsatz?",
-                     td.echarts(portfolio), height=480, span=2)],
-    footer="Demonstration mit synthetischen Zahlen.")
+# First author layout_html, css and the selected chart options for this brief.
+# Place each chart in layout_html with {{chart:its-id}}.
+td.compose("output/dashboard.html", title=title,
+    charts=charts, layout_html=layout_html, css=css, page_format="16:9")
 ```
 
-The example above uses the optional automatic card layout for a quick chart.
-For a finished dashboard, prefer a deliberate composition: a dominant visual,
-typographic hierarchy, whitespace, integrated numbers, annotations and varied
-section sizes. Use cards where they help grouping, not as the universal design.
+The API sketch uses your authored variables; a runnable composition example
+is in layout-and-export.md. It demonstrates mechanics, not a visual template.
+Avoid the stock KPI-strip + two-column-card-grid composition unless the user
+explicitly asks for it. A content-driven layout may use a large diagram,
+side commentary, integrated comparisons, a flow across the canvas or other
+arrangements. Meaningful grouping can still use a panel where appropriate.
 
 `td.chart(id, title, spec, span=1, height=340, note="")` defines a chart.
 In `layout_html`, place it with `{{chart:id}}`; no card is imposed. Set
 `height=None` for ECharts whose container height is controlled by your CSS.
-Give every card a distinct simple ID. `span=2` uses the full grid width.
+Give every chart a distinct simple ID. `span` is for legacy automatic cards;
+use CSS to allocate space in a composed dashboard.
 Use more height for trees, networks, parallel axes or dense calendars.
-`td.kpi(label, value, delta="", tone="")` adds a headline tile; tones are
-`up`, `down`, or empty. Direction is not automatically good or bad.
+Integrate headline numbers and comparisons directly in your layout HTML.
+Do not call the legacy KPI-tile helper by habit. Direction is not automatically
+good or bad; explain what a comparison means for this audience.
 
 Options stay native: `dataset`, `encode`, `visualMap`, `dataZoom`, `brush`,
 `timeline`, `graphic`, `media`, multiple grids/axes and any installed series
@@ -178,11 +178,16 @@ the same frame used by the charts.
 Open the generated page in the preview and inspect every card. Check the
 chosen interaction, narrow layout, light/dark appearance and console errors.
 For fixed formats, verify the full canvas and absence of clipped content.
-Click PNG herunterladen and open the actual PNG: verify dimensions, text,
+Click PNG herunterladen in the Talos UI and open the actual PNG: verify dimensions, text,
 charts, inline images and background. Download HTML and verify it still opens
 interactively. PNG is a static snapshot of the currently selected chart state.
 For GL, test the actual preview's WebGL support. File existence or file size
 alone is not a rendering check. Failures must be fixed or clearly reported.
+
+At the final visual check, identify the first thing the reader notices, the
+comparison that makes it meaningful, and what they should inspect next. If all
+regions look equally important or the page is still a wall of cards, change
+the spatial hierarchy before delivering. Inspect both HTML and exported PNG.
 
 For maintaining existing `td.line`, `td.waterfall`, etc. dashboards only,
 read [legacy-builders.md](references/legacy-builders.md). Mixed pages work;
