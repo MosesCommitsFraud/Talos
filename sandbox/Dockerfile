@@ -154,6 +154,41 @@ RUN set -eu; \
 # chart choices and the data instead of regenerating ~400 lines of boilerplate
 # per request — the single largest latency cost of a dashboard turn.
 COPY vendor/talos_dash.py /opt/talos/vendor/talos_dash.py
+COPY vendor/echarts-runtime.js /opt/talos/vendor/echarts-runtime.js
+
+# Full Apache ECharts is the primary dashboard API. Keep the old builders for
+# existing dashboards; render() only inlines the engines a page actually uses.
+ARG ECHARTS_VERSION=6.1.0
+ARG ECHARTS_EXAMPLES_REVISION=ef748beb99604435cc230974ab8f07dc3b01e6b2
+COPY vendor/charts/index_examples.py /tmp/index_examples.py
+RUN set -eu; \
+    mkdir -p /tmp/echarts; cd /tmp/echarts; \
+    npm install --no-audit --no-fund --no-save \
+        "echarts@${ECHARTS_VERSION}" echarts-gl@2.1.0 echarts-stat@1.2.0; \
+    cp node_modules/echarts/dist/echarts.min.js /opt/talos/vendor/echarts.min.js; \
+    printf '\n;\n' >> /opt/talos/vendor/echarts.min.js; \
+    cat node_modules/echarts/i18n/langDE.js >> /opt/talos/vendor/echarts.min.js; \
+    cp node_modules/echarts/index.d.ts /opt/talos/vendor/echarts-index.d.ts; \
+    cp -r node_modules/echarts/types /opt/talos/vendor/echarts-types; \
+    cp node_modules/echarts-gl/dist/echarts-gl.min.js /opt/talos/vendor/echarts-gl.min.js; \
+    cp node_modules/echarts-stat/dist/ecStat.min.js /opt/talos/vendor/echarts-stat.min.js; \
+    cp node_modules/echarts-stat/package.json /opt/talos/vendor/echarts-stat.package.json; \
+    cp node_modules/echarts-stat/README.md /opt/talos/vendor/echarts-stat.README.md; \
+    for package in echarts echarts-gl; do \
+        cp "node_modules/$package/LICENSE" "/opt/talos/vendor/$package.LICENSE"; \
+    done; \
+    printf '%s\n' "${ECHARTS_VERSION}" > /opt/talos/vendor/echarts.version; \
+    git init /tmp/echarts-examples; cd /tmp/echarts-examples; \
+    git remote add origin https://github.com/apache/echarts-examples.git; \
+    git sparse-checkout init --cone; \
+    git sparse-checkout set public/examples public/data/asset; \
+    git fetch --depth 1 --filter=blob:none origin "${ECHARTS_EXAMPLES_REVISION}"; \
+    git checkout --detach FETCH_HEAD; \
+    mkdir -p /opt/talos/vendor/echarts-examples; \
+    cp -r public LICENSE /opt/talos/vendor/echarts-examples/; \
+    printf '%s\n' "${ECHARTS_EXAMPLES_REVISION}" > /opt/talos/vendor/echarts-examples/REVISION; \
+    python /tmp/index_examples.py /opt/talos/vendor/echarts-examples; \
+    rm -rf /tmp/echarts /tmp/echarts-examples /tmp/index_examples.py /root/.npm
 RUN chmod -R a+rX /opt/talos
 
 COPY sandboxd.py ./sandboxd.py

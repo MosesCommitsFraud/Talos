@@ -7,7 +7,8 @@ user's question. Regenerating it per request is the dominant cost of a dashboard
 turn, so it lives here instead.
 
 What stays free is the part that should vary: which charts, and what data. Build
-chart specs with the catalog below and pass them to `dashboard()`.
+chart specs with echarts(option) or the compatibility builders below and pass
+them to `dashboard()`.
 
     import sys; sys.path.insert(0, "/opt/talos/vendor")
     import talos_dash as td          # import the module — a `from ... import a, b`
@@ -28,12 +29,10 @@ Single-series builders (bar, hbar, area, pie, histogram) take a flat sequence of
 numbers; multi-series builders (line, grouped_bar, stacked_bar, radar) take a
 {"name": [numbers]} mapping. Colour is not yours to set — see the Colour section.
 
-Each builder returns a plain dict — a *spec*, not a finished chart. The browser
-half of this scaffold (TanStack Charts, bundled into /opt/talos/vendor by the
-image build) turns a spec into marks, scales and guides. The split exists
-because a chart definition is made of functions and JSON cannot carry one: every
-knob a spec exposes is listed under its builder, and `check_spec` rejects the
-ones that are not.
+Each builder returns a plain dict spec. echarts(option) exposes the full Apache
+ECharts API, including explicit js() callbacks and setup for maps/events. The
+older convenience builders use TanStack Charts and retain their strict schema.
+Both engines are bundled at image build time; a page inlines only what it uses.
 
 Everything is self-contained: the workspace has no network and the preview
 iframe runs under a CSP that blocks every outbound request, so a CDN <script
@@ -49,6 +48,33 @@ from typing import Any, Mapping, Sequence
 
 VENDOR = Path("/opt/talos/vendor")
 BUNDLE = VENDOR / "talos-charts.js"
+ECHARTS_BUNDLE = VENDOR / "echarts.min.js"
+ECHARTS_ADAPTER = Path(__file__).with_name("echarts-runtime.js")
+
+
+class JS(str):
+    """Trusted JavaScript expression (function, formatter or renderItem), not data."""
+
+
+def js(expression: str) -> JS:
+    """Embed authored JavaScript without eval. Never pass user data as code."""
+    if not isinstance(expression, str) or not expression.strip():
+        raise ValueError("js() requires a non-empty JavaScript expression")
+    return JS(expression)
+
+
+def echarts(option, *, setup=None, data=None, extensions=()) -> dict:
+    """Full Apache ECharts option; no series-type whitelist.
+
+    Use js('function (params) {...}') for callbacks. Optional setup is a JS
+    function(chart, echarts, data), called before setOption; it may return a
+    cleanup function for listeners/timers. Inline assets in data, register maps
+    in setup. Extensions are vendored bundle names: echarts-gl, echarts-stat.
+    """
+    spec = dict(type="echarts", option=option, setup=setup, data=data,
+                extensions=list(extensions))
+    check_spec("echarts", spec)
+    return spec
 
 __all__ = [
     "dashboard", "render", "chart", "kpi", "check_spec", "check_option",
@@ -57,6 +83,7 @@ __all__ = [
     "boxplot", "histogram", "treemap", "sankey", "fmt",
     "lollipop", "dumbbell", "slope", "stacked_area", "range_area", "timeline",
     "calendar", "mosaic", "waffle", "violin",
+    "echarts", "js",
 ]
 
 # --------------------------------------------------------------------------
@@ -186,6 +213,20 @@ def check_spec(cid: str, spec: Mapping[str, Any]) -> None:
     without opening the page — so it is worth an exception here.
     """
     kind = spec.get("type")
+    if kind == "echarts":
+        unknown = set(spec) - {"type", "option", "setup", "data", "extensions"}
+        if unknown:
+            raise ValueError(f"{cid}: unknown ECharts wrapper fields: {sorted(unknown)}")
+        if not isinstance(spec.get("option"), (Mapping, JS)):
+            raise ValueError(f"{cid}: option must be a dict or td.js expression")
+        if spec.get("setup") is not None and not isinstance(spec["setup"], JS):
+            raise ValueError(f"{cid}: setup must be a td.js function expression")
+        if not isinstance(spec.get("extensions", []), (list, tuple)) or any(
+            name not in {"echarts-gl", "echarts-stat"} for name in spec.get("extensions", [])
+        ):
+            raise ValueError(f"{cid}: available extensions: echarts-gl, echarts-stat")
+        _js(spec)  # reject non-JSON data and non-finite numbers before writing
+        return
     if kind not in _TYPES:
         raise ValueError(
             f"{cid}: unknown chart type {kind!r}. Use one of: {', '.join(sorted(_TYPES))}"
@@ -961,8 +1002,16 @@ def _esc(text: Any) -> str:
 
 
 def _js(value: Any) -> str:
-    """JSON for embedding inside a <script> tag."""
-    return json.dumps(value, ensure_ascii=False, default=str).replace("</", "<\\/")
+    """Serialize data and explicit JS expressions without eval or string revival."""
+    if isinstance(value, JS):
+        return "(" + str(value).replace("</", "<\\/") + ")"
+    if isinstance(value, Mapping):
+        if any(not isinstance(k, str) for k in value):
+            raise TypeError("Chart object keys must be strings")
+        return "{" + ",".join(_js(k) + ":" + _js(v) for k, v in value.items()) + "}"
+    if isinstance(value, (list, tuple)):
+        return "[" + ",".join(_js(v) for v in value) + "]"
+    return json.dumps(value, ensure_ascii=False, allow_nan=False).replace("</", "<\\/")
 
 
 def render(title: str, charts: Sequence[Mapping[str, Any]],
@@ -973,13 +1022,19 @@ def render(title: str, charts: Sequence[Mapping[str, Any]],
     for c in charts:
         check_spec(c["id"], c["spec"])
 
-    if not BUNDLE.is_file():
-        raise FileNotFoundError(
-            f"{BUNDLE} is missing. The chart runtime is baked into the sandbox image "
-            f"at build time (sandbox/Dockerfile) — a dashboard cannot fetch it, the "
-            f"workspace has no network."
-        )
-    runtime = BUNDLE.read_text(encoding="utf-8")
+    bundles = []
+    if any(c["spec"]["type"] != "echarts" for c in charts):
+        bundles.append(BUNDLE)
+    if any(c["spec"]["type"] == "echarts" for c in charts):
+        bundles.append(ECHARTS_BUNDLE)
+        extensions = {name for c in charts for name in c["spec"].get("extensions", [])}
+        bundles.extend(VENDOR / (name + ".min.js") for name in sorted(extensions))
+        bundles.append(ECHARTS_ADAPTER)
+    for bundle in bundles:
+        if not bundle.is_file():
+            raise FileNotFoundError(f"{bundle} is missing. Rebuild the sandbox image; "
+                                    "dashboard runtimes must be vendored offline.")
+    runtime = "\n;\n".join(p.read_text(encoding="utf-8").replace("</", "<\\/") for p in bundles)
 
     tiles = "".join(
         f'<div class="kpi"><span class="kpi-label">{_esc(k["label"])}</span>'
@@ -1042,7 +1097,11 @@ __FOOTER__
 <script>
 // Fail loudly if the runtime didn't survive being inlined. A blank dashboard
 // with a clean console is the hardest version of this to debug.
-if (typeof TalosCharts !== 'object' || typeof TalosCharts.mountAll !== 'function') {
+const specs = __SPECS__;
+const legacy = specs.filter(c => c.spec.type !== 'echarts');
+const native = specs.filter(c => c.spec.type === 'echarts');
+if ((legacy.length && typeof TalosCharts === 'undefined') ||
+    (native.length && typeof TalosECharts === 'undefined')) {
   document.body.insertAdjacentHTML('afterbegin',
     '<p style="background:#fee;color:#900;padding:1rem">The chart runtime did not load: '
     + 'window.TalosCharts is ' + typeof TalosCharts + '. It must be inlined verbatim.</p>');
@@ -1052,7 +1111,9 @@ if (typeof TalosCharts !== 'object' || typeof TalosCharts.mountAll !== 'function
   // resizing from here — it measures the container and follows it, and falls
   // back to a deterministic width while the card is still hidden, which is
   // where a preview panel starts.
-  window.TALOS_CHARTS = TalosCharts.mountAll(__SPECS__, {locale: __LOCALE__});
+  window.TALOS_CHARTS = Object.assign({},
+    legacy.length ? TalosCharts.mountAll(legacy, {locale: __LOCALE__}) : {},
+    native.length ? TalosECharts.mountAll(native, {locale: __LOCALE__}) : {});
 }
 </script>
 </body></html>"""

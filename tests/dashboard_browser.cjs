@@ -1,0 +1,42 @@
+// Run after dashboard_browser_fixture.py. Set BROWSER_CHANNEL=msedge if needed.
+const {chromium} = require('playwright');
+const {pathToFileURL} = require('url');
+const path = require('path');
+const assert = require('assert');
+(async () => {
+ const root = path.resolve(process.argv[2]);
+ const browser = await chromium.launch({headless:true,channel:process.env.BROWSER_CHANNEL || undefined,args:['--enable-unsafe-swiftshader']});
+ const page = await browser.newPage({viewport:{width:1440,height:1100},colorScheme:'light'});
+ const errors=[]; const requests=[];
+ page.on('pageerror',e=>errors.push(e.message));
+ page.on('console',m=>{if(m.type()==='error') errors.push(m.text())});
+ await page.route(/^https?:/,r=>{requests.push(r.request().url());r.abort()});
+ await page.goto(pathToFileURL(path.join(root,'smoke.html')).href);
+ await page.waitForFunction(()=>Object.keys(window.TALOS_CHARTS||{}).length===11);
+ await page.waitForTimeout(800);
+ assert.deepEqual(await page.locator('.chart-error').allTextContents(),[]);
+ assert.equal(await page.locator('.chart canvas,.chart svg').count() >= 11,true);
+ assert.deepEqual(errors,[]);
+ await page.evaluate(()=>{
+  const c=TALOS_CHARTS.zoom.chart;
+  c.dispatchAction({type:'dataZoom',start:25,end:75});
+  c.dispatchAction({type:'legendUnSelect',name:'Plan'});
+  document.documentElement.dataset.theme='dark';
+ });
+ await page.waitForTimeout(400);
+ assert.deepEqual(await page.evaluate(()=>{const o=TALOS_CHARTS.zoom.chart.getOption();return [o.dataZoom[0].start,o.dataZoom[0].end,o.legend[0].selected.Plan]}),[25,75,false]);
+ await page.screenshot({path:path.join(root,'dark.png'),fullPage:true});
+ await page.setViewportSize({width:390,height:844});
+ await page.waitForTimeout(300);
+ assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth <= 390),true);
+ assert.deepEqual(await page.locator('.chart-error').allTextContents(),[]);
+ await page.screenshot({path:path.join(root,'mobile.png'),fullPage:true});
+ assert.deepEqual(errors,[]);
+ assert.deepEqual(requests,[]);
+ await page.goto(pathToFileURL(path.join(root,'error.html')).href);
+ await page.waitForFunction(()=>!!window.TALOS_CHARTS?.sunburst);
+ assert.match(await page.locator('#broken').innerText(),/intentional test/);
+ assert.equal(await page.locator('#sunburst canvas').count(),1);
+ console.log(JSON.stringify({charts:11,themeAndZoom:true,mobile:true,networkRequests:requests.length,errorIsolation:true}));
+ await browser.close();
+})().catch(e=>{console.error(e);process.exit(1)});

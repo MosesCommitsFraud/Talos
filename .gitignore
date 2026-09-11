@@ -112,3 +112,7 @@ tmp/talos-guide-qa/
 tmp/build_talos_guide.py
 output/Talos_Setup_Guide.docx
 output/Talos_Setup_Guide.md
+TODOMACS.md
+output/Talos_Hardware_Modelle_September_2026.docx
+output/Talos_Hardware_Modelle_September_2026_Cowork.docx
+output/Talos_Hardware_Modelle_September_2026_ueberarbeitet.docx
