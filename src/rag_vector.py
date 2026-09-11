@@ -5,9 +5,8 @@ Haystack-orchestrated RAG over Qdrant with native hybrid retrieval and a
 vLLM cross-encoder reranker.
 
 Pipeline:
-  * Parsing + chunking : Docling ``DoclingConverter`` (HybridChunker — layout-
-    and tokenizer-aware) for rich docs/images; a length splitter for plain
-    text/code/json.
+  * Parsing + chunking : Docling for rich docs/images; the same overlapping
+    word splitter for extracted text and plain text/code/json.
   * Dense embeddings   : vLLM (OpenAI-compatible) via Haystack ``OpenAI*Embedder``.
   * Sparse embeddings  : FastEmbed BM25/IDF via Haystack ``Fastembed*SparseEmbedder``.
   * Vector store       : Qdrant with named dense+sparse vectors; server-side RRF
@@ -2075,6 +2074,11 @@ class VectorRAG:
         if ext == ".pdf":
             docs = _repair_oversized_pdf_chunks(path, docs)
             _enrich_uncaptioned_figures(docs)
+        if docs and is_docling_format(path):
+            # Keep parser provenance / page boundaries, but give rich-document
+            # text the same retrieval-sized windows and overlap as Markdown.
+            # Run after PDF repair so collapsed PDFs can still recover pages.
+            docs = self._split_extracted_documents(docs)
         docs = _split_oversized_chunks(docs)
 
         # Ingest guards: strip text that is invisible on the rendered page
@@ -2800,10 +2804,17 @@ class VectorRAG:
 
     def _documents_from_text(self, text: str):
         """Create overlapping word chunks from already-extracted text."""
-        from haystack.components.preprocessors import DocumentSplitter
         from haystack.dataclasses import Document
 
         if not text.strip():
+            return []
+        return self._split_extracted_documents([Document(content=text)])
+
+    def _split_extracted_documents(self, docs):
+        """Share Markdown chunking while preserving metadata and figure assets."""
+        from haystack.components.preprocessors import DocumentSplitter
+
+        if not docs:
             return []
         if self._splitter is None:
             self._splitter = DocumentSplitter(split_by="word", split_length=250, split_overlap=40)
@@ -2811,7 +2822,13 @@ class VectorRAG:
                 self._splitter.warm_up()
             except Exception:
                 pass
-        return self._splitter.run(documents=[Document(content=text)]).get("documents", []) or []
+        result = []
+        for doc in docs:
+            if (doc.meta or {}).get("modality") == "figure":
+                result.append(doc)
+            elif (doc.content or "").strip():
+                result.extend(self._splitter.run(documents=[doc]).get("documents", []) or [])
+        return result
 
     def _extract_audio_segments(self, path: str):
         """Demux + normalize audio to 16 kHz mono WAV via ffmpeg, split into
