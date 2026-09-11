@@ -1,14 +1,22 @@
 ---
 name: dashboard-v2
-description: "Create interactive HTML dashboards, KPI overviews and reports with Apache ECharts, including follow-ups that add or change charts. Use when producing an HTML page with interactive charts. Not for a single static chart image, an Excel deliverable, or a report without charts."
+description: "Create designed Apache ECharts dashboards and interactive HTML reports, including 16:9 presentations, A4 dashboards and downloadable PNG versions. Use for dashboard layout, chart and export requests. Not for a standalone static plot, an Excel deliverable, or a report without charts."
 license: MIT
 ---
 
 # Dashboard v2 in Talos — Apache ECharts
 
 Produce one self-contained HTML file using `/opt/talos/vendor/talos_dash.py`.
-The scaffold supplies layout, KPI tiles, inline runtimes, theme and resize
-handling, and per-card error isolation. Focus on chart selection and data.
+The scaffold supplies inline runtimes, theme/resize handling, optional page
+formats and HTML/PNG downloads. You design the composition with `layout_html`
+and `css`; charts do not have to sit in cards or a uniform tile grid.
+
+**Read [layout-and-export.md](references/layout-and-export.md) before designing
+the page.** HTML always remains the interactive original. Set
+`download_png=True` for v2 dashboards so the whole composition can be downloaded
+as PNG as well. Choose `page_format="web"` by default, `"16:9"` for a slide,
+`"a4"` for A4 portrait or `"a4-landscape"` for A4 landscape when requested.
+Design for that canvas from the start; do not squeeze a long web page onto it.
 
 **Use `td.echarts(option)` for new charts. The full ECharts option API is
 available, including custom series, callbacks, coordinate systems and events.
@@ -73,12 +81,20 @@ portfolio = {
 }
 td.dashboard("output/dashboard.html", title="Umsatzstruktur",
     subtitle="2026 — Beispieldaten",
+    download_png=True,
     charts=[td.chart("portfolio", "Wo entsteht der Umsatz?",
                      td.echarts(portfolio), height=480, span=2)],
     footer="Demonstration mit synthetischen Zahlen.")
 ```
 
-`td.chart(id, title, spec, span=1, height=340, note="")` makes a card.
+The example above uses the optional automatic card layout for a quick chart.
+For a finished dashboard, prefer a deliberate composition: a dominant visual,
+typographic hierarchy, whitespace, integrated numbers, annotations and varied
+section sizes. Use cards where they help grouping, not as the universal design.
+
+`td.chart(id, title, spec, span=1, height=340, note="")` defines a chart.
+In `layout_html`, place it with `{{chart:id}}`; no card is imposed. Set
+`height=None` for ECharts whose container height is controlled by your CSS.
 Give every card a distinct simple ID. `span=2` uses the full grid width.
 Use more height for trees, networks, parallel axes or dense calendars.
 `td.kpi(label, value, delta="", tone="")` adds a headline tile; tones are
@@ -161,6 +177,10 @@ the same frame used by the charts.
 
 Open the generated page in the preview and inspect every card. Check the
 chosen interaction, narrow layout, light/dark appearance and console errors.
+For fixed formats, verify the full canvas and absence of clipped content.
+Click PNG herunterladen and open the actual PNG: verify dimensions, text,
+charts, inline images and background. Download HTML and verify it still opens
+interactively. PNG is a static snapshot of the currently selected chart state.
 For GL, test the actual preview's WebGL support. File existence or file size
 alone is not a rendering check. Failures must be fixed or clearly reported.
 

@@ -61,6 +61,42 @@ class DashboardTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             td.check_spec("old", {**td.bar(["A"], [1]), "visualMap": {}})
 
+    def test_custom_layout_slots_are_complete_and_unique(self):
+        native = td.chart("trend", "Trend", td.echarts({}), height=None)
+        for layout in ("<div>No chart</div>", "{{chart:other}}",
+                       "{{chart:trend}}{{chart:trend}}"):
+            with self.subTest(layout=layout), self.assertRaisesRegex(ValueError, "exactly once"):
+                td.render("Custom", [native], layout_html=layout)
+        with self.assertRaisesRegex(ValueError, "height=None"):
+            td.render("Missing CSS layout", [native])
+
+    def test_formats_and_export_are_opt_in_for_existing_dashboards(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            for filename in ("echarts.min.js", "html-to-image.js"):
+                (root / filename).write_text(f"/* {filename} */", encoding="utf-8")
+            with patch.multiple(td, VENDOR=root, ECHARTS_BUNDLE=root / "echarts.min.js"):
+                chart = td.chart("trend", "Trend", td.echarts({}), height=None)
+                html = td.render("Design", [chart], layout_html="<h1>Story</h1>{{chart:trend}}",
+                                 css="#td-artboard{padding:48px}", page_format="A4",
+                                 download_png=True)
+                self.assertIn('<h1>Story</h1><div class="chart"', html)
+                self.assertNotIn('<section class="card', html)
+                self.assertIn('"size":[794,1123,2480,3508]', html)
+                self.assertIn('id="td-save-png"', html)
+                self.assertIn('id="td-save-html"', html)
+                self.assertNotIn("{{chart:", html)
+                old = td.render("Existing", [])
+                self.assertNotIn('id="td-save-png"', old)
+                self.assertNotIn("/* html-to-image.js */", old)
+        with self.assertRaisesRegex(ValueError, "page_format"):
+            td.render("Unknown", [], page_format="poster")
+
+    def test_duplicate_chart_ids_rejected(self):
+        chart = td.chart("same", "Same", td.echarts({}))
+        with self.assertRaisesRegex(ValueError, "distinct"):
+            td.render("Duplicate", [chart, chart])
+
     def test_index_covers_all_sources_and_dependency_hints(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

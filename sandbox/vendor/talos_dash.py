@@ -42,7 +42,9 @@ src> yields a permanently blank page.
 from __future__ import annotations
 
 import json
+import html as html_lib
 import math
+import re
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
@@ -50,6 +52,15 @@ VENDOR = Path("/opt/talos/vendor")
 BUNDLE = VENDOR / "talos-charts.js"
 ECHARTS_BUNDLE = VENDOR / "echarts.min.js"
 ECHARTS_ADAPTER = Path(__file__).with_name("echarts-runtime.js")
+DASHBOARD_VIEW = Path(__file__).with_name("dashboard-view.js")
+
+# Logical CSS size and PNG pixel size. A4 PNG dimensions correspond to 300 dpi.
+PAGE_FORMATS = {
+    "web": None,
+    "16:9": (1280, 720, 1920, 1080),
+    "a4": (794, 1123, 2480, 3508),
+    "a4-landscape": (1123, 794, 3508, 2480),
+}
 
 
 class JS(str):
@@ -925,8 +936,8 @@ def sankey(nodes, links):
 # Page assembly
 # --------------------------------------------------------------------------
 def chart(cid: str, title: str, spec: Mapping[str, Any], *, span: int = 1,
-          height: int = 340, note: str = "") -> dict:
-    """One chart card. `span=2` makes it full width on a two-column grid."""
+          height: int | None = 340, note: str = "") -> dict:
+    """Chart definition. height=None lets a custom layout's CSS size ECharts."""
     return {"id": cid, "title": title, "spec": dict(spec),
             "span": span, "height": height, "note": note}
 
@@ -997,8 +1008,25 @@ body{padding:14px}}
 """
 
 
+_VIEW_CSS = """
+#td-downloads{display:flex;align-items:center;flex-wrap:wrap;gap:10px;margin:0 auto 18px;max-width:1400px}
+#td-downloads button{font:inherit;color:var(--fg);background:var(--card);border:1px solid var(--line);border-radius:7px;padding:8px 14px;cursor:pointer}
+#td-downloads button:disabled{opacity:.6;cursor:wait}
+#td-export-status{font-size:13px;color:var(--muted)}
+#td-stage{margin:0 auto;position:relative}
+#td-artboard{background:var(--bg);padding:32px;position:relative;transform-origin:top left}
+#td-artboard .chart{position:relative}
+body[data-page-format]:not([data-page-format="web"]) #td-artboard{overflow:hidden}
+body[data-page-format]:not([data-page-format="web"]) #td-stage{overflow:hidden}
+body[data-page-format]:not([data-page-format="web"]) .grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+body[data-page-format="web"] #td-stage{max-width:1464px}
+@media print{body{padding:0!important}#td-downloads{display:none}#td-stage{width:auto!important;height:auto!important}
+#td-artboard{transform:none!important;box-shadow:none!important}}
+"""
+
+
 def _esc(text: Any) -> str:
-    return (str(text).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"))
+    return html_lib.escape(str(text), quote=True)
 
 
 def _js(value: Any) -> str:
@@ -1017,10 +1045,26 @@ def _js(value: Any) -> str:
 def render(title: str, charts: Sequence[Mapping[str, Any]],
            kpis: Sequence[Mapping[str, Any]] = (), *,
            subtitle: str = "", footer: str = "", lang: str = "de",
-           locale: str = "de-DE") -> str:
+           locale: str = "de-DE", page_format: str = "web",
+           layout_html: str | None = None, css: str = "",
+           download_png: bool = False) -> str:
     """Build the complete self-contained HTML page."""
+    page_format = page_format.lower()
+    if page_format not in PAGE_FORMATS:
+        raise ValueError(f"Unknown page_format {page_format!r}; use {list(PAGE_FORMATS)}")
+    ids = [c["id"] for c in charts]
+    if len(ids) != len(set(ids)) or any(not re.fullmatch(r"[A-Za-z][A-Za-z0-9_-]*", cid) for cid in ids):
+        raise ValueError("Chart IDs must be distinct, start with a letter and use letters/digits/_/-")
     for c in charts:
         check_spec(c["id"], c["spec"])
+        if c.get("height", 340) is None and (layout_html is None or c["spec"]["type"] != "echarts"):
+            raise ValueError("height=None requires an ECharts chart in layout_html")
+
+    enhanced = download_png or layout_html is not None or page_format != "web"
+    if layout_html is not None:
+        slots = re.findall(r"\{\{chart:([^}]+)\}\}", layout_html)
+        if sorted(slots) != sorted(ids):
+            raise ValueError("layout_html must include every {{chart:id}} exactly once, with no unknown IDs")
 
     bundles = []
     if any(c["spec"]["type"] != "echarts" for c in charts):
@@ -1030,6 +1074,10 @@ def render(title: str, charts: Sequence[Mapping[str, Any]],
         extensions = {name for c in charts for name in c["spec"].get("extensions", [])}
         bundles.extend(VENDOR / (name + ".min.js") for name in sorted(extensions))
         bundles.append(ECHARTS_ADAPTER)
+    if download_png:
+        bundles.append(VENDOR / "html-to-image.js")
+    if enhanced:
+        bundles.append(DASHBOARD_VIEW)
     for bundle in bundles:
         if not bundle.is_file():
             raise FileNotFoundError(f"{bundle} is missing. Rebuild the sandbox image; "
@@ -1049,8 +1097,29 @@ def render(title: str, charts: Sequence[Mapping[str, Any]],
         + f'<div class="chart" id="{_esc(c["id"])}"></div></section>'
         for c in charts
     )
+    if layout_html is not None:
+        by_id = {c["id"]: c for c in charts}
+
+        def slot(match):
+            c = by_id[match[1]]
+            return f'<div class="chart" id="{c["id"]}" aria-label="{_esc(c["title"])}"></div>'
+
+        body = re.sub(r"\{\{chart:([^}]+)\}\}", slot, layout_html)
+    else:
+        body = (f'<header><h1>{_esc(title)}</h1>'
+                + (f'<div class="sub">{_esc(subtitle)}</div>' if subtitle else "")
+                + '</header><div class="wrap">'
+                + (f'<div class="kpis">{tiles}</div>' if tiles else "")
+                + f'<div class="grid">{cards}</div></div>'
+                + (f'<footer>{_esc(footer)}</footer>' if footer else ""))
+    if enhanced:
+        toolbar = ('<nav id="td-downloads" aria-label="Downloads">'
+                   '<button type="button" id="td-save-html">HTML herunterladen</button>'
+                   + ('<button type="button" id="td-save-png">PNG herunterladen</button>' if download_png else "")
+                   + '<span id="td-export-status" role="status" aria-live="polite"></span></nav>')
+        body = toolbar + '<div id="td-stage"><main id="td-artboard">' + body + '</main></div>'
     specs = _js([
-        {"id": c["id"], "title": c["title"], "height": int(c.get("height", 340)),
+        {"id": c["id"], "title": c["title"], "height": c.get("height", 340),
          "spec": c["spec"]}
         for c in charts
     ])
@@ -1058,7 +1127,7 @@ def render(title: str, charts: Sequence[Mapping[str, Any]],
     parts = {
         "__LANG__": _esc(lang),
         "__TITLE__": _esc(title),
-        "__CSS__": _css(),
+        "__CSS__": _css() + (_VIEW_CSS if enhanced else "") + "\n" + css,
         "__RUNTIME__": runtime,
         "__SUB__": f'<div class="sub">{_esc(subtitle)}</div>' if subtitle else "",
         "__KPIS__": f'<div class="kpis">{tiles}</div>' if tiles else "",
@@ -1066,6 +1135,9 @@ def render(title: str, charts: Sequence[Mapping[str, Any]],
         "__FOOTER__": f"<footer>{_esc(footer)}</footer>" if footer else "",
         "__SPECS__": specs,
         "__LOCALE__": _js(locale),
+        "__BODY__": body,
+        "__VIEW_INIT__": ("TalosDashboard.init(" + _js({"format": page_format,
+                          "size": PAGE_FORMATS[page_format], "title": title}) + ", originalHTML);" if enhanced else ""),
     }
     html = _PAGE_TEMPLATE
     # The runtime goes in last and its own text is never scanned for markers:
@@ -1073,7 +1145,7 @@ def render(title: str, charts: Sequence[Mapping[str, Any]],
     # matched inside it would corrupt the library.
     for marker in ("__LANG__", "__TITLE__", "__CSS__", "__SUB__", "__KPIS__",
                    "__CARDS__", "__FOOTER__", "__SPECS__", "__LOCALE__",
-                   "__RUNTIME__"):
+                   "__BODY__", "__VIEW_INIT__", "__RUNTIME__"):
         html = html.replace(marker, parts[marker])
     return html
 
@@ -1087,14 +1159,10 @@ _PAGE_TEMPLATE = """<!DOCTYPE html>
 <style>__CSS__</style>
 <script>__RUNTIME__</script>
 </head><body>
-<header><h1>__TITLE__</h1>
-__SUB__</header>
-<div class="wrap">
-__KPIS__
-<div class="grid">__CARDS__</div>
-</div>
-__FOOTER__
+__BODY__
 <script>
+const originalHTML = '<!DOCTYPE html>\\n' + document.documentElement.outerHTML;
+__VIEW_INIT__
 // Fail loudly if the runtime didn't survive being inlined. A blank dashboard
 // with a clean console is the hardest version of this to debug.
 const specs = __SPECS__;
@@ -1122,7 +1190,9 @@ if ((legacy.length && typeof TalosCharts === 'undefined') ||
 def dashboard(path: str, title: str, charts: Sequence[Mapping[str, Any]],
               kpis: Sequence[Mapping[str, Any]] = (), *,
               subtitle: str = "", footer: str = "", lang: str = "de",
-              locale: str = "de-DE", **unsupported) -> str:
+              locale: str = "de-DE", page_format: str = "web",
+              layout_html: str | None = None, css: str = "",
+              download_png: bool = False, **unsupported) -> str:
     """Render and write the page. Returns the path written."""
     if "theme" in unsupported:
         raise ValueError(
@@ -1133,7 +1203,8 @@ def dashboard(path: str, title: str, charts: Sequence[Mapping[str, Any]],
     if unsupported:
         raise TypeError(f"dashboard() got unexpected keyword(s) {sorted(unsupported)}")
     html = render(title, charts, kpis, subtitle=subtitle, footer=footer,
-                  lang=lang, locale=locale)
+                  lang=lang, locale=locale, page_format=page_format,
+                  layout_html=layout_html, css=css, download_png=download_png)
     out = Path(path)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(html, encoding="utf-8")

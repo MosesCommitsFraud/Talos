@@ -27,7 +27,7 @@ window.TalosECharts = {
           cleanup = null;
           if (chart) chart.dispose();
           el.replaceChildren();
-          el.style.height = `${entry.height || 340}px`;
+          if (entry.height != null) el.style.height = `${entry.height}px`;
           el.setAttribute('role', 'img');
           el.setAttribute('aria-label', entry.title);
           const css = getComputedStyle(document.documentElement);
@@ -35,7 +35,7 @@ window.TalosECharts = {
           const mode = document.documentElement.dataset.theme;
           const dark = mode === 'dark' || (mode !== 'light' && media.matches);
           chart = echarts.init(el, dark ? 'dark' : null, {locale: options.locale?.startsWith('de') ? 'DE' : 'EN',
-              width: el.clientWidth || 640, height: entry.height || 340});
+              width: el.clientWidth || 640, height: entry.height || el.clientHeight || 340});
           const spec = entry.spec;
           if (spec.setup) cleanup = spec.setup(chart, echarts, spec.data);
           chart.setOption({animation: false, aria: {enabled: true},
@@ -52,13 +52,14 @@ window.TalosECharts = {
       };
       draw();
       resize = new ResizeObserver(() => {
-        if (chart && !chart.isDisposed()) chart.resize({width: el.clientWidth || 640, height: entry.height || 340});
+        if (chart && !chart.isDisposed()) chart.resize({width: el.clientWidth || 640, height: entry.height || el.clientHeight || 340});
       });
       resize.observe(el);
       observer = new MutationObserver(draw);
       observer.observe(document.documentElement, {attributes: true, attributeFilter: ['data-theme']});
       media.addEventListener('change', draw);
       hosts[entry.id] = {
+        usesGL: entry.spec.extensions?.includes('echarts-gl') || false,
         get chart() { return chart; },
         dispose() {
           disposed = true;

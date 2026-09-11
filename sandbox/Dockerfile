@@ -155,6 +155,7 @@ RUN set -eu; \
 # per request — the single largest latency cost of a dashboard turn.
 COPY vendor/talos_dash.py /opt/talos/vendor/talos_dash.py
 COPY vendor/echarts-runtime.js /opt/talos/vendor/echarts-runtime.js
+COPY vendor/dashboard-view.js /opt/talos/vendor/dashboard-view.js
 
 # Full Apache ECharts is the primary dashboard API. Keep the old builders for
 # existing dashboards; render() only inlines the engines a page actually uses.
@@ -164,7 +165,9 @@ COPY vendor/charts/index_examples.py /tmp/index_examples.py
 RUN set -eu; \
     mkdir -p /tmp/echarts; cd /tmp/echarts; \
     npm install --no-audit --no-fund --no-save \
-        "echarts@${ECHARTS_VERSION}" echarts-gl@2.1.0 echarts-stat@1.2.0; \
+        "echarts@${ECHARTS_VERSION}" echarts-gl@2.1.0 echarts-stat@1.2.0 html-to-image@1.11.13; \
+    cp node_modules/html-to-image/dist/html-to-image.js /opt/talos/vendor/html-to-image.js; \
+    cp node_modules/html-to-image/LICENSE /opt/talos/vendor/html-to-image.LICENSE; \
     cp node_modules/echarts/dist/echarts.min.js /opt/talos/vendor/echarts.min.js; \
     printf '\n;\n' >> /opt/talos/vendor/echarts.min.js; \
     cat node_modules/echarts/i18n/langDE.js >> /opt/talos/vendor/echarts.min.js; \
