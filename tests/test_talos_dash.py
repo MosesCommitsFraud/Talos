@@ -110,6 +110,13 @@ class DashboardTests(unittest.TestCase):
             self.assertEqual(render.call_args.kwargs["layout_html"], "<h1>Story</h1>")
             self.assertEqual(render.call_args.kwargs["brand"], "macs")
 
+    def test_composed_pages_skip_legacy_layout_css(self):
+        self.assertIn(".kpi{", td._css())
+        composed = td._css("macs", legacy=False)
+        for selector in (".kpi{", "header{", "h1{", ".sub{", ".card{"):
+            self.assertNotIn(selector, composed)
+        self.assertIn(".chart{", composed)
+
     def test_brand_embeds_font_logo_and_palette(self):
         css = td._css("macs")
         self.assertIn("data:font/woff2;base64,", css)

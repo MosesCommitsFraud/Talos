@@ -1006,7 +1006,7 @@ def kpi(label: str, value: Any, delta: str = "", tone: str = "") -> dict:
     return {"label": label, "value": value, "delta": delta, "tone": tone}
 
 
-def _css(brand: str | None = None) -> str:
+def _css(brand: str | None = None, legacy: bool = True) -> str:
     """The page stylesheet, including every colour token the charts resolve
     against.
 
@@ -1038,7 +1038,7 @@ def _css(brand: str | None = None) -> str:
         dark_page = "--bg:#0d0d0d;--card:#1a1a19;--fg:#ffffff;--muted:#c3c2b7;--line:#2c2c2a;--up:#0ca30c;--down:#d03b3b"
     # A plain template with named placeholders rather than an f-string: CSS is
     # nothing but braces, and every one of them would need doubling.
-    out = (_CSS_TEMPLATE
+    out = ((_CSS_TEMPLATE + (_LEGACY_CSS if legacy else ""))
            .replace("__LIGHT__", light_page + ";--radius:14px;" + block("light"))
            .replace("__DARK__", dark_page + ";" + block("dark")))
     if spec:
@@ -1046,6 +1046,13 @@ def _css(brand: str | None = None) -> str:
         out = (f'@font-face{{font-family:"{family}";font-weight:100 900;font-display:block;'
                f'src:url(data:font/woff2;base64,{font}) format("woff2")}}\n' + out
                + "body,#td-artboard{font-family:var(--td-font)}"
+               # Readable defaults: body copy 14px/400, emphasis 600. Very thin
+               # or heavy cuts of a variable font smear on screens and in PNGs.
+               "#td-artboard{font-size:14px;line-height:1.5;font-weight:400;color:var(--fg);"
+               "-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}"
+               "#td-artboard b,#td-artboard strong{font-weight:600}"
+               # ECharts writes tooltip values inline at weight 900.
+               "#td-artboard .chart [style*='font-weight:900']{font-weight:600!important}"
                ".brand-logo{display:block;height:44px;width:auto}"
                ".brand-logo .macs-logo-ink{fill:var(--logo-ink)}"
                ".brand-logo .macs-logo-accent{fill:var(--logo-accent)}\n")
@@ -1059,6 +1066,14 @@ _CSS_TEMPLATE = """
 *{box-sizing:border-box}
 body{margin:0;padding:24px;background:var(--bg);color:var(--fg);
 font:15px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+.chart{width:100%}
+.chart-error{color:var(--down);font-size:.85rem;padding:12px;white-space:pre-wrap}
+"""
+
+# Styles of the automatic header/KPI/card layout. A composed page (layout_html)
+# never gets them: generic selectors like `header`, `h1`, `.sub` or `.kpi` would
+# otherwise restyle the authored markup that happens to use the same names.
+_LEGACY_CSS = """
 header{max-width:1400px;margin:0 auto 20px}
 h1{margin:0 0 4px;font-size:1.6rem;letter-spacing:-.01em}
 .sub{color:var(--muted);font-size:.92rem}
@@ -1077,8 +1092,6 @@ padding:16px 18px 12px;min-width:0}
 .card.span2{grid-column:1/-1}
 .card h2{margin:0 0 2px;font-size:1rem;font-weight:600}
 .card .note{color:var(--muted);font-size:.82rem;margin:0 0 8px}
-.chart{width:100%}
-.chart-error{color:var(--down);font-size:.85rem;padding:12px;white-space:pre-wrap}
 footer{max-width:1400px;margin:22px auto 0;color:var(--muted);font-size:.82rem}
 @media(max-width:900px){.grid{grid-template-columns:1fr}.card.span2{grid-column:auto}
 body{padding:14px}}
@@ -1087,8 +1100,10 @@ body{padding:14px}}
 
 _VIEW_CSS = """
 #td-stage{margin:0 auto;position:relative}
-#td-artboard{background:var(--bg);padding:32px;position:relative;transform-origin:top left}
+#td-artboard{background:var(--bg);padding:32px;position:relative;transform-origin:top left;container:artboard/inline-size}
 #td-artboard .chart{position:relative}
+body[data-page-format="web"]{padding:0}
+body[data-page-format="web"] #td-artboard{padding:clamp(12px,3vw,32px)}
 body[data-page-format]:not([data-page-format="web"]) #td-artboard{overflow:hidden}
 body[data-page-format]:not([data-page-format="web"]) #td-stage{overflow:hidden}
 body[data-page-format]:not([data-page-format="web"]) .grid{grid-template-columns:repeat(2,minmax(0,1fr))}
@@ -1202,7 +1217,7 @@ def render(title: str, charts: Sequence[Mapping[str, Any]],
     parts = {
         "__LANG__": _esc(lang),
         "__TITLE__": _esc(title),
-        "__CSS__": _css(brand) + (_VIEW_CSS if enhanced else "") + "\n" + css,
+        "__CSS__": _css(brand, legacy=layout_html is None) + (_VIEW_CSS if enhanced else "") + "\n" + css,
         "__RUNTIME__": runtime,
         "__SUB__": f'<div class="sub">{_esc(subtitle)}</div>' if subtitle else "",
         "__KPIS__": f'<div class="kpis">{tiles}</div>' if tiles else "",

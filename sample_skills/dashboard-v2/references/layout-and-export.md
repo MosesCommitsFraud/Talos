@@ -26,10 +26,9 @@ cropping. A4 pixel dimensions do not imply embedded printer DPI metadata.
 ## Build a BI report page
 
 Determine the question and reading order before choosing a layout: header with
-logo, title and data freshness → filter context → KPI cards with comparisons →
-main visual in the largest tile → supporting visuals → detail. Use a CSS grid of
-white tiles on the grey canvas; size tiles by importance. Keep the same colour
-for the same measure across all visuals.
+logo, title and data freshness → filter context → key figures with comparisons →
+main visual in the largest tile → supporting visuals → detail. Size tiles by
+importance and keep the same colour for the same measure across all visuals.
 
 `layout_html` replaces the generated header, KPI tiles, grid and footer. You
 therefore include the visible title, period, units, notes and sources yourself.
@@ -38,8 +37,12 @@ only its chart host; put tile titles/notes around it in the authored layout.
 `css` is appended after scaffold CSS; scope rules under `#td-artboard` to keep
 the outer preview-sizing wrapper intact. Escape data-derived text with `html.escape`.
 
-This example shows the BI structure in macs colours; adapt KPIs, tiles and
-visuals to the actual data:
+The page must read well in light and dark mode and from ~420 px (Talos side
+panel) up to a wide screen. `#td-artboard` is a size container named
+`artboard`: use `@container artboard (max-width: …)` for breakpoints, CSS
+variables for every colour and `"@…"` tokens/formatters in chart options.
+
+This example shows the structure; adapt figures, tiles and visuals to the data:
 
 ```python
 import sys
@@ -48,83 +51,96 @@ import talos_dash as td
 
 months = ["Jan", "Feb", "Mär", "Apr", "Mai", "Jun", "Jul", "Aug", "Sep", "Okt", "Nov", "Dez"]
 trend = td.echarts({
-    "tooltip": {"trigger": "axis"},
+    "tooltip": {"trigger": "axis", "valueFormatter": "@eur"},
     "legend": {"top": 0, "right": 0, "itemWidth": 14, "itemHeight": 8},
-    "grid": {"left": 44, "right": 12, "top": 30, "bottom": 24},
+    "grid": {"left": 8, "right": 8, "top": 36, "bottom": 8},
     "xAxis": {"type": "category", "data": months, "axisTick": {"show": False}},
-    "yAxis": {"type": "value", "name": "Mio. €"},
+    "yAxis": {"type": "value", "axisLabel": {"formatter": "@eurCompact"}},
     "series": [
-        {"name": "Ist 2026", "type": "line", "smooth": True, "symbol": "none", "lineStyle": {"width": 2.5},
-         "areaStyle": {"opacity": 0.1}, "data": [3.1, 3.0, 3.6, 3.4, 3.8, 4.0, 3.5, 3.3, 3.9, 4.2, 4.4, 4.8]},
-        {"name": "Vorjahr", "type": "line", "smooth": True, "symbol": "none", "lineStyle": {"width": 2, "type": "dashed"},
-         "data": [2.8, 2.9, 3.2, 3.1, 3.3, 3.5, 3.2, 3.0, 3.4, 3.7, 3.8, 4.1]},
+        {"name": "Ist 2026", "type": "line", "smooth": True, "symbol": "none",
+         "lineStyle": {"width": 2.5}, "areaStyle": {"opacity": 0.1},
+         "data": [3.1e6, 3.0e6, 3.6e6, 3.4e6, 3.8e6, 4.0e6, 3.5e6, 3.3e6, 3.9e6, 4.2e6, 4.4e6, 4.8e6]},
+        {"name": "Vorjahr", "type": "line", "smooth": True, "symbol": "none",
+         "lineStyle": {"width": 2, "type": "dashed"}, "itemStyle": {"color": "@s3"},
+         "data": [2.8e6, 2.9e6, 3.2e6, 3.1e6, 3.3e6, 3.5e6, 3.2e6, 3.0e6, 3.4e6, 3.7e6, 3.8e6, 4.1e6]},
     ],
 })
 top = td.echarts({
-    "tooltip": {"trigger": "axis", "axisPointer": {"type": "shadow"}},
-    "grid": {"left": 92, "right": 48, "top": 4, "bottom": 4},
+    "tooltip": {"trigger": "axis", "axisPointer": {"type": "shadow"}, "valueFormatter": "@eur"},
+    "grid": {"left": 8, "right": 56, "top": 4, "bottom": 4},
     "xAxis": {"type": "value", "show": False},
     "yAxis": {"type": "category", "inverse": True, "axisTick": {"show": False}, "axisLine": {"show": False},
+              "axisLabel": {"width": 110, "overflow": "truncate"},
               "data": ["Nord", "West", "Süd", "Ost", "Export"]},
-    "series": [{"type": "bar", "barMaxWidth": 18, "itemStyle": {"borderRadius": 2},
-                "label": {"show": True, "position": "right", "formatter": "{c} Mio."},
-                "data": [14.2, 11.8, 9.6, 5.1, 2.3]}],
+    "series": [{"type": "bar", "barMaxWidth": 22, "itemStyle": {"borderRadius": 2},
+                "label": {"show": True, "position": "right", "formatter": "@eurCompact"},
+                "data": [14.2e6, 11.8e6, 9.6e6, 5.1e6, 2.3e6]}],
 })
 charts = [td.chart("trend", "Umsatz nach Monat, Ist vs. Vorjahr", trend, height=None),
           td.chart("top", "Umsatz nach Region", top, height=None)]
 layout = """
 <header class="bar">{{brand:logo}}<h1>Vertriebsübersicht 2026</h1>
-  <span class="meta">Stand 31.12.2026 · Beträge in Mio. €</span></header>
+  <span class="meta">Stand 31.12.2026 · Beträge in €</span></header>
 <nav class="filters"><span>Zeitraum <b>Jan–Dez 2026</b></span><span>Region <b>Alle</b></span>
   <span>Sparte <b>Alle</b></span></nav>
-<section class="kpis">
-  <div class="kpi"><label>Umsatz</label><strong>43,0</strong><em class="up">▲ 12,0 % ggü. Vorjahr</em></div>
-  <div class="kpi"><label>Deckungsbeitrag</label><strong>15,9</strong><em class="up">▲ 4,1 % ggü. Vorjahr</em></div>
-  <div class="kpi"><label>Aufträge</label><strong>1.284</strong><em class="down">▼ 2,3 % ggü. Vorjahr</em></div>
-  <div class="kpi"><label>Ø Auftragswert</label><strong>33,5 T€</strong><em class="up">▲ 14,6 % ggü. Vorjahr</em></div>
+<section class="figures">
+  <div class="figure"><span class="label">Umsatz</span><strong>43,0 Mio. €</strong><em><i class="up">▲</i> 12,0 % ggü. Vorjahr</em></div>
+  <div class="figure"><span class="label">Deckungsbeitrag</span><strong>15,9 Mio. €</strong><em><i class="up">▲</i> 4,1 % ggü. Vorjahr</em></div>
+  <div class="figure"><span class="label">Aufträge</span><strong>1.284</strong><em><i class="down">▼</i> 2,3 % ggü. Vorjahr</em></div>
+  <div class="figure"><span class="label">Ø Auftragswert</span><strong>33.500 €</strong><em><i class="up">▲</i> 14,6 % ggü. Vorjahr</em></div>
 </section>
 <section class="tiles">
-  <article class="tile wide"><h2>Umsatz nach Monat, Ist vs. Vorjahr</h2><div class="plot">{{chart:trend}}</div></article>
-  <article class="tile"><h2>Umsatz nach Region</h2><div class="plot">{{chart:top}}</div></article>
+  <article class="tile wide"><h2>Das vierte Quartal wächst am stärksten</h2>
+    <p class="sub">Umsatz nach Monat, Ist 2026 und Vorjahr</p><div class="plot">{{chart:trend}}</div></article>
+  <article class="tile"><h2>Nord und West tragen 60 %</h2>
+    <p class="sub">Umsatz nach Region 2026</p><div class="plot">{{chart:top}}</div></article>
 </section>
 <p class="source">Quelle: synthetische Beispieldaten</p>
 """
 style = """
-#td-artboard {padding:0 20px 16px;background:var(--brand-grey);color:var(--fg);}
-#td-artboard .bar {display:flex;align-items:center;gap:16px;height:56px;margin:0 -20px;padding:0 20px;
-  background:var(--td-surface);border-bottom:1px solid var(--line);}
-#td-artboard .bar .brand-logo {height:26px;}
-#td-artboard h1 {font-size:20px;font-weight:600;margin:0;padding-left:16px;border-left:1px solid var(--line);}
-#td-artboard .meta {margin-left:auto;font-size:12px;color:var(--muted);}
-#td-artboard .filters {display:flex;gap:8px;margin:14px 0;font-size:12px;color:var(--muted);}
-#td-artboard .filters span {background:var(--td-surface);border:1px solid var(--line);border-radius:4px;padding:5px 10px;}
-#td-artboard .filters b {color:var(--brand-blue);font-weight:600;margin-left:4px;}
-#td-artboard .kpis {display:grid;grid-template-columns:repeat(4,1fr);gap:14px;}
-#td-artboard .kpi, #td-artboard .tile {background:var(--td-surface);border:1px solid var(--line);border-radius:6px;
-  box-shadow:0 1px 2px rgba(16,24,40,.06);min-width:0;}
-#td-artboard .kpi {padding:12px 16px;border-top:3px solid var(--brand-blue);display:flex;flex-direction:column;}
-#td-artboard .kpi label {font-size:12px;color:var(--muted);}
-#td-artboard .kpi strong {font-size:30px;font-weight:600;font-variant-numeric:tabular-nums;color:var(--brand-deep);}
-#td-artboard .kpi em {font-style:normal;font-size:12px;}
-#td-artboard .up {color:var(--td-good);} #td-artboard .down {color:var(--td-critical);}
-#td-artboard .tiles {display:grid;grid-template-columns:repeat(12,1fr);gap:14px;margin-top:14px;}
-#td-artboard .tile {grid-column:span 4;padding:12px 14px;}
+#td-artboard {background:var(--bg);}
+#td-artboard .bar {display:flex;flex-wrap:wrap;align-items:center;gap:8px 14px;padding-bottom:12px;border-bottom:1px solid var(--line);}
+#td-artboard .bar .brand-logo {height:24px;}
+#td-artboard h1 {font-size:20px;font-weight:600;line-height:1.3;margin:0;}
+#td-artboard .meta {margin-left:auto;font-size:13px;color:var(--muted);}
+#td-artboard .filters {display:flex;flex-wrap:wrap;gap:6px;margin:12px 0 16px;font-size:13px;color:var(--muted);}
+#td-artboard .filters span {border:1px solid var(--line);border-radius:6px;padding:3px 10px;}
+#td-artboard .filters b {color:var(--fg);font-weight:500;margin-left:4px;}
+#td-artboard .figures, #td-artboard .tile {background:var(--td-surface);border:1px solid var(--line);border-radius:8px;min-width:0;}
+#td-artboard .figures {display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,170px),1fr));overflow:hidden;}
+#td-artboard .figure {display:flex;flex-direction:column;gap:2px;padding:14px 18px;
+  border-left:1px solid var(--line);border-top:1px solid var(--line);margin:-1px 0 0 -1px;}
+#td-artboard .figure .label {font-size:13px;font-weight:500;color:var(--muted);}
+#td-artboard .figure strong {font-size:26px;font-weight:600;line-height:1.25;font-variant-numeric:tabular-nums;}
+#td-artboard .figure em {font-style:normal;font-size:13px;color:var(--muted);}
+#td-artboard .figure i {font-style:normal;} #td-artboard .figure .up {color:var(--td-good);}
+#td-artboard .figure .down {color:var(--td-critical);}
+#td-artboard .tiles {display:grid;grid-template-columns:repeat(12,minmax(0,1fr));gap:14px;margin-top:14px;}
+#td-artboard .tile {grid-column:span 4;padding:14px 16px;}
 #td-artboard .tile.wide {grid-column:span 8;}
-#td-artboard .tile h2 {font-size:13px;font-weight:600;margin:0 0 6px;color:var(--brand-deep);}
-#td-artboard .plot {height:360px;}
+#td-artboard .tile h2 {font-size:15px;font-weight:600;line-height:1.35;margin:0;}
+#td-artboard .tile .sub {font-size:13px;color:var(--muted);margin:2px 0 8px;}
+#td-artboard .plot {height:clamp(240px,30cqw,360px);}
 #td-artboard .plot .chart {height:100%;}
-#td-artboard .source {font-size:11px;color:var(--muted);margin:10px 0 0;}
+#td-artboard .source {font-size:12px;color:var(--muted);margin:12px 0 0;}
+@container artboard (max-width: 900px) {
+  #td-artboard .tile, #td-artboard .tile.wide {grid-column:span 6;}
+}
+@container artboard (max-width: 620px) {
+  #td-artboard .tile, #td-artboard .tile.wide {grid-column:1/-1;}
+  #td-artboard .meta {margin-left:0;width:100%;}
+  #td-artboard .figure strong {font-size:22px;}
+}
 """
 td.compose("output/dashboard.html", title="Vertriebsübersicht 2026",
-    charts=charts, page_format="16:9", layout_html=layout, css=style)
+    charts=charts, layout_html=layout, css=style)
 ```
 
 Give CSS-sized chart hosts a definite container height. Fixed-size charts can
 instead use `height=...`. The legacy builders still need explicit heights.
-For `web`, use responsive CSS to stack sections when needed. For fixed formats,
-avoid viewport-based media queries that alter the composition when the preview
-is narrow; use format-specific selectors such as
-`body[data-page-format="a4"] #td-artboard .story` or a dedicated layout instead.
+For `web`, reflow with container queries on `artboard`. For fixed formats
+(`16:9`, A4) the canvas does not reflow; use format-specific selectors such as
+`body[data-page-format="a4"] #td-artboard .tiles` for a dedicated arrangement.
 
 ## Export fidelity
 

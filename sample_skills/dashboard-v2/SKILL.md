@@ -168,11 +168,12 @@ use a function in `renderItem` without changing the Talos runtime.
 
 ## Readability and verification
 
-Use theme defaults for categories/text; they are the macs palette. When an
-explicit colour is semantically useful, use a hex from the macs-brand.md table
-— never a colour outside that palette. Prefer series order (`--td-s1` blue for
-the message, `--td-s2` petrol for context) over explicit colours so dark mode
-keeps working. Magnitude needs a sequential scale, signed deviation
+**Never write hex colours** — not in chart options, not in CSS. Pages must
+work in light and dark mode. Leave axis/label/legend/tooltip colours to the
+theme; where a series needs a colour use token strings (`"@s1"`, `"@s2"`,
+`"@muted"`, …) and CSS variables (`var(--fg)`, `var(--td-surface)`, …) as
+listed in macs-brand.md. Format every number with `"@eurCompact"`, `"@eur"`,
+`"@num"` or `"@pct"` formatter strings. Magnitude needs a sequential scale, signed deviation
 a diverging one. Avoid copying a gallery's background or rainbow palette just
 because it looks striking. Tooltips add detail; titles, units and legends must
 make the chart understandable without hover.
@@ -183,7 +184,8 @@ where justified. Use a workspace-relative output path such as
 the same frame used by the charts.
 
 Open the generated page in the preview and inspect every card. Check the
-chosen interaction, narrow layout, light/dark appearance and console errors.
+chosen interaction, console errors, **dark mode** and a **narrow width of about
+420 px** (the Talos side panel) — use container queries, not window media queries.
 For fixed formats, verify the full canvas and absence of clipped content.
 Click PNG herunterladen in the Talos UI and open the actual PNG: verify dimensions, text,
 charts, inline images and background. Download HTML and verify it still opens
@@ -191,7 +193,7 @@ interactively. PNG is a static snapshot of the currently selected chart state.
 For GL, test the actual preview's WebGL support. File existence or file size
 alone is not a rendering check. Failures must be fixed or clearly reported.
 
-At the final visual check, run the anti-generic checklist in macs-brand.md,
+At the final visual check, run the final checks in macs-brand.md,
 then identify the first thing the reader notices, the
 comparison that makes it meaningful, and what they should inspect next. If all
 regions look equally important or the page is still a wall of cards, change

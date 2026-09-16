@@ -1,89 +1,131 @@
 # macs look for BI dashboards
 
-Dashboards look like a professional BI report (Power BI, Tableau, Qlik style):
-a report header, filter context, KPI cards and a grid of visual tiles. What
-makes them macs is the **colour palette, Encode Sans and the logo** — not the
-PowerPoint slide layout. Do not copy slide elements (big blue slide titles,
-gradient footer band, slide-style accent panels).
+Dashboards read like a well-made BI report (Power BI, Tableau): a header,
+filter context, key figures and a grid of visuals. What makes them macs is
+**the palette, Encode Sans and the logo** — not PowerPoint slide elements.
 
-`td.compose` applies the brand by default (`brand="macs"`): palette tokens,
-Encode Sans embedded offline, themed ECharts axes/legends/tooltips, and the
-logo via `{{brand:logo}}`. Use `brand=None` only for a deliberately unbranded page.
+`td.compose` applies the brand by default (`brand="macs"`): palette tokens for
+light and dark, Encode Sans embedded offline, themed axes/legends/tooltips/labels,
+and the logo via `{{brand:logo}}`. `brand=None` only for a deliberately unbranded page.
 
-## Colours: use the CSS variables, never invent hex
+Every page must work in **three situations at once**: light mode, dark mode,
+and a narrow Talos side panel (~420 px wide) as well as a wide screen.
 
-| Role | Variable | Light | Use |
-| --- | --- | --- | --- |
-| macs blue | `--brand-blue` | `#0785c0` | Primary series, selected filter chip, active tab, key KPI value |
-| Petrol | `--brand-petrol` | `#2b4553` | Header bar or secondary series, strong text |
-| Deep blue | `--brand-deep` | `#1f4e79` | Tile titles, emphasised numbers |
-| Text | `--fg` / `--muted` | `#1f3a4d` / `#5a6672` | Values, labels / captions, units, sources |
-| Canvas | `--brand-grey` | `#f3f5f7` | Page background behind the tiles |
-| Tile | `--td-surface` | `#ffffff` | Visual and KPI card background |
-| Soft highlight | `--brand-tint` | `#e7f2f9` | Selected row, hovered chip, highlighted band |
-| Borders | `--line` | `#dbe3ea` | Tile borders, table rules, dividers |
-| Chart series | `--td-s1…s8` | blue, petrol, light blue, amber, … | Applied automatically in fixed order |
-| Status | `--td-good`, `--td-critical` | | Delta arrows / variance only, always with sign and text |
+## Colour: never write a hex value
 
-Dark mode swaps all variables automatically (near-black canvas, dark tiles,
-white logo "m"). Never hard-code white or light colours; go through variables.
+Hard-coded colours are the main reason dashboards break in dark mode (dark
+text on a dark tile, white chips on a dark page). There are no exceptions.
 
-Colour discipline: macs blue carries the primary measure across all visuals,
-petrol and light blue the comparison (prior year, plan), grey for "other".
-The same measure keeps the same colour in every visual. Amber (`--td-s4`) is
-the single highlight hue. No purple, rainbow category palettes or neon.
+**In CSS** use the variables:
 
-## Typography
+| Role | Variable |
+| --- | --- |
+| Page background | `--bg` (or `--brand-grey` for a canvas behind tiles) |
+| Tile / card surface | `--td-surface` |
+| Text / secondary text | `--fg` / `--muted` |
+| Hairlines, borders | `--line` |
+| macs blue (primary measure, active filter) | `--brand-blue` |
+| Petrol (comparison measure) | `--brand-petrol` |
+| Emphasised numbers, headings | `--brand-deep` |
+| Soft highlight (selected row, active chip) | `--brand-tint` |
+| Good / bad deltas | `--td-good` / `--td-critical` |
 
-- Encode Sans only; it is set on the artboard. Do not set other font families.
-- Report title 20–24px weight 600; tile titles 13–14px weight 600 `--brand-deep`.
-- KPI values 26–34px weight 600, tabular numbers (`font-variant-numeric: tabular-nums`),
-  label 12px `--muted` above, delta 12px with ▲/▼ and `--td-good`/`--td-critical`.
-- Axis/labels 11–12px, captions and data source 11px `--muted`.
-- German number format (`1.234,5 €`, `12,3 %`). No emoji.
+No `#fff`, `white`, `black`, `rgba(0,0,0,…)` backgrounds or text colours.
+A shadow may use `rgba(16,24,40,.06)`; nothing else.
 
-## BI report grammar
+**In ECharts options** don't set axis, label, legend, split-line, tooltip or
+pie-border colours at all — the theme does it per mode. Where a series needs a
+specific colour, write a token string; it is resolved for the current theme:
 
-1. **Header bar** (48–56px): `{{brand:logo}}` left (~26–30px high), report title,
-   right side: data freshness ("Stand 31.03.2026") and period. White or petrol
-   background (if petrol, use `--logo-ink:#fff` on the header).
-2. **Filter row**: static chips showing the active context (Zeitraum, Region,
-   Kostenstelle …) — pill or 4px-radius, `--line` border, the active value in
-   `--brand-blue`. Only show filters that describe the data actually shown.
-3. **KPI cards**: 3–5 in a row, white tile, 1px `--line` border, 6px radius,
-   optional 3px top or left border in the measure's colour. Each KPI has a
-   comparison (Vorjahr, Plan) and optionally a small sparkline.
-4. **Visual grid**: CSS grid (12 columns, 12–16px gap) on the grey canvas.
-   Tiles differ in size by importance — the main trend spans 8 columns, a
-   ranking 4 columns, a detail table full width. Each tile: title top left,
-   optional subtitle/unit in `--muted`, visual below, no redundant chart title.
-5. **Tables/matrices** where exact values matter: header row `--brand-grey`,
-   1px rules, right-aligned numbers, conditional bars or colour scale in blue.
-6. Subtle depth only: `box-shadow: 0 1px 2px rgba(16,24,40,.06)`. No glass,
-   glow, large radii or gradients.
+| Token | Meaning |
+| --- | --- |
+| `"@s1"` … `"@s8"` | categorical series colours (s1 = macs blue, s2 = petrol, s3 = light blue, s4 = amber highlight) |
+| `"@q1"` … `"@q5"` | sequential blue scale for magnitude (visualMap, heatmaps) |
+| `"@ink"`, `"@ink2"`, `"@muted"` | text colours |
+| `"@grid"`, `"@base"`, `"@surface"` | lines, axis base, tile colour |
+| `"@good"`, `"@critical"`, `"@warning"` | status |
+| `"@brand-blue"`, `"@brand-petrol"`, … | any page variable |
 
-For `16:9` and A4 use the same grammar compressed to the canvas; for `web` let
-the grid reflow (e.g. 12 → 6 → 1 columns).
+Colour discipline: the primary measure is `@s1` in every visual, the comparison
+(prior year, plan) `@s2` or `@s3`, "other" `@muted`. One amber highlight (`@s4`)
+at most. No per-bar rainbow, no purple, no neon.
+
+## Numbers: always formatted
+
+Raw values like `41781151.9` are unreadable. Use formatter strings, which
+become German-locale functions:
+
+- `"@eurCompact"` → `41,8 Mio. €` (axes, bar labels, KPIs in charts)
+- `"@eur"` → `41.781.152 €` (tooltips, tables)
+- `"@numCompact"`, `"@num"`, `"@pct"` (value already in percent → `12,3 %`)
+- Templates: `"{b}: @eurCompact"` ({a} series, {b} name, {d} pie share in %)
+
+Put them on `axisLabel.formatter`, `label.formatter` and
+`tooltip.valueFormatter`. In HTML, format numbers in Python
+(`f"{v/1e6:,.1f} Mio. €".replace(",", "X").replace(".", ",").replace("X", ".")`).
+
+## Typography: readable, not decorative
+
+- Encode Sans only (already set). Base text 14px, line-height 1.5.
+- Weights: **400** body, **500** labels, **600** headings and key numbers.
+  Never 100–350 (too thin) or 700–900 (too heavy).
+- Minimum size 12px for anything that must be read (axis labels, captions,
+  chip text). Report title 20–22px, tile titles 14–15px, KPI values 24–28px.
+- Sentence case. No uppercase letter-spaced labels, no gradient text, no emoji.
+- `font-variant-numeric: tabular-nums` for figures; German number format.
+
+## Layout: responsive by container, not by window
+
+The artboard is a size container named `artboard`. Use **container queries**
+(`@container artboard (max-width: 720px) { … }`), not `@media` on the window —
+the preview panel, the full page and the PNG all have different widths.
+
+- KPI row: `grid-template-columns: repeat(auto-fit, minmax(min(100%, 180px), 1fr))`.
+- Visual grid: 12 columns on wide pages; at `max-width: 900px` 6 columns; at
+  `max-width: 620px` every tile spans the full width.
+- Chart heights in CSS with `clamp()`, e.g. `height: clamp(240px, 32cqw, 380px)`,
+  and `td.chart(..., height=None)`.
+- Never a fixed `grid.left/right` of more than ~16 px in chart options; let
+  ECharts fit axis labels (default in ECharts 6). Long category names: horizontal
+  bars with `axisLabel.width: 120, overflow: "truncate"`.
+- No `min-height: 100vh`, no fixed pixel widths on tiles, no horizontal scroll.
+- Artboard padding is handled by the scaffold; tiles need no extra outer padding.
+
+For `16:9` and A4 the canvas is fixed; design for it, but still avoid hex
+colours and unreadable sizes.
+
+## Page grammar that doesn't look generated
+
+1. **Header**: logo (~24px high) and report title on the page background,
+   data freshness and period right-aligned in `--muted`, a single hairline
+   (`--line`) below. No coloured header bar with rounded corners.
+2. **Filter context**: one line of quiet text chips — transparent background,
+   `--line` border, 12–13px; the active value in `--fg` weight 500. Only
+   filters that describe the data shown.
+3. **Key figures**: 3–5 figures in ONE tile, separated by hairline dividers
+   (not five separate boxed cards). Each: label (13px `--muted`), value
+   (24–28px/600 `--fg`), comparison line with ▲/▼ in `--td-good`/`--td-critical`
+   and what it compares to. No coloured left or top accent borders.
+4. **Visual tiles**: `--td-surface` background, 1px `--line` border, 8px radius,
+   no or very faint shadow. Title states the finding or measure + dimension
+   ("amazon trägt 37 % des Umsatzes"), subtitle gives unit and period.
+   The most important visual gets the largest tile.
+5. **Tables** where exact values matter: right-aligned tabular numbers, hairline
+   rows, header in `--muted` 13px/500, optional in-cell bars in `@s1`.
+6. **Footer**: source and data freshness, 12px `--muted`.
 
 ## Charts
 
-The runtime already themes axes, legends and tooltips. In options additionally:
+- Direct labels over legends when there are ≤ 6 points; legend small, top-right.
+- Bars: `barMaxWidth` 24–32, `itemStyle.borderRadius: 2`; one colour per measure.
+- Lines: width 2–2.5, `symbol: "none"` or small; area opacity ≤ 0.12 for the main measure only.
+- Donuts only for 2–5 shares, labels `"{b}: {d}"`; otherwise a sorted bar chart.
+- `dataZoom` for long time series; `tooltip.valueFormatter` always set.
 
-- Hide the ECharts `title` (the tile has an HTML title); tight `grid` margins.
-- Light split lines, no axis ticks on category axes, no 3D, no shadows.
-- Bars: `barMaxWidth` 24–36, `borderRadius: 2`; one colour per measure, not per bar.
-- Lines: width 2–2.5, small or no symbols; area fill ≤ 0.12 opacity for the main measure.
-- Legends at top right of the tile, small; direct labels when there are few points.
-- Donuts only for 2–5 shares with labels; horizontal bars for rankings.
-- Add `dataZoom` for long time series and cross-highlighting (`emphasis`,
-  `connect`) where it helps exploration.
+## Final checks (render, don't assume)
 
-## Anti-generic checklist (run before delivering)
-
-- No logo, default system font, or colours outside the table above.
-- A different colour scheme in every visual; the same measure changes colour.
-- KPI cards without comparison, or cards that are just an icon plus a number.
-- Generic tile titles ("Chart 1", "Übersicht") instead of measure + dimension
-  ("Umsatz nach Monat, Ist vs. Vorjahr").
-- Emoji, decorative icons, gradient text, glowing or glassmorphism effects.
-- Missing units, period or data source.
+- Switch the preview to dark mode: every text, chip, axis and label readable?
+- Narrow the preview to ~420 px: no clipped labels, no horizontal scroll, tiles stacked?
+- Any hex colour, `#fff`, fixed `grid.left`, raw unformatted number, 10–11px
+  text, weight 300 or 700+, uppercase tracked label or accent side-border? Fix it.
+- Does the headline figure and its comparison read in two seconds?

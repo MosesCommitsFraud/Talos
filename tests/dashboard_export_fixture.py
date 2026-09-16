@@ -20,12 +20,12 @@ example = re.search(r"```python\n(.*?)\n```", reference, re.S)[1]
 example = example.replace('"output/dashboard.html"', repr(str(root / "design.html")))
 namespace = {}
 exec(compile(example, "skill-layout-example", "exec"), namespace)
-layout, style, charts = (namespace[k] for k in ("layout", "style", "charts"))
+layout, style, charts, trend = (namespace[k] for k in ("layout", "style", "charts", "trend"))
 styles = {
-    "16:9": "",
-    "a4": "#td-artboard .kpis{grid-template-columns:repeat(2,1fr)}#td-artboard .tile,#td-artboard .tile.wide{grid-column:1/-1}#td-artboard .plot{height:340px}",
-    "a4-landscape": "#td-artboard .plot{height:440px}",
-    "web": "@media(max-width:900px){#td-artboard .kpis{grid-template-columns:repeat(2,1fr)}#td-artboard .tile,#td-artboard .tile.wide{grid-column:1/-1}}",
+    "16:9": "#td-artboard .plot{height:250px}",
+    "a4": "#td-artboard .tile,#td-artboard .tile.wide{grid-column:1/-1}#td-artboard .plot{height:300px}",
+    "a4-landscape": "#td-artboard .plot{height:320px}",
+    "web": "",
 }
 csp = ("default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval'; "
        "style-src 'unsafe-inline'; img-src data: blob:; font-src data:; "
