@@ -452,6 +452,7 @@ const de: typeof en = {
       summary_other: '{{count}} Python-Snippets {{verb}}',
     },
     read: {
+      brief: 'Liest eine Datei',
       verbPast: 'gelesen',
       running: 'Liest {{subject}}',
       past: '{{subject}} {{verb}}',
@@ -459,6 +460,7 @@ const de: typeof en = {
       summary_other: '{{count}} Dateien {{verb}}',
     },
     write: {
+      brief: 'Schreibt eine Datei',
       verbPast: 'geschrieben',
       running: 'Schreibt {{subject}}',
       past: '{{subject}} {{verb}}',
@@ -466,6 +468,7 @@ const de: typeof en = {
       summary_other: '{{count}} Dateien {{verb}}',
     },
     edit: {
+      brief: 'Bearbeitet eine Datei',
       verbPast: 'bearbeitet',
       running: 'Bearbeitet {{subject}}',
       past: '{{subject}} {{verb}}',
@@ -488,6 +491,7 @@ const de: typeof en = {
     // `summary_other` ist die Fassung für ein Bündel — ohne sie würde der
     // Gruppenkopf eines von mehreren Mustern nennen wollen und ins Leere laufen.
     grep: {
+      brief: 'Durchsucht Dateien',
       verbPast: 'gesucht',
       running: 'Sucht nach {{subject}}',
       past: 'Nach {{subject}} {{verb}}',
@@ -495,6 +499,7 @@ const de: typeof en = {
       summary_other: 'Nach {{count}} Mustern {{verb}}',
     },
     glob: {
+      brief: 'Sucht Dateien',
       verbPast: 'gefunden',
       running: 'Sucht Dateien',
       runningNamed: 'Sucht Dateien mit dem Muster {{subject}}',
@@ -502,6 +507,7 @@ const de: typeof en = {
       pastNamed: 'Dateien mit dem Muster {{subject}} {{verb}}',
     },
     ls: {
+      brief: 'Listet ein Verzeichnis',
       verbPast: 'aufgelistet',
       running: 'Listet {{subject}}',
       past: '{{subject}} {{verb}}',
@@ -533,6 +539,7 @@ const de: typeof en = {
       pastN: 'Web {{times}} {{verb}}',
     },
     fetch: {
+      brief: 'Lädt eine Seite',
       verbPast: 'geladen',
       running: 'Lädt {{subject}}',
       past: '{{subject}} {{verb}}',

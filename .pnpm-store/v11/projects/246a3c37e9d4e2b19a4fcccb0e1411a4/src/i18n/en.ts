@@ -446,6 +446,7 @@ const en = {
       summary_other: '{{verb}} {{count}} Python snippets',
     },
     read: {
+      brief: 'Reading a file',
       verbPast: 'Read',
       running: 'Reading {{subject}}',
       past: '{{verb}} {{subject}}',
@@ -453,6 +454,7 @@ const en = {
       summary_other: '{{verb}} {{count}} files',
     },
     write: {
+      brief: 'Writing a file',
       verbPast: 'Wrote',
       running: 'Writing {{subject}}',
       past: '{{verb}} {{subject}}',
@@ -460,6 +462,7 @@ const en = {
       summary_other: '{{verb}} {{count}} files',
     },
     edit: {
+      brief: 'Editing a file',
       verbPast: 'Edited',
       running: 'Editing {{subject}}',
       past: '{{verb}} {{subject}}',
@@ -482,6 +485,7 @@ const en = {
     // `summary_other` is what a batch renders as — without it the group header
     // would try to name one of several patterns and come out dangling.
     grep: {
+      brief: 'Searching files',
       verbPast: 'Searched',
       running: 'Searching for {{subject}}',
       past: '{{verb}} for {{subject}}',
@@ -489,6 +493,7 @@ const en = {
       summary_other: '{{verb}} for {{count}} patterns',
     },
     glob: {
+      brief: 'Finding files',
       verbPast: 'Found',
       running: 'Finding files',
       runningNamed: 'Finding files matching {{subject}}',
@@ -496,6 +501,7 @@ const en = {
       pastNamed: '{{verb}} files matching {{subject}}',
     },
     ls: {
+      brief: 'Listing a directory',
       verbPast: 'Listed',
       running: 'Listing {{subject}}',
       past: '{{verb}} {{subject}}',
@@ -527,6 +533,7 @@ const en = {
       pastN: '{{verb}} the web {{times}}',
     },
     fetch: {
+      brief: 'Fetching a page',
       verbPast: 'Fetched',
       running: 'Fetching {{subject}}',
       past: '{{verb}} {{subject}}',

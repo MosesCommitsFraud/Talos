@@ -6,7 +6,7 @@ import { artifactDownloadUrl, downloadArtifact, fetchArtifacts, uploadDownloadUr
 import { cn, copyTextToClipboard, formatDurationMs } from '@/lib/utils';
 import { artifactSelectionLocator } from '@/lib/artifactSelection';
 import { artifactDisplayName, displayName, fileExt, isPreviewable } from '@/lib/files';
-import { describeCall, partsToString, toolFamily, type LabelParts } from '@/lib/toolLabels';
+import { describeStatus, partsToString, toolFamily, type LabelParts } from '@/lib/toolLabels';
 import { isRunning, useBgTasks } from '@/lib/useBgTasks';
 import { useChat, type UiMessage } from '@/state/chat';
 import { usePrefs } from '@/state/prefs';
@@ -125,8 +125,8 @@ function asCaption(parts: LabelParts): string {
  *  It used to say "thinking" for the whole turn, which was only true for the
  *  first few seconds of it — the rest was spent running commands and waiting
  *  on the endpoint. So the caption follows the work instead, in priority
- *  order: a tool call in flight names itself ("running a command", "reading
- *  agent_loop.py"), reasoning gets the thinking phrases but ONLY while its
+ *  order: a tool call in flight names itself, briefly and without its subject
+ *  ("running a command", "reading a file" — never the query or path), reasoning gets the thinking phrases but ONLY while its
  *  tokens are still arriving, and the quiet stretches say what they are —
  *  waiting for the model, or writing the answer.
  *
