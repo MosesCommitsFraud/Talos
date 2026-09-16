@@ -8,12 +8,18 @@ license: MIT
 
 Produce one self-contained HTML file using `/opt/talos/vendor/talos_dash.py`.
 The scaffold supplies inline runtimes, theme/resize handling, page
-formats and PNG rendering for Talos. You design the composition with `layout_html`
-and `css`; charts do not have to sit in cards or a uniform tile grid.
+formats and PNG rendering for Talos. You design the page with `layout_html`
+and `css` as a BI report (Power BI style): header, filter context, KPI cards
+and a grid of visual tiles.
 
-**Read [design-direction.md](references/design-direction.md) and
+**Read [macs-brand.md](references/macs-brand.md),
+[design-direction.md](references/design-direction.md) and
 [layout-and-export.md](references/layout-and-export.md) before designing
-the page.** HTML always remains the interactive original. Use `td.compose`,
+the page.** Dashboards use the macs colours, Encode Sans and the macs logo,
+but look like a BI dashboard, not like a PowerPoint slide. `td.compose`
+applies palette, font and chart theme automatically; you place the logo with
+`{{brand:logo}}` in the header and use the brand CSS variables instead of
+your own hex codes. HTML always remains the interactive original. Use `td.compose`,
 which requires authored HTML and CSS and exposes PNG rendering to Talos.
 Downloads belong in the Talos preview toolbar, never inside the artifact.
 Choose `page_format="web"` by default, `"16:9"` for a slide,
@@ -68,9 +74,9 @@ original dashboard skill; do not copy that skill's tile examples into v2.
 
 Before coding, establish the audience, decision, headline finding and supporting
 evidence. Compare two plausible spatial arrangements and choose the one that
-makes this particular story clear. Set typography, palette, spacing and the
-dominant visual deliberately. This is design work, not selecting a different
-border radius for a grid of identical panels.
+makes this particular story clear. Typography and palette are fixed by the macs
+brand; spend your design decisions on which KPIs and visuals answer the
+question, tile sizes by importance and consistent colour meaning per measure.
 
 ```python
 import sys
@@ -78,17 +84,15 @@ sys.path.insert(0, "/opt/talos/vendor")
 import talos_dash as td
 
 # First author layout_html, css and the selected chart options for this brief.
-# Place each chart in layout_html with {{chart:its-id}}.
+# Place each chart in layout_html with {{chart:its-id}} and the logo with
+# {{brand:logo}}. brand="macs" is the default.
 td.compose("output/dashboard.html", title=title,
     charts=charts, layout_html=layout_html, css=css, page_format="16:9")
 ```
 
 The API sketch uses your authored variables; a runnable composition example
-is in layout-and-export.md. It demonstrates mechanics, not a visual template.
-Avoid the stock KPI-strip + two-column-card-grid composition unless the user
-explicitly asks for it. A content-driven layout may use a large diagram,
-side commentary, integrated comparisons, a flow across the canvas or other
-arrangements. Meaningful grouping can still use a panel where appropriate.
+is in layout-and-export.md. It shows the BI report structure; adapt KPIs, tile sizes and visuals to the
+data. Avoid a grid of equal-sized tiles: the main visual gets the largest tile.
 
 `td.chart(id, title, spec, span=1, height=340, note="")` defines a chart.
 In `layout_html`, place it with `{{chart:id}}`; no card is imposed. Set
@@ -96,8 +100,8 @@ In `layout_html`, place it with `{{chart:id}}`; no card is imposed. Set
 Give every chart a distinct simple ID. `span` is for legacy automatic cards;
 use CSS to allocate space in a composed dashboard.
 Use more height for trees, networks, parallel axes or dense calendars.
-Integrate headline numbers and comparisons directly in your layout HTML.
-Do not call the legacy KPI-tile helper by habit. Direction is not automatically
+Author KPI cards in your layout HTML (value, label, comparison) instead of
+the legacy KPI-tile helper. Direction is not automatically
 good or bad; explain what a comparison means for this audience.
 
 Options stay native: `dataset`, `encode`, `visualMap`, `dataZoom`, `brush`,
@@ -164,8 +168,11 @@ use a function in `renderItem` without changing the Talos runtime.
 
 ## Readability and verification
 
-Use theme defaults for categories/text; explicit option colours are available
-when semantically useful. Magnitude needs a sequential scale, signed deviation
+Use theme defaults for categories/text; they are the macs palette. When an
+explicit colour is semantically useful, use a hex from the macs-brand.md table
+— never a colour outside that palette. Prefer series order (`--td-s1` blue for
+the message, `--td-s2` petrol for context) over explicit colours so dark mode
+keeps working. Magnitude needs a sequential scale, signed deviation
 a diverging one. Avoid copying a gallery's background or rainbow palette just
 because it looks striking. Tooltips add detail; titles, units and legends must
 make the chart understandable without hover.
@@ -184,7 +191,8 @@ interactively. PNG is a static snapshot of the currently selected chart state.
 For GL, test the actual preview's WebGL support. File existence or file size
 alone is not a rendering check. Failures must be fixed or clearly reported.
 
-At the final visual check, identify the first thing the reader notices, the
+At the final visual check, run the anti-generic checklist in macs-brand.md,
+then identify the first thing the reader notices, the
 comparison that makes it meaningful, and what they should inspect next. If all
 regions look equally important or the page is still a wall of cards, change
 the spatial hierarchy before delivering. Inspect both HTML and exported PNG.

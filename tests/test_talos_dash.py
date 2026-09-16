@@ -108,6 +108,21 @@ class DashboardTests(unittest.TestCase):
                              layout_html="<h1>Story</h1>", css="h1{color:navy}"), "composed.html")
             self.assertTrue(render.call_args.kwargs["download_png"])
             self.assertEqual(render.call_args.kwargs["layout_html"], "<h1>Story</h1>")
+            self.assertEqual(render.call_args.kwargs["brand"], "macs")
+
+    def test_brand_embeds_font_logo_and_palette(self):
+        css = td._css("macs")
+        self.assertIn("data:font/woff2;base64,", css)
+        self.assertIn("--td-s1:#0785c0", css)
+        self.assertIn("--td-brand:macs", css)
+        self.assertNotIn("--td-brand", td._css())
+        logo = td.brand_logo("macs")
+        self.assertTrue(logo.startswith('<svg class="brand-logo"'))
+        self.assertIn("macs-logo-accent", logo)
+        with self.assertRaisesRegex(ValueError, "needs a brand"):
+            td.render("Logo", [], layout_html="{{brand:logo}}", css="x{}")
+        with self.assertRaisesRegex(ValueError, "Unknown brand"):
+            td.render("Logo", [], brand="acme")
 
     def test_index_covers_all_sources_and_dependency_hints(self):
         with tempfile.TemporaryDirectory() as tmp:

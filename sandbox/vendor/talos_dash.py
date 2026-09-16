@@ -41,6 +41,7 @@ src> yields a permanently blank page.
 
 from __future__ import annotations
 
+import base64
 import json
 import html as html_lib
 import math
@@ -143,6 +144,63 @@ _TOKENS = {
         "muted": "#898781", "grid": "#2c2c2a", "base": "#383835",
     },
 }
+
+# --------------------------------------------------------------------------
+# Brand
+# --------------------------------------------------------------------------
+# A brand replaces the neutral tokens with a company's identity: colours taken
+# from its corporate slides, its typeface embedded as a data URI (the preview
+# CSP allows `font-src data:`) and its logo, placed in a composition with
+# `{{brand:logo}}`. Series order leads with the brand hues, then one warm
+# contrast hue so a highlighted category never has to borrow a status colour.
+BRAND_DIR = Path(__file__).with_name("brand")
+BRANDS = {
+    "macs": {
+        "font": ("Encode Sans", "encode-sans-latin-wght.woff2"),
+        "logo": "macs-logo.svg",
+        "tokens": {
+            "light": {
+                "s": ["#0785c0", "#2b4553", "#86bfe0", "#d9822b",
+                      "#2e8b78", "#8a97a3", "#a34a5b", "#1f4e79"],
+                "q": ["#e7f2f9", "#aed5ec", "#5aaedb", "#0785c0", "#0b4f75"],
+                "good": "#1d7f5f", "warning": "#d9a21b", "critical": "#c0392b",
+                "surface": "#ffffff", "ink": "#1f2a33", "ink2": "#3f4a56",
+                "muted": "#7a8691", "grid": "#e4eaef", "base": "#aec3ce",
+            },
+            "dark": {
+                "s": ["#2a9fd8", "#c9d6df", "#5f86a0", "#e89a4a",
+                      "#48b39e", "#8a97a3", "#c9727f", "#9ccbea"],
+                "q": ["#0b3a55", "#0f5d87", "#1a86bf", "#5ab4e3", "#aed8f0"],
+                "good": "#3fb68b", "warning": "#e5b53a", "critical": "#e0645a",
+                "surface": "#1b1d22", "ink": "#f2f5f7", "ink2": "#c9d3db",
+                "muted": "#8a97a3", "grid": "#2a2e35", "base": "#3c4750",
+            },
+        },
+        # Page roles from the slide master: white canvas, blue headlines,
+        # petrol text, pale blue/grey panels with a left accent bar, and the
+        # petrol-to-blue band along the bottom edge.
+        "page": {
+            "light": {"bg": "#ffffff", "card": "#f2f8fc", "fg": "#1f3a4d", "muted": "#5a6672",
+                      "line": "#dbe3ea", "up": "#1d7f5f", "down": "#c0392b",
+                      "brand-blue": "#0785c0", "brand-petrol": "#2b4553", "brand-deep": "#1f4e79",
+                      "brand-tint": "#e7f2f9", "brand-grey": "#f3f5f7", "brand-rule": "#aec3ce",
+                      "logo-ink": "#333337", "logo-accent": "#3d87cb"},
+            "dark": {"bg": "#17181c", "card": "#1f2226", "fg": "#f2f5f7", "muted": "#a9b6c1",
+                     "line": "#2e333a", "up": "#3fb68b", "down": "#e0645a",
+                     "brand-blue": "#0785c0", "brand-petrol": "#12303d", "brand-deep": "#9ccbea",
+                     "brand-tint": "#12303d", "brand-grey": "#1f2226", "brand-rule": "#3c4750",
+                     "logo-ink": "#ffffff", "logo-accent": "#2a9fd8"},
+        },
+    },
+}
+
+
+def brand_logo(brand: str = "macs") -> str:
+    """Inline SVG logo for a brand; size it with CSS on `.brand-logo`."""
+    if brand not in BRANDS:
+        raise ValueError(f"Unknown brand {brand!r}; use {list(BRANDS)}")
+    svg = (BRAND_DIR / BRANDS[brand]["logo"]).read_text(encoding="utf-8")
+    return svg.replace("<svg ", '<svg class="brand-logo" ', 1)
 
 
 def fmt(*, unit: str = "", decimals: int | None = None, compact: bool = False,
@@ -948,7 +1006,7 @@ def kpi(label: str, value: Any, delta: str = "", tone: str = "") -> dict:
     return {"label": label, "value": value, "delta": delta, "tone": tone}
 
 
-def _css() -> str:
+def _css(brand: str | None = None) -> str:
     """The page stylesheet, including every colour token the charts resolve
     against.
 
@@ -957,8 +1015,11 @@ def _css() -> str:
     the page. `data-theme` (a viewer toggle) must beat the OS media query in both
     directions, hence the `:not()` guard.
     """
+    spec = BRANDS[brand] if brand else None
+    tokens = spec["tokens"] if spec else _TOKENS
+
     def block(mode: str) -> str:
-        t = _TOKENS[mode]
+        t = tokens[mode]
         parts = [f"--td-s{i + 1}:{c}" for i, c in enumerate(t["s"])]
         parts += [f"--td-q{i + 1}:{c}" for i, c in enumerate(t["q"])]
         parts += [f"--td-{k}:{t[k]}" for k in
@@ -966,13 +1027,29 @@ def _css() -> str:
                    "muted", "grid", "base")]
         return ";".join(parts)
 
-    light_page = "--bg:#f9f9f7;--card:#fcfcfb;--fg:#0b0b0b;--muted:#52514e;--line:#e1e0d9;--up:#006300;--down:#d03b3b"
-    dark_page = "--bg:#0d0d0d;--card:#1a1a19;--fg:#ffffff;--muted:#c3c2b7;--line:#2c2c2a;--up:#0ca30c;--down:#d03b3b"
+    if spec:
+        light_page, dark_page = (";".join(f"--{k}:{v}" for k, v in spec["page"][m].items())
+                                 for m in ("light", "dark"))
+        family, font_file = spec["font"]
+        stack = f'"{family}",system-ui,"Segoe UI",sans-serif'
+        light_page += f";--td-brand:{brand};--td-font:{stack}"
+    else:
+        light_page = "--bg:#f9f9f7;--card:#fcfcfb;--fg:#0b0b0b;--muted:#52514e;--line:#e1e0d9;--up:#006300;--down:#d03b3b"
+        dark_page = "--bg:#0d0d0d;--card:#1a1a19;--fg:#ffffff;--muted:#c3c2b7;--line:#2c2c2a;--up:#0ca30c;--down:#d03b3b"
     # A plain template with named placeholders rather than an f-string: CSS is
     # nothing but braces, and every one of them would need doubling.
-    return (_CSS_TEMPLATE
-            .replace("__LIGHT__", light_page + ";--radius:14px;" + block("light"))
-            .replace("__DARK__", dark_page + ";" + block("dark")))
+    out = (_CSS_TEMPLATE
+           .replace("__LIGHT__", light_page + ";--radius:14px;" + block("light"))
+           .replace("__DARK__", dark_page + ";" + block("dark")))
+    if spec:
+        font = base64.b64encode((BRAND_DIR / font_file).read_bytes()).decode("ascii")
+        out = (f'@font-face{{font-family:"{family}";font-weight:100 900;font-display:block;'
+               f'src:url(data:font/woff2;base64,{font}) format("woff2")}}\n' + out
+               + "body,#td-artboard{font-family:var(--td-font)}"
+               ".brand-logo{display:block;height:44px;width:auto}"
+               ".brand-logo .macs-logo-ink{fill:var(--logo-ink)}"
+               ".brand-logo .macs-logo-accent{fill:var(--logo-accent)}\n")
+    return out
 
 
 _CSS_TEMPLATE = """
@@ -1043,9 +1120,11 @@ def render(title: str, charts: Sequence[Mapping[str, Any]],
            subtitle: str = "", footer: str = "", lang: str = "de",
            locale: str = "de-DE", page_format: str = "web",
            layout_html: str | None = None, css: str = "",
-           download_png: bool = False) -> str:
+           download_png: bool = False, brand: str | None = None) -> str:
     """Build the complete self-contained HTML page."""
     page_format = page_format.lower()
+    if brand is not None and brand not in BRANDS:
+        raise ValueError(f"Unknown brand {brand!r}; use {list(BRANDS)} or None")
     if page_format not in PAGE_FORMATS:
         raise ValueError(f"Unknown page_format {page_format!r}; use {list(PAGE_FORMATS)}")
     ids = [c["id"] for c in charts]
@@ -1057,6 +1136,10 @@ def render(title: str, charts: Sequence[Mapping[str, Any]],
             raise ValueError("height=None requires an ECharts chart in layout_html")
 
     enhanced = download_png or layout_html is not None or page_format != "web"
+    if layout_html is not None and "{{brand:logo}}" in layout_html:
+        if brand is None:
+            raise ValueError("{{brand:logo}} needs a brand; pass brand=...")
+        layout_html = layout_html.replace("{{brand:logo}}", brand_logo(brand))
     if layout_html is not None:
         slots = re.findall(r"\{\{chart:([^}]+)\}\}", layout_html)
         if sorted(slots) != sorted(ids):
@@ -1119,7 +1202,7 @@ def render(title: str, charts: Sequence[Mapping[str, Any]],
     parts = {
         "__LANG__": _esc(lang),
         "__TITLE__": _esc(title),
-        "__CSS__": _css() + (_VIEW_CSS if enhanced else "") + "\n" + css,
+        "__CSS__": _css(brand) + (_VIEW_CSS if enhanced else "") + "\n" + css,
         "__RUNTIME__": runtime,
         "__SUB__": f'<div class="sub">{_esc(subtitle)}</div>' if subtitle else "",
         "__KPIS__": f'<div class="kpis">{tiles}</div>' if tiles else "",
@@ -1183,7 +1266,8 @@ def dashboard(path: str, title: str, charts: Sequence[Mapping[str, Any]],
               subtitle: str = "", footer: str = "", lang: str = "de",
               locale: str = "de-DE", page_format: str = "web",
               layout_html: str | None = None, css: str = "",
-              download_png: bool = False, **unsupported) -> str:
+              download_png: bool = False, brand: str | None = None,
+              **unsupported) -> str:
     """Render and write the page. Returns the path written."""
     if "theme" in unsupported:
         raise ValueError(
@@ -1195,7 +1279,8 @@ def dashboard(path: str, title: str, charts: Sequence[Mapping[str, Any]],
         raise TypeError(f"dashboard() got unexpected keyword(s) {sorted(unsupported)}")
     html = render(title, charts, kpis, subtitle=subtitle, footer=footer,
                   lang=lang, locale=locale, page_format=page_format,
-                  layout_html=layout_html, css=css, download_png=download_png)
+                  layout_html=layout_html, css=css, download_png=download_png,
+                  brand=brand)
     out = Path(path)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(html, encoding="utf-8")
@@ -1204,13 +1289,17 @@ def dashboard(path: str, title: str, charts: Sequence[Mapping[str, Any]],
 
 def compose(path: str, title: str, charts: Sequence[Mapping[str, Any]], *,
             layout_html: str, css: str, page_format: str = "web",
-            lang: str = "de", locale: str = "de-DE") -> str:
+            lang: str = "de", locale: str = "de-DE",
+            brand: str | None = "macs") -> str:
     """Dashboard v2 entrypoint: authored composition required, no tile fallback.
 
     PNG rendering is exposed to Talos; the artifact contains no download UI.
     The legacy dashboard() entrypoint retains its automatic card layout.
+    Pages carry the macs brand (palette, Encode Sans, `{{brand:logo}}`) unless
+    `brand=None` is passed for a deliberately neutral page.
     """
     if not layout_html.strip() or not css.strip():
         raise ValueError("compose() needs an authored layout_html and css; design the page first")
     return dashboard(path, title, charts, layout_html=layout_html, css=css,
-                     page_format=page_format, lang=lang, locale=locale, download_png=True)
+                     page_format=page_format, lang=lang, locale=locale, download_png=True,
+                     brand=brand)

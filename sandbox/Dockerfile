@@ -156,6 +156,8 @@ RUN set -eu; \
 COPY vendor/talos_dash.py /opt/talos/vendor/talos_dash.py
 COPY vendor/echarts-runtime.js /opt/talos/vendor/echarts-runtime.js
 COPY vendor/dashboard-view.js /opt/talos/vendor/dashboard-view.js
+# Brand assets (logo SVG, OFL web font) embedded into branded dashboards.
+COPY vendor/brand /opt/talos/vendor/brand
 
 # Full Apache ECharts is the primary dashboard API. Keep the old builders for
 # existing dashboards; render() only inlines the engines a page actually uses.

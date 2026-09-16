@@ -23,67 +23,100 @@ needs more space, reduce the content or create additional HTML pages, each
 exportable through Talos. The exporter rejects overflowing fixed pages instead of silently
 cropping. A4 pixel dimensions do not imply embedded printer DPI metadata.
 
-## Compose the page, not a wall of tiles
+## Build a BI report page
 
-Determine the message and reading order before choosing a layout. Use a focal
-chart or number, a strong heading, supporting graphics, intentional whitespace,
-short explanations and integrated annotations. Consider editorial columns,
-an asymmetric split, a central diagram with callouts, a timeline across the
-page, or a report-like composition. Use colour areas, typography, rules and
-spacing for grouping; rounded cards are optional. Do not reuse one layout for
-every dashboard. Keep the user's branding and desired visual tone.
+Determine the question and reading order before choosing a layout: header with
+logo, title and data freshness → filter context → KPI cards with comparisons →
+main visual in the largest tile → supporting visuals → detail. Use a CSS grid of
+white tiles on the grey canvas; size tiles by importance. Keep the same colour
+for the same measure across all visuals.
 
 `layout_html` replaces the generated header, KPI tiles, grid and footer. You
 therefore include the visible title, period, units, notes and sources yourself.
 Every chart must appear exactly once as `{{chart:id}}`. The scaffold inserts
-only its chart host; put headings/notes around it in the authored layout.
+only its chart host; put tile titles/notes around it in the authored layout.
 `css` is appended after scaffold CSS; scope rules under `#td-artboard` to keep
 the outer preview-sizing wrapper intact. Escape data-derived text with `html.escape`.
 
-This small example demonstrates the API; vary the design for the actual story:
+This example shows the BI structure in macs colours; adapt KPIs, tiles and
+visuals to the actual data:
 
 ```python
 import sys
 sys.path.insert(0, "/opt/talos/vendor")
 import talos_dash as td
 
+months = ["Jan", "Feb", "Mär", "Apr", "Mai", "Jun", "Jul", "Aug", "Sep", "Okt", "Nov", "Dez"]
 trend = td.echarts({
     "tooltip": {"trigger": "axis"},
-    "grid": {"left": 45, "right": 24, "top": 30, "bottom": 35},
-    "xAxis": {"type": "category", "data": ["Q1", "Q2", "Q3", "Q4"]},
-    "yAxis": {"type": "value", "name": "Mio. EUR", "min": 0},
-    "series": [{"type": "line", "data": [8, 10, 11, 14], "areaStyle": {"opacity": 0.12}}]
+    "legend": {"top": 0, "right": 0, "itemWidth": 14, "itemHeight": 8},
+    "grid": {"left": 44, "right": 12, "top": 30, "bottom": 24},
+    "xAxis": {"type": "category", "data": months, "axisTick": {"show": False}},
+    "yAxis": {"type": "value", "name": "Mio. €"},
+    "series": [
+        {"name": "Ist 2026", "type": "line", "smooth": True, "symbol": "none", "lineStyle": {"width": 2.5},
+         "areaStyle": {"opacity": 0.1}, "data": [3.1, 3.0, 3.6, 3.4, 3.8, 4.0, 3.5, 3.3, 3.9, 4.2, 4.4, 4.8]},
+        {"name": "Vorjahr", "type": "line", "smooth": True, "symbol": "none", "lineStyle": {"width": 2, "type": "dashed"},
+         "data": [2.8, 2.9, 3.2, 3.1, 3.3, 3.5, 3.2, 3.0, 3.4, 3.7, 3.8, 4.1]},
+    ],
 })
+top = td.echarts({
+    "tooltip": {"trigger": "axis", "axisPointer": {"type": "shadow"}},
+    "grid": {"left": 92, "right": 48, "top": 4, "bottom": 4},
+    "xAxis": {"type": "value", "show": False},
+    "yAxis": {"type": "category", "inverse": True, "axisTick": {"show": False}, "axisLine": {"show": False},
+              "data": ["Nord", "West", "Süd", "Ost", "Export"]},
+    "series": [{"type": "bar", "barMaxWidth": 18, "itemStyle": {"borderRadius": 2},
+                "label": {"show": True, "position": "right", "formatter": "{c} Mio."},
+                "data": [14.2, 11.8, 9.6, 5.1, 2.3]}],
+})
+charts = [td.chart("trend", "Umsatz nach Monat, Ist vs. Vorjahr", trend, height=None),
+          td.chart("top", "Umsatz nach Region", top, height=None)]
 layout = """
-<div class="eyebrow">GESCHÄFTSENTWICKLUNG · 2026 · DEMODATEN</div>
-<h1>Wachstum mit<br>klarer Richtung.</h1>
-<div class="story">
-  <section class="lead"><div class="headline-number">43 Mio.</div>
-    <p>Umsatz im Gesamtjahr</p><hr>
-    <p>Das vierte Quartal liefert den größten Beitrag.</p>
-  </section>
-  <section class="figure"><h2>Jedes Quartal gewinnt an Volumen</h2>
-    <div class="plot">{{chart:trend}}</div>
-  </section>
-</div>
-<div class="source">Quelle: synthetische Beispieldaten · Beträge in EUR</div>
+<header class="bar">{{brand:logo}}<h1>Vertriebsübersicht 2026</h1>
+  <span class="meta">Stand 31.12.2026 · Beträge in Mio. €</span></header>
+<nav class="filters"><span>Zeitraum <b>Jan–Dez 2026</b></span><span>Region <b>Alle</b></span>
+  <span>Sparte <b>Alle</b></span></nav>
+<section class="kpis">
+  <div class="kpi"><label>Umsatz</label><strong>43,0</strong><em class="up">▲ 12,0 % ggü. Vorjahr</em></div>
+  <div class="kpi"><label>Deckungsbeitrag</label><strong>15,9</strong><em class="up">▲ 4,1 % ggü. Vorjahr</em></div>
+  <div class="kpi"><label>Aufträge</label><strong>1.284</strong><em class="down">▼ 2,3 % ggü. Vorjahr</em></div>
+  <div class="kpi"><label>Ø Auftragswert</label><strong>33,5 T€</strong><em class="up">▲ 14,6 % ggü. Vorjahr</em></div>
+</section>
+<section class="tiles">
+  <article class="tile wide"><h2>Umsatz nach Monat, Ist vs. Vorjahr</h2><div class="plot">{{chart:trend}}</div></article>
+  <article class="tile"><h2>Umsatz nach Region</h2><div class="plot">{{chart:top}}</div></article>
+</section>
+<p class="source">Quelle: synthetische Beispieldaten</p>
 """
 style = """
-#td-artboard {padding:48px 56px; font-family:Georgia,serif;}
-#td-artboard .eyebrow {font:12px system-ui;letter-spacing:2px;color:var(--muted)}
-#td-artboard h1 {font-size:58px;line-height:1.05;margin:22px 0 28px;}
-#td-artboard .story {display:grid;grid-template-columns:280px minmax(0,1fr);gap:60px;}
-#td-artboard .story > * {min-width:0;}
-#td-artboard .headline-number {font-size:54px;color:var(--td-s1);}
-#td-artboard .lead p {font:18px/1.5 system-ui;}
-#td-artboard .figure h2 {font:18px system-ui;}
-#td-artboard .plot {height:280px;}
+#td-artboard {padding:0 20px 16px;background:var(--brand-grey);color:var(--fg);}
+#td-artboard .bar {display:flex;align-items:center;gap:16px;height:56px;margin:0 -20px;padding:0 20px;
+  background:var(--td-surface);border-bottom:1px solid var(--line);}
+#td-artboard .bar .brand-logo {height:26px;}
+#td-artboard h1 {font-size:20px;font-weight:600;margin:0;padding-left:16px;border-left:1px solid var(--line);}
+#td-artboard .meta {margin-left:auto;font-size:12px;color:var(--muted);}
+#td-artboard .filters {display:flex;gap:8px;margin:14px 0;font-size:12px;color:var(--muted);}
+#td-artboard .filters span {background:var(--td-surface);border:1px solid var(--line);border-radius:4px;padding:5px 10px;}
+#td-artboard .filters b {color:var(--brand-blue);font-weight:600;margin-left:4px;}
+#td-artboard .kpis {display:grid;grid-template-columns:repeat(4,1fr);gap:14px;}
+#td-artboard .kpi, #td-artboard .tile {background:var(--td-surface);border:1px solid var(--line);border-radius:6px;
+  box-shadow:0 1px 2px rgba(16,24,40,.06);min-width:0;}
+#td-artboard .kpi {padding:12px 16px;border-top:3px solid var(--brand-blue);display:flex;flex-direction:column;}
+#td-artboard .kpi label {font-size:12px;color:var(--muted);}
+#td-artboard .kpi strong {font-size:30px;font-weight:600;font-variant-numeric:tabular-nums;color:var(--brand-deep);}
+#td-artboard .kpi em {font-style:normal;font-size:12px;}
+#td-artboard .up {color:var(--td-good);} #td-artboard .down {color:var(--td-critical);}
+#td-artboard .tiles {display:grid;grid-template-columns:repeat(12,1fr);gap:14px;margin-top:14px;}
+#td-artboard .tile {grid-column:span 4;padding:12px 14px;}
+#td-artboard .tile.wide {grid-column:span 8;}
+#td-artboard .tile h2 {font-size:13px;font-weight:600;margin:0 0 6px;color:var(--brand-deep);}
+#td-artboard .plot {height:360px;}
 #td-artboard .plot .chart {height:100%;}
-#td-artboard .source {position:absolute;bottom:32px;font:12px system-ui;color:var(--muted);}
+#td-artboard .source {font-size:11px;color:var(--muted);margin:10px 0 0;}
 """
-td.compose("output/dashboard.html", title="Geschäftsentwicklung 2026",
-    charts=[td.chart("trend", "Quartalsumsatz in Mio. EUR", trend, height=None)],
-    page_format="16:9", layout_html=layout, css=style)
+td.compose("output/dashboard.html", title="Vertriebsübersicht 2026",
+    charts=charts, page_format="16:9", layout_html=layout, css=style)
 ```
 
 Give CSS-sized chart hosts a definite container height. Fixed-size charts can

@@ -34,13 +34,29 @@ window.TalosECharts = {
           const token = name => css.getPropertyValue(`--td-${name}`).trim();
           const mode = document.documentElement.dataset.theme;
           const dark = mode === 'dark' || (mode !== 'light' && media.matches);
-          chart = echarts.init(el, dark ? 'dark' : null, {locale: options.locale?.startsWith('de') ? 'DE' : 'EN',
+          // A branded page carries its own axis, legend and tooltip colours and
+          // typeface. The stock ECharts greys are what make a chart look generic.
+          const font = token('font') || undefined;
+          let theme = dark ? 'dark' : null;
+          if (token('brand')) {
+            const axis = {axisLine: {lineStyle: {color: token('base')}}, axisTick: {lineStyle: {color: token('base')}},
+              axisLabel: {color: token('ink2')}, nameTextStyle: {color: token('ink2')},
+              splitLine: {lineStyle: {color: token('grid')}}};
+            theme = `talos-brand-${dark ? 'dark' : 'light'}`;
+            echarts.registerTheme(theme, {
+              textStyle: {fontFamily: font}, title: {textStyle: {color: token('ink')}, subtextStyle: {color: token('ink2')}},
+              legend: {textStyle: {color: token('ink2')}},
+              tooltip: {backgroundColor: token('surface'), borderColor: token('grid'), textStyle: {color: token('ink')}},
+              categoryAxis: axis, valueAxis: axis, logAxis: axis, timeAxis: axis,
+            });
+          }
+          chart = echarts.init(el, theme, {locale: options.locale?.startsWith('de') ? 'DE' : 'EN',
               width: el.clientWidth || 640, height: entry.height || el.clientHeight || 340});
           const spec = entry.spec;
           if (spec.setup) cleanup = spec.setup(chart, echarts, spec.data);
           chart.setOption({animation: false, aria: {enabled: true},
             color: Array.from({length: 8}, (_, i) => token(`s${i + 1}`)),
-            backgroundColor: 'transparent', textStyle: {color: token('ink')},
+            backgroundColor: 'transparent', textStyle: {color: token('ink'), fontFamily: font},
             ...spec.option});
           if (previous) {
             const state = {};
@@ -51,7 +67,9 @@ window.TalosECharts = {
         } catch (error) { fail(error); }
       };
       draw();
-      resize = new ResizeObserver(() => {
+      // Canvas text is measured once; redraw when an embedded brand font arrives.
+      if (document.fonts && document.fonts.status !== 'loaded') document.fonts.ready.then(draw);
+      resize =new ResizeObserver(() => {
         if (chart && !chart.isDisposed()) chart.resize({width: el.clientWidth || 640, height: entry.height || el.clientHeight || 340});
       });
       resize.observe(el);
