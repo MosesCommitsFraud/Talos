@@ -50,8 +50,19 @@ function talosResolve(node, token, locale, key) {
       TALOS_FORMATS.lastIndex = 0;
       return talosFormatter(node, locale);
     }
-    const m = /^@([a-z][a-z0-9-]*)$/i.exec(node);
-    return m ? (token(m[1]) || node) : node;
+    // "@s1" or "@s1/30" (30 % opacity, for area fills and gradients).
+    const m = /^@([a-z][a-z0-9-]*)(?:\/(\d{1,3}))?$/i.exec(node);
+    if (!m) return node;
+    const value = token(m[1]);
+    if (!value) return node;
+    return m[2] ? talosAlpha(value, Math.min(100, Number(m[2])) / 100) : value;
+  }
+  // Readability floor and ceiling: nothing a reader must decode below 12px,
+  // no hairline or black weights.
+  if (key === 'fontSize' && typeof node === 'number') return Math.max(12, node);
+  if (key === 'fontWeight') {
+    const w = typeof node === 'number' ? node : ({bold: 700, bolder: 800, lighter: 300}[node] ?? 400);
+    return Math.min(600, Math.max(400, w));
   }
   if (Array.isArray(node)) return node.map((x) => talosResolve(x, token, locale));
   if (node && typeof node === 'object' && Object.getPrototypeOf(node) === Object.prototype) {
@@ -62,6 +73,13 @@ function talosResolve(node, token, locale, key) {
   return node;
 }
 
+function talosAlpha(hex, alpha) {
+  const m = /^#?([0-9a-f]{6})$/i.exec(hex.trim());
+  if (!m) return hex;
+  const n = parseInt(m[1], 16);
+  return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${alpha})`;
+}
+
 window.TalosECharts = {
   mountAll(entries, options = {}) {
     const hosts = {};
@@ -69,7 +87,6 @@ window.TalosECharts = {
       const el = document.getElementById(entry.id);
       if (!el) continue;
       let chart, cleanup, resize, observer, disposed = false;
-      const media = window.matchMedia('(prefers-color-scheme: dark)');
       const fail = error => {
         console.error(entry.id, error);
         try { if (typeof cleanup === 'function') cleanup(); }
@@ -97,7 +114,7 @@ window.TalosECharts = {
           const token = name => css.getPropertyValue(`--td-${name}`).trim() || css.getPropertyValue(`--${name}`).trim();
           const locale = options.locale || 'de-DE';
           const mode = document.documentElement.dataset.theme;
-          const dark = mode === 'dark' || (mode !== 'light' && media.matches);
+          const dark = mode === 'dark';
           // A branded page carries its own axis, legend and tooltip colours and
           // typeface. The stock ECharts greys are what make a chart look generic.
           const font = token('font') || undefined;
@@ -140,19 +157,19 @@ window.TalosECharts = {
       draw();
       // Canvas text is measured once; redraw when an embedded brand font arrives.
       if (document.fonts && document.fonts.status !== 'loaded') document.fonts.ready.then(draw);
-      resize =new ResizeObserver(() => {
+      resize = new ResizeObserver(() => {
         if (chart && !chart.isDisposed()) chart.resize({width: el.clientWidth || 640, height: entry.height || el.clientHeight || 340});
       });
       resize.observe(el);
       observer = new MutationObserver(draw);
       observer.observe(document.documentElement, {attributes: true, attributeFilter: ['data-theme']});
-      media.addEventListener('change', draw);
+
       hosts[entry.id] = {
         usesGL: entry.spec.extensions?.includes('echarts-gl') || false,
         get chart() { return chart; },
         dispose() {
           disposed = true;
-          resize.disconnect(); observer.disconnect(); media.removeEventListener('change', draw);
+          resize.disconnect(); observer.disconnect();
           if (typeof cleanup === 'function') cleanup();
           if (chart) chart.dispose();
         }

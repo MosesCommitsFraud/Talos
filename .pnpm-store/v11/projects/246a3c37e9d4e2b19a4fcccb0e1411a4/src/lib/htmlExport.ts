@@ -9,11 +9,23 @@ const CDN = 'https://cdn.jsdelivr.net/npm/ https://cdnjs.cloudflare.com/ajax/lib
 const CSP = `default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval' ${CDN}; style-src 'unsafe-inline' ${CDN}; img-src data: blob:; font-src data:; connect-src 'none'; form-action 'none'; base-uri 'none'`;
 const script = (source: string) => `<script>${source.replace(/<\/script/gi, '<\\/script')}</script>`;
 
-export function htmlPreviewDocument(html: string): string {
+/** `dark` is the app's current theme. A generated page is light unless its
+ *  root carries data-theme="dark": the preview follows Talos, while the same
+ *  file downloaded and opened on its own stays light. Later theme switches
+ *  arrive as a `talos:theme` message (see html-export-bridge.js). */
+export function htmlPreviewDocument(html: string, dark = false): string {
   // The leading CSP also covers malformed/full-document HTML appended afterwards.
   // Hide controls in old Talos artifacts; current artifacts contain no toolbar.
+  // The attribute is set before the page's own <html> tag, whose attributes
+  // merge into the same root element.
+  const theme = `document.documentElement.dataset.theme=${JSON.stringify(dark ? 'dark' : 'light')};`;
   return `<!doctype html><meta http-equiv="Content-Security-Policy" content="${CSP}"><style>#td-downloads{display:none!important}</style>`
-    + script(imageRuntime) + script(bridge) + html;
+    + script(theme) + script(imageRuntime) + script(bridge) + html;
+}
+
+/** Tell a live preview frame about an app theme change without reloading it. */
+export function postPreviewTheme(frame: Window, dark: boolean): void {
+  frame.postMessage({ type: 'talos:theme', theme: dark ? 'dark' : 'light' }, '*');
 }
 
 export async function requestHtmlPng(frame: Window, signal: AbortSignal): Promise<Blob> {

@@ -1012,8 +1012,7 @@ def _css(brand: str | None = None, legacy: bool = True) -> str:
 
     Card surfaces and ink are the same tokens the marks use, so the palette that
     passed contrast against a `#fcfcfb` card on paper passes against the card on
-    the page. `data-theme` (a viewer toggle) must beat the OS media query in both
-    directions, hence the `:not()` guard.
+    the page. Dark tokens apply only under `data-theme="dark"` (see _CSS_TEMPLATE).
     """
     spec = BRANDS[brand] if brand else None
     tokens = spec["tokens"] if spec else _TOKENS
@@ -1059,9 +1058,11 @@ def _css(brand: str | None = None, legacy: bool = True) -> str:
     return out
 
 
+# Light unless the host says otherwise: the Talos preview sets data-theme to the
+# app's theme, while a downloaded file opened on its own always renders light —
+# the OS colour scheme is deliberately not consulted.
 _CSS_TEMPLATE = """
 :root{__LIGHT__}
-@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){__DARK__}}
 :root[data-theme="dark"]{__DARK__}
 *{box-sizing:border-box}
 body{margin:0;padding:24px;background:var(--bg);color:var(--fg);
@@ -1154,6 +1155,9 @@ def render(title: str, charts: Sequence[Mapping[str, Any]],
     if layout_html is not None and "{{brand:logo}}" in layout_html:
         if brand is None:
             raise ValueError("{{brand:logo}} needs a brand; pass brand=...")
+        # An <img src="{{brand:logo}}"> would put SVG markup inside an attribute
+        # and show a broken image: the placeholder is the whole element.
+        layout_html = re.sub(r"<img\b[^>]*\{\{brand:logo\}\}[^>]*>", "{{brand:logo}}", layout_html)
         layout_html = layout_html.replace("{{brand:logo}}", brand_logo(brand))
     if layout_html is not None:
         slots = re.findall(r"\{\{chart:([^}]+)\}\}", layout_html)
@@ -1302,6 +1306,90 @@ def dashboard(path: str, title: str, charts: Sequence[Mapping[str, Any]],
     return str(out)
 
 
+# --------------------------------------------------------------------------
+# Design lint for composed, branded pages
+# --------------------------------------------------------------------------
+# The skill text asks for theme colours, readable type and container queries;
+# generated pages kept ignoring it (white cards on a dark page, 10px labels,
+# "{c:,.0f}" formatters ECharts prints literally). These are checked instead.
+_COLOR_LITERAL = re.compile(r"#[0-9a-fA-F]{3,8}\b|\b(?:rgba?|hsla?)\(|\b(?:white|black)\b")
+_COLOR_VALUE = re.compile(r"^(?:#[0-9a-fA-F]{3,8}|(?:rgba?|hsla?)\(.*\)|white|black)$", re.I)
+_SHADOW_PROPS = {"box-shadow", "text-shadow", "filter"}
+_COLOR_PROPS = re.compile(r"^(?:color|background(?:-color|-image)?|border(?:-[a-z]+)*|outline(?:-color)?|fill|stroke|"
+                          r"accent-color|caret-color|text-decoration-color|column-rule(?:-color)?)$")
+_DECL = re.compile(r"([a-zA-Z-]+)\s*:\s*([^;{}]+)")
+_PY_FORMAT = re.compile(r"\{[a-zA-Z@]+:[^}]*\}")
+_RAW_NUMBER = re.compile(r"\{(?:c|value)\}")
+_MAX_ISSUES = 15
+
+
+def _lint_declarations(where: str, text: str, issues: list) -> None:
+    for prop, value in _DECL.findall(re.sub(r"/\*.*?\*/", "", text, flags=re.S)):
+        prop, value = prop.lower(), value.strip()
+        if prop not in _SHADOW_PROPS and _COLOR_PROPS.match(prop) and _COLOR_LITERAL.search(value):
+            issues.append(f"{where}: `{prop}: {value}` — fixed colour; use a variable such as "
+                          "var(--td-surface), var(--fg), var(--muted), var(--line), var(--brand-blue)")
+        if prop == "font-size":
+            px = re.match(r"([\d.]+)px", value)
+            rem = re.match(r"([\d.]+)r?em", value)
+            if (px and float(px.group(1)) < 12) or (rem and float(rem.group(1)) < 0.75):
+                issues.append(f"{where}: `font-size: {value}` — below 12px is not readable")
+        if prop == "font-weight":
+            v = value.lower()
+            if v in ("bold", "bolder", "lighter") or (v.isdigit() and not 400 <= int(v) <= 600):
+                issues.append(f"{where}: `font-weight: {value}` — use 400, 500 or 600")
+
+
+def _lint_option(path: str, node: Any, issues: list, key: str = "") -> None:
+    if isinstance(node, JS):
+        return
+    if isinstance(node, str):
+        # Whole-string match only: data such as "Black Friday" or "#1 Kunde" is not a colour.
+        if _COLOR_VALUE.match(node.strip()):
+            issues.append(f"{path}: `{node}` — fixed colour; leave it to the theme or use a token "
+                          "like \"@s1\", \"@s2\", \"@s1/30\" (30 % opacity), \"@muted\"")
+        if key in ("formatter", "valueFormatter"):
+            if _PY_FORMAT.search(node):
+                issues.append(f"{path}: `{node}` — Python-style format; ECharts prints it literally. "
+                              "Use \"@eurCompact\", \"@eur\", \"@num\", \"@pct\" or \"{b}: @eurCompact\"")
+            elif _RAW_NUMBER.search(node) and re.search(r"€|EUR|Mio|Tsd|%", node):
+                issues.append(f"{path}: `{node}` — prints the raw number; use \"@eurCompact\", \"@eur\" or \"@pct\"")
+        return
+    if isinstance(node, Mapping):
+        for k, v in node.items():
+            if k == "grid" and isinstance(v, Mapping):
+                for side in ("left", "right"):
+                    if isinstance(v.get(side), (int, float)) and v[side] > 48:
+                        issues.append(f"{path}.grid.{side}: {v[side]} — fixed margin breaks narrow "
+                                      "tiles; keep ≤ 48 and let ECharts fit the labels")
+            _lint_option(f"{path}.{k}", v, issues, str(k))
+    elif isinstance(node, (list, tuple)):
+        for i, v in enumerate(node[:50]):
+            _lint_option(f"{path}[{i}]", v, issues, key)
+
+
+def lint_composition(layout_html: str, css: str,
+                     charts: Sequence[Mapping[str, Any]]) -> list[str]:
+    """Design problems that break dark mode, narrow previews or readability."""
+    issues: list[str] = []
+    for block in re.findall(r"\{([^{}]*)\}", re.sub(r"/\*.*?\*/", "", css, flags=re.S)):
+        _lint_declarations("css", block, issues)
+    for m in re.finditer(r"@media[^{]*\((?:max|min)-width", css):
+        issues.append("css: `@media (…-width)` — the preview panel is narrower than the window; "
+                      "use `@container artboard (max-width: …)`")
+    for style in re.findall(r"style\s*=\s*\"([^\"]*)\"", layout_html):
+        _lint_declarations("layout_html style=", style, issues)
+    for c in charts:
+        spec = c.get("spec") or {}
+        if spec.get("type") == "echarts":
+            _lint_option(f"chart '{c.get('id')}'", spec.get("option"), issues)
+    seen: list[str] = []
+    for issue in issues:
+        if issue not in seen:
+            seen.append(issue)
+    return seen[:_MAX_ISSUES]
+
+
 def compose(path: str, title: str, charts: Sequence[Mapping[str, Any]], *,
             layout_html: str, css: str, page_format: str = "web",
             lang: str = "de", locale: str = "de-DE",
@@ -1315,6 +1403,14 @@ def compose(path: str, title: str, charts: Sequence[Mapping[str, Any]], *,
     """
     if not layout_html.strip() or not css.strip():
         raise ValueError("compose() needs an authored layout_html and css; design the page first")
+    if brand:
+        issues = lint_composition(layout_html, css, charts)
+        if issues:
+            raise ValueError(
+                "compose() rejected the design — it would break in dark mode, in the narrow "
+                "preview or be hard to read. Fix every point (rules: references/macs-brand.md):\n- "
+                + "\n- ".join(issues)
+            )
     return dashboard(path, title, charts, layout_html=layout_html, css=css,
                      page_format=page_format, lang=lang, locale=locale, download_png=True,
                      brand=brand)

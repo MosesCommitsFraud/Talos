@@ -4,6 +4,10 @@
   window.addEventListener('message', async event => {
     if (event.source !== window.parent || window.parent === window) return;
     const message = event.data;
+    if (message?.type === 'talos:theme' && (message.theme === 'dark' || message.theme === 'light')) {
+      document.documentElement.dataset.theme = message.theme;
+      return;
+    }
     if (message?.type !== 'talos:export-png' || typeof message.id !== 'string' || message.id.length > 100) return;
     const reply = data => event.source.postMessage({type: 'talos:export-result', id: message.id, ...data}, '*');
     if (busy) { reply({error: 'An export is already running.'}); return; }

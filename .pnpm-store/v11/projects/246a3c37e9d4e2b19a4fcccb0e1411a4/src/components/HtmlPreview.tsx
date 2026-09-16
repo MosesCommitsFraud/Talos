@@ -1,8 +1,20 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { CodeIcon, DownloadIcon, ExternalLinkIcon, EyeIcon } from 'lucide-react';
-import { htmlPreviewDocument, requestHtmlPng, savePreviewBlob } from '@/lib/htmlExport';
+import { htmlPreviewDocument, postPreviewTheme, requestHtmlPng, savePreviewBlob } from '@/lib/htmlExport';
 import { Markdown } from './Markdown';
+
+/** Whether the app itself is currently dark (applyTheme toggles .dark on <html>). */
+function useAppDark(): boolean {
+  const read = () => document.documentElement.classList.contains('dark');
+  const [dark, setDark] = useState(read);
+  useEffect(() => {
+    const observer = new MutationObserver(() => setDark(read()));
+    observer.observe(document.documentElement, {attributes: true, attributeFilter: ['class']});
+    return () => observer.disconnect();
+  }, []);
+  return dark;
+}
 
 export function HtmlPreview({text, url, name}: {text: string; url: string; name: string}) {
   const {t} = useTranslation();
@@ -12,7 +24,16 @@ export function HtmlPreview({text, url, name}: {text: string; url: string; name:
   const [ready, setReady] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  const srcDoc = useMemo(() => htmlPreviewDocument(text), [text]);
+  const dark = useAppDark();
+  const darkRef = useRef(dark);
+  darkRef.current = dark;
+  // Theme is baked in only when the document itself changes; later switches
+  // are posted to the live frame so charts keep their zoom/legend state.
+  const srcDoc = useMemo(() => htmlPreviewDocument(text, darkRef.current), [text]);
+  useEffect(() => {
+    const target = frame.current?.contentWindow;
+    if (target && ready) postPreviewTheme(target, dark);
+  }, [dark, ready]);
   useEffect(() => {
     setReady(false); setBusy(false); setError(''); setSource(false);
     return () => { pending.current?.abort(); pending.current = null; };
@@ -44,6 +65,6 @@ export function HtmlPreview({text, url, name}: {text: string; url: string; name:
     {source && <div className="min-h-0 flex-1 overflow-auto p-4"><Markdown text={'```html\n' + text + '\n```'} /></div>}
     <iframe ref={frame} srcDoc={srcDoc} title={name} onLoad={() => { pending.current?.abort(); pending.current = null; setBusy(false); setReady(true); }}
       sandbox="allow-scripts allow-popups allow-downloads"
-      className={`${source ? 'hidden' : 'block'} min-h-0 w-full flex-1 border-0 bg-white`} />
+      className={`${source ? 'hidden' : 'block'} min-h-0 w-full flex-1 border-0 ${dark ? 'bg-background' : 'bg-white'}`} />
   </div>;
 }

@@ -67,7 +67,7 @@ trend = td.echarts({
 })
 top = td.echarts({
     "tooltip": {"trigger": "axis", "axisPointer": {"type": "shadow"}, "valueFormatter": "@eur"},
-    "grid": {"left": 8, "right": 56, "top": 4, "bottom": 4},
+    "grid": {"left": 8, "right": 48, "top": 4, "bottom": 4},
     "xAxis": {"type": "value", "show": False},
     "yAxis": {"type": "category", "inverse": True, "axisTick": {"show": False}, "axisLine": {"show": False},
               "axisLabel": {"width": 110, "overflow": "truncate"},

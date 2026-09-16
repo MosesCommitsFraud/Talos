@@ -11,6 +11,22 @@ and the logo via `{{brand:logo}}`. `brand=None` only for a deliberately unbrande
 Every page must work in **three situations at once**: light mode, dark mode,
 and a narrow Talos side panel (~420 px wide) as well as a wide screen.
 
+**Theme:** a page is light by default. The Talos preview switches it to the
+app's theme (it sets `data-theme` on the root); a downloaded file opened on its
+own stays light. Never write your own `prefers-color-scheme` rules or a fixed
+dark/light background — use the variables below and both modes follow.
+
+**Enforced:** `td.compose` rejects the page and lists every problem when it
+finds fixed colours (hex, `rgb()`, `white`, `black`) in CSS, inline styles or
+chart options, font sizes under 12px, font weights outside 400–600,
+`@media (max/min-width)` breakpoints, Python-style formatters like
+`"{c:,.0f}"`, raw `"{value} Mio"` labels or a chart `grid.left/right` over
+48 px. Fix the listed points and call it again.
+
+**Logo:** `{{brand:logo}}` is an inline SVG element on its own —
+`<header>{{brand:logo}}<h1>…</h1></header>`. Never put it in `<img src="…">`
+or any other attribute. Size it with `#td-artboard .brand-logo {height: 24px}`.
+
 ## Colour: never write a hex value
 
 Hard-coded colours are the main reason dashboards break in dark mode (dark
@@ -40,6 +56,7 @@ specific colour, write a token string; it is resolved for the current theme:
 | Token | Meaning |
 | --- | --- |
 | `"@s1"` … `"@s8"` | categorical series colours (s1 = macs blue, s2 = petrol, s3 = light blue, s4 = amber highlight) |
+| `"@s1/30"` | any token with opacity in percent — area fills, gradient `colorStops` |
 | `"@q1"` … `"@q5"` | sequential blue scale for magnitude (visualMap, heatmaps) |
 | `"@ink"`, `"@ink2"`, `"@muted"` | text colours |
 | `"@grid"`, `"@base"`, `"@surface"` | lines, axis base, tile colour |

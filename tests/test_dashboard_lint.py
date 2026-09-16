@@ -1,0 +1,55 @@
+"""Design lint for composed, branded dashboards (td.lint_composition)."""
+
+import re
+import unittest
+from pathlib import Path
+
+from sandbox.vendor import talos_dash as td
+
+
+def _example():
+    ref = Path("sample_skills/dashboard-v2/references/layout-and-export.md").read_text(encoding="utf-8")
+    source = re.search(r"```python\n(.*?)\n```", ref, re.S)[1]
+    source = source.split("td.compose(")[0]  # build the inputs, don't render
+    namespace: dict = {"td": td}
+    exec(compile(source.replace("import talos_dash as td", ""), "example", "exec"), namespace)
+    return namespace
+
+
+class LintTests(unittest.TestCase):
+    def test_skill_example_passes(self):
+        ns = _example()
+        self.assertEqual(td.lint_composition(ns["layout"], ns["style"], ns["charts"]), [])
+
+    def test_generated_mistakes_are_reported(self):
+        css = (".grid-card{background:#fff;box-shadow:0 1px 4px rgba(0,0,0,.06)}"
+               ".card-title{font-size:11px;color:#555;font-weight:700}"
+               "@media (max-width: 1200px){.dashboard-grid{grid-template-columns:1fr}}")
+        chart = td.chart("c", "C", td.echarts({
+            "grid": {"left": 180},
+            "yAxis": {"axisLabel": {"formatter": "{value} Mio"}},
+            "series": [{"type": "bar", "itemStyle": {"color": ["#4A90D9", "#E85D2A"]},
+                        "label": {"formatter": "{c:,.0f}"}, "data": [1, 2]}],
+            "xAxis": {"data": ["Black Friday", "#1 Kunde"]},
+        }))
+        issues = "\n".join(td.lint_composition('<div style="color:#333">x</div>', css, [chart]))
+        for expected in ("background: #fff", "font-size: 11px", "color: #555", "font-weight: 700",
+                         "@media", "grid.left: 180", "{value} Mio", "#4A90D9", "{c:,.0f}", "layout_html style="):
+            self.assertIn(expected, issues)
+        self.assertNotIn("rgba(0,0,0,.06)", issues)  # shadows may use rgba
+        self.assertNotIn("Black Friday", issues)
+        self.assertNotIn("#1 Kunde", issues)
+
+    def test_compose_raises_with_all_points(self):
+        with self.assertRaisesRegex(ValueError, "fixed colour"):
+            td.compose("unused.html", "T", [], layout_html="<h1>x</h1>", css="h1{color:#000}")
+
+    def test_logo_placeholder_inside_img_becomes_inline_svg(self):
+        html = td.render("Logo", [], layout_html='<img src="{{brand:logo}}" alt="Logo" class="brand-logo">',
+                         css="h1{}", brand="macs")
+        self.assertIn('<svg class="brand-logo"', html)
+        self.assertNotIn('src="<svg', html)
+
+
+if __name__ == "__main__":
+    unittest.main()
