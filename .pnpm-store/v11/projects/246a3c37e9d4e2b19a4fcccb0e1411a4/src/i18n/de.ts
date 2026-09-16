@@ -1135,7 +1135,7 @@ const de: typeof en = {
       enrichmentError: 'Anreicherungsfehler',
       edit: 'Chunk bearbeiten',
       rawMeta: 'Rohe Metadaten',
-      download: 'Ingestierten Text herunterladen (Markdown)',
+      download: 'Text herunterladen (Markdown, ohne Ingest-Anmerkungen)',
       downloadOriginal: 'Originaldatei herunterladen',
       deleteChunk: 'Chunk löschen',
       deleteConfirm: 'Diesen Chunk aus dem Index löschen? Das kann nicht rückgängig gemacht werden.',

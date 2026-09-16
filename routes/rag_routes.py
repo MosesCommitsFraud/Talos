@@ -39,6 +39,37 @@ def original_file_response(source: str, indexed_documents: list[dict]):
     )
 
 
+def _strip_chunk_overlap(previous: str, current: str, max_overlap: int = 2000) -> str:
+    """Drop the head of `current` that repeats the tail of `previous`.
+
+    Consecutive chunks share `chunk_overlap_chars` of text so a sentence cut at
+    a boundary stays retrievable; stitched back together that overlap would
+    appear twice. Short matches (< 20 chars) are coincidence, not overlap."""
+    limit = min(len(previous), len(current), max_overlap)
+    for k in range(limit, 19, -1):
+        if previous.endswith(current[:k]):
+            return current[k:].lstrip()
+    return current
+
+
+def clean_document_text(chunks: list[dict]) -> str:
+    """The indexed text of one document, reassembled like the original.
+
+    No dump header, chunk headings, situating context or keyword enrichment,
+    and no figure descriptions (those are the ingest's words, not the
+    document's) — only the document's own text in page/sequence order."""
+    parts: list[str] = []
+    for c in chunks:
+        if c.get("modality") == "figure":
+            continue
+        text = (c.get("content") or "").strip()
+        if parts and text:
+            text = _strip_chunk_overlap(parts[-1], text)
+        if text:
+            parts.append(text)
+    return "\n\n".join(parts) + "\n"
+
+
 class RagPipelineConfig(BaseModel):
     enabled: bool = True
     provider: str = "internal"
@@ -887,10 +918,12 @@ def setup_rag_routes():
         return original_file_response(source, rag.list_documents(exclude_scopes=SCOPE_IDS))
 
     @router.get("/documents/export")
-    def export_document(source: str, rag_id: str | None = None):
-        """Download everything indexed for one source file as a Markdown dump.
+    def export_document(source: str, rag_id: str | None = None, annotated: bool = False):
+        """Download the indexed text of one source file as Markdown.
 
-        Ingest-quality audit: the file shows exactly the text the retriever sees,
+        By default the file is the document's own text, reassembled without any
+        ingest annotations (see ``clean_document_text``). ``annotated=true``
+        returns the ingest-quality audit dump instead: exactly the text the retriever sees,
         grouped by page (page text followed by its figures) when page provenance
         is available, including embedded-but-hidden enrichment (context blurbs,
         aux terms), so two ingests of the same document can be diffed.
@@ -907,6 +940,13 @@ def setup_rag_routes():
             raise HTTPException(404, "No indexed chunks for this source")
 
         base = os.path.basename(source) or "document"
+        if not annotated:
+            fname = f"{os.path.splitext(base)[0] or 'document'}.md"
+            return PlainTextResponse(
+                clean_document_text(chunks),
+                media_type="text/markdown; charset=utf-8",
+                headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(fname)}"},
+            )
         lines = [
             f"# Ingest dump: {base}",
             "",

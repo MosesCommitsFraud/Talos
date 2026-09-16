@@ -1129,7 +1129,7 @@ const en = {
       enrichmentError: 'Enrichment error',
       edit: 'Edit chunk',
       rawMeta: 'Raw metadata',
-      download: 'Download ingested text (Markdown)',
+      download: 'Download text (Markdown, without ingest annotations)',
       downloadOriginal: 'Download original file',
       deleteChunk: 'Delete chunk',
       deleteConfirm: 'Delete this chunk from the index? This cannot be undone.',
