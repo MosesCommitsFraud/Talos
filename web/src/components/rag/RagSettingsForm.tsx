@@ -424,8 +424,13 @@ export function RagSettingsForm({ ragId }: { ragId?: string }) {
               )}
             </RagDisclosure>
             <RagDisclosure title={t('settings.rag.parentTitle')} enabled={!!draft.expand_to_parent_enabled}>
+              {field('chunk_max_chars', t('settings.rag.chunkMaxChars'), { type: 'number', hint: t('settings.rag.hint.chunkMaxChars'), def: 4000 })}
+              {field('chunk_overlap_chars', t('settings.rag.chunkOverlapChars'), { type: 'number', hint: t('settings.rag.hint.chunkOverlapChars'), def: 200 })}
               {toggle('expand_to_parent_enabled', t('settings.rag.expandToParent'), t('settings.rag.hint.expandToParent'))}
-              {draft.expand_to_parent_enabled && field('parent_max_chars', t('settings.rag.parentMaxChars'), { type: 'number', hint: t('settings.rag.hint.parentMaxChars'), def: 2000 })}
+              {draft.expand_to_parent_enabled && <>
+                {field('parent_max_chars', t('settings.rag.parentMaxChars'), { type: 'number', hint: t('settings.rag.hint.parentMaxChars'), def: 12000 })}
+                {field('context_window', t('settings.rag.contextWindow'), { type: 'number', hint: t('settings.rag.hint.contextWindow'), def: 1 })}
+              </>}
             </RagDisclosure>
             <RagDisclosure title={t('settings.rag.pdfVlmTitle')} enabled={!!draft.pdf_vlm_enabled}>
               {toggle('pdf_vlm_enabled', t('settings.rag.pdfVlmEnabled'), t('settings.rag.hint.pdfVlmEnabled'))}

@@ -28,7 +28,7 @@ qdrant-client
 fastembed
 # Haystack-orchestrated RAG: Qdrant hybrid (dense+sparse/IDF) + Docling
 # HybridChunker + FastEmbed sparse. Pure-Python/ONNX, ARM64-friendly.
-haystack-ai
+haystack-ai>=3.1.1,<4
 qdrant-haystack
 docling-haystack
 fastembed-haystack
@@ -40,6 +40,7 @@ rq
 redis
 youtube-transcript-api
 markdown
+markdown-it-py>=3,<5
 nh3
 python-dateutil
 cryptography

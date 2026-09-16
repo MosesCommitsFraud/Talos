@@ -5,8 +5,8 @@ Haystack-orchestrated RAG over Qdrant with native hybrid retrieval and a
 vLLM cross-encoder reranker.
 
 Pipeline:
-  * Parsing + chunking : Docling for rich docs/images; the same overlapping
-    word splitter for extracted text and plain text/code/json.
+  * Parsing + chunking : Docling structure + native text readers, followed by
+    one section-aware Haystack RecursiveDocumentSplitter for every lane.
   * Dense embeddings   : vLLM (OpenAI-compatible) via Haystack ``OpenAI*Embedder``.
   * Sparse embeddings  : FastEmbed BM25/IDF via Haystack ``Fastembed*SparseEmbedder``.
   * Vector store       : Qdrant with named dense+sparse vectors; server-side RRF
@@ -349,11 +349,14 @@ def _strip_hidden_pdf_text(path: str, docs):
     if not spans:
         return docs
     kept, removed = [], 0
+    from src.rag_structure import clean_content_metadata
+
     for d in docs:
         text, n = strip_hidden_text(d.content or "", spans)
         removed += n
         if text.strip():
             d.content = text
+            clean_content_metadata(d.meta, lambda value: strip_hidden_text(value, spans)[0])
             kept.append(d)
     if removed:
         logger.warning(
@@ -380,6 +383,9 @@ def _redact_docs(docs, override: Optional[bool] = None):
     for d in docs:
         if d.content:
             d.content = redact_pii(d.content)
+        from src.rag_structure import clean_content_metadata
+
+        clean_content_metadata(d.meta, redact_pii)
     return docs
 
 
@@ -563,8 +569,9 @@ _SECTION_WINDOW = 3  # chunks per fallback "section" when no heading info exists
 def _section_key(meta: Dict[str, Any], index: int) -> str:
     """Group key for a chunk: its Docling heading path when available, else a
     sliding window over the chunk order (so neighbours share a parent)."""
-    dl = meta.get("dl_meta") if isinstance(meta.get("dl_meta"), dict) else None
-    headings = (dl or {}).get("headings")
+    from src.rag_structure import heading_path
+
+    headings = heading_path(meta)
     if isinstance(headings, (list, tuple)) and any(headings):
         return " / ".join(str(h) for h in headings if h)
     return f"win{index // _SECTION_WINDOW}"
@@ -585,6 +592,11 @@ def _retrieval_body(meta: Dict[str, Any], content: str) -> str:
     select the correct page before companion-image attachment.
     """
     body = (content or "").strip()
+    from src.rag_structure import heading_path
+
+    headings = heading_path(meta or {})
+    if headings:
+        body = f"Section: {' / '.join(str(h) for h in headings)}\n\n{body}"
     filename = str((meta or {}).get("filename") or "").strip()
     if filename:
         body = f"Document: {filename}\n\n{body}" if body else f"Document: {filename}"
@@ -680,6 +692,12 @@ def _bounded_text_parts(text: str, limit: int) -> List[str]:
         words = line.split()
         piece = ""
         for word in words:
+            if len(word) > limit:
+                if piece:
+                    units.append(piece)
+                    piece = ""
+                units.extend(word[i:i + limit] for i in range(0, len(word), limit))
+                continue
             candidate = f"{piece} {word}".strip()
             if piece and len(candidate) > limit:
                 units.append(piece)
@@ -823,7 +841,8 @@ def _repair_oversized_pdf_chunks(path: str, docs):
     documents are preserved as-is.
     """
     limit = _max_chunk_chars()
-    ordinary = [d for d in docs if not (d.meta or {}).get("modality") and (d.content or "").strip()]
+    ordinary = [d for d in docs if not (d.meta or {}).get("modality")
+                and not (d.meta or {}).get("structure_source") and (d.content or "").strip()]
     if len(ordinary) != 1 or len(ordinary[0].content or "") <= limit:
         return docs
 
@@ -1152,6 +1171,9 @@ def _apply_saved_rag_config(cfg: Optional[Dict[str, Any]] = None) -> None:
     os.environ["RAG_AUTO_QUESTIONS_N"] = str(int(cfg.get("auto_questions_n") or 0))
     os.environ["EXPAND_TO_PARENT_ENABLED"] = "true" if cfg.get("expand_to_parent_enabled") else ""
     os.environ["RAG_PARENT_MAX_CHARS"] = str(int(cfg.get("parent_max_chars") or 0))
+    os.environ["RAG_MAX_CHUNK_CHARS"] = str(int(cfg.get("chunk_max_chars") or 4000))
+    os.environ["RAG_CHUNK_OVERLAP_CHARS"] = str(int(cfg.get("chunk_overlap_chars", 200)))
+    os.environ["RAG_CONTEXT_WINDOW"] = str(int(cfg.get("context_window", 1)))
     os.environ["PDF_VLM_ENABLED"] = "true" if cfg.get("pdf_vlm_enabled") else ""
     os.environ["RAG_REDACT_PII"] = "true" if cfg.get("redact_pii_enabled") else ""
     os.environ["VIDEO_FRAMES_ENABLED"] = "true" if cfg.get("video_frames_enabled") else ""
@@ -1571,7 +1593,7 @@ class VectorRAG:
             top = self._rerank(query, candidates, k)
             # Small-to-big (Phase 10): attach each hit's surrounding section for
             # injection (citations still point at the matched chunk). No-op off.
-            top = self._expand_to_parent(top)
+            top = self._expand_to_parent(top, filters=self._build_filters(owner, scope, exclude_scopes))
             # Companion figures: ride a hit's document figures along with it, so
             # the model receives their image_url even though a caption-only
             # figure chunk rarely wins the ranking by itself.
@@ -1591,6 +1613,8 @@ class VectorRAG:
         """Best-effort page number for a chunk: the explicit ``page`` key (VLM
         page / figure chunks) or the first Docling provenance page."""
         page = (meta or {}).get("page")
+        if page is None:
+            page = (meta or {}).get("page_number")
         if isinstance(page, (int, float)) and not isinstance(page, bool):
             return int(page)
         try:
@@ -1815,6 +1839,7 @@ class VectorRAG:
         if not docs:
             return 0
         from haystack.document_stores.types import DuplicatePolicy
+        from haystack.components.writers import DocumentWriter
 
         # Ingest enrichment (Phases 8 & 9): embed dense+sparse on the enriched
         # text (situating context prefix + auto keywords/questions suffix), but
@@ -1825,12 +1850,15 @@ class VectorRAG:
             if enriched != d.content:
                 d.meta["_ctx_orig"] = d.content
                 d.content = enriched
-        docs = self._dense_doc_embedder().run(documents=docs)["documents"]
-        docs = self._sparse_doc_embedder().run(documents=docs)["documents"]
-        for d in docs:
-            if d.meta and "_ctx_orig" in d.meta:
-                d.content = d.meta.pop("_ctx_orig")
-        self._store.write_documents(docs, policy=DuplicatePolicy.OVERWRITE)
+        originals = list(docs)
+        try:
+            docs = self._dense_doc_embedder().run(documents=docs)["documents"]
+            docs = self._sparse_doc_embedder().run(documents=docs)["documents"]
+        finally:
+            for d in originals + list(docs):
+                if d.meta and "_ctx_orig" in d.meta:
+                    d.content = d.meta.pop("_ctx_orig")
+        DocumentWriter(document_store=self._store, policy=DuplicatePolicy.OVERWRITE).run(documents=docs)
         return len(docs)
 
     def _contextual_blurb(self, full_doc: str, chunk: str) -> str:
@@ -1986,53 +2014,26 @@ class VectorRAG:
         shared by its siblings, so retrieval can expand a small matched chunk to
         its surrounding section (Phase 10). Always runs (cheap metadata) so the
         expansion toggle works without a re-index discipline beyond this build."""
-        if not docs:
-            return
-        source = str((docs[0].meta or {}).get("source") or "")
-        for i, d in enumerate(docs):
-            d.meta["seq"] = i
-            key = _section_key(d.meta or {}, i)
-            d.meta["section_id"] = hashlib.sha256(f"{source}\x00{key}".encode("utf-8")).hexdigest()[
-                :16
-            ]
+        from src.rag_structure import assign_sections
 
-    def _expand_to_parent(self, results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        assign_sections(docs)
+
+    def _expand_to_parent(self, results: List[Dict[str, Any]], filters=None) -> List[Dict[str, Any]]:
         """Small-to-big: for each hit, attach an ``expanded`` field holding its
         whole section (sibling chunks with the same ``section_id``, in ``seq``
         order, capped). The matched chunk stays the citation; only the *injected*
         context grows. No-op (no ``expanded`` key) when disabled."""
         if not self._expand_on() or not results or self._store is None:
             return results
-        cap = self._conf_int("parent_max_chars", "RAG_PARENT_MAX_CHARS", 0) or 2000
-        section_cache: Dict[Tuple[str, str], str] = {}
-        for r in results:
-            meta = r.get("metadata") or {}
-            sid = meta.get("section_id")
-            src = meta.get("source")
-            if not sid or not src:
-                continue
-            ck = (str(src), str(sid))
-            text = section_cache.get(ck)
-            if text is None:
-                try:
-                    sibs = self._store.filter_documents(
-                        filters={
-                            "operator": "AND",
-                            "conditions": [
-                                {"field": "meta.source", "operator": "==", "value": src},
-                                {"field": "meta.section_id", "operator": "==", "value": sid},
-                            ],
-                        }
-                    )
-                    sibs = sorted(sibs, key=lambda d: (d.meta or {}).get("seq", 0))
-                    text = "\n\n".join((d.content or "") for d in sibs)
-                except Exception as e:
-                    logger.warning("parent expansion failed: %s", e)
-                    text = ""
-                section_cache[ck] = text
-            if text:
-                r["expanded"] = text[:cap]
-        return results
+        from src.rag_structure import expand_context
+
+        cap = self._conf_int("parent_max_chars", "RAG_PARENT_MAX_CHARS", 12000) or 12000
+        window = max(0, min(10, self._conf_int("context_window", "RAG_CONTEXT_WINDOW", 1)))
+        try:
+            return expand_context(self._store, results, cap, window, filters)
+        except Exception as e:
+            logger.warning("Haystack context expansion failed: %s", e)
+            return results
 
     def _documents_for_file(self, path: str, meta: Dict[str, Any], stage_cb=None):
         """Route a file to its modality lane → Haystack Documents with metadata.
@@ -2064,6 +2065,10 @@ class VectorRAG:
             )
         elif ext in _OPENDOCUMENT_EXTS:
             docs = self._lane_opendocument(path)
+        elif ext in {".md", ".markdown", ".txt"}:
+            docs = self._lane_text(path)
+        elif ext == ".xls":
+            docs = self._lane_xls(path)
         elif is_docling_format(path):
             docs = self._lane_docling(path)
         else:
@@ -2074,13 +2079,6 @@ class VectorRAG:
         if ext == ".pdf":
             docs = _repair_oversized_pdf_chunks(path, docs)
             _enrich_uncaptioned_figures(docs)
-        if docs and is_docling_format(path):
-            # Keep parser provenance / page boundaries, but give rich-document
-            # text the same retrieval-sized windows and overlap as Markdown.
-            # Run after PDF repair so collapsed PDFs can still recover pages.
-            docs = self._split_extracted_documents(docs)
-        docs = _split_oversized_chunks(docs)
-
         # Ingest guards: strip text that is invisible on the rendered page
         # (PDF prompt-injection channel — extractors read it, humans can't),
         # then optionally redact PII before anything reaches the index. The
@@ -2090,6 +2088,9 @@ class VectorRAG:
             docs = _strip_hidden_pdf_text(path, docs)
         redact_override = meta.get("redact_pii")
         docs = _redact_docs(docs, None if redact_override is None else bool(redact_override))
+        # Guard raw extracted text before assigning offsets/relationships. Every
+        # modality now passes through the same Haystack character splitter once.
+        docs = self._split_extracted_documents(docs)
         if ext == ".pdf":
             # Page vectors retrieve over both visible text and the meaning of
             # their same-page figures, while figures remain separate renderable
@@ -2749,15 +2750,15 @@ class VectorRAG:
         return docs
 
     def _lane_docling(self, path: str):
-        """Rich docs/images → Docling HybridChunker (layout- and table-aware)."""
+        """Rich docs/images → lossless structure; Haystack owns final chunking."""
         from haystack_integrations.components.converters.docling import DoclingConverter
+        from src.rag_structure import docling_documents
 
         if self._docling is None:
-            # Default export_type=DOC_CHUNKS → Docling HybridChunker. Use the bare
-            # converter (Docling's defaults) unless an explicit RAG_DOCLING_THREADS
-            # override is set, in which case hand it a thread-tuned converter.
+            # Select an explicit export mode: integration defaults have changed
+            # from chunks to Markdown. JSON retains heading levels and page refs.
             if _docling_threads() is None:
-                self._docling = DoclingConverter()
+                self._docling = DoclingConverter(export_type="json")
             else:
                 try:
                     from docling.datamodel.base_models import InputFormat
@@ -2770,11 +2771,21 @@ class VectorRAG:
                             )
                         }
                     )
-                    self._docling = DoclingConverter(converter=converter)
+                    self._docling = DoclingConverter(converter=converter, export_type="json")
                 except Exception as e:
                     logger.warning("docling: thread-tuned converter unavailable (%s); default", e)
-                    self._docling = DoclingConverter()
-        return self._docling.run(sources=[path]).get("documents", []) or []
+                    self._docling = DoclingConverter(export_type="json")
+        extracted = self._docling.run(sources=[path]).get("documents", []) or []
+        return [part for document in extracted for part in docling_documents(document.content)]
+
+    def _lane_xls(self, path: str):
+        """Legacy Excel needs xlrd, not the plain-text fallback."""
+        import pandas as pd
+        from haystack import Document
+
+        return [Document(content=frame.to_csv(index=False),
+                         meta={"sheet": name, "block_type": "table", "literal_text": True})
+                for name, frame in pd.read_excel(path, sheet_name=None).items()]
 
     def _lane_code(self, path: str, language: str):
         """Source code → tree-sitter AST chunks, one per function/class/etc.,
@@ -2798,37 +2809,29 @@ class VectorRAG:
         ]
 
     def _lane_text(self, path: str):
-        """Plain text/code/json → read directly and length-split."""
+        """Read source text; final splitting happens once in the shared pipeline."""
         text = Path(path).read_text(encoding="utf-8", errors="replace")
-        return self._documents_from_text(text)
+        docs = self._documents_from_text(text)
+        if Path(path).suffix.lower() not in {".md", ".markdown", ".txt"}:
+            for doc in docs:
+                doc.meta["literal_text"] = True
+        return docs
 
     def _documents_from_text(self, text: str):
-        """Create overlapping word chunks from already-extracted text."""
+        """Wrap extracted text without destroying its structural boundaries."""
         from haystack.dataclasses import Document
 
         if not text.strip():
             return []
-        return self._split_extracted_documents([Document(content=text)])
+        return [Document(content=text)]
 
     def _split_extracted_documents(self, docs):
         """Share Markdown chunking while preserving metadata and figure assets."""
-        from haystack.components.preprocessors import DocumentSplitter
+        from src.rag_structure import split_documents
 
-        if not docs:
-            return []
-        if self._splitter is None:
-            self._splitter = DocumentSplitter(split_by="word", split_length=250, split_overlap=40)
-            try:
-                self._splitter.warm_up()
-            except Exception:
-                pass
-        result = []
-        for doc in docs:
-            if (doc.meta or {}).get("modality") == "figure":
-                result.append(doc)
-            elif (doc.content or "").strip():
-                result.extend(self._splitter.run(documents=[doc]).get("documents", []) or [])
-        return result
+        limit = max(1000, min(20000, self._conf_int("chunk_max_chars", "RAG_MAX_CHUNK_CHARS", 4000)))
+        overlap = max(0, min(limit - 1, self._conf_int("chunk_overlap_chars", "RAG_CHUNK_OVERLAP_CHARS", 200)))
+        return split_documents(docs, limit, overlap)
 
     def _extract_audio_segments(self, path: str):
         """Demux + normalize audio to 16 kHz mono WAV via ffmpeg, split into
@@ -3636,7 +3639,9 @@ class VectorRAG:
         try:
             from haystack.dataclasses import Document
 
-            self._write_documents([Document(content=text, meta=dict(metadata))])
+            docs = self._split_extracted_documents([Document(content=text, meta=dict(metadata))])
+            self._assign_sections(docs)
+            self._write_documents(docs)
             return True
         except Exception as e:
             logger.error(f"add_document failed: {e}")
@@ -3653,7 +3658,11 @@ class VectorRAG:
         try:
             from haystack.dataclasses import Document
 
-            hs_docs = [Document(content=t, meta=dict(m)) for t, m in valid]
+            hs_docs = []
+            for text, meta in valid:
+                parts = self._split_extracted_documents([Document(content=text, meta=dict(meta))])
+                self._assign_sections(parts)
+                hs_docs.extend(parts)
             added = self._write_documents(hs_docs)
             return {
                 "success": True,

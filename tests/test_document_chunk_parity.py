@@ -20,12 +20,13 @@ def test_extracted_text_matches_markdown_with_overlap(tmp_path):
     meta = {"page": 3, "dl_meta": {"headings": ["Pivot"]}}
 
     rich = rag._split_extracted_documents([Document(content=text, meta=meta)])
-    markdown = rag._lane_text(str(path))
+    markdown = rag._split_extracted_documents(rag._lane_text(str(path)))
 
     assert [d.content for d in rich] == [d.content for d in markdown]
-    assert len(rich) == 3
-    assert rich[0].content.split()[-40:] == rich[1].content.split()[:40]
-    assert {w for d in rich for w in d.content.split()} == set(words)
+    assert len(rich) == 2
+    assert rich[0].content[-200:] == rich[1].content[:200]
+    assert all(len(d.content) <= 4000 for d in rich)
+    assert rich[0].content + rich[1].content[200:] == text
     assert all(d.meta["page"] == 3 and d.meta["dl_meta"] == meta["dl_meta"] for d in rich)
 
 
@@ -38,14 +39,14 @@ def test_figures_remain_intact_and_page_metadata_stays_local():
         Document(content="beta " * 300, meta={"page": 2}),
     ])
 
-    assert docs[2] is figure
-    assert [d.meta["page"] for d in docs] == [1, 1, 1, 2, 2]
+    assert docs[1] is figure
+    assert [d.meta["page"] for d in docs] == [1, 1, 2]
     assert all("beta" not in d.content for d in docs[:2])
 
 
 def test_docx_router_uses_shared_splitter(monkeypatch):
     rag = _rag()
-    monkeypatch.setattr(rag, "_lane_docling", lambda path: [Document(content="word " * 620)])
+    monkeypatch.setattr(rag, "_lane_docling", lambda path: [Document(content="word " * 1620)])
     monkeypatch.setattr(rag, "_assign_sections", lambda docs: None)
     monkeypatch.setattr(rag, "_apply_contextual", lambda docs: None)
     monkeypatch.setattr(rag, "_apply_autokeywords", lambda docs: None)
@@ -55,4 +56,4 @@ def test_docx_router_uses_shared_splitter(monkeypatch):
     docs = rag._documents_for_file("sample.docx", {})
 
     assert len(docs) == 3
-    assert all(len(d.content.split()) <= 250 for d in docs)
+    assert all(len(d.content) <= 4000 for d in docs)

@@ -37,6 +37,7 @@ DOCLING_EXTS = frozenset(
         ".adoc",
         ".asciidoc",
         ".csv",
+        ".epub",
         ".png",
         ".jpg",
         ".jpeg",

@@ -60,14 +60,21 @@ class _RagLike(rv.VectorRAG):
 
 
 def test_expand_merges_siblings_by_section(monkeypatch):
+    from haystack import Document
+    from haystack.document_stores.in_memory import InMemoryDocumentStore
+    from src.rag_structure import assign_sections
+
     monkeypatch.setenv("EXPAND_TO_PARENT_ENABLED", "true")
     monkeypatch.delenv("RAG_PARENT_MAX_CHARS", raising=False)
     siblings = [
-        _Doc("second part", {"seq": 1}),
-        _Doc("first part", {"seq": 0}),  # out of order on purpose
+        Document(content="first part", meta={"source": "/x", "section_ordinal": 1}),
+        Document(content="second part", meta={"source": "/x", "section_ordinal": 1}),
     ]
-    rag = _RagLike(_Store(siblings))
-    results = [{"document": "first part", "metadata": {"source": "/x", "section_id": "abc"}}]
+    assign_sections(siblings)
+    store = InMemoryDocumentStore()
+    store.write_documents(list(reversed(siblings)))
+    rag = _RagLike(store)
+    results = [{"id": siblings[0].id, "document": "first part", "metadata": siblings[0].meta}]
     out = rv.VectorRAG._expand_to_parent(rag, results)
     # Siblings merged in seq order.
     assert out[0]["expanded"] == "first part\n\nsecond part"
@@ -80,7 +87,9 @@ def test_expand_respects_char_cap(monkeypatch):
     rag = _RagLike(_Store(siblings))
     results = [{"document": "x", "metadata": {"source": "/x", "section_id": "abc"}}]
     out = rv.VectorRAG._expand_to_parent(rag, results)
-    assert len(out[0]["expanded"]) == 10
+    # Unsafe legacy parent relationships are not expanded or truncated.
+    assert "expanded" not in out[0]
+    assert out[0]["document"] == "x"
 
 
 def test_expand_noop_when_disabled(monkeypatch):

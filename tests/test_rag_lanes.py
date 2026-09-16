@@ -39,6 +39,9 @@ class _Router(rv.VectorRAG):
         return []
 
     # Post-dispatch steps `_documents_for_file` always runs — no-ops on the stub.
+    def _split_extracted_documents(self, docs):
+        return docs
+
     def _assign_sections(self, docs):
         pass
 
@@ -255,6 +258,9 @@ def test_router_uses_vlm_lane_only_for_image_bearing_docs(monkeypatch):
             return []
 
         # Post-dispatch no-ops so the router can run on the stub.
+        def _split_extracted_documents(self, docs):
+            return docs
+
         def _assign_sections(self, docs):
             pass
 

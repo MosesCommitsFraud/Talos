@@ -232,6 +232,9 @@ class _Doc:
 
 
 class _Router:
+    def _split_extracted_documents(self, docs):
+        return docs
+
     def _lane_text(self, path):
         return [_Doc("contact bob@example.com for access")]
 

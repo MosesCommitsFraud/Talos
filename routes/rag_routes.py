@@ -114,7 +114,10 @@ class RagPipelineConfig(BaseModel):
     auto_questions_n: int = 0
     # Advanced — small-to-big: inject the matched chunk's whole section.
     expand_to_parent_enabled: bool = False
-    parent_max_chars: int = 2000
+    parent_max_chars: int = 12000
+    chunk_max_chars: int = 4000
+    chunk_overlap_chars: int = 200
+    context_window: int = 1
 
 
 class RagBaseCreate(BaseModel):
@@ -249,7 +252,10 @@ def _normalize(body, current: dict) -> dict:
         "auto_keywords_n": _clamp_aux(body.auto_keywords_n),
         "auto_questions_n": _clamp_aux(body.auto_questions_n),
         "expand_to_parent_enabled": bool(body.expand_to_parent_enabled),
-        "parent_max_chars": max(0, min(int(body.parent_max_chars or 2000), 20000)),
+        "parent_max_chars": max(0, min(int(body.parent_max_chars or 12000), 20000)),
+        "chunk_max_chars": max(1000, min(int(body.chunk_max_chars), 20000)),
+        "chunk_overlap_chars": max(0, min(int(body.chunk_overlap_chars), 999)),
+        "context_window": max(0, min(int(body.context_window), 10)),
     }
 
 
@@ -299,7 +305,10 @@ def _public(cfg: dict) -> dict:
         "auto_keywords_n": _clamp_aux(cfg.get("auto_keywords_n", 0)),
         "auto_questions_n": _clamp_aux(cfg.get("auto_questions_n", 0)),
         "expand_to_parent_enabled": bool(cfg.get("expand_to_parent_enabled", False)),
-        "parent_max_chars": max(0, min(int(cfg.get("parent_max_chars") or 2000), 20000)),
+        "parent_max_chars": max(0, min(int(cfg.get("parent_max_chars") or 12000), 20000)),
+        "chunk_max_chars": max(1000, min(int(cfg.get("chunk_max_chars", 4000)), 20000)),
+        "chunk_overlap_chars": max(0, min(int(cfg.get("chunk_overlap_chars", 200)), 999)),
+        "context_window": max(0, min(int(cfg.get("context_window", 1)), 10)),
     }
 
 

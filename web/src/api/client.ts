@@ -758,6 +758,9 @@ export interface RagConfig {
   /** Advanced — small-to-big: inject the matched chunk's whole section. */
   expand_to_parent_enabled?: boolean;
   parent_max_chars?: number;
+  chunk_max_chars?: number;
+  chunk_overlap_chars?: number;
+  context_window?: number;
   /** Advanced — per-page VLM transcription for image-heavy PDFs + its endpoint. */
   pdf_vlm_enabled?: boolean;
   vlm_url?: string;
