@@ -532,6 +532,31 @@ def llm_language_prompt(language: str | None) -> str:
     )
 
 
+USER_INSTRUCTIONS_PREF_KEY = "custom_instructions"
+MAX_USER_INSTRUCTIONS_CHARS = 4000
+
+
+def user_instructions_prompt(uprefs: dict | None) -> str:
+    """The user's own standing instructions (Settings → Personalization), like
+    ChatGPT's custom instructions or Claude's profile preferences.
+
+    Stored per user as ``{"enabled": bool, "text": str}``. They are added after
+    the admin and preset prompts and framed as the user's preferences, so they
+    shape tone and format but cannot override deployment rules. Static per
+    user, so they don't disturb the prefix cache between turns."""
+    raw = (uprefs or {}).get(USER_INSTRUCTIONS_PREF_KEY)
+    if not isinstance(raw, dict) or raw.get("enabled") is False:
+        return ""
+    text = str(raw.get("text") or "").strip()[:MAX_USER_INSTRUCTIONS_CHARS]
+    if not text:
+        return ""
+    return (
+        "The user has set the following personal instructions for all their chats. "
+        "Follow them unless they conflict with the instructions above:\n"
+        f"<user_instructions>\n{text}\n</user_instructions>"
+    )
+
+
 def _append_no_think_reminder(messages: list) -> None:
     """Append the no-think directive to the end of the latest user message.
 
@@ -640,7 +665,10 @@ async def build_chat_context(
     _custom_sys = (get_setting("custom_system_prompt", "") or "").strip()
     _preset_sys = preset.system_prompt or ""
     _language_sys = llm_language_prompt(llm_language)
-    _effective_sys = "\n\n".join(p for p in (_custom_sys, _preset_sys, _language_sys) if p) or None
+    _user_sys = user_instructions_prompt(uprefs)
+    _effective_sys = (
+        "\n\n".join(p for p in (_custom_sys, _preset_sys, _user_sys, _language_sys) if p) or None
+    )
     _preface_kwargs = dict(
         message=_ctx_msg,
         session=sess,

@@ -1153,6 +1153,7 @@ const de: typeof en = {
     noResults: 'Keine Einstellungen gefunden',
     nav: {
       appearance: 'Darstellung',
+      personalization: 'Personalisierung',
       shortcuts: 'Tastenkürzel',
       account: 'Konto',
       skills: 'Skills',
@@ -1275,6 +1276,14 @@ const de: typeof en = {
         admin_panel: 'Einstellungen öffnen',
         cancel: 'Generierung stoppen / abbrechen',
       },
+    },
+    personalization: {
+      title: 'Eigene Anweisungen',
+      enabled: 'Für neue Nachrichten verwenden',
+      enabledHint: 'Gilt für alle deine Chats. Die Vorgaben des Administrators haben Vorrang.',
+      instructions: 'Was soll Talos bei jeder Antwort beachten?',
+      instructionsHint: 'Zum Beispiel deine Rolle, bevorzugte Sprache, Ton, Länge oder Format der Antworten.',
+      placeholder: 'Ich bin Controller bei einem Maschinenbauer. Antworte knapp, auf Deutsch, mit Zahlen in Tabellen und nenne Annahmen ausdrücklich.',
     },
     account: {
       title: 'Konto',

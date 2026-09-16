@@ -15,6 +15,7 @@ import {
   PlusIcon,
   ServerIcon,
   SettingsIcon,
+  SparklesIcon,
   Trash2Icon,
   UserIcon,
   UsersIcon,
@@ -86,7 +87,7 @@ import { useAuth } from './auth/AuthGate';
 import { UsersPanel } from './settings/UsersPanel';
 
 export type Panel =
-  | 'appearance' | 'shortcuts' | 'account'
+  | 'appearance' | 'personalization' | 'shortcuts' | 'account'
   | 'models' | 'ai' | 'assistants' | 'integrations' | 'web' | 'mcp' | 'tools' | 'skills'
   | 'rag' | 'users' | 'system';
 
@@ -506,6 +507,69 @@ function ShortcutsPanel() {
 }
 
 /* ── Account: password change + 2FA + logout ── */
+
+/* ── Personalization: the user's own standing instructions ── */
+
+const USER_INSTRUCTIONS_MAX = 4000;
+
+interface UserInstructions { enabled: boolean; text: string }
+
+function PersonalizationPanel() {
+  const { t } = useTranslation();
+  const qc = useQueryClient();
+  const { data, isLoading } = useQuery({
+    queryKey: ['userInstructions'],
+    queryFn: () => fetchUserPref<UserInstructions>('custom_instructions'),
+  });
+  const saved: UserInstructions = { enabled: data?.enabled !== false, text: data?.text ?? '' };
+  const [draft, setDraft] = useState<UserInstructions | null>(null);
+  const current = draft ?? saved;
+  const dirty = draft !== null && (draft.enabled !== saved.enabled || draft.text !== saved.text);
+  const save = useMutation({
+    mutationFn: (next: UserInstructions) => saveUserPref('custom_instructions', { ...next, text: next.text.trim() }),
+    onSuccess: async () => {
+      await qc.invalidateQueries({ queryKey: ['userInstructions'] });
+      setDraft(null);
+    },
+  });
+
+  return (
+    <Page>
+      <Section title={t('settings.personalization.title')}>
+        <Row label={t('settings.personalization.enabled')} hint={t('settings.personalization.enabledHint')}>
+          <Switch
+            checked={current.enabled}
+            disabled={isLoading}
+            onCheckedChange={(enabled: boolean) => setDraft({ ...current, enabled })}
+          />
+        </Row>
+        <div className="space-y-2 border-t border-border/60 px-4 py-3.5 sm:px-5">
+          <div className="space-y-0.5">
+            <div className="text-[13px] font-semibold tracking-[-0.01em]">{t('settings.personalization.instructions')}</div>
+            <p className="text-xs text-muted-foreground/80">{t('settings.personalization.instructionsHint')}</p>
+          </div>
+          <Textarea
+            className="min-h-[220px] w-full text-[13px] leading-relaxed"
+            value={current.text}
+            maxLength={USER_INSTRUCTIONS_MAX}
+            disabled={isLoading || !current.enabled}
+            placeholder={t('settings.personalization.placeholder')}
+            onChange={(e) => setDraft({ ...current, text: e.target.value })}
+          />
+          <div className="text-right text-[11px] text-muted-foreground tabular-nums">
+            {current.text.length} / {USER_INSTRUCTIONS_MAX}
+          </div>
+        </div>
+      </Section>
+      <SaveBar
+        dirty={dirty}
+        saving={save.isPending}
+        error={save.error ? (save.error as Error).message : undefined}
+        onSave={() => save.mutate(current)}
+      />
+    </Page>
+  );
+}
 
 function AccountPanel() {
   const { t } = useTranslation();
@@ -1932,6 +1996,7 @@ export function SettingsDialog({
 
   const userNav: Array<{ id: Panel; label: string; icon: React.ReactNode }> = [
     { id: 'appearance', label: t('settings.nav.appearance'), icon: <PaletteIcon /> },
+    { id: 'personalization', label: t('settings.nav.personalization'), icon: <SparklesIcon /> },
     { id: 'shortcuts', label: t('settings.nav.shortcuts'), icon: <KeyboardIcon /> },
     { id: 'account', label: t('settings.nav.account'), icon: <UserIcon /> },
   ];
@@ -2034,6 +2099,7 @@ export function SettingsDialog({
           <div className="min-w-0 flex-1 overflow-y-auto">
             {panel === 'appearance' && <AppearancePanel />}
             {panel === 'shortcuts' && <ShortcutsPanel />}
+            {panel === 'personalization' && <PersonalizationPanel />}
             {panel === 'account' && <AccountPanel />}
             {panel === 'skills' && <SharedSkillsPanel />}
             {panel === 'models' && <AddModelsPanel />}

@@ -1147,6 +1147,7 @@ const en = {
     noResults: 'No settings found',
     nav: {
       appearance: 'Appearance',
+      personalization: 'Personalization',
       shortcuts: 'Shortcuts',
       account: 'Account',
       skills: 'Skills',
@@ -1269,6 +1270,14 @@ const en = {
         admin_panel: 'Open settings',
         cancel: 'Stop generating / cancel',
       },
+    },
+    personalization: {
+      title: 'Custom instructions',
+      enabled: 'Use for new messages',
+      enabledHint: 'Applies to all your chats. Administrator settings take precedence.',
+      instructions: 'What should Talos keep in mind for every answer?',
+      instructionsHint: 'For example your role, preferred language, tone, length or format of answers.',
+      placeholder: 'I work in controlling at a machinery manufacturer. Answer concisely, put figures in tables and state assumptions explicitly.',
     },
     account: {
       title: 'Account',
