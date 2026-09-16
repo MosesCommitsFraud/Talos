@@ -343,6 +343,8 @@ const de: typeof en = {
     openPreview: '{{name}} öffnen',
     compacted: 'Frühere Nachrichten zusammengefasst, um ins Kontextfenster zu passen',
     sources: 'Quellen',
+    openSource: 'Quelle öffnen',
+    citationPage: 'S. {{page}}',
     generating: 'Wird generiert',
     scrollToBottom: 'Nach unten scrollen',
     timeJustNow: 'gerade eben',

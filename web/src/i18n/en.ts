@@ -340,6 +340,8 @@ const en = {
     openPreview: 'Open {{name}}',
     compacted: 'Earlier messages summarized to fit the context window',
     sources: 'Sources',
+    openSource: 'Open source',
+    citationPage: 'p. {{page}}',
     generating: 'Generating',
     scrollToBottom: 'Scroll to bottom',
     timeJustNow: 'just now',

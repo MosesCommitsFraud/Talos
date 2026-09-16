@@ -12,6 +12,7 @@ from fastapi import HTTPException
 from core.database import ModelEndpoint, SessionLocal
 from core.database import Session as DBSession
 from core.models import ChatMessage
+from src import citations as _citations
 from routes.prefs_routes import _load_for_user as load_prefs_for_user
 from src.auth_helpers import effective_user, get_current_user
 from src.context_compactor import maybe_compact, trim_for_context
@@ -624,6 +625,10 @@ async def build_chat_context(
         incognito,
     )
 
+    # Fresh citation numbering for this turn: retrieved sections and later web
+    # results are numbered [1], [2], … in one sequence (src/citations.py).
+    _citations.begin_turn(session_id)
+
     # Build context preface
     # The stream path uses enhanced_message (with CoT/preprocessing applied),
     # the sync path uses text_for_context.
@@ -727,7 +732,14 @@ async def build_chat_context(
                     "web: only search the internet when it does not cover the question, is "
                     "out of date for a question about current facts, or the user explicitly "
                     "asks you to look something up.\n\n"
-                    "USER QUESTION:\n"
+                    + (
+                        "Each retrieved section starts with its source number, e.g. `[2] handbuch.pdf`. "
+                        + _citations.CITATION_RULE
+                        + "\n\n"
+                        if any(s.get("n") for s in rag_sources)
+                        else ""
+                    )
+                    + "USER QUESTION:\n"
                 )
                 if isinstance(current, str):
                     messages[target_idx]["content"] = prefix + current
@@ -1368,6 +1380,7 @@ def save_assistant_response(
     *,
     character_name: str = None,
     rag_sources: list = None,
+    citations: list = None,
     research_sources: list = None,
     do_research: bool = False,
     tool_events: list = None,
@@ -1380,6 +1393,8 @@ def save_assistant_response(
         md["character_name"] = character_name
     if rag_sources:
         md["rag_sources"] = rag_sources
+    if citations:
+        md["citations"] = citations
     if research_sources:
         md["research_sources"] = research_sources
     if do_research and not research_sources:

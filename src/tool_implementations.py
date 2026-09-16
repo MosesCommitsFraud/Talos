@@ -1507,7 +1507,9 @@ async def do_search_chats(query: str, limit: int = 20, owner: str | None = None)
         db.close()
 
 
-async def do_search_knowledge(content: str, owner: Optional[str] = None) -> Dict:
+async def do_search_knowledge(
+    content: str, owner: Optional[str] = None, session_id: Optional[str] = None
+) -> Dict:
     """`search_knowledge` — let the agent query the knowledge base itself.
 
     The counterpart to auto-injection (``rag_pipeline.auto_inject_enabled``).
@@ -1540,7 +1542,9 @@ async def do_search_knowledge(content: str, owner: Optional[str] = None) -> Dict
         # whole duration, which stalls every other in-flight tool and the SSE
         # stream itself — so it must run off-loop now that a round can have
         # several tools in flight at once.
-        sources, block = await asyncio.to_thread(ChatProcessor(None).retrieve, query)
+        sources, block = await asyncio.to_thread(
+            ChatProcessor(None).retrieve, query, citation_session=session_id
+        )
     except Exception as e:
         logger.error(f"search_knowledge failed: {e}")
         return {"error": str(e), "exit_code": 1}
@@ -1559,6 +1563,7 @@ async def do_search_knowledge(content: str, owner: Optional[str] = None) -> Dict
     # Retrieved document text is untrusted input (prompt-injection surface), so
     # it keeps the same framing here as on the injection path — a tool result
     # is not a licence to drop the marker.
+    from src.citations import CITATION_RULE
     from src.prompt_security import UNTRUSTED_CONTEXT_HEADER
 
     # The `[filename]` label on each section reads like a path, and the model has
@@ -1573,12 +1578,13 @@ async def do_search_knowledge(content: str, owner: Optional[str] = None) -> Dict
         "output": (
             f"{UNTRUSTED_CONTEXT_HEADER}\n"
             "Source: retrieved documents\n\n"
-            "The [name] on each section identifies the indexed document it came "
-            "from. It is a label, NOT a file path: these documents live only in "
-            "the search index, so read_file/glob/ls cannot open them and will "
-            "report 'not found'. To see more of a document, call search_knowledge "
-            "again with wording aimed at the part you want.\n\n"
-            "<<<SUPPLIED_CONTEXT>>>\n"
+            "The [n] name on each section is its source number and the indexed "
+            "document it came from. The name is a label, NOT a file path: these "
+            "documents live only in the search index, so read_file/glob/ls cannot "
+            "open them and will report 'not found'. To see more of a document, call "
+            "search_knowledge again with wording aimed at the part you want.\n\n"
+            + (CITATION_RULE + "\n\n" if any(s.get("n") for s in sources) else "")
+            + "<<<SUPPLIED_CONTEXT>>>\n"
             f"{block}\n"
             "<<<END_SUPPLIED_CONTEXT>>>"
         ),
@@ -3084,7 +3090,9 @@ async def do_get_news(
     )
 
 
-async def do_web_fetch(content: str, owner: Optional[str] = None) -> Dict:
+async def do_web_fetch(
+    content: str, owner: Optional[str] = None, session_id: Optional[str] = None
+) -> Dict:
     """Fetch a public web page and return its readable text."""
     del owner
     try:
@@ -3098,7 +3106,11 @@ async def do_web_fetch(content: str, owner: Optional[str] = None) -> Dict:
 
     from src.web_search import fetch
 
-    return await fetch(url=str(args.get("url") or ""), max_chars=args.get("max_chars") or 0)
+    return await fetch(
+        url=str(args.get("url") or ""),
+        max_chars=args.get("max_chars") or 0,
+        session_id=session_id or "",
+    )
 
 
 # ---------------------------------------------------------------------------

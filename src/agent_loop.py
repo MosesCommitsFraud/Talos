@@ -3508,6 +3508,16 @@ async def stream_agent_loop(
                     + "\n\n"
                 )
 
+            # Web results / fetched pages / knowledge sections got turn-wide
+            # citation numbers while the tool ran. Send the current table so
+            # the "[n]" markers streaming next can already show their source.
+            if block.tool_type in ("web_search", "web_fetch", "search_knowledge"):
+                from src import citations as _citations
+
+                _cit = _citations.entries(session_id)
+                if _cit:
+                    yield f"data: {json.dumps({'type': 'citations', 'data': _cit})}\n\n"
+
             # Build output for frontend tool bubble.
             # Document tools get a short summary — content goes to the editor panel.
             output_text = ""

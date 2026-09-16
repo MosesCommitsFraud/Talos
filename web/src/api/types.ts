@@ -51,6 +51,23 @@ export interface HistoryMessage {
   metadata?: { _db_id?: string; attachments?: Attachment[]; tool_events?: ToolCall[]; [key: string]: unknown };
 }
 
+/** A numbered source the answer can cite inline as "[n]" — a web result, a
+ *  fetched page or a knowledge-base section (src/citations.py). */
+export interface Citation {
+  n: number;
+  kind: 'web' | 'rag';
+  title: string;
+  snippet: string;
+  url?: string;
+  site?: string;
+  published?: string;
+  page?: number | string;
+  image_url?: string;
+  image_caption?: string;
+  deeplink?: string;
+  start?: number;
+}
+
 /** A knowledge-base chunk the RAG retriever fed into the answer (for citations). */
 export interface RagSource {
   filename: string;

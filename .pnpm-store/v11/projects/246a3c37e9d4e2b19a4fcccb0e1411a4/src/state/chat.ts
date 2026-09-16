@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { compactSession, createSession, deleteMessages, editMessage, fetchActiveRuns, fetchArtifacts, fetchSession, resumeChat, streamChat } from '@/api/client';
-import type { Artifact, ArtifactSelection, Attachment, ChatEvent, Metrics, RagSource, ToolCall } from '@/api/types';
+import type { Artifact, ArtifactSelection, Attachment, ChatEvent, Citation, Metrics, RagSource, ToolCall } from '@/api/types';
 import { documentFileName, isPreviewable } from '@/lib/files';
 import { timestampMs } from '@/lib/utils';
 import { queryClient } from '@/lib/queryClient';
@@ -25,6 +25,8 @@ export interface UiMessage {
   metrics?: Metrics;
   /** RAG knowledge-base chunks cited for this answer. */
   sources?: RagSource[];
+  /** Numbered sources behind the answer's inline "[n]" markers. */
+  citations?: Citation[];
   streaming?: boolean;
   error?: boolean;
   /** Wall-clock the whole turn took, stamped on the terminal assistant bubble
@@ -255,6 +257,15 @@ function ragSourcesFromMetadata(metadata: Record<string, unknown> | undefined): 
   return sources.length > 0 ? sources : undefined;
 }
 
+function citationsFromMetadata(metadata: Record<string, unknown> | undefined): Citation[] | undefined {
+  const raw = metadata?.citations;
+  if (!Array.isArray(raw)) return undefined;
+  const out = raw.filter(
+    (c): c is Citation => !!c && typeof c === 'object' && typeof (c as Citation).n === 'number',
+  );
+  return out.length > 0 ? out : undefined;
+}
+
 function attachmentsFromMetadata(metadata: Record<string, unknown> | undefined): Attachment[] | undefined {
   const raw = metadata?.attachments;
   if (!Array.isArray(raw)) return undefined;
@@ -412,6 +423,7 @@ export function coldLoadMessage(m: HistoryMessage, sessionId: string): UiMessage
   const dbId = m.metadata?._db_id as string | undefined;
   const metrics = metricsFromMetadata(m.metadata);
   const sources = ragSourcesFromMetadata(m.metadata);
+  const citations = citationsFromMetadata(m.metadata);
   const tools = toolCallsFromMetadata(m.metadata);
   const roundTexts = m.metadata?.round_texts;
 
@@ -428,6 +440,7 @@ export function coldLoadMessage(m: HistoryMessage, sessionId: string): UiMessage
       metrics,
       tools,
       sources,
+      citations,
     }];
   }
 
@@ -451,6 +464,7 @@ export function coldLoadMessage(m: HistoryMessage, sessionId: string): UiMessage
       tools: roundTools?.length ? roundTools : undefined,
       metrics: terminal ? metrics : undefined,
       sources: terminal ? sources : undefined,
+      citations: terminal ? citations : undefined,
     };
   });
 }
@@ -897,6 +911,9 @@ export const useChat = create<ChatState>((set, get) => {
               // accumulated content with the authoritative text that gets
               // persisted.
               if (typeof ev.content === 'string') patchAi({ content: ev.content });
+              break;
+            case 'citations':
+              if (Array.isArray(ev.data)) patchAi({ citations: ev.data as Citation[] });
               break;
             case 'rag_sources':
               if (Array.isArray(ev.data)) patchAi({ sources: ev.data as RagSource[] });

@@ -1,6 +1,7 @@
 import { FileIcon, PlayCircleIcon } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import type { RagSource } from '@/api/types';
+import type { Citation, RagSource } from '@/api/types';
+import { WebSourceChips } from './Citations';
 import { useUi } from '@/state/ui';
 
 /** Format a seconds offset as m:ss (or h:mm:ss) for a video timestamp label. */
@@ -53,10 +54,10 @@ function mergeVideoSegments(segs: RagSource[], gap = 20): RagSource[] {
  *  came out of a document that is also cited for text; video ASR segments are
  *  merged per file into from–to time ranges, one tag per range, linking to the
  *  deep-link when one is available. */
-export function RagSources({ sources }: { sources: RagSource[] }) {
+export function RagSources({ sources, web = [] }: { sources: RagSource[]; web?: Citation[] }) {
   const { t } = useTranslation();
   const openLightbox = useUi((s) => s.openLightbox);
-  if (!sources?.length) return null;
+  if (!sources?.length && !web.length) return null;
 
   const byFile = new Map<string, RagSource>();
   const images = new Map<string, RagSource>();
@@ -82,6 +83,7 @@ export function RagSources({ sources }: { sources: RagSource[] }) {
   return (
     <div className="mt-2 flex flex-wrap items-center gap-1.5">
       <span className="text-xs text-muted-foreground/80">{t('messages.sources')}:</span>
+      <WebSourceChips citations={web} />
       {fileTags.map((s) => (
         <span
           key={`file:${s.filename}`}

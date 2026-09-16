@@ -37,6 +37,7 @@ from routes.document_helpers import _owner_session_filter
 from routes.model_routes import _visible_models
 from routes.session_routes import _verify_session_owner
 from src import agent_runs
+from src import citations as _citations
 from src.agent_loop import stream_agent_loop
 from src.auth_helpers import get_current_user
 from src.chat_helpers import coerce_message_and_session
@@ -1035,6 +1036,12 @@ def setup_chat_routes(
                 # ── Unified path: full agent loop with all tools ──
                 _agent_rounds = 0
                 _answered_by = None  # set if the selected model failed and a fallback answered
+                # Auto-injected knowledge is already numbered; announce it
+                # before the first token so its "[n]" markers render as chips
+                # while the answer streams.
+                _initial_cit = _citations.entries(session)
+                if _initial_cit:
+                    yield f"data: {json.dumps({'type': 'citations', 'data': _initial_cit})}\n\n"
                 try:
                     from src.agent_tools import MAX_AGENT_ROUNDS as _DEFAULT_ROUNDS
                     from src.settings import get_setting
@@ -1107,6 +1114,7 @@ def setup_chat_routes(
                                     "agent_stalled",
                                     "ask_user",
                                     "plan_update",
+                                    "citations",
                                 ):
                                     if data.get("type") == "agent_step":
                                         _agent_rounds = max(_agent_rounds, data.get("round", 1))
@@ -1202,9 +1210,18 @@ def setup_chat_routes(
                                 # keep only sources the answer actually drew on,
                                 # then announce them at the very end (after the
                                 # text) and persist that same filtered set.
-                                _used_rag = public_rag_sources(
-                                    filter_used_rag_sources(full_response, ctx.rag_sources)
-                                )
+                                # A source the answer cites by number is used by
+                                # definition, whatever the word-overlap heuristic says.
+                                _cited = _citations.cited_numbers(full_response)
+                                _used_raw = filter_used_rag_sources(full_response, ctx.rag_sources)
+                                _used_raw += [
+                                    s
+                                    for s in ctx.rag_sources
+                                    if s.get("n") in _cited and s not in _used_raw
+                                ]
+                                _used_rag = public_rag_sources(_used_raw)
+                                _final_cit = _citations.entries(session, _cited)
+                                yield f"data: {json.dumps({'type': 'citations', 'data': _final_cit, 'final': True})}\n\n"
                                 if _used_rag:
                                     yield f"data: {json.dumps({'type': 'rag_sources', 'data': _used_rag})}\n\n"
                                 _saved_id = save_assistant_response(
@@ -1215,6 +1232,7 @@ def setup_chat_routes(
                                     last_metrics,
                                     character_name=ctx.preset.character_name,
                                     rag_sources=_used_rag,
+                                    citations=_final_cit,
                                     incognito=incognito,
                                 )
                                 if _saved_id:

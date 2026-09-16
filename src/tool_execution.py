@@ -1854,7 +1854,7 @@ async def execute_tool_block(
         from src.tool_implementations import do_web_fetch
 
         desc = f"web_fetch: {content.split(chr(10))[0].strip()[:80]}"
-        result = await do_web_fetch(content, owner=owner)
+        result = await do_web_fetch(content, owner=owner, session_id=session_id)
     elif tool == "get_news":
         from src.tool_implementations import do_get_news
 
@@ -1893,7 +1893,7 @@ async def execute_tool_block(
         desc = "query_sql"
         result = await do_query_sql(content, owner=owner, session_id=session_id)
     elif tool == "search_knowledge":
-        result = await do_search_knowledge(content, owner=owner)
+        result = await do_search_knowledge(content, owner=owner, session_id=session_id)
         _hits = len(result.get("rag_sources") or [])
         desc = f"search_knowledge: {_hits} hit(s)"
     elif tool == "expand_output":

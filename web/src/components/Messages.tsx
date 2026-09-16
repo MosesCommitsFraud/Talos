@@ -12,6 +12,7 @@ import { useChat, type UiMessage } from '@/state/chat';
 import { usePrefs } from '@/state/prefs';
 import { useUi } from '@/state/ui';
 import { AttachmentTile, FilePreviewFace, hasVisualPreview, openUploadViewer } from './AttachmentTile';
+import { CitationProvider, citationMap, citedNumbers } from './Citations';
 import { Markdown } from './Markdown';
 import { PlanCard } from './PlanCard';
 import { RagSources } from './RagSources';
@@ -937,6 +938,12 @@ function AssistantTurn({ turn, containsLast, artifactFiles, sessionId }: { turn:
   // that hides how the answer was produced. ActivityFold suppresses its copy.
   const widgets = turn.flatMap((m) => (m.tools ?? []).map((call) => call.widget).filter(Boolean));
   const sources = turn.flatMap((m) => m.sources ?? []);
+  // Web pages the answer cites inline join the knowledge sources in the row
+  // under the answer; knowledge sections already arrive via `sources`.
+  const citeLookup = citationMap(turn.map((m) => m.citations));
+  const webCited = citedNumbers(copyText)
+    .map((n) => citeLookup.get(n))
+    .filter((c): c is NonNullable<typeof c> => c?.kind === 'web');
   // A plan-mode turn that actually proposed a plan (a checklist is present) gets
   // a compact chip; the full plan lives in the side panel. Strictly gated on
   // planProposed so ordinary turns never get it, and superseded by a question.
@@ -984,7 +991,7 @@ function AssistantTurn({ turn, containsLast, artifactFiles, sessionId }: { turn:
       )}
       {/* RAG citations: last thing in the turn, only when the backend confirmed
           the knowledge was used. */}
-      {sources.length > 0 && <RagSources sources={sources} />}
+      {(sources.length > 0 || webCited.length > 0) && <RagSources sources={sources} web={webCited} />}
       {/* Same spot it held while streaming — last in the turn — so the mark
           stays put while it plays its final cycle out instead of jumping. */}
       {indicator}
@@ -1121,12 +1128,14 @@ export function Messages() {
             </div>
           ) : (
             <div key={block.turn[0].id} className={`group w-full ${index === 0 ? '' : 'mt-3'}`}>
-              <AssistantTurn
-                turn={block.turn}
-                containsLast={block.turn.some((m) => m.id === lastAssistantId)}
-                artifactFiles={artifactFiles}
-                sessionId={sessionId}
-              />
+              <CitationProvider citations={citationMap(block.turn.map((m) => m.citations))}>
+                <AssistantTurn
+                  turn={block.turn}
+                  containsLast={block.turn.some((m) => m.id === lastAssistantId)}
+                  artifactFiles={artifactFiles}
+                  sessionId={sessionId}
+                />
+              </CitationProvider>
             </div>
           ),
         )}

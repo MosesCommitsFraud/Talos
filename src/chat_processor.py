@@ -395,6 +395,7 @@ class ChatProcessor:
         prefix: str = "",
         max_chars: Optional[int] = None,
         _manager: Any = None,
+        citation_session: Optional[str] = None,
     ) -> Tuple[List[Dict[str, Any]], str]:
         """Search the knowledge base and build the injectable context block.
 
@@ -597,7 +598,7 @@ class ChatProcessor:
                     "filename": r["metadata"].get(
                         "filename", r["metadata"].get("source", "unknown")
                     ),
-                    "snippet": r["document"][:200],
+                    "snippet": r["document"][:400],
                     "similarity": round(r.get("similarity", 0), 3),
                     # Larger slice of the chunk, kept ONLY for the
                     # post-generation "was this actually used?" check
@@ -624,13 +625,23 @@ class ChatProcessor:
                 for r in relevant
             ]
 
+            # Turn-wide citation numbers, so the answer can say "… [3]" and the
+            # UI can show exactly this section behind the marker.
+            from src import citations as _citations
+
+            for _src in rag_sources:
+                _n = _citations.cite_rag(citation_session, _src)
+                if _n is not None:
+                    _src["n"] = _n
+
             # Inject the expanded parent section when small-to-big is
             # on (r["expanded"]); otherwise the matched chunk. The
             # citation snippet (rag_sources) still uses the chunk.
             def _rag_section(s, r, passage=None):
                 from src.rag_structure import context_location
 
-                body = f"[{s['filename']}]\n{context_location(r)}\n{passage if passage is not None else (r.get('expanded') or r['document'])}"
+                label = f"[{s['n']}] {s['filename']}" if s.get("n") else f"[{s['filename']}]"
+                body = f"{label}\n{context_location(r)}\n{passage if passage is not None else (r.get('expanded') or r['document'])}"
                 # Expose the figure as a ready-made Markdown line with an
                 # imperative right next to it: small local models follow an
                 # instruction adjacent to the data far more reliably than
@@ -846,7 +857,9 @@ class ChatProcessor:
                 "not even when the same question was already answered earlier in this "
                 "conversation."
             )
-            rag_sources, rag_content = self.retrieve(search_query, prefix=context_prompt)
+            rag_sources, rag_content = self.retrieve(
+                search_query, prefix=context_prompt, citation_session=getattr(session, "id", None)
+            )
             if rag_content:
                 preface.append(untrusted_context_message("retrieved documents", rag_content))
                 # Authorize inline figure embedding only when a retrieved

@@ -9,6 +9,7 @@ import 'katex/dist/katex.min.css';
 import { copyTextToClipboard } from '@/lib/utils';
 import { normalizeMath } from '@/lib/math';
 import { useUi } from '@/state/ui';
+import { CitationRef, remarkCitations } from './Citations';
 
 /* ── hast helpers: extract plain text/structure from the syntax tree the
       renderers receive, so copy/download get the raw content even after
@@ -159,7 +160,7 @@ function TableBlock({ node, children }: { node?: HastNode; children: React.React
 
 /* Stable plugin/component references so react-markdown doesn't see a fresh
    config object every render while a sibling message streams. */
-const REMARK_PLUGINS = [remarkGfm, remarkMath];
+const REMARK_PLUGINS = [remarkGfm, remarkMath, remarkCitations];
 // `strict: false` keeps a slightly loose formula rendering instead of turning
 // the whole message red; errors render as the source text in place.
 const KATEX_OPTIONS = { throwOnError: false, strict: false as const, output: 'html' as const };
@@ -202,6 +203,7 @@ const MD_COMPONENTS = {
     </TableBlock>
   ),
   img: MarkdownImage,
+  cite: CitationRef,
 } as const;
 
 /** Assistant message body. Memoized — re-renders only when the text changes,
