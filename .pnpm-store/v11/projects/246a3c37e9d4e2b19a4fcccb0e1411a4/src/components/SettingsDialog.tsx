@@ -66,6 +66,7 @@ import {
   uploadSharedSkill,
   uploadSharedSkillBundle,
   deleteSharedSkill,
+  downloadSharedSkill,
   setSharedSkillEnabled,
   type SharedSkill,
   type AppSettings,
@@ -1862,6 +1863,14 @@ function SharedSkillsPanel() {
               </>
             }
           >
+            <Button
+              size="icon-sm"
+              variant="ghost"
+              title={t('settings.skills.download')}
+              onClick={() => downloadSharedSkill(s.name)}
+            >
+              <DownloadIcon />
+            </Button>
             <Button
               size="icon-sm"
               variant="ghost"

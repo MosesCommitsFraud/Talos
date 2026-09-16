@@ -1,9 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { BookOpenIcon, PlusIcon, Trash2Icon } from 'lucide-react';
+import { BookOpenIcon, DownloadIcon, PlusIcon, Trash2Icon } from 'lucide-react';
 import { useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   deleteSharedSkill,
+  downloadSharedSkill,
   fetchSharedSkills,
   setSharedSkillEnabled,
   uploadSharedSkill,
@@ -59,6 +60,14 @@ function SkillRow({
         </span>
       )}
       <Switch checked={skill.enabled} onCheckedChange={onToggle} />
+      <Button
+        size="icon-sm"
+        variant="ghost-muted"
+        title={t('settings.skills.download')}
+        onClick={() => downloadSharedSkill(skill.name)}
+      >
+        <DownloadIcon />
+      </Button>
       <Button size="icon-sm" variant="ghost-muted" title={t('settings.skills.delete')} onClick={onDelete}>
         <Trash2Icon />
       </Button>

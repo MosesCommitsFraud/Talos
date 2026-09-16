@@ -10,7 +10,7 @@ import logging
 import os
 from typing import Optional
 
-from fastapi import APIRouter, File, HTTPException, Request, UploadFile
+from fastapi import APIRouter, File, HTTPException, Request, Response, UploadFile
 from pydantic import BaseModel
 
 from services.memory import shared_skills
@@ -97,6 +97,20 @@ def setup_shared_skills_routes() -> APIRouter:
         if skill is None:
             raise HTTPException(404, "Skill not found")
         return skill
+
+    @router.get("/{name}/download")
+    async def download_skill(name: str, request: Request):
+        """The whole skill as a zip (`<name>/SKILL.md` + references/scripts),
+        in the same layout the bundle upload accepts."""
+        exported = shared_skills.export_bundle(name)
+        if exported is None:
+            raise HTTPException(404, "Skill not found")
+        skill_name, data = exported
+        return Response(
+            content=data,
+            media_type="application/zip",
+            headers={"Content-Disposition": f'attachment; filename="{skill_name}.zip"'},
+        )
 
     @router.delete("/{name}")
     async def delete_skill(name: str, request: Request):

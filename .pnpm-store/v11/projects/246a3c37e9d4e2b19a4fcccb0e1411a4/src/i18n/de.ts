@@ -1177,6 +1177,7 @@ const de: typeof en = {
       files_one: '{{count}} Bundle-Datei',
       files_other: '{{count}} Bundle-Dateien',
       delete: 'Skill löschen',
+      download: 'Skill als ZIP herunterladen',
     },
     assistants: {
       title: 'KI-Endpunkte',

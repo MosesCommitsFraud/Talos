@@ -489,6 +489,17 @@ export async function uploadSharedSkillBundle(file: File): Promise<void> {
   }
 }
 
+/** Whole skill package as a zip (SKILL.md + bundled files), re-uploadable as-is. */
+export const sharedSkillDownloadUrl = (name: string) =>
+  `/api/shared-skills/${encodeURIComponent(name)}/download`;
+
+export function downloadSharedSkill(name: string): void {
+  const a = document.createElement('a');
+  a.href = sharedSkillDownloadUrl(name);
+  a.download = `${name}.zip`;
+  a.click();
+}
+
 export async function deleteSharedSkill(name: string): Promise<void> {
   const res = await fetch(`/api/shared-skills/${encodeURIComponent(name)}`, {
     method: 'DELETE',

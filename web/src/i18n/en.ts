@@ -1171,6 +1171,7 @@ const en = {
       files_one: '{{count}} bundled file',
       files_other: '{{count}} bundled files',
       delete: 'Delete skill',
+      download: 'Download skill as ZIP',
     },
     assistants: {
       title: 'AI Endpoints',

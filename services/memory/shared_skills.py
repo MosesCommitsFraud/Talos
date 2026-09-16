@@ -405,6 +405,33 @@ def get_skill_file(name: str, path: str) -> Optional[bytes]:
         return None if row is None else bytes(row.content or b"")
 
 
+def export_bundle(name: str) -> Optional[tuple]:
+    """(skill name, zip bytes) with `<name>/SKILL.md` plus every bundle file,
+    or None. The layout is exactly what save_bundle accepts, so a download can
+    be re-uploaded (or installed elsewhere) unchanged."""
+    import io
+    import zipfile
+
+    with SessionLocal() as db:
+        row = db.get(SharedSkill, slugify(name, fallback=""))
+        if row is None:
+            return None
+        files = (
+            db.query(SharedSkillFile)
+            .filter(SharedSkillFile.skill_name == row.name)
+            .order_by(SharedSkillFile.path)
+            .all()
+        )
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+            zf.writestr(f"{row.name}/SKILL.md", row.content or "")
+            for f in files:
+                rel = _safe_bundle_path(f.path)
+                if rel is not None:
+                    zf.writestr(f"{row.name}/{rel}", bytes(f.content or b""))
+        return row.name, buf.getvalue()
+
+
 def materialize(name: str, dest_dir: str) -> List[str]:
     """Write a skill's SKILL.md + bundle files under `dest_dir` so the agent's
     bash/python tools can use them (run scripts, open templates). Returns the
