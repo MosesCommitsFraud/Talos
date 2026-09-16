@@ -1088,7 +1088,7 @@ const de: typeof en = {
     bases: {
       chatEnabled: "Im Talos-Chat aktiv",
       chatEnabledFor: "{{name}} im Talos-Chat verwenden",
-      chatEnabledHint: "Wähle, welche Wissensdatenbanken der Talos-Chat für alle durchsucht. Beim Ausschalten bleiben die Dokumente erhalten. Die Schalter gelten für den internen Wissensanbieter.",
+      chatEnabledHint: "Wähle, welche Wissensdatenbanken in den Modi Wissen und Volles Wissen durchsucht werden. Im Modus Nur Chat werden diese Datenbanken auch bei eingeschalteten Schaltern nicht durchsucht. Beim Ausschalten bleiben die Dokumente erhalten. Die Schalter gelten für den internen Wissensanbieter.",
       title: 'Wissensdatenbanken',
       new: 'Neu',
       newTitle: 'Neue Wissensdatenbank',

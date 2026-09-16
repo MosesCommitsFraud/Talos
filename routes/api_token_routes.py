@@ -33,6 +33,7 @@ ALLOWED_SCOPES = {
     # token can be given knowledge access without also being handed a route to
     # the public web.
     "web:read",
+    "sql:read",
 }
 TOKEN_PROFILES = {
     "chat": ["chat"],
@@ -42,6 +43,7 @@ TOKEN_PROFILES = {
     # `mcp` is knowledge-only; `mcp_web` adds outbound internet on top.
     "mcp": ["rag:read", "skills:read"],
     "mcp_web": ["rag:read", "skills:read", "web:read"],
+    "mcp_sql": ["sql:read"],
 }
 
 

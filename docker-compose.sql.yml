@@ -1,0 +1,29 @@
+# Optional SQL-only sandbox; the ordinary code sandbox stays on sandbox-net.
+# docker compose -f docker-compose.yml -f docker-compose.sql.yml up -d --build
+services:
+  talos-app:
+    environment:
+      - TALOS_SQL_SANDBOX_URL=http://talos-sql-sandbox:7800
+      - TALOS_SQL_SANDBOX_KEY=${TALOS_SQL_SANDBOX_KEY:?Set a separate SQL sandbox secret}
+      - TALOS_MCP_SQL_HEADER_HOST=${TALOS_MCP_SQL_HEADER_HOST:-X-DB-Host}
+      - TALOS_MCP_SQL_HEADER_DATABASE=${TALOS_MCP_SQL_HEADER_DATABASE:-X-DB-Name}
+      - TALOS_MCP_SQL_HEADER_USER=${TALOS_MCP_SQL_HEADER_USER:-X-SQL-User}
+      - TALOS_MCP_SQL_HEADER_PASSWORD=${TALOS_MCP_SQL_HEADER_PASSWORD:-X-SQL-PW}
+  talos-sql-sandbox:
+    build: ./sandbox
+    image: talos-sql-sandbox:local
+    user: "65534:65534"
+    entrypoint: ["/usr/bin/tini", "--"]
+    command: ["/opt/talos-sandbox-venv/bin/uvicorn", "sql_sandbox:app", "--host", "0.0.0.0", "--port", "7800", "--no-access-log"]
+    environment:
+      - TALOS_SQL_SANDBOX_KEY=${TALOS_SQL_SANDBOX_KEY:?Set a separate SQL sandbox secret}
+      - TALOS_SQL_ALLOWED_HOSTS=${TALOS_SQL_ALLOWED_HOSTS:?Set comma-separated database hosts}
+      - TALOS_SQL_PORT=${TALOS_SQL_PORT:-1433}
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 512m
+    cpus: 1
+    pids_limit: 64
+    networks: [default]
+    restart: unless-stopped

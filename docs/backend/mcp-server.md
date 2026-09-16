@@ -296,3 +296,102 @@ curl -sS https://<talos-host>/mcp -H "Authorization: Bearer ody_..." -H "Content
 
 The split keeps the tools callable without a server, so a stdio wrapper could
 reuse `src/mcp_public.py` verbatim if a local-only client ever needs one.
+# SQL Server aus Microsoft Agent Framework
+
+Das zusätzliche Tool `sql_query` führt eine einzelne SELECT-Abfrage in einer
+separaten SQL-Sandbox aus. Es benötigt einen Talos-API-Token mit Scope `sql:read`
+(Token-Profil `mcp_sql`). Bestehende MCP-Profile erhalten diesen Scope nicht automatisch.
+
+## Deployment
+
+In `.env` setzen:
+
+```dotenv
+TALOS_SQL_SANDBOX_KEY=<eigener-zufaelliger-langer-secret>
+TALOS_SQL_ALLOWED_HOSTS=sqlserver.example.internal
+TALOS_SQL_PORT=1433
+```
+
+Aus dem aktualisierten Checkout bauen und starten:
+
+```sh
+docker compose -f docker-compose.yml -f docker-compose.dev.yml -f docker-compose.sql.yml up -d --build
+```
+
+Die SQL-Sandbox verwendet das Sandbox-Image mit einem eigenen SQL-only-Server,
+ohne Shell-/Datei-API, ohne persistente Volumes und unter einem unprivilegierten
+Benutzer. Sie erreicht das Datenbanknetz über das normale Docker-Netz; DNS,
+Routing und die DB-Firewall müssen diesen Zugriff erlauben. Die normale
+Code-Sandbox bleibt ausschließlich im internen Netz. Der SQL-Port wird nicht
+am Docker-Host veröffentlicht. Erlaubte DB-Hosts werden exakt mit der
+kommagetrennten Liste verglichen; leere Liste erlaubt keine Verbindung.
+DB-Verbindungen verlangen Verschlüsselung.
+
+Der übergebene SQL-Login muss auf dem SQL Server ausschließlich die benötigten
+Leserechte besitzen. Die Syntaxprüfung blockiert mehrere Statements,
+Schreiboperationen, SELECT INTO und externe/arbiträre Funktionsaufrufe; sie
+ersetzt keine Datenbankberechtigungen. Es wird nie committed, und jede
+Verbindung wird nach dem Aufruf zurückgerollt und geschlossen. Manche
+SQL-Server-spezifischen Funktionen werden von der konservativen Prüfung abgelehnt.
+
+## Vorläufiger Request-Vertrag
+
+Die Zugangsdaten gehören **auf jeden tools/call-HTTP-Request**, nicht in die
+Tool-Argumente oder den Prompt:
+
+| Header | Inhalt | Optionaler abweichender Headername via Env |
+|---|---|---|
+| `Authorization` | `Bearer ody_…` | bestehende Talos-Authentifizierung |
+| `X-DB-Host` | DNS-Name oder IPv4-Adresse, ohne Port | `TALOS_MCP_SQL_HEADER_HOST` |
+| `X-DB-Name` | Datenbankname | `TALOS_MCP_SQL_HEADER_DATABASE` |
+| `X-SQL-User` | SQL-Login | `TALOS_MCP_SQL_HEADER_USER` |
+| `X-SQL-PW` | Passwort | `TALOS_MCP_SQL_HEADER_PASSWORD` |
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "method": "tools/call",
+  "params": {
+    "name": "sql_query",
+    "arguments": {"query": "SELECT TOP (10) name FROM sys.tables", "max_rows": 100}
+  }
+}
+```
+
+Das MCP-Textresultat enthält JSON mit `columns`, `rows` (Arrays in derselben
+Spaltenreihenfolge), `row_count` und `truncated`. Default: 100 Zeilen,
+Maximum: 1000 Zeilen und ungefähr 20.000 Zeichen. Bei `truncated: true` die
+Abfrage eingrenzen. Dezimalwerte bleiben als Strings exakt. Fehler liefern
+`isError: true`, ohne Treiberfehler oder Zugangsdaten auszugeben.
+Login-Timeout: 10 Sekunden, SQL-Timeout: 30 Sekunden, Prozesslimit: 45 Sekunden.
+Maximal vier Abfragen laufen gleichzeitig; weitere Aufrufe melden `busy`.
+
+## MAF-Beispiel (Python)
+
+Microsofts [MCPStreamableHTTPTool-Dokumentation](https://learn.microsoft.com/en-us/python/api/agent-framework-core/agent_framework.mcpstreamablehttptool?view=agent-framework-python-latest)
+beschreibt den `headers`-Parameter. Mit Geheimnissen aus der Umgebung:
+
+```python
+import os
+from agent_framework import MCPStreamableHTTPTool
+
+sql_tool = MCPStreamableHTTPTool(
+    name="talos_sql",
+    url=os.environ["TALOS_MCP_URL"],  # https://talos.example/mcp
+    headers={
+        "Authorization": "Bearer " + os.environ["TALOS_API_TOKEN"],
+        "X-DB-Host": os.environ["DB_HOST"],
+        "X-DB-Name": os.environ["DB_NAME"],
+        "X-SQL-User": os.environ["SQL_USER"],
+        "X-SQL-PW": os.environ["SQL_PASSWORD"],
+    },
+)
+```
+
+Das Tool innerhalb des MAF-Async-Kontexts verwenden. Für unterschiedliche
+DB-Zugangsdaten getrennte Client-Kontexte verwenden. Talos speichert diese
+Header nicht und übernimmt keine Zugangsdaten von vorherigen Requests.
+MAF → Talos über HTTPS betreiben und diese Header im vorgeschalteten Proxy
+nicht protokollieren. Ein echter MAF-/DB-Integrationstest benötigt den finalen
+Client-Vertrag und eine erreichbare SQL-Server-Testdatenbank.

@@ -36,6 +36,7 @@ logger = logging.getLogger(__name__)
 SCOPE_RAG_READ = "rag:read"
 SCOPE_SKILLS_READ = "skills:read"
 SCOPE_WEB_READ = "web:read"
+SCOPE_SQL_READ = "sql:read"
 
 # Per-tool output budget. Generous enough for a full SKILL.md, small enough
 # that a wide `rag_get_document` can't blow up the client's context window.
@@ -120,6 +121,28 @@ def _run_async(coro):
 # gating metadata, not part of the MCP tool schema.
 
 _TOOL_DEFS: List[Dict[str, Any]] = [
+    {
+        "_scope": SCOPE_SQL_READ,
+        "name": "sql_query",
+        "title": "Query SQL Server in the SQL sandbox",
+        "description": (
+            "Execute a single read-only SQL Server SELECT query in the dedicated SQL sandbox. "
+            "Connection credentials must be supplied by the client in HTTP headers "
+            "X-DB-Host, X-DB-Name, X-SQL-User and X-SQL-PW (deployment may rename them). "
+            "Never pass credentials as tool arguments. Returns JSON with columns, rows, "
+            "row_count and truncated. Use a SQL login with SELECT-only permissions."
+        ),
+        "annotations": {"readOnlyHint": True, "destructiveHint": False, "openWorldHint": True},
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "minLength": 1, "maxLength": 50000},
+                "max_rows": {"type": "integer", "minimum": 1, "maximum": 1000, "default": 100},
+            },
+            "required": ["query"],
+            "additionalProperties": False,
+        },
+    },
     {
         "_scope": SCOPE_RAG_READ,
         "name": "rag_query",
@@ -1306,6 +1329,7 @@ def call_tool(
     granted_scopes,
     owner: Optional[str] = None,
     skills_manager=None,
+    request_headers=None,
 ) -> Tuple[str, bool]:
     """Run one tool. Returns ``(text, is_error)``.
 
@@ -1336,6 +1360,10 @@ def call_tool(
         return (f"Tool {name!r} is disabled on this Talos instance.", True)
 
     try:
+        if name == "sql_query":
+            from src.mcp_sql import query_sql
+
+            return _run_async(query_sql(arguments, request_headers))
         # The administrator's knowledge-base and result-size policy. Applied to
         # a *copy* of the arguments here rather than inside the tool bodies,
         # which the REST service (src/rag_api.py) shares and which must stay

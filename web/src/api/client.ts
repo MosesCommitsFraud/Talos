@@ -810,7 +810,7 @@ export async function transcribeVoice(blob: Blob, signal?: AbortSignal): Promise
 /* ── Knowledge bases (RAG DBs) ──
  *  Several named indexes, each backed by its own Qdrant collection. Everything
  *  document-shaped below takes an optional `ragId`; omitting it targets the
- *  `default` base. Chat searches the bases with chat_enabled set. */
+ *  `default` base. Knowledge modes search only bases with chat_enabled set. */
 
 export interface RagBase {
   id: string;
@@ -1376,8 +1376,8 @@ export async function streamChat(opts: {
   const f = opts.flags ?? {};
   if (f.planMode) fd.set('plan_mode', 'true');
   if (f.approvedPlan) fd.set('approved_plan', f.approvedPlan);
-  if (f.useRag) fd.set('use_rag', 'true');
-  if (f.useDb) fd.set('use_db', 'true');
+  fd.set('use_rag', f.useRag === true ? 'true' : 'false');
+  fd.set('use_db', f.useDb === true ? 'true' : 'false');
   if (f.useWeb === false) fd.set('use_web', 'false');
   if (f.reasoning === false) fd.set('reasoning', 'false');
   if (f.reasoningEffort) fd.set('reasoning_effort', f.reasoningEffort);

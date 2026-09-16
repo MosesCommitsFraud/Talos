@@ -329,6 +329,7 @@ async def _handle_message(
                     granted_scopes=scopes,
                     owner=owner,
                     skills_manager=skills_manager,
+                    **({"request_headers": request.headers} if name == "sql_query" else {}),
                 ),
                 timeout=TOOL_TIMEOUT_SECONDS,
             )

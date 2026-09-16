@@ -62,6 +62,44 @@ class ChatSelectionTests(unittest.TestCase):
         self.assertEqual(processor.retrieve("hydraulic pressure"), ([], ""))
         self.assertFalse(self.indexes["default"].calls)
 
+    def test_chat_only_never_searches_enabled_bases(self):
+        rag_registry.update_base("manuals", chat_enabled=True)
+        for agent_mode in (False, True):
+            with self.subTest(agent_mode=agent_mode):
+                _, sources = ChatProcessor(None).build_context_preface(
+                    "hydraulic pressure calibration", None,
+                    use_rag=False, agent_mode=agent_mode, use_skills=False,
+                )
+                self.assertEqual(sources, [])
+                self.assertTrue(all(not index.calls for index in self.indexes.values()))
+
+    def test_missing_or_false_form_flag_does_not_enable_knowledge(self):
+        processor = ChatProcessor(None)
+        for flags in ({}, {"use_rag": "false"}, {"use_rag": None}):
+            with self.subTest(flags=flags):
+                _, sources = processor.build_context_preface(
+                    "hydraulic pressure calibration", None, use_skills=False, **flags,
+                )
+                self.assertEqual(sources, [])
+                self.assertTrue(all(not index.calls for index in self.indexes.values()))
+
+    def test_knowledge_mode_searches_only_enabled_bases(self):
+        rag_registry.update_base("default", chat_enabled=False)
+        rag_registry.update_base("manuals", chat_enabled=True)
+        _, sources = ChatProcessor(None).build_context_preface(
+            "hydraulic pressure calibration", None, use_rag=True, use_skills=False,
+        )
+        self.assertEqual([s["rag_id"] for s in sources], ["manuals"])
+        self.assertFalse(self.indexes["default"].calls)
+
+    def test_knowledge_mode_with_all_bases_off_searches_nothing(self):
+        rag_registry.update_base("default", chat_enabled=False)
+        _, sources = ChatProcessor(None).build_context_preface(
+            "hydraulic pressure calibration", None, use_rag=True, use_skills=False,
+        )
+        self.assertEqual(sources, [])
+        self.assertTrue(all(not index.calls for index in self.indexes.values()))
+
     def test_multiple_bases_keep_provenance_and_sql_exclusion(self):
         rag_registry.update_base("manuals", chat_enabled=True)
         sources, content = self.retrieve()

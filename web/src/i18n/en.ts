@@ -1082,7 +1082,7 @@ const en = {
     bases: {
       chatEnabled: "Active in Talos chat",
       chatEnabledFor: "Use {{name}} in Talos chat",
-      chatEnabledHint: "Choose which knowledge bases Talos chat searches for everyone. Switching a base off keeps its documents. These switches apply to the internal knowledge provider.",
+      chatEnabledHint: "Choose which knowledge bases are searched in Knowledge and Full Knowledge mode. Chat-only mode does not search these bases, even when their switches are on. Switching a base off keeps its documents. These switches apply to the internal knowledge provider.",
       title: 'Knowledge bases',
       new: 'New',
       newTitle: 'New knowledge base',

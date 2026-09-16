@@ -744,7 +744,7 @@ class ChatProcessor:
         self,
         message: str,
         session: Any,
-        use_rag: bool = True,
+        use_rag: bool = False,
         preset_system_prompt: Optional[str] = None,
         owner: Optional[str] = None,
         character_name: Optional[str] = None,
@@ -802,7 +802,9 @@ class ChatProcessor:
         # off would leave them with no knowledge at all and no way to ask for
         # it — so the choice only applies where a tool actually exists.
         _auto_inject = self._rag_cfg().get("auto_inject_enabled", True) is not False
-        if use_rag and (_auto_inject or not agent_mode):
+        # Retrieval is opt-in for this turn. In particular, a form value of
+        # "false" must never enable it just because non-empty strings are truthy.
+        if str(use_rag).lower() == "true" and (_auto_inject or not agent_mode):
             # Conversation-aware query transformation (Phase 7): resolve
             # follow-ups like "and the second one?" into a standalone
             # retrieval query. Off by default; degrades to the raw message.

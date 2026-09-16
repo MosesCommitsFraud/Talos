@@ -1,16 +1,11 @@
 sidebar für plan öffnet sich nicht
 reset to defaults button
 save setting profile
-actual queue list
 search expand on rag explorer
 what if images are shown despite not being relevant
-queueing only
-sharepoint devops anbindung
-zensierung von dokumenten
+queueing only for chat
 rag video screenshots when important
 projects?
-system prompt needs to be better
-queueing gives grey screen
 artifact editing for markdown output
 switching chat when preview or artifact panel is open should close it automatically
 sometimes image not shown and still no artifact when create document
@@ -23,18 +18,11 @@ formeln anzeigen
 download original ingest files
 vorschau tut nicht
 verlinkung im chat tut nicht wenn ki das gibt
-vision funktioniert
 system prompt für user
 skill download
-mcp settings in talos
-rag nach außen geben
-mcp für websuche skills
-almost done thinking change
-running task should be shown
-tanstack charts
-skeleton instead of sample title
-hardware requirements
-pipeline zur schema erstellung
-sandbox exposen per mcp
 better dashboard
 tables need to be inside the dropdown
+artifacts dashboard problems with restart
+dashboard v2 fixes
+neuer thinking orb
+macsify talos

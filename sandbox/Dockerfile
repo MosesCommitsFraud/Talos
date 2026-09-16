@@ -195,6 +195,7 @@ RUN set -eu; \
 RUN chmod -R a+rX /opt/talos
 
 COPY sandboxd.py ./sandboxd.py
+COPY sql_sandbox.py sql_worker.py ./
 COPY entrypoint.sh ./entrypoint.sh
 
 RUN mkdir -p /home/talos /var/lib/talos-sandbox
