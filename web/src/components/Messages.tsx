@@ -165,7 +165,7 @@ function ActivityStatus({
   const last = turn[turn.length - 1];
 
   let label: string;
-  if (running) label = asCaption(describeCall(running, t, 'running'));
+  if (running) label = asCaption([{ text: describeStatus(running, t), kind: 'plain' }]);
   else if (thinkingLive) label = thinkingPhrase(t, thinkingSince);
   // Text is landing in the bubble — the answer is being written, which is a
   // different wait from the one before the first token.

@@ -912,6 +912,22 @@ export const useChat = create<ChatState>((set, get) => {
               // persisted.
               if (typeof ev.content === 'string') patchAi({ content: ev.content });
               break;
+            case 'content_patch':
+              // Server-side citation backstop: whole-line replacements that add
+              // "[n]" markers the model left out. Last occurrence wins, matching
+              // how the server applies them to the saved text.
+              if (Array.isArray(ev.patches)) {
+                const patches = ev.patches as [string, string][];
+                patchAi((m) => {
+                  let content = m.content;
+                  for (const [from, to] of patches) {
+                    const at = content.lastIndexOf(from);
+                    if (at >= 0) content = content.slice(0, at) + to + content.slice(at + from.length);
+                  }
+                  return { content };
+                });
+              }
+              break;
             case 'citations':
               if (Array.isArray(ev.data)) patchAi({ citations: ev.data as Citation[] });
               break;

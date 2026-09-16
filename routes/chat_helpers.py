@@ -1151,6 +1151,80 @@ def append_missing_figures(answer: str, sources: list, *, max_figures: Optional[
     return "\n\n" + "\n\n".join(lines) if lines else ""
 
 
+_CITE_MARKER_RE = re.compile(r"\[(\d{1,3}(?:\s*,\s*\d{1,3})*)\]")
+_LIST_ITEM_RE = re.compile(r"^\s*(?:[-*+]|\d+[.)])\s+")
+
+
+def attribute_rag_citations(answer: str, sources: list) -> list:
+    """Inline "[n]" markers for knowledge sources the model used but did not cite.
+
+    The model is told to cite by number, but small local models often answer
+    from the retrieved sections without a single marker, leaving only the
+    source row under the answer. As a backstop, each prose line (paragraph or
+    list item) is matched against the numbered text sources by the same
+    overlap score that decides "used" (``_source_usage_score``) and gets the
+    best match appended. Runs only when the answer cites no knowledge source
+    at all, so a model that does cite is never second-guessed.
+
+    Returns ``[(old_line, new_line), ...]`` patches rather than a rewritten
+    string: the caller applies them to the saved text, to ``round_texts`` and
+    (as an event) to the already-streamed bubble alike.
+    """
+    numbered = [s for s in (sources or []) if s.get("n") and not s.get("image_url")]
+    if not answer or not numbered:
+        return []
+    cited = {int(x) for m in _CITE_MARKER_RE.finditer(answer) for x in re.split(r"\s*,\s*", m.group(1))}
+    if cited & {s["n"] for s in numbered}:
+        return []
+
+    patches = []
+    in_fence = False
+    prev_n = None
+    for line in answer.split("\n"):
+        stripped = line.strip()
+        if stripped.startswith(("```", "~~~")):
+            in_fence = not in_fence
+            prev_n = None
+            continue
+        if not stripped:
+            prev_n = None
+            continue
+        prose = _LIST_ITEM_RE.sub("", stripped)
+        if (
+            in_fence
+            or stripped.startswith(("#", "|", "!", ">", "$$"))
+            or len(prose) < 40
+            or prose.endswith(":")
+        ):
+            continue
+        best, best_score = None, None
+        for s in numbered:
+            score = _source_usage_score(prose, s)
+            if best_score is None or score > best_score:
+                best, best_score = s, score
+        bigrams, overlap = best_score[0], best_score[1]
+        if not (bigrams >= 2 or overlap >= 5):
+            continue
+        n = best["n"]
+        # A paragraph continued over several lines needs one pill, not one per
+        # line; list items are separate claims and each gets its own.
+        if n == prev_n and not _LIST_ITEM_RE.match(line):
+            continue
+        patches.append((line, f"{line.rstrip()} [{n}]"))
+        prev_n = n
+    return patches
+
+
+def apply_line_patches(text: str, patches: list) -> str:
+    """Apply (old_line, new_line) patches; the last occurrence wins, because
+    the final round's text sits at the end of a multi-round response."""
+    for old, new in patches:
+        at = text.rfind(old)
+        if at >= 0:
+            text = text[:at] + new + text[at + len(old):]
+    return text
+
+
 def public_rag_sources(sources: list) -> list:
     """Strip internal (underscore-prefixed) keys so a source is safe to emit to
     the client / persist to the DB."""

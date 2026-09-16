@@ -267,6 +267,18 @@ export function describeCall(call: ToolCall, t: Translate, tense: 'running' | 'p
   return toSegments(rendered, tense === 'past' ? t(`toolGroup.${usable}.verbPast`) : '', subject);
 }
 
+/** Short live caption for the activity status beside the working timer. Never
+ *  names the subject — a search query or a file path turns the caption into a
+ *  sentence ("Searching the knowledge base for 3 …"). Families whose plain
+ *  wording needs a subject supply a subject-free `brief` instead. */
+export function describeStatus(call: ToolCall, t: Translate): string {
+  const family = toolFamily(call.tool);
+  const brief = t(`toolGroup.${family}.brief`, { defaultValue: '' });
+  if (brief) return brief;
+  const usable = NEEDS_SUBJECT.has(family) ? 'generic' : family;
+  return t(`toolGroup.${usable}.running`, { tool: call.tool, subject: '', count: 1, verb: '' }).trim();
+}
+
 /** How many times an action repeated, as a suffix: "" / "twice" / "7 times".
  *  Plain digits past two — the exact number is the useful part. */
 function repeatSuffix(count: number, t: Translate): string {

@@ -6,6 +6,7 @@ import binascii
 import json
 import logging
 import os
+import re
 from datetime import datetime
 from typing import Any, AsyncGenerator, Dict, List
 
@@ -22,6 +23,8 @@ from core.models import ChatMessage
 from routes.chat_helpers import (
     _enforce_chat_privileges,
     append_missing_figures,
+    apply_line_patches,
+    attribute_rag_citations,
     auto_name_session,
     build_chat_context,
     clean_thinking_for_save,
@@ -1212,8 +1215,23 @@ def setup_chat_routes(
                                 # text) and persist that same filtered set.
                                 # A source the answer cites by number is used by
                                 # definition, whatever the word-overlap heuristic says.
-                                _cited = _citations.cited_numbers(full_response)
                                 _used_raw = filter_used_rag_sources(full_response, ctx.rag_sources)
+                                # The model drew on knowledge but wrote no "[n]":
+                                # attribute each paragraph of the final answer to
+                                # its best-matching source, so the pill still sits
+                                # where the information came from.
+                                _final_text = (
+                                    re.sub(r"<think(?:ing)?>[\s\S]*?</think(?:ing)?>", "", str(_rt[-1]))
+                                    if isinstance(_rt, list) and _rt
+                                    else full_response
+                                )
+                                _cite_patches = attribute_rag_citations(_final_text, _used_raw)
+                                if _cite_patches:
+                                    full_response = apply_line_patches(full_response, _cite_patches)
+                                    if isinstance(_rt, list) and _rt:
+                                        _rt[-1] = apply_line_patches(str(_rt[-1]), _cite_patches)
+                                    yield f"data: {json.dumps({'type': 'content_patch', 'patches': _cite_patches})}\n\n"
+                                _cited = _citations.cited_numbers(full_response)
                                 _used_raw += [
                                     s
                                     for s in ctx.rag_sources
