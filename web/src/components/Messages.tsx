@@ -331,7 +331,7 @@ function Working({
       // Sits low, with room above it: the row is a footer to the turn, not part
       // of it. One box for all three states, so the resting logo occupies the
       // exact spot the animation and its readouts had.
-      className="mt-3 flex items-center gap-2 pb-1 text-[11px] text-muted-foreground/70 tabular-nums"
+      className="mt-3 flex min-w-0 items-center gap-2 pb-1 text-[11px] text-muted-foreground/70 tabular-nums"
       aria-label={running ? t('messages.generating') : undefined}
     >
       {/* Both marks share one box and cross-fade inside it, so the hand-off is
@@ -369,11 +369,11 @@ function Working({
       </span>
       {/* The animation already says "still going" — the label only needs to
           say how long, so the clock stands alone. */}
-      {running && <span>{startedAt ? <WorkingTimer startedAt={startedAt} /> : t('messages.working')}</span>}
+      {running && <span className="shrink-0 whitespace-nowrap">{startedAt ? <WorkingTimer startedAt={startedAt} /> : t('messages.working')}</span>}
       {running && tokens > 0 && (
         <>
           <span aria-hidden>·</span>
-          <span className="flex items-center gap-1" aria-label={t('thinking.tokensLabel', { count: tokens })}>
+          <span className="flex shrink-0 items-center gap-1 whitespace-nowrap" aria-label={t('thinking.tokensLabel', { count: tokens })}>
             <RollingNumber value={tokens} compact />
             <span aria-hidden>{t('thinking.tokensUnit', { count: tokens })}</span>
           </span>

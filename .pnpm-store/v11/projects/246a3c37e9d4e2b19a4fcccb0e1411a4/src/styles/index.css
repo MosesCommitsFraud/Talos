@@ -512,6 +512,7 @@ body::after {
    with the same line-height inside, puts the glyphs back on the shared
    baseline. */
 .digit-cell {
+  white-space: nowrap;
   display: inline-block;
   overflow: hidden;
   vertical-align: top;
