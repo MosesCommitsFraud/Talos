@@ -376,6 +376,12 @@ function AppearancePanel() {
             ]}
           />
         </Row>
+        <Row label={t('settings.appearance.workingAnimation')} hint={t('settings.appearance.workingAnimationHint')}>
+          <Switch
+            checked={prefs.workingAnimation === 'legacy'}
+            onCheckedChange={(v) => prefs.setWorkingAnimation(v ? 'legacy' : 'orb')}
+          />
+        </Row>
       </Section>
       {VISIBILITY_SECTIONS.map((sec) => (
         <Section key={sec.secKey} title={t(`settings.appearance.sec.${sec.secKey}`)}>

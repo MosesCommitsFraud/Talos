@@ -26,3 +26,4 @@ artifacts dashboard problems with restart
 dashboard v2 fixes
 neuer thinking orb
 macsify talos
+tokens und ms stapeln sich wenn fenster zu klein

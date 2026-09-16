@@ -9,11 +9,12 @@ from collections import defaultdict
 from copy import deepcopy
 from dataclasses import is_dataclass, replace
 
-CHUNKING_VERSION = "haystack-sections-v1"
+CHUNKING_VERSION = "haystack-sections-v2"
 
 
 def clean_content_metadata(meta, transform):
     """Apply the same content guards to extracted headings/captions/provenance."""
+
     def clean(value):
         if isinstance(value, str):
             return transform(value)
@@ -22,7 +23,15 @@ def clean_content_metadata(meta, transform):
         if isinstance(value, dict):
             return {k: clean(v) for k, v in value.items()}
         return value
-    for key in ("heading_path", "dl_meta", "image_caption", "_visual_context", "context", "aux_terms"):
+
+    for key in (
+        "heading_path",
+        "dl_meta",
+        "image_caption",
+        "_visual_context",
+        "context",
+        "aux_terms",
+    ):
         if key in meta:
             meta[key] = clean(meta[key])
 
@@ -32,8 +41,12 @@ def heading_path(meta):
     if not isinstance(dl, dict):
         dl = {}
     # Both released Docling metadata layouts occur in existing collections.
-    return list(meta.get("heading_path") or dl.get("headings")
-                or (dl.get("meta") or {}).get("headings") or [])
+    return list(
+        meta.get("heading_path")
+        or dl.get("headings")
+        or (dl.get("meta") or {}).get("headings")
+        or []
+    )
 
 
 def markdown_sections(text):
@@ -122,8 +135,10 @@ def split_documents(documents, max_chars=4000, overlap=200):
 
     overlap = min(overlap, max_chars - 1)
     splitter = RecursiveDocumentSplitter(
-        split_length=max_chars - overlap, split_overlap=0,
-        split_unit="char", separators=["\n\n", "\n", ". ", "! ", "? ", "; ", " "],
+        split_length=max_chars - overlap,
+        split_overlap=0,
+        split_unit="char",
+        separators=["\n\n", "\n", ". ", "! ", "? ", "; ", " "],
     )
     splitter.warm_up()
     groups = []
@@ -141,8 +156,9 @@ def split_documents(documents, max_chars=4000, overlap=200):
             pieces = [(text, meta)]
         elif path:
             # Legacy parsers provide titles, but no positional hierarchy.
-            pieces = [(text, {**meta, "heading_path": path,
-                              "section_ordinal": f"legacy-{position}"})]
+            pieces = [
+                (text, {**meta, "heading_path": path, "section_ordinal": f"legacy-{position}"})
+            ]
         else:
             pieces = []
             parse_headings = not meta.get("symbol") and not meta.get("literal_text")
@@ -156,20 +172,35 @@ def split_documents(documents, max_chars=4000, overlap=200):
                         serial += 1
                         local_ids[local] = f"md-{position}-{serial}"
                 section = local_ids.get(ordinal, f"unit-{position}")
-                pieces.append((body, {**meta, "heading_path": [h[1] for h in stack],
-                    "section_path": [local_ids[h[2]] for h in stack],
-                    "section_ordinal": section,
-                    "structure_source": "markdown" if stack else "fallback"}))
+                pieces.append(
+                    (
+                        body,
+                        {
+                            **meta,
+                            "heading_path": [h[1] for h in stack],
+                            "section_path": [local_ids[h[2]] for h in stack],
+                            "section_ordinal": section,
+                            "structure_source": "markdown" if stack else "fallback",
+                        },
+                    )
+                )
         for body, part_meta in pieces:
-            locality = tuple(str(part_meta.get(k, "")) for k in
-                             ("page", "slide", "sheet", "start", "end", "symbol", "block_id"))
-            key = (str(part_meta["section_ordinal"]), tuple(part_meta.get("heading_path", [])), locality)
+            locality = tuple(
+                str(part_meta.get(k, ""))
+                for k in ("page", "slide", "sheet", "start", "end", "symbol", "block_id")
+            )
+            key = (
+                str(part_meta["section_ordinal"]),
+                tuple(part_meta.get("heading_path", [])),
+                locality,
+            )
             if groups and groups[-1][0] == key:
                 prior = groups[-1][1]
                 prior = replace(prior, content=prior.content + "\n\n" + body)
                 groups[-1] = (key, prior)
                 prior.meta.setdefault("dl_meta", {}).setdefault("doc_items", []).extend(
-                    part_meta.get("dl_meta", {}).get("doc_items", []))
+                    part_meta.get("dl_meta", {}).get("doc_items", [])
+                )
             else:
                 groups.append((key, Document(content=body, meta=part_meta)))
     out = []
@@ -179,27 +210,65 @@ def split_documents(documents, max_chars=4000, overlap=200):
             out.append(group)
             continue
         section_key = str(group.meta["section_ordinal"])
-        pieces = splitter.run(documents=[group])["documents"]
-        # Haystack recursively preserves small blocks (including headings).
-        # Pack those blocks so a heading need not become a standalone vector.
-        ranges = []
-        for piece in pieces:
-            start = piece.meta["split_idx_start"]
-            end = start + len(piece.content)
-            capacity = max_chars if len(ranges) == 1 else max_chars - overlap
-            if ranges and end - ranges[-1][0] <= capacity:
-                ranges[-1] = (ranges[-1][0], end)
-            else:
-                ranges.append((start, end))
-        for index, (start, end) in enumerate(ranges):
-            start = max(0, start - overlap) if index else start
-            chunk = Document(content=group.content[start:end], meta=deepcopy(group.meta))
-            chunk.meta["split_idx_start"] = start + offsets[section_key]
-            chunk.meta["chunking_version"] = CHUNKING_VERSION
-            chunk.meta["chunk_max_chars"] = max_chars
-            chunk.meta["chunk_overlap_chars"] = overlap
-            out.append(chunk)
+        from src.rag_tables import table_parts, table_units
+
+        units = (
+            list(table_units(group.content))
+            if not group.meta.get("literal_text")
+            else [(0, len(group.content), False)]
+        )
+        for unit_start, unit_end, is_table in units:
+            unit = replace(group, content=group.content[unit_start:unit_end])
+            if is_table:
+                for content, start, end, prefix in table_parts(unit.content, max_chars):
+                    meta = deepcopy(group.meta)
+                    meta.update(
+                        block_type="table",
+                        table_id=f"{section_key}:{offsets[section_key] + unit_start}",
+                        repeated_header_chars=prefix,
+                        table_header="".join(unit.content.splitlines(keepends=True)[:2]),
+                        split_idx_start=offsets[section_key] + unit_start + start,
+                        source_end=offsets[section_key] + unit_start + end,
+                        chunking_version=CHUNKING_VERSION,
+                        chunk_max_chars=max_chars,
+                        chunk_overlap_chars=0,
+                    )
+                    out.append(Document(content=content, meta=meta))
+                continue
+            out.extend(
+                _split_text_unit(
+                    unit, splitter, max_chars, overlap, offsets[section_key] + unit_start
+                )
+            )
         offsets[section_key] += len(group.content) + 2
+    return out
+
+
+def _split_text_unit(group, splitter, max_chars, overlap, offset):
+    from haystack import Document
+
+    pieces = splitter.run(documents=[group])["documents"]
+    # Haystack recursively preserves small blocks (including headings).
+    # Pack those blocks so a heading need not become a standalone vector.
+    ranges = []
+    for piece in pieces:
+        start = piece.meta["split_idx_start"]
+        end = start + len(piece.content)
+        capacity = max_chars if len(ranges) == 1 else max_chars - overlap
+        if ranges and end - ranges[-1][0] <= capacity:
+            ranges[-1] = (ranges[-1][0], end)
+        else:
+            ranges.append((start, end))
+    out = []
+    for index, (start, end) in enumerate(ranges):
+        start = max(0, start - overlap) if index else start
+        chunk = Document(content=group.content[start:end], meta=deepcopy(group.meta))
+        chunk.meta["split_idx_start"] = start + offset
+        chunk.meta["source_end"] = end + offset
+        chunk.meta["chunking_version"] = CHUNKING_VERSION
+        chunk.meta["chunk_max_chars"] = max_chars
+        chunk.meta["chunk_overlap_chars"] = overlap
+        out.append(chunk)
     return out
 
 
@@ -212,9 +281,22 @@ def assign_sections(documents):
     version = hashlib.sha256()
     for doc in documents:
         version.update((doc.content or "").encode())
-        version.update(json.dumps({k: doc.meta.get(k) for k in
-            ("section_ordinal", "chunk_max_chars", "chunk_overlap_chars", "chunking_version")},
-            sort_keys=True).encode())
+        version.update(
+            json.dumps(
+                {
+                    k: doc.meta.get(k)
+                    for k in (
+                        "section_ordinal",
+                        "chunk_max_chars",
+                        "chunk_overlap_chars",
+                        "chunking_version",
+                        "embedding_tokenizer",
+                        "embedding_max_tokens",
+                    )
+                },
+                sort_keys=True,
+            ).encode()
+        )
     generation = version.hexdigest()[:20]
     by_section = defaultdict(list)
     for seq, doc in enumerate(documents):
@@ -224,8 +306,13 @@ def assign_sections(documents):
             ordinal = f"figure-{seq}"
         seed = f"{source_id}:{generation}:{ordinal}"
         sid = hashlib.sha256(seed.encode()).hexdigest()[:24]
-        meta.update(document_id=source_id, document_version=generation, seq=seq,
-                    section_id=sid, source_id=sid)
+        meta.update(
+            document_id=source_id,
+            document_version=generation,
+            seq=seq,
+            section_id=sid,
+            source_id=sid,
+        )
         path = meta.get("section_path") or []
         if len(path) > 1:
             parent_seed = f"{source_id}:{generation}:{path[-2]}"
@@ -242,9 +329,13 @@ def assign_sections(documents):
             else:
                 doc.id = new_id
         for index, doc in enumerate(siblings):
-            doc.meta.update(split_id=index, chunk_index=index, chunk_count=len(siblings),
+            doc.meta.update(
+                split_id=index,
+                chunk_index=index,
+                chunk_count=len(siblings),
                 prev_chunk_id=siblings[index - 1].id if index else None,
-                next_chunk_id=siblings[index + 1].id if index + 1 < len(siblings) else None)
+                next_chunk_id=siblings[index + 1].id if index + 1 < len(siblings) else None,
+            )
     documents[:] = [replacements.get(id(doc), doc) for doc in documents]
 
 
@@ -256,9 +347,11 @@ class ScopedDocumentStore:
         self.filters = filters
 
     def filter_documents(self, filters=None, **kwargs):
-        conditions = [f for f in (self.filters, filters) if f]
+        from src.rag_generations import combine, store_filter
+
         return self.store.filter_documents(
-            filters={"operator": "AND", "conditions": conditions}, **kwargs)
+            filters=store_filter(self.store, combine(self.filters, filters)), **kwargs
+        )
 
 
 def expand_context(store, results, max_chars=12000, window=1, filters=None):
@@ -269,15 +362,19 @@ def expand_context(store, results, max_chars=12000, window=1, filters=None):
     if window < 1:
         return results
     retriever = SentenceWindowRetriever(
-        document_store=ScopedDocumentStore(store, filters), window_size=window,
+        document_store=ScopedDocumentStore(store, filters),
+        window_size=window,
         source_id_meta_field=["section_id", "source", "document_version"],
-        split_id_meta_field="split_id", raise_on_missing_meta_fields=False,
+        split_id_meta_field="split_id",
+        raise_on_missing_meta_fields=False,
     )
     for result in results:
         meta = result.get("metadata") or {}
         if meta.get("modality") == "figure" or not meta.get("document_version"):
             continue  # Legacy metadata cannot safely reconstruct a chapter.
-        anchor = Document(id=result.get("id") or "anchor", content=result.get("document") or "", meta=meta)
+        anchor = Document(
+            id=result.get("id") or "anchor", content=result.get("document") or "", meta=meta
+        )
         if len(anchor.content) > max_chars:
             continue  # A small expansion cap must never truncate the actual hit.
         fetched = retriever.run(retrieved_documents=[anchor])["context_documents"]
@@ -285,32 +382,118 @@ def expand_context(store, results, max_chars=12000, window=1, filters=None):
         candidates[anchor.id] = anchor
         selected = [anchor]
         budget = len(anchor.content)
-        for doc in sorted(candidates.values(), key=lambda d: abs(d.meta.get("split_id", 0) - meta.get("split_id", 0))):
+        for doc in sorted(
+            candidates.values(),
+            key=lambda d: abs(d.meta.get("split_id", 0) - meta.get("split_id", 0)),
+        ):
             if doc.id == anchor.id:
                 continue
             if budget + len(doc.content or "") + 2 <= max_chars:
                 selected.append(doc)
                 budget += len(doc.content or "") + 2
         selected.sort(key=lambda d: d.meta.get("split_id", 0))
-        # Offsets are within a section; add separators at provenance boundaries.
-        merged = ""
-        end = None
-        for doc in selected:
-            start = doc.meta.get("split_idx_start")
-            content = doc.content or ""
-            if start is not None and end is not None:
-                if start < end:
-                    content = content[max(0, end - start):]
-                elif start > end:
-                    merged += "\n\n"
-            elif merged:
-                merged += "\n\n"
-            merged += content
-            end = max(end or 0, start + len(doc.content or "")) if start is not None else None
-        result["expanded"] = merged
-        result["expanded_sources"] = [{"id": d.id, "source": d.meta.get("source"),
-            "page": d.meta.get("page"), "pages": d.meta.get("pages"),
-            "heading_path": d.meta.get("heading_path", []),
-            "chunk_index": d.meta.get("chunk_index"), "start": d.meta.get("start"),
-            "end": d.meta.get("end")} for d in selected]
+        result["_context_documents"] = [
+            {"id": d.id, "document": d.content or "", "metadata": dict(d.meta)} for d in selected
+        ]
+        budget_context(result, max_chars)
     return results
+
+
+def _source_record(doc):
+    meta = doc.get("metadata") or {}
+    return {
+        "id": doc.get("id"),
+        **{
+            k: meta.get(k)
+            for k in ("source", "page", "pages", "heading_path", "chunk_index", "start", "end")
+        },
+    }
+
+
+def budget_context(result, max_chars, seen=None):
+    """Budget and deduplicate *after* relevance filtering, keeping the hit whole.
+
+    `seen` is local to one consumer response. Never deduplicate in the retriever:
+    an earlier hit might subsequently fail a relevance threshold.
+    """
+    anchor = result.get("document") or ""
+    docs = result.get("_context_documents")
+    if not docs:
+        expanded = result.get("expanded") or anchor
+        if len(expanded) <= max_chars:
+            return expanded
+        # Legacy expansions have no component map; retain the actual match.
+        result.pop("expanded_sources", None)
+        result.pop("expanded", None)
+        return anchor if len(anchor) <= max_chars else ""
+    seen = seen if seen is not None else set()
+    namespace = result.get("collection")
+    if (namespace, result.get("id")) in seen:
+        result["expanded_sources"] = []
+        return ""
+    if len(anchor) > max_chars:
+        result["expanded_sources"] = []
+        return ""
+    center = result.get("metadata", {}).get("split_id", 0)
+    selected = []
+    used = 0
+    for doc in sorted(
+        docs,
+        key=lambda d: (
+            d.get("id") != result.get("id"),
+            abs(d.get("metadata", {}).get("split_id", 0) - center),
+        ),
+    ):
+        if (namespace, doc.get("id")) in seen:
+            continue
+        cost = len(doc["document"]) + (2 if selected else 0)
+        if used + cost <= max_chars:
+            selected.append(doc)
+            used += cost
+    selected.sort(key=lambda d: d.get("metadata", {}).get("split_id", 0))
+    merged, end, previous_table = "", None, None
+    for doc in selected:
+        meta = doc.get("metadata") or {}
+        start = meta.get("split_idx_start")
+        text = doc["document"]
+        prefix = meta.get("repeated_header_chars", 0)
+        if prefix and previous_table == meta.get("table_id") and end == start:
+            text = text[prefix:]
+        if start is not None and end is not None:
+            if start < end:
+                text = text[max(0, end - start) :]
+            elif start > end:
+                merged += "\n\n"
+        elif merged:
+            merged += "\n\n"
+        merged += text
+        end = (
+            meta.get("source_end", start + len(doc["document"]) - prefix)
+            if start is not None
+            else None
+        )
+        previous_table = meta.get("table_id")
+        seen.add((namespace, doc.get("id")))
+    result["expanded"] = merged
+    result["expanded_sources"] = [_source_record(d) for d in selected]
+    return merged
+
+
+def context_location(result):
+    """Human-readable provenance for the exact window passed to the model."""
+    records = result.get("expanded_sources") or []
+    pages = sorted(
+        {
+            int(page)
+            for record in records
+            for page in (record.get("pages") or [record.get("page")])
+            if isinstance(page, (int, float)) and not isinstance(page, bool)
+        }
+    )
+    path = heading_path(result.get("metadata") or {})
+    parts = []
+    if path:
+        parts.append("Section: " + " / ".join(str(h) for h in path))
+    if pages:
+        parts.append("Context pages: " + ", ".join(map(str, pages)))
+    return "; ".join(parts)

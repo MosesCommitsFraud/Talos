@@ -118,6 +118,8 @@ class RagPipelineConfig(BaseModel):
     chunk_max_chars: int = 4000
     chunk_overlap_chars: int = 200
     context_window: int = 1
+    embedding_tokenizer: str = ""
+    embedding_max_tokens: int = 0
 
 
 class RagBaseCreate(BaseModel):
@@ -256,6 +258,8 @@ def _normalize(body, current: dict) -> dict:
         "chunk_max_chars": max(1000, min(int(body.chunk_max_chars), 20000)),
         "chunk_overlap_chars": max(0, min(int(body.chunk_overlap_chars), 999)),
         "context_window": max(0, min(int(body.context_window), 10)),
+        "embedding_tokenizer": body.embedding_tokenizer.strip(),
+        "embedding_max_tokens": max(0, min(int(body.embedding_max_tokens), 1000000)),
     }
 
 
@@ -309,6 +313,8 @@ def _public(cfg: dict) -> dict:
         "chunk_max_chars": max(1000, min(int(cfg.get("chunk_max_chars", 4000)), 20000)),
         "chunk_overlap_chars": max(0, min(int(cfg.get("chunk_overlap_chars", 200)), 999)),
         "context_window": max(0, min(int(cfg.get("context_window", 1)), 10)),
+        "embedding_tokenizer": str(cfg.get("embedding_tokenizer") or ""),
+        "embedding_max_tokens": max(0, min(int(cfg.get("embedding_max_tokens") or 0), 1000000)),
     }
 
 

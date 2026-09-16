@@ -41,6 +41,8 @@ redis
 youtube-transcript-api
 markdown
 markdown-it-py>=3,<5
+transformers>=4.51,<6
+filelock>=3.16
 nh3
 python-dateutil
 cryptography

@@ -627,8 +627,10 @@ class ChatProcessor:
             # Inject the expanded parent section when small-to-big is
             # on (r["expanded"]); otherwise the matched chunk. The
             # citation snippet (rag_sources) still uses the chunk.
-            def _rag_section(s, r):
-                body = f"[{s['filename']}]\n{r.get('expanded') or r['document']}"
+            def _rag_section(s, r, passage=None):
+                from src.rag_structure import context_location
+
+                body = f"[{s['filename']}]\n{context_location(r)}\n{passage if passage is not None else (r.get('expanded') or r['document'])}"
                 # Expose the figure as a ready-made Markdown line with an
                 # imperative right next to it: small local models follow an
                 # instruction adjacent to the data far more reliably than
@@ -660,6 +662,8 @@ class ChatProcessor:
                     "sec": _rag_section(s, r),
                     "score": _score(r),
                     "figure": bool(s.get("image_url")),
+                    "source": s,
+                    "result": r,
                 }
                 for s, r in zip(rag_sources, relevant)
             ]
@@ -707,7 +711,23 @@ class ChatProcessor:
             pool = text_entries + [e for e in fig_entries if id(e) not in protected_ids]
             used = 0
             kept_ids: set = set()
+            from src.rag_structure import budget_context
+
+            seen_context = set()
             for e in sorted(pool, key=lambda x: x["score"], reverse=True):
+                r = e["result"]
+                if r.get("_context_documents") or r.get("expanded"):
+                    # Shrink neighbors before dropping an otherwise useful hit.
+                    # Reserve the current header (new provenance is no larger).
+                    original = r.get("expanded") or r["document"]
+                    overhead = len(e["sec"]) - len(original)
+                    available = budget - used - overhead - (len(sep) if kept_ids else 0)
+                    passage = budget_context(r, max(0, available), seen_context)
+                    if not passage:
+                        continue
+                    e["sec"] = _rag_section(e["source"], r, passage)
+                    e["source"]["context_sources"] = r.get("expanded_sources", [])
+                    e["source"]["_text"] = passage
                 cost = len(e["sec"]) + (len(sep) if kept_ids else 0)
                 if used + cost > budget:
                     continue
@@ -716,7 +736,7 @@ class ChatProcessor:
             kept = [e for e in pool if id(e) in kept_ids]
             if kept:
                 body = sep.join(e["sec"] for e in kept)
-            elif pool:
+            elif pool and not any(e["result"].get("_context_documents") for e in pool):
                 # Nothing fits whole (one oversized chunk against a small
                 # budget) — fall back to a character cut of the best section
                 # rather than returning the model an empty context.
@@ -735,6 +755,8 @@ class ChatProcessor:
             if fig_block:
                 rag_content += sep + fig_block
                 logger.info("RAG: injected %s figure section(s) with image_url", len(protected))
+            if kept or protected:
+                rag_sources = [e["source"] for e in entries if id(e) in kept_ids or id(e) in protected_ids]
             return rag_sources, rag_content
         except Exception as e:
             logger.warning(f"RAG retrieval failed: {e}")

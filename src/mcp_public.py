@@ -792,7 +792,20 @@ def render_search_results(query: str, results: List[Dict[str, Any]]) -> str:
     budget = max(MIN_PASSAGE_CHARS, min(PASSAGE_CHARS, share))
 
     lines = [f"{len(results)} passage(s) for {query!r}:\n"]
+    from src.rag_structure import budget_context, context_location
+
+    seen_context = set()
     for i, r in enumerate(results, 1):
+        original_passage = r.get("expanded") or r.get("document") or ""
+        available = max(0, MAX_TEXT_CHARS - sum(len(line) + 1 for line in lines) - HEADER_ALLOWANCE)
+        passage_budget = min(available, max(budget, len(r.get("document") or ""))) if r.get("_context_documents") else budget
+        passage = budget_context(r, passage_budget, seen_context)
+        if not passage:
+            # A duplicate window is already represented by an earlier citation.
+            # Oversized legacy records still use the historical bounded excerpt.
+            if r.get("_context_documents"):
+                continue
+            passage = _truncate(r.get("document") or original_passage, budget)
         meta = r.get("metadata") or {}
         source = meta.get("source") or meta.get("filename") or "unknown"
         filename = meta.get("filename") or os.path.basename(str(source)) or "unknown"
@@ -822,11 +835,12 @@ def render_search_results(query: str, results: List[Dict[str, Any]]) -> str:
         # Talos's own chat injects, so an external client gets the same context
         # the in-app model reasons over — and usually needs no follow-up call.
         # The citation still points at the matched chunk.
-        passage = (r.get("expanded") or r.get("document") or "").strip()
         if r.get("expanded"):
-            lines.append("- context: full section")
+            lines.append("- context: bounded section window")
+        if context_location(r):
+            lines.append("- " + context_location(r))
         lines.append("")
-        lines.append(_truncate(passage, budget))
+        lines.append(passage.strip())
         lines.append("")
     return "\n".join(lines)
 

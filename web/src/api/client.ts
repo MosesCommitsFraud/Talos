@@ -761,6 +761,8 @@ export interface RagConfig {
   chunk_max_chars?: number;
   chunk_overlap_chars?: number;
   context_window?: number;
+  embedding_tokenizer?: string;
+  embedding_max_tokens?: number;
   /** Advanced — per-page VLM transcription for image-heavy PDFs + its endpoint. */
   pdf_vlm_enabled?: boolean;
   vlm_url?: string;

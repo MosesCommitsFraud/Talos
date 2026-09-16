@@ -135,6 +135,27 @@ class ChatSelectionTests(unittest.TestCase):
         self.assertTrue(content.startswith("Reference material\n\n"))
         self.assertLessEqual(len(content), 500)
 
+    def test_middle_hit_survives_small_chat_budget_with_exact_sources(self):
+        from copy import deepcopy
+
+        parts = [{"id": str(i), "document": text, "metadata": {
+            "source": "manual.pdf", "filename": "manual.pdf", "page": i + 1,
+            "heading_path": ["Calibration"], "split_id": i,
+        }} for i, text in enumerate([
+            "Before " * 200, "Hydraulic pressure calibration middle evidence. " * 6,
+            "After " * 200,
+        ])]
+        hit = dict(deepcopy(parts[1]), similarity=0.9, rerank_score=0.9,
+                   expanded="\n\n".join(d["document"] for d in parts),
+                   _context_documents=parts)
+        with patch.object(self.indexes["default"], "search", return_value=[hit]):
+            sources, content = ChatProcessor(None).retrieve(
+                "hydraulic pressure calibration", max_chars=600)
+        self.assertIn(parts[1]["document"], content)
+        self.assertNotIn("Before Before", content)
+        self.assertLessEqual(len(content), 600)
+        self.assertEqual([r["page"] for r in sources[0]["context_sources"]], [2])
+
 
 if __name__ == "__main__":
     unittest.main()

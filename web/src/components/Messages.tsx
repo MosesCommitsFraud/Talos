@@ -6,7 +6,7 @@ import { artifactDownloadUrl, downloadArtifact, fetchArtifacts, uploadDownloadUr
 import { cn, copyTextToClipboard, formatDurationMs } from '@/lib/utils';
 import { artifactSelectionLocator } from '@/lib/artifactSelection';
 import { artifactDisplayName, displayName, fileExt, isPreviewable } from '@/lib/files';
-import { describeCall, partsToString, type LabelParts } from '@/lib/toolLabels';
+import { describeCall, partsToString, toolFamily, type LabelParts } from '@/lib/toolLabels';
 import { isRunning, useBgTasks } from '@/lib/useBgTasks';
 import { useChat, type UiMessage } from '@/state/chat';
 import { usePrefs } from '@/state/prefs';
@@ -19,6 +19,7 @@ import { RollingNumber } from './RollingNumber';
 import { TalosLogo } from './TalosLogo';
 import { ToolGroup, type GroupEntry } from './ToolGroup';
 import { WorkingAnimation } from './WorkingAnimation';
+import { WorkingOrb, type OrbState } from './WorkingOrb';
 import { ImageGallery, toolImages } from './ToolRow';
 import { WidgetView } from './widgets/registry';
 import { Collapse } from './ui/collapse';
@@ -227,6 +228,31 @@ function TasksChip() {
 
 /** How long the animation takes to dissolve into the resting logo. Matches the
  *  `duration-500` on both layers; the player is torn down once it has run. */
+/** Which orb animation fits a tool family: finding things sweeps a globe,
+ *  running code orbits, reaching other systems wires up, writing shapes. */
+const FAMILY_ORB: Record<string, OrbState> = {
+  grep: 'searching', glob: 'searching', ls: 'searching', knowledge: 'searching', web: 'searching',
+  chats: 'searching', skills: 'searching', news: 'searching',
+  command: 'working', code: 'working', task: 'working', expand: 'working',
+  sql: 'connecting', api: 'connecting', fetch: 'connecting', weather: 'connecting', models: 'connecting',
+  chatNew: 'connecting', chatsList: 'connecting', chatSend: 'connecting', chatManage: 'connecting',
+  read: 'weaving',
+  write: 'shaping', edit: 'shaping', document: 'shaping', image: 'shaping', skillNew: 'shaping',
+  skillManage: 'shaping', docsManage: 'shaping', settings: 'shaping', admin: 'shaping',
+  plan: 'solving', ask: 'listening',
+};
+
+/** The orb state for what the turn is doing right now — the same reading of
+ *  the turn that ActivityStatus turns into its caption. */
+function activityOrbState(turn: UiMessage[], thinkingLive: boolean): OrbState {
+  const call = [...turn].reverse().flatMap((m) => [...(m.tools ?? [])].reverse()).find((c) => c.status === 'running');
+  if (call) return FAMILY_ORB[toolFamily(call.tool)] ?? 'working';
+  if (thinkingLive) return 'solving';
+  const last = turn[turn.length - 1];
+  if (last?.streaming && last.content.trim()) return 'composing';
+  return 'breathing';
+}
+
 const SETTLE_FADE_MS = 500;
 
 /** Persistent "still running" indicator shown for the whole assistant turn —
@@ -292,6 +318,12 @@ function Working({
   if (phase !== 'rest') everPlayed.current = true;
 
   const showLogo = phase === 'rest' || faded;
+  const legacyAnimation = usePrefs((s) => s.workingAnimation === 'legacy');
+  const orbState = activityOrbState(turn, thinkingLive);
+  const handleFinished = () => {
+    setFaded(true);
+    onFinished?.();
+  };
   const showPlayer = everPlayed.current && !playerGone;
 
   return (
@@ -308,19 +340,26 @@ function Working({
           nothing but this mark, but it may still hold the task chip, which is
           the one thing in it a screen reader must not lose. */}
       <span aria-hidden className="relative inline-block size-5 shrink-0">
-        {showPlayer && (
+        {showPlayer && (legacyAnimation ? (
           <WorkingAnimation
             className={cn(
               'absolute inset-0 size-full transition-opacity duration-500',
               faded ? 'opacity-0' : 'opacity-100',
             )}
             playing={running}
-            onFinished={() => {
-              setFaded(true);
-              onFinished?.();
-            }}
+            onFinished={handleFinished}
           />
-        )}
+        ) : (
+          <WorkingOrb
+            className={cn(
+              'absolute inset-0 size-full transition-opacity duration-500',
+              faded ? 'opacity-0' : 'opacity-100',
+            )}
+            state={orbState}
+            playing={running}
+            onFinished={handleFinished}
+          />
+        ))}
         <TalosLogo
           className={cn(
             'absolute inset-0 size-full transition-opacity duration-500',

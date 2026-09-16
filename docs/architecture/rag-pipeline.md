@@ -146,6 +146,61 @@ RAG is driven entirely by environment variables (see `.env.example`):
 
 ## Diagnostics
 
+### Structured chunks and safe reindexing
+
+Markdown and Docling's structured JSON feed the same Haystack character splitter.
+The default maximum is 4,000 characters including overlap (default 200). Headings
+define section boundaries; page, sheet, slide and timed-segment provenance is
+preserved. Tables repeat their header when split across chunks. Oversized rows
+can continue across chunks; an oversized header is split without repetition.
+Docling remains the extraction layer for rich documents and OCR/layout paths.
+
+Per-base pipeline settings override environment fallbacks:
+
+| Setting | Environment fallback | Default |
+|---------|----------------------|---------|
+| `chunk_max_chars` | `RAG_MAX_CHUNK_CHARS` | 4000 |
+| `chunk_overlap_chars` | `RAG_CHUNK_OVERLAP_CHARS` | 200 |
+| `context_window` | `RAG_CONTEXT_WINDOW` | 1 |
+| `parent_max_chars` | `RAG_PARENT_MAX_CHARS` | 12000 |
+| `expand_to_parent_enabled` | `EXPAND_TO_PARENT_ENABLED` | disabled |
+| `embedding_tokenizer` | `RAG_EMBEDDING_TOKENIZER` | unset |
+| `embedding_max_tokens` | `RAG_EMBEDDING_MAX_TOKENS` | 0 |
+
+Token enforcement is optional and requires the tokenizer matching the embedding
+endpoint. It counts the complete embedding input, including enrichment and special
+tokens, and splits further if needed. A finite tokenizer limit is respected even
+when the configured limit is larger. Without a finite tokenizer limit, set an
+explicit maximum. Metadata that alone exhausts the budget produces an error.
+The character limit alone does not guarantee compatibility with every model.
+
+When expansion is enabled, Haystack's SentenceWindowRetriever adds nearby pieces
+of the same section after retrieval. It does not boost unrelated adjacent chapters.
+Chat and MCP retain the complete matching chunk before adding neighbors, deduplicate
+shared chunks, and cite the pages actually included within their context budgets.
+Legacy chunks without version/section metadata need reindexing to gain this behavior.
+
+File reindexing stages and verifies a new generation before activating it, then
+removes old chunks. Failed writes retain the previous searchable generation.
+The generation manifest in `<persist_directory>/generations/` is part of the index:
+all application processes must share this directory, and backups/restores must
+include it together with Qdrant. This publication boundary covers the text collection;
+the separate pixel-vector collection retains its existing lifecycle. A directory
+reindex does not delete sources missing on disk; use explicit removal for those.
+Large-corpus filter overhead and multi-process deployment require load validation.
+
+Validation includes real HTML, DOCX and CSV files through Docling-Haystack, a local
+Qdrant store, a local tokenizer, interrupted writes, and Chat/MCP budget regressions.
+`python -m scripts.rag_structure_smoke_eval` offers a synthetic BM25 comparison.
+In the three-question fixture, fixed-width chunks included complete evidence for
+2/3 questions, section chunks for 3/3, and section chunks with neighbors for 3/3.
+Mean context lengths were 4000, 1250 and 7273 characters respectively. This is a
+structural smoke check, not a historical Talos benchmark or production quality claim;
+neighbors increase context cost without improving this fixture's evidence coverage.
+Use `scripts/rag_eval.py` against a representative deployed corpus before changing
+retrieval defaults. Real PDF/OCR service validation and production reindexing remain
+deployment steps; no production index is migrated automatically by these changes.
+
 `VectorRAG.get_stats()` and `src/rag_worker.diagnostics()` surface health, document
 counts, the active backend, and the last error. These are exposed through
 `routes/rag_routes.py` and `routes/diagnostics_routes.py` for the Settings → RAG screen.

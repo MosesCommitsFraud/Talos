@@ -1174,6 +1174,8 @@ def _apply_saved_rag_config(cfg: Optional[Dict[str, Any]] = None) -> None:
     os.environ["RAG_MAX_CHUNK_CHARS"] = str(int(cfg.get("chunk_max_chars") or 4000))
     os.environ["RAG_CHUNK_OVERLAP_CHARS"] = str(int(cfg.get("chunk_overlap_chars", 200)))
     os.environ["RAG_CONTEXT_WINDOW"] = str(int(cfg.get("context_window", 1)))
+    os.environ["RAG_EMBEDDING_TOKENIZER"] = str(cfg.get("embedding_tokenizer") or "")
+    os.environ["RAG_EMBEDDING_MAX_TOKENS"] = str(int(cfg.get("embedding_max_tokens") or 0))
     os.environ["PDF_VLM_ENABLED"] = "true" if cfg.get("pdf_vlm_enabled") else ""
     os.environ["RAG_REDACT_PII"] = "true" if cfg.get("redact_pii_enabled") else ""
     os.environ["VIDEO_FRAMES_ENABLED"] = "true" if cfg.get("video_frames_enabled") else ""
@@ -1418,6 +1420,22 @@ class VectorRAG:
     def _expand_on(self) -> bool:
         return self._conf_bool("expand_to_parent_enabled", "EXPAND_TO_PARENT_ENABLED")
 
+    def _generation_catalog(self):
+        from src.rag_generations import GenerationCatalog
+
+        directory = getattr(self, "persist_directory", None)
+        collection = getattr(self, "collection_name", None)
+        return GenerationCatalog(directory, collection) if directory and collection else None
+
+    def _visible_filter(self, filters=None):
+        from src.rag_generations import store_filter
+
+        catalog = self._generation_catalog()
+        return store_filter(self._store, catalog.visibility_filter(filters) if catalog else filters)
+
+    def _read_documents(self, filters=None):
+        return self._store.filter_documents(filters=self._visible_filter(filters))
+
     @property
     def last_error(self) -> str:
         return self._last_error
@@ -1558,11 +1576,12 @@ class VectorRAG:
                 "embedding"
             ]
             sparse = self._sparse_text_embedder().run(text=query)["sparse_embedding"]
+            query_filters = self._visible_filter(self._build_filters(owner, scope, exclude_scopes))
             response = self._hybrid_retriever().run(
                 query_embedding=dense,
                 query_sparse_embedding=sparse,
                 top_k=fetch_k,
-                filters=self._build_filters(owner, scope, exclude_scopes),
+                filters=query_filters,
             )
             docs = response.get("documents", []) or []
             # Ordinary extracted figures/video keyframes are renderable
@@ -1593,7 +1612,7 @@ class VectorRAG:
             top = self._rerank(query, candidates, k)
             # Small-to-big (Phase 10): attach each hit's surrounding section for
             # injection (citations still point at the matched chunk). No-op off.
-            top = self._expand_to_parent(top, filters=self._build_filters(owner, scope, exclude_scopes))
+            top = self._expand_to_parent(top, filters=query_filters)
             # Companion figures: ride a hit's document figures along with it, so
             # the model receives their image_url even though a caption-only
             # figure chunk rarely wins the ranking by itself.
@@ -1625,7 +1644,7 @@ class VectorRAG:
     def _figures_for_source(self, source: str) -> List[Any]:
         """All ``modality == 'figure'`` chunks indexed for one source file."""
         try:
-            return self._store.filter_documents(
+            return self._read_documents(
                 filters={
                     "operator": "AND",
                     "conditions": [
@@ -1675,7 +1694,11 @@ class VectorRAG:
                     continue
                 if source not in by_source:
                     by_source[source] = self._figures_for_source(source)
-                figs = by_source[source]
+                # A shared path can exist for different owners/scopes. Figure
+                # companions must belong to the same published source as the hit.
+                figs = [f for f in by_source[source] if all(
+                    (f.meta or {}).get(key) == meta.get(key)
+                    for key in ("owner", "scope", "ingest_generation"))]
                 page = self._chunk_page(meta)
                 start, end = meta.get("start"), meta.get("end")
                 if page is not None:
@@ -1835,30 +1858,65 @@ class VectorRAG:
     # Ingestion — Docling HybridChunker → dense+sparse embed → Qdrant
     # ------------------------------------------------------------------
 
-    def _write_documents(self, docs) -> int:
+    def _write_documents(self, docs, preserve_ids=False, replace_sources=False) -> int:
         if not docs:
             return 0
-        from haystack.document_stores.types import DuplicatePolicy
         from haystack.components.writers import DocumentWriter
+        from haystack.document_stores.types import DuplicatePolicy
 
-        # Ingest enrichment (Phases 8 & 9): embed dense+sparse on the enriched
-        # text (situating context prefix + auto keywords/questions suffix), but
-        # store/display the ORIGINAL chunk. Swap content in before embedding and
-        # restore it after, so citations stay verbatim.
-        for d in docs:
-            enriched = _embed_text(d.meta or {}, d.content)
-            if enriched != d.content:
-                d.meta["_ctx_orig"] = d.content
-                d.content = enriched
-        originals = list(docs)
-        try:
-            docs = self._dense_doc_embedder().run(documents=docs)["documents"]
-            docs = self._sparse_doc_embedder().run(documents=docs)["documents"]
-        finally:
-            for d in originals + list(docs):
-                if d.meta and "_ctx_orig" in d.meta:
-                    d.content = d.meta.pop("_ctx_orig")
-        DocumentWriter(document_store=self._store, policy=DuplicatePolicy.OVERWRITE).run(documents=docs)
+        from src.rag_token_budget import bound_documents, embedding_counter
+
+        tokenizer_name = self._conf("embedding_tokenizer", "RAG_EMBEDDING_TOKENIZER")
+        count, token_limit = embedding_counter(
+            tokenizer_name, self._conf_int("embedding_max_tokens", "RAG_EMBEDDING_MAX_TOKENS", 0))
+        if count:
+            docs = bound_documents(docs, _embed_text, count, token_limit, preserve_ids)
+            for document in docs:
+                document.meta.update(embedding_tokenizer=tokenizer_name, embedding_max_tokens=token_limit)
+            if not preserve_ids:
+                # Batch callers can submit independent source documents.
+                from collections import defaultdict
+
+                groups = defaultdict(list)
+                for document in docs:
+                    key = document.meta.get("document_id") or document.id
+                    groups[key].append(document)
+                docs = []
+                for parts in groups.values():
+                    self._assign_sections(parts)
+                    docs.extend(parts)
+
+        # Embed copies: a failed endpoint or a component that copies Documents
+        # must never leave the stored/cited content enriched or half-mutated.
+        from copy import deepcopy
+        from dataclasses import replace
+
+        originals = {d.id: d.content for d in docs}
+        embedding_docs = [replace(d, content=_embed_text(d.meta or {}, d.content),
+                                  meta=deepcopy(d.meta)) for d in docs]
+        embedded = self._dense_doc_embedder().run(documents=embedding_docs)["documents"]
+        embedded = self._sparse_doc_embedder().run(documents=embedded)["documents"]
+        if {d.id for d in embedded} != set(originals):
+            raise RuntimeError("Embedding pipeline returned incomplete or unexpected documents.")
+        docs = [replace(d, content=originals[d.id]) for d in embedded]
+        writer = DocumentWriter(document_store=self._store, policy=DuplicatePolicy.OVERWRITE)
+        catalog = self._generation_catalog() if replace_sources else None
+        if catalog:
+            import json
+            from collections import defaultdict
+
+            from src.rag_generations import identity
+
+            groups = defaultdict(list)
+            for doc in docs:
+                groups[json.dumps(identity(doc.meta), sort_keys=True)].append(doc)
+            for parts in groups.values():
+                if parts[0].meta.get("source"):
+                    catalog.publish(parts, self._store, lambda batch: writer.run(documents=batch))
+                else:
+                    writer.run(documents=parts)
+        else:
+            writer.run(documents=docs)
         return len(docs)
 
     def _contextual_blurb(self, full_doc: str, chunk: str) -> str:
@@ -2105,6 +2163,8 @@ class VectorRAG:
         # which ``update`` preserves because they're absent from ``meta``.
         for d in docs:
             d.meta.update(meta)
+            d.meta.setdefault("source", path)
+            d.meta.setdefault("filename", os.path.basename(path))
 
         # Pixel lane (Phase 5): for images, ADDITIONALLY embed the pixels into
         # the visual collection — on top of the OCR/text docs above, not instead.
@@ -2740,7 +2800,18 @@ class VectorRAG:
 
         docs = []
         for node, unit_key, unit_no in units:
-            unit_docs = self._documents_from_text("\n\n".join(_blocks(node)))
+            if ext == ".ods":
+                from src.rag_tables import rows_markdown
+
+                rows = []
+                for row in node.iter(f"{{{table_ns}}}table-row"):
+                    cells = [" ".join(_blocks(cell)) for cell in row
+                             if _local(cell.tag) in {"table-cell", "covered-table-cell"}]
+                    if any(cells):
+                        rows.append(cells)
+                unit_docs = self._documents_from_text(rows_markdown(rows))
+            else:
+                unit_docs = self._documents_from_text("\n\n".join(_blocks(node)))
             if unit_key:
                 for d in unit_docs:
                     d.meta[unit_key] = unit_no
@@ -2752,6 +2823,7 @@ class VectorRAG:
     def _lane_docling(self, path: str):
         """Rich docs/images → lossless structure; Haystack owns final chunking."""
         from haystack_integrations.components.converters.docling import DoclingConverter
+
         from src.rag_structure import docling_documents
 
         if self._docling is None:
@@ -2783,8 +2855,10 @@ class VectorRAG:
         import pandas as pd
         from haystack import Document
 
-        return [Document(content=frame.to_csv(index=False),
-                         meta={"sheet": name, "block_type": "table", "literal_text": True})
+        from src.rag_tables import rows_markdown
+
+        return [Document(content=rows_markdown([list(frame.columns), *frame.fillna("").values.tolist()]),
+                         meta={"sheet": name, "block_type": "table"})
                 for name, frame in pd.read_excel(path, sheet_name=None).items()]
 
     def _lane_code(self, path: str, language: str):
@@ -3500,7 +3574,7 @@ class VectorRAG:
             try:
                 docs = self._documents_for_file(fpath, dict(meta or {}), stage_cb=_stage)
                 if docs:
-                    indexed += self._write_documents(docs)
+                    indexed += self._write_documents(docs, replace_sources=True)
                 else:
                     failed += 1
                     errors.append(
@@ -3592,7 +3666,7 @@ class VectorRAG:
 
                         docs = self._documents_for_file(fpath, meta, stage_cb=_stage)
                         if docs:
-                            indexed += self._write_documents(docs)
+                            indexed += self._write_documents(docs, replace_sources=True)
                     except Exception as e:
                         logger.error(f"index {fpath}: {e}")
                         failed += 1
@@ -3641,7 +3715,7 @@ class VectorRAG:
 
             docs = self._split_extracted_documents([Document(content=text, meta=dict(metadata))])
             self._assign_sections(docs)
-            self._write_documents(docs)
+            self._write_documents(docs, replace_sources=True)
             return True
         except Exception as e:
             logger.error(f"add_document failed: {e}")
@@ -3663,7 +3737,7 @@ class VectorRAG:
                 parts = self._split_extracted_documents([Document(content=text, meta=dict(meta))])
                 self._assign_sections(parts)
                 hs_docs.extend(parts)
-            added = self._write_documents(hs_docs)
+            added = self._write_documents(hs_docs, replace_sources=True)
             return {
                 "success": True,
                 "added_count": added,
@@ -3681,6 +3755,9 @@ class VectorRAG:
     def rebuild_index(self) -> bool:
         try:
             self._store = self._build_store(recreate=True)
+            catalog = self._generation_catalog()
+            if catalog:
+                catalog.reset()
             self._retriever = None
             # Drop the visual collection too so a re-index (e.g. a VL-model swap
             # that changes the image vector dimension) starts clean.
@@ -3742,9 +3819,9 @@ class VectorRAG:
         try:
             _filters = self._build_filters(scope=scope, exclude_scopes=exclude_scopes)
             chunks = (
-                self._store.filter_documents(filters=_filters)
+                self._read_documents(filters=_filters)
                 if _filters
-                else self._store.filter_documents()
+                else self._read_documents()
             )
             agg: Dict[str, Dict[str, Any]] = {}
             for d in chunks:
@@ -3779,7 +3856,7 @@ class VectorRAG:
         if not self.healthy:
             return []
         try:
-            docs = self._store.filter_documents(
+            docs = self._read_documents(
                 filters={"field": "meta.source", "operator": "==", "value": source}
             )
             rows: List[Dict[str, Any]] = []
@@ -3839,9 +3916,9 @@ class VectorRAG:
         try:
             _filters = self._build_filters(scope=scope, exclude_scopes=exclude_scopes)
             docs = (
-                self._store.filter_documents(filters=_filters)
+                self._read_documents(filters=_filters)
                 if _filters
-                else self._store.filter_documents()
+                else self._read_documents()
             )
             hits: List[Dict[str, Any]] = []
             for d in docs:
@@ -3906,7 +3983,7 @@ class VectorRAG:
         try:
             from haystack.dataclasses import Document
 
-            docs = self._store.filter_documents(
+            docs = self._read_documents(
                 filters={"field": "meta.source", "operator": "==", "value": source}
             )
             target = next((d for d in docs if d.id == chunk_id), None)
@@ -3918,7 +3995,13 @@ class VectorRAG:
             meta.pop("aux_terms", None)
             meta.pop("aux_terms_error", None)
             meta.pop("_ctx_orig", None)
-            self._write_documents([Document(id=chunk_id, content=text, meta=meta)])
+            # Edited text no longer has valid offsets into the original section.
+            # Isolate it from window merging until a source reindex rebuilds them.
+            meta["section_id"] = f"edited-{chunk_id}"
+            meta["split_id"] = 0
+            meta.pop("split_idx_start", None)
+            meta.pop("source_end", None)
+            self._write_documents([Document(id=chunk_id, content=text, meta=meta)], preserve_ids=True)
             return True
         except Exception as e:
             logger.error(f"update_chunk failed: {e}")
@@ -4009,17 +4092,16 @@ class VectorRAG:
     def reindex_directory(
         self, directory: str, file_extensions: Optional[set] = None
     ) -> Dict[str, Any]:
-        remove_result = self.remove_directory(directory)
-        if not remove_result.get("success"):
-            return remove_result
+        # Publish each file only after successful extraction, embedding and
+        # verification. A failed file must leave its previous generation intact.
         index_result = self.index_personal_documents(directory, file_extensions)
         return {
             "success": index_result.get("success", False),
             "message": (
-                f"Re-index for {directory}: removed {remove_result.get('removed_count', 0)}, "
+                f"Re-index for {directory}: replaced successfully processed sources, "
                 f"{index_result.get('message', '')}"
             ),
-            "removed_count": remove_result.get("removed_count", 0),
+            "removed_count": 0,
             "indexed_count": index_result.get("indexed_count", 0),
             "failed_count": index_result.get("failed_count", 0),
         }

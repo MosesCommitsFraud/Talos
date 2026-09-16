@@ -255,7 +255,7 @@ def test_rag_query_returns_the_whole_section_not_a_snippet(monkeypatch):
     assert is_error is False
     assert "Abschnitt 4.2" in text
     assert len(text) > mcp_public.SNIPPET_CHARS
-    assert "full section" in text
+    assert "bounded section window" in text
 
 
 def test_rag_query_passage_budget_shrinks_as_hits_grow(monkeypatch):

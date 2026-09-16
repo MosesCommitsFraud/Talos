@@ -8,6 +8,8 @@ export type Density = 'compact' | 'comfortable' | 'spacious';
 export type SortMode = 'active' | 'newest' | 'name';
 export type ChatMode = 'chat' | 'knowledge' | 'sql' | 'full';
 export type LlmLang = 'auto' | Lang;
+/** The working-row animation: the dotted orb, or the original Lottie mark. */
+export type WorkingAnimationStyle = 'orb' | 'legacy';
 /** Qwen3.8 thinking budget, cheapest first. Mirrors the model's
  *  `reasoning_effort` chat-template kwarg. */
 export type ReasoningEffort = 'low' | 'medium' | 'xhigh';
@@ -104,6 +106,7 @@ interface PrefsState {
   langChosen: boolean;
   llmLang: LlmLang;
   visibility: Visibility;
+  workingAnimation: WorkingAnimationStyle;
   /** Composer knowledge sources. The chat-input control (mode dropdown when
    *  both are configured, single toggle when one is) drives these; they map to
    *  the use_rag / use_db request flags. Default on so "Full Knowledge" is the
@@ -139,6 +142,7 @@ interface PrefsState {
   setSortMode: (m: SortMode) => void;
   setLang: (l: Lang) => void;
   setLlmLang: (l: LlmLang) => void;
+  setWorkingAnimation: (a: WorkingAnimationStyle) => void;
   setReasoningEffort: (e: ReasoningEffort) => void;
   setVisibility: (key: keyof Visibility, value: boolean) => void;
   resetVisibility: () => void;
@@ -163,6 +167,7 @@ export const usePrefs = create<PrefsState>()(
       langChosen: false,
       llmLang: 'auto',
       visibility: DEFAULT_VISIBILITY,
+      workingAnimation: 'orb',
       planMode: false,
       useRag: true,
       useDb: true,
@@ -181,6 +186,7 @@ export const usePrefs = create<PrefsState>()(
       // outranks the flipped default (see pickLang in @/i18n).
       setLang: (lang) => { void i18n.changeLanguage(lang); set({ lang, langChosen: true }); },
       setLlmLang: (llmLang) => set({ llmLang }),
+      setWorkingAnimation: (workingAnimation) => set({ workingAnimation }),
       setReasoningEffort: (reasoningEffort) => set({ reasoningEffort }),
       setVisibility: (key, value) => {
         // Toggling it is the reader stating a preference, which from here on
@@ -260,7 +266,7 @@ export const usePrefs = create<PrefsState>()(
  * incognito, plan mode, mic) intentionally stays local-only. */
 
 const SYNCED_KEYS = [
-  'theme', 'density', 'sortMode', 'lang', 'langChosen', 'llmLang', 'visibility',
+  'theme', 'density', 'sortMode', 'lang', 'langChosen', 'llmLang', 'visibility', 'workingAnimation',
   'useRag', 'useDb', 'useWeb', 'reasoning', 'reasoningEffort',
 ] as const;
 type SyncedKey = (typeof SYNCED_KEYS)[number];
