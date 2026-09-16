@@ -81,9 +81,18 @@ WORKDIR /app
 # Install Python deps first (layer cache). Optional extras (PyMuPDF AGPL, etc.)
 # are opt-in so the default image stays MIT-core; see requirements-optional.txt.
 ARG INSTALL_OPTIONAL=false
+# Large ARM64 wheels can stall on the package CDN. pip >=25.2 resumes
+# interrupted downloads; connection retries alone do not cover that case.
+# Keep downloaded wheels across failed builds without adding them to the image.
+ARG PIP_DEFAULT_TIMEOUT=120
+ARG PIP_RETRIES=10
+ARG PIP_RESUME_RETRIES=10
+RUN --mount=type=cache,target=/root/.cache/pip \
+    python -m pip install --upgrade 'pip>=25.2,<27'
 COPY requirements.txt requirements-optional.txt ./
-RUN pip install --no-cache-dir -r requirements.txt \
-    && if [ "$INSTALL_OPTIONAL" = "true" ]; then pip install --no-cache-dir -r requirements-optional.txt; fi
+RUN --mount=type=cache,target=/root/.cache/pip \
+    python -m pip install -r requirements.txt \
+    && if [ "$INSTALL_OPTIONAL" = "true" ]; then python -m pip install -r requirements-optional.txt; fi
 
 # Copy app code
 COPY . .
