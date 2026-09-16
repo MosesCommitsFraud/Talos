@@ -34,6 +34,7 @@ from core.database import ChatMessage as DbChatMessage
 from core.database import Document, GalleryImage, Ticket, TicketAttachment, get_db_session
 from core.database import Session as DbSession
 from core.middleware import require_admin
+from routes.document_helpers import HTML_CDN_SOURCES
 from src.auth_helpers import effective_user
 
 logger = logging.getLogger(__name__)
@@ -681,8 +682,8 @@ def setup_ticket_routes() -> APIRouter:
                     "X-Content-Type-Options": "nosniff",
                     "Content-Security-Policy": (
                         "default-src 'none'; "
-                        "script-src 'unsafe-inline' 'unsafe-eval'; "
-                        "style-src 'unsafe-inline'; "
+                        "script-src 'unsafe-inline' 'unsafe-eval' " + HTML_CDN_SOURCES + "; "
+                        "style-src 'unsafe-inline' " + HTML_CDN_SOURCES + "; "
                         "img-src data: blob:; "
                         "font-src data:; "
                         "connect-src 'none'; "

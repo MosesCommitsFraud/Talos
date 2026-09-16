@@ -34,6 +34,7 @@ def _aggregate_language_facets(lang_rows):
 
 from routes.document_helpers import (
     _PDF_RENDER_SCALE,
+    HTML_CDN_SOURCES,
     DocumentCreate,
     DocumentPatch,
     DocumentUpdate,
@@ -728,8 +729,8 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
                 "X-Content-Type-Options": "nosniff",
                 "Content-Security-Policy": (
                     "default-src 'none'; "
-                    "script-src 'unsafe-inline' 'unsafe-eval'; "
-                    "style-src 'unsafe-inline'; "
+                    "script-src 'unsafe-inline' 'unsafe-eval' " + HTML_CDN_SOURCES + "; "
+                    "style-src 'unsafe-inline' " + HTML_CDN_SOURCES + "; "
                     "img-src data: blob:; "
                     "font-src data:; "
                     "connect-src 'none'; "

@@ -2,7 +2,11 @@ import imageRuntime from 'html-to-image/dist/html-to-image.js?raw';
 import bridge from './html-export-bridge.js?raw';
 
 // Match the HTML artifact routes. srcDoc must not drop their network restrictions.
-const CSP = "default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; connect-src 'none'; form-action 'none'; base-uri 'none'";
+// Chart libraries may come from the public npm CDNs: hand-written dashboards load Chart.js/Plotly/D3 that way.
+// Keep in sync with HTML_CDN_SOURCES in routes/document_helpers.py.
+// connect-src stays 'none', so a loaded library still cannot fetch anything.
+const CDN = 'https://cdn.jsdelivr.net/npm/ https://cdnjs.cloudflare.com/ajax/libs/ https://unpkg.com/';
+const CSP = `default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval' ${CDN}; style-src 'unsafe-inline' ${CDN}; img-src data: blob:; font-src data:; connect-src 'none'; form-action 'none'; base-uri 'none'`;
 const script = (source: string) => `<script>${source.replace(/<\/script/gi, '<\\/script')}</script>`;
 
 export function htmlPreviewDocument(html: string): string {

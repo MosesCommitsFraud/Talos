@@ -238,3 +238,10 @@ def _derive_title(content: str) -> str:
             return title or "Untitled"
 
     return "Untitled"
+
+# Script/style hosts an HTML artifact may load from. Hand-written dashboards pull
+# Chart.js, Plotly or D3 from the public npm CDNs; without these the page renders
+# blank in the preview even though the downloaded file works. connect-src stays
+# 'none', so a library loaded from here still cannot fetch or send anything.
+# Keep in sync with web/src/lib/htmlExport.ts.
+HTML_CDN_SOURCES = "https://cdn.jsdelivr.net/npm/ https://cdnjs.cloudflare.com/ajax/libs/ https://unpkg.com/"
