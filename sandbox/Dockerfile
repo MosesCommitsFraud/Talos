@@ -1,6 +1,6 @@
 # trixie (Debian 13) ships Python 3.13 — the pinned numpy/scipy/scikit-learn
 # generation (numpy>=2.5) requires Python >=3.12, which bookworm's 3.11 can't satisfy.
-FROM node:22-trixie-slim
+FROM node:26-trixie-slim
 
 # Same CDN-resilience treatment as the app image (see the long note there): the
 # Fastly mirror resets connections under apt's default pipelining, and this
