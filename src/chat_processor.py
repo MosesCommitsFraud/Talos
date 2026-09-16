@@ -455,6 +455,10 @@ class ChatProcessor:
                                 search_query,
                                 max_chars=share,
                                 _manager=manager,
+                                # Without it the per-base sections come back
+                                # unnumbered: no "[n]" labels for the model to
+                                # cite, and no inline citation backstop.
+                                citation_session=citation_session,
                             )
                             if not block:
                                 continue
@@ -630,7 +634,15 @@ class ChatProcessor:
             from src import citations as _citations
 
             for _src in rag_sources:
-                _n = _citations.cite_rag(citation_session, _src)
+                # Chunk ids are only unique within one knowledge base; the caller
+                # prefixes them with the base id afterwards, so do the same for
+                # the numbering key or two bases could share a number.
+                _key_src = (
+                    {**_src, "_id": f"{self.rag_base_id}:{_src['_id']}"}
+                    if self.rag_base_id is not None and _src.get("_id") is not None
+                    else _src
+                )
+                _n = _citations.cite_rag(citation_session, _key_src)
                 if _n is not None:
                     _src["n"] = _n
 
