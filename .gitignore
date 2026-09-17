@@ -118,3 +118,6 @@ output/Talos_Hardware_Modelle_September_2026_Cowork.docx
 output/Talos_Hardware_Modelle_September_2026_ueberarbeitet.docx
 tmp/
 docs/architecture/rag-structure-plan.md
+output/
+.pnpm-store/v11/
+.data/
