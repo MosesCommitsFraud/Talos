@@ -74,12 +74,16 @@ only for maintaining old dashboards).
 - Header: `{{brand:logo}}` (standalone, never inside `<img>`), title, data
   freshness. Key figures as an open band with vertical hairlines. Visuals
   directly on the page. Insights as a plain section under a hairline.
-- Grid: `repeat(auto-fit, minmax(min(100%, 380px), 1fr))`. Wide visuals
+- Grid: `repeat(auto-fit, minmax(min(100%, 420px), 1fr))`. Wide visuals
   `grid-column: span 2` inside `@container artboard (min-width: 900px)`,
   full width `1 / -1`. No 12-column grids.
 - Breakpoints only with `@container artboard (…)`, never `@media (…width)`.
   The page must work at ~420 px (Talos side panel) and on a wide screen.
-- Chart heights with `clamp()`, e.g. `height: clamp(260px, 32cqw, 400px)`.
+- Chart heights with `clamp()`, e.g. `height: clamp(260px, 24cqw, 360px)`.
+- Use space efficiently but keep it calm: 16–28px between sections, no half
+  empty rows (let a lone last visual span the row), no oversized margins. Charts
+  need room: at least ~420px wide; long category names go into horizontal bars;
+  more than 6 parts of a whole go into a sorted bar chart, not a pie.
 
 **Interaction (required when there are two or more charts)**
 - Chart as filter: `"talos": {"emit": "region"}` in the option. A click sets
@@ -205,7 +209,7 @@ style = """
 #td-artboard .filters span {border:1px solid var(--line);border-radius:6px;padding:3px 10px;}
 #td-artboard .filters b {color:var(--fg);font-weight:500;margin-left:4px;}
 #td-artboard .figures {display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,190px),1fr));
-  margin:16px 0 28px;border-bottom:1px solid var(--line);}
+  margin:10px 0 18px;border-bottom:1px solid var(--line);}
 #td-artboard .figure {display:flex;flex-direction:column;gap:2px;padding:4px 20px 18px 0;}
 #td-artboard .figure + .figure {padding-left:20px;border-left:1px solid var(--line);}
 #td-artboard .figure .label {font-size:13px;font-weight:500;color:var(--muted);}
@@ -213,12 +217,12 @@ style = """
 #td-artboard .figure em {font-style:normal;font-size:13px;color:var(--muted);}
 #td-artboard .figure i {font-style:normal;}
 #td-artboard .up {color:var(--td-good);} #td-artboard .down {color:var(--td-critical);}
-#td-artboard .panels {display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,380px),1fr));gap:32px 36px;}
+#td-artboard .panels {display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,420px),1fr));gap:20px 28px;}
 #td-artboard .panel {min-width:0;}
 #td-artboard .panel.full {grid-column:1/-1;}
 #td-artboard h2 {font-size:16px;font-weight:600;line-height:1.35;margin:0;}
-#td-artboard .sub {font-size:13px;color:var(--muted);margin:2px 0 10px;}
-#td-artboard .plot {height:clamp(260px,32cqw,400px);}
+#td-artboard .sub {font-size:13px;color:var(--muted);margin:2px 0 6px;}
+#td-artboard .plot {height:clamp(260px,24cqw,360px);}
 #td-artboard .plot .chart {height:100%;}
 #td-artboard .drill {width:100%;border-collapse:collapse;font-size:14px;font-variant-numeric:tabular-nums;}
 #td-artboard .drill th, #td-artboard .drill td {padding:8px;border-bottom:1px solid var(--line);text-align:right;}
@@ -226,8 +230,8 @@ style = """
 #td-artboard .drill th:first-child {text-align:left;font-weight:500;}
 #td-artboard .drill td:last-child {width:28%;}
 #td-artboard .drill .detail th {padding-left:24px;font-weight:400;color:var(--muted);}
-#td-artboard .insights {margin-top:32px;padding-top:16px;border-top:1px solid var(--line);max-width:78ch;}
-#td-artboard .insights ol {margin:8px 0 0;padding-left:20px;display:grid;gap:8px;line-height:1.55;}
+#td-artboard .insights {margin-top:22px;padding-top:12px;border-top:1px solid var(--line);}
+#td-artboard .insights ol {margin:6px 0 0;padding-left:20px;display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,420px),1fr));gap:6px 36px;line-height:1.5;}
 #td-artboard .source {font-size:12px;color:var(--muted);margin:20px 0 0;}
 @container artboard (min-width: 900px) {
   #td-artboard .panel.wide {grid-column:span 2;}

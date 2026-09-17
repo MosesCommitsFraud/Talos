@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { CodeIcon, DownloadIcon, ExternalLinkIcon, EyeIcon } from 'lucide-react';
+import { CodeIcon, DownloadIcon, ExternalLinkIcon, EyeIcon, MonitorIcon, PanelRightIcon } from 'lucide-react';
 import { htmlPreviewDocument, postPreviewTheme, requestHtmlPng, savePreviewBlob } from '@/lib/htmlExport';
 import { Markdown } from './Markdown';
 
@@ -16,6 +16,33 @@ function useAppDark(): boolean {
   return dark;
 }
 
+/** Width a downloaded page is typically opened at. "Wie im Browser" lays the
+ *  page out at this width and scales it into the panel, so the preview shows
+ *  the same arrangement as the file opened on its own; "An Panel anpassen" lets
+ *  a responsive page reflow to the panel instead. */
+const DESKTOP_WIDTH = 1366;
+const MODE_KEY = 'talos-html-preview-mode';
+type FitMode = 'desktop' | 'panel';
+
+function readMode(): FitMode {
+  try { return localStorage.getItem(MODE_KEY) === 'panel' ? 'panel' : 'desktop'; } catch { return 'desktop'; }
+}
+
+function useBoxSize(ref: React.RefObject<HTMLDivElement | null>) {
+  const [size, setSize] = useState({width: 0, height: 0});
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const observer = new ResizeObserver(([entry]) => {
+      const {width, height} = entry.contentRect;
+      setSize({width, height});
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [ref]);
+  return size;
+}
+
 export function HtmlPreview({text, url, name}: {text: string; url: string; name: string}) {
   const {t} = useTranslation();
   const frame = useRef<HTMLIFrameElement>(null);
@@ -24,6 +51,14 @@ export function HtmlPreview({text, url, name}: {text: string; url: string; name:
   const [ready, setReady] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [mode, setModeState] = useState<FitMode>(readMode);
+  const setMode = (next: FitMode) => {
+    setModeState(next);
+    try { localStorage.setItem(MODE_KEY, next); } catch { /* storage unavailable: session-only choice */ }
+  };
+  const box = useRef<HTMLDivElement>(null);
+  const boxSize = useBoxSize(box);
+  const scale = mode === 'desktop' && boxSize.width > 0 && boxSize.width < DESKTOP_WIDTH ? boxSize.width / DESKTOP_WIDTH : 1;
   const dark = useAppDark();
   const darkRef = useRef(dark);
   darkRef.current = dark;
@@ -57,14 +92,24 @@ export function HtmlPreview({text, url, name}: {text: string; url: string; name:
     <div className="flex shrink-0 flex-wrap items-center gap-2 border-b bg-card px-2 py-1" aria-label={t('preview.htmlActions')}>
       <button type="button" aria-pressed={!source} onClick={() => setSource(false)} className={button}><EyeIcon className="size-3.5" />{t('preview.htmlRendered')}</button>
       <button type="button" aria-pressed={source} onClick={() => setSource(true)} className={button}><CodeIcon className="size-3.5" />{t('preview.htmlSource')}</button>
+      <button type="button" aria-pressed={mode === 'desktop'} disabled={source} onClick={() => setMode(mode === 'desktop' ? 'panel' : 'desktop')} className={button}
+        title={t(mode === 'desktop' ? 'preview.fitPanelHint' : 'preview.fitDesktopHint')}>
+        {mode === 'desktop' ? <MonitorIcon className="size-3.5" /> : <PanelRightIcon className="size-3.5" />}
+        {t(mode === 'desktop' ? 'preview.fitDesktop' : 'preview.fitPanel')}
+      </button>
       <button type="button" onClick={() => savePreviewBlob(new Blob([text], {type: 'text/html;charset=utf-8'}), name)} className={button}><DownloadIcon className="size-3.5" />{t('preview.downloadHtml')}</button>
       <button type="button" disabled={!ready || busy || source} onClick={png} className={button}><DownloadIcon className="size-3.5" />{t(busy ? 'preview.exportingPng' : 'preview.downloadPng')}</button>
       <a href={url} target="_blank" rel="noreferrer noopener" className={`${button} ml-auto`}><ExternalLinkIcon className="size-3.5" />{t('preview.openInTab')}</a>
     </div>
     {error && <p role="alert" className="px-3 py-2 text-xs text-destructive-foreground">{t('preview.pngError', {message: error})}</p>}
     {source && <div className="min-h-0 flex-1 overflow-auto p-4"><Markdown text={'```html\n' + text + '\n```'} /></div>}
-    <iframe ref={frame} srcDoc={srcDoc} title={name} onLoad={() => { pending.current?.abort(); pending.current = null; setBusy(false); setReady(true); }}
-      sandbox="allow-scripts allow-popups allow-downloads"
-      className={`${source ? 'hidden' : 'block'} min-h-0 w-full flex-1 border-0 ${dark ? 'bg-background' : 'bg-white'}`} />
+    <div ref={box} className={`${source ? 'hidden' : 'block'} relative min-h-0 flex-1 overflow-hidden ${dark ? 'bg-background' : 'bg-white'}`}>
+      <iframe ref={frame} srcDoc={srcDoc} title={name} onLoad={() => { pending.current?.abort(); pending.current = null; setBusy(false); setReady(true); }}
+        sandbox="allow-scripts allow-popups allow-downloads"
+        className="absolute top-0 left-0 block border-0"
+        style={scale < 1
+          ? {width: DESKTOP_WIDTH, height: boxSize.height / scale, transform: `scale(${scale})`, transformOrigin: '0 0'}
+          : {width: '100%', height: '100%'}} />
+    </div>
   </div>;
 }

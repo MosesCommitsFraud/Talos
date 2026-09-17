@@ -1203,7 +1203,18 @@ def render(title: str, charts: Sequence[Mapping[str, Any]],
     if layout_html is not None:
         slots = re.findall(r"\{\{chart:([^}]+)\}\}", layout_html)
         if sorted(slots) != sorted(ids):
-            raise ValueError("layout_html must include every {{chart:id}} exactly once, with no unknown IDs")
+            # Name the exact mismatch: a bare "every id exactly once" sent a
+            # model into a dozen rounds of printing and diffing lists itself.
+            missing = [i for i in ids if i not in slots]
+            unknown = sorted({s for s in slots if s not in ids})
+            twice = sorted({s for s in slots if slots.count(s) > 1})
+            details = "; ".join(part for part in (
+                f"missing in layout_html: {', '.join('{{chart:' + m + '}}' for m in missing)}" if missing else "",
+                f"no chart with this id: {', '.join(unknown)}" if unknown else "",
+                f"placed more than once: {', '.join(twice)}" if twice else "",
+            ) if part)
+            raise ValueError("layout_html must include every {{chart:id}} exactly once, with no unknown IDs. "
+                             + details + ". Check f-string braces: inside f\"\"\"…\"\"\" write {{{{chart:id}}}}.")
 
     bundles = []
     if any(c["spec"]["type"] != "echarts" for c in charts):
@@ -1473,6 +1484,14 @@ def lint_composition(layout_html: str, css: str,
     if re.search(r"grid-template-columns\s*:\s*repeat\(\s*1[0-2]\b", css):
         issues.append("css: 12-column grid — tiles without an explicit span collapse to 1/12 width; use "
                       "`repeat(auto-fit, minmax(min(100%, 360px), 1fr))` and `grid-column: 1 / -1` for wide tiles")
+    for c in charts:
+        option = (c.get("spec") or {}).get("option")
+        series = option.get("series") if isinstance(option, Mapping) else None
+        for s in series if isinstance(series, (list, tuple)) else ([series] if isinstance(series, Mapping) else []):
+            if isinstance(s, Mapping) and s.get("type") == "pie" and isinstance(s.get("data"), (list, tuple)) \
+                    and len(s["data"]) > 6:
+                issues.append(f"chart '{c.get('id')}': pie with {len(s['data'])} slices — unreadable; show the "
+                              "top 5 plus \"Sonstige\", or use a sorted horizontal bar chart")
     legacy = [c.get("id") for c in charts if (c.get("spec") or {}).get("type") not in (None, "echarts")]
     if legacy:
         issues.append(f"charts {legacy}: legacy td.bar/td.hbar/td.donut builders — they ignore formats, "

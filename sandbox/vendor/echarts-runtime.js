@@ -108,10 +108,16 @@ function talosPieLegend(series) {
    cut off; widening the value axis a little keeps it inside the chart. */
 function talosFit(option, width = 640) {
   const narrow = width < TALOS_NARROW;
+  talosHorizontalBars(option, width);
   const series = [].concat(option.series || []);
   const axes = (name) => [].concat(option[name] || []);
+  const hasPie = series.some((s) => s && s.type === 'pie');
+  if (hasPie && option.legend) talosPieLegendLayout(option, series);
   for (const s of series) {
     if (!s || typeof s !== 'object') continue;
+    // Value labels on dense charts ("215,4 Mio. €" over six narrow bars) run
+    // into each other; hide the ones that would overlap instead.
+    if (s.type !== 'pie' && s.label && s.label.show && s.labelLayout == null) s.labelLayout = {hideOverlap: true};
     if (s.type === 'bar' && s.label && s.label.show) {
       const horizontal = axes('yAxis').some((a) => a && a.type === 'category');
       const pos = s.label.position || (horizontal ? 'right' : 'top');
@@ -134,12 +140,77 @@ function talosFit(option, width = 640) {
         s.labelLine = {...(s.labelLine || {}), show: false};
         s.center = ['50%', '42%'];
         s.radius = ['38%', '62%'];
-        option.legend = option.legend || {bottom: 6, left: 'center', orient: 'horizontal', itemWidth: 10, itemHeight: 10,
-          formatter: talosPieLegend(s)};
+        if (option.legend) {
+          // The page's own legend now carries what the hidden labels showed.
+          option.legend = [].concat(option.legend).map((l) => (l && typeof l === 'object' && l.formatter == null
+            ? {...l, formatter: talosPieLegend(s)} : l));
+        } else {
+          option.legend = {type: 'scroll', bottom: 6, left: 'center', orient: 'horizontal', itemWidth: 10, itemHeight: 10,
+            formatter: talosPieLegend(s)};
+        }
       }
     }
   }
   return option;
+}
+
+/* Long category names under vertical bars end up rotated and overlapping.
+   A plain single-grid bar chart with such names is turned into horizontal bars,
+   which is what a reader needs for a ranking anyway. */
+function talosHorizontalBars(option, width) {
+  const x = option.xAxis, y = option.yAxis;
+  if (!x || !y || Array.isArray(x) || Array.isArray(y) || x.type !== 'category' || !Array.isArray(x.data)) return;
+  if (y.type && y.type !== 'value') return;
+  const series = [].concat(option.series || []);
+  if (!series.length || series.some((s) => !s || s.type !== 'bar')) return;
+  const names = x.data.map((d) => String(d && typeof d === 'object' ? d.value : d));
+  const longest = Math.max(...names.map((n) => n.length));
+  const perBar = width / Math.max(1, names.length);
+  if (names.length < 4 || longest * 7 < perBar) return;
+  const {rotate, interval, ...xLabel} = x.axisLabel || {};
+  option.yAxis = {...x, inverse: true, axisLabel: {...xLabel, width: Math.min(160, Math.round(width * 0.35)), overflow: 'truncate'}};
+  option.xAxis = {...y};
+  for (const s of series) {
+    if (s.label && (s.label.position == null || s.label.position === 'top')) s.label = {...s.label, position: 'right'};
+    const radius = s.itemStyle && s.itemStyle.borderRadius;
+    if (Array.isArray(radius) && radius.length === 4) s.itemStyle = {...s.itemStyle, borderRadius: [0, radius[0], radius[1], 0]};
+  }
+}
+
+/* A pie with its own legend: the legend goes into a scrolling strip under the
+   ring (or beside it when vertical) so the two never overlap. */
+function talosPieLegendLayout(option, series) {
+  const legends = [].concat(option.legend);
+  const vertical = legends.some((l) => l && l.orient === 'vertical');
+  option.legend = legends.map((l) => {
+    if (!l || typeof l !== 'object') return l;
+    const {top, bottom, left, right, ...rest} = l;
+    return vertical
+      ? {...rest, type: 'scroll', orient: 'vertical', right: 0, top: 'middle'}
+      : {...rest, type: 'scroll', orient: 'horizontal', left: 'center', bottom: 4};
+  });
+  for (const s of series) {
+    if (!s || s.type !== 'pie') continue;
+    s.center = vertical ? ['36%', '50%'] : ['50%', '44%'];
+    const outer = Array.isArray(s.radius) ? s.radius[1] : s.radius;
+    if (outer == null || parseFloat(outer) > 62) s.radius = Array.isArray(s.radius) ? [s.radius[0], '62%'] : ['0%', '62%'];
+  }
+}
+
+/* A chart host inside a container that has its own height must fill that
+   container. A fixed td.chart height (default 340px) in a CSS-sized slot
+   overflowed it by the difference and drew over the headings below, but only
+   where the slot was smaller, e.g. in the narrower Talos preview. A host with
+   no height at all gets a readable default instead of collapsing. */
+function talosFitHost(el, entry) {
+  const parent = el.parentElement;
+  const alone = parent && [...parent.children].every((c) => c === el);
+  if (alone) {
+    el.style.height = '0px';
+    const slot = parent.clientHeight;
+    if (slot >= 120) { el.style.height = '100%'; return; }
+  }
+  el.style.height = entry.height != null ? `${entry.height}px` : '320px';
 }
 
 /* Deep merge for filter views: objects merge, arrays of objects (series) merge
@@ -209,6 +280,7 @@ window.TalosECharts = {
           if (chart) chart.dispose();
           el.replaceChildren();
           if (entry.height != null) el.style.height = `${entry.height}px`;
+          talosFitHost(el, entry);
           el.setAttribute('role', 'img');
           el.setAttribute('aria-label', entry.title);
           const css = getComputedStyle(document.documentElement);
@@ -241,7 +313,7 @@ window.TalosECharts = {
             });
           }
           chart = echarts.init(el, theme, {locale: options.locale?.startsWith('de') ? 'DE' : 'EN',
-              width: el.clientWidth || 640, height: entry.height || el.clientHeight || 340});
+              width: el.clientWidth || 640, height: el.clientHeight || entry.height || 340});
           const spec = entry.spec;
           if (spec.setup) cleanup = spec.setup(chart, echarts, spec.data);
           // `talos` is ours, not ECharts': {emit: field} makes a click set a
@@ -279,7 +351,7 @@ window.TalosECharts = {
       resize = new ResizeObserver(() => {
         // Crossing the narrow threshold changes the layout (pie labels ↔ legend), not just the size.
         if (((el.clientWidth || 640) < TALOS_NARROW) !== narrowDrawn) { draw(); return; }
-        if (chart && !chart.isDisposed()) chart.resize({width: el.clientWidth || 640, height: entry.height || el.clientHeight || 340});
+        if (chart && !chart.isDisposed()) chart.resize({width: el.clientWidth || 640, height: el.clientHeight || entry.height || 340});
       });
       resize.observe(el);
       observer = new MutationObserver(draw);

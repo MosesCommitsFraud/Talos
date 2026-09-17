@@ -67,6 +67,11 @@ class DashboardTests(unittest.TestCase):
                        "{{chart:trend}}{{chart:trend}}"):
             with self.subTest(layout=layout), self.assertRaisesRegex(ValueError, "exactly once"):
                 td.render("Custom", [native], layout_html=layout)
+        # The message names the mismatch instead of leaving the author to diff lists.
+        with self.assertRaisesRegex(ValueError, r"missing in layout_html: \{\{chart:trend\}\}.*no chart with this id: other"):
+            td.render("Custom", [native], layout_html="{{chart:other}}")
+        with self.assertRaisesRegex(ValueError, "placed more than once: trend"):
+            td.render("Custom", [native], layout_html="{{chart:trend}}{{chart:trend}}")
         with self.assertRaisesRegex(ValueError, "height=None"):
             td.render("Missing CSS layout", [native])
 
