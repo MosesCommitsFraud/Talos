@@ -15,7 +15,7 @@ root = Path(sys.argv[1]).resolve()
 td.VENDOR = root
 td.BUNDLE = root / "talos-charts.js"
 td.ECHARTS_BUNDLE = root / "echarts.min.js"
-reference = Path("sample_skills/dashboard-v2/references/layout-and-export.md").read_text(encoding="utf-8")
+reference = Path("sample_skills/dashboard-v2/SKILL.md").read_text(encoding="utf-8")
 example = re.search(r"```python\n(.*?)\n```", reference, re.S)[1]
 example = example.replace('"output/dashboard.html"', repr(str(root / "design.html")))
 namespace = {}

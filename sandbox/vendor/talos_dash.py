@@ -1520,7 +1520,7 @@ def compose(path: str, title: str, charts: Sequence[Mapping[str, Any]], *,
         if issues:
             raise ValueError(
                 "compose() rejected the design — it would break in dark mode, in the narrow "
-                "preview or be hard to read. Fix every point (rules: references/macs-brand.md):\n- "
+                "preview or be hard to read. Fix every point and call compose again (rules and example: SKILL.md of dashboard-v2):\n- "
                 + "\n- ".join(issues)
             )
     return dashboard(path, title, charts, layout_html=layout_html, css=css,

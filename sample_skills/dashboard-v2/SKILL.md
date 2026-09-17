@@ -4,211 +4,335 @@ description: "Create designed Apache ECharts dashboards and interactive HTML rep
 license: MIT
 ---
 
-# Dashboard v2 in Talos — Apache ECharts
+# Dashboard v2 in Talos (Apache ECharts, macs design)
 
-Produce one self-contained HTML file using `/opt/talos/vendor/talos_dash.py`.
-The scaffold supplies inline runtimes, theme/resize handling, page
-formats and PNG rendering for Talos. You design the page with `layout_html`
-and `css` as a BI report (Power BI style): header, filter context, KPI cards
-and a grid of visual tiles.
+Produce one self-contained HTML file with `td.compose` from
+`/opt/talos/vendor/talos_dash.py`. **Everything required is in this file.**
+The files under `references/` are optional depth: fixed page formats and PNG
+details (`layout-and-export.md`) and the old builders (`legacy-builders.md`,
+only for maintaining old dashboards).
 
-**Read [macs-brand.md](references/macs-brand.md),
-[design-direction.md](references/design-direction.md) and
-[layout-and-export.md](references/layout-and-export.md) before designing
-the page.** Dashboards use the macs colours, Encode Sans and the macs logo,
-but look like a BI dashboard, not like a PowerPoint slide. `td.compose`
-applies palette, font and chart theme automatically; you place the logo with
-`{{brand:logo}}` in the header and use the brand CSS variables instead of
-your own hex codes. HTML always remains the interactive original. Use `td.compose`,
-which requires authored HTML and CSS and exposes PNG rendering to Talos.
-Downloads belong in the Talos preview toolbar, never inside the artifact.
-Choose `page_format="web"` by default, `"16:9"` for a slide,
-`"a4"` for A4 portrait or `"a4-landscape"` for A4 landscape when requested.
-Design for that canvas from the start; do not squeeze a long web page onto it.
+## Workflow
 
-**Use `td.echarts(option)` for new charts. The full ECharts option API is
-available, including custom series, callbacks, coordinate systems and events.
-The old Python builders are conveniences, not the available-chart boundary.**
+1. Load and aggregate the data in Python. Compute every figure you will show
+   (totals, shares, changes, top positions) before writing any markup.
+2. Decide what the reader must see: 3–5 key figures, as many visuals as the
+   question needs (one for a narrow question, ten for a broad overview), a
+   table where exact values matter, and 3–4 insights with numbers. For each
+   visual pick the chart type from "Choosing charts" below, not by habit.
+3. Start from the **complete example below** and adapt it. Keep its structure,
+   class names, CSS approach and interaction pattern; change content and charts.
+4. Call `td.compose(...)`. It checks design, numbers, wording and interaction.
+   If it raises, fix **every** listed point and call it again. Do not work
+   around the check (no `brand=None`, no legacy builders, no `td.dashboard`).
+5. Verify the rendered page (see the checklist at the end).
 
-## Choose from the whole gallery
+## Rules that make or break the page
 
-Before building a new dashboard or adding a materially different chart:
+**Charts**
+- Only `td.echarts(option)`. The full ECharts API is available: every series
+  listed in "Choosing charts" below (22 series types, all components, GL).
+- `td.chart(id, title, spec, height=None)` and a CSS height on the container.
+- Leave axis, label, legend, tooltip and split-line colours to the theme.
+- Series colours only as tokens: `"@s1"` macs blue (main measure), `"@s2"`
+  petrol, `"@s3"` light blue (comparison), `"@s4"` amber (one highlight),
+  `"@q1"`…`"@q5"` sequential scale, `"@muted"`, `"@good"`, `"@critical"`,
+  `"@s1/12"` = 12 % opacity. Colour callbacks may return tokens too.
+- Numbers only through formatters: `"@eurCompact"` (41,8 Mio. €), `"@eur"`,
+  `"@num"`, `"@numCompact"`, `"@pct"`, or templates like
+  `"{b}\n{d} · @eurCompact"` ({a} series, {b} name, {d} pie share).
+  Set `tooltip.valueFormatter` on every chart.
+- Keep `grid.left/right` ≤ 48. Value labels outside bars get headroom
+  automatically. Donuts: 2–5 slices, labels with share and amount.
 
-1. Identify what each view should reveal: comparison, temporal change,
-   distribution, hierarchy, relationships, flow, geography or uncertainty.
-2. Read [chart-selection.md](references/chart-selection.md) to consider the
-   families beyond bars, lines and donuts. Choose by the analytical question;
-   diversity should reveal something, not decorate the page.
-3. Search the **complete offline official-example index**, then read the
-   source of relevant candidates before adapting them. Do not stop at the
-   first familiar example or limit selection to this skill's snippets.
-4. Inspect dependencies and `since`. Adapt the example's data and interaction
-   to the question and the offline constraints below. Explain the useful
-   insight in the heading or annotation, rather than the technical chart name.
+**Numbers in HTML**
+- `td.eur(v)` → "20,7 Mio. €", `td.eur(v, compact=False)` → "20.748.512 €",
+  `td.pct(62.06)` → "62,1 %", `td.pct(4.1, signed=True)` → "+4,1 %",
+  `td.num(12037)` → "12.037", `td.meter(share)` → in-cell bar (0–100).
+- Put finished values into the f-string. There is no template engine:
+  `{{eur 123}}` or similar is rejected.
+- Key figures people already use: Umsatz, Deckungsbeitrag, Veränderung ggü.
+  Vorjahr/Plan, Anteil der größten Position, Anzahl Kunden/Aufträge. No
+  invented ratios such as "Ø Umsatz/Produkt".
 
-```bash
-cat /opt/talos/vendor/echarts.version
-cat /opt/talos/vendor/echarts-examples/categories.tsv
-rg -i 'sunburst|tree|chord|parallel|matrix|custom' /opt/talos/vendor/echarts-examples/index.tsv
-cat /opt/talos/vendor/echarts-examples/public/examples/ts/sunburst-simple.ts
-```
+**Colour and theme**
+- No hex, `rgb()`, `white` or `black` anywhere, and no redefining theme
+  variables. CSS uses `var(--bg)`, `var(--fg)`, `var(--muted)`, `var(--line)`,
+  `var(--td-surface)`, `var(--brand-blue)`, `var(--brand-tint)`,
+  `var(--td-good)`, `var(--td-critical)`.
+- Pages are light by default; the Talos preview switches them to the app
+  theme. Never write `prefers-color-scheme` rules.
 
-The index includes every `.ts`/`.js` example source in the pinned Apache
-repository, including GL, documentation and archived examples. It records
-titles, categories, minimum versions where supplied, source paths, URLs and
-dependency hints. Hints are heuristic; inspect the source. Supplemental and
-archived examples may require migration. Upstream sources are references,
-not scripts to execute blindly. Do not load the whole collection into context:
-search broadly, then read only the candidates needed for this dashboard.
+**Typography**
+- Encode Sans is set. Body 14px, minimum 12px, weights 400/500/600 only.
+- Title 20–22px, section headings 15–16px, key figures 26–32px.
+- Sentence case, no uppercase letter-spaced labels, no emoji.
 
-Official gallery: https://echarts.apache.org/examples/en/index.html
-Offline revision: `/opt/talos/vendor/echarts-examples/REVISION`.
-This is a build-time snapshot, not a promise of future examples or new APIs.
-If uncertain about an option, search `/opt/talos/vendor/echarts-types/`.
+**Layout (open, not boxed)**
+- Rows of identical rounded cards look generated. Group with whitespace,
+  alignment and hairlines (`1px solid var(--line)`), as in the example.
+- Header: `{{brand:logo}}` (standalone, never inside `<img>`), title, data
+  freshness. Key figures as an open band with vertical hairlines. Visuals
+  directly on the page. Insights as a plain section under a hairline.
+- Grid: `repeat(auto-fit, minmax(min(100%, 380px), 1fr))`. Wide visuals
+  `grid-column: span 2` inside `@container artboard (min-width: 900px)`,
+  full width `1 / -1`. No 12-column grids.
+- Breakpoints only with `@container artboard (…)`, never `@media (…width)`.
+  The page must work at ~420 px (Talos side panel) and on a wide screen.
+- Chart heights with `clamp()`, e.g. `height: clamp(260px, 32cqw, 400px)`.
 
-## Build
+**Interaction (required when there are two or more charts)**
+- Chart as filter: `"talos": {"emit": "region"}` in the option. A click sets
+  the filter, a second click clears it; other items fade.
+- Chart reacting: `"talos": {"filter": "region", "views": {value: option_patch}}`
+  with patches precomputed in Python (e.g. `{"series": [{"data": [...]}]}`).
+- Table drill-down: parent rows `data-filter-set="region" data-value="Nord"`,
+  child rows `data-filter="region" data-value="Nord" data-collapsed`.
+- Filter state: `<b data-filter-status="region"></b>` and an element with
+  `data-filter-reset="region"`; `data-filter="region" data-value=""` shows
+  something only while unfiltered.
 
-Use `td.compose` for Dashboard v2. It has no automatic card-layout fallback:
-you must supply the composition. `td.dashboard` is the old entrypoint for the
-original dashboard skill; do not copy that skill's tile examples into v2.
+**Insights (required)**
+- An element with `class="insights"` holding 3–4 `<li>`. Each point states a
+  finding with its number and what follows from it: concentration risk,
+  dependence on top customers/products, trend breaks, outliers, next check.
 
-Before coding, establish the audience, decision, headline finding and supporting
-evidence. Compare two plausible spatial arrangements and choose the one that
-makes this particular story clear. Typography and palette are fixed by the macs
-brand; spend your design decisions on which KPIs and visuals answer the
-question, tile sizes by importance and consistent colour meaning per measure.
-How many visuals is your call — one for a narrow question, ten for a broad
-overview. Every page also needs:
+**Language**
+Short, factual German sentences that start with the finding. Rejected:
+em dash (—) and spaced en dash ( – ) as punctuation (ranges like Jan–Dez are
+fine), list items starting with a bold label and colon, stock phrases such as
+nahtlos, ganzheitlich, maßgeschneidert, essenziell, bahnbrechend,
+bemerkenswert, "spielt eine (entscheidende) Rolle", "es ist wichtig zu
+beachten", "nicht nur … sondern auch", and emoji. Also avoid three-part lists
+by habit, "Nicht X, sondern Y", hedging with "kann" and vague sources.
 
-- 3–4 **insights/recommendations** grounded in the data (`class="insights"`),
-- **plain key figures** (Umsatz, Veränderung, Anteil) formatted with `td.eur`,
-  `td.pct`, `td.num`,
-- **interaction where it helps**: charts and table rows that filter the page and
-  drill down/up via `"talos": {"emit"/"filter"}` and `data-filter*` attributes.
-
-All of this is described in macs-brand.md; `td.compose` checks the formal parts.
+## Complete example
 
 ```python
+import html
 import sys
 sys.path.insert(0, "/opt/talos/vendor")
 import talos_dash as td
 
-# First author layout_html, css and the selected chart options for this brief.
-# Place each chart in layout_html with {{chart:its-id}} and the logo with
-# {{brand:logo}}. brand="macs" is the default.
-td.compose("output/dashboard.html", title=title,
-    charts=charts, layout_html=layout_html, css=css, page_format="16:9")
-```
-
-The API sketch uses your authored variables; a runnable composition example
-is in layout-and-export.md. It shows the BI report structure; adapt KPIs, tile sizes and visuals to the
-data. Avoid a grid of equal-sized tiles: the main visual gets the largest tile.
-
-`td.chart(id, title, spec, span=1, height=340, note="")` defines a chart.
-In `layout_html`, place it with `{{chart:id}}`; no card is imposed. Set
-`height=None` for ECharts whose container height is controlled by your CSS.
-Give every chart a distinct simple ID. `span` is for legacy automatic cards;
-use CSS to allocate space in a composed dashboard.
-Use more height for trees, networks, parallel axes or dense calendars.
-Author KPI cards in your layout HTML (value, label, comparison) instead of
-the legacy KPI-tile helper. Direction is not automatically
-good or bad; explain what a comparison means for this audience.
-
-Options stay native: `dataset`, `encode`, `visualMap`, `dataZoom`, `brush`,
-`timeline`, `graphic`, `media`, multiple grids/axes and any installed series
-are available. There is no fixed series whitelist. Do not pass native ECharts
-options into a legacy builder spec, or invent `td.sunburst`-style helpers.
-
-## Functions, maps and interactive examples
-
-Python dicts handle ordinary options. Wrap authored JavaScript expressions
-with `td.js(...)` for `renderItem`, formatters, symbol sizing, gradients or
-other functions. They are emitted as actual JavaScript, without `eval`.
-Never interpolate user-provided data into executable code: pass it as data.
-
-```python
-option = {
-    "xAxis": {}, "yAxis": {},
-    "series": [{"type": "scatter", "data": [[10, 20, 100], [30, 15, 400]],
-                "symbolSize": td.js("function (v) { return Math.sqrt(v[2]); }")}]
+months = ["Jan", "Feb", "Mär", "Apr", "Mai", "Jun", "Jul", "Aug", "Sep", "Okt", "Nov", "Dez"]
+ist = [3.1e6, 3.0e6, 3.6e6, 3.4e6, 3.8e6, 4.0e6, 3.5e6, 3.3e6, 3.9e6, 4.2e6, 4.4e6, 4.8e6]
+vorjahr = [2.8e6, 2.9e6, 3.2e6, 3.1e6, 3.3e6, 3.5e6, 3.2e6, 3.0e6, 3.4e6, 3.7e6, 3.8e6, 4.1e6]
+regions = {"Nord": 14.2e6, "West": 11.8e6, "Süd": 9.6e6, "Ost": 5.1e6, "Export": 2.3e6}
+products = {  # region -> [(product, revenue)]
+    "Nord": [("Vitamin C", 8.1e6), ("Magnesium", 3.9e6), ("Mints", 2.2e6)],
+    "West": [("Vitamin C", 6.0e6), ("Traubenzucker", 4.1e6), ("Mints", 1.7e6)],
+    "Süd": [("Traubenzucker", 5.2e6), ("Vitamin C", 3.1e6), ("Mints", 1.3e6)],
+    "Ost": [("Vitamin C", 3.4e6), ("Mints", 1.7e6)],
+    "Export": [("Vitamin C", 2.3e6)],
 }
-spec = td.echarts(option)
+total = sum(regions.values())
+
+trend = td.echarts({
+    "tooltip": {"trigger": "axis", "valueFormatter": "@eur"},
+    "legend": {"top": 0, "right": 0, "itemWidth": 14, "itemHeight": 8},
+    "grid": {"left": 8, "right": 8, "top": 36, "bottom": 8},
+    "xAxis": {"type": "category", "data": months, "axisTick": {"show": False}},
+    "yAxis": {"type": "value", "axisLabel": {"formatter": "@eurCompact"}},
+    "series": [
+        {"name": "Ist 2026", "type": "line", "smooth": True, "symbol": "none",
+         "lineStyle": {"width": 2.5}, "areaStyle": {"color": "@s1/12"}, "data": ist},
+        {"name": "Vorjahr", "type": "line", "smooth": True, "symbol": "none",
+         "lineStyle": {"width": 2, "type": "dashed"}, "itemStyle": {"color": "@s3"}, "data": vorjahr},
+    ],
+    # Reacts to the region filter: the same months, scaled to that region.
+    "talos": {"filter": "region", "views": {
+        r: {"series": [{"data": [round(v * rev / total) for v in ist]},
+                       {"data": [round(v * rev / total) for v in vorjahr]}]}
+        for r, rev in regions.items()}},
+})
+by_region = td.echarts({
+    "tooltip": {"trigger": "item", "valueFormatter": "@eur"},
+    "series": [{"type": "pie", "radius": ["48%", "72%"], "center": ["50%", "52%"],
+                "label": {"formatter": "{b}\n{d} · @eurCompact"},
+                "data": [{"name": r, "value": v} for r, v in regions.items()]}],
+    "talos": {"emit": "region"},  # click a slice to filter the page
+})
+charts = [td.chart("trend", "Umsatz nach Monat, Ist vs. Vorjahr", trend, height=None),
+          td.chart("regions", "Umsatz nach Region", by_region, height=None)]
+
+rows = []
+for r, rev in regions.items():
+    share = rev / total * 100
+    rows.append(f'<tr data-filter-set="region" data-value="{html.escape(r)}"><th scope="row">{html.escape(r)}</th>'
+                f'<td>{td.eur(rev)}</td><td>{td.pct(share)}</td><td>{td.meter(share)}</td></tr>')
+    for name, prod_rev in products[r]:
+        rows.append(f'<tr class="detail" data-filter="region" data-value="{html.escape(r)}" data-collapsed>'
+                    f'<th scope="row">{html.escape(name)}</th><td>{td.eur(prod_rev)}</td>'
+                    f'<td>{td.pct(prod_rev / rev * 100)}</td><td>{td.meter(prod_rev / rev * 100)}</td></tr>')
+rows_html = "".join(rows)
+nord_share = td.pct(regions["Nord"] / total * 100)
+
+layout = f"""
+<header class="bar">{{{{brand:logo}}}}<h1>Vertriebsübersicht 2026</h1>
+  <span class="meta">Stand 31.12.2026 · Beträge in €</span></header>
+<nav class="filters"><span>Zeitraum <b>Jan–Dez 2026</b></span>
+  <span data-filter="region" data-value="">Region <b>Alle</b></span>
+  <span data-filter-reset="region">Region <b data-filter-status="region"></b> ×</span></nav>
+<section class="figures">
+  <div class="figure"><span class="label">Umsatz</span><strong>{td.eur(total)}</strong><em><i class="up">▲</i> {td.pct(12.0, signed=True)} ggü. Vorjahr</em></div>
+  <div class="figure"><span class="label">Größte Region</span><strong>Nord</strong><em>{nord_share} vom Umsatz</em></div>
+  <div class="figure"><span class="label">Aufträge</span><strong>{td.num(1284)}</strong><em><i class="down">▼</i> {td.pct(-2.3)} ggü. Vorjahr</em></div>
+</section>
+<section class="panels">
+  <article class="panel wide"><h2>Das vierte Quartal wächst am stärksten</h2>
+    <p class="sub">Umsatz nach Monat, Ist 2026 und Vorjahr</p><div class="plot">{{{{chart:trend}}}}</div></article>
+  <article class="panel"><h2>Nord und West tragen 60 % des Umsatzes</h2>
+    <p class="sub">Umsatzanteil nach Region. Ein Klick filtert die Seite.</p><div class="plot">{{{{chart:regions}}}}</div></article>
+  <article class="panel full"><h2>Regionen und Produkte</h2>
+    <p class="sub">Zeile anklicken, um die Produkte zu sehen</p>
+    <table class="drill"><thead><tr><th>Region / Produkt</th><th>Umsatz</th><th>Anteil</th><th></th></tr></thead>
+    <tbody>{rows_html}</tbody></table></article>
+</section>
+<section class="insights"><h2>Auffälligkeiten und Empfehlungen</h2><ol>
+  <li>Vitamin C bringt {td.pct(22.9 / 43.0 * 100)} des Umsatzes. Fällt das Produkt aus, fehlt mehr als die Hälfte; ein zweites starkes Produkt im Sortiment würde das Risiko senken.</li>
+  <li>Nord und West liefern zusammen {td.pct(26.0 / 43.0 * 100)}. Die Großkunden dieser Regionen sollten im Forecast einzeln betrachtet werden.</li>
+  <li>Der Export kommt auf {td.eur(2.3e6)} mit einem einzigen Produkt. Hier lohnt eine Entscheidung, ob ausgebaut oder zurückgefahren wird.</li>
+  <li>Die Aufträge sinken um 2,3 %, der Umsatz steigt um 12 %. Vor der Planung 2027 prüfen, ob Preise oder Produktmix den Anstieg erklären.</li>
+</ol></section>
+<p class="source">Quelle: synthetische Beispieldaten</p>
+"""
+style = """
+#td-artboard .bar {display:flex;flex-wrap:wrap;align-items:center;gap:8px 14px;padding-bottom:12px;border-bottom:1px solid var(--line);}
+#td-artboard .bar .brand-logo {height:24px;}
+#td-artboard h1 {font-size:21px;font-weight:600;line-height:1.3;margin:0;}
+#td-artboard .meta {margin-left:auto;font-size:13px;color:var(--muted);}
+#td-artboard .filters {display:flex;flex-wrap:wrap;gap:6px;margin:12px 0 4px;font-size:13px;color:var(--muted);}
+#td-artboard .filters span {border:1px solid var(--line);border-radius:6px;padding:3px 10px;}
+#td-artboard .filters b {color:var(--fg);font-weight:500;margin-left:4px;}
+#td-artboard .figures {display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,190px),1fr));
+  margin:16px 0 28px;border-bottom:1px solid var(--line);}
+#td-artboard .figure {display:flex;flex-direction:column;gap:2px;padding:4px 20px 18px 0;}
+#td-artboard .figure + .figure {padding-left:20px;border-left:1px solid var(--line);}
+#td-artboard .figure .label {font-size:13px;font-weight:500;color:var(--muted);}
+#td-artboard .figure strong {font-size:30px;font-weight:600;line-height:1.2;font-variant-numeric:tabular-nums;}
+#td-artboard .figure em {font-style:normal;font-size:13px;color:var(--muted);}
+#td-artboard .figure i {font-style:normal;}
+#td-artboard .up {color:var(--td-good);} #td-artboard .down {color:var(--td-critical);}
+#td-artboard .panels {display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,380px),1fr));gap:32px 36px;}
+#td-artboard .panel {min-width:0;}
+#td-artboard .panel.full {grid-column:1/-1;}
+#td-artboard h2 {font-size:16px;font-weight:600;line-height:1.35;margin:0;}
+#td-artboard .sub {font-size:13px;color:var(--muted);margin:2px 0 10px;}
+#td-artboard .plot {height:clamp(260px,32cqw,400px);}
+#td-artboard .plot .chart {height:100%;}
+#td-artboard .drill {width:100%;border-collapse:collapse;font-size:14px;font-variant-numeric:tabular-nums;}
+#td-artboard .drill th, #td-artboard .drill td {padding:8px;border-bottom:1px solid var(--line);text-align:right;}
+#td-artboard .drill thead th {font-size:13px;font-weight:500;color:var(--muted);}
+#td-artboard .drill th:first-child {text-align:left;font-weight:500;}
+#td-artboard .drill td:last-child {width:28%;}
+#td-artboard .drill .detail th {padding-left:24px;font-weight:400;color:var(--muted);}
+#td-artboard .insights {margin-top:32px;padding-top:16px;border-top:1px solid var(--line);max-width:78ch;}
+#td-artboard .insights ol {margin:8px 0 0;padding-left:20px;display:grid;gap:8px;line-height:1.55;}
+#td-artboard .source {font-size:12px;color:var(--muted);margin:20px 0 0;}
+@container artboard (min-width: 900px) {
+  #td-artboard .panel.wide {grid-column:span 2;}
+}
+@container artboard (max-width: 620px) {
+  #td-artboard .meta {margin-left:0;width:100%;}
+  #td-artboard .figure, #td-artboard .figure + .figure {padding:10px 0;border-left:0;border-top:1px solid var(--line);}
+  #td-artboard .figure strong {font-size:24px;}
+  #td-artboard .drill td:nth-child(3) {display:none;}
+}
+"""
+td.compose("output/dashboard.html", title="Vertriebsübersicht 2026",
+    charts=charts, layout_html=layout, css=style)
 ```
 
-`td.echarts(option, setup=td.js("function(chart, echarts, data) {...}"),
-data=payload, extensions=())` supports preparation and event wiring.
-`setup` runs before `setOption`; register maps/transforms and attach events
-there. It may return a cleanup function to remove custom timers/listeners.
-Setup runs again on theme changes, so clean up side effects. The runtime
-preserves legend selection and zoom across theme changes; custom interaction
-state must be managed in your setup if needed.
+Page formats: `page_format="web"` (default, responsive), `"16:9"`, `"a4"`,
+`"a4-landscape"`. Fixed formats are one canvas that must not overflow; design
+for it from the start (details in `references/layout-and-export.md`).
+Downloads (HTML/PNG) live in the Talos preview toolbar, never in the page.
 
-```python
-spec = td.echarts(
-    {"series": [{"type": "map", "map": "regions", "data": values}]},
-    setup=td.js("function (chart, echarts, data) { echarts.registerMap('regions', data); }"),
-    data=geojson,
-)
+## Choosing charts: everything ECharts 6 offers
+
+Pick by the reader's question, not by habit. Bars, lines and donuts are right
+often, but check this list for every visual. All of these work with
+`td.echarts`, tokens, formatters and filters.
+
+**All series types (`series[].type`)**
+
+| type | Use it when | Notes |
+| --- | --- | --- |
+| `bar` | compare categories, rankings, periods; stacked for composition; horizontal for long names | sorted descending for rankings; `stack` for parts of a total; waterfall = stacked bar with a transparent base series |
+| `line` | development over time, Ist vs. Vorjahr/Plan, many periods | `areaStyle` for the main series only, `step` for price/stock levels, `markLine` for targets/averages |
+| `pie` | share of 2–5 parts of one total | `radius: [inner, outer]` for donut, `roseType` only for seasonal patterns |
+| `scatter` | relationship of two measures (Umsatz vs. Marge), outliers; bubble size = third measure | `symbolSize` via `td.js` function |
+| `effectScatter` | a few points that must draw attention (top locations on a map) | use sparingly |
+| `radar` | profile of few items across 4–8 normalized criteria | normalize axes, max 3 items |
+| `heatmap` | two categorical dimensions (Kunde × Monat, Produkt × Region), density | `visualMap` with `"@q1"`…`"@q5"`; also on `calendar` |
+| `tree` | parent-child structure (Kostenstellen, Organisation) | orient `LR`, collapsible |
+| `treemap` | hierarchical size (Umsatz by Gruppe → Produkt), many items | built-in drill-down on click, `leafDepth` |
+| `sunburst` | hierarchical shares over 2–3 levels | click drills into a ring |
+| `boxplot` | distribution per group (Auftragswerte je Region), spread and outliers | compute quartiles in Python |
+| `candlestick` | open/high/low/close series (prices, daily ranges) | with `dataZoom` |
+| `map` | values per region/country (choropleth) | GeoJSON inline via `setup` + `registerMap`, no online tiles |
+| `lines` | flows or routes between locations on `geo` | with `effect` only if movement matters |
+| `graph` | networks: relations between customers, products, sites | `layout: 'force'` or `'circular'` |
+| `sankey` | volume flowing through stages or from source to target (Umsatz Region → Kanal → Produkt) | flows must add up |
+| `chord` | mutual flows between a set of entities (ECharts 6) | few entities |
+| `funnel` | ordered conversion stages (Anfrage → Angebot → Auftrag) | only real sequential stages |
+| `gauge` | one value against a target or range | a plain key figure is often clearer |
+| `pictorialBar` | bars made of symbols, progress towards a target | only when the symbol adds meaning |
+| `themeRiver` | composition changing over time (streamgraph) | mix matters more than exact values |
+| `parallel` | many measures per item, find profiles | with `brush` |
+| `custom` | anything else: Gantt, bullet chart, dumbbell, violin, range bands | `renderItem` via `td.js` |
+
+**Coordinate systems and components worth combining**
+
+- `grid` (several grids for small multiples), `polar` (radial bars),
+  `singleAxis`, `calendar` (heatmap/scatter per day), `geo`, `parallel`,
+  `matrix` (ECharts 6, charts arranged in a table layout).
+- `dataset` + `encode` + `transform` (filter/sort/aggregate in the chart),
+  `dataZoom` (long series), `visualMap` (colour scales), `brush` (select
+  ranges), `timeline` (switch periods), `markLine`/`markArea`/`markPoint`
+  (targets, averages, events), `graphic` (annotations), `legend`, `tooltip`,
+  `axisPointer` (linked crosshair), `universalTransition` (animated drill).
+- GL (`extensions=("echarts-gl",)`): `bar3D`, `scatter3D`, `line3D`,
+  `surface`, `globe`, `map3D`, `lines3D`, `scatterGL`, `graphGL`, `flowGL`.
+  Only when a third dimension is real; needs WebGL.
+
+**Source examples.** The complete official example index is offline; read the
+source of a candidate before adapting it:
+
+```bash
+cat /opt/talos/vendor/echarts-examples/categories.tsv
+rg -i 'sunburst|treemap|sankey|heatmap|custom' /opt/talos/vendor/echarts-examples/index.tsv
+cat /opt/talos/vendor/echarts-examples/public/examples/ts/sunburst-simple.ts
 ```
 
-Translate gallery globals: `myChart` becomes setup's `chart`; use actual
-JavaScript rather than TypeScript annotations. Replace demo `app` controls
-with intentional chart events or ECharts controls. A timer-based example must
-return cleanup (e.g. `return () => clearInterval(timer)`). A custom series can
-use a function in `renderItem` without changing the Talos runtime.
+Read only the candidates you need, then adapt them: `myChart` becomes the
+`chart` argument of `setup`, TypeScript annotations go, demo `app` controls
+become real ECharts controls, and every colour becomes a token. If unsure about
+an option, search `/opt/talos/vendor/echarts-types/`.
 
-## Offline dependencies
+## Functions, setup and offline data
 
-- The sandbox and preview have **no outbound network**. No CDN scripts,
-  `fetch`, `$.get`, `getScript`, remote map tiles, or sibling runtime assets.
-- Official example assets are under
-  `/opt/talos/vendor/echarts-examples/public/data/asset/`. Read needed JSON,
-  GeoJSON or SVG in Python and embed it via `data`, `dataset` or options.
-  Embed required images/textures as data URIs; observe asset licenses.
-- `extensions=("echarts-gl",)` inlines the installed GL extension for 3D,
-  globe, surface and GL series; the browser must support WebGL.
-  `extensions=("echarts-stat",)` supplies global `ecStat`; register needed
-  transforms in setup. Extensions are opt-in so ordinary charts stay smaller.
-- jQuery, D3, Mapbox/Baidu APIs, API keys and arbitrary third-party plugins
-  are not supplied by the core library. An example using them needs adaptation
-  (e.g. inline GeoJSON instead of online basemaps) or an explicitly installed
-  dependency. Do not claim every upstream demo works unchanged offline.
-- Keep all data inline. Convert DataFrames/NumPy/dates to JSON-compatible
-  structures, and missing values to `None`; non-finite numbers are rejected.
+- JavaScript callbacks (`renderItem`, `symbolSize`, custom formatters) go
+  through `td.js("function (p) { … }")`. Never put user data into code.
+- `td.echarts(option, setup=td.js("function (chart, echarts, data) {…}"),
+  data=payload)` for maps (`echarts.registerMap`), transforms and events.
+  Setup runs again on theme changes; return a cleanup function for timers.
+- No network in sandbox or preview: no CDN scripts, no `fetch`. Example assets
+  are in `/opt/talos/vendor/echarts-examples/public/data/asset/`; embed them
+  via `data`/`dataset`. `extensions=("echarts-gl",)` or `("echarts-stat",)`
+  when needed.
+- Convert DataFrames/NumPy/dates to plain JSON types; missing values → `None`.
 
-## Readability and verification
+## Verify before delivering
 
-**Never write hex colours** — not in chart options, not in CSS. Pages must
-work in light and dark mode. Leave axis/label/legend/tooltip colours to the
-theme; where a series needs a colour use token strings (`"@s1"`, `"@s2"`,
-`"@muted"`, …) and CSS variables (`var(--fg)`, `var(--td-surface)`, …) as
-listed in macs-brand.md. Format every number with `"@eurCompact"`, `"@eur"`,
-`"@num"` or `"@pct"` formatter strings. Magnitude needs a sequential scale, signed deviation
-a diverging one. Avoid copying a gallery's background or rainbow palette just
-because it looks striking. Tooltips add detail; titles, units and legends must
-make the chart understandable without hover.
+Open the page in the Talos preview and check:
 
-Use truthful data, label projections and synthetic data, and show uncertainty
-where justified. Use a workspace-relative output path such as
-`output/dashboard.html`. When both data and dashboard are requested, export
-the same frame used by the charts.
+- Dark mode and light mode: every text, chip, axis and label readable.
+- Narrow panel (~420 px): nothing clipped, no horizontal scroll, sections stack.
+- Key figures show values (no placeholders), numbers in German format.
+- Click each filter source: dependent charts, rows and the status update; a
+  second click drills back up. Hover bars and slices: nothing disappears.
+- The first thing a reader sees is the main finding with its comparison.
+- For fixed formats and PNG export: the whole canvas, nothing cut off.
 
-Open the generated page in the preview and inspect every card. Check the
-chosen interaction, console errors, **dark mode** and a **narrow width of about
-420 px** (the Talos side panel) — use container queries, not window media queries.
-For fixed formats, verify the full canvas and absence of clipped content.
-Click PNG herunterladen in the Talos UI and open the actual PNG: verify dimensions, text,
-charts, inline images and background. Download HTML and verify it still opens
-interactively. PNG is a static snapshot of the currently selected chart state.
-For GL, test the actual preview's WebGL support. File existence or file size
-alone is not a rendering check. Failures must be fixed or clearly reported.
-
-At the final visual check, run the final checks in macs-brand.md,
-then identify the first thing the reader notices, the
-comparison that makes it meaningful, and what they should inspect next. If all
-regions look equally important or the page is still a wall of cards, change
-the spatial hierarchy before delivering. Inspect both HTML and exported PNG.
-
-For maintaining existing `td.line`, `td.waterfall`, etc. dashboards only,
-read [legacy-builders.md](references/legacy-builders.md). Mixed pages work;
-the scaffold embeds only the chart engines actually needed.
+Report any failure you could not fix instead of claiming the page works.

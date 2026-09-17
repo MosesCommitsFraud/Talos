@@ -8,7 +8,7 @@ from sandbox.vendor import talos_dash as td
 
 
 def _example():
-    ref = Path("sample_skills/dashboard-v2/references/layout-and-export.md").read_text(encoding="utf-8")
+    ref = Path("sample_skills/dashboard-v2/SKILL.md").read_text(encoding="utf-8")
     source = re.search(r"```python\n(.*?)\n```", ref, re.S)[1]
     source = source.split("td.compose(")[0]  # build the inputs, don't render
     namespace: dict = {"td": td}
