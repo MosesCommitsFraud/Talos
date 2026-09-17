@@ -301,3 +301,15 @@ def test_companion_figure_cannot_claim_synthetic_anchor_after_attachment():
     }
 
     assert not cp._synthetic_figure_relevant_to_query("pressure chart", figure)
+
+
+def test_relevance_gate_tolerates_german_inflection_and_compounds():
+    import src.chat_processor as cp
+
+    doc = "Definition: Die Pivot – in macs die Maske 'Pivot-Planung' – nutzt Datenarten."
+    assert cp._chunk_relevant_to_query("Was ist eine Datenart?", doc)
+    assert cp._chunk_relevant_to_query("Welche Datenarten gibt es?", "Die Datenart legt fest ...")
+    assert cp._chunk_relevant_to_query("Pivot Definition Bedeutung", doc)
+    assert cp._chunk_relevant_to_query("Planung", "Maske Pivot-Planung öffnen")
+    # Short terms stay exact: "band" is not "bandbreite".
+    assert not cp._chunk_relevant_to_query("Band", "Die Bandbreite der Leitung")

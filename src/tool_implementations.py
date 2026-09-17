@@ -1600,12 +1600,19 @@ async def do_search_knowledge(
         return {"error": str(e), "exit_code": 1}
 
     if not sources:
-        # An empty result is a normal, useful answer — say so plainly rather
-        # than returning an error, so the model moves on instead of retrying.
+        # Not an error, but not a licence to answer from general knowledge
+        # either: the old wording ("use another source") was read as exactly
+        # that, and the model filled the gap with invented facts. Steer it to
+        # retry with the user's literal question / single terms, then report
+        # the gap instead of papering over it.
         return {
             "output": (
-                f'No indexed document matched "{query}". The knowledge base has nothing '
-                "on this — answer from the conversation, or use another source."
+                f'No indexed document matched "{query}". Before concluding that the '
+                "knowledge base has nothing: search again with the user's literal "
+                "question, and with the single key term on its own (e.g. just "
+                "'Pivot'). If those also come back empty, tell the user that nothing "
+                "on this is stored in the knowledge base. Do NOT fill the gap from "
+                "general knowledge and present it as their documentation."
             ),
             "rag_sources": [],
         }
@@ -1633,6 +1640,11 @@ async def do_search_knowledge(
             "documents live only in the search index, so read_file/glob/ls cannot "
             "open them and will report 'not found'. To see more of a document, call "
             "search_knowledge again with wording aimed at the part you want.\n\n"
+            "Tables and lists you build from these passages may contain only columns "
+            "and entries that the passages actually state. Leave a missing value "
+            "empty or mark it 'nicht hinterlegt' / 'not stored' — never fill it from "
+            "general knowledge, and never put a source citation on anything the "
+            "passages don't say.\n\n"
             + (CITATION_RULE + "\n\n" if any(s.get("n") for s in sources) else "")
             + "<<<SUPPLIED_CONTEXT>>>\n"
             f"{block}\n"

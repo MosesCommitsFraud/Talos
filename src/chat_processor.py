@@ -106,7 +106,9 @@ _STOPWORDS = frozenset(
     "aber als also am an auf aus bei bin bis bist da das dass dein deine dem den der des "
     "die diese dieser dieses doch du ein eine einer eines er es für hat haben ich im in ist "
     "ja kann können man mit nach nicht noch nur oder sein seine sie sind so über um und uns "
-    "von vor war was wie wir wo zu zum zur".split()
+    "von vor war was wie wir wo zu zum zur "
+    "welche welcher welches welchen welchem gibt geben heißt bedeutet warum wieso weshalb "
+    "wann wer wen wem mir mich dir dich".split()
 )
 
 
@@ -133,9 +135,30 @@ def _chunk_relevant_to_query(query: str, document: str) -> bool:
     d = set(_content_tokens(document))
     if not d:
         return False
-    shared = set(q) & d
-    need = 1 if len(set(q)) <= 2 else 2
+    # Hyphenated compounds ("pivot-planung") also count via their parts.
+    d |= {part for t in d if "-" in t for part in t.split("-") if len(part) >= 3}
+    q = set(q)
+    shared = {t for t in q if _token_in_document(t, d)}
+    need = 1 if len(q) <= 2 else 2
     return len(shared) >= need
+
+
+def _token_in_document(token: str, doc_tokens: set) -> bool:
+    """Whether a query term occurs in the document, tolerant of German inflection
+    and compounds: "datenart" matches "datenarten" and "datenartenliste",
+    "datenarten" matches "datenart". Short terms (< 5 chars) stay exact, since
+    "band" inside "bandbreite" is a different word."""
+    if token in doc_tokens:
+        return True
+    if len(token) < 5:
+        return False
+    for d in doc_tokens:
+        if token in d:
+            return True
+        # Inflected query term ("datenarten", "pivots") vs. base form in the doc.
+        if len(d) >= 5 and token.startswith(d) and len(token) - len(d) <= 3:
+            return True
+    return False
 
 
 def _synthetic_figure_relevant_to_query(query: str, result: Dict[str, Any]) -> bool:

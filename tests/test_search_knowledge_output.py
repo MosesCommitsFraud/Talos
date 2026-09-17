@@ -54,3 +54,12 @@ def test_empty_result_stays_a_plain_answer(monkeypatch):
     assert "No indexed document matched" in out["output"]
     assert "SUPPLIED_CONTEXT" not in out["output"]
     assert out["rag_sources"] == []
+
+
+def test_empty_result_does_not_invite_general_knowledge(monkeypatch):
+    """The old "use another source" wording made the model invent answers."""
+    out = _run("Pivot Definition Bedeutung", [], "", monkeypatch)["output"]
+
+    assert "another source" not in out
+    assert "literal" in out
+    assert "general knowledge" in out
