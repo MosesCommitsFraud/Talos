@@ -27,8 +27,8 @@ async def query_sql(arguments, headers):
     headers = {k.lower(): v for k, v in (headers or {}).items()}
     payload = {"query": query, "max_rows": limit}
     for field, default in {
-        "host": "X-DB-Host", "database": "X-DB-Name",
-        "user": "X-SQL-User", "password": "X-SQL-PW",
+        "host": "macs-sql-host", "database": "macs-sql-database",
+        "user": "macs-sql-user", "password": "macs-sql-password",
     }.items():
         header = os.getenv(f"TALOS_MCP_SQL_HEADER_{field.upper()}", default)
         value = headers.get(header.lower())

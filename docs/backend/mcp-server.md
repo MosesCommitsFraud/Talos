@@ -342,10 +342,10 @@ Tool-Argumente oder den Prompt:
 | Header | Inhalt | Optionaler abweichender Headername via Env |
 |---|---|---|
 | `Authorization` | `Bearer ody_…` | bestehende Talos-Authentifizierung |
-| `X-DB-Host` | DNS-Name oder IPv4-Adresse, ohne Port | `TALOS_MCP_SQL_HEADER_HOST` |
-| `X-DB-Name` | Datenbankname | `TALOS_MCP_SQL_HEADER_DATABASE` |
-| `X-SQL-User` | SQL-Login | `TALOS_MCP_SQL_HEADER_USER` |
-| `X-SQL-PW` | Passwort | `TALOS_MCP_SQL_HEADER_PASSWORD` |
+| `macs-sql-host` | DNS-Name oder IPv4-Adresse, ohne Port | `TALOS_MCP_SQL_HEADER_HOST` |
+| `macs-sql-database` | Datenbankname | `TALOS_MCP_SQL_HEADER_DATABASE` |
+| `macs-sql-user` | SQL-Login | `TALOS_MCP_SQL_HEADER_USER` |
+| `macs-sql-password` | Passwort | `TALOS_MCP_SQL_HEADER_PASSWORD` |
 
 ```json
 {
@@ -381,10 +381,10 @@ sql_tool = MCPStreamableHTTPTool(
     url=os.environ["TALOS_MCP_URL"],  # https://talos.example/mcp
     headers={
         "Authorization": "Bearer " + os.environ["TALOS_API_TOKEN"],
-        "X-DB-Host": os.environ["DB_HOST"],
-        "X-DB-Name": os.environ["DB_NAME"],
-        "X-SQL-User": os.environ["SQL_USER"],
-        "X-SQL-PW": os.environ["SQL_PASSWORD"],
+        "macs-sql-host": os.environ["DB_HOST"],
+        "macs-sql-database": os.environ["DB_NAME"],
+        "macs-sql-user": os.environ["SQL_USER"],
+        "macs-sql-password": os.environ["SQL_PASSWORD"],
     },
 )
 ```

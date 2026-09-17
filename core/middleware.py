@@ -60,7 +60,9 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         # Same deal for HTML workspace artifacts (generated dashboards/reports):
         # the route sets its own no-network CSP and the iframe omits
         # allow-same-origin, so the default DENY headers must not clobber it.
-        is_artifact_render = path.startswith("/api/artifacts/") and path.endswith("/render")
+        is_artifact_render = (
+            path.startswith("/api/artifacts/") and path.endswith("/render")
+        ) or path == "/api/html-preview-shell"
         # Visual report pages are self-contained HTML — need inline scripts + external images
         is_report = path.startswith("/api/research/report/")
 

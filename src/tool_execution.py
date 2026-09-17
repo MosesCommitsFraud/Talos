@@ -916,6 +916,33 @@ def _parse_sandbox_file_payload(tool: str, content: str) -> tuple[str, dict[str,
     raise ValueError(f"unsupported sandbox file tool: {tool}")
 
 
+_WORKSPACE_SEGMENT_RE = re.compile(r"/workspaces/[^/]+/(.+)$")
+
+
+def _workspace_relative_path(path: str, *, writing: bool) -> tuple[str, Optional[str]]:
+    """Map a model-written path onto the session workspace.
+
+    Models copy absolute sandbox paths from earlier output and often get the
+    workspace id wrong (".../workspaces/<old id>/output/dashboard.html"), which
+    failed as "not found" and cost several rounds. Everything after
+    "/workspaces/<id>/" is the workspace-relative part, so that is what we send.
+    Writes to other absolute locations (/tmp, $HOME) are refused by the sandbox
+    with a bare 403; say plainly what to use instead.
+    """
+    p = path.strip().replace("\\", "/")
+    m = _WORKSPACE_SEGMENT_RE.search(p)
+    if m:
+        return m.group(1), None
+    if writing and p.startswith("/"):
+        name = p.rstrip("/").rsplit("/", 1)[-1] or "file"
+        return p, (
+            f"'{path}' is outside the workspace. Use a workspace-relative path "
+            f"such as 'output/{name}' (files there are kept, shown in the file panel "
+            "and can be edited later with edit_file)."
+        )
+    return p, None
+
+
 async def _try_sandbox_file_tool(
     *,
     tool: str,
@@ -939,6 +966,11 @@ async def _try_sandbox_file_tool(
         }
     try:
         operation, payload = _parse_sandbox_file_payload(tool, content)
+        if payload.get("path"):
+            normalized, problem = _workspace_relative_path(str(payload["path"]), writing=operation in ("write", "edit"))
+            if problem:
+                return {"error": f"{tool}: {problem}", "exit_code": 1, "sandboxed": True}
+            payload["path"] = normalized
         data = await file_tool_in_sandbox(
             owner=owner, session_id=session_id, operation=operation, payload=payload
         )

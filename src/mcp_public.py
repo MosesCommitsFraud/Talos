@@ -128,7 +128,7 @@ _TOOL_DEFS: List[Dict[str, Any]] = [
         "description": (
             "Execute a single read-only SQL Server SELECT query in the dedicated SQL sandbox. "
             "Connection credentials must be supplied by the client in HTTP headers "
-            "X-DB-Host, X-DB-Name, X-SQL-User and X-SQL-PW (deployment may rename them). "
+            "macs-sql-host, macs-sql-database, macs-sql-user and macs-sql-password (deployment may rename them). "
             "Never pass credentials as tool arguments. Returns JSON with columns, rows, "
             "row_count and truncated. Use a SQL login with SELECT-only permissions."
         ),

@@ -693,6 +693,45 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
     # allow-same-origin, so its scripts run in an opaque origin with no access to
     # the app's cookies, storage or DOM. Inline script/style are allowed because
     # that is exactly what a self-contained dashboard is made of.
+    # ---- GET /api/html-preview-shell — empty document the preview writes into ----
+    # The in-app HTML preview used an iframe srcdoc. A srcdoc document inherits
+    # the CSP of the page that embeds it, and the app page only allows nonce'd
+    # scripts, so every inline script of a generated dashboard was blocked: text
+    # and CSS showed, charts never rendered. This shell is a real response with
+    # its own no-network CSP (the same one the render route uses). The app posts
+    # the HTML into it, and document.write keeps this document's policy.
+    @router.get("/api/html-preview-shell")
+    async def html_preview_shell():
+        from fastapi.responses import Response
+
+        shell = (
+            "<!doctype html><meta charset=\"utf-8\"><script>"
+            "addEventListener('message',function receive(e){"
+            "if(e.source!==parent||!e.data||e.data.type!=='talos:preview-html'||typeof e.data.html!=='string')return;"
+            "removeEventListener('message',receive);"
+            "document.open();document.write(e.data.html);document.close();});"
+            "parent.postMessage({type:'talos:preview-shell-ready'},'*');"
+            "</script>"
+        )
+        return Response(
+            content=shell,
+            media_type="text/html; charset=utf-8",
+            headers={
+                "Cache-Control": "no-store",
+                "X-Content-Type-Options": "nosniff",
+                "Content-Security-Policy": (
+                    "default-src 'none'; "
+                    "script-src 'unsafe-inline' 'unsafe-eval' " + HTML_CDN_SOURCES + "; "
+                    "style-src 'unsafe-inline' " + HTML_CDN_SOURCES + "; "
+                    "img-src data: blob:; "
+                    "font-src data:; "
+                    "connect-src 'none'; "
+                    "form-action 'none'; "
+                    "base-uri 'none'"
+                ),
+            },
+        )
+
     @router.get("/api/artifacts/{session_id}/render")
     async def render_artifact_route(request: Request, session_id: str, path: str = Query(...)):
         from fastapi.responses import Response

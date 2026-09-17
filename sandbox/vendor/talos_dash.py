@@ -1432,18 +1432,33 @@ _AI_PHRASES = [
     "game-changer", "gamechanger", "delve", "crucial", "pivotal", "seamless", "leverage",
     "unlock", "tapestry", "testament to", "landscape",
 ]
-_AI_PHRASE_RE = re.compile(r"(?<!\w)(" + "|".join(re.escape(p) for p in _AI_PHRASES) + r")(?!\w)", re.I)
+# Up to three trailing letters so German inflections match too ("ganzheitlicher").
+_AI_PHRASE_RE = re.compile(r"(?<!\w)(" + "|".join(re.escape(p) for p in _AI_PHRASES) + r")\w{0,3}(?!\w)", re.I)
 _EMOJI_RE = re.compile("[\U0001F300-\U0001FAFF☀-⛿✀-➿⭐✅❌]")
 
 
+def _context(text: str, start: int, end: int) -> str:
+    """The words around a finding, so the author can search for them directly
+    instead of printing the layout to find where the problem is."""
+    snippet = re.sub(r"\s+", " ", text[max(0, start - 30):end + 30]).strip()
+    return f" in \"…{snippet}…\""
+
+
 def _lint_wording(text: str, layout_html: str, issues: list) -> None:
-    if "—" in text:
-        issues.append("layout_html: em dash (—) — reads machine-written; use a full stop, comma or colon")
-    if re.search(r"\w\s–\s\w", text):
-        issues.append("layout_html: spaced en dash ( – ) as punctuation — use a full stop or comma; "
-                      "keep – only for ranges like Jan–Dez")
-    for m in sorted({m.group(1).lower() for m in _AI_PHRASE_RE.finditer(text)}):
-        issues.append(f"layout_html: \"{m}\" — stock AI phrase; say the concrete fact with its number")
+    for m in re.finditer("—", text):
+        issues.append("layout_html: em dash (—)" + _context(text, m.start(), m.end())
+                      + " reads machine-written; use a full stop, comma or colon")
+    for m in re.finditer(r"\w\s–\s\w", text):
+        issues.append("layout_html: spaced en dash ( – )" + _context(text, m.start(), m.end())
+                      + " used as punctuation; use a full stop or comma, keep – only for ranges like Jan–Dez")
+    seen_phrases: set = set()
+    for m in _AI_PHRASE_RE.finditer(text):
+        phrase = m.group(1).lower()
+        if phrase in seen_phrases:
+            continue
+        seen_phrases.add(phrase)
+        issues.append(f"layout_html: \"{phrase}\"" + _context(text, m.start(), m.end())
+                      + " is a stock AI phrase; say the concrete fact with its number")
     if re.search(r"\bnicht nur\b.{0,80}\bsondern auch\b", text, re.I | re.S):
         issues.append("layout_html: \"nicht nur … sondern auch\" — formulaic contrast; state both facts plainly")
     if _EMOJI_RE.search(text):

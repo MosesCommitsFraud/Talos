@@ -390,12 +390,56 @@ def _clean_sql_for_validation(query: str) -> str:
     return query.strip()
 
 
+_TRAILING_LIMIT_RE = re.compile(r"\s+LIMIT\s+(\d+)\s*$", re.I)
+_LEADING_SELECT_RE = re.compile(r"^SELECT\s+(DISTINCT\s+)?", re.I)
+
+
+def _adapt_sql_dialect(query: str, dialect: str) -> tuple:
+    """Rewrite the one dialect slip that recurs on every SQL Server session.
+
+    Models write `… LIMIT 20` out of habit; SQL Server rejects it and the round
+    is lost. A plain `SELECT … LIMIT n` (no TOP yet, no OFFSET) becomes
+    `SELECT TOP n …`. Anything more complex is left alone and gets a hint on
+    failure instead. Returns (query, note_or_empty)."""
+    if dialect != "mssql":
+        return query, ""
+    m = _TRAILING_LIMIT_RE.search(query)
+    head = _LEADING_SELECT_RE.match(query)
+    if not m or not head or re.search(r"\bTOP\s*\(?\d", query, re.I) or re.search(r"\bOFFSET\b", query, re.I):
+        return query, ""
+    body = query[: m.start()]
+    rewritten = f"{head.group(0)}TOP {m.group(1)} {body[head.end():]}"
+    return rewritten, f"SQL Server: rewrote LIMIT {m.group(1)} as TOP {m.group(1)}"
+
+
+def _sql_error_hint(message: str, dialect: str) -> str:
+    """A concrete next step for errors that otherwise lead to guessing loops."""
+    lower = message.lower()
+    hints = []
+    if "invalid object name" in lower or "no such table" in lower or "does not exist" in lower:
+        hints.append("Do not guess table names: use the SQL schema knowledge in your context or "
+                     "action \"list_tables\".")
+    if "invalid column name" in lower or "no such column" in lower:
+        hints.append("Run action \"describe\" with this table before querying its columns.")
+    if dialect == "mssql":
+        if "near 'limit'" in lower:
+            hints.append("SQL Server uses SELECT TOP n, not LIMIT.")
+        if "is not a recognized built-in function name" in lower:
+            hints.append("SQL Server functions: DATENAME(month, d), MONTH(d), YEAR(d), FORMAT(d, 'yyyy-MM'), "
+                         "CONCAT(), LEN(), ISNULL().")
+    return (" Hint: " + " ".join(hints)) if hints else ""
+
+
 def _validate_readonly_sql(query: str) -> Optional[str]:
     cleaned = _clean_sql_for_validation(query)
     if not cleaned:
         return "Query is empty."
     if ";" in cleaned.rstrip(";"):
-        return "Multiple SQL statements are not allowed."
+        return (
+            "Multiple SQL statements are not allowed. Send each SELECT as its own "
+            "query_sql call; calls issued in the same message run in parallel. To get "
+            "one result, combine them with UNION ALL or a CTE."
+        )
     cleaned = cleaned.rstrip(";").strip()
     first = re.match(r"^([a-zA-Z_]+)", cleaned)
     if not first or first.group(1).lower() not in _SQL_ALLOWED_START:
@@ -570,6 +614,7 @@ async def do_query_sql(
         except Exception as exc:
             return {"error": f"SQLAlchemy is required for query_sql ({exc}).", "exit_code": 1}
 
+        engine = None
         try:
             engine = create_engine(url, pool_pre_ping=True, connect_args={})
             if action == "list_tables":
@@ -648,6 +693,7 @@ async def do_query_sql(
             if validation_error:
                 return {"error": validation_error, "exit_code": 1}
             query = _clean_sql_for_validation(query).rstrip(";").strip()
+            query, rewrite_note = _adapt_sql_dialect(query, getattr(engine.dialect, "name", ""))
             with engine.connect() as conn:
                 result = conn.execute(text(query))
                 columns = list(result.keys())
@@ -688,10 +734,14 @@ async def do_query_sql(
                     out["rows"] = rows
                 if truncated:
                     out["output"] += f"\n\nReturned first {max_rows} of {row_count} rows."
+                if rewrite_note:
+                    out["output"] = f"({rewrite_note})\n{out['output']}"
                 return out
         except SQLAlchemyError as exc:
+            message = str(exc)
             return {
-                "error": f"SQL query failed: {exc.__class__.__name__}: {str(exc)[:500]}",
+                "error": f"SQL query failed: {exc.__class__.__name__}: {message[:500]}"
+                + _sql_error_hint(message, getattr(getattr(engine, "dialect", None), "name", "")),
                 "exit_code": 1,
             }
         except Exception as exc:

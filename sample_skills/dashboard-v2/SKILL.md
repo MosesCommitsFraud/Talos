@@ -14,18 +14,34 @@ only for maintaining old dashboards).
 
 ## Workflow
 
-1. Load and aggregate the data in Python. Compute every figure you will show
-   (totals, shares, changes, top positions) before writing any markup.
+1. Get the data. Database rows come only from `query_sql` (the Python sandbox
+   has no database connection; `pd.read_sql` fails). Aggregate in SQL, one
+   statement per call, several calls in one message. Save what you will chart
+   once to `output/dashboard_data.json` (large results are already spilled to a
+   CSV you can read). Compute every figure you show (totals, shares, changes,
+   top positions) before writing any markup.
 2. Decide what the reader must see: 3–5 key figures, as many visuals as the
    question needs (one for a narrow question, ten for a broad overview), a
    table where exact values matter, and 3–4 insights with numbers. For each
    visual pick the chart type from "Choosing charts" below, not by habit.
 3. Start from the **complete example below** and adapt it. Keep its structure,
    class names, CSS approach and interaction pattern; change content and charts.
-4. Call `td.compose(...)`. It checks design, numbers, wording and interaction.
-   If it raises, fix **every** listed point and call it again. Do not work
-   around the check (no `brand=None`, no legacy builders, no `td.dashboard`).
+   Write it as a script file with `write_file` to `output/build_dashboard.py`
+   (reading `output/dashboard_data.json`) and run it with
+   `bash: python output/build_dashboard.py`.
+4. `td.compose(...)` at the end of that script checks design, numbers, wording
+   and interaction. If it raises, fix **every** listed point with `edit_file`
+   on the script (small `old_string`/`new_string` edits, all fixes in one call)
+   and run the script again. Do not work around the check (no `brand=None`,
+   no legacy builders, no `td.dashboard`).
 5. Verify the rendered page (see the checklist at the end).
+
+**Changing an existing dashboard** (also in a later message): do not query the
+database again and do not rewrite the script. `edit_file` on
+`output/build_dashboard.py` (or on the data file when numbers change), then run
+the script. Never edit the generated `output/dashboard.html` itself; it is
+~1 MB of inlined runtime and is overwritten on the next run. Use relative paths
+like `output/…`; absolute sandbox paths and `/tmp` are rejected.
 
 ## Rules that make or break the page
 

@@ -15,7 +15,7 @@ def configured(monkeypatch):
     monkeypatch.setenv("TALOS_SQL_SANDBOX_URL", "http://sql-sandbox:7800")
     monkeypatch.setenv("TALOS_SQL_SANDBOX_KEY", "test-secret")
     monkeypatch.setenv("TALOS_SQL_ALLOWED_HOSTS", "db.example")
-    return {"X-DB-Host": "db.example", "X-DB-Name": "db", "X-SQL-User": "reader", "X-SQL-PW": "secret+';"}
+    return {"macs-sql-host": "db.example", "macs-sql-database": "db", "macs-sql-user": "reader", "macs-sql-password": "secret+';"}
 
 
 def test_scope_and_credentials_not_in_schema():
@@ -53,7 +53,7 @@ def test_reject_unsafe_queries(query):
 
 def test_header_mapping_and_secret_safe_failure(configured, monkeypatch):
     monkeypatch.setenv("TALOS_MCP_SQL_HEADER_PASSWORD", "MAF-Password")
-    configured["MAF-Password"] = configured.pop("X-SQL-PW")
+    configured["MAF-Password"] = configured.pop("macs-sql-password")
     captured = []
 
     def handle(request):
@@ -75,7 +75,7 @@ def test_route_propagates_request_headers(configured, monkeypatch):
     from routes.mcp_public_routes import _handle_message
 
     async def fake_query(args, headers):
-        assert headers["X-SQL-PW"] == configured["X-SQL-PW"]
+        assert headers["macs-sql-password"] == configured["macs-sql-password"]
         return '{"columns":["n"],"rows":[[1]]}', False
 
     monkeypatch.setattr(mcp_sql, "query_sql", fake_query)

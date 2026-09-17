@@ -5,10 +5,10 @@ services:
     environment:
       - TALOS_SQL_SANDBOX_URL=http://talos-sql-sandbox:7800
       - TALOS_SQL_SANDBOX_KEY=${TALOS_SQL_SANDBOX_KEY:?Set a separate SQL sandbox secret}
-      - TALOS_MCP_SQL_HEADER_HOST=${TALOS_MCP_SQL_HEADER_HOST:-X-DB-Host}
-      - TALOS_MCP_SQL_HEADER_DATABASE=${TALOS_MCP_SQL_HEADER_DATABASE:-X-DB-Name}
-      - TALOS_MCP_SQL_HEADER_USER=${TALOS_MCP_SQL_HEADER_USER:-X-SQL-User}
-      - TALOS_MCP_SQL_HEADER_PASSWORD=${TALOS_MCP_SQL_HEADER_PASSWORD:-X-SQL-PW}
+      - TALOS_MCP_SQL_HEADER_HOST=${TALOS_MCP_SQL_HEADER_HOST:-macs-sql-host}
+      - TALOS_MCP_SQL_HEADER_DATABASE=${TALOS_MCP_SQL_HEADER_DATABASE:-macs-sql-database}
+      - TALOS_MCP_SQL_HEADER_USER=${TALOS_MCP_SQL_HEADER_USER:-macs-sql-user}
+      - TALOS_MCP_SQL_HEADER_PASSWORD=${TALOS_MCP_SQL_HEADER_PASSWORD:-macs-sql-password}
   talos-sql-sandbox:
     build: ./sandbox
     image: talos-sql-sandbox:local
