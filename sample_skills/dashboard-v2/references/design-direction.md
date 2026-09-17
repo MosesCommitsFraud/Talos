@@ -24,8 +24,10 @@ supporting visuals → detail table. Size tiles by importance instead of making
 every tile equal: the most important visual gets the largest tile in the first
 row below the KPIs. Group related visuals next to each other and align their
 axes where they share a dimension (e.g. two monthly charts on the same x-range).
-Keep 3–5 KPIs and roughly 3–6 visuals per page; split into several pages if more
-is needed rather than shrinking everything.
+The number of visuals follows the question, not a template: a focused question
+may need one chart and a table, a management overview ten. Decide it yourself;
+don't pad a page with charts that say nothing new, and don't squeeze a broad
+question into three. Keep 3–5 key figures.
 
 ## Work with the canvas
 

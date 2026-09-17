@@ -1,10 +1,72 @@
 /* Offline presentation sizing and PNG rendering; download controls live in Talos. */
+
+/* Page-wide filters for cross-filtering and drill-down, declared in markup:
+     data-filter-set="gruppe" data-value="Mints"   click toggles gruppe=Mints (again: clears)
+     data-filter="gruppe" data-value="Mints"       shown when no filter or gruppe=Mints
+       + data-collapsed                            shown only when gruppe=Mints (drill-down rows)
+     data-filter="gruppe" data-value=""            shown only while no gruppe filter (totals)
+     data-filter-status="gruppe"                   shows the active value, hidden otherwise
+     data-filter-reset="gruppe"                    clears the filter, hidden otherwise
+   Charts join through their option: talos: {emit: "gruppe"} / {filter: "gruppe", views: {…}}. */
+window.TalosFilter = (() => {
+  const state = {};
+  const listeners = new Set();
+  const apply = () => {
+    document.querySelectorAll('[data-filter]').forEach((el) => {
+      const active = state[el.dataset.filter];
+      const value = el.dataset.value ?? '';
+      el.hidden = value === ''
+        ? active != null
+        : (active == null ? el.hasAttribute('data-collapsed') : active !== value);
+    });
+    document.querySelectorAll('[data-filter-set]').forEach((el) => {
+      el.setAttribute('aria-pressed', String(state[el.dataset.filterSet] === (el.dataset.value ?? '')));
+    });
+    document.querySelectorAll('[data-filter-status]').forEach((el) => {
+      const active = state[el.dataset.filterStatus];
+      el.textContent = active ?? '';
+      el.hidden = active == null;
+    });
+    document.querySelectorAll('[data-filter-reset]').forEach((el) => {
+      el.hidden = state[el.dataset.filterReset] == null;
+    });
+  };
+  const api = {
+    get: (field) => state[field],
+    set(field, value) {
+      if (value == null || value === '') delete state[field]; else state[field] = String(value);
+      apply();
+      listeners.forEach((fn) => { try { fn(field); } catch (e) { console.error(e); } });
+    },
+    toggle(field, value) { api.set(field, state[field] === String(value) ? null : value); },
+    on(fn) { listeners.add(fn); return () => listeners.delete(fn); },
+    apply,
+  };
+  document.addEventListener('click', (event) => {
+    const setter = event.target.closest && event.target.closest('[data-filter-set]');
+    if (setter) { api.toggle(setter.dataset.filterSet, setter.dataset.value ?? ''); return; }
+    const reset = event.target.closest && event.target.closest('[data-filter-reset]');
+    if (reset) api.set(reset.dataset.filterReset, null);
+  });
+  document.addEventListener('keydown', (event) => {
+    if (event.key !== 'Enter' && event.key !== ' ') return;
+    const setter = event.target.closest && event.target.closest('[data-filter-set]');
+    if (setter) { event.preventDefault(); api.toggle(setter.dataset.filterSet, setter.dataset.value ?? ''); }
+  });
+  return api;
+})();
+
 window.TalosDashboard = {
   init(config) {
     const art = document.getElementById('td-artboard');
     const stage = document.getElementById('td-stage');
     const size = config.size;
     document.body.dataset.pageFormat = config.format;
+    document.querySelectorAll('[data-filter-set]').forEach((el) => {
+      if (!el.hasAttribute('tabindex')) el.tabIndex = 0;
+      if (!el.hasAttribute('role')) el.setAttribute('role', 'button');
+    });
+    window.TalosFilter.apply();
     if (size) {
       art.style.width = `${size[0]}px`;
       art.style.height = `${size[1]}px`;

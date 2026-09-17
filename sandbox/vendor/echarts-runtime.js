@@ -44,18 +44,31 @@ function talosFormatter(template, locale) {
   };
 }
 
+/* "@s1", "@s1/30" (30 % opacity) or "var(--line)" → a colour canvas can paint.
+   Canvas does not understand CSS variables; an unresolved one paints black and
+   turns transparent on hover. */
+function talosColor(value, token) {
+  if (typeof value !== 'string') return value;
+  const v = /^var\(--(?:td-)?([a-z0-9-]+)(?:\s*,[^)]*)?\)$/i.exec(value.trim());
+  if (v) return token(v[1]) || value;
+  const m = /^@([a-z][a-z0-9-]*)(?:\/(\d{1,3}))?$/i.exec(value);
+  if (!m) return value;
+  const resolved = token(m[1]);
+  if (!resolved) return value;
+  return m[2] ? talosAlpha(resolved, Math.min(100, Number(m[2])) / 100) : resolved;
+}
+
 function talosResolve(node, token, locale, key) {
   if (typeof node === 'string') {
     if ((key === 'formatter' || key === 'valueFormatter') && node.search(TALOS_FORMATS) >= 0) {
       TALOS_FORMATS.lastIndex = 0;
       return talosFormatter(node, locale);
     }
-    // "@s1" or "@s1/30" (30 % opacity, for area fills and gradients).
-    const m = /^@([a-z][a-z0-9-]*)(?:\/(\d{1,3}))?$/i.exec(node);
-    if (!m) return node;
-    const value = token(m[1]);
-    if (!value) return node;
-    return m[2] ? talosAlpha(value, Math.min(100, Number(m[2])) / 100) : value;
+    return talosColor(node, token);
+  }
+  // A colour callback may return a token too ({color: function (p) {return '@s2'}}).
+  if (typeof node === 'function' && key && /color$/i.test(key)) {
+    return function (...args) { return talosColor(node.apply(this, args), token); };
   }
   // Readability floor and ceiling: nothing a reader must decode below 12px,
   // no hairline or black weights.
@@ -73,6 +86,92 @@ function talosResolve(node, token, locale, key) {
   return node;
 }
 
+/* Legend text for a pie whose labels were moved out of a narrow tile: the same
+   content the label formatter would have shown, on one line. */
+function talosPieLegend(series) {
+  const items = (series.data || []).map((d) => (d && typeof d === 'object' ? d : {value: d}));
+  const total = items.reduce((sum, d) => sum + (Number(d.value) || 0), 0);
+  const labelFormatter = series.label && series.label.formatter;
+  return (name) => {
+    const d = items.find((x) => String(x.name) === String(name)) || {name, value: 0};
+    const percent = total ? Math.round((Number(d.value) || 0) / total * 1000) / 10 : 0;
+    const params = {name: d.name, value: d.value, percent, data: d, seriesName: series.name};
+    const text = typeof labelFormatter === 'function' ? labelFormatter(params) : `${name}  ${percent} %`;
+    return String(text).replace(/\n+/g, '  ');
+  };
+}
+
+/* Layout guards applied after resolution. Series labels are not part of the
+   grid's outer bounds, so a "97,7 Mio." label at the end of the longest bar was
+   cut off; widening the value axis a little keeps it inside the chart. */
+function talosFit(option, width = 640) {
+  const narrow = width < 380;
+  const series = [].concat(option.series || []);
+  const axes = (name) => [].concat(option[name] || []);
+  for (const s of series) {
+    if (!s || typeof s !== 'object') continue;
+    if (s.type === 'bar' && s.label && s.label.show) {
+      const horizontal = axes('yAxis').some((a) => a && a.type === 'category');
+      const pos = s.label.position || (horizontal ? 'right' : 'top');
+      const outside = horizontal ? pos === 'right' : pos === 'top';
+      if (outside) {
+        for (const a of axes(horizontal ? 'xAxis' : 'yAxis')) {
+          if (a && (a.type === 'value' || a.type == null) && a.boundaryGap == null && a.max == null) {
+            a.boundaryGap = [0, horizontal ? '18%' : '10%'];
+          }
+        }
+      }
+    }
+    if (s.type === 'pie') {
+      s.itemStyle = {...(s.itemStyle || {})};
+      if (s.itemStyle.borderWidth == null || s.itemStyle.borderWidth > 1.5) s.itemStyle.borderWidth = 1;
+      // Outside labels need room beside the ring; a narrow tile gets a smaller
+      // ring and labels as legend-style lines under it instead of "11…".
+      if (narrow && (!s.label || s.label.position == null || s.label.position === 'outside')) {
+        s.label = {...(s.label || {}), show: false};
+        s.labelLine = {...(s.labelLine || {}), show: false};
+        s.center = ['50%', '42%'];
+        s.radius = ['38%', '62%'];
+        option.legend = option.legend || {bottom: 0, left: 'center', orient: 'horizontal', itemWidth: 10, itemHeight: 10,
+          formatter: talosPieLegend(s)};
+      }
+    }
+  }
+  return option;
+}
+
+/* Deep merge for filter views: objects merge, arrays of objects (series) merge
+   by index, everything else is replaced. */
+function talosMerge(base, patch) {
+  if (Array.isArray(base) && Array.isArray(patch)) {
+    return patch.map((p, i) => (p && typeof p === 'object' && !Array.isArray(p) && base[i] && typeof base[i] === 'object'
+      ? talosMerge(base[i], p) : p));
+  }
+  if (base && patch && typeof base === 'object' && typeof patch === 'object' && !Array.isArray(base) && !Array.isArray(patch)) {
+    const out = {...base};
+    for (const [k, v] of Object.entries(patch)) out[k] = k in base ? talosMerge(base[k], v) : v;
+    return out;
+  }
+  return patch;
+}
+
+/* The emitting chart shows the active selection: other items fade. */
+function talosMarkSelection(option, value) {
+  const categories = [].concat(option.xAxis || [], option.yAxis || [])
+    .find((a) => a && a.type === 'category' && Array.isArray(a.data));
+  for (const s of [].concat(option.series || [])) {
+    if (!s || !Array.isArray(s.data)) continue;
+    s.data = s.data.map((d, i) => {
+      const name = d && typeof d === 'object' && !Array.isArray(d) ? d.name : categories?.data?.[i];
+      if (value == null || name == null) return d;
+      const item = d && typeof d === 'object' && !Array.isArray(d) ? {...d} : {value: d};
+      item.itemStyle = {...(item.itemStyle || {}), opacity: String(name) === String(value) ? 1 : 0.3};
+      return item;
+    });
+  }
+  return option;
+}
+
 function talosAlpha(hex, alpha) {
   const m = /^#?([0-9a-f]{6})$/i.exec(hex.trim());
   if (!m) return hex;
@@ -86,7 +185,7 @@ window.TalosECharts = {
     for (const entry of entries) {
       const el = document.getElementById(entry.id);
       if (!el) continue;
-      let chart, cleanup, resize, observer, disposed = false;
+      let chart, cleanup, resize, observer, disposed = false, narrowDrawn = false;
       const fail = error => {
         console.error(entry.id, error);
         try { if (typeof cleanup === 'function') cleanup(); }
@@ -133,7 +232,8 @@ window.TalosECharts = {
               tooltip: {backgroundColor: token('surface'), borderColor: token('grid'), textStyle: {color: token('ink'), fontSize: 13}},
               categoryAxis: axis, valueAxis: axis, logAxis: axis, timeAxis: axis,
               bar: {label}, line: {label}, scatter: {label},
-              pie: {label, itemStyle: itemBorder, labelLine: {lineStyle: {color: token('base')}}},
+              pie: {label: {...label, lineHeight: 16}, itemStyle: {...itemBorder, borderWidth: 1},
+                labelLine: {lineStyle: {color: token('base')}}},
               treemap: {itemStyle: itemBorder}, sunburst: {itemStyle: itemBorder},
               visualMap: {textStyle: {color: token('ink2')}},
             });
@@ -142,14 +242,31 @@ window.TalosECharts = {
               width: el.clientWidth || 640, height: entry.height || el.clientHeight || 340});
           const spec = entry.spec;
           if (spec.setup) cleanup = spec.setup(chart, echarts, spec.data);
+          // `talos` is ours, not ECharts': {emit: field} makes a click set a
+          // page filter, {filter: field, views: {value: optionPatch}} swaps in
+          // the view for the active value (see TalosFilter in dashboard-view.js).
+          let option = spec.option && typeof spec.option === 'object' ? {...spec.option} : spec.option;
+          const link = (option && option.talos) || {};
+          if (option && option.talos) delete option.talos;
+          const bus = window.TalosFilter;
+          if (bus && link.filter && link.views) {
+            const view = link.views[bus.get(link.filter)];
+            if (view) option = talosMerge(option, view);
+          }
+          narrowDrawn = (el.clientWidth || 640) < 380;
+          option = talosFit(talosResolve(option, token, locale), el.clientWidth || 640);
+          if (bus && link.emit) option = talosMarkSelection(option, bus.get(link.emit));
           chart.setOption({animation: false, aria: {enabled: true},
             color: Array.from({length: 8}, (_, i) => token(`s${i + 1}`)),
             backgroundColor: 'transparent', textStyle: {color: token('ink'), fontFamily: font},
-            ...talosResolve(spec.option, token, locale)});
+            ...option});
+          if (bus && link.emit) {
+            chart.on('click', (p) => { if (p && p.name != null) bus.toggle(link.emit, String(p.name)); });
+          }
           if (previous) {
             const state = {};
             if (previous.dataZoom) state.dataZoom = previous.dataZoom.map(z => ({start: z.start, end: z.end}));
-            if (previous.legend) state.legend = previous.legend.map(l => ({selected: l.selected}));
+            if (previous.legend && option && option.legend) state.legend = previous.legend.map(l => ({selected: l.selected}));
             chart.setOption(state);
           }
         } catch (error) { fail(error); }
@@ -158,18 +275,22 @@ window.TalosECharts = {
       // Canvas text is measured once; redraw when an embedded brand font arrives.
       if (document.fonts && document.fonts.status !== 'loaded') document.fonts.ready.then(draw);
       resize = new ResizeObserver(() => {
+        // Crossing the narrow threshold changes the layout (pie labels ↔ legend), not just the size.
+        if (((el.clientWidth || 640) < 380) !== narrowDrawn) { draw(); return; }
         if (chart && !chart.isDisposed()) chart.resize({width: el.clientWidth || 640, height: entry.height || el.clientHeight || 340});
       });
       resize.observe(el);
       observer = new MutationObserver(draw);
       observer.observe(document.documentElement, {attributes: true, attributeFilter: ['data-theme']});
+      const linked = entry.spec.option && entry.spec.option.talos;
+      const unsubscribe = linked && window.TalosFilter ? window.TalosFilter.on(draw) : null;
 
       hosts[entry.id] = {
         usesGL: entry.spec.extensions?.includes('echarts-gl') || false,
         get chart() { return chart; },
         dispose() {
           disposed = true;
-          resize.disconnect(); observer.disconnect();
+          resize.disconnect(); observer.disconnect(); if (unsubscribe) unsubscribe();
           if (typeof cleanup === 'function') cleanup();
           if (chart) chart.dispose();
         }

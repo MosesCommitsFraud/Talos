@@ -40,6 +40,23 @@ class LintTests(unittest.TestCase):
         self.assertNotIn("Black Friday", issues)
         self.assertNotIn("#1 Kunde", issues)
 
+    def test_numbers_insights_and_overflow(self):
+        layout = ('<p>207.5 Mio. € · 62.1% · 20748.5 K € · 33.500 € · Stand 31.12.2025</p>'
+                  '<div style="width:471.0%"></div>')
+        issues = "\n".join(td.lint_composition(layout, ":root{--bg:var(--brand-grey)}", []))
+        for expected in ("207.5 Mio", "62.1%", "K €", "width: 471.0%", "missing insights", "--bg"):
+            self.assertIn(expected, issues)
+        self.assertNotIn("33.500", issues)
+        self.assertNotIn("31.12", issues)
+
+    def test_german_number_helpers(self):
+        self.assertEqual(td.eur(207_500_000), "207,5 Mio. €")
+        self.assertEqual(td.eur(20_748_512, compact=False), "20.748.512 €")
+        self.assertEqual(td.pct(62.06), "62,1 %")
+        self.assertEqual(td.pct(4.1, signed=True), "+4,1 %")
+        self.assertEqual(td.num(12037), "12.037")
+        self.assertIn("width:100.0%", td.meter(471))
+
     def test_compose_raises_with_all_points(self):
         with self.assertRaisesRegex(ValueError, "fixed colour"):
             td.compose("unused.html", "T", [], layout_html="<h1>x</h1>", css="h1{color:#000}")

@@ -22,9 +22,9 @@ namespace = {}
 exec(compile(example, "skill-layout-example", "exec"), namespace)
 layout, style, charts, trend = (namespace[k] for k in ("layout", "style", "charts", "trend"))
 styles = {
-    "16:9": "#td-artboard .plot{height:250px}",
+    "16:9": "#td-artboard .tile.full,#td-artboard .insights,#td-artboard .source{display:none}#td-artboard .plot{height:250px}",
     "a4": "#td-artboard .tile,#td-artboard .tile.wide{grid-column:1/-1}#td-artboard .plot{height:300px}",
-    "a4-landscape": "#td-artboard .plot{height:320px}",
+    "a4-landscape": "#td-artboard .tile.full{display:none}#td-artboard .plot{height:280px}",
     "web": "",
 }
 csp = ("default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval'; "

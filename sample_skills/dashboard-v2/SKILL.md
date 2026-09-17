@@ -77,6 +77,16 @@ evidence. Compare two plausible spatial arrangements and choose the one that
 makes this particular story clear. Typography and palette are fixed by the macs
 brand; spend your design decisions on which KPIs and visuals answer the
 question, tile sizes by importance and consistent colour meaning per measure.
+How many visuals is your call — one for a narrow question, ten for a broad
+overview. Every page also needs:
+
+- 3–4 **insights/recommendations** grounded in the data (`class="insights"`),
+- **plain key figures** (Umsatz, Veränderung, Anteil) formatted with `td.eur`,
+  `td.pct`, `td.num`,
+- **interaction where it helps**: charts and table rows that filter the page and
+  drill down/up via `"talos": {"emit"/"filter"}` and `data-filter*` attributes.
+
+All of this is described in macs-brand.md; `td.compose` checks the formal parts.
 
 ```python
 import sys

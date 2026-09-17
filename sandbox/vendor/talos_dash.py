@@ -95,7 +95,7 @@ __all__ = [
     "boxplot", "histogram", "treemap", "sankey", "fmt",
     "lollipop", "dumbbell", "slope", "stacked_area", "range_area", "timeline",
     "calendar", "mosaic", "waffle", "violin",
-    "echarts", "js",
+    "echarts", "js", "eur", "num", "pct", "meter", "lint_composition",
 ]
 
 # --------------------------------------------------------------------------
@@ -201,6 +201,40 @@ def brand_logo(brand: str = "macs") -> str:
         raise ValueError(f"Unknown brand {brand!r}; use {list(BRANDS)}")
     svg = (BRAND_DIR / BRANDS[brand]["logo"]).read_text(encoding="utf-8")
     return svg.replace("<svg ", '<svg class="brand-logo" ', 1)
+
+
+def _de(value: float, decimals: int) -> str:
+    """1234567.8 → "1.234.567,8" (German grouping and decimal comma)."""
+    return f"{value:,.{decimals}f}".replace(",", "\0").replace(".", ",").replace("\0", ".")
+
+
+def eur(value: float, *, compact: bool = True) -> str:
+    """German euro amount for layout HTML: 41781151.9 → "41,8 Mio. €" (compact)
+    or "41.781.152 €". Use it for every KPI and table figure."""
+    v = float(value)
+    if compact:
+        for size, unit in ((1e9, "Mrd."), (1e6, "Mio."), (1e3, "Tsd.")):
+            if abs(v) >= size:
+                return f"{_de(v / size, 1)} {unit} €"
+    return f"{_de(v, 0 if abs(v) >= 100 else 2)} €"
+
+
+def num(value: float, decimals: int = 0) -> str:
+    """German number: 12037 → "12.037"."""
+    return _de(float(value), decimals)
+
+
+def pct(value: float, decimals: int = 1, *, signed: bool = False) -> str:
+    """Percent value (already ×100) → "62,1 %"; signed=True → "+4,1 %"."""
+    text = _de(float(value), decimals) + " %"
+    return ("+" + text) if signed and float(value) > 0 else text
+
+
+def meter(share: float) -> str:
+    """Inline bar for table cells; `share` in percent, clamped to 0–100 so a bar
+    can never run out of its cell."""
+    width = max(0.0, min(100.0, float(share)))
+    return f'<span class="td-meter" aria-hidden="true"><i style="width:{width:.1f}%"></i></span>'
 
 
 def fmt(*, unit: str = "", decimals: int | None = None, compact: bool = False,
@@ -1103,6 +1137,13 @@ _VIEW_CSS = """
 #td-stage{margin:0 auto;position:relative}
 #td-artboard{background:var(--bg);padding:32px;position:relative;transform-origin:top left;container:artboard/inline-size}
 #td-artboard .chart{position:relative}
+#td-artboard [hidden]{display:none!important}
+#td-artboard :where(div,span,i,b,em,strong,img,svg,figure){max-width:100%}
+#td-artboard [data-filter-set]{cursor:pointer}
+#td-artboard [data-filter-set]:hover,#td-artboard [data-filter-set][aria-pressed="true"]{background:var(--brand-tint,var(--card))}
+#td-artboard [data-filter-set]:focus-visible{outline:2px solid var(--brand-blue,currentColor);outline-offset:-2px}
+#td-artboard .td-meter{display:block;height:6px;border-radius:3px;background:var(--line);overflow:hidden}
+#td-artboard .td-meter>i{display:block;height:100%;border-radius:3px;background:var(--td-s1)}
 body[data-page-format="web"]{padding:0}
 body[data-page-format="web"] #td-artboard{padding:clamp(12px,3vw,32px)}
 body[data-page-format]:not([data-page-format="web"]) #td-artboard{overflow:hidden}
@@ -1377,8 +1418,26 @@ def lint_composition(layout_html: str, css: str,
     for m in re.finditer(r"@media[^{]*\((?:max|min)-width", css):
         issues.append("css: `@media (…-width)` — the preview panel is narrower than the window; "
                       "use `@container artboard (max-width: …)`")
+    for prop, value in re.findall(r"(--(?:bg|fg|muted|line|card|up|down|radius|td-[a-z0-9-]+|brand-[a-z-]+|logo-[a-z]+))\s*:\s*([^;{}]+)", css):
+        issues.append(f"css: `{prop}: {value.strip()}` — redefines a theme variable and breaks the "
+                      "other mode; use the variables as they are")
     for style in re.findall(r"style\s*=\s*\"([^\"]*)\"", layout_html):
         _lint_declarations("layout_html style=", style, issues)
+        for width in re.findall(r"width\s*:\s*([\d.]+)%", style):
+            if float(width) > 100:
+                issues.append(f"layout_html style=: `width: {width}%` — over 100 % runs out of its "
+                              "cell; use td.meter(share)")
+    text = re.sub(r"<[^>]+>", " ", re.sub(r"<(script|style)\b.*?</\1>", " ", layout_html, flags=re.S | re.I))
+    # A dot followed by 1–2 digits is an English decimal ("62.1%"); German
+    # thousands groups ("33.500 €") always have three.
+    for m in re.finditer(r"\b\d+\.\d{1,2}(?!\d)\s?(?:%|Mio\b|Mrd\b|Tsd\b|K\b|€)|\b\d+(?:[.,]\d+)?\s?K\s?€", text):
+        issues.append(f"layout_html: `{m.group(0).strip()}` — not German number format; "
+                      "use td.eur(v), td.pct(v), td.num(v) (e.g. \"20,7 Mio. €\", \"62,1 %\")")
+    insights = re.search(r"<(\w+)[^>]*class=\"[^\"]*\binsights\b[^\"]*\"[^>]*>(.*?)</\1>", layout_html, re.S)
+    if not insights or len(re.findall(r"<li\b", insights.group(2))) < 3:
+        issues.append("layout_html: missing insights — add an element with class=\"insights\" holding "
+                      "3–4 <li> findings or recommendations drawn from the data (concentration risk, "
+                      "outliers, trend breaks, what to check next)")
     for c in charts:
         spec = c.get("spec") or {}
         if spec.get("type") == "echarts":

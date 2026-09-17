@@ -78,8 +78,57 @@ become German-locale functions:
 - Templates: `"{b}: @eurCompact"` ({a} series, {b} name, {d} pie share in %)
 
 Put them on `axisLabel.formatter`, `label.formatter` and
-`tooltip.valueFormatter`. In HTML, format numbers in Python
-(`f"{v/1e6:,.1f} Mio. €".replace(",", "X").replace(".", ",").replace("X", ".")`).
+`tooltip.valueFormatter`. In HTML use the Python helpers — `td.eur(v)` →
+`"20,7 Mio. €"`, `td.eur(v, compact=False)` → `"20.748.512 €"`, `td.pct(62.06)`
+→ `"62,1 %"`, `td.pct(4.1, signed=True)` → `"+4,1 %"`, `td.num(12037)` →
+`"12.037"`. English decimals (`207.5 Mio.`, `62.1%`) and `K €` are rejected.
+In-cell bars: `td.meter(share_in_percent)` (clamped, cannot overflow).
+
+Pie/donut labels show share **and** amount: `"{b}\n{d} · @eurCompact"`.
+
+## Key figures people understand
+
+Key figures are the numbers a controller or sales lead already uses: Umsatz,
+Deckungsbeitrag/Marge, Veränderung ggü. Vorjahr/Plan, Anteil der größten
+Position, Anzahl Kunden/Aufträge. Label them plainly and give the comparison
+("+4,1 % ggü. Vorjahr", "37 % vom Umsatz"). Don't invent ratios such as
+"Ø Umsatz/Produkt" unless the user asks for them — an unfamiliar ratio forces
+the reader to decode instead of decide.
+
+## Insights and recommendations (required)
+
+Every dashboard carries an element with `class="insights"` holding 3–4 `<li>`
+points computed from the data, each with the number that supports it:
+
+- concentration / cluster risk ("Vitamin C Brausetablette = 47 % des Umsatzes"),
+- dependence on few customers/products (top-3 share), long tail,
+- trend breaks, strongest growth or decline, outliers vs. average,
+- a concrete next step or what to check ("Preisstruktur Private Label prüfen").
+
+No generic advice without a figure. `td.compose` rejects pages without it.
+
+## Interaction: cross-filter and drill-down (no JavaScript needed)
+
+Declare links in markup and chart options; the scaffold does the rest:
+
+- **Chart as filter**: `"talos": {"emit": "gruppe"}` in a chart option — a click
+  on a slice/bar sets `gruppe` to its name, a second click clears it (drill up).
+  The emitting chart fades the unselected items.
+- **Chart reacting**: `"talos": {"filter": "gruppe", "views": {"Mints": {"series":
+  [{"data": [...]}], "yAxis": {"data": [...]}}, …}}` — option patches per value,
+  precomputed in Python; without a filter the base option shows.
+- **HTML reacting**: `data-filter="gruppe" data-value="Mints"` shows the element
+  only for that value (or when unfiltered); add `data-collapsed` to hide it until
+  drilled into; `data-value=""` shows it only while unfiltered (totals).
+- **HTML as filter**: `data-filter-set="gruppe" data-value="Mints"` on a table row
+  or chip — click drills down, click again drills up.
+- **State**: `<span data-filter-status="gruppe"></span>` shows the active value,
+  `<button data-filter-reset="gruppe">Alle</button>` clears it.
+
+Typical: donut of groups emits `gruppe`; product bar chart has a view per
+group; the group table rows are `data-filter-set`, product rows below are
+`data-filter … data-collapsed`. ECharts' own drill-down (treemap/sunburst
+`nodeClick`, `dataZoom`) stays available too.
 
 ## Typography: readable, not decorative
 
@@ -102,7 +151,7 @@ the preview panel, the full page and the PNG all have different widths.
   `max-width: 620px` every tile spans the full width.
 - Chart heights in CSS with `clamp()`, e.g. `height: clamp(240px, 32cqw, 380px)`,
   and `td.chart(..., height=None)`.
-- Never a fixed `grid.left/right` of more than ~16 px in chart options; let
+- Never a fixed `grid.left/right` of more than 48 px in chart options; let
   ECharts fit axis labels (default in ECharts 6). Long category names: horizontal
   bars with `axisLabel.width: 120, overflow: "truncate"`.
 - No `min-height: 100vh`, no fixed pixel widths on tiles, no horizontal scroll.
@@ -136,7 +185,15 @@ colours and unreadable sizes.
 - Direct labels over legends when there are ≤ 6 points; legend small, top-right.
 - Bars: `barMaxWidth` 24–32, `itemStyle.borderRadius: 2`; one colour per measure.
 - Lines: width 2–2.5, `symbol: "none"` or small; area opacity ≤ 0.12 for the main measure only.
-- Donuts only for 2–5 shares, labels `"{b}: {d}"`; otherwise a sorted bar chart.
+- Donuts only for 2–5 shares, labels `"{b}\n{d} · @eurCompact"`, thin 1px
+  separators (the default); otherwise a sorted bar chart.
+- Colour callbacks may return tokens (`function (p) { return '@s2'; }`); never
+  CSS `var(--…)` inside callbacks' HTML strings.
+- Bar value labels outside the bar get automatic headroom on the value axis;
+  don't widen `grid.right` for them.
+- Every ECharts series and component is available (see SKILL.md) — pick by
+  the question: heatmap, treemap, sunburst, sankey, funnel, boxplot, scatter,
+  calendar, parallel, custom series …
 - `dataZoom` for long time series; `tooltip.valueFormatter` always set.
 
 ## Final checks (render, don't assume)
@@ -146,3 +203,6 @@ colours and unreadable sizes.
 - Any hex colour, `#fff`, fixed `grid.left`, raw unformatted number, 10–11px
   text, weight 300 or 700+, uppercase tracked label or accent side-border? Fix it.
 - Does the headline figure and its comparison read in two seconds?
+- Click every filter source: do dependent charts, rows and the status update,
+  and does a second click drill back up?
+- Hover every bar and slice: nothing disappears or jumps.

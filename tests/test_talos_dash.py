@@ -104,10 +104,11 @@ class DashboardTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "authored"):
             td.compose("unused.html", "No layout", [], layout_html="", css="")
         with patch.object(td, "dashboard", return_value="composed.html") as render:
+            story = "<h1>Story</h1><ul class=\"insights\"><li>a</li><li>b</li><li>c</li></ul>"
             self.assertEqual(td.compose("composed.html", "Story", [],
-                             layout_html="<h1>Story</h1>", css="h1{color:navy}"), "composed.html")
+                             layout_html=story, css="h1{color:navy}"), "composed.html")
             self.assertTrue(render.call_args.kwargs["download_png"])
-            self.assertEqual(render.call_args.kwargs["layout_html"], "<h1>Story</h1>")
+            self.assertEqual(render.call_args.kwargs["layout_html"], story)
             self.assertEqual(render.call_args.kwargs["brand"], "macs")
 
     def test_composed_pages_skip_legacy_layout_css(self):
