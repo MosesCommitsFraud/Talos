@@ -7,6 +7,8 @@
    locale-aware functions — optionally inside a template such as "{b}: @eurCompact"
    ({a} series, {b} name, {d} share of a pie in %). */
 const TALOS_FORMATS = /@(eurCompact|eur|numCompact|num|pct)\b/g;
+// Below this chart width, outside pie labels no longer fit beside the ring.
+const TALOS_NARROW = 480;
 
 function talosNumber(kind, value, locale) {
   const v = Number(value);
@@ -105,7 +107,7 @@ function talosPieLegend(series) {
    grid's outer bounds, so a "97,7 Mio." label at the end of the longest bar was
    cut off; widening the value axis a little keeps it inside the chart. */
 function talosFit(option, width = 640) {
-  const narrow = width < 380;
+  const narrow = width < TALOS_NARROW;
   const series = [].concat(option.series || []);
   const axes = (name) => [].concat(option[name] || []);
   for (const s of series) {
@@ -132,7 +134,7 @@ function talosFit(option, width = 640) {
         s.labelLine = {...(s.labelLine || {}), show: false};
         s.center = ['50%', '42%'];
         s.radius = ['38%', '62%'];
-        option.legend = option.legend || {bottom: 0, left: 'center', orient: 'horizontal', itemWidth: 10, itemHeight: 10,
+        option.legend = option.legend || {bottom: 6, left: 'center', orient: 'horizontal', itemWidth: 10, itemHeight: 10,
           formatter: talosPieLegend(s)};
       }
     }
@@ -253,7 +255,7 @@ window.TalosECharts = {
             const view = link.views[bus.get(link.filter)];
             if (view) option = talosMerge(option, view);
           }
-          narrowDrawn = (el.clientWidth || 640) < 380;
+          narrowDrawn = (el.clientWidth || 640) < TALOS_NARROW;
           option = talosFit(talosResolve(option, token, locale), el.clientWidth || 640);
           if (bus && link.emit) option = talosMarkSelection(option, bus.get(link.emit));
           chart.setOption({animation: false, aria: {enabled: true},
@@ -276,7 +278,7 @@ window.TalosECharts = {
       if (document.fonts && document.fonts.status !== 'loaded') document.fonts.ready.then(draw);
       resize = new ResizeObserver(() => {
         // Crossing the narrow threshold changes the layout (pie labels ↔ legend), not just the size.
-        if (((el.clientWidth || 640) < 380) !== narrowDrawn) { draw(); return; }
+        if (((el.clientWidth || 640) < TALOS_NARROW) !== narrowDrawn) { draw(); return; }
         if (chart && !chart.isDisposed()) chart.resize({width: el.clientWidth || 640, height: entry.height || el.clientHeight || 340});
       });
       resize.observe(el);

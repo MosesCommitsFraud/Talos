@@ -108,71 +108,70 @@ layout = f"""
   <span class="meta">Stand 31.12.2026 · Beträge in €</span></header>
 <nav class="filters"><span>Zeitraum <b>Jan–Dez 2026</b></span>
   <span data-filter="region" data-value="">Region <b>Alle</b></span>
-  <span data-filter-reset="region">Region <b data-filter-status="region"></b> ✕</span></nav>
+  <span data-filter-reset="region">Region <b data-filter-status="region"></b> ×</span></nav>
 <section class="figures">
   <div class="figure"><span class="label">Umsatz</span><strong>{td.eur(total)}</strong><em><i class="up">▲</i> {td.pct(12.0, signed=True)} ggü. Vorjahr</em></div>
   <div class="figure"><span class="label">Größte Region</span><strong>Nord</strong><em>{nord_share} vom Umsatz</em></div>
   <div class="figure"><span class="label">Aufträge</span><strong>{td.num(1284)}</strong><em><i class="down">▼</i> {td.pct(-2.3)} ggü. Vorjahr</em></div>
 </section>
-<section class="tiles">
-  <article class="tile wide"><h2>Das vierte Quartal wächst am stärksten</h2>
-    <p class="sub">Umsatz nach Monat, Ist 2026 und Vorjahr · Region wählen zum Filtern</p><div class="plot">{{{{chart:trend}}}}</div></article>
-  <article class="tile"><h2>Nord und West tragen 60 %</h2>
-    <p class="sub">Umsatzanteil nach Region · Klick filtert die Seite</p><div class="plot">{{{{chart:regions}}}}</div></article>
-  <article class="tile full"><h2>Regionen und Produkte</h2>
-    <p class="sub">Zeile anklicken zum Aufklappen</p>
+<section class="panels">
+  <article class="panel wide"><h2>Das vierte Quartal wächst am stärksten</h2>
+    <p class="sub">Umsatz nach Monat, Ist 2026 und Vorjahr</p><div class="plot">{{{{chart:trend}}}}</div></article>
+  <article class="panel"><h2>Nord und West tragen 60 % des Umsatzes</h2>
+    <p class="sub">Umsatzanteil nach Region. Ein Klick filtert die Seite.</p><div class="plot">{{{{chart:regions}}}}</div></article>
+  <article class="panel full"><h2>Regionen und Produkte</h2>
+    <p class="sub">Zeile anklicken, um die Produkte zu sehen</p>
     <table class="drill"><thead><tr><th>Region / Produkt</th><th>Umsatz</th><th>Anteil</th><th></th></tr></thead>
     <tbody>{rows_html}</tbody></table></article>
 </section>
-<aside class="insights"><h2>Auffälligkeiten und Empfehlungen</h2><ul>
-  <li><b>Klumpenrisiko Vitamin C:</b> {td.pct(22.9 / 43.0 * 100)} des Umsatzes hängen an einem Produkt — Alternativen im Sortiment stärken.</li>
-  <li><b>Nord und West:</b> zusammen {td.pct(26.0 / 43.0 * 100)} des Umsatzes; Ausfall eines Großkunden dort wirkt sofort auf das Gesamtjahr.</li>
-  <li><b>Export:</b> nur {td.eur(2.3e6)} mit einem einzigen Produkt — Potenzial oder Rückzug bewusst entscheiden.</li>
-  <li><b>Aufträge sinken um 2,3 %</b> bei steigendem Umsatz — Preis- oder Mixeffekt prüfen, bevor das Wachstum fortgeschrieben wird.</li>
-</ul></aside>
+<section class="insights"><h2>Auffälligkeiten und Empfehlungen</h2><ol>
+  <li>Vitamin C bringt {td.pct(22.9 / 43.0 * 100)} des Umsatzes. Fällt das Produkt aus, fehlt mehr als die Hälfte; ein zweites starkes Produkt im Sortiment würde das Risiko senken.</li>
+  <li>Nord und West liefern zusammen {td.pct(26.0 / 43.0 * 100)}. Die Großkunden dieser Regionen sollten im Forecast einzeln betrachtet werden.</li>
+  <li>Der Export kommt auf {td.eur(2.3e6)} mit einem einzigen Produkt. Hier lohnt eine Entscheidung, ob ausgebaut oder zurückgefahren wird.</li>
+  <li>Die Aufträge sinken um 2,3 %, der Umsatz steigt um 12 %. Vor der Planung 2027 prüfen, ob Preise oder Produktmix den Anstieg erklären.</li>
+</ol></section>
 <p class="source">Quelle: synthetische Beispieldaten</p>
 """
 style = """
 #td-artboard .bar {display:flex;flex-wrap:wrap;align-items:center;gap:8px 14px;padding-bottom:12px;border-bottom:1px solid var(--line);}
 #td-artboard .bar .brand-logo {height:24px;}
-#td-artboard h1 {font-size:20px;font-weight:600;line-height:1.3;margin:0;}
+#td-artboard h1 {font-size:21px;font-weight:600;line-height:1.3;margin:0;}
 #td-artboard .meta {margin-left:auto;font-size:13px;color:var(--muted);}
-#td-artboard .filters {display:flex;flex-wrap:wrap;gap:6px;margin:12px 0 16px;font-size:13px;color:var(--muted);}
+#td-artboard .filters {display:flex;flex-wrap:wrap;gap:6px;margin:12px 0 4px;font-size:13px;color:var(--muted);}
 #td-artboard .filters span {border:1px solid var(--line);border-radius:6px;padding:3px 10px;}
 #td-artboard .filters b {color:var(--fg);font-weight:500;margin-left:4px;}
-#td-artboard .figures, #td-artboard .tile, #td-artboard .insights {background:var(--td-surface);border:1px solid var(--line);border-radius:8px;min-width:0;}
-#td-artboard .figures {display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,170px),1fr));overflow:hidden;}
-#td-artboard .figure {display:flex;flex-direction:column;gap:2px;padding:14px 18px;
-  border-left:1px solid var(--line);border-top:1px solid var(--line);margin:-1px 0 0 -1px;}
+#td-artboard .figures {display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,190px),1fr));
+  margin:16px 0 28px;border-bottom:1px solid var(--line);}
+#td-artboard .figure {display:flex;flex-direction:column;gap:2px;padding:4px 20px 18px 0;}
+#td-artboard .figure + .figure {padding-left:20px;border-left:1px solid var(--line);}
 #td-artboard .figure .label {font-size:13px;font-weight:500;color:var(--muted);}
-#td-artboard .figure strong {font-size:26px;font-weight:600;line-height:1.25;font-variant-numeric:tabular-nums;}
+#td-artboard .figure strong {font-size:30px;font-weight:600;line-height:1.2;font-variant-numeric:tabular-nums;}
 #td-artboard .figure em {font-style:normal;font-size:13px;color:var(--muted);}
-#td-artboard .figure i {font-style:normal;} #td-artboard .figure .up {color:var(--td-good);}
-#td-artboard .figure .down {color:var(--td-critical);}
-#td-artboard .tiles {display:grid;grid-template-columns:repeat(12,minmax(0,1fr));gap:14px;margin-top:14px;}
-#td-artboard .tile {grid-column:span 4;padding:14px 16px;}
-#td-artboard .tile.wide {grid-column:span 8;}
-#td-artboard .tile.full {grid-column:1/-1;}
-#td-artboard h2 {font-size:15px;font-weight:600;line-height:1.35;margin:0;}
-#td-artboard .tile .sub {font-size:13px;color:var(--muted);margin:2px 0 8px;}
-#td-artboard .plot {height:clamp(240px,30cqw,360px);}
+#td-artboard .figure i {font-style:normal;}
+#td-artboard .up {color:var(--td-good);} #td-artboard .down {color:var(--td-critical);}
+#td-artboard .panels {display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,380px),1fr));gap:32px 36px;}
+#td-artboard .panel {min-width:0;}
+#td-artboard .panel.full {grid-column:1/-1;}
+#td-artboard h2 {font-size:16px;font-weight:600;line-height:1.35;margin:0;}
+#td-artboard .sub {font-size:13px;color:var(--muted);margin:2px 0 10px;}
+#td-artboard .plot {height:clamp(260px,32cqw,400px);}
 #td-artboard .plot .chart {height:100%;}
 #td-artboard .drill {width:100%;border-collapse:collapse;font-size:14px;font-variant-numeric:tabular-nums;}
-#td-artboard .drill th, #td-artboard .drill td {padding:7px 8px;border-bottom:1px solid var(--line);text-align:right;}
+#td-artboard .drill th, #td-artboard .drill td {padding:8px;border-bottom:1px solid var(--line);text-align:right;}
 #td-artboard .drill thead th {font-size:13px;font-weight:500;color:var(--muted);}
 #td-artboard .drill th:first-child {text-align:left;font-weight:500;}
 #td-artboard .drill td:last-child {width:28%;}
 #td-artboard .drill .detail th {padding-left:24px;font-weight:400;color:var(--muted);}
-#td-artboard .insights {margin-top:14px;padding:14px 16px;}
-#td-artboard .insights ul {margin:8px 0 0;padding-left:18px;display:grid;gap:6px;}
-#td-artboard .source {font-size:12px;color:var(--muted);margin:12px 0 0;}
-@container artboard (max-width: 900px) {
-  #td-artboard .tile, #td-artboard .tile.wide {grid-column:span 6;}
+#td-artboard .insights {margin-top:32px;padding-top:16px;border-top:1px solid var(--line);max-width:78ch;}
+#td-artboard .insights ol {margin:8px 0 0;padding-left:20px;display:grid;gap:8px;line-height:1.55;}
+#td-artboard .source {font-size:12px;color:var(--muted);margin:20px 0 0;}
+@container artboard (min-width: 900px) {
+  #td-artboard .panel.wide {grid-column:span 2;}
 }
 @container artboard (max-width: 620px) {
-  #td-artboard .tile, #td-artboard .tile.wide {grid-column:1/-1;}
   #td-artboard .meta {margin-left:0;width:100%;}
-  #td-artboard .figure strong {font-size:22px;}
+  #td-artboard .figure, #td-artboard .figure + .figure {padding:10px 0;border-left:0;border-top:1px solid var(--line);}
+  #td-artboard .figure strong {font-size:24px;}
   #td-artboard .drill td:nth-child(3) {display:none;}
 }
 """

@@ -49,6 +49,19 @@ class LintTests(unittest.TestCase):
         self.assertNotIn("33.500", issues)
         self.assertNotIn("31.12", issues)
 
+    def test_generated_wording_placeholders_layout_and_filters(self):
+        layout = ('<div class="kpi">{{eur 236240409}}</div>'
+                  '<ul class="insights"><li><strong>Konzentration:</strong> amazon trägt 33 % — prüfen.</li>'
+                  '<li><strong>Portfolio:</strong> ein ganzheitlicher Ansatz spielt eine Rolle 🚀</li>'
+                  '<li>Nicht nur Umsatz, sondern auch Marge steigt. Jan–Dez bleibt erlaubt.</li></ul>'
+                  '{{chart:a}}{{chart:b}}')
+        charts = [td.chart("a", "A", td.bar(["x"], [1])), td.chart("b", "B", td.echarts({"series": []}))]
+        issues = "\n".join(td.lint_composition(layout, ".g{grid-template-columns:repeat(12,1fr)}", charts))
+        for expected in ("em dash", "ganzheitlich", "spielt eine rolle", "nicht nur", "emoji", "bold label",
+                         "{{eur 236240409}}", "12-column", "legacy", "no filter"):
+            self.assertIn(expected, issues)
+        self.assertNotIn("en dash", issues)  # Jan–Dez is a range
+
     def test_german_number_helpers(self):
         self.assertEqual(td.eur(207_500_000), "207,5 Mio. €")
         self.assertEqual(td.eur(20_748_512, compact=False), "20.748.512 €")

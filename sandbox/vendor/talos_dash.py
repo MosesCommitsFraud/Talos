@@ -1409,6 +1409,39 @@ def _lint_option(path: str, node: Any, issues: list, key: str = "") -> None:
             _lint_option(f"{path}[{i}]", v, issues, key)
 
 
+# Wording that reads as machine-written. Sources: Wikipedia "Signs of AI
+# writing" and German blacklists (e.g. lillikoisser.at/ki-texte-erkennen).
+# Kept to terms that practically never belong in a controlling dashboard.
+_AI_PHRASES = [
+    "nahtlos", "ganzheitlich", "maßgeschneidert", "facettenreich", "essenziell", "essentiell",
+    "bahnbrechend", "beispiellos", "bemerkenswert", "zukunftsorientiert", "revolutionieren",
+    "revolutionär", "eintauchen", "unterstreicht", "unterstreichen", "entfesseln", "vorantreiben",
+    "volle potenzial", "volles potenzial", "nächste level", "entscheidende rolle", "spielt eine rolle",
+    "es ist wichtig zu beachten", "wichtiger denn je", "in der heutigen", "auf einen blick",
+    "game-changer", "gamechanger", "delve", "crucial", "pivotal", "seamless", "leverage",
+    "unlock", "tapestry", "testament to", "landscape",
+]
+_AI_PHRASE_RE = re.compile(r"(?<!\w)(" + "|".join(re.escape(p) for p in _AI_PHRASES) + r")(?!\w)", re.I)
+_EMOJI_RE = re.compile("[\U0001F300-\U0001FAFF☀-⛿✀-➿⭐✅❌]")
+
+
+def _lint_wording(text: str, layout_html: str, issues: list) -> None:
+    if "—" in text:
+        issues.append("layout_html: em dash (—) — reads machine-written; use a full stop, comma or colon")
+    if re.search(r"\w\s–\s\w", text):
+        issues.append("layout_html: spaced en dash ( – ) as punctuation — use a full stop or comma; "
+                      "keep – only for ranges like Jan–Dez")
+    for m in sorted({m.group(1).lower() for m in _AI_PHRASE_RE.finditer(text)}):
+        issues.append(f"layout_html: \"{m}\" — stock AI phrase; say the concrete fact with its number")
+    if re.search(r"\bnicht nur\b.{0,80}\bsondern auch\b", text, re.I | re.S):
+        issues.append("layout_html: \"nicht nur … sondern auch\" — formulaic contrast; state both facts plainly")
+    if _EMOJI_RE.search(text):
+        issues.append("layout_html: emoji — not in a business dashboard")
+    if len(re.findall(r"<li\b[^>]*>\s*<(b|strong)\b[^>]*>[^<]{1,80}:\s*</\1>", layout_html, re.I)) >= 2:
+        issues.append("layout_html: list items starting with a bold label and colon (\"<b>Thema:</b> …\") — "
+                      "typical generated pattern; write each point as one sentence that starts with the finding")
+
+
 def lint_composition(layout_html: str, css: str,
                      charts: Sequence[Mapping[str, Any]]) -> list[str]:
     """Design problems that break dark mode, narrow previews or readability."""
@@ -1433,6 +1466,26 @@ def lint_composition(layout_html: str, css: str,
     for m in re.finditer(r"\b\d+\.\d{1,2}(?!\d)\s?(?:%|Mio\b|Mrd\b|Tsd\b|K\b|€)|\b\d+(?:[.,]\d+)?\s?K\s?€", text):
         issues.append(f"layout_html: `{m.group(0).strip()}` — not German number format; "
                       "use td.eur(v), td.pct(v), td.num(v) (e.g. \"20,7 Mio. €\", \"62,1 %\")")
+    _lint_wording(text, layout_html, issues)
+    for token in sorted(set(re.findall(r"\{\{(?!chart:|brand:logo\}\})[^}]*\}\}", layout_html))):
+        issues.append(f"layout_html: `{token}` — no template engine runs on the page; put the finished "
+                      "value in, e.g. f\"{td.eur(236240409)}\"")
+    if re.search(r"grid-template-columns\s*:\s*repeat\(\s*1[0-2]\b", css):
+        issues.append("css: 12-column grid — tiles without an explicit span collapse to 1/12 width; use "
+                      "`repeat(auto-fit, minmax(min(100%, 360px), 1fr))` and `grid-column: 1 / -1` for wide tiles")
+    legacy = [c.get("id") for c in charts if (c.get("spec") or {}).get("type") not in (None, "echarts")]
+    if legacy:
+        issues.append(f"charts {legacy}: legacy td.bar/td.hbar/td.donut builders — they ignore formats, "
+                      "tokens and filters; build them with td.echarts(option)")
+    interactive = "data-filter-set" in layout_html or any(
+        isinstance((c.get("spec") or {}).get("option"), Mapping)
+        and isinstance(c["spec"]["option"].get("talos"), Mapping)
+        and c["spec"]["option"]["talos"].get("emit")
+        for c in charts)
+    if len(charts) >= 2 and not interactive:
+        issues.append("no filter — with several charts, let at least one chart or table filter the page: "
+                      "\"talos\": {\"emit\": field} on a chart and/or data-filter-set rows, with dependent "
+                      "views (\"talos\": {\"filter\": …}) or data-filter elements")
     insights = re.search(r"<(\w+)[^>]*class=\"[^\"]*\binsights\b[^\"]*\"[^>]*>(.*?)</\1>", layout_html, re.S)
     if not insights or len(re.findall(r"<li\b", insights.group(2))) < 3:
         issues.append("layout_html: missing insights — add an element with class=\"insights\" holding "

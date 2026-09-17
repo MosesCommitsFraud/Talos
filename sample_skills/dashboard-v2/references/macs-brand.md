@@ -147,8 +147,9 @@ The artboard is a size container named `artboard`. Use **container queries**
 the preview panel, the full page and the PNG all have different widths.
 
 - KPI row: `grid-template-columns: repeat(auto-fit, minmax(min(100%, 180px), 1fr))`.
-- Visual grid: 12 columns on wide pages; at `max-width: 900px` 6 columns; at
-  `max-width: 620px` every tile spans the full width.
+- Visual grid: `repeat(auto-fit, minmax(min(100%, 380px), 1fr))`; it reflows by
+  itself. Wide visuals `grid-column: span 2` only inside
+  `@container artboard (min-width: 900px)`. No 12-column grids.
 - Chart heights in CSS with `clamp()`, e.g. `height: clamp(240px, 32cqw, 380px)`,
   and `td.chart(..., height=None)`.
 - Never a fixed `grid.left/right` of more than 48 px in chart options; let
@@ -162,23 +163,50 @@ colours and unreadable sizes.
 
 ## Page grammar that doesn't look generated
 
+Not everything belongs in a box. Rows of identical rounded cards are the most
+recognisable generated-dashboard look. Group with whitespace, alignment and
+hairlines first; use a surface only where it separates something real.
+
 1. **Header**: logo (~24px high) and report title on the page background,
-   data freshness and period right-aligned in `--muted`, a single hairline
-   (`--line`) below. No coloured header bar with rounded corners.
-2. **Filter context**: one line of quiet text chips — transparent background,
-   `--line` border, 12–13px; the active value in `--fg` weight 500. Only
-   filters that describe the data shown.
-3. **Key figures**: 3–5 figures in ONE tile, separated by hairline dividers
-   (not five separate boxed cards). Each: label (13px `--muted`), value
-   (24–28px/600 `--fg`), comparison line with ▲/▼ in `--td-good`/`--td-critical`
-   and what it compares to. No coloured left or top accent borders.
-4. **Visual tiles**: `--td-surface` background, 1px `--line` border, 8px radius,
-   no or very faint shadow. Title states the finding or measure + dimension
-   ("amazon trägt 37 % des Umsatzes"), subtitle gives unit and period.
-   The most important visual gets the largest tile.
+   data freshness and period right-aligned in `--muted`, one hairline below.
+   No coloured header bar.
+2. **Filter context**: one line of quiet chips (transparent, `--line` border,
+   13px), the active value in `--fg` weight 500, plus the active filter and a
+   reset control (`data-filter-status` / `data-filter-reset`).
+3. **Key figures**: an open band on the page background, figures separated by
+   vertical hairlines, a hairline under the band. No card, no coloured accent
+   borders. Label 13px `--muted`, value 26–32px/600, comparison line with ▲/▼.
+4. **Visuals**: sit directly on the page in a grid
+   (`repeat(auto-fit, minmax(min(100%, 380px), 1fr))`, wide ones
+   `grid-column: span 2` inside `@container artboard (min-width: 900px)`,
+   full-width ones `1 / -1`). Heading states the finding, subtitle gives unit
+   and period. Charts need real space: at least ~360px wide and 260px high.
+   A 12-column grid is rejected because unspanned tiles collapse to 1/12.
 5. **Tables** where exact values matter: right-aligned tabular numbers, hairline
-   rows, header in `--muted` 13px/500, optional in-cell bars in `@s1`.
-6. **Footer**: source and data freshness, 12px `--muted`.
+   rows, header 13px/500 `--muted`, in-cell bars via `td.meter`.
+6. **Insights**: a plain section under a hairline, readable line length
+   (max ~78ch), numbered list. Not a card.
+7. **Footer**: source and data freshness, 12px `--muted`.
+
+## Language: write like a controller, not like a chatbot
+
+Short, factual German sentences that start with the finding and carry the
+number. `td.compose` rejects these machine-writing markers (based on
+[Wikipedia: Signs of AI writing](https://en.wikipedia.org/wiki/Wikipedia:Signs_of_AI_writing)
+and German blacklists such as
+[lillikoisser.at](https://lillikoisser.at/ki-texte-erkennen/)):
+
+- em dash (—) and spaced en dash ( – ) as punctuation; use full stop, comma or
+  colon. `–` stays fine in ranges (Jan–Dez).
+- list items that start with a bold label and colon (`<b>Thema:</b> …`);
+- stock phrases: nahtlos, ganzheitlich, maßgeschneidert, essenziell,
+  bahnbrechend, bemerkenswert, entscheidende Rolle, es ist wichtig zu beachten,
+  volles Potenzial, nächstes Level, "nicht nur … sondern auch" and the like;
+- emoji and leftover template tokens such as `{{eur 123}}`.
+
+Also avoid, even though not checked: three-part lists by habit ("schnell,
+einfach und sicher"), "Nicht X, sondern Y" contrasts, hedging with "kann",
+headings above every two sentences, and vague sources ("Experten sagen").
 
 ## Charts
 
