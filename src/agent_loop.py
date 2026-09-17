@@ -1404,6 +1404,7 @@ _BREAKDOWN_SOURCE_CATEGORY = {
     "active editor document": "documents",
     "available skills index": "skills",
     "skills": "skills",
+    "skill library": "skills",
 }
 
 
@@ -1444,6 +1445,7 @@ def _compute_context_breakdown(
     messages: List[Dict],
     tool_schemas: Optional[List[Dict]],
     ctx_tokens: int,
+    system_segments: Optional[Dict[str, List[str]]] = None,
 ) -> Optional[Dict[str, int]]:
     """Split context occupancy into categories for the meter's detail panel.
 
@@ -1452,15 +1454,27 @@ def _compute_context_breakdown(
     is the backend's real prompt count when usage was reported. The total
     stays authoritative; only the split between categories is
     proportional-to-estimate.
+
+    `system_segments` maps a category to text spans known to live inside
+    system messages (e.g. MCP tool descriptions), which are re-attributed from
+    "system" to that category wherever they appear.
     """
     if ctx_tokens <= 0:
         return None
     by_cat: Dict[str, List[Dict]] = {}
+    # Tokens carved out of system messages for spans that belong elsewhere.
+    carved: Dict[str, int] = {}
     for msg in messages:
         if not isinstance(msg, dict):
             continue
         if msg.get("role") == "system":
             cat = "system"
+            content = msg.get("content")
+            if system_segments and isinstance(content, str):
+                for seg_cat, spans in system_segments.items():
+                    for span in spans:
+                        if span and span in content:
+                            carved[seg_cat] = carved.get(seg_cat, 0) + int(len(span) * 0.3)
         elif _is_tool_result_message(msg):
             # Tool output is usually the biggest and most compressible part of
             # a long turn, so it gets its own row instead of inflating
@@ -1471,6 +1485,14 @@ def _compute_context_breakdown(
             cat = _BREAKDOWN_SOURCE_CATEGORY.get(source, "messages")
         by_cat.setdefault(cat, []).append(msg)
     estimates = {cat: estimate_tokens(msgs) for cat, msgs in by_cat.items()}
+    # MCP tool descriptions and the skill library are merged into the system
+    # prompt, so they'd otherwise hide inside "System prompt". Move their share
+    # out, never taking more than the system estimate actually holds.
+    for seg_cat, size in carved.items():
+        size = min(size, estimates.get("system", 0))
+        if size > 0:
+            estimates["system"] -= size
+            estimates[seg_cat] = estimates.get(seg_cat, 0) + size
     # Native tool schemas are tokenized server-side by the chat template, so
     # they never appear in the message list — approximate from their JSON.
     if tool_schemas:
@@ -1521,6 +1543,7 @@ def _compute_final_metrics(
     backend_gen_tps: float = 0,
     backend_prefill_tps: float = 0,
     tool_schemas: Optional[List[Dict]] = None,
+    system_segments: Optional[Dict[str, List[str]]] = None,
 ) -> dict:
     """Compute token counts, TPS, and build the final metrics dict."""
     # Estimate the size of the final prompt (the whole message list) — used both
@@ -1577,7 +1600,7 @@ def _compute_final_metrics(
     }
     # Per-category split of context_tokens (system/tools/skills/knowledge/
     # messages) for the meter's detail panel. Sums exactly to context_tokens.
-    breakdown = _compute_context_breakdown(messages, tool_schemas, ctx_tokens)
+    breakdown = _compute_context_breakdown(messages, tool_schemas, ctx_tokens, system_segments)
     if breakdown:
         metrics["context_breakdown"] = breakdown
     if backend_prefill_tps and backend_prefill_tps > 0:
@@ -1914,6 +1937,9 @@ async def stream_agent_loop(
     # never appear in the message list). Declared up here so the first
     # context-meter frame — emitted before any prep work — can read it.
     all_tool_schemas: List[Dict] = []
+    # Spans merged into the system prompt that the meter attributes to their own
+    # category instead of "System prompt" (filled in around prompt assembly).
+    system_segments: Dict[str, List[str]] = {}
 
     def _context_metrics_frame(ctx_tokens: int, source: str) -> str:
         """Build a live context-meter SSE frame for the current message list.
@@ -1937,7 +1963,9 @@ async def stream_agent_loop(
             "usage_source": source,
         }
         try:
-            bd = _compute_context_breakdown(messages, all_tool_schemas, ctx_tokens)
+            bd = _compute_context_breakdown(
+                messages, all_tool_schemas, ctx_tokens, system_segments
+            )
             # A single-category breakdown carries no information — the one row
             # would just restate the total — so it's withheld and the panel
             # shows the plain bar. Happens only on the opening frame of a brand
@@ -2198,6 +2226,22 @@ async def stream_agent_loop(
             logger.warning("Artifact selection visual analysis failed: %s", visual_error)
     elif artifact_selection and not vision_allowed:
         artifact_selection["visuals"] = []
+
+    # System-role preface messages lose their metadata when _build_system_prompt
+    # merges them, so capture the tagged ones (e.g. the skill library) first.
+    for _m in messages:
+        if isinstance(_m, dict) and _m.get("role") == "system":
+            _src = ((_m.get("metadata") or {}).get("source") or "").strip().lower()
+            _seg_cat = _BREAKDOWN_SOURCE_CATEGORY.get(_src)
+            if _seg_cat and isinstance(_m.get("content"), str):
+                system_segments.setdefault(_seg_cat, []).append(_m["content"])
+    if mcp_mgr:
+        try:
+            _mcp_desc = mcp_mgr.get_tool_descriptions_for_prompt(_mcp_disabled_map or {})
+            if _mcp_desc:
+                system_segments.setdefault("mcpTools", []).append(_mcp_desc.strip())
+        except Exception:  # meter attribution only — never break the turn
+            pass
 
     messages, mcp_schemas = _build_system_prompt(
         messages,
@@ -3830,6 +3874,7 @@ async def stream_agent_loop(
         backend_gen_tps=backend_gen_tps,
         backend_prefill_tps=backend_prefill_tps,
         tool_schemas=all_tool_schemas,
+        system_segments=system_segments,
     )
     yield f"data: {json.dumps({'type': 'metrics', 'data': metrics})}\n\n"
 

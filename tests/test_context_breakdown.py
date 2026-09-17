@@ -119,3 +119,29 @@ def test_second_turn_yields_a_real_split():
     assert bd is not None
     assert len(bd) > 1
     assert {"messages", "toolResults"} <= set(bd)
+
+
+def test_mcp_descriptions_and_skill_library_carved_out_of_system():
+    """MCP tool descriptions and the skill library are merged into the system
+    prompt; the meter must still show them as their own rows."""
+    mcp_desc = "You also have access to external MCP tool servers." + (" tool" * 1500)
+    skill_lib = "## Your skill library\n" + ("  - skill: does things\n" * 150)
+    messages = [
+        {"role": "system", "content": "base prompt " * 200 + "\n\n" + skill_lib + mcp_desc},
+        {"role": "user", "content": "hi"},
+    ]
+    segments = {"mcpTools": [mcp_desc], "skills": [skill_lib]}
+    bd = _compute_context_breakdown(messages, None, 20_000, segments)
+    assert bd is not None
+    assert {"system", "mcpTools", "skills"} <= set(bd)
+    assert bd["mcpTools"] > bd["system"]
+    assert sum(bd.values()) == 20_000
+    # Without segments everything stays in the system row.
+    plain = _compute_context_breakdown(messages, None, 20_000)
+    assert "mcpTools" not in plain and "skills" not in plain
+
+
+def test_absent_segments_are_ignored():
+    messages = [{"role": "system", "content": "sys " * 100}, {"role": "user", "content": "q"}]
+    bd = _compute_context_breakdown(messages, None, 1_000, {"mcpTools": ["not in prompt"]})
+    assert bd is not None and "mcpTools" not in bd
