@@ -156,10 +156,14 @@ def _anonymous_scopes() -> set:
 
     Two ways to get here: AUTH_ENABLED=false, or the token-free path letting a
     client on the local network reach `/mcp`. Defaults to the full read
-    catalogue — knowledge, skills and web — because that path exists so an agent
-    on the LAN can use the instance as it stands, and a half-catalogue would
-    just move the surprise to the first `web_search` call. `MCP_OPEN_SCOPES`
-    narrows it; Settings → MCP can switch the web tools off for everyone.
+    catalogue — knowledge, skills, web and SQL — because that path exists so an
+    agent on the LAN can use the instance as it stands, and a half-catalogue
+    would just move the surprise to the first `web_search` call. `sql:read` is
+    in the default for the same reason, and opens less than it looks: the caller
+    still has to bring its own SQL login in the per-request headers, and the
+    sandbox refuses any host outside TALOS_SQL_ALLOWED_HOSTS. `MCP_OPEN_SCOPES`
+    narrows it; Settings → MCP can switch the web and SQL tools off for
+    everyone.
     """
     raw = os.getenv("MCP_OPEN_SCOPES", "").strip()
     if not raw:
@@ -167,6 +171,7 @@ def _anonymous_scopes() -> set:
             mcp_public.SCOPE_RAG_READ,
             mcp_public.SCOPE_SKILLS_READ,
             mcp_public.SCOPE_WEB_READ,
+            mcp_public.SCOPE_SQL_READ,
         }
     return {s.strip() for s in raw.replace(" ", ",").split(",") if s.strip()}
 

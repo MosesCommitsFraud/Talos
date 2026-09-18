@@ -16,6 +16,7 @@ from src import mcp_public
 RAG = mcp_public.SCOPE_RAG_READ
 SKILLS = mcp_public.SCOPE_SKILLS_READ
 WEB = mcp_public.SCOPE_WEB_READ
+SQL = mcp_public.SCOPE_SQL_READ
 BOTH = {RAG, SKILLS}
 ALL = {RAG, SKILLS, WEB}
 
@@ -851,14 +852,15 @@ def test_ping_returns_an_empty_result():
 def test_an_anonymous_caller_gets_the_full_read_catalogue(monkeypatch):
     """The token-free path exists so an agent on the LAN can use the instance as
     it stands — a half-catalogue would only move the surprise to the first
-    web_search call."""
+    web_search call. sql_query is in it too — the caller still has to bring its
+    own SQL login in the per-request headers."""
     from routes.mcp_public_routes import _caller_context
 
     monkeypatch.delenv("MCP_OPEN_SCOPES", raising=False)
     monkeypatch.delenv("MCP_OPEN_OWNER", raising=False)
     scopes, owner, label = _caller_context(_request(api_token=False))
 
-    assert scopes == {RAG, SKILLS, WEB}
+    assert scopes == {RAG, SKILLS, WEB, SQL}
     assert owner is None
     assert label == "anonymous"
 

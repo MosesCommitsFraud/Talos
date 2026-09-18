@@ -71,7 +71,7 @@ changes is that a machine can read it without one.
 | --- | --- | --- |
 | `MCP_OPEN` | `true` | `false` requires a token again. |
 | `MCP_OPEN_NETWORKS` | loopback + RFC1918 | CIDRs that may use it. Narrow it to the calling server (`192.168.10.42/32`) when you can. |
-| `MCP_OPEN_SCOPES` | all three read scopes | What an anonymous caller may reach — knowledge, skills and web by default. Narrow it (e.g. `rag:read,skills:read`) to keep the web tools behind a token. |
+| `MCP_OPEN_SCOPES` | all four read scopes | What an anonymous caller may reach — knowledge, skills, web and SQL by default. `sql:read` costs less than it looks: the caller still has to bring its own SQL login in the per-request headers, and the sandbox refuses any host outside `TALOS_SQL_ALLOWED_HOSTS`. Narrow it (e.g. `rag:read,skills:read`) to keep the web and SQL tools behind a token. |
 | `MCP_OPEN_OWNER` | unset | Pins the skills view to one user. Unset means the caller sees every skill on the instance, including other users' personal ones — without a token there is no owner to scope by. |
 
 The address check judges the **transport peer** and refuses outright when
