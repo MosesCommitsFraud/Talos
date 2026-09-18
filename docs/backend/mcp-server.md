@@ -71,7 +71,7 @@ changes is that a machine can read it without one.
 | --- | --- | --- |
 | `MCP_OPEN` | `true` | `false` requires a token again. |
 | `MCP_OPEN_NETWORKS` | loopback + RFC1918 | CIDRs that may use it. Narrow it to the calling server (`192.168.10.42/32`) when you can. |
-| `MCP_OPEN_SCOPES` | all four read scopes | What an anonymous caller may reach — knowledge, skills, web and SQL by default. `sql:read` costs less than it looks: the caller still has to bring its own SQL login in the per-request headers, and the sandbox refuses any host outside `TALOS_SQL_ALLOWED_HOSTS`. Narrow it (e.g. `rag:read,skills:read`) to keep the web and SQL tools behind a token. |
+| `MCP_OPEN_SCOPES` | all four read scopes | What an anonymous caller may reach — knowledge, skills, web and SQL by default. `sql:read` costs less than it looks: the caller still has to bring its own SQL login in the per-request headers, and `TALOS_SQL_ALLOWED_HOSTS`, once set, limits which hosts it may reach. Narrow it (e.g. `rag:read,skills:read`) to keep the web and SQL tools behind a token. |
 | `MCP_OPEN_OWNER` | unset | Pins the skills view to one user. Unset means the caller sees every skill on the instance, including other users' personal ones — without a token there is no owner to scope by. |
 
 The address check judges the **transport peer** and refuses outright when
@@ -313,8 +313,9 @@ In `.env` setzen:
 
 ```dotenv
 TALOS_SQL_SANDBOX_KEY=<eigener-zufaelliger-langer-secret>
-TALOS_SQL_ALLOWED_HOSTS=sqlserver.example.internal
 TALOS_SQL_PORT=1433
+# Optional. Leer = jeder vom Client genannte Host wird akzeptiert.
+TALOS_SQL_ALLOWED_HOSTS=sqlserver.example.internal,*.macs.local
 ```
 
 Aus dem aktualisierten Checkout bauen und starten:
@@ -328,9 +329,14 @@ ohne Shell-/Datei-API, ohne persistente Volumes und unter einem unprivilegierten
 Benutzer. Sie erreicht das Datenbanknetz über das normale Docker-Netz; DNS,
 Routing und die DB-Firewall müssen diesen Zugriff erlauben. Die normale
 Code-Sandbox bleibt ausschließlich im internen Netz. Der SQL-Port wird nicht
-am Docker-Host veröffentlicht. Erlaubte DB-Hosts werden exakt mit der
-kommagetrennten Liste verglichen; leere Liste erlaubt keine Verbindung.
-DB-Verbindungen verlangen Verschlüsselung.
+am Docker-Host veröffentlicht. `TALOS_SQL_ALLOWED_HOSTS` nimmt kommagetrennt
+exakte Hostnamen, `*.domain`-Suffixe und `*` für jeden Host; leer bedeutet
+„keine Liste konfiguriert" und lässt jeden Host durch — gedacht für Clients,
+die den Host erst zur Laufzeit kennen. Die übrigen Schranken bleiben: der
+Aufrufer muss die Zugangsdaten der Datenbank selbst mitbringen, der Hostname
+muss blank sein (kein Port, kein Connection-String-Fragment), und der Port
+steht über `TALOS_SQL_PORT` fest. Wer aus einem nicht vertrauenswürdigen Netz
+erreichbar ist, setzt die Liste. DB-Verbindungen verlangen Verschlüsselung.
 
 Der übergebene SQL-Login muss auf dem SQL Server ausschließlich die benötigten
 Leserechte besitzen. Die Syntaxprüfung blockiert mehrere Statements,

@@ -143,3 +143,81 @@ def test_sandbox_worker_stdin_and_timeout_cleanup(configured, monkeypatch):
     asyncio.run(run())
     assert process.killed and process.returncode == -9
     assert captured[0]["password"] == "secret"
+
+
+def test_without_a_sandbox_the_headers_still_carry_the_credentials(monkeypatch):
+    """The fallback changes the transport, not where the credentials come from:
+    a deployment without the SQL sandbox container must still connect with what
+    the client sent on this request, and never with backend env credentials."""
+    monkeypatch.delenv("TALOS_SQL_SANDBOX_URL", raising=False)
+    monkeypatch.delenv("TALOS_SQL_SANDBOX_KEY", raising=False)
+    monkeypatch.delenv("TALOS_SQL_ALLOWED_HOSTS", raising=False)
+    monkeypatch.setenv("MSSQL_HOST", "wrong.example")
+    monkeypatch.setenv("MSSQL_READONLY_USER", "wrong-user")
+    seen = []
+
+    def fake_connect(payload):
+        seen.append(payload)
+        return {"columns": ["n"], "rows": [[1]], "row_count": 1, "truncated": False}
+
+    monkeypatch.setattr(mcp_sql, "_run_direct", fake_connect)
+    headers = {"macs-sql-host": "db.example", "macs-sql-database": "db",
+               "macs-sql-user": "reader", "macs-sql-password": "secret"}
+    text, failed = asyncio.run(mcp_sql.query_sql({"query": "SELECT 1"}, headers))
+
+    assert not failed and json.loads(text)["rows"] == [[1]]
+    assert seen[0]["host"] == "db.example" and seen[0]["user"] == "reader"
+    assert seen[0]["password"] == "secret" and seen[0]["port"] == 1433
+
+
+def test_the_fallback_refuses_writes_and_a_missing_header(monkeypatch):
+    monkeypatch.delenv("TALOS_SQL_SANDBOX_URL", raising=False)
+    monkeypatch.delenv("TALOS_SQL_SANDBOX_KEY", raising=False)
+    monkeypatch.setattr(mcp_sql, "_run_direct", lambda p: pytest.fail("must not connect"))
+    headers = {"macs-sql-host": "db.example", "macs-sql-database": "db",
+               "macs-sql-user": "reader", "macs-sql-password": "secret"}
+
+    text, failed = asyncio.run(mcp_sql.query_sql({"query": "DROP TABLE t"}, headers))
+    assert failed and "read-only" in text
+
+    # A host that smuggles a port or a connection-string fragment is refused
+    # before any connection is attempted, as the sandbox refuses it.
+    text, failed = asyncio.run(mcp_sql.query_sql(
+        {"query": "SELECT 1"}, {**headers, "macs-sql-host": "db.example:1433;trusted=yes"}
+    ))
+    assert failed and "bare hostname" in text
+
+    text, failed = asyncio.run(mcp_sql.query_sql({"query": "SELECT 1"}, {}))
+    assert failed and "macs-sql-host" in text
+
+
+def test_the_allow_list_still_applies_on_the_fallback_when_it_is_set(monkeypatch):
+    """Unset means 'not configured', but a deployment that sets it keeps the guard."""
+    monkeypatch.delenv("TALOS_SQL_SANDBOX_URL", raising=False)
+    monkeypatch.delenv("TALOS_SQL_SANDBOX_KEY", raising=False)
+    monkeypatch.setenv("TALOS_SQL_ALLOWED_HOSTS", "only.example")
+    monkeypatch.setattr(mcp_sql, "_run_direct", lambda p: pytest.fail("must not connect"))
+    headers = {"macs-sql-host": "db.example", "macs-sql-database": "db",
+               "macs-sql-user": "reader", "macs-sql-password": "secret"}
+
+    text, failed = asyncio.run(mcp_sql.query_sql({"query": "SELECT 1"}, headers))
+    assert failed and "not allowed" in text
+
+
+@pytest.mark.parametrize("configured_hosts,host,expected", [
+    ("", "anything.example", True),          # unset: the caller names the host
+    ("*", "anything.example", True),
+    ("db.example", "db.example", True),
+    ("db.example", "other.example", False),
+    ("*.macs.local", "laptop7.macs.local", True),
+    ("*.macs.local", "macs.local", False),   # the suffix needs a label in front
+    ("*.macs.local", "evil-macs.local", False),
+    ("a.example, *.b.example", "x.b.example", True),
+    ("DB.Example", "db.example", True),      # case-insensitive both ways
+])
+def test_host_allow_list_rules_match_in_both_paths(monkeypatch, configured_hosts, host, expected):
+    """The sandbox and the in-process fallback duplicate this matcher, so they
+    must not drift apart."""
+    monkeypatch.setenv("TALOS_SQL_ALLOWED_HOSTS", configured_hosts)
+    assert mcp_sql._host_allowed(host) is expected
+    assert sql_sandbox.host_allowed(host) is expected

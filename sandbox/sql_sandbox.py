@@ -19,6 +19,32 @@ async def health():
     return {"ok": True}
 
 
+def host_allowed(host: str) -> bool:
+    """Is `host` covered by TALOS_SQL_ALLOWED_HOSTS?
+
+    Three spellings, comma-separated: an exact hostname, a `*.domain` suffix for
+    a fleet whose members aren't known up front, and `*` for any host.
+
+    Unset means no allow-list is configured, and every host passes. That is a
+    deliberate loosening of the original "empty denies everything": the hosts
+    arrive on the request because the caller — not this deployment — knows which
+    database it is querying, and an operator who cannot enumerate them in
+    advance would otherwise have to disable the guard by writing `*` anyway.
+    The remaining guards still hold: the caller must supply that database's own
+    credentials, the hostname must be bare, and the port is fixed by
+    TALOS_SQL_PORT. Set the variable and the allow-list applies as before —
+    which is what a deployment reachable from an untrusted network should do.
+    """
+    allowed = {h.strip().lower() for h in os.getenv("TALOS_SQL_ALLOWED_HOSTS", "").split(",") if h.strip()}
+    if not allowed or "*" in allowed:
+        return True
+    host = host.lower()
+    return any(
+        host == entry or (entry.startswith("*.") and host.endswith(entry[1:]))
+        for entry in allowed
+    )
+
+
 @app.post("/query")
 async def query(request: Request):
     key = os.getenv("TALOS_SQL_SANDBOX_KEY", "")
@@ -43,8 +69,7 @@ async def query(request: Request):
         # No FreeTDS aliases, embedded ports or connection-string fragments.
         if not re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9.-]*", payload["host"]):
             raise ValueError()
-        allowed = {h.strip().lower() for h in os.getenv("TALOS_SQL_ALLOWED_HOSTS", "").split(",") if h.strip()}
-        if payload["host"].lower() not in allowed:
+        if not host_allowed(payload["host"]):
             return {"error": "host_denied"}
         payload["port"] = int(os.getenv("TALOS_SQL_PORT", "1433"))
         if not 1 <= payload["port"] <= 65535:

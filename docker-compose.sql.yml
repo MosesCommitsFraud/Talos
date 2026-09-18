@@ -17,7 +17,9 @@ services:
     command: ["/opt/talos-sandbox-venv/bin/uvicorn", "sql_sandbox:app", "--host", "0.0.0.0", "--port", "7800", "--no-access-log"]
     environment:
       - TALOS_SQL_SANDBOX_KEY=${TALOS_SQL_SANDBOX_KEY:?Set a separate SQL sandbox secret}
-      - TALOS_SQL_ALLOWED_HOSTS=${TALOS_SQL_ALLOWED_HOSTS:?Set comma-separated database hosts}
+      # Empty = every host the caller names is accepted. Narrow it when you can:
+      # exact names, *.domain suffixes, or * for any.
+      - TALOS_SQL_ALLOWED_HOSTS=${TALOS_SQL_ALLOWED_HOSTS:-}
       - TALOS_SQL_PORT=${TALOS_SQL_PORT:-1433}
     read_only: true
     cap_drop: [ALL]
