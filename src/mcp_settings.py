@@ -250,13 +250,15 @@ def tool_enabled(name: str) -> bool:
     """Whether one MCP tool is switched on for this instance.
 
     Two gates per family: the family switch, then that family's own tool
-    allow-list. Anything outside the three families is always on — its gate is
-    the token scope, which is checked separately in `mcp_public.call_tool`.
+    allow-list. The single SQL tool has its own switch. Token scopes are
+    checked separately in `mcp_public.call_tool`.
 
     Retired spellings (`rag_search`) are resolved to the current name before
     this is reached — see `mcp_public._TOOL_ALIASES` — so only real names are
     matched here.
     """
+    if name == "sql_query":
+        return _bool("mcp_sql_enabled", True)
     if name in WEB_TOOLS:
         return web_enabled() and name in web_tools()
     if name in RAG_TOOLS:

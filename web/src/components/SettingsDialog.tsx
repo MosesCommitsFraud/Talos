@@ -1315,6 +1315,14 @@ function McpPanel() {
         </code>
       </Section>
 
+      <Section title={t('settings.mcp.sql')}>
+        <BoolRow s={s} k="mcp_sql_enabled" label={t('settings.mcp.sqlEnabled')} hint={t('settings.mcp.sqlEnabledHint')} />
+        <div className="px-4 pb-4 text-xs text-muted-foreground/80 space-y-2">
+          <p>{t('settings.mcp.sqlDescription')}</p>
+          <p>{t('settings.mcp.sqlConnectionHint')}</p>
+        </div>
+      </Section>
+
       <Section title={t('settings.mcp.web')}>
         <BoolRow s={s} k="mcp_web_enabled" label={t('settings.mcp.webEnabled')} hint={t('settings.mcp.webEnabledHint')} />
         {webOn && (

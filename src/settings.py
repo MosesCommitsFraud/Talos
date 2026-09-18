@@ -202,6 +202,8 @@ DEFAULT_SETTINGS = {
     # for ordinary in-app retrieval. Naming one here opens it deliberately.
     "mcp_rag_allowed_scopes": [],
     "mcp_skills_enabled": True,
+    # SQL-only sandbox tool. Credentials remain request-local HTTP headers.
+    "mcp_sql_enabled": True,
     # True = expose exactly the published library the web UI serves (one
     # library, no second copy). False = only the skills named in
     # mcp_skills_allowed leave the instance.

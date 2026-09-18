@@ -504,3 +504,27 @@ def test_skills_search_never_ranks_a_gated_skill_into_the_window(settings):
 
     assert "deploy" in text
     assert "invoice" not in text
+
+
+@pytest.mark.parametrize("enabled", [False, "false", "off"])
+def test_sql_disabled_hides_tool_and_blocks_cached_calls(settings, monkeypatch, enabled):
+    from src import mcp_sql
+
+    settings["mcp_sql_enabled"] = enabled
+
+    async def unexpected_call(*args, **kwargs):
+        pytest.fail("Disabled SQL tool must not contact the sandbox")
+
+    monkeypatch.setattr(mcp_sql, "query_sql", unexpected_call)
+    assert mcp_public.list_tools({"sql:read"}) == []
+    text, failed = call("sql_query", {"query": "SELECT 1"}, scopes={"sql:read"})
+    assert failed and "disabled" in text
+
+
+def test_sql_enabled_preserves_scope_gate(settings):
+    assert mcp_settings.tool_enabled("sql_query")
+    settings["mcp_sql_enabled"] = False
+    assert not mcp_settings.tool_enabled("sql_query")
+    settings["mcp_sql_enabled"] = True
+    assert [tool["name"] for tool in mcp_public.list_tools({"sql:read"})] == ["sql_query"]
+    assert mcp_public.list_tools(set()) == []

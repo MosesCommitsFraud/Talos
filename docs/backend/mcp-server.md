@@ -302,6 +302,11 @@ Das zusätzliche Tool `sql_query` führt eine einzelne SELECT-Abfrage in einer
 separaten SQL-Sandbox aus. Es benötigt einen Talos-API-Token mit Scope `sql:read`
 (Token-Profil `mcp_sql`). Bestehende MCP-Profile erhalten diesen Scope nicht automatisch.
 
+Unter **Einstellungen → MCP → SQL Server über MCP** lässt sich `sql_query`
+ein- und ausschalten. Nach dem Speichern blendet ein ausgeschaltetes Tool sich
+aus dem MCP-Katalog aus; auch direkte Aufrufe werden abgewiesen. Der Schalter
+ist standardmäßig an. Die SQL-Sandbox muss zusätzlich eingerichtet sein.
+
 ## Deployment
 
 In `.env` setzen:
