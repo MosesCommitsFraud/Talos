@@ -378,6 +378,38 @@ Abfrage eingrenzen. Dezimalwerte bleiben als Strings exakt. Fehler liefern
 Login-Timeout: 10 Sekunden, SQL-Timeout: 30 Sekunden, Prozesslimit: 45 Sekunden.
 Maximal vier Abfragen laufen gleichzeitig; weitere Aufrufe melden `busy`.
 
+## Fehlersuche
+
+Der Aufrufer bekommt bewusst nur feste Fehlercodes — sie verraten weder
+Treibermeldungen noch Zugangsdaten. Zum Debuggen sind sie zu grob: `query_failed`
+deckt ein falsches Passwort, einen nicht erreichbaren Host und einen Tippfehler
+im Spaltennamen gleichermaßen ab. Der Grund steht deshalb serverseitig in zwei
+Logs.
+
+**Talos** — welcher Fehlercode für welche Verbindung, plus die Query:
+
+```sh
+docker compose logs -f talos | grep sql_query
+```
+
+Hier erscheinen auch die Fälle, die den Container nie erreichen: ein fehlender
+`macs-sql-*`-Header, ein Host mit Port oder Connection-String-Fragment, und eine
+nicht deployte Sandbox (mit dem Namen der fehlenden Variable).
+
+**Die Sandbox** — die Treibermeldung selbst:
+
+```sh
+docker compose logs -f talos-sql-sandbox
+```
+
+Der Worker schreibt seine Diagnose nach stderr, die Sandbox liest sie und
+protokolliert sie. Ebenfalls dort: ein nicht passender Sandbox-Key, ein durch
+`TALOS_SQL_ALLOWED_HOSTS` abgewiesener Host (mit der geltenden Liste), ein
+belegtes Slot-Kontingent und ein Timeout.
+
+Das Passwort steht in keinem der beiden Logs, und der Request-Body wird nie
+protokolliert.
+
 ## MAF-Beispiel (Python)
 
 Microsofts [MCPStreamableHTTPTool-Dokumentation](https://learn.microsoft.com/en-us/python/api/agent-framework-core/agent_framework.mcpstreamablehttptool?view=agent-framework-python-latest)

@@ -3,12 +3,18 @@
 import asyncio
 import hmac
 import json
+import logging
 import os
 import re
 import sys
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
+
+# The container runs with --no-access-log, so without this the operator has no
+# record of why a query failed — the caller only ever sees a fixed error code.
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+logger = logging.getLogger("sql_sandbox")
 
 app = FastAPI(title="Talos SQL Sandbox")
 _slots = asyncio.Semaphore(4)
@@ -50,6 +56,11 @@ async def query(request: Request):
     key = os.getenv("TALOS_SQL_SANDBOX_KEY", "")
     supplied = request.headers.get("x-talos-sandbox-key", "")
     if not key or not hmac.compare_digest(key.encode(), supplied.encode()):
+        logger.warning(
+            "rejected /query: %s",
+            "TALOS_SQL_SANDBOX_KEY is empty in this container, so every request is refused"
+            if not key else "the caller's X-Talos-Sandbox-Key does not match",
+        )
         return JSONResponse({"error": "unauthorized"}, status_code=401)
     raw = bytearray()
     async for chunk in request.stream():
@@ -70,13 +81,20 @@ async def query(request: Request):
         if not re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9.-]*", payload["host"]):
             raise ValueError()
         if not host_allowed(payload["host"]):
+            logger.warning(
+                "rejected /query: host %s is not covered by TALOS_SQL_ALLOWED_HOSTS=%r",
+                payload["host"], os.getenv("TALOS_SQL_ALLOWED_HOSTS", ""),
+            )
             return {"error": "host_denied"}
         payload["port"] = int(os.getenv("TALOS_SQL_PORT", "1433"))
         if not 1 <= payload["port"] <= 65535:
             raise ValueError()
-    except Exception:
+    except Exception as exc:
+        # The body is never logged: it carries the password.
+        logger.warning("rejected /query: malformed request (%s)", type(exc).__name__)
         return JSONResponse({"error": "invalid_request"}, status_code=400)
     if _slots.locked():
+        logger.warning("rejected /query: all 4 slots busy")
         return {"error": "busy"}
     async with _slots:
         process = None
@@ -84,16 +102,28 @@ async def query(request: Request):
             process = await asyncio.create_subprocess_exec(
                 sys.executable, "-m", "sql_worker",
                 stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.PIPE,
                 env={"PATH": os.environ.get("PATH", ""), "LANG": "C.UTF-8"},
             )
-            stdout, _ = await asyncio.wait_for(
+            stdout, stderr = await asyncio.wait_for(
                 process.communicate(json.dumps(payload).encode()), timeout=45
             )
-            return json.loads(stdout) if process.returncode == 0 else {"error": "query_failed"}
+            # The worker's diagnosis, kept on this side of the boundary.
+            for line in (stderr or b"").decode("utf-8", "replace").splitlines():
+                if line.strip():
+                    logger.warning("%s", line.strip())
+            if process.returncode != 0:
+                logger.warning("sql_worker exited %s for host=%s db=%s", process.returncode,
+                               payload["host"], payload["database"])
+                return {"error": "query_failed"}
+            return json.loads(stdout)
         except asyncio.TimeoutError:
+            logger.warning("sql_worker timed out after 45s for host=%s db=%s",
+                           payload["host"], payload["database"])
             return {"error": "timeout"}
         except Exception:
+            logger.exception("sql_worker could not be run for host=%s db=%s",
+                             payload["host"], payload["database"])
             return {"error": "query_failed"}
         finally:
             if process is not None and process.returncode is None:

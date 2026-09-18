@@ -1,10 +1,13 @@
 """Request-local SQL credentials and the dedicated SQL sandbox transport."""
 
 import json
+import logging
 import os
 import re
 
 import httpx
+
+logger = logging.getLogger(__name__)
 
 # Same shape the sandbox enforces (sandbox/sql_sandbox.py): a bare hostname, so
 # a FreeTDS alias, an embedded port or a connection-string fragment can't ride
@@ -42,9 +45,11 @@ async def query_sql(arguments, headers):
         names[field] = header
         value = headers.get(header.lower())
         if not isinstance(value, str) or not value or len(value) > 4096:
+            logger.warning("sql_query rejected: client sent no usable %s header", header)
             return f"Missing or invalid SQL connection header: {header}.", True
         payload[field] = value
     if not _HOST_RE.fullmatch(payload["host"]):
+        logger.warning("sql_query rejected: %s=%r is not a bare hostname", names["host"], payload["host"])
         return f"SQL connection header {names['host']} must be a bare hostname.", True
     url = os.getenv("TALOS_SQL_SANDBOX_URL", "").rstrip("/")
     key = os.getenv("TALOS_SQL_SANDBOX_KEY", "")
@@ -52,6 +57,10 @@ async def query_sql(arguments, headers):
         # Deliberately no in-process fallback: the isolation is the point of
         # this tool, so an undeployed sandbox means no SQL, not a quieter path
         # to the same database. Both come from docker-compose.sql.yml.
+        logger.warning(
+            "sql_query unavailable: %s unset — start the stack with -f docker-compose.sql.yml",
+            "TALOS_SQL_SANDBOX_URL" if not url else "TALOS_SQL_SANDBOX_KEY",
+        )
         return (
             "SQL sandbox is not deployed on this Talos instance. This is a "
             "server-side deployment issue, not a problem with your request.",
@@ -65,15 +74,33 @@ async def query_sql(arguments, headers):
             response.raise_for_status()
             result = response.json()
         if result.get("error"):
-            # Only fixed error codes cross the public boundary, never driver messages.
+            # Only fixed error codes cross the public boundary, never driver
+            # messages. That makes the caller's view too coarse to debug with,
+            # so the same event is logged here with the connection it was for —
+            # and the sandbox's own log carries the driver's reason.
+            logger.warning(
+                "sql_query failed (%s) for host=%s db=%s user=%s query=%.200s",
+                result["error"], payload["host"], payload["database"], payload["user"], query,
+            )
             messages = {
                 "invalid_query": "Only a single read-only SELECT query is allowed.",
                 "host_denied": "Database host is not allowed by the SQL sandbox configuration.",
                 "timeout": "SQL query timed out.",
                 "busy": "SQL sandbox is busy. Retry later.",
+                "result_too_wide": "The result's columns alone exceed the output budget. Select fewer columns.",
             }
             return messages.get(result["error"], "SQL connection or query failed."), True
+        logger.info(
+            "sql_query ok: %s row(s)%s from host=%s db=%s",
+            result.get("row_count"), " (truncated)" if result.get("truncated") else "",
+            payload["host"], payload["database"],
+        )
         return json.dumps(result, ensure_ascii=False), False
     except Exception:
-        # Driver/proxy exceptions can include credentials or the request body.
+        # Driver/proxy exceptions can include credentials or the request body,
+        # so the message is logged without them and never returned.
+        logger.exception(
+            "sql_query could not reach the SQL sandbox at %s (host=%s db=%s)",
+            url, payload["host"], payload["database"],
+        )
         return "SQL sandbox request failed. Check its configuration and availability.", True

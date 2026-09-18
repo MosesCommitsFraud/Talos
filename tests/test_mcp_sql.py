@@ -190,3 +190,38 @@ def test_host_allow_list_rules(monkeypatch, configured_hosts, host, expected):
     in advance would otherwise have to write `*` anyway."""
     monkeypatch.setenv("TALOS_SQL_ALLOWED_HOSTS", configured_hosts)
     assert sql_sandbox.host_allowed(host) is expected
+
+
+def test_a_failure_is_diagnosable_from_the_logs_without_leaking_the_password(monkeypatch, capsys):
+    """The caller only ever gets a fixed error code, which is too coarse to debug
+    with — "query_failed" covers a wrong password, an unreachable host and a typo
+    in a column name alike. The driver's reason must therefore reach the operator's
+    log, and the password must not."""
+    def connect(**kwargs):
+        raise RuntimeError(f"login failed for user {kwargs['user']} with password {kwargs['password']}")
+
+    monkeypatch.setitem(__import__("sys").modules, "pymssql", types.SimpleNamespace(connect=connect))
+    payload = {"host": "db.example", "database": "db", "user": "reader",
+               "password": "hunter2", "query": "SELECT 1", "max_rows": 10, "port": 1433}
+
+    assert sql_worker.execute(payload) == {"error": "query_failed"}
+
+    diagnosis = capsys.readouterr().err
+    assert "query_failed" in diagnosis and "RuntimeError" in diagnosis
+    assert "db.example" in diagnosis and "reader" in diagnosis
+    assert "hunter2" not in diagnosis
+
+
+def test_talos_logs_the_error_code_with_the_connection_it_was_for(configured, monkeypatch, caplog):
+    def handle(request):
+        return httpx.Response(200, json={"error": "query_failed"})
+
+    client = httpx.AsyncClient
+    monkeypatch.setattr(mcp_sql.httpx, "AsyncClient", lambda **kw: client(transport=httpx.MockTransport(handle), **kw))
+    with caplog.at_level("WARNING", logger=mcp_sql.logger.name):
+        text, failed = asyncio.run(mcp_sql.query_sql({"query": "SELECT 42"}, configured))
+
+    assert failed
+    logged = caplog.text
+    assert "query_failed" in logged and "db.example" in logged and "SELECT 42" in logged
+    assert configured["macs-sql-password"] not in logged

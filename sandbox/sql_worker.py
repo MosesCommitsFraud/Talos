@@ -23,10 +23,26 @@ def validate_query(query):
             raise ValueError("invalid_query")
 
 
+def diagnose(stage, detail, payload):
+    """One line to stderr for the operator; never part of the response.
+
+    The fixed error codes are what the caller gets, and they are too coarse to
+    debug with: "query_failed" covers a wrong password, an unreachable host and
+    a typo in a column name alike. The sandbox reads this off stderr and logs
+    it, so the detail stays on the server. The password is never in it.
+    """
+    print(
+        f"sql_worker {stage}: {detail} "
+        f"[host={payload.get('host')} db={payload.get('database')} user={payload.get('user')}]",
+        file=sys.stderr,
+    )
+
+
 def execute(payload):
     try:
         validate_query(payload["query"])
-    except Exception:
+    except Exception as exc:
+        diagnose("invalid_query", f"{type(exc).__name__}: {exc}", payload)
         return {"error": "invalid_query"}
     import pymssql
 
@@ -60,7 +76,10 @@ def execute(payload):
             result["truncated"] = cursor.fetchone() is not None
         result["row_count"] = len(result["rows"])
         return result
-    except Exception:
+    except Exception as exc:
+        # Driver messages can carry the host, the login and the request body,
+        # so they reach the operator's log and never the response.
+        diagnose("query_failed", f"{type(exc).__name__}: {exc}", payload)
         return {"error": "query_failed"}
     finally:
         if connection is not None:
