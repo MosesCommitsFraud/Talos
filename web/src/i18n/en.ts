@@ -94,6 +94,8 @@ const en = {
     fullSetIn: 'Full set in {{path}}',
     showAll: 'Show all {{count}}',
     downloadHint: 'Download the loaded rows as CSV',
+    expand: 'Expand table',
+    collapse: 'Collapse table',
     view: {
       table: 'Table view',
       chart: 'Chart view',

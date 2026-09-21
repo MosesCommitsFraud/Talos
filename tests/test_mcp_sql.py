@@ -225,3 +225,18 @@ def test_talos_logs_the_error_code_with_the_connection_it_was_for(configured, mo
     logged = caplog.text
     assert "query_failed" in logged and "db.example" in logged and "SELECT 42" in logged
     assert configured["macs-sql-password"] not in logged
+
+
+@pytest.mark.parametrize("host", ["localhost", "LOCALHOST", "db.localhost", "127.0.0.1", "127.1.2.3"])
+def test_a_loopback_host_is_refused_with_an_explanation(configured, monkeypatch, host):
+    """The connection is opened inside the sandbox on the Talos server, so
+    `localhost` is that container — never the client's machine. A real MAF
+    client sent exactly this and only got back a refused connection."""
+    monkeypatch.setattr(mcp_sql.httpx, "AsyncClient", lambda **kw: pytest.fail("must not reach the sandbox"))
+    text, failed = asyncio.run(mcp_sql.query_sql({"query": "SELECT 1"}, {**configured, "macs-sql-host": host}))
+    assert failed and "Talos server itself" in text
+
+
+@pytest.mark.parametrize("host", ["db.example", "127.example", "localhost-db", "10.0.0.5"])
+def test_names_that_only_look_like_loopback_pass(host):
+    assert not mcp_sql._is_loopback(host)

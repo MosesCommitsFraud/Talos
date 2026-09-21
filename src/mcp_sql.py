@@ -16,6 +16,19 @@ logger = logging.getLogger(__name__)
 _HOST_RE = re.compile(r"[a-zA-Z0-9][a-zA-Z0-9.-]*")
 
 
+def _is_loopback(host: str) -> bool:
+    """`localhost`, `*.localhost` or anything in 127.0.0.0/8.
+
+    Only names the bare-hostname check lets through need handling — `::1`
+    already fails it on the colon.
+    """
+    host = host.lower().rstrip(".")
+    if host == "localhost" or host.endswith(".localhost"):
+        return True
+    parts = host.split(".")
+    return len(parts) == 4 and parts[0] == "127" and all(p.isdigit() for p in parts)
+
+
 async def query_sql(arguments, headers):
     from src.sandbox_client import sandbox_enabled
 
@@ -45,12 +58,30 @@ async def query_sql(arguments, headers):
         names[field] = header
         value = headers.get(header.lower())
         if not isinstance(value, str) or not value or len(value) > 4096:
-            logger.warning("sql_query rejected: client sent no usable %s header", header)
+            # Names only, never values: tells "missing" from "empty" from
+            # "arrived under another spelling" without logging a password.
+            seen = sorted(k for k in headers if "sql" in k or k.startswith("macs"))
+            logger.warning(
+                "sql_query rejected: %s header %s; SQL-looking headers received: %s",
+                header, "missing" if value is None else "empty or oversized", seen or "none",
+            )
             return f"Missing or invalid SQL connection header: {header}.", True
         payload[field] = value
     if not _HOST_RE.fullmatch(payload["host"]):
         logger.warning("sql_query rejected: %s=%r is not a bare hostname", names["host"], payload["host"])
         return f"SQL connection header {names['host']} must be a bare hostname.", True
+    if _is_loopback(payload["host"]):
+        # The connection is opened inside the SQL sandbox on the Talos server,
+        # so a loopback name resolves to that container — never to the machine
+        # the client runs on. Without this the caller only sees a refused
+        # connection, which reads like a wrong password or a down server.
+        logger.warning("sql_query rejected: %s=%s is loopback", names["host"], payload["host"])
+        return (
+            f"SQL connection header {names['host']}={payload['host']} points at the Talos "
+            "server itself, not at the machine the client runs on. Send the database's "
+            "hostname or IP address as reachable from the Talos server.",
+            True,
+        )
     url = os.getenv("TALOS_SQL_SANDBOX_URL", "").rstrip("/")
     key = os.getenv("TALOS_SQL_SANDBOX_KEY", "")
     if not url or not key:

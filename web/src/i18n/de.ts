@@ -96,6 +96,8 @@ const de: typeof en = {
     fullSetIn: 'Vollständig in {{path}}',
     showAll: 'Alle {{count}} anzeigen',
     downloadHint: 'Geladene Zeilen als CSV herunterladen',
+    expand: 'Tabelle aufklappen',
+    collapse: 'Tabelle einklappen',
     view: {
       table: 'Als Tabelle',
       chart: 'Als Diagramm',

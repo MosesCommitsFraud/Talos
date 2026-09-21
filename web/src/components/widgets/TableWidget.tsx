@@ -1,7 +1,8 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { ArrowDownIcon, ArrowUpIcon, BarChart3Icon, DownloadIcon, TableIcon } from 'lucide-react';
+import { ArrowDownIcon, ArrowUpIcon, BarChart3Icon, ChevronRightIcon, DownloadIcon, TableIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { Collapse } from '../ui/collapse';
 import { ChartView, chartable } from './ChartView';
 import type { WidgetProps } from './registry';
 
@@ -72,7 +73,7 @@ function toCsv(columns: string[], rows: Cell[][]): string {
  *  runs over the WHOLE set, so the top of a sorted table is the real top. */
 const INITIAL_ROWS = 50;
 
-export function TableWidget({ data }: WidgetProps) {
+export function TableWidget({ data, settled = false }: WidgetProps) {
   const { t } = useTranslation();
   const payload = asDict(data);
   const columns = useMemo(
@@ -92,6 +93,18 @@ export function TableWidget({ data }: WidgetProps) {
   const [sort, setSort] = useState<{ column: number; desc: boolean } | null>(null);
   const [expanded, setExpanded] = useState(false);
   const [view, setView] = useState<'table' | 'chart'>('table');
+  // Open while the turn streams — the rows are what the user is waiting for —
+  // and folded to the header line once it settles. The effect covers an
+  // instance that lives through the transition; a remount starts folded anyway.
+  const [open, setOpen] = useState(!settled);
+  useEffect(() => {
+    if (settled) setOpen(false);
+  }, [settled]);
+  // The body is mounted on first open, not before: a reopened history can hold
+  // many folded tables, and a few thousand hidden cells each would still be
+  // laid out on every resize.
+  const [mounted, setMounted] = useState(!settled);
+  if (open && !mounted) setMounted(true);
 
   const numeric = useMemo(() => numericColumns(rows, columns.length), [rows, columns.length]);
   const sorted = useMemo(() => {
@@ -143,12 +156,35 @@ export function TableWidget({ data }: WidgetProps) {
 
   return (
     <div className="overflow-hidden rounded-xl border bg-card">
-      <div className="flex items-center gap-2 border-b px-4 py-2 text-xs text-muted-foreground">
-        <TableIcon className="size-3.5 shrink-0" />
-        {database && <span className="shrink-0 font-medium">{database}</span>}
-        <span className="min-w-0 flex-1 truncate font-mono" title={label}>
-          {label}
-        </span>
+      <div
+        className={cn(
+          'flex items-center gap-2 px-4 py-2 text-xs text-muted-foreground transition-[border-color]',
+          open ? 'border-b' : 'border-b border-transparent',
+        )}
+      >
+        <button
+          type="button"
+          aria-expanded={open}
+          onClick={() => setOpen((v) => !v)}
+          title={open ? t('table.collapse') : t('table.expand')}
+          className="flex min-w-0 flex-1 items-center gap-2 text-left transition-colors hover:text-foreground"
+        >
+          <ChevronRightIcon className={cn('size-3.5 shrink-0 opacity-60 transition-transform', open && 'rotate-90')} />
+          <TableIcon className="size-3.5 shrink-0" />
+          {database && <span className="shrink-0 font-medium">{database}</span>}
+          <span className="min-w-0 flex-1 truncate font-mono" title={label}>
+            {label}
+          </span>
+          {/* Folded, the footer is out of sight — the row count is the one fact
+              worth keeping on the header line. */}
+          {!open && (
+            <span className="shrink-0 tabular-nums">
+              {shown < rowCount
+                ? t('table.showingOf', { shown, total: rowCount })
+                : t('table.rows', { count: rowCount })}
+            </span>
+          )}
+        </button>
         {canChart && (
           <div className="flex shrink-0 items-center rounded border p-0.5">
             {(['table', 'chart'] as const).map((mode) => {
@@ -158,7 +194,10 @@ export function TableWidget({ data }: WidgetProps) {
                   key={mode}
                   type="button"
                   aria-pressed={view === mode}
-                  onClick={() => setView(mode)}
+                  onClick={() => {
+                    setView(mode);
+                    setOpen(true);
+                  }}
                   title={t(`table.view.${mode}`)}
                   className={cn(
                     'rounded px-1.5 py-0.5 transition-colors',
@@ -182,107 +221,113 @@ export function TableWidget({ data }: WidgetProps) {
         </button>
       </div>
 
-      {view === 'chart' && <ChartView source={source} />}
+      <Collapse open={open}>
+        {mounted && (
+          <>
+            {view === 'chart' && <ChartView source={source} />}
 
-      {/* The table scrolls inside this box in both directions. A wide result set
+            {/* The table scrolls inside this box in both directions. A wide result set
           must never make the message column itself scroll sideways. */}
-      <div className={cn('max-h-96 overflow-auto', view === 'chart' && 'hidden')}>
-        <table className="w-full border-collapse text-xs">
-          <thead className="sticky top-0 z-10 bg-card">
-            <tr>
-              {columns.map((column, i) => {
-                const active = sort?.column === i;
-                return (
-                  <th
-                    key={column + i}
-                    scope="col"
-                    aria-sort={active ? (sort.desc ? 'descending' : 'ascending') : 'none'}
-                    className={cn(
-                      'border-b bg-card px-3 py-1.5 font-medium whitespace-nowrap',
-                      numeric[i] ? 'text-right' : 'text-left',
-                    )}
-                  >
-                    <button
-                      type="button"
-                      onClick={() => toggleSort(i)}
-                      className={cn(
-                        'inline-flex items-center gap-1 transition-colors hover:text-foreground',
-                        active ? 'text-foreground' : 'text-muted-foreground',
-                      )}
+            <div className={cn('max-h-96 overflow-auto', view === 'chart' && 'hidden')}>
+              <table className="w-full border-collapse text-xs">
+                <thead className="sticky top-0 z-10 bg-card">
+                  <tr>
+                    {columns.map((column, i) => {
+                      const active = sort?.column === i;
+                      return (
+                        <th
+                          key={column + i}
+                          scope="col"
+                          aria-sort={active ? (sort.desc ? 'descending' : 'ascending') : 'none'}
+                          className={cn(
+                            'border-b bg-card px-3 py-1.5 font-medium whitespace-nowrap',
+                            numeric[i] ? 'text-right' : 'text-left',
+                          )}
+                        >
+                          <button
+                            type="button"
+                            onClick={() => toggleSort(i)}
+                            className={cn(
+                              'inline-flex items-center gap-1 transition-colors hover:text-foreground',
+                              active ? 'text-foreground' : 'text-muted-foreground',
+                            )}
+                          >
+                            {column}
+                            {active &&
+                              (sort.desc ? <ArrowDownIcon className="size-3" /> : <ArrowUpIcon className="size-3" />)}
+                          </button>
+                        </th>
+                      );
+                    })}
+                  </tr>
+                </thead>
+                <tbody>
+                  {visible.map((row, r) => (
+                    // `content-visibility: auto` lets the browser skip layout and paint
+                    // for rows scrolled out of the box — the intrinsic size keeps the
+                    // scrollbar honest so skipping one does not make the track jump.
+                    <tr
+                      key={r}
+                      className="border-b border-border/40 [content-visibility:auto] [contain-intrinsic-size:auto_26px] last:border-0 hover:bg-accent/50"
                     >
-                      {column}
-                      {active &&
-                        (sort.desc ? <ArrowDownIcon className="size-3" /> : <ArrowUpIcon className="size-3" />)}
-                    </button>
-                  </th>
-                );
-              })}
-            </tr>
-          </thead>
-          <tbody>
-            {visible.map((row, r) => (
-              // `content-visibility: auto` lets the browser skip layout and paint
-              // for rows scrolled out of the box — the intrinsic size keeps the
-              // scrollbar honest so skipping one does not make the track jump.
-              <tr
-                key={r}
-                className="border-b border-border/40 [content-visibility:auto] [contain-intrinsic-size:auto_26px] last:border-0 hover:bg-accent/50"
-              >
-                {columns.map((_column, c) => {
-                  const value = row[c];
-                  return (
-                    <td
-                      key={c}
-                      className={cn(
-                        'px-3 py-1 align-top',
-                        numeric[c] ? 'text-right tabular-nums whitespace-nowrap' : 'max-w-72 truncate',
-                      )}
-                      title={value === null ? undefined : String(value)}
-                    >
-                      {value === null ? (
-                        // Rendered, not blank: an empty cell is ambiguous between
-                        // NULL and the empty string, and in a database that is a
-                        // distinction people are usually querying about.
-                        <span className="text-muted-foreground/50 italic">NULL</span>
-                      ) : typeof value === 'boolean' ? (
-                        String(value)
-                      ) : (
-                        String(value)
-                      )}
-                    </td>
-                  );
-                })}
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+                      {columns.map((_column, c) => {
+                        const value = row[c];
+                        return (
+                          <td
+                            key={c}
+                            className={cn(
+                              'px-3 py-1 align-top',
+                              numeric[c] ? 'text-right tabular-nums whitespace-nowrap' : 'max-w-72 truncate',
+                            )}
+                            title={value === null ? undefined : String(value)}
+                          >
+                            {value === null ? (
+                              // Rendered, not blank: an empty cell is ambiguous between
+                              // NULL and the empty string, and in a database that is a
+                              // distinction people are usually querying about.
+                              <span className="text-muted-foreground/50 italic">NULL</span>
+                            ) : typeof value === 'boolean' ? (
+                              String(value)
+                            ) : (
+                              String(value)
+                            )}
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
 
-      <div className="flex flex-wrap items-center gap-x-2 border-t px-4 py-1.5 text-[11px] text-muted-foreground">
-        <span className="tabular-nums">
-          {shown < rowCount
-            ? t('table.showingOf', { shown, total: rowCount })
-            : t('table.rows', { count: rowCount })}
-        </span>
-        {!expanded && sorted.length > INITIAL_ROWS && (
-          <>
-            <span aria-hidden>·</span>
-            <button
-              type="button"
-              onClick={() => setExpanded(true)}
-              className="rounded px-1 py-0.5 underline underline-offset-2 transition-colors hover:bg-accent hover:text-foreground"
-            >
-              {t('table.showAll', { count: sorted.length })}
-            </button>
+            <div className="flex flex-wrap items-center gap-x-2 border-t px-4 py-1.5 text-[11px] text-muted-foreground">
+              <span className="tabular-nums">
+                {shown < rowCount
+                  ? t('table.showingOf', { shown, total: rowCount })
+                  : t('table.rows', { count: rowCount })}
+              </span>
+              {!expanded && sorted.length > INITIAL_ROWS && (
+                <>
+                  <span aria-hidden>·</span>
+                  <button
+                    type="button"
+                    onClick={() => setExpanded(true)}
+                    className="rounded px-1 py-0.5 underline underline-offset-2 transition-colors hover:bg-accent hover:text-foreground"
+                  >
+                    {t('table.showAll', { count: sorted.length })}
+                  </button>
+                </>
+              )}
+              {spillPath && (
+                <>
+                  <span aria-hidden>·</span>
+                  <span className="truncate font-mono">{t('table.fullSetIn', { path: spillPath })}</span>
+                </>
+              )}
+            </div>
           </>
         )}
-        {spillPath && (
-          <>
-            <span aria-hidden>·</span>
-            <span className="truncate font-mono">{t('table.fullSetIn', { path: spillPath })}</span>
-          </>
-        )}
-      </div>
+      </Collapse>
     </div>
   );
 }

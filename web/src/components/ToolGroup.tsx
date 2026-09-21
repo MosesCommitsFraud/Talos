@@ -6,7 +6,7 @@ import { describeCall, groupDiffStat, joinClauses, partsToString, summarizeCalls
 import { ToolLabel } from './ToolLabel';
 import { DiffStatBadge, ToolRow } from './ToolRow';
 import { Collapse } from './ui/collapse';
-import { WidgetView } from './widgets/registry';
+import { staysInFold, WidgetView } from './widgets/registry';
 
 /** One item on a group's timeline. Only tool calls: the model's reasoning is
  *  shown beside the working timer instead of on this track. */
@@ -34,11 +34,12 @@ const FADE_IN_MS = 170;
  *  detailed reading ("Queried SQL: list tables").
  *
  *  Widgets are the exception to the fold: a weather card is the answer, not a
- *  log line, so it sits under the header where it needs no click. `showWidgets`
- *  turns that off for the one caller that re-surfaces them itself — a settled
- *  turn shows the cards under the answer, and drawing them again inside the
- *  reopened fold would show the same card twice on one screen. */
-export function ToolGroup({ entries, showWidgets = true }: { entries: GroupEntry[]; showWidgets?: boolean }) {
+ *  log line, so it sits under the header where it needs no click. `settled` is
+ *  set by the one caller that re-surfaces most of them itself — a settled turn
+ *  shows the cards under the answer, and drawing them again inside the reopened
+ *  fold would show the same card twice on one screen. Only the widgets that stay
+ *  in the fold (result tables) are drawn here then, in their compact form. */
+export function ToolGroup({ entries, settled = false }: { entries: GroupEntry[]; settled?: boolean }) {
   const { t, i18n } = useTranslation();
   const [open, setOpen] = useState(false);
   const hasEntries = entries.length > 0;
@@ -130,8 +131,13 @@ export function ToolGroup({ entries, showWidgets = true }: { entries: GroupEntry
           </div>
         </div>
       </Collapse>
-      {showWidgets &&
-        calls.map((call, i) => call.widget && <WidgetView key={`w-${i}`} widget={call.widget} />)}
+      {calls.map(
+        (call, i) =>
+          call.widget &&
+          (!settled || staysInFold(call.widget)) && (
+            <WidgetView key={`w-${i}`} widget={call.widget} settled={settled} />
+          ),
+      )}
     </div>
   );
 }

@@ -22,7 +22,7 @@ import { ToolGroup, type GroupEntry } from './ToolGroup';
 import { WorkingAnimation } from './WorkingAnimation';
 import { WorkingOrb, type OrbState } from './WorkingOrb';
 import { ImageGallery, toolImages } from './ToolRow';
-import { WidgetView } from './widgets/registry';
+import { staysInFold, WidgetView } from './widgets/registry';
 import { Collapse } from './ui/collapse';
 import { Tooltip } from './ui/misc';
 import { Button } from './ui/button';
@@ -523,9 +523,9 @@ function ActivityFold({ turn, showThinking, durationMs, terminalId }: { turn: Ui
       </button>
       <Collapse open={open}>
         <div className="mt-1.5">
-          {/* `hideWidgets`: the settled turn already re-surfaces the cards under
-              the answer, outside this fold. */}
-          <TurnBody turn={turn} showThinking={showThinking} hideContentFor={terminalId} hideWidgets />
+          {/* `settled`: the turn already re-surfaces the answer-like cards
+              outside this fold; only result tables stay in here, compact. */}
+          <TurnBody turn={turn} showThinking={showThinking} hideContentFor={terminalId} settled />
         </div>
       </Collapse>
     </div>
@@ -537,12 +537,12 @@ function ActivityFold({ turn, showThinking, durationMs, terminalId }: { turn: Ui
  *  groups just switch from live labels to their past-tense recap.
  *  `hideContentFor` suppresses one bubble's text (the final answer, which stays
  *  outside the fold; or a proposed plan, which renders as a chip). */
-export function TurnBody({ turn, showThinking, hideContentFor, hideWidgets }: { turn: UiMessage[]; showThinking: boolean; hideContentFor?: string; hideWidgets?: boolean }) {
+export function TurnBody({ turn, showThinking, hideContentFor, settled }: { turn: UiMessage[]; showThinking: boolean; hideContentFor?: string; settled?: boolean }) {
   return (
     <>
       {buildSegments(turn, showThinking).map((seg) => {
         if (seg.kind === 'activity') {
-          return <ToolGroup key={`act-${seg.id}`} entries={seg.entries} showWidgets={!hideWidgets} />;
+          return <ToolGroup key={`act-${seg.id}`} entries={seg.entries} settled={settled} />;
         }
         if (seg.kind === 'thinking') {
           // Italic and muted at message size: an aside in the same voice as the
@@ -936,7 +936,11 @@ function AssistantTurn({ turn, containsLast, artifactFiles, sessionId }: { turn:
   // Same reasoning as the images, one step further: a widget is the answer in
   // visual form, so it belongs beside the answer rather than inside the fold
   // that hides how the answer was produced. ActivityFold suppresses its copy.
-  const widgets = turn.flatMap((m) => (m.tools ?? []).map((call) => call.widget).filter(Boolean));
+  // Result tables are the exception: they are part of the work, not the
+  // answer, so they stay in the fold with the tool calls (see staysInFold).
+  const widgets = turn.flatMap((m) =>
+    (m.tools ?? []).map((call) => call.widget).filter((w) => w && !staysInFold(w)),
+  );
   const sources = turn.flatMap((m) => m.sources ?? []);
   // Web pages the answer cites inline join the knowledge sources in the row
   // under the answer; knowledge sections already arrive via `sources`.
@@ -959,7 +963,7 @@ function AssistantTurn({ turn, containsLast, artifactFiles, sessionId }: { turn:
       {/* Above the answer, not below it: that is where the stream put them, and
           a turn must not visibly rearrange itself the moment it settles. */}
       {widgets.map((widget, i) => (
-        <WidgetView key={`w-${i}`} widget={widget} />
+        <WidgetView key={`w-${i}`} widget={widget} settled />
       ))}
       {/* The answer itself stays outside the fold. A proposed plan opens in the
           side panel instead, so the stream shows a compact chip. */}

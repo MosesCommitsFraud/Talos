@@ -12,6 +12,10 @@ import { WeatherWidget } from './WeatherWidget';
 export interface WidgetProps {
   data: unknown;
   version: number;
+  /** The turn that produced the widget is over. Bulky widgets (the SQL table)
+   *  fold down to their header line then, so a finished conversation reads as a
+   *  run of answers rather than a wall of result sets. */
+  settled?: boolean;
 }
 
 /** Widget type -> component. The single place a new widget is hooked up on the
@@ -39,7 +43,13 @@ const WIDGET_REGISTRY: Record<string, ComponentType<WidgetProps>> = {
  *  chat store: `patchAi` rebuilds only the call that is still running, so the
  *  `widget` object a finished call carries is the same object on every later
  *  render. */
-export const WidgetView = memo(function WidgetView({ widget }: { widget: Widget | undefined }) {
+export const WidgetView = memo(function WidgetView({
+  widget,
+  settled = false,
+}: {
+  widget: Widget | undefined;
+  settled?: boolean;
+}) {
   if (!widget) return null;
   const Component = WIDGET_REGISTRY[widget.type];
   if (!Component) return null;
@@ -51,10 +61,18 @@ export const WidgetView = memo(function WidgetView({ widget }: { widget: Widget 
   // rather than as a caption for the card.
   return (
     <div className="my-5">
-      <Component data={widget.data} version={widget.version} />
+      <Component data={widget.data} version={widget.version} settled={settled} />
     </div>
   );
 });
+
+/** Widgets that belong to the work rather than to the answer. A result table
+ *  is evidence the answer was drawn from — once the turn settles it folds away
+ *  with the tool calls and reasoning, instead of being re-surfaced above the
+ *  answer like a weather card, which IS the answer. */
+export function staysInFold(widget: Widget | undefined): boolean {
+  return widget?.type === 'table';
+}
 
 export function hasWidget(widget: Widget | undefined): boolean {
   return !!widget && widget.type in WIDGET_REGISTRY;
