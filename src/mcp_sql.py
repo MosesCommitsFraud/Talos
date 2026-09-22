@@ -15,6 +15,23 @@ logger = logging.getLogger(__name__)
 # act on — the sandbox's own refusal is a bare 400.
 _HOST_RE = re.compile(r"[a-zA-Z0-9][a-zA-Z0-9.-]*")
 
+# The model can't tell which engine sits behind sql_query and defaults to
+# MySQL/PostgreSQL habits (LIMIT, NOW(), backticks), each a hard syntax error on
+# SQL Server. Named in the tool description and repeated on every failure —
+# like the in-app SQL integration's dialect notes (src/tool_implementations.py).
+TSQL_GUIDE = (
+    "The database is Microsoft SQL Server — write T-SQL, not MySQL/PostgreSQL: "
+    "row limit `SELECT TOP n …` (never LIMIT; paging is ORDER BY … OFFSET n ROWS FETCH NEXT m ROWS ONLY); "
+    "GETDATE() not NOW(); DATEADD(day, -30, GETDATE()), DATEDIFF(day, a, b); "
+    "YEAR(d), MONTH(d), DATENAME(month, d), FORMAT(d, 'yyyy-MM'); CAST(d AS date); "
+    "ISNULL(x, 0) / COALESCE; LEN() not LENGTH(); CONCAT() or +; "
+    "quote identifiers with [brackets], never backticks; string literals N'…'; "
+    "schema-qualify tables (dbo.Table)."
+)
+_TSQL_REMINDER = (
+    " Remember: Microsoft SQL Server / T-SQL syntax (SELECT TOP n, GETDATE(), [brackets])."
+)
+
 
 def _is_loopback(host: str) -> bool:
     """`localhost`, `*.localhost` or anything in 127.0.0.0/8.
@@ -48,6 +65,11 @@ async def query_sql(arguments, headers):
     # header as a server configuration problem, which sends the caller — or the
     # model driving it — hunting in the wrong place.
     headers = {k.lower(): v for k, v in (headers or {}).items()}
+    # Same safety net as the in-app query_sql: a plain trailing `LIMIT n` becomes
+    # `TOP n` instead of costing the caller a round trip.
+    from src.tool_implementations import _adapt_sql_dialect
+
+    query, rewrite_note = _adapt_sql_dialect(query, "mssql")
     payload = {"query": query, "max_rows": limit}
     names = {}
     for field, default in {
@@ -124,13 +146,21 @@ async def query_sql(arguments, headers):
                 query,
             )
             messages = {
-                "invalid_query": "Only a single read-only SELECT query is allowed.",
+                # The sandbox parses as T-SQL and refuses unknown functions, so
+                # MySQL/PostgreSQL syntax (NOW(), LENGTH(), backticks) lands here
+                # as well as genuinely non-SELECT statements.
+                "invalid_query": "Rejected: only a single read-only SELECT is allowed, "
+                "and it must parse as T-SQL using SQL Server built-in functions." + _TSQL_REMINDER,
                 "host_denied": "Database host is not allowed by the SQL sandbox configuration.",
                 "timeout": "SQL query timed out.",
                 "busy": "SQL sandbox is busy. Retry later.",
                 "result_too_wide": "The result's columns alone exceed the output budget. Select fewer columns.",
             }
-            return messages.get(result["error"], "SQL connection or query failed."), True
+            # A syntax error from the server itself also arrives as the generic
+            # query_failed, so it carries the dialect reminder too.
+            return messages.get(
+                result["error"], "SQL connection or query failed." + _TSQL_REMINDER
+            ), True
         logger.info(
             "sql_query ok: %s row(s)%s from host=%s db=%s",
             result.get("row_count"),
@@ -138,6 +168,8 @@ async def query_sql(arguments, headers):
             payload["host"],
             payload["database"],
         )
+        if rewrite_note:
+            result["note"] = rewrite_note
         return json.dumps(result, ensure_ascii=False), False
     except Exception:
         # Driver/proxy exceptions can include credentials or the request body,

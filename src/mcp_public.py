@@ -26,6 +26,7 @@ import logging
 import os
 from typing import Any, Dict, List, Optional, Set, Tuple
 
+from src.mcp_sql import TSQL_GUIDE
 from src.rag_scopes import SCOPE_IDS
 
 logger = logging.getLogger(__name__)
@@ -126,8 +127,9 @@ _TOOL_DEFS: List[Dict[str, Any]] = [
         "name": "sql_query",
         "title": "Query SQL Server in the SQL sandbox",
         "description": (
-            "Execute a single read-only SQL Server SELECT query in the dedicated SQL sandbox. "
-            "Connection credentials must be supplied by the client in HTTP headers "
+            "Execute a single read-only SELECT query in the dedicated SQL sandbox. "
+            + TSQL_GUIDE
+            + " Connection credentials must be supplied by the client in HTTP headers "
             "macs-sql-host, macs-sql-database, macs-sql-user and macs-sql-password (deployment may rename them). "
             "Never pass credentials as tool arguments. Returns JSON with columns, rows, "
             "row_count and truncated. Use a SQL login with SELECT-only permissions."
@@ -136,7 +138,12 @@ _TOOL_DEFS: List[Dict[str, Any]] = [
         "inputSchema": {
             "type": "object",
             "properties": {
-                "query": {"type": "string", "minLength": 1, "maxLength": 50000},
+                "query": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 50000,
+                    "description": "One T-SQL SELECT for Microsoft SQL Server (SELECT TOP n, not LIMIT).",
+                },
                 "max_rows": {"type": "integer", "minimum": 1, "maximum": 1000, "default": 100},
             },
             "required": ["query"],

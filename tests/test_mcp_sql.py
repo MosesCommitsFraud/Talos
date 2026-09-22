@@ -94,6 +94,39 @@ def test_header_mapping_and_secret_safe_failure(configured, monkeypatch):
     assert failed and len(captured) == 1  # no credential reuse
 
 
+def test_tool_tells_the_model_it_is_sql_server():
+    (tool,) = mcp_public.list_tools({"sql:read"})
+    assert "Microsoft SQL Server" in tool["description"]
+    assert "SELECT TOP n" in tool["description"]
+    assert "T-SQL" in tool["inputSchema"]["properties"]["query"]["description"]
+
+
+def test_trailing_limit_becomes_top_and_failures_name_the_dialect(configured, monkeypatch):
+    captured = []
+
+    def handle(request):
+        captured.append(json.loads(request.content))
+        if len(captured) == 1:
+            return httpx.Response(200, json={"columns": ["n"], "rows": [[1]], "row_count": 1})
+        return httpx.Response(200, json={"error": "invalid_query"})
+
+    client = httpx.AsyncClient
+    monkeypatch.setattr(
+        mcp_sql.httpx,
+        "AsyncClient",
+        lambda **kw: client(transport=httpx.MockTransport(handle), **kw),
+    )
+    text, failed = asyncio.run(
+        mcp_sql.query_sql({"query": "SELECT name FROM dbo.customers LIMIT 5"}, configured)
+    )
+    assert not failed
+    assert captured[0]["query"] == "SELECT TOP 5 name FROM dbo.customers"
+    assert "TOP 5" in json.loads(text)["note"]
+
+    text, failed = asyncio.run(mcp_sql.query_sql({"query": "SELECT NOW()"}, configured))
+    assert failed and "T-SQL" in text and "SELECT TOP n" in text
+
+
 def test_route_propagates_request_headers(configured, monkeypatch):
     from routes.mcp_public_routes import _handle_message
 
