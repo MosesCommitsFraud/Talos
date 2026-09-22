@@ -11,6 +11,8 @@ SQLAlchemy
 psycopg[binary]
 pymysql
 pymssql
+# Pinned to sandbox/requirements.txt: tests import sandbox/sql_worker.py in this image.
+sqlglot==25.34.1
 pypdf
 beautifulsoup4
 charset-normalizer

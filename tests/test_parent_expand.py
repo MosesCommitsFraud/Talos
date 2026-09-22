@@ -62,6 +62,7 @@ class _RagLike(rv.VectorRAG):
 def test_expand_merges_siblings_by_section(monkeypatch):
     from haystack import Document
     from haystack.document_stores.in_memory import InMemoryDocumentStore
+
     from src.rag_structure import assign_sections
 
     monkeypatch.setenv("EXPAND_TO_PARENT_ENABLED", "true")

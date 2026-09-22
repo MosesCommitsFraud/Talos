@@ -12,8 +12,8 @@ from fastapi import HTTPException
 from core.database import ModelEndpoint, SessionLocal
 from core.database import Session as DBSession
 from core.models import ChatMessage
-from src import citations as _citations
 from routes.prefs_routes import _load_for_user as load_prefs_for_user
+from src import citations as _citations
 from src.auth_helpers import effective_user, get_current_user
 from src.context_compactor import maybe_compact, trim_for_context
 from src.endpoint_resolver import normalize_base

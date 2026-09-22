@@ -9,6 +9,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path.cwd()))
 from sandbox.vendor import talos_dash as td
+
 sys.modules["talos_dash"] = td
 
 root = Path(sys.argv[1]).resolve()

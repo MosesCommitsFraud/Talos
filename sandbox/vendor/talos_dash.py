@@ -1489,7 +1489,9 @@ def lint_composition(layout_html: str, css: str,
     text = re.sub(r"<[^>]+>", " ", re.sub(r"<(script|style)\b.*?</\1>", " ", layout_html, flags=re.S | re.I))
     # A dot followed by 1–2 digits is an English decimal ("62.1%"); German
     # thousands groups ("33.500 €") always have three.
-    for m in re.finditer(r"\b\d+\.\d{1,2}(?!\d)\s?(?:%|Mio\b|Mrd\b|Tsd\b|K\b|€)|\b\d+(?:[.,]\d+)?\s?K\s?€", text):
+    # "K €" goes first: tried second, the decimal branch claims "20748.5 K" and
+    # the report never names the unit.
+    for m in re.finditer(r"\b\d+(?:[.,]\d+)?\s?K\s?€|\b\d+\.\d{1,2}(?!\d)\s?(?:%|Mio\b|Mrd\b|Tsd\b|K\b|€)", text):
         issues.append(f"layout_html: `{m.group(0).strip()}` — not German number format; "
                       "use td.eur(v), td.pct(v), td.num(v) (e.g. \"20,7 Mio. €\", \"62,1 %\")")
     _lint_wording(text, layout_html, issues)

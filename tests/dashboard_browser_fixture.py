@@ -6,6 +6,7 @@ Then run: node tests/dashboard_browser.cjs <runtime-dir> (requires Playwright).
 """
 import sys
 from pathlib import Path
+
 sys.path.insert(0, str(Path.cwd()))
 from sandbox.vendor import talos_dash as td
 

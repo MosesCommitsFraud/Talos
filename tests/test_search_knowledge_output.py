@@ -18,7 +18,7 @@ def _run(query, sources, block, monkeypatch):
         def __init__(self, _docs_manager):
             pass
 
-        def retrieve(self, _query):
+        def retrieve(self, _query, **_kwargs):
             return sources, block
 
     monkeypatch.setattr(
