@@ -60,3 +60,7 @@ def test_ask_user_forbids_rendering_the_options_as_prose():
     assert "OFFERING A CHOICE IS THIS TOOL, NOT PROSE" in schema["function"]["description"]
 
     assert "look like buttons and do nothing" in BUILTIN_TOOL_DESCRIPTIONS["ask_user"]
+
+
+def test_talos_system_prompt_forbids_emojis():
+    assert "NO EMOJIS" in TALOS_SYSTEM_PROMPT
