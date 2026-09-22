@@ -43,10 +43,12 @@ import type { Session } from '@/api/types';
 import { selectChatStatus, selectFolderStatus, useChat } from '@/state/chat';
 import { usePrefs, type SortMode } from '@/state/prefs';
 import { useUi } from '@/state/ui';
+import { brand } from '@/lib/brand';
 import { cn, formatRelativeTime, timestampMs } from '@/lib/utils';
 import { anyTitlePending, isTitlePending, placeholderTitleText } from '@/lib/sessionTitle';
 import { Skeleton, Tooltip } from './ui/misc';
 import { KeybindingPill } from './ui/kbd';
+import { BrandImage } from './BrandImage';
 import {
   ContextMenu,
   ContextMenuItem,
@@ -582,9 +584,11 @@ function SidebarBody({ onOpenPalette, account, onOpenTicketDialog, preview }: Si
       {/* Header — the wordmark, at the same height as the rail's expand button
           so nothing below shifts when the sidebar collapses. */}
       <div className="flex h-12 shrink-0 items-center px-3">
-        {!preview && (
-          <span className="truncate text-xl font-semibold tracking-tight text-primary">Talos</span>
-        )}
+        {!preview && (brand.logoLarge ? (
+          <BrandImage src={brand.logoLarge} alt={brand.name} align="left" className="h-7 w-full text-foreground" />
+        ) : (
+          <span className="truncate text-xl font-semibold tracking-tight text-primary">{brand.name}</span>
+        ))}
       </div>
 
       {/* Primary nav — each row below "New" opens its full-page view, and shows

@@ -1,8 +1,17 @@
+import { brand } from '@/lib/brand';
+import { cn } from '@/lib/utils';
+import { BrandImage } from './BrandImage';
+
 /** The Talos mark (matches the favicon): two stacked sails over a wave.
  *
  *  Drawn in `currentColor`, so it takes the colour of whatever it sits in — the
- *  sidebar header, or the working row once its animation has settled. */
+ *  sidebar header, or the working row once its animation has settled. A branded
+ *  deployment's `logo-small` replaces it (see BrandImage). */
 export function TalosLogo({ className }: { className?: string }) {
+  if (brand.logoSmall) {
+    // text-foreground: a brand mark keeps its own ink colour wherever it sits.
+    return <BrandImage src={brand.logoSmall} alt="" className={cn(className, 'text-foreground')} />;
+  }
   return (
     <svg viewBox="0 0 32 32" className={className} fill="none" aria-hidden="true">
       <path d="M16 4L16 22L6 22Z" fill="currentColor" />

@@ -37,16 +37,20 @@ from dotenv import load_dotenv
 load_dotenv(encoding="utf-8-sig")
 
 import asyncio
+import html
+import json
 import logging
+import re
 import secrets
 from contextlib import asynccontextmanager
 from datetime import datetime
+from functools import lru_cache
 from typing import Dict
 
 import bcrypt as _bcrypt
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import RedirectResponse
@@ -227,7 +231,7 @@ if AUTH_ENABLED:
     # /assets are the hashed Vite bundles of the React UI (web/dist); /static
     # now serves only fonts. All are code/assets (no data) and must be loadable
     # before a cookie exists so the login screen can render.
-    AUTH_EXEMPT_PREFIXES = ["/static", "/assets", "/fonts"]
+    AUTH_EXEMPT_PREFIXES = ["/static", "/assets", "/fonts", "/branding/"]
     AUTH_EXEMPT_PATTERNS = []
 
     def _is_auth_exempt(path: str) -> bool:
@@ -828,8 +832,43 @@ async def serve_index(request: Request):
     # scripts, so no CSP nonce injection is needed (script-src includes 'self').
     # It gates itself, rendering login/setup screens from /api/auth/status.
     if os.path.exists(_WEB_INDEX):
-        return FileResponse(_WEB_INDEX, headers={"Cache-Control": "no-cache"})
+        return HTMLResponse(_branded_index(), headers={"Cache-Control": "no-cache"})
     raise HTTPException(503, "web UI not built — run `npm run build` in web/")
+
+
+@lru_cache(maxsize=1)
+def _branded_index() -> str:
+    """web/dist/index.html with the deployment's branding (TALOS_BRAND) baked in:
+    tab title, favicon, and a <meta name="talos-brand"> the React app reads
+    synchronously at boot — a meta tag rather than an inline script, which the
+    CSP would block, and rather than a fetch, which would flash "Talos" first."""
+    from core.branding import brand_public
+
+    brand = brand_public()
+    with open(_WEB_INDEX, encoding="utf-8") as f:
+        page = f.read()
+    page = re.sub(r"<title>.*?</title>", f"<title>{html.escape(brand['name'])}</title>", page, count=1)
+    if brand["logoSmall"]:
+        page = re.sub(
+            r'<link rel="icon"[^>]*>', f'<link rel="icon" href="{brand["logoSmall"]}" />', page, count=1
+        )
+    meta = f'<meta name="talos-brand" content="{html.escape(json.dumps(brand))}" />'
+    return page.replace("</head>", f"  {meta}\n  </head>", 1)
+
+
+@app.get("/branding/{which}")
+async def serve_brand_logo(which: str):
+    from core.branding import LOGO_TYPES, get_brand
+
+    brand = get_brand()
+    path = {"logo-small": brand.logo_small, "logo-large": brand.logo_large}.get(which)
+    if not path:
+        raise HTTPException(404, "no such logo")
+    return FileResponse(
+        path,
+        media_type=LOGO_TYPES[os.path.splitext(path)[1].lower()],
+        headers={"Cache-Control": "no-cache"},
+    )
 
 
 @app.get("/pcm-capture.worklet.js")

@@ -2,6 +2,7 @@ import i18n from 'i18next';
 import { initReactI18next } from 'react-i18next';
 import en from './en';
 import de from './de';
+import { brand } from '@/lib/brand';
 
 export const LANGUAGES = [
   { value: 'en', label: 'English' },
@@ -44,7 +45,8 @@ void i18n.use(initReactI18next).init({
   // Stays English on purpose: it only kicks in for a key missing from de.ts,
   // where the English string beats the raw key name.
   fallbackLng: 'en',
-  interpolation: { escapeValue: false },
+  // {{brand}} is the product name — "Talos", or the deployment's TALOS_BRAND name.
+  interpolation: { escapeValue: false, defaultVariables: { brand: brand.name } },
   returnNull: false,
 });
 

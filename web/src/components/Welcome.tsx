@@ -4,15 +4,10 @@ import { useTranslation } from 'react-i18next';
 import { fetchUsageStats, type UsageStats } from '@/api/client';
 import { usePrefs } from '@/state/prefs';
 import { useAuth } from './auth/AuthGate';
+import { TalosLogo } from './TalosLogo';
 
 function Logo() {
-  return (
-    <svg viewBox="0 0 32 32" width="40" height="40" aria-hidden>
-      <path d="M16 4L16 22L6 22Z" fill="var(--primary)" />
-      <path d="M16 8L16 22L24 22Z" fill="var(--primary)" opacity="0.6" />
-      <path d="M4 24Q10 20 16 24Q22 28 28 24" stroke="var(--primary)" strokeWidth="2.5" fill="none" strokeLinecap="round" />
-    </svg>
-  );
+  return <TalosLogo className="size-10 shrink-0 text-primary" />;
 }
 
 const GREETING_COUNT = 6;

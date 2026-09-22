@@ -25,6 +25,8 @@ services:
       - talos-uploads:/srv/uploads
     environment:
       - TALOS_UPLOAD_DIR=/srv/uploads
+      # Branding profile: name + logos from branding/<profile>/ (see core/branding.py).
+      - TALOS_BRAND=${TALOS_BRAND:-talos}
       - APP_BIND=${APP_BIND:-127.0.0.1}
       - APP_PORT=${APP_PORT:-7000}
       - AUTH_ENABLED=${AUTH_ENABLED:-true}

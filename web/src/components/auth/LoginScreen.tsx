@@ -3,6 +3,9 @@ import { useTranslation } from 'react-i18next';
 import { login, setupAdmin, signup } from '@/api/client';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/misc';
+import { BrandImage } from '@/components/BrandImage';
+import { TalosLogo } from '@/components/TalosLogo';
+import { brand } from '@/lib/brand';
 
 type Mode = 'login' | 'signup' | 'setup' | 'totp';
 
@@ -70,11 +73,11 @@ export function LoginScreen({
     <div className="flex h-full items-center justify-center bg-background">
       <div className="w-[340px]">
         <div className="mb-6 text-center">
-          <svg viewBox="0 0 32 32" aria-hidden="true" className="mx-auto mb-3 size-11 text-primary">
-            <path d="M16 4L16 22L6 22Z" fill="currentColor" />
-            <path d="M16 8L16 22L24 22Z" fill="currentColor" opacity="0.6" />
-            <path d="M4 24Q10 20 16 24Q22 28 28 24" stroke="currentColor" strokeWidth="2.5" fill="none" strokeLinecap="round" />
-          </svg>
+          {brand.logoLarge ? (
+            <BrandImage src={brand.logoLarge} alt={brand.name} className="mx-auto mb-4 h-16 w-[240px] text-foreground" />
+          ) : (
+            <TalosLogo className="mx-auto mb-3 size-11 text-primary" />
+          )}
           <h1 className="font-semibold text-foreground text-xl">{copy.heading}</h1>
           <p className="mt-1 text-muted-foreground text-sm">{copy.sub}</p>
         </div>
