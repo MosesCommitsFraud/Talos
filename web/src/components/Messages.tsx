@@ -362,6 +362,7 @@ function Working({
           />
         ))}
         <TalosLogo
+          mono
           className={cn(
             'absolute inset-0 size-full transition-opacity duration-500',
             showLogo ? 'opacity-100' : 'opacity-0',

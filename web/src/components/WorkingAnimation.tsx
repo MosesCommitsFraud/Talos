@@ -1,6 +1,8 @@
 import { useEffect, useRef } from 'react';
 import lottie, { type AnimationItem } from 'lottie-web/build/player/lottie_light';
+import { brand } from '@/lib/brand';
 import { cn } from '@/lib/utils';
+import { TalosLogo } from './TalosLogo';
 import animationUrl from '@/assets/working-animation.json?url';
 
 /** The Lottie JSON is ~750 KB, so it is emitted as its own asset and fetched on
@@ -24,15 +26,29 @@ function loadAnimationData(): Promise<unknown> {
  *  looping off, so the cycle in flight runs out to its end frame and `onFinished`
  *  fires there. The caller keeps the row mounted until then — a loop cut off
  *  mid-swing reads as the UI breaking rather than as the turn finishing. */
-export function WorkingAnimation({
-  className,
-  playing = true,
-  onFinished,
-}: {
+type WorkingAnimationProps = {
   className?: string;
   playing?: boolean;
   onFinished?: () => void;
-}) {
+};
+
+export function WorkingAnimation(props: WorkingAnimationProps) {
+  // The Lottie is the Talos mark itself, so a branded deployment pulses its own
+  // logo-small instead.
+  return brand.logoSmall ? <BrandWorkingAnimation {...props} /> : <LottieWorkingAnimation {...props} />;
+}
+
+function BrandWorkingAnimation({ className, playing = true, onFinished }: WorkingAnimationProps) {
+  const finished = useRef(onFinished);
+  finished.current = onFinished;
+  // No cycle to run out: winding down is immediate.
+  useEffect(() => {
+    if (!playing) finished.current?.();
+  }, [playing]);
+  return <TalosLogo mono className={cn('inline-block shrink-0', playing && 'animate-pulse', className)} />;
+}
+
+function LottieWorkingAnimation({ className, playing = true, onFinished }: WorkingAnimationProps) {
   const host = useRef<HTMLSpanElement>(null);
   const anim = useRef<AnimationItem | null>(null);
   // Both props are read through refs inside the mount effect so that it never
