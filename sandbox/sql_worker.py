@@ -29,8 +29,12 @@ def diagnose(stage, detail, payload):
     The fixed error codes are what the caller gets, and they are too coarse to
     debug with: "query_failed" covers a wrong password, an unreachable host and
     a typo in a column name alike. The sandbox reads this off stderr and logs
-    it, so the detail stays on the server. The password is never in it.
+    it, so the detail stays on the server. The password is never in it — not
+    even when a driver echoes it back inside its own error message.
     """
+    password = str(payload.get("password") or "")
+    if password:
+        detail = detail.replace(password, "***")
     print(
         f"sql_worker {stage}: {detail} "
         f"[host={payload.get('host')} db={payload.get('database')} user={payload.get('user')}]",
