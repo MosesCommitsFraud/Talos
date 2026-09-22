@@ -3,6 +3,7 @@
 First run dashboard_browser_fixture.py. Put html-to-image.js in that same
 runtime directory, then run this script with the directory as its argument.
 """
+
 import re
 import sys
 from pathlib import Path
@@ -28,30 +29,60 @@ styles = {
     "a4-landscape": "#td-artboard .panel.full{display:none}#td-artboard .plot{height:280px}",
     "web": "",
 }
-csp = ("default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval'; "
-       "style-src 'unsafe-inline'; img-src data: blob:; font-src data:; "
-       "connect-src 'none'; form-action 'none'; base-uri 'none'")
+csp = (
+    "default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval'; "
+    "style-src 'unsafe-inline'; img-src data: blob:; font-src data:; "
+    "connect-src 'none'; form-action 'none'; base-uri 'none'"
+)
 for fmt, extra in styles.items():
     page = root / (fmt.replace(":", "-") + ".html")
-    td.dashboard(str(page), title="Vertriebsübersicht 2026",
-                 charts=charts,
-                 page_format=fmt, layout_html=layout, css=style + extra, download_png=True,
-                 brand="macs")
-    page.write_text(page.read_text(encoding="utf-8").replace(
-        "<head>", f'<head><meta http-equiv="Content-Security-Policy" content="{csp}">'), encoding="utf-8")
+    td.dashboard(
+        str(page),
+        title="Vertriebsübersicht 2026",
+        charts=charts,
+        page_format=fmt,
+        layout_html=layout,
+        css=style + extra,
+        download_png=True,
+        brand="macs",
+    )
+    page.write_text(
+        page.read_text(encoding="utf-8").replace(
+            "<head>", f'<head><meta http-equiv="Content-Security-Policy" content="{csp}">'
+        ),
+        encoding="utf-8",
+    )
 
 # Test refusal of overflowing pages instead of silent cropping.
-td.dashboard(str(root / "overflow.html"), title="Overflow", charts=[],
-             page_format="16:9", layout_html='<div style="height:900px">Too tall</div>',
-             download_png=True)
+td.dashboard(
+    str(root / "overflow.html"),
+    title="Overflow",
+    charts=[],
+    page_format="16:9",
+    layout_html='<div style="height:900px">Too tall</div>',
+    download_png=True,
+)
 
 # Mixed engines and GL exercise the snapshot overlay and native SVG paths.
-gl = td.echarts({"xAxis3D": {}, "yAxis3D": {}, "zAxis3D": {}, "grid3D": {},
-                 "series": [{"type": "scatter3D", "symbolSize": 20,
-                             "data": [[1, 2, 3], [2, 3, 1], [3, 1, 2]]}]},
-                extensions=["echarts-gl"])
-td.dashboard(str(root / "mixed.html"), title="Mixed export", charts=[
-    td.chart("native", "ECharts", trend),
-    td.chart("legacy", "Legacy SVG", td.bar(["A", "B", "C"], [3, 5, 2])),
-    td.chart("gl", "WebGL", gl),
-], download_png=True)
+gl = td.echarts(
+    {
+        "xAxis3D": {},
+        "yAxis3D": {},
+        "zAxis3D": {},
+        "grid3D": {},
+        "series": [
+            {"type": "scatter3D", "symbolSize": 20, "data": [[1, 2, 3], [2, 3, 1], [3, 1, 2]]}
+        ],
+    },
+    extensions=["echarts-gl"],
+)
+td.dashboard(
+    str(root / "mixed.html"),
+    title="Mixed export",
+    charts=[
+        td.chart("native", "ECharts", trend),
+        td.chart("legacy", "Legacy SVG", td.bar(["A", "B", "C"], [3, 5, 2])),
+        td.chart("gl", "WebGL", gl),
+    ],
+    download_png=True,
+)

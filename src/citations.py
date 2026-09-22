@@ -89,10 +89,16 @@ def site_name(url: str) -> str:
     return host[4:] if host.startswith("www.") else host
 
 
-def cite_web(session_id: Optional[str], url: str, title: str, snippet: str,
-             published: str = "") -> Optional[int]:
-    entry = {"kind": "web", "title": title or site_name(url), "url": url,
-             "site": site_name(url), "snippet": (snippet or "")[:500]}
+def cite_web(
+    session_id: Optional[str], url: str, title: str, snippet: str, published: str = ""
+) -> Optional[int]:
+    entry = {
+        "kind": "web",
+        "title": title or site_name(url),
+        "url": url,
+        "site": site_name(url),
+        "snippet": (snippet or "")[:500],
+    }
     if published:
         entry["published"] = published
     return cite(session_id, "web:" + (url or "").rstrip("/"), entry)
@@ -101,11 +107,14 @@ def cite_web(session_id: Optional[str], url: str, title: str, snippet: str,
 def cite_rag(session_id: Optional[str], source: dict) -> Optional[int]:
     """Number a retrieved knowledge-base section (a rag_sources dict)."""
     key = source.get("_id") or "|".join(
-        str(x) for x in (source.get("filename"), source.get("_page"),
-                         (source.get("snippet") or "")[:80])
+        str(x)
+        for x in (source.get("filename"), source.get("_page"), (source.get("snippet") or "")[:80])
     )
-    entry = {"kind": "rag", "title": source.get("filename") or "",
-             "snippet": (source.get("snippet") or "")[:500]}
+    entry = {
+        "kind": "rag",
+        "title": source.get("filename") or "",
+        "snippet": (source.get("snippet") or "")[:500],
+    }
     for k in ("image_url", "image_caption", "deeplink", "start", "end", "modality"):
         if source.get(k) is not None:
             entry[k] = source[k]

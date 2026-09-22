@@ -405,10 +405,15 @@ def _adapt_sql_dialect(query: str, dialect: str) -> tuple:
         return query, ""
     m = _TRAILING_LIMIT_RE.search(query)
     head = _LEADING_SELECT_RE.match(query)
-    if not m or not head or re.search(r"\bTOP\s*\(?\d", query, re.I) or re.search(r"\bOFFSET\b", query, re.I):
+    if (
+        not m
+        or not head
+        or re.search(r"\bTOP\s*\(?\d", query, re.I)
+        or re.search(r"\bOFFSET\b", query, re.I)
+    ):
         return query, ""
     body = query[: m.start()]
-    rewritten = f"{head.group(0)}TOP {m.group(1)} {body[head.end():]}"
+    rewritten = f"{head.group(0)}TOP {m.group(1)} {body[head.end() :]}"
     return rewritten, f"SQL Server: rewrote LIMIT {m.group(1)} as TOP {m.group(1)}"
 
 
@@ -417,16 +422,20 @@ def _sql_error_hint(message: str, dialect: str) -> str:
     lower = message.lower()
     hints = []
     if "invalid object name" in lower or "no such table" in lower or "does not exist" in lower:
-        hints.append("Do not guess table names: use the SQL schema knowledge in your context or "
-                     "action \"list_tables\".")
+        hints.append(
+            "Do not guess table names: use the SQL schema knowledge in your context or "
+            'action "list_tables".'
+        )
     if "invalid column name" in lower or "no such column" in lower:
-        hints.append("Run action \"describe\" with this table before querying its columns.")
+        hints.append('Run action "describe" with this table before querying its columns.')
     if dialect == "mssql":
         if "near 'limit'" in lower:
             hints.append("SQL Server uses SELECT TOP n, not LIMIT.")
         if "is not a recognized built-in function name" in lower:
-            hints.append("SQL Server functions: DATENAME(month, d), MONTH(d), YEAR(d), FORMAT(d, 'yyyy-MM'), "
-                         "CONCAT(), LEN(), ISNULL().")
+            hints.append(
+                "SQL Server functions: DATENAME(month, d), MONTH(d), YEAR(d), FORMAT(d, 'yyyy-MM'), "
+                "CONCAT(), LEN(), ISNULL()."
+            )
     return (" Hint: " + " ".join(hints)) if hints else ""
 
 

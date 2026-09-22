@@ -705,7 +705,7 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
         from fastapi.responses import Response
 
         shell = (
-            "<!doctype html><meta charset=\"utf-8\"><script>"
+            '<!doctype html><meta charset="utf-8"><script>'
             "addEventListener('message',function receive(e){"
             "if(e.source!==parent||!e.data||e.data.type!=='talos:preview-html'||typeof e.data.html!=='string')return;"
             "removeEventListener('message',receive);"

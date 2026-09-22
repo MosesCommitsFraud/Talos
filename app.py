@@ -847,10 +847,15 @@ def _branded_index() -> str:
     brand = brand_public()
     with open(_WEB_INDEX, encoding="utf-8") as f:
         page = f.read()
-    page = re.sub(r"<title>.*?</title>", f"<title>{html.escape(brand['name'])}</title>", page, count=1)
+    page = re.sub(
+        r"<title>.*?</title>", f"<title>{html.escape(brand['name'])}</title>", page, count=1
+    )
     if brand["logoSmall"]:
         page = re.sub(
-            r'<link rel="icon"[^>]*>', f'<link rel="icon" href="{brand["logoSmall"]}" />', page, count=1
+            r'<link rel="icon"[^>]*>',
+            f'<link rel="icon" href="{brand["logoSmall"]}" />',
+            page,
+            count=1,
         )
     meta = f'<meta name="talos-brand" content="{html.escape(json.dumps(brand))}" />'
     return page.replace("</head>", f"  {meta}\n  </head>", 1)

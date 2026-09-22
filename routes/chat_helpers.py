@@ -1173,7 +1173,9 @@ def attribute_rag_citations(answer: str, sources: list) -> list:
     numbered = [s for s in (sources or []) if s.get("n") and not s.get("image_url")]
     if not answer or not numbered:
         return []
-    cited = {int(x) for m in _CITE_MARKER_RE.finditer(answer) for x in re.split(r"\s*,\s*", m.group(1))}
+    cited = {
+        int(x) for m in _CITE_MARKER_RE.finditer(answer) for x in re.split(r"\s*,\s*", m.group(1))
+    }
     if cited & {s["n"] for s in numbered}:
         return []
 
@@ -1221,7 +1223,7 @@ def apply_line_patches(text: str, patches: list) -> str:
     for old, new in patches:
         at = text.rfind(old)
         if at >= 0:
-            text = text[:at] + new + text[at + len(old):]
+            text = text[:at] + new + text[at + len(old) :]
     return text
 
 

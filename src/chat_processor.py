@@ -498,10 +498,14 @@ class ChatProcessor:
                             blocks.append(block)
                             sources.extend(found)
                         except Exception as error:
-                            logger.warning("Chat retrieval failed for base %s: %s", base["id"], error)
+                            logger.warning(
+                                "Chat retrieval failed for base %s: %s", base["id"], error
+                            )
                     if not blocks:
                         return [], ""
-                    return sources, ((prefix + "\n\n") if prefix else "") + "\n\n---\n\n".join(blocks)
+                    return sources, ((prefix + "\n\n") if prefix else "") + "\n\n---\n\n".join(
+                        blocks
+                    )
                 rag_manager = _manager
             if not rag_manager:
                 return [], ""
@@ -802,7 +806,9 @@ class ChatProcessor:
                 rag_content += sep + fig_block
                 logger.info("RAG: injected %s figure section(s) with image_url", len(protected))
             if kept or protected:
-                rag_sources = [e["source"] for e in entries if id(e) in kept_ids or id(e) in protected_ids]
+                rag_sources = [
+                    e["source"] for e in entries if id(e) in kept_ids or id(e) in protected_ids
+                ]
             return rag_sources, rag_content
         except Exception as e:
             logger.warning(f"RAG retrieval failed: {e}")

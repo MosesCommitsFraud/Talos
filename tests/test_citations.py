@@ -10,7 +10,9 @@ web_search = importlib.import_module("src.web_search")
 def test_numbers_are_turn_wide_and_stable():
     citations.begin_turn("s1")
     a = citations.cite_web("s1", "https://example.com/a", "A", "snippet a")
-    b = citations.cite_rag("s1", {"_id": "chunk-7", "filename": "handbuch.pdf", "snippet": "x", "_page": 3})
+    b = citations.cite_rag(
+        "s1", {"_id": "chunk-7", "filename": "handbuch.pdf", "snippet": "x", "_page": 3}
+    )
     again = citations.cite_web("s1", "https://example.com/a/", "A", "snippet a")
     assert (a, b, again) == (1, 2, 1)
     rag = citations.entries("s1", {2})[0]
@@ -32,10 +34,12 @@ def test_cited_numbers_parses_groups():
 
 
 def test_search_results_carry_citation_numbers():
-    payload = {"results": [
-        {"url": "https://example.com/a", "title": "Erste", "content": "eins"},
-        {"url": "https://example.com/b", "title": "Zweite", "content": "zwei"},
-    ]}
+    payload = {
+        "results": [
+            {"url": "https://example.com/a", "title": "Erste", "content": "eins"},
+            {"url": "https://example.com/b", "title": "Zweite", "content": "zwei"},
+        ]
+    }
     citations.begin_turn("s2")
     citations.cite_web("s2", "https://other.org", "Vorher", "")
     out = web_search._format_search_results("q", payload, max_results=5, session_id="s2")

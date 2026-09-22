@@ -1221,7 +1221,9 @@ def setup_chat_routes(
                                 # its best-matching source, so the pill still sits
                                 # where the information came from.
                                 _final_text = (
-                                    re.sub(r"<think(?:ing)?>[\s\S]*?</think(?:ing)?>", "", str(_rt[-1]))
+                                    re.sub(
+                                        r"<think(?:ing)?>[\s\S]*?</think(?:ing)?>", "", str(_rt[-1])
+                                    )
                                     if isinstance(_rt, list) and _rt
                                     else full_response
                                 )

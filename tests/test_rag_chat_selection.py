@@ -16,13 +16,15 @@ class FakeIndex:
 
     def search(self, query, **kwargs):
         self.calls.append(kwargs)
-        return [{
-            "id": "same-id",
-            "document": f"Hydraulic pressure calibration instructions from {self.name}.",
-            "metadata": {"filename": "manual.pdf", "source": "manual.pdf"},
-            "similarity": 0.9,
-            "rerank_score": 0.9,
-        }]
+        return [
+            {
+                "id": "same-id",
+                "document": f"Hydraulic pressure calibration instructions from {self.name}.",
+                "metadata": {"filename": "manual.pdf", "source": "manual.pdf"},
+                "similarity": 0.9,
+                "rerank_score": 0.9,
+            }
+        ]
 
 
 class ChatSelectionTests(unittest.TestCase):
@@ -53,7 +55,11 @@ class ChatSelectionTests(unittest.TestCase):
         rag_registry.update_base("manuals", chat_enabled=True)
         sources, _ = self.retrieve()
         self.assertEqual([s["rag_id"] for s in sources], ["manuals"])
-        self.assertTrue(rag_registry.describe(rag_registry.get_base("manuals"), with_counts=False)["chat_enabled"])
+        self.assertTrue(
+            rag_registry.describe(rag_registry.get_base("manuals"), with_counts=False)[
+                "chat_enabled"
+            ]
+        )
         self.assertEqual(len(self.indexes["default"].calls), 1)
 
     def test_all_off_does_not_fall_back_to_cached_manager(self):
@@ -67,8 +73,11 @@ class ChatSelectionTests(unittest.TestCase):
         for agent_mode in (False, True):
             with self.subTest(agent_mode=agent_mode):
                 _, sources = ChatProcessor(None).build_context_preface(
-                    "hydraulic pressure calibration", None,
-                    use_rag=False, agent_mode=agent_mode, use_skills=False,
+                    "hydraulic pressure calibration",
+                    None,
+                    use_rag=False,
+                    agent_mode=agent_mode,
+                    use_skills=False,
                 )
                 self.assertEqual(sources, [])
                 self.assertTrue(all(not index.calls for index in self.indexes.values()))
@@ -78,7 +87,10 @@ class ChatSelectionTests(unittest.TestCase):
         for flags in ({}, {"use_rag": "false"}, {"use_rag": None}):
             with self.subTest(flags=flags):
                 _, sources = processor.build_context_preface(
-                    "hydraulic pressure calibration", None, use_skills=False, **flags,
+                    "hydraulic pressure calibration",
+                    None,
+                    use_skills=False,
+                    **flags,
                 )
                 self.assertEqual(sources, [])
                 self.assertTrue(all(not index.calls for index in self.indexes.values()))
@@ -87,7 +99,10 @@ class ChatSelectionTests(unittest.TestCase):
         rag_registry.update_base("default", chat_enabled=False)
         rag_registry.update_base("manuals", chat_enabled=True)
         _, sources = ChatProcessor(None).build_context_preface(
-            "hydraulic pressure calibration", None, use_rag=True, use_skills=False,
+            "hydraulic pressure calibration",
+            None,
+            use_rag=True,
+            use_skills=False,
         )
         self.assertEqual([s["rag_id"] for s in sources], ["manuals"])
         self.assertFalse(self.indexes["default"].calls)
@@ -95,7 +110,10 @@ class ChatSelectionTests(unittest.TestCase):
     def test_knowledge_mode_with_all_bases_off_searches_nothing(self):
         rag_registry.update_base("default", chat_enabled=False)
         _, sources = ChatProcessor(None).build_context_preface(
-            "hydraulic pressure calibration", None, use_rag=True, use_skills=False,
+            "hydraulic pressure calibration",
+            None,
+            use_rag=True,
+            use_skills=False,
         )
         self.assertEqual(sources, [])
         self.assertTrue(all(not index.calls for index in self.indexes.values()))
@@ -138,19 +156,37 @@ class ChatSelectionTests(unittest.TestCase):
     def test_middle_hit_survives_small_chat_budget_with_exact_sources(self):
         from copy import deepcopy
 
-        parts = [{"id": str(i), "document": text, "metadata": {
-            "source": "manual.pdf", "filename": "manual.pdf", "page": i + 1,
-            "heading_path": ["Calibration"], "split_id": i,
-        }} for i, text in enumerate([
-            "Before " * 200, "Hydraulic pressure calibration middle evidence. " * 6,
-            "After " * 200,
-        ])]
-        hit = dict(deepcopy(parts[1]), similarity=0.9, rerank_score=0.9,
-                   expanded="\n\n".join(d["document"] for d in parts),
-                   _context_documents=parts)
+        parts = [
+            {
+                "id": str(i),
+                "document": text,
+                "metadata": {
+                    "source": "manual.pdf",
+                    "filename": "manual.pdf",
+                    "page": i + 1,
+                    "heading_path": ["Calibration"],
+                    "split_id": i,
+                },
+            }
+            for i, text in enumerate(
+                [
+                    "Before " * 200,
+                    "Hydraulic pressure calibration middle evidence. " * 6,
+                    "After " * 200,
+                ]
+            )
+        ]
+        hit = dict(
+            deepcopy(parts[1]),
+            similarity=0.9,
+            rerank_score=0.9,
+            expanded="\n\n".join(d["document"] for d in parts),
+            _context_documents=parts,
+        )
         with patch.object(self.indexes["default"], "search", return_value=[hit]):
             sources, content = ChatProcessor(None).retrieve(
-                "hydraulic pressure calibration", max_chars=600)
+                "hydraulic pressure calibration", max_chars=600
+            )
         self.assertIn(parts[1]["document"], content)
         self.assertNotIn("Before Before", content)
         self.assertLessEqual(len(content), 600)

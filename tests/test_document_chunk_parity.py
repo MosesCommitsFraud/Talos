@@ -33,11 +33,13 @@ def test_extracted_text_matches_markdown_with_overlap(tmp_path):
 def test_figures_remain_intact_and_page_metadata_stays_local():
     rag = _rag()
     figure = Document(content="caption " * 300, meta={"modality": "figure", "page": 1})
-    docs = rag._split_extracted_documents([
-        Document(content="alpha " * 300, meta={"page": 1}),
-        figure,
-        Document(content="beta " * 300, meta={"page": 2}),
-    ])
+    docs = rag._split_extracted_documents(
+        [
+            Document(content="alpha " * 300, meta={"page": 1}),
+            figure,
+            Document(content="beta " * 300, meta={"page": 2}),
+        ]
+    )
 
     assert docs[1] is figure
     assert [d.meta["page"] for d in docs] == [1, 1, 2]

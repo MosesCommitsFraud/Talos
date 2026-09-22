@@ -1964,9 +1964,7 @@ async def stream_agent_loop(
             "usage_source": source,
         }
         try:
-            bd = _compute_context_breakdown(
-                messages, all_tool_schemas, ctx_tokens, system_segments
-            )
+            bd = _compute_context_breakdown(messages, all_tool_schemas, ctx_tokens, system_segments)
             # A single-category breakdown carries no information — the one row
             # would just restate the total — so it's withheld and the panel
             # shows the plain bar. Happens only on the opening frame of a brand

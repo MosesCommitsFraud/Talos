@@ -61,7 +61,11 @@ def get_brand() -> Brand:
         logger.warning("TALOS_BRAND=%r is not a valid profile name — using talos", profile)
         profile = "talos"
     folder = next(
-        (os.path.join(root, profile) for root in _SEARCH_ROOTS if os.path.isdir(os.path.join(root, profile))),
+        (
+            os.path.join(root, profile)
+            for root in _SEARCH_ROOTS
+            if os.path.isdir(os.path.join(root, profile))
+        ),
         None,
     )
     if folder is None:
@@ -81,7 +85,10 @@ def get_brand() -> Brand:
     brand = Brand(profile, name, _find_logo(folder, "logo-small"), _find_logo(folder, "logo-large"))
     logger.info(
         "Branding: profile=%s name=%r small_logo=%s large_logo=%s",
-        brand.profile, brand.name, bool(brand.logo_small), bool(brand.logo_large),
+        brand.profile,
+        brand.name,
+        bool(brand.logo_small),
+        bool(brand.logo_large),
     )
     return brand
 

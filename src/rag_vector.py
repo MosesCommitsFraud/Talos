@@ -696,7 +696,7 @@ def _bounded_text_parts(text: str, limit: int) -> List[str]:
                 if piece:
                     units.append(piece)
                     piece = ""
-                units.extend(word[i:i + limit] for i in range(0, len(word), limit))
+                units.extend(word[i : i + limit] for i in range(0, len(word), limit))
                 continue
             candidate = f"{piece} {word}".strip()
             if piece and len(candidate) > limit:
@@ -841,8 +841,13 @@ def _repair_oversized_pdf_chunks(path: str, docs):
     documents are preserved as-is.
     """
     limit = _max_chunk_chars()
-    ordinary = [d for d in docs if not (d.meta or {}).get("modality")
-                and not (d.meta or {}).get("structure_source") and (d.content or "").strip()]
+    ordinary = [
+        d
+        for d in docs
+        if not (d.meta or {}).get("modality")
+        and not (d.meta or {}).get("structure_source")
+        and (d.content or "").strip()
+    ]
     if len(ordinary) != 1 or len(ordinary[0].content or "") <= limit:
         return docs
 
@@ -1696,9 +1701,14 @@ class VectorRAG:
                     by_source[source] = self._figures_for_source(source)
                 # A shared path can exist for different owners/scopes. Figure
                 # companions must belong to the same published source as the hit.
-                figs = [f for f in by_source[source] if all(
-                    (f.meta or {}).get(key) == meta.get(key)
-                    for key in ("owner", "scope", "ingest_generation"))]
+                figs = [
+                    f
+                    for f in by_source[source]
+                    if all(
+                        (f.meta or {}).get(key) == meta.get(key)
+                        for key in ("owner", "scope", "ingest_generation")
+                    )
+                ]
                 page = self._chunk_page(meta)
                 start, end = meta.get("start"), meta.get("end")
                 if page is not None:
@@ -1868,11 +1878,14 @@ class VectorRAG:
 
         tokenizer_name = self._conf("embedding_tokenizer", "RAG_EMBEDDING_TOKENIZER")
         count, token_limit = embedding_counter(
-            tokenizer_name, self._conf_int("embedding_max_tokens", "RAG_EMBEDDING_MAX_TOKENS", 0))
+            tokenizer_name, self._conf_int("embedding_max_tokens", "RAG_EMBEDDING_MAX_TOKENS", 0)
+        )
         if count:
             docs = bound_documents(docs, _embed_text, count, token_limit, preserve_ids)
             for document in docs:
-                document.meta.update(embedding_tokenizer=tokenizer_name, embedding_max_tokens=token_limit)
+                document.meta.update(
+                    embedding_tokenizer=tokenizer_name, embedding_max_tokens=token_limit
+                )
             if not preserve_ids:
                 # Batch callers can submit independent source documents.
                 from collections import defaultdict
@@ -1892,8 +1905,10 @@ class VectorRAG:
         from dataclasses import replace
 
         originals = {d.id: d.content for d in docs}
-        embedding_docs = [replace(d, content=_embed_text(d.meta or {}, d.content),
-                                  meta=deepcopy(d.meta)) for d in docs]
+        embedding_docs = [
+            replace(d, content=_embed_text(d.meta or {}, d.content), meta=deepcopy(d.meta))
+            for d in docs
+        ]
         embedded = self._dense_doc_embedder().run(documents=embedding_docs)["documents"]
         embedded = self._sparse_doc_embedder().run(documents=embedded)["documents"]
         if {d.id for d in embedded} != set(originals):
@@ -2076,7 +2091,9 @@ class VectorRAG:
 
         assign_sections(docs)
 
-    def _expand_to_parent(self, results: List[Dict[str, Any]], filters=None) -> List[Dict[str, Any]]:
+    def _expand_to_parent(
+        self, results: List[Dict[str, Any]], filters=None
+    ) -> List[Dict[str, Any]]:
         """Small-to-big: for each hit, attach an ``expanded`` field holding its
         whole section (sibling chunks with the same ``section_id``, in ``seq``
         order, capped). The matched chunk stays the citation; only the *injected*
@@ -2805,8 +2822,11 @@ class VectorRAG:
 
                 rows = []
                 for row in node.iter(f"{{{table_ns}}}table-row"):
-                    cells = [" ".join(_blocks(cell)) for cell in row
-                             if _local(cell.tag) in {"table-cell", "covered-table-cell"}]
+                    cells = [
+                        " ".join(_blocks(cell))
+                        for cell in row
+                        if _local(cell.tag) in {"table-cell", "covered-table-cell"}
+                    ]
                     if any(cells):
                         rows.append(cells)
                 unit_docs = self._documents_from_text(rows_markdown(rows))
@@ -2857,9 +2877,13 @@ class VectorRAG:
 
         from src.rag_tables import rows_markdown
 
-        return [Document(content=rows_markdown([list(frame.columns), *frame.fillna("").values.tolist()]),
-                         meta={"sheet": name, "block_type": "table"})
-                for name, frame in pd.read_excel(path, sheet_name=None).items()]
+        return [
+            Document(
+                content=rows_markdown([list(frame.columns), *frame.fillna("").values.tolist()]),
+                meta={"sheet": name, "block_type": "table"},
+            )
+            for name, frame in pd.read_excel(path, sheet_name=None).items()
+        ]
 
     def _lane_code(self, path: str, language: str):
         """Source code → tree-sitter AST chunks, one per function/class/etc.,
@@ -2903,8 +2927,12 @@ class VectorRAG:
         """Share Markdown chunking while preserving metadata and figure assets."""
         from src.rag_structure import split_documents
 
-        limit = max(1000, min(20000, self._conf_int("chunk_max_chars", "RAG_MAX_CHUNK_CHARS", 4000)))
-        overlap = max(0, min(limit - 1, self._conf_int("chunk_overlap_chars", "RAG_CHUNK_OVERLAP_CHARS", 200)))
+        limit = max(
+            1000, min(20000, self._conf_int("chunk_max_chars", "RAG_MAX_CHUNK_CHARS", 4000))
+        )
+        overlap = max(
+            0, min(limit - 1, self._conf_int("chunk_overlap_chars", "RAG_CHUNK_OVERLAP_CHARS", 200))
+        )
         return split_documents(docs, limit, overlap)
 
     def _extract_audio_segments(self, path: str):
@@ -3818,11 +3846,7 @@ class VectorRAG:
             return []
         try:
             _filters = self._build_filters(scope=scope, exclude_scopes=exclude_scopes)
-            chunks = (
-                self._read_documents(filters=_filters)
-                if _filters
-                else self._read_documents()
-            )
+            chunks = self._read_documents(filters=_filters) if _filters else self._read_documents()
             agg: Dict[str, Dict[str, Any]] = {}
             for d in chunks:
                 meta = d.meta or {}
@@ -3915,11 +3939,7 @@ class VectorRAG:
             return []
         try:
             _filters = self._build_filters(scope=scope, exclude_scopes=exclude_scopes)
-            docs = (
-                self._read_documents(filters=_filters)
-                if _filters
-                else self._read_documents()
-            )
+            docs = self._read_documents(filters=_filters) if _filters else self._read_documents()
             hits: List[Dict[str, Any]] = []
             for d in docs:
                 meta = dict(d.meta or {})
@@ -4001,7 +4021,9 @@ class VectorRAG:
             meta["split_id"] = 0
             meta.pop("split_idx_start", None)
             meta.pop("source_end", None)
-            self._write_documents([Document(id=chunk_id, content=text, meta=meta)], preserve_ids=True)
+            self._write_documents(
+                [Document(id=chunk_id, content=text, meta=meta)], preserve_ids=True
+            )
             return True
         except Exception as e:
             logger.error(f"update_chunk failed: {e}")

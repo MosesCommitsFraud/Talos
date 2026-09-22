@@ -1,4 +1,5 @@
 """Offline dashboard serialization and engine-selection contracts."""
+
 import csv
 import tempfile
 import unittest
@@ -11,8 +12,10 @@ from sandbox.vendor.charts.index_examples import build
 
 class DashboardTests(unittest.TestCase):
     def test_full_options_and_explicit_callbacks(self):
-        option = {"series": [{"type": "custom", "renderItem": td.js("function() { return null; }")}],
-                  "matrix": {"x": {"data": ["A"]}}}
+        option = {
+            "series": [{"type": "custom", "renderItem": td.js("function() { return null; }")}],
+            "matrix": {"x": {"data": ["A"]}},
+        }
         spec = td.echarts(option)
         encoded = td._js(spec)
         self.assertIn('"renderItem":(function()', encoded)
@@ -38,9 +41,13 @@ class DashboardTests(unittest.TestCase):
             root = Path(tmp)
             for name in ("legacy.js", "echarts.min.js", "echarts-gl.min.js", "adapter.js"):
                 (root / name).write_text(f"/* {name} */", encoding="utf-8")
-            with patch.multiple(td, VENDOR=root, BUNDLE=root / "legacy.js",
-                                ECHARTS_BUNDLE=root / "echarts.min.js",
-                                ECHARTS_ADAPTER=root / "adapter.js"):
+            with patch.multiple(
+                td,
+                VENDOR=root,
+                BUNDLE=root / "legacy.js",
+                ECHARTS_BUNDLE=root / "echarts.min.js",
+                ECHARTS_ADAPTER=root / "adapter.js",
+            ):
                 native = td.chart("n", "Native", td.echarts({"series": []}))
                 html = td.render("Demo", [native])
                 self.assertIn("/* echarts.min.js */", html)
@@ -63,12 +70,13 @@ class DashboardTests(unittest.TestCase):
 
     def test_custom_layout_slots_are_complete_and_unique(self):
         native = td.chart("trend", "Trend", td.echarts({}), height=None)
-        for layout in ("<div>No chart</div>", "{{chart:other}}",
-                       "{{chart:trend}}{{chart:trend}}"):
+        for layout in ("<div>No chart</div>", "{{chart:other}}", "{{chart:trend}}{{chart:trend}}"):
             with self.subTest(layout=layout), self.assertRaisesRegex(ValueError, "exactly once"):
                 td.render("Custom", [native], layout_html=layout)
         # The message names the mismatch instead of leaving the author to diff lists.
-        with self.assertRaisesRegex(ValueError, r"missing in layout_html: \{\{chart:trend\}\}.*no chart with this id: other"):
+        with self.assertRaisesRegex(
+            ValueError, r"missing in layout_html: \{\{chart:trend\}\}.*no chart with this id: other"
+        ):
             td.render("Custom", [native], layout_html="{{chart:other}}")
         with self.assertRaisesRegex(ValueError, "placed more than once: trend"):
             td.render("Custom", [native], layout_html="{{chart:trend}}{{chart:trend}}")
@@ -82,9 +90,14 @@ class DashboardTests(unittest.TestCase):
                 (root / filename).write_text(f"/* {filename} */", encoding="utf-8")
             with patch.multiple(td, VENDOR=root, ECHARTS_BUNDLE=root / "echarts.min.js"):
                 chart = td.chart("trend", "Trend", td.echarts({}), height=None)
-                html = td.render("Design", [chart], layout_html="<h1>Story</h1>{{chart:trend}}",
-                                 css="#td-artboard{padding:48px}", page_format="A4",
-                                 download_png=True)
+                html = td.render(
+                    "Design",
+                    [chart],
+                    layout_html="<h1>Story</h1>{{chart:trend}}",
+                    css="#td-artboard{padding:48px}",
+                    page_format="A4",
+                    download_png=True,
+                )
                 self.assertIn('<h1>Story</h1><div class="chart"', html)
                 self.assertNotIn('<section class="card', html)
                 self.assertIn('"size":[794,1123,2480,3508]', html)
@@ -109,9 +122,11 @@ class DashboardTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "authored"):
             td.compose("unused.html", "No layout", [], layout_html="", css="")
         with patch.object(td, "dashboard", return_value="composed.html") as render:
-            story = "<h1>Story</h1><ul class=\"insights\"><li>a</li><li>b</li><li>c</li></ul>"
-            self.assertEqual(td.compose("composed.html", "Story", [],
-                             layout_html=story, css="h1{color:navy}"), "composed.html")
+            story = '<h1>Story</h1><ul class="insights"><li>a</li><li>b</li><li>c</li></ul>'
+            self.assertEqual(
+                td.compose("composed.html", "Story", [], layout_html=story, css="h1{color:navy}"),
+                "composed.html",
+            )
             self.assertTrue(render.call_args.kwargs["download_png"])
             self.assertEqual(render.call_args.kwargs["layout_html"], story)
             self.assertEqual(render.call_args.kwargs["brand"], "macs")
@@ -143,9 +158,15 @@ class DashboardTests(unittest.TestCase):
             sources = root / "public/examples/ts"
             for folder in (sources, sources / "gl", sources / "archive"):
                 folder.mkdir(parents=True, exist_ok=True)
-            (sources / "tree.ts").write_text("/*\ntitle: Tree\ncategory: tree\n*/\noption = {};", encoding="utf-8")
-            (sources / "gl/surface.js").write_text("/*\ntitle: Surface\ncategory: surface\n*/\nfetch(ROOT_PATH);", encoding="utf-8")
-            (sources / "archive/old.js").write_text("/*\ntitle: Old\ncategory: custom\n*/\nrenderItem()", encoding="utf-8")
+            (sources / "tree.ts").write_text(
+                "/*\ntitle: Tree\ncategory: tree\n*/\noption = {};", encoding="utf-8"
+            )
+            (sources / "gl/surface.js").write_text(
+                "/*\ntitle: Surface\ncategory: surface\n*/\nfetch(ROOT_PATH);", encoding="utf-8"
+            )
+            (sources / "archive/old.js").write_text(
+                "/*\ntitle: Old\ncategory: custom\n*/\nrenderItem()", encoding="utf-8"
+            )
             self.assertEqual(build(root), 3)
             with (root / "index.tsv").open(encoding="utf-8") as stream:
                 rows = {r["id"]: r for r in csv.DictReader(stream, delimiter="\t")}

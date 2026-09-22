@@ -51,8 +51,10 @@ async def query_sql(arguments, headers):
     payload = {"query": query, "max_rows": limit}
     names = {}
     for field, default in {
-        "host": "macs-sql-host", "database": "macs-sql-database",
-        "user": "macs-sql-user", "password": "macs-sql-password",
+        "host": "macs-sql-host",
+        "database": "macs-sql-database",
+        "user": "macs-sql-user",
+        "password": "macs-sql-password",
     }.items():
         header = os.getenv(f"TALOS_MCP_SQL_HEADER_{field.upper()}", default)
         names[field] = header
@@ -63,12 +65,16 @@ async def query_sql(arguments, headers):
             seen = sorted(k for k in headers if "sql" in k or k.startswith("macs"))
             logger.warning(
                 "sql_query rejected: %s header %s; SQL-looking headers received: %s",
-                header, "missing" if value is None else "empty or oversized", seen or "none",
+                header,
+                "missing" if value is None else "empty or oversized",
+                seen or "none",
             )
             return f"Missing or invalid SQL connection header: {header}.", True
         payload[field] = value
     if not _HOST_RE.fullmatch(payload["host"]):
-        logger.warning("sql_query rejected: %s=%r is not a bare hostname", names["host"], payload["host"])
+        logger.warning(
+            "sql_query rejected: %s=%r is not a bare hostname", names["host"], payload["host"]
+        )
         return f"SQL connection header {names['host']} must be a bare hostname.", True
     if _is_loopback(payload["host"]):
         # The connection is opened inside the SQL sandbox on the Talos server,
@@ -111,7 +117,11 @@ async def query_sql(arguments, headers):
             # and the sandbox's own log carries the driver's reason.
             logger.warning(
                 "sql_query failed (%s) for host=%s db=%s user=%s query=%.200s",
-                result["error"], payload["host"], payload["database"], payload["user"], query,
+                result["error"],
+                payload["host"],
+                payload["database"],
+                payload["user"],
+                query,
             )
             messages = {
                 "invalid_query": "Only a single read-only SELECT query is allowed.",
@@ -123,8 +133,10 @@ async def query_sql(arguments, headers):
             return messages.get(result["error"], "SQL connection or query failed."), True
         logger.info(
             "sql_query ok: %s row(s)%s from host=%s db=%s",
-            result.get("row_count"), " (truncated)" if result.get("truncated") else "",
-            payload["host"], payload["database"],
+            result.get("row_count"),
+            " (truncated)" if result.get("truncated") else "",
+            payload["host"],
+            payload["database"],
         )
         return json.dumps(result, ensure_ascii=False), False
     except Exception:
@@ -132,6 +144,8 @@ async def query_sql(arguments, headers):
         # so the message is logged without them and never returned.
         logger.exception(
             "sql_query could not reach the SQL sandbox at %s (host=%s db=%s)",
-            url, payload["host"], payload["database"],
+            url,
+            payload["host"],
+            payload["database"],
         )
         return "SQL sandbox request failed. Check its configuration and availability.", True

@@ -798,7 +798,11 @@ def render_search_results(query: str, results: List[Dict[str, Any]]) -> str:
     for i, r in enumerate(results, 1):
         original_passage = r.get("expanded") or r.get("document") or ""
         available = max(0, MAX_TEXT_CHARS - sum(len(line) + 1 for line in lines) - HEADER_ALLOWANCE)
-        passage_budget = min(available, max(budget, len(r.get("document") or ""))) if r.get("_context_documents") else budget
+        passage_budget = (
+            min(available, max(budget, len(r.get("document") or "")))
+            if r.get("_context_documents")
+            else budget
+        )
         passage = budget_context(r, passage_budget, seen_context)
         if not passage:
             # A duplicate window is already represented by an earlier citation.

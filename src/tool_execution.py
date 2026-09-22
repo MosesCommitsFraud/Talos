@@ -967,7 +967,9 @@ async def _try_sandbox_file_tool(
     try:
         operation, payload = _parse_sandbox_file_payload(tool, content)
         if payload.get("path"):
-            normalized, problem = _workspace_relative_path(str(payload["path"]), writing=operation in ("write", "edit"))
+            normalized, problem = _workspace_relative_path(
+                str(payload["path"]), writing=operation in ("write", "edit")
+            )
             if problem:
                 return {"error": f"{tool}: {problem}", "exit_code": 1, "sandboxed": True}
             payload["path"] = normalized

@@ -5,10 +5,17 @@ from routes.rag_routes import clean_document_text
 
 def test_clean_export_drops_annotations_figures_and_overlap():
     chunks = [
-        {"content": "Kapitel 1\n\nDer Report Editor legt Bänder an. Ein Band hat eine Höhe.",
-         "context": "Dieser Abschnitt erklärt Bänder.", "aux_terms": "Band, Höhe", "modality": ""},
+        {
+            "content": "Kapitel 1\n\nDer Report Editor legt Bänder an. Ein Band hat eine Höhe.",
+            "context": "Dieser Abschnitt erklärt Bänder.",
+            "aux_terms": "Band, Höhe",
+            "modality": "",
+        },
         {"content": "VLM: Screenshot des Eigenschaftsfensters", "modality": "figure"},
-        {"content": "Ein Band hat eine Höhe. Sie wird im Eigenschaftsfenster geändert.", "modality": ""},
+        {
+            "content": "Ein Band hat eine Höhe. Sie wird im Eigenschaftsfenster geändert.",
+            "modality": "",
+        },
     ]
     out = clean_document_text(chunks)
     assert out == (
