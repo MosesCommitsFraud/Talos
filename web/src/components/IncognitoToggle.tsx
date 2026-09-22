@@ -22,6 +22,7 @@ export function IncognitoToggle() {
   const incognito = usePrefs((s) => s.incognito);
   const toggle = usePrefs((s) => s.toggle);
   const visible = usePrefs((s) => s.visibility.incognitoBtn);
+  const sidebarCollapsed = usePrefs((s) => s.sidebarCollapsed);
   const sessionId = useChat((s) => s.sessionId);
   const newChat = useChat((s) => s.newChat);
   const setArtifactsOpen = useUi((s) => s.setArtifactsOpen);
@@ -95,7 +96,9 @@ export function IncognitoToggle() {
           }}
         />
       )}
-      <div className="pointer-events-none absolute inset-x-0 top-2 z-10 flex items-center gap-2 px-3">
+      {/* Collapsed, the sidebar's expand button floats over this corner
+          (Sidebar.tsx: left-2.5, size-7), so the title starts past it. */}
+      <div className={cn('pointer-events-none absolute inset-x-0 top-2 z-10 flex items-center gap-2 px-3', sidebarCollapsed && 'pl-12')}>
         <div className="min-w-0 flex-1">
           {/* pointer-events only on the text itself, so the empty space next to
               a short title doesn't swallow clicks meant for the chat. */}
