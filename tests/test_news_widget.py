@@ -283,7 +283,6 @@ def test_get_news_is_registered_end_to_end():
     from src.tool_index import ALWAYS_AVAILABLE, BUILTIN_TOOL_DESCRIPTIONS
     from src.tool_parsing import _TOOL_NAME_MAP
     from src.tool_schemas import FUNCTION_TOOL_SCHEMAS
-    from src.tool_security import plan_mode_disabled_tools
     from src.widgets import WIDGET_TYPES
 
     assert "get_news" in TOOL_TAGS
@@ -297,8 +296,6 @@ def test_get_news_is_registered_end_to_end():
     # read complete but have lost their URL.
     assert "get_news" in NEVER_COMPRESS_TOOLS
     assert "get_news" in _RETRIEVAL_TOOLS
-    # Read-only lookup — usable while planning.
-    assert "get_news" not in plan_mode_disabled_tools()
     assert "news" in WIDGET_TYPES
 
 

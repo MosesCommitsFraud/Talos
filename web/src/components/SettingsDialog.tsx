@@ -320,7 +320,6 @@ const VISIBILITY_SECTIONS: Array<{ secKey: string; items: Array<{ key: keyof Vis
     secKey: 'chatBar',
     items: [
       { key: 'composerAttach' },
-      { key: 'composerPlan' },
       { key: 'composerModelPicker' },
       { key: 'contextMeter' },
     ],

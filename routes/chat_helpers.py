@@ -1,5 +1,6 @@
 """Shared helpers for chat routes — context building, post-response tasks, auth resolution."""
 
+import asyncio
 import json
 import logging
 import os
@@ -21,6 +22,11 @@ from src.history_replay import expand_tool_history
 from src.llm_core import normalize_model_id
 from src.prompt_security import untrusted_context_message
 from src.settings import get_setting
+from src.turn_context import (
+    FIGURE_RULE_SOURCE,
+    insert_before_last_user,
+    turn_context_message,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -680,7 +686,12 @@ async def build_chat_context(
         use_skills=skills_enabled,
     )
     _preface_kwargs["use_rag"] = use_rag_val
-    preface, rag_sources = chat_processor.build_context_preface(**_preface_kwargs)
+    # Off the event loop: the preface does blocking work — the query-rewrite LLM
+    # call, the embedding and reranker requests, the vector search. Run inline it
+    # froze every other request and stream on the server until it finished.
+    preface, rag_sources = await asyncio.to_thread(
+        chat_processor.build_context_preface, **_preface_kwargs
+    )
 
     # YouTube transcripts
     for transcript in preprocessed.youtube_transcripts:
@@ -732,14 +743,20 @@ async def build_chat_context(
             if isinstance(m, dict)
             and (m.get("metadata") or {}).get("source") == "retrieved documents"
         ]
+        # The figure rule exists only on turns whose sections carry a figure. It
+        # travels with the retrieved text into the current turn, so the prompt's
+        # head (and with it the prefix cache) stays the same across turns.
+        figure_rules = [
+            str(m.get("content") or "")
+            for m in messages
+            if isinstance(m, dict) and (m.get("metadata") or {}).get("source") == FIGURE_RULE_SOURCE
+        ]
         if rag_msgs:
+            _moved = ("retrieved documents", FIGURE_RULE_SOURCE)
             messages = [
                 m
                 for m in messages
-                if not (
-                    isinstance(m, dict)
-                    and (m.get("metadata") or {}).get("source") == "retrieved documents"
-                )
+                if not (isinstance(m, dict) and (m.get("metadata") or {}).get("source") in _moved)
             ]
             target_idx = None
             for i in range(len(messages) - 1, -1, -1):
@@ -767,6 +784,7 @@ async def build_chat_context(
                         if any(s.get("n") for s in rag_sources)
                         else ""
                     )
+                    + "".join(rule + "\n\n" for rule in figure_rules)
                     + "USER QUESTION:\n"
                 )
                 if isinstance(current, str):
@@ -780,7 +798,19 @@ async def build_chat_context(
                 )
             else:
                 messages.extend(rag_msgs)
+                messages.extend({"role": "system", "content": rule} for rule in figure_rules)
                 logger.info("Appended RAG context as fallback (%d sources)", len(rag_sources))
+
+    # Plain chat: the clock goes right before the question, after the history,
+    # so it never voids the prefix cache for the chat (agent mode adds it in
+    # the agent loop's prompt assembly instead).
+    if not agent_mode:
+        try:
+            from src.user_time import current_datetime_prompt
+
+            insert_before_last_user(messages, turn_context_message(current_datetime_prompt()))
+        except Exception:
+            logger.debug("Failed to add current date/time context", exc_info=True)
 
     # Auto-compact
     messages, context_length, was_compacted = await maybe_compact(

@@ -399,7 +399,6 @@ def setup_chat_routes(
         # caller) keeps whatever the admin configured; only an explicit "false"
         # — the composer's web-search toggle — withholds the web tools below.
         use_web = str(form_data.get("use_web", "true")).lower() != "false"
-        plan_mode = str(form_data.get("plan_mode", "")).lower() == "true"
         # Model reasoning/thinking. Default on; only an explicit "false" disables
         # it (tells vLLM enable_thinking:false for Qwen3-style hybrid models).
         reasoning = str(form_data.get("reasoning", "true")).lower() != "false"
@@ -420,9 +419,6 @@ def setup_chat_routes(
         if workspace:
             _ws_real = os.path.realpath(os.path.expanduser(workspace))
             workspace = _ws_real if os.path.isdir(_ws_real) else ""
-        approved_plan = ""
-        if not plan_mode:
-            approved_plan = (form_data.get("approved_plan") or "").strip()[:8192]
         active_doc_id = form_data.get("active_doc_id", "").strip()
         artifact_selection = None
         artifact_selection_raw = form_data.get("artifact_selection")
@@ -798,6 +794,11 @@ def setup_chat_routes(
 
         # Build disabled-tools set from frontend toggles + user privileges
         disabled_tools = set()
+        # Tools switched off by a composer toggle for this message only. They
+        # are merged into disabled_tools below and also passed on separately:
+        # with the tool catalog they stay in the model's tool list (refused at
+        # execution) so a toggle never changes the prompt's head.
+        turn_disabled = set()
         # The shell/file/MCP/management tool groups are gated by their own
         # privileges (src/tool_security.TOOL_PRIVILEGE_GROUPS), applied in
         # src/agent_loop.py where the owner is known. They are deliberately not
@@ -806,7 +807,7 @@ def setup_chat_routes(
         # Nobody/incognito mode: deny tools that would expose the user's
         # past chats or other identity-linked data.
         if incognito:
-            disabled_tools.update(
+            turn_disabled.update(
                 {
                     "search_chats",  # past chat history
                     "manage_skills",  # skill presets tied to user
@@ -816,7 +817,7 @@ def setup_chat_routes(
         # Web search turned off in the composer: the model answers without
         # reaching the internet for this turn.
         if not use_web:
-            disabled_tools.update({"web_search", "web_fetch"})
+            turn_disabled.update({"web_search", "web_fetch"})
 
         # Enforce per-user privileges
         _privs = {}
@@ -903,10 +904,8 @@ def setup_chat_routes(
                     }
                 )
 
-        if plan_mode:
-            from src.tool_security import plan_mode_disabled_tools
-
-            disabled_tools.update(plan_mode_disabled_tools())
+        turn_disabled -= disabled_tools  # also off for a lasting reason → stays hidden
+        disabled_tools |= turn_disabled
 
         async def stream_with_save() -> AsyncGenerator[str, None]:
             # _effective_mode is read-only here; closure captures it from
@@ -1060,12 +1059,7 @@ def setup_chat_routes(
                         _max_rounds = _DEFAULT_ROUNDS
                     _max_rounds = max(1, min(_max_rounds, 200))
 
-                    # Plan mode produces a detailed design doc (Context/Approach/
-                    # Plan/Verification) and benefits from more reasoning room, so
-                    # give the turn a larger token budget than ordinary replies.
                     _max_tokens = ctx.preset.max_tokens
-                    if plan_mode:
-                        _max_tokens = max(_max_tokens, 8192)
 
                     async for chunk in stream_agent_loop(
                         sess.endpoint_url,
@@ -1085,12 +1079,11 @@ def setup_chat_routes(
                         owner=_user,
                         fallbacks=_fallback_candidates,
                         workspace=workspace or None,
-                        plan_mode=plan_mode,
-                        approved_plan=approved_plan or None,
                         force_db=use_db,
                         use_rag=str(use_rag).lower() == "true",
                         reasoning=reasoning,
                         reasoning_effort=reasoning_effort,
+                        turn_disabled_tools=turn_disabled,
                     ):
                         if chunk.startswith("data: ") and not chunk.startswith("data: [DONE]"):
                             try:

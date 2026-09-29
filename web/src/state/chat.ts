@@ -38,11 +38,8 @@ export interface UiMessage {
   pendingQuestion?: { question: string; options: { label: string; description?: string }[]; multi: boolean };
   /** Latest `update_plan` checklist (markdown) emitted during this turn. */
   plan?: string;
-  /** This turn ran in plan mode and proposed a plan — its content gets an
-   *  "Implement plan" / "Revise" approval card. */
-  planProposed?: boolean;
-  /** Set once the user answers a pendingQuestion or acts on a plan card, so the
-   *  card goes inert (a new turn has started from it). */
+  /** Set once the user answers a pendingQuestion, so the card goes inert (a
+   *  new turn has started from it). */
   answered?: boolean;
   /** Auto-compaction ran before this turn — earlier messages were summarized
    *  to fit the context window. Renders a marker above the bubble. */
@@ -99,7 +96,7 @@ interface ChatState {
   setPendingModel: (m: ChatState['pendingModel']) => void;
   newChat: () => void;
   openSession: (id: string) => Promise<void>;
-  send: (text: string, opts?: { attachments?: Attachment[]; artifactSelection?: ArtifactSelection; onSessionCreated?: (id: string) => void; approvedPlan?: string; planMode?: boolean; goalIteration?: boolean; targetSessionId?: string; resume?: boolean; resumeElapsedMs?: number | null }) => Promise<void>;
+  send: (text: string, opts?: { attachments?: Attachment[]; artifactSelection?: ArtifactSelection; onSessionCreated?: (id: string) => void; goalIteration?: boolean; targetSessionId?: string; resume?: boolean; resumeElapsedMs?: number | null }) => Promise<void>;
   /** Reattach to a turn that is still running server-side for `id` (after a
    *  page reload). Loads the session's history first when we have none.
    *  `elapsedMs` (how long the turn has already run) backdates the working
@@ -119,33 +116,12 @@ interface ChatState {
   compact: () => Promise<void>;
   edit: (msgId: string, content: string) => Promise<void>;
   remove: (msgId: string) => Promise<void>;
-  /** Dismiss the active session's pending proposed plan without executing it
-   *  (the "Cancel" action on the approval bar). */
-  cancelPlan: () => void;
 }
-
-const PLAN_CHECKLIST_RE = /[-*]\s*\[[ xX]\]/;
 
 /** True iff a turn is currently streaming for `id`. Used by the sidebar to
  *  render a running indicator on chats other than the one on screen. */
 export const selectIsStreaming = (id: string | null | undefined) => (s: ChatState) =>
   !!id && !!s.runtimes[id]?.streaming;
-
-/** The active session's proposed plan (a plan-mode turn that produced a
- *  checklist), or null. Drives the side plan panel and the approval bar. */
-export const selectActivePlan = (s: ChatState): UiMessage | null => {
-  for (let i = s.messages.length - 1; i >= 0; i -= 1) {
-    const m = s.messages[i];
-    if (m.role === 'assistant' && m.planProposed && PLAN_CHECKLIST_RE.test(m.content)) return m;
-  }
-  return null;
-};
-/** The active plan only while it still needs a decision (not yet accepted or
- *  cancelled) — drives the composer's approval bar. */
-export const selectPendingPlan = (s: ChatState): UiMessage | null => {
-  const p = selectActivePlan(s);
-  return p && !p.answered ? p : null;
-};
 
 /** The active session's unanswered `ask_user` question, or null — rendered as a
  *  card docked above the composer rather than inline in the transcript. */
@@ -659,7 +635,7 @@ export const useChat = create<ChatState>((set, get) => {
         // left behind by the connection it replaces (never persisted, hence no
         // dbId) would be duplicated — drop them and let the replay rebuild.
         ...(opts?.resume ? dropUnsavedTail(rt.messages) : rt.messages).map((m) =>
-          m.pendingQuestion || m.planProposed ? { ...m, answered: true } : m,
+          m.pendingQuestion ? { ...m, answered: true } : m,
         ),
         // On a resume the user message is already in the loaded history — only
         // the assistant bubble the replayed events stream into is new.
@@ -740,11 +716,6 @@ export const useChat = create<ChatState>((set, get) => {
     const activeDocId = activePreview?.sessionId === sid && activePreview.path.startsWith('document:')
       ? activePreview.path.slice('document:'.length)
       : undefined;
-    // Plan-mode applies to this turn unless the caller overrides it (e.g. an
-    // "Implement plan" approval forces it off and passes the approved checklist).
-    // A resumed turn inherits whatever mode it was started in; only a fresh
-    // send decides plan mode here.
-    const planMode = opts?.resume ? false : (opts?.planMode ?? prefs.planMode);
     try {
       // Two transports, one event handler: a new turn POSTs and reads the
       // response stream, a resume subscribes to the detached server-side run
@@ -756,8 +727,6 @@ export const useChat = create<ChatState>((set, get) => {
               message: text,
               sessionId: sid,
               flags: {
-                planMode,
-                approvedPlan: opts?.approvedPlan,
                 useRag: prefs.useRag,
                 useDb: prefs.useDb,
                 useWeb: prefs.useWeb,
@@ -995,8 +964,6 @@ export const useChat = create<ChatState>((set, get) => {
       patchAi((m) => ({
         streaming: false,
         turnElapsedMs: startedAt != null ? Date.now() - startedAt : m.turnElapsedMs,
-        // A plan-mode turn proposes a plan — its terminal bubble gets an approval card.
-        planProposed: planMode || m.planProposed,
       }));
       // Clear only this session's turn flags — a different chat may be active.
       writeRuntime(sid, () => ({ streaming: false, turnStartedAt: null, abort: null }));
@@ -1046,7 +1013,7 @@ export const useChat = create<ChatState>((set, get) => {
     if (sid) install(sid);
     await get().send(
       `GOAL: ${clean}\n\nWork autonomously toward this objective. Check your result before stopping. If the objective is fully satisfied, end with [GOAL_COMPLETE]. Otherwise state concrete progress and the next action; the goal runner will continue you. Ask the user only when genuinely blocked.`,
-      { planMode: false, goalIteration: true, onSessionCreated: install },
+      { goalIteration: true, onSessionCreated: install },
     );
   },
 
@@ -1066,7 +1033,7 @@ export const useChat = create<ChatState>((set, get) => {
     writeRuntime(sessionId, () => ({ goal: next }));
     await get().send(
       `Continue goal (iteration ${next.iteration}): ${next.objective}\n\nReview all progress so far, perform the next useful work, and verify it. End with [GOAL_COMPLETE] only when the objective is fully satisfied. Ask the user only if genuinely blocked.`,
-      { planMode: false, goalIteration: true, targetSessionId: sessionId },
+      { goalIteration: true, targetSessionId: sessionId },
     );
   },
 
@@ -1126,16 +1093,6 @@ export const useChat = create<ChatState>((set, get) => {
     if (!sessionId || !msg?.dbId) throw new Error('Message not deletable yet');
     await deleteMessages(sessionId, [msg.dbId]);
     writeRuntime(sessionId, (rt) => ({ messages: rt.messages.filter((m) => m.id !== msgId) }));
-  },
-
-  cancelPlan: () => {
-    const { sessionId, messages } = get();
-    if (!sessionId) return;
-    const p = [...messages].reverse().find((m) => m.role === 'assistant' && m.planProposed && !m.answered);
-    if (!p) return;
-    writeRuntime(sessionId, (rt) => ({
-      messages: rt.messages.map((m) => (m.id === p.id ? { ...m, answered: true } : m)),
-    }));
   },
   };
 });

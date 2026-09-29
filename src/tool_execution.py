@@ -1935,6 +1935,16 @@ async def execute_tool_block(
         from src.context_optimizer import do_expand_output
 
         result = do_expand_output(content)
+    elif tool == "find_tools":
+        from src.tool_catalog import do_find_tools
+
+        desc = "find_tools"
+        result = do_find_tools(content)
+    elif tool == "run_tool":
+        # Only reached when a run_tool call couldn't be unwrapped into the
+        # catalog tool it names (see agent_loop._resolve_tool_blocks).
+        desc = "run_tool: invalid call"
+        result = {"error": content, "exit_code": 1}
     elif tool == "edit_file":
         result = await _try_sandbox_file_tool(
             tool=tool, content=content, session_id=session_id, owner=owner

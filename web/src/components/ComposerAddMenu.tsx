@@ -6,7 +6,6 @@ import {
   GlobeIcon,
   MicIcon,
   PaperclipIcon,
-  PencilRulerIcon,
   PlusIcon,
   SettingsIcon,
   SparklesIcon,
@@ -186,24 +185,21 @@ function KnowledgeItems() {
 }
 
 /** The composer's "+" menu: attachments, the skill library, the microphone
- *  chooser, and the per-turn switches (knowledge sources, plan mode, web). */
+ *  chooser, and the per-turn switches (knowledge sources, web). */
 export function ComposerAddMenu({
   onAttach,
   uploading,
   showMic,
-  showPlan,
   className,
 }: {
   onAttach: () => void;
   uploading?: boolean;
   showMic?: boolean;
-  showPlan?: boolean;
   className?: string;
 }) {
   const { t } = useTranslation();
   const auth = useAuth();
   const useWeb = usePrefs((s) => s.useWeb);
-  const planMode = usePrefs((s) => s.planMode);
   const toggle = usePrefs((s) => s.toggle);
 
   return (
@@ -229,20 +225,6 @@ export function ComposerAddMenu({
         {showMic && <MicSubmenu />}
         <MenuSeparator />
         <KnowledgeItems />
-        {showPlan && (
-          // Plan mode is a per-turn switch like the others, so it reads as a
-          // checked row rather than the old Plan/Work face swap.
-          <MenuItem
-            onSelect={(e) => {
-              e.preventDefault();
-              toggle('planMode');
-            }}
-          >
-            <PencilRulerIcon />
-            <span className="min-w-0 flex-1 truncate">{t('composer.plan')}</span>
-            <CheckIcon className={cn('size-3.5 shrink-0 text-primary', planMode ? 'opacity-100' : 'opacity-0')} />
-          </MenuItem>
-        )}
         {/* Per-turn, not a deployment setting: with it off the backend withholds
             web_search / web_fetch for the messages that follow. */}
         <MenuItem

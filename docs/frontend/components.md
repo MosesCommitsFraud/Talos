@@ -23,7 +23,7 @@ component does. (For an interactive, rendered catalog, see *Storybook* at the bo
 | `RagSources.tsx` | Shows the document passages cited by a RAG answer |
 | `ArtifactsPanel.tsx` | Side panel for generated artifacts |
 | `Lightbox.tsx` | Full-screen image viewer |
-| `PlanCard.tsx` / `PlanPanel.tsx` | Display the agent's plan |
+| `PlanCard.tsx` | Live `update_plan` checklist |
 
 ## Navigation & chrome
 

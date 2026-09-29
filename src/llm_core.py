@@ -934,6 +934,49 @@ def _sanitize_llm_messages(messages: List[Dict]) -> List[Dict]:
     return merged
 
 
+# Prefix for a system message that arrives mid-conversation and is therefore
+# sent in place as a user turn (see _consolidate_system_messages).
+SYSTEM_NOTICE_PREFIX = "[System notice]"
+
+
+def _consolidate_system_messages(messages: List[Dict]) -> List[Dict]:
+    """Fold system messages into the single leading system turn the chat
+    templates require (Qwen3.5+ rejects a system message that isn't first).
+
+    Only system messages that precede the first assistant/tool message are
+    hoisted. Those are the preface — policy, preset, tool prompt, skill
+    library — and are the same every turn. A system message *after* that
+    point (an agent-loop nudge, the verifier's findings, the artifact
+    manifest) is a per-turn note, and hoisting it rewrote the first tokens of
+    the prompt: vLLM's prefix cache matches from token 0 and stops at the
+    first difference, so every such note re-prefilled the whole conversation.
+    Those are sent in place as a user turn instead, marked as coming from the
+    system, which leaves everything before them cacheable.
+    """
+    first_reply = next(
+        (i for i, m in enumerate(messages) if m.get("role") in ("assistant", "tool")),
+        len(messages),
+    )
+    sys_parts = []
+    rest = []
+    for i, m in enumerate(messages):
+        if m.get("role") != "system":
+            rest.append(m)
+        elif i < first_reply:
+            sys_parts.append(m.get("content") or "")
+        else:
+            content = m.get("content") or ""
+            if isinstance(content, list):
+                content = [{"type": "text", "text": SYSTEM_NOTICE_PREFIX}] + content
+            else:
+                content = f"{SYSTEM_NOTICE_PREFIX}\n{content}"
+            rest.append({"role": "user", "content": content})
+    out = ([{"role": "system", "content": "\n\n".join(sys_parts)}] if sys_parts else []) + rest
+    # A converted notice can land next to a user turn; re-run the sanitizer so
+    # consecutive user messages are merged exactly as everywhere else.
+    return _sanitize_llm_messages(out)
+
+
 def _normalize_anthropic_url(url: str) -> str:
     """Ensure Anthropic URL points to /v1/messages."""
     url = url.rstrip("/")
@@ -1277,18 +1320,8 @@ def llm_call(
 
     messages_copy = _sanitize_llm_messages(messages)
 
-    # Consolidate multiple system messages into one at the start.
-    sys_parts = []
-    non_sys = []
-    for m in messages_copy:
-        if m.get("role") == "system":
-            sys_parts.append(m.get("content") or "")
-        else:
-            non_sys.append(m)
-    if sys_parts:
-        messages_copy = [{"role": "system", "content": "\n\n".join(sys_parts)}] + non_sys
-    else:
-        messages_copy = non_sys
+    # One leading system turn; later system notes stay in place (cache-safe).
+    messages_copy = _consolidate_system_messages(messages_copy)
 
     provider = _detect_provider(url)
     cache_key = _get_cache_key(url, model, messages_copy, temperature, max_tokens)
@@ -1437,18 +1470,8 @@ async def llm_call_async(
     provider = _detect_provider(url)
     messages_copy = _sanitize_llm_messages(messages)
 
-    # Consolidate multiple system messages into one at the start.
-    sys_parts = []
-    non_sys = []
-    for m in messages_copy:
-        if m.get("role") == "system":
-            sys_parts.append(m.get("content") or "")
-        else:
-            non_sys.append(m)
-    if sys_parts:
-        messages_copy = [{"role": "system", "content": "\n\n".join(sys_parts)}] + non_sys
-    else:
-        messages_copy = non_sys
+    # One leading system turn; later system notes stay in place (cache-safe).
+    messages_copy = _consolidate_system_messages(messages_copy)
 
     cache_key = _get_cache_key(url, model, messages_copy, temperature, max_tokens)
     cached_response = _get_cached_response(cache_key)
@@ -1595,19 +1618,8 @@ async def stream_llm(
     provider = _detect_provider(url)
     messages_copy = _sanitize_llm_messages(messages)
 
-    # Consolidate multiple system messages into one at the start.
-    # Some models (e.g. Qwen3.5) reject system messages that aren't first.
-    sys_parts = []
-    non_sys = []
-    for m in messages_copy:
-        if m.get("role") == "system":
-            sys_parts.append(m.get("content") or "")
-        else:
-            non_sys.append(m)
-    if sys_parts:
-        messages_copy = [{"role": "system", "content": "\n\n".join(sys_parts)}] + non_sys
-    else:
-        messages_copy = non_sys
+    # One leading system turn; later system notes stay in place (cache-safe).
+    messages_copy = _consolidate_system_messages(messages_copy)
 
     if provider == "anthropic":
         target_url = _normalize_anthropic_url(url)

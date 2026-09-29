@@ -6,6 +6,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import quote
 
 from src.prompt_security import UNTRUSTED_CONTEXT_POLICY, untrusted_context_message
+from src.turn_context import FIGURE_RULE_SOURCE
 
 logger = logging.getLogger(__name__)
 
@@ -843,18 +844,10 @@ class ChatProcessor:
         # Add preset system prompt if specified
         if preset_system_prompt:
             preface.append({"role": "system", "content": preset_system_prompt})
-        if not agent_mode:
-            try:
-                from src.user_time import current_datetime_prompt
-
-                preface.append(
-                    {
-                        "role": "system",
-                        "content": current_datetime_prompt(),
-                    }
-                )
-            except Exception:
-                logger.debug("Failed to add current date/time context", exc_info=True)
+        # The current date/time is NOT part of the preface: the clock changes
+        # every minute and the preface precedes the whole history, so it would
+        # void the prefix cache for the entire chat. Callers put it in the turn
+        # context right before the question (see src/turn_context.py).
         preface.append(
             {
                 "role": "system",
@@ -907,7 +900,17 @@ class ChatProcessor:
                 # section actually has one (keeps the rule out of context
                 # otherwise). Trusted system message, not untrusted data.
                 if any(s.get("image_url") for s in rag_sources):
-                    preface.append({"role": "system", "content": _FIGURE_EMBED_RULE})
+                    # Tagged so build_chat_context can move it next to the
+                    # retrieved sections in the current turn — it only exists on
+                    # turns with figures, so leaving it in the preface would
+                    # change the prompt's head from turn to turn.
+                    preface.append(
+                        {
+                            "role": "system",
+                            "content": _FIGURE_EMBED_RULE,
+                            "metadata": {"source": FIGURE_RULE_SOURCE},
+                        }
+                    )
 
         # Skills index — progressive disclosure. Only injected when the
         # model has the `manage_skills` tool available (agent_mode), and

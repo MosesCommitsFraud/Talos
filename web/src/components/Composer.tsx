@@ -4,7 +4,6 @@ import {
   CirclePauseIcon,
   CircleStopIcon,
   CornerDownLeftIcon,
-  ListChecksIcon,
   Loader2Icon,
   MicIcon,
   PaperclipIcon,
@@ -17,7 +16,7 @@ import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 import { fetchCapabilities, uploadDownloadUrl, uploadFiles, type UploadedFile } from '@/api/client';
 import type { ArtifactSelection } from '@/api/types';
-import { selectPendingPlan, useChat } from '@/state/chat';
+import { useChat } from '@/state/chat';
 import { usePrefs } from '@/state/prefs';
 import { useUi } from '@/state/ui';
 import { cn } from '@/lib/utils';
@@ -29,7 +28,6 @@ import { FilePreviewFace, hasVisualPreview, openUploadViewer } from './Attachmen
 import { FileTypeIcon } from './FileTypeIcon';
 import { ComposerAddMenu } from './ComposerAddMenu';
 import { ModelEffortPicker } from './ModelEffortPicker';
-import { Button } from './ui/button';
 import { Tooltip } from './ui/misc';
 
 /** How tall the input may grow before it starts scrolling. */
@@ -57,7 +55,6 @@ type SlashCommand = {
 const SLASH_COMMANDS: SlashCommand[] = [
   { name: 'btw', description: 'Ask a side question without changing the current task', takesText: true },
   { name: 'goal', description: 'Run autonomously until the goal is complete or blocked', takesText: true },
-  { name: 'plan', description: 'Create an editable execution plan', takesText: true },
   { name: 'status', description: 'Show goal progress, next action, and blockers' },
   { name: 'compact', description: 'Summarize and persist older conversation context' },
   { name: 'pause', description: 'Pause the active goal after the current turn' },
@@ -161,7 +158,6 @@ export function Composer() {
   const [dragging, setDragging] = useState(false);
   const [slashIndex, setSlashIndex] = useState(0);
   const [commandError, setCommandError] = useState('');
-  const [planArtifactSelections, setPlanArtifactSelections] = useState<Record<string, ArtifactSelection>>({});
   const [queuedMessages, setQueuedMessages] = useState<Array<{
     id: string;
     text: string;
@@ -188,9 +184,6 @@ export function Composer() {
   const resumeGoal = useChat((s) => s.resumeGoal);
   const cancelGoal = useChat((s) => s.cancelGoal);
   const compact = useChat((s) => s.compact);
-  const cancelPlan = useChat((s) => s.cancelPlan);
-  const pendingPlan = useChat(selectPendingPlan);
-  const setPlanPanelOpen = useUi((s) => s.setPlanPanelOpen);
   const artifactSelection = useUi((s) => s.artifactSelection);
   const setArtifactSelection = useUi((s) => s.setArtifactSelection);
   const prefs = usePrefs();
@@ -208,17 +201,6 @@ export function Composer() {
   const slashItems = slashMatch
     ? SLASH_COMMANDS.filter((c) => c.name.startsWith(slashMatch[1].toLowerCase()))
     : [];
-
-  const rememberPlanSelection = (selection: ArtifactSelection | null) => {
-    const key = selection?.sessionId ?? sessionId;
-    if (!key) return;
-    setPlanArtifactSelections((items) => {
-      if (selection) return { ...items, [key]: selection };
-      const next = { ...items };
-      delete next[key];
-      return next;
-    });
-  };
 
   useEffect(() => {
     setSlashIndex(0);
@@ -467,10 +449,9 @@ export function Composer() {
         attachments: pending,
         artifactSelection: artifactSelection ?? undefined,
       }]);
-      if (prefs.planMode) rememberPlanSelection(artifactSelection);
       setText('');
       setPending([]);
-      if (!prefs.planMode) setArtifactSelection(null);
+      setArtifactSelection(null);
       requestAnimationFrame(autoresize);
       setCommandError('');
       return;
@@ -497,7 +478,6 @@ export function Composer() {
       }
       const prompts: Record<string, string> = {
         btw: `Side question: ${arg}\n\nAnswer this briefly without changing, replacing, or reprioritizing the current task or goal. Then return control to the existing task.`,
-        plan: `Create an editable step-by-step plan for: ${arg || 'the current request'}. Do not execute it yet.`,
         status: 'Report the current objective, completed work, current step, next action, and any blockers. Do not start new work.',
         summarize: `Summarize ${arg || 'the attached material or current conversation'}. Preserve decisions, constraints, dates, and open questions.`,
         rewrite: `Rewrite the following clearly while preserving its meaning: ${arg || 'the attached or most recently discussed text'}`,
@@ -511,18 +491,16 @@ export function Composer() {
       if (prompts[command]) {
         setText(''); setPending([]); requestAnimationFrame(autoresize);
         const selection = artifactSelection ?? undefined;
-        if (command === 'plan' || prefs.planMode) rememberPlanSelection(artifactSelection);
-        if (command !== 'plan' && !prefs.planMode) setArtifactSelection(null);
+        setArtifactSelection(null);
         await send(prompts[command], { attachments: pending, artifactSelection: selection });
         return;
       }
     }
     const attachments = pending;
     const selection = artifactSelection ?? undefined;
-    if (prefs.planMode) rememberPlanSelection(artifactSelection);
     setText('');
     setPending([]);
-    if (!prefs.planMode) setArtifactSelection(null);
+    setArtifactSelection(null);
     requestAnimationFrame(autoresize);
     await send(value, {
       attachments,
@@ -533,40 +511,6 @@ export function Composer() {
     });
     void queryClient.refetchQueries({ queryKey: ['sessions'], type: 'active' });
   };
-
-  const acceptPlan = async () => {
-    if (!pendingPlan) return;
-    const selection = sessionId ? planArtifactSelections[sessionId] : undefined;
-    rememberPlanSelection(null);
-    setArtifactSelection(null);
-    await send(t('plan.implementing'), { approvedPlan: pendingPlan.content, planMode: false, artifactSelection: selection });
-    void queryClient.refetchQueries({ queryKey: ['sessions'], type: 'active' });
-  };
-
-  // A proposed plan replaces the input with an approval bar: Cancel discards it,
-  // Accept executes it via the approved-plan flow. The full plan is in the panel.
-  if (pendingPlan) {
-    return (
-      <div className="mx-auto w-full max-w-[800px] px-4 pb-2">
-        <div className="flex items-center gap-3 rounded-[20px] border border-primary/30 bg-primary/[0.05] px-4 py-3">
-          <button
-            type="button"
-            onClick={() => setPlanPanelOpen(true)}
-            className="flex min-w-0 flex-1 items-center gap-2 text-left text-sm text-foreground"
-          >
-            <ListChecksIcon className="size-4 shrink-0 text-primary" />
-            <span className="truncate">{t('plan.reviewPrompt')}</span>
-          </button>
-          <Button variant="outline" size="sm" onClick={cancelPlan}>
-            {t('plan.cancel')}
-          </Button>
-          <Button size="sm" onClick={() => void acceptPlan()}>
-            <PlayIcon /> {t('plan.accept')}
-          </Button>
-        </div>
-      </div>
-    );
-  }
 
   return (
     <div className="mx-auto w-full max-w-[800px] px-4 pb-2">
@@ -788,7 +732,6 @@ export function Composer() {
                 onAttach={() => fileInput.current?.click()}
                 uploading={uploading}
                 showMic={!!caps?.voice}
-                showPlan={prefs.visibility.composerPlan}
                 className={INLINE_CONTROL}
               />
             </div>
@@ -853,7 +796,6 @@ export function Composer() {
                   onAttach={() => fileInput.current?.click()}
                   uploading={uploading}
                   showMic={!!caps?.voice}
-                  showPlan={prefs.visibility.composerPlan}
                 />
               )}
             </div>

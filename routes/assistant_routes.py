@@ -14,6 +14,7 @@ OpenAI client (OpenWebUI, Continue, LangChain, curl) can drive it. See
 routes/api_token_routes.py for the CRUD pattern this mirrors.
 """
 
+import asyncio
 import json
 import logging
 import re
@@ -360,7 +361,9 @@ def setup_assistant_routes(chat_processor=None, session_manager=None) -> APIRout
         preface: list[dict] = [{"role": "system", "content": TALOS_SYSTEM_PROMPT}]
         if chat_processor is not None:
             try:
-                preface, _rag = chat_processor.build_context_preface(
+                # Blocking retrieval/LLM work — keep it off the event loop.
+                preface, _rag = await asyncio.to_thread(
+                    chat_processor.build_context_preface,
                     message=_last_user_text(body.messages),
                     session=None,
                     use_rag=cfg["use_rag"],
