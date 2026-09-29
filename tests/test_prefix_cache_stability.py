@@ -224,7 +224,7 @@ async def test_second_turn_extends_the_first_turns_prompt(captured):
     # Identical system turn — the clock and the DB note are not in it.
     assert w1[0] == w2[0]
     assert "10:0" not in w1[0]["content"]
-    assert "DATABASE MODE" not in w2[0]["content"]
+    assert "DATABASE ACCESS" not in w2[0]["content"]
     # Everything before the first turn's question is shared verbatim; the
     # question itself differs only because its turn context is gone.
     assert len(w1) == 4
@@ -232,6 +232,6 @@ async def test_second_turn_extends_the_first_turns_prompt(captured):
     assert w2[3] == {"role": "user", "content": "Wie viele Kunden haben wir?"}
     assert "10:00" in w1[3]["content"] and "10:01" in w2[-1]["content"]
     # The per-turn material sits in the new question's turn.
-    assert "DATABASE MODE" in w2[-1]["content"]
+    assert "DATABASE ACCESS" in w2[-1]["content"]
     assert "`web_search`" in w2[-1]["content"]
     assert w2[-1]["content"].endswith("Und im Vorjahr?")

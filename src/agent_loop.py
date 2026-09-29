@@ -336,7 +336,7 @@ Use it when the work is slow AND the user does not need it inside this reply —
 Ask the user a multiple-choice question when the task is genuinely ambiguous and the answer changes what you do next (pick an approach, confirm an assumption, choose a target). 2-6 options. The user gets clickable buttons; calling this ENDS your turn and their choice comes back as your next message. Prefer sensible defaults — only ask when you truly can't proceed well without their input.
 **Offering a choice IS this tool.** The moment you decide to put a question to the user, it goes in an `ask_user` call — never written out in your prose. Ending a reply with "Was möchten Sie tun?" followed by a list, a row of bracketed choices like `[Option A · Option B · Option C]`, a numbered menu, or "sag mir welches" is the failure this rule exists to prevent: it LOOKS like buttons and does nothing. The user cannot click a sentence, so they have to retype an option you already knew — and you spent a turn to make them do it.
 So: either commit to a sensible default and carry on, or call `ask_user`. Those are the only two endings. Never a menu in text.""",
-    "update_plan": '- ```update_plan``` — While executing an approved plan, write the full checklist back with completed steps marked `- [x]`. Args (JSON): {"plan": "- [x] done step\\n- [ ] next step"}. Always pass the COMPLETE checklist, not a diff.',
+    "update_plan": '- ```update_plan``` — For a multi-step task, show a progress checklist and write it back with completed steps marked `- [x]` as you go. Args (JSON): {"plan": "- [x] done step\\n- [ ] next step"}. Always pass the COMPLETE checklist, not a diff.',
 }
 
 
@@ -2300,9 +2300,8 @@ async def stream_agent_loop(
             messages.insert(0, {"role": "system", "content": _ws_note})
         logger.info("[workspace] active for this turn: %s", workspace)
     if force_db:
-        # The DB toggle is an explicit instruction, not a hint: answer THIS
-        # message from the external SQL database. Prepended like the workspace
-        # note so small models can't miss it.
+        # The DB toggle makes the database available and preferred for this
+        # message; the note below tells the model when to use it.
         #
         # Big schemas need many round-trips just to orient — list_tables,
         # describe on several tables, then the actual SELECT(s), often with a
@@ -2343,23 +2342,36 @@ async def stream_agent_loop(
             warm_schema_card(None)
         except Exception as _sc_err:
             logger.debug("[db-mode] schema card warm-up skipped: %s", _sc_err)
+        # A preference, not an order. The switch is on by default ("Full
+        # Knowledge"), so it rides along on every message — including "who is
+        # <celebrity>" or "explain X". A hard "you MUST query" sent those into
+        # the database, and on a miss the model kept hunting through tables.
         _db_note = (
-            "## DATABASE MODE\n"
-            "The user activated the database button for this message: they want "
-            "it answered FROM the configured external SQL database. You MUST "
-            "call the `query_sql` tool before answering — do not answer from "
-            "general knowledge and do not use python/bash to reach the database."
+            "## DATABASE ACCESS\n"
+            "The user's SQL database is connected for this message (read it with "
+            "`query_sql`). First decide whether the question is about THEIR data — "
+            "records in their business such as customers, contacts, orders, articles, "
+            "employees, figures and reports, or anything the reference material or the "
+            "conversation ties to the database. If it is, look it up with `query_sql` "
+            "before answering and prefer what the database says over general knowledge "
+            "or the web. If it is not — general knowledge, public figures, events, news, "
+            "definitions, how-to questions, small talk — answer normally without "
+            "querying. When unsure, one quick lookup is fine; if it finds nothing, say "
+            "in one sentence that the database has no match and answer from general "
+            "knowledge (or the web) instead of searching further tables. Never use "
+            "python/bash to reach the database."
             + _db_list_note
-            + " If the reference material and the conversation don't already tell you "
-            "which tables to use, call `query_sql` action=schema_map once to see every "
-            "table and its columns, then run the SELECT that answers the question."
+            + " For a database question where the reference material and the "
+            "conversation don't already tell you which tables to use, call `query_sql` "
+            "action=schema_map once to see every table and its columns, then run the "
+            "SELECT that answers the question."
         )
         # In the turn context before the question, never at the head of the
         # system prompt: the note exists only on DB turns, so prepending it
         # voided the prefix cache for the whole chat whenever the button was
         # toggled.
         insert_before_last_user(messages, turn_context_message(_db_note))
-        logger.info("[db-mode] forced query_sql for this turn")
+        logger.info("[db-mode] database available for this turn")
     # With the catalog, switched-off tools stay in the tool list (see above), so
     # the model is told here which ones it can't use for this message.
     _turn_off_listed = sorted(_turn_off & _catalog_names)
@@ -2615,8 +2627,9 @@ async def stream_agent_loop(
                 _kb = await asyncio.to_thread(_retrieve_sql_knowledge, _sql_kb_query(messages))
                 if _kb:
                     _kb_content = (
-                        "Reference material for this database (uploaded SQL knowledge "
-                        "— use it to navigate the schema):\n" + _kb
+                        "Reference material for the user's database (uploaded SQL "
+                        "knowledge — use it to navigate the schema when the question "
+                        "is about their data; its presence doesn't mean it is):\n" + _kb
                     )
                     if _sql_kb_msg is None:
                         _sql_kb_msg = turn_context_message(_kb_content)

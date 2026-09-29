@@ -874,7 +874,7 @@ FUNCTION_TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "update_plan",
-            "description": "Update the active approved plan checklist while executing it. Pass the complete markdown checklist with completed steps marked - [x].",
+            "description": "Show the user a progress checklist for a multi-step task and keep it current as you work. Pass the complete markdown checklist with completed steps marked - [x].",
             "parameters": {
                 "type": "object",
                 "properties": {
