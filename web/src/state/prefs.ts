@@ -36,7 +36,6 @@ export interface Visibility {
   incognitoBtn: boolean;
   messageMetrics: boolean;
   composerAttach: boolean;
-  composerPlan: boolean;
   composerDocs: boolean;
   composerDb: boolean;
   composerModelPicker: boolean;
@@ -55,7 +54,6 @@ export const DEFAULT_VISIBILITY: Visibility = {
   incognitoBtn: true,
   messageMetrics: true,
   composerAttach: true,
-  composerPlan: true,
   composerDocs: true,
   composerDb: true,
   composerModelPicker: true,
@@ -111,7 +109,6 @@ interface PrefsState {
    *  both are configured, single toggle when one is) drives these; they map to
    *  the use_rag / use_db request flags. Default on so "Full Knowledge" is the
    *  out-of-the-box mode. */
-  planMode: boolean;
   useRag: boolean;
   useDb: boolean;
   /** Whether the turn may reach the web. Maps to the `use_web` request flag;
@@ -146,7 +143,7 @@ interface PrefsState {
   setReasoningEffort: (e: ReasoningEffort) => void;
   setVisibility: (key: keyof Visibility, value: boolean) => void;
   resetVisibility: () => void;
-  toggle: (key: 'planMode' | 'useRag' | 'useDb' | 'useWeb' | 'reasoning' | 'incognito') => void;
+  toggle: (key: 'useRag' | 'useDb' | 'useWeb' | 'reasoning' | 'incognito') => void;
   /** Set both knowledge flags at once (used by the mode dropdown). */
   setKnowledge: (useRag: boolean, useDb: boolean) => void;
   setMicDeviceId: (id: string | null) => void;
@@ -168,7 +165,6 @@ export const usePrefs = create<PrefsState>()(
       llmLang: 'auto',
       visibility: DEFAULT_VISIBILITY,
       workingAnimation: 'orb',
-      planMode: false,
       useRag: true,
       useDb: true,
       useWeb: true,

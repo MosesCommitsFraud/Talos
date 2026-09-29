@@ -49,10 +49,6 @@ interface UiState {
   setArtifactsOpen: (open: boolean) => void;
   panelMode: 'files' | 'preview';
   setPanelMode: (mode: 'files' | 'preview') => void;
-  /** Right-side plan drawer (a proposed plan awaiting approval). Auto-opens when
-   *  a plan is proposed; the user can collapse it and reopen from the approval bar. */
-  planPanelOpen: boolean;
-  setPlanPanelOpen: (open: boolean) => void;
   /** Right-side drawer listing the session's background jobs and their live
    *  output. Opened from the task chip in the working row; never auto-opens —
    *  a job runs precisely so the reader can carry on with something else. */
@@ -100,8 +96,6 @@ export const useUi = create<UiState>((set) => ({
   setArtifactsOpen: (artifactsOpen) => set({ artifactsOpen }),
   panelMode: 'files',
   setPanelMode: (panelMode) => set({ panelMode }),
-  planPanelOpen: false,
-  setPlanPanelOpen: (planPanelOpen) => set({ planPanelOpen }),
   tasksPanelOpen: false,
   setTasksPanelOpen: (tasksPanelOpen) => set({ tasksPanelOpen }),
   lightbox: null,

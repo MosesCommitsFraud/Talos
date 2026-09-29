@@ -1347,9 +1347,6 @@ export const importData = (data: unknown) => postJSON<{ ok?: boolean; message?: 
 export const wipeData = (kind: string) => postJSON<{ ok?: boolean;[key: string]: unknown }>(`/api/admin/wipe/${kind}`, undefined, 'DELETE');
 
 export interface StreamFlags {
-  planMode?: boolean;
-  /** A previously proposed plan the user approved — the turn executes it. */
-  approvedPlan?: string;
   useRag?: boolean;
   useDb?: boolean;
   /** Whether the turn may reach the web. `false` makes the backend withhold
@@ -1390,8 +1387,6 @@ export async function streamChat(opts: {
   fd.set('message', opts.message);
   fd.set('session', opts.sessionId);
   const f = opts.flags ?? {};
-  if (f.planMode) fd.set('plan_mode', 'true');
-  if (f.approvedPlan) fd.set('approved_plan', f.approvedPlan);
   fd.set('use_rag', f.useRag === true ? 'true' : 'false');
   fd.set('use_db', f.useDb === true ? 'true' : 'false');
   if (f.useWeb === false) fd.set('use_web', 'false');

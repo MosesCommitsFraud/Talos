@@ -77,6 +77,9 @@ TOOL_TAGS = {
     # Retrieve the full original of a compressed tool output
     # (see src/context_optimizer.py)
     "expand_output",
+    # Load a catalog tool's definition (see src/tool_catalog.py). Its partner,
+    # run_tool, is unwrapped into the named tool before execution.
+    "find_tools",
 }
 
 ToolBlock = namedtuple("ToolBlock", ["tool_type", "content"])

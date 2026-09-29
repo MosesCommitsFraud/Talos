@@ -119,8 +119,9 @@ class RagPipelineConfig(BaseModel):
     image_embed_model: str = ""
     # Advanced — opt-in tree-sitter AST code chunking (off by default).
     code_lane_enabled: bool = False
-    # Advanced — conversation-aware query rewrite before retrieval (off by default).
-    query_rewrite_enabled: bool = False
+    # Advanced — conversation-aware query rewrite before retrieval. On by
+    # default, matching chat_processor._maybe_rewrite_query.
+    query_rewrite_enabled: bool = True
     # Advanced — ingest-time Contextual Retrieval + the LLM endpoint it uses.
     contextual_retrieval_enabled: bool = False
     llm_url: str = ""
@@ -328,7 +329,8 @@ def _public(cfg: dict) -> dict:
         "image_embed_url": cfg.get("image_embed_url", ""),
         "image_embed_model": cfg.get("image_embed_model", ""),
         "code_lane_enabled": bool(cfg.get("code_lane_enabled", False)),
-        "query_rewrite_enabled": bool(cfg.get("query_rewrite_enabled", False)),
+        # Same default as the chat path, so the form shows what actually runs.
+        "query_rewrite_enabled": bool(cfg.get("query_rewrite_enabled", True)),
         "contextual_retrieval_enabled": bool(cfg.get("contextual_retrieval_enabled", False)),
         "llm_url": cfg.get("llm_url", ""),
         "llm_model": cfg.get("llm_model", ""),

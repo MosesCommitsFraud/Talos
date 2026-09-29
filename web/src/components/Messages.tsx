@@ -1,4 +1,4 @@
-import { CheckIcon, ChevronDownIcon, CopyIcon, DownloadIcon, FoldVerticalIcon, ListChecksIcon, LoaderIcon, PencilIcon, ScanSearchIcon, TerminalIcon, Trash2Icon } from 'lucide-react';
+import { CheckIcon, ChevronDownIcon, CopyIcon, DownloadIcon, FoldVerticalIcon, LoaderIcon, PencilIcon, ScanSearchIcon, TerminalIcon, Trash2Icon } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -806,23 +806,6 @@ function ArtifactChips({ sessionId, files }: { sessionId: string; files: Artifac
   );
 }
 
-/** Compact marker in the message stream for a proposed plan — the full plan
- *  lives in the side panel, which this reopens if it was collapsed. */
-function PlanChip() {
-  const { t } = useTranslation();
-  const openPlan = useUi((s) => s.setPlanPanelOpen);
-  return (
-    <button
-      type="button"
-      onClick={() => openPlan(true)}
-      className="mt-3 inline-flex items-center gap-1.5 rounded-lg border border-primary/30 bg-primary/[0.06] px-2.5 py-1.5 text-xs font-medium text-primary transition-colors hover:bg-primary/10"
-    >
-      <ListChecksIcon className="size-3.5" />
-      {t('plan.viewPlan')}
-    </button>
-  );
-}
-
 /** Centered divider shown above a turn when auto-compaction ran before it —
  *  tells the user older messages were summarized to keep the chat in-context. */
 function CompactionMarker() {
@@ -893,10 +876,9 @@ function AssistantTurn({ turn, containsLast, artifactFiles, sessionId }: { turn:
 
   const last = turn[turn.length - 1];
   const copyText = turn.map((m) => m.content.trim()).filter(Boolean).join('\n\n');
-  // Interactive cards: a live/updated plan checklist, and (settled) a question
-  // the agent asked. Stamped onto the bubble that received the turn's deltas.
+  // Live/updated plan checklist (update_plan), stamped onto the bubble that
+  // received the turn's deltas.
   const planMsg = [...turn].reverse().find((m) => m.plan);
-  const questionMsg = [...turn].reverse().find((m) => m.pendingQuestion);
   const compacted = turn.some((m) => m.compacted);
 
   if (streaming) {
@@ -949,12 +931,6 @@ function AssistantTurn({ turn, containsLast, artifactFiles, sessionId }: { turn:
   const webCited = citedNumbers(copyText)
     .map((n) => citeLookup.get(n))
     .filter((c): c is NonNullable<typeof c> => c?.kind === 'web');
-  // A plan-mode turn that actually proposed a plan (a checklist is present) gets
-  // a compact chip; the full plan lives in the side panel. Strictly gated on
-  // planProposed so ordinary turns never get it, and superseded by a question.
-  const proposalMsg =
-    !questionMsg && terminal?.planProposed && /[-*]\s*\[[ xX]\]/.test(terminal.content) ? terminal : undefined;
-
   return (
     <>
       {compacted && <CompactionMarker />}
@@ -966,15 +942,13 @@ function AssistantTurn({ turn, containsLast, artifactFiles, sessionId }: { turn:
       {widgets.map((widget, i) => (
         <WidgetView key={`w-${i}`} widget={widget} settled />
       ))}
-      {/* The answer itself stays outside the fold. A proposed plan opens in the
-          side panel instead, so the stream shows a compact chip. */}
-      {!proposalMsg && terminal && (
+      {/* The answer itself stays outside the fold. */}
+      {terminal && (
         <div className={terminal.error ? 'text-destructive-foreground' : 'text-strong'}>
           <Markdown text={terminal.content} />
         </div>
       )}
-      {proposalMsg && <PlanChip />}
-      {planMsg && !proposalMsg && <PlanCard msg={planMsg} />}
+      {planMsg && <PlanCard msg={planMsg} />}
       {/* Images produced inside a collapsed tool group, re-surfaced between the
           answer and the artifacts button. No subtitles: this is a recap. */}
       {createdImages.length > 0 && (

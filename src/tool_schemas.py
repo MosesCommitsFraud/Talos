@@ -149,6 +149,9 @@ FUNCTION_TOOL_SCHEMAS = [
             "description": (
                 "Read-only access to the configured external SQL database. Use for database "
                 "questions, schema/table inspection, metrics, reports, and SELECT queries. "
+                "To orient in an unfamiliar database, call action=schema_map ONCE: it returns "
+                "every table/view and the key columns in one result (cached, always matches "
+                "the current schema) — use it instead of list_tables plus many describes. "
                 "Credentials are loaded by the backend from environment variables and are never "
                 "needed in the prompt. Results over 200 rows are saved to a CSV in your workspace "
                 "and only a preview is shown — read that file with pandas instead of re-running "
@@ -163,7 +166,7 @@ FUNCTION_TOOL_SCHEMAS = [
                 "properties": {
                     "action": {
                         "type": "string",
-                        "enum": ["list_tables", "describe", "query"],
+                        "enum": ["schema_map", "list_tables", "describe", "query"],
                         "description": "Operation to perform",
                     },
                     "table": {"type": "string", "description": "Table name for describe"},

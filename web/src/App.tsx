@@ -20,14 +20,13 @@ import { UsersWorkspace } from './components/users/UsersWorkspace';
 import { TicketsWorkspace } from './components/tickets/TicketsWorkspace';
 import { TicketDialog } from './components/tickets/TicketDialog';
 import { Lightbox } from './components/Lightbox';
-import { PlanPanel } from './components/PlanPanel';
 import { TasksPanel } from './components/TasksPanel';
 import { PendingQuestion } from './components/AskUser';
 import { AuthGate } from './components/auth/AuthGate';
 import { TooltipProvider } from './components/ui/misc';
 import { Toaster } from './components/ui/toast';
 import { applyDensity, applyLang, applyTheme, usePrefs } from './state/prefs';
-import { selectPendingPlan, useChat } from './state/chat';
+import { useChat } from './state/chat';
 import { useUi } from './state/ui';
 import { queryClient } from './lib/queryClient';
 
@@ -77,14 +76,6 @@ export default function App() {
   // between a conversation and a genuinely new draft, avoiding a welcome-page
   // flash while older chat history loads.
   const hasActiveSession = useChat((s) => s.sessionId !== null);
-  const pendingPlanId = useChat((s) => selectPendingPlan(s)?.id ?? null);
-  const setPlanPanelOpen = useUi((s) => s.setPlanPanelOpen);
-
-  // A freshly proposed plan slides the panel open (like opening an artifact).
-  useEffect(() => {
-    if (pendingPlanId) setPlanPanelOpen(true);
-  }, [pendingPlanId, setPlanPanelOpen]);
-
   useEffect(() => applyTheme(theme), [theme]);
   useEffect(() => applyDensity(density), [density]);
   useEffect(() => applyLang(lang), [lang]);
@@ -171,7 +162,6 @@ export default function App() {
                     <Composer />
                   </div>
                 </main>
-                <PlanPanel />
                 <TasksPanel />
                 <RightPanel />
               </>

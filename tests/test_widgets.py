@@ -4,8 +4,6 @@ get_weather (src/weather.py)."""
 import asyncio
 import math
 
-import pytest
-
 from src import weather as weather_mod
 from src.widgets import MAX_WIDGET_BYTES, WIDGET_TYPES, make_widget, sanitize_widget
 
@@ -466,10 +464,3 @@ def test_registered_widget_types_match_the_frontend_registry():
     """Guards the registry contract: a type added here without a component in
     web/src/components/widgets/registry.tsx renders as nothing."""
     assert WIDGET_TYPES == frozenset({"weather", "news", "table"})
-
-
-@pytest.mark.parametrize("tool", ["get_weather"])
-def test_plan_mode_treats_it_as_read_only(tool):
-    from src.tool_security import plan_mode_disabled_tools
-
-    assert tool not in plan_mode_disabled_tools()

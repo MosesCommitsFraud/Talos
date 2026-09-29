@@ -38,15 +38,16 @@ from src.context_compactor import (
     get_compact_threshold,
 )
 from src.context_optimizer import optimize_tool_output
-from src.llm_core import _is_ollama_native_url, stream_llm_with_fallback
+from src.llm_core import _detect_provider, _is_ollama_native_url, stream_llm_with_fallback
 from src.model_context import estimate_tokens
 from src.prompt_security import untrusted_context_message
 from src.settings import get_setting, get_user_setting
+from src.tool_catalog import RUN_TOOL, unwrap_run_tool
 from src.tool_security import (
     blocked_tools_for_owner,
     mcp_blocked_for_owner,
-    plan_mode_disabled_tools,
 )
+from src.turn_context import insert_before_last_user, turn_context_message
 
 logger = logging.getLogger(__name__)
 
@@ -280,7 +281,7 @@ Search the documents indexed in this Talos instance (the knowledge base: manuals
 ```query_sql
 {"action": "query", "query": "SELECT ...", "max_rows": 100}
 ```
-Read-only SQL access to the configured external database(s). Use when the user asks about database data, tables, rows, reports, metrics, or SQL. Actions: `list_databases` (names of the connected databases), `list_tables`, `describe` with `table`, and `query`. When more than one database is configured, pass `"database": "<name>"` to pick which one each call targets (omit it when only one is configured). Omit `max_rows` or pass `0` when the user wants the full result set. Only read-only SELECT/WITH/SHOW/DESCRIBE/EXPLAIN/PRAGMA statements are allowed; never ask the user for DB credentials and never reveal credentials.
+Read-only SQL access to the configured external database(s). Use when the user asks about database data, tables, rows, reports, metrics, or SQL. Actions: `schema_map` (every table/view with its key columns in one result — call it ONCE to orient instead of `list_tables` plus many `describe`s), `list_databases` (names of the connected databases), `list_tables`, `describe` with `table`, and `query`. When more than one database is configured, pass `"database": "<name>"` to pick which one each call targets (omit it when only one is configured). Omit `max_rows` or pass `0` when the user wants the full result set. Only read-only SELECT/WITH/SHOW/DESCRIBE/EXPLAIN/PRAGMA statements are allowed; never ask the user for DB credentials and never reveal credentials.
 **This tool is the ONLY route to the database.** The `python`/`bash` sandbox has no network path to the DB host, so `pymssql.connect`, `psycopg2.connect` or a SQLAlchemy engine written in a code cell will always fail — do not try it, and do not treat the failure as something to work around. To analyse rows in pandas, pull them with `query_sql` (the result is written to a CSV in your workspace when it is large) and `read_csv` that file in the `python` tool.""",
     "web_search": """\
 ```web_search
@@ -726,6 +727,7 @@ def _build_system_prompt(
     compact: bool = False,
     owner: Optional[str] = None,
     selection_vision: bool = False,
+    catalog=None,
 ) -> List[Dict]:
     """Build agent system prompt, inject MCP/document context, merge consecutive system msgs."""
     global _cached_base_prompt, _cached_base_prompt_key
@@ -752,6 +754,9 @@ def _build_system_prompt(
         compact,
         _ov_sig,
     )
+    if catalog is not None:
+        # The catalog prompt ignores the per-turn inputs above.
+        cache_key = ("catalog", catalog, _ov_sig)
     if _cached_base_prompt and _cached_base_prompt_key == cache_key and not active_document:
         agent_prompt = _cached_base_prompt
         # Skill index is user-editable (name + description), so it must never
@@ -764,6 +769,7 @@ def _build_system_prompt(
             relevant_tools,
             mcp_disabled_map=mcp_disabled_map,
             compact=compact,
+            catalog=catalog,
         )
     else:
         agent_prompt, _skill_index_block = _build_base_prompt(
@@ -773,6 +779,7 @@ def _build_system_prompt(
             relevant_tools,
             mcp_disabled_map=mcp_disabled_map,
             compact=compact,
+            catalog=catalog,
         )
         if not active_document:
             _cached_base_prompt = agent_prompt
@@ -788,18 +795,18 @@ def _build_system_prompt(
     # Current date/time for every agent request. This is user-local when the
     # browser provided timezone headers, with a server-local fallback.
     #
-    # It goes LAST, and that placement is load-bearing. The block carries the
-    # clock to the minute, so its text differs on almost every request, while
-    # everything above it — base prompt plus tool schemas, the bulk of the
-    # system message — is byte-identical from turn to turn. vLLM's prefix cache
-    # matches from token 0 forward and stops at the first difference, so
-    # prepending this cost a full re-prefill of the whole system prompt every
-    # minute. Appending leaves the stable part cacheable and confines the miss
-    # to the tail.
+    # It goes into the turn context right before the question, NOT into the
+    # system prompt. The block carries the clock to the minute, so its text
+    # differs on almost every request, and vLLM's prefix cache stops at the
+    # first difference. At the end of the system prompt it still sat in front
+    # of the entire conversation history, so a message sent a minute after the
+    # last one re-prefilled the whole chat. Before the question, only the new
+    # turn is re-processed.
+    _time_message = None
     try:
         from src.user_time import current_datetime_prompt
 
-        agent_prompt = agent_prompt.rstrip() + "\n\n" + current_datetime_prompt()
+        _time_message = turn_context_message(current_datetime_prompt())
     except Exception:
         pass
 
@@ -1124,6 +1131,9 @@ def _build_system_prompt(
         if merged[i].get("role") == "user":
             last_user_idx = i
             break
+    if _time_message:
+        merged.insert(last_user_idx, _time_message)
+        last_user_idx += 1
     if _doc_message:
         merged.insert(last_user_idx, _doc_message)
         last_user_idx += 1  # the document message is now at last_user_idx
@@ -1158,11 +1168,15 @@ def _build_base_prompt(
     relevant_tools=None,
     mcp_disabled_map=None,
     compact: bool = False,
+    catalog=None,
 ):
     """Build the agent prompt with only relevant tools included.
 
     If relevant_tools is provided (from RAG retrieval), only those tools
     are shown with full descriptions. Otherwise falls back to full prompt.
+    With `catalog` = (core tool names, catalog listing) — native tool calling
+    with the tool catalog — the prompt names the core tools and lists the
+    catalog; it depends on nothing that changes from message to message.
     """
     from src.tool_index import ALWAYS_AVAILABLE
 
@@ -1170,7 +1184,12 @@ def _build_base_prompt(
     if not get_setting("image_gen_enabled", True):
         disabled.add("generate_image")
 
-    if relevant_tools is not None:
+    if catalog is not None:
+        core_names, catalog_text = catalog
+        agent_prompt = _assemble_prompt(set(core_names), set(), compact=True)
+        if catalog_text:
+            agent_prompt += "\n\n" + catalog_text
+    elif relevant_tools is not None:
         # RAG mode: include always-available + retrieved + admin (if needed)
         tool_names = set(ALWAYS_AVAILABLE) | set(relevant_tools)
         if needs_admin:
@@ -1239,8 +1258,8 @@ def _build_base_prompt(
     if integ_prompt:
         agent_prompt += "\n\n" + integ_prompt
 
-    # Inject MCP tool descriptions
-    if mcp_mgr:
+    # Inject MCP tool descriptions (the catalog already lists MCP tools)
+    if mcp_mgr and catalog is None:
         mcp_desc = mcp_mgr.get_tool_descriptions_for_prompt(mcp_disabled_map or {})
         if mcp_desc:
             agent_prompt += mcp_desc
@@ -1272,6 +1291,21 @@ def _resolve_tool_blocks(
         for tc in native_tool_calls:
             tc_name = tc.get("name", "")
             tc_args = tc.get("arguments", "{}")
+            if tc_name == RUN_TOOL:
+                # Catalog call: execute the named tool itself, so every tool-
+                # specific path (UI labels, gating, widgets) sees the real one.
+                # The history keeps the run_tool call the model actually made.
+                inner = unwrap_run_tool(tc_args)
+                if inner is None:
+                    tool_blocks.append(
+                        ToolBlock(
+                            RUN_TOOL,
+                            'run_tool needs {"name": "<catalog tool>", "arguments": {...}}. '
+                            "Load the tool with find_tools first.",
+                        )
+                    )
+                    continue
+                tc_name, tc_args = inner
             block = function_call_to_tool_block(tc_name, tc_args)
             if block:
                 tool_blocks.append(block)
@@ -1801,70 +1835,6 @@ def _empty_response_fallback(
     return _error_msg, f"data: {json.dumps({'delta': _error_msg})}\n\n"
 
 
-PLAN_MODE_DIRECTIVE = (
-    "## PLAN MODE — OVERRIDES EVERYTHING ELSE BELOW\n"
-    "You are in PLAN MODE. Your ONLY job this turn is to PROPOSE a clear, "
-    "well-reasoned plan for the user to approve. You have NOT done anything yet. Do "
-    "NOT claim you created, wrote, ran, sent, or changed anything.\n\n"
-    "ABSOLUTE RULE — DO NOT MUTATE ANYTHING. Every write/state-changing tool, "
-    "including bash/python, is disabled this turn and will be rejected.\n\n"
-    "INVESTIGATE, THEN COMMIT. Use the read-only tools (read_file, grep, glob, ls, "
-    "search, …) to open the few files directly involved and see how the affected code "
-    "works today, then write the plan. A plan grounded in real files beats a vague one "
-    "— but you do NOT need certainty on everything before you write it.\n\n"
-    "DON'T SPIRAL. Plan in roughly ONE investigation pass. Write each section once and "
-    "move on — do NOT keep re-opening files, re-deriving decisions, or rewriting "
-    "sections you've already written. Producing a good-enough plan the user can correct "
-    "is the goal, NOT a perfect one. When you hit a genuine fork or open question, do "
-    "NOT think in circles trying to resolve it yourself. Instead, pick ONE:\n"
-    "  • If the choice materially changes the plan and you can't pick a sensible "
-    "default — call `ask_user` with 2-6 concrete options. It ends your turn; their "
-    "answer comes back as your next message and you continue then.\n"
-    '  • Otherwise — state your assumption inline (e.g. "Assumes X; tell me if not"), '
-    "pick the reasonable default, and keep going. The user reviews the whole plan "
-    "before anything runs and will correct you, so a wrong assumption is cheap.\n"
-    "Note edge cases and failure modes briefly where they matter; don't exhaustively "
-    "solve them in the plan.\n\n"
-    "OUTPUT — write the plan as markdown with these four sections, in this order and "
-    "with these exact headings. Be specific and concrete throughout; reference real "
-    "file paths, functions, and symbols you found (use `backticks`). Aim for a clear "
-    "senior-engineer design doc — concrete and complete, but no filler and no "
-    "over-polishing.\n\n"
-    "## Context\n"
-    "What the user wants and WHY — the problem or need it addresses and the intended "
-    "outcome. State the key constraints, assumptions, and exactly what you learned "
-    "from investigating (name the specific files/functions/components you inspected "
-    "and how the relevant code works today).\n\n"
-    "## Approach\n"
-    "The detailed approach: what you will change and how, the design decisions and the "
-    "trade-offs you weighed, and the specific files/components involved with real "
-    "paths. Note alternatives you considered and why you rejected them, anything you "
-    "will deliberately reuse, and the edge cases / failure modes you'll handle. Explain "
-    "it well enough that the user can judge the approach before any code is written.\n\n"
-    "## Plan\n"
-    "A GitHub-style checklist, one concrete, ordered action per line — each step "
-    "specific enough to act on (name the file/function it touches):\n"
-    "- [ ] first action you will take once approved\n"
-    "- [ ] next action\n\n"
-    "## Verification\n"
-    "How the change will be proven to work end-to-end — exact commands to run, UI "
-    "flows to exercise, tests to add, and what a successful result looks like.\n\n"
-    "Do NOT execute anything. End your turn with this plan."
-)
-
-
-def build_active_plan_note(approved_plan: str) -> str:
-    if not approved_plan or not approved_plan.strip():
-        return ""
-    return (
-        "## ACTIVE PLAN (approved — execute this)\n"
-        "You are executing a plan the user already approved. Work through it IN ORDER. "
-        "After finishing each step, call `update_plan` with the full checklist and that "
-        "step marked `- [x]` so progress stays visible. If a step is impossible, say so and stop.\n\n"
-        "Current plan:\n" + approved_plan.strip()
-    )
-
-
 async def stream_agent_loop(
     endpoint_url: str,
     model: str,
@@ -1884,14 +1854,18 @@ async def stream_agent_loop(
     relevant_tools: Optional[Set[str]] = None,
     fallbacks: Optional[List[tuple]] = None,
     workspace: Optional[str] = None,
-    plan_mode: bool = False,
-    approved_plan: Optional[str] = None,
     force_db: bool = False,
     use_rag: bool = False,
     reasoning: bool = True,
     reasoning_effort: Optional[str] = None,
+    turn_disabled_tools: Optional[Set[str]] = None,
 ) -> AsyncGenerator[str, None]:
     """Streaming agent loop generator.
+
+    `disabled_tools` are refused at execution. The subset also listed in
+    `turn_disabled_tools` is off only for this message (a composer switch);
+    with the tool catalog those stay in the tool list so flipping a switch
+    doesn't change the prompt's head — see src/tool_catalog.py.
 
     Yields SSE events:
       - data: {"delta": "text"}                             (text chunks)
@@ -1929,9 +1903,6 @@ async def stream_agent_loop(
     # still lose the MCP schemas, and vice versa.
     if mcp_blocked_for_owner(owner):
         mcp_mgr = None
-
-    if plan_mode:
-        disabled_tools.update(plan_mode_disabled_tools())
 
     # Survives the loop so final metrics can attribute the last round's native
     # tool schemas in the context breakdown (they're tokenized server-side and
@@ -1991,106 +1962,6 @@ async def stream_agent_loop(
     _mcp_disabled_map = _load_mcp_disabled_map() if mcp_mgr else {}
     prep_timings["request_setup"] = time.time() - _t0
 
-    # RAG-based tool selection: retrieve relevant tools for this query.
-    # If caller provided a pre-computed set (e.g. task_scheduler), use that.
-    _relevant_tools = relevant_tools
-    _t1 = time.time()
-    if _relevant_tools:
-        logger.info(
-            f"[tool-rag] Using caller-provided relevant_tools ({len(_relevant_tools)} tools)"
-        )
-    if not _relevant_tools:
-        try:
-            from src.tool_index import ALWAYS_AVAILABLE, get_tool_index
-
-            tool_idx = get_tool_index()
-            if tool_idx:
-                if mcp_mgr:
-                    try:
-                        await asyncio.wait_for(
-                            asyncio.to_thread(tool_idx.index_mcp_tools, mcp_mgr, _mcp_disabled_map),
-                            timeout=_TOOL_SELECTION_TIMEOUT_SECONDS,
-                        )
-                    except asyncio.TimeoutError:
-                        logger.warning(
-                            "[tool-rag] MCP tool indexing exceeded %.1fs; continuing without reindex",
-                            _TOOL_SELECTION_TIMEOUT_SECONDS,
-                        )
-                if _retrieval_query:
-                    try:
-                        _relevant_tools = await asyncio.wait_for(
-                            asyncio.to_thread(tool_idx.get_tools_for_query, _retrieval_query, 8),
-                            timeout=_TOOL_SELECTION_TIMEOUT_SECONDS,
-                        )
-                        logger.info(
-                            f"[tool-rag] Retrieved tools for query: {sorted(_relevant_tools - ALWAYS_AVAILABLE)}"
-                        )
-                    except asyncio.TimeoutError:
-                        logger.warning(
-                            "[tool-rag] Retrieval exceeded %.1fs; falling back to always-available tools",
-                            _TOOL_SELECTION_TIMEOUT_SECONDS,
-                        )
-                        _relevant_tools = set(ALWAYS_AVAILABLE)
-        except Exception as e:
-            logger.warning(f"[tool-rag] Retrieval failed, using keyword fallback: {e}")
-            _relevant_tools = None
-
-    # Fallback: if RAG unavailable, use keyword-based tool selection
-    # instead of sending ALL tools (which overwhelms the model).
-    if not _relevant_tools and _retrieval_query:
-        from src.tool_index import ALWAYS_AVAILABLE, ToolIndex
-
-        _relevant_tools = set(ALWAYS_AVAILABLE)
-        ql = _retrieval_query.lower()
-        for keywords, tools in ToolIndex._KEYWORD_HINTS.items():
-            if any(kw in ql for kw in keywords):
-                _relevant_tools.update(tools)
-        # Always include core document tools
-        _relevant_tools.update({"create_document"})
-        logger.info(
-            f"[tool-rag] Keyword fallback selected: {sorted(_relevant_tools - ALWAYS_AVAILABLE)}"
-        )
-
-    # If a document is open the model needs the editing tools available
-    # regardless of which selection path (RAG, keyword, caller-provided) ran
-    # or what keywords were in the latest user message.
-    if _relevant_tools is not None and active_document is not None:
-        _relevant_tools.update({"edit_document", "update_document", "suggest_document"})
-    if _relevant_tools is not None and artifact_selection is not None:
-        if artifact_selection.get("kind") in {"word", "excel", "presentation", "pdf", "image"}:
-            _relevant_tools.update({"bash", "python", "run_cell", "read_file", "write_file", "ls"})
-        else:
-            _relevant_tools.update({"read_file", "edit_file", "grep"})
-
-    # query_sql is gated by the DB button (force_db): expose it only when the
-    # user turned the database toggle on for this message. Otherwise keep it
-    # disabled even if an external SQL DB is configured, so the model never
-    # queries the database unless explicitly asked to.
-    if force_db:
-        if _relevant_tools is not None:
-            _relevant_tools.add("query_sql")
-        disabled_tools.discard("query_sql")
-    else:
-        disabled_tools.add("query_sql")
-        if _relevant_tools is not None:
-            _relevant_tools.discard("query_sql")
-
-    # search_knowledge mirrors that, gated by the Knowledge/Full-Knowledge mode
-    # (use_rag) instead. The two gates are independent of `auto_inject_enabled`:
-    # that admin setting decides whether context is ALSO prefixed onto the user
-    # turn, not whether the model may look things up itself.
-    if use_rag:
-        if _relevant_tools is not None:
-            _relevant_tools.add("search_knowledge")
-        disabled_tools.discard("search_knowledge")
-    else:
-        disabled_tools.add("search_knowledge")
-        if _relevant_tools is not None:
-            _relevant_tools.discard("search_knowledge")
-
-    prep_timings["tool_selection"] = time.time() - _t1
-
-    _t2 = time.time()
     # Hosted-API match by URL, OR the model name looks like a recent model
     # known to follow OpenAI-style function calling (DeepSeek, GPT*, Claude,
     # Gemini, Qwen3+, Mixtral, Llama 3.1+). Caught the DeepSeek-via-local-
@@ -2189,6 +2060,156 @@ async def stream_agent_loop(
         _is_api_model = True
     else:
         _is_api_model = any(h in endpoint_url for h in _API_HOSTS) or _model_supports_tools
+    # Native tool calling gets the stable tool catalog (src/tool_catalog.py):
+    # the same core schemas every turn plus on-demand catalog tools, instead of
+    # a per-message retrieved subset that voided the prefix cache whenever it
+    # changed. Callers that pass their own relevant_tools keep that behaviour.
+    _catalog_mode = bool(
+        _is_api_model and relevant_tools is None and get_setting("tool_catalog_enabled", True)
+    )
+    # tool_choice is only forwarded on the OpenAI-compatible path (vLLM & co).
+    _supports_tool_choice = _detect_provider(endpoint_url or "") not in ("anthropic", "ollama")
+
+    # RAG-based tool selection: retrieve relevant tools for this query.
+    # If caller provided a pre-computed set (e.g. task_scheduler), use that.
+    _relevant_tools = relevant_tools
+    _t1 = time.time()
+    if _relevant_tools:
+        logger.info(
+            f"[tool-rag] Using caller-provided relevant_tools ({len(_relevant_tools)} tools)"
+        )
+    if not _relevant_tools and not _catalog_mode:
+        try:
+            from src.tool_index import ALWAYS_AVAILABLE, get_tool_index
+
+            tool_idx = get_tool_index()
+            if tool_idx:
+                if mcp_mgr:
+                    try:
+                        await asyncio.wait_for(
+                            asyncio.to_thread(tool_idx.index_mcp_tools, mcp_mgr, _mcp_disabled_map),
+                            timeout=_TOOL_SELECTION_TIMEOUT_SECONDS,
+                        )
+                    except asyncio.TimeoutError:
+                        logger.warning(
+                            "[tool-rag] MCP tool indexing exceeded %.1fs; continuing without reindex",
+                            _TOOL_SELECTION_TIMEOUT_SECONDS,
+                        )
+                if _retrieval_query:
+                    try:
+                        _relevant_tools = await asyncio.wait_for(
+                            asyncio.to_thread(tool_idx.get_tools_for_query, _retrieval_query, 8),
+                            timeout=_TOOL_SELECTION_TIMEOUT_SECONDS,
+                        )
+                        logger.info(
+                            f"[tool-rag] Retrieved tools for query: {sorted(_relevant_tools - ALWAYS_AVAILABLE)}"
+                        )
+                    except asyncio.TimeoutError:
+                        logger.warning(
+                            "[tool-rag] Retrieval exceeded %.1fs; falling back to always-available tools",
+                            _TOOL_SELECTION_TIMEOUT_SECONDS,
+                        )
+                        _relevant_tools = set(ALWAYS_AVAILABLE)
+        except Exception as e:
+            logger.warning(f"[tool-rag] Retrieval failed, using keyword fallback: {e}")
+            _relevant_tools = None
+
+    # Fallback: if RAG unavailable, use keyword-based tool selection
+    # instead of sending ALL tools (which overwhelms the model).
+    if not _relevant_tools and _retrieval_query and not _catalog_mode:
+        from src.tool_index import ALWAYS_AVAILABLE, ToolIndex
+
+        _relevant_tools = set(ALWAYS_AVAILABLE)
+        ql = _retrieval_query.lower()
+        for keywords, tools in ToolIndex._KEYWORD_HINTS.items():
+            if any(kw in ql for kw in keywords):
+                _relevant_tools.update(tools)
+        # Always include core document tools
+        _relevant_tools.update({"create_document"})
+        logger.info(
+            f"[tool-rag] Keyword fallback selected: {sorted(_relevant_tools - ALWAYS_AVAILABLE)}"
+        )
+
+    # If a document is open the model needs the editing tools available
+    # regardless of which selection path (RAG, keyword, caller-provided) ran
+    # or what keywords were in the latest user message.
+    if _relevant_tools is not None and active_document is not None:
+        _relevant_tools.update({"edit_document", "update_document", "suggest_document"})
+    if _relevant_tools is not None and artifact_selection is not None:
+        if artifact_selection.get("kind") in {"word", "excel", "presentation", "pdf", "image"}:
+            _relevant_tools.update({"bash", "python", "run_cell", "read_file", "write_file", "ls"})
+        else:
+            _relevant_tools.update({"read_file", "edit_file", "grep"})
+
+    # query_sql is gated by the DB button (force_db): expose it only when the
+    # user turned the database toggle on for this message. Otherwise keep it
+    # disabled even if an external SQL DB is configured, so the model never
+    # queries the database unless explicitly asked to.
+    if force_db:
+        if _relevant_tools is not None:
+            _relevant_tools.add("query_sql")
+        disabled_tools.discard("query_sql")
+    else:
+        disabled_tools.add("query_sql")
+        if _relevant_tools is not None:
+            _relevant_tools.discard("query_sql")
+
+    # search_knowledge mirrors that, gated by the Knowledge/Full-Knowledge mode
+    # (use_rag) instead. The two gates are independent of `auto_inject_enabled`:
+    # that admin setting decides whether context is ALSO prefixed onto the user
+    # turn, not whether the model may look things up itself.
+    if use_rag:
+        if _relevant_tools is not None:
+            _relevant_tools.add("search_knowledge")
+        disabled_tools.discard("search_knowledge")
+    else:
+        disabled_tools.add("search_knowledge")
+        if _relevant_tools is not None:
+            _relevant_tools.discard("search_knowledge")
+
+    # Tool catalog: split into the fixed core list and the on-demand catalog.
+    # Tools switched off only for this message stay listed (refused at
+    # execution, named in the turn context) so the list never changes with a
+    # composer switch; tools this owner never gets are left out entirely.
+    _core_schemas: List[Dict] = []
+    _catalog_names: frozenset = frozenset()
+    _catalog_text = ""
+    _turn_off: Set[str] = set()
+    if _catalog_mode:
+        from src.tool_catalog import catalog_prompt, set_current_catalog, split_tools
+        from src.tool_execution import _ADMIN_TOOLS as _EXEC_ADMIN_TOOLS
+        from src.tool_execution import _owner_is_admin
+
+        _turn_off = set(turn_disabled_tools or ())
+        if artifact_selection:
+            _turn_off |= {"create_document", "update_document"}
+        if not force_db:
+            _turn_off.add("query_sql")
+        if not use_rag:
+            _turn_off.add("search_knowledge")
+        _turn_off &= disabled_tools
+        _hidden = disabled_tools - _turn_off
+        if not get_setting("image_gen_enabled", True):
+            _hidden.add("generate_image")
+        if not _owner_is_admin(owner):
+            _hidden |= _EXEC_ADMIN_TOOLS
+        _mcp_all = mcp_mgr.get_all_openai_schemas(_mcp_disabled_map or {}) if mcp_mgr else []
+        _core_schemas, _catalog = split_tools(FUNCTION_TOOL_SCHEMAS, _mcp_all, _hidden)
+        set_current_catalog(_catalog)
+        _catalog_names = frozenset(
+            s["function"]["name"] for s in _core_schemas if s.get("function", {}).get("name")
+        )
+        _catalog_text = catalog_prompt(_catalog)
+        logger.info(
+            "[tool-catalog] %d core tools, %d in catalog, off this turn: %s",
+            len(_core_schemas),
+            len(_catalog),
+            sorted(_turn_off) or "none",
+        )
+
+    prep_timings["tool_selection"] = time.time() - _t1
+
+    _t2 = time.time()
     from src.chat_helpers import model_supports_vision
 
     vision_allowed = bool(get_user_setting("vision_enabled", owner or "", True))
@@ -2255,6 +2276,7 @@ async def stream_agent_loop(
         compact=_is_api_model,
         owner=owner,
         selection_vision=selection_vision,
+        catalog=(_catalog_names, _catalog_text) if _catalog_mode else None,
     )
     if workspace:
         # PREPEND (not append) so it dominates the large base prompt — appended
@@ -2309,67 +2331,48 @@ async def stream_agent_loop(
             )
         else:
             _db_list_note = ""
-        # Cached schema card: the table/column map, built once per hour instead
-        # of rediscovered with list_tables + N × describe at the start of every
-        # DB turn. When it's available the model can go straight to the SELECT,
-        # which is worth ~20 rounds — and those rounds each carried the raw
-        # introspection dumps in context. Only for a single configured database;
-        # with several, which one to map is ambiguous and get_schema_card
-        # declines rather than guessing.
-        _schema_card = ""
+        # The schema map is fetched on demand (`query_sql action=schema_map`),
+        # not injected: most DB questions are answered from the uploaded SQL
+        # knowledge plus a known table, and an injected card cost every such turn
+        # its tokens. Warm the cache now so the call, if the model makes it,
+        # answers instantly. Never awaited — a slow catalog must not hold up the
+        # first token.
         try:
-            from src.tool_implementations import get_schema_card
+            from src.tool_implementations import warm_schema_card
 
-            _schema_card = await asyncio.wait_for(
-                asyncio.to_thread(get_schema_card, None),
-                timeout=20,
-            )
+            warm_schema_card(None)
         except Exception as _sc_err:
-            logger.debug("[db-mode] schema card unavailable: %s", _sc_err)
-        if _schema_card:
-            _schema_note = (
-                "\n\nSCHEMA MAP (cached, may be up to an hour stale — trust it to "
-                "navigate, verify with `describe` only if a query fails):\n"
-                + _schema_card
-                + "\nYou already have this map: do NOT open with action=list_tables. "
-                "Go to the SELECT that answers the question, and `describe` only the "
-                "specific table you still need columns for."
-            )
-            logger.info("[db-mode] schema card injected (%d chars)", len(_schema_card))
-        else:
-            _schema_note = (
-                " If you don't know the schema yet, start with `query_sql` "
-                "action=list_tables, then action=describe on the relevant tables, "
-                "then run the SELECT that answers the question."
-            )
+            logger.debug("[db-mode] schema card warm-up skipped: %s", _sc_err)
         _db_note = (
-            "## DATABASE MODE — READ FIRST\n"
+            "## DATABASE MODE\n"
             "The user activated the database button for this message: they want "
             "it answered FROM the configured external SQL database. You MUST "
             "call the `query_sql` tool before answering — do not answer from "
             "general knowledge and do not use python/bash to reach the database."
             + _db_list_note
-            + _schema_note
+            + " If the reference material and the conversation don't already tell you "
+            "which tables to use, call `query_sql` action=schema_map once to see every "
+            "table and its columns, then run the SELECT that answers the question."
         )
-        if messages and messages[0].get("role") == "system":
-            messages[0]["content"] = _db_note + "\n\n" + (messages[0].get("content") or "")
-        else:
-            messages.insert(0, {"role": "system", "content": _db_note})
+        # In the turn context before the question, never at the head of the
+        # system prompt: the note exists only on DB turns, so prepending it
+        # voided the prefix cache for the whole chat whenever the button was
+        # toggled.
+        insert_before_last_user(messages, turn_context_message(_db_note))
         logger.info("[db-mode] forced query_sql for this turn")
-    if plan_mode:
-        if messages and messages[0].get("role") == "system":
-            messages[0]["content"] = (
-                PLAN_MODE_DIRECTIVE + "\n\n" + (messages[0].get("content") or "")
-            )
-        else:
-            messages.insert(0, {"role": "system", "content": PLAN_MODE_DIRECTIVE})
-    elif approved_plan and approved_plan.strip():
-        _plan_note = build_active_plan_note(approved_plan)
-        if messages and messages[0].get("role") == "system":
-            messages[0]["content"] = _plan_note + "\n\n" + (messages[0].get("content") or "")
-        else:
-            messages.insert(0, {"role": "system", "content": _plan_note})
-        logger.info("[plan] pinned approved plan (%d chars) for execution turn", len(approved_plan))
+    # With the catalog, switched-off tools stay in the tool list (see above), so
+    # the model is told here which ones it can't use for this message.
+    _turn_off_listed = sorted(_turn_off & _catalog_names)
+    if _turn_off_listed:
+        insert_before_last_user(
+            messages,
+            turn_context_message(
+                "Switched off by the user for this message: "
+                + ", ".join(f"`{t}`" for t in _turn_off_listed)
+                + ". Do not call them. If one is genuinely needed, say which switch "
+                "to turn on (web access, database, knowledge base) instead."
+            ),
+        )
     prep_timings["prompt_build"] = time.time() - _t2
 
     _t3 = time.time()
@@ -2581,14 +2584,13 @@ async def stream_agent_loop(
 
         # DB mode: SQL knowledge is retrieved ONCE and then held still.
         #
-        # This message has role="system", and stream_llm consolidates every
-        # system message into one block at position 0 before sending. So
-        # rewriting it mid-turn changes the first few hundred tokens of the
-        # prompt, which invalidates the server-side prefix cache for the ENTIRE
-        # conversation — vLLM re-prefills the whole context from scratch. It
-        # used to refresh every round: a 39-round DB turn re-processed ~168k
-        # tokens per round (6.5M prompt tokens, ~2/3 of a 107-minute wall
-        # clock) for a reference that barely changed between rounds.
+        # It sits right before the question as turn context (user role). It
+        # used to be a system message, which stream_llm hoisted to position 0,
+        # so every rewrite invalidated the prefix cache for the ENTIRE
+        # conversation — a 39-round DB turn re-processed ~168k tokens per round
+        # (6.5M prompt tokens, ~2/3 of a 107-minute wall clock). Now a rewrite
+        # only re-prefills this turn's question and rounds, which is still not
+        # free, so the refresh stays gated.
         #
         # Re-retrieving is only worth that price when the model is genuinely
         # lost in the schema, so it is gated on a query_sql MISS in the previous
@@ -2609,17 +2611,18 @@ async def stream_agent_loop(
             )
             if _kb_stale:
                 _sql_kb_attempted = True
-                _kb = _retrieve_sql_knowledge(_sql_kb_query(messages))
+                # Embedding + vector search are blocking — keep the loop free.
+                _kb = await asyncio.to_thread(_retrieve_sql_knowledge, _sql_kb_query(messages))
                 if _kb:
                     _kb_content = (
                         "Reference material for this database (uploaded SQL knowledge "
                         "— use it to navigate the schema):\n" + _kb
                     )
                     if _sql_kb_msg is None:
-                        _sql_kb_msg = {"role": "system", "content": _kb_content}
-                        messages.append(_sql_kb_msg)
-                    elif _sql_kb_msg["content"] != _kb_content:
-                        _sql_kb_msg["content"] = _kb_content
+                        _sql_kb_msg = turn_context_message(_kb_content)
+                        insert_before_last_user(messages, _sql_kb_msg)
+                    elif _sql_kb_msg["content"] != turn_context_message(_kb_content)["content"]:
+                        _sql_kb_msg["content"] = turn_context_message(_kb_content)["content"]
                         _sql_kb_refreshes += 1
                         logger.info(
                             "[db-mode] SQL knowledge refreshed after a missed query "
@@ -2641,11 +2644,19 @@ async def stream_agent_loop(
         # Merge native tool schemas with MCP tool schemas, filtering out
         # Only send function schemas for API models (OpenAI, Anthropic, etc.).
         # Local models use fenced code blocks or <tool_code> — schemas add overhead.
-        if _force_answer:
+        # Catalog + an OpenAI-compatible server: a forced answer keeps the tool
+        # list and sets tool_choice="none" instead of dropping the tools, since
+        # the tools render at the top of the prompt and dropping them would
+        # re-prefill the entire conversation for the final round.
+        _force_via_choice = _force_answer and _catalog_mode and _supports_tool_choice
+        if _force_answer and not _force_via_choice:
             # Loop-breaker decided the model has enough info but keeps
             # calling tools. Send NO tools this round so it's forced to
             # write the answer instead of flailing further.
             all_tool_schemas = []
+        elif _catalog_mode:
+            # Same list, same order, every round and every turn.
+            all_tool_schemas = _core_schemas
         elif _is_api_model:
             # Filter schemas by RAG-selected tools (if available)
             if _relevant_tools:
@@ -2689,7 +2700,7 @@ async def stream_agent_loop(
         # Tool selection stays the model's call — skills are offered the same way
         # search_knowledge/web_search are (tool always reachable + a description
         # that says when it's worth calling), never pinned via tool_choice.
-        _round_tool_choice = None
+        _round_tool_choice = "none" if _force_via_choice else None
         logger.info(
             f"[agent-debug] round={round_num} model={model} _is_api_model={_is_api_model} tools_sent={len(_tool_names_sent)} tool_names={_tool_names_sent[:15]} relevant_tools={sorted(_relevant_tools)[:15] if _relevant_tools else 'ALL'}"
         )
