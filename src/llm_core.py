@@ -28,11 +28,29 @@ class LLMConfig:
     STREAM_TIMEOUT = 300
 
 
-# Cache for LLM responses
+# Cache for LLM responses.
+#
+# Only deterministic calls (temperature 0) are cached, and only briefly. A
+# sampled call is asked precisely because a fresh answer is wanted: caching it
+# without expiry meant e.g. the same first message always got the same chat
+# title, and the request never reached the model again until a restart.
+_RESPONSE_CACHE_TTL_SECONDS = 300
+
+
 def _get_cache_key(
-    url: str, model: str, messages: List[Dict], temperature: float, max_tokens: int
-) -> str:
-    """Generate cache key for LLM requests."""
+    url: str,
+    model: str,
+    messages: List[Dict],
+    temperature: float,
+    max_tokens: int,
+    *extra: Any,
+) -> Optional[str]:
+    """Cache key for an LLM request, or None when the call must not be cached.
+
+    `extra` carries anything else that changes the answer (reasoning mode).
+    """
+    if temperature is None or temperature > 0:
+        return None
     hashable_messages = []
     for msg in messages:
         sorted_items = tuple(sorted(msg.items()))
@@ -45,6 +63,7 @@ def _get_cache_key(
             "messages": hashable_messages,
             "temp": temperature,
             "max_tokens": max_tokens,
+            "extra": [str(e) for e in extra],
         },
         sort_keys=True,
     )
@@ -257,13 +276,24 @@ def _get_http_client() -> httpx.AsyncClient:
     return _http_client
 
 
-def _get_cached_response(cache_key: str) -> Optional[str]:
-    """Get cached response if it exists."""
-    return _response_cache.get(cache_key)
+def _get_cached_response(cache_key: Optional[str]) -> Optional[str]:
+    """Get a cached response if it exists and hasn't expired."""
+    if cache_key is None:
+        return None
+    hit = _response_cache.get(cache_key)
+    if not hit:
+        return None
+    stored_at, response = hit
+    if time.time() - stored_at > _RESPONSE_CACHE_TTL_SECONDS:
+        _response_cache.pop(cache_key, None)
+        return None
+    return response
 
 
-def _set_cached_response(cache_key: str, response: str) -> None:
-    """Store response in cache."""
+def _set_cached_response(cache_key: Optional[str], response: str) -> None:
+    """Store response in cache (no-op for uncacheable calls)."""
+    if cache_key is None:
+        return
     if len(_response_cache) > 128:
         keys_to_remove = list(_response_cache.keys())[:64]
         for key in keys_to_remove:
@@ -271,7 +301,7 @@ def _set_cached_response(cache_key: str, response: str) -> None:
             # threadpool) may have already evicted the same snapshotted key,
             # and del would raise KeyError mid-eviction (issue #659).
             _response_cache.pop(key, None)
-    _response_cache[cache_key] = response
+    _response_cache[cache_key] = (time.time(), response)
 
 
 # ── Anthropic native API adapter ──
@@ -1324,7 +1354,9 @@ def llm_call(
     messages_copy = _consolidate_system_messages(messages_copy)
 
     provider = _detect_provider(url)
-    cache_key = _get_cache_key(url, model, messages_copy, temperature, max_tokens)
+    cache_key = _get_cache_key(
+        url, model, messages_copy, temperature, max_tokens, enable_thinking, reasoning_effort
+    )
     cached_response = _get_cached_response(cache_key)
     if cached_response:
         logger.debug(f"Returning cached response for key: {cache_key}")
@@ -1473,7 +1505,9 @@ async def llm_call_async(
     # One leading system turn; later system notes stay in place (cache-safe).
     messages_copy = _consolidate_system_messages(messages_copy)
 
-    cache_key = _get_cache_key(url, model, messages_copy, temperature, max_tokens)
+    cache_key = _get_cache_key(
+        url, model, messages_copy, temperature, max_tokens, enable_thinking, reasoning_effort
+    )
     cached_response = _get_cached_response(cache_key)
     if cached_response:
         logger.debug(f"Returning cached response for key: {cache_key}")
@@ -1978,6 +2012,15 @@ async def stream_llm(
                                         "input_tokens": u.get("prompt_tokens", 0),
                                         "output_tokens": u.get("completion_tokens", 0),
                                     }
+                                    # Prefix-cache hits (vLLM with
+                                    # --enable-prompt-tokens-details, OpenAI):
+                                    # the part of the prompt NOT re-prefilled.
+                                    _ptd = u.get("prompt_tokens_details") or {}
+                                    if (
+                                        isinstance(_ptd, dict)
+                                        and _ptd.get("cached_tokens") is not None
+                                    ):
+                                        _usage_data["cached_tokens"] = _ptd["cached_tokens"]
                                     # llama.cpp puts a `timings` block alongside `usage` with the
                                     # TRUE generation speed (predicted_per_second) — pure decode,
                                     # excluding prefill/network. Pass it through so the UI shows the
