@@ -170,8 +170,8 @@ def _refusal(sample: str) -> str:
     return (
         "Blocked: this query repeats content from the user's internal documents "
         f"({sample}) and would send it to a public search engine. Never put document "
-        "content, customer or person names, internal identifiers, contract or clause "
-        "numbers into a web search. Search for the general, public version of the "
+        "content, names of the user's customers, contacts or employees, internal "
+        "identifiers, contract or clause numbers into a web search. Search for the general, public version of the "
         "question instead — the concept, the law, the standard, the product — and apply "
         "what you find to the internal document yourself. If the answer only exists in "
         "the user's documents, say so instead of searching."

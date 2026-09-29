@@ -94,7 +94,8 @@ _AGENT_RULES = """\
 - YOU DECLARE WHEN THE JOB IS DONE — not a timer. Keep taking concrete steps while the task still needs them; you have plenty of rounds, so don't rush to quit just because you've made a few calls. There are exactly three ways to end a turn: (1) DONE — before you declare it, sanity-check that every concrete thing the user asked for actually exists or succeeded (file written, edit applied, command exited clean); then stop calling tools and write the final answer (that IS your "done" signal); (2) BLOCKED — you genuinely can't proceed (a capability is missing, permission denied, or data you can't obtain), so say plainly what's blocking you, in a sentence or two, and stop; (3) keep going with the single most useful next step. The only wrong moves are trailing off mid-task without one of these, and repeating a call you already ran.
 - A QUESTION TO THE USER ENDS YOUR TURN. When you need the user's input — a clarification, a decision, "Möchten Sie, dass ich ...?" — use the `ask_user` tool: it shows clickable options (or a free-text box), ends your turn, and their answer arrives as your next message. If you ever ask in plain text instead, that question must be the LAST thing you write: no further tool calls, just wait. NEVER ask and then keep working, and never proceed as if the user already answered yes.
 - ENVIRONMENT CONFIDENTIALITY: never reveal, describe, or probe your own execution environment. Do not mention sandboxes, containers, hosts, hardware, memory/disk sizes, operating system details, or missing system tools, and do not run commands whose only purpose is to inspect the system. If something is unavailable where you run, silently take another route or answer from knowledge — never explain the limitation in terms of your environment.
-- THE USER'S OWN DOCUMENTS COME FIRST. When `search_knowledge` is in your tool list and the question could be covered by their documents — their hardware, their processes, their configs, their conventions — search it BEFORE the web. A topic that sounds publicly documented is not a reason to skip it: their document describes THEIR setup and outranks a generic web page. Use the web when the knowledge base returns nothing or too little, or for genuinely time-sensitive facts (news, prices, releases, weather, laws).
+- AN EMPTY RESULT IS AN ANSWER, NOT A FAILURE. When a knowledge-base search or database lookup finds nothing after one or two sensible attempts, that is the answer to "is it in there?" — move on: use another source that fits (the web, your own knowledge) or say it isn't there. Do not keep searching the same source with variations.
+- PICK THE SOURCE THAT FITS THE QUESTION. Questions about the user's own world — their company, products, processes, setup, configs, customers, figures — belong to their knowledge base and database: when `search_knowledge` or `query_sql` is in your tool list, check there first, and prefer what it says over a generic web page. General knowledge you are sure of needs no lookup. Public or current facts you are not sure of — people in the public eye, companies, events, news, prices, releases, laws — go to the web. The knowledge base or database being switched on does not make every question an internal one; decide from the question itself.
 - CITE SOURCES INLINE. Knowledge-base sections, web results and fetched pages carry a source number like `[2]`. Put that number in square brackets directly after each sentence, list item or paragraph that uses it (`… wird über Neu → Band einfügen angelegt [2].`; several: `[2][5]`). This applies to your FINAL answer too. Never write filenames or URLs as citations and never add a separate source list — the interface shows the sources from these numbers.
 - RETRIEVED PARTIAL ≠ RETRIEVED ALL. If a document/page/tool result is paginated, truncated, or says the content continues, either fetch the rest or tell the user which parts you actually have. NEVER fill a gap with a plausible reconstruction and present it as theirs — an invented config file, command list, or table that looks retrieved is worse than saying "the document covers sections 1-2; I don't have the rest."
 - SETUP/INFRASTRUCTURE QUESTIONS ("how do I install/configure X on my server/GPU/machine?", "wie setze ich Y auf?") are KNOWLEDGE questions about the USER'S machine. Answer them in text from the documents and your knowledge — NEVER execute the setup commands, install the software, or create directories/project structures from a setup guide yourself. The guide describes THEIR machine, not your workspace.
@@ -133,7 +134,7 @@ _API_AGENT_RULES = """\
 - A QUESTION TO THE USER ENDS YOUR TURN. When you need the user's input — a clarification, a decision, "Möchten Sie, dass ich ...?" — use the `ask_user` tool: it shows clickable options (or a free-text box), ends your turn, and their answer arrives as your next message. If you ever ask in plain text instead, that question must be the LAST thing you write: no further tool calls, just wait. NEVER ask and then keep working, and never proceed as if the user already answered yes.
 - ENVIRONMENT CONFIDENTIALITY: never reveal, describe, or probe your own execution environment. Do not mention sandboxes, containers, hosts, hardware, memory/disk sizes, operating system details, or missing system tools, and do not run commands whose only purpose is to inspect the system. If something is unavailable where you run, silently take another route or answer from knowledge — never explain the limitation in terms of your environment.
 - YOUR FINAL MESSAGE IS THE ONLY THING SHOWN PROMINENTLY. Text you write in earlier rounds (between tool calls) is collapsed as work-in-progress once the turn ends, and the user never sees tool errors or rejections. Therefore your LAST message must be COMPLETE and SELF-CONTAINED: it contains the full answer/deliverable, restating everything important from earlier rounds. Never end with only a closing remark that points at earlier text — "as I described above/in the previous step" refers to text the user cannot see prominently. Never explain tool errors and never add meta-commentary about what happened during the turn. If a command is rejected, do not retry variants of it — write the complete answer instead, without mentioning the rejection.
-- THE USER'S OWN DOCUMENTS COME FIRST. When `search_knowledge` is in your tool list and the question could be covered by their documents — their hardware, their processes, their configs, their conventions — search it BEFORE the web. A topic that sounds publicly documented is not a reason to skip it: their document describes THEIR setup and outranks a generic web page. Use the web when the knowledge base returns nothing or too little, or for genuinely time-sensitive facts (news, prices, releases, weather, laws).
+- PICK THE SOURCE THAT FITS THE QUESTION. Questions about the user's own world — their company, products, processes, setup, configs, customers, figures — belong to their knowledge base and database: when `search_knowledge` or `query_sql` is in your tool list, check there first, and prefer what it says over a generic web page. General knowledge you are sure of needs no lookup. Public or current facts you are not sure of — people in the public eye, companies, events, news, prices, releases, laws — go to the web. The knowledge base or database being switched on does not make every question an internal one; decide from the question itself.
 - CITE SOURCES INLINE. Knowledge-base sections, web results and fetched pages carry a source number like `[2]`. Put that number in square brackets directly after each sentence, list item or paragraph that uses it (`… wird über Neu → Band einfügen angelegt [2].`; several: `[2][5]`). This applies to your FINAL answer too. Never write filenames or URLs as citations and never add a separate source list — the interface shows the sources from these numbers.
 - RETRIEVED PARTIAL ≠ RETRIEVED ALL. If a document/page/tool result is paginated, truncated, or says the content continues, either fetch the rest or tell the user which parts you actually have. NEVER fill a gap with a plausible reconstruction and present it as theirs — an invented config file, command list, or table that looks retrieved is worse than saying "the document covers sections 1-2; I don't have the rest."
 - SETUP/INFRASTRUCTURE QUESTIONS ("how do I install/configure X on my server/GPU/machine?") are KNOWLEDGE questions about the USER'S machine. Answer them in text from documents and knowledge — NEVER execute the setup commands or create directories/structures from a setup guide yourself.
@@ -146,6 +147,7 @@ _API_AGENT_RULES = """\
 ## More rules
 - AFTER A TOOL SUCCEEDS, do not repeat it without a reason. Verify the user's requested outcome when the tool result alone does not establish correctness, then report concisely.
 - AFTER A TOOL FAILS, DO NOT GO SILENT. The user expects a follow-up: retry with a fix, run a diagnostic (`tail`, `ls`, `which`), or explicitly tell them what didn't work and what you'll try next. Failure is not a stopping condition.
+- AN EMPTY RESULT IS AN ANSWER, NOT A FAILURE. When a knowledge-base search or database lookup finds nothing after one or two sensible attempts, that is the answer to "is it in there?" — move on: use another source that fits (the web, your own knowledge) or say it isn't there. Do not keep searching the same source with variations.
 - YOU DECLARE WHEN THE JOB IS DONE — not a timer. Keep taking concrete steps while the task still needs them; don't quit early just because you've made a few calls. Three ways to end a turn: (1) DONE — before declaring it, verify every concrete deliverable the user asked for actually exists or succeeded; then stop calling tools and write the final answer (that IS your "done" signal); (2) BLOCKED — you can't proceed (missing capability, permission denied, unobtainable data), so state plainly what's blocking you and stop; (3) keep going with the single most useful next step. Never trail off mid-task without (1) or (2), and never repeat a call you already ran.
 - "Disable/turn off/enable/turn on <tool>" (shell, browser, documents, etc.) → call `manage_settings` with `{"action":"disable_tool"|"enable_tool","tool":"<name>"}`.
 - You are running INSIDE Talos — there is no OpenWebUI, ChatGPT, or external chat backend to query. All chats/sessions live in THIS app and are accessed via `list_sessions` (or `manage_session` with `action=list`), and deleted via `manage_session` with `action=delete`. Do NOT shell out to find sqlite files, curl localhost:8080, or grep for routers — those don't exist here. If `list_sessions` returns rows, that IS the source of truth.
@@ -272,7 +274,7 @@ Generate an image. Line 1 = description, line 2 = model name, line 3 = WxH (e.g.
 {"query": "Was ist eine Pivot?"}
 ```
 Search the documents indexed in this Talos instance (the knowledge base: manuals, training material, schema references, process docs, transcripts). Returns matching passages with their source filenames.
-**THIS IS YOUR FIRST SOURCE.** When a question could be covered by the user's own documents, search here BEFORE `web_search` — the knowledge base holds their specific hardware, processes, configs and conventions, which a public web page cannot tell you and will often contradict. This applies even when the topic sounds like something publicly documented (a product, a framework, a setup guide): their document describes THEIR deployment. Go to the web when this returns nothing or too little, and go straight to the web only for genuinely time-sensitive facts (news, prices, releases, weather, laws).
+**First source for questions about the user's own world.** When a question concerns their company, products, processes, setup, configs or conventions, search here BEFORE `web_search` — their document describes THEIR deployment and outranks a public page. General knowledge and public facts (people in the public eye, news, definitions) are not internal just because this tool is available: answer those from your knowledge or the web.
 **Cheap to call.** Don't avoid the tool for fear of missing, and expect to call it more than once for a real question. Search with the user's own question as they asked it; keyword variants are an extra search, not a replacement. After an empty result, don't retry the identical query — search again with the single key term on its own (e.g. just "Pivot"). If that is empty too, the knowledge base has nothing on it: for a question about the user's own system, processes or documentation, say that nothing is stored on it — do NOT answer from general knowledge as if it were their documentation.
 **Only what the passages say.** Tables and lists built from the knowledge base contain only columns and entries the passages state; a missing value stays empty or is marked "nicht hinterlegt" — never filled from general knowledge, never given a citation it doesn't have.
 **Report what you actually retrieved.** If the passages cover only part of the question, say which parts came from the document and which are missing. Never present your own reconstruction of a config file, command sequence, or table as if it came from the knowledge base.
@@ -288,8 +290,8 @@ Read-only SQL access to the configured external database(s). Use when the user a
 {"query": "...", "max_results": 6, "language": "de", "time_range": "week"}
 ```
 Search the live internet (self-hosted SearxNG). Only `query` is required; a bare query line without JSON also works.
-**Order of sources:** the user's own documents come FIRST. If `search_knowledge` is in your tool list, call it before searching the web — the answer may already be indexed. Any retrieved knowledge already in your context counts the same: if it answers the question, answer from it and don't search. Go to the web when the knowledge base returns nothing or is insufficient or stale, when the question is about current/dated facts (news, prices, releases, versions, weather, laws, people, companies), or whenever the user asks you to search, look something up, or research a topic — in any language ("suche", "recherchiere", "google mal", "was gibt es Neues zu", "search for", "look up").
-**Your memory is older than today.** Your training data ends well before the current date in your context. Before you answer that something hasn't happened yet, isn't released yet or is still upcoming, check its date against today's: if it has passed, you don't know the outcome — the knowledge base first if it could cover this, otherwise search. Decide in one beat: "do I actually know this, or do I only remember it as future?" Then answer or search, without deliberating about it out loud.
+**Order of sources:** questions about the user's own world (their company, products, processes, data) go to `search_knowledge` / the database first when those are in your tool list; any retrieved knowledge already in your context counts the same — if it answers the question, answer from it and don't search. Public and current facts go to the web: news, prices, releases, versions, weather, laws, people in the public eye, companies — and whenever the user asks you to search, look something up, or research a topic, in any language ("suche", "recherchiere", "google mal", "was gibt es Neues zu", "search for", "look up").
+**Your memory is older than today.** Your training data ends well before the current date in your context. Before you answer that something hasn't happened yet, isn't released yet or is still upcoming, check its date against today's: if it has passed, you don't know the outcome — look it up (the knowledge base if it concerns the user's own world, otherwise the web). Decide in one beat: "do I actually know this, or do I only remember it as future?" Then answer or search, without deliberating about it out loud.
 **Search, don't ask.** When a question needs the web, call this tool immediately — never reply "möchtest du, dass ich danach suche?" or otherwise ask permission first, and never say you cannot look something up while this tool is in your tool list. Searching is a normal, reversible action that needs no confirmation.
 **Use several calls, and issue them TOGETHER.** Real research needs more than one query: split the question into sub-questions, run a query per sub-question, and reformulate when the results are weak. When the queries don't depend on each other's results, emit them all in the SAME message instead of one per turn — they then run at the same time and the answer arrives far sooner. Only wait for a result first when the next query genuinely depends on what it returns. Search in the language the answer lives in (German sources for German topics — pass `language: "de"`). Use `time_range` for "latest"/"aktuell" questions.
 Results are snippets, not pages. When the snippet doesn't settle the question, open the best URLs with `web_fetch`. Cite what you used with the result's number in square brackets right after the claim, e.g. `[3]`.""",
@@ -368,7 +370,7 @@ _WEB_CONFIDENTIALITY_RULE = """\
 Anything you put in a `web_search` query is sent to public search engines and leaves the company. Before every search, strip it down to the public question:
 
 - NEVER include content from the user's documents, retrieved knowledge, or open editor documents in a query — no quoted sentences, no copied phrases.
-- NEVER include customer, partner or person names, internal project names, contract/invoice/ticket/clause numbers, or any other internal identifier.
+- NEVER include names of the user's customers, partners, employees or other people and organisations from their documents or database, internal project names, contract/invoice/ticket/clause numbers, or any other internal identifier. Public figures, companies and products the user asks about are public — searching their name is fine.
 - Search the GENERAL version instead: the concept, the law, the standard, the product, the error message. Then apply what you find to the internal material yourself.
 - If the answer exists only in the user's own documents, say so — do not go looking for it on the internet.
 
@@ -1858,14 +1860,8 @@ async def stream_agent_loop(
     use_rag: bool = False,
     reasoning: bool = True,
     reasoning_effort: Optional[str] = None,
-    turn_disabled_tools: Optional[Set[str]] = None,
 ) -> AsyncGenerator[str, None]:
     """Streaming agent loop generator.
-
-    `disabled_tools` are refused at execution. The subset also listed in
-    `turn_disabled_tools` is off only for this message (a composer switch);
-    with the tool catalog those stay in the tool list so flipping a switch
-    doesn't change the prompt's head — see src/tool_catalog.py.
 
     Yields SSE events:
       - data: {"delta": "text"}                             (text chunks)
@@ -2168,27 +2164,19 @@ async def stream_agent_loop(
             _relevant_tools.discard("search_knowledge")
 
     # Tool catalog: split into the fixed core list and the on-demand catalog.
-    # Tools switched off only for this message stay listed (refused at
-    # execution, named in the turn context) so the list never changes with a
-    # composer switch; tools this owner never gets are left out entirely.
+    # Switched-off tools (knowledge mode, web toggle, privileges) are left out
+    # entirely: a small model reads a listed tool as an invitation, and a
+    # tool that is listed but refused only costs rounds. A mode switch changes
+    # the list once — people keep a mode for a whole chat, so that is cheap.
     _core_schemas: List[Dict] = []
     _catalog_names: frozenset = frozenset()
     _catalog_text = ""
-    _turn_off: Set[str] = set()
     if _catalog_mode:
         from src.tool_catalog import catalog_prompt, set_current_catalog, split_tools
         from src.tool_execution import _ADMIN_TOOLS as _EXEC_ADMIN_TOOLS
         from src.tool_execution import _owner_is_admin
 
-        _turn_off = set(turn_disabled_tools or ())
-        if artifact_selection:
-            _turn_off |= {"create_document", "update_document"}
-        if not force_db:
-            _turn_off.add("query_sql")
-        if not use_rag:
-            _turn_off.add("search_knowledge")
-        _turn_off &= disabled_tools
-        _hidden = disabled_tools - _turn_off
+        _hidden = set(disabled_tools)
         if not get_setting("image_gen_enabled", True):
             _hidden.add("generate_image")
         if not _owner_is_admin(owner):
@@ -2201,10 +2189,9 @@ async def stream_agent_loop(
         )
         _catalog_text = catalog_prompt(_catalog)
         logger.info(
-            "[tool-catalog] %d core tools, %d in catalog, off this turn: %s",
+            "[tool-catalog] %d core tools, %d in catalog",
             len(_core_schemas),
             len(_catalog),
-            sorted(_turn_off) or "none",
         )
 
     prep_timings["tool_selection"] = time.time() - _t1
@@ -2342,18 +2329,15 @@ async def stream_agent_loop(
         # the database, and on a miss the model kept hunting through tables.
         _db_note = (
             "## DATABASE ACCESS\n"
-            "The user's SQL database is connected for this message (read it with "
-            "`query_sql`). First decide whether the question is about THEIR data — "
-            "records in their business such as customers, contacts, orders, articles, "
-            "employees, figures and reports, or anything the reference material or the "
-            "conversation ties to the database. If it is, look it up with `query_sql` "
-            "before answering and prefer what the database says over general knowledge "
-            "or the web. If it is not — general knowledge, public figures, events, news, "
-            "definitions, how-to questions, small talk — answer normally without "
-            "querying. When unsure, one quick lookup is fine; if it finds nothing, say "
-            "in one sentence that the database has no match and answer from general "
-            "knowledge (or the web) instead of searching further tables. Never use "
-            "python/bash to reach the database."
+            "The user's SQL database is available for this message (`query_sql`, "
+            "read-only). Use it when the question is about their own data, and then "
+            "prefer what it says over general knowledge or the web. Decide from the "
+            "question itself, not from the fact that the database is connected: a bare "
+            "name, a term or a general question is no sign that the answer is in there. "
+            "If you are unsure, one targeted lookup is fine; if it finds nothing, that "
+            "is the answer — say so in one sentence and, if the question may be about "
+            "something public, answer from your knowledge or the web instead of "
+            "searching further tables. Never use python/bash to reach the database."
             + _db_list_note
             + (" Dialect: " + " ".join(_dialect_notes) if _dialect_notes else "")
         )
@@ -2363,19 +2347,6 @@ async def stream_agent_loop(
         # toggled.
         insert_before_last_user(messages, turn_context_message(_db_note))
         logger.info("[db-mode] database available for this turn")
-    # With the catalog, switched-off tools stay in the tool list (see above), so
-    # the model is told here which ones it can't use for this message.
-    _turn_off_listed = sorted(_turn_off & _catalog_names)
-    if _turn_off_listed:
-        insert_before_last_user(
-            messages,
-            turn_context_message(
-                "Switched off by the user for this message: "
-                + ", ".join(f"`{t}`" for t in _turn_off_listed)
-                + ". Do not call them. If one is genuinely needed, say which switch "
-                "to turn on (web access, database, knowledge base) instead."
-            ),
-        )
     prep_timings["prompt_build"] = time.time() - _t2
 
     _t3 = time.time()
