@@ -11,9 +11,6 @@ import json
 import logging
 import os
 import re
-import threading
-import time
-from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
 MAX_OUTPUT_CHARS = 10_000
@@ -46,6 +43,9 @@ _SQL_MAX_ROWS_DEFAULT = 100
 # its prompt.
 _SQL_SPILL_ROWS = 200
 _SQL_PREVIEW_ROWS = 25
+# A long but narrow result (a 373-row id/name lookup list) is cheaper inline
+# than spilled: spilling it cost a pandas round just to read it back.
+_SQL_INLINE_MAX_CHARS = 16_000
 # Rows carried to the TABLE WIDGET, which is a different budget from the model's.
 # The model gets a 25-row preview because rows in context are expensive and it
 # only needs the shape to write the pandas that does the real work. The user gets
@@ -146,237 +146,24 @@ def _resolve_conn_url(conn: dict) -> tuple[Optional[str], Optional[str]]:
     return _build_sql_url_from_cfg(conn)
 
 
-# --- Schema card ------------------------------------------------------------
-# A compact, cached map of a database (tables, views, columns — structure only,
-# never data), returned by `query_sql action=schema_map`. Without it the model
-# spends its first ~20 rounds on list_tables + describe just to orient — and
-# every one of those raw dumps then rides along in the context of every later
-# round.
-#
-# It is rebuilt only when the schema actually changed: a cheap catalog query
-# (milliseconds) fingerprints the structure, and the full introspection runs
-# only when that fingerprint moves. So a database whose tables are altered
-# every few minutes stays current, and one that sits unchanged for weeks is
-# never re-introspected. Row changes do not touch the fingerprint.
-#
-# Engines without a fingerprint query fall back to rebuilding once per TTL.
-_SCHEMA_CARD_TTL_SECONDS = 3600
-# How long a fingerprint check counts as fresh. Keeps back-to-back calls (the
-# warm-up at the start of a turn, then the model's own schema_map call) from
-# hitting the catalog twice.
-_SCHEMA_CARD_RECHECK_SECONDS = 30
-_SCHEMA_CARD_MAX_CHARS = 12_000
-# Tables we spell out column-by-column. The rest appear as names only; the model
-# can still `describe` them, it just doesn't have to guess that they exist.
-_SCHEMA_CARD_MAX_DETAILED = 40
-# A family (dim1, dim2, … dim3255) is collapsed to one line once it has at least
-# this many members — listing 218 near-identical names teaches nothing and costs
-# a few thousand tokens in every round of the turn.
-_SCHEMA_CARD_FAMILY_MIN = 4
-
-
-@dataclass
-class _SchemaCard:
-    card: str
-    fingerprint: Optional[str]
-    built_at: float
-    checked_at: float
-
-
-_schema_card_cache: dict[str, _SchemaCard] = {}
-_schema_card_locks: dict[str, threading.Lock] = {}
-
-# One catalog query per engine whose result changes whenever a table or view is
-# created, dropped or altered — and costs milliseconds even on a large schema.
-_SCHEMA_FINGERPRINT_SQL = {
-    "mssql": (
-        "SELECT COUNT(*), MAX(modify_date), "
-        "CHECKSUM_AGG(CHECKSUM(SCHEMA_NAME(schema_id), name, modify_date)) "
-        "FROM sys.objects WHERE is_ms_shipped = 0 AND type IN ('U', 'V')"
-    ),
-    "postgresql": (
-        "SELECT COUNT(*), md5(COALESCE(string_agg("
-        "table_schema || '.' || table_name || '.' || column_name || ':' || data_type, ',' "
-        "ORDER BY table_schema, table_name, ordinal_position), '')) "
-        "FROM information_schema.columns "
-        "WHERE table_schema NOT IN ('pg_catalog', 'information_schema')"
-    ),
-    "mysql": (
-        "SELECT COUNT(*), SUM(CRC32(CONCAT_WS('.', table_schema, table_name, "
-        "column_name, column_type))) FROM information_schema.columns "
-        "WHERE table_schema NOT IN ('mysql', 'information_schema', 'performance_schema', 'sys')"
-    ),
-    "sqlite": "SELECT COUNT(*), group_concat(type || name || COALESCE(sql, ''), '|') "
-    "FROM sqlite_master",
-}
-_SCHEMA_FINGERPRINT_SQL["mariadb"] = _SCHEMA_FINGERPRINT_SQL["mysql"]
-
-
-def _schema_fingerprint_sync(url: str) -> Optional[str]:
-    """Cheap structure fingerprint of `url`, or None when the engine has none
-    (or the query fails). Blocking; run in a thread."""
-    from sqlalchemy import create_engine, text
-
-    engine = create_engine(url, pool_pre_ping=True, connect_args={})
-    try:
-        sql = _SCHEMA_FINGERPRINT_SQL.get(engine.dialect.name)
-        if not sql:
-            return None
-        with engine.connect() as conn:
-            row = conn.execute(text(sql)).fetchone()
-        return hashlib.sha256(repr(tuple(row or ())).encode("utf-8")).hexdigest()
-    except Exception as exc:
-        logger.debug("schema fingerprint unavailable: %s", exc)
-        return None
-    finally:
-        engine.dispose()
-
-
-def _schema_card_family(name: str) -> Optional[str]:
-    """Stem of a numbered table family ('dbo.dim3255' -> 'dbo.dim<N>'), else None."""
-    m = re.match(r"^(.*?)(\d+)$", name)
-    return f"{m.group(1)}<N>" if m and len(m.group(1)) >= 2 else None
-
-
 # Row-limiting syntax is the one dialect difference that bites on the FIRST
 # query: `LIMIT 20` against SQL Server is a hard syntax error, and the model has
-# no way to know which engine it is talking to. Naming it in the schema card
-# costs one line and saves a round trip.
+# no way to know which engine it is talking to. Stated in the DB-mode note.
 _DIALECT_NOTES = {
-    "mssql": " SQL Server — row limit is `SELECT TOP n`, not `LIMIT n`.",
-    "postgresql": " PostgreSQL — row limit is `LIMIT n`.",
-    "mysql": " MySQL — row limit is `LIMIT n`.",
-    "sqlite": " SQLite — row limit is `LIMIT n`.",
+    "mssql": "SQL Server — row limit is `SELECT TOP n`, not `LIMIT n`.",
+    "postgresql": "PostgreSQL — row limit is `LIMIT n`.",
+    "mysql": "MySQL — row limit is `LIMIT n`.",
+    "mariadb": "MariaDB — row limit is `LIMIT n`.",
+    "sqlite": "SQLite — row limit is `LIMIT n`.",
 }
 
 
-def _dialect_note(engine: Any) -> str:
-    try:
-        return _DIALECT_NOTES.get(engine.dialect.name, "")
-    except Exception:
-        return ""
-
-
-def _build_schema_card_sync(url: str) -> str:
-    """Introspect `url` and render the compact schema card. Blocking; run in a thread."""
-    from sqlalchemy import create_engine, inspect
-
-    engine = create_engine(url, pool_pre_ping=True, connect_args={})
-    try:
-        inspector = inspect(engine)
-        tables: list[str] = []
-        for schema in inspector.get_schema_names():
-            if schema.lower() in {"information_schema", "pg_catalog", "sys"}:
-                continue
-            try:
-                for table in inspector.get_table_names(schema=schema):
-                    tables.append(f"{schema}.{table}" if schema else table)
-                for view in inspector.get_view_names(schema=schema):
-                    tables.append(f"{schema}.{view}" if schema else view)
-            except Exception:
-                continue
-        tables = sorted(dict.fromkeys(tables))
-        if not tables:
-            return ""
-
-        # Split into numbered families and standalone tables.
-        families: dict[str, list[str]] = {}
-        for name in tables:
-            stem = _schema_card_family(name)
-            if stem:
-                families.setdefault(stem, []).append(name)
-        collapsed = {
-            stem: members
-            for stem, members in families.items()
-            if len(members) >= _SCHEMA_CARD_FAMILY_MIN
-        }
-        in_family = {name for members in collapsed.values() for name in members}
-        standalone = [t for t in tables if t not in in_family]
-
-        # Names first, columns second. _truncate cuts the tail, and knowing that
-        # a table EXISTS is what saves a round — its columns are one `describe`
-        # away. So if anything has to go, let it be the column detail.
-        lines = [f"{len(tables)} tables/views.{_dialect_note(engine)}"]
-        for stem, members in sorted(collapsed.items()):
-            sample = ", ".join(members[:3])
-            lines.append(f"- {stem} — {len(members)} tables ({sample}, …)")
-        if standalone:
-            lines.append("Tables: " + ", ".join(standalone))
-
-        detailed = standalone[:_SCHEMA_CARD_MAX_DETAILED]
-        if detailed:
-            lines.append("Columns:")
-        for name in detailed:
-            schema, table_name = name.rsplit(".", 1) if "." in name else (None, name)
-            try:
-                cols = inspector.get_columns(table_name, schema=schema)
-            except Exception:
-                continue
-            rendered = ", ".join(f"{c.get('name')}:{c.get('type')}" for c in cols)
-            lines.append(f"- {name}({rendered})")
-        return _truncate("\n".join(lines), _SCHEMA_CARD_MAX_CHARS)
-    finally:
-        engine.dispose()
-
-
-def get_schema_card(database: Optional[str] = None) -> str:
-    """Cached schema card for `database` (or the sole connection). "" when unavailable.
-
-    Blocking — callers on the event loop should wrap this in ``asyncio.to_thread``.
-    """
-    conns = _sql_connections()
-    if not conns:
-        return ""
-    if database:
-        conn = next((c for c in conns if c["name"].lower() == database.lower()), None)
-    elif len(conns) == 1:
-        conn = conns[0]
-    else:
-        conn = None
-    if conn is None:
-        return ""
+def sql_dialect_note(conn: dict) -> str:
+    """One-line SQL dialect hint for a connection from ``_sql_connections``."""
     url, err = _resolve_conn_url(conn)
     if err or not url:
         return ""
-
-    key = hashlib.sha256(url.encode("utf-8")).hexdigest()
-    with _schema_card_locks.setdefault(key, threading.Lock()):
-        hit = _schema_card_cache.get(key)
-        now = time.time()
-        # Checked moments ago (e.g. by the warm-up at the start of this turn).
-        if hit and now - hit.checked_at < _SCHEMA_CARD_RECHECK_SECONDS:
-            return hit.card
-        fingerprint = _schema_fingerprint_sync(url)
-        if hit:
-            unchanged = (
-                fingerprint == hit.fingerprint
-                if fingerprint is not None
-                # No cheap change signal for this engine: fall back to the TTL.
-                else now - hit.built_at < _SCHEMA_CARD_TTL_SECONDS
-            )
-            if unchanged:
-                hit.checked_at = now
-                return hit.card
-        try:
-            card = _build_schema_card_sync(url)
-        except Exception as exc:
-            logger.warning("schema card build failed for %s: %s", conn["name"], exc)
-            return hit.card if hit else ""
-        _schema_card_cache[key] = _SchemaCard(card, fingerprint, now, now)
-        logger.info("schema card built for %s (%d chars)", conn["name"], len(card))
-        return card
-
-
-_warm_tasks: set = set()
-
-
-def warm_schema_card(database: Optional[str] = None) -> None:
-    """Refresh the schema card in the background so `query_sql action=schema_map`
-    answers from cache. Fire-and-forget; must be called from the event loop."""
-    task = asyncio.get_running_loop().create_task(asyncio.to_thread(get_schema_card, database))
-    # Hold a reference until it finishes — the loop only keeps a weak one.
-    _warm_tasks.add(task)
-    task.add_done_callback(_warm_tasks.discard)
+    return _DIALECT_NOTES.get(url.split(":", 1)[0].split("+", 1)[0].lower(), "")
 
 
 def _build_external_sql_url() -> tuple[Optional[str], Optional[str]]:
@@ -609,8 +396,8 @@ def _spill_name(query: str) -> str:
     return f"{_SQL_SPILL_DIR}/query_{digest}.csv"
 
 
-# Aliases models reach for instead of the real query_sql actions. Echoing the
-# tool's own name back as the action is the single most common one.
+# Aliases models reach for instead of the four real query_sql actions. Echoing
+# the tool's own name back as the action is the single most common one.
 _SQL_ACTION_ALIASES = {
     "query_sql": "query",
     "sql": "query",
@@ -624,16 +411,14 @@ _SQL_ACTION_ALIASES = {
     "list": "list_tables",
     "show_tables": "list_tables",
     "describe_table": "describe",
-    "schema_card": "schema_map",
-    "map": "schema_map",
-    "overview": "schema_map",
+    "schema": "describe",
 }
 
-_SQL_ACTIONS = {"query", "list_databases", "list_tables", "describe", "schema_map"}
+_SQL_ACTIONS = {"query", "list_databases", "list_tables", "describe"}
 
 
 def _normalize_sql_action(raw: str, args: Dict) -> str:
-    """Map an action alias onto one of the real actions.
+    """Map an action alias onto one of the four real actions.
 
     A wrong `action` used to hard-fail a call whose intent was unambiguous
     (`{"query": "SELECT ...", "action": "query_sql"}`), costing the model a
@@ -642,9 +427,6 @@ def _normalize_sql_action(raw: str, args: Dict) -> str:
     action = raw.strip().lower()
     if action in _SQL_ACTIONS:
         return action
-    if action == "schema":
-        # With a table it means that table's columns, without one the whole map.
-        return "describe" if str(args.get("table") or "").strip() else "schema_map"
     action = _SQL_ACTION_ALIASES.get(action, action)
     if action in _SQL_ACTIONS:
         return action
@@ -717,25 +499,6 @@ async def do_query_sql(
     url, err = _resolve_conn_url(conn)
     if err or not url:
         return {"error": err or "No SQL database URL could be built.", "exit_code": 1}
-
-    if action == "schema_map":
-        card = await asyncio.to_thread(get_schema_card, conn["name"])
-        if not card:
-            return {
-                "error": (
-                    "No schema map available for this database. Use action=list_tables, "
-                    "then action=describe on the tables you need."
-                ),
-                "exit_code": 1,
-            }
-        return {
-            "output": (
-                "SCHEMA MAP (tables, views and columns; current as of the last schema "
-                "change):\n" + card + "\n`describe` a table only if its columns are not "
-                "listed above."
-            ),
-            "exit_code": 0,
-        }
 
     def _run() -> Dict:
         try:
@@ -812,8 +575,8 @@ async def do_query_sql(
                 return {
                     "error": (
                         f'Unknown action {action!r}. Use one of: "query" (with a "query" '
-                        'field), "schema_map", "list_databases", "list_tables", "describe" '
-                        '(with a "table" field). Omit "action" entirely to run a query.'
+                        'field), "list_databases", "list_tables", "describe" (with a '
+                        '"table" field). Omit "action" entirely to run a query.'
                     ),
                     "exit_code": 1,
                 }
@@ -849,7 +612,10 @@ async def do_query_sql(
                 # Big result sets go to a CSV rather than into the context. The
                 # model still sees the columns and a head preview, which is all
                 # it needs to write the pandas code that does the real work.
-                if len(rows) > _SQL_SPILL_ROWS:
+                rendered = _format_sql_rows(rows) if len(rows) <= 2000 else None
+                if len(rows) > _SQL_SPILL_ROWS and (
+                    rendered is None or len(rendered) > _SQL_INLINE_MAX_CHARS
+                ):
                     out["_spill_csv"] = _spill_rows_to_csv(columns, rows)
                     out["_spill_name"] = _spill_name(query)
                     out["_spill_rows"] = len(rows)
@@ -860,7 +626,7 @@ async def do_query_sql(
                     )
                     out["rows"] = rows[:_SQL_PREVIEW_ROWS]
                 else:
-                    out["output"] = _format_sql_rows(rows)
+                    out["output"] = rendered
                     out["rows"] = rows
                 if truncated:
                     out["output"] += f"\n\nReturned first {max_rows} of {row_count} rows."

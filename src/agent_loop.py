@@ -281,7 +281,7 @@ Search the documents indexed in this Talos instance (the knowledge base: manuals
 ```query_sql
 {"action": "query", "query": "SELECT ...", "max_rows": 100}
 ```
-Read-only SQL access to the configured external database(s). Use when the user asks about database data, tables, rows, reports, metrics, or SQL. Actions: `schema_map` (every table/view with its key columns in one result — call it ONCE to orient instead of `list_tables` plus many `describe`s), `list_databases` (names of the connected databases), `list_tables`, `describe` with `table`, and `query`. When more than one database is configured, pass `"database": "<name>"` to pick which one each call targets (omit it when only one is configured). Omit `max_rows` or pass `0` when the user wants the full result set. Only read-only SELECT/WITH/SHOW/DESCRIBE/EXPLAIN/PRAGMA statements are allowed; never ask the user for DB credentials and never reveal credentials.
+Read-only SQL access to the configured external database(s). Use when the user asks about database data, tables, rows, reports, metrics, or SQL. Actions: `list_databases` (names of the connected databases), `list_tables`, `describe` with `table`, and `query`. When more than one database is configured, pass `"database": "<name>"` to pick which one each call targets (omit it when only one is configured). Omit `max_rows` or pass `0` when the user wants the full result set. Only read-only SELECT/WITH/SHOW/DESCRIBE/EXPLAIN/PRAGMA statements are allowed; never ask the user for DB credentials and never reveal credentials.
 **This tool is the ONLY route to the database.** The `python`/`bash` sandbox has no network path to the DB host, so `pymssql.connect`, `psycopg2.connect` or a SQLAlchemy engine written in a code cell will always fail — do not try it, and do not treat the failure as something to work around. To analyse rows in pandas, pull them with `query_sql` (the result is written to a CSV in your workspace when it is large) and `read_csv` that file in the `python` tool.""",
     "web_search": """\
 ```web_search
@@ -2316,10 +2316,16 @@ async def stream_agent_loop(
         max_rounds = max(max_rounds, min(_db_rounds, 200))
         logger.info("[db-mode] round ceiling raised to %d for this turn", max_rounds)
         _db_names = []
+        _dialect_notes = []
         try:
-            from src.tool_implementations import _sql_connections
+            from src.tool_implementations import _sql_connections, sql_dialect_note
 
-            _db_names = [c["name"] for c in _sql_connections()]
+            _conns = _sql_connections()
+            _db_names = [c["name"] for c in _conns]
+            for _c in _conns:
+                _dn = sql_dialect_note(_c)
+                if _dn:
+                    _dialect_notes.append(f"{_c['name']}: {_dn}" if len(_conns) > 1 else _dn)
         except Exception:
             _db_names = []
         if len(_db_names) > 1:
@@ -2330,18 +2336,6 @@ async def stream_agent_loop(
             )
         else:
             _db_list_note = ""
-        # The schema map is fetched on demand (`query_sql action=schema_map`),
-        # not injected: most DB questions are answered from the uploaded SQL
-        # knowledge plus a known table, and an injected card cost every such turn
-        # its tokens. Warm the cache now so the call, if the model makes it,
-        # answers instantly. Never awaited — a slow catalog must not hold up the
-        # first token.
-        try:
-            from src.tool_implementations import warm_schema_card
-
-            warm_schema_card(None)
-        except Exception as _sc_err:
-            logger.debug("[db-mode] schema card warm-up skipped: %s", _sc_err)
         # A preference, not an order. The switch is on by default ("Full
         # Knowledge"), so it rides along on every message — including "who is
         # <celebrity>" or "explain X". A hard "you MUST query" sent those into
@@ -2361,10 +2355,7 @@ async def stream_agent_loop(
             "knowledge (or the web) instead of searching further tables. Never use "
             "python/bash to reach the database."
             + _db_list_note
-            + " For a database question where the reference material and the "
-            "conversation don't already tell you which tables to use, call `query_sql` "
-            "action=schema_map once to see every table and its columns, then run the "
-            "SELECT that answers the question."
+            + (" Dialect: " + " ".join(_dialect_notes) if _dialect_notes else "")
         )
         # In the turn context before the question, never at the head of the
         # system prompt: the note exists only on DB turns, so prepending it
@@ -2544,6 +2535,7 @@ async def stream_agent_loop(
     # using tools — i.e. it was cut off, not finished. Drives a "Continue" event
     # so the user can resume instead of the turn silently stalling.
     _exhausted_rounds = False
+    round_profile: List[Dict[str, Any]] = []
 
     for round_num in range(1, max_rounds + 1):
         round_response = ""
@@ -2727,6 +2719,17 @@ async def stream_agent_loop(
         # complementary cap for the rare stream that trickles bytes forever and
         # so never trips the inactivity timeout. Generous — only catches runaway.
         _round_deadline = time.time() + max(agent_stream_timeout * 4, 1200)
+        # Per-round profile: how long the model took to start (queue + prefill,
+        # plus thinking before the first visible token), how much of the prompt
+        # the server had cached, and how long the tools and our own overhead
+        # took before the next round. Shows where a slow turn's time went.
+        _rp_t0 = time.time()
+        if round_profile and "_ended" in round_profile[-1]:
+            _prev = round_profile[-1]
+            _prev["tools_s"] = round(_rp_t0 - _prev.pop("_ended"), 2)
+        _rp = {"round": round_num, "prompt_tokens": 0, "cached_tokens": None, "output_tokens": 0}
+        round_profile.append(_rp)
+        _rp_first = None
         async for chunk in stream_llm_with_fallback(
             _candidates,
             messages,
@@ -2748,6 +2751,12 @@ async def stream_agent_loop(
             if chunk.startswith("event: error"):
                 yield chunk
                 continue
+            if (
+                _rp_first is None
+                and chunk.startswith("data: ")
+                and not chunk.startswith(('data: {"type": "usage"', "data: [DONE]"))
+            ):
+                _rp_first = time.time()
             if chunk.startswith("data: ") and not chunk.startswith("data: [DONE]"):
                 try:
                     data = json.loads(chunk[6:])
@@ -2804,6 +2813,9 @@ async def stream_agent_loop(
                     elif data.get("type") == "usage":
                         u = data.get("data", {})
                         round_input = u.get("input_tokens", 0)
+                        _rp["prompt_tokens"] = round_input
+                        _rp["cached_tokens"] = u.get("cached_tokens")
+                        _rp["output_tokens"] = u.get("output_tokens", 0)
                         real_input_tokens += round_input
                         real_output_tokens += u.get("output_tokens", 0)
                         last_round_input_tokens = round_input
@@ -2921,6 +2933,21 @@ async def stream_agent_loop(
                 # Forward error events to frontend as visible text
                 yield chunk
             # Intercept [DONE] — don't forward until all rounds finish
+
+        _rp_end = time.time()
+        _rp["first_token_s"] = round((_rp_first or _rp_end) - _rp_t0, 2)
+        _rp["stream_s"] = round(_rp_end - _rp_t0, 2)
+        _rp["_ended"] = _rp_end
+        logger.info(
+            "[agent-perf] round %d: prompt %s tok (cached %s), first token %.1fs, "
+            "stream %.1fs, %s tok out",
+            round_num,
+            _rp["prompt_tokens"],
+            "n/a" if _rp["cached_tokens"] is None else _rp["cached_tokens"],
+            _rp["first_token_s"],
+            _rp["stream_s"],
+            _rp["output_tokens"],
+        )
 
         if round_num == 1:
             for message in messages:
@@ -3899,6 +3926,10 @@ async def stream_agent_loop(
         tool_schemas=all_tool_schemas,
         system_segments=system_segments,
     )
+    if round_profile:
+        if "_ended" in round_profile[-1]:
+            round_profile[-1]["tools_s"] = round(time.time() - round_profile[-1].pop("_ended"), 2)
+        metrics["round_profile"] = round_profile
     yield f"data: {json.dumps({'type': 'metrics', 'data': metrics})}\n\n"
 
     yield "data: [DONE]\n\n"
