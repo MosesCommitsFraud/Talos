@@ -5,6 +5,7 @@ import json
 import logging
 import os
 import re
+import time
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
@@ -73,6 +74,10 @@ class ChatContext:
     # The chat route emits a doc_update SSE event for each before streaming
     # begins, so the editor pane switches to the new doc immediately.
     auto_opened_docs: list = field(default_factory=list)
+    # Wall-clock seconds spent here (preprocess, RAG preface with retrieval and
+    # query rewrite, compaction) — time the user waits before the agent loop,
+    # which the loop's own time-to-first-token does not include.
+    build_seconds: float = 0.0
 
 
 # ── Helpers ────────────────────────────────────────────────────────────── #
@@ -607,6 +612,7 @@ async def build_chat_context(
     This is the shared logic between /chat and /chat_stream — preset extraction,
     message preprocessing, RAG injection, compaction, normalization.
     """
+    _build_t0 = time.time()
     # Preset
     preset = extract_preset(chat_handler, preset_id)
 
@@ -849,6 +855,7 @@ async def build_chat_context(
         preset=preset,
         preprocessed=preprocessed,
         auto_opened_docs=auto_opened_docs,
+        build_seconds=time.time() - _build_t0,
     )
 
 
