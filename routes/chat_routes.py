@@ -63,6 +63,22 @@ _active_streams: Dict[str, dict] = {}
 _IMAGE_MODEL_PREFIXES = ("gpt-image", "dall-e", "chatgpt-image")
 
 
+_AUTO_NAME_REGISTER_WAIT_S = 10  # the stream registers a moment after scheduling
+_AUTO_NAME_MAX_WAIT_S = 600  # a very long agent run still gets its title eventually
+
+
+async def _auto_name_after_stream(session_manager, sess, session_id: str, lang=None) -> None:
+    """Generate the chat title after the session's active stream has ended."""
+    loop = asyncio.get_running_loop()
+    register_by = loop.time() + _AUTO_NAME_REGISTER_WAIT_S
+    while session_id not in _active_streams and loop.time() < register_by:
+        await asyncio.sleep(0.5)
+    give_up_at = loop.time() + _AUTO_NAME_MAX_WAIT_S
+    while session_id in _active_streams and loop.time() < give_up_at:
+        await asyncio.sleep(1)
+    await auto_name_session(session_manager, sess, lang=lang)
+
+
 def _stream_set(session_id: str, **fields) -> None:
     """Update fields on the active-stream entry for `session_id`, or
     no-op if the entry has already been popped. Using .get() avoids a
@@ -684,12 +700,16 @@ def setup_chat_routes(
             artifact_selection=artifact_selection,
         )
 
-        # Auto-name the session immediately — the user message is now in
-        # history, so fire title generation right away instead of waiting for
-        # the response to finish (which left titles inconsistent on interrupted
-        # streams). Background task so it never blocks streaming.
+        # Auto-name the session once its first response is over. Scheduled now
+        # (the user message is in history) so the title still comes when the
+        # stream fails or is interrupted, but it runs only after the stream has
+        # ended: fired in parallel, the title request competed with the answer
+        # for the model server's few slots and its prefill, right when the
+        # user is waiting for the first token.
         if not incognito and not compare_mode and needs_auto_name(sess.name):
-            asyncio.create_task(auto_name_session(session_manager, sess, lang=ui_lang))
+            asyncio.create_task(
+                _auto_name_after_stream(session_manager, sess, session, lang=ui_lang)
+            )
 
         _research_flags = {"do": do_research}  # Mutable container for generator scope
 
@@ -1135,6 +1155,10 @@ def setup_chat_routes(
                                 elif data.get("type") == "metrics":
                                     last_metrics = data.get("data", {})
                                     last_metrics["model"] = _answered_by or sess.model
+                                    # Time before the agent loop started (RAG
+                                    # retrieval, query rewrite, compaction) — the
+                                    # loop's time_to_first_token starts after it.
+                                    last_metrics["context_build_s"] = round(ctx.build_seconds, 2)
                                     yield f"data: {json.dumps({'type': 'metrics', 'data': last_metrics})}\n\n"
                             except json.JSONDecodeError:
                                 yield chunk

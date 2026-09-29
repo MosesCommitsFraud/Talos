@@ -2496,6 +2496,7 @@ async def stream_agent_loop(
     _sql_kb_msg = None
     _sql_kb_attempted = False  # retrieval ran at least once (it may have found nothing)
     _sql_kb_refreshes = 0
+    _sql_kb_seconds = 0.0  # last retrieval's duration, reported in the round profile
 
     # Document streaming state (persists across rounds)
     _doc_acc = ""  # accumulated tool-call JSON arguments
@@ -2587,7 +2588,13 @@ async def stream_agent_loop(
             if _kb_stale:
                 _sql_kb_attempted = True
                 # Embedding + vector search are blocking — keep the loop free.
+                _kb_t0 = time.time()
                 _kb = await asyncio.to_thread(_retrieve_sql_knowledge, _sql_kb_query(messages))
+                _sql_kb_seconds = time.time() - _kb_t0
+                if round_num == 1:
+                    # Before the first token, so it belongs to the prep time
+                    # (and out of agent_model_wait_time, which is derived).
+                    prep_timings["sql_knowledge"] = _sql_kb_seconds
                 if _kb:
                     _kb_content = (
                         "Reference material for the user's database (uploaded SQL "
@@ -2699,8 +2706,12 @@ async def stream_agent_loop(
             _prev = round_profile[-1]
             _prev["tools_s"] = round(_rp_t0 - _prev.pop("_ended"), 2)
         _rp = {"round": round_num, "prompt_tokens": 0, "cached_tokens": None, "output_tokens": 0}
+        if _sql_kb_seconds:
+            _rp["sql_knowledge_s"] = round(_sql_kb_seconds, 2)
+            _sql_kb_seconds = 0.0
         round_profile.append(_rp)
         _rp_first = None
+        _rp_visible = None  # first answer text or tool call (thinking is hidden in the UI)
         async for chunk in stream_llm_with_fallback(
             _candidates,
             messages,
@@ -2777,6 +2788,8 @@ async def stream_agent_loop(
                                     _doc_last_len = len(decoded)
                                     yield f"data: {json.dumps({'type': 'doc_stream_delta', 'content': decoded})}\n\n"
                     elif data.get("type") == "tool_calls":
+                        if _rp_visible is None:
+                            _rp_visible = time.time()
                         native_tool_calls = data.get("calls", [])
                         logger.info(
                             f"Agent round {round_num}: received {len(native_tool_calls)} native tool call(s)"
@@ -2824,6 +2837,8 @@ async def stream_agent_loop(
                         if data.get("thinking"):
                             round_reasoning += data["delta"]
                         else:
+                            if _rp_visible is None:
+                                _rp_visible = time.time()
                             round_response += data["delta"]
                             full_response += data["delta"]
                         yield chunk  # Stream all rounds
@@ -2907,15 +2922,18 @@ async def stream_agent_loop(
 
         _rp_end = time.time()
         _rp["first_token_s"] = round((_rp_first or _rp_end) - _rp_t0, 2)
+        # What the user waits for: thinking runs hidden until this point.
+        _rp["first_visible_s"] = round((_rp_visible or _rp_end) - _rp_t0, 2)
         _rp["stream_s"] = round(_rp_end - _rp_t0, 2)
         _rp["_ended"] = _rp_end
         logger.info(
             "[agent-perf] round %d: prompt %s tok (cached %s), first token %.1fs, "
-            "stream %.1fs, %s tok out",
+            "first visible %.1fs, stream %.1fs, %s tok out",
             round_num,
             _rp["prompt_tokens"],
             "n/a" if _rp["cached_tokens"] is None else _rp["cached_tokens"],
             _rp["first_token_s"],
+            _rp["first_visible_s"],
             _rp["stream_s"],
             _rp["output_tokens"],
         )
