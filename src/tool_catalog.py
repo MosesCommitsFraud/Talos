@@ -10,9 +10,8 @@ model picks worse from a long list.
 So, like Claude Code's deferred tools, the surface is split:
 
 * **Core tools** — the everyday set, sent with full schemas on every request,
-  in a fixed order. Per-turn switches (web, database, knowledge base) do NOT
-  remove tools from this list; they are enforced at execution time instead,
-  so toggling them never changes the prompt's head.
+  in a fixed order. A switched-off source (web, database, knowledge base) is
+  left out; the list changes only when the user changes a mode.
 * **Catalog** — everything else (session/admin tools, MCP tools). The system
   prompt lists each by name with a one-line summary. The model loads a full
   schema with `find_tools`, whose result lands at the END of the conversation,
@@ -28,10 +27,10 @@ from src.tool_index import ALWAYS_AVAILABLE
 FIND_TOOLS = "find_tools"
 RUN_TOOL = "run_tool"
 
-# Always sent with full schemas. The retrieval-independent set plus the tools
-# a per-turn switch or an open document makes relevant — those used to join
-# the list only on the turns that needed them, which is exactly the churn this
-# module exists to avoid.
+# Sent with full schemas whenever available. The retrieval-independent set plus
+# the knowledge/database and document tools — those used to join the list only
+# when a keyword in the message suggested them, which is exactly the per-message
+# churn this module exists to avoid.
 CORE_TOOLS = frozenset(
     ALWAYS_AVAILABLE
     | {

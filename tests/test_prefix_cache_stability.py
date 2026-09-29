@@ -151,8 +151,8 @@ def test_malformed_run_tool_call_reports_an_error_block():
     assert blocks[0].tool_type == RUN_TOOL
 
 
-def test_core_tools_cover_the_per_turn_switches():
-    # A composer switch must never move a tool between core and catalog.
+def test_core_tools_include_the_knowledge_sources():
+    # Available sources are always core tools, never hidden in the catalog.
     for name in ("web_search", "web_fetch", "query_sql", "search_knowledge", "create_document"):
         assert name in CORE_TOOLS
     assert {s["function"]["name"] for s in META_TOOL_SCHEMAS} == {FIND_TOOLS, RUN_TOOL}
@@ -202,29 +202,20 @@ async def test_second_turn_extends_the_first_turns_prompt(captured):
         {"role": "assistant", "content": "Hallo! Wie kann ich helfen?"},
         {"role": "user", "content": "Wie viele Kunden haben wir?"},
     ]
-    await _run_turn([dict(m) for m in base], use_rag=True, force_db=False)
+    # "Full knowledge" on both messages — the usual case: a mode stays on.
+    await _run_turn([dict(m) for m in base], use_rag=True, force_db=True)
     turn2 = [dict(m) for m in base] + [
         {"role": "assistant", "content": "Antwort."},
         {"role": "user", "content": "Und im Vorjahr?"},
     ]
-    # Different switches on the second message: web off, database on.
-    await _run_turn(
-        turn2,
-        use_rag=False,
-        force_db=True,
-        disabled_tools={"web_search", "web_fetch"},
-        turn_disabled_tools={"web_search", "web_fetch"},
-    )
+    await _run_turn(turn2, use_rag=True, force_db=True)
     first, second = captured
-    # Identical tool list, even though the switches differ.
     assert first["tools"] == second["tools"]
-    names = [t["function"]["name"] for t in first["tools"]]
-    assert "query_sql" in names and "web_search" in names
     w1, w2 = _wire(first), _wire(second)
     # Identical system turn — the clock and the DB note are not in it.
     assert w1[0] == w2[0]
     assert "10:0" not in w1[0]["content"]
-    assert "DATABASE ACCESS" not in w2[0]["content"]
+    assert "DATABASE ACCESS" not in w1[0]["content"]
     # Everything before the first turn's question is shared verbatim; the
     # question itself differs only because its turn context is gone.
     assert len(w1) == 4
@@ -233,5 +224,24 @@ async def test_second_turn_extends_the_first_turns_prompt(captured):
     assert "10:00" in w1[3]["content"] and "10:01" in w2[-1]["content"]
     # The per-turn material sits in the new question's turn.
     assert "DATABASE ACCESS" in w2[-1]["content"]
-    assert "`web_search`" in w2[-1]["content"]
     assert w2[-1]["content"].endswith("Und im Vorjahr?")
+
+
+async def test_switched_off_sources_are_not_offered(captured):
+    msgs = [{"role": "system", "content": "p"}, {"role": "user", "content": "wer ist markus rühl"}]
+    # "Nur Chat" with web off: no database, no knowledge base, no web.
+    await _run_turn(
+        [dict(m) for m in msgs],
+        use_rag=False,
+        force_db=False,
+        disabled_tools={"web_search", "web_fetch"},
+    )
+    (call,) = captured
+    names = {t["function"]["name"] for t in call["tools"]}
+    assert not names & {"query_sql", "search_knowledge", "web_search", "web_fetch"}
+    wire = _wire(call)
+    assert "DATABASE ACCESS" not in json.dumps(wire)
+    available = next(
+        line for line in wire[0]["content"].splitlines() if line.startswith("Available tools:")
+    )
+    assert "query_sql" not in available and "search_knowledge" not in available

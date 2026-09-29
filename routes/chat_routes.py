@@ -794,11 +794,6 @@ def setup_chat_routes(
 
         # Build disabled-tools set from frontend toggles + user privileges
         disabled_tools = set()
-        # Tools switched off by a composer toggle for this message only. They
-        # are merged into disabled_tools below and also passed on separately:
-        # with the tool catalog they stay in the model's tool list (refused at
-        # execution) so a toggle never changes the prompt's head.
-        turn_disabled = set()
         # The shell/file/MCP/management tool groups are gated by their own
         # privileges (src/tool_security.TOOL_PRIVILEGE_GROUPS), applied in
         # src/agent_loop.py where the owner is known. They are deliberately not
@@ -807,7 +802,7 @@ def setup_chat_routes(
         # Nobody/incognito mode: deny tools that would expose the user's
         # past chats or other identity-linked data.
         if incognito:
-            turn_disabled.update(
+            disabled_tools.update(
                 {
                     "search_chats",  # past chat history
                     "manage_skills",  # skill presets tied to user
@@ -817,7 +812,7 @@ def setup_chat_routes(
         # Web search turned off in the composer: the model answers without
         # reaching the internet for this turn.
         if not use_web:
-            turn_disabled.update({"web_search", "web_fetch"})
+            disabled_tools.update({"web_search", "web_fetch"})
 
         # Enforce per-user privileges
         _privs = {}
@@ -903,9 +898,6 @@ def setup_chat_routes(
                         "background_task",  # spawns a whole agent turn
                     }
                 )
-
-        turn_disabled -= disabled_tools  # also off for a lasting reason → stays hidden
-        disabled_tools |= turn_disabled
 
         async def stream_with_save() -> AsyncGenerator[str, None]:
             # _effective_mode is read-only here; closure captures it from
@@ -1083,7 +1075,6 @@ def setup_chat_routes(
                         use_rag=str(use_rag).lower() == "true",
                         reasoning=reasoning,
                         reasoning_effort=reasoning_effort,
-                        turn_disabled_tools=turn_disabled,
                     ):
                         if chunk.startswith("data: ") and not chunk.startswith("data: [DONE]"):
                             try:

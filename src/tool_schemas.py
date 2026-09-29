@@ -230,8 +230,11 @@ FUNCTION_TOOL_SCHEMAS = [
                 "results are weak. Returns titles, URLs and snippets; snippets are often too thin "
                 "to answer from, so follow up with web_fetch on the best URLs. Search in the "
                 "language the answer lives in — German queries for German topics. Queries go to "
-                "public search engines: never put document content, customer or person names, or "
-                "internal identifiers in one — search the general, public version of the question."
+                "public search engines: never put anything you took from the user's documents or "
+                "database into one — document content, names of their customers, contacts or "
+                "employees, internal identifiers or figures; search the general, public version "
+                "of the question. Names of public figures, companies or products the user asks "
+                "about are fine to search."
             ),
             "parameters": {
                 "type": "object",
@@ -306,7 +309,8 @@ FUNCTION_TOOL_SCHEMAS = [
                 "answer what they asked. Results are snippets, not articles: call web_fetch on a "
                 "URL before stating what a piece actually says. The query goes to public search "
                 "engines, so keep it to the public version of the question — never put document "
-                "content, customer or person names, or internal identifiers in one."
+                "content, names of the user's customers, contacts or employees, or internal "
+                "identifiers in one."
             ),
             "parameters": {
                 "type": "object",

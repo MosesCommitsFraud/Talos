@@ -137,6 +137,6 @@ def current_datetime_prompt(now_utc: Optional[datetime] = None) -> str:
         "answer that an event has not happened: check its date against today first, "
         "and if it has passed, look the outcome up rather than reporting your "
         "memory. Look it up the same way as anything else — the user's own "
-        "documents first, the web when they don't cover it. This is about dated "
+        "documents if it concerns them, otherwise the web. This is about dated "
         "claims only; it is not a reason to go looking for things you do know.\n\n"
     )
