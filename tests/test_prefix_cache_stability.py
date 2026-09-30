@@ -245,3 +245,33 @@ async def test_switched_off_sources_are_not_offered(captured):
         line for line in wire[0]["content"].splitlines() if line.startswith("Available tools:")
     )
     assert "query_sql" not in available and "search_knowledge" not in available
+
+
+async def test_sql_knowledge_refresh_is_appended_not_rewritten(monkeypatch):
+    calls = []
+
+    async def fake_stream(candidates, messages, **kwargs):
+        calls.append(json.loads(json.dumps(messages, default=str)))
+        if len(calls) == 1:
+            call = {"id": "c1", "name": "query_sql", "arguments": '{"query": "SELECT 1"}'}
+            yield f"data: {json.dumps({'type': 'tool_calls', 'calls': [call]})}\n\n"
+        else:
+            yield f"data: {json.dumps({'delta': 'Fertig.'})}\n\n"
+        yield "data: [DONE]\n\n"
+
+    retrievals = iter(["[a.md]\nTabelle A", "[a.md]\nTabelle A\n\n---\n\n[b.md]\nTabelle B"])
+    monkeypatch.setattr(agent_loop, "stream_llm_with_fallback", fake_stream)
+    monkeypatch.setattr(agent_loop, "_retrieve_sql_knowledge", lambda q: next(retrievals, ""))
+    monkeypatch.setenv("TALOS_ASSUME_NATIVE_TOOLS", "1")
+    msgs = [{"role": "system", "content": "p"}, {"role": "user", "content": "Umsatz 2025?"}]
+    async for _ in agent_loop.stream_agent_loop(
+        "http://vllm.test:8000/v1", "qwen3-llm", msgs, max_rounds=2, force_db=True
+    ):
+        pass
+    first, second = (_consolidate_system_messages(c) for c in calls)
+    # Round 2 starts with round 1's prompt, byte for byte.
+    assert second[: len(first)] == first
+    assert "Tabelle A" in json.dumps(first)
+    # The refresh sits at the end and carries only the new section.
+    tail = second[-1]["content"]
+    assert "Tabelle B" in tail and "Tabelle A" not in tail

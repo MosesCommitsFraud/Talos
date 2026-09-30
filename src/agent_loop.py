@@ -688,6 +688,7 @@ def _sql_kb_query(messages: List[Dict], max_msgs: int = 4, max_chars: int = 1200
 # full re-prefill of the conversation.
 _SQL_KB_K = 12
 _SQL_KB_MAX_CHARS = 16000
+_SQL_KB_SEPARATOR = "\n\n---\n\n"
 
 
 def _retrieve_sql_knowledge(
@@ -710,7 +711,7 @@ def _retrieve_sql_knowledge(
         for h in hits:
             fn = (h.get("metadata") or {}).get("filename") or "doc"
             parts.append(f"[{fn}]\n{h.get('document', '')}")
-        return "\n\n---\n\n".join(parts)[:max_chars]
+        return _SQL_KB_SEPARATOR.join(parts)[:max_chars]
     except Exception as _kb_err:
         logger.debug("SQL knowledge retrieval skipped: %s", _kb_err)
         return ""
@@ -2497,6 +2498,7 @@ async def stream_agent_loop(
     _sql_kb_attempted = False  # retrieval ran at least once (it may have found nothing)
     _sql_kb_refreshes = 0
     _sql_kb_seconds = 0.0  # last retrieval's duration, reported in the round profile
+    _sql_kb_sent: Set[str] = set()  # sections already given to the model this turn
 
     # Document streaming state (persists across rounds)
     _doc_acc = ""  # accumulated tool-call JSON arguments
@@ -2558,15 +2560,17 @@ async def stream_agent_loop(
                     yield f"data: {json.dumps({'type': 'compacted', 'context_length': context_length})}\n\n"
                     yield _context_metrics_frame(estimate_tokens(messages), "estimated")
 
-        # DB mode: SQL knowledge is retrieved ONCE and then held still.
+        # DB mode: SQL knowledge is retrieved once, right before the question
+        # (turn context), and that message is never edited afterwards.
         #
-        # It sits right before the question as turn context (user role). It
-        # used to be a system message, which stream_llm hoisted to position 0,
-        # so every rewrite invalidated the prefix cache for the ENTIRE
-        # conversation — a 39-round DB turn re-processed ~168k tokens per round
-        # (6.5M prompt tokens, ~2/3 of a 107-minute wall clock). Now a rewrite
-        # only re-prefills this turn's question and rounds, which is still not
-        # free, so the refresh stays gated.
+        # A refresh is APPENDED after the latest tool results, carrying only
+        # sections not given yet. Editing the message in place rewrote the
+        # prompt from before the question on — the question and every tool
+        # round of the turn — so vLLM re-prefilled all of it: measured ~50 s per
+        # refresh at 40k tokens. (As a system message, which stream_llm hoisted
+        # to position 0, it was worse still: a 39-round DB turn once spent ~2/3
+        # of 107 minutes re-prefilling.) Appended, a refresh costs only its own
+        # new sections.
         #
         # Re-retrieving is only worth that price when the model is genuinely
         # lost in the schema, so it is gated on a query_sql MISS in the previous
@@ -2595,25 +2599,42 @@ async def stream_agent_loop(
                     # Before the first token, so it belongs to the prep time
                     # (and out of agent_model_wait_time, which is derived).
                     prep_timings["sql_knowledge"] = _sql_kb_seconds
-                if _kb:
-                    _kb_content = (
-                        "Reference material for the user's database (uploaded SQL "
-                        "knowledge — use it to navigate the schema when the question "
-                        "is about their data; its presence doesn't mean it is):\n" + _kb
-                    )
-                    if _sql_kb_msg is None:
-                        _sql_kb_msg = turn_context_message(_kb_content)
+                # Only sections the model hasn't been given yet this turn.
+                _kb_new = [
+                    part
+                    for part in (_kb.split(_SQL_KB_SEPARATOR) if _kb else [])
+                    if part.strip() and part not in _sql_kb_sent
+                ]
+                if _kb_new:
+                    _sql_kb_sent.update(_kb_new)
+                    _kb_text = _SQL_KB_SEPARATOR.join(_kb_new)
+                    if _sql_kb_msg is None and round_num == 1:
+                        _sql_kb_msg = turn_context_message(
+                            "Reference material for the user's database (uploaded SQL "
+                            "knowledge — use it to navigate the schema when the question "
+                            "is about their data; its presence doesn't mean it is):\n" + _kb_text
+                        )
                         insert_before_last_user(messages, _sql_kb_msg)
-                    elif _sql_kb_msg["content"] != turn_context_message(_kb_content)["content"]:
-                        _sql_kb_msg["content"] = turn_context_message(_kb_content)["content"]
+                    else:
+                        _sql_kb_msg = turn_context_message(
+                            "More reference material for the user's database, found for "
+                            "your latest queries (the previous one came back empty or "
+                            "failed):\n" + _kb_text
+                        )
+                        messages.append(_sql_kb_msg)
                         _sql_kb_refreshes += 1
                         logger.info(
-                            "[db-mode] SQL knowledge refreshed after a missed query "
-                            "(round %d, refresh %d/%d) — prefix cache resets",
+                            "[db-mode] SQL knowledge appended after a missed query "
+                            "(round %d, refresh %d/%d, %d new section(s))",
                             round_num,
                             _sql_kb_refreshes,
                             _SQL_KB_MAX_REFRESHES,
+                            len(_kb_new),
                         )
+                elif _sql_kb_msg is not None:
+                    # Nothing new to add — still counts, so a model stuck on
+                    # misses doesn't trigger a vector search every round.
+                    _sql_kb_refreshes += 1
         # Reset doc streaming state per round
         _doc_acc = ""
         _doc_opened = False
