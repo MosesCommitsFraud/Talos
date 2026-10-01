@@ -344,6 +344,84 @@ def _validate_readonly_sql(query: str) -> Optional[str]:
     return None
 
 
+# A table listing below this many names is returned as a plain list.
+_TABLE_LIST_COMPACT_MIN = 60
+# Names sharing a stem form a group once there are this many of them.
+_TABLE_GROUP_MIN = 3
+_TRAILING_NUMBER = re.compile(r"^(.*?)(\d+)$")
+
+
+def _filter_table_names(names: List[str], pattern: str) -> List[str]:
+    """Names matching a SQL LIKE pattern (`%`, `_`), case-insensitive.
+
+    Matched against the full `schema.table` name and against the table name
+    alone, so `kunden%` finds `dbo.kunden_2024` as well.
+    """
+    regex = re.compile(
+        "^"
+        + "".join(".*" if c == "%" else "." if c == "_" else re.escape(c) for c in pattern)
+        + "$",
+        re.IGNORECASE,
+    )
+    return [n for n in names if regex.match(n) or regex.match(n.rsplit(".", 1)[-1])]
+
+
+def _number_ranges(numbers: List[int], width: int) -> str:
+    """`[1, 2, 3, 7, 9, 10]` -> `1–3, 7, 9–10`, zero-padded to `width` digits."""
+    fmt = (lambda n: str(n).zfill(width)) if width else str
+    parts, start, prev = [], numbers[0], numbers[0]
+    for n in numbers[1:] + [None]:
+        if n is not None and n == prev + 1:
+            prev = n
+            continue
+        parts.append(fmt(start) if start == prev else f"{fmt(start)}–{fmt(prev)}")
+        if n is not None:
+            start = prev = n
+    return ", ".join(parts)
+
+
+def _compact_table_list(names: List[str]) -> str:
+    """Lossless, compact rendering of a table listing for the model.
+
+    Databases often hold whole families of tables that differ only in a
+    trailing number (`log_2023`, `t1`…`t500`, one table per year, tenant or
+    entity). Listed one per line, a schema with a few thousand of those costs
+    tens of thousands of tokens in every later round. Here each family becomes
+    one line — `stem<N> (count): 1–124, 130` — from which every original name
+    can be rebuilt exactly; zero-padded numbers keep their width. Everything
+    else is listed as is. Short listings stay a plain list.
+    """
+    if len(names) < _TABLE_LIST_COMPACT_MIN:
+        return "\n".join(names)
+    families: Dict[tuple, List[int]] = {}
+    for name in names:
+        m = _TRAILING_NUMBER.match(name)
+        if m and m.group(1):
+            digits = m.group(2)
+            # Zero-padded numbers form their own family, so `t01` and `t1`
+            # never collapse into the same — ambiguous — range.
+            width = len(digits) if len(digits) > 1 and digits.startswith("0") else 0
+            families.setdefault((m.group(1), width), []).append(int(digits))
+    grouped = {k: sorted(v) for k, v in families.items() if len(v) >= _TABLE_GROUP_MIN}
+    in_group = set()
+    for (stem, width), nums in grouped.items():
+        in_group.update(f"{stem}{str(n).zfill(width) if width else n}" for n in nums)
+    singles = [n for n in names if n not in in_group]
+
+    lines = [
+        f"{len(names)} tables/views. Families of tables that differ only in a trailing "
+        "number are written as stem<N> with the numbers that exist (a–b = every number "
+        "from a to b), e.g. `dbo.t<N> (3): 1–2, 5` = dbo.t1, dbo.t2, dbo.t5. Use "
+        'action=list_tables with "pattern" (SQL LIKE, e.g. "dbo.t%") to list a subset.'
+    ]
+    for (stem, width), nums in sorted(grouped.items()):
+        lines.append(f"{stem}<N> ({len(nums)}): {_number_ranges(nums, width)}")
+    if singles:
+        lines.append("Other tables/views:")
+        lines.extend(singles)
+    return "\n".join(lines)
+
+
 def _format_sql_rows(rows: List[Dict[str, Any]], max_chars: int = MAX_OUTPUT_CHARS) -> str:
     if not rows:
         return "No rows returned."
@@ -524,6 +602,9 @@ async def do_query_sql(
                     except Exception:
                         continue
                 names = sorted(dict.fromkeys(names))
+                pattern = str(args.get("pattern") or "").strip()
+                if pattern:
+                    names = _filter_table_names(names, pattern)
                 if max_rows is not None:
                     names = names[:max_rows]
                 # A schema listing is a two-column table, and on a real database
@@ -535,8 +616,12 @@ async def do_query_sql(
                     dict(zip(("schema", "table"), n.split(".", 1) if "." in n else ("", n)))
                     for n in names
                 ]
+                if not names:
+                    output = "No tables found" + (f" matching {pattern!r}." if pattern else ".")
+                else:
+                    output = _compact_table_list(names)
                 return {
-                    "output": "\n".join(names) if names else "No tables found.",
+                    "output": output,
                     "_columns": ["schema", "table"],
                     "_widget_rows": listed[:_SQL_WIDGET_ROWS],
                     "_widget_label": f"{len(names)} tables",
