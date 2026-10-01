@@ -167,6 +167,13 @@ FUNCTION_TOOL_SCHEMAS = [
                         "description": "Operation to perform",
                     },
                     "table": {"type": "string", "description": "Table name for describe"},
+                    "pattern": {
+                        "type": "string",
+                        "description": (
+                            "Optional filter for list_tables, SQL LIKE syntax "
+                            "(e.g. 'dbo.kunden%', '%2025%'). Omit to list everything."
+                        ),
+                    },
                     "query": {
                         "type": "string",
                         "description": "Read-only SQL statement for action=query",
