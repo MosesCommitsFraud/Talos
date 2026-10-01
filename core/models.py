@@ -29,11 +29,19 @@ class ChatMessage:
     content: str
     metadata: Optional[Dict[str, Any]] = None
 
-    def to_dict(self) -> Dict[str, Any]:
-        """Convert to dict for API responses."""
+    def to_dict(self, include_wire: bool = False) -> Dict[str, Any]:
+        """Convert to dict for API responses.
+
+        The turn's verbatim prompt record (``metadata._wire``, see
+        src/history_replay.py) can be large and is only for the LLM path, so it
+        is left out unless `include_wire` is set.
+        """
         result = {"role": self.role, "content": self.content}
         if self.metadata:
-            result["metadata"] = self.metadata
+            md = self.metadata
+            if not include_wire and "_wire" in md:
+                md = {k: v for k, v in md.items() if k != "_wire"}
+            result["metadata"] = md
         return result
 
     def get(self, key: str, default=None):
@@ -88,7 +96,9 @@ class Session:
         unaffected.
         """
         return [
-            msg.to_dict() for msg in self.history if (msg.metadata or {}).get("source") != "slash"
+            msg.to_dict(include_wire=True)
+            for msg in self.history
+            if (msg.metadata or {}).get("source") != "slash"
         ]
 
     def get(self, key: str, default=None):

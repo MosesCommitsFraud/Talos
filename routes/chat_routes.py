@@ -8,7 +8,7 @@ import logging
 import os
 import re
 from datetime import datetime
-from typing import Any, AsyncGenerator, Dict, List
+from typing import Any, AsyncGenerator, Dict, List, Optional
 
 from fastapi import APIRouter, Form, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
@@ -46,6 +46,7 @@ from src.auth_helpers import get_current_user
 from src.chat_helpers import coerce_message_and_session
 from src.endpoint_resolver import build_chat_url
 from src.endpoint_resolver import normalize_base as _normalize_base
+from src.history_replay import WIRE_KEY, collect_turn_messages, make_turn_wire, stamp_answer
 from src.llm_core import (
     DEFAULT_REASONING_EFFORT,
     QWEN_REASONING_EFFORTS,
@@ -61,6 +62,20 @@ logger = logging.getLogger(__name__)
 # Track active streams for partial-save safety net
 _active_streams: Dict[str, dict] = {}
 _IMAGE_MODEL_PREFIXES = ("gpt-image", "dall-e", "chatgpt-image")
+
+
+def _turn_wire_record(sess, sink) -> Optional[Dict[str, Any]]:
+    """Package the agent loop's live view of this turn for verbatim replay,
+    paired with the question as stored in the session history."""
+    if not sink or not sink.get("messages"):
+        return None
+    question = next((m for m in reversed(sess.history) if m.role == "user"), None)
+    if question is None:
+        return None
+    turn = collect_turn_messages(
+        sink["messages"], sink.get("round_text") or "", compacted=bool(sink.get("compacted"))
+    )
+    return make_turn_wire(turn, question.content, base=bool(sink.get("compacted")))
 
 
 _AUTO_NAME_REGISTER_WAIT_S = 10  # the stream registers a moment after scheduling
@@ -955,6 +970,7 @@ def setup_chat_routes(
             full_response = ""
             thinking_response = ""
             last_metrics = None
+            _wire_sink: Dict[str, Any] = {}  # see the agent-loop branch below
 
             # Configured fallback chain for the default chat model. Tried in
             # order if the session's primary model fails before producing
@@ -1050,6 +1066,10 @@ def setup_chat_routes(
                 # ── Unified path: full agent loop with all tools ──
                 _agent_rounds = 0
                 _answered_by = None  # set if the selected model failed and a fallback answered
+                # Live view of this turn's messages as sent, kept current by the
+                # agent loop — stored with the answer for verbatim replay
+                # (src/history_replay.py), also when the stream is stopped.
+                _wire_sink = {}
                 # Auto-injected knowledge is already numbered; announce it
                 # before the first token so its "[n]" markers render as chips
                 # while the answer streams.
@@ -1095,6 +1115,7 @@ def setup_chat_routes(
                         use_rag=str(use_rag).lower() == "true",
                         reasoning=reasoning,
                         reasoning_effort=reasoning_effort,
+                        wire_sink=_wire_sink,
                     ):
                         if chunk.startswith("data: ") and not chunk.startswith("data: [DONE]"):
                             try:
@@ -1252,6 +1273,10 @@ def setup_chat_routes(
                                 yield f"data: {json.dumps({'type': 'citations', 'data': _final_cit, 'final': True})}\n\n"
                                 if _used_rag:
                                     yield f"data: {json.dumps({'type': 'rag_sources', 'data': _used_rag})}\n\n"
+                                _wire_rec = _turn_wire_record(sess, _wire_sink)
+                                if _wire_rec:
+                                    last_metrics = dict(last_metrics or {})
+                                    last_metrics[WIRE_KEY] = _wire_rec
                                 _saved_id = save_assistant_response(
                                     sess,
                                     session_manager,
@@ -1303,6 +1328,11 @@ def setup_chat_routes(
                             _stopped_content2, _stopped_md2 = clean_thinking_for_save(
                                 full_response, _stopped_md_base
                             )
+                            # Keep exactly what happened up to the stop.
+                            _stopped_wire = _turn_wire_record(sess, _wire_sink)
+                            if _stopped_wire:
+                                stamp_answer(_stopped_wire, _stopped_content2)
+                                _stopped_md2 = {**(_stopped_md2 or {}), WIRE_KEY: _stopped_wire}
                             sess.add_message(
                                 ChatMessage("assistant", _stopped_content2, metadata=_stopped_md2)
                             )

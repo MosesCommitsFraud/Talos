@@ -224,6 +224,10 @@ def expand_tool_history(messages: List[Dict], enabled: Optional[bool] = None) ->
         msg = messages[idx]
         if not isinstance(msg, dict) or msg.get("role") != "assistant":
             continue
+        if (msg.get("metadata") or {}).get(WIRE_REPLAYED):
+            # Replayed verbatim by apply_turn_wires — its tool calls and results
+            # are already in the prompt as real messages.
+            continue
         events = (msg.get("metadata") or {}).get("tool_events")
         if not isinstance(events, list) or not events:
             continue
@@ -283,4 +287,181 @@ def expand_tool_history(messages: List[Dict], enabled: Optional[bool] = None) ->
         spent,
         " + artifact manifest" if manifest else "",
     )
+    return out
+
+
+# ── Verbatim turn replay ("wire") ───────────────────────────────────────────
+#
+# The reconstruction above changes a turn's shape between the request that
+# produced it and every later request: native tool calls become one summary
+# block, the question loses the context it was sent with. vLLM's prefix cache
+# reuses work only up to the first differing token, so each follow-up re-ran
+# the prefill for the whole previous turn — 25k+ tokens, 30–40 s before the
+# first token after a dashboard turn.
+#
+# So a finished turn's messages are stored exactly as they were sent (the
+# question with its context, the assistant's tool calls, the tool results, the
+# final answer) and replayed unchanged on later turns — append-only, the way
+# Claude and other chat APIs keep a conversation. Turns stored without a wire
+# (chats from before this existed) still go through expand_tool_history.
+#
+# The edge cases follow what Claude does with a conversation:
+# * an edited question deletes that turn and everything after it and resends
+#   (the frontend already does this); the question fingerprint is a backstop;
+# * an answer edited by hand is what the model sees from then on;
+# * a stopped answer keeps exactly what had happened up to the stop;
+# * a turn that compacted itself mid-way carries the compacted conversation,
+#   which replaces everything before it (`base`).
+
+# Metadata key on the persisted assistant message holding its turn's wire.
+WIRE_KEY = "_wire"
+# Marker set on the replayed final assistant message: skip the legacy replay
+# block for it, but keep its tool_events visible to build_artifact_manifest.
+WIRE_REPLAYED = "wire_replayed"
+# Marks the agent's leading system block (system prompt, policy) — never part
+# of a stored turn. Set in the agent loop.
+HEAD_KEY = "_head"
+# Marks the per-request preface (skills index and the like) from
+# build_chat_context — rebuilt fresh every turn, so never stored either.
+PREFACE_KEY = "_preface"
+# Marks messages that were already in the conversation before this turn
+# (set in build_chat_context); everything after the last marked one is the turn
+# that make_turn_wire stores. Dropped before sending, like all unknown keys.
+PRIOR_KEY = "_prior"
+_WIRE_VERSION = 1
+_WIRE_ALLOWED_KEYS = ("role", "content", "name", "tool_call_id", "tool_calls")
+# Larger wires (inline images, huge tool output) are not stored; the turn then
+# falls back to the reconstructed replay.
+WIRE_MAX_BYTES = 16_000_000
+
+
+def _content_fingerprint(content: Any) -> str:
+    import hashlib
+
+    raw = json.dumps(content, sort_keys=True, ensure_ascii=False, default=str)
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def collect_turn_messages(
+    messages: List[Dict], final_text: str, compacted: bool = False
+) -> List[Dict]:
+    """This turn's messages as sent, plus the final (or, after a stop, partial)
+    answer text of the last round, which no request carried yet.
+
+    Normally that is everything after the prior conversation (PRIOR_KEY). After
+    a mid-turn compaction it is the whole compacted conversation minus the
+    system head and preface — the summary stands in for what came before.
+    """
+    if compacted:
+        turn = [
+            m
+            for m in messages
+            if isinstance(m, dict) and not m.get(HEAD_KEY) and not m.get(PREFACE_KEY)
+        ]
+    else:
+        last_prior = max(
+            (i for i, m in enumerate(messages) if isinstance(m, dict) and m.get(PRIOR_KEY)),
+            default=-1,
+        )
+        if last_prior < 0:
+            # No prior conversation: the turn starts after the system head.
+            last_prior = next(
+                (i - 1 for i, m in enumerate(messages) if not m.get(HEAD_KEY)),
+                len(messages) - 1,
+            )
+        turn = list(messages[last_prior + 1 :])
+    if not turn:
+        return []
+    if (final_text or "").strip() and not (
+        turn[-1].get("role") == "assistant" and (turn[-1].get("content") or "") == final_text
+    ):
+        turn.append({"role": "assistant", "content": final_text})
+    return turn
+
+
+def make_turn_wire(
+    sent_messages: List[Dict], question_content: Any, base: bool = False
+) -> Optional[Dict]:
+    """Package a turn's sent messages for storage, or None if too large/empty.
+
+    `question_content` is the user message as stored in the session history; it
+    is fingerprinted so an edited question never replays a stale turn. `base`
+    marks a compacted turn that replaces everything before it.
+    """
+    clean = []
+    for m in sent_messages or []:
+        if not isinstance(m, dict) or not m.get("role"):
+            continue
+        clean.append({k: m[k] for k in _WIRE_ALLOWED_KEYS if k in m and m[k] is not None})
+        if m.get("role") == "assistant" and "content" not in clean[-1]:
+            clean[-1]["content"] = None
+    if not clean:
+        return None
+    wire = {"v": _WIRE_VERSION, "q": _content_fingerprint(question_content), "messages": clean}
+    if base:
+        wire["base"] = True
+    try:
+        size = len(json.dumps(wire, ensure_ascii=False, default=str).encode("utf-8"))
+    except (TypeError, ValueError):
+        return None
+    if size > WIRE_MAX_BYTES:
+        logger.info("[history_replay] turn wire not stored (%d bytes)", size)
+        return None
+    return wire
+
+
+def stamp_answer(wire: Dict, answer_content: Any) -> None:
+    """Record the answer as saved, so a later hand edit can be detected."""
+    wire["a"] = _content_fingerprint(answer_content)
+
+
+def apply_turn_wires(history: List[Dict]) -> List[Dict]:
+    """Replace each stored (question, answer) pair that has a wire by the
+    messages exactly as they were sent. Returns a new list.
+
+    A pair is replaced only when the answer's wire matches the question right
+    before it (an edited or regenerated question falls back to the plain pair).
+    """
+    import copy
+
+    out: List[Dict] = []
+    for msg in history:
+        md = (msg.get("metadata") or {}) if isinstance(msg, dict) else {}
+        wire = md.get(WIRE_KEY)
+        prev = out[-1] if out else None
+        if (
+            msg.get("role") == "assistant"
+            and isinstance(wire, dict)
+            and wire.get("v") == _WIRE_VERSION
+            and isinstance(wire.get("messages"), list)
+            and wire["messages"]
+            and isinstance(prev, dict)
+            and prev.get("role") == "user"
+            and wire.get("q") == _content_fingerprint(prev.get("content"))
+        ):
+            out.pop()  # the plain question — the wire carries it as sent
+            if wire.get("base"):
+                # Compacted mid-turn: its summary already covers everything before.
+                out.clear()
+            replayed = copy.deepcopy(wire["messages"])
+            if wire.get("a") and wire["a"] != _content_fingerprint(msg.get("content")):
+                # The answer was edited by hand: the model sees the edited text,
+                # like the user does.
+                while replayed and replayed[-1].get("role") == "assistant":
+                    replayed.pop()
+                replayed.append({"role": "assistant", "content": msg.get("content")})
+            # Hand the turn's tool_events to the artifact manifest via the last
+            # assistant message (metadata never reaches the provider).
+            for m in reversed(replayed):
+                if m.get("role") == "assistant":
+                    m["metadata"] = {
+                        "tool_events": md.get("tool_events") or [],
+                        WIRE_REPLAYED: True,
+                    }
+                    break
+            out.extend(replayed)
+            continue
+        if isinstance(msg, dict) and WIRE_KEY in md:
+            msg = {**msg, "metadata": {k: v for k, v in md.items() if k != WIRE_KEY}}
+        out.append(msg)
     return out

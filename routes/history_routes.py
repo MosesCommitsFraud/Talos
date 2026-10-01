@@ -98,10 +98,7 @@ def setup_history_routes(session_manager) -> APIRouter:
                 # Skip hidden messages (e.g. compaction summaries for AI context)
                 if msg.metadata and msg.metadata.get("hidden"):
                     continue
-                entry = {"role": msg.role, "content": msg.content}
-                if msg.metadata:
-                    entry["metadata"] = msg.metadata
-                history_dict.append(entry)
+                history_dict.append(msg.to_dict())  # leaves out the server-side `_wire`
             elif isinstance(msg, dict):
                 if msg.get("metadata", {}).get("hidden"):
                     continue
@@ -110,7 +107,7 @@ def setup_history_routes(session_manager) -> APIRouter:
                     "content": msg.get("content", ""),
                 }
                 if msg.get("metadata"):
-                    entry["metadata"] = msg["metadata"]
+                    entry["metadata"] = {k: v for k, v in msg["metadata"].items() if k != "_wire"}
                 history_dict.append(entry)
 
         # Fallback: load from DB if in-memory is empty
@@ -151,7 +148,15 @@ def setup_history_routes(session_manager) -> APIRouter:
                     ]
                 # Response excludes hidden messages, matching the in-memory path.
                 history_dict = [
-                    m for m in db_history if not (m.get("metadata") or {}).get("hidden")
+                    {
+                        **m,
+                        # The verbatim turn record stays server-side (LLM path only).
+                        "metadata": {
+                            k: v for k, v in (m.get("metadata") or {}).items() if k != "_wire"
+                        },
+                    }
+                    for m in db_history
+                    if not (m.get("metadata") or {}).get("hidden")
                 ]
             except Exception as e:
                 logger.error(f"DB fallback failed for {session_id}: {e}")

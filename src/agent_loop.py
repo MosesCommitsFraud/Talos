@@ -38,6 +38,7 @@ from src.context_compactor import (
     get_compact_threshold,
 )
 from src.context_optimizer import optimize_tool_output
+from src.history_replay import HEAD_KEY
 from src.llm_core import _detect_provider, _is_ollama_native_url, stream_llm_with_fallback
 from src.model_context import estimate_tokens
 from src.prompt_security import untrusted_context_message
@@ -1861,8 +1862,14 @@ async def stream_agent_loop(
     use_rag: bool = False,
     reasoning: bool = True,
     reasoning_effort: Optional[str] = None,
+    wire_sink: Optional[Dict[str, Any]] = None,
 ) -> AsyncGenerator[str, None]:
     """Streaming agent loop generator.
+
+    `wire_sink`, when given, is kept pointing at the live message list, the
+    current round's answer text and whether the turn compacted itself, so the
+    caller can store the turn exactly as sent — also when the stream is stopped
+    midway (see src/history_replay.collect_turn_messages).
 
     Yields SSE events:
       - data: {"delta": "text"}                             (text chunks)
@@ -2408,6 +2415,13 @@ async def stream_agent_loop(
 
     # Strip internal metadata keys before sending to the LLM API
     messages = [{k: v for k, v in msg.items() if k != "_protected"} for msg in messages]
+    # The system head is never part of a stored turn (history_replay).
+    for _m in messages:
+        if _m.get("role") != "system":
+            break
+        _m[HEAD_KEY] = True
+    if wire_sink is not None:
+        wire_sink.update(messages=messages, round_text="", compacted=False)
 
     # Mid-turn compaction state. The user's request for THIS turn is pinned so a
     # turn that compacts itself can never summarize away the task it is working
@@ -2510,9 +2524,12 @@ async def stream_agent_loop(
     # so the user can resume instead of the turn silently stalling.
     _exhausted_rounds = False
     round_profile: List[Dict[str, Any]] = []
+    round_response = ""
 
     for round_num in range(1, max_rounds + 1):
         round_response = ""
+        if wire_sink is not None:
+            wire_sink["round_text"] = ""
         round_reasoning = (
             ""  # reasoning_content deltas (DeepSeek-thinking, vLLM --reasoning-parser)
         )
@@ -2549,6 +2566,8 @@ async def stream_agent_loop(
                     _did_compact = False
                 if _did_compact:
                     _mid_turn_compactions += 1
+                    if wire_sink is not None:
+                        wire_sink.update(messages=messages, compacted=True)
                     # The last reported real usage describes a context that no
                     # longer exists — leaving it in place would keep the trigger
                     # (and tool-output compression) reading "full" and compact
@@ -2861,6 +2880,8 @@ async def stream_agent_loop(
                             if _rp_visible is None:
                                 _rp_visible = time.time()
                             round_response += data["delta"]
+                            if wire_sink is not None:
+                                wire_sink["round_text"] = round_response
                             full_response += data["delta"]
                         yield chunk  # Stream all rounds
                         # Detect fenced document output in every round so Preview
