@@ -19,7 +19,14 @@ from src import citations as _citations
 from src.auth_helpers import effective_user, get_current_user
 from src.context_compactor import maybe_compact, trim_for_context
 from src.endpoint_resolver import normalize_base
-from src.history_replay import expand_tool_history
+from src.history_replay import (
+    PREFACE_KEY,
+    PRIOR_KEY,
+    WIRE_KEY,
+    apply_turn_wires,
+    expand_tool_history,
+    stamp_answer,
+)
 from src.llm_core import normalize_model_id
 from src.prompt_security import untrusted_context_message
 from src.settings import get_setting
@@ -710,7 +717,22 @@ async def build_chat_context(
         sess.model = norm
 
     # Build messages
-    messages = preface + sess.get_context_messages()
+    # Earlier turns stored with their verbatim prompt record go back in exactly
+    # as they were sent, so vLLM's prefix cache covers them on the follow-up
+    # (see apply_turn_wires).
+    for _m in preface:
+        if isinstance(_m, dict):
+            # Rebuilt fresh every request — never part of a stored turn.
+            _m[PREFACE_KEY] = True
+    messages = preface + apply_turn_wires(sess.get_context_messages())
+
+    # Everything before the new question is prior conversation. The agent loop
+    # uses the mark to cut out exactly this turn's messages for the wire.
+    # Marked before expand_tool_history: the artifact manifest it inserts right
+    # before the question belongs to THIS turn.
+    for _m in messages[:-1]:
+        if isinstance(_m, dict):
+            _m[PRIOR_KEY] = True
 
     # Replay earlier turns' tool calls + outputs. `get_context_messages` returns
     # only role/content, because ChatMessage has nowhere to store a tool
@@ -718,6 +740,7 @@ async def build_chat_context(
     # what any tool actually returned, and a follow-up about earlier tool output
     # has to re-run the tool or guess. The data is already persisted in each
     # assistant message's metadata.tool_events; this feeds it back, budgeted.
+    # Turns replayed verbatim above are skipped here.
     messages = expand_tool_history(messages)
 
     # Hand the retrieved knowledge to the web-search leak guard (or clear a
@@ -1553,6 +1576,8 @@ def save_assistant_response(
         _content = _think_info["reply"]
     else:
         _content = full_response
+    if isinstance(md.get(WIRE_KEY), dict):
+        stamp_answer(md[WIRE_KEY], _content)
     sess.add_message(ChatMessage("assistant", _content, metadata=md))
 
     if not incognito:

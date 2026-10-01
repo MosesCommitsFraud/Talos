@@ -997,6 +997,13 @@ def setup_session_routes(session_manager: SessionManager, config: dict):
                 # DB; expose it parsed under the name the frontend uses.
                 row.pop("metadata", None)
                 row["metadata"] = _parse_metadata(m.meta_data)
+                # The verbatim turn record can be megabytes; report its size only.
+                _md = row["metadata"]
+                if isinstance(_md, dict) and isinstance(_md.get("_wire"), dict):
+                    _md["_wire"] = {
+                        "messages": len(_md["_wire"].get("messages") or []),
+                        "bytes": len(json.dumps(_md["_wire"], default=str)),
+                    }
                 message_rows.append(row)
             usage = (
                 db.query(UsageEvent)
