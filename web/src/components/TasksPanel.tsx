@@ -1,22 +1,45 @@
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { BotIcon, CheckIcon, ChevronDownIcon, CopyIcon, LoaderIcon, SquareIcon, TerminalIcon, TriangleAlertIcon, XIcon } from 'lucide-react';
+import { ArrowLeftIcon, CheckIcon, ChevronRightIcon, CopyIcon, LoaderIcon, SquareIcon, XIcon } from 'lucide-react';
 import { useQueryClient } from '@tanstack/react-query';
 import { stopBgTask } from '@/api/client';
 import type { BgTask, ToolCall } from '@/api/types';
 import { describeCall } from '@/lib/toolLabels';
 import { cn, copyTextToClipboard, formatDurationMs } from '@/lib/utils';
-import { Markdown } from './Markdown';
-import { ToolLabel } from './ToolLabel';
 import { useBgTasks } from '@/lib/useBgTasks';
 import { useChat } from '@/state/chat';
 import { useUi } from '@/state/ui';
+import { Markdown } from './Markdown';
+import { ToolLabel } from './ToolLabel';
 import { Tooltip } from './ui/misc';
 
-/** Elapsed time for one job — live while it runs, frozen at its total once it
- *  has finished. `started_at`/`ended_at` come from the backend as Unix
- *  *seconds*, so both are scaled before they meet Date.now(). */
-function TaskElapsed({ task }: { task: BgTask }) {
+/* The tray reads like Claude's task list: a quiet list of one-line rows, and a
+ * click opens that task on its own page (assignment, what it did, result)
+ * instead of unfolding everything in place. Status is a small static dot —
+ * the working row in the chat already carries the animation. */
+
+type Outcome = 'running' | 'done' | 'failed' | 'stopped';
+
+function outcomeOf(task: BgTask): Outcome {
+  if (task.stopped) return 'stopped';
+  if (task.status === 'running') return 'running';
+  return task.status === 'failed' ? 'failed' : 'done';
+}
+
+const DOT: Record<Outcome, string> = {
+  running: 'bg-primary',
+  done: 'bg-emerald-500',
+  failed: 'bg-destructive-foreground',
+  stopped: 'bg-muted-foreground/50',
+};
+
+function StatusDot({ task, className }: { task: BgTask; className?: string }) {
+  return <span aria-hidden className={cn('size-2 shrink-0 rounded-full', DOT[outcomeOf(task)], className)} />;
+}
+
+/** Elapsed time — live while it runs, frozen once it has finished. The
+ *  backend sends Unix seconds. */
+function Elapsed({ task }: { task: BgTask }) {
   const [, force] = useState(0);
   const running = task.status === 'running';
   useEffect(() => {
@@ -29,142 +52,193 @@ function TaskElapsed({ task }: { task: BgTask }) {
   return <span className="tabular-nums">{formatDurationMs(end - task.started_at * 1000)}</span>;
 }
 
-/** Status glyph: a spinner while it runs, a tick or a warning once it lands.
- *  Colour carries the outcome, so the row stays readable at a glance in a list
- *  where every label is a long command line. */
-function StatusIcon({ status, stopped }: { status: BgTask['status']; stopped?: boolean }) {
-  // Stopped on purpose is not a failure: a neutral square, not a warning.
-  if (stopped) return <SquareIcon className="size-3.5 shrink-0 text-muted-foreground" />;
-  if (status === 'running') return <LoaderIcon className="size-3.5 shrink-0 animate-spin text-primary" />;
-  if (status === 'failed') return <TriangleAlertIcon className="size-3.5 shrink-0 text-destructive-foreground" />;
-  return <CheckIcon className="size-3.5 shrink-0 text-emerald-500" />;
-}
-
-/** The captured log, pinned to the bottom while the job is still writing —
- *  a live tail that scrolled away from the newest line would be useless. Once
- *  the job settles the view is left alone so the reader can scroll back. */
-function TaskOutput({ task }: { task: BgTask }) {
+/** "Läuft · 0:42 · 3 Schritte" — one muted line under the title. */
+function MetaLine({ task }: { task: BgTask }) {
   const { t } = useTranslation();
-  const box = useRef<HTMLPreElement>(null);
-  const running = task.status === 'running';
-  useEffect(() => {
-    if (running && box.current) box.current.scrollTop = box.current.scrollHeight;
-  }, [task.output, running]);
-  if (!task.output.trim()) {
-    return (
-      <p className="mt-2 text-xs text-muted-foreground italic">
-        {running ? t('tasks.noOutputYet') : t('tasks.noOutput')}
-      </p>
-    );
-  }
+  const outcome = outcomeOf(task);
+  const state =
+    task.timed_out ? t('tasks.timedOut')
+    : outcome === 'failed' && task.kind !== 'subagent' ? t('tasks.exitCode', { code: task.exit_code ?? -1 })
+    : t(`tasks.state.${outcome}`);
+  const steps = task.steps?.length ?? 0;
   return (
-    <pre
-      ref={box}
-      className="mt-2 max-h-72 overflow-auto rounded-md bg-muted/50 p-2 font-mono text-[11px] leading-relaxed whitespace-pre-wrap break-words text-muted-foreground"
-    >
-      {task.output}
-    </pre>
+    <span className="flex min-w-0 items-center gap-1.5 text-[11px] text-muted-foreground">
+      <span className={cn(outcome === 'failed' && 'text-destructive-foreground')}>{state}</span>
+      <span aria-hidden>·</span>
+      <Elapsed task={task} />
+      {steps > 0 && (
+        <>
+          <span aria-hidden>·</span>
+          <span>{t('tasks.steps', { count: steps })}</span>
+        </>
+      )}
+    </span>
   );
 }
 
-/** A subagent's live trail: its assignment (folded), each tool call it made
- *  in the same wording the chat uses for the main agent's calls, and the
- *  report as it is being written. Pinned to the bottom while it runs, like a
- *  log tail. */
-function SubagentDetail({ task }: { task: BgTask }) {
-  const { t } = useTranslation();
-  const [showPrompt, setShowPrompt] = useState(false);
-  const box = useRef<HTMLDivElement>(null);
-  const running = task.status === 'running';
-  const steps = task.steps ?? [];
-  useEffect(() => {
-    if (running && box.current) box.current.scrollTop = box.current.scrollHeight;
-  }, [steps.length, task.output, running]);
-  return (
-    <div ref={box} className="mt-2 max-h-[28rem] space-y-2 overflow-y-auto">
-      {task.prompt && (
-        <div className="text-[11px] text-muted-foreground">
-          <button
-            type="button"
-            onClick={() => setShowPrompt((v) => !v)}
-            className="inline-flex items-center gap-1 transition-colors hover:text-foreground"
-          >
-            <ChevronDownIcon className={cn('size-3 transition-transform', !showPrompt && '-rotate-90')} />
-            {t('tasks.assignment')}
-          </button>
-          {showPrompt && (
-            <p className="mt-1 rounded-md bg-muted/50 p-2 whitespace-pre-wrap break-words">{task.prompt}</p>
-          )}
-        </div>
-      )}
-      {steps.length > 0 && (
-        <ul className="space-y-1">
-          {steps.map((step, i) => {
-            const call: ToolCall = { tool: step.tool, command: step.command, status: step.status };
-            const parts = describeCall(call, t, step.status === 'running' ? 'running' : 'past');
-            return (
-              <li key={i} className="flex items-start gap-1.5 text-[12px] text-muted-foreground">
-                {step.status === 'running' ? (
-                  <LoaderIcon className="mt-0.5 size-3 shrink-0 animate-spin text-primary" />
-                ) : (
-                  <span className="mt-[7px] size-1 shrink-0 rounded-full bg-muted-foreground/60" aria-hidden />
-                )}
-                <span className={cn('min-w-0 break-words', step.status === 'running' && 'shimmer-text')}>
-                  <ToolLabel parts={parts} failed={step.status === 'error'} />
-                </span>
-              </li>
-            );
-          })}
-        </ul>
-      )}
-      {task.output.trim() ? (
-        <div className="rounded-md bg-muted/30 p-2 text-[13px]">
-          <Markdown text={task.output} streaming={running} />
-        </div>
-      ) : (
-        <p className="text-xs text-muted-foreground italic">
-          {running ? t('tasks.subagentWorking') : t('tasks.noOutput')}
-        </p>
-      )}
-    </div>
-  );
-}
-
-function TaskRow({ task, defaultOpen }: { task: BgTask; defaultOpen: boolean }) {
-  const { t } = useTranslation();
-  const [open, setOpen] = useState(defaultOpen);
-  const [copied, setCopied] = useState(false);
-  const Icon = task.kind === 'agent' || task.kind === 'subagent' ? BotIcon : TerminalIcon;
-  const kindLabel =
-    task.kind === 'subagent' ? 'tasks.kindSubagent' : task.kind === 'agent' ? 'tasks.kindAgent' : 'tasks.kindShell';
+/** Stops one subagent; the delegating turn carries on with the others. */
+function useStop(task: BgTask) {
   const sessionId = useChat((s) => s.sessionId);
   const queryClient = useQueryClient();
   const [stopping, setStopping] = useState(false);
-  const [stopError, setStopError] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const canStop = task.kind === 'subagent' && task.status === 'running' && !!sessionId;
-  const outcome = task.stopped
-    ? null
-    : task.timed_out
-      ? t('tasks.timedOut')
-      : task.status === 'failed'
-        ? t('tasks.exitCode', { code: task.exit_code ?? -1 })
-        : null;
-
-  // Stop just this subagent. The delegating turn keeps running with the rest
-  // and receives what this one had found so far.
   const stop = async () => {
     if (!sessionId) return;
     setStopping(true);
-    setStopError(null);
+    setError(null);
     try {
       await stopBgTask(sessionId, task.id);
     } catch (e) {
-      setStopError((e as Error).message);
+      setError((e as Error).message);
     } finally {
       setStopping(false);
       void queryClient.invalidateQueries({ queryKey: ['bg-tasks', sessionId] });
     }
   };
+  return { canStop, stop, stopping, error };
+}
+
+function StopButton({ task, withLabel }: { task: BgTask; withLabel?: boolean }) {
+  const { t } = useTranslation();
+  const { canStop, stop, stopping } = useStop(task);
+  if (!canStop) return null;
+  const button = (
+    <button
+      type="button"
+      onClick={(e) => {
+        e.stopPropagation();
+        void stop();
+      }}
+      disabled={stopping}
+      aria-label={t('tasks.stopNamed', { name: task.label || t('tasks.untitled') })}
+      className={cn(
+        'flex shrink-0 items-center justify-center gap-1.5 rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-50',
+        withLabel ? 'h-7 border px-2.5 text-xs' : 'size-7',
+      )}
+    >
+      {stopping ? <LoaderIcon className="size-3.5 animate-spin" /> : <SquareIcon className="size-3 fill-current" />}
+      {withLabel && t('tasks.stopShort')}
+    </button>
+  );
+  return withLabel ? button : <Tooltip label={t('tasks.stop')}>{button}</Tooltip>;
+}
+
+function TaskListRow({ task, onOpen }: { task: BgTask; onOpen: () => void }) {
+  const { t } = useTranslation();
+  return (
+    <div className="group flex items-center gap-1 rounded-lg pr-1 transition-colors hover:bg-accent/60">
+      <button type="button" onClick={onOpen} className="flex min-w-0 flex-1 items-center gap-3 px-2.5 py-2 text-left">
+        <StatusDot task={task} />
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-[13px] text-foreground">{task.label || t('tasks.untitled')}</span>
+          <MetaLine task={task} />
+        </span>
+        <ChevronRightIcon className="size-3.5 shrink-0 text-muted-foreground/60 transition-colors group-hover:text-muted-foreground" />
+      </button>
+      <StopButton task={task} />
+    </div>
+  );
+}
+
+interface Group {
+  key: string;
+  subagents: boolean;
+  startedAt: number;
+  tasks: BgTask[];
+}
+
+/** Subagents of one `delegate` call form a group in the order they were
+ *  given; every other job is its own group. Newest group first. */
+function groupTasks(tasks: BgTask[]): Group[] {
+  const groups = new Map<string, Group>();
+  for (const task of tasks) {
+    const key = task.kind === 'subagent' && task.group ? task.group : task.id;
+    const at = task.started_at ?? 0;
+    const g = groups.get(key);
+    if (g) {
+      g.tasks.push(task);
+      g.startedAt = Math.min(g.startedAt, at);
+    } else {
+      groups.set(key, { key, subagents: task.kind === 'subagent', startedAt: at, tasks: [task] });
+    }
+  }
+  return [...groups.values()].sort((a, b) => b.startedAt - a.startedAt);
+}
+
+/** Start time of a group as a wall-clock time ("14:32"). */
+function clock(unixSeconds: number): string {
+  return new Date(unixSeconds * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+
+function TaskList({ tasks, onOpen }: { tasks: BgTask[]; onOpen: (id: string) => void }) {
+  const { t } = useTranslation();
+  if (tasks.length === 0) {
+    return <p className="px-4 py-10 text-center text-sm text-muted-foreground">{t('tasks.empty')}</p>;
+  }
+  return (
+    <div className="space-y-4 p-2">
+      {groupTasks(tasks).map((group) => (
+        <section key={group.key}>
+          <h3 className="px-2.5 pb-1 text-[11px] font-medium text-muted-foreground">
+            {group.subagents ? t('tasks.groupSubagents') : t(group.tasks[0].kind === 'agent' ? 'tasks.kindAgent' : 'tasks.kindShell')}
+            {group.startedAt > 0 && <span className="font-normal"> · {clock(group.startedAt)}</span>}
+          </h3>
+          {group.tasks.map((task) => (
+            <TaskListRow key={task.id} task={task} onOpen={() => onOpen(task.id)} />
+          ))}
+        </section>
+      ))}
+    </div>
+  );
+}
+
+function SectionTitle({ children }: { children: React.ReactNode }) {
+  return <h4 className="mb-2 text-[11px] font-medium tracking-wide text-muted-foreground uppercase">{children}</h4>;
+}
+
+/** What the subagent did, as a vertical timeline in the chat's own wording. */
+function StepTimeline({ task }: { task: BgTask }) {
+  const { t } = useTranslation();
+  const steps = task.steps ?? [];
+  if (steps.length === 0) return null;
+  return (
+    <ol className="relative space-y-2.5 border-l border-border/70 pl-4">
+      {steps.map((step, i) => {
+        const call: ToolCall = { tool: step.tool, command: step.command, status: step.status };
+        const running = step.status === 'running';
+        return (
+          <li key={i} className="relative text-[12.5px] leading-snug text-muted-foreground">
+            <span
+              aria-hidden
+              className={cn(
+                'absolute top-[5px] -left-[21px] size-2.5 rounded-full border-2 border-card',
+                running ? 'bg-primary' : step.status === 'error' ? 'bg-destructive-foreground' : 'bg-muted-foreground/40',
+              )}
+            />
+            <span className={cn('break-words', running && 'shimmer-text')}>
+              <ToolLabel parts={describeCall(call, t, running ? 'running' : 'past')} failed={step.status === 'error'} />
+            </span>
+          </li>
+        );
+      })}
+    </ol>
+  );
+}
+
+function TaskDetail({ task }: { task: BgTask }) {
+  const { t } = useTranslation();
+  const [promptOpen, setPromptOpen] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const { error } = useStop(task);
+  const box = useRef<HTMLDivElement>(null);
+  const running = task.status === 'running';
+  const isSubagent = task.kind === 'subagent';
+  // Follow the live end while it runs, like a log tail; leave the reader's
+  // scroll position alone once it has settled.
+  useEffect(() => {
+    if (running && box.current) box.current.scrollTop = box.current.scrollHeight;
+  }, [task.steps?.length, task.output, running]);
 
   const copy = async () => {
     await copyTextToClipboard(task.output);
@@ -173,114 +247,88 @@ function TaskRow({ task, defaultOpen }: { task: BgTask; defaultOpen: boolean }) 
   };
 
   return (
-    <div className="rounded-md border bg-background/40 p-2.5">
-      <div className="flex items-start gap-1">
-      <button
-        type="button"
-        aria-expanded={open}
-        onClick={() => setOpen((v) => !v)}
-        className="flex min-w-0 flex-1 items-start gap-2 text-left"
-      >
-        <StatusIcon status={task.status} stopped={task.stopped} />
-        <span className="min-w-0 flex-1">
-          <span className="flex items-center gap-1.5 text-[13px] font-medium text-foreground">
-            <Icon className="size-3 shrink-0 text-muted-foreground" />
-            {/* The whole command, wrapped — a truncated one hides the argument
-                that says which of four similar jobs this is. */}
-            <span className="min-w-0 break-words">{task.label || t('tasks.untitled')}</span>
-          </span>
-          <span className="mt-0.5 flex items-center gap-1.5 text-[11px] text-muted-foreground">
-            <span>{t(kindLabel)}</span>
-            <span aria-hidden>·</span>
-            <TaskElapsed task={task} />
-            {task.kind === 'subagent' && (task.steps?.length ?? 0) > 0 && (
-              <>
-                <span aria-hidden>·</span>
-                <span>{t('tasks.steps', { count: task.steps?.length ?? 0 })}</span>
-              </>
-            )}
-            {task.stopped && (
-              <>
-                <span aria-hidden>·</span>
-                <span>{t('tasks.stopped')}</span>
-              </>
-            )}
-            {outcome && (
-              <>
-                <span aria-hidden>·</span>
-                <span className="text-destructive-foreground">{outcome}</span>
-              </>
-            )}
-          </span>
-        </span>
-        <ChevronDownIcon className={cn('mt-0.5 size-3.5 shrink-0 opacity-60 transition-transform', open && 'rotate-180')} />
-      </button>
-      {canStop && (
-        <Tooltip label={t('tasks.stop')}>
-          <button
-            type="button"
-            onClick={() => void stop()}
-            disabled={stopping}
-            aria-label={t('tasks.stopNamed', { name: task.label || t('tasks.untitled') })}
-            className="-mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-50"
-          >
-            {stopping ? <LoaderIcon className="size-3.5 animate-spin" /> : <SquareIcon className="size-3 fill-current" />}
-          </button>
-        </Tooltip>
-      )}
+    <div ref={box} className="min-h-0 flex-1 overflow-y-auto px-4 pt-3 pb-6">
+      <div className="mb-5 flex items-start gap-3">
+        <StatusDot task={task} className="mt-1.5" />
+        <div className="min-w-0 flex-1">
+          <h3 className="text-sm leading-snug font-medium break-words text-foreground">{task.label || t('tasks.untitled')}</h3>
+          <MetaLine task={task} />
+        </div>
+        <StopButton task={task} withLabel />
       </div>
-      {stopError && <p className="mt-1 text-[11px] text-destructive-foreground">{stopError}</p>}
-      {open && (
-        <>
-          {task.kind === 'subagent' ? <SubagentDetail task={task} /> : <TaskOutput task={task} />}
+      {error && <p className="-mt-3 mb-4 text-[11px] text-destructive-foreground">{error}</p>}
+
+      {isSubagent && task.prompt && (
+        <section className="mb-5">
+          <SectionTitle>{t('tasks.assignment')}</SectionTitle>
+          <p className={cn('text-[12.5px] leading-relaxed whitespace-pre-wrap break-words text-muted-foreground', !promptOpen && 'line-clamp-3')}>
+            {task.prompt}
+          </p>
+          {task.prompt.length > 180 && (
+            <button
+              type="button"
+              onClick={() => setPromptOpen((v) => !v)}
+              className="mt-1 text-[11px] text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+            >
+              {promptOpen ? t('tasks.showLess') : t('tasks.showMore')}
+            </button>
+          )}
+        </section>
+      )}
+
+      {isSubagent && (task.steps?.length ?? 0) > 0 && (
+        <section className="mb-5">
+          <SectionTitle>{t('tasks.activity')}</SectionTitle>
+          <StepTimeline task={task} />
+        </section>
+      )}
+
+      <section>
+        <div className="mb-2 flex items-center justify-between">
+          <SectionTitle>{isSubagent ? t('tasks.result') : t('tasks.output')}</SectionTitle>
           {task.output.trim() && (
             <button
               type="button"
               onClick={() => void copy()}
-              className="mt-1.5 inline-flex items-center gap-1 text-[11px] text-muted-foreground transition-colors hover:text-foreground"
+              className="-mt-2 inline-flex items-center gap-1 text-[11px] text-muted-foreground transition-colors hover:text-foreground"
             >
               {copied ? <CheckIcon className="size-3" /> : <CopyIcon className="size-3" />}
               {copied ? t('messages.copied') : t('tasks.copyOutput')}
             </button>
           )}
-        </>
-      )}
+        </div>
+        {!task.output.trim() ? (
+          <p className="text-[12.5px] text-muted-foreground italic">
+            {running ? (isSubagent ? t('tasks.subagentWorking') : t('tasks.noOutputYet')) : t('tasks.noOutput')}
+          </p>
+        ) : isSubagent ? (
+          <div className="text-[13px]">
+            <Markdown text={task.output} streaming={running} />
+          </div>
+        ) : (
+          <pre className="rounded-md bg-muted/50 p-2.5 font-mono text-[11px] leading-relaxed whitespace-pre-wrap break-words text-muted-foreground">
+            {task.output}
+          </pre>
+        )}
+      </section>
     </div>
   );
 }
 
-/** Right-side drawer listing the session's background jobs — detached shell
- *  commands and nested agent turns — with their live output.
- *
- *  Newest first: a job launched thirty seconds ago is the one being watched,
- *  and finished ones (kept for an hour after the agent has read them) sink
- *  below it. The first running job starts expanded, because opening the tray
- *  while something is running is a request to see that log. */
+/** Right-side drawer with the session's background work — delegated
+ *  subagents, nested agent tasks and detached shell jobs. */
 export function TasksPanel() {
   const { t } = useTranslation();
   const open = useUi((s) => s.tasksPanelOpen);
   const setOpen = useUi((s) => s.setTasksPanelOpen);
   const tasks = useBgTasks();
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const sessionId = useChat((s) => s.sessionId);
+  // A different chat has different tasks; never show a stale detail page.
+  useEffect(() => setSelectedId(null), [sessionId]);
 
   if (!open) return null;
-  // Newest first — except that the subagents of one `delegate` call stay
-  // together in the order they were given (task 1 above task 2).
-  const groupStart = new Map<string, number>();
-  for (const task of tasks) {
-    const key = task.group || task.id;
-    const at = task.started_at ?? 0;
-    groupStart.set(key, Math.min(groupStart.get(key) ?? at, at));
-  }
-  const ordered = tasks
-    .map((task, index) => ({ task, index }))
-    .sort((a, b) => {
-      const ga = groupStart.get(a.task.group || a.task.id) ?? 0;
-      const gb = groupStart.get(b.task.group || b.task.id) ?? 0;
-      if (ga !== gb) return gb - ga;
-      return (a.task.group || a.task.id) === (b.task.group || b.task.id) ? a.index - b.index : b.index - a.index;
-    })
-    .map(({ task }) => task);
-  const firstRunning = ordered.find((task) => task.status === 'running')?.id;
+  const selected = selectedId ? tasks.find((task) => task.id === selectedId) : undefined;
   const runningCount = tasks.filter((task) => task.status === 'running').length;
 
   return (
@@ -288,13 +336,24 @@ export function TasksPanel() {
       className="m-2 flex w-[26rem] max-w-[40vw] shrink-0 flex-col overflow-hidden rounded-md border bg-card shadow-lg"
       aria-label={t('tasks.panelLabel')}
     >
-      <div className="flex h-10 shrink-0 items-center justify-between border-b px-3">
-        <span className="flex items-center gap-2 text-sm font-medium">
-          <TerminalIcon className="size-4 text-primary" />
-          {t('tasks.title')}
-          {runningCount > 0 && (
-            <span className="text-xs font-normal tabular-nums text-muted-foreground">
-              · {t('tasks.runningCount', { count: runningCount })}
+      <div className="flex h-11 shrink-0 items-center gap-1 border-b px-2">
+        {selected ? (
+          <button
+            type="button"
+            onClick={() => setSelectedId(null)}
+            aria-label={t('tasks.back')}
+            className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+          >
+            <ArrowLeftIcon className="size-4" />
+          </button>
+        ) : (
+          <span className="w-1" />
+        )}
+        <span className="min-w-0 flex-1 truncate text-sm font-medium">
+          {selected ? t('tasks.detailTitle') : t('tasks.title')}
+          {!selected && runningCount > 0 && (
+            <span className="ml-1.5 text-xs font-normal text-muted-foreground tabular-nums">
+              {t('tasks.runningCount', { count: runningCount })}
             </span>
           )}
         </span>
@@ -307,15 +366,13 @@ export function TasksPanel() {
           <XIcon className="size-4" />
         </button>
       </div>
-      <div className="min-h-0 flex-1 space-y-2 overflow-y-auto p-3">
-        {ordered.length === 0 ? (
-          <p className="px-1 py-6 text-center text-sm text-muted-foreground">{t('tasks.empty')}</p>
-        ) : (
-          ordered.map((task) => (
-            <TaskRow key={task.id} task={task} defaultOpen={task.id === firstRunning} />
-          ))
-        )}
-      </div>
+      {selected ? (
+        <TaskDetail key={selected.id} task={selected} />
+      ) : (
+        <div className="min-h-0 flex-1 overflow-y-auto">
+          <TaskList tasks={tasks} onOpen={setSelectedId} />
+        </div>
+      )}
     </aside>
   );
 }

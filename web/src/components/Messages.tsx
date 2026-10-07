@@ -1,4 +1,4 @@
-import { CheckIcon, ChevronDownIcon, CopyIcon, FoldVerticalIcon, LoaderIcon, PencilIcon, ScanSearchIcon, TerminalIcon, Trash2Icon } from 'lucide-react';
+import { CheckIcon, ChevronDownIcon, CopyIcon, FoldVerticalIcon, ListChecksIcon, PencilIcon, ScanSearchIcon, Trash2Icon } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { uploadDownloadUrl } from '@/api/client';
@@ -214,13 +214,9 @@ function TasksChip() {
         onClick={() => setOpen(!open)}
         className="flex min-w-0 items-center gap-1 truncate text-left transition-colors hover:text-foreground"
       >
-        {/* Only a live job gets the spinner; a tray of finished ones is a log,
-            not an activity. */}
-        {running > 0 ? (
-          <LoaderIcon className="size-3 shrink-0 animate-spin text-primary" />
-        ) : (
-          <TerminalIcon className="size-3 shrink-0" />
-        )}
+        {/* Static on purpose: the working row already animates, and a second
+            spinner beside it only competes for attention. */}
+        <ListChecksIcon className="size-3 shrink-0" />
         <span className="truncate">{label}</span>
       </button>
     </>

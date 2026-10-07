@@ -30,9 +30,29 @@ export function SessionFilesPopover({ sessionId }: { sessionId: string }) {
   const kindLabel = useKindLabel();
   const messages = useChat((s) => s.messages);
   const { outputs, inputs } = useSessionFiles(sessionId);
-  const [open, setOpen] = useState(false);
+  // Two ways in: hovering the button peeks at the list (it folds away again
+  // when the pointer leaves), clicking pins it open until an outside click,
+  // Escape or the X.
+  const [pinned, setPinned] = useState(false);
+  const [peek, setPeek] = useState(false);
+  const open = pinned || peek;
   const [uploadsOpen, setUploadsOpen] = useState(false);
   const root = useRef<HTMLDivElement>(null);
+  const hoverTimer = useRef<number | undefined>(undefined);
+
+  const setOpen = (value: boolean) => {
+    window.clearTimeout(hoverTimer.current);
+    setPinned(value);
+    setPeek(false);
+  };
+  // Short delays both ways: passing over the button doesn't flash the panel,
+  // and the pointer can cross the gap down into it without it closing.
+  const onHover = (inside: boolean) => {
+    if (!window.matchMedia('(hover: hover)').matches) return;
+    window.clearTimeout(hoverTimer.current);
+    hoverTimer.current = window.setTimeout(() => setPeek(inside), inside ? 150 : 250);
+  };
+  useEffect(() => () => window.clearTimeout(hoverTimer.current), []);
 
   useEffect(() => {
     if (!open) return;
@@ -64,13 +84,13 @@ export function SessionFilesPopover({ sessionId }: { sessionId: string }) {
   const uploadNames = inputs.map((f) => f.name || f.id);
 
   return (
-    <div ref={root} className="relative">
+    <div ref={root} className="relative" onPointerEnter={() => onHover(true)} onPointerLeave={() => onHover(false)}>
       <button
         type="button"
-        onClick={() => setOpen((v) => !v)}
+        // A click while only peeking pins the panel instead of closing it.
+        onClick={() => setOpen(!pinned)}
         aria-expanded={open}
         aria-label={t('outputs.filesAria', { count: outputs.length + inputs.length })}
-        title={t('outputs.title')}
         className={cn(
           'flex h-7 items-center gap-1.5 rounded-md border px-2 text-sm font-medium transition-colors',
           open ? 'bg-accent text-foreground' : 'text-muted-foreground hover:bg-accent hover:text-foreground',
