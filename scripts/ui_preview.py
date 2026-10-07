@@ -462,6 +462,102 @@ def _cold_agent_turn(ts_offset: int) -> dict:
     return entry
 
 
+def _rag_turn(ts_offset: int) -> dict:
+    """A knowledge-base answer: several passages of one file, a single-passage
+    file, a figure and a video — the shapes the sources bar under the answer
+    groups into chips with a stepping hover card."""
+    entry = _entry(
+        "assistant",
+        "Die Wartung erfolgt alle 500 Betriebsstunden [1], der Filter wird dabei "
+        "immer mitgetauscht [2, 3]. Details zur Montage zeigt das Schulungsvideo [4].",
+        ts_offset,
+    )
+    sources = [
+        {
+            "filename": "Wartungshandbuch.pdf",
+            "_page": 12,
+            "similarity": 0.82,
+            "snippet": "Die Inspektion ist alle 500 Betriebsstunden durchzuführen. Dabei sind "
+            "Hydraulikleitungen, Dichtungen und der Ölstand zu prüfen.\n\nAbweichungen "
+            "sind im Wartungsprotokoll zu dokumentieren.",
+        },
+        {
+            "filename": "Wartungshandbuch.pdf",
+            "_page": 14,
+            "similarity": 0.77,
+            "snippet": "Der Ansaugfilter ist bei jeder Inspektion zu ersetzen, unabhängig vom "
+            "optischen Zustand. Verwenden Sie ausschließlich Originalfilter (Art.-Nr. 4711).",
+        },
+        {
+            "filename": "Wartungshandbuch.pdf",
+            "_page": 31,
+            "similarity": 0.64,
+            "snippet": "Anhang B: Drehmomenttabelle für Filtergehäuse M8 – 24 Nm, M10 – 45 Nm.",
+        },
+        {
+            "filename": "Ersatzteilliste_2025.xlsx",
+            "similarity": 0.58,
+            "snippet": "4711 | Ansaugfilter komplett | VE 1 | lagernd",
+        },
+        {
+            "filename": "Wartungshandbuch.pdf",
+            "modality": "image",
+            "similarity": 0.6,
+            "image_url": "/api/news/thumbnail?url=filter",
+            "image_caption": "Abb. 7: Filtergehäuse, Explosionsdarstellung",
+            "snippet": "Abb. 7",
+        },
+        {
+            "filename": "Schulung_Filterwechsel.mp4",
+            "modality": "video",
+            "similarity": 0.7,
+            "start": 42,
+            "end": 75,
+            "deeplink": "https://example.com/video#t=42",
+            "snippet": "Zuerst das Gehäuse drucklos machen, dann die vier Schrauben lösen …",
+        },
+        {
+            "filename": "Schulung_Filterwechsel.mp4",
+            "modality": "video",
+            "similarity": 0.66,
+            "start": 190,
+            "end": 230,
+            "snippet": "Beim Einsetzen auf den Sitz des O-Rings achten.",
+        },
+    ]
+    entry["metadata"]["rag_sources"] = sources
+    entry["metadata"]["citations"] = [
+        {
+            "n": 1,
+            "kind": "rag",
+            "title": "Wartungshandbuch.pdf",
+            "page": 12,
+            "snippet": sources[0]["snippet"],
+        },
+        {
+            "n": 2,
+            "kind": "rag",
+            "title": "Wartungshandbuch.pdf",
+            "page": 14,
+            "snippet": sources[1]["snippet"],
+        },
+        {
+            "n": 3,
+            "kind": "rag",
+            "title": "Ersatzteilliste_2025.xlsx",
+            "snippet": sources[3]["snippet"],
+        },
+        {
+            "n": 4,
+            "kind": "rag",
+            "title": "Schulung_Filterwechsel.mp4",
+            "snippet": sources[5]["snippet"],
+            "deeplink": "https://example.com/video#t=42",
+        },
+    ]
+    return entry
+
+
 def _history_for(session_id: str) -> list[dict]:
     """History for a session, seeding the canonical preview session on first use."""
     if session_id not in _HISTORY:
@@ -471,6 +567,8 @@ def _history_for(session_id: str) -> list[dict]:
                 _entry("assistant", "This is mock content for local UI work.", -2 * 86400 + 12),
                 _entry("user", "Check the orders schema", -86400),
                 _cold_agent_turn(-86400 + 30),
+                _entry("user", "Wie oft muss die Anlage gewartet werden?", -3600),
+                _rag_turn(-3600 + 8),
             ]
         else:
             _HISTORY[session_id] = []
@@ -907,8 +1005,10 @@ def _mock_bg_tasks(session_id: str) -> list[dict]:
     for run in _SUBAGENT_RUNS:
         if run["session_id"] != session_id:
             continue
-        elapsed = now - run["started_at"]
-        done = elapsed >= run["duration"]
+        # A stopped run freezes at the moment the tray's stop button was hit.
+        stopped_at = run.get("stopped_at")
+        elapsed = (stopped_at or now) - run["started_at"]
+        done = stopped_at is not None or elapsed >= run["duration"]
         per = run["duration"] / (len(run["steps"]) + 1)
         shown = min(len(run["steps"]), int(elapsed / per) + 1)
         steps = []
@@ -917,17 +1017,25 @@ def _mock_bg_tasks(session_id: str) -> list[dict]:
             steps.append(
                 {"tool": tool, "command": command, "status": "running" if running else "done"}
             )
+        stopped = stopped_at is not None
         out.append(
             {
                 "id": run["id"],
                 "kind": "subagent",
                 "label": run["title"],
-                "status": "done" if done else "running",
+                "status": "failed" if stopped else ("done" if done else "running"),
                 "started_at": run["started_at"],
-                "ended_at": run["started_at"] + run["duration"] if done else None,
-                "exit_code": 0 if done else None,
+                "ended_at": (stopped_at or run["started_at"] + run["duration"]) if done else None,
+                "exit_code": (1 if stopped else 0) if done else None,
                 "timed_out": False,
-                "output": run["report"] if done else ("Lese die Abschnitte…" if shown > 1 else ""),
+                "stopped": stopped,
+                "output": (
+                    "Lese die Abschnitte…\n\n[Stopped by the user.]"
+                    if stopped
+                    else run["report"]
+                    if done
+                    else ("Lese die Abschnitte…" if shown > 1 else "")
+                ),
                 "prompt": run["prompt"],
                 "group": run["group"],
                 "steps": steps,
@@ -1070,6 +1178,21 @@ print(result)
                     ),
                 }
             ],
+        },
+        # present_files flow: the agent names the turn's deliverables, which
+        # render as output cards under the answer (and lead the file panel).
+        {
+            "type": "tool_start",
+            "tool": "present_files",
+            "command": '{"files": ["revenue.xlsx", "summary.md"]}',
+        },
+        {
+            "type": "tool_output",
+            "tool": "present_files",
+            "command": '{"files": ["revenue.xlsx", "summary.md"]}',
+            "output": "Shown to the user: revenue.xlsx, summary.md",
+            "exit_code": 0,
+            "presented_files": ["revenue.xlsx", "summary.md"],
         },
         # Widget flow: a tool result that carries a structured payload. The card
         # must render OUTSIDE the collapsed tool group (it is the answer, not a
@@ -1990,6 +2113,16 @@ class PreviewHandler(BaseHTTPRequestHandler):
     def do_POST(self):
         parsed = urlparse(self.path)
         path = parsed.path
+        if path.startswith("/api/bg-tasks/") and path.endswith("/stop"):
+            job_id = path[len("/api/bg-tasks/") : -len("/stop")]
+            for run in _SUBAGENT_RUNS:
+                if run["id"] == job_id and "stopped_at" not in run:
+                    if time.time() - run["started_at"] < run["duration"]:
+                        run["stopped_at"] = time.time()
+                        self._send_json({"stopped": True})
+                        return
+            self._send_json({"stopped": False, "reason": "already finished"})
+            return
         body = self._read_body()
         ctype = self.headers.get("Content-Type", "")
         if "multipart/form-data" in ctype and "boundary=" in ctype:

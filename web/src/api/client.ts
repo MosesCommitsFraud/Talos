@@ -199,6 +199,12 @@ export async function fetchBgTasks(sessionId: string): Promise<import('./types')
   return data.tasks ?? [];
 }
 
+/** Stop one running subagent; the others and the chat turn keep going. */
+export const stopBgTask = (sessionId: string, taskId: string) =>
+  postJSON<{ stopped?: boolean }>(
+    `/api/bg-tasks/${encodeURIComponent(taskId)}/stop?session_id=${encodeURIComponent(sessionId)}`,
+  );
+
 export const artifactDownloadUrl = (sessionId: string, path: string) =>
   `/api/artifacts/${encodeURIComponent(sessionId)}/download?path=${encodeURIComponent(path)}`;
 

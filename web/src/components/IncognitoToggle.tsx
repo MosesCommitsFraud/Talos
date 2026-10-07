@@ -1,93 +1,70 @@
-import { ArchiveIcon, BugIcon, ChevronDownIcon, FileIcon, FolderArchiveIcon, GhostIcon, PaperclipIcon, PencilIcon, Trash2Icon } from 'lucide-react';
-import { useState } from 'react';
+import { ArchiveIcon, BugIcon, ChevronDownIcon, GhostIcon, PencilIcon, Trash2Icon } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { archiveSession, deleteSession, downloadArtifactsZip, downloadChatDebugDump, fetchSessions, renameSession, uploadDownloadUrl } from '@/api/client';
+import { archiveSession, deleteSession, downloadChatDebugDump, fetchSessions, renameSession } from '@/api/client';
 import { useAuth } from './auth/AuthGate';
 import { useChat } from '@/state/chat';
 import { usePrefs } from '@/state/prefs';
 import { cn } from '@/lib/utils';
-import { displayName, fileTypeLabel } from '@/lib/files';
 import { isTitlePending, placeholderTitleText } from '@/lib/sessionTitle';
-import { useSessionFiles } from '@/lib/useSessionFiles';
-import { AttachmentTile, openUploadViewer } from './AttachmentTile';
-import { OutputTile, openSessionFile } from './OutputCard';
+import { SessionFilesPopover } from './SessionFilesPopover';
 import { Skeleton, Tooltip } from './ui/misc';
-import { Menu, MenuItem, MenuLabel, MenuPopup, MenuSeparator, MenuTrigger } from './ui/menu';
+import { Menu, MenuItem, MenuPopup, MenuSeparator, MenuTrigger } from './ui/menu';
 
-/** The header's file button ("📄 3"): a dropdown listing everything the agent
- *  produced, each with a small preview, plus the uploads used in the chat.
- *  Picking a file opens it in the preview panel. */
-function SessionFilesMenu({ sessionId }: { sessionId: string }) {
+/** The chat title, edited in place: a click turns it into an input, Enter or
+ *  leaving the field saves, Escape restores the old name. */
+function EditableTitle({
+  title, editing, onEdit, onDone,
+}: {
+  title: string;
+  editing: boolean;
+  onEdit: () => void;
+  onDone: (name: string | null) => void;
+}) {
   const { t } = useTranslation();
-  const { outputs, inputs } = useSessionFiles(sessionId);
-  if (outputs.length === 0 && inputs.length === 0) return null;
+  const [draft, setDraft] = useState(title);
+  const input = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (!editing) return;
+    setDraft(title);
+    // After the menu that may have asked for the edit has handed focus back.
+    requestAnimationFrame(() => { input.current?.focus(); input.current?.select(); });
+  }, [editing, title]);
+
+  if (editing) {
+    return (
+      <input
+        ref={input}
+        value={draft}
+        aria-label={t('chatHeader.renameChat')}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={() => onDone(draft)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') { e.preventDefault(); onDone(draft); }
+          if (e.key === 'Escape') { e.preventDefault(); onDone(null); }
+        }}
+        // Sized to its text, so it sits exactly where the title was.
+        size={Math.max(8, draft.length + 1)}
+        className="pointer-events-auto h-7 min-w-0 max-w-full rounded-md border border-ring/60 bg-background px-2 text-sm font-medium text-foreground outline-none"
+      />
+    );
+  }
   return (
-    <Menu>
-      <MenuTrigger
-          aria-label={t('outputs.filesAria', { count: outputs.length })}
-          className="flex h-7 items-center gap-1.5 rounded-md border px-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground data-[state=open]:bg-accent data-[state=open]:text-foreground"
-        >
-          <FileIcon className="size-3.5" />
-          <span className="tabular-nums">{outputs.length || inputs.length}</span>
-      </MenuTrigger>
-      <MenuPopup align="end" className="max-h-[70vh] w-80 overflow-y-auto">
-        {outputs.length > 0 && (
-          <>
-            <MenuLabel>{t('outputs.title')}</MenuLabel>
-            {outputs.map((f) => (
-              <MenuItem key={f.path} onSelect={() => openSessionFile(sessionId, f)} className="group/out gap-3 py-1.5" title={f.name}>
-                <OutputTile sessionId={sessionId} file={f} size="sm" />
-                <span className="min-w-0 flex-1 truncate">{displayName(f.name)}</span>
-                <span className="shrink-0 text-[11px] font-medium tracking-wide text-muted-foreground">{fileTypeLabel(f.name, f.mime)}</span>
-              </MenuItem>
-            ))}
-          </>
-        )}
-        {inputs.length > 0 && (
-          <>
-            {outputs.length > 0 && <MenuSeparator />}
-            <MenuLabel className="flex items-center gap-1.5"><PaperclipIcon className="size-3" />{t('outputs.usedInSession')}</MenuLabel>
-            {inputs.map((f) => {
-              const name = f.name || f.id;
-              const url = uploadDownloadUrl(f.id);
-              return (
-                <MenuItem
-                  key={f.id}
-                  className="gap-3 py-1.5"
-                  title={name}
-                  onSelect={() => {
-                    if (openUploadViewer({ url, name, mime: f.mime, sessionId })) return;
-                    const a = document.createElement('a');
-                    a.href = url;
-                    a.download = name;
-                    a.click();
-                  }}
-                >
-                  <AttachmentTile url={url} name={name} mime={f.mime} size={36} />
-                  <span className="min-w-0 flex-1 truncate">{displayName(name)}</span>
-                  <span className="shrink-0 text-[11px] font-medium tracking-wide text-muted-foreground">{fileTypeLabel(name, f.mime)}</span>
-                </MenuItem>
-              );
-            })}
-          </>
-        )}
-        {outputs.length > 0 && (
-          <>
-            <MenuSeparator />
-            <MenuItem onSelect={() => { void downloadArtifactsZip(sessionId); }}>
-              <FolderArchiveIcon /> {t('artifacts.downloadZip')}
-            </MenuItem>
-          </>
-        )}
-      </MenuPopup>
-    </Menu>
+    <button
+      type="button"
+      onClick={onEdit}
+      title={t('chatHeader.clickToRename')}
+      className="pointer-events-auto h-7 min-w-0 cursor-text truncate rounded-md px-2 text-left text-sm font-medium text-foreground transition-colors hover:bg-accent"
+    >
+      {title}
+    </button>
   );
 }
 
-/** Floating chat header: the session title doubles as a dropdown with the
- *  per-session actions (rename / archive / debug dump / delete), and on the
- *  right the session's file menu. Incognito only shows on a fresh chat, where
+/** Floating chat header: the session title (click to rename in place) with a
+ *  chevron menu of per-session actions (rename / archive / debug dump /
+ *  delete), and on the right the session's file panel. Incognito only shows on a fresh chat, where
  *  it decides how the next chat is kept. A background-coloured fade underneath
  *  keeps messages from scrolling visibly through the controls. */
 export function IncognitoToggle() {
@@ -101,6 +78,7 @@ export function IncognitoToggle() {
   const queryClient = useQueryClient();
   const auth = useAuth();
   const [dumping, setDumping] = useState(false);
+  const [editingTitle, setEditingTitle] = useState(false);
 
   const { data: sessions } = useQuery({ queryKey: ['sessions'], queryFn: fetchSessions });
   const session = sessions?.find((s) => s.id === sessionId);
@@ -114,10 +92,14 @@ export function IncognitoToggle() {
 
   const refresh = () => queryClient.invalidateQueries({ queryKey: ['sessions'] });
 
-  const onRename = () => {
-    if (!sessionId) return;
-    const name = window.prompt(t('chatHeader.renameChat'), title);
-    if (name?.trim()) void renameSession(sessionId, name.trim()).then(refresh);
+  const onRenameDone = (name: string | null) => {
+    setEditingTitle(false);
+    const next = name?.trim();
+    if (!sessionId || !next || next === title) return;
+    // Show the new name at once; the refetch confirms it.
+    queryClient.setQueryData<typeof sessions>(['sessions'], (list) =>
+      list?.map((s) => (s.id === sessionId ? { ...s, name: next } : s)));
+    void renameSession(sessionId, next).then(refresh);
   };
   const onArchive = () => {
     if (!sessionId) return;
@@ -171,40 +153,49 @@ export function IncognitoToggle() {
               />
             </div>
           ) : sessionId ? (
-            // pointer-events only on the trigger itself, so the empty space next
-            // to a short title doesn't swallow clicks meant for the chat.
-            <Menu>
-              <MenuTrigger
-                aria-label={t('chatHeader.moreOptions')}
-                className="group pointer-events-auto flex h-7 min-w-0 max-w-full items-center gap-1 rounded-md px-2 text-sm font-medium text-foreground transition-colors hover:bg-accent data-[state=open]:bg-accent"
-              >
-                <span className="truncate">{title}</span>
-                <ChevronDownIcon className="size-3.5 shrink-0 text-muted-foreground transition-transform group-data-[state=open]:rotate-180" />
-              </MenuTrigger>
-              <MenuPopup align="start" className="min-w-44">
-                <MenuItem onSelect={onRename}>
-                  <PencilIcon /> {t('chatHeader.rename')}
-                </MenuItem>
-                <MenuItem onSelect={onArchive}>
-                  <ArchiveIcon /> {t('sidebar.archive')}
-                </MenuItem>
-                {/* Admin-only: raw JSON dump of the whole chat (reasoning, tool
-                    calls, tool errors, metrics) for debugging. */}
-                {auth?.is_admin && (
-                  <MenuItem onSelect={onDebugDump} disabled={dumping}>
-                    <BugIcon /> {t('chatHeader.debugDump')}
+            // pointer-events only on the title and chevron, so the empty space
+            // next to a short title doesn't swallow clicks meant for the chat.
+            <div className="flex min-w-0 items-center">
+              <EditableTitle
+                title={title}
+                editing={editingTitle}
+                onEdit={() => setEditingTitle(true)}
+                onDone={onRenameDone}
+              />
+              <Menu>
+                <MenuTrigger
+                  aria-label={t('chatHeader.moreOptions')}
+                  className="group pointer-events-auto flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground data-[state=open]:bg-accent data-[state=open]:text-foreground"
+                >
+                  <ChevronDownIcon className="size-4 transition-transform group-data-[state=open]:rotate-180" />
+                </MenuTrigger>
+                {/* No focus return to the chevron: Rename moves focus into the
+                    title field, and the trigger would steal it right back. */}
+                <MenuPopup align="start" className="min-w-44" onCloseAutoFocus={(e) => e.preventDefault()}>
+                  <MenuItem onSelect={() => setEditingTitle(true)}>
+                    <PencilIcon /> {t('chatHeader.rename')}
                   </MenuItem>
-                )}
-                <MenuSeparator />
-                <MenuItem variant="destructive" onSelect={onDelete}>
-                  <Trash2Icon /> {t('common.delete')}
-                </MenuItem>
-              </MenuPopup>
-            </Menu>
+                  <MenuItem onSelect={onArchive}>
+                    <ArchiveIcon /> {t('sidebar.archive')}
+                  </MenuItem>
+                  {/* Admin-only: raw JSON dump of the whole chat (reasoning, tool
+                      calls, tool errors, metrics) for debugging. */}
+                  {auth?.is_admin && (
+                    <MenuItem onSelect={onDebugDump} disabled={dumping}>
+                      <BugIcon /> {t('chatHeader.debugDump')}
+                    </MenuItem>
+                  )}
+                  <MenuSeparator />
+                  <MenuItem variant="destructive" onSelect={onDelete}>
+                    <Trash2Icon /> {t('common.delete')}
+                  </MenuItem>
+                </MenuPopup>
+              </Menu>
+            </div>
           ) : null}
         </div>
         <div className="pointer-events-auto flex shrink-0 items-center gap-1">
-          {sessionId && <SessionFilesMenu sessionId={sessionId} />}
+          {sessionId && <SessionFilesPopover sessionId={sessionId} />}
           {!sessionId && visible && (
             <Tooltip label={incognito ? t('chatHeader.incognitoOn') : t('chatHeader.incognitoOff')}>
               <button

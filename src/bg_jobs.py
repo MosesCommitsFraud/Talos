@@ -255,6 +255,14 @@ def read_steps(rec: Dict[str, Any]) -> List[Dict[str, Any]]:
     return data if isinstance(data, list) else []
 
 
+def update(job_id: str, **fields: Any) -> None:
+    """Merge extra fields into a job record (e.g. ``stopped=True``)."""
+    jobs = _load()
+    if job_id in jobs:
+        jobs[job_id].update(fields)
+        _save(jobs)
+
+
 def complete_agent(job_id: str, report: str, exit_code: int = 0) -> None:
     """Record an agent job's result. Writes the same log/exit files a shell
     job produces, so refresh() reconciles it through the identical path.

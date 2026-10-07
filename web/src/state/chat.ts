@@ -220,6 +220,12 @@ function ragSourcesFromMetadata(metadata: Record<string, unknown> | undefined): 
       filename: String(item.filename ?? item.source ?? 'unknown'),
       snippet: typeof item.snippet === 'string' ? item.snippet : '',
       similarity: typeof item.similarity === 'number' ? item.similarity : 0,
+      page:
+        typeof item.page === 'number' || typeof item.page === 'string'
+          ? item.page
+          : typeof item._page === 'number' || typeof item._page === 'string'
+            ? item._page
+            : undefined,
       // Media fields must survive a cold load, or reopened chats lose their
       // image previews / video deeplinks that the live stream showed.
       modality: item.modality === 'image' || item.modality === 'video' ? (item.modality as 'image' | 'video') : undefined,

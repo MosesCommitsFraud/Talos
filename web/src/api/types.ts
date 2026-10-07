@@ -73,6 +73,10 @@ export interface RagSource {
   filename: string;
   snippet: string;
   similarity: number;
+  /** Page the chunk came from, when the ingest recorded one (live stream
+   *  sends the backend's internal `_page`; normalised by ragPage()). */
+  page?: number | string;
+  _page?: number | string;
   /** Set for image/video chunks so the citation can show a preview/timestamp. */
   modality?: 'image' | 'video';
   /** Path-confined endpoint that streams the indexed image (image modality). */
@@ -266,6 +270,8 @@ export interface BgTask {
   prompt?: string;
   group?: string;
   steps?: SubagentStep[];
+  /** Subagents only: stopped by the user from the task tray. */
+  stopped?: boolean;
   /** The command line, or the agent task's label / first line. */
   label: string;
   status: 'running' | 'done' | 'failed';

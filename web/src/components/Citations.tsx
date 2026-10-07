@@ -1,6 +1,6 @@
 import * as TooltipPrimitive from '@radix-ui/react-tooltip';
-import { ArrowUpRightIcon, FileTextIcon, GlobeIcon } from 'lucide-react';
-import { createContext, useContext } from 'react';
+import { ArrowUpRightIcon, ChevronLeftIcon, ChevronRightIcon, FileTextIcon, GlobeIcon } from 'lucide-react';
+import { Children, createContext, useContext, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { Citation } from '@/api/types';
 import { useUi } from '@/state/ui';
@@ -133,6 +133,57 @@ function CitationCard({ c }: { c: Citation }) {
   );
 }
 
+/** ‹ › stepper at the foot of a source hover card: "Passage 2 of 5". Arrow
+ *  keys step too while the card is open (`active`), unless the user is typing. */
+export function PassageNav({
+  index,
+  count,
+  onStep,
+  active = true,
+  children,
+}: {
+  index: number;
+  count: number;
+  onStep: (next: number) => void;
+  active?: boolean;
+  children?: React.ReactNode;
+}) {
+  const { t } = useTranslation();
+  useEffect(() => {
+    if (!active || count < 2) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+      const el = e.target as HTMLElement | null;
+      if (el && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName))) return;
+      e.preventDefault();
+      onStep((index + (e.key === 'ArrowRight' ? 1 : count - 1)) % count);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [active, count, index, onStep]);
+  if (count < 2 && Children.toArray(children).length === 0) return null;
+  const btn =
+    'flex size-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground';
+  return (
+    <div className="-mx-1 -mb-1 flex items-center gap-1 border-t border-border/60 pt-1.5">
+      {count > 1 && (
+        <>
+          <button type="button" aria-label={t('messages.prevPassage')} className={btn} onClick={() => onStep((index + count - 1) % count)}>
+            <ChevronLeftIcon className="size-3.5" />
+          </button>
+          <button type="button" aria-label={t('messages.nextPassage')} className={btn} onClick={() => onStep((index + 1) % count)}>
+            <ChevronRightIcon className="size-3.5" />
+          </button>
+          <span className="text-[11px] text-muted-foreground tabular-nums">
+            {t('messages.passageOf', { i: index + 1, n: count })}
+          </span>
+        </>
+      )}
+      <span className="ml-auto flex items-center gap-2 pr-1">{children}</span>
+    </div>
+  );
+}
+
 function openCitation(c: Citation) {
   if (c.url) window.open(c.url, '_blank', 'noopener,noreferrer');
   else if (c.deeplink) window.open(c.deeplink, '_blank', 'noopener,noreferrer');
@@ -147,9 +198,23 @@ export function CitationRef({ children, ...props }: { children?: React.ReactNode
   // A number with no registered source (plain "[2]" in prose, or a marker the
   // model invented) stays literal text rather than a pill pointing nowhere.
   if (cites.length === 0) return <>{children}</>;
+  return <CitationPill cites={cites} />;
+}
+
+function CitationPill({ cites }: { cites: Citation[] }) {
+  const [open, setOpen] = useState(false);
+  const [idx, setIdx] = useState(0);
   const first = cites[0];
+  const shown = cites[Math.min(idx, cites.length - 1)];
   return (
-    <TooltipPrimitive.Root delayDuration={120}>
+    <TooltipPrimitive.Root
+      delayDuration={120}
+      open={open}
+      onOpenChange={(v) => {
+        setOpen(v);
+        if (v) setIdx(0);
+      }}
+    >
       <TooltipPrimitive.Trigger asChild>
         <button
           type="button"
@@ -166,11 +231,13 @@ export function CitationRef({ children, ...props }: { children?: React.ReactNode
           align="start"
           sideOffset={6}
           collisionPadding={12}
-          className="z-50 w-[22rem] max-w-[calc(100vw-24px)] space-y-3 rounded-xl border bg-popover p-3 shadow-lg"
+          // Radix mirrors the children into a hidden copy for screen readers
+          // unless given a label — a second stepper with its own key handler.
+          aria-label={cites.map((c) => c.title).join(', ')}
+          className="z-50 w-[22rem] max-w-[calc(100vw-24px)] space-y-2.5 rounded-xl border bg-popover p-3 shadow-lg"
         >
-          {cites.map((c) => (
-            <CitationCard key={c.n} c={c} />
-          ))}
+          <CitationCard key={shown.n} c={shown} />
+          <PassageNav index={idx} count={cites.length} onStep={setIdx} active={open} />
         </TooltipPrimitive.Content>
       </TooltipPrimitive.Portal>
     </TooltipPrimitive.Root>

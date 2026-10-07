@@ -85,6 +85,34 @@ def set_turn_context(ctx: Optional[Dict[str, Any]]) -> None:
     _turn.set(ctx)
 
 
+# Subagents of this process that have not finished yet (queued or running),
+# the asyncio task of each running one, and those the user stopped from the
+# task tray. Process-local by nature: the runs live in this event loop.
+_pending: set = set()
+_live: Dict[str, asyncio.Task] = {}
+_user_stopped: set = set()
+
+
+def _forget(job_id: str) -> None:
+    _pending.discard(job_id)
+    _live.pop(job_id, None)
+    _user_stopped.discard(job_id)
+
+
+def stop(job_id: str) -> bool:
+    """Stop one subagent (tray button). Its siblings and the delegating turn
+    carry on; the turn receives whatever this one had written so far, marked
+    as stopped. False when the job is not an unfinished subagent of this
+    process."""
+    if job_id not in _pending:
+        return False
+    _user_stopped.add(job_id)
+    task = _live.get(job_id)
+    if task is not None and not task.done():
+        task.cancel()
+    return True
+
+
 def _setting(key: str, default: Any) -> Any:
     try:
         from src.settings import get_setting
@@ -158,6 +186,7 @@ class _Run:
         self.text = ""
         self.steps: List[Dict[str, Any]] = []
         self.sources: List[Dict[str, Any]] = []
+        self.stopped = False
         self._last_write = 0.0
 
     def flush(self, force: bool = False) -> None:
@@ -274,31 +303,57 @@ async def run_tasks(
             extra={"group": group},
         )
         runs.append(_Run(rec, task["title"]))
+        _pending.add(rec["id"])
 
     sem = asyncio.Semaphore(_int_setting("subagent_parallelism", 3, 1, MAX_TASKS))
     finished = 0
 
     async def _guarded(run: _Run, prompt: str) -> int:
         nonlocal finished
+        job_id = run.rec["id"]
         code = 1
+        inner: Optional[asyncio.Task] = None
         try:
             async with sem:
-                run.flush(force=True)
-                code = await asyncio.wait_for(_run_one(run, prompt, ctx), timeout=runtime)
+                if job_id in _user_stopped:
+                    # Stopped from the tray while still queued: never start it.
+                    run.text = "[Stopped by the user before it started.]"
+                else:
+                    run.flush(force=True)
+                    # Its own task, so the tray can stop THIS subagent (stop())
+                    # without cancelling the delegate call and its siblings.
+                    inner = asyncio.create_task(
+                        asyncio.wait_for(_run_one(run, prompt, ctx), timeout=runtime)
+                    )
+                    _live[job_id] = inner
+                    code = await inner
         except asyncio.TimeoutError:
             run.text = (run.text + f"\n\n[Stopped after the {runtime}s time limit.]").strip()
             code = 1
         except asyncio.CancelledError:
-            # The delegating turn was stopped: record it, then let it propagate.
-            run.text = (run.text + "\n\n[Stopped before it finished.]").strip()
-            bg_jobs.complete_agent(run.rec["id"], run.text, 1)
-            raise
+            if job_id in _user_stopped and inner is not None and inner.cancelled():
+                run.text = (run.text + "\n\n[Stopped by the user.]").strip()
+                code = 1
+            else:
+                # The delegating turn was stopped: end the run, record it, and
+                # let the cancellation propagate.
+                if inner is not None:
+                    inner.cancel()
+                run.text = (run.text + "\n\n[Stopped before it finished.]").strip()
+                bg_jobs.complete_agent(job_id, run.text, 1)
+                _forget(job_id)
+                raise
         except Exception as e:
-            logger.warning("subagent %s failed: %s", run.rec["id"], e)
+            logger.warning("subagent %s failed: %s", job_id, e)
             run.text = (run.text + f"\n\n[Failed: {e}]").strip()
             code = 1
+        stopped = job_id in _user_stopped
+        run.stopped = stopped
+        _forget(job_id)
         run.flush(force=True)
-        bg_jobs.complete_agent(run.rec["id"], run.text or "(no report)", code)
+        if stopped:
+            bg_jobs.update(job_id, stopped=True)
+        bg_jobs.complete_agent(job_id, run.text or "(no report)", code)
         finished += 1
         if progress_cb:
             try:
@@ -316,7 +371,7 @@ async def run_tasks(
         report = run.text.strip() or "(The subagent produced no report.)"
         if len(report) > _REPORT_CHARS:
             report = report[:_REPORT_CHARS] + "\n…[report truncated]…"
-        status = "done" if code == 0 else "FAILED"
+        status = "STOPPED BY THE USER" if run.stopped else ("done" if code == 0 else "FAILED")
         parts.append(f"## Task {i} — {run.title} ({status})\n\n{report}")
         sources.extend(run.sources)
     ok = sum(1 for c in codes if c == 0)
@@ -324,7 +379,8 @@ async def run_tasks(
         f"{ok}/{len(runs)} subagent task(s) finished. Their reports follow. They are "
         "digests: the [n] numbers are real sources of this turn and may be cited. "
         "Check anything decisive yourself (e.g. read_knowledge) before stating it "
-        "as fact, and say which parts a failed task left open."
+        "as fact, and say which parts a failed task left open. A task the user "
+        "stopped was stopped on purpose: do not redo it, use what it reported."
     )
     from src.prompt_security import UNTRUSTED_CONTEXT_HEADER
 

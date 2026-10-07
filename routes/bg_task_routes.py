@@ -4,7 +4,8 @@
 until now the only consumer was the monitor that re-invokes the agent when one
 finishes. The UI had no way to see that anything was running: the turn ended,
 the indicator went quiet, and a ten-minute build was invisible until its
-follow-up landed. This exposes the same store read-only, per session.
+follow-up landed. This exposes the same store per session — read-only,
+except that a delegated subagent can be stopped from the tray.
 """
 
 import logging
@@ -53,6 +54,7 @@ def _subagent_fields(rec: Dict[str, Any]) -> Dict[str, Any]:
         "prompt": str(rec.get("task") or "")[:4000],
         "group": rec.get("group") or "",
         "steps": bg_jobs.read_steps(rec)[-200:],
+        "stopped": bool(rec.get("stopped")),
     }
 
 
@@ -78,5 +80,29 @@ def setup_bg_task_routes():
             records = []
         records.sort(key=lambda r: r.get("started_at") or 0)
         return {"tasks": [_public(rec) for rec in records]}
+
+    @router.post("/{job_id}/stop")
+    async def stop_task(request: Request, job_id: str, session_id: str = Query(...)):
+        """Stop one running subagent. Its siblings and the delegating turn keep
+        going; the turn gets what this one had found so far.
+
+        Async on purpose: the run is an asyncio task on the server loop, and
+        cancelling it from FastAPI's threadpool (a plain `def`) is not safe."""
+        session_id = (session_id or "").strip()
+        if not session_id:
+            raise HTTPException(400, "session_id is required")
+        _verify_session_owner(request, session_id)
+        rec = bg_jobs.get(job_id)
+        if not rec or rec.get("session_id") != session_id:
+            raise HTTPException(404, "No such task in this chat")
+        if rec.get("kind") != "subagent":
+            raise HTTPException(400, "Only subagents can be stopped from here")
+        if rec.get("status") != "running":
+            return {"stopped": False, "reason": "already finished"}
+        from src import subagents
+
+        if not subagents.stop(job_id):
+            raise HTTPException(409, "This subagent is not running in this server process")
+        return {"stopped": True}
 
     return router

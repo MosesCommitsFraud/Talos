@@ -1,13 +1,17 @@
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { BotIcon, CheckIcon, ChevronDownIcon, CopyIcon, LoaderIcon, TerminalIcon, TriangleAlertIcon, XIcon } from 'lucide-react';
+import { BotIcon, CheckIcon, ChevronDownIcon, CopyIcon, LoaderIcon, SquareIcon, TerminalIcon, TriangleAlertIcon, XIcon } from 'lucide-react';
+import { useQueryClient } from '@tanstack/react-query';
+import { stopBgTask } from '@/api/client';
 import type { BgTask, ToolCall } from '@/api/types';
 import { describeCall } from '@/lib/toolLabels';
 import { cn, copyTextToClipboard, formatDurationMs } from '@/lib/utils';
 import { Markdown } from './Markdown';
 import { ToolLabel } from './ToolLabel';
 import { useBgTasks } from '@/lib/useBgTasks';
+import { useChat } from '@/state/chat';
 import { useUi } from '@/state/ui';
+import { Tooltip } from './ui/misc';
 
 /** Elapsed time for one job — live while it runs, frozen at its total once it
  *  has finished. `started_at`/`ended_at` come from the backend as Unix
@@ -28,7 +32,9 @@ function TaskElapsed({ task }: { task: BgTask }) {
 /** Status glyph: a spinner while it runs, a tick or a warning once it lands.
  *  Colour carries the outcome, so the row stays readable at a glance in a list
  *  where every label is a long command line. */
-function StatusIcon({ status }: { status: BgTask['status'] }) {
+function StatusIcon({ status, stopped }: { status: BgTask['status']; stopped?: boolean }) {
+  // Stopped on purpose is not a failure: a neutral square, not a warning.
+  if (stopped) return <SquareIcon className="size-3.5 shrink-0 text-muted-foreground" />;
   if (status === 'running') return <LoaderIcon className="size-3.5 shrink-0 animate-spin text-primary" />;
   if (status === 'failed') return <TriangleAlertIcon className="size-3.5 shrink-0 text-destructive-foreground" />;
   return <CheckIcon className="size-3.5 shrink-0 text-emerald-500" />;
@@ -131,11 +137,34 @@ function TaskRow({ task, defaultOpen }: { task: BgTask; defaultOpen: boolean }) 
   const Icon = task.kind === 'agent' || task.kind === 'subagent' ? BotIcon : TerminalIcon;
   const kindLabel =
     task.kind === 'subagent' ? 'tasks.kindSubagent' : task.kind === 'agent' ? 'tasks.kindAgent' : 'tasks.kindShell';
-  const outcome = task.timed_out
-    ? t('tasks.timedOut')
-    : task.status === 'failed'
-      ? t('tasks.exitCode', { code: task.exit_code ?? -1 })
-      : null;
+  const sessionId = useChat((s) => s.sessionId);
+  const queryClient = useQueryClient();
+  const [stopping, setStopping] = useState(false);
+  const [stopError, setStopError] = useState<string | null>(null);
+  const canStop = task.kind === 'subagent' && task.status === 'running' && !!sessionId;
+  const outcome = task.stopped
+    ? null
+    : task.timed_out
+      ? t('tasks.timedOut')
+      : task.status === 'failed'
+        ? t('tasks.exitCode', { code: task.exit_code ?? -1 })
+        : null;
+
+  // Stop just this subagent. The delegating turn keeps running with the rest
+  // and receives what this one had found so far.
+  const stop = async () => {
+    if (!sessionId) return;
+    setStopping(true);
+    setStopError(null);
+    try {
+      await stopBgTask(sessionId, task.id);
+    } catch (e) {
+      setStopError((e as Error).message);
+    } finally {
+      setStopping(false);
+      void queryClient.invalidateQueries({ queryKey: ['bg-tasks', sessionId] });
+    }
+  };
 
   const copy = async () => {
     await copyTextToClipboard(task.output);
@@ -145,13 +174,14 @@ function TaskRow({ task, defaultOpen }: { task: BgTask; defaultOpen: boolean }) 
 
   return (
     <div className="rounded-md border bg-background/40 p-2.5">
+      <div className="flex items-start gap-1">
       <button
         type="button"
         aria-expanded={open}
         onClick={() => setOpen((v) => !v)}
-        className="flex w-full items-start gap-2 text-left"
+        className="flex min-w-0 flex-1 items-start gap-2 text-left"
       >
-        <StatusIcon status={task.status} />
+        <StatusIcon status={task.status} stopped={task.stopped} />
         <span className="min-w-0 flex-1">
           <span className="flex items-center gap-1.5 text-[13px] font-medium text-foreground">
             <Icon className="size-3 shrink-0 text-muted-foreground" />
@@ -169,6 +199,12 @@ function TaskRow({ task, defaultOpen }: { task: BgTask; defaultOpen: boolean }) 
                 <span>{t('tasks.steps', { count: task.steps?.length ?? 0 })}</span>
               </>
             )}
+            {task.stopped && (
+              <>
+                <span aria-hidden>·</span>
+                <span>{t('tasks.stopped')}</span>
+              </>
+            )}
             {outcome && (
               <>
                 <span aria-hidden>·</span>
@@ -179,6 +215,21 @@ function TaskRow({ task, defaultOpen }: { task: BgTask; defaultOpen: boolean }) 
         </span>
         <ChevronDownIcon className={cn('mt-0.5 size-3.5 shrink-0 opacity-60 transition-transform', open && 'rotate-180')} />
       </button>
+      {canStop && (
+        <Tooltip label={t('tasks.stop')}>
+          <button
+            type="button"
+            onClick={() => void stop()}
+            disabled={stopping}
+            aria-label={t('tasks.stopNamed', { name: task.label || t('tasks.untitled') })}
+            className="-mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-50"
+          >
+            {stopping ? <LoaderIcon className="size-3.5 animate-spin" /> : <SquareIcon className="size-3 fill-current" />}
+          </button>
+        </Tooltip>
+      )}
+      </div>
+      {stopError && <p className="mt-1 text-[11px] text-destructive-foreground">{stopError}</p>}
       {open && (
         <>
           {task.kind === 'subagent' ? <SubagentDetail task={task} /> : <TaskOutput task={task} />}
