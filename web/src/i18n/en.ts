@@ -395,6 +395,8 @@ const en = {
     kindSubagent: 'Subagent',
     typeResearch: 'Research',
     typeWorker: 'Worker',
+    modelSmall: 'small model',
+    modelLarge: 'large model',
     state: { running: 'Running', done: 'Done', failed: 'Failed', stopped: 'Stopped' },
     stopShort: 'Stop',
     groupSubagents: 'Subagents',

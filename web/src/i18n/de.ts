@@ -398,6 +398,8 @@ const de: typeof en = {
     kindSubagent: 'Subagent',
     typeResearch: 'Recherche',
     typeWorker: 'Bearbeitung',
+    modelSmall: 'kleines Modell',
+    modelLarge: 'großes Modell',
     state: { running: 'Läuft', done: 'Fertig', failed: 'Fehlgeschlagen', stopped: 'Gestoppt' },
     stopShort: 'Stoppen',
     groupSubagents: 'Subagenten',

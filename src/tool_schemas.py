@@ -324,6 +324,15 @@ FUNCTION_TOOL_SCHEMAS = [
                                     "enum": ["research", "worker"],
                                     "description": "research (default) or worker (files + code).",
                                 },
+                                "model": {
+                                    "type": "string",
+                                    "enum": ["small", "large"],
+                                    "description": (
+                                        "small (default, much faster): clear lookups and "
+                                        "extraction, simple scripts. large (your own "
+                                        "model): judgement, synthesis, tricky analysis."
+                                    ),
+                                },
                                 "context": {
                                     "type": "string",
                                     "description": (
@@ -364,6 +373,11 @@ FUNCTION_TOOL_SCHEMAS = [
                 "properties": {
                     "task_id": {"type": "string", "description": "From the subagent's report."},
                     "prompt": {"type": "string", "description": "The follow-up instruction."},
+                    "model": {
+                        "type": "string",
+                        "enum": ["small", "large"],
+                        "description": "Default: the model it ran on before.",
+                    },
                     "background": {
                         "type": "boolean",
                         "description": "Return immediately; the report arrives as a follow-up.",

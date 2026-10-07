@@ -63,7 +63,11 @@ def _run(content, monkeypatch, **fake_kw):
 def test_parse_tasks_accepts_common_shapes():
     assert sub.parse_tasks('{"tasks": ["read chapter 2"]}')[0]["title"] == "read chapter 2"
     got = sub.parse_tasks('[{"name": "A", "task": "do a"}]')
-    assert got == [{"title": "A", "prompt": "do a", "type": "research", "context": ""}]
+    assert got == [
+        {"title": "A", "prompt": "do a", "type": "research", "model": "small", "context": ""}
+    ]
+    with pytest.raises(ValueError, match="Unknown subagent model"):
+        sub.parse_tasks('{"tasks": [{"prompt": "x", "model": "huge"}]}')
     with pytest.raises(ValueError, match="Unknown subagent type"):
         sub.parse_tasks('{"tasks": [{"prompt": "x", "type": "admin"}]}')
     with pytest.raises(ValueError):
@@ -433,3 +437,54 @@ def test_continue_task_refuses_unknown_or_running_tasks(jobs_dir, monkeypatch):
         sub.continue_task(json.dumps({"task_id": rec["id"], "prompt": "x"}), session_id="s1")
     )
     assert "still running" in out["error"]
+
+
+def test_the_main_agent_picks_small_or_large_per_task(jobs_dir, monkeypatch):
+    calls = []
+    monkeypatch.setattr(agent_loop, "stream_agent_loop", _recording_loop(calls))
+    settings = {"subagent_endpoint_id": "ep-small", "subagent_model": "qwen3-4b"}
+    monkeypatch.setattr(sub, "_setting", lambda k, d: settings.get(k, d))
+    resolver = importlib.import_module("src.endpoint_resolver")
+    monkeypatch.setattr(
+        resolver,
+        "resolve_endpoint_by_id",
+        lambda ep, model, owner=None: ("http://small/v1/chat/completions", model, {}),
+    )
+    monkeypatch.setattr(
+        importlib.import_module("src.model_context"), "get_context_length", lambda u, m: 32768
+    )
+    content = {
+        "tasks": [
+            {"title": "Fakten", "prompt": "lies K7"},
+            {"title": "Abwägen", "prompt": "vergleiche die Quellen", "model": "large"},
+        ]
+    }
+    out = asyncio.run(sub.run_tasks(json.dumps(content), session_id="s1"))
+    by_prompt = {c["messages"][0]["content"].split("Assignment:")[1].strip(): c for c in calls}
+    assert by_prompt["lies K7"]["model"] == "qwen3-4b"
+    assert by_prompt["vergleiche die Quellen"]["model"] == "m"
+    assert by_prompt["vergleiche die Quellen"]["endpoint_url"] == "http://llm"
+    recs = {r["command"]: r for r in bg_jobs.list_for_session("s1")}
+    assert recs["Fakten"]["model_size"] == "small" and recs["Abwägen"]["model_size"] == "large"
+
+    # A follow-up stays on the model the subagent ran on, unless asked otherwise.
+    large_id = recs["Abwägen"]["id"]
+    asyncio.run(sub.continue_task(json.dumps({"task_id": large_id, "prompt": "und?"}), "s1"))
+    assert calls[-1]["model"] == "m"
+    small_id = recs["Fakten"]["id"]
+    asyncio.run(
+        sub.continue_task(
+            json.dumps({"task_id": small_id, "prompt": "genauer", "model": "large"}), "s1"
+        )
+    )
+    assert calls[-1]["model"] == "m"
+    assert "task_id:" in out["output"]
+
+
+def test_small_without_a_configured_model_runs_on_the_chat_model(jobs_dir, monkeypatch):
+    calls = []
+    monkeypatch.setattr(agent_loop, "stream_agent_loop", _recording_loop(calls))
+    asyncio.run(sub.run_tasks('{"tasks": [{"prompt": "x", "model": "small"}]}', session_id="s1"))
+    assert calls[0]["model"] == "m"
+    # Recorded honestly: it did not run on a small model.
+    assert bg_jobs.list_for_session("s1")[0]["model_size"] == "large"

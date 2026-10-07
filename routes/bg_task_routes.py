@@ -56,6 +56,8 @@ def _subagent_fields(rec: Dict[str, Any]) -> Dict[str, Any]:
         "steps": bg_jobs.read_steps(rec)[-200:],
         "stopped": bool(rec.get("stopped")),
         "agent_type": rec.get("agent_type") or "research",
+        "model_size": rec.get("model_size") or "",
+        "model": rec.get("model") or "",
         "continues": rec.get("continues") or "",
     }
 

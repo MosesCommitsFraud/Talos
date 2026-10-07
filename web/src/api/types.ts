@@ -275,6 +275,9 @@ export interface BgTask {
   /** Subagents only: `research` (lookups) or `worker` (files + code), and the
    *  subagent this one continues, if any. */
   agent_type?: 'research' | 'worker';
+  /** Which model it ran on: the small subagent model or the chat model. */
+  model_size?: 'small' | 'large' | '';
+  model?: string;
   continues?: string;
   /** The command line, or the agent task's label / first line. */
   label: string;

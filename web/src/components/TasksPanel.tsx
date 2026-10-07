@@ -68,6 +68,14 @@ function MetaLine({ task }: { task: BgTask }) {
         <>
           <span aria-hidden>·</span>
           <span>{t(task.agent_type === 'worker' ? 'tasks.typeWorker' : 'tasks.typeResearch')}</span>
+          {task.model_size && (
+            <>
+              <span aria-hidden>·</span>
+              <span title={task.model || undefined}>
+                {t(task.model_size === 'large' ? 'tasks.modelLarge' : 'tasks.modelSmall')}
+              </span>
+            </>
+          )}
         </>
       )}
       <span aria-hidden>·</span>
