@@ -1,10 +1,11 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { DownloadIcon, XIcon } from 'lucide-react';
+import { DownloadIcon, Maximize2Icon, Minimize2Icon, XIcon } from 'lucide-react';
 import { downloadPreviewFile } from '@/api/client';
 import { displayName, fileTypeLabel } from '@/lib/files';
 import { usePrefs } from '@/state/prefs';
 import { useUi } from '@/state/ui';
+import { cn } from '@/lib/utils';
 import { FileTypeIcon } from './FileTypeIcon';
 import { PreviewContent } from './PreviewPanel';
 import { Tooltip } from './ui/misc';
@@ -22,6 +23,8 @@ export function RightPanel() {
   const open = useUi((s) => s.artifactsOpen);
   const setOpen = useUi((s) => s.setArtifactsOpen);
   const preview = useUi((s) => s.preview);
+  const fullscreen = useUi((s) => s.previewFullscreen);
+  const setFullscreen = useUi((s) => s.setPreviewFullscreen);
   const width = usePrefs((s) => s.previewWidth);
   const setWidth = usePrefs((s) => s.setPreviewWidth);
   // Live width during a drag (avoids persisting on every mousemove).
@@ -48,24 +51,43 @@ export function RightPanel() {
     window.addEventListener('pointerup', onUp);
   }, [width, setWidth]);
 
+  // Escape steps out of full screen (before anything closes the panel).
+  useEffect(() => {
+    if (!fullscreen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && !e.defaultPrevented) setFullscreen(false);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [fullscreen, setFullscreen]);
+
   if (!open || !preview) return null;
   const effWidth = dragWidth ?? width;
   const iconBtn = 'flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground';
 
   return (
     <aside
-      className="relative m-2 flex shrink-0 flex-col overflow-hidden rounded-md border bg-background shadow-lg"
-      style={{ width: effWidth }}
+      // Full screen lifts the panel over the whole chat column (App gives it a
+      // positioned box that stops at the sidebar). z-40 sits above everything
+      // the chat floats — header, scroll-to-bottom pill (z-30) — so none of it
+      // shows through.
+      className={cn(
+        'flex flex-col overflow-hidden rounded-md border bg-background shadow-lg',
+        fullscreen ? 'absolute inset-0 z-40 m-2' : 'relative m-2 shrink-0',
+      )}
+      style={fullscreen ? undefined : { width: effWidth }}
       aria-label={t('preview.panelLabel')}
     >
       {/* Drag handle on the left edge — widens/narrows the panel. */}
-      <div
-        role="separator"
-        aria-orientation="vertical"
-        aria-label={t('preview.resize')}
-        onPointerDown={onResizeStart}
-        className="absolute inset-y-0 left-0 z-10 w-1.5 cursor-col-resize hover:bg-primary/30 active:bg-primary/40"
-      />
+      {!fullscreen && (
+        <div
+          role="separator"
+          aria-orientation="vertical"
+          aria-label={t('preview.resize')}
+          onPointerDown={onResizeStart}
+          className="absolute inset-y-0 left-0 z-10 w-1.5 cursor-col-resize hover:bg-primary/30 active:bg-primary/40"
+        />
+      )}
 
       <div className="flex h-10 shrink-0 items-center justify-between gap-2 border-b pl-3 pr-2">
         <div className="flex min-w-0 items-center gap-2" title={preview.name}>
@@ -87,6 +109,17 @@ export function RightPanel() {
               </button>
             </Tooltip>
           )}
+          <Tooltip label={fullscreen ? t('preview.exitFullscreen') : t('preview.fullscreen')}>
+            <button
+              type="button"
+              onClick={() => setFullscreen(!fullscreen)}
+              aria-label={fullscreen ? t('preview.exitFullscreen') : t('preview.fullscreen')}
+              aria-pressed={fullscreen}
+              className={iconBtn}
+            >
+              {fullscreen ? <Minimize2Icon className="size-4" /> : <Maximize2Icon className="size-4" />}
+            </button>
+          </Tooltip>
           <button
             type="button"
             aria-label={t('preview.close')}

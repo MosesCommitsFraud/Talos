@@ -793,6 +793,8 @@ const en = {
     },
   },
   preview: {
+    fullscreen: 'Full screen',
+    exitFullscreen: 'Exit full screen',
     panelLabel: 'File preview',
     close: 'Close preview',
     download: 'Download file',

@@ -917,6 +917,7 @@ export function Messages() {
   const messages = useChat((s) => s.messages);
   const [editing, setEditing] = useState<string | null>(null);
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
+  const previewFullscreen = useUi((s) => s.previewFullscreen);
   const scroller = useRef<HTMLDivElement>(null);
   const pinned = useRef(true);
   const { outputs } = useSessionFiles(sessionId);
@@ -987,7 +988,9 @@ export function Messages() {
   }
 
   return (
-   <div className="relative flex min-h-0 flex-1 flex-col">
+   // A container, so the scroll pill can fold to its round arrow-only form
+    // when the chat column (not the viewport) gets narrow.
+   <div className="@container/chat relative flex min-h-0 flex-1 flex-col">
     <div ref={scroller} onScroll={onScroll} className="flex-1 overflow-y-auto [scrollbar-gutter:stable]" role="log" aria-live="polite">
       <div className="mx-auto flex w-full max-w-[800px] flex-col px-4 pb-6 pt-14">
         {blocks.map((block, index) =>
@@ -1028,16 +1031,21 @@ export function Messages() {
       </div>
     </div>
     {/* Scroll-to-bottom pill — shown when scrolled away from the bottom (t3code style). */}
-    {showScrollToBottom && (
+    {/* Hidden while the preview covers the chat: the panel sits over this
+        column, and the pill must not float out from under it. */}
+    {showScrollToBottom && !previewFullscreen && (
       <div className="pointer-events-none absolute bottom-2 left-1/2 z-30 flex -translate-x-1/2 justify-center">
         <button
           type="button"
           onClick={scrollToBottom}
           aria-label={t('messages.scrollToBottom')}
-          className="pointer-events-auto flex items-center gap-1.5 rounded-full border border-foreground/15 bg-card px-3 py-1 text-xs text-muted-foreground shadow-sm transition-colors hover:cursor-pointer hover:border-foreground/25 hover:text-foreground dark:border-border/60 dark:hover:border-border"
+          title={t('messages.scrollToBottom')}
+          // Compact below @md: a round button with just the arrow, so a narrow
+          // column (preview open beside it) doesn't wrap the label.
+          className="pointer-events-auto flex size-8 items-center justify-center rounded-full border border-foreground/15 bg-card text-muted-foreground shadow-sm transition-colors hover:cursor-pointer hover:border-foreground/25 hover:text-foreground dark:border-border/60 dark:hover:border-border @md/chat:size-auto @md/chat:gap-1.5 @md/chat:px-3 @md/chat:py-1 @md/chat:text-xs"
         >
-          <ChevronDownIcon className="size-3.5" />
-          {t('messages.scrollToBottom')}
+          <ChevronDownIcon className="size-4 @md/chat:size-3.5" />
+          <span className="hidden whitespace-nowrap @md/chat:inline">{t('messages.scrollToBottom')}</span>
         </button>
       </div>
     )}

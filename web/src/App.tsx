@@ -135,7 +135,9 @@ export default function App() {
             ) : view === 'customize' ? (
               <CustomizeWorkspace />
             ) : (
-              <>
+              // One positioning box for chat + panels, so a full-screen preview
+              // can cover exactly the chat column and leave the sidebar alone.
+              <div className="relative flex min-w-0 flex-1">
                 <main className="relative flex min-w-0 flex-1 flex-col">
                   {/* Empty chat shows the home screen (greeting + usage stats)
                       in the message area; the composer always sits at the
@@ -164,7 +166,7 @@ export default function App() {
                 </main>
                 <TasksPanel />
                 <RightPanel />
-              </>
+              </div>
             )}
           </div>
           <CommandPalette

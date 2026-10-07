@@ -47,6 +47,10 @@ interface UiState {
    *  header's file menu; the panel only ever shows `preview`. */
   artifactsOpen: boolean;
   setArtifactsOpen: (open: boolean) => void;
+  /** Preview spread over the chat column (the sidebar stays). Dropped whenever
+   *  the panel closes, so the next file opens beside the chat again. */
+  previewFullscreen: boolean;
+  setPreviewFullscreen: (fullscreen: boolean) => void;
   /** Right-side drawer listing the session's background jobs and their live
    *  output. Opened from the task chip in the working row; never auto-opens —
    *  a job runs precisely so the reader can carry on with something else. */
@@ -91,7 +95,9 @@ export const useUi = create<UiState>((set) => ({
     set({ view });
   },
   artifactsOpen: false,
-  setArtifactsOpen: (artifactsOpen) => set({ artifactsOpen }),
+  setArtifactsOpen: (artifactsOpen) => set(artifactsOpen ? { artifactsOpen } : { artifactsOpen, previewFullscreen: false }),
+  previewFullscreen: false,
+  setPreviewFullscreen: (previewFullscreen) => set({ previewFullscreen }),
   tasksPanelOpen: false,
   setTasksPanelOpen: (tasksPanelOpen) => set({ tasksPanelOpen }),
   lightbox: null,
@@ -103,7 +109,7 @@ export const useUi = create<UiState>((set) => ({
   updatePreview: (patch) => set((state) => ({
     preview: state.preview ? { ...state.preview, ...patch } : null,
   })),
-  closePreview: () => set({ preview: null, artifactsOpen: false }),
+  closePreview: () => set({ preview: null, artifactsOpen: false, previewFullscreen: false }),
   artifactSelection: null,
   setArtifactSelection: (artifactSelection) => set({ artifactSelection }),
   openProject: null,

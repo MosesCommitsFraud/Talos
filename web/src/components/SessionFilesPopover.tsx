@@ -7,9 +7,10 @@ import { displayName, fileTypeLabel } from '@/lib/files';
 import { presentedOutputs, useSessionFiles, type SessionFile } from '@/lib/useSessionFiles';
 import { cn } from '@/lib/utils';
 import { useChat } from '@/state/chat';
-import { AttachmentTile, openUploadViewer } from './AttachmentTile';
+import { openUploadViewer } from './AttachmentTile';
+import { FileTypeIcon } from './FileTypeIcon';
 import { FilePoster } from './FilePoster';
-import { OutputTile, openSessionFile, useKindLabel } from './OutputCard';
+import { openSessionFile, useKindLabel } from './OutputCard';
 
 function openUpload(f: Attachment, sessionId: string) {
   const name = f.name || f.id;
@@ -128,10 +129,10 @@ export function SessionFilesPopover({ sessionId }: { sessionId: string }) {
                   title={f.name}
                   className="group/poster block w-full cursor-pointer text-left"
                 >
-                  <div className="h-40 overflow-hidden rounded-lg border bg-muted transition-[border-color,box-shadow] group-hover/poster:border-foreground/25 group-hover/poster:shadow-md">
-                    <div className="size-full transition-transform duration-300 ease-out group-hover/poster:scale-[1.02]">
-                      <FilePoster sessionId={sessionId} file={f} />
-                    </div>
+                  {/* Still, on purpose: the tile animations belong to the chat's
+                      output cards, the panel is a plain index. */}
+                  <div className="h-40 overflow-hidden rounded-lg border bg-muted group-hover/poster:border-foreground/25">
+                    <FilePoster sessionId={sessionId} file={f} />
                   </div>
                   <div className="mt-2 truncate text-[15px] font-medium text-foreground">{displayName(f.name)}</div>
                   <div className="truncate text-xs text-muted-foreground">{kindLabel(f)} · {fileTypeLabel(f.name, f.mime)}</div>
@@ -148,11 +149,12 @@ export function SessionFilesPopover({ sessionId }: { sessionId: string }) {
                   type="button"
                   onClick={() => pick(f)}
                   title={f.name}
-                  className="group/out flex w-full cursor-pointer items-center gap-3 rounded-md px-1.5 py-1.5 text-left text-sm transition-colors hover:bg-accent"
+                  className="flex w-full cursor-pointer items-center gap-2.5 rounded-md px-1.5 py-1.5 text-left text-sm hover:bg-accent"
                 >
-                  <OutputTile sessionId={sessionId} file={f} size="sm" />
+                  {/* The type glyph carries the extension (XLSX, PY…), so one
+                      icon replaces a thumbnail and a type label. */}
+                  <FileTypeIcon path={f.name} mime={f.mime} className="size-4 shrink-0 text-muted-foreground" />
                   <span className="min-w-0 flex-1 truncate">{displayName(f.name)}</span>
-                  <span className="shrink-0 text-[11px] font-medium tracking-wide text-muted-foreground">{fileTypeLabel(f.name, f.mime)}</span>
                 </button>
               ))}
             </div>
@@ -165,13 +167,13 @@ export function SessionFilesPopover({ sessionId }: { sessionId: string }) {
                 type="button"
                 onClick={() => setUploadsOpen((v) => !v)}
                 aria-expanded={uploadsOpen}
-                className="flex w-full cursor-pointer items-center gap-2.5 rounded-md px-1.5 py-1.5 text-left text-sm transition-colors hover:bg-accent"
+                className="flex w-full cursor-pointer items-center gap-2.5 rounded-md px-1.5 py-1.5 text-left text-sm hover:bg-accent"
               >
                 <PaperclipIcon className="size-4 shrink-0 text-muted-foreground" />
                 <span className="shrink-0 font-medium">{t('outputs.uploads')}</span>
                 <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">{uploadNames.slice(0, 2).join(', ')}</span>
                 {uploadNames.length > 2 && <span className="shrink-0 text-xs text-muted-foreground">+{uploadNames.length - 2}</span>}
-                <ChevronRightIcon className={cn('size-3.5 shrink-0 text-muted-foreground transition-transform', uploadsOpen && 'rotate-90')} />
+                <ChevronRightIcon className={cn('size-3.5 shrink-0 text-muted-foreground', uploadsOpen && 'rotate-90')} />
               </button>
               {uploadsOpen && (
                 <div className="mt-0.5 space-y-0.5 pl-1">
@@ -183,11 +185,10 @@ export function SessionFilesPopover({ sessionId }: { sessionId: string }) {
                         type="button"
                         onClick={() => { openUpload(f, sessionId); setOpen(false); }}
                         title={name}
-                        className="flex w-full cursor-pointer items-center gap-3 rounded-md px-1.5 py-1 text-left text-sm transition-colors hover:bg-accent"
+                        className="flex w-full cursor-pointer items-center gap-2.5 rounded-md px-1.5 py-1.5 text-left text-sm hover:bg-accent"
                       >
-                        <AttachmentTile url={uploadDownloadUrl(f.id)} name={name} mime={f.mime} size={32} />
+                        <FileTypeIcon path={name} mime={f.mime} className="size-4 shrink-0 text-muted-foreground" />
                         <span className="min-w-0 flex-1 truncate">{displayName(name)}</span>
-                        <span className="shrink-0 text-[11px] font-medium tracking-wide text-muted-foreground">{fileTypeLabel(name, f.mime)}</span>
                       </button>
                     );
                   })}
@@ -197,14 +198,19 @@ export function SessionFilesPopover({ sessionId }: { sessionId: string }) {
           )}
 
           {outputs.length > 1 && (
-            <button
-              type="button"
-              onClick={() => { void downloadArtifactsZip(sessionId); }}
-              className="mt-3 flex w-full cursor-pointer items-center gap-2.5 rounded-md border-t px-1.5 pb-1 pt-3 text-left text-xs text-muted-foreground transition-colors hover:text-foreground"
-            >
-              <FolderArchiveIcon className="size-4" />
-              {t('artifacts.downloadZip')}
-            </button>
+            // Its own footer strip, out to the panel edges, so the space above
+            // and below the row is the same instead of the panel padding
+            // stacking up underneath it.
+            <div className="-mx-4 -mb-4 mt-3 border-t px-2.5 py-1.5">
+              <button
+                type="button"
+                onClick={() => { void downloadArtifactsZip(sessionId); }}
+                className="flex w-full cursor-pointer items-center gap-2.5 rounded-md px-1.5 py-1.5 text-left text-xs text-muted-foreground hover:bg-accent hover:text-foreground"
+              >
+                <FolderArchiveIcon className="size-4" />
+                {t('artifacts.downloadZip')}
+              </button>
+            </div>
           )}
         </div>
       )}

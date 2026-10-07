@@ -799,6 +799,8 @@ const de: typeof en = {
     },
   },
   preview: {
+    fullscreen: 'Vollbild',
+    exitFullscreen: 'Vollbild beenden',
     panelLabel: 'Dateivorschau',
     close: 'Vorschau schließen',
     download: 'Datei herunterladen',
