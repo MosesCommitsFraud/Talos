@@ -25,6 +25,9 @@ const FAMILY: Record<string, string> = {
   ls: 'ls',
   query_sql: 'sql',
   search_knowledge: 'knowledge',
+  list_knowledge: 'knowledgeList',
+  read_knowledge: 'knowledgeRead',
+  grep_knowledge: 'knowledgeGrep',
   web_search: 'web',
   web_fetch: 'fetch',
   get_weather: 'weather',
@@ -149,6 +152,20 @@ export function callSubject(call: ToolCall): string {
     case 'knowledge':
     case 'news':
       return pick('query', 'q', 'topic') || firstLine(raw);
+    case 'knowledgeList':
+      return pick('query');
+    case 'knowledgeGrep':
+      return pick('pattern', 'query') || firstLine(raw);
+    case 'knowledgeRead': {
+      const doc = pick('document', 'name');
+      // Models send section/pages as numbers as often as strings.
+      const val = (key: string): string => {
+        const v = args[key];
+        return typeof v === 'number' ? String(v) : typeof v === 'string' ? v.trim() : '';
+      };
+      const part = val('section') ? `§${val('section')}` : val('pages') ? `p. ${val('pages')}` : val('time');
+      return clip([doc, part].filter(Boolean).join(' · '));
+    }
     case 'fetch':
       return pick('url') || firstLine(raw);
     case 'weather':

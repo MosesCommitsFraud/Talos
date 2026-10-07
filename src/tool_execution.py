@@ -1930,6 +1930,21 @@ async def execute_tool_block(
         result = await do_search_knowledge(content, owner=owner, session_id=session_id)
         _hits = len(result.get("rag_sources") or [])
         desc = f"search_knowledge: {_hits} hit(s)"
+    elif tool == "list_knowledge":
+        from src.tool_implementations import do_list_knowledge
+
+        desc = "list_knowledge"
+        result = await do_list_knowledge(content)
+    elif tool == "read_knowledge":
+        from src.tool_implementations import do_read_knowledge
+
+        result = await do_read_knowledge(content, session_id=session_id)
+        desc = f"read_knowledge: {result.get('label') or 'error'}"
+    elif tool == "grep_knowledge":
+        from src.tool_implementations import do_grep_knowledge
+
+        desc = "grep_knowledge"
+        result = await do_grep_knowledge(content)
     elif tool == "expand_output":
         desc = "expand_output"
         from src.context_optimizer import do_expand_output

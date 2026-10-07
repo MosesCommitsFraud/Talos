@@ -87,6 +87,8 @@ NEVER_COMPRESS_TOOLS = frozenset(
         "read_skill",
         "expand_output",
         "search_knowledge",
+        # Verbatim document sections: same evidence role as search_knowledge.
+        "read_knowledge",
         "web_fetch",
         "web_search",
         # Same shape as web_search: a list of headline + URL + snippet, where a

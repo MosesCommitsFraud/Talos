@@ -1564,6 +1564,11 @@ async def do_search_knowledge(
     query = str((args or {}).get("query") or "").strip()
     if not query:
         return {"error": "search_knowledge requires a non-empty 'query'.", "exit_code": 1}
+    document = str((args or {}).get("document") or "").strip()
+    try:
+        top_k = int((args or {}).get("k") or 0) or None
+    except (TypeError, ValueError):
+        top_k = None
 
     try:
         from src.chat_processor import ChatProcessor
@@ -1573,10 +1578,23 @@ async def do_search_knowledge(
         # whole duration, which stalls every other in-flight tool and the SSE
         # stream itself — so it must run off-loop now that a round can have
         # several tools in flight at once.
-        sources, block = await asyncio.to_thread(
-            ChatProcessor(None).retrieve, query, citation_session=session_id
-        )
+        if document:
+            sources, block = await asyncio.to_thread(
+                _search_one_document, query, document, top_k, session_id
+            )
+        elif top_k:
+            sources, block = await asyncio.to_thread(
+                ChatProcessor(None).retrieve, query, citation_session=session_id, top_k=top_k
+            )
+        else:
+            sources, block = await asyncio.to_thread(
+                ChatProcessor(None).retrieve, query, citation_session=session_id
+            )
     except Exception as e:
+        from src.rag_navigate import NavigationError
+
+        if isinstance(e, NavigationError):
+            return {"error": str(e), "exit_code": 1}
         logger.error(f"search_knowledge failed: {e}")
         return {"error": str(e), "exit_code": 1}
 
@@ -1619,8 +1637,9 @@ async def do_search_knowledge(
             "The [n] name on each section is its source number and the indexed "
             "document it came from. The name is a label, NOT a file path: these "
             "documents live only in the search index, so read_file/glob/ls cannot "
-            "open them and will report 'not found'. To see more of a document, call "
-            "search_knowledge again with wording aimed at the part you want.\n\n"
+            "open them and will report 'not found'. To see more of a document, use "
+            "read_knowledge with its name (outline first, then the sections you need), "
+            "or call search_knowledge again with wording aimed at the part you want.\n\n"
             "Tables and lists you build from these passages may contain only columns "
             "and entries that the passages actually state. Leave a missing value "
             "empty or mark it 'nicht hinterlegt' / 'not stored' — never fill it from "
@@ -1633,6 +1652,111 @@ async def do_search_knowledge(
         ),
         "rag_sources": sources,
     }
+
+
+def _search_one_document(query: str, document: str, top_k, session_id):
+    """search_knowledge pinned to one document: the same relevance gates as the
+    ordinary path, run against that document's base with a source filter."""
+    from src.chat_processor import ChatProcessor
+    from src.rag_navigate import resolve_document
+
+    base, manager, row = resolve_document(document)
+    found, block = ChatProcessor(None, rag_base_id=base["id"]).retrieve(
+        query,
+        _manager=manager,
+        citation_session=session_id,
+        sources=[row["source"]],
+        top_k=top_k,
+    )
+    # Same provenance prefixing the multi-base path applies (chunk ids are only
+    # unique within one base).
+    for source in found:
+        source["rag_id"] = base["id"]
+        source["rag_name"] = base.get("name")
+        for key in ("_id", "_anchor_id", "_source"):
+            if source.get(key) is not None:
+                source[key] = f"{base['id']}:{source[key]}"
+    return found, block
+
+
+def _knowledge_args(content) -> Dict:
+    args = _parse_tool_args(content)
+    return args if isinstance(args, dict) else {}
+
+
+async def do_list_knowledge(content: str) -> Dict:
+    """`list_knowledge` — which documents the knowledge base holds."""
+    from src.rag_navigate import list_knowledge
+
+    try:
+        args = _knowledge_args(content)
+    except ValueError:
+        args = {"query": str(content or "").strip()}
+    try:
+        out = await asyncio.to_thread(list_knowledge, str(args.get("query") or ""))
+    except Exception as e:
+        logger.error(f"list_knowledge failed: {e}")
+        return {"error": str(e), "exit_code": 1}
+    return {"output": out, "exit_code": 0}
+
+
+async def do_read_knowledge(content: str, session_id: Optional[str] = None) -> Dict:
+    """`read_knowledge` — a document's outline, or the verbatim text of a
+    section / page range / time range (paged via `offset`)."""
+    from src.rag_navigate import NavigationError, read_knowledge
+
+    try:
+        args = _knowledge_args(content)
+    except ValueError as e:
+        return {"error": f"Invalid JSON arguments: {e}", "exit_code": 1}
+    try:
+        text, sources, label = await asyncio.to_thread(read_knowledge, args, session_id)
+    except NavigationError as e:
+        return {"error": str(e), "exit_code": 1}
+    except Exception as e:
+        logger.error(f"read_knowledge failed: {e}")
+        return {"error": str(e), "exit_code": 1}
+    if not sources:
+        # The outline: our own listing of the document's structure.
+        return {"output": text, "rag_sources": [], "label": label, "exit_code": 0}
+    from src.citations import CITATION_RULE
+    from src.prompt_security import UNTRUSTED_CONTEXT_HEADER
+
+    status, _, body = text.partition("\n\n")
+    return {
+        "output": (
+            f"{UNTRUSTED_CONTEXT_HEADER}\n"
+            "Source: knowledge-base document, read verbatim\n\n"
+            f"{status}\n\n"
+            "Answer only from what this text states; anything it does not cover is "
+            "'nicht hinterlegt' / 'not stored'.\n\n"
+            + (CITATION_RULE + "\n\n" if any(s.get("n") for s in sources) else "")
+            + "<<<SUPPLIED_CONTEXT>>>\n"
+            f"{body}\n"
+            "<<<END_SUPPLIED_CONTEXT>>>"
+        ),
+        "rag_sources": sources,
+        "label": label,
+        "exit_code": 0,
+    }
+
+
+async def do_grep_knowledge(content: str) -> Dict:
+    """`grep_knowledge` — exact term lookup across the knowledge base."""
+    from src.rag_navigate import NavigationError, grep_knowledge
+
+    try:
+        args = _knowledge_args(content)
+    except ValueError:
+        args = {"pattern": str(content or "").strip()}
+    try:
+        out = await asyncio.to_thread(grep_knowledge, args)
+    except NavigationError as e:
+        return {"error": str(e), "exit_code": 1}
+    except Exception as e:
+        logger.error(f"grep_knowledge failed: {e}")
+        return {"error": str(e), "exit_code": 1}
+    return {"output": out, "exit_code": 0}
 
 
 # ---------------------------------------------------------------------------

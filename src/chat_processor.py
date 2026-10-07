@@ -420,6 +420,8 @@ class ChatProcessor:
         max_chars: Optional[int] = None,
         _manager: Any = None,
         citation_session: Optional[str] = None,
+        sources: Optional[List[str]] = None,
+        top_k: Optional[int] = None,
     ) -> Tuple[List[Dict[str, Any]], str]:
         """Search the knowledge base and build the injectable context block.
 
@@ -513,7 +515,7 @@ class ChatProcessor:
 
             # RAG is a global admin-managed knowledge base. Do not owner-filter here:
             # when enabled, indexed knowledge is available to every user.
-            rag_k = min(self._rag_k_setting("chat_top_k", 5), 20)
+            rag_k = min(int(top_k) if top_k else self._rag_k_setting("chat_top_k", 5), 20)
             candidate_k = max(rag_k, min(self._rag_k_setting("candidate_top_k", 40), 100))
             rerank_min = self._rag_float_setting("rerank_min_score", self.RAG_RERANK_MIN_SCORE)
             sim_threshold = self._rag_float_setting(
@@ -528,12 +530,16 @@ class ChatProcessor:
                     search_query, k=rag_k, owner=None, candidate_k=candidate_k
                 )
             else:
+                # search_knowledge `document`: pin the search to one file.
+                # Passed only when set, so managers without the kwarg still work.
+                pinned = {"sources": list(sources)} if sources else {}
                 results = rag_manager.search(
                     search_query,
                     k=rag_k,
                     owner=None,
                     candidate_k=candidate_k,
                     exclude_scopes=["sql"],
+                    **pinned,
                 )
 
             # Decide which retrieved chunks are relevant enough to inject.

@@ -280,6 +280,15 @@ Search the documents indexed in this Talos instance (the knowledge base: manuals
 **Only what the passages say.** Tables and lists built from the knowledge base contain only columns and entries the passages state; a missing value stays empty or is marked "nicht hinterlegt" — never filled from general knowledge, never given a citation it doesn't have.
 **Report what you actually retrieved.** If the passages cover only part of the question, say which parts came from the document and which are missing. Never present your own reconstruction of a config file, command sequence, or table as if it came from the knowledge base.
 **Keep the wording, make it standalone.** Use the user's literal question; only resolve pronouns and references against the conversation yourself before searching — a bare follow-up ("all three", "expand on that") is not a search query, and searching it verbatim matches noise. If the user's message is a reply to your own question, answer it from the conversation; don't search.""",
+    "read_knowledge": """\
+```read_knowledge
+{"document": "Handbuch_X.pdf", "section": "7-9"}
+```
+Read a knowledge-base document like a person would. With only `document` you get its OUTLINE: numbered sections with pages or video times and sizes (short documents come back in full). Then read the sections you need verbatim with `section` ("7" or "7-9"), `pages` ("12-15") or `time` ("0:10:00-0:25:00").
+**Use it when a few search passages cannot cover the question:** "what does chapter X say", a whole procedure, every step of a workflow, a summary of a document, a part of a workshop recording, comparing two sections. Typical path: `search_knowledge` (or `grep_knowledge`) finds WHERE → `read_knowledge` reads THAT part completely.
+**Read before you claim.** Never describe a section from its outline title alone. When a result says MORE TEXT FOLLOWS, call again with the given `offset` before relying on the rest. For a summary of a long document, read it section by section and say which parts you covered.""",
+    "list_knowledge": '- ```list_knowledge``` — List the documents in the knowledge base (optional JSON `{"query": "<word in the name>"}`). Use it to find the right manual, transcript or video before reading it with `read_knowledge`, or when the user asks what documents exist.',
+    "grep_knowledge": '- ```grep_knowledge``` — Exact, complete term lookup: `{"pattern": "E-4711", "document": "<optional name>"}`. For error codes, part numbers, menu names, commands, names — anything that must match literally, or when you need EVERY place a term occurs. Each hit names its section/page so you can open it with `read_knowledge`.',
     "query_sql": """\
 ```query_sql
 {"action": "query", "query": "SELECT ...", "max_rows": 100}
@@ -1681,10 +1690,16 @@ _VERIFIER_MAX_ROUNDS = 2  # cap re-verify cycles per turn — never loop forever
 # External reads touch nothing this turn can mutate — a preceding bash or
 # write_file in the same round cannot change what they return, so they are
 # always safe to launch up front.
+# Knowledge-base tools, all gated by the Knowledge mode (use_rag).
+KNOWLEDGE_TOOLS = ("search_knowledge", "list_knowledge", "read_knowledge", "grep_knowledge")
+
 _PARALLEL_EXTERNAL_TOOLS = {
     "web_search",
     "web_fetch",
     "search_knowledge",
+    "list_knowledge",
+    "read_knowledge",
+    "grep_knowledge",
     "search_chats",
     "query_sql",  # read-only by construction (SELECT/WITH/SHOW/... only)
 }
@@ -2162,14 +2177,16 @@ async def stream_agent_loop(
     # (use_rag) instead. The two gates are independent of `auto_inject_enabled`:
     # that admin setting decides whether context is ALSO prefixed onto the user
     # turn, not whether the model may look things up itself.
-    if use_rag:
-        if _relevant_tools is not None:
-            _relevant_tools.add("search_knowledge")
-        disabled_tools.discard("search_knowledge")
-    else:
-        disabled_tools.add("search_knowledge")
-        if _relevant_tools is not None:
-            _relevant_tools.discard("search_knowledge")
+    # The navigation tools (list/read/grep) share the same gate.
+    for _kb_tool in KNOWLEDGE_TOOLS:
+        if use_rag:
+            if _relevant_tools is not None:
+                _relevant_tools.add(_kb_tool)
+            disabled_tools.discard(_kb_tool)
+        else:
+            disabled_tools.add(_kb_tool)
+            if _relevant_tools is not None:
+                _relevant_tools.discard(_kb_tool)
 
     # Tool catalog: split into the fixed core list and the on-demand catalog.
     # Switched-off tools (knowledge mode, web toggle, privileges) are left out
@@ -3638,7 +3655,7 @@ async def stream_agent_loop(
             # Web results / fetched pages / knowledge sections got turn-wide
             # citation numbers while the tool ran. Send the current table so
             # the "[n]" markers streaming next can already show their source.
-            if block.tool_type in ("web_search", "web_fetch", "search_knowledge"):
+            if block.tool_type in ("web_search", "web_fetch", "search_knowledge", "read_knowledge"):
                 from src import citations as _citations
 
                 _cit = _citations.entries(session_id)

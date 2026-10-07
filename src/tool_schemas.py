@@ -208,8 +208,106 @@ FUNCTION_TOOL_SCHEMAS = [
                             "pronouns and references against the conversation yourself."
                         ),
                     },
+                    "document": {
+                        "type": "string",
+                        "description": (
+                            "Optional: search only inside this document (its name as "
+                            "shown in results or by list_knowledge)."
+                        ),
+                    },
+                    "k": {
+                        "type": "integer",
+                        "description": "Optional: number of passages (default 5, max 20).",
+                    },
                 },
                 "required": ["query"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_knowledge",
+            "description": (
+                "List the documents in the knowledge base (name, type, size), optionally "
+                "filtered by a word in the name. Use it to find which manual, transcript "
+                "or video covers a topic before reading it."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Optional filter on document names.",
+                    },
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "read_knowledge",
+            "description": (
+                "Read a knowledge-base document. With only `document` you get its outline "
+                "(numbered sections with pages / video times and sizes; short documents "
+                "come back in full). Then read the parts you need verbatim with `section`, "
+                "`pages` or `time`. Use it for questions about a whole chapter, procedure, "
+                "workshop part or document, where a few search passages are not enough. "
+                "Long parts are paged: when the result says MORE TEXT FOLLOWS, call again "
+                "with the given `offset`."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "document": {
+                        "type": "string",
+                        "description": "Document name, as shown by search results or list_knowledge.",
+                    },
+                    "section": {
+                        "type": "string",
+                        "description": 'Section number or range from the outline, e.g. "7" or "7-9".',
+                    },
+                    "pages": {
+                        "type": "string",
+                        "description": 'Page or page range, e.g. "12" or "12-15".',
+                    },
+                    "time": {
+                        "type": "string",
+                        "description": 'For audio/video: time range, e.g. "0:10:00-0:25:00".',
+                    },
+                    "offset": {
+                        "type": "integer",
+                        "description": "Continue a paged read at this character offset.",
+                    },
+                },
+                "required": ["document"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "grep_knowledge",
+            "description": (
+                "Find every exact occurrence of a term in the knowledge base (or in one "
+                "document): error codes, part numbers, menu names, commands, people. "
+                "Unlike search_knowledge it is literal and complete, and it reports where "
+                "each hit sits (section, page) so you can read it with read_knowledge."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "pattern": {
+                        "type": "string",
+                        "description": "The exact term to find (case-insensitive).",
+                    },
+                    "document": {
+                        "type": "string",
+                        "description": "Optional: only this document.",
+                    },
+                },
+                "required": ["pattern"],
             },
         },
     },

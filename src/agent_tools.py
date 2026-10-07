@@ -65,6 +65,11 @@ TOOL_TAGS = {
     # Knowledge-base retrieval the model asks for itself (the counterpart to
     # auto-injection — see rag_pipeline.auto_inject_enabled)
     "search_knowledge",
+    # Navigating the knowledge base: list documents, read outline/sections,
+    # exact term lookup (see src/rag_navigate.py)
+    "list_knowledge",
+    "read_knowledge",
+    "grep_knowledge",
     # Internet access via the self-hosted SearxNG instance
     "web_search",
     "web_fetch",

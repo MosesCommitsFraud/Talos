@@ -1515,6 +1515,7 @@ class VectorRAG:
         owner: Optional[str] = None,
         scope: Optional[str] = None,
         exclude_scopes: Optional[List[str]] = None,
+        sources: Optional[List[str]] = None,
     ):
         """Combine optional owner/scope constraints into a Haystack-Qdrant filter.
 
@@ -1534,6 +1535,9 @@ class VectorRAG:
             conds.append(
                 {"field": "meta.scope", "operator": "not in", "value": list(exclude_scopes)}
             )
+        if sources:
+            # Pin the search to specific documents (search_knowledge `document`).
+            conds.append({"field": "meta.source", "operator": "in", "value": list(sources)})
         if not conds:
             return None
         if len(conds) == 1:
@@ -1565,6 +1569,7 @@ class VectorRAG:
         candidate_k: Optional[int] = None,
         scope: Optional[str] = None,
         exclude_scopes: Optional[List[str]] = None,
+        sources: Optional[List[str]] = None,
     ) -> List[Dict[str, Any]]:
         if not self.healthy:
             return []
@@ -1581,7 +1586,9 @@ class VectorRAG:
                 "embedding"
             ]
             sparse = self._sparse_text_embedder().run(text=query)["sparse_embedding"]
-            query_filters = self._visible_filter(self._build_filters(owner, scope, exclude_scopes))
+            query_filters = self._visible_filter(
+                self._build_filters(owner, scope, exclude_scopes, sources)
+            )
             response = self._hybrid_retriever().run(
                 query_embedding=dense,
                 query_sparse_embedding=sparse,
