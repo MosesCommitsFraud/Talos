@@ -73,6 +73,7 @@ TOOL_TAGS = {
     "grep_knowledge",
     # Parallel read-only helper agents within one turn (see src/subagents.py)
     "delegate",
+    "continue_task",
     # Internet access via the self-hosted SearxNG instance
     "web_search",
     "web_fetch",

@@ -55,6 +55,8 @@ def _subagent_fields(rec: Dict[str, Any]) -> Dict[str, Any]:
         "group": rec.get("group") or "",
         "steps": bg_jobs.read_steps(rec)[-200:],
         "stopped": bool(rec.get("stopped")),
+        "agent_type": rec.get("agent_type") or "research",
+        "continues": rec.get("continues") or "",
     }
 
 
@@ -78,6 +80,9 @@ def setup_bg_task_routes():
         except Exception as e:
             logger.warning("bg-tasks: could not read the job store: %s", e)
             records = []
+        # A background delegate call is only a holder for its subagents'
+        # combined report; the subagents themselves are what the tray lists.
+        records = [r for r in records if r.get("kind") != "delegate"]
         records.sort(key=lambda r: r.get("started_at") or 0)
         return {"tasks": [_public(rec) for rec in records]}
 

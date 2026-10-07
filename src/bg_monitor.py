@@ -118,7 +118,18 @@ async def _run_followup(rec: dict) -> bool:
     except Exception:
         pass
 
-    if rec.get("kind") == "agent":
+    if rec.get("kind") == "delegate":
+        # Background subagents finished. Their reports are the material for
+        # an answer the user is waiting on — deliver it, don't redo it.
+        inject = (
+            f"[Background subagents {rec['id']} finished]\n\n"
+            f"{bg_jobs.result_text(rec)}\n\n"
+            "You started these subagents in the background earlier in this chat. "
+            "Answer the user's request from their reports now, in the user's "
+            "language — they have not seen any of it. Do NOT redo the work; use "
+            "tools only to check something decisive or to fill a gap a report names."
+        )
+    elif rec.get("kind") == "agent":
         # An agent task already DID the work and wrote a report. The job here
         # is to deliver it, not to redo it — without this the parent model
         # reads "continue the task" and runs the whole thing again.

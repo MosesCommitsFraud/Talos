@@ -58,7 +58,15 @@ DEFAULT_TOTAL_MAX_CHARS = 0
 # fabricated compose file. Shell and Python output, by contrast, is reproducible
 # on demand and usually just a log.
 _RETRIEVAL_TOOLS = frozenset(
-    {"search_knowledge", "read_knowledge", "delegate", "web_fetch", "web_search", "get_news"}
+    {
+        "search_knowledge",
+        "read_knowledge",
+        "delegate",
+        "continue_task",
+        "web_fetch",
+        "web_search",
+        "get_news",
+    }
 )
 DEFAULT_RETRIEVAL_OUTPUT_MAX_CHARS = 0
 

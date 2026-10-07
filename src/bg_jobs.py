@@ -19,6 +19,10 @@ Two kinds of job share that machinery:
     in-process lifecycle as an agent job, but the delegating turn awaits the
     result itself, so it is born ``followed_up`` (no auto-continue) and it
     also writes a live step list (``.steps.json``) for the task tray.
+  * ``kind="delegate"`` — the holder of a *background* `delegate` call: it
+    finishes when all its subagents have, with their combined reports as its
+    output, and the monitor delivers that as a follow-up. Hidden from the tray
+    (the subagents themselves are listed there).
 
 Design goals:
   * Restart-safe: status is derived from an on-disk exit-code file, not a live
@@ -70,7 +74,7 @@ _MAX_OUTPUT_CHARS = 16000
 # without bound. The agent has already consumed the result by then.
 _RETENTION_S = 3600  # 1 hour after follow-up
 # Jobs that live as asyncio tasks in the launching process, not OS processes.
-_IN_PROCESS_KINDS = ("agent", "subagent")
+_IN_PROCESS_KINDS = ("agent", "subagent", "delegate")
 
 
 def _load() -> Dict[str, Dict[str, Any]]:
@@ -462,6 +466,8 @@ def result_text(rec: Dict[str, Any]) -> str:
             head = "Background task failed."
         else:
             head = "Background task finished."
+        if rec.get("kind") == "delegate":
+            return f"Background subagents ({rec.get('command')}):\n\n{out or '(no reports)'}"
         return f"{head}\nTask: {rec.get('task') or rec.get('command')}\n\nReport:\n{out or '(no report)'}"
     if rec.get("timed_out"):
         head = f"Background job timed out after {rec.get('max_runtime_s')}s."

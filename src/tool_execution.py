@@ -1750,7 +1750,7 @@ async def execute_tool_block(
                 path = path[2:]
             for prefix in ("/workspace/", "workspace/"):
                 if path.startswith(prefix):
-                    path = path[len(prefix):]
+                    path = path[len(prefix) :]
             if path and path not in files:
                 files.append(path)
         files = files[:8]
@@ -1996,6 +1996,11 @@ async def execute_tool_block(
 
         result = await run_tasks(content, session_id=session_id, progress_cb=progress_cb)
         desc = f"delegate: {result.get('label') or 'error'}"
+    elif tool == "continue_task":
+        from src.subagents import continue_task
+
+        result = await continue_task(content, session_id=session_id, progress_cb=progress_cb)
+        desc = f"continue_task: {result.get('label') or 'error'}"
     elif tool == "expand_output":
         desc = "expand_output"
         from src.context_optimizer import do_expand_output

@@ -66,6 +66,10 @@ import {
   MenuTrigger,
 } from './ui/menu';
 
+/** Chats rendered before the list asks for "show more" — keeps the DOM small
+ *  for users with hundreds of chats while the common case needs no click. */
+const CHAT_PAGE = 30;
+
 const SORT_KEYS: Record<SortMode, string> = {
   active: 'sidebar.sortActive',
   newest: 'sidebar.sortNewest',
@@ -576,6 +580,10 @@ function SidebarBody({ onOpenPalette, account, onOpenTicketDialog, preview }: Si
   const loose = active.filter((s) => !s.folder);
   const pinned = openProject === null ? loose.filter((s) => s.is_important).sort(sorter) : [];
   const rows = openProject === null ? loose.filter((s) => !s.is_important).sort(sorter) : inProject.slice().sort(sorter);
+  const [visibleCount, setVisibleCount] = useState(CHAT_PAGE);
+  // A different list (project / sort order) starts collapsed again.
+  useEffect(() => setVisibleCount(CHAT_PAGE), [openProject, sortMode]);
+  const hiddenCount = Math.max(0, rows.length - visibleCount);
   const accountLabel = auth?.display_name || auth?.username;
   const initial = (accountLabel ?? 'U').slice(0, 1).toUpperCase();
 
@@ -722,9 +730,19 @@ function SidebarBody({ onOpenPalette, account, onOpenTicketDialog, preview }: Si
               )}
             </>
           )}
-          {rows.map((s) => (
+          {rows.slice(0, visibleCount).map((s) => (
             <SessionRow key={s.id} session={s} projects={projectNames} />
           ))}
+          {hiddenCount > 0 && (
+            <button
+              type="button"
+              onClick={() => setVisibleCount((n) => n + CHAT_PAGE)}
+              className="my-1 flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-xs text-muted-foreground hover:bg-accent hover:text-foreground"
+            >
+              <ChevronDownIcon className="size-3.5" />
+              {t('sidebar.showMoreChats', { count: Math.min(hiddenCount, CHAT_PAGE) })}
+            </button>
+          )}
           {rows.length === 0 && pinned.length === 0 && (
             <div className="flex flex-col items-center gap-1.5 px-2 py-6 text-center text-xs text-muted-foreground">
               <MessageSquareIcon className="size-4 opacity-60" />

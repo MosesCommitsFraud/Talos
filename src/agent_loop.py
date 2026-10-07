@@ -291,11 +291,15 @@ Read a knowledge-base document like a person would. With only `document` you get
 **Read before you claim.** Never describe a section from its outline title alone. When a result says MORE TEXT FOLLOWS, call again with the given `offset` before relying on the rest. For a summary of a long document, read it section by section and say which parts you covered.""",
     "delegate": """\
 ```delegate
-{"tasks": [{"title": "Handbuch A: Export", "prompt": "Read the export chapter of Handbuch_A.pdf (read_knowledge) and list every configuration step with its menu path and the page it is on."}, {"title": "Workshop: Export", "prompt": "In Workshop_Export.mp4 find where the export setup is shown and list the steps the presenter performs, with timestamps. Ignore chat and small talk."}]}
+{"tasks": [{"title": "Handbuch A: Export", "prompt": "Read the export chapter of Handbuch_A.pdf and list every configuration step with menu path and page.", "context": "The export chapter is section 7-9 (found via search_knowledge)."}, {"title": "Exportdaten auswerten", "type": "worker", "prompt": "Load exports/q3.csv, compute revenue per region and month, save a bar chart as PNG and a summary table as CSV."}]}
 ```
-Run independent research pieces in parallel by subagents and get their cited reports back. Each subagent starts with ONLY its prompt (no conversation), has read-only lookup tools (knowledge base, web, database) and works fast without long reasoning.
-**When:** the question splits into 2–6 separate lookups that each need several steps — one per document, chapter range, recording, or comparison item; or a long document whose parts can be read independently. **Not** for one quick search — do that yourself.
-**Prompts must stand alone:** name the documents/sections/time ranges, say exactly what the report must contain. Then build your answer from the reports, keep their [n] citations, and verify anything decisive yourself.""",
+Hand independent pieces of work to parallel subagents and get their reports back. Each subagent starts with ONLY its prompt and `context` (no conversation) and works fast on a small model without long reasoning — give it clear, well-scoped jobs a small model can do.
+**Types:** `research` (default) — knowledge base, web search/fetch, read-only database. `worker` — research tools plus files and one-shot Python/bash in this chat's sandbox: analyses, calculations, conversions, charts, drafting a text into a file. Workers write into their own folder and list the files they made.
+**When:** the request splits into 2–6 separate pieces that each need several steps — one per document, chapter range, recording, web topic, data file or comparison item. **Not** for one quick lookup — do that yourself.
+**Make it fast:** put what you already know into `context` (document names, sections, time ranges, passages or URLs you found, column names) so the subagent does not search for it again. Prompts must stand alone and say exactly what the report must contain.
+**Background:** `"background": true` returns at once; the reports arrive later as a follow-up message. Use it when the user does not need to wait (long analyses, several documents) — say what is running and end your turn.
+Build your answer from the reports, keep their [n] citations, and verify anything decisive yourself. Each report names its `task_id`.""",
+    "continue_task": '- ```continue_task``` — Give a finished subagent a follow-up instruction: `{"task_id": "<from its report>", "prompt": "..."}` (optional `"background": true`). It still has everything it read and did, so a follow-up on the same material is much faster than starting a new subagent.',
     "list_knowledge": '- ```list_knowledge``` — List the documents in the knowledge base (optional JSON `{"query": "<word in the name>"}`). Use it to find the right manual, transcript or video before reading it with `read_knowledge`, or when the user asks what documents exist.',
     "grep_knowledge": '- ```grep_knowledge``` — Exact, complete term lookup: `{"pattern": "E-4711", "document": "<optional name>"}`. For error codes, part numbers, menu names, commands, names — anything that must match literally, or when you need EVERY place a term occurs. Each hit names its section/page so you can open it with `read_knowledge`.',
     "query_sql": """\
@@ -1949,7 +1953,7 @@ async def stream_agent_loop(
     from src import subagents as _subagents
 
     if subagent or not _subagents.enabled():
-        disabled_tools.add("delegate")
+        disabled_tools.update({"delegate", "continue_task"})
     # The delegate tool starts subagents against this turn's endpoint, model
     # and modes. A subagent's own turn records itself so it cannot fan out.
     _subagents.set_turn_context(
@@ -3710,6 +3714,7 @@ async def stream_agent_loop(
                 "search_knowledge",
                 "read_knowledge",
                 "delegate",
+                "continue_task",
             ):
                 from src import citations as _citations
 

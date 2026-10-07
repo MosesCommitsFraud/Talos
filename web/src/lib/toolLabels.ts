@@ -29,6 +29,7 @@ const FAMILY: Record<string, string> = {
   read_knowledge: 'knowledgeRead',
   grep_knowledge: 'knowledgeGrep',
   delegate: 'delegate',
+  continue_task: 'continueTask',
   web_search: 'web',
   web_fetch: 'fetch',
   get_weather: 'weather',
@@ -160,6 +161,8 @@ export function callSubject(call: ToolCall): string {
       return pick('query', 'q', 'topic') || firstLine(raw);
     case 'knowledgeList':
       return pick('query');
+    case 'continueTask':
+      return clip(pick('prompt').replace(/\s+/g, ' '));
     case 'delegate': {
       const tasks = Array.isArray(args.tasks) ? args.tasks : [];
       const titles = tasks

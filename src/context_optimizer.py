@@ -91,6 +91,7 @@ NEVER_COMPRESS_TOOLS = frozenset(
         "read_knowledge",
         # Subagent reports: digests of retrieved evidence, already capped.
         "delegate",
+        "continue_task",
         "web_fetch",
         "web_search",
         # Same shape as web_search: a list of headline + URL + snippet, where a

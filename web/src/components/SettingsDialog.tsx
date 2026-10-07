@@ -850,6 +850,8 @@ function AiDefaultsPanel() {
 
       <Section title={t('settings.ai.subagents')}>
         <BoolRow s={s} k="subagents_enabled" label={t('settings.ai.subagentsEnabled')} hint={t('settings.ai.subagentsEnabledHint')} />
+        <EndpointModelRows s={s} epKey="subagent_endpoint_id" modelKey="subagent_model" label={t('settings.ai.subagentLabel')} />
+        <p className="-mt-1 px-1 text-xs text-muted-foreground">{t('settings.ai.subagentModelHint')}</p>
         <Row label={t('settings.ai.subagentReasoning')} hint={t('settings.ai.subagentReasoningHint')}>
           <Select
             className="w-40"

@@ -63,7 +63,9 @@ def _run(content, monkeypatch, **fake_kw):
 def test_parse_tasks_accepts_common_shapes():
     assert sub.parse_tasks('{"tasks": ["read chapter 2"]}')[0]["title"] == "read chapter 2"
     got = sub.parse_tasks('[{"name": "A", "task": "do a"}]')
-    assert got == [{"title": "A", "prompt": "do a"}]
+    assert got == [{"title": "A", "prompt": "do a", "type": "research", "context": ""}]
+    with pytest.raises(ValueError, match="Unknown subagent type"):
+        sub.parse_tasks('{"tasks": [{"prompt": "x", "type": "admin"}]}')
     with pytest.raises(ValueError):
         sub.parse_tasks('{"tasks": []}')
     with pytest.raises(ValueError):
@@ -273,3 +275,161 @@ def test_stop_route_only_stops_running_subagents_of_the_chat(jobs_dir, monkeypat
     assert client.post(f"/api/bg-tasks/{shell_like['id']}/stop?session_id=s1").status_code == 400
     assert client.post(f"/api/bg-tasks/{rec['id']}/stop?session_id=s1").json() == {"stopped": True}
     assert stopped == [rec["id"]]
+
+
+# ── types, context, own model, background, continue ─────────────────────────
+
+
+def _recording_loop(calls, reply="Bericht"):
+    """Fake turn that records its arguments and fills the wire sink like the
+    real loop: the messages as sent plus a tool round."""
+
+    async def fake(endpoint_url, model, messages, **kw):
+        calls.append({"endpoint_url": endpoint_url, "model": model, "messages": messages, **kw})
+        sink = kw.get("wire_sink")
+        if sink is not None:
+            sink["messages"] = list(messages) + [
+                {
+                    "role": "assistant",
+                    "content": None,
+                    "tool_calls": [
+                        {
+                            "id": "c1",
+                            "type": "function",
+                            "function": {"name": "read_knowledge", "arguments": "{}"},
+                        }
+                    ],
+                },
+                {"role": "tool", "tool_call_id": "c1", "content": "Kapiteltext"},
+            ]
+        yield _frame({"delta": reply})
+
+    return fake
+
+
+def test_worker_type_gets_files_and_code_and_a_folder(jobs_dir, monkeypatch):
+    calls = []
+    monkeypatch.setattr(agent_loop, "stream_agent_loop", _recording_loop(calls))
+    content = {"tasks": [{"title": "Analyse", "prompt": "werte q3.csv aus", "type": "worker"}]}
+    asyncio.run(sub.run_tasks(json.dumps(content), session_id="s1"))
+    (call,) = calls
+    assert call["tool_allowlist"] == sub.WORKER_TOOLS
+    assert {"python", "write_file"} <= call["tool_allowlist"]
+    assert "run_cell" not in call["tool_allowlist"]
+    assert "delegate" not in call["tool_allowlist"]
+    rec = bg_jobs.list_for_session("s1")[0]
+    assert f"subagents/{rec['id']}/" in call["messages"][0]["content"]
+    assert rec["agent_type"] == "worker"
+
+
+def test_context_is_passed_and_the_head_is_shared(jobs_dir, monkeypatch):
+    calls = []
+    monkeypatch.setattr(agent_loop, "stream_agent_loop", _recording_loop(calls))
+    content = {
+        "tasks": [
+            {"title": "A", "prompt": "lies A", "context": "Kapitel 7, S. 40-44"},
+            {"title": "B", "prompt": "lies B"},
+        ]
+    }
+    asyncio.run(sub.run_tasks(json.dumps(content), session_id="s1"))
+    first = [c["messages"][0]["content"] for c in calls]
+    a = next(m for m in first if "lies A" in m)
+    b = next(m for m in first if "lies B" in m)
+    assert "Kapitel 7, S. 40-44" in a and "Kapitel 7" not in b
+    # Everything up to the assignment is identical: the prefix cache reuses it
+    # across the whole batch.
+    head = a.split("Assignment:")[0]
+    assert head and b.startswith(head)
+
+
+def test_configured_subagent_model_is_used(jobs_dir, monkeypatch):
+    calls = []
+    monkeypatch.setattr(agent_loop, "stream_agent_loop", _recording_loop(calls))
+    settings = {"subagent_endpoint_id": "ep-small", "subagent_model": "qwen3-4b"}
+    monkeypatch.setattr(sub, "_setting", lambda k, d: settings.get(k, d))
+    resolver = importlib.import_module("src.endpoint_resolver")
+    monkeypatch.setattr(
+        resolver,
+        "resolve_endpoint_by_id",
+        lambda ep, model, owner=None: ("http://small/v1/chat/completions", model, {"x": "1"}),
+    )
+    monkeypatch.setattr(
+        importlib.import_module("src.model_context"), "get_context_length", lambda u, m: 32768
+    )
+    asyncio.run(sub.run_tasks('{"tasks": ["x"]}', session_id="s1"))
+    (call,) = calls
+    assert call["endpoint_url"] == "http://small/v1/chat/completions"
+    assert call["model"] == "qwen3-4b" and call["context_length"] == 32768
+    assert call["fallbacks"] is None
+
+
+def test_unresolvable_subagent_model_falls_back_to_the_chat_model(jobs_dir, monkeypatch):
+    calls = []
+    monkeypatch.setattr(agent_loop, "stream_agent_loop", _recording_loop(calls))
+    monkeypatch.setattr(sub, "_setting", lambda k, d: "gone" if k == "subagent_endpoint_id" else d)
+    resolver = importlib.import_module("src.endpoint_resolver")
+    monkeypatch.setattr(resolver, "resolve_endpoint_by_id", lambda *a, **k: None)
+    asyncio.run(sub.run_tasks('{"tasks": ["x"]}', session_id="s1"))
+    assert calls[0]["endpoint_url"] == "http://llm" and calls[0]["model"] == "m"
+
+
+def test_background_returns_at_once_and_delivers_one_followup(jobs_dir, monkeypatch):
+    calls = []
+    monkeypatch.setattr(agent_loop, "stream_agent_loop", _recording_loop(calls, "Ergebnis"))
+    routes = importlib.import_module("routes.bg_task_routes")
+
+    async def main():
+        out = await sub.run_tasks('{"tasks": ["a", "b"], "background": true}', session_id="s1")
+        assert "background" in out["output"] and out["exit_code"] == 0
+        holder = next(r for r in bg_jobs.list_for_session("s1") if r["kind"] == "delegate")
+        assert holder["status"] == "running" and not holder["followed_up"]
+        await asyncio.gather(*list(sub._background))
+        return holder["id"]
+
+    holder_id = asyncio.run(main())
+    recs = bg_jobs.list_for_session("s1")
+    holder = next(r for r in recs if r["id"] == holder_id)
+    assert holder["status"] == "done"
+    # Exactly one follow-up: the holder. The subagents are born followed_up.
+    assert [r["id"] for r in bg_jobs.pending_followups()] == [holder_id]
+    text = bg_jobs.result_text(bg_jobs.get(holder_id))
+    assert text.count("Ergebnis") == 2 and "task_id:" in text
+    # Background reports cite by name: [n] numbers would be stale by then.
+    assert all("Do not use [n] numbers" in c["messages"][0]["content"] for c in calls)
+    listed = [routes._public(r)["kind"] for r in recs if r.get("kind") != "delegate"]
+    assert listed == ["subagent", "subagent"]
+
+
+def test_continue_task_resumes_with_the_full_history(jobs_dir, monkeypatch):
+    calls = []
+    monkeypatch.setattr(agent_loop, "stream_agent_loop", _recording_loop(calls, "Antwort"))
+    content = {"tasks": [{"title": "K7", "prompt": "lies K7", "type": "worker"}]}
+    out = asyncio.run(sub.run_tasks(json.dumps(content), session_id="s1"))
+    task_id = out["output"].split("task_id: ")[1].split()[0]
+
+    follow = asyncio.run(
+        sub.continue_task(
+            json.dumps({"task_id": task_id, "prompt": "und Kapitel 8?"}), session_id="s1"
+        )
+    )
+    assert follow["exit_code"] == 0
+    resumed = calls[-1]
+    contents = [m.get("content") for m in resumed["messages"]]
+    # The original assignment, the tool round and its result, the first answer,
+    # then the follow-up: nothing has to be read again.
+    assert "lies K7" in contents[0]
+    assert "Kapiteltext" in contents
+    assert contents[-2] == "Antwort" and contents[-1] == "und Kapitel 8?"
+    assert resumed["tool_allowlist"] == sub.WORKER_TOOLS
+    new = next(r for r in bg_jobs.list_for_session("s1") if r.get("continues") == task_id)
+    assert new["kind"] == "subagent" and new["status"] == "done"
+
+
+def test_continue_task_refuses_unknown_or_running_tasks(jobs_dir, monkeypatch):
+    out = asyncio.run(sub.continue_task('{"task_id": "nope", "prompt": "x"}', session_id="s1"))
+    assert out["exit_code"] == 1 and "No subagent" in out["error"]
+    rec = bg_jobs.launch_agent("p", "s1", label="T", kind="subagent")
+    out = asyncio.run(
+        sub.continue_task(json.dumps({"task_id": rec["id"], "prompt": "x"}), session_id="s1")
+    )
+    assert "still running" in out["error"]

@@ -64,6 +64,12 @@ function MetaLine({ task }: { task: BgTask }) {
   return (
     <span className="flex min-w-0 items-center gap-1.5 text-[11px] text-muted-foreground">
       <span className={cn(outcome === 'failed' && 'text-destructive-foreground')}>{state}</span>
+      {task.kind === 'subagent' && (
+        <>
+          <span aria-hidden>·</span>
+          <span>{t(task.agent_type === 'worker' ? 'tasks.typeWorker' : 'tasks.typeResearch')}</span>
+        </>
+      )}
       <span aria-hidden>·</span>
       <Elapsed task={task} />
       {steps > 0 && (

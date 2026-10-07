@@ -290,13 +290,14 @@ FUNCTION_TOOL_SCHEMAS = [
         "function": {
             "name": "delegate",
             "description": (
-                "Hand independent pieces of research to parallel helper agents (subagents) "
-                "and get their reports back. Each subagent starts fresh with only its "
-                "prompt, can search and read the knowledge base, the web and the database "
-                "(read-only), and returns a cited digest. Use it when a question splits "
-                "into 2-6 separate lookups that each need several steps — e.g. one "
-                "subagent per manual, per chapter range, per workshop recording, or per "
-                "comparison item. Not for a single quick search."
+                "Hand independent pieces of work to parallel helper agents (subagents) "
+                "and get their reports back. Each starts fresh with only its prompt and "
+                "context. Type `research` (default): knowledge base, web, read-only "
+                "database. Type `worker`: also files and Python/bash in the chat sandbox "
+                "(analyses, charts, conversions, drafts into files). Use it when a request "
+                "splits into 2-6 separate pieces that each need several steps — one per "
+                "document, chapter range, recording, web topic, data file or comparison "
+                "item. Not for a single quick lookup."
             ),
             "parameters": {
                 "type": "object",
@@ -313,10 +314,23 @@ FUNCTION_TOOL_SCHEMAS = [
                                 "prompt": {
                                     "type": "string",
                                     "description": (
-                                        "Complete, self-contained assignment: what to find, "
-                                        "where to look (document names, sections, time "
-                                        "ranges) and what the report must contain. The "
-                                        "subagent cannot see this conversation."
+                                        "Complete, self-contained assignment: what to do, "
+                                        "where to look and what the report must contain. "
+                                        "The subagent cannot see this conversation."
+                                    ),
+                                },
+                                "type": {
+                                    "type": "string",
+                                    "enum": ["research", "worker"],
+                                    "description": "research (default) or worker (files + code).",
+                                },
+                                "context": {
+                                    "type": "string",
+                                    "description": (
+                                        "What you already know that the subagent needs: "
+                                        "document names, sections, time ranges, passages, "
+                                        "URLs, file paths, column names — so it does not "
+                                        "search for them again."
                                     ),
                                 },
                             },
@@ -324,8 +338,38 @@ FUNCTION_TOOL_SCHEMAS = [
                         },
                         "description": "1-6 independent tasks, run in parallel.",
                     },
+                    "background": {
+                        "type": "boolean",
+                        "description": (
+                            "Return immediately; the reports arrive later as a follow-up "
+                            "message. For work the user does not need to wait for."
+                        ),
+                    },
                 },
                 "required": ["tasks"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "continue_task",
+            "description": (
+                "Give a finished subagent a follow-up instruction. It keeps everything it "
+                "already read and did, so a follow-up on the same material is much faster "
+                "than a new subagent. Take the task_id from its report."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "task_id": {"type": "string", "description": "From the subagent's report."},
+                    "prompt": {"type": "string", "description": "The follow-up instruction."},
+                    "background": {
+                        "type": "boolean",
+                        "description": "Return immediately; the report arrives as a follow-up.",
+                    },
+                },
+                "required": ["task_id", "prompt"],
             },
         },
     },

@@ -272,6 +272,10 @@ export interface BgTask {
   steps?: SubagentStep[];
   /** Subagents only: stopped by the user from the task tray. */
   stopped?: boolean;
+  /** Subagents only: `research` (lookups) or `worker` (files + code), and the
+   *  subagent this one continues, if any. */
+  agent_type?: 'research' | 'worker';
+  continues?: string;
   /** The command line, or the agent task's label / first line. */
   label: string;
   status: 'running' | 'done' | 'failed';

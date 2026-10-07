@@ -221,6 +221,34 @@ def setup_session_routes(session_manager: SessionManager, config: dict):
     OPENAI_API_KEY = config.get("OPENAI_API_KEY")
     SESSIONS_FILE = config.get("SESSIONS_FILE")
 
+    def _sessions_incl_db(user, archived: bool):
+        """The user's sessions, including the ones the session manager never
+        loaded into memory — it only keeps the 100 most recently accessed at
+        boot, which used to cut older chats out of the sidebar entirely.
+        Rows read here are metadata-only and are not cached in the manager."""
+        sessions = dict(session_manager.get_sessions_for_user(user))
+        db = SessionLocal()
+        try:
+            q = db.query(DbSession).filter(
+                DbSession.archived == archived,
+                DbSession.message_count > 0,
+            )
+            if user is not None:
+                q = q.filter(DbSession.owner == user)
+            for row in q.all():
+                if row.id in sessions:
+                    continue
+                try:
+                    meta = session_manager._db_to_session_meta(row)
+                except Exception as e:
+                    logger.error(f"Error reading session {row.id}: {e}")
+                    continue
+                if meta is not None:
+                    sessions[row.id] = meta
+        finally:
+            db.close()
+        return sessions
+
     @router.get("/sessions")
     def list_sessions(request: Request):
         user = effective_user(request)
@@ -273,7 +301,7 @@ def setup_session_routes(session_manager: SessionManager, config: dict):
                 _purge_db.close()
         except Exception:
             pass
-        user_sessions = session_manager.get_sessions_for_user(user)
+        user_sessions = _sessions_incl_db(user, archived=False)
         # Fetch folder info from DB for each session
         db = SessionLocal()
         try:
@@ -379,7 +407,7 @@ def setup_session_routes(session_manager: SessionManager, config: dict):
         active list stays lean; returns only the fields the Archive list needs.
         """
         user = effective_user(request)
-        user_sessions = session_manager.get_sessions_for_user(user)
+        user_sessions = _sessions_incl_db(user, archived=True)
         db = SessionLocal()
         try:
             rows = (
