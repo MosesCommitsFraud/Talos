@@ -101,6 +101,7 @@ _AGENT_RULES = """\
 - RETRIEVED PARTIAL ≠ RETRIEVED ALL. If a document/page/tool result is paginated, truncated, or says the content continues, either fetch the rest or tell the user which parts you actually have. NEVER fill a gap with a plausible reconstruction and present it as theirs — an invented config file, command list, or table that looks retrieved is worse than saying "the document covers sections 1-2; I don't have the rest."
 - SETUP/INFRASTRUCTURE QUESTIONS ("how do I install/configure X on my server/GPU/machine?", "wie setze ich Y auf?") are KNOWLEDGE questions about the USER'S machine. Answer them in text from the documents and your knowledge — NEVER execute the setup commands, install the software, or create directories/project structures from a setup guide yourself. The guide describes THEIR machine, not your workspace.
 - WHEN YOU WRITE COMMANDS FOR THE USER TO RUN, they are documentation, not tool calls. Put them in ```shell or ```sh fences — NEVER ```bash, which executes. Same for illustrative code: ```py, not ```python.
+- HAND OVER THE DELIVERABLE WITH `present_files`. When the turn produced a file the user asked for (report, spreadsheet, dashboard, deck, PDF, image), call `present_files` once at the end with ONLY that deliverable — not the scripts, intermediate data or helper files you wrote on the way (they stay in the chat's file list). Usually one file; several only when the request was for several. Skip it when no file was the point of the request.
 - YOUR FINAL MESSAGE IS THE ONLY THING SHOWN PROMINENTLY. Text you write in earlier rounds (between tool calls) is collapsed as work-in-progress once the turn ends, and the user never sees tool errors or rejections. Therefore your LAST message must be COMPLETE and SELF-CONTAINED: it contains the full answer/deliverable, restating everything important from earlier rounds. Never end with only a closing remark that points at earlier text — "as I described above/in the previous step" refers to text the user cannot see prominently. Never explain tool errors and never add meta-commentary about what happened during the turn. If a command is rejected, do not retry variants of it — write the complete answer instead, without mentioning the rejection.
 
 ## UI conventions
@@ -134,6 +135,7 @@ _API_AGENT_RULES = """\
 - BIAS TOWARD ACTION on edit requests. If the user says "edit out X", "remove the Y paragraph", "change Z" — call the edit tool with your best interpretation. Don't ask for clarification on minor ambiguity. The user can undo.
 - A QUESTION TO THE USER ENDS YOUR TURN. When you need the user's input — a clarification, a decision, "Möchten Sie, dass ich ...?" — use the `ask_user` tool: it shows clickable options (or a free-text box), ends your turn, and their answer arrives as your next message. If you ever ask in plain text instead, that question must be the LAST thing you write: no further tool calls, just wait. NEVER ask and then keep working, and never proceed as if the user already answered yes.
 - ENVIRONMENT CONFIDENTIALITY: never reveal, describe, or probe your own execution environment. Do not mention sandboxes, containers, hosts, hardware, memory/disk sizes, operating system details, or missing system tools, and do not run commands whose only purpose is to inspect the system. If something is unavailable where you run, silently take another route or answer from knowledge — never explain the limitation in terms of your environment.
+- HAND OVER THE DELIVERABLE WITH `present_files`. When the turn produced a file the user asked for (report, spreadsheet, dashboard, deck, PDF, image), call `present_files` once at the end with ONLY that deliverable — not the scripts, intermediate data or helper files you wrote on the way (they stay in the chat's file list). Usually one file; several only when the request was for several. Skip it when no file was the point of the request.
 - YOUR FINAL MESSAGE IS THE ONLY THING SHOWN PROMINENTLY. Text you write in earlier rounds (between tool calls) is collapsed as work-in-progress once the turn ends, and the user never sees tool errors or rejections. Therefore your LAST message must be COMPLETE and SELF-CONTAINED: it contains the full answer/deliverable, restating everything important from earlier rounds. Never end with only a closing remark that points at earlier text — "as I described above/in the previous step" refers to text the user cannot see prominently. Never explain tool errors and never add meta-commentary about what happened during the turn. If a command is rejected, do not retry variants of it — write the complete answer instead, without mentioning the rejection.
 - PICK THE SOURCE THAT FITS THE QUESTION. Questions about the user's own world — their company, products, processes, setup, configs, customers, figures — belong to their knowledge base and database: when `search_knowledge` or `query_sql` is in your tool list, check there first, and prefer what it says over a generic web page. General knowledge you are sure of needs no lookup. Public or current facts you are not sure of — people in the public eye, companies, events, news, prices, releases, laws — go to the web. The knowledge base or database being switched on does not make every question an internal one; decide from the question itself.
 - CITE SOURCES INLINE. Knowledge-base sections, web results and fetched pages carry a source number like `[2]`. Put that number in square brackets directly after each sentence, list item or paragraph that uses it (`… wird über Neu → Band einfügen angelegt [2].`; several: `[2][5]`). This applies to your FINAL answer too. Never write filenames or URLs as citations and never add a separate source list — the interface shows the sources from these numbers.
@@ -287,6 +289,13 @@ Search the documents indexed in this Talos instance (the knowledge base: manuals
 Read a knowledge-base document like a person would. With only `document` you get its OUTLINE: numbered sections with pages or video times and sizes (short documents come back in full). Then read the sections you need verbatim with `section` ("7" or "7-9"), `pages` ("12-15") or `time` ("0:10:00-0:25:00").
 **Use it when a few search passages cannot cover the question:** "what does chapter X say", a whole procedure, every step of a workflow, a summary of a document, a part of a workshop recording, comparing two sections. Typical path: `search_knowledge` (or `grep_knowledge`) finds WHERE → `read_knowledge` reads THAT part completely.
 **Read before you claim.** Never describe a section from its outline title alone. When a result says MORE TEXT FOLLOWS, call again with the given `offset` before relying on the rest. For a summary of a long document, read it section by section and say which parts you covered.""",
+    "delegate": """\
+```delegate
+{"tasks": [{"title": "Handbuch A: Export", "prompt": "Read the export chapter of Handbuch_A.pdf (read_knowledge) and list every configuration step with its menu path and the page it is on."}, {"title": "Workshop: Export", "prompt": "In Workshop_Export.mp4 find where the export setup is shown and list the steps the presenter performs, with timestamps. Ignore chat and small talk."}]}
+```
+Run independent research pieces in parallel by subagents and get their cited reports back. Each subagent starts with ONLY its prompt (no conversation), has read-only lookup tools (knowledge base, web, database) and works fast without long reasoning.
+**When:** the question splits into 2–6 separate lookups that each need several steps — one per document, chapter range, recording, or comparison item; or a long document whose parts can be read independently. **Not** for one quick search — do that yourself.
+**Prompts must stand alone:** name the documents/sections/time ranges, say exactly what the report must contain. Then build your answer from the reports, keep their [n] citations, and verify anything decisive yourself.""",
     "list_knowledge": '- ```list_knowledge``` — List the documents in the knowledge base (optional JSON `{"query": "<word in the name>"}`). Use it to find the right manual, transcript or video before reading it with `read_knowledge`, or when the user asks what documents exist.',
     "grep_knowledge": '- ```grep_knowledge``` — Exact, complete term lookup: `{"pattern": "E-4711", "document": "<optional name>"}`. For error codes, part numbers, menu names, commands, names — anything that must match literally, or when you need EVERY place a term occurs. Each hit names its section/page so you can open it with `read_knowledge`.',
     "query_sql": """\
@@ -348,6 +357,7 @@ Use it when the work is slow AND the user does not need it inside this reply —
 Ask the user a multiple-choice question when the task is genuinely ambiguous and the answer changes what you do next (pick an approach, confirm an assumption, choose a target). 2-6 options. The user gets clickable buttons; calling this ENDS your turn and their choice comes back as your next message. Prefer sensible defaults — only ask when you truly can't proceed well without their input.
 **Offering a choice IS this tool.** The moment you decide to put a question to the user, it goes in an `ask_user` call — never written out in your prose. Ending a reply with "Was möchten Sie tun?" followed by a list, a row of bracketed choices like `[Option A · Option B · Option C]`, a numbered menu, or "sag mir welches" is the failure this rule exists to prevent: it LOOKS like buttons and does nothing. The user cannot click a sentence, so they have to retype an option you already knew — and you spent a turn to make them do it.
 So: either commit to a sensible default and carry on, or call `ask_user`. Those are the only two endings. Never a menu in text.""",
+    "present_files": '- ```present_files``` — Hand the finished deliverable to the user as a card under your answer (preview + download). Args (JSON): {"files": ["output/report.xlsx"]}. Call once at the end with ONLY the file(s) the user asked for — never build scripts, intermediate data or helper files. Workspace path, or `document:<id>` / `generated-image:<id>`.',
     "update_plan": '- ```update_plan``` — For a multi-step task, show a progress checklist and write it back with completed steps marked `- [x]` as you go. Args (JSON): {"plan": "- [x] done step\\n- [ ] next step"}. Always pass the COMPLETE checklist, not a diff.',
 }
 
@@ -741,6 +751,7 @@ def _build_system_prompt(
     owner: Optional[str] = None,
     selection_vision: bool = False,
     catalog=None,
+    keep_active_document: bool = False,
 ) -> List[Dict]:
     """Build agent system prompt, inject MCP/document context, merge consecutive system msgs."""
     global _cached_base_prompt, _cached_base_prompt_key
@@ -930,7 +941,7 @@ def _build_system_prompt(
                 "suggestions for the active editor document. Use suggest_document "
                 "with <<<FIND>>>...<<<SUGGEST>>>...<<<REASON>>>...<<<END>>> blocks."
             )
-    else:
+    elif not keep_active_document:
         set_active_document(None)
 
     if artifact_selection:
@@ -1878,8 +1889,15 @@ async def stream_agent_loop(
     reasoning: bool = True,
     reasoning_effort: Optional[str] = None,
     wire_sink: Optional[Dict[str, Any]] = None,
+    tool_allowlist: Optional[Set[str]] = None,
+    subagent: bool = False,
 ) -> AsyncGenerator[str, None]:
     """Streaming agent loop generator.
+
+    `tool_allowlist` restricts the turn to exactly those built-in tools (MCP
+    tools are dropped); `subagent` marks a nested helper turn started by
+    `delegate` (src/subagents.py), which must leave turn-global state such as
+    the active editor document alone.
 
     `wire_sink`, when given, is kept pointing at the live message list, the
     current round's answer text and whether the turn compacted itself, so the
@@ -1922,6 +1940,34 @@ async def stream_agent_loop(
     # still lose the MCP schemas, and vice versa.
     if mcp_blocked_for_owner(owner):
         mcp_mgr = None
+    if tool_allowlist is not None:
+        _all_builtin = set(TOOL_TAGS) | {
+            (s.get("function") or {}).get("name") for s in FUNCTION_TOOL_SCHEMAS
+        }
+        disabled_tools.update(_all_builtin - set(tool_allowlist))
+        mcp_mgr = None
+    from src import subagents as _subagents
+
+    if subagent or not _subagents.enabled():
+        disabled_tools.add("delegate")
+    # The delegate tool starts subagents against this turn's endpoint, model
+    # and modes. A subagent's own turn records itself so it cannot fan out.
+    _subagents.set_turn_context(
+        {
+            "endpoint_url": endpoint_url,
+            "model": model,
+            "headers": headers,
+            "context_length": context_length,
+            "max_tokens": max_tokens,
+            "session_id": session_id,
+            "disabled_tools": set(disabled_tools),
+            "owner": owner,
+            "fallbacks": fallbacks,
+            "force_db": force_db,
+            "use_rag": use_rag,
+            "subagent": subagent,
+        }
+    )
 
     # Survives the loop so final metrics can attribute the last round's native
     # tool schemas in the context breakdown (they're tokenized server-side and
@@ -2289,6 +2335,9 @@ async def stream_agent_loop(
         owner=owner,
         selection_vision=selection_vision,
         catalog=(_catalog_names, _catalog_text) if _catalog_mode else None,
+        # A subagent runs inside the parent's turn; resetting the editor
+        # pointer would detach the user's open document from that turn.
+        keep_active_document=subagent,
     )
     if workspace:
         # PREPEND (not append) so it dominates the large base prompt — appended
@@ -3655,7 +3704,13 @@ async def stream_agent_loop(
             # Web results / fetched pages / knowledge sections got turn-wide
             # citation numbers while the tool ran. Send the current table so
             # the "[n]" markers streaming next can already show their source.
-            if block.tool_type in ("web_search", "web_fetch", "search_knowledge", "read_knowledge"):
+            if block.tool_type in (
+                "web_search",
+                "web_fetch",
+                "search_knowledge",
+                "read_knowledge",
+                "delegate",
+            ):
                 from src import citations as _citations
 
                 _cit = _citations.entries(session_id)
@@ -3782,6 +3837,8 @@ async def stream_agent_loop(
             if artifact_changed:
                 tool_output_data["artifacts_changed"] = True
                 tool_output_data["created_artifacts"] = created_artifacts
+            if result.get("presented_files"):
+                tool_output_data["presented_files"] = result["presented_files"]
             # Forward a file-write diff for inline before/after rendering
             if "diff" in result:
                 tool_output_data["diff"] = result["diff"]
@@ -3839,6 +3896,10 @@ async def stream_agent_loop(
             # re-validating — the two copies must not be able to disagree.
             if widget:
                 tool_event["widget"] = widget
+            # The turn's deliverables: the output cards are rebuilt from this on
+            # reload, exactly as the live frame above drew them.
+            if result.get("presented_files"):
+                tool_event["presented_files"] = result["presented_files"]
             tool_events.append(tool_event)
             if block.tool_type in _VERIFIER_EFFECTFUL_TOOLS:
                 _effectful_used = True

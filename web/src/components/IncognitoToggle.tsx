@@ -1,22 +1,95 @@
-﻿import { ArchiveIcon, BugIcon, FileTextIcon, GhostIcon, MoreVerticalIcon, PencilIcon, PlayIcon, Trash2Icon } from 'lucide-react';
+import { ArchiveIcon, BugIcon, ChevronDownIcon, FileIcon, FolderArchiveIcon, GhostIcon, PaperclipIcon, PencilIcon, Trash2Icon } from 'lucide-react';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { archiveSession, deleteSession, downloadChatDebugDump, fetchArtifacts, fetchSessions, renameSession } from '@/api/client';
+import { archiveSession, deleteSession, downloadArtifactsZip, downloadChatDebugDump, fetchSessions, renameSession, uploadDownloadUrl } from '@/api/client';
 import { useAuth } from './auth/AuthGate';
 import { useChat } from '@/state/chat';
 import { usePrefs } from '@/state/prefs';
-import { useUi } from '@/state/ui';
 import { cn } from '@/lib/utils';
+import { displayName, fileTypeLabel } from '@/lib/files';
 import { isTitlePending, placeholderTitleText } from '@/lib/sessionTitle';
+import { useSessionFiles } from '@/lib/useSessionFiles';
+import { AttachmentTile, openUploadViewer } from './AttachmentTile';
+import { OutputTile, openSessionFile } from './OutputCard';
 import { Skeleton, Tooltip } from './ui/misc';
-import { Menu, MenuItem, MenuPopup, MenuSeparator, MenuTrigger } from './ui/menu';
+import { Menu, MenuItem, MenuLabel, MenuPopup, MenuSeparator, MenuTrigger } from './ui/menu';
 
-/** Floating chat header (where the old solid header used to sit): the session
- *  title on the left, and on the right the artifact/preview buttons, the
- *  incognito toggle and a three-dot menu with per-session actions
- *  (rename / archive / delete). A background-coloured fade underneath keeps
- *  messages from scrolling visibly through the controls. */
+/** The header's file button ("📄 3"): a dropdown listing everything the agent
+ *  produced, each with a small preview, plus the uploads used in the chat.
+ *  Picking a file opens it in the preview panel. */
+function SessionFilesMenu({ sessionId }: { sessionId: string }) {
+  const { t } = useTranslation();
+  const { outputs, inputs } = useSessionFiles(sessionId);
+  if (outputs.length === 0 && inputs.length === 0) return null;
+  return (
+    <Menu>
+      <MenuTrigger
+          aria-label={t('outputs.filesAria', { count: outputs.length })}
+          className="flex h-7 items-center gap-1.5 rounded-md border px-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground data-[state=open]:bg-accent data-[state=open]:text-foreground"
+        >
+          <FileIcon className="size-3.5" />
+          <span className="tabular-nums">{outputs.length || inputs.length}</span>
+      </MenuTrigger>
+      <MenuPopup align="end" className="max-h-[70vh] w-80 overflow-y-auto">
+        {outputs.length > 0 && (
+          <>
+            <MenuLabel>{t('outputs.title')}</MenuLabel>
+            {outputs.map((f) => (
+              <MenuItem key={f.path} onSelect={() => openSessionFile(sessionId, f)} className="group/out gap-3 py-1.5" title={f.name}>
+                <OutputTile sessionId={sessionId} file={f} size="sm" />
+                <span className="min-w-0 flex-1 truncate">{displayName(f.name)}</span>
+                <span className="shrink-0 text-[11px] font-medium tracking-wide text-muted-foreground">{fileTypeLabel(f.name, f.mime)}</span>
+              </MenuItem>
+            ))}
+          </>
+        )}
+        {inputs.length > 0 && (
+          <>
+            {outputs.length > 0 && <MenuSeparator />}
+            <MenuLabel className="flex items-center gap-1.5"><PaperclipIcon className="size-3" />{t('outputs.usedInSession')}</MenuLabel>
+            {inputs.map((f) => {
+              const name = f.name || f.id;
+              const url = uploadDownloadUrl(f.id);
+              return (
+                <MenuItem
+                  key={f.id}
+                  className="gap-3 py-1.5"
+                  title={name}
+                  onSelect={() => {
+                    if (openUploadViewer({ url, name, mime: f.mime, sessionId })) return;
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = name;
+                    a.click();
+                  }}
+                >
+                  <AttachmentTile url={url} name={name} mime={f.mime} size={36} />
+                  <span className="min-w-0 flex-1 truncate">{displayName(name)}</span>
+                  <span className="shrink-0 text-[11px] font-medium tracking-wide text-muted-foreground">{fileTypeLabel(name, f.mime)}</span>
+                </MenuItem>
+              );
+            })}
+          </>
+        )}
+        {outputs.length > 0 && (
+          <>
+            <MenuSeparator />
+            <MenuItem onSelect={() => { void downloadArtifactsZip(sessionId); }}>
+              <FolderArchiveIcon /> {t('artifacts.downloadZip')}
+            </MenuItem>
+          </>
+        )}
+      </MenuPopup>
+    </Menu>
+  );
+}
+
+/** Floating chat header: the session title doubles as a dropdown with the
+ *  per-session actions (rename / archive / debug dump / delete), and on the
+ *  right the session's file menu. Incognito only shows on a fresh chat, where
+ *  it decides how the next chat is kept. A background-coloured fade underneath
+ *  keeps messages from scrolling visibly through the controls. */
 export function IncognitoToggle() {
   const { t } = useTranslation();
   const incognito = usePrefs((s) => s.incognito);
@@ -25,10 +98,6 @@ export function IncognitoToggle() {
   const sidebarCollapsed = usePrefs((s) => s.sidebarCollapsed);
   const sessionId = useChat((s) => s.sessionId);
   const newChat = useChat((s) => s.newChat);
-  const setArtifactsOpen = useUi((s) => s.setArtifactsOpen);
-  const setPanelMode = useUi((s) => s.setPanelMode);
-  const panelMode = useUi((s) => s.panelMode);
-  const artifactsOpen = useUi((s) => s.artifactsOpen);
   const queryClient = useQueryClient();
   const auth = useAuth();
   const [dumping, setDumping] = useState(false);
@@ -43,18 +112,11 @@ export function IncognitoToggle() {
   // archived one — keeps the old blank-title behaviour.)
   const titlePending = !!sessionId && (sessions === undefined || isTitlePending(session));
 
-  const { data: artifacts } = useQuery({
-    queryKey: ['artifacts', sessionId],
-    queryFn: () => fetchArtifacts(sessionId!),
-    enabled: !!sessionId,
-  });
-  const hasArtifacts = (artifacts?.length ?? 0) > 0;
-
   const refresh = () => queryClient.invalidateQueries({ queryKey: ['sessions'] });
 
   const onRename = () => {
     if (!sessionId) return;
-    const name = window.prompt(t('chatHeader.renameChat'));
+    const name = window.prompt(t('chatHeader.renameChat'), title);
     if (name?.trim()) void renameSession(sessionId, name.trim()).then(refresh);
   };
   const onArchive = () => {
@@ -99,75 +161,51 @@ export function IncognitoToggle() {
       {/* Collapsed, the sidebar's expand button floats over this corner
           (Sidebar.tsx: left-2.5, size-7), so the title starts past it. */}
       <div className={cn('pointer-events-none absolute inset-x-0 top-2 z-10 flex items-center gap-2 px-3', sidebarCollapsed && 'pl-12')}>
-        <div className="min-w-0 flex-1">
-          {/* pointer-events only on the text itself, so the empty space next to
-              a short title doesn't swallow clicks meant for the chat. */}
+        <div className="flex min-w-0 flex-1">
           {titlePending ? (
-            <div className="flex h-7 items-center text-sm font-medium">
+            <div className="flex h-7 items-center px-2 text-sm font-medium">
               <Skeleton
                 className="h-3.5"
                 text={placeholderTitleText(session?.name)}
                 label={t('chatHeader.titlePending')}
               />
             </div>
-          ) : (
-            <span className="pointer-events-auto inline-block max-w-full truncate align-middle text-sm font-medium leading-7 text-foreground">
-              {title}
-            </span>
-          )}
+          ) : sessionId ? (
+            // pointer-events only on the trigger itself, so the empty space next
+            // to a short title doesn't swallow clicks meant for the chat.
+            <Menu>
+              <MenuTrigger
+                aria-label={t('chatHeader.moreOptions')}
+                className="group pointer-events-auto flex h-7 min-w-0 max-w-full items-center gap-1 rounded-md px-2 text-sm font-medium text-foreground transition-colors hover:bg-accent data-[state=open]:bg-accent"
+              >
+                <span className="truncate">{title}</span>
+                <ChevronDownIcon className="size-3.5 shrink-0 text-muted-foreground transition-transform group-data-[state=open]:rotate-180" />
+              </MenuTrigger>
+              <MenuPopup align="start" className="min-w-44">
+                <MenuItem onSelect={onRename}>
+                  <PencilIcon /> {t('chatHeader.rename')}
+                </MenuItem>
+                <MenuItem onSelect={onArchive}>
+                  <ArchiveIcon /> {t('sidebar.archive')}
+                </MenuItem>
+                {/* Admin-only: raw JSON dump of the whole chat (reasoning, tool
+                    calls, tool errors, metrics) for debugging. */}
+                {auth?.is_admin && (
+                  <MenuItem onSelect={onDebugDump} disabled={dumping}>
+                    <BugIcon /> {t('chatHeader.debugDump')}
+                  </MenuItem>
+                )}
+                <MenuSeparator />
+                <MenuItem variant="destructive" onSelect={onDelete}>
+                  <Trash2Icon /> {t('common.delete')}
+                </MenuItem>
+              </MenuPopup>
+            </Menu>
+          ) : null}
         </div>
         <div className="pointer-events-auto flex shrink-0 items-center gap-1">
-          {hasArtifacts && (() => {
-            // Each button opens the shared right panel to its view; clicking the
-            // active one closes the panel.
-            const openMode = (mode: 'files' | 'preview') => {
-              if (artifactsOpen && panelMode === mode) setArtifactsOpen(false);
-              else { setPanelMode(mode); setArtifactsOpen(true); }
-            };
-            const active = (mode: 'files' | 'preview') => artifactsOpen && panelMode === mode;
-            return (
-              <>
-                <Tooltip label={t('chatHeader.sessionFiles')}>
-                  <button
-                    type="button"
-                    aria-label={t('chatHeader.sessionFilesAria')}
-                    aria-pressed={active('files')}
-                    onClick={() => openMode('files')}
-                    className={cn(btnBase, active('files') ? 'bg-accent text-foreground' : btnQuiet)}
-                  >
-                    <FileTextIcon className="size-4" />
-                  </button>
-                </Tooltip>
-                <Tooltip label={t('chatHeader.sessionPreview')}>
-                  <button
-                    type="button"
-                    aria-label={t('chatHeader.sessionPreviewAria')}
-                    aria-pressed={active('preview')}
-                    onClick={() => openMode('preview')}
-                    className={cn(btnBase, active('preview') ? 'bg-accent text-foreground' : btnQuiet)}
-                  >
-                    <PlayIcon className="size-4" />
-                  </button>
-                </Tooltip>
-              </>
-            );
-          })()}
-          {/* Admin-only: raw JSON dump of the whole chat (reasoning, tool calls,
-              tool errors, metrics) for debugging. */}
-          {sessionId && auth?.is_admin && (
-            <Tooltip label={t('chatHeader.debugDump')}>
-              <button
-                type="button"
-                aria-label={t('chatHeader.debugDump')}
-                onClick={onDebugDump}
-                disabled={dumping}
-                className={cn(btnBase, btnQuiet, dumping && 'opacity-50')}
-              >
-                <BugIcon className="size-4" />
-              </button>
-            </Tooltip>
-          )}
-          {visible && (
+          {sessionId && <SessionFilesMenu sessionId={sessionId} />}
+          {!sessionId && visible && (
             <Tooltip label={incognito ? t('chatHeader.incognitoOn') : t('chatHeader.incognitoOff')}>
               <button
                 type="button"
@@ -179,30 +217,6 @@ export function IncognitoToggle() {
                 <GhostIcon className="size-4" />
               </button>
             </Tooltip>
-          )}
-          {sessionId && (
-            <Menu>
-              <Tooltip label={t('chatHeader.moreOptions')}>
-                <MenuTrigger
-                  aria-label={t('chatHeader.moreOptions')}
-                  className={cn(btnBase, btnQuiet, 'data-[state=open]:bg-accent data-[state=open]:text-foreground')}
-                >
-                  <MoreVerticalIcon className="size-4" />
-                </MenuTrigger>
-              </Tooltip>
-              <MenuPopup align="end">
-                <MenuItem onSelect={onRename}>
-                  <PencilIcon /> {t('chatHeader.rename')}
-                </MenuItem>
-                <MenuItem onSelect={onArchive}>
-                  <ArchiveIcon /> {t('sidebar.archive')}
-                </MenuItem>
-                <MenuSeparator />
-                <MenuItem variant="destructive" onSelect={onDelete}>
-                  <Trash2Icon /> {t('common.delete')}
-                </MenuItem>
-              </MenuPopup>
-            </Menu>
           )}
         </div>
       </div>

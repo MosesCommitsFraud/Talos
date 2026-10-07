@@ -42,6 +42,9 @@ ALWAYS_AVAILABLE = frozenset(
         # Always reachable so the agent can pause and ask at any point.
         "ask_user",
         "update_plan",
+        # Marks the turn's deliverable for the UI. Whether a turn produced one
+        # is only known at its end, so retrieval can't pick it from the request.
+        "present_files",
         # Retrieve the full original of a compressed tool output. Compression
         # markers can appear after ANY tool runs, so the retrieval tool must
         # always be in reach (RAG would never select it from the user's message).
@@ -109,6 +112,7 @@ BUILTIN_TOOL_DESCRIPTIONS: Dict[str, str] = {
     "suggest_document": "Suggest changes to the active document with explanations. For code review, proofreading, feedback requests.",
     "generate_image": "Generate an AI image from a text prompt. Specify model, size, and quality. Art, illustrations, photos.",
     "update_plan": "Update the approved plan checklist while executing it. Mark completed steps with - [x] and keep unchecked steps as - [ ]. Use after finishing each plan step.",
+    "present_files": "Show the finished deliverable file(s) of this turn to the user as cards under the answer (preview + download). Only the files the user asked for — not build scripts, data dumps or helper files.",
     "expand_output": "Retrieve the full original of a compressed tool output by its stored id (out_xxxxxxxx). Supports searching for specific lines or paging through large outputs.",
     "list_models": "List all available AI models and their endpoints.",
     "manage_session": "Chat management: rename, archive, delete, or fork chats (the UI calls these 'chats'; internally 'sessions'). Use for 'rename my chats', 'rename this chat', 'archive/delete a chat'.",
@@ -133,6 +137,7 @@ BUILTIN_TOOL_DESCRIPTIONS: Dict[str, str] = {
     "search_knowledge": "Search the documents indexed in this Talos instance — the uploaded knowledge base (manuals, training material, schema references, process docs, transcripts). Returns matching passages with their source filenames, or nothing when the base has no match. Cheap to call and an empty result is a normal outcome, so reach for it whenever a lookup might help rather than guessing. Multiple calls with different wording are expected. Deutsch: Wissensdatenbank, Dokumente, Handbuch, Schulung, Unterlagen, Doku durchsuchen.",
     "list_knowledge": "List the documents in the knowledge base by name, type and size, optionally filtered by a word in the name. Deutsch: welche Dokumente, Handbücher, Videos, Schulungen gibt es.",
     "read_knowledge": "Read a knowledge-base document: its outline (sections with pages / video times), then whole sections, page ranges or time ranges verbatim. For chapters, full procedures, summaries of a document, parts of a workshop recording. Deutsch: Kapitel lesen, Abschnitt, Inhaltsverzeichnis, ganzes Dokument, zusammenfassen.",
+    "delegate": "Run 2-6 independent research tasks in parallel by read-only helper agents (subagents) that search and read the knowledge base, web and database and return cited reports. For questions spanning several documents, chapters, recordings or comparison items. Deutsch: parallel recherchieren, aufteilen, Teilaufgaben, mehrere Dokumente vergleichen.",
     "grep_knowledge": "Exact, complete term lookup across the knowledge base or one document — error codes, part numbers, menu names, commands, names — with the section and page of every hit. Deutsch: genau suchen, alle Stellen, Fehlercode, Artikelnummer.",
     "query_sql": "Read-only SQL access to the configured external database using backend .env credentials. Use when the user asks for database data, SQL, tables, schema, rows, metrics, reports, counts, customers, orders, products, invoices, or anything stored in the DB. Supports list_tables, describe table, and read-only SELECT/WITH/SHOW/DESCRIBE/EXPLAIN/PRAGMA queries with optional max_rows; omit max_rows or pass 0 for no row limit. The model never needs DB passwords.",
 }

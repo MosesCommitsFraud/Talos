@@ -43,12 +43,10 @@ interface UiState {
   /** Which top-level surface is shown (chat vs. the /rag workspace). */
   view: AppView;
   setView: (view: AppView) => void;
-  /** Right-side panel that hosts both the session file list and the document
-   *  preview; `panelMode` chooses which is shown and the header switch flips it. */
+  /** Right-side preview panel. The session's file list lives in the chat
+   *  header's file menu; the panel only ever shows `preview`. */
   artifactsOpen: boolean;
   setArtifactsOpen: (open: boolean) => void;
-  panelMode: 'files' | 'preview';
-  setPanelMode: (mode: 'files' | 'preview') => void;
   /** Right-side drawer listing the session's background jobs and their live
    *  output. Opened from the task chip in the working row; never auto-opens —
    *  a job runs precisely so the reader can carry on with something else. */
@@ -94,20 +92,18 @@ export const useUi = create<UiState>((set) => ({
   },
   artifactsOpen: false,
   setArtifactsOpen: (artifactsOpen) => set({ artifactsOpen }),
-  panelMode: 'files',
-  setPanelMode: (panelMode) => set({ panelMode }),
   tasksPanelOpen: false,
   setTasksPanelOpen: (tasksPanelOpen) => set({ tasksPanelOpen }),
   lightbox: null,
   openLightbox: (lightbox) => set({ lightbox }),
   closeLightbox: () => set({ lightbox: null }),
   preview: null,
-  // Selecting a file opens the shared panel and flips it to the preview view.
-  openPreview: (preview) => set({ preview, panelMode: 'preview', artifactsOpen: true }),
+  // Selecting a file opens the panel on it.
+  openPreview: (preview) => set({ preview, artifactsOpen: true }),
   updatePreview: (patch) => set((state) => ({
     preview: state.preview ? { ...state.preview, ...patch } : null,
   })),
-  closePreview: () => set({ preview: null, panelMode: 'files' }),
+  closePreview: () => set({ preview: null, artifactsOpen: false }),
   artifactSelection: null,
   setArtifactSelection: (artifactSelection) => set({ artifactSelection }),
   openProject: null,

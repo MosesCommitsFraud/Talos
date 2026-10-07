@@ -39,6 +39,7 @@ CORE_TOOLS = frozenset(
         "list_knowledge",
         "read_knowledge",
         "grep_knowledge",
+        "delegate",
         "create_document",
         "edit_document",
         "suggest_document",

@@ -50,6 +50,7 @@ TOOL_TAGS = {
     "generate_image",
     "ask_user",
     "update_plan",
+    "present_files",
     "api_call",
     "manage_skills",
     "read_skill",
@@ -70,6 +71,8 @@ TOOL_TAGS = {
     "list_knowledge",
     "read_knowledge",
     "grep_knowledge",
+    # Parallel read-only helper agents within one turn (see src/subagents.py)
+    "delegate",
     # Internet access via the self-hosted SearxNG instance
     "web_search",
     "web_fetch",

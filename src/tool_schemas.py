@@ -288,6 +288,50 @@ FUNCTION_TOOL_SCHEMAS = [
     {
         "type": "function",
         "function": {
+            "name": "delegate",
+            "description": (
+                "Hand independent pieces of research to parallel helper agents (subagents) "
+                "and get their reports back. Each subagent starts fresh with only its "
+                "prompt, can search and read the knowledge base, the web and the database "
+                "(read-only), and returns a cited digest. Use it when a question splits "
+                "into 2-6 separate lookups that each need several steps — e.g. one "
+                "subagent per manual, per chapter range, per workshop recording, or per "
+                "comparison item. Not for a single quick search."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "tasks": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "title": {
+                                    "type": "string",
+                                    "description": "Short label shown to the user.",
+                                },
+                                "prompt": {
+                                    "type": "string",
+                                    "description": (
+                                        "Complete, self-contained assignment: what to find, "
+                                        "where to look (document names, sections, time "
+                                        "ranges) and what the report must contain. The "
+                                        "subagent cannot see this conversation."
+                                    ),
+                                },
+                            },
+                            "required": ["title", "prompt"],
+                        },
+                        "description": "1-6 independent tasks, run in parallel.",
+                    },
+                },
+                "required": ["tasks"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "grep_knowledge",
             "description": (
                 "Find every exact occurrence of a term in the knowledge base (or in one "
@@ -990,6 +1034,24 @@ FUNCTION_TOOL_SCHEMAS = [
                     }
                 },
                 "required": ["plan"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "present_files",
+            "description": "Hand the finished deliverable(s) of this turn to the user: each file you name is shown as a prominent card under your answer, with preview and download. Call it once, at the end, with ONLY what the user actually asked for (the report, spreadsheet, dashboard, deck, PDF, image) — never the build scripts, intermediate data, or helper files you wrote on the way; those stay reachable in the chat's file list. Usually one file; several only when the request itself was for several (e.g. two images, a PDF plus its XLSX). Skip it when no file was the point of the request.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "files": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Workspace paths of the deliverables (e.g. 'output/dashboard.html'), or `document:<id>` / `generated-image:<id>` for editor documents and generated images.",
+                    }
+                },
+                "required": ["files"],
             },
         },
     },

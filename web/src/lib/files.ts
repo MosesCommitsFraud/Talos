@@ -89,3 +89,19 @@ export function formatSize(bytes?: number): string {
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 }
+
+function normalizePath(path: string): string {
+  return path.trim().replace(/\\/g, '/').replace(/^(?:\.\/)+/, '').replace(/^\/?workspace\//, '');
+}
+
+/** Does a path the agent named (`present_files`) refer to this artifact? The
+ *  model writes paths the way it thinks of them — `dashboard.html` for
+ *  `output/dashboard.html`, a document's title instead of `document:<id>` — so
+ *  an exact match, a matching tail, or the display name all count. */
+export function samePath(named: string, artifactPath: string, artifactName?: string): boolean {
+  const a = normalizePath(named);
+  const b = normalizePath(artifactPath);
+  if (!a || !b) return false;
+  if (a === b || b.endsWith(`/${a}`) || a.endsWith(`/${b}`)) return true;
+  return !!artifactName && a === artifactName.trim();
+}

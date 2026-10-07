@@ -42,6 +42,17 @@ def _public(rec: Dict[str, Any]) -> Dict[str, Any]:
         "exit_code": rec.get("exit_code"),
         "timed_out": bool(rec.get("timed_out")),
         "output": bg_jobs.output_tail(rec, _TAIL_CHARS),
+        **(_subagent_fields(rec) if rec.get("kind") == "subagent" else {}),
+    }
+
+
+def _subagent_fields(rec: Dict[str, Any]) -> Dict[str, Any]:
+    """What the tray shows for a delegated subagent beyond the shared fields:
+    the assignment it was given and its live tool steps."""
+    return {
+        "prompt": str(rec.get("task") or "")[:4000],
+        "group": rec.get("group") or "",
+        "steps": bg_jobs.read_steps(rec)[-200:],
     }
 
 

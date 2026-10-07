@@ -1,12 +1,11 @@
 import { useCallback, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { DownloadIcon, FolderArchiveIcon, XIcon } from 'lucide-react';
-import { downloadArtifactsZip, downloadPreviewFile } from '@/api/client';
-import { useChat } from '@/state/chat';
+import { DownloadIcon, XIcon } from 'lucide-react';
+import { downloadPreviewFile } from '@/api/client';
+import { displayName, fileTypeLabel } from '@/lib/files';
 import { usePrefs } from '@/state/prefs';
 import { useUi } from '@/state/ui';
-import { cn } from '@/lib/utils';
-import { ArtifactsList } from './ArtifactsPanel';
+import { FileTypeIcon } from './FileTypeIcon';
 import { PreviewContent } from './PreviewPanel';
 import { Tooltip } from './ui/misc';
 
@@ -14,19 +13,15 @@ const MIN_WIDTH = 320;
 /** Cap the panel at most of the viewport so the chat never fully disappears. */
 const maxWidth = () => Math.max(MIN_WIDTH, Math.round(window.innerWidth * 0.7));
 
-/** Right-side resizable panel that hosts both the session file list and the
- *  document preview. A segmented switch in the header flips between the two;
- *  clicking a previewable file in the list jumps straight to the preview view.
- *  Chrome matches the left sidebar (rounded border, bg-background). */
+/** Right-side resizable panel showing one file — opened from an output banner
+ *  or the header's file menu. The file list itself lives in that menu, so the
+ *  panel is just the preview. Chrome matches the left sidebar (rounded border,
+ *  bg-background). */
 export function RightPanel() {
   const { t } = useTranslation();
   const open = useUi((s) => s.artifactsOpen);
   const setOpen = useUi((s) => s.setArtifactsOpen);
-  const mode = useUi((s) => s.panelMode);
-  const setMode = useUi((s) => s.setPanelMode);
   const preview = useUi((s) => s.preview);
-  const openPreview = useUi((s) => s.openPreview);
-  const sessionId = useChat((s) => s.sessionId);
   const width = usePrefs((s) => s.previewWidth);
   const setWidth = usePrefs((s) => s.setPreviewWidth);
   // Live width during a drag (avoids persisting on every mousemove).
@@ -53,28 +48,15 @@ export function RightPanel() {
     window.addEventListener('pointerup', onUp);
   }, [width, setWidth]);
 
-  if (!open) return null;
+  if (!open || !preview) return null;
   const effWidth = dragWidth ?? width;
-
-  const tab = (m: 'files' | 'preview', label: string) => (
-    <button
-      type="button"
-      onClick={() => setMode(m)}
-      aria-pressed={mode === m}
-      className={cn(
-        'rounded-md px-2.5 py-1 text-xs font-medium transition-colors',
-        mode === m ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground',
-      )}
-    >
-      {label}
-    </button>
-  );
+  const iconBtn = 'flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground';
 
   return (
     <aside
       className="relative m-2 flex shrink-0 flex-col overflow-hidden rounded-md border bg-background shadow-lg"
       style={{ width: effWidth }}
-      aria-label={t('rightPanel.label')}
+      aria-label={t('preview.panelLabel')}
     >
       {/* Drag handle on the left edge — widens/narrows the panel. */}
       <div
@@ -85,33 +67,21 @@ export function RightPanel() {
         className="absolute inset-y-0 left-0 z-10 w-1.5 cursor-col-resize hover:bg-primary/30 active:bg-primary/40"
       />
 
-      <div className="flex h-10 shrink-0 items-center justify-between gap-2 border-b pl-2 pr-2">
-        {/* Segmented switch: Files ⇄ Preview. */}
-        <div className="flex items-center gap-0.5 rounded-lg bg-muted p-0.5">
-          {tab('files', t('rightPanel.files'))}
-          {tab('preview', t('rightPanel.preview'))}
+      <div className="flex h-10 shrink-0 items-center justify-between gap-2 border-b pl-3 pr-2">
+        <div className="flex min-w-0 items-center gap-2" title={preview.name}>
+          <FileTypeIcon path={preview.name} mime={preview.mime} className="size-4 shrink-0 text-muted-foreground" />
+          <span className="truncate text-sm font-medium">{displayName(preview.name)}</span>
+          <span className="shrink-0 text-[11px] font-medium tracking-wide text-muted-foreground">{fileTypeLabel(preview.name, preview.mime)}</span>
         </div>
 
         <div className="flex shrink-0 items-center gap-1">
-          {mode === 'files' && sessionId && (
-            <Tooltip label={t('artifacts.downloadZip')}>
-              <button
-                type="button"
-                onClick={() => { void downloadArtifactsZip(sessionId); }}
-                aria-label={t('artifacts.downloadZip')}
-                className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-              >
-                <FolderArchiveIcon className="size-4" />
-              </button>
-            </Tooltip>
-          )}
-          {mode === 'preview' && preview && !preview.streaming && (
+          {!preview.streaming && (
             <Tooltip label={t('preview.download')}>
               <button
                 type="button"
                 onClick={() => { void downloadPreviewFile(preview); }}
                 aria-label={t('preview.download')}
-                className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                className={iconBtn}
               >
                 <DownloadIcon className="size-4" />
               </button>
@@ -119,18 +89,16 @@ export function RightPanel() {
           )}
           <button
             type="button"
-            aria-label={t('rightPanel.close')}
+            aria-label={t('preview.close')}
             onClick={() => setOpen(false)}
-            className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+            className={iconBtn}
           >
             <XIcon className="size-4" />
           </button>
         </div>
       </div>
 
-      {mode === 'files'
-        ? <ArtifactsList sessionId={sessionId} onOpen={openPreview} />
-        : <PreviewContent preview={preview} />}
+      <PreviewContent preview={preview} />
     </aside>
   );
 }

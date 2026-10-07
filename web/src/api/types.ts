@@ -188,6 +188,9 @@ export interface ToolCall {
     [key: string]: unknown;
   }>;
   widget?: Widget;
+  /** `present_files`: the paths the agent handed over as this turn's
+   *  deliverables — each becomes an output card under the answer. */
+  presented_files?: string[];
 }
 
 export interface Metrics {
@@ -245,9 +248,24 @@ export interface ChatEvent {
  *  agent turn spawned by `background_task` (`kind: 'agent'`). Both outlive the
  *  turn that started them, which is why the UI polls for them separately from
  *  the message stream. */
+/** One tool call a subagent made, as its live step list records it. */
+export interface SubagentStep {
+  tool: string;
+  command?: string;
+  status: 'running' | 'done' | 'error';
+  /** Unix seconds. */
+  at?: number;
+}
+
 export interface BgTask {
   id: string;
-  kind: 'shell' | 'agent';
+  /** `subagent`: a parallel helper the agent delegated within its turn. */
+  kind: 'shell' | 'agent' | 'subagent';
+  /** Subagents only: the assignment, the delegate call it belongs to, and
+   *  its tool calls so far. */
+  prompt?: string;
+  group?: string;
+  steps?: SubagentStep[];
   /** The command line, or the agent task's label / first line. */
   label: string;
   status: 'running' | 'done' | 'failed';

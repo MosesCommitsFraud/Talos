@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { compactSession, createSession, deleteMessages, editMessage, fetchActiveRuns, fetchArtifacts, fetchSession, resumeChat, streamChat } from '@/api/client';
 import type { Artifact, ArtifactSelection, Attachment, ChatEvent, Citation, Metrics, RagSource, ToolCall } from '@/api/types';
-import { documentFileName, isPreviewable } from '@/lib/files';
+import { documentFileName, isPreviewable, samePath } from '@/lib/files';
 import { timestampMs } from '@/lib/utils';
 import { queryClient } from '@/lib/queryClient';
 import { StreamSmoother } from '@/lib/streamSmoother';
@@ -309,6 +309,12 @@ const asWidget = (value: unknown): ToolCall['widget'] => {
  *  component that assumes otherwise, and a `diff` that isn't a string crashes
  *  the whole message list the moment its tool group renders (diff.split). Old
  *  rows predate current writers, so nothing here may be taken on trust. */
+function asPaths(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const paths = value.filter((v): v is string => typeof v === 'string' && !!v.trim());
+  return paths.length ? paths : undefined;
+}
+
 function mapToolEvent(item: Record<string, unknown>): RoundedToolCall {
   const exitCode = typeof item.exit_code === 'number' ? item.exit_code : typeof item.exitCode === 'number' ? item.exitCode : undefined;
   return {
@@ -331,6 +337,7 @@ function mapToolEvent(item: Record<string, unknown>): RoundedToolCall {
       ? (item.created_images as ToolCall['created_images'])
       : undefined,
     widget: asWidget(item.widget),
+    presented_files: asPaths(item.presented_files),
   };
 }
 
@@ -680,8 +687,6 @@ export const useChat = create<ChatState>((set, get) => {
     const revealArtifacts = (preferredPaths: string[] = []) => {
       void queryClient.invalidateQueries({ queryKey: ['artifacts', sid] });
       if (get().sessionId !== sid) return;
-      useUi.getState().setPanelMode('files');
-      useUi.getState().setArtifactsOpen(true);
       void queryClient.fetchQuery({
         queryKey: ['artifacts', sid],
         queryFn: () => fetchArtifacts(sid),
@@ -691,10 +696,11 @@ export const useChat = create<ChatState>((set, get) => {
         const normalized = (path: string) => path.replace(/\\/g, '/').replace(/^\.\//, '');
         const preferred = preferredPaths
           .map((path) => artifacts.find((artifact) => (
-            normalized(String(artifact.path ?? '')) === normalized(path)
+            samePath(path, String(artifact.path ?? ''), String(artifact.name ?? ''))
           )))
           .find((artifact): artifact is Artifact => !!artifact);
-        const currentPreview = useUi.getState().preview;
+        // Refresh the file on screen — but a panel the user closed stays closed.
+        const currentPreview = useUi.getState().artifactsOpen ? useUi.getState().preview : null;
         const currentArtifact = currentPreview?.sessionId === sid
           ? artifacts.find((artifact) => normalized(String(artifact.path ?? '')) === normalized(currentPreview.path))
           : undefined;
@@ -706,7 +712,7 @@ export const useChat = create<ChatState>((set, get) => {
         if (path && isPreviewable(name, mime)) {
           useUi.getState().openPreview({ sessionId: sid, path, name, mime, version: typeof toPreview.version === 'number' ? toPreview.version : undefined });
         }
-      }).catch(() => { /* Files tab remains available if preview lookup fails. */ });
+      }).catch(() => { /* The header's file menu still lists it if the preview lookup fails. */ });
     };
 
     const prefs = usePrefs.getState();
@@ -762,10 +768,6 @@ export const useChat = create<ChatState>((set, get) => {
               patchAi((m) => ({
                 tools: [...(m.tools ?? []), { tool: String(ev.tool), command: ev.command as string | undefined, status: 'running' }],
               }));
-              if (['create_document', 'write_file', 'generate_image'].includes(String(ev.tool)) && get().sessionId === sid) {
-                useUi.getState().setPanelMode('files');
-                useUi.getState().setArtifactsOpen(true);
-              }
               break;
             case 'tool_output':
               patchAi((m) => ({
@@ -789,15 +791,17 @@ export const useChat = create<ChatState>((set, get) => {
                         diff: typeof ev.diff === 'string' ? ev.diff : undefined,
                         created_images: Array.isArray(ev.created_images) ? ev.created_images as ToolCall['created_images'] : undefined,
                         widget: asWidget(ev.widget),
+                        presented_files: asPaths(ev.presented_files),
                       }
                     : t,
                 ),
               }));
-              if (ev.artifacts_changed) {
-                const created = Array.isArray(ev.created_artifacts)
-                  ? ev.created_artifacts.map(String)
-                  : [];
-                revealArtifacts(created);
+              // Only what the agent handed over with present_files takes over
+              // the panel; any other write just refreshes the list (and the
+              // preview, when it is the file on screen).
+              {
+                const presented = asPaths(ev.presented_files);
+                if (ev.artifacts_changed || presented) revealArtifacts(presented ?? []);
               }
               break;
             case 'doc_stream_open': {

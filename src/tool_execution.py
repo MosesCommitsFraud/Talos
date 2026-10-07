@@ -1722,6 +1722,52 @@ async def execute_tool_block(
         logger.info("Tool executed: %s (%d options, multi=%s)", desc, len(options), multi)
         return desc, result
 
+    # present_files: the agent names the turn's deliverable(s). Pure UI marker —
+    # the paths ride on the tool event (live and in saved history), and the
+    # frontend turns each into an output card. Nothing is checked on disk: the
+    # card matches against the chat's artifact list, and a path that matches
+    # nothing simply shows no card.
+    if tool == "present_files":
+        import json as _json
+
+        raw = (content or "").strip()
+        try:
+            parsed = _json.loads(raw) if raw else {}
+        except (ValueError, TypeError):
+            parsed = {}
+        if isinstance(parsed, dict):
+            items = parsed.get("files") or parsed.get("paths") or parsed.get("file") or []
+        elif isinstance(parsed, list):
+            items = parsed
+        else:
+            items = [line for line in raw.splitlines()]
+        if isinstance(items, str):
+            items = [items]
+        files: list[str] = []
+        for item in items:
+            path = str(item or "").strip().replace("\\", "/")
+            while path.startswith("./"):
+                path = path[2:]
+            for prefix in ("/workspace/", "workspace/"):
+                if path.startswith(prefix):
+                    path = path[len(prefix):]
+            if path and path not in files:
+                files.append(path)
+        files = files[:8]
+        if not files:
+            return "present_files: invalid", {
+                "error": "present_files needs `files`: a non-empty list of workspace paths (or document:<id> / generated-image:<id>).",
+                "exit_code": 1,
+            }
+        desc = f"present_files: {', '.join(files)[:120]}"
+        result = {
+            "presented_files": files,
+            "output": "Shown to the user: " + ", ".join(files),
+            "exit_code": 0,
+        }
+        logger.info("Tool executed: %s", desc)
+        return desc, result
+
     if tool == "update_plan":
         import json as _json
 
@@ -1945,6 +1991,11 @@ async def execute_tool_block(
 
         desc = "grep_knowledge"
         result = await do_grep_knowledge(content)
+    elif tool == "delegate":
+        from src.subagents import run_tasks
+
+        result = await run_tasks(content, session_id=session_id, progress_cb=progress_cb)
+        desc = f"delegate: {result.get('label') or 'error'}"
     elif tool == "expand_output":
         desc = "expand_output"
         from src.context_optimizer import do_expand_output

@@ -843,6 +843,122 @@ def _sse(event: dict | str) -> str:
     return f"data: {json.dumps(event)}\n\n"
 
 
+# Mock subagents (`delegate`): started by a chat message mentioning
+# "subagent"/"delegate", then advanced by wall-clock on every /api/bg-tasks
+# poll so the tray shows them working step by step and finishing.
+_SUBAGENT_RUNS: list[dict] = []
+_SUBAGENT_PLAN = [
+    (
+        "Handbuch A: Export",
+        "Read the export chapter of Handbuch_A.pdf and list every configuration step.",
+        [
+            ("list_knowledge", '{"query": "Handbuch"}'),
+            ("read_knowledge", '{"document": "Handbuch_A.pdf"}'),
+            ("read_knowledge", '{"document": "Handbuch_A.pdf", "section": "7-9"}'),
+        ],
+        "**Export einrichten (Handbuch A, §7–9)**\n\n1. *Einstellungen › Export* öffnen [1]\n"
+        "2. Zielordner wählen [1]\n3. Format **CSV (UTF-8)** setzen [2]",
+    ),
+    (
+        "Handbuch B: Export",
+        "Read the export chapter of Handbuch_B.pdf and list every configuration step.",
+        [
+            ("grep_knowledge", '{"pattern": "Export", "document": "Handbuch_B.pdf"}'),
+            ("read_knowledge", '{"document": "Handbuch_B.pdf", "pages": "40-44"}'),
+        ],
+        "**Export (Handbuch B, S. 40–44)**\n\nGleiche Schritte, zusätzlich *Zeitplan* [3].",
+    ),
+    (
+        "Workshop: Export",
+        "In Workshop_Export.mp4 list the export steps the presenter performs, with timestamps.",
+        [
+            ("read_knowledge", '{"document": "Workshop_Export.mp4"}'),
+            ("read_knowledge", '{"document": "Workshop_Export.mp4", "time": "0:12:00-0:25:00"}'),
+            ("search_knowledge", '{"query": "Export Zeitplan", "document": "Workshop_Export.mp4"}'),
+        ],
+        "Ab **0:12:40** zeigt der Referent den Export-Dialog [4]; Zeitplan bei 0:21:05 [5].",
+    ),
+]
+
+
+def _start_mock_subagents(session_id: str) -> None:
+    now = time.time()
+    group = f"g{int(now)}"
+    for i, (title, prompt, steps, report) in enumerate(_SUBAGENT_PLAN):
+        _SUBAGENT_RUNS.append(
+            {
+                "id": f"sub{int(now)}{i}",
+                "session_id": session_id,
+                "group": group,
+                "title": title,
+                "prompt": prompt,
+                "steps": steps,
+                "report": report,
+                "started_at": now,
+                # Staggered finish so the tray shows mixed states.
+                "duration": 7 + 3 * i,
+            }
+        )
+
+
+def _mock_bg_tasks(session_id: str) -> list[dict]:
+    now = time.time()
+    out = []
+    for run in _SUBAGENT_RUNS:
+        if run["session_id"] != session_id:
+            continue
+        elapsed = now - run["started_at"]
+        done = elapsed >= run["duration"]
+        per = run["duration"] / (len(run["steps"]) + 1)
+        shown = min(len(run["steps"]), int(elapsed / per) + 1)
+        steps = []
+        for j, (tool, command) in enumerate(run["steps"][:shown]):
+            running = not done and j == shown - 1 and elapsed < per * (j + 1)
+            steps.append(
+                {"tool": tool, "command": command, "status": "running" if running else "done"}
+            )
+        out.append(
+            {
+                "id": run["id"],
+                "kind": "subagent",
+                "label": run["title"],
+                "status": "done" if done else "running",
+                "started_at": run["started_at"],
+                "ended_at": run["started_at"] + run["duration"] if done else None,
+                "exit_code": 0 if done else None,
+                "timed_out": False,
+                "output": run["report"] if done else ("Lese die Abschnitte…" if shown > 1 else ""),
+                "prompt": run["prompt"],
+                "group": run["group"],
+                "steps": steps,
+            }
+        )
+    return out
+
+
+def _delegate_stream() -> bytes:
+    tasks = [{"title": t, "prompt": p} for t, p, _, _ in _SUBAGENT_PLAN]
+    events: list[dict | str] = [
+        {"delta": "Three independent lookups — I will hand them to subagents.\n", "thinking": True},
+        {"type": "tool_start", "tool": "delegate", "command": json.dumps({"tasks": tasks})},
+        ": sleep 13",
+        {
+            "type": "tool_output",
+            "tool": "delegate",
+            "output": "3/3 subagent task(s) finished.",
+            "exit_code": 0,
+        },
+        {"delta": "Alle drei Quellen beschreiben den Export gleich: Einstellungen › Export [1], "},
+        {
+            "delta": "Format CSV [2]; Handbuch B ergänzt einen Zeitplan [3], im Workshop ab 0:12:40 [4]."
+        },
+        "[DONE]",
+    ]
+    return "".join(
+        e + "\n\n" if isinstance(e, str) and e.startswith(":") else _sse(e) for e in events
+    ).encode("utf-8")
+
+
 def _preview_stream(message: str) -> bytes:
     code = """import duckdb
 import pandas as pd
@@ -1435,6 +1551,10 @@ class PreviewHandler(BaseHTTPRequestHandler):
         for event in body.split(b"\n\n"):
             if not event:
                 continue
+            if event.startswith(b": sleep "):
+                # Mock-only pause: hold a tool "running" while the tray polls.
+                time.sleep(float(event[len(b": sleep ") :]))
+                continue
             self.wfile.write(event + b"\n\n")
             self.wfile.flush()
             time.sleep(0.15)
@@ -1755,6 +1875,10 @@ class PreviewHandler(BaseHTTPRequestHandler):
         if path == "/api/prefs/custom-themes":
             self._send_json([])
             return
+        if path == "/api/bg-tasks":
+            sid = parse_qs(parsed.query).get("session_id", [""])[0]
+            self._send_json({"tasks": _mock_bg_tasks(sid)})
+            return
         if path.startswith("/api/tasks"):
             self._send_json([] if path in ("/api/tasks", "/api/tasks/runs/recent") else {})
             return
@@ -1914,6 +2038,10 @@ class PreviewHandler(BaseHTTPRequestHandler):
             message = fields.get("message", [""])[0]
             session_id = fields.get("session", ["preview-session"])[0]
             _record_turn(session_id, message)
+            if "subagent" in message.lower() or "delegate" in message.lower():
+                _start_mock_subagents(session_id)
+                self._send_event_stream(_delegate_stream())
+                return
             self._send_event_stream(_preview_stream(message))
             return
         if path.endswith("/delete-messages"):

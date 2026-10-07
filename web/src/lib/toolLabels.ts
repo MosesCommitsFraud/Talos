@@ -28,6 +28,7 @@ const FAMILY: Record<string, string> = {
   list_knowledge: 'knowledgeList',
   read_knowledge: 'knowledgeRead',
   grep_knowledge: 'knowledgeGrep',
+  delegate: 'delegate',
   web_search: 'web',
   web_fetch: 'fetch',
   get_weather: 'weather',
@@ -42,6 +43,7 @@ const FAMILY: Record<string, string> = {
   background_task: 'task',
   expand_output: 'expand',
   update_plan: 'plan',
+  present_files: 'present',
   ask_user: 'ask',
   // The UI calls a session a "chat", so the labels must too.
   create_session: 'chatNew',
@@ -140,6 +142,10 @@ export function callSubject(call: ToolCall): string {
       return clip(pick('title', 'name'));
     case 'api':
       return clip(pick('url', 'endpoint', 'name'));
+    case 'present': {
+      const files = Array.isArray(args.files) ? args.files.filter((f): f is string => typeof f === 'string') : [];
+      return clip(files.map(basename).join(', '));
+    }
     case 'read':
     case 'write':
     case 'edit':
@@ -154,6 +160,13 @@ export function callSubject(call: ToolCall): string {
       return pick('query', 'q', 'topic') || firstLine(raw);
     case 'knowledgeList':
       return pick('query');
+    case 'delegate': {
+      const tasks = Array.isArray(args.tasks) ? args.tasks : [];
+      const titles = tasks
+        .map((task) => (task && typeof task === 'object' ? (task as Record<string, unknown>).title : undefined))
+        .filter((title): title is string => typeof title === 'string' && !!title.trim());
+      return clip(titles.join(' · '));
+    }
     case 'knowledgeGrep':
       return pick('pattern', 'query') || firstLine(raw);
     case 'knowledgeRead': {
@@ -199,13 +212,13 @@ export function callSubject(call: ToolCall): string {
 /** Families whose wording is built around a subject ("Reading {{subject}}").
  *  Without one they would render a dangling "Reading " / "Searched for ", so
  *  they fall back to the generic tool-name phrasing instead. */
-const NEEDS_SUBJECT = new Set(['read', 'write', 'edit', 'ls', 'grep', 'glob', 'fetch']);
+const NEEDS_SUBJECT = new Set(['present', 'read', 'write', 'edit', 'ls', 'grep', 'glob', 'fetch']);
 
 /** Families whose subject is a FILE. The UI prints those at full text
  *  brightness — the filename is what a reader scans the row for. Grep patterns
  *  and shell commands are subjects too, but they are long and would light up
  *  half the line. */
-const FILE_SUBJECT = new Set(['read', 'write', 'edit', 'ls']);
+const FILE_SUBJECT = new Set(['present', 'read', 'write', 'edit', 'ls']);
 
 /** A label cut into styled pieces. Position cannot do this job: English fronts
  *  the verb ("Edited test.py"), German ends on the participle ("test.py

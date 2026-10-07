@@ -848,6 +848,20 @@ function AiDefaultsPanel() {
         <TextRow s={s} k="agent_tool_parallelism" label={t('settings.ai.toolParallelism')} hint={t('settings.ai.toolParallelismHint')} type="number" width="w-24" />
       </Section>
 
+      <Section title={t('settings.ai.subagents')}>
+        <BoolRow s={s} k="subagents_enabled" label={t('settings.ai.subagentsEnabled')} hint={t('settings.ai.subagentsEnabledHint')} />
+        <Row label={t('settings.ai.subagentReasoning')} hint={t('settings.ai.subagentReasoningHint')}>
+          <Select
+            className="w-40"
+            value={String(s.value('subagent_reasoning') ?? 'off')}
+            onChange={(v) => s.setValue('subagent_reasoning', v)}
+            options={['off', 'low', 'medium', 'high'].map((v) => ({ value: v, label: t(`settings.ai.subagentReasoning_${v}`) }))}
+          />
+        </Row>
+        <TextRow s={s} k="subagent_parallelism" label={t('settings.ai.subagentParallelism')} hint={t('settings.ai.subagentParallelismHint')} type="number" width="w-24" />
+        <TextRow s={s} k="subagent_max_rounds" label={t('settings.ai.subagentMaxRounds')} type="number" width="w-24" />
+      </Section>
+
       <SaveBar dirty={s.dirty} saving={s.save.isPending} error={s.save.isError ? (s.save.error as Error).message : undefined} onSave={() => s.save.mutate()} />
     </Page>
   );

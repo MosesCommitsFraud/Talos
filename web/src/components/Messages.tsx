@@ -1,17 +1,17 @@
-import { CheckIcon, ChevronDownIcon, CopyIcon, DownloadIcon, FoldVerticalIcon, LoaderIcon, PencilIcon, ScanSearchIcon, TerminalIcon, Trash2Icon } from 'lucide-react';
-import { useQuery } from '@tanstack/react-query';
+import { CheckIcon, ChevronDownIcon, CopyIcon, FoldVerticalIcon, LoaderIcon, PencilIcon, ScanSearchIcon, TerminalIcon, Trash2Icon } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { artifactDownloadUrl, downloadArtifact, fetchArtifacts, uploadDownloadUrl } from '@/api/client';
+import { uploadDownloadUrl } from '@/api/client';
 import { cn, copyTextToClipboard, formatDurationMs } from '@/lib/utils';
 import { artifactSelectionLocator } from '@/lib/artifactSelection';
-import { artifactDisplayName, displayName, fileExt, isPreviewable } from '@/lib/files';
+import { presentedOutputs, useSessionFiles, type SessionFile } from '@/lib/useSessionFiles';
 import { describeStatus, partsToString, toolFamily, type LabelParts } from '@/lib/toolLabels';
 import { isRunning, useBgTasks } from '@/lib/useBgTasks';
 import { useChat, type UiMessage } from '@/state/chat';
 import { usePrefs } from '@/state/prefs';
 import { useUi } from '@/state/ui';
-import { AttachmentTile, FilePreviewFace, hasVisualPreview, openUploadViewer } from './AttachmentTile';
+import { AttachmentTile, openUploadViewer } from './AttachmentTile';
+import { OutputCard } from './OutputCard';
 import { CitationProvider, citationMap, citedNumbers } from './Citations';
 import { Markdown } from './Markdown';
 import { PlanCard } from './PlanCard';
@@ -241,6 +241,7 @@ const FAMILY_ORB: Record<string, OrbState> = {
   write: 'shaping', edit: 'shaping', document: 'shaping', image: 'shaping', skillNew: 'shaping',
   skillManage: 'shaping', docsManage: 'shaping', settings: 'shaping', admin: 'shaping',
   plan: 'solving', ask: 'listening',
+  knowledgeList: 'searching', knowledgeGrep: 'searching', knowledgeRead: 'weaving', delegate: 'working',
 };
 
 /** The orb state for what the turn is doing right now — the same reading of
@@ -728,80 +729,14 @@ function EditBox({ msg, onDone }: { msg: UiMessage; onDone: () => void }) {
   );
 }
 
-export interface ArtifactFile { path: string; name: string; size?: number; mime?: string; version?: number }
-
-/** Downloadable chips for the files a turn produced — documents and images
- *  alike, shown inline on the last turn. Clicking a previewable file
- *  (md/text/code/csv/Word/Excel/pdf/image) opens the resizable preview panel;
- *  the trailing icon always downloads. */
-function ArtifactChips({ sessionId, files }: { sessionId: string; files: ArtifactFile[] }) {
-  const { t } = useTranslation();
-  const openPreview = useUi((s) => s.openPreview);
+/** Banner(s) for the files the agent handed over with `present_files` — the
+ *  model decides what the deliverable is; build scripts and data dumps it wrote
+ *  on the way stay in the header's file menu. */
+function OutputCards({ sessionId, files }: { sessionId: string; files: SessionFile[] }) {
   if (files.length === 0) return null;
   return (
-    <div className="mt-3 flex flex-wrap gap-2">
-      {files.map((f) => {
-        const previewable = isPreviewable(f.name, f.mime);
-        const visual = hasVisualPreview(f.name, f.mime);
-        const ext = fileExt(f.name).toUpperCase();
-        return (
-          <div key={f.path} className="group/chip relative">
-            <button
-              type="button"
-              onClick={() => {
-                if (previewable) openPreview({ sessionId, path: f.path, name: f.name, mime: f.mime, version: typeof f.version === 'number' ? f.version : undefined });
-                else void downloadArtifact(sessionId, f.path, f.name);
-              }}
-              title={previewable ? t('messages.openPreview', { name: f.name }) : f.name}
-              // A card, not a chip: the file's own first page/frame is the
-              // background for anything with a visual face, with the label
-              // block over a scrim so it stays readable on any image.
-              className="relative flex h-[132px] w-[168px] flex-col justify-end overflow-hidden rounded-xl border bg-card p-2.5 text-left transition-colors hover:border-foreground/25"
-            >
-              {visual && (
-                <>
-                  <div className="absolute inset-0">
-                    <FilePreviewFace url={artifactDownloadUrl(sessionId, f.path)} name={f.name} mime={f.mime} width={168} height={132} />
-                  </div>
-                  <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/45 to-black/10" />
-                </>
-              )}
-              <span
-                className={cn(
-                  'absolute left-2.5 top-2.5 rounded-md px-1.5 py-0.5 text-[10px] font-semibold tracking-wide',
-                  visual ? 'bg-black/45 text-white/90' : 'bg-muted text-muted-foreground',
-                )}
-              >
-                {ext || t('artifacts.file')}
-              </span>
-              <span
-                className={cn(
-                  'relative line-clamp-2 text-[13px] font-medium leading-tight break-all',
-                  visual ? 'text-white' : 'text-foreground',
-                )}
-              >
-                {displayName(f.name)}
-              </span>
-              {f.size != null && (
-                <span className={cn('relative mt-1 text-[11px]', visual ? 'text-white/70' : 'text-muted-foreground')}>
-                  {formatSize(f.size)}
-                </span>
-              )}
-            </button>
-            <button
-              type="button"
-              onClick={() => { void downloadArtifact(sessionId, f.path, f.name); }}
-              aria-label={t('artifacts.download', { name: f.name })}
-              className={cn(
-                'absolute right-1.5 top-1.5 flex size-6 items-center justify-center rounded-md opacity-0 transition-opacity focus-visible:opacity-100 group-hover/chip:opacity-100',
-                visual ? 'bg-black/45 text-white hover:bg-black/65' : 'bg-muted text-muted-foreground hover:text-foreground',
-              )}
-            >
-              <DownloadIcon className="size-3.5" />
-            </button>
-          </div>
-        );
-      })}
+    <div className="mt-3 flex flex-col gap-2">
+      {files.map((f) => <OutputCard key={f.path} sessionId={sessionId} file={f} />)}
     </div>
   );
 }
@@ -827,12 +762,14 @@ function CompactionMarker() {
  *  with one collapsible group per batch of tool calls — so the turn doesn't
  *  rearrange itself when it finishes. The live "Working for Xs" indicator is
  *  swapped for the final elapsed time. */
-function AssistantTurn({ turn, containsLast, artifactFiles, sessionId }: { turn: UiMessage[]; containsLast: boolean; artifactFiles: ArtifactFile[]; sessionId: string | null }) {
+function AssistantTurn({ turn, containsLast, outputs, sessionId }: { turn: UiMessage[]; containsLast: boolean; outputs: SessionFile[]; sessionId: string | null }) {
   const showThinking = usePrefs((s) => s.visibility.showThinking);
   const showMetrics = usePrefs((s) => s.visibility.messageMetrics);
   const turnStartedAt = useChat((s) => s.turnStartedAt);
 
   const streaming = turn.some((m) => m.streaming);
+  // What the agent handed over this turn (present_files), as session files.
+  const presented = presentedOutputs(turn, outputs);
   // The indicator outlives the stream: when the turn settles the mark keeps its
   // place until it has played the cycle it was in out to the end frame, then
   // dissolves into the resting logo. Only turns that were actually seen
@@ -956,11 +893,11 @@ function AssistantTurn({ turn, containsLast, artifactFiles, sessionId }: { turn:
           <ImageGallery images={createdImages} showLabels={false} />
         </div>
       )}
-      {/* Downloadable chips for every file the turn produced (documents and
-          images alike) — each opens the resizable preview panel or downloads.
-          Shown on the last turn, where the session's output files are known. */}
-      {containsLast && sessionId && artifactFiles.length > 0 && (
-        <ArtifactChips sessionId={sessionId} files={artifactFiles} />
+      {/* Banner for the headline output (Claude-style) — opens the preview
+          panel or downloads. Shown on the last turn, where the session's
+          output files are known. */}
+      {sessionId && presented.length > 0 && (
+        <OutputCards sessionId={sessionId} files={presented} />
       )}
       {copyText && (
         <div className="mt-2 flex items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
@@ -986,12 +923,7 @@ export function Messages() {
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
   const scroller = useRef<HTMLDivElement>(null);
   const pinned = useRef(true);
-  const { data: artifacts } = useQuery({
-    queryKey: ['artifacts', sessionId],
-    queryFn: () => fetchArtifacts(sessionId!),
-    enabled: !!sessionId,
-    refetchInterval: 10_000,
-  });
+  const { outputs } = useSessionFiles(sessionId);
 
   const syncScrollState = useCallback(() => {
     const el = scroller.current;
@@ -1038,28 +970,7 @@ export function Messages() {
   if (messages.length === 0) return <div className="min-h-0 flex-1" />;
 
   const lastAssistantId = [...messages].reverse().find((m) => m.role === 'assistant')?.id;
-  const inputPaths = new Set(
-    messages.flatMap((m) => m.role === 'user'
-      ? (m.attachments ?? []).flatMap((f) => [f.sandbox_path, f.name].filter((v): v is string => !!v))
-      : []),
-  );
-  // Output files the agent created — rendered as downloadable/previewable chips
-  // on the last turn. Images are listed by name here too (clicking opens the
-  // image in the preview panel), so every artifact type is surfaced the same way.
-  const artifactFiles: ArtifactFile[] = sessionId
-    ? (artifacts ?? []).flatMap((f) => {
-        const path = String(f.path ?? f.name ?? '');
-        const name = artifactDisplayName(path, typeof f.name === 'string' ? f.name : undefined);
-        const mime = String(f.mime ?? '');
-        if (!path || (f.source === 'workspace' && inputPaths.has(path))) return [];
-        return [{
-          path,
-          name,
-          size: typeof f.size === 'number' ? f.size : undefined,
-          mime: mime || undefined,
-        }];
-      })
-    : [];
+
   // Group the flat message list into render blocks: a user bubble, or an
   // assistant turn (the run of consecutive assistant bubbles after it).
   type Block = { kind: 'user'; msg: UiMessage } | { kind: 'turn'; turn: UiMessage[] };
@@ -1111,7 +1022,7 @@ export function Messages() {
                 <AssistantTurn
                   turn={block.turn}
                   containsLast={block.turn.some((m) => m.id === lastAssistantId)}
-                  artifactFiles={artifactFiles}
+                  outputs={outputs}
                   sessionId={sessionId}
                 />
               </CitationProvider>

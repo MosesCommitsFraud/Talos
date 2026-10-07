@@ -1,8 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { BotIcon, CheckIcon, ChevronDownIcon, CopyIcon, LoaderIcon, TerminalIcon, TriangleAlertIcon, XIcon } from 'lucide-react';
-import type { BgTask } from '@/api/types';
+import type { BgTask, ToolCall } from '@/api/types';
+import { describeCall } from '@/lib/toolLabels';
 import { cn, copyTextToClipboard, formatDurationMs } from '@/lib/utils';
+import { Markdown } from './Markdown';
+import { ToolLabel } from './ToolLabel';
 import { useBgTasks } from '@/lib/useBgTasks';
 import { useUi } from '@/state/ui';
 
@@ -58,11 +61,76 @@ function TaskOutput({ task }: { task: BgTask }) {
   );
 }
 
+/** A subagent's live trail: its assignment (folded), each tool call it made
+ *  in the same wording the chat uses for the main agent's calls, and the
+ *  report as it is being written. Pinned to the bottom while it runs, like a
+ *  log tail. */
+function SubagentDetail({ task }: { task: BgTask }) {
+  const { t } = useTranslation();
+  const [showPrompt, setShowPrompt] = useState(false);
+  const box = useRef<HTMLDivElement>(null);
+  const running = task.status === 'running';
+  const steps = task.steps ?? [];
+  useEffect(() => {
+    if (running && box.current) box.current.scrollTop = box.current.scrollHeight;
+  }, [steps.length, task.output, running]);
+  return (
+    <div ref={box} className="mt-2 max-h-[28rem] space-y-2 overflow-y-auto">
+      {task.prompt && (
+        <div className="text-[11px] text-muted-foreground">
+          <button
+            type="button"
+            onClick={() => setShowPrompt((v) => !v)}
+            className="inline-flex items-center gap-1 transition-colors hover:text-foreground"
+          >
+            <ChevronDownIcon className={cn('size-3 transition-transform', !showPrompt && '-rotate-90')} />
+            {t('tasks.assignment')}
+          </button>
+          {showPrompt && (
+            <p className="mt-1 rounded-md bg-muted/50 p-2 whitespace-pre-wrap break-words">{task.prompt}</p>
+          )}
+        </div>
+      )}
+      {steps.length > 0 && (
+        <ul className="space-y-1">
+          {steps.map((step, i) => {
+            const call: ToolCall = { tool: step.tool, command: step.command, status: step.status };
+            const parts = describeCall(call, t, step.status === 'running' ? 'running' : 'past');
+            return (
+              <li key={i} className="flex items-start gap-1.5 text-[12px] text-muted-foreground">
+                {step.status === 'running' ? (
+                  <LoaderIcon className="mt-0.5 size-3 shrink-0 animate-spin text-primary" />
+                ) : (
+                  <span className="mt-[7px] size-1 shrink-0 rounded-full bg-muted-foreground/60" aria-hidden />
+                )}
+                <span className={cn('min-w-0 break-words', step.status === 'running' && 'shimmer-text')}>
+                  <ToolLabel parts={parts} failed={step.status === 'error'} />
+                </span>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+      {task.output.trim() ? (
+        <div className="rounded-md bg-muted/30 p-2 text-[13px]">
+          <Markdown text={task.output} streaming={running} />
+        </div>
+      ) : (
+        <p className="text-xs text-muted-foreground italic">
+          {running ? t('tasks.subagentWorking') : t('tasks.noOutput')}
+        </p>
+      )}
+    </div>
+  );
+}
+
 function TaskRow({ task, defaultOpen }: { task: BgTask; defaultOpen: boolean }) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(defaultOpen);
   const [copied, setCopied] = useState(false);
-  const Icon = task.kind === 'agent' ? BotIcon : TerminalIcon;
+  const Icon = task.kind === 'agent' || task.kind === 'subagent' ? BotIcon : TerminalIcon;
+  const kindLabel =
+    task.kind === 'subagent' ? 'tasks.kindSubagent' : task.kind === 'agent' ? 'tasks.kindAgent' : 'tasks.kindShell';
   const outcome = task.timed_out
     ? t('tasks.timedOut')
     : task.status === 'failed'
@@ -92,9 +160,15 @@ function TaskRow({ task, defaultOpen }: { task: BgTask; defaultOpen: boolean }) 
             <span className="min-w-0 break-words">{task.label || t('tasks.untitled')}</span>
           </span>
           <span className="mt-0.5 flex items-center gap-1.5 text-[11px] text-muted-foreground">
-            <span>{t(task.kind === 'agent' ? 'tasks.kindAgent' : 'tasks.kindShell')}</span>
+            <span>{t(kindLabel)}</span>
             <span aria-hidden>·</span>
             <TaskElapsed task={task} />
+            {task.kind === 'subagent' && (task.steps?.length ?? 0) > 0 && (
+              <>
+                <span aria-hidden>·</span>
+                <span>{t('tasks.steps', { count: task.steps?.length ?? 0 })}</span>
+              </>
+            )}
             {outcome && (
               <>
                 <span aria-hidden>·</span>
@@ -107,7 +181,7 @@ function TaskRow({ task, defaultOpen }: { task: BgTask; defaultOpen: boolean }) 
       </button>
       {open && (
         <>
-          <TaskOutput task={task} />
+          {task.kind === 'subagent' ? <SubagentDetail task={task} /> : <TaskOutput task={task} />}
           {task.output.trim() && (
             <button
               type="button"
@@ -138,7 +212,23 @@ export function TasksPanel() {
   const tasks = useBgTasks();
 
   if (!open) return null;
-  const ordered = [...tasks].reverse();
+  // Newest first — except that the subagents of one `delegate` call stay
+  // together in the order they were given (task 1 above task 2).
+  const groupStart = new Map<string, number>();
+  for (const task of tasks) {
+    const key = task.group || task.id;
+    const at = task.started_at ?? 0;
+    groupStart.set(key, Math.min(groupStart.get(key) ?? at, at));
+  }
+  const ordered = tasks
+    .map((task, index) => ({ task, index }))
+    .sort((a, b) => {
+      const ga = groupStart.get(a.task.group || a.task.id) ?? 0;
+      const gb = groupStart.get(b.task.group || b.task.id) ?? 0;
+      if (ga !== gb) return gb - ga;
+      return (a.task.group || a.task.id) === (b.task.group || b.task.id) ? a.index - b.index : b.index - a.index;
+    })
+    .map(({ task }) => task);
   const firstRunning = ordered.find((task) => task.status === 'running')?.id;
   const runningCount = tasks.filter((task) => task.status === 'running').length;
 

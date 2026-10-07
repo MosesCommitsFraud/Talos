@@ -89,6 +89,8 @@ NEVER_COMPRESS_TOOLS = frozenset(
         "search_knowledge",
         # Verbatim document sections: same evidence role as search_knowledge.
         "read_knowledge",
+        # Subagent reports: digests of retrieved evidence, already capped.
+        "delegate",
         "web_fetch",
         "web_search",
         # Same shape as web_search: a list of headline + URL + snippet, where a

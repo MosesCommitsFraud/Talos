@@ -84,6 +84,15 @@ DEFAULT_SETTINGS = {
     # IO-bound tools are ever overlapped — see _PARALLEL_EXTERNAL_TOOLS in
     # src/agent_loop.py. 1 = disabled (strictly sequential, the old behaviour).
     "agent_tool_parallelism": 4,
+    # Subagents (`delegate`, src/subagents.py): parallel read-only helper turns.
+    # Reasoning off|low|medium|high — off by default: they read and extract,
+    # and a thinking pass each costs more wall-clock than parallelism saves.
+    # Parallelism 3 suits a DGX Spark (vLLM batches, bandwidth-bound decode).
+    "subagents_enabled": True,
+    "subagent_reasoning": "off",
+    "subagent_parallelism": 3,
+    "subagent_max_rounds": 12,
+    "subagent_max_runtime_s": 900,
     "agent_max_rounds": 20,  # per-message agent step cap (clamped 1..200)
     # DB-mode (query_sql button) round ceiling. Big schemas need many
     # list_tables/describe/SELECT round-trips to navigate, so DB turns raise

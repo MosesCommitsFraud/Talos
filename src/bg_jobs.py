@@ -14,6 +14,11 @@ Two kinds of job share that machinery:
     and reports back through exactly the same log/exit-file contract, so
     refresh() / pending_followups() / the monitor treat both identically.
     See src/bg_agent_task.py for the runner.
+  * ``kind="subagent"`` — one of several parallel helper turns the agent
+    delegates within its own turn (`delegate`, src/subagents.py). Same
+    in-process lifecycle as an agent job, but the delegating turn awaits the
+    result itself, so it is born ``followed_up`` (no auto-continue) and it
+    also writes a live step list (``.steps.json``) for the task tray.
 
 Design goals:
   * Restart-safe: status is derived from an on-disk exit-code file, not a live
@@ -64,6 +69,8 @@ _MAX_OUTPUT_CHARS = 16000
 # files) is kept before pruning, so neither the store nor data/bg_jobs/ grows
 # without bound. The agent has already consumed the result by then.
 _RETENTION_S = 3600  # 1 hour after follow-up
+# Jobs that live as asyncio tasks in the launching process, not OS processes.
+_IN_PROCESS_KINDS = ("agent", "subagent")
 
 
 def _load() -> Dict[str, Dict[str, Any]]:
@@ -180,6 +187,8 @@ def launch_agent(
     session_id: str,
     label: str = "",
     max_runtime_s: int = DEFAULT_MAX_RUNTIME_S,
+    kind: str = "agent",
+    extra: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Register an ``kind="agent"`` job and return its record (status='running').
 
@@ -199,7 +208,7 @@ def launch_agent(
     rec = {
         "id": job_id,
         "session_id": session_id,
-        "kind": "agent",
+        "kind": kind,
         "command": (label or task.strip().split("\n")[0])[:200],
         "task": task,
         "status": "running",
@@ -209,14 +218,41 @@ def launch_agent(
         "ended_at": None,
         "exit_code": None,
         "max_runtime_s": max_runtime_s,
-        "followed_up": False,
+        # A subagent's result is consumed by the turn that delegated it, so the
+        # monitor must never auto-continue the chat for it.
+        "followed_up": kind == "subagent",
         "log_path": str(_JOBS_DIR / f"{job_id}.log"),
         "exit_path": str(_JOBS_DIR / f"{job_id}.exit"),
+        "steps_path": str(_JOBS_DIR / f"{job_id}.steps.json"),
+        **(extra or {}),
     }
     jobs = _load()
     jobs[job_id] = rec
     _save(jobs)
     return rec
+
+
+def write_live(rec: Dict[str, Any], text: str, steps: List[Dict[str, Any]]) -> None:
+    """Persist a running subagent's progress: its prose so far (the log the
+    tray tails) and its step list. Never touches the exit file, so refresh()
+    still sees the job as running."""
+    try:
+        Path(rec["log_path"]).write_text(text or "", encoding="utf-8")
+        atomic_write_json(rec["steps_path"], steps)
+    except Exception as e:
+        logger.debug("write_live failed for %s: %s", rec.get("id"), e)
+
+
+def read_steps(rec: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """A subagent's live step list ([] for every other job kind)."""
+    path = rec.get("steps_path")
+    if not path:
+        return []
+    try:
+        data = json.loads(Path(path).read_text(encoding="utf-8"))
+    except Exception:
+        return []
+    return data if isinstance(data, list) else []
 
 
 def complete_agent(job_id: str, report: str, exit_code: int = 0) -> None:
@@ -310,7 +346,7 @@ def refresh() -> Dict[str, Dict[str, Any]]:
             changed = True
         elif (now - rec.get("started_at", now)) > rec.get("max_runtime_s", DEFAULT_MAX_RUNTIME_S):
             # Runaway / stuck — reap it but STILL surface a follow-up.
-            if rec.get("kind") == "agent":
+            if rec.get("kind") in _IN_PROCESS_KINDS:
                 _cancel_agent(rec["id"])
             else:
                 _kill(rec.get("pid"))
@@ -319,7 +355,7 @@ def refresh() -> Dict[str, Dict[str, Any]]:
             rec["ended_at"] = now
             rec["timed_out"] = True
             changed = True
-        elif rec.get("kind") == "agent":
+        elif rec.get("kind") in _IN_PROCESS_KINDS:
             # An agent job has no OS process to probe — it lives in the event
             # loop of the process that launched it. If that process is gone
             # (server restart, crash), nothing will ever write its exit file,
@@ -405,7 +441,7 @@ def list_for_session(session_id: str) -> List[Dict[str, Any]]:
 def result_text(rec: Dict[str, Any]) -> str:
     """Human/agent-readable summary of a finished job, for the follow-up."""
     out = _read_output(rec)
-    if rec.get("kind") == "agent":
+    if rec.get("kind") in _IN_PROCESS_KINDS:
         # An agent job's "output" is a written report, not a command's stdout;
         # exit codes and stderr framing would only mislead the reading model.
         if rec.get("timed_out"):

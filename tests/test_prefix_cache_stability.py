@@ -275,3 +275,23 @@ async def test_sql_knowledge_refresh_is_appended_not_rewritten(monkeypatch):
     # The refresh sits at the end and carries only the new section.
     tail = second[-1]["content"]
     assert "Tabelle B" in tail and "Tabelle A" not in tail
+
+
+async def test_subagent_turn_offers_only_its_allowlist(captured):
+    from src.subagents import SUBAGENT_TOOLS
+
+    msgs = [{"role": "user", "content": "lies Kapitel 2"}]
+    await _run_turn(msgs, use_rag=True, tool_allowlist=SUBAGENT_TOOLS, subagent=True)
+    (call,) = captured
+    names = {t["function"]["name"] for t in call["tools"]}
+    assert names <= set(SUBAGENT_TOOLS)
+    assert {"read_knowledge", "search_knowledge"} <= names
+    assert "delegate" not in names and "bash" not in names
+
+
+async def test_main_turn_offers_navigation_and_delegate(captured):
+    msgs = [{"role": "user", "content": "Vergleiche die Handbücher"}]
+    await _run_turn(msgs, use_rag=True)
+    (call,) = captured
+    names = {t["function"]["name"] for t in call["tools"]}
+    assert {"list_knowledge", "read_knowledge", "grep_knowledge", "delegate"} <= names
