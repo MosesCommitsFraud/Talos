@@ -640,6 +640,9 @@ export const useChat = create<ChatState>((set, get) => {
     const userMsg: UiMessage = { id: uid(), role: 'user', content: text, attachments, artifactSelection, createdAt: Date.now() };
     const aiMsg: UiMessage = { id: uid(), role: 'assistant', content: '', streaming: true, createdAt: Date.now() };
     const abort = new AbortController();
+    // The connection ended without the run's end marker — the server-side run
+    // carries on (a long silent stretch, e.g. waiting on subagents, can drop it).
+    let dropped = false;
     // A new turn supersedes any open question/plan card: mark them answered so
     // they go inert, and clear the "needs you" flag.
     writeRuntime(sid, (rt) => ({
@@ -754,7 +757,7 @@ export const useChat = create<ChatState>((set, get) => {
               signal: abort.signal,
               onEvent,
             });
-      await consume((ev) => {
+      const finished = await consume((ev) => {
           if ('delta' in ev && typeof ev.delta === 'string') {
             smoother.push(ev.delta, !!ev.thinking);
             return;
@@ -939,6 +942,7 @@ export const useChat = create<ChatState>((set, get) => {
             }
           }
       });
+      dropped = !finished && !abort.signal.aborted;
       // The stream is over — show whatever is still queued instead of animating
       // into a bubble the UI already considers settled.
       smoother.flush();
@@ -987,25 +991,37 @@ export const useChat = create<ChatState>((set, get) => {
           return empty ? { messages: rt.messages.slice(0, -1) } : {};
         });
       }
-      // Badge it "Done" if it finished in the background (user is elsewhere) — but
-      // not when it ended on a question; that's surfaced as "Needs you" instead.
-      const awaiting = get().runtimes[sid]?.awaitingInput;
-      if (!awaiting && get().sessionId !== sid) set((s) => ({ completed: { ...s.completed, [sid]: true } }));
+      // Only the connection ended, not the turn: rejoin the run. The resume
+      // replays it from the start with the server's own elapsed time, so the
+      // timer and the final "Worked for" cover the whole turn; a run that
+      // finished meanwhile is picked up from the saved history instead.
+      if (dropped) {
+        setTimeout(() => {
+          void fetchActiveRuns()
+            .then((runs) => get().attachRun(sid, runs.find((r) => r.sessionId === sid)?.elapsedMs ?? null))
+            .catch(() => { /* best-effort */ });
+        }, 1000);
+      } else {
+        // Badge it "Done" if it finished in the background (user is elsewhere) — but
+        // not when it ended on a question; that's surfaced as "Needs you" instead.
+        const awaiting = get().runtimes[sid]?.awaitingInput;
+        if (!awaiting && get().sessionId !== sid) set((s) => ({ completed: { ...s.completed, [sid]: true } }));
 
-      // A goal is a bounded Ralph-style loop: after each completed turn, inspect
-      // the explicit completion signal and otherwise schedule another turn.
-      // setTimeout avoids re-entering send() before this turn's cleanup settles.
-      const rt = get().runtimes[sid];
-      const goal = rt?.goal;
-      if (goal?.status === 'running' && !rt.awaitingInput) {
-        const answer = [...rt.messages].reverse().find((m) => m.role === 'assistant' && m.content.trim())?.content ?? '';
-        if (/\[GOAL_COMPLETE\]/i.test(answer)) {
-          writeRuntime(sid, () => ({
-            goal: { ...goal, status: 'completed' },
-            messages: rt.messages.map((m) => ({ ...m, content: m.content.replace(/\s*\[GOAL_COMPLETE\]\s*/gi, '') })),
-          }));
-        } else {
-          setTimeout(() => { void get().resumeGoal(sid); }, 0);
+        // A goal is a bounded Ralph-style loop: after each completed turn, inspect
+        // the explicit completion signal and otherwise schedule another turn.
+        // setTimeout avoids re-entering send() before this turn's cleanup settles.
+        const rt = get().runtimes[sid];
+        const goal = rt?.goal;
+        if (goal?.status === 'running' && !rt.awaitingInput) {
+          const answer = [...rt.messages].reverse().find((m) => m.role === 'assistant' && m.content.trim())?.content ?? '';
+          if (/\[GOAL_COMPLETE\]/i.test(answer)) {
+            writeRuntime(sid, () => ({
+              goal: { ...goal, status: 'completed' },
+              messages: rt.messages.map((m) => ({ ...m, content: m.content.replace(/\s*\[GOAL_COMPLETE\]\s*/gi, '') })),
+            }));
+          } else {
+            setTimeout(() => { void get().resumeGoal(sid); }, 0);
+          }
         }
       }
     }

@@ -1061,7 +1061,14 @@ def setup_session_routes(session_manager: SessionManager, config: dict):
                 "history": [m.to_dict() for m in getattr(session, "history", [])],
             }
 
-        from src import agent_runs
+        from src import agent_runs, bg_jobs
+
+        # Background jobs and subagents of this chat — the UI hides which model
+        # each subagent ran on, so this is where to look for it.
+        try:
+            bg_tasks = bg_jobs.list_for_session(sid)
+        except Exception as e:
+            bg_tasks = [{"error": str(e)}]
 
         payload = {
             "exported_at": datetime.now().isoformat(),
@@ -1072,6 +1079,7 @@ def setup_session_routes(session_manager: SessionManager, config: dict):
             "live_session": live,
             "messages": message_rows,
             "usage_events": usage_rows,
+            "bg_tasks": bg_tasks,
         }
 
         safe_name = re.sub(r"[^\w\-_]", "_", (session_row or {}).get("name") or sid)

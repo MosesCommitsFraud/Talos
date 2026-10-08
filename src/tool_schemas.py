@@ -297,7 +297,8 @@ FUNCTION_TOOL_SCHEMAS = [
                 "(analyses, charts, conversions, drafts into files). Use it when a request "
                 "splits into 2-6 separate pieces that each need several steps — one per "
                 "document, chapter range, recording, web topic, data file or comparison "
-                "item. Not for a single quick lookup."
+                "item. Use it on your own initiative — the user does not have to ask "
+                "for subagents. Not for a single quick lookup."
             ),
             "parameters": {
                 "type": "object",
@@ -328,9 +329,13 @@ FUNCTION_TOOL_SCHEMAS = [
                                     "type": "string",
                                     "enum": ["small", "large"],
                                     "description": (
-                                        "small (default, much faster): clear lookups and "
-                                        "extraction, simple scripts. large (your own "
-                                        "model): judgement, synthesis, tricky analysis."
+                                        "small (default, much faster): almost every task — "
+                                        "lookups, extraction, web research and page "
+                                        "summaries, simple scripts. You synthesize the "
+                                        "reports yourself, so that is no reason for large. "
+                                        "large (your own model, many times slower): only "
+                                        "when the subagent itself must make a hard "
+                                        "judgement or write final text."
                                     ),
                                 },
                                 "context": {
@@ -394,8 +399,10 @@ FUNCTION_TOOL_SCHEMAS = [
             "description": (
                 "Find every exact occurrence of a term in the knowledge base (or in one "
                 "document): error codes, part numbers, menu names, commands, people. "
-                "Unlike search_knowledge it is literal and complete, and it reports where "
-                "each hit sits (section, page) so you can read it with read_knowledge."
+                "Unlike search_knowledge it is literal and complete, and it lists the "
+                "sections with hits so you can read them with read_knowledge. For "
+                "'everything about X' or an overview of a topic, grep the word stem and "
+                "read every listed section."
             ),
             "parameters": {
                 "type": "object",

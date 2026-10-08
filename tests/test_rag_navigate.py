@@ -212,6 +212,7 @@ def test_grep_in_document_names_the_section(kb):
     out = nav.grep_knowledge({"pattern": "e-4711", "document": "Handbuch.pdf"})
     assert out.startswith("1 occurrence(s)")
     assert "§3 Fehler (p. 9)" in out
+    assert "Sections with hits: §3 Fehler (1)" in out
 
 
 def test_grep_everywhere_and_miss(kb):

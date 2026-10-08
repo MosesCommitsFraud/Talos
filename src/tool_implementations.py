@@ -1609,7 +1609,8 @@ async def do_search_knowledge(
                 f'No indexed document matched "{query}". Before concluding that the '
                 "knowledge base has nothing: search again with the user's literal "
                 "question, and with the single key term on its own (e.g. just "
-                "'Pivot'). If those also come back empty, tell the user that nothing "
+                "'Pivot'); for a name, code or menu item also try grep_knowledge "
+                "with its word stem. If those also come back empty, tell the user that nothing "
                 "on this is stored in the knowledge base. Do NOT fill the gap from "
                 "general knowledge and present it as their documentation."
             ),

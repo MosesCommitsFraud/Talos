@@ -725,6 +725,34 @@ function AddModelsPanel() {
     try { await fn(); setMsg({ text: ok, ok: true }); refresh(); } catch (e) { setMsg({ text: (e as Error).message, ok: false }); }
   };
 
+  // "Lokale suchen" scans the known hosts on the usual model-server ports.
+  // Its hits used to be thrown away (only "discovery finished" appeared), so
+  // a second vLLM on another port could never be picked up from here. Keep
+  // the servers that are not configured yet and offer each one for adding.
+  const [found, setFound] = useState<Array<{ base: string; models: string[] }> | null>(null);
+  const [searching, setSearching] = useState(false);
+  const baseOf = (u: string) => u.replace(/\/chat\/completions\/?$/, '').replace(/\/+$/, '');
+  const discover = async () => {
+    setMsg(null);
+    setSearching(true);
+    try {
+      const data = await discoverEndpoints();
+      const items = Array.isArray((data as { items?: unknown }).items) ? (data as { items: unknown[] }).items : [];
+      const known = new Set((endpoints ?? []).map((e) => baseOf(e.base_url)));
+      setFound(
+        items
+          .map((raw) => raw as { url?: string; models?: unknown[] })
+          .filter((it) => typeof it.url === 'string')
+          .map((it) => ({ base: baseOf(it.url as string), models: (it.models ?? []).map(String) }))
+          .filter((it) => !known.has(it.base)),
+      );
+    } catch (e) {
+      setMsg({ text: (e as Error).message, ok: false });
+    } finally {
+      setSearching(false);
+    }
+  };
+
   return (
     <Page>
       <Section title={t('settings.models.addEndpoint')} padded>
@@ -741,14 +769,41 @@ function AddModelsPanel() {
             <Button size="sm" variant="outline" disabled={!url.trim()} onClick={() => void run(() => testModelEndpoint(url, apiKey || undefined), t('settings.models.connectionOk'))}>
               {t('common.test')}
             </Button>
-            <Button size="sm" variant="outline" onClick={() => void run(() => discoverEndpoints(), t('settings.models.discoveryFinished'))}>
-              {t('settings.models.discover')}
+            <Button size="sm" variant="outline" disabled={searching} onClick={() => void discover()}>
+              {searching ? t('settings.models.searching') : t('settings.models.discover')}
             </Button>
             <Button size="sm" variant="outline" onClick={() => { setUrl('http://localhost:11434'); setKind('llm'); }}>
               {t('settings.models.ollamaPreset')}
             </Button>
           </div>
           {msg && <p className={cn('text-xs', msg.ok ? 'text-success' : 'text-destructive-foreground')}>{msg.text}</p>}
+          {found && (
+            <div className="space-y-1.5 pt-1">
+              <p className="text-xs text-muted-foreground">
+                {found.length ? t('settings.models.foundNew', { count: found.length }) : t('settings.models.foundNone')}
+              </p>
+              {found.map((it) => (
+                <div key={it.base} className="flex items-center justify-between gap-2 rounded-lg border bg-background px-3 py-2">
+                  <div className="min-w-0">
+                    <div className="truncate text-sm">{it.base}</div>
+                    <div className="truncate text-xs text-muted-foreground">{it.models.join(', ')}</div>
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() =>
+                      void run(async () => {
+                        await addModelEndpoint({ baseUrl: it.base, modelType: 'llm' });
+                        setFound((cur) => (cur ?? []).filter((x) => x.base !== it.base));
+                      }, t('settings.models.endpointAdded'))
+                    }
+                  >
+                    <PlusIcon /> {t('common.add')}
+                  </Button>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       </Section>
 

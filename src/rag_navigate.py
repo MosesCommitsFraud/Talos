@@ -570,10 +570,17 @@ def grep_knowledge(args: Dict[str, Any]) -> str:
     doc = str(args.get("document") or "").strip()
     hits: List[str] = []
     count = 0
+    # Where the hits sit, as one overview line: for "everything about X" the
+    # model needs the list of sections to read, not just the first 40 snippets.
+    summary = ""
     if doc:
         base, manager, row = resolve_document(doc)
+        per_section: List[str] = []
         for sec in build_sections(_ordered_chunks(manager, row["source"])):
             low = sec["text"].lower()
+            n_sec = low.count(needle)
+            if n_sec:
+                per_section.append(f"§{sec['n']} {sec['title']} ({n_sec})")
             pos = low.find(needle)
             while pos >= 0:
                 count += 1
@@ -588,19 +595,39 @@ def grep_knowledge(args: Dict[str, Any]) -> str:
                     )
                 pos = low.find(needle, pos + len(needle))
         where = f" in {row.get('filename')}"
-        follow = 'Read a hit\'s section with read_knowledge {"document": ..., "section": n}.'
+        follow = (
+            'Read the sections you need with read_knowledge {"document": ..., "section": "n"} '
+            '(ranges like "4-6" work). For a question about everything on this term, read '
+            "every listed section, not just the first."
+        )
+        if per_section:
+            summary = "Sections with hits: " + ", ".join(per_section) + "\n"
     else:
+        per_doc: Dict[str, int] = {}
         for base, manager in _bases():
             for h in manager.grep_chunks(pattern, limit=500, exclude_scopes=["sql"]) or []:
                 count += 1
+                name = str(h.get("filename") or "")
+                per_doc[name] = per_doc.get(name, 0) + 1
                 if len(hits) < MAX_GREP_HITS:
                     loc = f", p. {h['page']}" if h.get("page") is not None else ""
-                    hits.append(f"- {h.get('filename')}{loc}: {h.get('snippet')}")
+                    hits.append(f"- {name}{loc}: {h.get('snippet')}")
+        # All hits in one document: answer as if it had been named, so the
+        # result lists the sections to read instead of costing another round.
+        if len(per_doc) == 1:
+            try:
+                scoped = grep_knowledge({"pattern": pattern, "document": next(iter(per_doc))})
+            except NavigationError:
+                scoped = ""
+            if "occurrence(s)" in scoped.split("\n", 1)[0]:
+                return scoped
         where = ""
         follow = (
-            "Narrow to one document with `document`, or open one with read_knowledge "
-            "to see where the hit sits in its outline."
+            "Pass `document` to see which sections of a document contain the term, "
+            "then read those with read_knowledge."
         )
+        if len(per_doc) > 1:
+            summary = "Documents with hits: " + ", ".join(f"{n} ({c})" for n, c in per_doc.items()) + "\n"
     if not hits:
         return (
             f'"{pattern}" does not occur literally{where} in the knowledge base. '
@@ -608,4 +635,4 @@ def grep_knowledge(args: Dict[str, Any]) -> str:
             "for a meaning-based search."
         )
     more = f" Showing {len(hits)}." if count > len(hits) else ""
-    return f'{count} occurrence(s) of "{pattern}"{where}.{more} {follow}\n' + "\n".join(hits)
+    return f'{count} occurrence(s) of "{pattern}"{where}.{more} {follow}\n' + summary + "\n".join(hits)

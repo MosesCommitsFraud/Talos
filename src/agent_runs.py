@@ -285,6 +285,9 @@ def start(session_id: str, agen: AsyncGenerator[str, None]) -> _Run:
     return run
 
 
+_KEEPALIVE_S = 15.0
+
+
 async def subscribe(session_id: str) -> AsyncGenerator[str, None]:
     """Replay the run's buffer from the start, then stream live until it ends.
     Safe to call repeatedly (reconnect) and from multiple clients at once."""
@@ -305,7 +308,14 @@ async def subscribe(session_id: str) -> AsyncGenerator[str, None]:
         if run.status != "running":
             return
         while True:
-            seq, ev = await q.get()
+            try:
+                seq, ev = await asyncio.wait_for(q.get(), _KEEPALIVE_S)
+            except asyncio.TimeoutError:
+                # Nothing to send for a while (a long tool call, subagents at
+                # work): an SSE comment keeps proxies and the browser from
+                # closing the idle connection. Clients skip comment lines.
+                yield ": keepalive\n\n"
+                continue
             if seq is None:  # end sentinel
                 while next_seq < len(run.buffer):  # flush any tail the sentinel raced
                     yield run.buffer[next_seq]

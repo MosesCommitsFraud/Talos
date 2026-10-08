@@ -1388,7 +1388,7 @@ export async function streamChat(opts: {
   flags?: StreamFlags;
   signal?: AbortSignal;
   onEvent: (ev: ChatEvent) => void;
-}): Promise<void> {
+}): Promise<boolean> {
   const fd = new FormData();
   fd.set('message', opts.message);
   fd.set('session', opts.sessionId);
@@ -1427,26 +1427,27 @@ export async function streamChat(opts: {
     throw new Error(detail);
   }
 
-  await readSse(res, opts.onEvent);
+  return readSse(res, opts.onEvent);
 }
 
 /** Reattach to a turn that is still running server-side (the run is detached
  *  from the request that started it, so a reload/tab close doesn't kill it).
  *  The server replays the run's whole event log before going live, so the
- *  caller rebuilds the turn from the start exactly as it originally streamed. */
+ *  caller rebuilds the turn from the start exactly as it originally streamed.
+ *  Resolves like streamChat: true once the run has finished. */
 export async function resumeChat(opts: {
   sessionId: string;
   signal?: AbortSignal;
   onEvent: (ev: ChatEvent) => void;
-}): Promise<void> {
+}): Promise<boolean> {
   const res = await fetch(`/api/chat/resume/${opts.sessionId}`, {
     credentials: 'same-origin',
     signal: opts.signal,
   });
   // 404 = the run finished (or was evicted) between discovery and reconnect.
-  if (res.status === 404) return;
+  if (res.status === 404) return true;
   if (!res.ok || !res.body) throw new Error(`resumeChat: ${res.status}`);
-  await readSse(res, opts.onEvent);
+  return readSse(res, opts.onEvent);
 }
 
 /** Sessions whose turn is still running server-side — asked once on page load
@@ -1466,16 +1467,17 @@ export async function fetchActiveRuns(): Promise<{ sessionId: string; elapsedMs:
   }
 }
 
-/** Parse an SSE body frame-by-frame, dispatching each `data:` payload. Returns
- *  when the stream ends or a `[DONE]` sentinel arrives. */
-async function readSse(res: Response, onEvent: (ev: ChatEvent) => void): Promise<void> {
+/** Parse an SSE body frame-by-frame, dispatching each `data:` payload. Resolves
+ *  true at the `[DONE]` sentinel, false when the connection ends without it —
+ *  a dropped connection, while the detached run may well still be going. */
+async function readSse(res: Response, onEvent: (ev: ChatEvent) => void): Promise<boolean> {
   const reader = res.body!.getReader();
   const decoder = new TextDecoder();
   let buffer = '';
 
   for (;;) {
     const { done, value } = await reader.read();
-    if (done) break;
+    if (done) return false;
     buffer += decoder.decode(value, { stream: true });
 
     let sep: number;
@@ -1485,7 +1487,7 @@ async function readSse(res: Response, onEvent: (ev: ChatEvent) => void): Promise
       for (const line of frame.split('\n')) {
         if (!line.startsWith('data: ')) continue;
         const payload = line.slice(6);
-        if (payload === '[DONE]') return;
+        if (payload === '[DONE]') return true;
         try {
           onEvent(JSON.parse(payload) as ChatEvent);
         } catch {

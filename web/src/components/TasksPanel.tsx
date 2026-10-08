@@ -1,10 +1,33 @@
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { ArrowLeftIcon, CheckIcon, ChevronRightIcon, CopyIcon, LoaderIcon, SquareIcon, XIcon } from 'lucide-react';
+import {
+  ArrowLeftIcon,
+  BookOpenIcon,
+  CheckIcon,
+  ChevronRightIcon,
+  CloudSunIcon,
+  CodeIcon,
+  CopyIcon,
+  DatabaseIcon,
+  FileTextIcon,
+  FolderIcon,
+  GlobeIcon,
+  ImageIcon,
+  LoaderIcon,
+  type LucideIcon,
+  NewspaperIcon,
+  PencilIcon,
+  SearchIcon,
+  SquareIcon,
+  TerminalIcon,
+  TextSearchIcon,
+  WrenchIcon,
+  XIcon,
+} from 'lucide-react';
 import { useQueryClient } from '@tanstack/react-query';
 import { stopBgTask } from '@/api/client';
 import type { BgTask, ToolCall } from '@/api/types';
-import { describeCall } from '@/lib/toolLabels';
+import { describeCall, toolFamily } from '@/lib/toolLabels';
 import { cn, copyTextToClipboard, formatDurationMs } from '@/lib/utils';
 import { useBgTasks } from '@/lib/useBgTasks';
 import { useChat } from '@/state/chat';
@@ -61,31 +84,26 @@ function MetaLine({ task }: { task: BgTask }) {
     : outcome === 'failed' && task.kind !== 'subagent' ? t('tasks.exitCode', { code: task.exit_code ?? -1 })
     : t(`tasks.state.${outcome}`);
   const steps = task.steps?.length ?? 0;
+  // Each part keeps its separator and stays on one line, so a narrow panel
+  // wraps between parts ("· großes Modell") rather than inside them.
+  const parts: React.ReactNode[] = [
+    <span key="state" className={cn(outcome === 'failed' && 'text-destructive-foreground')}>{state}</span>,
+  ];
+  if (task.kind === 'subagent') {
+    // Which model a subagent ran on is a debugging detail — it is in the
+    // chat's debug dump, not here.
+    parts.push(<span key="type">{t(task.agent_type === 'worker' ? 'tasks.typeWorker' : 'tasks.typeResearch')}</span>);
+  }
+  parts.push(<Elapsed key="elapsed" task={task} />);
+  if (steps > 0) parts.push(<span key="steps">{t('tasks.steps', { count: steps })}</span>);
   return (
-    <span className="flex min-w-0 items-center gap-1.5 text-[11px] text-muted-foreground">
-      <span className={cn(outcome === 'failed' && 'text-destructive-foreground')}>{state}</span>
-      {task.kind === 'subagent' && (
-        <>
-          <span aria-hidden>·</span>
-          <span>{t(task.agent_type === 'worker' ? 'tasks.typeWorker' : 'tasks.typeResearch')}</span>
-          {task.model_size && (
-            <>
-              <span aria-hidden>·</span>
-              <span title={task.model || undefined}>
-                {t(task.model_size === 'large' ? 'tasks.modelLarge' : 'tasks.modelSmall')}
-              </span>
-            </>
-          )}
-        </>
-      )}
-      <span aria-hidden>·</span>
-      <Elapsed task={task} />
-      {steps > 0 && (
-        <>
-          <span aria-hidden>·</span>
-          <span>{t('tasks.steps', { count: steps })}</span>
-        </>
-      )}
+    <span className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[11px] text-muted-foreground">
+      {parts.map((part, i) => (
+        <span key={i} className="inline-flex items-center gap-1.5 whitespace-nowrap">
+          {i > 0 && <span aria-hidden>·</span>}
+          {part}
+        </span>
+      ))}
     </span>
   );
 }
@@ -211,27 +229,59 @@ function SectionTitle({ children }: { children: React.ReactNode }) {
   return <h4 className="mb-2 text-[11px] font-medium tracking-wide text-muted-foreground uppercase">{children}</h4>;
 }
 
+/** One glyph per tool family, so the timeline can be scanned by kind. */
+const STEP_ICON: Record<string, LucideIcon> = {
+  web: SearchIcon,
+  fetch: GlobeIcon,
+  news: NewspaperIcon,
+  weather: CloudSunIcon,
+  command: TerminalIcon,
+  code: CodeIcon,
+  read: FileTextIcon,
+  write: PencilIcon,
+  edit: PencilIcon,
+  document: FileTextIcon,
+  ls: FolderIcon,
+  grep: TextSearchIcon,
+  glob: FolderIcon,
+  knowledge: BookOpenIcon,
+  knowledgeList: BookOpenIcon,
+  knowledgeRead: BookOpenIcon,
+  knowledgeGrep: BookOpenIcon,
+  sql: DatabaseIcon,
+  image: ImageIcon,
+};
+
 /** What the subagent did, as a vertical timeline in the chat's own wording. */
 function StepTimeline({ task }: { task: BgTask }) {
   const { t } = useTranslation();
   const steps = task.steps ?? [];
   if (steps.length === 0) return null;
   return (
-    <ol className="relative space-y-2.5 border-l border-border/70 pl-4">
+    <ol>
       {steps.map((step, i) => {
         const call: ToolCall = { tool: step.tool, command: step.command, status: step.status };
         const running = step.status === 'running';
+        const failed = step.status === 'error';
+        const Icon = running ? LoaderIcon : (STEP_ICON[toolFamily(step.tool)] ?? WrenchIcon);
         return (
-          <li key={i} className="relative text-[12.5px] leading-snug text-muted-foreground">
+          <li key={i} className="relative flex gap-2.5 pb-3 last:pb-0">
+            {i < steps.length - 1 && (
+              <span aria-hidden className="absolute top-6 bottom-0 left-3 w-px -translate-x-1/2 bg-border" />
+            )}
             <span
               aria-hidden
               className={cn(
-                'absolute top-[5px] -left-[21px] size-2.5 rounded-full border-2 border-card',
-                running ? 'bg-primary' : step.status === 'error' ? 'bg-destructive-foreground' : 'bg-muted-foreground/40',
+                'flex size-6 shrink-0 items-center justify-center rounded-full border bg-card',
+                running ? 'border-primary/40 text-primary'
+                : failed ? 'border-destructive-foreground/40 text-destructive-foreground'
+                : 'text-muted-foreground',
               )}
-            />
-            <span className={cn('break-words', running && 'shimmer-text')}>
-              <ToolLabel parts={describeCall(call, t, running ? 'running' : 'past')} failed={step.status === 'error'} />
+            >
+              <Icon className={cn('size-3', running && 'animate-spin')} />
+            </span>
+            <span className={cn('min-w-0 pt-[3px] text-[12.5px] leading-snug break-words text-muted-foreground', running && 'shimmer-text')}>
+              <ToolLabel parts={describeCall(call, t, running ? 'running' : 'past')} failed={failed} />
             </span>
           </li>
         );
