@@ -1450,6 +1450,8 @@ const de: typeof en = {
       subagents: 'Subagenten',
       subagentsEnabled: 'Subagenten erlauben',
       subagentsEnabledHint: 'Der Agent darf unabhängige Recherche-Teile an parallele Helfer abgeben (nur lesende Tools).',
+      endpointOffline: 'offline',
+      endpointOfflineHint: 'Talos erreicht diesen Endpoint gerade nicht und kennt seine Modelle noch nicht. Prüfe die URL (aus Sicht des Talos-Containers) und ob der Server läuft; die Liste lädt sich danach von selbst neu.',
       subagentLabel: 'Subagenten',
       subagentModelHint: 'Leer = gleiches Modell wie im Chat. Ein kleines Modell (z. B. 4B) macht Subagenten deutlich schneller.',
       subagentReasoning: 'Denken der Subagenten',

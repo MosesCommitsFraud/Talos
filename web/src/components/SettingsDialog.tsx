@@ -211,9 +211,18 @@ function useEndpoints() {
 
 function EndpointModelRows({ s, epKey, modelKey, label }: { s: Draft; epKey: string; modelKey: string; label: string }) {
   const { t } = useTranslation();
-  const endpoints = useEndpoints();
+  const { data } = useQuery({ queryKey: ['models'], queryFn: fetchModels });
+  // Unreachable endpoints stay listed (marked offline) instead of vanishing:
+  // a server that is still starting, or one whose model list has not been
+  // fetched yet, must remain selectable — otherwise the picker looks as if
+  // the endpoint was never added.
+  const endpoints = (data ?? []).filter((e) => e.model_type !== 'embedding');
   const epId = String(s.value(epKey) ?? '');
-  const models = endpoints.find((e) => e.id === epId)?.models ?? endpoints.flatMap((e) => e.models);
+  const current = String(s.value(modelKey) ?? '');
+  const selected = endpoints.find((e) => e.id === epId);
+  const listed = selected ? selected.models : endpoints.filter((e) => e.is_enabled).flatMap((e) => e.models);
+  // Keep the saved model selectable even while its endpoint reports none.
+  const models = current && !listed.includes(current) ? [current, ...listed] : listed;
   return (
     <>
       <Row label={t('settings.ai.endpoint', { label })}>
@@ -221,13 +230,22 @@ function EndpointModelRows({ s, epKey, modelKey, label }: { s: Draft; epKey: str
           className="w-56"
           value={epId}
           onChange={(v) => s.setValue(epKey, v)}
-          options={[{ value: '', label: '—' }, ...endpoints.map((e) => ({ value: e.id, label: e.name }))]}
+          options={[
+            { value: '', label: '—' },
+            ...endpoints.map((e) => ({
+              value: e.id,
+              label: e.is_enabled ? e.name : `${e.name} (${t('settings.ai.endpointOffline')})`,
+            })),
+          ]}
         />
       </Row>
-      <Row label={t('settings.ai.model', { label })}>
+      <Row
+        label={t('settings.ai.model', { label })}
+        hint={selected && !selected.is_enabled ? t('settings.ai.endpointOfflineHint') : undefined}
+      >
         <Select
           className="w-56"
-          value={String(s.value(modelKey) ?? '')}
+          value={current}
           onChange={(v) => s.setValue(modelKey, v)}
           options={[{ value: '', label: '—' }, ...models.map((m) => ({ value: m }))]}
         />

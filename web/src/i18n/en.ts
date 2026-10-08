@@ -1444,6 +1444,8 @@ const en = {
       subagents: 'Subagents',
       subagentsEnabled: 'Allow subagents',
       subagentsEnabledHint: 'The agent may hand independent research pieces to parallel helpers (read-only tools).',
+      endpointOffline: 'offline',
+      endpointOfflineHint: 'Talos cannot reach this endpoint right now and does not know its models yet. Check the URL (as seen from the Talos container) and that the server is running; the list reloads by itself afterwards.',
       subagentLabel: 'Subagents',
       subagentModelHint: 'Empty = same model as the chat. A small model (e.g. 4B) makes subagents much faster.',
       subagentReasoning: 'Subagent reasoning',
