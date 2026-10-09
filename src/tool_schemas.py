@@ -1089,7 +1089,7 @@ FUNCTION_TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "update_plan",
-            "description": "Show the user a progress checklist for a multi-step task and keep it current as you work. Pass the complete markdown checklist with completed steps marked - [x].",
+            "description": "Show the user a progress checklist for a multi-step task and keep it current as you work: call it again as soon as a step is done (alongside your next tool calls), not only at the end. Pass the complete markdown checklist with completed steps marked - [x].",
             "parameters": {
                 "type": "object",
                 "properties": {

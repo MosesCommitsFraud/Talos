@@ -163,6 +163,11 @@ const en = {
   },
   plan: {
     progress: '{{done}}/{{total}} done',
+    title: 'Plan',
+    openInPanel: 'Show plan in the task panel',
+    closePanel: 'Close plan',
+    empty: 'No plan in this chat yet.',
+    show: 'Show plan',
   },
   chatHeader: {
     clickToRename: 'Click to rename',
@@ -382,6 +387,9 @@ const en = {
   // the activity status; clicking it opens the tray.
   tasks: {
     title: 'Tasks',
+    paneTitle: 'Subagents & background',
+    show: 'Show subagents',
+    now: 'Now: {{step}}',
     panelLabel: 'Background tasks',
     openPanel: 'Show background tasks',
     closePanel: 'Close background tasks',
@@ -814,6 +822,8 @@ const en = {
     close: 'Close preview',
     download: 'Download file',
     resize: 'Resize preview',
+    resizeDock: 'Resize sidebar',
+    resizeSplit: 'Resize split',
     error: 'Could not load this file.',
     saveError: 'Could not save this document.',
     currentVersion: 'Current version (v{{version}})',

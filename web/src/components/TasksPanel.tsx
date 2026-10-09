@@ -5,6 +5,7 @@ import {
   BookOpenIcon,
   CheckIcon,
   ChevronRightIcon,
+  ListChecksIcon,
   CloudSunIcon,
   CodeIcon,
   CopyIcon,
@@ -156,17 +157,36 @@ function StopButton({ task, withLabel }: { task: BgTask; withLabel?: boolean }) 
   return withLabel ? button : <Tooltip label={t('tasks.stop')}>{button}</Tooltip>;
 }
 
+/** What a running task is doing right now — its newest step, in the chat's
+ *  own wording. A sidebar shows several tasks at once, so this line is what
+ *  tells them apart without opening each one. */
+function CurrentStep({ task }: { task: BgTask }) {
+  const { t } = useTranslation();
+  if (task.status !== 'running') return null;
+  const steps = task.steps ?? [];
+  const step = [...steps].reverse().find((s) => s.status === 'running') ?? steps[steps.length - 1];
+  if (!step) return null;
+  const call: ToolCall = { tool: step.tool, command: step.command, status: step.status };
+  const running = step.status === 'running';
+  return (
+    <span className={cn('mt-0.5 block truncate text-[11.5px] text-muted-foreground', running && 'shimmer-text')}>
+      <ToolLabel parts={describeCall(call, t, running ? 'running' : 'past')} failed={step.status === 'error'} />
+    </span>
+  );
+}
+
 function TaskListRow({ task, onOpen }: { task: BgTask; onOpen: () => void }) {
   const { t } = useTranslation();
   return (
     <div className="group flex items-center gap-1 rounded-lg pr-1 transition-colors hover:bg-accent/60">
-      <button type="button" onClick={onOpen} className="flex min-w-0 flex-1 items-center gap-3 px-2.5 py-2 text-left">
-        <StatusDot task={task} />
+      <button type="button" onClick={onOpen} className="flex min-w-0 flex-1 items-start gap-2.5 px-2 py-1.5 text-left">
+        <StatusDot task={task} className="mt-[5px]" />
         <span className="min-w-0 flex-1">
           <span className="block truncate text-[13px] text-foreground">{task.label || t('tasks.untitled')}</span>
           <MetaLine task={task} />
+          <CurrentStep task={task} />
         </span>
-        <ChevronRightIcon className="size-3.5 shrink-0 text-muted-foreground/60 transition-colors group-hover:text-muted-foreground" />
+        <ChevronRightIcon className="mt-[3px] size-3.5 shrink-0 text-muted-foreground/60 transition-colors group-hover:text-muted-foreground" />
       </button>
       <StopButton task={task} />
     </div>
@@ -203,24 +223,49 @@ function clock(unixSeconds: number): string {
   return new Date(unixSeconds * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 
+/** Thin progress bar: finished share of a plan or a subagent group. */
+export function Progress({ done, total }: { done: number; total: number }) {
+  return (
+    <span aria-hidden className="block h-1 w-full overflow-hidden rounded-full bg-muted">
+      <span
+        className="block h-full rounded-full bg-primary transition-[width] duration-500"
+        style={{ width: `${total ? (done / total) * 100 : 0}%` }}
+      />
+    </span>
+  );
+}
+
 function TaskList({ tasks, onOpen }: { tasks: BgTask[]; onOpen: (id: string) => void }) {
   const { t } = useTranslation();
   if (tasks.length === 0) {
-    return <p className="px-4 py-10 text-center text-sm text-muted-foreground">{t('tasks.empty')}</p>;
+    return <p className="px-4 py-8 text-center text-sm text-muted-foreground">{t('tasks.empty')}</p>;
   }
   return (
-    <div className="space-y-4 p-2">
-      {groupTasks(tasks).map((group) => (
-        <section key={group.key}>
-          <h3 className="px-2.5 pb-1 text-[11px] font-medium text-muted-foreground">
-            {group.subagents ? t('tasks.groupSubagents') : t(group.tasks[0].kind === 'agent' ? 'tasks.kindAgent' : 'tasks.kindShell')}
-            {group.startedAt > 0 && <span className="font-normal"> · {clock(group.startedAt)}</span>}
-          </h3>
-          {group.tasks.map((task) => (
-            <TaskListRow key={task.id} task={task} onOpen={() => onOpen(task.id)} />
-          ))}
-        </section>
-      ))}
+    <div className="space-y-3 p-1.5">
+      {groupTasks(tasks).map((group) => {
+        const finished = group.tasks.filter((task) => task.status !== 'running').length;
+        return (
+          <section key={group.key}>
+            <h3 className="flex items-center gap-1 px-2 pt-1 pb-1 text-[11px] font-medium text-muted-foreground">
+              <span className="min-w-0 truncate">
+                {group.subagents ? t('tasks.groupSubagents') : t(group.tasks[0].kind === 'agent' ? 'tasks.kindAgent' : 'tasks.kindShell')}
+                {group.startedAt > 0 && <span className="font-normal"> · {clock(group.startedAt)}</span>}
+              </span>
+              {group.tasks.length > 1 && (
+                <span className="ml-auto shrink-0 font-normal tabular-nums">{finished}/{group.tasks.length}</span>
+              )}
+            </h3>
+            {group.tasks.length > 1 && finished < group.tasks.length && (
+              <div className="px-2 pb-1.5">
+                <Progress done={finished} total={group.tasks.length} />
+              </div>
+            )}
+            {group.tasks.map((task) => (
+              <TaskListRow key={task.id} task={task} onOpen={() => onOpen(task.id)} />
+            ))}
+          </section>
+        );
+      })}
     </div>
   );
 }
@@ -311,7 +356,7 @@ function TaskDetail({ task }: { task: BgTask }) {
   };
 
   return (
-    <div ref={box} className="min-h-0 flex-1 overflow-y-auto px-4 pt-3 pb-6">
+    <div ref={box} className="min-h-0 flex-1 overflow-y-auto px-3 pt-3 pb-5">
       <div className="mb-5 flex items-start gap-3">
         <StatusDot task={task} className="mt-1.5" />
         <div className="min-w-0 flex-1">
@@ -379,11 +424,12 @@ function TaskDetail({ task }: { task: BgTask }) {
   );
 }
 
-/** Right-side drawer with the session's background work — delegated
- *  subagents, nested agent tasks and detached shell jobs. */
-export function TasksPanel() {
+/** The task list as a pane of the right-hand dock (see RightDock): the
+ *  chat's background work — delegated subagents, nested agent tasks and
+ *  detached shell jobs. A click opens one task on its
+ *  own page within the pane. */
+export function TasksPane({ className }: { className?: string }) {
   const { t } = useTranslation();
-  const open = useUi((s) => s.tasksPanelOpen);
   const setOpen = useUi((s) => s.setTasksPanelOpen);
   const tasks = useBgTasks();
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -391,42 +437,29 @@ export function TasksPanel() {
   // A different chat has different tasks; never show a stale detail page.
   useEffect(() => setSelectedId(null), [sessionId]);
 
-  if (!open) return null;
   const selected = selectedId ? tasks.find((task) => task.id === selectedId) : undefined;
   const runningCount = tasks.filter((task) => task.status === 'running').length;
+  const iconBtn = 'flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground';
 
   return (
-    <aside
-      className="m-2 flex w-[26rem] max-w-[40vw] shrink-0 flex-col overflow-hidden rounded-md border bg-card shadow-lg"
-      aria-label={t('tasks.panelLabel')}
-    >
-      <div className="flex h-11 shrink-0 items-center gap-1 border-b px-2">
+    <section className={className} aria-label={t('tasks.panelLabel')}>
+      <div className="flex h-10 shrink-0 items-center gap-1 border-b pr-2 pl-1.5">
         {selected ? (
-          <button
-            type="button"
-            onClick={() => setSelectedId(null)}
-            aria-label={t('tasks.back')}
-            className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-          >
+          <button type="button" onClick={() => setSelectedId(null)} aria-label={t('tasks.back')} className={iconBtn}>
             <ArrowLeftIcon className="size-4" />
           </button>
         ) : (
-          <span className="w-1" />
+          <ListChecksIcon className="mx-1.5 size-4 shrink-0 text-muted-foreground" />
         )}
         <span className="min-w-0 flex-1 truncate text-sm font-medium">
-          {selected ? t('tasks.detailTitle') : t('tasks.title')}
+          {selected ? t('tasks.detailTitle') : t('tasks.paneTitle')}
           {!selected && runningCount > 0 && (
             <span className="ml-1.5 text-xs font-normal text-muted-foreground tabular-nums">
               {t('tasks.runningCount', { count: runningCount })}
             </span>
           )}
         </span>
-        <button
-          type="button"
-          aria-label={t('tasks.closePanel')}
-          onClick={() => setOpen(false)}
-          className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-        >
+        <button type="button" aria-label={t('tasks.closePanel')} onClick={() => setOpen(false)} className={iconBtn}>
           <XIcon className="size-4" />
         </button>
       </div>
@@ -437,6 +470,6 @@ export function TasksPanel() {
           <TaskList tasks={tasks} onOpen={setSelectedId} />
         </div>
       )}
-    </aside>
+    </section>
   );
 }

@@ -1,4 +1,4 @@
-import { CheckIcon, ChevronDownIcon, CopyIcon, FoldVerticalIcon, ListChecksIcon, PencilIcon, ScanSearchIcon, Trash2Icon } from 'lucide-react';
+import { CheckIcon, ChevronDownIcon, CopyIcon, FoldVerticalIcon, PencilIcon, ScanSearchIcon, Trash2Icon } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { uploadDownloadUrl } from '@/api/client';
@@ -212,12 +212,10 @@ function TasksChip() {
         aria-expanded={open}
         title={t('tasks.openPanel')}
         onClick={() => setOpen(!open)}
-        className="flex min-w-0 items-center gap-1 truncate text-left transition-colors hover:text-foreground"
+        // A link, not a control: blue, underlined on hover, no icon.
+        className="min-w-0 truncate text-left text-primary underline-offset-2 hover:underline"
       >
-        {/* Static on purpose: the working row already animates, and a second
-            spinner beside it only competes for attention. */}
-        <ListChecksIcon className="size-3 shrink-0" />
-        <span className="truncate">{label}</span>
+        {label}
       </button>
     </>
   );

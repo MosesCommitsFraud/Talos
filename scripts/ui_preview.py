@@ -1044,10 +1044,18 @@ def _mock_bg_tasks(session_id: str) -> list[dict]:
     return out
 
 
+# The delegating turn's update_plan checklist, ticked off as the mock runs.
+_MOCK_PLAN = (
+    "- [{}] Quellen bestimmen\n- [{}] Handbuch A lesen\n- [{}] Handbuch B lesen\n"
+    "- [{}] Workshop auswerten\n- [{}] Antwort schreiben"
+)
+
+
 def _delegate_stream() -> bytes:
     tasks = [{"title": t, "prompt": p} for t, p, _, _ in _SUBAGENT_PLAN]
     events: list[dict | str] = [
         {"delta": "Three independent lookups — I will hand them to subagents.\n", "thinking": True},
+        {"type": "plan_update", "data": {"plan": _MOCK_PLAN.format("x", " ", " ", " ", " ")}},
         {"type": "tool_start", "tool": "delegate", "command": json.dumps({"tasks": tasks})},
         ": sleep 13",
         {
@@ -1056,6 +1064,7 @@ def _delegate_stream() -> bytes:
             "output": "3/3 subagent task(s) finished.",
             "exit_code": 0,
         },
+        {"type": "plan_update", "data": {"plan": _MOCK_PLAN.format("x", "x", "x", "x", " ")}},
         {"delta": "Alle drei Quellen beschreiben den Export gleich: Einstellungen › Export [1], "},
         {
             "delta": "Format CSV [2]; Handbuch B ergänzt einen Zeitplan [3], im Workshop ab 0:12:40 [4]."

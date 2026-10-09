@@ -166,6 +166,11 @@ const de: typeof en = {
   },
   plan: {
     progress: '{{done}}/{{total}} erledigt',
+    title: 'Plan',
+    openInPanel: 'Plan im Aufgabenbereich anzeigen',
+    closePanel: 'Plan schließen',
+    empty: 'Noch kein Plan in diesem Chat.',
+    show: 'Plan anzeigen',
   },
   chatHeader: {
     clickToRename: 'Zum Umbenennen klicken',
@@ -385,6 +390,9 @@ const de: typeof en = {
   // Aktivitätsstatus; ein Klick öffnet die Ablage.
   tasks: {
     title: 'Aufgaben',
+    paneTitle: 'Subagenten & Hintergrund',
+    show: 'Subagenten anzeigen',
+    now: 'Gerade: {{step}}',
     panelLabel: 'Hintergrund-Aufgaben',
     openPanel: 'Hintergrund-Aufgaben anzeigen',
     closePanel: 'Hintergrund-Aufgaben schließen',
@@ -820,6 +828,8 @@ const de: typeof en = {
     close: 'Vorschau schließen',
     download: 'Datei herunterladen',
     resize: 'Vorschau anpassen',
+    resizeDock: 'Seitenleiste anpassen',
+    resizeSplit: 'Aufteilung anpassen',
     error: 'Diese Datei konnte nicht geladen werden.',
     saveError: 'Dieses Dokument konnte nicht gespeichert werden.',
     currentVersion: 'Aktuelle Version (v{{version}})',

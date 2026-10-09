@@ -137,8 +137,11 @@ interface PrefsState {
    *  until the first chat moves into it, and the only place a project's
    *  description lives. */
   projects: Project[];
-  /** Width (px) of the resizable artifact preview panel. */
+  /** Width (px) of the right-hand dock (file preview and/or task list). */
   previewWidth: number;
+  /** Relative heights of the dock's panes when several are open (flex-grow
+   *  weights; only the ratio between open panes matters). */
+  dockSizes: DockSizes;
   setTheme: (t: Theme) => void;
   setDensity: (d: Density) => void;
   setSortMode: (m: SortMode) => void;
@@ -157,7 +160,13 @@ interface PrefsState {
   /** Follow a project through a rename; `to === null` drops it from the list. */
   renameProjectPref: (from: string, to: string | null) => void;
   setPreviewWidth: (px: number) => void;
+  setDockSizes: (sizes: DockSizes) => void;
 }
+
+export type DockPane = 'preview' | 'plan' | 'tasks';
+export type DockSizes = Record<DockPane, number>;
+/** Preview gets the most room; the plan is a short checklist. */
+export const DEFAULT_DOCK_SIZES: DockSizes = { preview: 3, plan: 1.2, tasks: 2 };
 
 export const usePrefs = create<PrefsState>()(
   persist(
@@ -181,6 +190,7 @@ export const usePrefs = create<PrefsState>()(
       sidebarCollapsed: false,
       projects: [],
       previewWidth: 480,
+      dockSizes: DEFAULT_DOCK_SIZES,
       setTheme: (theme) => set({ theme }),
       setDensity: (density) => set({ density }),
       setSortMode: (sortMode) => set({ sortMode }),
@@ -238,6 +248,7 @@ export const usePrefs = create<PrefsState>()(
         return { projects: to ? [...rest, { ...moved, name: to }] : rest };
       }),
       setPreviewWidth: (previewWidth) => set({ previewWidth }),
+      setDockSizes: (dockSizes) => set({ dockSizes }),
     }),
     {
       name: 'talos-prefs',
@@ -249,6 +260,7 @@ export const usePrefs = create<PrefsState>()(
           ...p,
           visibility: withThinkingDefault({ ...DEFAULT_VISIBILITY, ...(p.visibility ?? {}) }),
           useWeb: webChosen() ? (p.useWeb ?? true) : true,
+          dockSizes: { ...DEFAULT_DOCK_SIZES, ...(p.dockSizes ?? {}) },
           deepResearch: false,
           lang: pickLang(p.lang, p.langChosen),
           // Projects were bare names before they gained a description.

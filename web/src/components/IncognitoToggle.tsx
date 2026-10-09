@@ -8,6 +8,7 @@ import { useChat } from '@/state/chat';
 import { usePrefs } from '@/state/prefs';
 import { cn } from '@/lib/utils';
 import { isTitlePending, placeholderTitleText } from '@/lib/sessionTitle';
+import { selectDockOpen, useUi } from '@/state/ui';
 import { SessionFilesPopover } from './SessionFilesPopover';
 import { Skeleton, Tooltip } from './ui/misc';
 import { Menu, MenuItem, MenuPopup, MenuSeparator, MenuTrigger } from './ui/menu';
@@ -118,6 +119,7 @@ export function IncognitoToggle() {
       .finally(() => setDumping(false));
   };
 
+  const dockOpen = useUi(selectDockOpen);
   const btnBase =
     'flex size-7 items-center justify-center rounded-md transition-colors';
   const btnQuiet = 'text-muted-foreground hover:bg-accent hover:text-foreground';
@@ -195,7 +197,9 @@ export function IncognitoToggle() {
           ) : null}
         </div>
         <div className="pointer-events-auto flex shrink-0 items-center gap-1">
-          {sessionId && <SessionFilesPopover sessionId={sessionId} />}
+          {/* Over the dock while it is open (RightDock), which leaves the
+              chat title the whole width of the chat column. */}
+          {sessionId && !dockOpen && <SessionFilesPopover sessionId={sessionId} />}
           {!sessionId && visible && (
             <Tooltip label={incognito ? t('chatHeader.incognitoOn') : t('chatHeader.incognitoOff')}>
               <button

@@ -10,7 +10,7 @@ import { CommandPalette } from './components/CommandPalette';
 import { SettingsDialog, type Panel, type SettingsScope } from './components/SettingsDialog';
 import { ArchiveDialog } from './components/ArchiveDialog';
 import { HelpDialog } from './components/HelpDialog';
-import { RightPanel } from './components/RightPanel';
+import { RightDock } from './components/RightPanel';
 import { RagWorkspace } from './components/rag/RagWorkspace';
 import { ProjectsWorkspace } from './components/pages/ProjectsWorkspace';
 import { ArtifactsWorkspace } from './components/pages/ArtifactsWorkspace';
@@ -20,7 +20,6 @@ import { UsersWorkspace } from './components/users/UsersWorkspace';
 import { TicketsWorkspace } from './components/tickets/TicketsWorkspace';
 import { TicketDialog } from './components/tickets/TicketDialog';
 import { Lightbox } from './components/Lightbox';
-import { TasksPanel } from './components/TasksPanel';
 import { PendingQuestion } from './components/AskUser';
 import { AuthGate } from './components/auth/AuthGate';
 import { TooltipProvider } from './components/ui/misc';
@@ -164,8 +163,7 @@ export default function App() {
                     <Composer />
                   </div>
                 </main>
-                <TasksPanel />
-                <RightPanel />
+                <RightDock />
               </div>
             )}
           </div>

@@ -671,6 +671,9 @@ export const useChat = create<ChatState>((set, get) => {
     // thinking block and tool rows), so this tracks the bubble currently
     // receiving deltas rather than closing over aiMsg.
     let aiId = aiMsg.id;
+    // The first plan of a turn opens the plan pane once, so the checklist sits
+    // beside the chat while the work runs; closing it then sticks for the turn.
+    let planShown = false;
     const patchAi = (patch: Partial<UiMessage> | ((m: UiMessage) => Partial<UiMessage>)) => {
       writeRuntime(sid, (rt) => ({
         messages: rt.messages.map((m) =>
@@ -938,7 +941,11 @@ export const useChat = create<ChatState>((set, get) => {
             }
             case 'plan_update': {
               const plan = (ev.data as { plan?: string } | undefined)?.plan;
-              if (typeof plan === 'string' && plan.trim()) patchAi({ plan });
+              if (typeof plan === 'string' && plan.trim()) {
+                patchAi({ plan });
+                if (!planShown && get().sessionId === sid) useUi.getState().setPlanPanelOpen(true);
+                planShown = true;
+              }
               break;
             }
           }

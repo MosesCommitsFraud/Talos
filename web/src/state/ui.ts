@@ -56,6 +56,10 @@ interface UiState {
    *  a job runs precisely so the reader can carry on with something else. */
   tasksPanelOpen: boolean;
   setTasksPanelOpen: (open: boolean) => void;
+  /** The turn's `update_plan` checklist as its own pane of the right dock.
+   *  Opens with the first plan of a turn (see the stream handler). */
+  planPanelOpen: boolean;
+  setPlanPanelOpen: (open: boolean) => void;
   /** Full-screen image viewer. Set to open a zoomable/downloadable lightbox over
    *  any image (tool output, generated image, artifact); null when closed. */
   lightbox: { src: string; label?: string } | null;
@@ -100,6 +104,8 @@ export const useUi = create<UiState>((set) => ({
   setPreviewFullscreen: (previewFullscreen) => set({ previewFullscreen }),
   tasksPanelOpen: false,
   setTasksPanelOpen: (tasksPanelOpen) => set({ tasksPanelOpen }),
+  planPanelOpen: false,
+  setPlanPanelOpen: (planPanelOpen) => set({ planPanelOpen }),
   lightbox: null,
   openLightbox: (lightbox) => set({ lightbox }),
   closeLightbox: () => set({ lightbox: null }),
@@ -117,3 +123,8 @@ export const useUi = create<UiState>((set) => ({
   createProjectOpen: false,
   setCreateProjectOpen: (createProjectOpen) => set({ createProjectOpen }),
 }));
+
+/** Whether the right dock shows anything (preview, plan or task pane). The
+ *  chat header hands its files button to the dock while it does. */
+export const selectDockOpen = (s: UiState) =>
+  (s.artifactsOpen && !!s.preview) || s.planPanelOpen || s.tasksPanelOpen;
