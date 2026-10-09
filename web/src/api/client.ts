@@ -1365,6 +1365,9 @@ export interface StreamFlags {
   /** How long the model may think when reasoning is on — Qwen3.8's
    *  `reasoning_effort` chat-template kwarg. Ignored when reasoning is off. */
   reasoningEffort?: ReasoningEffortLevel;
+  /** Deep research mode: plan → parallel research subagents → gap check →
+   *  cited report. */
+  deepResearch?: boolean;
   incognito?: boolean;
   attachments?: string[];
   /** UI language ("de"/"en") — the backend writes auto-generated session
@@ -1398,6 +1401,7 @@ export async function streamChat(opts: {
   if (f.useWeb === false) fd.set('use_web', 'false');
   if (f.reasoning === false) fd.set('reasoning', 'false');
   if (f.reasoningEffort) fd.set('reasoning_effort', f.reasoningEffort);
+  if (f.deepResearch) fd.set('deep_research', 'true');
   if (f.incognito) fd.set('incognito', 'true');
   if (f.lang) fd.set('lang', f.lang);
   if (f.llmLanguage) fd.set('llm_language', f.llmLanguage);

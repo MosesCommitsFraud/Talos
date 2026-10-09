@@ -213,6 +213,9 @@ const en = {
     micDefault: 'System default',
     micUnnamed: 'Microphone {{n}}',
     webSearch: 'Web search',
+    deepResearch: 'Deep research',
+    deepResearchOff: 'Deep research — click to turn off',
+    deepResearchHint: 'Plans the question, sends parallel research agents and writes a cited report. Takes several minutes.',
     aiDisclaimer: '{{brand}} is AI and can make mistakes. Please double-check responses.',
     skills: {
       none: 'No skills uploaded yet',
@@ -1459,6 +1462,8 @@ const en = {
       subagentParallelism: 'Concurrent subagents',
       subagentParallelismHint: '1–6. On a DGX Spark, 2–3 is sensible.',
       subagentMaxRounds: 'Max steps per subagent',
+      deepResearchMaxRounds: 'Max steps per subagent (deep research)',
+      deepResearchMaxRoundsHint: 'Research subagents in deep research mode search broadly, then narrowly, read and cross-check — they need more steps for that.',
       endpoint: '{{label}} endpoint',
       model: '{{label}} model',
       fallbacks: 'Fallbacks (tried in order when the primary fails)',

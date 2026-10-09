@@ -295,3 +295,33 @@ async def test_main_turn_offers_navigation_and_delegate(captured):
     (call,) = captured
     names = {t["function"]["name"] for t in call["tools"]}
     assert {"list_knowledge", "read_knowledge", "grep_knowledge", "delegate"} <= names
+
+
+async def test_deep_research_rides_in_the_turn_context(captured):
+    base = [
+        {"role": "system", "content": "Talos policy."},
+        {"role": "user", "content": "Hallo"},
+        {"role": "assistant", "content": "Hallo!"},
+        {"role": "user", "content": "Vergleiche Wärmepumpen-Förderung in DE und AT"},
+    ]
+    # A real context window: without one the 6k default input budget applies,
+    # and any long turn context would trim the system prompt.
+    await _run_turn([dict(m) for m in base], context_length=131072)
+    await _run_turn([dict(m) for m in base], context_length=131072, deep_research=True)
+    plain, deep = captured
+    # Same tools and the same head: switching the mode on costs no re-prefill.
+    assert plain["tools"] == deep["tools"]
+    w1, w2 = _wire(plain), _wire(deep)
+    assert w1[:3] == w2[:3]
+    assert "DEEP RESEARCH MODE" not in json.dumps(w1)
+    assert "DEEP RESEARCH MODE" in w2[-1]["content"]
+    assert w2[-1]["content"].endswith("Vergleiche Wärmepumpen-Förderung in DE und AT")
+
+
+async def test_subagent_turn_ignores_deep_research(captured):
+    from src.subagents import SUBAGENT_TOOLS
+
+    msgs = [{"role": "user", "content": "Finde X"}]
+    await _run_turn(msgs, tool_allowlist=SUBAGENT_TOOLS, subagent=True, deep_research=True)
+    (call,) = captured
+    assert "DEEP RESEARCH MODE" not in json.dumps(call["messages"])

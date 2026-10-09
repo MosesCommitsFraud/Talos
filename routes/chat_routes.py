@@ -604,8 +604,10 @@ def setup_chat_routes(
         # Ensure session has auth headers
         resolve_session_auth(sess, session, owner=get_current_user(request))
 
-        # Deep research feature removed (no outbound web access in this build).
-        do_research = False
+        # Deep research (composer "+" → Deep research): the turn runs as a
+        # research project — plan, parallel research subagents, gap check, a
+        # cited report (src/deep_research.py). Not in compare columns.
+        do_research = str(form_data.get("deep_research", "")).lower() == "true" and not compare_mode
 
         # Persist session mode (agent > chat)
         _effective_mode = chat_mode or "chat"
@@ -871,6 +873,7 @@ def setup_chat_routes(
                 disabled_tools.add("manage_skills")
             if not _privs.get("can_use_research", True):
                 _research_flags["do"] = False
+                do_research = False
             if not _privs.get("can_use_agent", True):
                 # No chat/agent split anymore — this admin restriction now means
                 # "withhold the heavy browser/document tools" rather than
@@ -983,7 +986,7 @@ def setup_chat_routes(
                 _fallback_candidates = []
 
             # Send model name early so the frontend can show it during streaming
-            _model_suffix = "Research" if do_research else None
+            _model_suffix = "Deep Research" if do_research else None
             _model_info = {"type": "model_info", "model": sess.model}
             if _model_suffix:
                 _model_info["suffix"] = _model_suffix
@@ -1092,6 +1095,12 @@ def setup_chat_routes(
                     _max_rounds = max(1, min(_max_rounds, 200))
 
                     _max_tokens = ctx.preset.max_tokens
+                    if do_research:
+                        from src import deep_research as _deep_research
+
+                        _max_rounds, _max_tokens = _deep_research.turn_budget(
+                            _max_rounds, _max_tokens
+                        )
 
                     async for chunk in stream_agent_loop(
                         sess.endpoint_url,
@@ -1116,6 +1125,7 @@ def setup_chat_routes(
                         reasoning=reasoning,
                         reasoning_effort=reasoning_effort,
                         wire_sink=_wire_sink,
+                        deep_research=do_research,
                     ):
                         if chunk.startswith("data: ") and not chunk.startswith("data: [DONE]"):
                             try:

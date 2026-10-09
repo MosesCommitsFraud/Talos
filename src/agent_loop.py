@@ -1896,8 +1896,13 @@ async def stream_agent_loop(
     wire_sink: Optional[Dict[str, Any]] = None,
     tool_allowlist: Optional[Set[str]] = None,
     subagent: bool = False,
+    deep_research: bool = False,
 ) -> AsyncGenerator[str, None]:
     """Streaming agent loop generator.
+
+    `deep_research` runs the turn as a research project (src/deep_research.py):
+    the protocol goes into the turn context and subagents started by this turn
+    research more thoroughly.
 
     `tool_allowlist` restricts the turn to exactly those built-in tools (MCP
     tools are dropped); `subagent` marks a nested helper turn started by
@@ -1971,6 +1976,7 @@ async def stream_agent_loop(
             "force_db": force_db,
             "use_rag": use_rag,
             "subagent": subagent,
+            "deep_research": bool(deep_research and not subagent),
         }
     )
 
@@ -2426,6 +2432,21 @@ async def stream_agent_loop(
         # toggled.
         insert_before_last_user(messages, turn_context_message(_db_note))
         logger.info("[db-mode] database available for this turn")
+    if deep_research and not subagent:
+        from src import deep_research as _deep_research
+
+        # Turn context, like the database note: the mode is a per-message
+        # switch, so it must not touch the cached head of the conversation.
+        insert_before_last_user(
+            messages,
+            _deep_research.protocol_message(
+                subagents="delegate" not in disabled_tools,
+                web="web_search" not in disabled_tools,
+                knowledge=bool(use_rag),
+                database=bool(force_db),
+            ),
+        )
+        logger.info("[deep-research] protocol added for this turn")
     prep_timings["prompt_build"] = time.time() - _t2
 
     _t3 = time.time()

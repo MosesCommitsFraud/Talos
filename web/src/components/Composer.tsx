@@ -26,7 +26,7 @@ import { previewKind } from '@/lib/files';
 import { ContextMeter } from './ContextMeter';
 import { FilePreviewFace, hasVisualPreview, openUploadViewer } from './AttachmentTile';
 import { FileTypeIcon } from './FileTypeIcon';
-import { ComposerAddMenu } from './ComposerAddMenu';
+import { ComposerAddMenu, DeepResearchChip } from './ComposerAddMenu';
 import { ModelEffortPicker } from './ModelEffortPicker';
 import { Tooltip } from './ui/misc';
 
@@ -363,7 +363,7 @@ export function Composer() {
     window.addEventListener('resize', onResize);
     return () => window.removeEventListener('resize', onResize);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hero, caps?.voice, showStop, dictating, prefs.visibility.composerAttach]);
+  }, [hero, caps?.voice, showStop, dictating, prefs.visibility.composerAttach, prefs.deepResearch]);
 
   const attach = async (files: FileList | File[]) => {
     const list = Array.from(files);
@@ -562,7 +562,7 @@ export function Composer() {
           // The faint lift in light mode: the box shares the page background, so
           // a whisper of shadow is what separates it from the message stream.
           // Dark mode drops it — the --card step already does that job there.
-          'group/composer relative rounded-[10px] border border-foreground/14 bg-background shadow-[0_1px_2px_rgba(0,0,0,0.03),0_6px_16px_-8px_rgba(0,0,0,0.07)] transition-colors duration-200 focus-within:border-foreground/32 dark:border-foreground/10 dark:bg-card dark:shadow-none dark:focus-within:border-foreground/20',
+          'group/composer @container/composer relative rounded-[10px] border border-foreground/14 bg-background shadow-[0_1px_2px_rgba(0,0,0,0.03),0_6px_16px_-8px_rgba(0,0,0,0.07)] transition-colors duration-200 focus-within:border-foreground/32 dark:border-foreground/10 dark:bg-card dark:shadow-none dark:focus-within:border-foreground/20',
           dragging && 'border-primary/60 ring-2 ring-primary/30',
         )}
       >
@@ -727,13 +727,14 @@ export function Composer() {
               growing text block can slide over them instead of pushing them
               around. The new-chat box carries its controls in the row below. */}
           {!hero && prefs.visibility.composerAttach && (
-            <div ref={inputLead} className="absolute bottom-2 start-2">
+            <div ref={inputLead} className="absolute bottom-2 start-2 flex items-center gap-1">
               <ComposerAddMenu
                 onAttach={() => fileInput.current?.click()}
                 uploading={uploading}
                 showMic={!!caps?.voice}
                 className={INLINE_CONTROL}
               />
+              <DeepResearchChip />
             </div>
           )}
           {!hero && (
@@ -798,6 +799,7 @@ export function Composer() {
                   showMic={!!caps?.voice}
                 />
               )}
+              <DeepResearchChip />
             </div>
             <div className="flex shrink-0 items-center gap-2">
               <ModelEffortPicker visible={prefs.visibility.composerModelPicker} />

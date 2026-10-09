@@ -574,6 +574,7 @@ def setup_auth_routes(auth_manager: AuthManager) -> APIRouter:
             "agent_tool_parallelism": (1, 8),  # 1 = sequential
             "subagent_parallelism": (1, 6),
             "subagent_max_rounds": (2, 40),
+            "deep_research_subagent_max_rounds": (2, 60),
             "subagent_max_runtime_s": (60, 3600),
             # Outward MCP defaults; the hard caps live in src/web_search.py.
             "mcp_web_max_results": (1, 20),

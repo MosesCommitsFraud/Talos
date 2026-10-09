@@ -747,6 +747,7 @@ export const useChat = create<ChatState>((set, get) => {
                 useWeb: prefs.useWeb,
                 reasoning: prefs.reasoning,
                 reasoningEffort: prefs.reasoningEffort,
+                deepResearch: prefs.deepResearch,
                 incognito: prefs.incognito,
                 lang: prefs.lang,
                 llmLanguage: prefs.llmLang,

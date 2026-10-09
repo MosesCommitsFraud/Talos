@@ -9,6 +9,8 @@ import {
   PlusIcon,
   SettingsIcon,
   SparklesIcon,
+  TelescopeIcon,
+  XIcon,
 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -200,6 +202,7 @@ export function ComposerAddMenu({
   const { t } = useTranslation();
   const auth = useAuth();
   const useWeb = usePrefs((s) => s.useWeb);
+  const deepResearch = usePrefs((s) => s.deepResearch);
   const toggle = usePrefs((s) => s.toggle);
 
   return (
@@ -237,7 +240,44 @@ export function ComposerAddMenu({
           <span className="min-w-0 flex-1 truncate">{t('composer.webSearch')}</span>
           <CheckIcon className={cn('size-3.5 shrink-0 text-primary', useWeb ? 'opacity-100' : 'opacity-0')} />
         </MenuItem>
+        {/* A mode, not a source: the next messages run as a research project
+            (plan, parallel subagents, gap check, cited report). */}
+        <MenuItem
+          title={t('composer.deepResearchHint')}
+          onSelect={() => toggle('deepResearch')}
+        >
+          <TelescopeIcon />
+          <span className="min-w-0 flex-1 truncate">{t('composer.deepResearch')}</span>
+          <CheckIcon className={cn('size-3.5 shrink-0 text-primary', deepResearch ? 'opacity-100' : 'opacity-0')} />
+        </MenuItem>
       </MenuPopup>
     </Menu>
+  );
+}
+
+/** Shown next to the "+" while deep research is on, so the mode is visible
+ *  before sending (it makes a turn take minutes). Clicking it turns it off. */
+export function DeepResearchChip({ className }: { className?: string }) {
+  const { t } = useTranslation();
+  const on = usePrefs((s) => s.deepResearch);
+  const toggle = usePrefs((s) => s.toggle);
+  if (!on) return null;
+  return (
+    <button
+      type="button"
+      title={t('composer.deepResearchOff')}
+      aria-label={t('composer.deepResearchOff')}
+      onClick={() => toggle('deepResearch')}
+      className={cn(
+        'group/dr flex h-[1.625rem] min-w-[1.625rem] shrink-0 items-center justify-center gap-1 rounded-lg bg-primary/10 px-1.5 text-xs font-medium text-primary transition-colors hover:bg-primary/15 [&_svg]:size-3.5',
+        className,
+      )}
+    >
+      <TelescopeIcon className="group-hover/dr:hidden" />
+      <XIcon className="hidden group-hover/dr:block" />
+      {/* A narrow composer (preview panel open) keeps only the icon, so the
+          chip never runs into the controls on the right. */}
+      <span className="hidden @md/composer:inline">{t('composer.deepResearch')}</span>
+    </button>
   );
 }

@@ -51,6 +51,8 @@ logger = logging.getLogger(__name__)
 
 MAX_TASKS = 6
 _REPORT_CHARS = 8000
+# Deep research asks for fuller reports (facts with citations, reliability).
+_DEEP_REPORT_CHARS = 12000
 # Background reports travel through the job log, whose reader keeps 16k chars.
 _BACKGROUND_REPORT_BUDGET = 14000
 _LIVE_WRITE_S = 0.8
@@ -301,9 +303,14 @@ def parse_tasks(content: Any) -> List[Dict[str, str]]:
     return out
 
 
-def _first_message(task: Dict[str, str], job_id: str, background: bool) -> str:
+def _first_message(task: Dict[str, str], job_id: str, background: bool, deep: bool = False) -> str:
     """Shared head (cacheable) → type head → citation rule → the assignment."""
-    parts = [_BASE, _TYPE_HEAD[task["type"]], _CITE_BACKGROUND if background else _CITE_LIVE]
+    parts = [_BASE, _TYPE_HEAD[task["type"]]]
+    if deep:
+        from src.deep_research import SUBAGENT_HEAD
+
+        parts.append(SUBAGENT_HEAD)
+    parts.append(_CITE_BACKGROUND if background else _CITE_LIVE)
     parts.append("\nAssignment:\n\n" + task["prompt"])
     if task.get("context"):
         parts.append("\n\nContext from the main assistant:\n" + task["context"])
@@ -411,6 +418,10 @@ async def _run_one(run: _Run, ctx: Dict[str, Any]) -> int:
     sink: Dict[str, Any] = {}
     target = run.target
     max_rounds = _int_setting("subagent_max_rounds", 12, 2, 40)
+    if ctx.get("deep_research"):
+        # A research subagent searches broad, then narrow, then reads and
+        # cross-checks — more rounds than a quick lookup.
+        max_rounds = max(max_rounds, _int_setting("deep_research_subagent_max_rounds", 20, 2, 60))
     try:
         async for chunk in stream_agent_loop(
             target["endpoint_url"],
@@ -595,8 +606,9 @@ async def _finish(
         await _run_all(runs, ctx, progress_cb)
         sources = [s for r in runs for s in r.sources]
         ok = any(r.code == 0 for r in runs)
+        per_report = _DEEP_REPORT_CHARS if ctx.get("deep_research") else _REPORT_CHARS
         return {
-            "output": _wrap(_summary_head(runs), _reports(runs, _REPORT_CHARS)),
+            "output": _wrap(_summary_head(runs), _reports(runs, per_report)),
             "rag_sources": sources,
             "label": f"{len(runs)} task(s)",
             "exit_code": 0 if ok else 1,
@@ -669,7 +681,7 @@ async def run_tasks(
             # subagent model is configured.
             {"model_size": target["size"], "model": target["model"]},
         )
-        message = _first_message(task, rec["id"], background)
+        message = _first_message(task, rec["id"], background, bool(ctx.get("deep_research")))
         runs.append(
             _Run(rec, task["title"], task["type"], [{"role": "user", "content": message}], target)
         )

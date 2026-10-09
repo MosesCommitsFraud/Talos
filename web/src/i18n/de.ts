@@ -216,6 +216,9 @@ const de: typeof en = {
     micDefault: 'Systemstandard',
     micUnnamed: 'Mikrofon {{n}}',
     webSearch: 'Websuche',
+    deepResearch: 'Deep Research',
+    deepResearchOff: 'Deep Research – zum Ausschalten klicken',
+    deepResearchHint: 'Plant die Frage, schickt parallele Recherche-Agenten los und schreibt einen Bericht mit Quellen. Dauert einige Minuten.',
     aiDisclaimer: '{{brand}} ist KI und kann Fehler machen. Bitte Antworten prüfen.',
     skills: {
       none: 'Noch keine Skills hochgeladen',
@@ -1465,6 +1468,8 @@ const de: typeof en = {
       subagentParallelism: 'Gleichzeitige Subagenten',
       subagentParallelismHint: '1–6. Auf einer DGX Spark sind 2–3 sinnvoll.',
       subagentMaxRounds: 'Max. Schritte je Subagent',
+      deepResearchMaxRounds: 'Max. Schritte je Subagent (Deep Research)',
+      deepResearchMaxRoundsHint: 'Recherche-Subagenten im Deep-Research-Modus suchen breit, dann gezielt, lesen und gleichen ab – dafür brauchen sie mehr Schritte.',
       endpoint: '{{label}}-Endpunkt',
       model: '{{label}}-Modell',
       fallbacks: 'Ausweichmodelle (werden der Reihe nach versucht, wenn das primäre fehlschlägt)',

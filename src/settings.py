@@ -92,6 +92,9 @@ DEFAULT_SETTINGS = {
     "subagent_reasoning": "off",
     "subagent_parallelism": 3,
     "subagent_max_rounds": 12,
+    # Rounds for a research subagent of a deep-research turn (src/deep_research.py):
+    # broad search, narrow search, read, cross-check.
+    "deep_research_subagent_max_rounds": 20,
     "subagent_max_runtime_s": 900,
     # Own (smaller, faster) model for subagents; empty = the chat's model.
     "subagent_endpoint_id": "",

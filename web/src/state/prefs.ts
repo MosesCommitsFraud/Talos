@@ -121,6 +121,11 @@ interface PrefsState {
   /** How long the model may think while reasoning is on. Maps to the
    *  `reasoning_effort` request flag; ignored when reasoning is off. */
   reasoningEffort: ReasoningEffort;
+  /** Deep research for the next messages: the main model plans, sends parallel
+   *  research subagents, closes gaps and writes a cited report. Maps to the
+   *  `deep_research` request flag. Local and reset on reload — a run costs
+   *  minutes of model time, so it must not stay on by accident. */
+  deepResearch: boolean;
   incognito: boolean;
   /** Preferred microphone for voice dictation; null = system default. */
   micDeviceId: string | null;
@@ -143,7 +148,7 @@ interface PrefsState {
   setReasoningEffort: (e: ReasoningEffort) => void;
   setVisibility: (key: keyof Visibility, value: boolean) => void;
   resetVisibility: () => void;
-  toggle: (key: 'useRag' | 'useDb' | 'useWeb' | 'reasoning' | 'incognito') => void;
+  toggle: (key: 'useRag' | 'useDb' | 'useWeb' | 'reasoning' | 'deepResearch' | 'incognito') => void;
   /** Set both knowledge flags at once (used by the mode dropdown). */
   setKnowledge: (useRag: boolean, useDb: boolean) => void;
   setMicDeviceId: (id: string | null) => void;
@@ -170,6 +175,7 @@ export const usePrefs = create<PrefsState>()(
       useWeb: true,
       reasoning: true,
       reasoningEffort: 'medium',
+      deepResearch: false,
       incognito: false,
       micDeviceId: null,
       sidebarCollapsed: false,
@@ -243,6 +249,7 @@ export const usePrefs = create<PrefsState>()(
           ...p,
           visibility: withThinkingDefault({ ...DEFAULT_VISIBILITY, ...(p.visibility ?? {}) }),
           useWeb: webChosen() ? (p.useWeb ?? true) : true,
+          deepResearch: false,
           lang: pickLang(p.lang, p.langChosen),
           // Projects were bare names before they gained a description.
           projects: ((p.projects ?? []) as Array<string | Project>).map((entry) =>

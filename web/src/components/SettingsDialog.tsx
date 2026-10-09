@@ -935,6 +935,7 @@ function AiDefaultsPanel() {
         </Row>
         <TextRow s={s} k="subagent_parallelism" label={t('settings.ai.subagentParallelism')} hint={t('settings.ai.subagentParallelismHint')} type="number" width="w-24" />
         <TextRow s={s} k="subagent_max_rounds" label={t('settings.ai.subagentMaxRounds')} type="number" width="w-24" />
+        <TextRow s={s} k="deep_research_subagent_max_rounds" label={t('settings.ai.deepResearchMaxRounds')} hint={t('settings.ai.deepResearchMaxRoundsHint')} type="number" width="w-24" />
       </Section>
 
       <SaveBar dirty={s.dirty} saving={s.save.isPending} error={s.save.isError ? (s.save.error as Error).message : undefined} onSave={() => s.save.mutate()} />
