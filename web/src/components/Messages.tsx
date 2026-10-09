@@ -201,8 +201,9 @@ function TasksChip() {
   const tasks = useBgTasks();
   const setOpen = useUi((s) => s.setTasksPanelOpen);
   const open = useUi((s) => s.tasksPanelOpen);
+  const streaming = useChat((s) => s.streaming);
   const running = tasks.filter(isRunning).length;
-  if (tasks.length === 0) return null;
+  if (tasks.length === 0 || (running === 0 && !streaming)) return null;
   const label = running > 0 ? t('tasks.chipRunning', { count: running }) : t('tasks.chipDone', { count: tasks.length });
   return (
     <>
@@ -879,7 +880,6 @@ function AssistantTurn({ turn, containsLast, outputs, sessionId }: { turn: UiMes
           <Markdown text={terminal.content} />
         </div>
       )}
-      {planMsg && <PlanCard msg={planMsg} />}
       {/* Images produced inside a collapsed tool group, re-surfaced between the
           answer and the artifacts button. No subtitles: this is a recap. */}
       {createdImages.length > 0 && (

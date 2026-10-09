@@ -1,6 +1,6 @@
 import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { BotIcon, DownloadIcon, ListChecksIcon, Maximize2Icon, Minimize2Icon, XIcon } from 'lucide-react';
+import { DownloadIcon, Maximize2Icon, Minimize2Icon, XIcon } from 'lucide-react';
 import { downloadPreviewFile } from '@/api/client';
 import { displayName, fileTypeLabel } from '@/lib/files';
 import { useBgTasks } from '@/lib/useBgTasks';
@@ -9,6 +9,7 @@ import { type DockPane, type DockSizes, usePrefs } from '@/state/prefs';
 import { useUi } from '@/state/ui';
 import { cn } from '@/lib/utils';
 import { FileTypeIcon } from './FileTypeIcon';
+import { AgentsIcon, PlanIcon } from './icons';
 import { PlanPane, useSessionPlan } from './PlanCard';
 import { PreviewContent } from './PreviewPanel';
 import { SessionFilesPopover } from './SessionFilesPopover';
@@ -141,6 +142,50 @@ function Grip({
   );
 }
 
+/** Switches for the plan and task panes, each shown once there is something
+ *  to show. They sit in the dock's bar while the dock is open and in the chat
+ *  header otherwise — after a turn this is the way back to its plan. */
+export function PaneToggles() {
+  const { t } = useTranslation();
+  const planOpen = useUi((s) => s.planPanelOpen);
+  const setPlanOpen = useUi((s) => s.setPlanPanelOpen);
+  const tasksOpen = useUi((s) => s.tasksPanelOpen);
+  const setTasksOpen = useUi((s) => s.setTasksPanelOpen);
+  const hasPlan = !!useSessionPlan();
+  const hasTasks = useBgTasks().length > 0;
+  const toggle = (on: boolean) => cn(iconBtn, on && 'bg-primary/10 text-primary hover:bg-primary/15 hover:text-primary');
+  return (
+    <>
+      {(hasPlan || planOpen) && (
+        <Tooltip label={planOpen ? t('plan.closePanel') : t('plan.show')}>
+          <button
+            type="button"
+            aria-pressed={planOpen}
+            aria-label={planOpen ? t('plan.closePanel') : t('plan.show')}
+            onClick={() => setPlanOpen(!planOpen)}
+            className={toggle(planOpen)}
+          >
+            <PlanIcon className="size-4" />
+          </button>
+        </Tooltip>
+      )}
+      {(hasTasks || tasksOpen) && (
+        <Tooltip label={tasksOpen ? t('tasks.closePanel') : t('tasks.show')}>
+          <button
+            type="button"
+            aria-pressed={tasksOpen}
+            aria-label={tasksOpen ? t('tasks.closePanel') : t('tasks.show')}
+            onClick={() => setTasksOpen(!tasksOpen)}
+            className={toggle(tasksOpen)}
+          >
+            <AgentsIcon className="size-4" />
+          </button>
+        </Tooltip>
+      )}
+    </>
+  );
+}
+
 type PaneDef = { key: DockPane; node: (className: string) => React.ReactNode };
 
 /** The right-hand dock: file preview, plan and task list, each its own pane.
@@ -156,13 +201,9 @@ export function RightDock() {
   const sessionId = useChat((s) => s.sessionId);
   const previewOpen = useUi((s) => s.artifactsOpen && !!s.preview);
   const planOpen = useUi((s) => s.planPanelOpen);
-  const setPlanOpen = useUi((s) => s.setPlanPanelOpen);
   const tasksOpen = useUi((s) => s.tasksPanelOpen);
-  const setTasksOpen = useUi((s) => s.setTasksPanelOpen);
   const fullscreen = useUi((s) => s.previewFullscreen);
   const setFullscreen = useUi((s) => s.setPreviewFullscreen);
-  const hasPlan = !!useSessionPlan();
-  const hasTasks = useBgTasks().length > 0;
   const width = usePrefs((s) => s.previewWidth);
   const setWidth = usePrefs((s) => s.setPreviewWidth);
   const sizes = usePrefs((s) => s.dockSizes);
@@ -230,7 +271,6 @@ export function RightDock() {
   if (planOpen) panes.push({ key: 'plan', node: (c) => <PlanPane className={cn(paneChrome, c)} /> });
   if (tasksOpen) panes.push({ key: 'tasks', node: (c) => <TasksPane className={cn(paneChrome, c)} /> });
   const weights = dragSizes ?? sizes;
-  const toggle = (on: boolean) => cn(iconBtn, on && 'bg-accent text-foreground');
 
   return (
     <>
@@ -251,32 +291,7 @@ export function RightDock() {
           <div className="flex min-w-0 flex-1 flex-col">
             {/* Same line as the chat header (top-2, h-7). */}
             <div className="mb-2 flex h-7 shrink-0 items-center justify-end gap-1">
-              {(hasPlan || planOpen) && (
-                <Tooltip label={planOpen ? t('plan.closePanel') : t('plan.show')}>
-                  <button
-                    type="button"
-                    aria-pressed={planOpen}
-                    aria-label={planOpen ? t('plan.closePanel') : t('plan.show')}
-                    onClick={() => setPlanOpen(!planOpen)}
-                    className={toggle(planOpen)}
-                  >
-                    <ListChecksIcon className="size-4" />
-                  </button>
-                </Tooltip>
-              )}
-              {(hasTasks || tasksOpen) && (
-                <Tooltip label={tasksOpen ? t('tasks.closePanel') : t('tasks.show')}>
-                  <button
-                    type="button"
-                    aria-pressed={tasksOpen}
-                    aria-label={tasksOpen ? t('tasks.closePanel') : t('tasks.show')}
-                    onClick={() => setTasksOpen(!tasksOpen)}
-                    className={toggle(tasksOpen)}
-                  >
-                    <BotIcon className="size-4" />
-                  </button>
-                </Tooltip>
-              )}
+              <PaneToggles />
               {sessionId && <SessionFilesPopover sessionId={sessionId} />}
             </div>
             {panes.map((pane, i) => (

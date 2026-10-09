@@ -5,7 +5,6 @@ import {
   BookOpenIcon,
   CheckIcon,
   ChevronRightIcon,
-  ListChecksIcon,
   CloudSunIcon,
   CodeIcon,
   CopyIcon,
@@ -34,6 +33,7 @@ import { useBgTasks } from '@/lib/useBgTasks';
 import { useChat } from '@/state/chat';
 import { useUi } from '@/state/ui';
 import { Markdown } from './Markdown';
+import { AgentsIcon } from './icons';
 import { ToolLabel } from './ToolLabel';
 import { Tooltip } from './ui/misc';
 
@@ -312,20 +312,20 @@ function StepTimeline({ task }: { task: BgTask }) {
         return (
           <li key={i} className="relative flex gap-2.5 pb-3 last:pb-0">
             {i < steps.length - 1 && (
-              <span aria-hidden className="absolute top-6 bottom-0 left-3 w-px -translate-x-1/2 bg-border" />
+              <span aria-hidden className="absolute top-2.5 -bottom-2.5 left-2.5 w-px -translate-x-1/2 bg-foreground/15" />
             )}
             <span
               aria-hidden
               className={cn(
-                'flex size-6 shrink-0 items-center justify-center rounded-full border bg-card',
-                running ? 'border-primary/40 text-primary'
-                : failed ? 'border-destructive-foreground/40 text-destructive-foreground'
+                'relative z-[1] flex size-5 shrink-0 items-center justify-center rounded-full bg-background ring-1 ring-foreground/20',
+                running ? 'text-primary ring-primary/50'
+                : failed ? 'text-destructive-foreground ring-destructive-foreground/50'
                 : 'text-muted-foreground',
               )}
             >
-              <Icon className={cn('size-3', running && 'animate-spin')} />
+              <Icon className={cn('size-2.5', running && 'animate-spin')} />
             </span>
-            <span className={cn('min-w-0 pt-[3px] text-[12.5px] leading-snug break-words text-muted-foreground', running && 'shimmer-text')}>
+            <span className={cn('min-w-0 pt-px text-[12.5px] leading-snug break-words text-muted-foreground', running && 'shimmer-text')}>
               <ToolLabel parts={describeCall(call, t, running ? 'running' : 'past')} failed={failed} />
             </span>
           </li>
@@ -449,7 +449,7 @@ export function TasksPane({ className }: { className?: string }) {
             <ArrowLeftIcon className="size-4" />
           </button>
         ) : (
-          <ListChecksIcon className="mx-1.5 size-4 shrink-0 text-muted-foreground" />
+          <AgentsIcon className="mx-1.5 size-4 shrink-0 text-muted-foreground" />
         )}
         <span className="min-w-0 flex-1 truncate text-sm font-medium">
           {selected ? t('tasks.detailTitle') : t('tasks.paneTitle')}

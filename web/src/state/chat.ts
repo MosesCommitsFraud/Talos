@@ -673,6 +673,8 @@ export const useChat = create<ChatState>((set, get) => {
     let aiId = aiMsg.id;
     // The first plan of a turn opens the plan pane once, so the checklist sits
     // beside the chat while the work runs; closing it then sticks for the turn.
+    // When the turn is over the pane closes again (see `finally`) — the plan
+    // stays one click away on the dock's plan button.
     let planShown = false;
     const patchAi = (patch: Partial<UiMessage> | ((m: UiMessage) => Partial<UiMessage>)) => {
       writeRuntime(sid, (rt) => ({
@@ -980,6 +982,9 @@ export const useChat = create<ChatState>((set, get) => {
       }
     } finally {
       smoother.flush();
+      // A dropped connection is not the end of the turn: the run carries on
+      // server-side and a resume picks it up, plan pane and all.
+      if (planShown && !dropped && get().sessionId === sid) useUi.getState().setPlanPanelOpen(false);
       // Stamp the turn's wall-clock onto the terminal bubble before the start
       // time is cleared, so the settled "Worked for Xs" fold has a duration.
       const startedAt = get().runtimes[sid]?.turnStartedAt;

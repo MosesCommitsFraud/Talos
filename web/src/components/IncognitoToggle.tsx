@@ -9,6 +9,7 @@ import { usePrefs } from '@/state/prefs';
 import { cn } from '@/lib/utils';
 import { isTitlePending, placeholderTitleText } from '@/lib/sessionTitle';
 import { selectDockOpen, useUi } from '@/state/ui';
+import { PaneToggles } from './RightPanel';
 import { SessionFilesPopover } from './SessionFilesPopover';
 import { Skeleton, Tooltip } from './ui/misc';
 import { Menu, MenuItem, MenuPopup, MenuSeparator, MenuTrigger } from './ui/menu';
@@ -199,6 +200,7 @@ export function IncognitoToggle() {
         <div className="pointer-events-auto flex shrink-0 items-center gap-1">
           {/* Over the dock while it is open (RightDock), which leaves the
               chat title the whole width of the chat column. */}
+          {sessionId && !dockOpen && <PaneToggles />}
           {sessionId && !dockOpen && <SessionFilesPopover sessionId={sessionId} />}
           {!sessionId && visible && (
             <Tooltip label={incognito ? t('chatHeader.incognitoOn') : t('chatHeader.incognitoOff')}>
