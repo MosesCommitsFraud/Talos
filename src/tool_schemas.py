@@ -613,6 +613,201 @@ FUNCTION_TOOL_SCHEMAS = [
     {
         "type": "function",
         "function": {
+            "name": "render_widget",
+            "description": (
+                "Show a standard visual in the chat from DATA ONLY — no HTML or code: a chart, "
+                "key-figure tiles, a sortable table, a flow/process/architecture diagram, a "
+                "timeline or a side-by-side comparison. Talos builds it in its own look. Prefer "
+                "this over render_ui whenever one of these types fits; use render_ui only for "
+                "something bespoke (calculators, simulations, custom controls). Data per type — "
+                "chart: {kind: bar|horizontal|stacked|line|area|donut, categories: [...], "
+                "series: [{name, values: [...]}], unit} (donut: {kind: 'donut', items: [{label, "
+                "value}], unit}); kpi: {items: [{label, value, unit, delta (fraction, 0.12 = "
+                "+12 %), deltaLabel, higherIsBetter, note}]}; table: {columns: [...], rows: "
+                "[[...], ...]}; diagram: {mermaid: 'flowchart LR\\n A --> B'}; timeline: "
+                "{events: [{date, title, text, status: done|risk}]}; comparison: {options: "
+                "[...], rows: [{criterion, values: [...], best: index}], verdict}. Real numbers "
+                "only (from your tools or the user), `sources` required. The user sees it at "
+                "once; do not repeat its values as text."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "type": {
+                        "type": "string",
+                        "enum": ["chart", "kpi", "table", "diagram", "timeline", "comparison"],
+                    },
+                    "title": {"type": "string", "description": "Short title above it."},
+                    "data": {"type": "object", "description": "The data for the type, see above."},
+                    "sources": {
+                        "type": "array",
+                        "description": "Required. Where the data comes from; shown under it.",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "kind": {
+                                    "type": "string",
+                                    "enum": [
+                                        "user",
+                                        "sql",
+                                        "knowledge",
+                                        "web",
+                                        "model",
+                                        "calculated",
+                                        "illustrative",
+                                    ],
+                                },
+                                "label": {"type": "string"},
+                                "ref": {"type": "string"},
+                            },
+                            "required": ["kind", "label"],
+                        },
+                    },
+                },
+                "required": ["type", "data", "sources"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "render_ui",
+            "description": (
+                "Answer with an interactive UI rendered inline in the chat: a chart the user can "
+                "filter, a calculator, a comparison with adjustable weights, a simulation, a "
+                "process or architecture diagram, a KPI overview. Use it when seeing or playing "
+                "with the answer helps more than reading it; plain questions get plain text. "
+                "Runs in a sandboxed iframe with NO network: fetch/XHR fail and no data can be "
+                "loaded at runtime, so get real numbers first (query_sql, search_knowledge, "
+                "web_search …) or use well-established facts you know, and embed them in "
+                "`data` (read it in js as `window.TALOS_DATA`). Emit the fields in this order: "
+                "title, initialHeight, placeholderMessages, css, html, js, jsInit, data, "
+                "sources. `html` is a fragment (no <html>/<head>/<body>). The Talos look is "
+                "preloaded — use it instead of styling from scratch: classes t-stack, t-row, "
+                "t-grid, t-split, t-card, t-title, t-note, t-kpi (t-kpi-label, t-kpi-value, "
+                "t-delta up|down), t-field, t-seg, t-btn (primary), t-switch, t-chip, t-table; "
+                "charts via talos.chart.bar|line|donut(el, {categories, series:[{name, values}], "
+                "unit}) returning a handle with .update(); maps via talos.map(el, {markers:[{lat, "
+                "lng, label}]}) (OpenStreetMap, attribution automatic); numbers via "
+                "talos.fmt.number|currency|percent. Heavier libraries are served locally — name "
+                "them in `libraries` (echarts, d3, chartjs, three, leaflet, mermaid); no CDN. "
+                "Colours only via var(--talos-fg|muted|border|surface|accent|"
+                "chart-1…8|good|critical); light/dark switch automatically. "
+                "When the user wants a FILE (HTML page, dashboard to download), use the "
+                "dashboard workflow instead. "
+                "`window.talos.sendPrompt(text)` (on a button click) sends a follow-up message "
+                "to the chat. The user sees the UI immediately; afterwards add only what it "
+                "does not show. To change it later, call render_ui again with the full new "
+                "version."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "title": {
+                        "type": "string",
+                        "description": "Short title shown above the UI.",
+                    },
+                    "initialHeight": {
+                        "type": "integer",
+                        "description": "Expected height in px (50-4000) to reserve before it renders; it then sizes itself to its content.",
+                    },
+                    "placeholderMessages": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "1-3 short status lines shown while it loads, in the user's language.",
+                    },
+                    "css": {
+                        "type": "string",
+                        "description": "Only layout-specific styles; the Talos kit already styles everything else. Colours only via var(--talos-*).",
+                    },
+                    "html": {
+                        "type": "string",
+                        "description": "Markup fragment using the t-* kit classes.",
+                    },
+                    "js": {
+                        "type": "string",
+                        "description": "Script: function definitions and event wiring. Runs after the html is in the page.",
+                    },
+                    "jsInit": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": 'Optional short calls run in order after `js`, e.g. ["render()"]. Each is reported separately if it throws.',
+                    },
+                    "data": {
+                        "description": "JSON data the UI shows (object or array), available as window.TALOS_DATA. Aggregate first; keep it under ~200 KB.",
+                    },
+                    "dataSources": {
+                        "type": "array",
+                        "description": (
+                            "Optional live data the UI may reload with new parameter values via "
+                            "`await talos.refresh(id, params)` — e.g. another year or region "
+                            "without a new turn. kind sql: read-only `query` with :name bind "
+                            "parameters (optional `database`, `maxRows`); kind web: https `url` "
+                            "template with {name} in path/query (`maxChars`); kind knowledge: "
+                            "search `query` template with {name} (`topK`). Every parameter is "
+                            "declared in `params` with a type (int|number with min+max, enum with "
+                            "values, string, bool, date) and optional default."
+                        ),
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "id": {"type": "string"},
+                                "kind": {"type": "string", "enum": ["sql", "web", "knowledge"]},
+                                "label": {"type": "string"},
+                                "query": {"type": "string"},
+                                "url": {"type": "string"},
+                                "database": {"type": "string"},
+                                "params": {"type": "object"},
+                            },
+                            "required": ["id", "kind"],
+                        },
+                    },
+                    "libraries": {
+                        "type": "array",
+                        "items": {
+                            "type": "string",
+                            "enum": ["echarts", "d3", "chartjs", "three", "leaflet", "mermaid"],
+                        },
+                        "description": "Optional. Locally served libraries to load (global echarts, d3, Chart, THREE, L, mermaid). Not needed for talos.chart / talos.map.",
+                    },
+                    "sources": {
+                        "type": "array",
+                        "description": "Required. Where the shown data comes from; displayed under the UI.",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "kind": {
+                                    "type": "string",
+                                    "enum": [
+                                        "user",
+                                        "sql",
+                                        "knowledge",
+                                        "web",
+                                        "model",
+                                        "calculated",
+                                        "illustrative",
+                                    ],
+                                },
+                                "label": {
+                                    "type": "string",
+                                    "description": "What it is, e.g. 'Umsatz je Monat aus dbo.orders'.",
+                                },
+                                "ref": {
+                                    "type": "string",
+                                    "description": "Optional: URL, document name or table.",
+                                },
+                            },
+                            "required": ["kind", "label"],
+                        },
+                    },
+                },
+                "required": ["html", "sources"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "read_file",
             "description": "Read a file from disk. Optionally read a line range with offset/limit for large files.",
             "parameters": {

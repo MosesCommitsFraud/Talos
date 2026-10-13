@@ -4,6 +4,8 @@ import { ArrowDownIcon, ArrowUpIcon, BarChart3Icon, ChevronRightIcon, DownloadIc
 import { cn } from '@/lib/utils';
 import { Collapse } from '../ui/collapse';
 import { ChartView, chartable } from './ChartView';
+import { SourceBar } from '@/components/interactive/InlineUi';
+import { readUiPayload } from '@/lib/uiFrame';
 import type { WidgetProps } from './registry';
 
 type Dict = Record<string, unknown>;
@@ -96,14 +98,20 @@ export function TableWidget({ data, settled = false }: WidgetProps) {
   // Open while the turn streams — the rows are what the user is waiting for —
   // and folded to the header line once it settles. The effect covers an
   // instance that lives through the transition; a remount starts folded anyway.
-  const [open, setOpen] = useState(!settled);
+  // A table shown as the answer (render_widget, `answer: true`) never folds.
+  const fold = settled && payload.answer !== true;
+  const answerSources = useMemo(
+    () => (payload.answer === true ? (readUiPayload({ html: '-', sources: payload.sources })?.sources ?? []) : []),
+    [payload.answer, payload.sources],
+  );
+  const [open, setOpen] = useState(!fold);
   useEffect(() => {
-    if (settled) setOpen(false);
-  }, [settled]);
+    if (fold) setOpen(false);
+  }, [fold]);
   // The body is mounted on first open, not before: a reopened history can hold
   // many folded tables, and a few thousand hidden cells each would still be
   // laid out on every resize.
-  const [mounted, setMounted] = useState(!settled);
+  const [mounted, setMounted] = useState(!fold);
   if (open && !mounted) setMounted(true);
 
   const numeric = useMemo(() => numericColumns(rows, columns.length), [rows, columns.length]);
@@ -328,6 +336,9 @@ export function TableWidget({ data, settled = false }: WidgetProps) {
           </>
         )}
       </Collapse>
+      {/* A table shown as the answer (render_widget) names its sources, like
+          every other interactive answer. */}
+      {answerSources.length > 0 && <SourceBar sources={answerSources} />}
     </div>
   );
 }

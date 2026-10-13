@@ -1,5 +1,6 @@
 import { memo, type ComponentType } from 'react';
 import type { Widget } from '@/api/types';
+import { InlineUi } from '@/components/interactive/InlineUi';
 import { NewsWidget } from './NewsWidget';
 import { TableWidget } from './TableWidget';
 import { WeatherWidget } from './WeatherWidget';
@@ -24,6 +25,7 @@ const WIDGET_REGISTRY: Record<string, ComponentType<WidgetProps>> = {
   weather: WeatherWidget,
   news: NewsWidget,
   table: TableWidget,
+  ui: InlineUi,
 };
 
 /** Render a tool result's widget, or nothing.
@@ -71,7 +73,10 @@ export const WidgetView = memo(function WidgetView({
  *  with the tool calls and reasoning, instead of being re-surfaced above the
  *  answer like a weather card, which IS the answer. */
 export function staysInFold(widget: Widget | undefined): boolean {
-  return widget?.type === 'table';
+  // A table the agent showed ON PURPOSE (render_widget) is the answer, not
+  // evidence — it is marked `answer` and stays visible like any other card.
+  const answer = !!widget && typeof widget.data === 'object' && widget.data !== null && (widget.data as { answer?: unknown }).answer === true;
+  return widget?.type === 'table' && !answer;
 }
 
 export function hasWidget(widget: Widget | undefined): boolean {

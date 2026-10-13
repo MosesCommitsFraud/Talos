@@ -64,6 +64,7 @@ nav:
   - Architecture:
       - Overview: architecture/overview.md
       - RAG pipeline: architecture/rag-pipeline.md
+      - Interactive answers: architecture/interactive-answers.md
   - Backend:
       - API reference: backend/api.md
       - MCP server: backend/mcp-server.md

@@ -8,6 +8,8 @@ import { presentedOutputs, useSessionFiles, type SessionFile } from '@/lib/useSe
 import { describeStatus, partsToString, toolFamily, type LabelParts } from '@/lib/toolLabels';
 import { isRunning, useBgTasks } from '@/lib/useBgTasks';
 import { useChat, type UiMessage } from '@/state/chat';
+import type { UiDraft, Widget } from '@/api/types';
+import { UiDraftView } from './interactive/UiDraftView';
 import { usePrefs } from '@/state/prefs';
 import { useUi } from '@/state/ui';
 import { AttachmentTile, openUploadViewer } from './AttachmentTile';
@@ -233,7 +235,7 @@ const FAMILY_ORB: Record<string, OrbState> = {
   sql: 'connecting', api: 'connecting', fetch: 'connecting', weather: 'connecting', models: 'connecting',
   chatNew: 'connecting', chatsList: 'connecting', chatSend: 'connecting', chatManage: 'connecting',
   read: 'weaving',
-  write: 'shaping', edit: 'shaping', document: 'shaping', image: 'shaping', skillNew: 'shaping',
+  write: 'shaping', edit: 'shaping', document: 'shaping', image: 'shaping', skillNew: 'shaping', ui: 'shaping',
   skillManage: 'shaping', docsManage: 'shaping', settings: 'shaping', admin: 'shaping',
   plan: 'solving', ask: 'listening',
   knowledgeList: 'searching', knowledgeGrep: 'searching', knowledgeRead: 'weaving', delegate: 'working',
@@ -398,7 +400,8 @@ function Working({
 type TurnSegment =
   | { kind: 'text'; msg: UiMessage }
   | { kind: 'thinking'; id: string; text: string }
-  | { kind: 'activity'; id: string; entries: GroupEntry[] };
+  | { kind: 'activity'; id: string; entries: GroupEntry[] }
+  | { kind: 'ui'; draft: UiDraft; widget?: Widget };
 
 /** Split a turn into the sequence a reader should see: what the model said, and
  *  — bunched into one collapsible group between those — what it did.
@@ -447,6 +450,12 @@ function buildSegments(turn: UiMessage[], showThinking: boolean): TurnSegment[] 
     if (m.content.trim()) {
       flush();
       out.push({ kind: 'text', msg: m });
+    }
+    // An interactive answer sits right after the text that introduced it — it
+    // is part of the answer, never folded into a tool group.
+    for (const draft of m.uiDrafts ?? []) {
+      flush();
+      out.push({ kind: 'ui', draft, widget: m.tools?.find((c) => c.uiDraftId === draft.id)?.widget });
     }
     for (const call of m.tools ?? []) add(m.id, { kind: 'call', call });
   }
@@ -540,6 +549,12 @@ export function TurnBody({ turn, showThinking, hideContentFor, settled }: { turn
       {buildSegments(turn, showThinking).map((seg) => {
         if (seg.kind === 'activity') {
           return <ToolGroup key={`act-${seg.id}`} entries={seg.entries} settled={settled} />;
+        }
+        if (seg.kind === 'ui') {
+          // Settled turns re-surface the finished UI above the answer, so the
+          // fold does not repeat it.
+          if (settled) return null;
+          return <UiDraftView key={`ui-${seg.draft.id}`} draft={seg.draft} widget={seg.widget} />;
         }
         if (seg.kind === 'thinking') {
           // Italic and muted at message size: an aside in the same voice as the

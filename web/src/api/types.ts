@@ -167,6 +167,15 @@ export interface Widget {
   data: unknown;
 }
 
+/** An interactive answer while the model is still writing it
+ *  (`ui_stream_open` / `ui_stream_delta`, see src/interactive_ui.UiStream).
+ *  `fields` holds what has arrived — the string fields as far as they go. */
+export interface UiDraft {
+  id: string;
+  fields: Record<string, unknown>;
+  complete: string[];
+}
+
 /** One tool invocation inside an assistant turn. */
 export interface ToolCall {
   tool: string;
@@ -192,6 +201,10 @@ export interface ToolCall {
     [key: string]: unknown;
   }>;
   widget?: Widget;
+  /** `render_ui`: the streamed draft (UiMessage.uiDrafts) this call finished.
+   *  The draft's slot then shows the final UI, so the widget is not drawn a
+   *  second time under the tool row. */
+  uiDraftId?: string;
   /** `present_files`: the paths the agent handed over as this turn's
    *  deliverables — each becomes an output card under the answer. */
   presented_files?: string[];

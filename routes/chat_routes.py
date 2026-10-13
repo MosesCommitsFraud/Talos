@@ -1146,6 +1146,10 @@ def setup_chat_routes(
                                     "agent_step",
                                     "doc_stream_open",
                                     "doc_stream_delta",
+                                    # An interactive answer being written
+                                    # (src/interactive_ui.UiStream).
+                                    "ui_stream_open",
+                                    "ui_stream_delta",
                                     "doc_update",
                                     "doc_suggestions",
                                     "rounds_exhausted",

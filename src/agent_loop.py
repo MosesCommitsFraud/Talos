@@ -19,6 +19,7 @@ from typing import Any, AsyncGenerator, Dict, List, Optional, Set
 from urllib.parse import urlparse
 
 from src.agent_tools import (
+    _TOOL_NAME_MAP,
     FUNCTION_TOOL_SCHEMAS,
     MAX_AGENT_ROUNDS,
     TOOL_TAGS,
@@ -180,7 +181,7 @@ Use `bash` for SHELL tasks only. To RUN Python, use the `python` tool — NOT `b
 INSTALL POLICY: the ONLY thing you may install is Python libraries via `pip install <package>`, and only when the current work task needs them (e.g. openpyxl, python-pptx, pypdf, plotly, pandas, sqlalchemy). System package managers (apt, dpkg, snap, ...), `sudo`/privilege escalation, docker/systemctl/services, non-Python package managers (npm, cargo, ...), conda/pyenv, `git clone`, source builds (cmake, make, gcc, nvcc), model runtimes (ollama, vllm, llama.cpp, huggingface-cli), heavyweight ML/GPU packages via pip (torch, vllm, transformers, unsloth, ...), and piping curl/wget into a shell are all rejected by policy — do not attempt them. Installed libraries may not persist forever, so do not assume they survive between sessions.
 SETUP/INFRASTRUCTURE QUESTIONS: when the user asks HOW to install or configure software, servers, GPUs, containers, or hardware, that is a KNOWLEDGE question about THEIR machine — answer it in text from the documents and your knowledge. NEVER execute or "test" those setup commands yourself, and never create directories or project structures from a setup guide: the guide describes the user's machine, not your workspace.
 NO NETWORK IN THE WORKSPACE: the workspace has no route to the internet, so `curl`, `wget`, and Python `urllib`/`requests`/`httpx` calls to any external host fail here — always, not intermittently. Never try to search or scrape the web from the shell. Use the `web_search` tool to search and `web_fetch` to read a URL; those run outside the workspace and do have network access. If those tools are not in your tool list this turn, tell the user web access is not enabled — do NOT report it as a sandbox/DNS problem.
-WORKSPACE LIMITS: stdin/stdout are pipes, so there is NO interactive terminal — `input()`, `curses`, `termios`, `pygame`, and `tkinter` will all fail. Don't try to RUN interactive terminal games or GUI apps here — verify syntax (`python -c "import py_compile; py_compile.compile('x.py')"`) and tell the user to run it themselves in their own terminal. For anything the USER should play/use interactively (games, UIs, demos), prefer a single self-contained HTML file with `<canvas>` + inline JS — save it via `create_document` with language="html" and tell the user to hit the Run / Preview button (▶) in the document editor toolbar; it renders inline in a sandboxed iframe so the game is playable right there. Works from any machine that can reach the Talos UI — no need to copy files out.
+WORKSPACE LIMITS: stdin/stdout are pipes, so there is NO interactive terminal — `input()`, `curses`, `termios`, `pygame`, and `tkinter` will all fail. Don't try to RUN interactive terminal games or GUI apps here — verify syntax (`python -c "import py_compile; py_compile.compile('x.py')"`) and tell the user to run it themselves in their own terminal. For an interactive answer the user should see right in the chat (charts to explore, calculators, comparisons, diagrams), use `render_ui` when it is in your tool list. When the user asks for an interactive HTML FILE (a dashboard, report or page to keep, download or send), build it as a self-contained `.html` under `output/` the way the `dashboard-v2` skill describes; for a game or demo page, a single self-contained HTML file with `<canvas>` + inline JS under `output/`. Talos shows HTML files from `output/` live in the preview panel.
 NEVER pipe multi-line Python through `python -c "..."`. Use the dedicated `python` tool, or create a workspace script with `write_file` and run it.""",
     "python": """\
 ```python
@@ -343,6 +344,33 @@ Current weather and forecast for one place, from a live weather service. A bare 
 **Forecast length:** `days` accepts 1-16. Beyond 16 there is no numerical forecast to be had — that is meteorology, not this tool. Ask for what exists, say plainly that the horizon ends there, and use `web_search` for a seasonal outlook or climate averages if the user needs the period after it. Never continue the table from your own head.
 **The user already sees the card.** Calling this displays a weather card with the current conditions and the full forecast inline. So answer the question they asked, in a sentence or two — never re-type the forecast as a list or a table underneath your own card.
 Pass `latitude`/`longitude` only when you already have exact coordinates; otherwise the plain place name is better, and add the country when it's ambiguous ("Springfield, US").""",
+    "render_widget": """\
+```render_widget
+{"type": "chart", "title": "Umsatz je Monat 2025", "data": {"kind": "bar", "categories": ["Jan", "Feb"], "series": [{"name": "Umsatz", "values": [286, 302]}], "unit": "T€"}, "sources": [{"kind": "sql", "label": "dbo.orders"}]}
+```
+Show a STANDARD visual from data alone — Talos builds it in its own look; you write no HTML or code. **First choice** whenever one of these fits; `render_ui` only for bespoke UIs (calculators, simulations, custom controls).
+- `chart`: `{kind: bar|horizontal|stacked|line|area|donut, categories, series: [{name, values}], unit}`; donut: `{kind: "donut", items: [{label, value}], unit}`. Trends over time → line/area; rankings → horizontal; parts of a whole (≤ 7) → donut.
+- `kpi`: `{items: [{label, value, unit, delta, deltaLabel, higherIsBetter, note}]}` — `delta` as a fraction (0.12 = +12 %).
+- `table`: `{columns: [...], rows: [[...]]}` — sortable, CSV download, chart toggle.
+- `diagram`: `{mermaid: "flowchart LR\\n  A[Antrag] --> B{Prüfung}"}` — processes, architectures, sequences, org charts.
+- `timeline`: `{events: [{date, title, text, status: done|risk}]}`.
+- `comparison`: `{options: [...], rows: [{criterion, values: [...], best: <index>}], verdict}`.
+Real numbers only (tool results, the user, or `model` for well-established facts); `sources` is required. Several widgets per answer are fine (e.g. kpi + chart). The user sees them at once: write only what they do not show. Method: built-in skills `interactive-answers`, `ui-visualization`, `ui-diagrams`, `ui-data` via `read_skill` (always available, load all that apply, together).""",
+    "render_ui": """\
+```render_ui
+{"title": "...", "initialHeight": 420, "placeholderMessages": ["..."], "css": "...", "html": "...", "js": "...", "jsInit": ["render()"], "data": {...}, "sources": [{"kind": "sql", "label": "..."}]}
+```
+Answer with an interactive UI rendered INLINE in the chat (not in the preview panel): charts the user can filter, calculators, comparisons with adjustable weights, simulations, process/architecture diagrams, KPI overviews.
+**When:** the user wants to understand, compare or work something out, and seeing or adjusting it helps more than reading — "zeig mir", "vergleiche", "wie entwickelt sich", "rechne durch", "visualisiere", "simuliere". Plain factual questions and short answers stay text. When the user asks for a FILE (an HTML page, a dashboard to download or send, a report) use the dashboard workflow (`dashboard-v2` skill) instead — not `render_ui`, not `create_document`. One UI per answer is the norm.
+**Real data only.** The iframe has NO network: fetch/XHR fail. Get the numbers first — `query_sql` (aggregate in SQL), `search_knowledge`/`read_knowledge`/`grep_knowledge`, `web_search`/`web_fetch` — or use well-established facts from your own knowledge; then embed them in `data` (js reads `window.TALOS_DATA`). Never present invented figures as facts: example values get a source of kind `illustrative`.
+**`sources` is required** — kind `user` | `sql` | `knowledge` | `web` | `model` (your own general knowledge) | `calculated` | `illustrative`, a `label`, optional `ref` (URL, document, table). Talos shows them under the UI.
+**Field order matters:** title, initialHeight, placeholderMessages, css, html, js, jsInit, data, sources, libraries. `html` is a fragment (no <html>/<body>). `js` holds functions and event wiring; `jsInit` short calls run after it. No top-level `await`, no localStorage, no alert/prompt.
+**Design — use the built-in Talos kit, do not style from scratch.** Talos font, colours and light/dark mode are preloaded. Layout/components by class: `t-stack`, `t-row`, `t-grid` (responsive tiles), `t-split` (controls | result), `t-card`, `t-title`, `t-note`, KPI tiles (`t-kpi` > `t-kpi-label`, `t-kpi-value`, `t-delta up|down`), `t-field` (label + control), `t-seg` (segmented buttons, `aria-pressed`), `t-btn` / `t-btn primary`, `t-toggle` with `<input type="checkbox" class="t-switch">` (on/off switch), `t-scale` (min/max under a slider), `t-chip`, `t-table` (`td.num` right-aligned). Bare buttons, inputs, sliders, selects, checkboxes and tables already look like Talos — do not restyle them. Charts: `talos.chart.bar(el, {categories, series:[{name, values}], unit})`, `talos.chart.line(el, {categories, series, unit, area})`, `talos.chart.donut(el, {items:[{label, value}], unit})` — each returns a handle with `.update({...})` for sliders; options `horizontal`, `stacked`, `format`, `height`. Numbers: `talos.fmt.number|currency|percent|compact|unit`. Maps: `talos.map(el, {markers:[{lat, lng, label, popup}], lines:[{points:[[lat,lng],…]}], height})` — OpenStreetMap tiles, attribution is added automatically; never remove it. Coordinates come from your knowledge or a lookup; there is no geocoding in the frame. Other libraries are served locally (no CDN — a CDN URL is blocked): list them in `libraries` — `echarts`, `d3`, `chartjs` (global `Chart`), `three` (global `THREE`), `leaflet` (global `L`), `mermaid`. Prefer `talos.chart`/`talos.map`; reach for a library only for what they cannot do. Write only layout-specific css (spacing, a custom SVG diagram); colours only via `var(--talos-…)` tokens (`--talos-fg`, `--talos-muted`, `--talos-border`, `--talos-surface`, `--talos-accent`, `--talos-chart-1`…`8`, `--talos-good`/`--talos-critical`). Never white/black backgrounds. Must work at 360 px width.
+**Live data:** when a control needs data you did not embed (another year, region, search term), declare it in `dataSources` — `{"id": "umsatz", "kind": "sql", "query": "SELECT monat, SUM(betrag) AS umsatz FROM dbo.orders WHERE jahr = :jahr GROUP BY monat ORDER BY monat", "params": {"jahr": {"type": "int", "min": 2018, "max": 2025, "default": 2025}}}` (kind `web`: https `url` with `{param}`; kind `knowledge`: search `query` with `{param}`) — and call `const r = await talos.refresh('umsatz', {jahr: 2024})` from the control's handler (SQL returns `{columns, rows, rowCount}`, web `{url, text}`, knowledge `{passages:[{document, page, text}]}`). Embed the initial values in `data` as usual; refresh only re-runs YOUR declared spec with typed, bounded parameters. Show a loading state and handle rejection. Images from the web: write the https URL in `<img src>` (or call `talos.img(url)` in js) — Talos proxies them; never hotlink otherwise.
+**No navigation:** the UI never changes `location`, opens windows or uses meta refresh — such code is rejected. External links: an `<a href>` or `talos.openLink(url)` with a URL written literally in the UI; URLs assembled at runtime are not opened.
+**Follow-ups from the UI:** `window.talos.sendPrompt("…")` inside a click handler sends a message to the chat as the user (e.g. a "Details zu Variante B" button). Only on click, never on load.
+**After it renders** the user already sees it: write at most a few sentences on what it shows or what stands out — do not repeat its numbers as a table. To change it, call `render_ui` again with the complete new version.
+**Built-in method skills** (always available, not part of the user's skill library — do not mention them to the user): load `interactive-answers` with `read_skill` before the first `render_ui`/`render_widget` of a turn, plus every one of these the task touches — several at once is normal: `ui-visualization` (chart choice, KPIs, tables, libraries), `ui-diagrams` (processes, architectures, timelines), `ui-data` (SQL/knowledge/web data, `dataSources` + `talos.refresh`, images), `ui-maps` (locations, routes, regions). Issue the `read_skill` calls together in one message.""",
     "create_session": "- ```create_session``` — Create a new chat. Line 1 = chat name, line 2 = model name. Use for background/parallel work.",
     "list_sessions": "- ```list_sessions``` — List chats sorted MOST-RECENT FIRST (the UI calls them 'chats') with clickable chat-title links. Output includes a relative \"last active\" timestamp per row, so the first row is the user's most recent chat. Content = optional filter keyword (matches chat name). When answering, preserve the `[title](#session-id)` links exactly; do not convert them into plain text.",
     "send_to_session": "- ```send_to_session``` — Send a message to another session. Line 1 = session_id, rest = message. Use for orchestrating work across sessions.",
@@ -1960,6 +1988,12 @@ async def stream_agent_loop(
 
     if subagent or not _subagents.enabled():
         disabled_tools.update({"delegate", "continue_task"})
+    # Interactive answers are an admin opt-in (and pointless in a subagent,
+    # whose output is a report for the parent, never shown to the user).
+    from src import interactive_ui as _interactive_ui
+
+    if subagent or not _interactive_ui.enabled():
+        disabled_tools.update({"render_ui", "render_widget"})
     # The delegate tool starts subagents against this turn's endpoint, model
     # and modes. A subagent's own turn records itself so it cannot fan out.
     _subagents.set_turn_context(
@@ -2749,6 +2783,15 @@ async def stream_agent_loop(
         # Reset doc streaming state per round
         _doc_acc = ""
         _doc_opened = False
+        # Interactive answers being written this round, by tool-call index
+        # (native calls) — see src/interactive_ui.UiStream.
+        _ui_args: Dict[int, str] = {}
+        _ui_streams: Dict[int, Any] = {}
+        # The same for ```render_ui fences in the text: cursor past the last
+        # finished fence, and the stream of the fence being written.
+        _ui_fence_from = 0
+        _ui_fence_stream = None
+        _ui_fence_count = 0
         _doc_last_len = 0
         _doc_fence_offset = 0  # offset into round_response for text-fence content
         # Cursor for the multi-block scanner — when a `create_document`
@@ -2877,10 +2920,32 @@ async def stream_agent_loop(
                     # IMPORTANT: check type-based events BEFORE "delta" key,
                     # because tool_call_delta also has an "arg_delta" field.
                     if data.get("type") == "tool_call_delta":
-                        # Stream document content to frontend as AI generates it
                         logger.debug(
                             f"tool_call_delta: name={data.get('name')}, len(arg_delta)={len(data.get('arg_delta', ''))}"
                         )
+                        # Route by tool name. Only the document tools open the
+                        # editor panel; an interactive answer streams into the
+                        # chat; every other tool's arguments are not shown while
+                        # they are being written. (This used to treat ANY call
+                        # with a "title" argument as a document.)
+                        _tc_name = _TOOL_NAME_MAP.get(
+                            str(data.get("name") or ""), str(data.get("name") or "")
+                        )
+                        if _tc_name == "render_ui":
+                            _tc_idx = data.get("index", 0)
+                            _ui_args[_tc_idx] = _ui_args.get(_tc_idx, "") + data.get(
+                                "arg_delta", ""
+                            )
+                            if _tc_idx not in _ui_streams:
+                                from src.interactive_ui import UiStream
+
+                                _ui_streams[_tc_idx] = UiStream(f"{round_num}-{_tc_idx}")
+                            for _uev in _ui_streams[_tc_idx].feed(_ui_args[_tc_idx]):
+                                yield f"data: {json.dumps(_uev)}\n\n"
+                            continue
+                        if _tc_name not in ("create_document", "update_document"):
+                            continue
+                        # Stream document content to frontend as AI generates it
                         _doc_acc += data.get("arg_delta", "")
                         if not _doc_opened:
                             tm = re.search(r'"title"\s*:\s*"((?:[^"\\]|\\.)*)"', _doc_acc)
@@ -2976,6 +3041,28 @@ async def stream_agent_loop(
                                 wire_sink["round_text"] = round_response
                             full_response += data["delta"]
                         yield chunk  # Stream all rounds
+                        # A ```render_ui fence streams into the chat the same
+                        # way a native call does (models without tool calling).
+                        if not data.get("thinking"):
+                            _uf_marker = "```render_ui\n"
+                            if _ui_fence_stream is None:
+                                _uf_at = round_response.find(_uf_marker, _ui_fence_from)
+                                if _uf_at >= 0:
+                                    from src.interactive_ui import UiStream
+
+                                    _ui_fence_from = _uf_at + len(_uf_marker)
+                                    _ui_fence_count += 1
+                                    _ui_fence_stream = UiStream(f"{round_num}-f{_ui_fence_count}")
+                            if _ui_fence_stream is not None:
+                                _uf_body = round_response[_ui_fence_from:]
+                                _uf_close = _uf_body.find("\n```")
+                                for _uev in _ui_fence_stream.feed(
+                                    _uf_body if _uf_close < 0 else _uf_body[:_uf_close]
+                                ):
+                                    yield f"data: {json.dumps(_uev)}\n\n"
+                                if _uf_close >= 0:
+                                    _ui_fence_from += _uf_close + 4
+                                    _ui_fence_stream = None
                         # Detect fenced document output in every round so Preview
                         # opens and updates while the model is still generating.
                         if not _doc_acc:
@@ -3625,6 +3712,17 @@ async def stream_agent_loop(
             )
             if is_doc_tool:
                 cmd_display = block.content.split("\n")[0].strip()[:80]
+            elif block.tool_type == "render_widget":
+                from src.declarative_widgets import display_title as widget_title
+
+                cmd_display = widget_title(block.content)
+            elif block.tool_type == "render_ui":
+                # The arguments are the whole UI (tens of KB of markup). The
+                # tool row and the replayed history record need its title only;
+                # the payload itself travels as the widget.
+                from src.interactive_ui import display_title
+
+                cmd_display = display_title(block.content)
             else:
                 cmd_display = block.content.strip()
 

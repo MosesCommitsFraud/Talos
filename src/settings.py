@@ -89,6 +89,17 @@ DEFAULT_SETTINGS = {
     # and a thinking pass each costs more wall-clock than parallelism saves.
     # Parallelism 3 suits a DGX Spark (vLLM batches, bandwidth-bound decode).
     "subagents_enabled": True,
+    # Interactive answers (`render_ui`, src/interactive_ui.py): the model may
+    # answer with a sandboxed HTML/CSS/JS UI rendered inline in the chat. Off
+    # until rolled out — small local models produce broken JS more often.
+    "interactive_answers_enabled": False,
+    # Maps in interactive answers (Leaflet in the frame). Default tile server is
+    # OpenStreetMap, used under its tile usage policy: attribution always shown,
+    # on-demand tiles only, origin-only Referer. Heavy use → own tile server.
+    "ui_maps_enabled": True,
+    "ui_map_tile_url": "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
+    "ui_map_attribution": "",
+    "ui_map_max_zoom": 19,
     "subagent_reasoning": "off",
     "subagent_parallelism": 3,
     "subagent_max_rounds": 12,

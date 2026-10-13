@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { compactSession, createSession, deleteMessages, editMessage, fetchActiveRuns, fetchArtifacts, fetchSession, resumeChat, streamChat } from '@/api/client';
-import type { Artifact, ArtifactSelection, Attachment, ChatEvent, Citation, Metrics, RagSource, ToolCall } from '@/api/types';
+import type { Artifact, ArtifactSelection, Attachment, ChatEvent, Citation, Metrics, RagSource, ToolCall, UiDraft } from '@/api/types';
 import { documentFileName, isPreviewable, samePath } from '@/lib/files';
 import { timestampMs } from '@/lib/utils';
 import { queryClient } from '@/lib/queryClient';
@@ -44,6 +44,10 @@ export interface UiMessage {
   /** Auto-compaction ran before this turn — earlier messages were summarized
    *  to fit the context window. Renders a marker above the bubble. */
   compacted?: { contextLength?: number };
+  /** Interactive answers this round is writing (render_ui), in order. Drawn at
+   *  their place in the stream; the matching tool call links back via
+   *  `uiDraftId` once it has run. */
+  uiDrafts?: UiDraft[];
 }
 
 /** Live runtime for one session, kept in the store keyed by session id so it
@@ -772,7 +776,7 @@ export const useChat = create<ChatState>((set, get) => {
           // text, or replaces the text outright — so the queued characters have
           // to be on screen first. Document/metric events don't touch the
           // message body and can stream past without interrupting the reveal.
-          if (ev.type !== 'doc_stream_delta' && ev.type !== 'doc_stream_open' && ev.type !== 'metrics') {
+          if (ev.type !== 'doc_stream_delta' && ev.type !== 'doc_stream_open' && ev.type !== 'metrics' && ev.type !== 'ui_stream_delta') {
             smoother.flush();
           }
           switch (ev.type) {
@@ -785,10 +789,21 @@ export const useChat = create<ChatState>((set, get) => {
               }));
               break;
             case 'tool_output':
-              patchAi((m) => ({
+              patchAi((m) => {
+                // A finished render_ui takes over the oldest draft of this
+                // round that no call has claimed yet; a failed one drops it,
+                // so a broken attempt does not linger as a half-drawn preview.
+                const last = (m.tools ?? []).at(-1);
+                const isUi = last?.tool === 'render_ui' && last.status === 'running';
+                const claimed = new Set((m.tools ?? []).map((t) => t.uiDraftId).filter(Boolean));
+                const draft = isUi ? (m.uiDrafts ?? []).find((d) => !claimed.has(d.id)) : undefined;
+                const failed = (ev.exit_code ?? 0) !== 0;
+                return {
+                ...(draft && failed ? { uiDrafts: (m.uiDrafts ?? []).filter((d) => d.id !== draft.id) } : {}),
                 tools: (m.tools ?? []).map((t, i, arr) =>
                   i === arr.length - 1 && t.status === 'running'
                     ? {
+                        ...(draft && !failed ? { uiDraftId: draft.id } : {}),
                         ...t,
                         output: ev.output as string | undefined,
                         exitCode: ev.exit_code as number | undefined,
@@ -810,7 +825,8 @@ export const useChat = create<ChatState>((set, get) => {
                       }
                     : t,
                 ),
-              }));
+                };
+              });
               // Only what the agent handed over with present_files takes over
               // the panel; any other write just refreshes the list (and the
               // preview, when it is the file on screen).
@@ -819,6 +835,33 @@ export const useChat = create<ChatState>((set, get) => {
                 if (ev.artifacts_changed || presented) revealArtifacts(presented ?? []);
               }
               break;
+            case 'ui_stream_open': {
+              const id = typeof ev.id === 'string' ? ev.id : '';
+              if (!id) break;
+              patchAi((m) => (m.uiDrafts ?? []).some((d) => d.id === id)
+                ? {}
+                : { uiDrafts: [...(m.uiDrafts ?? []), { id, fields: {}, complete: [] }] });
+              break;
+            }
+            case 'ui_stream_delta': {
+              const id = typeof ev.id === 'string' ? ev.id : '';
+              const field = typeof ev.field === 'string' ? ev.field : '';
+              if (!id || !field) break;
+              patchAi((m) => ({
+                uiDrafts: (m.uiDrafts ?? []).map((d) => {
+                  if (d.id !== id) return d;
+                  const value = typeof ev.append === 'string'
+                    ? String(d.fields[field] ?? '') + ev.append
+                    : ev.value;
+                  return {
+                    ...d,
+                    fields: { ...d.fields, [field]: value },
+                    complete: ev.complete && !d.complete.includes(field) ? [...d.complete, field] : d.complete,
+                  };
+                }),
+              }));
+              break;
+            }
             case 'doc_stream_open': {
               if (get().sessionId !== sid) break;
               const current = useUi.getState().preview;

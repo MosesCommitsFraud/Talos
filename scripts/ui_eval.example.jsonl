@@ -1,0 +1,47 @@
+# Interactive-answers eval set — instance-independent.
+#
+# Prompts that need the instance's own data do not name tables or documents:
+# a `setup` turn (same chat, not scored) lets the agent find something fitting,
+# and the scored question `q` refers back to it. Where the instance has no such
+# data, the prompt scores n/a instead of FAIL. Add your own concrete prompts
+# below if you want to test specific questions — they are just more lines.
+#
+# expect: text | widget | ui | view | file   data: source kinds that must be cited
+#
+# ── database (render_widget expected) ──
+{"id": "db-kpi", "setup": ["Schau in die angebundene Datenbank: Welche Tabelle enthält Kennzahlen, die man über Zeiträume vergleichen kann (Beträge, Mengen, Anzahlen mit Datum)? Nenne eine und die wichtigsten Spalten, ohne Abfrageergebnisse zu zeigen."], "q": "Zeig mir dazu die wichtigsten Kennzahlen für den letzten vollständigen Zeitraum im Vergleich zum Zeitraum davor.", "expect": "widget", "widget_types": ["kpi"], "data": ["sql"], "flags": {"use_db": true}}
+{"id": "db-trend", "setup": ["Welche Tabelle in der Datenbank hat eine Datumsspalte und eine Zahl, deren Verlauf interessant ist? Nenne eine, ohne Werte abzufragen."], "q": "Zeig mir, wie sich diese Zahl über die Zeit entwickelt hat.", "expect": "widget", "widget_types": ["chart"], "data": ["sql"], "flags": {"use_db": true}}
+{"id": "db-ranking", "setup": ["Gibt es in der Datenbank eine Tabelle mit Kategorien (z. B. Kunden, Produkte, Regionen, Mitarbeiter) und einer Zahl dazu? Nenne eine, ohne Werte abzufragen."], "q": "Welche 10 haben dabei den höchsten Wert? Als Diagramm bitte.", "expect": "widget", "widget_types": ["chart", "table"], "data": ["sql"], "flags": {"use_db": true}}
+{"id": "db-share", "setup": ["Welche Tabelle in der Datenbank eignet sich, um Anteile zu zeigen (eine Gesamtmenge, die sich auf wenige Gruppen verteilt)? Nenne eine, ohne Werte abzufragen."], "q": "Wie verteilt sich das auf die Gruppen?", "expect": "widget", "widget_types": ["chart"], "data": ["sql"], "flags": {"use_db": true}}
+{"id": "db-table", "setup": ["Welche Tabelle in der Datenbank enthält einzelne Vorgänge, Aufträge oder Einträge mit mehreren Eigenschaften? Nenne eine, ohne Werte abzufragen."], "q": "Liste mir die 20 neuesten Einträge daraus mit den wichtigsten Spalten.", "expect": "view", "widget_types": ["table"], "data": ["sql"], "flags": {"use_db": true}}
+{"id": "db-mixed", "setup": ["Welche Tabelle in der Datenbank hat Beträge oder Mengen mit Datum? Nenne eine, ohne Werte abzufragen."], "q": "Gib mir dazu einen Überblick: die wichtigsten Kennzahlen und den Verlauf über das letzte Jahr.", "expect": "widget", "widget_types": ["kpi", "chart"], "data": ["sql"], "flags": {"use_db": true}}
+# ── interactive (render_ui expected) ──
+{"id": "db-filter", "setup": ["Welche Tabelle in der Datenbank hat eine Zahl, eine Kategorie (z. B. Region, Gruppe, Typ) und ein Datum? Nenne eine, ohne Werte abzufragen."], "q": "Zeig mir die Zahl je Kategorie, und ich möchte zwischen den Jahren umschalten können.", "expect": "ui", "data": ["sql"], "flags": {"use_db": true}}
+{"id": "calc-loan", "q": "Rechne mir durch, was ein Kredit über 250.000 € bei verschiedenen Zinssätzen und Laufzeiten monatlich kostet.", "expect": "ui"}
+{"id": "calc-breakeven", "q": "Ab welcher Stückzahl lohnt sich die neue Maschine? Fixkosten 120.000 €, Deckungsbeitrag 18 € je Stück. Ich will mit den Werten spielen.", "expect": "ui", "data": ["user"]}
+{"id": "compare-weights", "q": "Vergleiche diese drei Angebote und lass mich die Kriterien gewichten: A 48.000 € 6 Wochen 2 Jahre Garantie, B 52.500 € 3 Wochen 3 Jahre, C 45.900 € 8 Wochen 2 Jahre.", "expect": "ui", "data": ["user"]}
+{"id": "sim-staff", "q": "Simuliere, wie sich die Wartezeit an der Hotline ändert, wenn wir 3 bis 8 Mitarbeiter einsetzen (120 Anrufe pro Stunde, 4 Minuten je Anruf).", "expect": "ui", "data": ["user"]}
+{"id": "map-db", "setup": ["Gibt es in der Datenbank Orte, Adressen, Städte oder Koordinaten (z. B. Standorte, Kunden, Lieferadressen)? Nenne eine passende Tabelle, ohne Werte abzufragen."], "q": "Zeig mir diese Orte auf einer Karte.", "expect": "ui", "data": ["sql"], "flags": {"use_db": true}}
+{"id": "map-route", "q": "Zeig mir auf einer Karte die Route Hamburg – Hannover – Frankfurt – München.", "expect": "ui"}
+# ── diagrams ──
+{"id": "diag-process-kb", "setup": ["Welches Dokument in der Wissensdatenbank beschreibt einen Ablauf, Prozess oder eine Vorgehensweise in Schritten? Nenne Dokument und Abschnitt."], "q": "Zeig mir diesen Ablauf als Diagramm.", "expect": "widget", "widget_types": ["diagram"], "data": ["knowledge"], "flags": {"use_rag": true}}
+{"id": "diag-arch", "q": "Erklär mir als Schaubild, wie ein typisches Web-Shop-System aufgebaut ist: Browser, Webserver, Anwendung, Datenbank, Zahlungsdienst.", "expect": "view"}
+{"id": "diag-timeline-kb", "setup": ["Welches Dokument in der Wissensdatenbank enthält Termine, Fristen, Meilensteine oder eine zeitliche Abfolge? Nenne Dokument und Abschnitt."], "q": "Stell diese Termine als Zeitstrahl dar.", "expect": "widget", "widget_types": ["timeline"], "data": ["knowledge"], "flags": {"use_rag": true}}
+{"id": "diag-orgchart", "q": "Zeichne ein Organigramm: Geschäftsführung, darunter Vertrieb, Produktion und Verwaltung, unter Produktion zwei Werke.", "expect": "widget", "widget_types": ["diagram"], "data": ["user"]}
+# ── knowledge base and web ──
+{"id": "kb-figures", "setup": ["Welches Dokument in der Wissensdatenbank enthält Zahlenangaben, Grenzwerte, Intervalle oder eine Tabelle, die man vergleichen könnte? Nenne Dokument und Abschnitt."], "q": "Stell diese Angaben übersichtlich dar.", "expect": "view", "widget_types": ["table", "comparison", "chart"], "data": ["knowledge"], "flags": {"use_rag": true}}
+{"id": "web-compare", "q": "Vergleiche die aktuellen Leitzinsen von EZB, Fed und Bank of England.", "expect": "view", "data": ["web"]}
+{"id": "web-trend", "q": "Wie hat sich der Strompreis für Gewerbekunden in Deutschland seit 2020 entwickelt?", "expect": "widget", "widget_types": ["chart"], "data": ["web"]}
+{"id": "model-facts", "q": "Vergleiche die Wirkungsgrade von Wärmepumpe, Gasbrennwert und Ölheizung grafisch.", "expect": "widget", "widget_types": ["chart", "comparison"], "data": ["model"]}
+# ── plain text is right ──
+{"id": "text-fact", "q": "Was ist der Unterschied zwischen Brutto- und Nettoumsatz?", "expect": "text"}
+{"id": "text-howto", "q": "Wie lege ich in Talos einen neuen Chat an?", "expect": "text"}
+{"id": "text-single", "setup": ["Welche Tabelle in der Datenbank hat Datensätze mit Datum? Nenne eine, ohne Werte abzufragen."], "q": "Wie viele Einträge hat diese Tabelle insgesamt?", "expect": "text", "flags": {"use_db": true}}
+{"id": "text-mail", "q": "Schreib eine kurze E-Mail an das Team, dass das Meeting auf Donnerstag verschoben ist.", "expect": "text"}
+{"id": "text-weather", "q": "Wie wird das Wetter morgen in Berlin?", "expect": "text"}
+# ── a file is right ──
+{"id": "file-dashboard", "setup": ["Welche Tabelle in der Datenbank hat Beträge oder Mengen mit Datum? Nenne eine, ohne Werte abzufragen."], "q": "Erstelle mir daraus ein Dashboard als Datei zum Herunterladen.", "expect": "file", "flags": {"use_db": true}}
+{"id": "file-png", "q": "Mach mir aus diesen Quartalszahlen ein Diagramm als PNG für meine Präsentation: Q1 1,2 Mio., Q2 1,5 Mio., Q3 1,4 Mio., Q4 1,9 Mio.", "expect": "file"}
+# ── follow-up and honesty ──
+{"id": "followup-bar", "setup": ["Zeig mir die Entwicklung der Weltbevölkerung seit 1950 in Zehnjahresschritten als Liniendiagramm."], "q": "Mach daraus ein Balkendiagramm.", "expect": "widget", "widget_types": ["chart"], "data": ["model"]}
+{"id": "illustrative", "q": "Zeig mir mal beispielhaft, wie ein Burndown-Chart aussieht.", "expect": "widget", "widget_types": ["chart"], "data": ["illustrative"]}

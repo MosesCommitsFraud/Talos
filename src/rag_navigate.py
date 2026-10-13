@@ -627,7 +627,9 @@ def grep_knowledge(args: Dict[str, Any]) -> str:
             "then read those with read_knowledge."
         )
         if len(per_doc) > 1:
-            summary = "Documents with hits: " + ", ".join(f"{n} ({c})" for n, c in per_doc.items()) + "\n"
+            summary = (
+                "Documents with hits: " + ", ".join(f"{n} ({c})" for n, c in per_doc.items()) + "\n"
+            )
     if not hits:
         return (
             f'"{pattern}" does not occur literally{where} in the knowledge base. '
@@ -635,4 +637,6 @@ def grep_knowledge(args: Dict[str, Any]) -> str:
             "for a meaning-based search."
         )
     more = f" Showing {len(hits)}." if count > len(hits) else ""
-    return f'{count} occurrence(s) of "{pattern}"{where}.{more} {follow}\n' + summary + "\n".join(hits)
+    return (
+        f'{count} occurrence(s) of "{pattern}"{where}.{more} {follow}\n' + summary + "\n".join(hits)
+    )

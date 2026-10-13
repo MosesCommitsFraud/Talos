@@ -39,6 +39,17 @@ _FM_RE = re.compile(r"\A\s*---\s*\n(.*?)\n---\s*(?:\n|\Z)", re.S)
 _FM_FIELD_RE = re.compile(r"^([A-Za-z_][A-Za-z0-9_-]*)\s*:\s*(.*)$")
 
 
+def _reserved_names() -> set:
+    """Names of Talos's built-in system skills (src/system_skills.py). They are
+    not part of this library: never listed, never enabled, never uploadable."""
+    try:
+        from src.system_skills import names
+
+        return names()
+    except Exception:
+        return set()
+
+
 def parse_frontmatter(content: str) -> dict:
     """Extract scalar frontmatter fields from a SKILL.md. Raises ValueError
     when the document has no frontmatter or is missing name/description."""
@@ -111,6 +122,8 @@ def save_skill(content: str, uploader: Optional[str], bundle_files: Optional[dic
         raise ValueError(f"Skill file too large (max {MAX_SKILL_CHARS} chars).")
     fields = parse_frontmatter(content)
     name = fields["name"]
+    if name in _reserved_names():
+        raise ValueError(f"The skill name {name!r} is reserved for a built-in Talos skill.")
     with SessionLocal() as db:
         row = db.get(SharedSkill, name)
         if row is None:
@@ -296,6 +309,7 @@ def seed_sample_skills(source_dir: Optional[str] = None) -> int:
 
     ledger = _read_seed_ledger()
     written = 0
+    _retire_seeded_system_skills(ledger)
     for entry in sorted(os.listdir(source_dir)):
         skill_dir = os.path.join(source_dir, entry)
         if not os.path.isdir(skill_dir):
@@ -344,6 +358,32 @@ def seed_sample_skills(source_dir: Optional[str] = None) -> int:
     return written
 
 
+def _retire_seeded_system_skills(ledger: dict) -> None:
+    """A skill that moved from sample_skills to the built-in system skills
+    (interactive-answers did) may still sit in this library from an earlier
+    seed. Remove that copy — the built-in one is used now — unless an admin
+    edited it, in which case it is theirs; it stays hidden either way."""
+    reserved = _reserved_names() & set(ledger)
+    if not reserved:
+        return
+    changed = False
+    with SessionLocal() as db:
+        for name in reserved:
+            row = db.get(SharedSkill, name)
+            if row is not None and _content_hash(row.content or "") == ledger.get(name):
+                db.query(SharedSkillFile).filter(SharedSkillFile.skill_name == name).delete()
+                db.delete(row)
+                changed = True
+            ledger.pop(name, None)
+        db.commit()
+    try:
+        _write_seed_ledger(ledger)
+    except Exception as e:
+        logger.warning("Could not persist the sample-skill ledger: %s", e)
+    if changed:
+        logger.info("Removed seeded copies of built-in skills: %s", ", ".join(sorted(reserved)))
+
+
 def _file_counts(db) -> dict:
     from sqlalchemy import func as _func
 
@@ -362,8 +402,11 @@ def list_skills() -> List[dict]:
     with SessionLocal() as db:
         counts = _file_counts(db)
         rows = db.query(SharedSkill).order_by(SharedSkill.name).all()
+        reserved = _reserved_names()
         out = []
         for r in rows:
+            if r.name in reserved:
+                continue
             meta = _row_meta(r, counts.get(r.name, 0))
             meta["bundled"] = r.name in seeded
             out.append(meta)
@@ -371,6 +414,8 @@ def list_skills() -> List[dict]:
 
 
 def get_skill(name: str) -> Optional[dict]:
+    if slugify(name, fallback="") in _reserved_names():
+        return None
     with SessionLocal() as db:
         row = db.get(SharedSkill, slugify(name, fallback=""))
         if row is None:
@@ -481,7 +526,7 @@ def enabled_names() -> set:
         with SessionLocal() as db:
             return {
                 n for (n,) in db.query(SharedSkill.name).filter(SharedSkill.enabled.is_(True)).all()
-            }
+            } - _reserved_names()
     except Exception as e:
         logger.debug(f"shared-skills enabled read failed: {e}")
         return set()

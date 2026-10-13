@@ -337,6 +337,12 @@ _TOOL_NAME_MAP = {
     "news": "get_news",
     "nachrichten": "get_news",
     "headlines": "get_news",
+    "render_ui": "render_ui",
+    "generate_ui": "render_ui",
+    "generatesandboxedui": "render_ui",
+    "render_widget": "render_widget",
+    "show_chart": "render_widget",
+    "render_chart": "render_widget",
 }
 
 

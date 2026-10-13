@@ -1,10 +1,18 @@
 ---
 name: dashboard-v2
-description: "Create designed Apache ECharts dashboards and interactive HTML reports, including 16:9 presentations, A4 dashboards and downloadable PNG versions. Use for dashboard layout, chart and export requests. Not for a standalone static plot, an Excel deliverable, or a report without charts."
+description: "Create designed Apache ECharts dashboards and interactive HTML reports, including 16:9 presentations, A4 dashboards and downloadable PNG versions. Use when the user wants a dashboard or report as a FILE (to keep, download, send, print, present). Not for a quick look at figures in the chat (that is render_widget / render_ui), a standalone static plot, an Excel deliverable, or a report without charts."
 license: MIT
 ---
 
 # Dashboard v2 in Talos (Apache ECharts, macs design)
+
+**File or chat?** This skill makes a dashboard FILE. When the user only wants
+to see or explore figures in the conversation ("zeig mir", "wie entwickelt
+sich", "vergleiche") and has not asked for a file, answer in the chat instead
+with `render_widget` (charts, key figures, tables) or `render_ui`
+(interactive) — no file, no build script. Switch to this skill when they ask
+for something to keep, download, send, print or present, or when a view in
+the chat should become a file ("als Dashboard speichern", "als PDF/PNG").
 
 Produce one self-contained HTML file with `td.compose` from
 `/opt/talos/vendor/talos_dash.py`. **Everything required is in this file.**

@@ -45,6 +45,18 @@ def _load_or_create_key() -> bytes:
     return key
 
 
+def derive_key(purpose: str) -> bytes:
+    """A key for one purpose (e.g. signing URLs), derived from the app key so
+    it survives restarts without another secret file. Distinct purposes get
+    unrelated keys; the app key itself never leaves this module."""
+    import hashlib
+    import hmac
+
+    return hmac.new(
+        _load_or_create_key(), b"talos-derive:" + purpose.encode(), hashlib.sha256
+    ).digest()
+
+
 def _get_fernet() -> Fernet:
     global _fernet
     if _fernet is None:

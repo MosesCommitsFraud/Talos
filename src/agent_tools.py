@@ -83,6 +83,12 @@ TOOL_TAGS = {
     # Headlines as cards — the same SearxNG instance as web_search, news
     # category, rendered as articles (see src/news.py)
     "get_news",
+    # Interactive answers rendered inline in the chat — sandboxed css/html/js
+    # (see src/interactive_ui.py)
+    "render_ui",
+    # Standard visuals from data alone: chart, kpi, table, diagram, timeline,
+    # comparison (see src/declarative_widgets.py)
+    "render_widget",
     # Retrieve the full original of a compressed tool output
     # (see src/context_optimizer.py)
     "expand_output",

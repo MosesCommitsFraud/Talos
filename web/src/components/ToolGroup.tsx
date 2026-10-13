@@ -134,6 +134,9 @@ export function ToolGroup({ entries, settled = false }: { entries: GroupEntry[];
       {calls.map(
         (call, i) =>
           call.widget &&
+          // A streamed interactive answer is already drawn at its place in
+          // the message (UiDraftView), so the row does not add a copy.
+          !call.uiDraftId &&
           (!settled || staysInFold(call.widget)) && (
             <WidgetView key={`w-${i}`} widget={call.widget} settled={settled} />
           ),

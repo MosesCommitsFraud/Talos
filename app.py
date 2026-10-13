@@ -227,6 +227,10 @@ if AUTH_ENABLED:
         "/api/auth/integrations/presets",
         "/api/health",
         "/api/version",
+        # Images inside interactive answers are requested by a sandboxed
+        # (opaque-origin) frame, which carries no cookie. The route accepts
+        # only URLs signed when the answer was rendered (routes/ui_routes.py).
+        "/api/ui/img",
     }
     # /assets are the hashed Vite bundles of the React UI (web/dist); /static
     # now serves only fonts. All are code/assets (no data) and must be loadable
@@ -769,6 +773,11 @@ app.include_router(setup_font_routes())
 from routes.news_routes import setup_news_routes
 
 app.include_router(setup_news_routes())
+
+# Interactive answers: data refresh for declared sources, signed image proxy
+from routes.ui_routes import setup_ui_routes
+
+app.include_router(setup_ui_routes())
 
 
 # MCP (Model Context Protocol)

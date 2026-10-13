@@ -1,0 +1,253 @@
+/* Talos UI kit for inline interactive answers (render_ui).
+ *
+ * Injected into every frame before the model's own css. The goal: markup that
+ * uses these classes looks like the rest of the chat (the weather card, the
+ * table widget) without the model writing a line of styling. Everything reads
+ * the --talos-* tokens, which follow the app's light/dark theme live.
+ *
+ * Bare elements (button, input, select, table) get the same look at :where()
+ * specificity, so a model that ignores the classes still lands close, and a
+ * model that styles its own elements always wins. */
+
+*, *::before, *::after { box-sizing: border-box; }
+html, body {
+  margin: 0; padding: 0; background: transparent; color: var(--talos-fg);
+  font-family: var(--talos-font); font-size: 14px; line-height: 1.5;
+  -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility;
+}
+body { overflow-x: hidden; }
+#talos-root { padding: 14px 16px 16px; }
+:where(h1, h2, h3, h4) { margin: 0 0 8px; font-weight: 600; line-height: 1.3; letter-spacing: -0.005em; }
+:where(h1) { font-size: 18px; } :where(h2) { font-size: 16px; } :where(h3, h4) { font-size: 14px; }
+:where(p) { margin: 0 0 8px; }
+:where(b, strong) { font-weight: 600; }
+:where(a) { color: var(--talos-accent); text-decoration: none; }
+:where(svg) { display: block; max-width: 100%; }
+:where(svg text) { fill: currentColor; font-family: var(--talos-font); }
+:where(code, pre) { font-family: var(--talos-mono); font-size: 12px; }
+
+/* ── Layout ── */
+.t-stack { display: flex; flex-direction: column; gap: 14px; }
+.t-row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; }
+.t-spread { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; }
+.t-grid { display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(var(--t-min, 150px), 1fr)); }
+.t-split { display: grid; gap: 18px; grid-template-columns: minmax(200px, 1fr) 2fr; }
+@media (max-width: 560px) { .t-split { grid-template-columns: 1fr; } }
+
+/* ── Surfaces & text ── */
+.t-card {
+  background: var(--talos-surface); border: 1px solid var(--talos-border);
+  border-radius: var(--talos-radius); padding: 12px 14px; min-width: 0;
+}
+.t-title { margin: 0 0 6px; font-size: 13px; font-weight: 600; color: var(--talos-fg); }
+.t-label { font-size: 12px; color: var(--talos-muted); }
+.t-muted { color: var(--talos-muted); }
+.t-note { font-size: 12px; color: var(--talos-muted); margin: 0; }
+.t-num { font-variant-numeric: tabular-nums; }
+.t-divider { height: 1px; background: var(--talos-border); border: 0; margin: 4px 0; }
+.t-chip {
+  display: inline-flex; align-items: center; gap: 4px; padding: 1px 8px; border-radius: 999px;
+  font-size: 11px; color: var(--talos-muted); background: var(--talos-surface); border: 1px solid var(--talos-border);
+}
+.t-chip.accent { color: var(--talos-accent); border-color: color-mix(in srgb, var(--talos-accent) 35%, transparent); }
+
+/* ── KPI tiles ── */
+.t-kpi { display: flex; flex-direction: column; gap: 2px; }
+.t-kpi-label { font-size: 12px; color: var(--talos-muted); }
+.t-kpi-value { font-size: 24px; font-weight: 600; line-height: 1.15; letter-spacing: -0.01em; font-variant-numeric: tabular-nums; }
+.t-kpi-value small { font-size: 13px; font-weight: 500; color: var(--talos-muted); margin-left: 2px; }
+.t-delta { font-size: 12px; font-variant-numeric: tabular-nums; color: var(--talos-muted); }
+.t-delta.up { color: var(--talos-good); }
+.t-delta.down { color: var(--talos-critical); }
+
+/* ── Controls ── */
+.t-field { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.t-field > label, .t-field > .t-label { display: flex; justify-content: space-between; gap: 8px; font-size: 12px; color: var(--talos-muted); }
+/* The live value of a control, as t3code shows it next to its sliders: a small
+ * muted badge in tabular mono figures. */
+.t-field output, .t-field .t-value, output.t-value {
+  min-width: 40px; padding: 2px 7px; border-radius: 6px; background: var(--talos-muted-chip);
+  color: var(--talos-fg); font: 500 11px/1.4 var(--talos-mono); font-variant-numeric: tabular-nums; text-align: center;
+}
+.t-field > label, .t-field > .t-label { align-items: center; }
+
+/* Buttons — web/src/components/ui/button.tsx: "outline" is the plain button,
+ * `.primary` the filled Talos-blue one, `.ghost` the borderless one. */
+:where(button), .t-btn {
+  position: relative; display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  height: 32px; padding: 0 12px; border-radius: 8px; white-space: nowrap;
+  border: 1px solid var(--talos-input); background: var(--talos-popover); color: var(--talos-fg);
+  font: 500 14px/1 var(--talos-font); cursor: pointer; outline: none;
+  box-shadow: 0 1px 2px rgb(0 0 0 / .05); transition: background-color .15s, border-color .15s, color .15s;
+}
+:where(:root[data-theme=dark]) :where(button), :where(:root[data-theme=dark]) .t-btn { background: var(--talos-input-fill); }
+:where(button):hover, .t-btn:hover { background: var(--talos-hover); }
+:where(:root[data-theme=dark]) :where(button):hover, :where(:root[data-theme=dark]) .t-btn:hover { background: var(--talos-input-fill-hover); }
+:where(button):focus-visible, .t-btn:focus-visible { box-shadow: 0 0 0 2px var(--talos-bg), 0 0 0 4px var(--talos-ring); }
+:where(button):disabled, .t-btn:disabled { opacity: .6; pointer-events: none; }
+.t-btn.primary, :where(:root[data-theme=dark]) .t-btn.primary {
+  background: var(--talos-accent); border-color: var(--talos-accent); color: var(--talos-accent-fg);
+  box-shadow: 0 1px 2px rgb(0 0 0 / .05), inset 0 1px rgb(255 255 255 / .16);
+}
+.t-btn.primary:hover, :where(:root[data-theme=dark]) .t-btn.primary:hover { background: color-mix(in srgb, var(--talos-accent) 90%, transparent); }
+.t-btn.ghost, :where(:root[data-theme=dark]) .t-btn.ghost { background: transparent; border-color: transparent; box-shadow: none; }
+.t-btn.ghost:hover, :where(:root[data-theme=dark]) .t-btn.ghost:hover { background: var(--talos-hover); }
+.t-btn.sm { height: 28px; padding: 0 10px; gap: 6px; font-size: 13px; }
+
+/* Segmented control — t3code's toggle-group "segmented" variant: a soft input
+ * well with small pills; the pressed one lifts onto the page colour.
+ * <div class="t-seg"><button aria-pressed="true">Monat</button>…</div> */
+.t-seg { display: inline-flex; width: fit-content; gap: 2px; padding: 2px; border-radius: 8px; background: color-mix(in srgb, var(--talos-input) 40%, transparent); }
+.t-seg > button, :where(:root[data-theme=dark]) .t-seg > button {
+  height: 24px; min-width: 0; padding: 0 10px; border: 0; border-radius: 6px; box-shadow: none;
+  background: transparent; color: var(--talos-muted); font: 500 12px/1 var(--talos-font);
+  transition: background-color .15s, color .15s;
+}
+.t-seg > button:hover { background: color-mix(in srgb, var(--talos-page) 55%, transparent); color: var(--talos-fg); }
+:where(:root[data-theme=dark]) .t-seg > button:hover { background: color-mix(in srgb, var(--talos-input) 32%, transparent); }
+.t-seg > button[aria-pressed="true"], .t-seg > button.active {
+  background: var(--talos-page); color: var(--talos-fg); box-shadow: 0 1px 2px rgb(0 0 0 / .1);
+}
+:where(:root[data-theme=dark]) .t-seg > button[aria-pressed="true"], :where(:root[data-theme=dark]) .t-seg > button.active {
+  background: color-mix(in srgb, var(--talos-input) 72%, transparent);
+}
+
+/* Inputs / selects — web/src/components/ui/misc.tsx Input and ui/select.tsx. */
+:where(input:not([type=range]):not([type=checkbox]):not([type=radio]):not([type=color]), select, textarea) {
+  height: 32px; width: auto; min-width: 0; padding: 0 10px; border-radius: 8px;
+  border: 1px solid var(--talos-input); background: transparent; color: var(--talos-fg);
+  font: 14px var(--talos-font); outline: none; transition: border-color .15s, box-shadow .15s;
+}
+:where(:root[data-theme=dark]) :where(input:not([type=range]):not([type=checkbox]):not([type=radio]):not([type=color]), select, textarea) { background: var(--talos-input-fill-soft); }
+:where(input, select, textarea)::placeholder { color: var(--talos-muted); }
+:where(input:not([type=range]):not([type=checkbox]):not([type=radio]), select, textarea):focus-visible {
+  border-color: var(--talos-ring); box-shadow: 0 0 0 2px color-mix(in srgb, var(--talos-ring) 30%, transparent);
+}
+:where(select) {
+  -webkit-appearance: none; appearance: none; padding-right: 30px; cursor: pointer;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%23888' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat; background-position: right 9px center;
+}
+:where(select):hover { border-color: color-mix(in srgb, var(--talos-ring) 60%, transparent); }
+:where(textarea) { height: auto; min-height: 88px; padding: 8px 10px; line-height: 1.5; resize: vertical; }
+:where(input[type=checkbox], input[type=radio]) { accent-color: var(--talos-accent); width: 15px; height: 15px; margin: 0; vertical-align: -2px; }
+
+/* Switch — t3code's ui/switch.tsx: a 30×18 pill with 2px padding, Talos blue
+ * when on, input-grey when off, a 14px knob in the page colour that stretches
+ * a little while pressed. <input type="checkbox" class="t-switch"> or role="switch". */
+:where(input[type=checkbox].t-switch, input[type=checkbox][role=switch]) {
+  -webkit-appearance: none; appearance: none; position: relative; flex: none; box-sizing: border-box;
+  width: 30px; height: 18px; margin: 0; padding: 2px; border: 0; border-radius: 999px;
+  background: var(--talos-input); cursor: pointer; vertical-align: middle;
+  transition: background-color .2s, box-shadow .2s;
+}
+:where(input[type=checkbox].t-switch, input[type=checkbox][role=switch])::before {
+  content: ''; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 14px;
+  background: var(--talos-page); box-shadow: 0 1px 2px rgb(0 0 0 / .08); transform-origin: left;
+  transition: translate .15s, scale .1s .1s, border-radius .15s;
+}
+:where(input[type=checkbox].t-switch, input[type=checkbox][role=switch]):checked { background: var(--talos-accent); }
+:where(input[type=checkbox].t-switch, input[type=checkbox][role=switch]):checked::before { translate: 12px 0; transform-origin: right; }
+:where(input[type=checkbox].t-switch, input[type=checkbox][role=switch]):active::before { scale: 1.1 1; }
+:where(input[type=checkbox].t-switch, input[type=checkbox][role=switch]):focus-visible { box-shadow: 0 0 0 1px var(--talos-bg), 0 0 0 3px var(--talos-ring); }
+:where(input[type=checkbox].t-switch, input[type=checkbox][role=switch]):disabled { opacity: .64; cursor: not-allowed; }
+/* A switch with its label on one line: <label class="t-toggle"><input type="checkbox" class="t-switch"> Prognose</label> */
+.t-toggle { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; color: var(--talos-fg); cursor: pointer; user-select: none; }
+
+/* Slider — t3code's .settings-slider: a 6px pill track filled in Talos blue up
+ * to the knob, a 16px knob in the page colour with a blue ring that grows on
+ * hover and gives on press. The fill position comes from talos.kit (--t-fill),
+ * offset by half a knob so it ends under the knob's centre. */
+:where(input[type=range]) {
+  --t-fill: 50%; --t-fill-offset: 0rem;
+  -webkit-appearance: none; appearance: none; width: 100%; height: 24px; margin: 0; padding: 0;
+  background: transparent; cursor: pointer; outline: none; touch-action: none;
+}
+:where(input[type=range])::-webkit-slider-runnable-track {
+  height: 6px; border-radius: 999px; border: 0;
+  background: linear-gradient(to right,
+    var(--talos-accent) 0 calc(var(--t-fill) + var(--t-fill-offset)),
+    color-mix(in srgb, var(--talos-muted) 22%, transparent) calc(var(--t-fill) + var(--t-fill-offset)) 100%);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--talos-border) 55%, transparent);
+}
+:where(input[type=range])::-moz-range-track {
+  height: 6px; border-radius: 999px; border: 0;
+  background: color-mix(in srgb, var(--talos-muted) 22%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--talos-border) 55%, transparent);
+}
+:where(input[type=range])::-moz-range-progress { height: 6px; border-radius: 999px; background: var(--talos-accent); }
+:where(input[type=range])::-webkit-slider-thumb {
+  -webkit-appearance: none; appearance: none; width: 16px; height: 16px; margin-top: -5px;
+  border: 2px solid var(--talos-accent); border-radius: 999px; background: var(--talos-page);
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--talos-fg) 12%, transparent);
+  transition: transform .12s ease, box-shadow .12s ease;
+}
+:where(input[type=range])::-moz-range-thumb {
+  width: 16px; height: 16px; box-sizing: border-box; border: 2px solid var(--talos-accent); border-radius: 999px;
+  background: var(--talos-page); box-shadow: 0 1px 2px color-mix(in srgb, var(--talos-fg) 12%, transparent);
+  transition: transform .12s ease, box-shadow .12s ease;
+}
+:where(input[type=range]):hover::-webkit-slider-thumb { transform: scale(1.08); box-shadow: 0 1px 3px color-mix(in srgb, var(--talos-fg) 20%, transparent); }
+:where(input[type=range]):hover::-moz-range-thumb { transform: scale(1.08); box-shadow: 0 1px 3px color-mix(in srgb, var(--talos-fg) 20%, transparent); }
+:where(input[type=range]):active::-webkit-slider-thumb { transform: scale(.94); }
+:where(input[type=range]):active::-moz-range-thumb { transform: scale(.94); }
+:where(input[type=range]):focus-visible::-webkit-slider-thumb { box-shadow: inset 0 0 0 1px var(--talos-page), inset 0 0 0 3px var(--talos-ring); }
+:where(input[type=range]):focus-visible::-moz-range-thumb { box-shadow: inset 0 0 0 1px var(--talos-page), inset 0 0 0 3px var(--talos-ring); }
+:where(input[type=range]):disabled { opacity: .5; cursor: default; }
+@media (forced-colors: active) {
+  :where(input[type=range]) { appearance: auto; accent-color: Highlight; }
+  :where(input[type=range])::-webkit-slider-runnable-track, :where(input[type=range])::-webkit-slider-thumb { all: revert; }
+}
+/* Scale under a slider: <div class="t-scale"><span>0 %</span><span>100 %</span></div> */
+.t-scale { display: flex; justify-content: space-between; font-size: 11px; color: var(--talos-muted); margin-top: 2px; }
+
+/* ── Tables ── */
+:where(table), .t-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+:where(th), .t-table th { text-align: left; font-weight: 500; color: var(--talos-muted); padding: 6px 8px; border-bottom: 1px solid var(--talos-border-strong); white-space: nowrap; }
+:where(td), .t-table td { padding: 6px 8px; border-bottom: 1px solid var(--talos-border); font-variant-numeric: tabular-nums; }
+:where(tr:last-child td) { border-bottom: 0; }
+.t-table .num, :where(td.num, th.num) { text-align: right; }
+
+/* ── Charts (talos.chart) ── */
+.t-chart { position: relative; width: 100%; min-width: 0; }
+.t-chart svg { overflow: visible; }
+.t-axis text { fill: var(--talos-muted); font-size: 11px; }
+.t-axis line, .t-axis path { stroke: var(--talos-border-strong); }
+.t-gridline { stroke: var(--talos-border); stroke-width: 1; }
+.t-chart .t-mark { transition: opacity .15s; }
+.t-chart.t-hovering .t-mark:not(.t-active) { opacity: .45; }
+.t-value-label { fill: var(--talos-fg); font-size: 11px; font-weight: 500; }
+.t-legend { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12px; color: var(--talos-muted); margin-bottom: 6px; }
+.t-legend span { display: inline-flex; align-items: center; gap: 6px; }
+.t-legend i { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
+.t-tooltip {
+  position: absolute; z-index: 5; pointer-events: none; min-width: 120px; max-width: 260px;
+  padding: 7px 9px; border-radius: 8px; font-size: 12px; line-height: 1.4;
+  background: var(--talos-popover); color: var(--talos-fg); border: 1px solid var(--talos-border-strong);
+  box-shadow: 0 8px 24px rgb(0 0 0 / .18); opacity: 0; transition: opacity .1s;
+}
+.t-tooltip.show { opacity: 1; }
+.t-tooltip .t-tt-title { font-weight: 600; margin-bottom: 3px; }
+.t-tooltip .t-tt-row { display: flex; align-items: center; gap: 6px; }
+.t-tooltip .t-tt-row b { margin-left: auto; padding-left: 10px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.t-tooltip i { width: 8px; height: 8px; border-radius: 2px; display: inline-block; }
+.t-empty { padding: 24px; text-align: center; color: var(--talos-muted); font-size: 13px; }
+
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; } }
+
+/* ── Maps (talos.map / Leaflet) in the Talos look ── */
+.t-map { position: relative; width: 100%; border-radius: var(--talos-radius); overflow: hidden; border: 1px solid var(--talos-border); background: var(--talos-surface); z-index: 0; }
+.t-map .leaflet-container, .t-map.leaflet-container { font: 12px/1.4 var(--talos-font); background: var(--talos-surface); }
+:where(:root[data-theme=dark]) .t-map .leaflet-tile-pane { filter: brightness(.82) contrast(1.05) saturate(.85); }
+.t-map .leaflet-bar { border: 1px solid var(--talos-input); border-radius: 8px; box-shadow: 0 1px 2px rgb(0 0 0 / .08); overflow: hidden; }
+.t-map .leaflet-bar a { width: 28px; height: 28px; line-height: 28px; background: var(--talos-popover); color: var(--talos-fg); border-bottom-color: var(--talos-border); }
+.t-map .leaflet-bar a:hover { background: var(--talos-hover); color: var(--talos-fg); }
+.t-map .leaflet-control-attribution { background: color-mix(in srgb, var(--talos-popover) 85%, transparent); color: var(--talos-muted); font-size: 10px; padding: 1px 6px; border-top-left-radius: 6px; }
+.t-map .leaflet-control-attribution a { color: var(--talos-muted); text-decoration: underline; }
+.t-map .leaflet-tooltip, .t-map .leaflet-popup-content-wrapper, .t-map .leaflet-popup-tip {
+  background: var(--talos-popover); color: var(--talos-fg); border: 1px solid var(--talos-border-strong); box-shadow: 0 8px 24px rgb(0 0 0 / .18);
+}
+.t-map .leaflet-tooltip { border-radius: 6px; padding: 3px 7px; font-size: 12px; }
+.t-map .leaflet-tooltip-top::before { border-top-color: var(--talos-border-strong); }
+.t-map .leaflet-popup-content-wrapper { border-radius: 10px; }
+.t-map .leaflet-popup-content { margin: 10px 12px; font-size: 13px; }

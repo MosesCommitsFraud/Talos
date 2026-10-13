@@ -463,4 +463,4 @@ def test_background_monitor_persists_the_widget():
 def test_registered_widget_types_match_the_frontend_registry():
     """Guards the registry contract: a type added here without a component in
     web/src/components/widgets/registry.tsx renders as nothing."""
-    assert WIDGET_TYPES == frozenset({"weather", "news", "table"})
+    assert WIDGET_TYPES == frozenset({"weather", "news", "table", "ui"})

@@ -1787,7 +1787,10 @@ def _skill_matches_query(skill_meta: dict, query: str) -> bool:
 
 
 async def do_browse_skills(
-    content: str, owner: Optional[str] = None, workspace: Optional[str] = None
+    content: str,
+    owner: Optional[str] = None,
+    workspace: Optional[str] = None,
+    disabled_tools: Optional[set] = None,
 ) -> Dict:
     """List the user's enabled skills and, for any that match the task, inline
     their full instructions so the model can follow them immediately.
@@ -1819,23 +1822,36 @@ async def do_browse_skills(
         logger.error(f"browse_skills failed: {e}")
         return {"error": f"Could not list skills: {e}", "exit_code": 1}
 
-    if not enabled:
+    # Built-in methods for Talos's own features (src/system_skills.py) join the
+    # matching on equal terms — several may fit one task, and all that fit are
+    # expanded. They are not listed by name: they are not the user's library.
+    from src import system_skills
+
+    system_matched = system_skills.matches(query, disabled_tools) if query else []
+
+    if not enabled and not system_matched:
         return {"results": "No skills are enabled. Proceed with the task normally."}
 
     # Decide which skills to expand fully. With a query, expand the matches;
     # with no usable query, expand everything when the library is small so the
     # forced call still surfaces the method (the common single-skill case).
     matched = [s for s in enabled if _skill_matches_query(s, query)]
-    if not matched and (not query or len(enabled) <= 2):
+    if enabled and not matched and (not query or len(enabled) <= 2):
         matched = list(enabled)
+    matched = matched + [dict(s, system=True) for s in system_matched]
 
-    lines = ["## Your enabled skills"]
+    lines = ["## Your enabled skills"] if enabled else ["## Skills"]
     for s in sorted(enabled, key=lambda x: x["name"]):
         lines.append(f"- {s['name']}: {s['description']}")
 
     expanded = []
     bundle_notes = []
     for s in sorted(matched, key=lambda x: x["name"]):
+        if s.get("system"):
+            builtin = system_skills.get(s["name"])
+            if builtin:
+                expanded.append(f"### SKILL: {s['name']}\n{builtin['content']}")
+            continue
         try:
             full = shared_skills.get_skill(s["name"])
         except Exception as e:
@@ -1919,6 +1935,39 @@ async def do_read_skill(
         path = lines[1].strip() if len(lines) > 1 else ""
     if not name:
         return {"error": "name is required (the skill's name from the skills list)", "exit_code": 1}
+
+    # System skills (src/system_skills.py) first: the methods behind Talos's
+    # own features. Always readable — no admin switch, no user toggle — and,
+    # like library skills, as many per turn as the work needs.
+    from src import system_skills
+
+    system = system_skills.get(name)
+    if system is not None:
+        if path:
+            data = system_skills.get_file(system["name"], path)
+            if data is None:
+                listing = ", ".join(system["file_paths"]) or "(no bundled files)"
+                return {
+                    "error": f"No file {path!r} in skill {system['name']!r}. Bundled files: {listing}",
+                    "exit_code": 1,
+                }
+            return {
+                "results": f"=== {system['name']} / {path} ===\n{data.decode('utf-8', 'replace')}"
+            }
+        listing = "\n".join(f"  - {p}" for p in system["file_paths"])
+        return {
+            "results": (
+                f"=== SKILL: {system['name']} ===\n{system['content']}"
+                + (
+                    f"\n\nBundled files (load one with read_skill name + path):\n{listing}"
+                    if listing
+                    else ""
+                )
+                + "\n\n[Instruction: You have now loaded this skill. Follow its method "
+                "EXACTLY as written. Other skills may be loaded alongside it when the "
+                "task spans several.]"
+            )
+        }
 
     try:
         from services.memory import shared_skills

@@ -35,6 +35,9 @@ WIDGET_TYPES = frozenset(
         "weather",
         "news",
         "table",
+        # A model-built interactive answer (render_ui, src/interactive_ui.py):
+        # sandboxed HTML/CSS/JS rendered inline in the chat.
+        "ui",
     }
 )
 
@@ -43,6 +46,13 @@ WIDGET_TYPES = frozenset(
 # a card (a 7-day forecast with 24 hourly points is ~6 KB) and far below
 # anything that would bloat a session row.
 MAX_WIDGET_BYTES = 64_000
+
+# Per-type exceptions to the cap. An interactive answer carries its own markup,
+# styles, script and embedded data, so it is an order of magnitude bigger than a
+# card. render_ui enforces the same bound on its input, so the model hears about
+# an oversized UI as a tool error it can act on, rather than the widget silently
+# vanishing here.
+WIDGET_BYTE_CAPS = {"ui": 512_000}
 
 
 def make_widget(widget_type: str, data: Dict[str, Any], version: int = 1) -> Dict[str, Any]:
@@ -127,12 +137,13 @@ def sanitize_widget(widget: Any) -> Optional[Dict[str, Any]]:
         logger.warning("Dropping %s widget: payload is not JSON-serialisable (%s)", widget_type, e)
         return None
 
-    if len(encoded.encode("utf-8")) > MAX_WIDGET_BYTES:
+    cap = WIDGET_BYTE_CAPS.get(widget_type, MAX_WIDGET_BYTES)
+    if len(encoded.encode("utf-8")) > cap:
         logger.warning(
             "Dropping %s widget: %d bytes exceeds the %d-byte cap",
             widget_type,
             len(encoded.encode("utf-8")),
-            MAX_WIDGET_BYTES,
+            cap,
         )
         return None
 

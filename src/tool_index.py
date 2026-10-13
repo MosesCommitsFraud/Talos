@@ -75,6 +75,11 @@ ALWAYS_AVAILABLE = frozenset(
         # Same reasoning again: "was gibt es Neues zu X" can surface at any point
         # in a turn, long after the tool set was fixed from the first message.
         "get_news",
+        # Whether an answer is better shown than told often only becomes clear
+        # once the data is in, long after the tool set was fixed. Still subject
+        # to the interactive_answers_enabled flag (disabled_tools).
+        "render_ui",
+        "render_widget",
     }
 )
 
@@ -133,6 +138,8 @@ BUILTIN_TOOL_DESCRIPTIONS: Dict[str, str] = {
     "web_search": "Search the live internet via the self-hosted SearxNG instance (Google/Bing/DuckDuckGo/Wikipedia results, no API key). For current events, news, prices, releases, versions, documentation, laws, people, companies — anything newer than training data or absent from the user's own documents. Also for any explicit request to search, look up, google, or research something, in English or German (suche, recherchiere, nachschlagen, aktuelle Informationen). Check the user's own documents first — `search_knowledge` when it's available, plus any retrieved knowledge already in context; use the web when that doesn't answer. Multiple calls per task are expected.",
     "get_news": "Recent news articles and headlines on a topic, from news sources only and within a recent time window. For 'what's happening with X', 'was gibt es Neues zu X', aktuelle Nachrichten, Schlagzeilen, Meldungen, Berichterstattung, latest on, breaking, coverage, headlines, press. Shows the user clickable article cards with source and age. Use web_search instead when the question wants a single recent fact rather than coverage of a story.",
     "get_weather": "Live weather and forecast for a place: temperature, rain, wind, humidity, sunrise/sunset, several days ahead. The tool for every weather question in any language — Wetter, Temperatur, Regen, regnet es morgen, wie warm wird es, Vorhersage, Wettervorhersage, forecast, will it rain, how cold, do I need a jacket, umbrella. Takes a plain place name (Berlin, Freiburg im Breisgau, Tokyo) or coordinates. Shows the user a weather card automatically. Use instead of web_search for weather.",
+    "render_ui": "Answer with an interactive UI inline in the chat: charts to explore, filters, sliders, calculators, comparisons with adjustable weights, simulations, process and architecture diagrams, KPI overviews, timelines. Deutsch: visualisieren, Diagramm, interaktiv, vergleichen, Rechner, durchrechnen, Simulation, Dashboard im Chat, zeig mir.",
+    "render_widget": "Show a standard visual in the chat from data alone, no code: bar/line/area/donut chart, KPI tiles with deltas, a sortable table, a Mermaid flow/process/architecture diagram, a timeline, a side-by-side comparison. Deutsch: Diagramm, Balkendiagramm, Kennzahlen, Tabelle, Ablaufdiagramm, Prozess, Zeitstrahl, Vergleich, zeig mir.",
     "web_fetch": "Open a public web page URL and return its readable text. Follow-up to web_search when snippets are too thin, or direct read of a link the user provided. Public http(s) HTML/text pages only.",
     "search_knowledge": "Search the documents indexed in this Talos instance — the uploaded knowledge base (manuals, training material, schema references, process docs, transcripts). Returns matching passages with their source filenames, or nothing when the base has no match. Cheap to call and an empty result is a normal outcome, so reach for it whenever a lookup might help rather than guessing. Multiple calls with different wording are expected. Deutsch: Wissensdatenbank, Dokumente, Handbuch, Schulung, Unterlagen, Doku durchsuchen.",
     "list_knowledge": "List the documents in the knowledge base by name, type and size, optionally filtered by a word in the name. Deutsch: welche Dokumente, Handbücher, Videos, Schulungen gibt es.",

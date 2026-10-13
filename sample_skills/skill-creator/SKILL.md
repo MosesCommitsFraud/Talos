@@ -51,6 +51,22 @@ skillbuild/
 └── scripts/          (optional — helper code the skill runs)
 ```
 
+### 2b. Skills that answer with something to look at
+A skill may prescribe that its result is SHOWN in the chat rather than told —
+a standard view of the department's KPIs, a cost calculator in the company's
+terms, an approval flow as a diagram. Do not re-teach the mechanics in the
+skill; point at the built-in tools and methods instead:
+- standard visuals (chart, key figures, table, diagram, timeline,
+  comparison) → "call `render_widget` with type …" — data only, no code;
+- anything with its own controls or logic → "build it with `render_ui`";
+- the method for both lives in built-in skills that are always available:
+  write "load `interactive-answers` (and `ui-data` / `ui-maps` /
+  `ui-diagrams` / `ui-visualization` as needed) with `read_skill` first".
+  They are not in the user's library and need not be bundled or enabled.
+What the skill adds is the domain: which figures, which SQL or documents
+they come from, which thresholds matter, what the view must contain. Give a
+complete example call with realistic data – the model copies examples.
+
 ### 3. Write a *pushy* description
 The description is the highest-leverage field — it is the only thing the model
 sees when deciding to use the skill, so under-triggering is the common failure.

@@ -732,6 +732,53 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
             },
         )
 
+    # ---- GET /api/ui-shell — empty document an inline interactive answer is written into ----
+    # Same mechanism as the preview shell above, for `render_ui` answers in the
+    # chat (src/interactive_ui.py, web/src/components/interactive/InlineUi.tsx).
+    # The frame is embedded without allow-same-origin, so the generated code runs
+    # in an opaque origin: no cookies, no app storage, no app DOM, and with
+    # connect-src 'none' no way to send anything anywhere.
+    #
+    # Libraries come only from this instance (static/ui-vendor/, see
+    # scripts/vendor_ui_libs.py) — no public CDN: Talos often runs without
+    # internet, and a CDN request would tell a third party who uses Talos. The
+    # one outside host is the configured map tile server, for images only.
+    @router.get("/api/ui-shell")
+    async def ui_shell():
+        from fastapi.responses import Response
+
+        from src.interactive_ui import map_config, ui_shell_csp
+
+        shell = (
+            '<!doctype html><meta charset="utf-8"><script>'
+            "addEventListener('message',function receive(e){"
+            "if(e.source!==parent||!e.data||e.data.type!=='talos:ui-document'||typeof e.data.html!=='string')return;"
+            "removeEventListener('message',receive);"
+            "document.open();document.write(e.data.html);document.close();});"
+            "parent.postMessage({type:'talos:ui-shell-ready'},'*');"
+            "</script>"
+        )
+        return Response(
+            content=shell,
+            media_type="text/html; charset=utf-8",
+            headers={
+                "Cache-Control": "no-store",
+                "X-Content-Type-Options": "nosniff",
+                # The tile server's usage policy (OpenStreetMap's included)
+                # asks for a valid Referer. The app default is no-referrer;
+                # this frame sends the instance's ORIGIN only, never a path.
+                "Referrer-Policy": "strict-origin-when-cross-origin",
+                "Content-Security-Policy": ui_shell_csp(map_config()),
+            },
+        )
+
+    # ---- GET /api/ui/config — what the inline UI frame needs to know ----
+    @router.get("/api/ui/config")
+    async def ui_config():
+        from src.interactive_ui import map_config
+
+        return {"maps": map_config()}
+
     @router.get("/api/artifacts/{session_id}/render")
     async def render_artifact_route(request: Request, session_id: str, path: str = Query(...)):
         from fastapi.responses import Response

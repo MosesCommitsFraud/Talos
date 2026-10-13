@@ -16,12 +16,15 @@ import os
 import shutil
 import signal
 import subprocess
+import sys
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
 
 ROOT = Path(__file__).resolve().parents[1]
+# The inline-UI routes reuse the real CSP/tile helpers (stdlib-only module).
+sys.path.insert(0, str(ROOT))
 STATIC = ROOT / "static"
 # New React UI bundle — served at "/" when built (mirrors app.py's strangler
 # routing: new UI at /, legacy at /legacy).
@@ -456,6 +459,39 @@ def _cold_agent_turn(ts_offset: int) -> dict:
                     "exit_code": 0,
                     "widget": _news_widget(),
                 },
+                {
+                    "round": 2,
+                    "tool": "render_ui",
+                    "command": "Angebotsvergleich – gewichtete Bewertung",
+                    "output": "Interactive answer rendered inline for the user.",
+                    "exit_code": 0,
+                    "widget": _ui_widget(),
+                },
+                {
+                    "round": 2,
+                    "tool": "render_ui",
+                    "command": "Umsatz 2025 nach Region",
+                    "output": "Interactive answer rendered inline for the user.",
+                    "exit_code": 0,
+                    "widget": _ui_widget(1),
+                },
+                {
+                    "round": 2,
+                    "tool": "render_ui",
+                    "command": "Standorte und Mitarbeitende",
+                    "output": "Interactive answer rendered inline for the user.",
+                    "exit_code": 0,
+                    "widget": _ui_widget(0, "ui-maps"),
+                },
+                {
+                    "round": 2,
+                    "tool": "render_ui",
+                    "command": "Umsatz je Monat",
+                    "output": "Interactive answer rendered inline for the user.",
+                    "exit_code": 0,
+                    "widget": _ui_widget(0, "ui-data"),
+                },
+                *_declarative_events(),
             ],
         }
     )
@@ -863,6 +899,173 @@ def _placeholder_png(seed: str) -> bytes:
     )
 
 
+def _declarative_events() -> list:
+    """render_widget results (src/declarative_widgets.py), one per type."""
+    from src.declarative_widgets import build
+
+    src = [{"kind": "sql", "label": "dbo.orders"}]
+    calls = [
+        {
+            "type": "kpi",
+            "title": "Kennzahlen 2025",
+            "data": {
+                "items": [
+                    {
+                        "label": "Umsatz",
+                        "value": 4.15,
+                        "unit": "Mio. €",
+                        "delta": 0.191,
+                        "deltaLabel": "ggü. Vorjahr",
+                    },
+                    {"label": "Aufträge", "value": 12840, "delta": 0.064},
+                    {
+                        "label": "Reklamationsquote",
+                        "value": "1,8 %",
+                        "delta": 0.12,
+                        "higherIsBetter": False,
+                    },
+                    {
+                        "label": "Ø Lieferzeit",
+                        "value": 3.4,
+                        "unit": "Tage",
+                        "delta": -0.08,
+                        "higherIsBetter": False,
+                    },
+                ]
+            },
+            "sources": src,
+        },
+        {
+            "type": "diagram",
+            "title": "Freigabeprozess Bestellung",
+            "data": {
+                "mermaid": (
+                    "flowchart LR\n  A[Bedarf] --> B{Betrag > 5.000 €?}\n"
+                    "  B -- nein --> C[Einkauf bestellt]\n  B -- ja --> D[Freigabe Leitung]\n"
+                    "  D --> C\n  C --> E[(ERP)]"
+                )
+            },
+            "sources": [
+                {
+                    "kind": "knowledge",
+                    "label": "Einkaufsrichtlinie",
+                    "ref": "Richtlinie_Einkauf.pdf, Kap. 3",
+                }
+            ],
+        },
+        {
+            "type": "timeline",
+            "title": "Projektverlauf",
+            "data": {
+                "events": [
+                    {
+                        "date": "2025-01",
+                        "title": "Kick-off",
+                        "text": "Ziele und Team festgelegt.",
+                        "status": "done",
+                    },
+                    {"date": "2025-04", "title": "Pilot Werk Süd", "status": "done"},
+                    {
+                        "date": "2025-09",
+                        "title": "Rollout",
+                        "text": "Verzögert durch Lieferengpass.",
+                        "status": "risk",
+                    },
+                    {"date": "2026-01", "title": "Abnahme"},
+                ]
+            },
+            "sources": [{"kind": "user", "label": "Projektplan aus deiner Nachricht"}],
+        },
+        {
+            "type": "comparison",
+            "title": "Angebote im Vergleich",
+            "data": {
+                "options": ["Angebot A", "Angebot B", "Angebot C"],
+                "rows": [
+                    {
+                        "criterion": "Preis",
+                        "values": ["48.000 €", "52.500 €", "45.900 €"],
+                        "best": 2,
+                    },
+                    {
+                        "criterion": "Lieferzeit",
+                        "values": ["6 Wochen", "3 Wochen", "8 Wochen"],
+                        "best": 1,
+                    },
+                    {
+                        "criterion": "Garantie",
+                        "values": ["2 Jahre", "3 Jahre", "2 Jahre"],
+                        "best": 1,
+                    },
+                ],
+                "verdict": "B ist teurer, liefert aber am schnellsten mit der längsten Garantie.",
+            },
+            "sources": [{"kind": "user", "label": "Angebote aus deiner Nachricht"}],
+        },
+        {
+            "type": "table",
+            "title": "Top-Kunden 2025",
+            "data": {
+                "columns": ["Kunde", "Umsatz (T€)", "Aufträge"],
+                "rows": [["Müller GmbH", 412, 88], ["Schmidt AG", 388, 61], ["Weber KG", 301, 74]],
+            },
+            "sources": src,
+        },
+    ]
+    return [
+        {
+            "round": 2,
+            "tool": "render_widget",
+            "command": call["title"],
+            "output": "Shown to the user.",
+            "exit_code": 0,
+            "widget": build(call),
+        }
+        for call in calls
+    ]
+
+
+def _ui_widget_raw(index: int, skill_name: str = "interactive-answers") -> dict:
+    """The skill example as written, before render-time processing."""
+    skill = ROOT / "system_skills" / skill_name / "SKILL.md"
+    body = skill.read_text(encoding="utf-8").split("```json\n")[index + 1].split("\n```", 1)[0]
+    return json.loads(body)
+
+
+def _ui_widget(index: int = 0, skill_name: str = "interactive-answers") -> dict:
+    """A render_ui widget (src/interactive_ui.py). The payload is one of the
+    complete examples from the built-in skills (system_skills/), so the preview
+    also proves that the examples the model learns from actually render."""
+    skill = ROOT / "system_skills" / skill_name / "SKILL.md"
+    text = skill.read_text(encoding="utf-8")
+    body = text.split("```json\n")[index + 1].split("\n```", 1)[0]
+    data = json.loads(body)
+    # What do_render_ui does with declared data sources: register them (here a
+    # fixed id the mock /api/ui/data answers for) and keep only the public part.
+    if data.get("dataSources"):
+        from src.ui_data import normalize_sources, public_spec
+
+        data["uiId"] = "0" * 32
+        data["dataSources"] = [public_spec(s) for s in normalize_sources(data["dataSources"])]
+    data.setdefault("jsInit", [])
+    data.setdefault("placeholderMessages", [])
+    return {"type": "ui", "version": 1, "data": data}
+
+
+def _ui_stream_events(index: int = 0, chunk: int = 40) -> list:
+    """The ui_stream_* frames the backend emits while a render_ui call is being
+    written — produced by the real UiStream over the skill example, cut into
+    token-sized pieces."""
+    from src.interactive_ui import UiStream
+
+    args = json.dumps(_ui_widget(index)["data"], ensure_ascii=False)
+    stream = UiStream("1-0")
+    events = []
+    for end in range(chunk, len(args) + chunk, chunk):
+        events.extend(stream.feed(args[:end]))
+    return events
+
+
 def _news_widget() -> dict:
     """A get_news widget payload in the shape src/news.py emits.
 
@@ -1255,6 +1458,23 @@ print(result)
             "output": 'News: "EU AI Act" — 5 article(s).\n1. **EU AI Act: Übergangsfristen für Hochrisiko-Systeme laufen aus**',
             "exit_code": 0,
             "widget": _news_widget(),
+        },
+        # An interactive answer (render_ui), streamed the way the agent loop
+        # streams it: the call's arguments arrive in pieces and become
+        # ui_stream_* events (src/interactive_ui.UiStream), then the call runs.
+        *_ui_stream_events(),
+        {
+            "type": "tool_start",
+            "tool": "render_ui",
+            "command": "Angebotsvergleich – gewichtete Bewertung",
+        },
+        {
+            "type": "tool_output",
+            "tool": "render_ui",
+            "command": "Angebotsvergleich – gewichtete Bewertung",
+            "output": "Interactive answer rendered inline for the user.",
+            "exit_code": 0,
+            "widget": _ui_widget(),
         },
         # An unknown widget type must render as NOTHING rather than an error —
         # that is what keeps a backend ahead of the deployed bundle safe.
@@ -1742,6 +1962,45 @@ class PreviewHandler(BaseHTTPRequestHandler):
             name, mime, data = entry
             self._send(200, data, mime, {"Content-Disposition": f'inline; filename="{name}"'})
             return
+        if path == "/api/ui-shell":
+            # Mirrors routes/document_routes.py: an empty document the inline
+            # interactive answer is written into, under its own no-network CSP.
+            shell = (
+                '<!doctype html><meta charset="utf-8"><script>'
+                "addEventListener('message',function receive(e){"
+                "if(e.source!==parent||!e.data||e.data.type!=='talos:ui-document'||typeof e.data.html!=='string')return;"
+                "removeEventListener('message',receive);"
+                "document.open();document.write(e.data.html);document.close();});"
+                "parent.postMessage({type:'talos:ui-shell-ready'},'*');"
+                "</script>"
+            )
+            from src.interactive_ui import DEFAULT_TILE_URL, ui_shell_csp
+
+            maps = {"enabled": True, "tileUrl": DEFAULT_TILE_URL}
+            self._send(
+                200,
+                shell.encode("utf-8"),
+                "text/html; charset=utf-8",
+                {
+                    "Content-Security-Policy": ui_shell_csp(maps),
+                    "Referrer-Policy": "strict-origin-when-cross-origin",
+                },
+            )
+            return
+        if path == "/api/ui/config":
+            from src.interactive_ui import DEFAULT_TILE_ATTRIBUTION, DEFAULT_TILE_URL
+
+            self._send_json(
+                {
+                    "maps": {
+                        "enabled": True,
+                        "tileUrl": DEFAULT_TILE_URL,
+                        "attribution": DEFAULT_TILE_ATTRIBUTION,
+                        "maxZoom": 19,
+                    }
+                }
+            )
+            return
         if path == "/api/news/thumbnail":
             # Stands in for routes/news_routes.py — the news cards point their
             # <img> at this path, so without it the preview only ever exercises
@@ -2122,6 +2381,45 @@ class PreviewHandler(BaseHTTPRequestHandler):
     def do_POST(self):
         parsed = urlparse(self.path)
         path = parsed.path
+        if path == "/api/ui/data":
+            # Stands in for routes/ui_routes.py: resolves the parameters against
+            # the skill example's declared source and returns made-up months.
+            from src.ui_data import DataSourceError, normalize_sources, resolve_params
+
+            body = json.loads(self._read_body() or b"{}")
+            spec = next(
+                (
+                    s
+                    for s in normalize_sources(_ui_widget_raw(0, "ui-data").get("dataSources"))
+                    if s["id"] == body.get("sourceId")
+                ),
+                None,
+            )
+            if spec is None:
+                self._send_json({"detail": "Unknown data source."}, 404)
+                return
+            try:
+                params = resolve_params(spec, body.get("params"))
+            except DataSourceError as e:
+                self._send_json({"detail": str(e)}, 422)
+                return
+            time.sleep(0.4)
+            factor = {2023: 0.82, 2024: 0.91}.get(params.get("jahr"), 1.0)
+            base = [286, 302, 330, 329, 340, 361, 348, 320, 352, 368, 386, 424]
+            rows = [[i + 1, round(v * factor)] for i, v in enumerate(base)]
+            self._send_json(
+                {
+                    "sourceId": spec["id"],
+                    "params": params,
+                    "data": {
+                        "columns": ["monat", "umsatz"],
+                        "rows": rows,
+                        "rowCount": 12,
+                        "truncated": False,
+                    },
+                }
+            )
+            return
         if path.startswith("/api/bg-tasks/") and path.endswith("/stop"):
             job_id = path[len("/api/bg-tasks/") : -len("/stop")]
             for run in _SUBAGENT_RUNS:

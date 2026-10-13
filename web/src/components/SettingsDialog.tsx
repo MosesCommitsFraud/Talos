@@ -919,6 +919,10 @@ function AiDefaultsPanel() {
         <TextRow s={s} k="agent_max_tool_calls" label={t('settings.ai.toolCallLimit')} hint={t('settings.ai.toolCallLimitHint')} type="number" width="w-24" />
         <TextRow s={s} k="agent_max_rounds" label={t('settings.ai.maxSteps')} type="number" width="w-24" />
         <TextRow s={s} k="agent_tool_parallelism" label={t('settings.ai.toolParallelism')} hint={t('settings.ai.toolParallelismHint')} type="number" width="w-24" />
+        <BoolRow s={s} k="interactive_answers_enabled" label={t('settings.ai.interactiveAnswers')} hint={t('settings.ai.interactiveAnswersHint')} />
+        <BoolRow s={s} k="ui_maps_enabled" label={t('settings.ai.uiMaps')} hint={t('settings.ai.uiMapsHint')} />
+        <TextRow s={s} k="ui_map_tile_url" label={t('settings.ai.uiMapTiles')} hint={t('settings.ai.uiMapTilesHint')} width="w-80" />
+        <TextRow s={s} k="ui_map_attribution" label={t('settings.ai.uiMapAttribution')} hint={t('settings.ai.uiMapAttributionHint')} width="w-80" />
       </Section>
 
       <Section title={t('settings.ai.subagents')}>

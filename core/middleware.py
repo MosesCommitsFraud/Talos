@@ -62,12 +62,21 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         # allow-same-origin, so the default DENY headers must not clobber it.
         is_artifact_render = (
             path.startswith("/api/artifacts/") and path.endswith("/render")
-        ) or path == "/api/html-preview-shell"
+        ) or path in ("/api/html-preview-shell", "/api/ui-shell")
         # Visual report pages are self-contained HTML — need inline scripts + external images
         is_report = path.startswith("/api/research/report/")
 
         response.headers["X-Content-Type-Options"] = "nosniff"
-        response.headers["Referrer-Policy"] = "no-referrer"
+        # The inline-UI shell sets its own (origin-only) policy: map tile
+        # servers such as OpenStreetMap require a Referer under their usage
+        # policy. Everything else keeps no-referrer.
+        if path != "/api/ui-shell" or "Referrer-Policy" not in response.headers:
+            response.headers["Referrer-Policy"] = "no-referrer"
+        # Libraries for inline UIs are loaded by an opaque (sandboxed) origin,
+        # and ES modules (three.js) are fetched in CORS mode — without this
+        # header the browser refuses them. Public, static, credential-free.
+        if path.startswith("/static/ui-vendor/"):
+            response.headers["Access-Control-Allow-Origin"] = "*"
 
         if is_report:
             response.headers["Content-Security-Policy"] = (

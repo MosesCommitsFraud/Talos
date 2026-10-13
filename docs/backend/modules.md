@@ -24,6 +24,9 @@ Grouped by concern:
 
 - `agent_loop.py` — the model ↔ tool loop driving agentic chat.
 - `agent_tools.py`, `builtin_actions.py`, `builtin_mcp.py` — tools available to the agent.
+- `interactive_ui.py`, `declarative_widgets.py`, `ui_data.py`, `system_skills.py` — interactive
+  answers in the chat (`render_ui`, `render_widget`, live data sources, built-in method skills);
+  see [Interactive answers](../architecture/interactive-answers.md).
 - `web_search.py` — internet access (`web_search` / `web_fetch`) via the bundled
   self-hosted SearxNG service; `web_fetch` is SSRF-guarded against internal hosts.
 - `chat_handler.py`, `chat_processor.py`, `chat_helpers.py` — request handling & streaming.

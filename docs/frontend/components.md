@@ -24,6 +24,9 @@ component does. (For an interactive, rendered catalog, see *Storybook* at the bo
 | `ArtifactsPanel.tsx` | Side panel for generated artifacts |
 | `Lightbox.tsx` | Full-screen image viewer |
 | `PlanCard.tsx` | Live `update_plan` checklist |
+| `interactive/InlineUi.tsx` | An interactive answer (`ui` widget): sandboxed frame, bridge, toolbar, source bar |
+| `interactive/UiDraftView.tsx` | The same answer while it streams: placeholder → live preview → hand-over |
+| `widgets/registry.tsx` | Widget type → component (`weather`, `news`, `table`, `ui`) |
 
 ## Navigation & chrome
 

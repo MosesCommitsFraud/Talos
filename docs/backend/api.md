@@ -51,6 +51,7 @@ Routers live in `routes/`, one module per feature area. The main groups:
 | Memory | `routes/memory_routes.py`, `routes/personal_routes.py` |
 | Models / embeddings | `routes/model_routes.py`, `routes/embedding_routes.py` |
 | MCP | `routes/mcp_routes.py` |
+| Interactive answers | `routes/ui_routes.py` (`/api/ui/data`, `/api/ui/img`), `routes/document_routes.py` (`/api/ui-shell`, `/api/ui/config`) — see [Interactive answers](../architecture/interactive-answers.md) |
 | Admin / diagnostics | `routes/diagnostics_routes.py`, `routes/admin_wipe_routes.py`, `routes/backup_routes.py` |
 
 For the full, always-current list, open [`/api/docs`](/api/docs).

@@ -653,6 +653,28 @@ class UserToolData(Base):
     __table_args__ = (Index("ix_user_tool_data_tool_key", "tool_id", "key", unique=True),)
 
 
+class UiDataSource(Base):
+    """A data source an interactive answer (render_ui) may refresh later.
+
+    The model declares it once, at render time; the frame can then only ask the
+    host to re-run THIS stored spec with typed, bounded parameters — never a
+    query or URL of its own. Bound to the user who received the answer.
+    See src/ui_data.py.
+    """
+
+    __tablename__ = "ui_data_sources"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    ui_id = Column(String, nullable=False)
+    source_id = Column(String, nullable=False)
+    owner = Column(String, nullable=True, index=True)
+    session_id = Column(String, nullable=True, index=True)
+    spec = Column(Text, nullable=False)
+    created_at = Column(DateTime, default=utcnow_naive)
+
+    __table_args__ = (Index("ix_ui_data_sources_ui_source", "ui_id", "source_id", unique=True),)
+
+
 class CrewMember(TimestampMixin, Base):
     """A custom AI persona ('crew member') with its own personality, model, tools, and memory scope."""
 

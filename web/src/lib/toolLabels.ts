@@ -34,6 +34,8 @@ const FAMILY: Record<string, string> = {
   web_fetch: 'fetch',
   get_weather: 'weather',
   get_news: 'news',
+  render_ui: 'ui',
+  render_widget: 'ui',
   generate_image: 'image',
   show_image: 'image',
   browse_skills: 'skills',
@@ -184,6 +186,8 @@ export function callSubject(call: ToolCall): string {
     }
     case 'fetch':
       return pick('url') || firstLine(raw);
+    case 'ui':
+      return clip(pick('title') || (raw.startsWith('{') ? '' : firstLine(raw)));
     case 'weather':
       return clip(pick('location', 'place', 'city') || firstLine(raw));
     case 'sql': {

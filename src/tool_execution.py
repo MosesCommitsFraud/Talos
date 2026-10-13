@@ -1914,7 +1914,9 @@ async def execute_tool_block(
         from src.tool_implementations import do_browse_skills
 
         desc = "browse_skills"
-        result = await do_browse_skills(content, owner=owner, workspace=workspace)
+        result = await do_browse_skills(
+            content, owner=owner, workspace=workspace, disabled_tools=disabled_tools
+        )
     elif tool == "create_skill":
         from src.tool_implementations import do_create_skill
 
@@ -1945,6 +1947,17 @@ async def execute_tool_block(
 
         desc = f"get_weather: {content.split(chr(10))[0].strip()[:60]}"
         result = await do_get_weather(content, owner=owner)
+    elif tool == "render_widget":
+        from src.declarative_widgets import display_title as widget_title
+        from src.declarative_widgets import do_render_widget
+
+        desc = f"render_widget: {widget_title(content)}"
+        result = await do_render_widget(content)
+    elif tool == "render_ui":
+        from src.interactive_ui import display_title, do_render_ui
+
+        desc = f"render_ui: {display_title(content)[:80]}"
+        result = await do_render_ui(content, owner=owner, session_id=session_id)
     elif tool == "background_task":
         from src.tool_implementations import do_background_task
 
