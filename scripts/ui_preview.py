@@ -1974,32 +1974,36 @@ class PreviewHandler(BaseHTTPRequestHandler):
                 "parent.postMessage({type:'talos:ui-shell-ready'},'*');"
                 "</script>"
             )
-            from src.interactive_ui import DEFAULT_TILE_URL, ui_shell_csp
+            from src.interactive_ui import ui_shell_csp
 
-            maps = {"enabled": True, "tileUrl": DEFAULT_TILE_URL}
             self._send(
                 200,
                 shell.encode("utf-8"),
                 "text/html; charset=utf-8",
                 {
-                    "Content-Security-Policy": ui_shell_csp(maps),
-                    "Referrer-Policy": "strict-origin-when-cross-origin",
+                    "Content-Security-Policy": ui_shell_csp(),
                 },
             )
             return
         if path == "/api/ui/config":
-            from src.interactive_ui import DEFAULT_TILE_ATTRIBUTION, DEFAULT_TILE_URL
+            from src.interactive_ui import DEFAULT_TILE_ATTRIBUTION, TILE_PROXY_PATH
 
             self._send_json(
                 {
                     "maps": {
                         "enabled": True,
-                        "tileUrl": DEFAULT_TILE_URL,
+                        "osm": True,
+                        "tileUrl": TILE_PROXY_PATH,
                         "attribution": DEFAULT_TILE_ATTRIBUTION,
                         "maxZoom": 19,
                     }
                 }
             )
+            return
+        if path.startswith("/api/ui/tiles/"):
+            # Stands in for the tile proxy (routes/ui_routes.py). The preview
+            # never contacts a real tile server: a generated square per tile.
+            self._send(200, _placeholder_png(path), "image/png", {"Cache-Control": "max-age=86400"})
             return
         if path == "/api/news/thumbnail":
             # Stands in for routes/news_routes.py — the news cards point their

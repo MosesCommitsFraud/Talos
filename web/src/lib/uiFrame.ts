@@ -144,7 +144,9 @@ function stripCdnTags(html: string): string {
 
 /* ── Environment ──
  * Fetched once per page load and shared by every frame. */
-export interface UiMaps { enabled: boolean; tileUrl: string; attribution: string; maxZoom: number }
+/** `tileUrl` is this instance's tile proxy (/api/ui/tiles/…), never the tile
+ *  server itself — see src/tile_proxy.py. `osm`: the server is OpenStreetMap. */
+export interface UiMaps { enabled: boolean; tileUrl: string; attribution: string; maxZoom: number; osm?: boolean }
 export interface UiEnv { fontCss: string; maps: UiMaps }
 const NO_MAPS: UiMaps = { enabled: false, tileUrl: '', attribution: '', maxZoom: 19 };
 let envPromise: Promise<UiEnv> | null = null;
@@ -155,21 +157,14 @@ export function loadUiEnv(): Promise<UiEnv> {
       .then((r) => (r.ok ? r.json() : null))
       .then((cfg): UiMaps => {
         const m = cfg?.maps;
-        return m && typeof m.tileUrl === 'string' && /^https:\/\//.test(m.tileUrl)
-          ? { enabled: !!m.enabled, tileUrl: m.tileUrl, attribution: String(m.attribution ?? ''), maxZoom: Number(m.maxZoom) || 19 }
+        return m && typeof m.tileUrl === 'string' && m.tileUrl.startsWith('/api/ui/tiles/')
+          ? { enabled: !!m.enabled, tileUrl: m.tileUrl, attribution: String(m.attribution ?? ''), maxZoom: Number(m.maxZoom) || 19, osm: !!m.osm }
           : NO_MAPS;
       })
       .catch(() => NO_MAPS),
   ]).then(([fontCss, maps]) => ({ fontCss, maps }));
   return envPromise;
 }
-
-const tileOrigin = (url: string) => {
-  try {
-    const u = new URL(url.replace('{s}', 'a'));
-    return url.includes('{s}') ? `https://*.${u.host.split('.').slice(1).join('.')}` : u.origin;
-  } catch { return ''; }
-};
 
 /** Same policy as the /api/ui-shell route (ui_shell_csp in
  *  src/interactive_ui.py), repeated as a meta tag so a downloaded copy keeps it
@@ -179,7 +174,9 @@ function frameCsp(maps: UiMaps, standalone: boolean): string {
   // downloaded copy opened from disk has no 'self', so it names the instance.
   const vendor = standalone ? window.location.origin + VENDOR_PATH : "'self'";
   const images = standalone ? ` ${window.location.origin}${IMAGE_PROXY_PATH}` : '';
-  const tiles = maps.enabled && maps.tileUrl ? ` ${tileOrigin(maps.tileUrl)}` : '';
+  // Tiles come from this instance's proxy: covered by 'self' inline; a
+  // downloaded copy names the instance.
+  const tiles = standalone && maps.enabled ? ` ${window.location.origin}/api/ui/tiles/` : '';
   return `default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval' blob: ${vendor}; style-src 'unsafe-inline' ${vendor}; img-src data: blob: ${vendor}${images}${tiles}; font-src data:; connect-src 'none'; form-action 'none'; base-uri 'none'`;
 }
 
@@ -590,13 +587,12 @@ window.__talosPhase = 'runtime'; window.__talosReady();</script>`
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta http-equiv="Content-Security-Policy" content="${frameCsp(env.maps, standalone)}">
-<meta name="referrer" content="strict-origin-when-cross-origin">
 <title>${title || 'Talos'}</title>
 ${head}
 <style id="talos-theme">${themeCss(theme)}</style>
 <style>${env.fontCss}${styleSafe(kitCss)}${standalone ? 'html,body{background:var(--talos-bg)}#talos-root{max-width:1100px;margin:0 auto;padding:24px}' : ''}</style>
 <style id="talos-user-css">${styleSafe(ui.css)}</style>
-<script>window.TALOS_DATA=${jsonForScript(ui.data)};window.TALOS_CONFIG=${jsonForScript({ maps: env.maps, dataSources: ui.dataSources ?? [] })};window.TALOS_IMAGES=${jsonForScript(standalone ? absoluteImages(ui.images) : ui.images ?? {})};window.__talosRestore=${jsonForScript(restore)};</script>
+<script>window.TALOS_DATA=${jsonForScript(ui.data)};window.TALOS_CONFIG=${jsonForScript({ maps: standalone && env.maps.tileUrl ? { ...env.maps, tileUrl: window.location.origin + env.maps.tileUrl } : env.maps, dataSources: ui.dataSources ?? [] })};window.TALOS_IMAGES=${jsonForScript(standalone ? absoluteImages(ui.images) : ui.images ?? {})};window.__talosRestore=${jsonForScript(restore)};</script>
 <script>${BOOTSTRAP}</script>
 <script>${scriptSafe(kitJs)}</script>
 ${standalone ? '' : `<script>${scriptSafe(imageRuntime)}</script>\n<script>${scriptSafe(exportBridge)}</script>`}

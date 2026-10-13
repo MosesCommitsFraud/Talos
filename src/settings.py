@@ -100,6 +100,11 @@ DEFAULT_SETTINGS = {
     "ui_map_tile_url": "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
     "ui_map_attribution": "",
     "ui_map_max_zoom": 19,
+    # Tiles are fetched by Talos and cached on disk (src/tile_proxy.py): size
+    # limit of that cache, and a contact (URL or e-mail) the tile server's
+    # operators can reach — sent in the User-Agent, as OSM's policy asks.
+    "ui_map_cache_mb": 1024,
+    "ui_map_contact": "",
     "subagent_reasoning": "off",
     "subagent_parallelism": 3,
     "subagent_max_rounds": 12,

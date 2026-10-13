@@ -414,7 +414,10 @@
     const L = window.L;
     const m = L.map(host, { zoomControl: true, attributionControl: true, scrollWheelZoom: false, worldCopyJump: true, maxZoom: cfg.maxZoom || 19 });
     m.attributionControl.setPrefix('<a href="https://leafletjs.com">Leaflet</a>');
-    L.tileLayer(cfg.tileUrl, { maxZoom: cfg.maxZoom || 19, attribution: cfg.attribution, referrerPolicy: 'strict-origin-when-cross-origin' }).addTo(m);
+    // Tiles from this instance's caching proxy (src/tile_proxy.py), which
+    // talks to the tile server under its usage policy. keepBuffer 1: only one
+    // ring of look-ahead beyond the visible area, no prefetching.
+    L.tileLayer(cfg.tileUrl, { maxZoom: cfg.maxZoom || 19, attribution: cfg.attribution, keepBuffer: 1 }).addTo(m);
     m.on('click', () => m.scrollWheelZoom.enable());
     host.addEventListener('mouseleave', () => m.scrollWheelZoom.disable());
 

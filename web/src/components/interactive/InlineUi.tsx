@@ -425,13 +425,19 @@ export function SourceBar({ sources, map }: { sources: UiSource[]; map?: boolean
             className={`inline-flex max-w-[24rem] items-center gap-1 ${s.kind === 'illustrative' ? 'italic' : ''}`}>{label}</span>
         );
       })}
-      {tiles && (
-        <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer noopener"
-          className="inline-flex items-center gap-1 hover:text-foreground hover:underline">
-          <MapIcon className="size-3 shrink-0" />
-          {tiles.tileUrl.includes('tile.openstreetmap.org') ? t('interactive.osmAttribution') : plainText(tiles.attribution)}
-        </a>
-      )}
+      {tiles && (tiles.osm ? (
+        <>
+          <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer noopener"
+            className="inline-flex items-center gap-1 hover:text-foreground hover:underline">
+            <MapIcon className="size-3 shrink-0" />
+            {t('interactive.osmAttribution')}
+          </a>
+          <a href="https://www.openstreetmap.org/fixthemap" target="_blank" rel="noreferrer noopener"
+            className="hover:text-foreground hover:underline">{t('interactive.osmFixTheMap')}</a>
+        </>
+      ) : (
+        <span className="inline-flex items-center gap-1"><MapIcon className="size-3 shrink-0" />{plainText(tiles.attribution)}</span>
+      ))}
     </div>
   );
 }

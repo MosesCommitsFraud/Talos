@@ -923,6 +923,8 @@ function AiDefaultsPanel() {
         <BoolRow s={s} k="ui_maps_enabled" label={t('settings.ai.uiMaps')} hint={t('settings.ai.uiMapsHint')} />
         <TextRow s={s} k="ui_map_tile_url" label={t('settings.ai.uiMapTiles')} hint={t('settings.ai.uiMapTilesHint')} width="w-80" />
         <TextRow s={s} k="ui_map_attribution" label={t('settings.ai.uiMapAttribution')} hint={t('settings.ai.uiMapAttributionHint')} width="w-80" />
+        <TextRow s={s} k="ui_map_contact" label={t('settings.ai.uiMapContact')} hint={t('settings.ai.uiMapContactHint')} width="w-80" />
+        <TextRow s={s} k="ui_map_cache_mb" label={t('settings.ai.uiMapCache')} hint={t('settings.ai.uiMapCacheHint')} type="number" width="w-24" />
       </Section>
 
       <Section title={t('settings.ai.subagents')}>

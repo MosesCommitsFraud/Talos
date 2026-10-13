@@ -741,13 +741,14 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
     #
     # Libraries come only from this instance (static/ui-vendor/, see
     # scripts/vendor_ui_libs.py) — no public CDN: Talos often runs without
-    # internet, and a CDN request would tell a third party who uses Talos. The
-    # one outside host is the configured map tile server, for images only.
+    # internet, and a CDN request would tell a third party who uses Talos. Map
+    # tiles come through this instance as well (src/tile_proxy.py), so the
+    # frame contacts no outside host at all.
     @router.get("/api/ui-shell")
     async def ui_shell():
         from fastapi.responses import Response
 
-        from src.interactive_ui import map_config, ui_shell_csp
+        from src.interactive_ui import ui_shell_csp
 
         shell = (
             '<!doctype html><meta charset="utf-8"><script>'
@@ -764,20 +765,16 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
             headers={
                 "Cache-Control": "no-store",
                 "X-Content-Type-Options": "nosniff",
-                # The tile server's usage policy (OpenStreetMap's included)
-                # asks for a valid Referer. The app default is no-referrer;
-                # this frame sends the instance's ORIGIN only, never a path.
-                "Referrer-Policy": "strict-origin-when-cross-origin",
-                "Content-Security-Policy": ui_shell_csp(map_config()),
+                "Content-Security-Policy": ui_shell_csp(),
             },
         )
 
     # ---- GET /api/ui/config — what the inline UI frame needs to know ----
     @router.get("/api/ui/config")
     async def ui_config():
-        from src.interactive_ui import map_config
+        from src.interactive_ui import public_map_config
 
-        return {"maps": map_config()}
+        return {"maps": public_map_config()}
 
     @router.get("/api/artifacts/{session_id}/render")
     async def render_artifact_route(request: Request, session_id: str, path: str = Query(...)):

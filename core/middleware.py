@@ -67,11 +67,7 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         is_report = path.startswith("/api/research/report/")
 
         response.headers["X-Content-Type-Options"] = "nosniff"
-        # The inline-UI shell sets its own (origin-only) policy: map tile
-        # servers such as OpenStreetMap require a Referer under their usage
-        # policy. Everything else keeps no-referrer.
-        if path != "/api/ui-shell" or "Referrer-Policy" not in response.headers:
-            response.headers["Referrer-Policy"] = "no-referrer"
+        response.headers["Referrer-Policy"] = "no-referrer"
         # Libraries for inline UIs are loaded by an opaque (sandboxed) origin,
         # and ES modules (three.js) are fetched in CORS mode — without this
         # header the browser refuses them. Public, static, credential-free.

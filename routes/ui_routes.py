@@ -25,6 +25,9 @@ _data_limiter = RateLimiter(max_requests=40, window_seconds=60)
 _image_limiter = RateLimiter(max_requests=240, window_seconds=60)
 
 IMAGE_CACHE = "private, max-age=86400"
+# Per client: a map view is ~20-40 tiles, panning and zooming adds a few dozen
+# more. Generous for people, a backstop against scraping through the proxy.
+_tile_limiter = RateLimiter(max_requests=600, window_seconds=60)
 
 
 def setup_ui_routes():
@@ -92,5 +95,28 @@ def setup_ui_routes():
             media_type=media_type,
             headers={"Cache-Control": IMAGE_CACHE, **SAFE_HEADERS},
         )
+
+    @router.get("/tiles/{z}/{x}/{tile}")
+    async def tile(request: Request, z: int, x: int, tile: str):
+        """A map tile, from this instance's cache or fetched once from the
+        configured tile server (src/tile_proxy.py). No cookie check — the
+        sandboxed frame cannot send one; the route only ever serves tiles of
+        the configured server, valid coordinates only, rate-limited per client."""
+        from src import tile_proxy
+
+        if not tile.endswith(".png") or not tile[:-4].isdigit():
+            raise HTTPException(404, "Not a tile.")
+        client = request.client.host if request.client else "?"
+        if not _tile_limiter.check(client):
+            raise HTTPException(429, "Too many tile requests.")
+        origin = f"{request.url.scheme}://{request.url.netloc}"
+        try:
+            body, etag = await tile_proxy.get_tile(z, x, int(tile[:-4]), origin)
+        except tile_proxy.TileError as e:
+            raise HTTPException(e.status, str(e))
+        headers = {"Cache-Control": f"public, max-age={tile_proxy.CLIENT_MAX_AGE}"}
+        if etag:
+            headers["ETag"] = etag
+        return Response(content=body, media_type="image/png", headers=headers)
 
     return router

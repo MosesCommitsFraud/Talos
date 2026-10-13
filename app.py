@@ -235,7 +235,9 @@ if AUTH_ENABLED:
     # /assets are the hashed Vite bundles of the React UI (web/dist); /static
     # now serves only fonts. All are code/assets (no data) and must be loadable
     # before a cookie exists so the login screen can render.
-    AUTH_EXEMPT_PREFIXES = ["/static", "/assets", "/fonts", "/branding/"]
+    # /api/ui/tiles/: map tiles requested by the sandboxed (cookie-less) frame of
+    # an interactive answer; the route serves only the configured tile server.
+    AUTH_EXEMPT_PREFIXES = ["/static", "/assets", "/fonts", "/branding/", "/api/ui/tiles/"]
     AUTH_EXEMPT_PATTERNS = []
 
     def _is_auth_exempt(path: str) -> bool:

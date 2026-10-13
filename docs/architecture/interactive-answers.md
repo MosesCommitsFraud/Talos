@@ -111,7 +111,7 @@ unknown.
 | Prompts sent "as the user" | host-side user-activation check, one per gesture |
 | Data sources | stored spec only, typed parameters, owner-bound, tool permissions, rate limit |
 | Web images | rewritten at render time to `/api/ui/img?u=…&s=…` (HMAC from a key derived from the app key); the proxy serves signed URLs only, with the SSRF guard, image-type and size checks shared with the news thumbnails (`src/image_proxy.py`) |
-| Maps | OpenStreetMap by default under its tile usage policy: attribution in the frame and under it, on-demand tiles only, zoom ≤ 19, origin-only `Referer` (`Referrer-Policy` on `/api/ui-shell`) |
+| Maps | Browsers never contact the tile server: tiles come from `/api/ui/tiles/{z}/{x}/{y}.png`, a caching proxy (`src/tile_proxy.py`) that follows OpenStreetMap's tile usage policy — identifying User-Agent (with `ui_map_contact`), the instance's origin as `Referer`, disk cache honouring the server's caching headers (7 days when absent) with conditional revalidation, valid coordinates only, rate-limited, Leaflet look-ahead of one ring. Attribution and a "report a map issue" link in the frame and under it |
 
 ## Settings
 
@@ -122,6 +122,8 @@ unknown.
 | `ui_map_tile_url` | `https://tile.openstreetmap.org/{z}/{x}/{y}.png` | tile server (https, `{z}/{x}/{y}`); use your own for heavy use |
 | `ui_map_attribution` | (OSM) | attribution required by the tile server |
 | `ui_map_max_zoom` | `19` | capped at 19 for OSM |
+| `ui_map_contact` | `""` | e-mail or URL sent in the tile requests' User-Agent |
+| `ui_map_cache_mb` | `1024` | size of the shared tile cache (`data/tile_cache/`) |
 
 ## Evaluating a model
 
@@ -154,8 +156,9 @@ and check the error badge on the cards.
 | `src/declarative_widgets.py` | `render_widget`: data → kit view |
 | `src/ui_data.py` | data source specs, parameter checks, execution |
 | `src/image_proxy.py` | shared public-image fetcher (SSRF guard) |
+| `src/tile_proxy.py` | map tile proxy and cache |
 | `src/system_skills.py`, `system_skills/` | built-in method skills |
-| `routes/ui_routes.py` | `POST /api/ui/data`, `GET /api/ui/img` |
+| `routes/ui_routes.py` | `POST /api/ui/data`, `GET /api/ui/img`, `GET /api/ui/tiles/{z}/{x}/{y}.png` |
 | `routes/document_routes.py` | `GET /api/ui-shell`, `GET /api/ui/config` |
 | `web/src/lib/uiFrame.ts` | document builder, theme, libraries, CSP, bridge bootstrap |
 | `web/src/lib/ui-kit.css`, `ui-kit.js` | the Talos UI kit inside the frame |

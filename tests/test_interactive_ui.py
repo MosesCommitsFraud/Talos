@@ -213,7 +213,8 @@ def test_map_config_defaults_to_openstreetmap(monkeypatch):
     monkeypatch.setattr(settings, "get_setting", lambda key, default=None: default)
     cfg = ui.map_config()
     assert cfg["enabled"] is True
-    assert cfg["tileUrl"] == ui.DEFAULT_TILE_URL
+    assert cfg["tileUrl"] == ui.TILE_PROXY_PATH
+    assert cfg["upstream"] == ui.DEFAULT_TILE_URL
     assert "OpenStreetMap" in cfg["attribution"]
     assert cfg["maxZoom"] <= 19  # OSM tiles stop at 19
 
@@ -226,21 +227,13 @@ def test_map_config_rejects_insecure_tile_servers(monkeypatch):
     assert ui.map_config()["enabled"] is False
 
 
-def test_shell_csp_allows_only_local_libraries_and_the_tile_host():
-    csp = ui.ui_shell_csp({"enabled": True, "tileUrl": ui.DEFAULT_TILE_URL})
+def test_shell_csp_allows_only_this_instance():
+    csp = ui.ui_shell_csp()
     assert "connect-src 'none'" in csp
     assert "cdn.jsdelivr.net" not in csp and "unpkg.com" not in csp
     assert "script-src 'unsafe-inline' 'unsafe-eval' blob: 'self';" in csp
-    assert "img-src data: blob: 'self' https://tile.openstreetmap.org;" in csp
-    no_maps = ui.ui_shell_csp({"enabled": False, "tileUrl": ""})
-    assert "openstreetmap" not in no_maps
-
-
-def test_tile_subdomain_placeholder_becomes_wildcard():
-    assert (
-        ui._tile_origin("https://{s}.tile.example.org/{z}/{x}/{y}.png")
-        == "https://*.tile.example.org"
-    )
+    # Tiles come through the instance's proxy: no outside image host.
+    assert "img-src data: blob: 'self';" in csp
 
 
 # ── streaming (UiStream / parse_partial_object) ──

@@ -96,19 +96,20 @@ VENDOR_PATH = "/static/ui-vendor/"
 DEFAULT_TILE_URL = "https://tile.openstreetmap.org/{z}/{x}/{y}.png"
 DEFAULT_TILE_ATTRIBUTION = (
     '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>-Mitwirkende'
+    ' · <a href="https://www.openstreetmap.org/fixthemap">Kartenfehler melden</a>'
 )
+
+
+TILE_PROXY_PATH = "/api/ui/tiles/{z}/{x}/{y}.png"
 
 
 def map_config() -> Dict[str, Any]:
     """Map tiles for interactive answers. OpenStreetMap by default.
 
-    OSM's tile usage policy (operations.osmfoundation.org/policies/tiles) is
-    honoured by construction: the attribution is always shown (by Leaflet in
-    the frame AND by the host under it), requests carry the browser's
-    User-Agent and an origin-only Referer (Referrer-Policy on /api/ui-shell),
-    tiles are fetched on demand and cached by the browser — no prefetching, no
-    bulk download, zoom capped at 19. For heavy use an operator sets their own
-    tile server here."""
+    The browser never talks to the tile server: frames load tiles from this
+    instance (TILE_PROXY_PATH), which fetches and caches them under the tile
+    server's usage policy (src/tile_proxy.py). `upstream` is the real template
+    and stays on the server; `public()` is what the frame gets."""
     try:
         from src.settings import get_setting
 
@@ -124,24 +125,20 @@ def map_config() -> Dict[str, Any]:
         attribution = DEFAULT_TILE_ATTRIBUTION
     return {
         "enabled": enabled_,
-        "tileUrl": url if enabled_ else "",
+        "tileUrl": TILE_PROXY_PATH if enabled_ else "",
+        "upstream": url if enabled_ else "",
         "attribution": attribution,
+        "osm": url == DEFAULT_TILE_URL,
         "maxZoom": max(1, min(max_zoom, 19 if url == DEFAULT_TILE_URL else 22)),
     }
 
 
-def _tile_origin(url: str) -> str:
-    """`https://host` of a tile URL template, for the CSP. Subdomain
-    placeholders ({s}.tile.example.org) become a wildcard."""
-    from urllib.parse import urlsplit
-
-    host = urlsplit(url.replace("{s}", "a")).netloc
-    if "{s}" in url:
-        host = "*." + host.split(".", 1)[1]
-    return "https://" + host if host else ""
+def public_map_config() -> Dict[str, Any]:
+    """map_config without the server-side tile server URL."""
+    return {k: v for k, v in map_config().items() if k != "upstream"}
 
 
-def ui_shell_csp(maps: Dict[str, Any]) -> str:
+def ui_shell_csp() -> str:
     """CSP of the frame.
 
     Libraries are admitted by 'self', not by host name: behind a reverse proxy
@@ -150,15 +147,16 @@ def ui_shell_csp(maps: Dict[str, Any]) -> str:
     sandboxed (opaque-origin) document 'self' still means the origin of the
     document's URL, i.e. this instance.
     """
+    # Map tiles come from this instance too (the tile proxy), so images need
+    # no outside host at all.
     vendor = "'self'"
-    tiles = _tile_origin(maps.get("tileUrl") or "") if maps.get("enabled") else ""
     return (
         "default-src 'none'; "
         # blob: — the libraries arrive embedded in the document and are run
         # from blob URLs the frame creates itself (web/src/lib/uiFrame.ts).
         f"script-src 'unsafe-inline' 'unsafe-eval' blob: {vendor}; "
         f"style-src 'unsafe-inline' {vendor}; "
-        f"img-src data: blob: {vendor}{(' ' + tiles) if tiles else ''}; "
+        f"img-src data: blob: {vendor}; "
         "font-src data:; "
         "connect-src 'none'; "
         "form-action 'none'; "
