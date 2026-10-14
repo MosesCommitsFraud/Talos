@@ -104,7 +104,7 @@ export type Panel =
 /** Page body: stacks sections. Padding leaves room for the dialog's close
  *  button in the top-right corner. */
 export function Page({ children, className }: { children: React.ReactNode; className?: string }) {
-  return <div className={cn('flex flex-col gap-8 px-6 pt-8 pb-10 sm:px-10', className)}>{children}</div>;
+  return <div className={cn('flex flex-col gap-8 px-6 pt-0 pb-8 sm:px-10', className)}>{children}</div>;
 }
 
 /** A titled group. Rows go inside as direct children (self-dividing);
@@ -184,7 +184,7 @@ function SaveBar({ dirty, saving, error, onSave }: { dirty: boolean; saving: boo
   const { t } = useTranslation();
   if (!dirty && !error) return null;
   return (
-    <div className="sticky bottom-0 -mx-6 -mb-10 mt-1 flex items-center justify-end gap-3 border-t bg-popover/95 px-6 py-3 backdrop-blur-sm sm:-mx-10 sm:px-10">
+    <div className="sticky bottom-0 -mx-6 -mb-8 mt-1 flex items-center justify-end gap-3 border-t bg-popover/95 px-6 py-3 backdrop-blur-sm sm:-mx-10 sm:px-10">
       {error && <span className="min-w-0 flex-1 truncate text-xs text-destructive-foreground">{error}</span>}
       <Button size="sm" disabled={saving || !dirty} onClick={onSave}>
         {saving ? t('common.saving') : t('settings.saveChanges')}
@@ -2224,14 +2224,18 @@ export function SettingsDialog({
             </div>
           </nav>
           {/* The only scroll container for panel content: panels must not
-              add their own outer overflow, or the modal grows a second bar. */}
-          <div className="relative min-w-0 flex-1 overflow-y-auto overscroll-contain">
+              add their own outer overflow, or the modal grows a second bar.
+              It is inset from the top (below the close button) and bottom so
+              the scrollbar has a fixed track instead of running edge to edge;
+              `scrollbar-gutter` keeps that track reserved on short panels too. */}
+          <div className="relative flex min-w-0 flex-1 flex-col">
             <DialogClose
               aria-label={t('common.close')}
-              className="sticky top-3 z-10 float-right mr-3 flex size-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+              className="absolute top-3 right-3 z-10 flex size-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
             >
               <XIcon className="size-4" />
             </DialogClose>
+            <div className="mt-14 mb-3 min-h-0 flex-1 overflow-y-auto overscroll-contain [scrollbar-gutter:stable]">
             <div className="mx-auto max-w-[1100px] [&_.settings-row-hint]:hidden">
               {panel === 'appearance' && <AppearancePanel />}
               {panel === 'shortcuts' && <ShortcutsPanel />}
@@ -2248,6 +2252,7 @@ export function SettingsDialog({
               {panel === 'tools' && <ToolsPanel />}
               {panel === 'users' && <UsersPanel currentUser={auth?.username} />}
               {panel === 'system' && <SystemPanel />}
+            </div>
             </div>
           </div>
         </div>
