@@ -1708,6 +1708,19 @@ async def stream_llm(
             from src.copilot import apply_request_headers
 
             apply_request_headers(h, messages_copy)
+        else:
+            # Logs how far this prompt matches recent ones (`[prompt-diff]`), so a
+            # low `cached` count in `[agent-perf]` can be traced to the first
+            # byte that changed — or to the server having lost its cache.
+            from src import prompt_diff
+
+            prompt_diff.record(
+                target_url,
+                model,
+                messages_copy,
+                payload.get("tools"),
+                payload.get("chat_template_kwargs"),
+            )
 
     # Short connect timeout: a reachable peer answers SYN in <100ms even on
     # Tailscale. 3s is plenty; 30s let one dead upstream wedge the UI.
