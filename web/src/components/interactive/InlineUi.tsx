@@ -16,6 +16,7 @@ import {
   UserIcon,
 } from 'lucide-react';
 import { Dialog, DialogContent } from '@/components/ui/dialog';
+import { builtinView } from '@/lib/builtinViews';
 import { toast } from '@/components/ui/toast';
 import { Markdown } from '@/components/Markdown';
 import { requestHtmlPng, savePreviewBlob } from '@/lib/htmlExport';
@@ -125,6 +126,23 @@ interface FrameError { phase: string; message: string }
  *  user left the old one. Lives for the page session only. */
 const uiStates = new Map<string, Record<string, unknown>>();
 
+/** talos.store per UI: kept in this browser (localStorage), so a todo list or
+ *  a counter is still there after a reload. Keyed like uiStates. */
+const STORE_PREFIX = 'talos:ui-store:';
+function loadStore(key: string): Record<string, unknown> | null {
+  try {
+    const raw = localStorage.getItem(STORE_PREFIX + key);
+    const v = raw ? JSON.parse(raw) : null;
+    return v && typeof v === 'object' && !Array.isArray(v) ? v : null;
+  } catch { return null; }
+}
+function saveStore(key: string, value: Record<string, unknown>) {
+  try { localStorage.setItem(STORE_PREFIX + key, JSON.stringify(value)); } catch { /* full or blocked: the view keeps working for this session */ }
+}
+const DOWNLOAD_TYPES: Record<string, string> = {
+  csv: 'text/csv', json: 'application/json', md: 'text/markdown', txt: 'text/plain', ics: 'text/calendar', tsv: 'text/tab-separated-values', svg: 'image/svg+xml',
+};
+
 /** Identity of a UI across rebuilds: same markup, same script, same title. */
 export function uiStateKey(ui: UiPayload): string {
   const text = `${ui.title}\u0000${ui.html}\u0000${ui.js}`;
@@ -191,6 +209,7 @@ export function UiFrame({
       preview,
       libCode,
       restore: stateKey ? uiStates.get(stateKey) ?? null : null,
+      store: stateKey ? loadStore(stateKey) : null,
     })),
     // The restore snapshot is read once per build on purpose.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -210,6 +229,8 @@ export function UiFrame({
 
   const stateKeyRef = useRef(stateKey);
   stateKeyRef.current = stateKey;
+  const fillRef = useRef(fill);
+  fillRef.current = fill;
   const writtenLinks = useRef(new Set<string>());
   writtenLinks.current = useMemo(() => literalLinks(ui), [ui]);
   const latestUi = useRef(ui);
@@ -280,6 +301,7 @@ export function UiFrame({
           break;
         case 'talos:ui-ready':
           setReady(true);
+          if (fillRef.current) frame.current?.contentWindow?.postMessage({ type: 'talos:ui-fill', fill: true }, '*');
           onReadyRef.current?.();
           break;
         case 'talos:ui-state':
@@ -287,6 +309,31 @@ export function UiFrame({
             uiStates.set(stateKeyRef.current, msg.state as Record<string, unknown>);
           }
           break;
+        case 'talos:ui-store':
+          if (stateKeyRef.current && msg.store && typeof msg.store === 'object' && !Array.isArray(msg.store) && JSON.stringify(msg.store).length <= 100_000) {
+            saveStore(stateKeyRef.current, msg.store as Record<string, unknown>);
+          }
+          break;
+        case 'talos:ui-copy':
+          if (!hostActivated()) { toast('interactive.needsClick'); break; }
+          if (typeof msg.text === 'string') {
+            void navigator.clipboard.writeText(msg.text.slice(0, 200_000)).then(
+              () => toast('interactive.copied'),
+              () => toast('interactive.copyFailed'),
+            );
+          }
+          break;
+        case 'talos:ui-download': {
+          if (!hostActivated()) { toast('interactive.needsClick'); break; }
+          if (typeof msg.content !== 'string' || msg.content.length > 2_000_000) break;
+          // Plain text formats only, named by the extension; never HTML or a
+          // script the browser would run when opened.
+          const name = (typeof msg.filename === 'string' ? msg.filename : '').replace(/[\\/:*?"<>|\u0000-\u001f]+/g, ' ').trim().slice(0, 120) || 'talos.txt';
+          const ext = (name.match(/\.([a-z0-9]{1,5})$/i)?.[1] ?? 'txt').toLowerCase();
+          const type = DOWNLOAD_TYPES[ext] ?? 'text/plain';
+          savePreviewBlob(new Blob([ext === 'csv' ? `\ufeff${msg.content}` : msg.content], { type: `${type};charset=utf-8` }), DOWNLOAD_TYPES[ext] ? name : `${name}.txt`);
+          break;
+        }
         case 'talos:ui-error': {
           if (errors.current.length >= 10) break;
           const err = { phase: String(msg.phase ?? '').slice(0, 120), message: String(msg.message ?? '').slice(0, 500) };
@@ -368,7 +415,7 @@ export function UiFrame({
         style={{ colorScheme: theme.dark ? 'dark' : 'light' }}
       />
       {(!ready || (preview && !ui.html.trim())) && (
-        <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+        <div className="pointer-events-none absolute inset-0 flex items-center justify-center rounded-lg bg-muted/40">
           <span className="shimmer-text text-sm text-muted-foreground">{messages[placeholder % messages.length]}</span>
         </div>
       )}
@@ -396,7 +443,7 @@ const plainText = (html: string) => {
   return (el.textContent ?? '').replace(/\s+/g, ' ').trim();
 };
 
-export function SourceBar({ sources, map }: { sources: UiSource[]; map?: boolean }) {
+export function SourceBar({ sources, map, inCard = false }: { sources: UiSource[]; map?: boolean; inCard?: boolean }) {
   const { t } = useTranslation();
   const env = useUiEnv();
   // A map's attribution is a condition of the tile server's usage policy, so
@@ -405,8 +452,8 @@ export function SourceBar({ sources, map }: { sources: UiSource[]; map?: boolean
   const tiles = map && env?.maps.enabled ? env.maps : null;
   if (!sources.length && !tiles) return null;
   return (
-    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-t px-4 py-1.5 text-[11px] text-muted-foreground">
-      <span className="font-medium">{t('interactive.sources')}</span>
+    <div className={`flex min-w-0 items-center gap-x-3 overflow-hidden text-[11px] leading-5 text-muted-foreground ${inCard ? 'border-t-[0.5px] border-foreground/15 px-4 py-1.5' : 'mt-2'}`}>
+      {sources.length > 0 && <span className="shrink-0 font-medium">{t('interactive.sources')}</span>}
       {sources.map((s, i) => {
         const Icon = SOURCE_ICONS[s.kind] ?? SparklesIcon;
         const link = s.ref ? safeExternalUrl(s.ref) : null;
@@ -419,26 +466,82 @@ export function SourceBar({ sources, map }: { sources: UiSource[]; map?: boolean
         );
         return link ? (
           <a key={i} href={link} target="_blank" rel="noreferrer noopener" title={s.ref}
-            className="inline-flex max-w-[24rem] items-center gap-1 hover:text-foreground hover:underline">{label}</a>
+            className="inline-flex min-w-0 max-w-[24rem] shrink items-center gap-1 hover:text-foreground hover:underline">{label}</a>
         ) : (
           <span key={i} title={[t(`interactive.kind.${s.kind}`, { defaultValue: s.kind }), s.ref].filter(Boolean).join(' · ')}
-            className={`inline-flex max-w-[24rem] items-center gap-1 ${s.kind === 'illustrative' ? 'italic' : ''}`}>{label}</span>
+            className={`inline-flex min-w-0 max-w-[24rem] shrink items-center gap-1 ${s.kind === 'illustrative' ? 'italic' : ''}`}>{label}</span>
         );
       })}
       {tiles && (tiles.osm ? (
         <>
           <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer noopener"
-            className="inline-flex items-center gap-1 hover:text-foreground hover:underline">
+            className="inline-flex shrink-0 items-center gap-1 hover:text-foreground hover:underline">
             <MapIcon className="size-3 shrink-0" />
             {t('interactive.osmAttribution')}
           </a>
           <a href="https://www.openstreetmap.org/fixthemap" target="_blank" rel="noreferrer noopener"
-            className="hover:text-foreground hover:underline">{t('interactive.osmFixTheMap')}</a>
+            className="shrink-0 hover:text-foreground hover:underline">{t('interactive.osmFixTheMap')}</a>
         </>
       ) : (
         <span className="inline-flex items-center gap-1"><MapIcon className="size-3 shrink-0" />{plainText(tiles.attribution)}</span>
       ))}
     </div>
+  );
+}
+
+/** Data sources of the widgets in a turn (interactive views, answer tables),
+ *  de-duplicated — they join the knowledge and web sources in the row under
+ *  the answer instead of taking room inside each card. */
+export function widgetSources(widgets: Array<{ type: string; data: unknown } | null | undefined>): UiSource[] {
+  const out: UiSource[] = [];
+  const seen = new Set<string>();
+  for (const w of widgets) {
+    if (!w) continue;
+    const list = w.type === 'ui' ? readUiPayload(w.data)?.sources : readUiPayload(builtinView(w.type, w.data))?.sources;
+    for (const s of list ?? []) {
+      const key = `${s.kind}|${s.label}|${s.ref ?? ''}`;
+      if (!seen.has(key)) { seen.add(key); out.push(s); }
+    }
+  }
+  return out;
+}
+
+/** One chip per data source, styled like the knowledge-source chips. A long
+ *  list shows its first few and a "+N" chip that unfolds the rest. */
+const CHIPS_FOLDED = 4;
+export function DataSourceChips({ sources }: { sources: UiSource[] }) {
+  const { t } = useTranslation();
+  const [all, setAll] = useState(false);
+  const chip = 'inline-flex h-6 max-w-[16rem] items-center gap-1.5 rounded-full border border-border/60 bg-muted/40 px-2.5 text-[11px] text-muted-foreground';
+  const folded = !all && sources.length > CHIPS_FOLDED + 1;
+  const shown = folded ? sources.slice(0, CHIPS_FOLDED) : sources;
+  return (
+    <>
+      {shown.map((s, i) => {
+        const Icon = SOURCE_ICONS[s.kind] ?? SparklesIcon;
+        const link = s.ref ? safeExternalUrl(s.ref) : null;
+        const title = [t(`interactive.kind.${s.kind}`, { defaultValue: s.kind }), s.ref].filter(Boolean).join(' · ');
+        const body = (
+          <>
+            <Icon className="size-3 shrink-0" />
+            <span className={`truncate ${s.kind === 'illustrative' ? 'italic' : ''}`}>{s.label}</span>
+          </>
+        );
+        return link ? (
+          <a key={i} href={link} target="_blank" rel="noreferrer noopener" title={title}
+            className={`${chip} transition-colors hover:border-border hover:bg-accent hover:text-foreground`}>{body}</a>
+        ) : (
+          <span key={i} title={title} className={chip}>{body}</span>
+        );
+      })}
+      {folded && (
+        <button type="button" onClick={() => setAll(true)}
+          className={`${chip} tabular-nums transition-colors hover:border-border hover:bg-accent hover:text-foreground`}
+          title={sources.slice(CHIPS_FOLDED).map((s) => s.label).join(', ')}>
+          +{sources.length - CHIPS_FOLDED}
+        </button>
+      )}
+    </>
   );
 }
 
@@ -489,9 +592,13 @@ export function InlineUi({ data, onReady }: WidgetProps & { onReady?: () => void
   ].filter(Boolean).join('\n\n');
 
   return (
-    <div ref={boxRef} className="group/ui overflow-hidden rounded-xl border bg-card">
-      <div className="flex items-center gap-1 px-4 pt-3">
-        <span className="min-w-0 flex-1 truncate text-sm font-medium">{ui.title || t('interactive.title')}</span>
+    // Claude's card for an interactive answer: one hairline card (the same as
+    // the table, weather and news widgets) with a quiet title line whose
+    // actions show on hover, and the view. Its sources join the row under the
+    // answer (widgetSources); only a map's attribution stays here.
+    <div ref={boxRef} className="group/ui relative rounded-xl border-[0.5px] border-foreground/15 bg-card px-4 pt-2 pb-3 dark:border-foreground/12">
+      <div className="mb-1 flex min-h-8 items-center gap-1">
+        <span className="min-w-0 flex-1 truncate text-[15px] font-medium text-foreground">{ui.title}</span>
         {errors.length > 0 && (
           <span className="inline-flex items-center gap-1 text-[11px] text-warning" title={errors.map((e) => `${e.phase}: ${e.message}`).join('\n')}>
             <AlertTriangleIcon className="size-3.5" />{t('interactive.errors', { count: errors.length })}
@@ -513,7 +620,7 @@ export function InlineUi({ data, onReady }: WidgetProps & { onReady?: () => void
         </span>
       </div>
       {source && (
-        <div className="max-h-[32rem] overflow-auto px-4 py-2 text-xs"><Markdown text={sourceText} /></div>
+        <div className="max-h-[32rem] overflow-auto rounded-lg bg-muted/40 px-3 py-2 text-xs"><Markdown text={sourceText} /></div>
       )}
       <div className={source ? 'hidden' : ''}>
         {near
@@ -521,19 +628,19 @@ export function InlineUi({ data, onReady }: WidgetProps & { onReady?: () => void
           : <div style={{ height: ui.initialHeight }} />}
       </div>
       {errors.length > 0 && !source && (
-        <details className="border-t px-4 py-1.5 text-[11px] text-muted-foreground">
+        <details className="py-1 text-[11px] text-muted-foreground">
           <summary className="cursor-pointer select-none">{t('interactive.errorDetails')}</summary>
           <ul className="mt-1 space-y-0.5 font-mono">
             {errors.map((e, i) => <li key={i}><span className="text-warning">{e.phase}</span> — {e.message}</li>)}
           </ul>
         </details>
       )}
-      <SourceBar sources={ui.sources} map={usesMap} />
+      <SourceBar sources={[]} map={usesMap} />
       <Dialog open={full} onOpenChange={setFull}>
         <DialogContent title={ui.title || t('interactive.title')} className="h-[90vh] max-h-[90vh] w-[min(1400px,96vw)]">
           <div className="flex h-full flex-col">
-            <div className="min-h-0 flex-1 bg-card">{full && <UiFrame ui={ui} fill />}</div>
-            <SourceBar sources={ui.sources} map={usesMap} />
+            <div className="min-h-0 flex-1 bg-card px-5 py-4">{full && <UiFrame ui={ui} fill />}</div>
+            <SourceBar sources={ui.sources} map={usesMap} inCard />
           </div>
         </DialogContent>
       </Dialog>

@@ -322,6 +322,48 @@ _SAMPLE_ARTIFACTS: dict[str, tuple[bytes, str]] = {
 }
 
 
+# --- Artifacts page library (GET/PATCH/DELETE /api/artifacts) ----------------
+# A spread of types and dates so the list's month groups, the tile previews and
+# the type filter all have something to show. Mutated by pin/rename/delete.
+def _library_seed() -> list[dict]:
+    now = time.time()
+    day = 86400
+    sid, sname = "preview-session", PREVIEW_SESSION_NAME
+    rows = [
+        ("summary.md", "text/markdown", now - 3600, "document"),
+        ("deck.pptx", "application/vnd.openxmlformats-officedocument.presentationml.presentation", now - 2 * day, "workspace"),
+        ("revenue.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", now - 9 * day, "workspace"),
+        ("chart.png", "image/png", now - 20 * day, "workspace"),
+        ("result.csv", "text/csv", now - 45 * day, "workspace"),
+        ("notes.txt", "text/plain", now - 80 * day, "workspace"),
+        ("dashboard.html", "text/html", now - 120 * day, "workspace"),
+        ("etl_job.py", "text/x-python", now - 400 * day, "workspace"),
+    ]
+    out = []
+    for name, mime, mtime, source in rows:
+        content = _SAMPLE_ARTIFACTS.get(name, (b"", mime))[0]
+        row = {
+            "path": f"document:{name}" if source == "document" else name,
+            "name": name,
+            "size": len(content) or 2048,
+            "mime": mime,
+            "mtime": mtime,
+            "source": source,
+            "session_id": sid,
+            "session_name": sname,
+            "pinned": name == "deck.pptx",
+            "pinned_at": now if name == "deck.pptx" else None,
+        }
+        if source == "document":
+            row["snippet"] = content.decode("utf-8", "replace")[:600]
+        out.append(row)
+    return out
+
+
+_LIBRARY: list[dict] = []
+_LIBRARY_DELETED: set[str] = set()
+
+
 # --- Mock conversation state -------------------------------------------------
 # Real edit/revert/delete affordances only render once a message has a backend
 # row id (metadata._db_id). The live app gets that from /api/history; we mirror
@@ -2133,6 +2175,13 @@ class PreviewHandler(BaseHTTPRequestHandler):
                 }
             )
             return
+        if path == "/api/usage/me":
+            days = int(parse_qs(parsed.query).get("days", ["30"])[0])
+            detail = _usage_detail("preview", days)
+            detail["comparison"] = None
+            detail["limit"] = {"max_messages_per_day": 50, "hit_days": 0}
+            self._send_json(detail)
+            return
         if path == "/api/stats":
             # Shape must match client.ts UsageStats — StatsPanel dereferences
             # every field, so an empty object crashes the whole Welcome tree.
@@ -2293,6 +2342,11 @@ class PreviewHandler(BaseHTTPRequestHandler):
         if path.startswith("/api/workspace/browse"):
             self._send_json({"path": "/preview", "entries": []})
             return
+        if path == "/api/artifacts":
+            if not _LIBRARY:
+                _LIBRARY.extend(_library_seed())
+            self._send_json({"artifacts": _LIBRARY, "count": len(_LIBRARY)})
+            return
         if path.startswith("/api/artifacts/"):
             # Download endpoint: stream one of the sample files (so the preview
             # panel has real markdown/csv/text to render in dev).
@@ -2316,7 +2370,7 @@ class PreviewHandler(BaseHTTPRequestHandler):
             if path.endswith("/preview"):
                 self._send_json({"detail": "Sandbox not available"}, 404)
                 return
-            self._send_json(
+            listing = (
                 {
                     "artifacts": [
                         {
@@ -2353,6 +2407,9 @@ class PreviewHandler(BaseHTTPRequestHandler):
                     ]
                 }
             )
+            # Deleting on the Artifacts page removes the file here too.
+            listing["artifacts"] = [a for a in listing["artifacts"] if a["path"] not in _LIBRARY_DELETED]
+            self._send_json(listing)
             return
         if path == "/api/assistants":
             self._send_json(
@@ -2620,11 +2677,29 @@ class PreviewHandler(BaseHTTPRequestHandler):
         self._send_json({"ok": True})
 
     def do_PATCH(self):
-        self._read_body()
+        body = self._read_body()
+        if urlparse(self.path).path == "/api/artifacts":
+            req = json.loads(body or b"{}")
+            for row in _LIBRARY:
+                if row["path"] != req.get("path"):
+                    continue
+                if "pinned" in req:
+                    row["pinned"] = bool(req["pinned"])
+                    row["pinned_at"] = time.time() if req["pinned"] else None
+                if req.get("name"):
+                    ext = row["name"].rsplit(".", 1)[-1] if "." in row["name"] else ""
+                    row["name"] = f"{req['name']}.{ext}" if ext else req["name"]
+            self._send_json({"status": "ok", "path": req.get("path")})
+            return
         self._send_json({"ok": True})
 
     def do_DELETE(self):
-        path = urlparse(self.path).path
+        parsed = urlparse(self.path)
+        path = parsed.path
+        if path == "/api/artifacts":
+            target = parse_qs(parsed.query).get("path", [""])[0]
+            _LIBRARY[:] = [r for r in _LIBRARY if r["path"] != target]
+            _LIBRARY_DELETED.add(target.split(":", 1)[-1])
         if path.startswith("/api/shared-skills/"):
             name = path[len("/api/shared-skills/") :]
             _SHARED_SKILLS[:] = [s for s in _SHARED_SKILLS if s["name"] != name]

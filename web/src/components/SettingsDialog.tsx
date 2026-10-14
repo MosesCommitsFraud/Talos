@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
+  BarChart3Icon,
   BotIcon,
   ChevronRightIcon,
   DatabaseIcon,
@@ -9,6 +10,8 @@ import {
   KeyboardIcon,
   Link2Icon,
   LogOutIcon,
+  MonitorIcon,
+  MoonIcon,
   NetworkIcon,
   PaletteIcon,
   PlugIcon,
@@ -16,6 +19,8 @@ import {
   ServerIcon,
   SettingsIcon,
   SparklesIcon,
+  SunIcon,
+  TicketIcon,
   Trash2Icon,
   UserIcon,
   UsersIcon,
@@ -78,67 +83,62 @@ import { applyDensity, applyLang, applyTheme, usePrefs, type Density, type Lang,
 import { LANGUAGES } from '@/i18n';
 import { cn } from '@/lib/utils';
 import { Button } from './ui/button';
-import { Dialog, DialogContent } from './ui/dialog';
+import { Dialog, DialogClose, DialogContent } from './ui/dialog';
 import { Input, Switch, Textarea } from './ui/misc';
 import { Select } from './ui/select';
 import { KeybindingPill } from './ui/kbd';
 import { SearchInput } from './ui/search';
 import { useAuth } from './auth/AuthGate';
 import { UsersPanel } from './settings/UsersPanel';
+import { UsagePanel } from './settings/UsagePanel';
 
 export type Panel =
-  | 'appearance' | 'personalization' | 'shortcuts' | 'account'
+  | 'appearance' | 'personalization' | 'shortcuts' | 'account' | 'usage'
   | 'models' | 'ai' | 'assistants' | 'integrations' | 'web' | 'mcp' | 'tools' | 'skills'
-  | 'rag' | 'users' | 'system';
+  | 'rag' | 'users' | 'tickets' | 'system';
 
-/* ── Shared layout (t3code settings design) ── */
+/* ── Shared layout (Claude settings design) ──
+   Flat and dense: a bold section heading over a hairline-divided list of rows,
+   no cards. The dialog's content column is the only scroll container. */
 
-/** Scrollable page body: stacks sections with generous spacing. */
+/** Page body: stacks sections. Padding leaves room for the dialog's close
+ *  button in the top-right corner. */
 export function Page({ children, className }: { children: React.ReactNode; className?: string }) {
-  return <div className={cn('flex flex-col gap-7 p-5 sm:p-6', className)}>{children}</div>;
+  return <div className={cn('flex flex-col gap-8 px-6 pt-8 pb-10 sm:px-10', className)}>{children}</div>;
 }
 
-/** A titled card group. Rows go inside as direct children (self-bordered);
- *  free-form content can opt into padding with `padded`. */
+/** A titled group. Rows go inside as direct children (self-dividing);
+ *  free-form content can opt into a little breathing room with `padded`. */
 export function Section({ title, action, padded, children }: { title: string; action?: React.ReactNode; padded?: boolean; children: React.ReactNode }) {
   return (
-    <section className="space-y-2.5">
-      <header className="flex min-h-5 items-center justify-between px-1">
-        <h2 className="flex items-center gap-2 text-[11px] font-semibold tracking-[0.08em] text-foreground/50 uppercase">
-          <span className="inline-block h-px w-3 bg-border" aria-hidden="true" />
-          {title}
-        </h2>
+    <section>
+      <header className="flex min-h-7 items-center justify-between gap-3 pb-1">
+        <h2 className="text-[15px] font-semibold tracking-[-0.01em] text-foreground">{title}</h2>
         {action && <div className="flex items-center">{action}</div>}
       </header>
-      <div className={cn('overflow-hidden rounded-md border bg-card text-card-foreground', padded && 'p-4 sm:p-5')}>
+      <div className={cn('text-card-foreground', padded && 'pt-2 pb-1')}>
         {children}
       </div>
     </section>
   );
 }
 
-/** Just the section header (uppercase tracked label), for panels that render
- *  their own cards instead of using a Section wrapper. */
+/** Just the section heading, for panels that lay out their own lists. */
 function SectionHeader({ children }: { children: React.ReactNode }) {
-  return (
-    <h2 className="flex items-center gap-2 px-1 text-[11px] font-semibold tracking-[0.08em] text-foreground/50 uppercase">
-      <span className="inline-block h-px w-3 bg-border" aria-hidden="true" />
-      {children}
-    </h2>
-  );
+  return <h2 className="text-[15px] font-semibold tracking-[-0.01em] text-foreground">{children}</h2>;
 }
 
 /** A single setting row: title + description on the left, control on the right.
- *  Rows separate themselves with a top border so they read as a grouped list. */
+ *  Rows separate themselves with a hairline so they read as a grouped list. */
 export function Row({ label, hint, children, stacked }: { label: React.ReactNode; hint?: React.ReactNode; children?: React.ReactNode; stacked?: boolean }) {
   return (
     <div className={cn(
-      'flex flex-col gap-3 border-t border-border/60 px-4 py-3.5 first:border-t-0 sm:px-5',
-      stacked ? 'xl:flex-row xl:items-center xl:justify-between' : 'sm:flex-row sm:items-center sm:justify-between',
+      'flex flex-col gap-2 border-t border-border/60 py-3 first:border-t-0',
+      stacked ? 'xl:flex-row xl:items-center xl:justify-between xl:gap-6' : 'sm:flex-row sm:items-center sm:justify-between sm:gap-6',
     )}>
       <div className="min-w-0 flex-1 space-y-0.5">
-        <div className="text-[13px] font-semibold tracking-[-0.01em] text-foreground">{label}</div>
-        {hint && <p className="settings-row-hint text-xs text-muted-foreground/80">{hint}</p>}
+        <div className="text-sm text-foreground">{label}</div>
+        {hint && <p className="settings-row-hint text-[13px] leading-snug text-muted-foreground">{hint}</p>}
       </div>
       {children && <div className={cn(
         'flex w-full shrink-0 items-center gap-2',
@@ -148,11 +148,43 @@ export function Row({ label, hint, children, stacked }: { label: React.ReactNode
   );
 }
 
+/** Claude-style segmented control: a pill track with the active option raised. */
+export function Segmented<T extends string>({ value, onChange, options, label }: {
+  value: T;
+  onChange: (v: T) => void;
+  options: Array<{ value: T; label: React.ReactNode; title?: string }>;
+  label?: string;
+}) {
+  return (
+    <div role="radiogroup" aria-label={label} className="inline-flex shrink-0 items-center gap-0.5 rounded-lg bg-muted/60 p-0.5">
+      {options.map((o) => (
+        <button
+          key={o.value}
+          type="button"
+          role="radio"
+          aria-checked={value === o.value}
+          title={o.title}
+          aria-label={o.title}
+          onClick={() => onChange(o.value)}
+          className={cn(
+            'flex h-7 min-w-8 items-center justify-center rounded-md px-2.5 text-[13px] transition-colors [&_svg]:size-4',
+            value === o.value
+              ? 'bg-background text-foreground shadow-[0_0_0_1px_var(--border)]'
+              : 'text-muted-foreground hover:text-foreground',
+          )}
+        >
+          {o.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 function SaveBar({ dirty, saving, error, onSave }: { dirty: boolean; saving: boolean; error?: string; onSave: () => void }) {
   const { t } = useTranslation();
   if (!dirty && !error) return null;
   return (
-    <div className="sticky bottom-0 -mx-5 -mb-5 mt-1 flex items-center justify-end gap-3 border-t bg-popover/95 px-5 py-3 backdrop-blur-sm sm:-mx-6 sm:-mb-6 sm:px-6">
+    <div className="sticky bottom-0 -mx-6 -mb-10 mt-1 flex items-center justify-end gap-3 border-t bg-popover/95 px-6 py-3 backdrop-blur-sm sm:-mx-10 sm:px-10">
       {error && <span className="min-w-0 flex-1 truncate text-xs text-destructive-foreground">{error}</span>}
       <Button size="sm" disabled={saving || !dirty} onClick={onSave}>
         {saving ? t('common.saving') : t('settings.saveChanges')}
@@ -279,7 +311,7 @@ function FallbacksEditor({ s, k }: { s: Draft; k: string }) {
   const list: Fallback[] = Array.isArray(s.value(k)) ? (s.value(k) as Fallback[]) : [];
   const allModels = endpoints.flatMap((e) => e.models.map((model) => ({ endpoint_id: e.id, model, name: e.name })));
   return (
-    <div className="space-y-1.5 border-t border-border/60 px-4 py-3.5 first:border-t-0 sm:px-5">
+    <div className="space-y-1.5 border-t border-border/60 py-3 first:border-t-0">
       <div className="text-xs text-muted-foreground">{t('settings.ai.fallbacks')}</div>
       {list.map((f, i) => (
         <div key={`${f.endpoint_id}:${f.model}:${i}`} className="flex items-center gap-2">
@@ -353,14 +385,14 @@ function AppearancePanel() {
           settings style) rather than three stacked cards of giant buttons. */}
       <Section title={t('settings.appearance.title')}>
         <Row label={t('settings.appearance.theme')} hint={t('settings.appearance.themeHint')}>
-          <Select
-            className="w-44"
+          <Segmented<Theme>
+            label={t('settings.appearance.theme')}
             value={prefs.theme}
-            onChange={(v) => { prefs.setTheme(v as Theme); applyTheme(v as Theme); }}
+            onChange={(v) => { prefs.setTheme(v); applyTheme(v); }}
             options={[
-              { value: 'system', label: t('settings.appearance.system') },
-              { value: 'light', label: t('settings.appearance.light') },
-              { value: 'dark', label: t('settings.appearance.dark') },
+              { value: 'system', label: <MonitorIcon />, title: t('settings.appearance.system') },
+              { value: 'light', label: <SunIcon />, title: t('settings.appearance.light') },
+              { value: 'dark', label: <MoonIcon />, title: t('settings.appearance.dark') },
             ]}
           />
         </Row>
@@ -384,10 +416,10 @@ function AppearancePanel() {
           />
         </Row>
         <Row label={t('settings.appearance.density')} hint={t('settings.appearance.densityHint')}>
-          <Select
-            className="w-44"
+          <Segmented<Density>
+            label={t('settings.appearance.density')}
             value={prefs.density}
-            onChange={(v) => { prefs.setDensity(v as Density); applyDensity(v as Density); }}
+            onChange={(v) => { prefs.setDensity(v); applyDensity(v); }}
             options={[
               { value: 'compact', label: t('settings.appearance.compact') },
               { value: 'comfortable', label: t('settings.appearance.comfortable') },
@@ -517,7 +549,6 @@ function ShortcutsPanel() {
           </Row>
         ))}
       </Section>
-      <p className="-mt-3 px-1 text-xs text-muted-foreground">{t('settings.shortcuts.hint')}</p>
       {save.isError && <p className="px-1 text-xs text-destructive">{(save.error as Error).message}</p>}
     </Page>
   );
@@ -560,10 +591,9 @@ function PersonalizationPanel() {
             onCheckedChange={(enabled: boolean) => setDraft({ ...current, enabled })}
           />
         </Row>
-        <div className="space-y-2 border-t border-border/60 px-4 py-3.5 sm:px-5">
+        <div className="space-y-2 border-t border-border/60 py-3">
           <div className="space-y-0.5">
             <div className="text-[13px] font-semibold tracking-[-0.01em]">{t('settings.personalization.instructions')}</div>
-            <p className="text-xs text-muted-foreground/80">{t('settings.personalization.instructionsHint')}</p>
           </div>
           <Textarea
             className="min-h-[220px] w-full text-[13px] leading-relaxed"
@@ -930,7 +960,6 @@ function AiDefaultsPanel() {
       <Section title={t('settings.ai.subagents')}>
         <BoolRow s={s} k="subagents_enabled" label={t('settings.ai.subagentsEnabled')} hint={t('settings.ai.subagentsEnabledHint')} />
         <EndpointModelRows s={s} epKey="subagent_endpoint_id" modelKey="subagent_model" label={t('settings.ai.subagentLabel')} />
-        <p className="-mt-1 px-1 text-xs text-muted-foreground">{t('settings.ai.subagentModelHint')}</p>
         <Row label={t('settings.ai.subagentReasoning')} hint={t('settings.ai.subagentReasoningHint')}>
           <Select
             className="w-40"
@@ -976,7 +1005,6 @@ function IntegrationsPanel() {
   return (
     <Page>
       <Section title={t('settings.integrations.title')} padded>
-        <p className="pb-2 text-xs text-muted-foreground">{t('settings.integrations.hint')}</p>
         <div className="space-y-1.5">
           {(integrations ?? []).map((it, i) => {
             const id = String(it.id ?? i);
@@ -1062,7 +1090,6 @@ function SqlContextSection() {
   const docs = data?.documents ?? [];
   return (
     <Section title={t('settings.sql.contextTitle')} padded>
-      <p className="mb-3 text-xs text-muted-foreground/80">{t('settings.sql.contextHint')}</p>
 
       {data && !data.available ? (
         <p className="text-xs text-destructive-foreground">{data.error || t('settings.sql.knowledgeUnavailable')}</p>
@@ -1173,10 +1200,7 @@ function SqlDatabaseSection() {
 
   return (
     <Section title={t('settings.sql.title')}>
-      <div className="px-4 pt-3.5 text-xs text-muted-foreground sm:px-5">
-        {t('settings.sql.intro')}
-      </div>
-      <div className="flex flex-col gap-3 px-4 py-3.5 sm:px-5">
+      <div className="flex flex-col gap-3 py-3">
         {draft.length === 0 && <p className="text-sm text-muted-foreground">{t('settings.sql.empty')}</p>}
         {draft.map((row, i) => {
           const saved = data?.find((d) => d.id === row.id);
@@ -1243,7 +1267,7 @@ function SqlDatabaseSection() {
           <Button size="sm" variant="outline" onClick={() => setDraft([...draft, newSqlRow()])}><PlusIcon /> {t('settings.sql.addDatabase')}</Button>
         </div>
       </div>
-      <div className="flex items-center gap-2 border-t border-border/60 px-4 py-3.5 sm:px-5">
+      <div className="flex items-center gap-2 border-t border-border/60 py-3">
         <Button size="sm" onClick={save}>{t('common.save')}</Button>
         {msg && <span className={cn('text-xs', msg.ok ? 'text-success' : 'text-destructive-foreground')}>{msg.text}</span>}
       </div>
@@ -1288,7 +1312,6 @@ function WebPanel() {
       </Section>
 
       <Section title={t('settings.web.allowlist')} padded>
-        <p className="mb-2.5 text-xs text-muted-foreground/80">{t('settings.web.allowlistHint')}</p>
         <Textarea
           className="min-h-[110px] font-mono text-[13px]"
           placeholder={'wikipedia.org\ndocs.python.org\nheise.de'}
@@ -1298,7 +1321,6 @@ function WebPanel() {
       </Section>
 
       <Section title={t('settings.web.blocklist')} padded>
-        <p className="mb-2.5 text-xs text-muted-foreground/80">{t('settings.web.blocklistHint')}</p>
         <Textarea
           className="min-h-[110px] font-mono text-[13px]"
           placeholder={'facebook.com\npastebin.com'}
@@ -1404,7 +1426,6 @@ function McpPanel() {
   return (
     <Page>
       <Section title={t('settings.mcp.endpoint')} padded>
-        <p className="text-xs text-muted-foreground/80">{t('settings.mcp.endpointHint')}</p>
         <code className="mt-2 block w-fit rounded border bg-muted/40 px-2 py-1 font-mono text-[13px]">
           POST {window.location.origin}/mcp
         </code>
@@ -1412,10 +1433,6 @@ function McpPanel() {
 
       <Section title={t('settings.mcp.sql')}>
         <BoolRow s={s} k="mcp_sql_enabled" label={t('settings.mcp.sqlEnabled')} hint={t('settings.mcp.sqlEnabledHint')} />
-        <div className="px-4 pb-4 text-xs text-muted-foreground/80 space-y-2">
-          <p>{t('settings.mcp.sqlDescription')}</p>
-          <p>{t('settings.mcp.sqlConnectionHint')}</p>
-        </div>
       </Section>
 
       <Section title={t('settings.mcp.web')}>
@@ -1455,7 +1472,6 @@ function McpPanel() {
       {webOn && !webInherit && (
         <>
           <Section title={t('settings.mcp.allowlist')} padded>
-            <p className="mb-2.5 text-xs text-muted-foreground/80">{t('settings.mcp.allowlistHint')}</p>
             <Textarea
               className="min-h-[110px] font-mono text-[13px]"
               placeholder={'wikipedia.org\ndocs.python.org'}
@@ -1464,7 +1480,6 @@ function McpPanel() {
             />
           </Section>
           <Section title={t('settings.mcp.blocklist')} padded>
-            <p className="mb-2.5 text-xs text-muted-foreground/80">{t('settings.mcp.blocklistHint')}</p>
             <Textarea
               className="min-h-[110px] font-mono text-[13px]"
               placeholder={'facebook.com\npastebin.com'}
@@ -1630,16 +1645,15 @@ function ToolsPanel() {
   }
 
   return (
-    <Page className="gap-2.5">
+    <Page className="gap-0">
       <SectionHeader>{t('settings.tools.title')}</SectionHeader>
-      <p className="-mt-1.5 px-1 text-xs text-muted-foreground">{t('settings.tools.hint')}</p>
       {TOOL_CAT_ORDER.filter((c) => groups.has(c)).map((cat) => {
         const items = groups.get(cat)!;
         const enabledCount = items.filter((i) => i.enabled).length;
         const open = !!openCats[cat];
         return (
-          <div key={cat} className="overflow-hidden rounded-md border bg-card">
-            <div className="flex w-full items-center gap-2 px-3 py-2">
+          <div key={cat} className="border-t border-border/60 first-of-type:border-t-0">
+            <div className="flex w-full items-center gap-2 py-2.5">
               <button
                 type="button"
                 onClick={() => setOpenCats((o) => ({ ...o, [cat]: !o[cat] }))}
@@ -1655,9 +1669,9 @@ function ToolsPanel() {
               />
             </div>
             {open && (
-              <div className="border-t">
+              <div className="pb-1.5 pl-5.5">
                 {items.map((item) => (
-                  <div key={item.id} className="flex items-center gap-3 px-3 py-2 not-last:border-b">
+                  <div key={item.id} className="flex items-center gap-3 border-t border-border/40 py-2">
                     <div className="min-w-0 flex-1">
                       <div className="text-sm">{toolName(item.id)}</div>
                       <div className="truncate text-xs text-muted-foreground">{toolDesc(item.id)}</div>
@@ -1767,7 +1781,7 @@ function SystemPanel() {
       </Section>
 
       <Section title={t('settings.system.dangerZone')}>
-        <div className="px-4 pt-3.5 text-xs text-muted-foreground sm:px-5">
+        <div className="pt-3.5 text-xs text-muted-foreground">
           {t('settings.system.dangerHint')}
         </div>
         {WIPE_KINDS.map((kind) => {
@@ -1891,7 +1905,6 @@ function AssistantsPanel() {
         action={!editing && <Button size="sm" onClick={() => setEditing({ ...EMPTY_ASSISTANT })}><PlusIcon /> {t('settings.assistants.new')}</Button>}
         padded
       >
-        <p className="mb-3 text-xs text-muted-foreground">{t('settings.assistants.intro')}</p>
         {editing && <AssistantEditor initial={editing} onDone={done} onCancel={() => setEditing(null)} />}
         {!editing && (
           <div className="space-y-1.5">
@@ -1924,7 +1937,6 @@ function AssistantsPanel() {
       </Section>
 
       <Section title={t('settings.assistants.usageTitle')} padded>
-        <p className="mb-2 text-xs text-muted-foreground">{t('settings.assistants.usageIntro')}</p>
         <pre className="overflow-x-auto rounded-lg border bg-muted/40 p-3 text-[11px] leading-relaxed">{`curl ${origin}/v1/chat/completions \\
   -H "Authorization: Bearer ody_..." \\
   -H "Content-Type: application/json" \\
@@ -1998,10 +2010,9 @@ function SharedSkillsPanel() {
           </>
         }
       >
-        <div className="px-4 pt-3 text-xs text-muted-foreground sm:px-5">{t('settings.skills.intro')}</div>
-        {msg && <div className="px-4 pt-2 text-xs text-muted-foreground sm:px-5">{msg}</div>}
+        {msg && <div className="pt-2 text-xs text-muted-foreground">{msg}</div>}
         {skills.length === 0 && (
-          <div className="px-4 py-6 text-center text-xs text-muted-foreground sm:px-5">
+          <div className="py-6 text-center text-xs text-muted-foreground">
             {t('settings.skills.empty')}
           </div>
         )}
@@ -2071,6 +2082,7 @@ export function SettingsDialog({
   scope,
   onOpenRag,
   onOpenUsers,
+  onOpenTickets,
 }: {
   open: boolean;
   onClose: () => void;
@@ -2082,6 +2094,7 @@ export function SettingsDialog({
   /** Same idea for Users: the panel outgrew the dialog once it grew usage
    *  analytics and storage management, so it lives at `/users`. */
   onOpenUsers?: () => void;
+  onOpenTickets?: () => void;
 }) {
   const { t } = useTranslation();
   const [panel, setPanel] = useState<Panel>(initialPanel ?? 'appearance');
@@ -2102,6 +2115,7 @@ export function SettingsDialog({
     { id: 'personalization', label: t('settings.nav.personalization'), icon: <SparklesIcon /> },
     { id: 'shortcuts', label: t('settings.nav.shortcuts'), icon: <KeyboardIcon /> },
     { id: 'account', label: t('settings.nav.account'), icon: <UserIcon /> },
+    { id: 'usage', label: t('settings.nav.usage'), icon: <BarChart3Icon /> },
   ];
   const adminNav: Array<{ id: Panel; label: string; icon: React.ReactNode }> = [
     { id: 'models', label: t('settings.nav.models'), icon: <ServerIcon /> },
@@ -2119,6 +2133,7 @@ export function SettingsDialog({
   const advancedNav: Array<{ id: Panel; label: string; icon: React.ReactNode }> = [
     { id: 'rag', label: t('settings.nav.rag'), icon: <DatabaseIcon /> },
     { id: 'users', label: t('settings.nav.users'), icon: <UsersIcon /> },
+    { id: 'tickets', label: t('settings.nav.tickets'), icon: <TicketIcon /> },
   ];
 
   // These two entries route to their dedicated workspaces instead of swapping
@@ -2130,6 +2145,9 @@ export function SettingsDialog({
     } else if (id === 'users' && onOpenUsers) {
       onOpenUsers();
       onClose();
+    } else if (id === 'tickets' && onOpenTickets) {
+      onOpenTickets();
+      onClose();
     } else {
       setPanel(id);
     }
@@ -2140,8 +2158,10 @@ export function SettingsDialog({
       onClick={() => navClick(n.id)}
       title={n.label}
       className={cn(
-        'flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm transition-colors [&_svg]:size-[18px] [&_svg]:shrink-0 [&_svg]:text-muted-foreground',
-        panel === n.id ? 'bg-accent font-medium' : 'hover:bg-accent/60',
+        'flex h-8 w-full items-center gap-2.5 rounded-lg pr-4 pl-2.5 text-sm whitespace-nowrap transition-colors [&_svg]:size-4 [&_svg]:shrink-0',
+        panel === n.id
+          ? 'bg-accent font-medium text-foreground [&_svg]:text-foreground'
+          : 'text-foreground/80 hover:bg-accent/60 hover:text-foreground [&_svg]:text-muted-foreground',
       )}
     >
       {n.icon}
@@ -2149,7 +2169,7 @@ export function SettingsDialog({
     </button>
   );
   const GroupLabel = ({ children }: { children: React.ReactNode }) => (
-    <div className="px-2.5 pt-3 pb-1 text-[11px] font-medium tracking-wide text-muted-foreground uppercase first:pt-1">
+    <div className="px-2.5 pt-4 pb-1 text-xs text-muted-foreground first:pt-1">
       {children}
     </div>
   );
@@ -2164,10 +2184,14 @@ export function SettingsDialog({
 
   return (
     <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
-      <DialogContent title={t('settings.title')} className="w-[min(1080px,95vw)]">
-        <div className="flex h-[min(760px,86vh)]">
-          <div className="flex w-60 shrink-0 flex-col border-r">
-            <div className="p-2.5">
+      <DialogContent
+        bare
+        title={t('settings.title')}
+        className="h-[calc(100vh-4rem)] max-h-none w-[calc(100vw-4rem)] max-w-[1800px] rounded-xl"
+      >
+        <div className="flex min-h-0 flex-1">
+          <nav className="flex w-max min-w-48 shrink-0 flex-col border-r bg-sidebar">
+            <div className="w-0 min-w-full p-3 pb-2">
               <SearchInput
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
@@ -2175,10 +2199,10 @@ export function SettingsDialog({
                 aria-label={t('settings.searchPlaceholder')}
               />
             </div>
-            <div className="min-h-0 flex-1 space-y-0.5 overflow-y-auto px-2 pb-2">
+            <div className="min-h-0 flex-1 space-y-px overflow-y-auto px-3 pb-3">
               {userItems.length > 0 && (
                 <>
-                  <GroupLabel>{t('settings.general')}</GroupLabel>
+                  <GroupLabel>{t('settings.title')}</GroupLabel>
                   {userItems.map((n) => <NavButton key={n.id} n={n} />)}
                 </>
               )}
@@ -2198,22 +2222,33 @@ export function SettingsDialog({
                 <div className="px-2.5 py-8 text-center text-xs text-muted-foreground">{t('settings.noResults')}</div>
               )}
             </div>
-          </div>
-          <div className="min-w-0 flex-1 overflow-y-auto">
-            {panel === 'appearance' && <AppearancePanel />}
-            {panel === 'shortcuts' && <ShortcutsPanel />}
-            {panel === 'personalization' && <PersonalizationPanel />}
-            {panel === 'account' && <AccountPanel />}
-            {panel === 'skills' && <SharedSkillsPanel />}
-            {panel === 'models' && <AddModelsPanel />}
-            {panel === 'ai' && <AiDefaultsPanel />}
-            {panel === 'assistants' && <AssistantsPanel />}
-            {panel === 'integrations' && <IntegrationsPanel />}
-            {panel === 'web' && <WebPanel />}
-            {panel === 'mcp' && <McpPanel />}
-            {panel === 'tools' && <ToolsPanel />}
-            {panel === 'users' && <UsersPanel currentUser={auth?.username} />}
-            {panel === 'system' && <SystemPanel />}
+          </nav>
+          {/* The only scroll container for panel content: panels must not
+              add their own outer overflow, or the modal grows a second bar. */}
+          <div className="relative min-w-0 flex-1 overflow-y-auto overscroll-contain">
+            <DialogClose
+              aria-label={t('common.close')}
+              className="sticky top-3 z-10 float-right mr-3 flex size-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+            >
+              <XIcon className="size-4" />
+            </DialogClose>
+            <div className="mx-auto max-w-[1100px] [&_.settings-row-hint]:hidden">
+              {panel === 'appearance' && <AppearancePanel />}
+              {panel === 'shortcuts' && <ShortcutsPanel />}
+              {panel === 'personalization' && <PersonalizationPanel />}
+              {panel === 'account' && <AccountPanel />}
+              {panel === 'usage' && <UsagePanel />}
+              {panel === 'skills' && <SharedSkillsPanel />}
+              {panel === 'models' && <AddModelsPanel />}
+              {panel === 'ai' && <AiDefaultsPanel />}
+              {panel === 'assistants' && <AssistantsPanel />}
+              {panel === 'integrations' && <IntegrationsPanel />}
+              {panel === 'web' && <WebPanel />}
+              {panel === 'mcp' && <McpPanel />}
+              {panel === 'tools' && <ToolsPanel />}
+              {panel === 'users' && <UsersPanel currentUser={auth?.username} />}
+              {panel === 'system' && <SystemPanel />}
+            </div>
           </div>
         </div>
       </DialogContent>

@@ -168,7 +168,7 @@ def _kpi(data: Dict[str, Any]) -> Dict[str, Any]:
             f"{('<span class=t-note>' + _esc(note) + '</span>') if note else ''}"
             "</div>"
         )
-    html = f'<div class="t-grid" style="--t-min:150px">{"".join(tiles)}</div>'
+    html = f'<div class="t-grid" style="--t-min:120px">{"".join(tiles)}</div>'
     rows = (len(tiles) + 3) // 4
     return {"html": html, "height": 40 + rows * 110}
 
@@ -244,11 +244,13 @@ def _diagram(data: Dict[str, Any]) -> Dict[str, Any]:
         "    if (b.width > 0 && b.height > 0) {\n"
         "      el.setAttribute('viewBox', `${b.x - pad} ${b.y - pad} ${b.width + 2 * pad} ${b.height + 2 * pad}`);\n"
         "      el.setAttribute('width', b.width + 2 * pad); el.setAttribute('height', b.height + 2 * pad);\n"
-        "      el.style.maxWidth = 'none'; } }\n"
+        "      el.style.maxWidth = '100%'; el.style.height = 'auto'; } }\n"
         "  window.__talosMeasure && window.__talosMeasure();\n"
         "})().catch(e => { document.getElementById('w').innerHTML = '<p class=\"t-note\">Diagramm fehlerhaft: ' + String(e.message || e).replace(/[<&]/g, '') + '</p>'; throw e; });"
     )
-    css = "#w{overflow-x:auto;overflow-y:hidden;padding-bottom:4px}#w svg{display:block;margin:0 auto}"
+    # Fit the column, never scroll inside the answer (no nested scrolling);
+    # natural size when the diagram is narrower than the column.
+    css = "#w svg{display:block;margin:0 auto;max-width:100%;height:auto}"
     return {
         "spec": {"mermaid": source},
         "js": js,
@@ -277,23 +279,26 @@ def _timeline(data: Dict[str, Any]) -> Dict[str, Any]:
         items.append(
             '<li class="tl-item">'
             f'<span class="tl-dot" style="background:{tone}"></span>'
-            f'<div class="tl-date">{_esc(_text(ev.get("date"), 40))}</div>'
-            f'<div class="tl-title">{_esc(_text(ev.get("title"), 120))}</div>'
+            '<div class="tl-head">'
+            f'<span class="tl-date">{_esc(_text(ev.get("date"), 40))}</span>'
+            f'<span class="tl-title">{_esc(_text(ev.get("title"), 120))}</span>'
+            "</div>"
             f"{('<div class=t-note>' + _esc(_text(ev.get('text'), 400)) + '</div>') if ev.get('text') else ''}"
             "</li>"
         )
     css = (
         ".tl{list-style:none;margin:0;padding:0 0 0 18px;position:relative}"
         ".tl::before{content:'';position:absolute;left:5px;top:6px;bottom:6px;width:2px;background:var(--talos-border)}"
-        ".tl-item{position:relative;padding:0 0 14px 12px}"
+        ".tl-item{position:relative;padding:0 0 10px 10px}.tl-item:last-child{padding-bottom:0}"
         ".tl-dot{position:absolute;left:-18px;top:5px;width:12px;height:12px;border-radius:50%;box-shadow:0 0 0 3px var(--talos-bg)}"
+        ".tl-head{display:flex;flex-wrap:wrap;align-items:baseline;gap:0 8px}"
         ".tl-date{font:500 11px/1.4 var(--talos-mono);color:var(--talos-muted)}"
-        ".tl-title{font-weight:600;font-size:14px;margin:1px 0 2px}"
+        ".tl-title{font-weight:500;font-size:14px;line-height:1.45}"
     )
     return {
         "html": f'<ol class="tl">{"".join(items)}</ol>',
         "css": css,
-        "height": 40 + len(items) * 64,
+        "height": 24 + len(items) * 46,
     }
 
 
@@ -324,9 +329,9 @@ def _comparison(data: Dict[str, Any]) -> Dict[str, Any]:
     verdict = _text(data.get("verdict"), 300)
     css = (
         ".cmp{overflow-x:auto}.cmp table{min-width:420px}"
-        ".cmp thead th{color:var(--talos-fg);font-weight:600}"
-        ".cmp tbody th{color:var(--talos-muted);font-weight:500;white-space:normal}"
-        ".cmp-best{color:var(--talos-fg);font-weight:600;background:color-mix(in srgb,var(--talos-accent) 12%,transparent);border-radius:6px}"
+        ".cmp thead th{color:var(--talos-fg);font-size:13px;font-weight:500;text-transform:none;letter-spacing:0}"
+        ".cmp tbody th{color:var(--talos-muted);font-size:12px;font-weight:500;text-transform:none;letter-spacing:0;white-space:normal}"
+        ".cmp-best{color:var(--talos-fg);font-weight:500;background:color-mix(in srgb,var(--talos-accent) 12%,transparent);border-radius:6px}"
     )
     html = (
         f'<div class="t-stack"><div class="cmp"><table class="t-table"><thead><tr><th></th>{head}</tr></thead>'

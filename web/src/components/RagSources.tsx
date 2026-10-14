@@ -1,4 +1,6 @@
 import * as TooltipPrimitive from '@radix-ui/react-tooltip';
+import { DataSourceChips } from '@/components/interactive/InlineUi';
+import type { UiSource } from '@/lib/uiFrame';
 import { ArrowUpRightIcon, FileTextIcon, ImageIcon, Maximize2Icon, PlayCircleIcon } from 'lucide-react';
 import { useCallback, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -174,7 +176,7 @@ function PassageView({ group, s }: { group: SourceGroup; s: RagSource }) {
  *  segments are merged into time ranges). Hovering a chip opens a card with
  *  the passage itself; ‹ › (or ← →) step through every passage of the turn,
  *  starting at the hovered file's first one. */
-export function RagSources({ sources, web = [] }: { sources: RagSource[]; web?: Citation[] }) {
+export function RagSources({ sources, web = [], data = [] }: { sources: RagSource[]; web?: Citation[]; data?: UiSource[] }) {
   const { t } = useTranslation();
   const openLightbox = useUi((s) => s.openLightbox);
   const groups = useMemo(() => buildGroups(sources ?? []), [sources]);
@@ -183,7 +185,7 @@ export function RagSources({ sources, web = [] }: { sources: RagSource[]; web?: 
   const [cursor, setCursor] = useState(0);
   const step = useCallback((i: number) => setCursor(i), []);
 
-  if (!groups.length && !web.length) return null;
+  if (!groups.length && !web.length && !data.length) return null;
 
   const current = openKey != null ? flat[Math.min(cursor, flat.length - 1)] : undefined;
 
@@ -191,6 +193,7 @@ export function RagSources({ sources, web = [] }: { sources: RagSource[]; web?: 
     <div className="mt-3 flex flex-wrap items-center gap-1.5">
       <span className="mr-0.5 text-xs text-muted-foreground/80">{t('messages.sources')}</span>
       <WebSourceChips citations={web} />
+      <DataSourceChips sources={data} />
       {groups.map((g) => {
         const isOpen = openKey === g.key;
         // While a card is open the chip of the passage on screen lights up,

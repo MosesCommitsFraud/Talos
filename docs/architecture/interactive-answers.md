@@ -86,6 +86,23 @@ Theme switches are posted into the live frame; height follows the content
 | `talos.openLink(url)` / `<a href>` | opened in a new tab — click required, https only, not the app's origin, and only URLs written literally in the answer |
 | `talos.refresh(id, params)` | `POST /api/ui/data` by the host under the user's session (see below) |
 | `talos.img(url)` | the signed proxy URL for a web image named in the answer |
+| `talos.copy(text)` | copied to the clipboard by the host — click required |
+| `talos.download(name, text)` | saved as a file by the host — click required; text formats only (csv, json, md, txt, ics, tsv, svg) |
+| `talos.store.get/set/remove/clear` | JSON state per view (~100 KB), kept by the host in `localStorage` so a todo list or counter survives a reload |
+
+## Built-in views
+
+The tools that come with a picture — `get_weather`, `get_news`, `query_sql`
+(and `render_widget` tables) — still send plain data widgets (`weather`,
+`news`, `table` in `src/widgets.py`). The frontend renders them as interactive
+UI too: `web/src/lib/builtinViews.ts` turns the data into a UI payload with a
+static view script from `web/src/lib/views/`, and `InlineUi` shows it in the
+same frame, kit and card as any `render_ui` answer. Because the conversion
+happens at render time, stored conversations need no migration. These views
+do not depend on the *interactive answers* setting — it only governs whether
+the model may build views of its own. News thumbnails travel as signed
+`/api/ui/img` URLs (`images` in the news widget), since the frame has no
+cookies.
 
 ## Live data
 
@@ -164,5 +181,6 @@ and check the error badge on the cards.
 | `web/src/lib/ui-kit.css`, `ui-kit.js` | the Talos UI kit inside the frame |
 | `web/src/components/interactive/InlineUi.tsx` | the card, frame host, bridge handling, toolbar, source bar |
 | `web/src/components/interactive/UiDraftView.tsx` | streaming draft → final hand-over |
+| `web/src/lib/builtinViews.ts`, `web/src/lib/views/` | weather, news and table widgets as interactive UI |
 | `scripts/ui_preview.py` | mock server with streamed and stored examples |
 | `scripts/ui_eval.py`, `scripts/ui_eval.example.jsonl` | eval of a model against 30 prompts |

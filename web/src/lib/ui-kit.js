@@ -47,15 +47,70 @@
   const color = (i, opts) => (opts.colors && opts.colors[i]) || `var(--talos-chart-${(i % 8) + 1})`;
   const measure = () => { if (window.__talosMeasure) window.__talosMeasure(); };
 
-  // Keep range inputs' filled track in step with their value.
-  // The fill ends under the knob's centre: the knob travels a track that is
-  // one knob (1rem) shorter than the input, so the offset runs from +0.5rem
-  // at the start to -0.5rem at the end (t3code's settings slider).
+  // Keep range inputs' fill (and bubble / step segments) in step with their
+  // value. The invisible 2px knob travels a track 2px shorter than the
+  // input, hence the ±1px offset.
   function fillRange(input) {
     const min = +input.min || 0, max = input.max === '' ? 100 : +input.max, v = +input.value;
     const ratio = max > min ? Math.min(1, Math.max(0, (v - min) / (max - min))) : 0;
     input.style.setProperty('--t-fill', `${ratio * 100}%`);
-    input.style.setProperty('--t-fill-offset', `${0.5 - ratio}rem`);
+    input.style.setProperty('--t-fill-offset', `${1 - ratio * 2}px`);
+    const wrap = input.parentElement;
+    if (wrap && wrap.classList.contains('t-range')) {
+      wrap.style.setProperty('--t-pos', `${ratio * 100}%`);
+      // Write only on change: the observer below reacts to DOM changes, and
+      // an unconditional write would feed it forever.
+      const bubble = wrap.querySelector(':scope > .t-range-bubble');
+      const label = bubble && rangeLabel(input);
+      if (bubble && bubble.textContent !== label) bubble.textContent = label;
+      const segs = wrap.querySelector(':scope > .t-steps-track');
+      if (segs) {
+        const k = Math.round(ratio * (segs.children.length - 1));
+        [...segs.children].forEach((el, i) => { const c = i < k ? 'on' : i === k ? 'cur' : ''; if (el.className !== c) el.className = c; });
+      }
+    }
+  }
+  // The bubble shows what the UI shows next to the slider (its <output>), else
+  // the value with data-unit.
+  function rangeLabel(input) {
+    const field = input.closest('.t-field');
+    const out = field && field.querySelector('output, .t-value');
+    if (out && out.textContent.trim()) return out.textContent.trim();
+    return fmt.number(+input.value) + (input.dataset.unit ? ' ' + input.dataset.unit : '');
+  }
+  function stepCount(input) {
+    const min = +input.min || 0, max = input.max === '' ? 100 : +input.max;
+    const step = input.step === 'any' ? 0 : (+input.step || 1);
+    return step > 0 ? Math.round((max - min) / step) + 1 : 0;
+  }
+  function enhanceRange(input) {
+    if (input.hasAttribute('data-native') || (input.parentElement && input.parentElement.classList.contains('t-range'))) return;
+    const wrap = document.createElement('span');
+    wrap.className = 't-range';
+    input.before(wrap);
+    wrap.appendChild(input);
+    const n = stepCount(input);
+    if (input.classList.contains('t-steps') || (n >= 2 && n <= 12 && !input.hasAttribute('data-continuous'))) {
+      wrap.classList.add('steps');
+      const segs = document.createElement('span');
+      segs.className = 't-steps-track';
+      segs.setAttribute('aria-hidden', 'true');
+      segs.innerHTML = '<i></i>'.repeat(Math.max(2, Math.min(40, n || 10)));
+      wrap.appendChild(segs);
+    } else {
+      const bubble = document.createElement('span');
+      bubble.className = 't-range-bubble';
+      bubble.setAttribute('aria-hidden', 'true');
+      wrap.appendChild(bubble);
+    }
+    const end = () => wrap.classList.remove('drag');
+    input.addEventListener('pointerdown', () => { wrap.classList.add('drag'); fillRange(input); });
+    input.addEventListener('pointerup', end);
+    input.addEventListener('pointercancel', end);
+    input.addEventListener('blur', end);
+    // The UI updates its <output> in its own input handler — read it after.
+    input.addEventListener('input', () => requestAnimationFrame(() => fillRange(input)));
+    fillRange(input);
   }
   document.addEventListener('input', (e) => { if (e.target && e.target.type === 'range') fillRange(e.target); }, true);
   const fillAll = () => document.querySelectorAll('input[type=range]').forEach(fillRange);
@@ -69,8 +124,234 @@
   });
   document.addEventListener('change', (e) => { if (e.target && e.target.type === 'range') fillRange(e.target); }, true);
 
+  // ── self-wiring controls ──
+  // Segmented controls, tabs, chips and steppers work without any code in the
+  // UI: clicks update aria-pressed / aria-selected, an indicator glides to the
+  // chosen item, and the group fires a bubbling `talos:change` event with
+  // { value, values } — `el.addEventListener('talos:change', e => …)`.
+  const reduced = () => { try { return matchMedia('(prefers-reduced-motion: reduce)').matches; } catch (e) { return false; } };
+  const valueOf = (b) => (b.dataset.value != null ? b.dataset.value : b.textContent.trim());
+  const emit = (root, detail) => root.dispatchEvent(new CustomEvent('talos:change', { bubbles: true, detail }));
+  function place(root, cls, sel) {
+    let ind = root.querySelector(':scope > .' + cls);
+    const on = root.querySelector(sel);
+    if (!ind) { ind = document.createElement('span'); ind.className = cls; ind.setAttribute('aria-hidden', 'true'); root.prepend(ind); }
+    if (!on) { ind.style.width = '0'; return; }
+    ind.style.width = on.offsetWidth + 'px';
+    ind.style.transform = `translateX(${on.offsetLeft}px)`;
+  }
+  function syncSeg(root) { if (!root.classList.contains('t-ready')) root.classList.add('t-ready'); place(root, 't-seg-ind', ':scope > button[aria-pressed="true"], :scope > button.active'); }
+  function syncTabs(root) {
+    place(root, 't-tabs-ind', ':scope > button[aria-selected="true"]');
+    const on = root.querySelector(':scope > button[aria-selected="true"]');
+    root.querySelectorAll(':scope > button').forEach((b) => {
+      b.setAttribute('role', 'tab');
+      const panel = b.dataset.tab && document.querySelector(`[data-tab-panel="${CSS.escape(b.dataset.tab)}"]`);
+      if (panel) panel.hidden = b !== on;
+    });
+  }
+  // ── select → floating list ──
+  const selProto = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value');
+  const idxProto = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'selectedIndex');
+  let openSelect = null;
+  function enhanceSelect(sel) {
+    if (sel.multiple || sel.size > 1 || sel.hasAttribute('data-native') || sel.parentElement && sel.parentElement.classList.contains('t-select')) return;
+    const wrap = document.createElement('span');
+    wrap.className = 't-select';
+    if (sel.style.width) wrap.style.width = sel.style.width;
+    sel.before(wrap);
+    wrap.appendChild(sel);
+    sel.tabIndex = -1;
+    sel.setAttribute('aria-hidden', 'true');
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 't-select-btn';
+    btn.setAttribute('aria-haspopup', 'listbox');
+    btn.setAttribute('aria-expanded', 'false');
+    const label = document.createElement('span');
+    btn.appendChild(label);
+    wrap.appendChild(btn);
+    if (sel.id) { const l = document.querySelector(`label[for="${CSS.escape(sel.id)}"]`); if (l) { l.addEventListener('click', (e) => { e.preventDefault(); btn.focus(); }); btn.setAttribute('aria-label', l.textContent.trim()); } }
+    const update = () => {
+      const o = sel.options[sel.selectedIndex];
+      label.textContent = o ? o.textContent : '';
+      btn.disabled = sel.disabled;
+    };
+    // Values set from code (`select.value = 'x'`) update the button too.
+    Object.defineProperty(sel, 'value', { configurable: true, get() { return selProto.get.call(this); }, set(v) { selProto.set.call(this, v); update(); } });
+    Object.defineProperty(sel, 'selectedIndex', { configurable: true, get() { return idxProto.get.call(this); }, set(v) { idxProto.set.call(this, v); update(); } });
+    sel.addEventListener('change', update);
+    if (window.MutationObserver) new MutationObserver(update).observe(sel, { childList: true, subtree: true, attributes: true, characterData: true });
+    update();
+
+    let menu = null, active = -1, typed = '', typedAt = 0;
+    const rows = () => (menu ? [...menu.querySelectorAll('[role=option]')] : []);
+    const setActive = (i) => {
+      const r = rows();
+      if (!r.length) return;
+      active = Math.max(0, Math.min(r.length - 1, i));
+      r.forEach((el, k) => el.classList.toggle('active', k === active));
+      r[active].scrollIntoView({ block: 'nearest' });
+    };
+    const close = (focus) => {
+      if (!menu) return;
+      menu.remove(); menu = null; openSelect = null;
+      btn.setAttribute('aria-expanded', 'false');
+      if (focus) btn.focus();
+      measure();
+    };
+    const choose = (i) => {
+      const r = rows()[i];
+      if (!r || r.getAttribute('aria-disabled') === 'true') return;
+      idxProto.set.call(sel, +r.dataset.index);
+      update();
+      sel.dispatchEvent(new Event('input', { bubbles: true }));
+      sel.dispatchEvent(new Event('change', { bubbles: true }));
+      close(true);
+    };
+    const open = () => {
+      if (menu || sel.disabled) return;
+      if (openSelect) openSelect();
+      menu = document.createElement('ul');
+      menu.className = 't-select-menu';
+      menu.setAttribute('role', 'listbox');
+      [...sel.children].forEach((node) => {
+        const add = (o) => {
+          const li = document.createElement('li');
+          li.setAttribute('role', 'option');
+          li.dataset.index = String(o.index);
+          li.textContent = o.textContent;
+          li.setAttribute('aria-selected', o.selected ? 'true' : 'false');
+          if (o.disabled) li.setAttribute('aria-disabled', 'true');
+          menu.appendChild(li);
+        };
+        if (node.tagName === 'OPTGROUP') {
+          const g = document.createElement('li');
+          g.className = 't-select-group';
+          g.setAttribute('role', 'presentation');
+          g.textContent = node.label;
+          menu.appendChild(g);
+          [...node.children].forEach(add);
+        } else if (node.tagName === 'OPTION') add(node);
+      });
+      menu.addEventListener('pointermove', (e) => { const li = e.target.closest('[role=option]'); if (li) setActive(rows().indexOf(li)); });
+      menu.addEventListener('click', (e) => { const li = e.target.closest('[role=option]'); if (li) choose(rows().indexOf(li)); });
+      wrap.appendChild(menu);
+      // Open upwards when the list would run past the view and there is room above.
+      const r = wrap.getBoundingClientRect(), h = menu.offsetHeight, docH = document.documentElement.clientHeight;
+      if (r.bottom + h + 8 > docH && r.top > h + 8) menu.classList.add('up');
+      btn.setAttribute('aria-expanded', 'true');
+      openSelect = () => close(false);
+      setActive(Math.max(0, rows().findIndex((li) => li.getAttribute('aria-selected') === 'true')));
+      measure();
+    };
+    btn.addEventListener('click', () => (menu ? close(true) : open()));
+    btn.addEventListener('keydown', (e) => {
+      const k = e.key;
+      if (!menu) {
+        if (k === 'ArrowDown' || k === 'ArrowUp' || k === 'Enter' || k === ' ') { e.preventDefault(); open(); }
+        return;
+      }
+      if (k === 'ArrowDown') { e.preventDefault(); setActive(active + 1); }
+      else if (k === 'ArrowUp') { e.preventDefault(); setActive(active - 1); }
+      else if (k === 'Home') { e.preventDefault(); setActive(0); }
+      else if (k === 'End') { e.preventDefault(); setActive(rows().length - 1); }
+      else if (k === 'Enter' || k === ' ') { e.preventDefault(); choose(active); }
+      else if (k === 'Escape') { e.preventDefault(); close(true); }
+      else if (k === 'Tab') close(false);
+      else if (k.length === 1) {
+        const now = Date.now();
+        typed = (now - typedAt < 700 ? typed : '') + k.toLowerCase();
+        typedAt = now;
+        const i = rows().findIndex((li) => li.textContent.toLowerCase().startsWith(typed));
+        if (i >= 0) setActive(i);
+      }
+    });
+    document.addEventListener('pointerdown', (e) => { if (menu && !wrap.contains(e.target)) close(false); }, true);
+  }
+
+  function syncAll() {
+    document.querySelectorAll('select').forEach(enhanceSelect);
+    document.querySelectorAll('input[type=range]').forEach(enhanceRange);
+    document.querySelectorAll('.t-seg').forEach(syncSeg);
+    document.querySelectorAll('.t-tabs').forEach((t) => {
+      if (!t.querySelector(':scope > button[aria-selected="true"]')) { const f = t.querySelector(':scope > button'); if (f) f.setAttribute('aria-selected', 'true'); }
+      syncTabs(t);
+    });
+    document.querySelectorAll('.t-chips > button:not([aria-pressed])').forEach((b) => b.setAttribute('aria-pressed', 'false'));
+    document.querySelectorAll('input[type=range][data-ticks]:not([data-t-ticks])').forEach((r) => {
+      const n = Math.max(2, Math.min(21, +r.dataset.ticks || 5));
+      const t = document.createElement('div');
+      t.className = 't-ticks';
+      t.innerHTML = '<i></i>'.repeat(n);
+      r.setAttribute('data-t-ticks', '');
+      (r.parentElement && r.parentElement.classList.contains('t-range') ? r.parentElement : r).after(t);
+    });
+  }
+  document.addEventListener('click', (e) => {
+    const btn = e.target.closest && e.target.closest('button');
+    if (!btn || !btn.parentElement) return;
+    const root = btn.parentElement;
+    if (root.classList.contains('t-seg')) {
+      root.querySelectorAll(':scope > button').forEach((b) => b.setAttribute('aria-pressed', b === btn ? 'true' : 'false'));
+      syncSeg(root);
+      emit(root, { value: valueOf(btn) });
+    } else if (root.classList.contains('t-tabs')) {
+      root.querySelectorAll(':scope > button').forEach((b) => b.setAttribute('aria-selected', b === btn ? 'true' : 'false'));
+      syncTabs(root);
+      measure();
+      emit(root, { value: valueOf(btn) });
+    } else if (root.classList.contains('t-chips')) {
+      const single = root.hasAttribute('data-single');
+      const on = btn.getAttribute('aria-pressed') !== 'true';
+      if (single) root.querySelectorAll(':scope > button').forEach((b) => b.setAttribute('aria-pressed', 'false'));
+      btn.setAttribute('aria-pressed', single || on ? 'true' : 'false');
+      const values = [...root.querySelectorAll(':scope > button[aria-pressed="true"]')].map(valueOf);
+      emit(root, { value: valueOf(btn), values });
+    } else if (root.classList.contains('t-stepper') && btn.dataset.step) {
+      const input = root.querySelector('input');
+      if (!input) return;
+      const step = (+input.step || 1) * Math.sign(+btn.dataset.step || 1);
+      let v = (+input.value || 0) + step;
+      if (input.min !== '') v = Math.max(+input.min, v);
+      if (input.max !== '') v = Math.min(+input.max, v);
+      input.value = String(+v.toFixed(6));
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+  }, true);
+  document.addEventListener('DOMContentLoaded', () => {
+    syncAll();
+    if (window.MutationObserver) {
+      let queued = false;
+      new MutationObserver(() => { if (!queued) { queued = true; requestAnimationFrame(() => { queued = false; syncAll(); }); } })
+        .observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['aria-pressed', 'aria-selected'] });
+    }
+    if (window.ResizeObserver) new ResizeObserver(() => syncAll()).observe(document.body);
+  });
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(syncAll);
+
+  /** Count a number up to `to` (formatted with `format(v)`), e.g. after a slider moved. */
+  function count(target, to, format, ms) {
+    const el = $(target);
+    if (!el) return;
+    const f = format || ((v) => fmt.number(v));
+    const from = +el.dataset.tValue || 0;
+    el.dataset.tValue = String(to);
+    if (reduced() || !finite(from) || !finite(to) || from === to) { el.textContent = f(to); return; }
+    const dur = ms || 450, t0 = performance.now();
+    const step = (now) => {
+      const k = Math.min(1, (now - t0) / dur), e = 1 - Math.pow(1 - k, 3);
+      el.textContent = f(from + (to - from) * e);
+      if (k < 1 && el.dataset.tValue === String(to)) requestAnimationFrame(step);
+    };
+    requestAnimationFrame(step);
+  }
+
   talos.kit = {
     fillRange,
+    count,
+    sync: syncAll,
     /** Wire a .t-seg group: onChange(value) gets the clicked button's data-value. */
     segmented(target, onChange) {
       const root = $(target);
@@ -107,6 +388,9 @@
     if (!host) throw new Error('talos.chart: container ' + target + ' not found');
     let options = Object.assign({}, opts);
     host.classList.add('t-chart');
+    // The first draw animates in (bars grow, lines draw); redraws from a
+    // slider or update() are instant.
+    let entered = false;
     const render = () => {
       host.innerHTML = '';
       const series = options.series || [];
@@ -138,6 +422,12 @@
         throw e;
       }
       host.appendChild(tip);
+      if (!entered) {
+        entered = true;
+        host.querySelectorAll('.t-line').forEach((l) => { try { l.style.setProperty('--t-len', Math.ceil(l.getTotalLength())); } catch (e) { /* not laid out */ } });
+        host.classList.add('t-enter');
+        setTimeout(() => host.classList.remove('t-enter'), 900);
+      }
       measure();
     };
     render();
@@ -151,6 +441,16 @@
       update(next) { options = Object.assign({}, options, next); render(); },
       get options() { return options; },
     };
+  }
+
+  // A bar rounded only at its data end (t3code's rounded-t-sm), square at the
+  // baseline.
+  function barPath(x, y, w, h, end) {
+    const r = Math.max(0, Math.min(3, w / 2, h / 2));
+    if (end === 'right') return `M${x},${y}H${x + w - r}Q${x + w},${y} ${x + w},${y + r}V${y + h - r}Q${x + w},${y + h} ${x + w - r},${y + h}H${x}Z`;
+    if (end === 'left') return `M${x + w},${y}H${x + r}Q${x},${y} ${x},${y + r}V${y + h - r}Q${x},${y + h} ${x + r},${y + h}H${x + w}Z`;
+    if (end === 'bottom') return `M${x},${y}H${x + w}V${y + h - r}Q${x + w},${y + h} ${x + w - r},${y + h}H${x + r}Q${x},${y + h} ${x},${y + h - r}Z`;
+    return `M${x},${y + h}V${y + r}Q${x},${y} ${x + r},${y}H${x + w - r}Q${x + w},${y} ${x + w},${y + r}V${y + h}Z`;
   }
 
   const valueFormat = (opts) => opts.format || ((v) => fmt.unit(v, opts.unit, opts.digits));
@@ -180,6 +480,7 @@
       const horizontal = o.horizontal != null ? o.horizontal : cats.some((c) => String(c).length > 12) || cats.length > 14;
       const showValues = o.valueLabels != null ? o.valueLabels : series.length === 1 && cats.length <= 12;
 
+      host.classList.toggle('t-h', horizontal);
       if (horizontal) {
         const labelW = Math.min(W * 0.38, Math.max(...cats.map((c) => textWidth(clip(c, 32), 12))) + 10);
         const rowH = Math.max(18, Math.min(34, (o.barSize || 22) * (stacked ? 1 : series.length))) + 10;
@@ -204,7 +505,14 @@
             if (stacked) { if (v >= 0) { a = accPos; b = accPos += v; } else { a = accNeg; b = accNeg += v; } } else { a = 0; b = v; }
             const xa = x(Math.min(a, b)), xb = x(Math.max(a, b));
             const yy = stacked ? y0 : y0 + si * h;
-            const r = svgEl('rect', { x: xa, y: yy, width: Math.max(1, xb - xa), height: Math.max(2, h - (stacked ? 0 : 2)), rx: 3, class: 't-mark', style: `fill:${color(si, o)}` }, svg);
+            // Single bars get a rounded data end; stacked segments stay square
+            // with a 1px surface-coloured gap between them.
+            const bw2 = Math.max(1, xb - xa), bh2 = Math.max(2, h - (stacked ? 0 : 2));
+            const r = svgEl('path', {
+              d: stacked ? `M${xa},${yy}h${bw2}v${bh2}h${-bw2}Z` : barPath(xa, yy, bw2, bh2, v >= 0 ? 'right' : 'left'),
+              class: 't-mark t-bar',
+              style: `fill:${color(si, o)}${stacked ? ';stroke:var(--talos-bg);stroke-width:1' : ''}`,
+            }, svg);
             hover(r, c, ci);
             if (showValues && !stacked) svgEl('text', { x: xb + 6, y: yy + h / 2 + 4, class: 't-value-label' }, svg).textContent = f(v);
           });
@@ -212,11 +520,16 @@
         svgEl('line', { x1: x(0), x2: x(0), y1: top, y2: H - bottom, class: 't-axis-zero', style: 'stroke:var(--talos-border-strong)' }, svg);
       } else {
         const left = Math.max(...ticks.map((t) => textWidth(o.axisFormat ? o.axisFormat(t) : fmt.compact(t)))) + 12;
-        const top = showValues ? 18 : 8, right = 8;
-        const slot0 = (W - left - right) / cats.length;
+        const slot0 = (W - left - 8) / cats.length;
+        // Value labels only where they fit over their column — otherwise they
+        // collide into an unreadable row; the tooltip still has the figures.
+        const colValues = showValues && !stacked && Math.max(...series.flatMap((s) => s.values.filter((v) => v != null).map((v) => textWidth(f(v), 11)))) <= slot0 - 2;
+        const top = colValues ? 18 : 8, right = 8;
         const maxLabel = Math.max(3, Math.floor(slot0 / 6.4));
         const bottom = 26;
-        const H = o.height || 260;
+        // Height follows the width: a narrow column gets a flatter chart
+        // instead of a tall one with empty bands.
+        const H = o.height || Math.round(Math.min(260, Math.max(170, W * 0.5)));
         const svg = svgEl('svg', { viewBox: `0 0 ${W} ${H}`, width: W, height: H, role: 'img', 'aria-label': o.title || 'Säulendiagramm' }, host);
         const y = (v) => top + (1 - (v - t0) / (t1 - t0 || 1)) * (H - top - bottom);
         const ax = svgEl('g', { class: 't-axis' }, svg);
@@ -239,9 +552,14 @@
             if (stacked) { if (v >= 0) { a = accPos; b = accPos += v; } else { a = accNeg; b = accNeg += v; } } else { a = 0; b = v; }
             const ya = y(Math.max(a, b)), yb = y(Math.min(a, b));
             const xx = cx - groupW / 2 + (stacked ? 0 : si * bw);
-            const r = svgEl('rect', { x: xx + (stacked ? 0 : 1), y: ya, width: Math.max(2, bw - (stacked ? 0 : 2)), height: Math.max(1, yb - ya), rx: 3, class: 't-mark', style: `fill:${color(si, o)}` }, svg);
+            const bx = xx + (stacked ? 0 : 1), bwid = Math.max(2, bw - (stacked ? 0 : 2)), bh = Math.max(1, yb - ya);
+            const r = svgEl('path', {
+              d: stacked ? `M${bx},${ya}h${bwid}v${bh}h${-bwid}Z` : barPath(bx, ya, bwid, bh, v >= 0 ? 'top' : 'bottom'),
+              class: 't-mark t-bar',
+              style: `fill:${color(si, o)}${stacked ? ';stroke:var(--talos-bg);stroke-width:1' : ''}`,
+            }, svg);
             hover(r, c, ci);
-            if (showValues && !stacked) svgEl('text', { x: xx + bw / 2, y: ya - 5, 'text-anchor': 'middle', class: 't-value-label' }, svg).textContent = f(v);
+            if (colValues) svgEl('text', { x: xx + bw / 2, y: ya - 5, 'text-anchor': 'middle', class: 't-value-label' }, svg).textContent = f(v);
           });
         });
         svgEl('line', { x1: left, x2: W - right, y1: y(Math.max(t0, Math.min(0, t1))), y2: y(Math.max(t0, Math.min(0, t1))), style: 'stroke:var(--talos-border-strong)' }, svg);
@@ -273,7 +591,7 @@
       if (o.max != null) hi = o.max;
       const ticks = niceTicks(lo, hi, 5);
       const t0 = ticks[0], t1 = ticks[ticks.length - 1];
-      const W = ctx.width, H = o.height || 260;
+      const W = ctx.width, H = o.height || Math.round(Math.min(260, Math.max(170, W * 0.5)));
       const left = Math.max(...ticks.map((t) => textWidth(o.axisFormat ? o.axisFormat(t) : fmt.compact(t)))) + 12;
       const top = 10, right = 12, bottom = 26;
       const svg = svgEl('svg', { viewBox: `0 0 ${W} ${H}`, width: W, height: H, role: 'img', 'aria-label': o.title || 'Liniendiagramm' }, host);
@@ -284,9 +602,13 @@
         svgEl('line', { x1: left, x2: W - right, y1: y(t), y2: y(t), class: 't-gridline' }, svg);
         svgEl('text', { x: left - 8, y: y(t) + 4, 'text-anchor': 'end' }, ax).textContent = o.axisFormat ? o.axisFormat(t) : fmt.compact(t);
       });
-      const step = Math.ceil(cats.length / Math.max(1, Math.floor((W - left) / 64)));
+      // Room per label from the longest label, so dates like "2025-01" never
+      // run into each other; the last label shows only with room to spare.
+      const labelW = Math.max(40, ...cats.map((c) => textWidth(clip(c, 14), 12))) + 14;
+      const step = Math.ceil(cats.length / Math.max(1, Math.floor((W - left) / labelW)));
+      const lastAt = cats.length - 1, showLast = lastAt % step === 0 || lastAt % step >= Math.ceil(step * 0.7);
       cats.forEach((c, i) => {
-        if (i % step === 0 || i === cats.length - 1) svgEl('text', { x: x(i), y: H - 8, 'text-anchor': i === 0 ? 'start' : i === cats.length - 1 ? 'end' : 'middle' }, ax).textContent = clip(c, 14);
+        if (i % step === 0 || (i === lastAt && showLast)) svgEl('text', { x: x(i), y: H - 8, 'text-anchor': i === 0 ? 'start' : i === lastAt ? 'end' : 'middle' }, ax).textContent = clip(c, 14);
       });
       series.forEach((s, si) => {
         const segs = [];
@@ -299,7 +621,7 @@
             const base = y(Math.max(t0, Math.min(0, t1)));
             svgEl('path', { d: `${d}L${pts[pts.length - 1][0]},${base}L${pts[0][0]},${base}Z`, style: `fill:${color(si, o)};opacity:${series.length > 1 ? 0.12 : 0.16}` }, svg);
           }
-          svgEl('path', { d, class: 't-mark', style: `fill:none;stroke:${color(si, o)};stroke-width:2;stroke-linejoin:round;stroke-linecap:round${s.dashed ? ';stroke-dasharray:5 4' : ''}` }, svg);
+          svgEl('path', { d, class: 't-mark t-line', style: `fill:none;stroke:${color(si, o)};stroke-width:2;stroke-linejoin:round;stroke-linecap:round${s.dashed ? ';stroke-dasharray:5 4' : ''}` }, svg);
           if (pts.length === 1) svgEl('circle', { cx: pts[0][0], cy: pts[0][1], r: 3, style: `fill:${color(si, o)}` }, svg);
         });
       });
@@ -351,7 +673,7 @@
         const d = full
           ? `M${cx - R},${cy}a${R},${R} 0 1,0 ${2 * R},0a${R},${R} 0 1,0 ${-2 * R},0M${cx - r},${cy}a${r},${r} 0 1,1 ${2 * r},0a${r},${r} 0 1,1 ${-2 * r},0`
           : `M${p(R, a0)}A${R},${R} 0 ${large} 1 ${p(R, a1)}L${p(r, a1)}A${r},${r} 0 ${large} 0 ${p(r, a0)}Z`;
-        const seg = svgEl('path', { d, class: 't-mark', 'fill-rule': 'evenodd', style: `fill:${color(i, o)};stroke:var(--talos-bg);stroke-width:2` }, svg);
+        const seg = svgEl('path', { d, class: 't-mark t-slice', 'fill-rule': 'evenodd', style: `fill:${color(i, o)};stroke:var(--talos-bg);stroke-width:2` }, svg);
         seg.addEventListener('mousemove', (e) => {
           seg.classList.add('t-active');
           const hr = host.getBoundingClientRect();
@@ -380,6 +702,85 @@
   const swatch = document.createElement('canvas');
   swatch.width = swatch.height = 1;
   const probe = document.createElement('span');
+  /** Markdown → safe HTML for live previews and notes: headings, bold,
+   *  italic, strike, inline code, code blocks, lists (incl. task lists),
+   *  quotes, links, rules, simple tables. Everything is escaped first, so
+   *  user text can never inject markup. */
+  talos.md = function md(text) {
+    const lines = String(text == null ? '' : text).replace(/\r\n?/g, '\n').split('\n');
+    const inline = (s) => esc(s)
+      .replace(/`([^`]+)`/g, '<code>$1</code>')
+      .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+      .replace(/(^|[^*])\*([^*\s][^*]*)\*/g, '$1<em>$2</em>')
+      .replace(/(^|[^_\w])_([^_\s][^_]*)_/g, '$1<em>$2</em>')
+      .replace(/~~([^~]+)~~/g, '<del>$1</del>')
+      .replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2">$1</a>');
+    const out = [];
+    let i = 0;
+    while (i < lines.length) {
+      const line = lines[i];
+      if (/^```/.test(line)) {
+        const body = [];
+        i++;
+        while (i < lines.length && !/^```/.test(lines[i])) body.push(lines[i++]);
+        i++;
+        out.push(`<pre><code>${esc(body.join('\n'))}</code></pre>`);
+        continue;
+      }
+      let m;
+      if ((m = /^(#{1,4})\s+(.*)$/.exec(line))) { out.push(`<h${m[1].length}>${inline(m[2])}</h${m[1].length}>`); i++; continue; }
+      if (/^\s*(?:(?:-\s*){3,}|(?:\*\s*){3,}|(?:_\s*){3,})$/.test(line)) { out.push('<hr>'); i++; continue; }
+      if (/^>\s?/.test(line)) {
+        const body = [];
+        while (i < lines.length && /^>\s?/.test(lines[i])) body.push(lines[i++].replace(/^>\s?/, ''));
+        out.push(`<blockquote>${talos.md(body.join('\n'))}</blockquote>`);
+        continue;
+      }
+      if (/^\s*\|.*\|\s*$/.test(line) && i + 1 < lines.length && /^\s*\|?\s*:?-{2,}/.test(lines[i + 1])) {
+        const cells = (l) => l.trim().replace(/^\||\|$/g, '').split('|').map((c) => inline(c.trim()));
+        const head = cells(line);
+        i += 2;
+        const rows = [];
+        while (i < lines.length && /^\s*\|.*\|\s*$/.test(lines[i])) rows.push(cells(lines[i++]));
+        out.push(`<table><thead><tr>${head.map((c) => `<th>${c}</th>`).join('')}</tr></thead><tbody>${rows.map((r) => `<tr>${r.map((c) => `<td>${c}</td>`).join('')}</tr>`).join('')}</tbody></table>`);
+        continue;
+      }
+      if (/^\s*([-*+]|\d+[.)])\s+/.test(line)) {
+        const ordered = /^\s*\d/.test(line);
+        const items = [];
+        while (i < lines.length && /^\s*([-*+]|\d+[.)])\s+/.test(lines[i])) {
+          const item = lines[i++].replace(/^\s*([-*+]|\d+[.)])\s+/, '');
+          const task = /^\[([ xX])\]\s+(.*)$/.exec(item);
+          items.push(task ? `<li class="t-task"><input type="checkbox" disabled${task[1] !== ' ' ? ' checked' : ''}> ${inline(task[2])}</li>` : `<li>${inline(item)}</li>`);
+        }
+        out.push(ordered ? `<ol>${items.join('')}</ol>` : `<ul>${items.join('')}</ul>`);
+        continue;
+      }
+      if (!line.trim()) { i++; continue; }
+      const para = [];
+      while (i < lines.length && lines[i].trim() && !/^(#{1,4}\s|```|>|\s*([-*+]|\d+[.)])\s)/.test(lines[i])) para.push(lines[i++]);
+      out.push(`<p>${para.map(inline).join('<br>')}</p>`);
+    }
+    return out.join('\n');
+  };
+
+  /** A small trend line: talos.spark('#el', [3, 5, 4, 8], { color, area }). */
+  talos.spark = function spark(target, values, opts) {
+    const host = $(target);
+    if (!host) return;
+    const o = opts || {}, v = (values || []).filter(finite);
+    host.innerHTML = '';
+    if (v.length < 2) return;
+    const W = 100, H = 28, lo = Math.min(...v), hi = Math.max(...v), span = hi - lo || 1;
+    const pts = v.map((x, i) => [(i / (v.length - 1)) * W, H - 3 - ((x - lo) / span) * (H - 6)]);
+    const d = pts.map((p, i) => (i ? 'L' : 'M') + p[0].toFixed(1) + ' ' + p[1].toFixed(1)).join(' ');
+    const c = o.color || 'var(--talos-accent)';
+    const svg = svgEl('svg', { class: 't-spark', viewBox: `0 0 ${W} ${H}`, preserveAspectRatio: 'none', 'aria-hidden': 'true' }, host);
+    if (o.area !== false) svgEl('path', { d: `${d} L${W} ${H} L0 ${H} Z`, style: `fill:${c};opacity:.12;stroke:none` }, svg);
+    svgEl('path', { d, style: `fill:none;stroke:${c};stroke-width:1.6;vector-effect:non-scaling-stroke;stroke-linejoin:round;stroke-linecap:round` }, svg);
+    measure();
+  };
+
   talos.color = function color(token, fallback) {
     const name = String(token || '').startsWith('--') ? token : `--talos-${token}`;
     probe.style.color = `var(${name}, ${fallback || 'currentColor'})`;

@@ -13,8 +13,15 @@ export function DialogContent({
   children,
   title,
   description,
+  bare,
   ...props
-}: DialogPrimitive.DialogContentProps & { title: string; description?: string }) {
+}: DialogPrimitive.DialogContentProps & {
+  title: string;
+  description?: string;
+  /** No header bar or scroll wrapper: the title is screen-reader only and the
+   *  children own the layout (and their own single scroll container). */
+  bare?: boolean;
+}) {
   const { t } = useTranslation();
   return (
     <DialogPrimitive.Portal>
@@ -26,6 +33,13 @@ export function DialogContent({
         )}
         {...props}
       >
+        {bare ? (
+          <>
+            <DialogPrimitive.Title className="sr-only">{title}</DialogPrimitive.Title>
+            {description && <DialogPrimitive.Description className="sr-only">{description}</DialogPrimitive.Description>}
+            {children}
+          </>
+        ) : (<>
         <div className="flex items-center justify-between border-b px-5 py-3.5">
           <DialogPrimitive.Title className="text-[15px] font-semibold">{title}</DialogPrimitive.Title>
           <DialogPrimitive.Close
@@ -41,6 +55,7 @@ export function DialogContent({
           </DialogPrimitive.Description>
         )}
         <div className="min-h-0 flex-1 overflow-y-auto">{children}</div>
+        </>)}
       </DialogPrimitive.Content>
     </DialogPrimitive.Portal>
   );

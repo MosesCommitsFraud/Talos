@@ -120,6 +120,9 @@ interface ChatState {
   compact: () => Promise<void>;
   edit: (msgId: string, content: string) => Promise<void>;
   remove: (msgId: string) => Promise<void>;
+  /** Drop a generated image (by its URL) from every loaded chat — it was
+   *  deleted on the Artifacts page. A reload gets the same from the server. */
+  forgetImage: (url: string) => void;
 }
 
 /** True iff a turn is currently streaming for `id`. Used by the sidebar to
@@ -1167,6 +1170,19 @@ export const useChat = create<ChatState>((set, get) => {
     await deleteMessages(sessionId, dropIds);
     writeRuntime(sessionId, () => ({ messages: messages.slice(0, idx) }));
     await get().send(content, { attachments: msg.attachments, artifactSelection: msg.artifactSelection });
+  },
+
+  forgetImage: (url) => {
+    for (const [id, rt] of Object.entries(get().runtimes)) {
+      if (!rt.messages.some((m) => m.tools?.some((call) => call.image_url === url))) continue;
+      writeRuntime(id, (prev) => ({
+        messages: prev.messages.map((m) =>
+          m.tools?.some((call) => call.image_url === url)
+            ? { ...m, tools: m.tools.map((call) => (call.image_url === url ? { ...call, image_url: undefined } : call)) }
+            : m,
+        ),
+      }));
+    }
   },
 
   remove: async (msgId) => {

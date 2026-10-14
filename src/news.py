@@ -176,6 +176,8 @@ async def get_news(
     # No cards, no widget: an empty stack is a worse answer than the sentence
     # explaining that nothing came back.
     if articles:
+        from src.interactive_ui import sign_image_url
+
         result["widget"] = make_widget(
             "news",
             {
@@ -183,6 +185,14 @@ async def get_news(
                 "timeRange": (time_range or "").strip().lower(),
                 "articles": articles,
                 "hiddenByPolicy": filtered,
+                # The card renders in the sandboxed UI frame, which has no
+                # cookies: thumbnails go through the signed image proxy
+                # (/api/ui/img, same fetch guard and domain policy).
+                "images": {
+                    a["thumbnail"]: sign_image_url(a["thumbnail"])
+                    for a in articles
+                    if a.get("thumbnail")
+                },
             },
         )
     return result

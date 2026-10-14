@@ -83,6 +83,11 @@ def test_fenced_json_body_is_accepted():
     assert _run(body)["exit_code"] == 0
 
 
+def test_a_tool_without_data_passes_an_empty_source_list():
+    payload = ui.normalize(_call(sources=[]))
+    assert payload["sources"] == []
+
+
 # ── errors the model must fix ──
 
 
@@ -90,7 +95,7 @@ def test_fenced_json_body_is_accepted():
     "overrides, needle",
     [
         ({"sources": None}, "sources"),
-        ({"sources": []}, "sources"),
+        ({"sources": "dbo.orders"}, "sources"),
         ({"sources": [{"kind": "guess", "label": "x"}]}, "Unknown source kind"),
         ({"sources": [{"kind": "web"}]}, "label"),
         ({"html": "  "}, "html"),

@@ -80,11 +80,11 @@ function UsageSection({ username, days }: { username: string; days: number }) {
     <div className="space-y-4">
       <Card
         title={t('users.section.activity')}
-        action={
+        action={comparison && (
           <span className="text-xs text-muted-foreground">
             {t('users.rankOf', { rank: comparison.rank, of: comparison.of })}
           </span>
-        }
+        )}
       >
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
           <Tile label={t('users.tiles.turns')} value={num(tiles.turns)} />
@@ -136,11 +136,11 @@ function UsageSection({ username, days }: { username: string; days: number }) {
         <div className="mt-3">
           <DailyChart daily={data.daily} days={days} />
         </div>
-        <div className="mt-3 flex flex-wrap gap-x-5 gap-y-1 text-xs">
+        {comparison && <div className="mt-3 flex flex-wrap gap-x-5 gap-y-1 text-xs">
           <VersusMedian mine={tiles.total_tokens} median={comparison.median_tokens} label={t('users.tiles.totalTokens')} />
           <VersusMedian mine={tiles.turns} median={comparison.median_turns} label={t('users.tiles.turns')} />
           <VersusMedian mine={tiles.tool_calls} median={comparison.median_tools} label={t('users.tiles.toolCalls')} />
-        </div>
+        </div>}
         {data.limit.max_messages_per_day > 0 && (
           <p className="mt-2 text-xs text-muted-foreground">
             {t('users.limitPressure', {

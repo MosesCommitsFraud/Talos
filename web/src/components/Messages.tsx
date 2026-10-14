@@ -18,6 +18,7 @@ import { CitationProvider, citationMap, citedNumbers } from './Citations';
 import { Markdown } from './Markdown';
 import { PlanCard } from './PlanCard';
 import { RagSources } from './RagSources';
+import { widgetSources } from './interactive/InlineUi';
 import { RollingNumber } from './RollingNumber';
 import { TalosLogo } from './TalosLogo';
 import { ToolGroup, type GroupEntry } from './ToolGroup';
@@ -872,6 +873,9 @@ function AssistantTurn({ turn, containsLast, outputs, sessionId }: { turn: UiMes
     (m.tools ?? []).map((call) => call.widget).filter((w) => w && !staysInFold(w)),
   );
   const sources = turn.flatMap((m) => m.sources ?? []);
+  // Data behind the turn's views and answer tables, shown with the other
+  // sources instead of inside each card.
+  const dataSources = widgetSources(turn.flatMap((m) => (m.tools ?? []).map((call) => call.widget)));
   // Web pages the answer cites inline join the knowledge sources in the row
   // under the answer; knowledge sections already arrive via `sources`.
   const citeLookup = citationMap(turn.map((m) => m.citations));
@@ -916,7 +920,9 @@ function AssistantTurn({ turn, containsLast, outputs, sessionId }: { turn: UiMes
       )}
       {/* RAG citations: last thing in the turn, only when the backend confirmed
           the knowledge was used. */}
-      {(sources.length > 0 || webCited.length > 0) && <RagSources sources={sources} web={webCited} />}
+      {(sources.length > 0 || webCited.length > 0 || dataSources.length > 0) && (
+        <RagSources sources={sources} web={webCited} data={dataSources} />
+      )}
       {/* Same spot it held while streaming — last in the turn — so the mark
           stays put while it plays its final cycle out instead of jumping. */}
       {indicator}

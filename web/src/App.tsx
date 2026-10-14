@@ -96,7 +96,7 @@ export default function App() {
   useEffect(() => {
     const onOpen = (e: Event) => {
       const detail = (e as CustomEvent<{ panel?: Panel; scope?: SettingsScope }>).detail ?? {};
-      setSettings({ panel: detail.panel, scope: detail.scope ?? 'admin' });
+      setSettings({ panel: detail.panel, scope: detail.scope });
     };
     window.addEventListener(OPEN_SETTINGS_EVENT, onOpen);
     return () => window.removeEventListener(OPEN_SETTINGS_EVENT, onOpen);
@@ -111,13 +111,9 @@ export default function App() {
             <Sidebar
               onOpenPalette={() => setPalette(true)}
               account={{
-                onOpenSettings: () => setSettings({ scope: 'user' }),
-                onOpenAdmin: () => setSettings({ scope: 'admin' }),
+                onOpenSettings: () => setSettings({}),
                 onOpenHelp: () => setHelpOpen(true),
                 onOpenArchive: () => setArchiveOpen(true),
-                onOpenAccount: () => setSettings({ scope: 'user', panel: 'account' }),
-                onOpenRag: () => setView('rag'),
-                onOpenTickets: () => setView('tickets'),
               }}
               onOpenTicketDialog={() => setTicketOpen(true)}
             />
@@ -182,6 +178,7 @@ export default function App() {
             scope={settings?.scope}
             onOpenRag={() => setView('rag')}
             onOpenUsers={() => setView('users')}
+            onOpenTickets={() => setView('tickets')}
           />
           <ArchiveDialog open={archiveOpen} onClose={() => setArchiveOpen(false)} />
           <HelpDialog open={helpOpen} onClose={() => setHelpOpen(false)} />

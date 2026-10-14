@@ -1,0 +1,9 @@
+.tb-head { margin-bottom: 8px; }
+.tb-head .t-note b { font-weight: 500; color: var(--talos-fg); }
+.tb-tools { gap: 6px; }
+.tb th { cursor: pointer; user-select: none; }
+.tb th:hover { color: var(--talos-fg); }
+.tb td.num, .tb th.num { text-align: right; }
+.tb-null { color: var(--talos-muted); font-style: italic; opacity: .6; }
+.tb-more { margin-top: 6px; }
+.tb-ctitle { margin: 8px 0 4px; }

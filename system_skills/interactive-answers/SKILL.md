@@ -1,6 +1,6 @@
 ---
 name: interactive-answers
-description: "Base method for answers shown in the chat instead of told: when to use render_widget (standard chart, KPIs, table, diagram, timeline, comparison from data) or render_ui (bespoke interactive UI: calculators, simulations, adjustable comparisons), the Talos UI kit, talos.chart, sources and follow-ups. Read it before the first render_ui/render_widget of a turn. Not for files the user wants to keep (dashboard-v2) or plain factual answers."
+description: "Base method for answers shown in the chat instead of told: when to use render_widget (standard chart, KPIs, table, diagram, timeline, comparison from data) or render_ui (bespoke interactive UI: calculators, simulations, adjustable comparisons, small tools like checklists, counters, timers, live previews), the Talos UI kit, talos.chart, sources and follow-ups. Read it before the first render_ui/render_widget of a turn. Not for files the user wants to keep (dashboard-v2) or plain factual answers."
 requires-tools: render_ui, render_widget
 license: MIT
 keywords: visualisieren, interaktiv, ansicht, darstellen, zeigen, rechner, simulation, vergleich, gewichtung, regler, dashboard im chat, visualize, interactive, calculator, simulate
@@ -24,6 +24,7 @@ source, HTML/PNG download).
 | **compare** options, periods, products, scenarios | `render_ui` – chart, or comparison with adjustable weights |
 | **work something out**: "was kostet …, wenn …", break-even, loan, staffing, sizing | `render_ui` – calculator with sliders/inputs |
 | explore data from the database, the knowledge base or the web | `render_ui` – KPIs + chart with a selector |
+| **use** something: tick off steps, count, time, convert, write with a live preview, quiz themselves | `render_ui` – a small tool built for exactly this request (`ui-apps`) |
 | keep, send or print it (an HTML file, a dashboard to download, a PNG for slides) | **file**: `dashboard-v2` skill, not `render_ui` |
 
 **Which tool:** a standard visual – chart, key figures, table, flow diagram,
@@ -41,6 +42,7 @@ as many as apply, alongside this one:
 | `ui-diagrams` | processes, architectures, org charts, sequences, timelines |
 | `ui-data` | data from SQL, the knowledge base or the web; reloading it from the view (`dataSources`); images |
 | `ui-maps` | anything with locations, routes or regions |
+| `ui-apps` | tools to use: todo/checklists, counters, timers, converters, live previews, quizzes, planners |
 
 No ceremony: if a view helps, build it straight away – do not ask "soll ich
 das visualisieren?". One view per answer is the norm. Write 1–3 sentences
@@ -74,19 +76,68 @@ calls after it (`["render()"]`). `data` is `window.TALOS_DATA`.
 
 ### Components (classes)
 
+Layout and surfaces:
+
 | Class | Use |
 |---|---|
 | `t-stack` / `t-row` / `t-spread` | vertical stack / wrapping row / row with space-between |
 | `t-grid` | responsive tiles (min width via `style="--t-min:200px"`) |
 | `t-split` | two columns: controls left, result right (stacks on narrow screens) |
-| `t-card`, `t-title`, `t-note`, `t-muted`, `t-chip` | panel, panel heading, small grey text, pill |
-| `t-kpi` > `t-kpi-label`, `t-kpi-value` (`<small>` for the unit), `t-delta up|down` | key figure tile |
-| `t-field` > `<label>Name <output id=…></output></label>` + control | labelled slider/input with live value |
-| `t-seg` with `<button data-value="…" aria-pressed="true">` | segmented control; wire with `talos.kit.segmented(el, onChange)` |
-| `t-btn`, `t-btn primary`, `t-btn ghost`, `t-btn sm` | buttons |
-| `<label class="t-toggle"><input type="checkbox" class="t-switch"> Prognose zeigen</label>` | on/off switch, as in Talos settings |
-| `<div class="t-scale"><span>0 %</span><span>100 %</span></div>` | min/max captions under a slider |
-| `t-table`, `td.num` | compact table, right-aligned numbers |
+| `t-section` | a part of the view with a `t-title` heading |
+| `t-card` | filled tile for a key figure or a small panel |
+| `t-card raised` (+ `accent`) | one bordered object – an offer, a record (+ the recommended one) |
+| `t-kpi` > `t-kpi-label`, `t-kpi-value` (`<small>` unit), `t-delta up\|down` | key figure; add `<div class="t-spark" id=…>` + `talos.spark(el, values)` for a trend |
+| `t-title`, `t-note`, `t-muted`, `t-num` | heading, small grey text, muted, tabular figures |
+| `t-badge` (`good` `warn` `bad`), `t-chip`, `t-avatar` | status label, neutral pill, initials circle |
+| `t-callout` (`good` `warn` `bad`) | tinted note: `<div class="t-callout warn"><b>Hinweis</b> …</div>` |
+| `t-progress` (`good` `warn` `bad`) | bar with `style="--v:62%"` – animates when `--v` changes |
+| `t-list` | dense rows divided by hairlines (each child a row; `button` rows are clickable) |
+| `details.t-disclosure` > `summary` | collapsible part (assumptions, details) |
+| `data-tip="…"` on any element | small tooltip on hover |
+| `t-table`, `td.num`, `t-scroll` | compact table, right-aligned numbers, wrapper for wide tables |
+
+Controls – they wire themselves; listen for the bubbling `talos:change` event
+(`e.detail.value`, chips also `e.detail.values`) or read the inputs:
+
+| Markup | Control |
+|---|---|
+| `<div class="t-seg"><button data-value="m" aria-pressed="true">Monat</button>…</div>` | segmented control, gliding marker |
+| `<div class="t-tabs"><button data-tab="a" aria-selected="true">Übersicht</button>…</div>` + `<div data-tab-panel="a">…</div>` | tabs with sliding underline; panels show/hide by themselves |
+| `<div class="t-chips"><button data-value="nord" aria-pressed="true">Nord</button>…</div>` | filter chips, multi-select (`data-single` for one) |
+| `<div class="t-options"><label class="t-option"><input type="radio" name="p"><span><b>Basis</b><small>12 €/Monat</small></span></label>…</div>` | choice cards (radio or checkbox) |
+| `<div class="t-field"><label>Preis <output id="po"></output></label><input type="range" min=0 max=100 step=5></div>` | slider with live value: a track that swells while dragged and shows the value (your `<output>`, else the number + `data-unit`) in a bubble. With 12 values or fewer (`min=1 max=10`) it becomes a row of step segments; force that with `class="t-steps"`, avoid it with `data-continuous`. `t-scale` for end captions |
+| `<label class="t-toggle"><input type="checkbox" class="t-switch"> Prognose zeigen</label>` | switch |
+| `<div class="t-stepper"><button data-step="-1">−</button><input type="number" value="3" min="0"><button data-step="1">+</button></div>` | stepper for counts |
+| `<select>` with `<option>`s | dropdown – Talos turns it into a floating list with keyboard support (`data-native` keeps the browser's own); read `select.value`, listen for `change` |
+| `t-btn`, `t-btn primary`, `t-btn ghost`, `t-btn sm` | buttons (one `primary` at most) |
+
+Motion is built in and subtle: switches spring, slider knobs grow a halo,
+markers glide, charts grow in on their first draw (redraws are instant).
+`talos.kit.count(el, value, format)` counts a figure to its new value – use it
+when a slider changes a result. Respect it: no extra CSS animations.
+
+### Layout – like Claude's interactive answers
+
+Talos puts the view in one clean card – the `title` on top, the sources behind
+a small icon next to it – the same card as its table and weather widgets.
+
+- Do **not** repeat the title as a heading in `html`; do not wrap the view in
+  another card or bordered box, and do not list the sources inside the view.
+- Key figures: `t-card` tiles in a `t-grid` – filled, no border, a muted label
+  (`t-kpi-label`) above the number (`t-kpi-value`).
+- `t-card raised` only for one bounded object – an offer, a record. Mark the
+  recommended one with `t-card raised accent` and a
+  `<span class="t-badge">Empfohlen</span>`. Never a card inside a card.
+- Separate parts with spacing (`t-stack`, `t-section`), not lines or boxes.
+- Prefer real controls over text: chips to filter, a segmented control to
+  switch views, tabs for separate perspectives, choice cards to pick a
+  variant, a stepper for counts, a `<select>` for long option lists.
+- Charts, tables and maps stand on their own; no frame around them.
+- **No scrolling inside the view.** It grows to its content; fit the width.
+  Only a table wider than the column goes in `<div class="t-scroll">`.
+- Sentence case, two weights (400, 500), short labels. Explanations belong in
+  your text around the view, not inside it.
+- A button that asks a follow-up through `talos.sendPrompt` ends with "↗".
 
 Bare `button`, `input`, `select`, checkboxes, range sliders and tables already
 look exactly like the Talos controls. Do not restyle them; write `css` only for

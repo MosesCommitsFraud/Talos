@@ -222,11 +222,19 @@ export function readAppTheme(): UiTheme {
   const css = getComputedStyle(root);
   const pick = (name: string, fallback: string) => css.getPropertyValue(name).trim() || fallback;
   const palette = (PALETTES[brand.name.toLowerCase()] ?? PALETTES.talos)[dark ? 'dark' : 'light'];
-  const bg = pick('--card', dark ? '#262628' : '#f6f6f6');
+  // The view sits in a Claude-style card (bg-card, hairline border) — the
+  // same card as the table, weather and news widgets — so the card colour is
+  // its background: gaps between stacked bars, donut seams, focus offsets.
+  const bg = pick('--card', dark ? '#232325' : '#f6f6f6');
+  const page = pick('--background', dark ? '#1e1e20' : '#ffffff');
   const fg = pick('--strong', dark ? '#f5f5f5' : '#171717');
   const vars: Record<string, string> = {
     '--talos-bg': bg,
-    '--talos-surface': `color-mix(in srgb, ${bg} ${dark ? 94 : 97}%, ${dark ? '#fff' : '#000'})`,
+    // Claude's elevation steps, in Talos colours: metric tiles sit one step
+    // below the card (the page colour in dark mode, a grey step in light),
+    // a bordered object inside the view one step above it.
+    '--talos-surface': dark ? page : `color-mix(in srgb, ${bg} 96%, ${fg})`,
+    '--talos-raised': dark ? `color-mix(in srgb, ${bg} 95%, ${fg})` : page,
     '--talos-popover': pick('--popover', dark ? '#2a2a2c' : '#ffffff'),
     '--talos-fg': fg,
     '--talos-muted': pick('--muted-foreground', dark ? '#a3a3a3' : '#6b6b6b'),
@@ -340,7 +348,40 @@ window.talos = {
   // The proxied, signed URL for an image the answer referenced (images from
   // the web cannot be loaded directly in here).
   img: function(url){ var map = window.TALOS_IMAGES || {}; return map[url] || url; },
-  sources: (window.TALOS_CONFIG || {}).dataSources || []
+  sources: (window.TALOS_CONFIG || {}).dataSources || [],
+  // Copy text to the clipboard — only in response to a click.
+  copy: function(text){
+    if (!activated()) { report('bridge', 'copy needs a user click'); return false; }
+    post({type:'talos:ui-copy', text: String(text == null ? '' : text).slice(0, 200000)}); return true;
+  },
+  // Save a file the view produced (a CSV of the todo list, a JSON export) —
+  // only in response to a click. Text formats only.
+  download: function(filename, content, type){
+    if (!activated()) { report('bridge', 'download needs a user click'); return false; }
+    var text = typeof content === 'string' ? content : JSON.stringify(content, null, 2);
+    if (text.length > 2000000) { report('bridge', 'download is larger than 2 MB'); return false; }
+    post({type:'talos:ui-download', filename: String(filename || 'talos.txt').slice(0, 120), content: text, mime: String(type || '')}); return true;
+  },
+  // State the view keeps across reloads and rebuilds (a todo list, a
+  // counter, a draft): JSON values under short keys, ~100 KB in all. Stored
+  // per view in this browser.
+  store: (function(){
+    var data = {};
+    try { var init = window.TALOS_STORE; if (init && typeof init === 'object') data = JSON.parse(JSON.stringify(init)); } catch (e) {}
+    var timer = 0;
+    function flush(){
+      var json = JSON.stringify(data);
+      if (json.length > 100000) { report('store', 'store is larger than 100 KB — not saved'); return; }
+      post({type:'talos:ui-store', store: data});
+    }
+    return {
+      get: function(key, fallback){ return Object.prototype.hasOwnProperty.call(data, key) ? JSON.parse(JSON.stringify(data[key])) : fallback; },
+      set: function(key, value){ data[key] = value === undefined ? null : JSON.parse(JSON.stringify(value)); clearTimeout(timer); timer = setTimeout(flush, 200); return value; },
+      remove: function(key){ delete data[key]; clearTimeout(timer); timer = setTimeout(flush, 200); },
+      all: function(){ return JSON.parse(JSON.stringify(data)); },
+      clear: function(){ data = {}; clearTimeout(timer); timer = setTimeout(flush, 200); }
+    };
+  })()
 };
 var reqSeq = 0, pending = {};
 window.addEventListener('message', function(e){
@@ -417,6 +458,7 @@ window.addEventListener('message', function(e){
 });
 window.addEventListener('message', function(e){
   if (e.source !== window.parent || !e.data) return;
+  if (e.data.type === 'talos:ui-fill') { document.documentElement.classList.toggle('t-fill', !!e.data.fill); return; }
   if (e.data.type === 'talos:ui-theme' && typeof e.data.css === 'string') {
     var el = document.getElementById('talos-theme'); if (el) el.textContent = e.data.css;
     document.documentElement.dataset.theme = e.data.dark ? 'dark' : 'light';
@@ -466,6 +508,8 @@ export interface BuildOptions {
   preview?: boolean;
   /** Control state from an earlier copy of this UI (see `talos:ui-state`). */
   restore?: Record<string, unknown> | null;
+  /** talos.store values the view saved earlier. */
+  store?: Record<string, unknown> | null;
   /** Library code to embed (loadUiLibraries); null falls back to URLs. */
   libCode?: UiLibCode | null;
 }
@@ -547,7 +591,7 @@ run().catch(function(e){ window.dispatchEvent(new ErrorEvent('error', {message: 
 const embedJson = (type: string, value: unknown, attrs = '') =>
   `<script type="${type}"${attrs}>${jsonForScript(value)}</script>`;
 
-export function buildUiDocument(ui: UiPayload, theme: UiTheme, { standalone = false, env = NO_ENV, preview = false, restore = null, libCode = null }: BuildOptions = {}): string {
+export function buildUiDocument(ui: UiPayload, theme: UiTheme, { standalone = false, env = NO_ENV, preview = false, restore = null, store = null, libCode = null }: BuildOptions = {}): string {
   const base = (standalone ? window.location.origin : '') + VENDOR_PATH;
   const libs = preview ? [] : uiLibraries(ui).map((name) => LIBRARIES[name]);
   const steps: Array<[string, string]> = [['js', ui.js], ...ui.jsInit.map((step, i): [string, string] => [`init ${i + 1}: ${step.slice(0, 80)}`, step])];
@@ -592,7 +636,7 @@ ${head}
 <style id="talos-theme">${themeCss(theme)}</style>
 <style>${env.fontCss}${styleSafe(kitCss)}${standalone ? 'html,body{background:var(--talos-bg)}#talos-root{max-width:1100px;margin:0 auto;padding:24px}' : ''}</style>
 <style id="talos-user-css">${styleSafe(ui.css)}</style>
-<script>window.TALOS_DATA=${jsonForScript(ui.data)};window.TALOS_CONFIG=${jsonForScript({ maps: standalone && env.maps.tileUrl ? { ...env.maps, tileUrl: window.location.origin + env.maps.tileUrl } : env.maps, dataSources: ui.dataSources ?? [] })};window.TALOS_IMAGES=${jsonForScript(standalone ? absoluteImages(ui.images) : ui.images ?? {})};window.__talosRestore=${jsonForScript(restore)};</script>
+<script>window.TALOS_DATA=${jsonForScript(ui.data)};window.TALOS_CONFIG=${jsonForScript({ maps: standalone && env.maps.tileUrl ? { ...env.maps, tileUrl: window.location.origin + env.maps.tileUrl } : env.maps, dataSources: ui.dataSources ?? [] })};window.TALOS_IMAGES=${jsonForScript(standalone ? absoluteImages(ui.images) : ui.images ?? {})};window.__talosRestore=${jsonForScript(restore)};window.TALOS_STORE=${jsonForScript(store ?? {})};</script>
 <script>${BOOTSTRAP}</script>
 <script>${scriptSafe(kitJs)}</script>
 ${standalone ? '' : `<script>${scriptSafe(imageRuntime)}</script>\n<script>${scriptSafe(exportBridge)}</script>`}

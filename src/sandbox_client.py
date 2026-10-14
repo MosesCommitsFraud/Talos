@@ -191,6 +191,44 @@ async def list_artifacts(*, owner: str | None, session_id: str | None) -> list[d
         return resp.json().get("artifacts", [])
 
 
+async def list_artifacts_bulk(
+    *, owner: str | None, session_ids: list[str]
+) -> dict[str, list[dict[str, Any]]]:
+    """Workspace files for many chats in one call, keyed by session id. Chats
+    without a workspace are absent. Raises on an older sandbox without the
+    route (404), so callers can fall back to leaving workspace files out."""
+    if not session_ids:
+        return {}
+    user_path = quote(safe_user_id(owner), safe="")
+    async with httpx.AsyncClient(
+        headers=_SANDBOX_HEADERS, timeout=httpx.Timeout(SANDBOX_TIMEOUT, connect=15.0)
+    ) as client:
+        resp = await client.post(
+            f"{SANDBOX_URL}/users/{user_path}/artifacts",
+            json={"chat_ids": session_ids},
+        )
+        resp.raise_for_status()
+        return resp.json().get("workspaces", {})
+
+
+async def move_artifact(*, owner: str | None, session_id: str | None, src: str, dst: str) -> bool:
+    """Rename/move a file inside a chat's workspace. Returns True on success."""
+    if not session_id:
+        return False
+    user_path = quote(safe_user_id(owner), safe="")
+    session_path = quote(session_id, safe="")
+    async with httpx.AsyncClient(
+        headers=_SANDBOX_HEADERS, timeout=httpx.Timeout(30.0, connect=10.0)
+    ) as client:
+        resp = await client.post(
+            f"{SANDBOX_URL}/users/{user_path}/workspaces/{session_path}/files/move",
+            json={"src": src, "dst": dst},
+        )
+        resp.raise_for_status()
+        data = resp.json()
+    return data.get("exit_code", 1) == 0
+
+
 async def delete_artifact(*, owner: str | None, session_id: str | None, path: str) -> bool:
     """Delete a file or directory in a chat's workspace. Returns True on success."""
     if not session_id:

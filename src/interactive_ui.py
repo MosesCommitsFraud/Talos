@@ -209,13 +209,16 @@ def _height(value: Any) -> int:
 def _sources(value: Any) -> List[Dict[str, str]]:
     if isinstance(value, dict):
         value = [value]
-    if not isinstance(value, list) or not value:
+    # Required, but may be an explicit empty list: a tool that shows no data
+    # of its own (a todo list, a counter, a timer, a markdown preview).
+    if not isinstance(value, list):
         raise RenderUiError(
             "`sources` is required: list where the shown data comes from, e.g. "
             '[{"kind": "sql", "label": "Umsatz je Monat aus dbo.orders"}]. '
             f"kind is one of {', '.join(SOURCE_KINDS)}. Use 'model' for facts from your "
             "own general knowledge, 'illustrative' for "
-            "example values and 'calculated' for numbers you derived."
+            "example values and 'calculated' for numbers you derived. "
+            "A tool that shows no data (todo list, counter, timer, editor) passes []."
         )
     if len(value) > MAX_SOURCES:
         raise RenderUiError(f"`sources` takes at most {MAX_SOURCES} entries.")

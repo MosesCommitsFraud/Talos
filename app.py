@@ -532,6 +532,9 @@ async def serve_generated_image(filename: str, request: Request):
                 # Row exists with a different owner → 404 (don't confirm existence).
                 if _row is not None and _row.owner and _row.owner != _user:
                     raise HTTPException(status_code=404, detail="Image not found")
+                # Deleted from the Artifacts page → gone everywhere.
+                if _row is not None and _row.is_active is False:
+                    raise HTTPException(status_code=404, detail="Image not found")
             finally:
                 _db.close()
     except HTTPException:

@@ -21,11 +21,7 @@ import {
   SearchIcon,
   SettingsIcon,
   ShapesIcon,
-  ShieldIcon,
-  DatabaseIcon,
-  TicketIcon,
   Trash2Icon,
-  UserIcon,
 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -450,18 +446,16 @@ function NavRow({
   );
 }
 
-/** The account dropdown anchored to the footer avatar. Holds the entries that
- *  used to be a single Settings button: scoped Settings / Admin panel / Help /
- *  Archive / Account / Log out. */
+/** The account dropdown anchored to the footer avatar. One Settings entry
+ *  covers everything (account, usage, and for admins the admin and advanced
+ *  groups); the rest is Help / Archive / Log out. */
 function AccountMenu({
   trigger,
-  isAdmin,
   authEnabled,
   username,
   actions,
 }: {
   trigger: React.ReactNode;
-  isAdmin: boolean;
   authEnabled: boolean;
   username: string;
   actions: AccountActions;
@@ -475,29 +469,11 @@ function AccountMenu({
         <MenuItem onSelect={actions.onOpenSettings}>
           <SettingsIcon /> {t('sidebar.menu.settings')}
         </MenuItem>
-        {isAdmin && (
-          <MenuItem onSelect={actions.onOpenAdmin}>
-            <ShieldIcon /> {t('sidebar.menu.adminPanel')}
-          </MenuItem>
-        )}
-        {isAdmin && (
-          <MenuItem onSelect={actions.onOpenRag}>
-            <DatabaseIcon /> {t('sidebar.menu.rag')}
-          </MenuItem>
-        )}
-        {isAdmin && (
-          <MenuItem onSelect={actions.onOpenTickets}>
-            <TicketIcon /> {t('sidebar.menu.tickets')}
-          </MenuItem>
-        )}
         <MenuItem onSelect={actions.onOpenHelp}>
           <HelpCircleIcon /> {t('sidebar.menu.help')}
         </MenuItem>
         <MenuItem onSelect={actions.onOpenArchive}>
           <ArchiveIcon /> {t('sidebar.menu.archive')}
-        </MenuItem>
-        <MenuItem onSelect={actions.onOpenAccount}>
-          <UserIcon /> {t('sidebar.menu.account')}
         </MenuItem>
         {authEnabled && (
           <>
@@ -514,12 +490,8 @@ function AccountMenu({
 
 interface AccountActions {
   onOpenSettings: () => void;
-  onOpenAdmin: () => void;
   onOpenHelp: () => void;
   onOpenArchive: () => void;
-  onOpenAccount: () => void;
-  onOpenRag: () => void;
-  onOpenTickets: () => void;
 }
 
 interface SidebarProps {
@@ -760,7 +732,6 @@ function SidebarBody({ onOpenPalette, account, onOpenTicketDialog, preview }: Si
         <div className="flex items-center gap-1">
           {(visibility.sidebarUserBar || visibility.sidebarSettingsBtn) && (
             <AccountMenu
-              isAdmin={!!auth?.is_admin}
               authEnabled={auth?.auth_enabled !== false}
               username={accountLabel ?? t('sidebar.user')}
               actions={account}

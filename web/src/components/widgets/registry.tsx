@@ -1,9 +1,7 @@
-import { memo, type ComponentType } from 'react';
+import { memo, useMemo, type ComponentType } from 'react';
 import type { Widget } from '@/api/types';
 import { InlineUi } from '@/components/interactive/InlineUi';
-import { NewsWidget } from './NewsWidget';
-import { TableWidget } from './TableWidget';
-import { WeatherWidget } from './WeatherWidget';
+import { builtinView } from '@/lib/builtinViews';
 
 /** Props every widget component receives. `data` is `unknown` on purpose — it
  *  comes off the wire and out of persisted turns written by older backends, so
@@ -19,12 +17,25 @@ export interface WidgetProps {
   settled?: boolean;
 }
 
+/** A tool's own result view (weather, news, a result table) — rendered as an
+ *  interactive UI like every render_ui answer: same frame, kit and card. The
+ *  tool sends data; lib/builtinViews.ts supplies the view. */
+function builtin(type: string): ComponentType<WidgetProps> {
+  function BuiltinView({ data, version }: WidgetProps) {
+    const payload = useMemo(() => builtinView(type, data), [data]);
+    return payload ? <InlineUi data={payload} version={version} /> : null;
+  }
+  BuiltinView.displayName = `BuiltinView(${type})`;
+  return BuiltinView;
+}
+
 /** Widget type -> component. The single place a new widget is hooked up on the
- *  frontend; the backend counterpart is `WIDGET_TYPES` in `src/widgets.py`. */
+ *  frontend; the backend counterpart is `WIDGET_TYPES` in `src/widgets.py`.
+ *  Everything renders as interactive UI. */
 const WIDGET_REGISTRY: Record<string, ComponentType<WidgetProps>> = {
-  weather: WeatherWidget,
-  news: NewsWidget,
-  table: TableWidget,
+  weather: builtin('weather'),
+  news: builtin('news'),
+  table: builtin('table'),
   ui: InlineUi,
 };
 

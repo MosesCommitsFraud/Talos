@@ -182,11 +182,31 @@ export async function fetchArtifacts(sessionId: string): Promise<import('./types
 }
 
 /** Every artifact the user owns, across all their chats — the Artifacts page.
- *  Documents and generated images only (see the route: workspace files would
- *  cost one sandbox call per chat); each row carries the chat it came from. */
+ *  Documents, generated images and the files the assistant wrote into each
+ *  chat's workspace; each row carries the chat it came from and its pin. */
 export async function fetchAllArtifacts(): Promise<import('./types').LibraryArtifact[]> {
   const data = await getJSON<{ artifacts?: import('./types').LibraryArtifact[] }>('/api/artifacts');
   return data.artifacts ?? [];
+}
+
+/** Pin/unpin or rename (`name` without extension) one library artifact.
+ *  Resolves to the artifact's path afterwards — a renamed workspace file moves. */
+export async function updateLibraryArtifact(
+  ref: { path: string; sessionId?: string | null },
+  change: { pinned?: boolean; name?: string },
+): Promise<string> {
+  const data = await postJSON<{ path?: string }>(
+    '/api/artifacts',
+    { path: ref.path, session_id: ref.sessionId ?? null, ...change },
+    'PATCH',
+  );
+  return data.path ?? ref.path;
+}
+
+export async function deleteLibraryArtifact(ref: { path: string; sessionId?: string | null }): Promise<void> {
+  const qs = new URLSearchParams({ path: ref.path });
+  if (ref.sessionId) qs.set('session_id', ref.sessionId);
+  await postJSON(`/api/artifacts?${qs}`, undefined, 'DELETE');
 }
 
 /** Detached background jobs belonging to a session — running and recently
@@ -658,10 +678,11 @@ export interface UsageDetail {
   modes: Record<string, number>;
   models: Record<string, number>;
   skills: { used: Array<{ name: string; count: number }>; authored: string[] };
+  /** Null on the self-service endpoint. */
   comparison: {
     rank: number; of: number;
     median_tokens: number; median_turns: number; median_tools: number;
-  };
+  } | null;
   limit: { max_messages_per_day: number; hit_days: number };
 }
 
@@ -693,6 +714,11 @@ export const fetchUsageOverview = (days: number) =>
 
 export const fetchUsageDetail = (username: string, days: number) =>
   postJSON<UsageDetail>('/api/admin/usage/detail', { username, tz_offset: tzOffset(), days });
+
+/** The signed-in user's own usage (Settings → Usage). Same shape as the admin
+ *  detail, with `comparison` null — it never ranks against other users. */
+export const fetchMyUsage = (days: number) =>
+  getJSON<UsageDetail>(`/api/usage/me?tz_offset=${tzOffset()}&days=${days}`);
 
 export const fetchUserStorage = (username: string) =>
   postJSON<StorageOverview>('/api/admin/storage/detail', { username });

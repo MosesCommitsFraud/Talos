@@ -9,7 +9,7 @@ the user's local calendar.
 
 from datetime import date, datetime, timedelta
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException, Request
 
 from core.database import ChatMessage as DbMessage
 from core.database import Session as DbSession
@@ -134,5 +134,20 @@ def setup_stats_routes():
             }
         finally:
             db.close()
+
+    @router.get("/usage/me")
+    def my_usage(request: Request, tz_offset: int = 0, days: int = 30):
+        """The caller's own token/turn/tool usage — the self-service twin of
+        /api/admin/usage/detail, minus the comparison against other users.
+        Takes no username: it only ever reports on the requester."""
+        from routes.admin_usage_routes import build_usage_detail
+
+        user = effective_user(request)
+        if not user:
+            raise HTTPException(401, "Not signed in")
+        auth_mgr = getattr(request.app.state, "auth_manager", None)
+        return build_usage_detail(
+            auth_mgr, user.strip().lower(), days, tz_offset, compare=False
+        )
 
     return router

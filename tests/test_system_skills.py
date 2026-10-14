@@ -10,7 +10,7 @@ import pytest
 from src import system_skills
 
 ROOT = Path(__file__).parents[1] / "system_skills"
-EXPECTED = {"interactive-answers", "ui-data", "ui-diagrams", "ui-maps", "ui-visualization"}
+EXPECTED = {"interactive-answers", "ui-apps", "ui-data", "ui-diagrams", "ui-maps", "ui-visualization"}
 
 
 def test_all_system_skills_load_with_their_tool_gate():

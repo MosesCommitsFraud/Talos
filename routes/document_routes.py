@@ -10,7 +10,14 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, File, Form, HTTPException, Query, Request, UploadFile
 from sqlalchemy import func
 
-from core.database import Document, DocumentVersion, GalleryImage, SessionLocal
+from core.database import (
+    ArtifactMeta,
+    ChatMessage,
+    Document,
+    DocumentVersion,
+    GalleryImage,
+    SessionLocal,
+)
 from core.database import Session as DbSession
 from src.auth_helpers import effective_user, get_current_user, require_user
 
@@ -105,6 +112,9 @@ def gallery_artifact(image: GalleryImage) -> Dict[str, Any]:
         "mime": mime,
         "is_image": mime.startswith("image/"),
         "source": "generated_image",
+        # Where the chat shows it — lets a client drop a deleted image from
+        # messages it already has loaded.
+        "url": f"/api/generated-image/{image.filename}",
     }
 
 
@@ -482,19 +492,83 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
     _document_artifact = document_artifact
     _gallery_artifact = gallery_artifact
 
+    def _artifact_key(session_id: Optional[str], path: str) -> str:
+        """ArtifactMeta key: DB-backed artifacts are unique by their pseudo-path,
+        a workspace file only together with its chat."""
+        if path.startswith(("document:", "generated-image:")):
+            return path
+        return f"{session_id or ''}/{path}"
+
+    def _chat_upload_paths(db, session_ids: List[str]) -> set:
+        """(session_id, sandbox_path) of every file the user attached to a chat.
+        Uploads are mirrored into the workspace next to what the assistant made;
+        the library lists only the latter."""
+        import json
+
+        uploads = set()
+        if not session_ids:
+            return uploads
+        rows = (
+            db.query(ChatMessage.session_id, ChatMessage.meta_data)
+            .filter(
+                ChatMessage.session_id.in_(session_ids),
+                ChatMessage.role == "user",
+                ChatMessage.meta_data.like('%"sandbox_path"%'),
+            )
+            .all()
+        )
+        for session_id, raw in rows:
+            try:
+                meta = json.loads(raw or "{}")
+            except (TypeError, ValueError):
+                continue
+            for att in meta.get("attachments") or []:
+                if isinstance(att, dict) and att.get("sandbox_path"):
+                    uploads.add((session_id, str(att["sandbox_path"])))
+        return uploads
+
+    def _upsert_meta(db, user: str, key: str) -> ArtifactMeta:
+        row = (
+            db.query(ArtifactMeta)
+            .filter(ArtifactMeta.owner == user, ArtifactMeta.artifact_key == key)
+            .first()
+        )
+        if not row:
+            row = ArtifactMeta(owner=user, artifact_key=key)
+            db.add(row)
+        return row
+
+    def _move_meta(user: str, old_key: str, new_key: str) -> None:
+        """Carry a workspace file's pin over to its renamed path."""
+        db = SessionLocal()
+        try:
+            row = (
+                db.query(ArtifactMeta)
+                .filter(ArtifactMeta.owner == user, ArtifactMeta.artifact_key == old_key)
+                .first()
+            )
+            if row:
+                db.query(ArtifactMeta).filter(
+                    ArtifactMeta.owner == user, ArtifactMeta.artifact_key == new_key
+                ).delete()
+                row.artifact_key = new_key
+                db.commit()
+        finally:
+            db.close()
+
     # ---- GET /api/artifacts — everything this user has created, all chats ----
     @router.get("/api/artifacts")
     async def list_all_artifacts_route(
-        request: Request, limit: int = Query(default=300, ge=1, le=1000)
+        request: Request, limit: int = Query(default=1000, ge=1, le=3000)
     ) -> Dict[str, Any]:
-        """The Artifacts page: one library of every document and generated image
-        the user owns, newest first, each tagged with the chat it came from.
+        """The Artifacts page: one library of every document, generated image
+        and workspace file the user owns, newest first, each tagged with the
+        chat it came from and whether the user pinned it.
 
-        Deliberately DB-only. The per-session route above also asks the sandbox
-        for workspace files, which costs one call per chat — fine for the one
-        session on screen, not for a library spanning every chat the user has.
-        Workspace files stay reachable from the chat's own files panel.
-        """
+        Workspace files come from one bulk sandbox call for all chats; files
+        the user uploaded themselves are left out — they are inputs, not
+        something that was created. An older sandbox without the bulk route
+        just means the page shows the DB-backed artifacts only."""
         user = effective_user(request)
         db = SessionLocal()
         try:
@@ -507,22 +581,212 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
                 artifact["session_name"] = session_names.get(session_id) if session_id else None
                 return artifact
 
-            rows = [
-                _with_session(document_artifact(doc), doc.session_id)
-                for doc in _owner_session_filter(db.query(Document), user)
+            rows = []
+            for doc in (
+                _owner_session_filter(db.query(Document), user)
                 .filter(Document.is_active == True)  # noqa: E712 — SQLAlchemy needs ==
                 .all()
-            ]
+            ):
+                row = _with_session(document_artifact(doc), doc.session_id)
+                # The tile view shows the opening lines, like a page preview.
+                row["snippet"] = (doc.current_content or "")[:600]
+                rows.append(row)
             rows.extend(
                 _with_session(gallery_artifact(image), image.session_id)
                 for image in db.query(GalleryImage)
                 .filter(GalleryImage.owner == user, GalleryImage.is_active == True)  # noqa: E712
                 .all()
             )
+            meta = {
+                m.artifact_key: m
+                for m in db.query(ArtifactMeta).filter(ArtifactMeta.owner == user).all()
+            }
+            session_ids = list(session_names)
+            uploads = _chat_upload_paths(db, session_ids)
         finally:
             db.close()
+
+        from src.sandbox_client import list_artifacts_bulk, sandbox_enabled
+
+        if sandbox_enabled() and session_ids:
+            try:
+                workspaces = await list_artifacts_bulk(owner=user, session_ids=session_ids)
+            except Exception as e:
+                logger.info("bulk workspace listing unavailable: %s", e)
+                workspaces = {}
+            for session_id, files in workspaces.items():
+                for artifact in files:
+                    path = str(artifact.get("path") or "")
+                    if not path or (session_id, path) in uploads:
+                        continue
+                    artifact["source"] = "workspace"
+                    rows.append(_with_session(artifact, session_id))
+
+        for row in rows:
+            m = meta.get(_artifact_key(row.get("session_id"), str(row.get("path") or "")))
+            row["pinned"] = bool(m and m.pinned_at)
+            if m and m.pinned_at:
+                row["pinned_at"] = m.pinned_at.replace(tzinfo=timezone.utc).timestamp()
+            if m and m.title and row.get("source") == "generated_image":
+                ext = row["name"].rsplit(".", 1)[-1] if "." in row["name"] else ""
+                row["name"] = f"{m.title}.{ext}" if ext else m.title
         rows.sort(key=lambda item: float(item.get("mtime") or 0), reverse=True)
         return {"artifacts": rows[:limit], "count": len(rows)}
+
+    async def _rename_workspace_file(owner: str, session_id: str, path: str, name: str) -> str:
+        """Rename a workspace file in place, keeping its folder and extension.
+        Returns the new workspace path."""
+        from src.sandbox_client import list_artifacts, move_artifact, sandbox_enabled
+
+        if not sandbox_enabled():
+            raise HTTPException(404, "Sandbox not available")
+        folder, _, base = path.replace("\\", "/").rpartition("/")
+        ext = base[base.rfind(".") :] if base.rfind(".") > 0 else ""
+        if ext and name.lower().endswith(ext.lower()):
+            name = name[: -len(ext)]
+        new_path = f"{folder}/{name}{ext}" if folder else f"{name}{ext}"
+        if new_path == path:
+            return path
+        try:
+            existing = {
+                str(a.get("path") or "")
+                for a in await list_artifacts(owner=owner, session_id=session_id)
+            }
+        except Exception as e:
+            logger.warning("artifact rename lookup failed for %s (%s): %s", session_id, path, e)
+            raise HTTPException(502, "Sandbox unavailable")
+        if path not in existing:
+            raise HTTPException(404, "File not found")
+        if new_path in existing:
+            raise HTTPException(409, "A file with that name already exists")
+        try:
+            ok = await move_artifact(owner=owner, session_id=session_id, src=path, dst=new_path)
+        except Exception as e:
+            logger.warning("artifact rename failed for %s (%s): %s", session_id, path, e)
+            raise HTTPException(500, "Rename failed")
+        if not ok:
+            raise HTTPException(500, "Rename failed")
+        return new_path
+
+    # ---- PATCH /api/artifacts — pin/unpin or rename one library artifact ----
+    @router.patch("/api/artifacts")
+    async def patch_library_artifact(request: Request) -> Dict[str, Any]:
+        """Body: {path, session_id?, pinned?, name?}. `name` is the new name
+        without extension — documents change their title, generated images get
+        a display name, workspace files are renamed in the sandbox."""
+        body = await request.json()
+        path = str(body.get("path") or "")
+        session_id = body.get("session_id") or None
+        pinned = body.get("pinned")
+        name = body.get("name")
+        if not path:
+            raise HTTPException(400, "path is required")
+        if isinstance(name, str):
+            name = name.strip().replace("/", "_").replace("\\", "_")
+            if not name:
+                raise HTTPException(400, "name must not be empty")
+            if len(name) > 200:
+                raise HTTPException(400, "name is too long")
+        user = effective_user(request) or require_user(request) or "anonymous"
+        key = _artifact_key(session_id, path)
+        workspace_owner = None
+        db = SessionLocal()
+        try:
+            if path.startswith("document:"):
+                doc = db.query(Document).filter(Document.id == path.split(":", 1)[1]).first()
+                if not doc:
+                    raise HTTPException(404, "Document not found")
+                _verify_doc_owner(db, doc, user)
+                if isinstance(name, str):
+                    doc.title = name
+            elif path.startswith("generated-image:"):
+                image = (
+                    db.query(GalleryImage)
+                    .filter(GalleryImage.id == path.split(":", 1)[1])
+                    .first()
+                )
+                if not image or image.owner != user:
+                    raise HTTPException(404, "Image not found")
+                if isinstance(name, str):
+                    _upsert_meta(db, user, key).title = name
+            else:
+                if not session_id:
+                    raise HTTPException(400, "session_id is required for workspace files")
+                workspace_owner = _verify_session_access(db, request, session_id)
+            if pinned is not None:
+                _upsert_meta(db, user, key).pinned_at = (
+                    datetime.now(timezone.utc).replace(tzinfo=None) if pinned else None
+                )
+            db.commit()
+        finally:
+            db.close()
+
+        new_path = path
+        if isinstance(name, str) and workspace_owner is not None:
+            new_path = await _rename_workspace_file(workspace_owner, session_id, path, name)
+            if new_path != path:
+                _move_meta(user, key, _artifact_key(session_id, new_path))
+        return {"status": "ok", "path": new_path}
+
+    # ---- DELETE /api/artifacts?path=&session_id= — remove one library artifact ----
+    @router.delete("/api/artifacts")
+    async def delete_library_artifact(
+        request: Request, path: str = Query(...), session_id: Optional[str] = Query(default=None)
+    ) -> Dict[str, Any]:
+        """Documents and generated images are soft-deleted (is_active=False, the
+        same as deleting a document elsewhere); a workspace file is removed from
+        the chat's sandbox."""
+        user = effective_user(request) or require_user(request) or "anonymous"
+        workspace_owner = None
+        db = SessionLocal()
+        try:
+            if path.startswith("document:"):
+                doc_id = path.split(":", 1)[1]
+                doc = db.query(Document).filter(Document.id == doc_id).first()
+                if not doc:
+                    raise HTTPException(404, "Document not found")
+                _verify_doc_owner(db, doc, user)
+                doc.is_active = False
+                try:
+                    from src.tool_implementations import clear_active_document
+
+                    clear_active_document(doc_id)
+                except Exception:
+                    pass
+            elif path.startswith("generated-image:"):
+                image = (
+                    db.query(GalleryImage)
+                    .filter(GalleryImage.id == path.split(":", 1)[1])
+                    .first()
+                )
+                if not image or image.owner != user:
+                    raise HTTPException(404, "Image not found")
+                image.is_active = False
+            else:
+                if not session_id:
+                    raise HTTPException(400, "session_id is required for workspace files")
+                workspace_owner = _verify_session_access(db, request, session_id)
+            db.query(ArtifactMeta).filter(
+                ArtifactMeta.owner == user,
+                ArtifactMeta.artifact_key == _artifact_key(session_id, path),
+            ).delete()
+            db.commit()
+        finally:
+            db.close()
+
+        if workspace_owner is not None:
+            from src.sandbox_client import delete_artifact, sandbox_enabled
+
+            if not sandbox_enabled():
+                raise HTTPException(404, "Sandbox not available")
+            try:
+                ok = await delete_artifact(owner=workspace_owner, session_id=session_id, path=path)
+            except Exception as e:
+                logger.warning("artifact delete failed for %s (%s): %s", session_id, path, e)
+                raise HTTPException(500, "Delete failed")
+            if not ok:
+                raise HTTPException(404, "File not found")
+        return {"status": "deleted", "path": path}
 
     # ---- GET /api/artifacts/{session_id} — every output associated with the chat ----
     @router.get("/api/artifacts/{session_id}")
@@ -530,14 +794,18 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
         db = SessionLocal()
         try:
             owners = _workspace_owners(db, request, session_id)
+            # Deleted (is_active=False) rows stay in the DB but are gone for the
+            # user — the chat's file cards must not bring them back.
             documents = [
                 _document_artifact(doc)
-                for doc in db.query(Document).filter(Document.session_id == session_id).all()
+                for doc in db.query(Document)
+                .filter(Document.session_id == session_id, Document.is_active == True)  # noqa: E712
+                .all()
             ]
             images = [
                 _gallery_artifact(image)
                 for image in db.query(GalleryImage)
-                .filter(GalleryImage.session_id == session_id)
+                .filter(GalleryImage.session_id == session_id, GalleryImage.is_active == True)  # noqa: E712
                 .all()
             ]
         finally:

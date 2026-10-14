@@ -8,6 +8,7 @@ from typing import Any, Dict
 from fastapi import APIRouter, HTTPException, Request
 
 from core.database import ChatMessage as DbChatMessage
+from core.database import GalleryImage
 from core.database import Session as DbSession
 from core.database import SessionLocal
 from core.models import ChatMessage
@@ -79,6 +80,44 @@ def _merge_continue_rows_to_delete(db_messages, db1, db2):
         ):
             to_delete.append(between)
     return to_delete
+
+
+def _without_deleted_images(history: list, session_id: str) -> list:
+    """Drop generated images the user deleted (Artifacts page) from the tool
+    events of a chat's history, so the chat stops showing them. The stored
+    history is untouched — entries are copied where they change."""
+    db = SessionLocal()
+    try:
+        rows = (
+            db.query(GalleryImage.id, GalleryImage.filename)
+            .filter(GalleryImage.session_id == session_id, GalleryImage.is_active == False)  # noqa: E712
+            .all()
+        )
+    finally:
+        db.close()
+    if not rows:
+        return history
+    ids = {r.id for r in rows}
+    urls = {f"/api/generated-image/{r.filename}" for r in rows}
+
+    def _deleted(ev: dict) -> bool:
+        return ev.get("image_id") in ids or ev.get("image_url") in urls
+
+    out = []
+    for entry in history:
+        meta = entry.get("metadata") or {}
+        events = meta.get("tool_events")
+        if isinstance(events, list) and any(isinstance(e, dict) and _deleted(e) for e in events):
+            image_keys = ("image_url", "image_id", "image_prompt", "image_model", "image_size", "image_quality")
+            events = [
+                {k: v for k, v in e.items() if k not in image_keys}
+                if isinstance(e, dict) and _deleted(e)
+                else e
+                for e in events
+            ]
+            entry = {**entry, "metadata": {**meta, "tool_events": events}}
+        out.append(entry)
+    return out
 
 
 def setup_history_routes(session_manager) -> APIRouter:
@@ -164,7 +203,7 @@ def setup_history_routes(session_manager) -> APIRouter:
                 db.close()
 
         return {
-            "history": history_dict,
+            "history": _without_deleted_images(history_dict, session_id),
             "model": session.model,
             "endpoint_url": session.endpoint_url,
             "name": session.name,

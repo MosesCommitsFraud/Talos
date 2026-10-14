@@ -121,6 +121,10 @@ export interface LibraryArtifact extends Artifact {
   session_id?: string | null;
   session_name?: string | null;
   mtime?: number;
+  pinned?: boolean;
+  pinned_at?: number;
+  /** Opening text of a living document, for the tile preview. */
+  snippet?: string;
 }
 
 export interface ArtifactSelectionTarget {

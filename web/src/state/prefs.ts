@@ -142,6 +142,8 @@ interface PrefsState {
   /** Relative heights of the dock's panes when several are open (flex-grow
    *  weights; only the ratio between open panes matters). */
   dockSizes: DockSizes;
+  /** Artifacts page layout: rows with dates, or preview tiles. */
+  artifactsView: 'list' | 'grid';
   setTheme: (t: Theme) => void;
   setDensity: (d: Density) => void;
   setSortMode: (m: SortMode) => void;
@@ -161,6 +163,7 @@ interface PrefsState {
   renameProjectPref: (from: string, to: string | null) => void;
   setPreviewWidth: (px: number) => void;
   setDockSizes: (sizes: DockSizes) => void;
+  setArtifactsView: (v: 'list' | 'grid') => void;
 }
 
 export type DockPane = 'preview' | 'plan' | 'tasks';
@@ -191,6 +194,7 @@ export const usePrefs = create<PrefsState>()(
       projects: [],
       previewWidth: 480,
       dockSizes: DEFAULT_DOCK_SIZES,
+      artifactsView: 'list',
       setTheme: (theme) => set({ theme }),
       setDensity: (density) => set({ density }),
       setSortMode: (sortMode) => set({ sortMode }),
@@ -249,6 +253,7 @@ export const usePrefs = create<PrefsState>()(
       }),
       setPreviewWidth: (previewWidth) => set({ previewWidth }),
       setDockSizes: (dockSizes) => set({ dockSizes }),
+      setArtifactsView: (artifactsView) => set({ artifactsView }),
     }),
     {
       name: 'talos-prefs',

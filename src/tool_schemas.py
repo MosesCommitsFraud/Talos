@@ -675,8 +675,10 @@ FUNCTION_TOOL_SCHEMAS = [
             "description": (
                 "Answer with an interactive UI rendered inline in the chat: a chart the user can "
                 "filter, a calculator, a comparison with adjustable weights, a simulation, a "
-                "process or architecture diagram, a KPI overview. Use it when seeing or playing "
-                "with the answer helps more than reading it; plain questions get plain text. "
+                "process or architecture diagram, a KPI overview — or a small working tool built "
+                "for the request: a checklist or todo list, a counter, a timer, a converter, a "
+                "live preview, a quiz. Use it when seeing, playing with or using the answer helps "
+                "more than reading it; plain questions get plain text. "
                 "Runs in a sandboxed iframe with NO network: fetch/XHR fail and no data can be "
                 "loaded at runtime, so get real numbers first (query_sql, search_knowledge, "
                 "web_search …) or use well-established facts you know, and embed them in "

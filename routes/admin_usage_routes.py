@@ -252,6 +252,125 @@ def _load_aggregates(db, shift: timedelta, cutoff, owner: str = None) -> dict:
     return aggs
 
 
+def build_usage_detail(auth_manager, username: str, days: int, tz_offset: int, compare: bool = True) -> dict:
+    """Full usage detail for one user. `compare` adds rank/medians against
+    everyone else — admin only; the self-service view leaves it out."""
+    shift, today, cutoff = _window(days, tz_offset)
+    db = SessionLocal()
+    try:
+        # Everyone's aggregates are only needed for rank/median; the self
+        # view skips the comparison and scans just its own rows.
+        aggs = _load_aggregates(db, shift, cutoff, owner=None if compare else username)
+        a = aggs.get(username, _blank_agg())
+
+        start = today - timedelta(days=SERIES_DAYS - 1)
+        empty_day = {"turns": 0, "tokens": 0, "input": 0, "output": 0, "tools": 0}
+        daily = []
+        for i in range(SERIES_DAYS):
+            d = start + timedelta(days=i)
+            b = a["daily"].get(d, empty_day)
+            daily.append(
+                {
+                    "date": d.isoformat(),
+                    "turns": b["turns"],
+                    "tokens": b["tokens"],
+                    "input": b["input"],
+                    "output": b["output"],
+                    "tools": b["tools"],
+                }
+            )
+        busiest = max(daily, key=lambda r: r["tokens"]) if daily else None
+
+        tools = sorted(
+            (
+                {"tool": k, "count": v["count"], "errors": v["errors"]}
+                for k, v in a["tools"].items()
+            ),
+            key=lambda r: r["count"],
+            reverse=True,
+        )
+        skills_used = sorted(
+            ({"name": k, "count": v} for k, v in a["skills"].items()),
+            key=lambda r: r["count"],
+            reverse=True,
+        )
+
+        # Skills this user actually authored into the shared library —
+        # counted from the library itself, not from tool calls, so it
+        # reflects what still exists.
+        from core.database import SharedSkill
+
+        authored = [
+            s.name
+            for s in db.query(SharedSkill.name)
+            .filter(SharedSkill.uploaded_by == username)
+            .all()
+        ]
+
+        totals = [ag["input_tokens"] + ag["output_tokens"] for ag in aggs.values()]
+        mine = a["input_tokens"] + a["output_tokens"]
+        rank = sum(1 for t in totals if t > mine) + 1
+
+        privileges = auth_manager.get_privileges(username) if auth_manager else {}
+        daily_limit = int((privileges or {}).get("max_messages_per_day") or 0)
+        limit_hit_days = (
+            sum(1 for b in a["daily"].values() if b["turns"] >= daily_limit)
+            if daily_limit > 0
+            else 0
+        )
+
+        return {
+            "username": username,
+            "days": days,
+            "tiles": {
+                "turns": a["turns"],
+                "tool_calls": a["tool_calls"],
+                "tool_errors": a["tool_errors"],
+                "input_tokens": a["input_tokens"],
+                "output_tokens": a["output_tokens"],
+                "total_tokens": mine,
+                "sessions": len(a["sessions"]) + a["sessions_rolled"],
+                "active_days": len(a["active_days"]),
+                "web_searches": a["web_searches"],
+                "skill_loads": a["skill_loads"],
+                "avg_tokens_per_turn": round(mine / a["turns"]) if a["turns"] else 0,
+                "peak_hour": max(range(24), key=lambda h: a["hours"][h])
+                if any(a["hours"])
+                else None,
+                "last_active": a["last_active"].isoformat() if a["last_active"] else None,
+                "first_seen": a["first_seen"].isoformat() if a["first_seen"] else None,
+                # Wall-clock spent generating for this user, and how deep
+                # their turns run. Raw-window only — the rollup drops both.
+                "avg_response_ms": round(a["duration_ms"] / a["timed_turns"])
+                if a["timed_turns"]
+                else 0,
+                "total_compute_ms": a["duration_ms"],
+                "avg_rounds": round(a["rounds"] / a["rounds_turns"], 1)
+                if a["rounds_turns"]
+                else 0,
+                "busiest_day": busiest["date"] if busiest and busiest["tokens"] else None,
+                "busiest_day_tokens": busiest["tokens"] if busiest else 0,
+            },
+            "daily": daily,
+            "hours": a["hours"],
+            "weekday": a["weekday"],
+            "tools": tools,
+            "modes": a["modes"],
+            "models": a["models"],
+            "skills": {"used": skills_used, "authored": authored},
+            "comparison": None if not compare else {
+                "rank": rank,
+                "of": len(totals),
+                "median_tokens": _median(totals),
+                "median_turns": _median([ag["turns"] for ag in aggs.values()]),
+                "median_tools": _median([ag["tool_calls"] for ag in aggs.values()]),
+            },
+            "limit": {"max_messages_per_day": daily_limit, "hit_days": limit_hit_days},
+        }
+    finally:
+        db.close()
+
+
 def setup_admin_usage_routes(auth_manager, session_manager):
     """`session_manager` is needed for the same reason the global wipe takes it:
     deleting a user's chats must also evict them from its in-memory cache."""
@@ -354,121 +473,7 @@ def setup_admin_usage_routes(auth_manager, session_manager):
         the URL (see the note on UsageQuery)."""
         require_admin(request)
         username = (body.username or "").strip().lower()
-        days, tz_offset = body.days, body.tz_offset
-        shift, today, cutoff = _window(days, tz_offset)
-        db = SessionLocal()
-        try:
-            # Everyone's aggregates: needed for rank/median, and it's the same
-            # scan cost as loading one user on any realistic deployment.
-            aggs = _load_aggregates(db, shift, cutoff)
-            a = aggs.get(username, _blank_agg())
-
-            start = today - timedelta(days=SERIES_DAYS - 1)
-            empty_day = {"turns": 0, "tokens": 0, "input": 0, "output": 0, "tools": 0}
-            daily = []
-            for i in range(SERIES_DAYS):
-                d = start + timedelta(days=i)
-                b = a["daily"].get(d, empty_day)
-                daily.append(
-                    {
-                        "date": d.isoformat(),
-                        "turns": b["turns"],
-                        "tokens": b["tokens"],
-                        "input": b["input"],
-                        "output": b["output"],
-                        "tools": b["tools"],
-                    }
-                )
-            busiest = max(daily, key=lambda r: r["tokens"]) if daily else None
-
-            tools = sorted(
-                (
-                    {"tool": k, "count": v["count"], "errors": v["errors"]}
-                    for k, v in a["tools"].items()
-                ),
-                key=lambda r: r["count"],
-                reverse=True,
-            )
-            skills_used = sorted(
-                ({"name": k, "count": v} for k, v in a["skills"].items()),
-                key=lambda r: r["count"],
-                reverse=True,
-            )
-
-            # Skills this user actually authored into the shared library —
-            # counted from the library itself, not from tool calls, so it
-            # reflects what still exists.
-            from core.database import SharedSkill
-
-            authored = [
-                s.name
-                for s in db.query(SharedSkill.name)
-                .filter(SharedSkill.uploaded_by == username)
-                .all()
-            ]
-
-            totals = [ag["input_tokens"] + ag["output_tokens"] for ag in aggs.values()]
-            mine = a["input_tokens"] + a["output_tokens"]
-            rank = sum(1 for t in totals if t > mine) + 1
-
-            privileges = auth_manager.get_privileges(username) if auth_manager else {}
-            daily_limit = int((privileges or {}).get("max_messages_per_day") or 0)
-            limit_hit_days = (
-                sum(1 for b in a["daily"].values() if b["turns"] >= daily_limit)
-                if daily_limit > 0
-                else 0
-            )
-
-            return {
-                "username": username,
-                "days": days,
-                "tiles": {
-                    "turns": a["turns"],
-                    "tool_calls": a["tool_calls"],
-                    "tool_errors": a["tool_errors"],
-                    "input_tokens": a["input_tokens"],
-                    "output_tokens": a["output_tokens"],
-                    "total_tokens": mine,
-                    "sessions": len(a["sessions"]) + a["sessions_rolled"],
-                    "active_days": len(a["active_days"]),
-                    "web_searches": a["web_searches"],
-                    "skill_loads": a["skill_loads"],
-                    "avg_tokens_per_turn": round(mine / a["turns"]) if a["turns"] else 0,
-                    "peak_hour": max(range(24), key=lambda h: a["hours"][h])
-                    if any(a["hours"])
-                    else None,
-                    "last_active": a["last_active"].isoformat() if a["last_active"] else None,
-                    "first_seen": a["first_seen"].isoformat() if a["first_seen"] else None,
-                    # Wall-clock spent generating for this user, and how deep
-                    # their turns run. Raw-window only — the rollup drops both.
-                    "avg_response_ms": round(a["duration_ms"] / a["timed_turns"])
-                    if a["timed_turns"]
-                    else 0,
-                    "total_compute_ms": a["duration_ms"],
-                    "avg_rounds": round(a["rounds"] / a["rounds_turns"], 1)
-                    if a["rounds_turns"]
-                    else 0,
-                    "busiest_day": busiest["date"] if busiest and busiest["tokens"] else None,
-                    "busiest_day_tokens": busiest["tokens"] if busiest else 0,
-                },
-                "daily": daily,
-                "hours": a["hours"],
-                "weekday": a["weekday"],
-                "tools": tools,
-                "modes": a["modes"],
-                "models": a["models"],
-                "skills": {"used": skills_used, "authored": authored},
-                "comparison": {
-                    "rank": rank,
-                    "of": len(totals),
-                    "median_tokens": _median(totals),
-                    "median_turns": _median([ag["turns"] for ag in aggs.values()]),
-                    "median_tools": _median([ag["tool_calls"] for ag in aggs.values()]),
-                },
-                "limit": {"max_messages_per_day": daily_limit, "hit_days": limit_hit_days},
-            }
-        finally:
-            db.close()
+        return build_usage_detail(auth_manager, username, body.days, body.tz_offset)
 
     # ── Storage ────────────────────────────────────────────────────────────
 

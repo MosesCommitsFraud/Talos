@@ -1,0 +1,20 @@
+#news { display: flex; flex-direction: column; margin: 0 -8px; }
+.nw-row, :where(:root[data-theme=dark]) .nw-row {
+  display: flex; align-items: flex-start; gap: 12px; width: 100%; height: auto; padding: 10px 8px; border: 0; border-radius: 10px;
+  background: transparent; box-shadow: none; text-align: left; white-space: normal; font: 400 13px/1.45 var(--talos-font); color: var(--talos-fg); transform: none;
+}
+.nw-row:hover { background: var(--talos-surface); }
+.nw-thumb { position: relative; flex: none; display: flex; align-items: center; justify-content: center; width: 64px; height: 64px; border-radius: 8px; background: var(--talos-surface); color: color-mix(in srgb, var(--talos-muted) 50%, transparent); overflow: hidden; }
+.nw-thumb svg { width: 20px; height: 20px; }
+.nw-thumb img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; opacity: 0; transition: opacity .2s ease; }
+.nw-thumb img.in { opacity: 1; }
+.nw-body { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
+.nw-meta { display: flex; align-items: center; gap: 4px; font-size: 12px; color: var(--talos-muted); }
+.nw-meta b { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.nw-ext { margin-left: auto; display: inline-flex; opacity: 0; transition: opacity .15s ease; }
+.nw-ext svg { width: 12px; height: 12px; }
+.nw-row:hover .nw-ext { opacity: .6; }
+.nw-title { font-size: 14px; font-weight: 500; }
+.nw-row:hover .nw-title { text-decoration: underline; text-underline-offset: 2px; }
+.nw-snip { font-size: 12px; color: var(--talos-muted); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.nw-hidden { padding: 6px 8px 0; }

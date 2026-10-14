@@ -158,6 +158,10 @@ class ListRequest(BaseModel):
     path: str = ""
 
 
+class BulkArtifactsRequest(BaseModel):
+    chat_ids: list[str] = []
+
+
 MAX_READ_CHARS = 20_000
 MAX_OUTPUT_CHARS = 10_000
 MAX_DIFF_LINES = 400
@@ -1607,41 +1611,69 @@ def read_image_route(user_id: str, chat_id: str, req: FileReadRequest) -> dict[s
     return {"output": f"Displaying {display_name}", "name": display_name, "data_url": f"data:{IMAGE_MIME_BY_EXT[ext]};base64,{b64}", "exit_code": 0}
 
 
+def _list_workspace_files(workspace: Path) -> list[dict[str, Any]]:
+    """Every deliverable-looking file in one workspace, intentional outputs (the
+    output/ dir) first, then newest first. Recursive, skipping noise dirs."""
+    root = workspace.resolve()
+    items: list[dict[str, Any]] = []
+    for p in root.rglob("*"):
+        if not p.is_file():
+            continue
+        rel = p.relative_to(root)
+        if set(rel.parts) & SKIP_DIRS:
+            continue
+        ext = p.suffix.lower()
+        # Skip obvious junk that isn't a real deliverable.
+        if ext in ARTIFACT_JUNK_EXTS or p.name in ARTIFACT_JUNK_NAMES:
+            continue
+        try:
+            st = p.stat()
+        except OSError:
+            continue
+        items.append({
+            "path": str(rel),
+            "name": p.name,
+            "size": st.st_size,
+            "mtime": st.st_mtime,
+            "mime": mimetypes.guess_type(p.name)[0] or "application/octet-stream",
+            "is_image": ext in IMAGE_MIME_BY_EXT,
+        })
+    items.sort(key=lambda it: (0 if it["path"].split("/", 1)[0] == OUTPUT_DIR_NAME else 1, -it["mtime"]))
+    return items[:500]
+
+
 @app.get("/users/{user_id}/workspaces/{chat_id}/artifacts")
 def list_artifacts_route(user_id: str, chat_id: str) -> dict[str, Any]:
     """List files in a chat's workspace (uploads, generated results, etc.) so the
-    UI can show + download them. Recursive, skipping noise dirs; newest first."""
+    UI can show + download them."""
     _name, workspace = _workspace(user_id, chat_id)
-    root = workspace.resolve()
-    items: list[dict[str, Any]] = []
     try:
-        for p in root.rglob("*"):
-            if not p.is_file():
-                continue
-            rel = p.relative_to(root)
-            if set(rel.parts) & SKIP_DIRS:
-                continue
-            ext = p.suffix.lower()
-            # Skip obvious junk that isn't a real deliverable.
-            if ext in ARTIFACT_JUNK_EXTS or p.name in ARTIFACT_JUNK_NAMES:
-                continue
-            try:
-                st = p.stat()
-            except OSError:
-                continue
-            items.append({
-                "path": str(rel),
-                "name": p.name,
-                "size": st.st_size,
-                "mtime": st.st_mtime,
-                "mime": mimetypes.guess_type(p.name)[0] or "application/octet-stream",
-                "is_image": ext in IMAGE_MIME_BY_EXT,
-            })
+        return {"artifacts": _list_workspace_files(workspace)}
     except OSError as exc:
         return {"artifacts": [], "error": str(exc)}
-    # Sort intentional outputs (the output/ dir) first, then newest first.
-    items.sort(key=lambda it: (0 if it["path"].split("/", 1)[0] == OUTPUT_DIR_NAME else 1, -it["mtime"]))
-    return {"artifacts": items[:500]}
+
+
+@app.post("/users/{user_id}/artifacts")
+def list_artifacts_bulk_route(user_id: str, req: BulkArtifactsRequest) -> dict[str, Any]:
+    """The same listing for many chats at once — the app's Artifacts page spans
+    every chat a user has, and one request per chat doesn't scale. Read-only:
+    unlike the per-chat route it never creates a workspace, so a chat that
+    never ran a tool simply has no entry."""
+    home = user_home(user_id)
+    workspaces: dict[str, list[dict[str, Any]]] = {}
+    if home.is_symlink() or (home / "workspaces").is_symlink():
+        return {"workspaces": workspaces}
+    for chat_id in req.chat_ids[:2000]:
+        workspace = workspace_path(user_id, chat_id)
+        if workspace.is_symlink() or not workspace.is_dir():
+            continue
+        try:
+            files = _list_workspace_files(workspace)
+        except OSError:
+            continue
+        if files:
+            workspaces[chat_id] = files
+    return {"workspaces": workspaces}
 
 
 @app.get("/users/{user_id}/workspaces/{chat_id}/files/download")

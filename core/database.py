@@ -418,6 +418,27 @@ class GalleryImage(TimestampMixin, Base):
     )
 
 
+class ArtifactMeta(TimestampMixin, Base):
+    """Per-user state the Artifacts page keeps about one artifact: whether it is
+    pinned, and a display name for artifacts whose real name cannot change
+    (a generated image's filename is its storage key).
+
+    Artifacts come from three places (documents, generated images, sandbox
+    workspace files), none of which can carry the flag themselves, so the row
+    is keyed by `artifact_key`: the `document:<id>` / `generated-image:<id>`
+    pseudo-path, or `<session_id>/<path>` for a workspace file."""
+
+    __tablename__ = "artifact_meta"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    owner = Column(String, nullable=False, index=True)
+    artifact_key = Column(String, nullable=False)
+    pinned_at = Column(DateTime, nullable=True)
+    title = Column(String, nullable=True)
+
+    __table_args__ = (Index("ux_artifact_meta_owner_key", "owner", "artifact_key", unique=True),)
+
+
 class EmailAccount(TimestampMixin, Base):
     """A configured IMAP/SMTP account. Supports multiple accounts per user —
     exactly one row per owner has is_default=True.

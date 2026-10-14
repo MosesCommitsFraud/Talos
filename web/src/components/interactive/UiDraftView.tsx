@@ -47,11 +47,9 @@ export function UiDraftView({ draft, widget }: { draft: UiDraft; widget?: Widget
         </div>
       )}
       {!finalReady && (
-        <div className="overflow-hidden rounded-xl border bg-card" aria-busy="true">
-          <div className="flex items-center gap-1 px-4 pt-3">
-            <span className="min-w-0 flex-1 truncate text-sm font-medium">
-              {ui.title || t('interactive.title')}
-            </span>
+        <div aria-busy="true" className="rounded-xl border-[0.5px] border-foreground/15 bg-card px-4 pt-2 pb-3 dark:border-foreground/12">
+          <div className="mb-1 flex min-h-8 items-center gap-1">
+            <span className="min-w-0 flex-1 truncate text-[15px] font-medium text-foreground">{ui.title}</span>
             <span className="shimmer-text text-[11px] text-muted-foreground">{t('interactive.building')}</span>
           </div>
           <UiFrame ui={ui} preview />
