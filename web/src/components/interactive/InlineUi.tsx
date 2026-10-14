@@ -492,6 +492,12 @@ export function SourceBar({ sources, map, inCard = false }: { sources: UiSource[
 /** Data sources of the widgets in a turn (interactive views, answer tables),
  *  de-duplicated — they join the knowledge and web sources in the row under
  *  the answer instead of taking room inside each card. */
+// Only data that came from somewhere counts as a source in the row under the
+// answer. "From your message", "calculated", "example values" and the model's
+// own knowledge describe how a view was made, not where its data lives — a
+// counter or a todo list shows no source row at all.
+const CITED_KINDS = new Set(['sql', 'knowledge', 'web']);
+
 export function widgetSources(widgets: Array<{ type: string; data: unknown } | null | undefined>): UiSource[] {
   const out: UiSource[] = [];
   const seen = new Set<string>();
@@ -499,6 +505,7 @@ export function widgetSources(widgets: Array<{ type: string; data: unknown } | n
     if (!w) continue;
     const list = w.type === 'ui' ? readUiPayload(w.data)?.sources : readUiPayload(builtinView(w.type, w.data))?.sources;
     for (const s of list ?? []) {
+      if (!CITED_KINDS.has(s.kind)) continue;
       const key = `${s.kind}|${s.label}|${s.ref ?? ''}`;
       if (!seen.has(key)) { seen.add(key); out.push(s); }
     }
