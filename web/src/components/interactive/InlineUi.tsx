@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import {
   AlertTriangleIcon,
   BrainIcon,
+  ChevronRightIcon,
   CodeIcon,
   DatabaseIcon,
   DownloadIcon,
@@ -13,12 +14,14 @@ import {
   Maximize2Icon,
   SigmaIcon,
   SparklesIcon,
+  TableIcon,
   UserIcon,
 } from 'lucide-react';
 import { Dialog, DialogContent } from '@/components/ui/dialog';
 import { builtinView } from '@/lib/builtinViews';
 import { toast } from '@/components/ui/toast';
 import { Markdown } from '@/components/Markdown';
+import { Collapse } from '@/components/ui/collapse';
 import { requestHtmlPng, savePreviewBlob } from '@/lib/htmlExport';
 import {
   buildUiDocument,
@@ -555,11 +558,31 @@ export function DataSourceChips({ sources }: { sources: UiSource[] }) {
 const fileBase = (title: string) =>
   (title || 'talos-ui').replace(/[\\/:*?"<>|]+/g, ' ').replace(/\s+/g, '-').slice(0, 60) || 'talos-ui';
 
+/** A card that folds down to its title line (result tables). `open` is the
+ *  state it starts in and follows when it changes - a query result is open
+ *  while its turn streams and folds once the turn settles. */
+export interface UiFold {
+  open: boolean;
+  /** Shown on the title line while folded, e.g. the row count. */
+  meta?: string;
+  expandLabel?: string;
+  collapseLabel?: string;
+}
+
 /** `ui` widget: a model-built interactive answer, inline in the chat.
  *  `onReady` lets a streamed draft keep its preview up until this copy has
  *  actually drawn (UiDraftView). */
-export function InlineUi({ data, onReady }: WidgetProps & { onReady?: () => void }) {
+export function InlineUi({ data, onReady, fold }: WidgetProps & { onReady?: () => void; fold?: UiFold }) {
   const { t } = useTranslation();
+  const [open, setOpen] = useState(fold ? fold.open : true);
+  const foldOpen = fold?.open;
+  useEffect(() => {
+    if (foldOpen !== undefined) setOpen(foldOpen);
+  }, [foldOpen]);
+  // The frame is built on first open, not before: a long chat can hold many
+  // folded tables, and each frame is a document of its own.
+  const [mounted, setMounted] = useState(open);
+  if (open && !mounted) setMounted(true);
   const ui = useMemo(() => readUiPayload(data), [data]);
   const usesMap = useMemo(() => !!ui && uiLibraries(ui).includes('leaflet'), [ui]);
   const [boxRef, near] = useNearViewport<HTMLDivElement>();
@@ -603,15 +626,39 @@ export function InlineUi({ data, onReady }: WidgetProps & { onReady?: () => void
     // the table, weather and news widgets) with a quiet title line whose
     // actions show on hover, and the view. Its sources join the row under the
     // answer (widgetSources); only a map's attribution stays here.
-    <div ref={boxRef} className="group/ui relative rounded-xl border-[0.5px] border-foreground/15 bg-card px-4 pt-2 pb-3 dark:border-foreground/12">
-      <div className="mb-1 flex min-h-8 items-center gap-1">
-        <span className="min-w-0 flex-1 truncate text-[15px] font-medium text-foreground">{ui.title}</span>
+    // A foldable card (a result table) is the slim variant: one small log
+    // line like the tool rows, no title-sized heading. Sans, not mono: a mono
+    // face sits off the icon centre by a fraction that rounds differently per
+    // display scale.
+    <div
+      ref={boxRef}
+      className={fold
+        ? `group/ui relative rounded-lg border-[0.5px] border-foreground/15 bg-card px-3 dark:border-foreground/12 ${open ? 'pb-2' : ''}`
+        : 'group/ui relative rounded-xl border-[0.5px] border-foreground/15 bg-card px-4 pt-2 pb-3 dark:border-foreground/12'}
+    >
+      <div className={fold ? 'flex h-8 items-center gap-1' : 'mb-1 flex min-h-8 items-center gap-1'}>
+        {fold ? (
+          <button
+            type="button"
+            aria-expanded={open}
+            onClick={() => setOpen((v) => !v)}
+            title={open ? fold.collapseLabel : fold.expandLabel}
+            className="flex min-w-0 flex-1 items-center gap-1.5 text-left text-xs text-muted-foreground transition-colors hover:text-foreground"
+          >
+            <ChevronRightIcon className={`size-3.5 shrink-0 opacity-60 transition-transform ${open ? 'rotate-90' : ''}`} />
+            <TableIcon className="size-3.5 shrink-0" />
+            <span className="min-w-0 flex-1 truncate">{ui.title}</span>
+            {!open && fold.meta && <span className="shrink-0 tabular-nums">{fold.meta}</span>}
+          </button>
+        ) : (
+          <span className="min-w-0 flex-1 truncate text-[15px] font-medium text-foreground">{ui.title}</span>
+        )}
         {errors.length > 0 && (
           <span className="inline-flex items-center gap-1 text-[11px] text-warning" title={errors.map((e) => `${e.phase}: ${e.message}`).join('\n')}>
             <AlertTriangleIcon className="size-3.5" />{t('interactive.errors', { count: errors.length })}
           </span>
         )}
-        <span className="flex items-center gap-0.5 opacity-0 transition-opacity focus-within:opacity-100 group-hover/ui:opacity-100 [@media(hover:none)]:opacity-100">
+        <span className={`${open ? 'flex' : 'hidden'} items-center gap-0.5 opacity-0 transition-opacity focus-within:opacity-100 group-hover/ui:opacity-100 [@media(hover:none)]:opacity-100`}>
         <button type="button" className={button} aria-pressed={source} onClick={() => setSource((v) => !v)} title={t('interactive.source')} aria-label={t('interactive.source')}>
           <CodeIcon className="size-3.5" />
         </button>
@@ -626,14 +673,16 @@ export function InlineUi({ data, onReady }: WidgetProps & { onReady?: () => void
         </button>
         </span>
       </div>
-      {source && (
-        <div className="max-h-[32rem] overflow-auto rounded-lg bg-muted/40 px-3 py-2 text-xs"><Markdown text={sourceText} /></div>
-      )}
-      <div className={source ? 'hidden' : ''}>
-        {near
-          ? <UiFrame ui={ui} frameRef={frame} onErrors={setErrors} onReady={onReady} />
-          : <div style={{ height: ui.initialHeight }} />}
-      </div>
+      <Collapse open={open}>
+        {source && (
+          <div className="max-h-[32rem] overflow-auto rounded-lg bg-muted/40 px-3 py-2 text-xs"><Markdown text={sourceText} /></div>
+        )}
+        <div className={source ? 'hidden' : ''}>
+          {near && mounted
+            ? <UiFrame ui={ui} frameRef={frame} onErrors={setErrors} onReady={onReady} />
+            : <div style={{ height: mounted ? ui.initialHeight : 0 }} />}
+        </div>
+      </Collapse>
       {errors.length > 0 && !source && (
         <details className="py-1 text-[11px] text-muted-foreground">
           <summary className="cursor-pointer select-none">{t('interactive.errorDetails')}</summary>

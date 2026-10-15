@@ -1,6 +1,7 @@
 import { memo, useMemo, type ComponentType } from 'react';
+import { useTranslation } from 'react-i18next';
 import type { Widget } from '@/api/types';
-import { InlineUi } from '@/components/interactive/InlineUi';
+import { InlineUi, type UiFold } from '@/components/interactive/InlineUi';
 import { builtinView } from '@/lib/builtinViews';
 
 /** Props every widget component receives. `data` is `unknown` on purpose — it
@@ -21,9 +22,24 @@ export interface WidgetProps {
  *  interactive UI like every render_ui answer: same frame, kit and card. The
  *  tool sends data; lib/builtinViews.ts supplies the view. */
 function builtin(type: string): ComponentType<WidgetProps> {
-  function BuiltinView({ data, version }: WidgetProps) {
+  function BuiltinView({ data, version, settled }: WidgetProps) {
+    const { t } = useTranslation();
     const payload = useMemo(() => builtinView(type, data), [data]);
-    return payload ? <InlineUi data={payload} version={version} /> : null;
+    // A query result folds to its title line once the turn settles, like the
+    // tool calls around it; a table shown as the answer stays open.
+    const d = (data && typeof data === 'object' ? data : {}) as { answer?: unknown; rowCount?: unknown; rows?: unknown };
+    let fold: UiFold | undefined;
+    if (type === 'table' && d.answer !== true) {
+      const shown = Array.isArray(d.rows) ? d.rows.length : 0;
+      const total = typeof d.rowCount === 'number' ? d.rowCount : shown;
+      fold = {
+        open: !settled,
+        meta: shown < total ? t('table.showingOf', { shown, total }) : t('table.rows', { count: total }),
+        expandLabel: t('table.expand'),
+        collapseLabel: t('table.collapse'),
+      };
+    }
+    return payload ? <InlineUi data={payload} version={version} fold={fold} /> : null;
   }
   BuiltinView.displayName = `BuiltinView(${type})`;
   return BuiltinView;

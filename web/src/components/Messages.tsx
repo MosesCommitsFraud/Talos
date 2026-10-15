@@ -869,10 +869,10 @@ function AssistantTurn({ turn, containsLast, outputs, sessionId }: { turn: UiMes
   // visual form, so it belongs beside the answer rather than inside the fold
   // that hides how the answer was produced. ActivityFold suppresses its copy.
   // Result tables are the exception: they are part of the work, not the
-  // answer, so they stay in the fold with the tool calls (see staysInFold).
-  const widgets = turn.flatMap((m) =>
-    (m.tools ?? []).map((call) => call.widget).filter((w) => w && !staysInFold(w)),
-  );
+  // answer, so they go below it, folded to their title line (see staysInFold).
+  const turnWidgets = turn.flatMap((m) => (m.tools ?? []).map((call) => call.widget));
+  const widgets = turnWidgets.filter((w) => w && !staysInFold(w));
+  const resultTables = turnWidgets.filter((w) => w && staysInFold(w));
   const sources = turn.flatMap((m) => m.sources ?? []);
   // Data behind the turn's views and answer tables, shown with the other
   // sources instead of inside each card.
@@ -900,6 +900,15 @@ function AssistantTurn({ turn, containsLast, outputs, sessionId }: { turn: UiMes
       {terminal && (
         <div className={terminal.error ? 'text-destructive-foreground' : 'text-strong'}>
           <Markdown text={terminal.content} />
+        </div>
+      )}
+      {/* The query results behind the answer, folded: one line each, opened
+          on demand, so a chat with many queries stays readable. */}
+      {resultTables.length > 0 && (
+        <div className="mt-2 flex flex-col gap-1.5 [&>div]:my-0">
+          {resultTables.map((widget, i) => (
+            <WidgetView key={`t-${i}`} widget={widget} settled />
+          ))}
         </div>
       )}
       {/* Images produced inside a collapsed tool group, re-surfaced between the
