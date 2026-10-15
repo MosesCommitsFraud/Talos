@@ -163,8 +163,6 @@ async def auto_name_session(session_manager, sess, lang: str | None = None):
     language of the message when unset/unknown.
     """
     try:
-        from src.llm_core import llm_call_async
-
         # Find first user message
         first_msg = ""
         for msg in sess.history:
@@ -185,14 +183,30 @@ async def auto_name_session(session_manager, sess, lang: str | None = None):
         if not first_msg:
             return
 
-        # Auto-naming uses the session's own chat model (not a separate task
-        # endpoint) so the title matches the model the user is actually
-        # chatting with, and runs it with reasoning disabled — a title needs
-        # no <think> pass, and skipping it returns a clean title in ~1s.
-        t_url, t_model, t_headers = sess.endpoint_url, sess.model, sess.headers
-        if not t_model:
+        # Auto-naming runs on the Utility model (the small, fast model meant for
+        # titles and background tasks). When no Utility model is configured,
+        # resolve_endpoint hands back the session's own chat model. Utility
+        # fallbacks and then the session model stay in the chain so an offline
+        # utility endpoint never leaves a chat untitled. Reasoning is disabled
+        # either way — a title needs no <think> pass.
+        from src.endpoint_resolver import resolve_endpoint, resolve_utility_fallback_candidates
+        from src.llm_core import llm_call_async_with_fallback
+
+        owner = getattr(sess, "owner", None)
+        t_url, t_model, t_headers = resolve_endpoint(
+            "utility", sess.endpoint_url, sess.model, sess.headers, owner=owner
+        )
+        candidates = [(t_url, t_model, t_headers)]
+        try:
+            candidates += resolve_utility_fallback_candidates(owner=owner)
+        except Exception:
+            pass
+        candidates.append((sess.endpoint_url, sess.model, sess.headers))
+        candidates = [c for c in candidates if c[0] and c[1]]
+        if not candidates:
             logger.debug("[auto-name] No model provided, skipping")
             return
+        t_model = candidates[0][1]
 
         # `/no_think` is a Qwen3 soft switch that disables reasoning; belt-and
         # suspenders alongside enable_thinking=False for backends that only
@@ -215,9 +229,8 @@ async def auto_name_session(session_manager, sess, lang: str | None = None):
         # <think> block (despite enable_thinking=False) has headroom for it
         # plus the actual title rather than getting clipped mid-reasoning.
         # Timeout 60s gives slow local models room to finish.
-        title = await llm_call_async(
-            t_url,
-            t_model,
+        title = await llm_call_async_with_fallback(
+            candidates,
             [
                 {
                     "role": "system",
@@ -228,7 +241,6 @@ async def auto_name_session(session_manager, sess, lang: str | None = None):
             ],
             temperature=0.3,
             max_tokens=4096,
-            headers=t_headers,
             timeout=60,
             enable_thinking=False,
         )

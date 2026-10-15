@@ -70,7 +70,10 @@ cite where they come from in `sources`.
 
 `query_sql` spills big result sets to a CSV in the workspace. Do not embed
 those: aggregate further in SQL, or – when the user really needs rows – show a
-table widget with the top rows and say where the full set is.
+table widget with the top rows (~10–20) and say where the full set is. The
+same applies to results that were not spilled: 200 rows are already far too
+many for the chat – summarise, or collapse the rest behind a
+`details.t-disclosure` (see `interactive-answers`).
 
 ## Example – live data: switch the year
 

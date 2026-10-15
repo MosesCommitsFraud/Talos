@@ -41,6 +41,9 @@ recompute, sliders, what-if), and then use `talos.chart` there.
   `{kind: "donut", items: [{label, value}], unit}`.
 - `kpi`: `{items: [{label, value, unit, delta, deltaLabel, higherIsBetter, note}]}`.
 - `table`: `{columns, rows}` (rows as lists); sortable, CSV download, chart toggle.
+  Keep it short: ~10–20 rows. For more, aggregate or show the top rows, name
+  the total in the title or your text ("Top 10 von 2.000") and point to the
+  full CSV – never hundreds of rows in the chat.
 - `comparison`: `{options, rows: [{criterion, values, best}], verdict}`.
 
 ## Libraries in render_ui

@@ -66,6 +66,19 @@ view shows goes into the call.
 Never present invented numbers as facts. Keep `data` small: aggregate, round,
 at most a few thousand points.
 
+**Keep the view compact when there is a lot of it.** A chat answer is not a
+data dump: a view should fit roughly one screen. When something has many
+entries (more than ~15 table rows, list items, cards, steps …):
+
+- Prefer a summary – KPIs, an aggregated table (GROUP BY), a chart, the top
+  10 plus "Sonstige" – over the raw rows.
+- If the rows themselves matter, show the first ~10 and put the rest behind
+  a `details.t-disclosure` ("Alle 200 Zeilen anzeigen") or a "Mehr anzeigen"
+  button; for long lists add a filter (chips, search input).
+- Always say how many there are in total ("10 von 2.000 Einträgen") and where
+  the full set is (CSV in the workspace, download in the table widget).
+- Never put hundreds of rows into one visible table.
+
 ## 3. Build it with the kit
 
 Field order (lets the view stream in progressively): `title`, `initialHeight`,
