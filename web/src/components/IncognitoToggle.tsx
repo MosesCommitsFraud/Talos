@@ -1,8 +1,8 @@
-import { ArchiveIcon, BugIcon, ChevronDownIcon, GhostIcon, PencilIcon, Trash2Icon } from 'lucide-react';
+import { ArchiveIcon, BugIcon, ChevronDownIcon, GaugeIcon, GhostIcon, PencilIcon, Trash2Icon } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { archiveSession, deleteSession, downloadChatDebugDump, fetchSessions, renameSession } from '@/api/client';
+import { archiveSession, deleteSession, downloadChatDebugDump, downloadChatMetrics, fetchSessions, renameSession } from '@/api/client';
 import { useAuth } from './auth/AuthGate';
 import { useChat } from '@/state/chat';
 import { usePrefs } from '@/state/prefs';
@@ -65,8 +65,8 @@ function EditableTitle({
 }
 
 /** Floating chat header: the session title (click to rename in place) with a
- *  chevron menu of per-session actions (rename / archive / debug dump /
- *  delete), and on the right the session's file panel. Incognito only shows on a fresh chat, where
+ *  chevron menu of per-session actions (rename / archive / metrics export /
+ *  debug dump / delete), and on the right the session's file panel. Incognito only shows on a fresh chat, where
  *  it decides how the next chat is kept. A background-coloured fade underneath
  *  keeps messages from scrolling visibly through the controls. */
 export function IncognitoToggle() {
@@ -80,6 +80,7 @@ export function IncognitoToggle() {
   const queryClient = useQueryClient();
   const auth = useAuth();
   const [dumping, setDumping] = useState(false);
+  const [exporting, setExporting] = useState(false);
   const [editingTitle, setEditingTitle] = useState(false);
 
   const { data: sessions } = useQuery({ queryKey: ['sessions'], queryFn: fetchSessions });
@@ -118,6 +119,14 @@ export function IncognitoToggle() {
     void downloadChatDebugDump(sessionId)
       .catch((err: unknown) => window.alert(err instanceof Error ? err.message : String(err)))
       .finally(() => setDumping(false));
+  };
+
+  const onExportMetrics = () => {
+    if (!sessionId || exporting) return;
+    setExporting(true);
+    void downloadChatMetrics(sessionId)
+      .catch((err: unknown) => window.alert(err instanceof Error ? err.message : String(err)))
+      .finally(() => setExporting(false));
   };
 
   const dockOpen = useUi(selectDockOpen);
@@ -180,6 +189,11 @@ export function IncognitoToggle() {
                   </MenuItem>
                   <MenuItem onSelect={onArchive}>
                     <ArchiveIcon /> {t('sidebar.archive')}
+                  </MenuItem>
+                  {/* Turn metrics as CSV (TTFT, time, tokens, tokens/s, tools)
+                      — for model comparisons; the caller's own chat only. */}
+                  <MenuItem onSelect={onExportMetrics} disabled={exporting}>
+                    <GaugeIcon /> {t('chatHeader.exportMetrics')}
                   </MenuItem>
                   {/* Admin-only: raw JSON dump of the whole chat (reasoning, tool
                       calls, tool errors, metrics) for debugging. */}

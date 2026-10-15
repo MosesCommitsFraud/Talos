@@ -373,9 +373,29 @@ export async function downloadChatDebugDump(sessionId: string): Promise<void> {
     throw new Error('Not authenticated');
   }
   if (!res.ok) throw new Error(`Debug dump failed (HTTP ${res.status})`);
-  // Honour the filename the server picked (debug_<chat>_<timestamp>.json).
+  await saveAttachment(res, `debug_${sessionId}.json`);
+}
+
+/** Download a chat's turn metrics (TTFT, response time, tokens, tokens/s,
+ *  tool rounds and calls) as CSV for a German Excel: one row per turn plus a
+ *  total row. */
+export async function downloadChatMetrics(sessionId: string): Promise<void> {
+  const res = await fetch(`/api/session/${encodeURIComponent(sessionId)}/metrics-export`, {
+    credentials: 'same-origin',
+    cache: 'no-store',
+  });
+  if (res.status === 401) {
+    notifyUnauthenticated();
+    throw new Error('Not authenticated');
+  }
+  if (!res.ok) throw new Error(`Metrics export failed (HTTP ${res.status})`);
+  await saveAttachment(res, `metriken_${sessionId}.csv`);
+}
+
+/** Save a response as a file, under the filename the server picked. */
+async function saveAttachment(res: Response, fallback: string): Promise<void> {
   const disposition = res.headers.get('Content-Disposition') ?? '';
-  const name = /filename="?([^";]+)"?/.exec(disposition)?.[1] ?? `debug_${sessionId}.json`;
+  const name = /filename="?([^";]+)"?/.exec(disposition)?.[1] ?? fallback;
   const blob = await res.blob();
   const url = URL.createObjectURL(blob);
   try {

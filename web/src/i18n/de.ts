@@ -225,6 +225,7 @@ const de: typeof en = {
     toggleIncognito: 'Inkognito umschalten',
     moreOptions: 'Weitere Optionen',
     titlePending: 'Titel wird erstellt…',
+    exportMetrics: 'Metriken exportieren',
     debugDump: 'Debug',
     you: 'Du',
     assistant: '{{brand}}',

@@ -1091,6 +1091,78 @@ def setup_session_routes(session_manager: SessionManager, config: dict):
             headers={"Content-Disposition": f'attachment; filename="{out_name}"'},
         )
 
+    @router.get("/session/{sid}/metrics-export")
+    def export_session_metrics(request: Request, sid: str, format: str = "excel"):
+        """The chat's turn metrics (TTFT, response time, tokens, tokens/s, tool
+        rounds and calls) as CSV — one row per turn plus a total row, for
+        pasting into a model-test sheet. Owner-scoped, not admin-only: it
+        holds the caller's own numbers and none of the content beyond a
+        shortened question. ``format=excel`` (default) writes semicolons and
+        decimal commas for a German Excel; ``format=csv`` commas and dots."""
+        from core.database import ChatMessage as DbMessage
+        from src.turn_metrics_export import build_rows, to_csv
+
+        _verify_session_owner(request, sid, session_manager)
+
+        db = SessionLocal()
+        try:
+            db_session = db.query(DbSession).filter(DbSession.id == sid).first()
+            name = getattr(db_session, "name", None) if db_session else None
+            rows = (
+                db.query(DbMessage)
+                .filter(DbMessage.session_id == sid)
+                .order_by(DbMessage.timestamp, DbMessage.id)
+                .all()
+            )
+            messages = []
+            for m in rows:
+                try:
+                    md = json.loads(m.meta_data) if m.meta_data else {}
+                except Exception:
+                    md = {}
+                messages.append(
+                    {
+                        "role": m.role,
+                        "content": m.content,
+                        "metadata": md,
+                        "timestamp": m.timestamp.isoformat(timespec="seconds")
+                        if m.timestamp
+                        else "",
+                    }
+                )
+        finally:
+            db.close()
+        if not messages:
+            # A chat that lives only in memory (not yet persisted).
+            try:
+                live = session_manager.get_session(sid)
+            except KeyError:
+                live = None
+            if live is not None:
+                name = name or getattr(live, "name", None)
+                for m in getattr(live, "history", []):
+                    d = m.to_dict()
+                    messages.append(
+                        {
+                            "role": d.get("role"),
+                            "content": d.get("content"),
+                            "metadata": d.get("metadata") or {},
+                            "timestamp": d.get("timestamp") or "",
+                        }
+                    )
+
+        excel_de = format != "csv"
+        body = to_csv(build_rows(messages, sid), excel_de=excel_de)
+        safe_name = re.sub(r"[^\w\-_]", "_", name or sid)
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        out_name = _sanitize_export_filename(f"metriken_{safe_name}_{timestamp}.csv")
+        # BOM so Excel reads the file as UTF-8 (umlauts in the column names).
+        return Response(
+            content="﻿" + body,
+            media_type="text/csv; charset=utf-8",
+            headers={"Content-Disposition": f'attachment; filename="{out_name}"'},
+        )
+
     @router.post("/sessions/save")
     def sessions_save_now(request: Request):
         user = effective_user(request)

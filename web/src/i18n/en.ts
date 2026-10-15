@@ -222,6 +222,7 @@ const en = {
     toggleIncognito: 'Toggle incognito',
     moreOptions: 'More options',
     titlePending: 'Generating title…',
+    exportMetrics: 'Export metrics',
     debugDump: 'Debug',
     you: 'You',
     assistant: '{{brand}}',
