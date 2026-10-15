@@ -7,3 +7,5 @@
 .tb-null { color: var(--talos-muted); font-style: italic; opacity: .6; }
 .tb-more { margin-top: 6px; }
 .tb-ctitle { margin: 8px 0 4px; }
+.tb-box { max-height: 360px; overflow: auto; }
+.tb-box thead th { position: sticky; top: 0; background: var(--talos-bg); z-index: 1; }

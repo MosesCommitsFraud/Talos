@@ -91,7 +91,7 @@ export function builtinView(type: string, data: unknown): Record<string, unknown
       const label = asStr(d.label) || asStr(d.title);
       return {
         title: label || (de() ? 'Ergebnis' : 'Result'),
-        initialHeight: 90 + Math.min(rows, 50) * 33,
+        initialHeight: 90 + Math.min(rows, 10) * 33,
         html: '<div id="tb"></div>',
         css: tableCss,
         js: tableJs,

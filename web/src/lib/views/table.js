@@ -1,15 +1,16 @@
 // Built-in view: a result table (query_sql, render_widget table). Sorts over
-// the whole set, shows 50 rows until asked, exports CSV, and switches to a
+// the whole set, shows 10 rows until asked (then the rest in a box that
+// scrolls, so a big result never makes the chat a wall of rows), exports CSV, and switches to a
 // chart when the columns allow one (a label column + numeric columns).
 const D = window.TALOS_DATA || {};
 const de = (D.__lang || navigator.language || 'de').toLowerCase().startsWith('de');
 const T = de
-  ? { table: 'Tabelle', chart: 'Diagramm', csv: 'CSV', rows: (n) => `${n.toLocaleString('de-DE')} ${n === 1 ? 'Zeile' : 'Zeilen'}`, of: (s, n) => `${s.toLocaleString('de-DE')} von ${n.toLocaleString('de-DE')} Zeilen`, all: (n) => `Alle ${n.toLocaleString('de-DE')} anzeigen`, spill: (p) => `Vollständiges Ergebnis in ${p}`, by: 'nach' }
-  : { table: 'Table', chart: 'Chart', csv: 'CSV', rows: (n) => `${n.toLocaleString('en-GB')} ${n === 1 ? 'row' : 'rows'}`, of: (s, n) => `${s.toLocaleString('en-GB')} of ${n.toLocaleString('en-GB')} rows`, all: (n) => `Show all ${n.toLocaleString('en-GB')}`, spill: (p) => `Full result in ${p}`, by: 'by' };
+  ? { table: 'Tabelle', chart: 'Diagramm', csv: 'CSV', rows: (n) => `${n.toLocaleString('de-DE')} ${n === 1 ? 'Zeile' : 'Zeilen'}`, of: (s, n) => `${s.toLocaleString('de-DE')} von ${n.toLocaleString('de-DE')} Zeilen`, all: (n) => `Alle ${n.toLocaleString('de-DE')} anzeigen`, less: 'Weniger anzeigen', spill: (p) => `Vollständiges Ergebnis in ${p}`, by: 'nach' }
+  : { table: 'Table', chart: 'Chart', csv: 'CSV', rows: (n) => `${n.toLocaleString('en-GB')} ${n === 1 ? 'row' : 'rows'}`, of: (s, n) => `${s.toLocaleString('en-GB')} of ${n.toLocaleString('en-GB')} rows`, all: (n) => `Show all ${n.toLocaleString('en-GB')}`, less: 'Show less', spill: (p) => `Full result in ${p}`, by: 'by' };
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const columns = (Array.isArray(D.columns) ? D.columns : []).map(String);
 const rows = (Array.isArray(D.rows) ? D.rows : []).filter(Array.isArray).map((r) => r.map((v) => (v === undefined ? null : v)));
-const INITIAL = 50;
+const INITIAL = 10;
 // A column is numeric only if every non-null value in it is a number.
 const numeric = columns.map((_, c) => {
   let seen = false;
@@ -41,10 +42,10 @@ function csv() {
 function renderTable() {
   const all = sorted(), shown = expanded ? all : all.slice(0, INITIAL);
   const arrow = (c) => (sort && sort.c === c ? (sort.desc ? ' ↓' : ' ↑') : '');
-  document.getElementById('tb-body').innerHTML = `<div class="t-scroll"><table class="t-table tb">
+  document.getElementById('tb-body').innerHTML = `<div class="t-scroll${expanded ? ' tb-box' : ''}"><table class="t-table tb">
     <thead><tr>${columns.map((n, c) => `<th class="${numeric[c] ? 'num' : ''}" data-sort="${c}" aria-sort="${sort && sort.c === c ? (sort.desc ? 'descending' : 'ascending') : 'none'}">${esc(n)}${arrow(c)}</th>`).join('')}</tr></thead>
     <tbody>${shown.map((r) => `<tr>${r.map((v, c) => `<td class="${numeric[c] ? 'num' : ''}">${cell(v, c)}</td>`).join('')}</tr>`).join('')}</tbody></table></div>
-    ${!expanded && all.length > INITIAL ? `<button type="button" class="t-btn ghost sm tb-more" data-act="all">${T.all(all.length)}</button>` : ''}`;
+    ${all.length > INITIAL ? `<button type="button" class="t-btn ghost sm tb-more" data-act="${expanded ? 'less' : 'all'}">${expanded ? T.less : T.all(all.length)}</button>` : ''}`;
 }
 
 function renderChart() {
@@ -83,6 +84,7 @@ root.addEventListener('click', (e) => {
   }
   const act = e.target.closest('[data-act]');
   if (act && act.dataset.act === 'all') { expanded = true; renderTable(); }
+  if (act && act.dataset.act === 'less') { expanded = false; renderTable(); }
   if (act && act.dataset.act === 'csv') talos.download((D.label || 'ergebnis').replace(/[^\w.-]+/g, '_').slice(0, 60) + '.csv', csv());
 });
 root.addEventListener('talos:change', (e) => {

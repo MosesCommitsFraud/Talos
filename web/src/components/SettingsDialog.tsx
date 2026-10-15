@@ -2246,7 +2246,7 @@ export function SettingsDialog({
                 aria-label={t('settings.searchPlaceholder')}
               />
             </div>
-            <div ref={setNavList}className="relative min-h-0 flex-1 space-y-px overflow-y-auto px-3 pb-3">
+            <div ref={setNavList}className="relative min-h-0 flex-1 space-y-px overflow-y-auto px-3 pb-3 [scrollbar-gutter:stable]">
               {navPill && (
                 <span
                   aria-hidden
@@ -2275,6 +2275,19 @@ export function SettingsDialog({
               {noResults && (
                 <div className="px-2.5 py-8 text-center text-xs text-muted-foreground">{t('settings.noResults')}</div>
               )}
+              {/* Zero-height copy of the unfiltered nav: keeps the sidebar at
+                  its full width while the search filters out the long labels. */}
+              <div aria-hidden className="invisible h-0 overflow-hidden">
+                {[
+                  ...(scope === 'admin' ? [] : userNav),
+                  ...(auth?.is_admin && scope !== 'user' ? [...adminNav, ...advancedNav] : []),
+                ].map((n) => (
+                  <div key={n.id} className="flex items-center gap-2.5 pr-4 pl-2.5 text-sm font-medium whitespace-nowrap [&_svg]:size-4 [&_svg]:shrink-0">
+                    {n.icon}
+                    <span>{n.label}</span>
+                  </div>
+                ))}
+              </div>
             </div>
           </nav>
           {/* The only scroll container for panel content: panels must not
