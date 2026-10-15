@@ -1,5 +1,5 @@
 import { useTranslation } from 'react-i18next';
-import { CheckIcon, PanelRightIcon, XIcon } from 'lucide-react';
+import { CheckIcon, LoaderCircleIcon, PanelRightIcon, XIcon } from 'lucide-react';
 import { useUi } from '@/state/ui';
 import { type UiMessage, useChat } from '@/state/chat';
 import { cn } from '@/lib/utils';
@@ -134,37 +134,76 @@ function ProgressRing({ done, total, size = 44 }: { done: number; total: number;
   );
 }
 
-/** Inline live checklist from `update_plan`, only while its turn runs and only
- *  when the plan pane is closed (the pane is where the plan lives). Once the
- *  turn is over the plan leaves the chat; the dock's plan button brings it
- *  back. */
-export function PlanCard({ msg }: { msg: UiMessage }) {
+/** One step's marker in the inline checklist: a filled check once done, a
+ *  spinner while it is being worked on, a dashed ring while still ahead. */
+function StepMarker({ state }: { state: StepState }) {
+  if (state === 'done') {
+    return (
+      // Disc and check in ONE svg: as a span plus a nested icon the two boxes
+      // snap to different fractional pixels (odd sizes, 125% scaling) and the
+      // check drifts off-centre. Drawn together they always rasterise as one.
+      <svg viewBox="0 0 16 16" className="size-4 shrink-0" aria-hidden>
+        <circle cx="8" cy="8" r="8" className="fill-muted-foreground/70" />
+        <path
+          d="M4.75 8.25 7 10.5 11.25 5.75"
+          fill="none"
+          className="stroke-background"
+          strokeWidth={1.75}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      </svg>
+    );
+  }
+  if (state === 'current') {
+    return <LoaderCircleIcon className="size-4 shrink-0 animate-spin text-foreground/80" strokeWidth={2.25} />;
+  }
+  return <span className="size-4 shrink-0 rounded-full border-[1.5px] border-dashed border-muted-foreground/60" />;
+}
+
+/** The turn's `update_plan` checklist under its reply: one row per step, the
+ *  step in work spinning while the turn runs. Stays with the turn once it has
+ *  settled (restored from the persisted tool event on reload); the pane
+ *  button pins it beside the chat. */
+export function PlanCard({ msg, live }: { msg: UiMessage; live: boolean }) {
   const { t } = useTranslation();
-  const paneOpen = useUi((s) => s.planPanelOpen);
   const openPane = useUi((s) => s.setPlanPanelOpen);
   const steps = parseChecklist(msg.plan ?? '');
-  if (steps.length === 0 || paneOpen) return null;
+  if (steps.length === 0) return null;
+  const states = stepStates(steps, live);
   const done = steps.filter((s) => s.done).length;
 
   return (
-    <div className="mt-3 rounded-xl border border-primary/25 bg-primary/[0.03]">
-      <div className="flex items-center gap-2 px-3 pt-2.5 pb-1 text-xs font-medium text-muted-foreground">
-        <PlanIcon className="size-3.5 text-primary" />
-        <span>{t('plan.title')}</span>
-        <span className="tabular-nums">· {t('plan.progress', { done, total: steps.length })}</span>
-        <button
-          type="button"
-          title={t('plan.openInPanel')}
-          aria-label={t('plan.openInPanel')}
-          onClick={() => openPane(true)}
-          className="ml-auto flex size-6 items-center justify-center rounded-md transition-colors hover:bg-accent hover:text-foreground"
-        >
-          <PanelRightIcon className="size-3.5" />
-        </button>
-      </div>
-      <div className="px-3 pt-1 pb-2">
-        <Timeline steps={steps} live compact />
-      </div>
+    <div
+      className="group/plan relative mt-3 mb-6 rounded-xl border bg-card/40 px-4 py-3"
+      aria-label={`${t('plan.title')} · ${t('plan.progress', { done, total: steps.length })}`}
+    >
+      <button
+        type="button"
+        title={t('plan.openInPanel')}
+        aria-label={t('plan.openInPanel')}
+        onClick={() => openPane(true)}
+        className="absolute top-2 right-2 flex size-6 items-center justify-center rounded-md text-muted-foreground opacity-0 transition-opacity group-hover/plan:opacity-100 hover:bg-accent hover:text-foreground focus-visible:opacity-100"
+      >
+        <PanelRightIcon className="size-3.5" />
+      </button>
+      <ol className="flex flex-col gap-2">
+        {steps.map((step, i) => (
+          <li key={i} className="flex items-center gap-2.5">
+            <StepMarker state={states[i]} />
+            <span
+              className={cn(
+                'min-w-0 text-sm leading-snug break-words',
+                states[i] === 'done' && 'text-muted-foreground',
+                states[i] === 'current' && 'font-medium text-foreground',
+                states[i] === 'ahead' && 'text-foreground/80',
+              )}
+            >
+              {step.text}
+            </span>
+          </li>
+        ))}
+      </ol>
     </div>
   );
 }

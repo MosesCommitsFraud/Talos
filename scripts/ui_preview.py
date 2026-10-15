@@ -1623,6 +1623,68 @@ print(result)
     return "".join(_sse(event) for event in events).encode("utf-8")
 
 
+# In-memory stand-in for routes/mcp_routes.py (Settings → MCP connections).
+# A server whose command or url contains "fail" comes up in the error state.
+_MCP_SERVERS: list[dict] = [
+    {
+        "id": "a1b2c3d4",
+        "name": "github",
+        "transport": "http",
+        "command": None,
+        "args": [],
+        "env": {},
+        "url": "https://api.githubcopilot.com/mcp/",
+        "is_enabled": True,
+        "disabled": ["delete_repository"],
+        "tools": [
+            ("search_repositories", "Search GitHub repositories by query."),
+            ("get_file_contents", "Read a file or directory listing from a repository."),
+            ("create_issue", "Open a new issue in a repository."),
+            ("delete_repository", "Permanently delete a repository."),
+        ],
+    },
+]
+
+
+def _mcp_status(srv: dict) -> dict:
+    target = f"{srv.get('command') or ''} {' '.join(srv['args'])} {srv.get('url') or ''}"
+    failed = "fail" in target
+    connected = srv["is_enabled"] and not failed
+    total = len(srv["tools"]) if connected else 0
+    disabled = len(srv["disabled"])
+    return {
+        **{k: srv[k] for k in ("id", "name", "transport", "command", "args", "env", "url", "is_enabled")},
+        "status": "connected" if connected else ("error" if srv["is_enabled"] else "disconnected"),
+        "tool_count": total,
+        "disabled_tool_count": disabled,
+        "enabled_tool_count": max(0, total - disabled),
+        "error": "spawn npx ENOENT: command failed to start" if srv["is_enabled"] and failed else None,
+        "auth_url": None,
+        "has_oauth": False,
+        "needs_oauth": False,
+    }
+
+
+def _mcp_find(path: str) -> dict | None:
+    sid = path[len("/api/mcp/servers/") :].split("/")[0]
+    return next((s for s in _MCP_SERVERS if s["id"] == sid), None)
+
+
+def _form_fields(body: bytes, ctype: str) -> dict[str, str]:
+    """Plain (non-file) fields of a multipart/form-data body."""
+    if "boundary=" not in ctype:
+        return {}
+    boundary = ctype.split("boundary=")[1].split(";")[0].strip()
+    fields = {}
+    for part in body.split(b"--" + boundary.encode()):
+        header_blob, _, data = part.partition(b"\r\n\r\n")
+        if b'name="' not in header_blob or b'filename="' in header_blob:
+            continue
+        name = header_blob.split(b'name="')[1].split(b'"')[0].decode()
+        fields[name] = data[:-2].decode("utf-8", errors="replace") if data.endswith(b"\r\n") else data.decode()
+    return fields
+
+
 # In-memory shared-skills store for the settings panel preview.
 # Files posted to /api/upload during this preview run: id -> (name, mime, bytes).
 _UPLOADS: dict[str, tuple[str, str, bytes]] = {}
@@ -2489,6 +2551,26 @@ class PreviewHandler(BaseHTTPRequestHandler):
         if path == "/api/shared-skills":
             self._send_json({"skills": _SHARED_SKILLS, "count": len(_SHARED_SKILLS)})
             return
+        if path == "/api/mcp/servers":
+            self._send_json([_mcp_status(s) for s in _MCP_SERVERS])
+            return
+        if path.startswith("/api/mcp/servers/") and path.endswith("/tools"):
+            srv = _mcp_find(path)
+            self._send_json(
+                [
+                    {
+                        "server_id": srv["id"],
+                        "name": n,
+                        "qualified_name": f"mcp__{srv['id']}__{n}",
+                        "description": d,
+                        "is_disabled": n in srv["disabled"],
+                    }
+                    for n, d in srv["tools"]
+                ]
+                if srv
+                else []
+            )
+            return
         if path.startswith("/api/"):
             self._send_json({})
             return
@@ -2498,6 +2580,32 @@ class PreviewHandler(BaseHTTPRequestHandler):
     def do_POST(self):
         parsed = urlparse(self.path)
         path = parsed.path
+        if path == "/api/mcp/servers":
+            f = _form_fields(self._read_body(), self.headers.get("Content-Type", ""))
+            srv = {
+                "id": f"{len(_MCP_SERVERS) + 1:08x}",
+                "name": f.get("name", ""),
+                "transport": f.get("transport", "stdio"),
+                "command": f.get("command"),
+                "args": json.loads(f.get("args") or "[]"),
+                "env": json.loads(f.get("env") or "{}"),
+                "url": f.get("url"),
+                "is_enabled": True,
+                "disabled": [],
+                "tools": [
+                    ("list_targets", "List analysis targets known to this server."),
+                    ("analyze", "Run an analysis on a target and return findings."),
+                ],
+            }
+            _MCP_SERVERS.append(srv)
+            st = _mcp_status(srv)
+            self._send_json({**st, "connected": st["status"] == "connected"})
+            return
+        if path.startswith("/api/mcp/servers/") and path.endswith("/reconnect"):
+            srv = _mcp_find(path)
+            st = _mcp_status(srv) if srv else {"status": "disconnected", "tool_count": 0}
+            self._send_json({**st, "connected": st["status"] == "connected"})
+            return
         if path == "/api/ui/data":
             # Stands in for routes/ui_routes.py: resolves the parameters against
             # the skill example's declared source and returns made-up months.
@@ -2742,7 +2850,17 @@ class PreviewHandler(BaseHTTPRequestHandler):
 
     def do_PATCH(self):
         body = self._read_body()
-        if urlparse(self.path).path == "/api/artifacts":
+        path = urlparse(self.path).path
+        if path.startswith("/api/mcp/servers/"):
+            srv = _mcp_find(path)
+            if srv and path.endswith("/tools"):
+                srv["disabled"] = list(json.loads(body or b"{}").get("disabled", []))
+            elif srv:
+                fields = _form_fields(body, self.headers.get("Content-Type", ""))
+                srv["is_enabled"] = fields.get("is_enabled", "true").lower() == "true"
+            self._send_json({"ok": True})
+            return
+        if path == "/api/artifacts":
             req = json.loads(body or b"{}")
             for row in _LIBRARY:
                 if row["path"] != req.get("path"):
@@ -2764,6 +2882,9 @@ class PreviewHandler(BaseHTTPRequestHandler):
             target = parse_qs(parsed.query).get("path", [""])[0]
             _LIBRARY[:] = [r for r in _LIBRARY if r["path"] != target]
             _LIBRARY_DELETED.add(target.split(":", 1)[-1])
+        if path.startswith("/api/mcp/servers/"):
+            srv = _mcp_find(path)
+            _MCP_SERVERS[:] = [s for s in _MCP_SERVERS if s is not srv]
         if path.startswith("/api/shared-skills/"):
             name = path[len("/api/shared-skills/") :]
             _SHARED_SKILLS[:] = [s for s in _SHARED_SKILLS if s["name"] != name]

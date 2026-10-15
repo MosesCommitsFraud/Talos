@@ -836,7 +836,7 @@ function AssistantTurn({ turn, containsLast, outputs, sessionId }: { turn: UiMes
         {compacted && <CompactionMarker />}
         <TurnBody turn={turn} showThinking={showThinking} />
         {/* Live plan checklist as the agent ticks steps off via update_plan. */}
-        {planMsg && <PlanCard msg={planMsg} />}
+        {planMsg && <PlanCard msg={planMsg} live />}
         {/* Persistent "still running" indicator: shown for the whole streaming
             turn — through thinking, tool calls, and text deltas. */}
         {indicator}
@@ -889,6 +889,8 @@ function AssistantTurn({ turn, containsLast, outputs, sessionId }: { turn: UiMes
       {hasActivity && (
         <ActivityFold turn={turn} showThinking={showThinking} durationMs={durationMs} terminalId={terminalId} />
       )}
+      {/* The turn's plan, settled: every step where the work left it. */}
+      {planMsg && <PlanCard msg={planMsg} live={false} />}
       {/* Above the answer, not below it: that is where the stream put them, and
           a turn must not visibly rearrange itself the moment it settles. */}
       {widgets.map((widget, i) => (

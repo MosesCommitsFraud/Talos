@@ -1394,6 +1394,90 @@ export async function deleteTicket(id: string): Promise<void> {
   if (!res.ok) throw new Error(`Delete failed (HTTP ${res.status})`);
 }
 
+/* ── External MCP servers Talos connects to as a client ──
+   routes/mcp_routes.py. Admin-only: a stdio server runs an arbitrary command
+   inside the app container. Writes take form fields, the tool list takes JSON. */
+export type McpTransport = 'stdio' | 'sse' | 'http';
+
+export interface McpServerInfo {
+  id: string;
+  name: string;
+  transport: McpTransport;
+  command: string | null;
+  args: string[];
+  env: Record<string, string>;
+  url: string | null;
+  is_enabled: boolean;
+  status: string;
+  tool_count: number;
+  enabled_tool_count: number;
+  disabled_tool_count: number;
+  error?: string | null;
+  auth_url?: string | null;
+  has_oauth?: boolean;
+  needs_oauth?: boolean;
+}
+
+export interface McpServerTool {
+  name: string;
+  qualified_name: string;
+  description: string;
+  is_disabled: boolean;
+}
+
+export interface McpServerInput {
+  name: string;
+  transport: McpTransport;
+  command?: string;
+  args?: string[];
+  env?: Record<string, string>;
+  url?: string;
+}
+
+async function sendForm<T = Record<string, unknown>>(url: string, fields: Record<string, string>, method = 'POST'): Promise<T> {
+  const fd = new FormData();
+  for (const [k, v] of Object.entries(fields)) fd.set(k, v);
+  const res = await fetch(url, { method, body: fd, credentials: 'same-origin' });
+  if (res.status === 401) notifyUnauthenticated();
+  if (!res.ok) {
+    let detail = `HTTP ${res.status}`;
+    try { const e = await res.json(); detail = e.detail || e.error || detail; } catch { /* noop */ }
+    throw new Error(detail);
+  }
+  return res.json().catch(() => ({}) as T);
+}
+
+export const fetchMcpServers = () => getJSON<McpServerInfo[]>('/api/mcp/servers');
+
+export const addMcpServer = (s: McpServerInput) => {
+  const fields: Record<string, string> = {
+    name: s.name,
+    transport: s.transport,
+    args: JSON.stringify(s.args ?? []),
+    env: JSON.stringify(s.env ?? {}),
+  };
+  if (s.command) fields.command = s.command;
+  if (s.url) fields.url = s.url;
+  return sendForm<{ id: string; connected: boolean; status: string; tool_count: number; error?: string | null }>(
+    '/api/mcp/servers', fields);
+};
+
+export const setMcpServerEnabled = (id: string, enabled: boolean) =>
+  sendForm(`/api/mcp/servers/${encodeURIComponent(id)}`, { is_enabled: String(enabled) }, 'PATCH');
+
+export const reconnectMcpServer = (id: string) =>
+  postJSON<{ connected: boolean; status: string; tool_count: number; error?: string | null }>(
+    `/api/mcp/servers/${encodeURIComponent(id)}/reconnect`);
+
+export const deleteMcpServer = (id: string) =>
+  postJSON(`/api/mcp/servers/${encodeURIComponent(id)}`, undefined, 'DELETE');
+
+export const fetchMcpServerTools = (id: string) =>
+  getJSON<McpServerTool[]>(`/api/mcp/servers/${encodeURIComponent(id)}/tools`);
+
+export const setMcpDisabledTools = (id: string, disabled: string[]) =>
+  postJSON(`/api/mcp/servers/${encodeURIComponent(id)}/tools`, { disabled }, 'PATCH');
+
 /* ── System: backup + danger zone ── */
 export const importData = (data: unknown) => postJSON<{ ok?: boolean; message?: string }>('/api/import', data);
 export const wipeData = (kind: string) => postJSON<{ ok?: boolean;[key: string]: unknown }>(`/api/admin/wipe/${kind}`, undefined, 'DELETE');

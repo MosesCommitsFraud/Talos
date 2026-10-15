@@ -1296,13 +1296,13 @@ FUNCTION_TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "update_plan",
-            "description": "Show the user a progress checklist for a multi-step task and keep it current as you work: call it again as soon as a step is done (alongside your next tool calls), not only at the end. Pass the complete markdown checklist with completed steps marked - [x].",
+            "description": "Show the user a live progress checklist under your reply. Whether to use it is your call, like ask_user: worth it when the request takes several distinct steps of real work (roughly three or more, e.g. investigate, change several files, verify), noise for a question or anything one or two tool calls settle. Open with it in the same round as your first tool call; then call it again as soon as a step is done, alongside the next step's tool calls, not in a batch at the end. Steps are short imperative phrases (at most ~7 words) in the user's language. Always pass the complete markdown checklist, completed steps marked - [x], open ones - [ ].",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "plan": {
                         "type": "string",
-                        "description": "The full updated markdown checklist.",
+                        "description": "The full updated markdown checklist, one `- [ ]` / `- [x]` line per step.",
                     }
                 },
                 "required": ["plan"],

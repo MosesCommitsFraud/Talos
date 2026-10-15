@@ -17,19 +17,22 @@ COPY mkdocs.yml ./
 COPY docs/ ./docs/
 RUN mkdocs build
 
+# ---- Stage 1c: Node runtime for stdio MCP servers ----
+# Debian's nodejs is too old for current MCP servers (REA needs >=22.19), so the
+# app image takes node/npm/npx from the official multi-arch Node 24 image
+# instead. glibc-based (not alpine) so the binary runs on python:3.12-slim.
+FROM node:24-bookworm-slim AS noderuntime
+
 # ---- Stage 2: the Talos app ----
 FROM python:3.12-slim
 
 # System deps for the Talos web/API container. Agent code execution happens in
 # the separate talos-sandbox container, not in this app container.
-# nodejs/npm are NOT just build tooling: src/builtin_mcp.py resolves `npx` at
-# runtime to launch stdio MCP servers, so they have to stay in the final image.
 # gosu lets the entrypoint drop privileges cleanly so signals still reach
 # uvicorn directly (no extra shell layer like `su`/`sudo` would add).
 #
 # The apt dance below exists because deb.debian.org is a Fastly CDN that resets
-# the connection when apt pipelines hundreds of small .debs at once — Debian's
-# `npm` package alone drags in ~650 node-* packages. Pipeline-Depth 0 serialises
+# the connection when apt pipelines many small .debs at once. Pipeline-Depth 0 serialises
 # the requests. Acquire::Retries does NOT rescue this on its own: it doesn't
 # cover the OpenSSL "connection reset by peer" error class, which is why a build
 # with Retries=5 already set still died on a single .deb. Hence the retry loop.
@@ -54,8 +57,6 @@ RUN set -eu; \
             curl \
             ffmpeg \
             git \
-            nodejs \
-            npm \
             gosu \
             libglib2.0-0 \
             libgl1 \
@@ -70,6 +71,14 @@ RUN set -eu; \
     done; \
     [ "$ok" = 1 ]; \
     rm -rf /var/lib/apt/lists/*
+
+# Node is NOT just build tooling: src/builtin_mcp.py and the admin-added MCP
+# servers (Settings → MCP connections) launch stdio servers via `npx` at runtime.
+COPY --from=noderuntime /usr/local/bin/node /usr/local/bin/node
+COPY --from=noderuntime /usr/local/lib/node_modules /usr/local/lib/node_modules
+RUN ln -s ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
+    && ln -s ../lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx \
+    && node --version && npm --version
 
 # MSSQL connectivity uses the pymssql / FreeTDS stack (see _build_external_sql_url:
 # `mssql+pymssql://`). The pinned pymssql wheel bundles FreeTDS statically, so no

@@ -120,6 +120,18 @@ function pendingQuestionFromMetadata(metadata: Record<string, unknown> | undefin
   return undefined;
 }
 
+/** The last `update_plan` checklist of a persisted turn, from its tool events. */
+function planFromMetadata(metadata: Record<string, unknown> | undefined): string | undefined {
+  const raw = metadata?.tool_events;
+  if (!Array.isArray(raw)) return undefined;
+  for (let i = raw.length - 1; i >= 0; i -= 1) {
+    const ev = raw[i] as Record<string, unknown> | null;
+    const plan = (ev?.plan_update as { plan?: unknown } | undefined)?.plan;
+    if (typeof plan === 'string' && plan.trim()) return plan;
+  }
+  return undefined;
+}
+
 /** Live runtime for one session, kept in the store keyed by session id so it
  *  survives switching chats. A turn that is mid-flight keeps streaming into its
  *  own runtime even while a different session (or a fresh draft) is on screen —
@@ -496,6 +508,7 @@ export function coldLoadMessage(m: HistoryMessage, sessionId: string): UiMessage
   const citations = citationsFromMetadata(m.metadata);
   const tools = toolCallsFromMetadata(m.metadata);
   const pendingQuestion = pendingQuestionFromMetadata(m.metadata);
+  const plan = planFromMetadata(m.metadata);
   const roundTexts = m.metadata?.round_texts;
 
   // Single-round / no-tool replies don't persist round_texts — keep the flat
@@ -513,6 +526,7 @@ export function coldLoadMessage(m: HistoryMessage, sessionId: string): UiMessage
       sources,
       citations,
       pendingQuestion,
+      plan,
     }];
   }
 
@@ -538,6 +552,7 @@ export function coldLoadMessage(m: HistoryMessage, sessionId: string): UiMessage
       sources: terminal ? sources : undefined,
       citations: terminal ? citations : undefined,
       pendingQuestion: terminal ? pendingQuestion : undefined,
+      plan: terminal ? plan : undefined,
     };
   });
 }
@@ -756,11 +771,6 @@ export const useChat = create<ChatState>((set, get) => {
     // thinking block and tool rows), so this tracks the bubble currently
     // receiving deltas rather than closing over aiMsg.
     let aiId = aiMsg.id;
-    // The first plan of a turn opens the plan pane once, so the checklist sits
-    // beside the chat while the work runs; closing it then sticks for the turn.
-    // When the turn is over the pane closes again (see `finally`) — the plan
-    // stays one click away on the dock's plan button.
-    let planShown = false;
     const patchAi = (patch: Partial<UiMessage> | ((m: UiMessage) => Partial<UiMessage>)) => {
       writeRuntime(sid, (rt) => ({
         messages: rt.messages.map((m) =>
@@ -1064,8 +1074,6 @@ export const useChat = create<ChatState>((set, get) => {
               const plan = (ev.data as { plan?: string } | undefined)?.plan;
               if (typeof plan === 'string' && plan.trim()) {
                 patchAi({ plan });
-                if (!planShown && get().sessionId === sid) useUi.getState().setPlanPanelOpen(true);
-                planShown = true;
               }
               break;
             }
@@ -1101,9 +1109,6 @@ export const useChat = create<ChatState>((set, get) => {
       }
     } finally {
       smoother.flush();
-      // A dropped connection is not the end of the turn: the run carries on
-      // server-side and a resume picks it up, plan pane and all.
-      if (planShown && !dropped && get().sessionId === sid) useUi.getState().setPlanPanelOpen(false);
       // Stamp the turn's wall-clock onto the terminal bubble before the start
       // time is cleared, so the settled "Worked for Xs" fold has a duration.
       const startedAt = get().runtimes[sid]?.turnStartedAt;

@@ -15,6 +15,7 @@ import {
   NetworkIcon,
   PaletteIcon,
   PlugIcon,
+  PlugZapIcon,
   PlusIcon,
   ServerIcon,
   SettingsIcon,
@@ -91,10 +92,11 @@ import { SearchInput } from './ui/search';
 import { useAuth } from './auth/AuthGate';
 import { UsersPanel } from './settings/UsersPanel';
 import { UsagePanel } from './settings/UsagePanel';
+import { McpServersPanel } from './settings/McpServersPanel';
 
 export type Panel =
   | 'appearance' | 'personalization' | 'shortcuts' | 'account' | 'usage'
-  | 'models' | 'ai' | 'assistants' | 'integrations' | 'web' | 'mcp' | 'tools' | 'skills'
+  | 'models' | 'ai' | 'assistants' | 'integrations' | 'web' | 'mcp' | 'mcpServers' | 'tools' | 'skills'
   | 'rag' | 'users' | 'tickets' | 'system';
 
 /* ── Shared layout (Claude settings design) ──
@@ -2154,6 +2156,7 @@ export function SettingsDialog({
     { id: 'assistants', label: t('settings.nav.assistants'), icon: <PlugIcon /> },
     { id: 'integrations', label: t('settings.nav.integrations'), icon: <Link2Icon /> },
     { id: 'web', label: t('settings.nav.web'), icon: <GlobeIcon /> },
+    { id: 'mcpServers', label: t('settings.nav.mcpServers'), icon: <PlugZapIcon /> },
     { id: 'mcp', label: t('settings.nav.mcp'), icon: <NetworkIcon /> },
     { id: 'tools', label: t('settings.nav.tools'), icon: <WrenchIcon /> },
     { id: 'skills', label: t('settings.nav.skills'), icon: <FileTextIcon /> },
@@ -2300,6 +2303,7 @@ export function SettingsDialog({
               {panel === 'integrations' && <IntegrationsPanel />}
               {panel === 'web' && <WebPanel />}
               {panel === 'mcp' && <McpPanel />}
+              {panel === 'mcpServers' && <McpServersPanel />}
               {panel === 'tools' && <ToolsPanel />}
               {panel === 'users' && <UsersPanel currentUser={auth?.username} />}
               {panel === 'system' && <SystemPanel />}
