@@ -33,9 +33,12 @@ export interface UiMessage {
    *  when streaming ends. Drives the settled "Worked for Xs" fold (t3code style);
    *  turns loaded cold from history fall back to summed metrics.response_time. */
   turnElapsedMs?: number;
-  /** An `ask_user` tool call ended the turn with a question — rendered as an
-   *  interactive card. Free-text when `options` is empty, else multiple-choice. */
-  pendingQuestion?: { question: string; options: { label: string; description?: string }[]; multi: boolean };
+  /** An `ask_user` tool call ended the turn with 1-4 questions — rendered as
+   *  an interactive card docked above the composer. */
+  pendingQuestion?: { questions: AskQuestion[] };
+  /** This user message answered an `ask_user` card — rendered as the
+   *  question/answer summary instead of a plain bubble. */
+  askAnswers?: AskAnswer[];
   /** Latest `update_plan` checklist (markdown) emitted during this turn. */
   plan?: string;
   /** Set once the user answers a pendingQuestion, so the card goes inert (a
@@ -48,6 +51,73 @@ export interface UiMessage {
    *  their place in the stream; the matching tool call links back via
    *  `uiDraftId` once it has run. */
   uiDrafts?: UiDraft[];
+}
+
+/** One question of an `ask_user` card. Free-text when `options` is empty,
+ *  else single- or multiple-choice (both with an "Other" free-text row). */
+export interface AskQuestion {
+  question: string;
+  header?: string;
+  options: { label: string; description?: string }[];
+  multi: boolean;
+}
+
+export interface AskAnswer {
+  question: string;
+  /** Empty when the user skipped the question. */
+  answer: string;
+}
+
+/** Normalise an `ask_user` payload (live SSE frame or persisted tool event).
+ *  Accepts both the `questions` list and the older single-question shape. */
+export function asAskQuestions(raw: unknown): AskQuestion[] {
+  if (!raw || typeof raw !== 'object') return [];
+  const r = raw as Record<string, unknown>;
+  const list = Array.isArray(r.questions) && r.questions.length ? r.questions : [r];
+  const out: AskQuestion[] = [];
+  for (const item of list) {
+    if (!item || typeof item !== 'object') continue;
+    const q = item as Record<string, unknown>;
+    const question = typeof q.question === 'string' ? q.question.trim() : '';
+    if (!question) continue;
+    const options = (Array.isArray(q.options) ? q.options : [])
+      .filter((o): o is Record<string, unknown> => !!o && typeof o === 'object' && typeof (o as { label?: unknown }).label === 'string')
+      .map((o) => ({ label: String(o.label), description: typeof o.description === 'string' && o.description ? o.description : undefined }));
+    out.push({ question, header: typeof q.header === 'string' && q.header ? q.header : undefined, options, multi: !!q.multi });
+  }
+  return out;
+}
+
+function askAnswersFromMetadata(metadata: Record<string, unknown> | undefined): AskAnswer[] | undefined {
+  const raw = metadata?.ask_answers;
+  if (!Array.isArray(raw)) return undefined;
+  const pairs = raw
+    .filter((p): p is Record<string, unknown> => !!p && typeof p === 'object' && typeof (p as { question?: unknown }).question === 'string')
+    .map((p) => ({ question: String(p.question), answer: typeof p.answer === 'string' ? p.answer : '' }));
+  return pairs.length ? pairs : undefined;
+}
+
+/** The backend also writes the asked questions into the turn's text, so the
+ *  model sees them on replay. The card shows them now, so drop that trailing
+ *  copy from what the bubble displays. */
+function withoutAskedText(content: string, questions: AskQuestion[]): string {
+  const tail = questions.map((q) => q.question).join('\n\n');
+  const body = content.trimEnd();
+  return tail && body.endsWith(tail) ? body.slice(0, -tail.length).trimEnd() : content;
+}
+
+/** The question card a persisted turn ended on, from its ask_user tool event. */
+function pendingQuestionFromMetadata(metadata: Record<string, unknown> | undefined): UiMessage['pendingQuestion'] {
+  const raw = metadata?.tool_events;
+  if (!Array.isArray(raw)) return undefined;
+  for (let i = raw.length - 1; i >= 0; i -= 1) {
+    const ev = raw[i] as Record<string, unknown> | null;
+    if (ev && typeof ev === 'object' && ev.ask_user) {
+      const questions = asAskQuestions(ev.ask_user);
+      if (questions.length) return { questions };
+    }
+  }
+  return undefined;
 }
 
 /** Live runtime for one session, kept in the store keyed by session id so it
@@ -100,7 +170,7 @@ interface ChatState {
   setPendingModel: (m: ChatState['pendingModel']) => void;
   newChat: () => void;
   openSession: (id: string) => Promise<void>;
-  send: (text: string, opts?: { attachments?: Attachment[]; artifactSelection?: ArtifactSelection; onSessionCreated?: (id: string) => void; goalIteration?: boolean; targetSessionId?: string; resume?: boolean; resumeElapsedMs?: number | null }) => Promise<void>;
+  send: (text: string, opts?: { attachments?: Attachment[]; artifactSelection?: ArtifactSelection; askAnswers?: AskAnswer[]; onSessionCreated?: (id: string) => void; goalIteration?: boolean; targetSessionId?: string; resume?: boolean; resumeElapsedMs?: number | null }) => Promise<void>;
   /** Reattach to a turn that is still running server-side for `id` (after a
    *  page reload). Loads the session's history first when we have none.
    *  `elapsedMs` (how long the turn has already run) backdates the working
@@ -135,6 +205,9 @@ export const selectIsStreaming = (id: string | null | undefined) => (s: ChatStat
 export const selectPendingQuestion = (s: ChatState): UiMessage | null => {
   for (let i = s.messages.length - 1; i >= 0; i -= 1) {
     const m = s.messages[i];
+    // A later user message answered (or moved past) any earlier question —
+    // that's also how a reopened chat knows its old cards are settled.
+    if (m.role === 'user') return null;
     if (m.role === 'assistant' && m.pendingQuestion && !m.answered) return m;
   }
   return null;
@@ -413,6 +486,7 @@ export function coldLoadMessage(m: HistoryMessage, sessionId: string): UiMessage
       content: displayUserContent(m.content),
       attachments: attachmentsFromMetadata(m.metadata),
       artifactSelection: artifactSelectionFromMetadata(m.metadata, sessionId),
+      askAnswers: askAnswersFromMetadata(m.metadata),
     }];
   }
 
@@ -421,6 +495,7 @@ export function coldLoadMessage(m: HistoryMessage, sessionId: string): UiMessage
   const sources = ragSourcesFromMetadata(m.metadata);
   const citations = citationsFromMetadata(m.metadata);
   const tools = toolCallsFromMetadata(m.metadata);
+  const pendingQuestion = pendingQuestionFromMetadata(m.metadata);
   const roundTexts = m.metadata?.round_texts;
 
   // Single-round / no-tool replies don't persist round_texts — keep the flat
@@ -431,12 +506,13 @@ export function coldLoadMessage(m: HistoryMessage, sessionId: string): UiMessage
       dbId,
       role: 'assistant',
       createdAt,
-      content: m.content,
+      content: pendingQuestion ? withoutAskedText(m.content, pendingQuestion.questions) : m.content,
       thinking: thinkingFromMetadata(m.metadata),
       metrics,
       tools,
       sources,
       citations,
+      pendingQuestion,
     }];
   }
 
@@ -455,12 +531,13 @@ export function coldLoadMessage(m: HistoryMessage, sessionId: string): UiMessage
       dbId: terminal ? dbId : undefined,
       role: 'assistant' as const,
       createdAt,
-      content: round.content,
+      content: terminal && pendingQuestion ? withoutAskedText(round.content, pendingQuestion.questions) : round.content,
       thinking: round.thinking,
       tools: roundTools?.length ? roundTools : undefined,
       metrics: terminal ? metrics : undefined,
       sources: terminal ? sources : undefined,
       citations: terminal ? citations : undefined,
+      pendingQuestion: terminal ? pendingQuestion : undefined,
     };
   });
 }
@@ -644,7 +721,8 @@ export const useChat = create<ChatState>((set, get) => {
     // screen to every turn, and the composer showed a selection chip for a
     // selection the user never made.
     const artifactSelection = opts?.artifactSelection;
-    const userMsg: UiMessage = { id: uid(), role: 'user', content: text, attachments, artifactSelection, createdAt: Date.now() };
+    const askAnswers = opts?.askAnswers;
+    const userMsg: UiMessage = { id: uid(), role: 'user', content: text, attachments, artifactSelection, askAnswers, createdAt: Date.now() };
     const aiMsg: UiMessage = { id: uid(), role: 'assistant', content: '', streaming: true, createdAt: Date.now() };
     const abort = new AbortController();
     // The connection ended without the run's end marker — the server-side run
@@ -765,6 +843,7 @@ export const useChat = create<ChatState>((set, get) => {
                 llmLanguage: prefs.llmLang,
                 activeDocId,
                 artifactSelection,
+                askAnswers,
                 attachments: attachments.map((file) => file.id),
               },
               signal: abort.signal,
@@ -974,15 +1053,9 @@ export const useChat = create<ChatState>((set, get) => {
             case 'ask_user': {
               // The agent posed a question and ended the turn — render the card
               // and flag the session as needing the user.
-              const q = ev.data as UiMessage['pendingQuestion'];
-              if (q && q.question) {
-                patchAi({
-                  pendingQuestion: {
-                    question: q.question,
-                    options: Array.isArray(q.options) ? q.options : [],
-                    multi: !!q.multi,
-                  },
-                });
+              const questions = asAskQuestions(ev.data);
+              if (questions.length) {
+                patchAi((m) => ({ pendingQuestion: { questions }, content: withoutAskedText(m.content, questions) }));
                 writeRuntime(sid, () => ({ awaitingInput: true }));
               }
               break;

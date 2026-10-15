@@ -1253,7 +1253,7 @@ FUNCTION_TOOL_SCHEMAS = [
                 "properties": {
                     "question": {
                         "type": "string",
-                        "description": "The question to ask. Be specific and self-contained.",
+                        "description": "The question to ask. Be specific and self-contained. Required unless `questions` is given.",
                     },
                     "options": {
                         "type": "array",
@@ -1277,8 +1277,18 @@ FUNCTION_TOOL_SCHEMAS = [
                         "type": "boolean",
                         "description": "Set true to let the user select multiple options instead of one. Default false. Ignored for open (free-text) questions.",
                     },
+                    "header": {
+                        "type": "string",
+                        "description": "Optional very short topic chip shown with the question (max ~12 chars), e.g. 'Ansatz', 'Zeitraum'.",
+                    },
+                    "questions": {
+                        "type": "array",
+                        "description": "Optional. Ask 2-4 related questions in ONE card (the user pages through them and answers all at once) instead of the top-level question/options/multi. Each item has the same fields: question, header, options, multi. Only bundle questions you genuinely need answered together.",
+                        "items": {"type": "object"},
+                        "maxItems": 4,
+                    },
                 },
-                "required": ["question"],
+                "required": [],
             },
         },
     },

@@ -1675,16 +1675,21 @@ async def execute_tool_block(
     if tool == "ask_user":
         import json as _json
 
-        question, options, multi = "", [], False
         raw = (content or "").strip()
         try:
             parsed = _json.loads(raw) if raw else {}
         except (ValueError, TypeError):
             parsed = {}
-        if isinstance(parsed, dict):
-            question = str(parsed.get("question", "")).strip()
-            multi = bool(parsed.get("multi") or parsed.get("multiSelect"))
-            for opt in parsed.get("options") or []:
+
+        def _one(q) -> dict | None:
+            """Normalise one question; None when it has no text."""
+            if not isinstance(q, dict):
+                return None
+            text = str(q.get("question", "")).strip()
+            if not text:
+                return None
+            opts = []
+            for opt in q.get("options") or []:
                 if isinstance(opt, dict):
                     label = str(opt.get("label", "")).strip()
                     descr = str(opt.get("description", "")).strip()
@@ -1693,33 +1698,56 @@ async def execute_tool_block(
                 else:
                     continue
                 if label:
-                    options.append({"label": label, "description": descr})
+                    opts.append({"label": label, "description": descr})
+            return {
+                "question": text,
+                "header": str(q.get("header", "")).strip()[:24],
+                "options": opts[:6],  # keep the choice list sane
+                "multi": bool(q.get("multi") or q.get("multiSelect")),
+            }
+
+        # Two call shapes: a single question at the top level (the original
+        # form), or `questions` — up to 4 asked together and paged through in
+        # one card. Both normalise to the list.
+        if isinstance(parsed, dict) and isinstance(parsed.get("questions"), list):
+            questions = [q for q in map(_one, parsed["questions"]) if q][:4]
+        elif isinstance(parsed, dict):
+            questions = [q for q in [_one(parsed)] if q]
         else:
-            question = raw
-        # Two valid shapes: an open question (no options -> free-text answer) or
-        # a multiple-choice question (2-6 options). Exactly one option is ambiguous.
-        if not question or len(options) == 1:
+            questions = [q for q in [_one({"question": raw})] if q]
+        # Each question is either open (no options -> free-text answer) or a
+        # choice between at least 2 options. Exactly one option is ambiguous.
+        if not questions or any(len(q["options"]) == 1 for q in questions):
             return "ask_user: invalid", {
                 "error": (
-                    "ask_user needs a non-empty `question`. Either omit `options` for an "
-                    "open question (the user types a free-text answer) or provide at least "
-                    "2 `options` (each an object with a `label`, optional `description`)."
+                    "ask_user needs a non-empty `question` (or a `questions` list of them). "
+                    "Each question either omits `options` for an open question (the user types "
+                    "a free-text answer) or provides at least 2 `options` (each an object with "
+                    "a `label`, optional `description`)."
                 ),
                 "exit_code": 1,
             }
-        options = options[:6]  # keep the choice list sane
-        desc = f"ask_user: {question[:80]}"
-        if options:
-            labels = ", ".join(o["label"] for o in options)
-            output = f"Asked the user: {question}\nOptions: {labels}\nAwaiting their selection."
-        else:
-            output = f"Asked the user: {question}\nAwaiting their typed answer."
+        desc = f"ask_user: {questions[0]['question'][:80]}"
+        lines = []
+        for q in questions:
+            lines.append(f"Asked the user: {q['question']}")
+            if q["options"]:
+                lines.append("Options: " + ", ".join(o["label"] for o in q["options"]))
+        lines.append("Awaiting their answer.")
+        first = questions[0]
         result = {
-            "ask_user": {"question": question, "options": options, "multi": multi},
-            "output": output,
+            # Top-level question/options/multi mirror the first question so older
+            # clients that only know the single-question shape keep working.
+            "ask_user": {
+                "question": first["question"],
+                "options": first["options"],
+                "multi": first["multi"],
+                "questions": questions,
+            },
+            "output": "\n".join(lines),
             "exit_code": 0,
         }
-        logger.info("Tool executed: %s (%d options, multi=%s)", desc, len(options), multi)
+        logger.info("Tool executed: %s (%d questions)", desc, len(questions))
         return desc, result
 
     # present_files: the agent names the turn's deliverable(s). Pure UI marker —

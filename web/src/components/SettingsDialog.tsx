@@ -27,7 +27,7 @@ import {
   WrenchIcon,
   XIcon,
 } from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   addModelEndpoint,
@@ -148,6 +148,28 @@ export function Row({ label, hint, children, stacked }: { label: React.ReactNode
   );
 }
 
+/** Measures the box of the element matching `selector` inside `container`, for
+ *  a highlight that slides between options. Re-measures when `key` changes and
+ *  whenever the container resizes (density, language or font changes). */
+function useActiveBox(container: HTMLElement | null, selector: string, key: unknown) {
+  const [box, setBox] = useState<{ left: number; top: number; width: number; height: number } | null>(null);
+  useLayoutEffect(() => {
+    if (!container) return;
+    const el = container.querySelector<HTMLElement>(selector);
+    const measure = () => {
+      setBox(el ? { left: el.offsetLeft, top: el.offsetTop, width: el.offsetWidth, height: el.offsetHeight } : null);
+    };
+    measure();
+    // A scroll list keeps its own size when its rows reflow, and the active
+    // row can move without resizing, so watch every row.
+    const ro = new ResizeObserver(measure);
+    ro.observe(container);
+    for (const child of Array.from(container.children)) ro.observe(child);
+    return () => ro.disconnect();
+  }, [container, selector, key]);
+  return box;
+}
+
 /** Claude-style segmented control: a pill track with the active option raised. */
 export function Segmented<T extends string>({ value, onChange, options, label }: {
   value: T;
@@ -155,8 +177,19 @@ export function Segmented<T extends string>({ value, onChange, options, label }:
   options: Array<{ value: T; label: React.ReactNode; title?: string }>;
   label?: string;
 }) {
+  // One raised pill slides under the active option instead of each button
+  // painting its own background, so switching reads as motion.
+  const [track, setTrack] = useState<HTMLDivElement | null>(null);
+  const pill = useActiveBox(track, '[aria-checked="true"]', `${value}|${options.length}`);
   return (
-    <div role="radiogroup" aria-label={label} className="inline-flex shrink-0 items-center gap-0.5 rounded-lg bg-muted/60 p-0.5">
+    <div ref={setTrack} role="radiogroup" aria-label={label} className="relative inline-flex shrink-0 items-center gap-0.5 rounded-lg bg-muted/60 p-0.5">
+      {pill && (
+        <span
+          aria-hidden
+          className="absolute top-0.5 bottom-0.5 rounded-md bg-background shadow-[0_0_0_1px_var(--border)] transition-[left,width] duration-250 ease-[cubic-bezier(0.34,1.25,0.64,1)] motion-reduce:transition-none"
+          style={{ left: pill.left, width: pill.width }}
+        />
+      )}
       {options.map((o) => (
         <button
           key={o.value}
@@ -167,10 +200,8 @@ export function Segmented<T extends string>({ value, onChange, options, label }:
           aria-label={o.title}
           onClick={() => onChange(o.value)}
           className={cn(
-            'flex h-7 min-w-8 items-center justify-center rounded-md px-2.5 text-[13px] transition-colors [&_svg]:size-4',
-            value === o.value
-              ? 'bg-background text-foreground shadow-[0_0_0_1px_var(--border)]'
-              : 'text-muted-foreground hover:text-foreground',
+            'relative flex h-7 min-w-8 items-center justify-center rounded-md px-2.5 text-[13px] transition-colors duration-200 [&_svg]:size-4 [&_svg]:transition-transform [&_svg]:duration-200 active:[&_svg]:scale-90',
+            value === o.value ? 'text-foreground' : 'text-muted-foreground hover:text-foreground',
           )}
         >
           {o.label}
@@ -2152,15 +2183,20 @@ export function SettingsDialog({
       setPanel(id);
     }
   };
-  const NavButton = ({ n }: { n: { id: Panel; label: string; icon: React.ReactNode } }) => (
+  // A plain render function, not a component: a component declared in here
+  // would remount every row on each render and detach the measured active row.
+  const navButton = (n: { id: Panel; label: string; icon: React.ReactNode }) => (
     <button
+      key={n.id}
       type="button"
       onClick={() => navClick(n.id)}
       title={n.label}
+      data-nav-id={n.id}
+      aria-current={panel === n.id ? 'page' : undefined}
       className={cn(
-        'flex h-8 w-full items-center gap-2.5 rounded-lg pr-4 pl-2.5 text-sm whitespace-nowrap transition-colors [&_svg]:size-4 [&_svg]:shrink-0',
+        'relative flex h-8 w-full items-center gap-2.5 rounded-lg pr-4 pl-2.5 text-sm whitespace-nowrap transition-colors duration-150 [&_svg]:size-4 [&_svg]:shrink-0 [&_svg]:transition-transform [&_svg]:duration-200 active:[&_svg]:scale-90',
         panel === n.id
-          ? 'bg-accent font-medium text-foreground [&_svg]:text-foreground'
+          ? 'font-medium text-foreground [&_svg]:text-foreground'
           : 'text-foreground/80 hover:bg-accent/60 hover:text-foreground [&_svg]:text-muted-foreground',
       )}
     >
@@ -2182,12 +2218,20 @@ export function SettingsDialog({
   const advancedItems = auth?.is_admin && scope !== 'user' ? advancedNav.filter(matches) : [];
   const noResults = userItems.length === 0 && adminItems.length === 0 && advancedItems.length === 0;
 
+  // The active-row highlight is one element that slides between rows. It is
+  // re-measured whenever the list can reflow (filtering, scope, reopening).
+  // The list is held in state (callback ref) because the dialog portal mounts
+  // it a render after `open` flips, when a plain ref would still be empty.
+  const [navList, setNavList] = useState<HTMLDivElement | null>(null);
+  const navKey = [...userItems, ...adminItems, ...advancedItems].map((n) => n.id).join(',');
+  const navPill = useActiveBox(navList, `[data-nav-id="${panel}"]`, navKey);
+
   return (
     <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
       <DialogContent
         bare
         title={t('settings.title')}
-        className="h-[calc(100vh-4rem)] max-h-none w-[calc(100vw-4rem)] max-w-[1800px] rounded-xl"
+        className="h-[80vh] max-h-none min-h-[min(560px,calc(100vh-2rem))] w-[80vw] max-w-[1600px] min-w-[min(860px,calc(100vw-2rem))] rounded-xl"
       >
         <div className="flex min-h-0 flex-1">
           <nav className="flex w-max min-w-48 shrink-0 flex-col border-r bg-sidebar">
@@ -2199,23 +2243,30 @@ export function SettingsDialog({
                 aria-label={t('settings.searchPlaceholder')}
               />
             </div>
-            <div className="min-h-0 flex-1 space-y-px overflow-y-auto px-3 pb-3">
+            <div ref={setNavList}className="relative min-h-0 flex-1 space-y-px overflow-y-auto px-3 pb-3">
+              {navPill && (
+                <span
+                  aria-hidden
+                  className="pointer-events-none absolute right-3 left-3 rounded-lg bg-accent transition-[top] duration-250 ease-[cubic-bezier(0.34,1.2,0.64,1)] motion-reduce:transition-none"
+                  style={{ top: navPill.top, height: navPill.height }}
+                />
+              )}
               {userItems.length > 0 && (
                 <>
                   <GroupLabel>{t('settings.title')}</GroupLabel>
-                  {userItems.map((n) => <NavButton key={n.id} n={n} />)}
+                  {userItems.map(navButton)}
                 </>
               )}
               {adminItems.length > 0 && (
                 <>
                   <GroupLabel>{t('settings.admin')}</GroupLabel>
-                  {adminItems.map((n) => <NavButton key={n.id} n={n} />)}
+                  {adminItems.map(navButton)}
                 </>
               )}
               {advancedItems.length > 0 && (
                 <>
                   <GroupLabel>{t('settings.advanced')}</GroupLabel>
-                  {advancedItems.map((n) => <NavButton key={n.id} n={n} />)}
+                  {advancedItems.map(navButton)}
                 </>
               )}
               {noResults && (
@@ -2236,7 +2287,7 @@ export function SettingsDialog({
               <XIcon className="size-4" />
             </DialogClose>
             <div className="mt-14 mb-3 min-h-0 flex-1 overflow-y-auto overscroll-contain [scrollbar-gutter:stable]">
-            <div className="mx-auto max-w-[1100px] [&_.settings-row-hint]:hidden">
+            <div key={panel} className="settings-panel-in mx-auto max-w-[1100px] [&_.settings-row-hint]:hidden">
               {panel === 'appearance' && <AppearancePanel />}
               {panel === 'shortcuts' && <ShortcutsPanel />}
               {panel === 'personalization' && <PersonalizationPanel />}

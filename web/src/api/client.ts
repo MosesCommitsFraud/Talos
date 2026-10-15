@@ -1424,6 +1424,8 @@ export interface StreamFlags {
   /** Database-backed document currently selected in Preview. */
   activeDocId?: string;
   artifactSelection?: import('./types').ArtifactSelection;
+  /** Question/answer pairs when the message answers an ask_user card. */
+  askAnswers?: { question: string; answer: string }[];
 }
 
 /**
@@ -1454,6 +1456,7 @@ export async function streamChat(opts: {
   if (f.activeDocId) fd.set('active_doc_id', f.activeDocId);
   if (f.artifactSelection) fd.set('artifact_selection', JSON.stringify(f.artifactSelection));
   if (f.attachments?.length) fd.set('attachments', JSON.stringify(f.attachments));
+  if (f.askAnswers?.length) fd.set('ask_answers', JSON.stringify(f.askAnswers));
 
   const tzOffsetMin = -new Date().getTimezoneOffset();
   let tzName = '';

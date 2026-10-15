@@ -194,6 +194,13 @@ const de: typeof en = {
     chooseOne: 'Wähle eine Option',
     chooseMany: 'Alle Zutreffenden auswählen',
     answered: 'Beantwortet',
+    other: 'Andere',
+    skip: 'Überspringen',
+    next: 'Weiter',
+    prev: 'Zurück',
+    pageOf: '{{n}} von {{total}}',
+    noPreference: '(keine Präferenz)',
+    skipped: 'Übersprungen',
   },
   plan: {
     progress: '{{done}}/{{total}} erledigt',

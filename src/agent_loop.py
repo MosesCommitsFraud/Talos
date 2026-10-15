@@ -385,8 +385,9 @@ Use it when the work is slow AND the user does not need it inside this reply —
     "search_chats": "- ```search_chats``` — Search across all chat history. Use when user asks 'did we discuss X?' or 'find the conversation about Y'.",
     "ask_user": """\
 ```ask_user
-{"question": "...", "options": [{"label": "...", "description": "..."}], "multi": false}
+{"question": "...", "header": "...", "options": [{"label": "...", "description": "..."}], "multi": false}
 ```
+Several related questions at once: {"questions": [{"question": "...", "header": "...", "options": [...]}, ...]} (max 4, one card).
 Ask the user a multiple-choice question when the task is genuinely ambiguous and the answer changes what you do next (pick an approach, confirm an assumption, choose a target). 2-6 options. The user gets clickable buttons; calling this ENDS your turn and their choice comes back as your next message. Prefer sensible defaults — only ask when you truly can't proceed well without their input.
 **Offering a choice IS this tool.** The moment you decide to put a question to the user, it goes in an `ask_user` call — never written out in your prose. Ending a reply with "Was möchten Sie tun?" followed by a list, a row of bracketed choices like `[Option A · Option B · Option C]`, a numbered menu, or "sag mir welches" is the failure this rule exists to prevent: it LOOKS like buttons and does nothing. The user cannot click a sentence, so they have to retype an option you already knew — and you spent a turn to make them do it.
 So: either commit to a sensible default and carry on, or call `ask_user`. Those are the only two endings. Never a menu in text.""",
@@ -3798,7 +3799,9 @@ async def stream_agent_loop(
                 # text (once) so it persists and is replayed. The card shows the
                 # options only, so this is the single visible copy of the question.
                 _auq = result["ask_user"]
-                _auq_q = (_auq.get("question") or "").strip()
+                _auq_q = "\n\n".join(
+                    q["question"] for q in _auq.get("questions") or [] if q.get("question")
+                ) or (_auq.get("question") or "").strip()
                 if _auq_q and _auq_q not in full_response:
                     _auq_delta = ("\n\n" if full_response.strip() else "") + _auq_q
                     full_response += _auq_delta
@@ -4025,6 +4028,10 @@ async def stream_agent_loop(
             # reload, exactly as the live frame above drew them.
             if result.get("presented_files"):
                 tool_event["presented_files"] = result["presented_files"]
+            # The question card: persisted so a reopened chat still shows an
+            # unanswered question, and can pair the answer with what was asked.
+            if result.get("ask_user"):
+                tool_event["ask_user"] = result["ask_user"]
             tool_events.append(tool_event)
             if block.tool_type in _VERIFIER_EFFECTFUL_TOOLS:
                 _effectful_used = True

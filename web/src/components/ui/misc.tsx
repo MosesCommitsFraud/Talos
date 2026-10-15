@@ -28,12 +28,14 @@ export function Switch({ className, ...props }: SwitchPrimitive.SwitchProps) {
   return (
     <SwitchPrimitive.Root
       className={cn(
-        'peer inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full border border-transparent transition-colors data-[state=checked]:bg-primary data-[state=unchecked]:bg-foreground/20',
+        'group/switch peer inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full border border-transparent transition-colors duration-200 ease-out data-[state=checked]:bg-primary data-[state=unchecked]:bg-foreground/20 disabled:cursor-not-allowed disabled:opacity-50',
         className,
       )}
       {...props}
     >
-      <SwitchPrimitive.Thumb className="block size-4 translate-x-0.5 rounded-full bg-white shadow-sm transition-transform data-[state=checked]:translate-x-[18px]" />
+      {/* The thumb slides with a slight overshoot and stretches while pressed,
+          anchored to the side it will leave from. */}
+      <SwitchPrimitive.Thumb className="block h-4 w-4 translate-x-0.5 rounded-full bg-white shadow-sm transition-[transform,width] duration-250 ease-[cubic-bezier(0.34,1.4,0.64,1)] group-active/switch:w-5 data-[state=checked]:translate-x-[18px] data-[state=checked]:group-active/switch:translate-x-[14px] motion-reduce:transition-none" />
     </SwitchPrimitive.Root>
   );
 }

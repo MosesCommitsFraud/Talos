@@ -653,7 +653,61 @@ def _history_for(session_id: str) -> list[dict]:
     return _HISTORY[session_id]
 
 
-def _record_turn(session_id: str, message: str) -> None:
+# An ask_user card with three questions (multi-select, single choice with a
+# header chip, free text), so the preview exercises the paged question card.
+_MOCK_ASK = {
+    "questions": [
+        {
+            "question": "Welche Features sollen rein?",
+            "header": "Features",
+            "multi": True,
+            "options": [
+                {"label": "Dark Mode", "description": "Eigenes Farbschema für dunkle Umgebungen."},
+                {"label": "CSV-Export", "description": "Tabellen als CSV herunterladen."},
+                {"label": "Tastenkürzel", "description": "Häufige Aktionen per Tastatur."},
+            ],
+        },
+        {
+            "question": "Welcher Zeitraum soll ausgewertet werden?",
+            "header": "Zeitraum",
+            "options": [
+                {"label": "Letzte 12 Monate (empfohlen)", "description": "Genug Daten für Saisonalität."},
+                {"label": "Aktuelles Quartal", "description": "Schneller, aber ohne Vorjahresvergleich."},
+            ],
+        },
+        {"question": "Gibt es sonst noch etwas, das ich wissen sollte?"},
+    ]
+}
+
+
+def _ask_stream() -> bytes:
+    first = _MOCK_ASK["questions"][0]
+    payload = {**_MOCK_ASK, "question": first["question"], "options": first["options"], "multi": True}
+    events: list[dict | str] = [
+        {"delta": "Bevor ich loslege, brauche ich ein paar Entscheidungen.\n\n"},
+        # The real loop also streams the questions as text (for replay).
+        {"delta": "\n\n".join(q["question"] for q in _MOCK_ASK["questions"])},
+        {"type": "tool_start", "tool": "ask_user", "command": json.dumps(_MOCK_ASK)},
+        {"type": "tool_output", "tool": "ask_user", "output": "Awaiting their answer.", "exit_code": 0},
+        {"type": "ask_user", "data": payload},
+        "[DONE]",
+    ]
+    return "".join(_sse(e) for e in events).encode("utf-8")
+
+
+def _record_ask_turn(session_id: str, message: str) -> None:
+    hist = _HISTORY.setdefault(session_id, [])
+    hist.append(_entry("user", message or "(empty)"))
+    asked = "\n\n".join(q["question"] for q in _MOCK_ASK["questions"])
+    entry = _entry("assistant", "Bevor ich loslege, brauche ich ein paar Entscheidungen.\n\n" + asked)
+    entry["metadata"]["tool_events"] = [
+        {"tool": "ask_user", "command": json.dumps(_MOCK_ASK), "output": "Awaiting their answer.",
+         "exit_code": 0, "ask_user": _MOCK_ASK}
+    ]
+    hist.append(entry)
+
+
+def _record_turn(session_id: str, message: str, ask_answers=None) -> None:
     """Append a sent turn (user + the two assistant rounds the stream emits) so a
     post-stream history fetch hands every message a _db_id — matching runtime
     length so the app reconciles them and shows edit/revert/delete."""
@@ -662,6 +716,8 @@ def _record_turn(session_id: str, message: str) -> None:
     # carries the seeded backlog.
     hist = _HISTORY.setdefault(session_id, [])
     hist.append(_entry("user", message or "(empty)"))
+    if ask_answers:
+        hist[-1]["metadata"]["ask_answers"] = ask_answers
     hist.append(
         _entry("assistant", "The computed highest gross value is **22.61** for item **B**.", 1)
     )
@@ -2538,7 +2594,15 @@ class PreviewHandler(BaseHTTPRequestHandler):
         if path == "/api/chat_stream":
             message = fields.get("message", [""])[0]
             session_id = fields.get("session", ["preview-session"])[0]
-            _record_turn(session_id, message)
+            if "frage" in message.lower():
+                _record_ask_turn(session_id, message)
+                self._send_event_stream(_ask_stream())
+                return
+            try:
+                ask_answers = json.loads(fields.get("ask_answers", [""])[0] or "null")
+            except ValueError:
+                ask_answers = None
+            _record_turn(session_id, message, ask_answers)
             if "subagent" in message.lower() or "delegate" in message.lower():
                 _start_mock_subagents(session_id)
                 self._send_event_stream(_delegate_stream())

@@ -64,6 +64,29 @@ _active_streams: Dict[str, dict] = {}
 _IMAGE_MODEL_PREFIXES = ("gpt-image", "dall-e", "chatgpt-image")
 
 
+def _parse_ask_answers(raw) -> Optional[list]:
+    """The question/answer pairs a message sends in reply to an ask_user card,
+    as `[{"question", "answer"}]`. Display-only metadata, so anything malformed
+    is dropped rather than failing the send."""
+    if not raw:
+        return None
+    try:
+        items = json.loads(str(raw))
+    except (TypeError, ValueError):
+        return None
+    if not isinstance(items, list):
+        return None
+    pairs = []
+    for item in items[:4]:
+        if not isinstance(item, dict):
+            continue
+        question = str(item.get("question") or "").strip()[:500]
+        answer = str(item.get("answer") or "").strip()[:2000]
+        if question:
+            pairs.append({"question": question, "answer": answer})
+    return pairs or None
+
+
 def _turn_wire_record(sess, sink) -> Optional[Dict[str, Any]]:
     """Package the agent loop's live view of this turn for verbatim replay,
     paired with the question as stored in the session history."""
@@ -551,6 +574,7 @@ def setup_chat_routes(
             except (TypeError, ValueError, json.JSONDecodeError) as exc:
                 raise HTTPException(400, f"Invalid artifact selection: {exc}")
         logger.info(f"[doc-inject] active_doc_id={active_doc_id!r}")
+        ask_answers = _parse_ask_answers(form_data.get("ask_answers"))
 
         try:
             # Attachment-only sends: skip the message-required check when the
@@ -715,6 +739,7 @@ def setup_chat_routes(
             reasoning=reasoning,
             llm_language=llm_language,
             artifact_selection=artifact_selection,
+            ask_answers=ask_answers,
         )
 
         # Auto-name the session once its first response is over. Scheduled now

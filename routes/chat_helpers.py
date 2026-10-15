@@ -382,6 +382,7 @@ def add_user_message(
     preprocessed: PreprocessedMessage,
     incognito: bool = False,
     artifact_selection: Optional[dict] = None,
+    ask_answers: Optional[list] = None,
 ):
     """Add user message to session history and update session name.
     In incognito mode, still add to in-memory history (for conversation context)
@@ -393,6 +394,10 @@ def add_user_message(
         user_meta["artifact_selection"] = {
             key: value for key, value in artifact_selection.items() if key != "visuals"
         }
+    if ask_answers:
+        # The message answers an ask_user card: keep the question/answer pairs
+        # so the chat renders them as the answer summary, not a plain bubble.
+        user_meta["ask_answers"] = ask_answers
     sess.add_message(ChatMessage("user", preprocessed.user_content, metadata=user_meta or None))
     if not incognito:
         chat_handler.update_session_name_if_needed(sess, preprocessed.text_for_context)
@@ -613,6 +618,7 @@ async def build_chat_context(
     reasoning: bool = True,
     llm_language: str | None = None,
     artifact_selection: Optional[dict] = None,
+    ask_answers: Optional[list] = None,
 ) -> ChatContext:
     """Build the full context (preface + messages) for an LLM call.
 
@@ -643,6 +649,7 @@ async def build_chat_context(
         preprocessed,
         incognito=incognito,
         artifact_selection=artifact_selection,
+        ask_answers=ask_answers,
     )
 
     # Resolve user prefs

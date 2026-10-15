@@ -29,6 +29,7 @@ import { staysInFold, WidgetView } from './widgets/registry';
 import { Collapse } from './ui/collapse';
 import { Tooltip } from './ui/misc';
 import { Button } from './ui/button';
+import { AskAnswers } from './AskUser';
 
 const formatWorkingElapsed = (startMs: number, nowMs: number) => formatDurationMs(nowMs - startMs);
 
@@ -1014,7 +1015,12 @@ export function Messages() {
       <div className="mx-auto flex w-full max-w-[800px] flex-col px-4 pb-6 pt-14">
         {blocks.map((block, index) =>
           block.kind === 'user' ? (
-            <div key={block.msg.id} className={`group ml-auto flex w-full max-w-[75%] flex-col items-end gap-0.5 ${index === 0 ? '' : 'mt-3'}`}>
+            // An answer to a question card reads as part of the assistant's flow
+            // (full width, left), not as a user bubble — as in Claude Code.
+            <div
+              key={block.msg.id}
+              className={`group flex w-full flex-col gap-0.5 ${block.msg.askAnswers ? 'items-start' : 'ml-auto max-w-[75%] items-end'} ${index === 0 ? '' : 'mt-3'}`}
+            >
               {editing === block.msg.id ? (
                 <EditBox msg={block.msg} onDone={() => setEditing(null)} />
               ) : (
@@ -1022,9 +1028,13 @@ export function Messages() {
                   {/* Attachments sit above the text, the way they were staged
                       in the composer. */}
                   <AttachmentList msg={block.msg} />
-                  <div className="rounded-lg rounded-br-sm bg-bubble px-3 py-1 text-[15px] leading-relaxed whitespace-pre-wrap text-strong">
-                    {block.msg.content}
-                  </div>
+                  {block.msg.askAnswers ? (
+                    <AskAnswers answers={block.msg.askAnswers} />
+                  ) : (
+                    <div className="rounded-lg rounded-br-sm bg-bubble px-3 py-1 text-[15px] leading-relaxed whitespace-pre-wrap text-strong">
+                      {block.msg.content}
+                    </div>
+                  )}
                   <ArtifactSelectionChip msg={block.msg} />
                   <div className="flex items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
                     {/* Time trails the icons, matching the assistant row. */}

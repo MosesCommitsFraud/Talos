@@ -191,6 +191,13 @@ const en = {
     chooseOne: 'Choose one',
     chooseMany: 'Select all that apply',
     answered: 'Answered',
+    other: 'Other',
+    skip: 'Skip',
+    next: 'Next',
+    prev: 'Previous',
+    pageOf: '{{n}} of {{total}}',
+    noPreference: '(no preference)',
+    skipped: 'Skipped',
   },
   plan: {
     progress: '{{done}}/{{total}} done',
