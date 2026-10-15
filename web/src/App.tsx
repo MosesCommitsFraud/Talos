@@ -79,17 +79,6 @@ export default function App() {
   useEffect(() => applyDensity(density), [density]);
   useEffect(() => applyLang(lang), [lang]);
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
-        e.preventDefault();
-        setPalette((v) => !v);
-      }
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, []);
-
   // The settings dialog is owned here, so surfaces that only want to jump to a
   // panel (the composer's Skills menu) ask for it by event instead of threading
   // a callback through.

@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { useTranslation } from 'react-i18next';
-import { CheckIcon, ChevronLeftIcon, ChevronRightIcon, CornerDownLeftIcon } from 'lucide-react';
+import { CheckIcon, ChevronLeftIcon, ChevronRightIcon } from 'lucide-react';
 import { selectPendingQuestion, useChat, type AskAnswer, type AskQuestion, type UiMessage } from '@/state/chat';
 import { Button } from './ui/button';
-import { Kbd, KbdGroup, isMac } from './ui/kbd';
+import { KeybindingPill } from './ui/kbd';
 import { cn } from '@/lib/utils';
 
 /** The active session's pending question, docked at composer width directly
@@ -50,6 +50,7 @@ export function AskUser({ msg }: { msg: UiMessage }) {
   const [drafts, setDrafts] = useState<Draft[]>(() => questions.map(emptyDraft));
   const [skipped, setSkipped] = useState<boolean[]>(() => questions.map(() => false));
   const textRef = useRef<HTMLTextAreaElement>(null);
+  const cardRef = useRef<HTMLDivElement>(null);
 
   const q = questions[page];
   const d = drafts[page] ?? emptyDraft();
@@ -60,9 +61,13 @@ export function AskUser({ msg }: { msg: UiMessage }) {
   const answer = q ? draftAnswer(q, d) : '';
 
   // The text box gets focus whenever it appears (free-text page, or "Other"
-  // just ticked), so the user can type straight away.
+  // just ticked), so the user can type straight away. Otherwise the card keeps
+  // it after a page change, or focus would drop to <body> along with the
+  // unmounted control and the 1-9 / Ctrl+Enter shortcuts would stop working.
+  // Focus held elsewhere (the user typing in the composer) is left alone.
   useEffect(() => {
     if (showText) textRef.current?.focus();
+    else if (!document.activeElement || document.activeElement === document.body) cardRef.current?.focus();
   }, [showText, page]);
 
   if (!q) return null;
@@ -124,6 +129,7 @@ export function AskUser({ msg }: { msg: UiMessage }) {
 
   return (
     <div
+      ref={cardRef}
       // biome-ignore lint/a11y/noNoninteractiveTabindex: keyboard shortcuts (1-9, Ctrl+Enter) need focus on the card
       tabIndex={0}
       onKeyDown={onKeyDown}
@@ -204,12 +210,7 @@ export function AskUser({ msg }: { msg: UiMessage }) {
         </Button>
         <Button size="sm" disabled={disabled || !answer} onClick={() => advance(false)}>
           {last ? t('askUser.submit') : t('askUser.next')}
-          <KbdGroup className="ml-0.5">
-            <Kbd className="bg-primary-foreground/15 text-primary-foreground">{isMac ? '⌘' : 'Ctrl'}</Kbd>
-            <Kbd className="bg-primary-foreground/15 text-primary-foreground">
-              <CornerDownLeftIcon />
-            </Kbd>
-          </KbdGroup>
+          <KeybindingPill value="mod+enter" className="bg-primary-foreground/20 text-primary-foreground" />
         </Button>
       </div>
     </div>

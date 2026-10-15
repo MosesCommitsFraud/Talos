@@ -44,6 +44,7 @@ import { cn, formatRelativeTime, timestampMs } from '@/lib/utils';
 import { anyTitlePending, isTitlePending, placeholderTitleText } from '@/lib/sessionTitle';
 import { Skeleton, Tooltip } from './ui/misc';
 import { KeybindingPill } from './ui/kbd';
+import { matchesBinding, useKeybinds } from '@/lib/keybinds';
 import { BrandImage } from './BrandImage';
 import {
   ContextMenu,
@@ -418,9 +419,12 @@ function NavRow({
   onClick,
   emphasis,
   active,
+  shortcut,
 }: {
   icon: React.ReactNode;
   label: string;
+  /** Keybinding revealed at the row's right edge on hover. */
+  shortcut?: string;
   anim?: 'lift' | 'shapes' | 'tilt';
   onClick?: () => void;
   /** The "New" row sits a shade brighter — it is the sidebar's primary action. */
@@ -434,7 +438,7 @@ function NavRow({
       onClick={onClick}
       aria-current={active ? 'page' : undefined}
       className={cn(
-        'nav-row my-px flex h-[30px] w-full items-center gap-2.5 rounded-lg px-2 text-sm transition-colors [&_svg]:size-[18px] [&_svg]:shrink-0',
+        'nav-row group/nav my-px flex h-[30px] w-full items-center gap-2.5 rounded-lg px-2 text-sm transition-colors [&_svg]:size-[18px] [&_svg]:shrink-0',
         emphasis || active
           ? 'bg-sidebar-active text-strong hover:bg-sidebar-active'
           : 'text-foreground/80 hover:bg-sidebar-accent hover:text-foreground',
@@ -442,6 +446,32 @@ function NavRow({
     >
       <span className={cn('flex size-5 shrink-0 items-center justify-center', anim && `nav-anim-${anim}`)}>{icon}</span>
       <span className="min-w-0 flex-1 truncate text-left">{label}</span>
+      {shortcut && (
+        <span className="opacity-0 transition-opacity group-hover/nav:opacity-100 group-focus-visible/nav:opacity-100">
+          <KeybindingPill value={shortcut} />
+        </span>
+      )}
+    </button>
+  );
+}
+
+/** The sidebar's search field. Not a real input: a click (or the search
+ *  shortcut, shown on hover) opens the command palette, which does the search. */
+function SearchBar({ onOpen, shortcut }: { onOpen: () => void; shortcut?: string }) {
+  const { t } = useTranslation();
+  return (
+    <button
+      type="button"
+      onClick={onOpen}
+      className="group/nav mb-1.5 flex h-[30px] w-full items-center gap-2 rounded-lg border border-input px-2.5 text-sm text-muted-foreground shadow-xs/5 outline-none transition-colors hover:bg-sidebar-accent hover:text-foreground focus-visible:border-ring dark:bg-input/20"
+    >
+      <SearchIcon className="size-4 shrink-0 opacity-80" />
+      <span className="min-w-0 flex-1 truncate text-left">{t('sidebar.search')}</span>
+      {shortcut && (
+        <span className="opacity-0 transition-opacity group-hover/nav:opacity-100 group-focus-visible/nav:opacity-100">
+          <KeybindingPill value={shortcut} />
+        </span>
+      )}
     </button>
   );
 }
@@ -530,6 +560,7 @@ function SidebarBody({ onOpenPalette, account, onOpenTicketDialog, preview }: Si
   const visibility = usePrefs((s) => s.visibility);
   const storedProjects = usePrefs((s) => s.projects);
   const toggleSidebar = usePrefs((s) => s.toggleSidebar);
+  const keybinds = useKeybinds();
 
   const sorter = (a: Session, b: Session) => {
     if (sortMode === 'newest') return timestampMs(b.created_at) - timestampMs(a.created_at);
@@ -574,10 +605,12 @@ function SidebarBody({ onOpenPalette, account, onOpenTicketDialog, preview }: Si
       {/* Primary nav — each row below "New" opens its full-page view, and shows
           as selected while that view is the one on screen. */}
       <div className="px-2">
+        <SearchBar onOpen={onOpenPalette} shortcut={keybinds.search} />
         <NavRow
           emphasis
           icon={<PlusIcon />}
           label={t('sidebar.new')}
+          shortcut={keybinds.new_session}
           onClick={() => { newChat(); setView('chat'); }}
         />
         <NavRow
@@ -762,17 +795,7 @@ function SidebarBody({ onOpenPalette, account, onOpenTicketDialog, preview }: Si
               <BugIcon className="size-4" />
             </button>
           </Tooltip>
-          <Tooltip label={<span className="flex items-center gap-1.5">{t('sidebar.search')}<KeybindingPill value="mod+k" /></span>}>
-            <button
-              type="button"
-              onClick={onOpenPalette}
-              aria-label={t('sidebar.search')}
-              className="flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-foreground"
-            >
-              <SearchIcon className="size-4" />
-            </button>
-          </Tooltip>
-          <Tooltip label={<span className="flex items-center gap-1.5">{t('sidebar.collapseSidebar')}<KeybindingPill value="mod+b" /></span>}>
+          <Tooltip label={<span className="flex items-center gap-1.5">{t('sidebar.collapseSidebar')}<KeybindingPill value={keybinds.toggle_sidebar} /></span>}>
             <button
               type="button"
               onClick={toggleSidebar}
@@ -797,18 +820,31 @@ export function Sidebar(props: SidebarProps) {
   const collapsed = usePrefs((s) => s.sidebarCollapsed);
   const toggleSidebar = usePrefs((s) => s.toggleSidebar);
   const [peek, setPeek] = useState(false);
+  const keybinds = useKeybinds();
+  const newChat = useChat((s) => s.newChat);
+  const setView = useUi((s) => s.setView);
+  const { onOpenPalette } = props;
 
-  // Ctrl/⌘-B mirrors the footer toggle, matching the tooltip's hint.
+  // The sidebar's actions by keyboard, with the bindings from Settings →
+  // Shortcuts — the same ones the search field, "New" row and collapse
+  // tooltip show. Mounted while collapsed too, so they always work.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'b') {
+      if (matchesBinding(e, keybinds.toggle_sidebar)) {
         e.preventDefault();
         toggleSidebar();
+      } else if (matchesBinding(e, keybinds.search)) {
+        e.preventDefault();
+        onOpenPalette();
+      } else if (matchesBinding(e, keybinds.new_session)) {
+        e.preventDefault();
+        newChat();
+        setView('chat');
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [toggleSidebar]);
+  }, [keybinds.toggle_sidebar, keybinds.search, keybinds.new_session, toggleSidebar, onOpenPalette, newChat, setView]);
 
   useEffect(() => { if (!collapsed) setPeek(false); }, [collapsed]);
 
@@ -834,7 +870,7 @@ export function Sidebar(props: SidebarProps) {
             collapse button inside it. */}
         <Tooltip
           open={peek ? false : undefined}
-          label={<span className="flex items-center gap-1.5">{t('sidebar.expandSidebar')}<KeybindingPill value="mod+b" /></span>}
+          label={<span className="flex items-center gap-1.5">{t('sidebar.expandSidebar')}<KeybindingPill value={keybinds.toggle_sidebar} /></span>}
           side="right"
         >
           <button

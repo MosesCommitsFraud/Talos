@@ -80,12 +80,12 @@ function tokenLabel(part: string): string {
 }
 
 /** Renders a "ctrl+shift+k" style binding string as keycap pills. */
-export function KeybindingPill({ value }: { value: string }) {
+export function KeybindingPill({ value, className }: { value: string; className?: string }) {
   const parts = value.split('+').filter(Boolean);
   return (
     <KbdGroup className="bg-transparent p-0 shadow-none">
       {parts.map((part, i) => (
-        <Kbd key={`${part}-${i}`} className="min-w-6 justify-center px-1.5">
+        <Kbd key={`${part}-${i}`} className={cn('min-w-6 justify-center px-1.5', className)}>
           {tokenLabel(part)}
         </Kbd>
       ))}
