@@ -44,6 +44,7 @@ may call:
 | `rag:read` | `rag_query`, `rag_list_collections`, `rag_list_documents`, `rag_get_document` |
 | `skills:read` | `skills_list`, `skills_search`, `skills_get`, `skills_read_reference`, plus one `skill_<slug>` tool per published skill |
 | `web:read` | `web_search`, `web_fetch` |
+| `rag:update` | `update_rag` — never in the anonymous or browser-session defaults |
 
 Two token profiles cover the common cases: `mcp` grants the two knowledge
 scopes, `mcp_web` adds `web:read` on top. Web access is a separate scope on
@@ -92,7 +93,8 @@ above exist for.
 
 ## Tools
 
-Every tool is **read-only**. There is no ingest, no delete, no skill authoring.
+Every tool is **read-only**, except `update_rag` (below). There is no ingest,
+no delete, no skill authoring.
 An outward-facing endpoint held open by a long-lived bearer token is the wrong
 place to accept mutations, and skills in particular have a deliberate
 publish/audit review step (`routes/skills_routes.py`) that a write tool would
@@ -100,6 +102,13 @@ route around.
 
 The static catalogue is ten tools; the per-skill tools below are appended to it,
 so the exact list depends on the token's owner.
+
+### Re-index trigger (`rag:update`)
+
+- **`update_rag`** — lets an external caller start a refresh of the knowledge
+  base inside Talos with a single call (fire-and-forget; optional
+  `collection`, omit for all). **Placeholder:** the tool is listed and
+  scope-gated, but does not start anything yet.
 
 ### RAG (`rag:read`)
 

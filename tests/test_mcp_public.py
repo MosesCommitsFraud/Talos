@@ -17,6 +17,7 @@ RAG = mcp_public.SCOPE_RAG_READ
 SKILLS = mcp_public.SCOPE_SKILLS_READ
 WEB = mcp_public.SCOPE_WEB_READ
 SQL = mcp_public.SCOPE_SQL_READ
+RAG_UPDATE = mcp_public.SCOPE_RAG_UPDATE
 BOTH = {RAG, SKILLS}
 ALL = {RAG, SKILLS, WEB}
 
@@ -162,6 +163,27 @@ def test_scopes_match_the_mintable_token_scopes():
     assert ALL <= ALLOWED_SCOPES
     assert set(TOKEN_PROFILES["mcp"]) == {RAG, SKILLS}
     assert set(TOKEN_PROFILES["mcp_web"]) == ALL
+
+
+def test_update_rag_needs_its_own_scope():
+    """Triggering a re-index is not something a read token may do."""
+    empty = FakeSkills(index=[])
+    assert "update_rag" not in {t["name"] for t in mcp_public.list_tools(ALL | {SQL}, skills_manager=empty)}
+    assert {t["name"] for t in mcp_public.list_tools({RAG_UPDATE}, skills_manager=empty)} == {"update_rag"}
+
+    text, is_error = call("update_rag", {}, scopes=ALL)
+    assert is_error is True
+    assert "rag:update" in text
+
+    from routes.api_token_routes import ALLOWED_SCOPES
+
+    assert RAG_UPDATE in ALLOWED_SCOPES
+
+
+def test_update_rag_is_a_placeholder_for_now():
+    text, is_error = call("update_rag", {"collection": "handbook"}, scopes={RAG_UPDATE})
+    assert is_error is False
+    assert "not implemented" in text and "'handbook'" in text
 
 
 # ---------------------------------------------------------------------------

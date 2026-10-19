@@ -34,6 +34,9 @@ ALLOWED_SCOPES = {
     # the public web.
     "web:read",
     "sql:read",
+    # The one MCP tool that acts rather than reads: update_rag starts a
+    # re-index inside Talos. Never handed out by default.
+    "rag:update",
 }
 TOKEN_PROFILES = {
     "chat": ["chat"],

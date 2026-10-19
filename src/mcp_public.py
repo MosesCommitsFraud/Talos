@@ -13,8 +13,10 @@ plumbing lives in `routes/mcp_public_routes.py`; keeping the tools here means
 they stay unit-testable without a server, and a stdio wrapper could reuse them
 verbatim.
 
-Everything here is READ-ONLY. Nothing in this module writes to Qdrant, to the
-skills directory, or to the settings store: an outward-facing endpoint reached
+Everything here is READ-ONLY, with one planned exception: `update_rag`, which
+will let an external caller kick off a re-index inside Talos (currently a
+no-op placeholder, behind its own `rag:update` scope). Nothing in this module
+writes to Qdrant, to the skills directory, or to the settings store: an outward-facing endpoint reached
 with a long-lived bearer token is the wrong place to accept mutations, and the
 skills flow in particular has a deliberate publish/audit review step
 (routes/skills_routes.py) that a write tool would route around.
@@ -38,6 +40,10 @@ SCOPE_RAG_READ = "rag:read"
 SCOPE_SKILLS_READ = "skills:read"
 SCOPE_WEB_READ = "web:read"
 SCOPE_SQL_READ = "sql:read"
+# Triggers a re-index rather than reading anything, so it is its own scope:
+# never part of the anonymous or browser-session defaults, only minted on
+# purpose onto a token.
+SCOPE_RAG_UPDATE = "rag:update"
 
 # Per-tool output budget. Generous enough for a full SKILL.md, small enough
 # that a wide `rag_get_document` can't blow up the client's context window.
@@ -292,6 +298,27 @@ _TOOL_DEFS: List[Dict[str, Any]] = [
         },
     },
     {
+        "_scope": SCOPE_RAG_UPDATE,
+        "name": "update_rag",
+        "title": "Refresh the knowledge base",
+        "description": (
+            "Ask Talos to re-index its knowledge base from its document "
+            "sources. Fire-and-forget: the call only starts the process inside "
+            "Talos and returns straight away. Not implemented yet — the call is "
+            "accepted but nothing is started."
+        ),
+        "annotations": {"readOnlyHint": False, "destructiveHint": False, "idempotentHint": True},
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "collection": {
+                    "type": "string",
+                    "description": "Knowledge-base id to refresh. Omit for all of them.",
+                },
+            },
+        },
+    },
+    {
         "_scope": SCOPE_SKILLS_READ,
         "name": "skills_list",
         "title": "List available skills",
@@ -505,6 +532,20 @@ def scope_for_tool(name: str) -> Optional[str]:
 # ---------------------------------------------------------------------------
 # RAG tools
 # ---------------------------------------------------------------------------
+
+
+def _tool_update_rag(args: Dict[str, Any]) -> str:
+    """Placeholder for the remote re-index trigger.
+
+    Will hand off to a background ingest process in Talos and return at once;
+    for now it only acknowledges the call so clients can be wired up against
+    the final tool name and scope.
+    """
+    target = _collection_arg(args)
+    what = f"knowledge base {target!r}" if target else "all knowledge bases"
+    return (
+        f"update_rag is not implemented yet — no re-index of {what} was started."
+    )
 
 
 def _rag(base_id: Optional[str] = None):
@@ -1425,6 +1466,8 @@ def call_tool(
             return _truncate(_tool_rag_list_documents(args)), False
         if name == "rag_get_document":
             return _truncate(_tool_rag_get_document(args)), False
+        if name == "update_rag":
+            return _tool_update_rag(args), False
         if name == "skills_list":
             return _truncate(_tool_skills_list(args, owner, skills_manager)), False
         if name == "skills_search":
