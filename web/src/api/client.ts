@@ -898,6 +898,8 @@ export interface RagBase {
   error?: string;
   /** How many pipeline settings this base changes vs. the global defaults. */
   override_count?: number;
+  /** Who may retrieve from this base. Admins always may. */
+  access?: RagBaseAccess;
   /** Purpose-bound sub-indexes inside this base (see RagScope). */
   scopes?: RagScope[];
 }
@@ -931,9 +933,19 @@ export const createRagBase = (body: {
   id?: string;
 }) => postJSON<RagBase>('/api/rag/bases', body);
 
+export interface RagBaseAccess {
+  restricted: boolean;
+  users: string[];
+}
 export const updateRagBase = (
   id: string,
-  body: { name?: string; description?: string; language?: string; chat_enabled?: boolean },
+  body: {
+    name?: string;
+    description?: string;
+    language?: string;
+    chat_enabled?: boolean;
+    access?: RagBaseAccess;
+  },
 ) => postJSON<RagBase>(`/api/rag/bases/${encodeURIComponent(id)}`, body, 'PATCH');
 
 export async function deleteRagBase(id: string, dropData = true): Promise<void> {

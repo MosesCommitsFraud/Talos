@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   AlertTriangleIcon,
   DatabaseIcon,
+  LockIcon,
   PencilIcon,
   PlusIcon,
   SlidersHorizontalIcon,
@@ -13,6 +14,7 @@ import {
   createRagBase,
   deleteRagBase,
   fetchRagBases,
+  fetchUsers,
   updateRagBase,
   type RagBase,
 } from '@/api/client';
@@ -88,9 +90,76 @@ interface FormState {
   name: string;
   description: string;
   language: string;
+  restricted: boolean;
+  users: string[];
 }
 
-const EMPTY: FormState = { id: '', name: '', description: '', language: '' };
+const EMPTY: FormState = {
+  id: '',
+  name: '',
+  description: '',
+  language: '',
+  restricted: false,
+  users: [],
+};
+
+/** Who may retrieve from a base. Admins always can, so only regular accounts
+ *  are listed; a restricted base with nobody ticked is admin-only. */
+function AccessEditor({
+  restricted,
+  users,
+  onChange,
+}: {
+  restricted: boolean;
+  users: string[];
+  onChange: (restricted: boolean, users: string[]) => void;
+}) {
+  const { t } = useTranslation();
+  const accounts = useQuery({ queryKey: ['users'], queryFn: fetchUsers });
+  const regular = (accounts.data ?? []).filter((u) => !u.is_admin);
+  const toggle = (name: string) =>
+    onChange(
+      restricted,
+      users.includes(name) ? users.filter((u) => u !== name) : [...users, name],
+    );
+  return (
+    <div className="space-y-2">
+      <span className="text-[13px] font-semibold">{t('rag.access.title')}</span>
+      <Select
+        className="w-full text-sm"
+        value={restricted ? 'restricted' : 'all'}
+        onChange={(v) => onChange(v === 'restricted', users)}
+        options={[
+          { value: 'all', label: t('rag.access.all') },
+          { value: 'restricted', label: t('rag.access.restricted') },
+        ]}
+      />
+      {restricted && (
+        <div className="space-y-1.5 rounded-md border border-border/60 p-2.5">
+          <p className="text-xs text-muted-foreground/80">{t('rag.access.hint')}</p>
+          {accounts.isLoading ? (
+            <p className="text-xs text-muted-foreground">{t('common.loading', 'Loading…')}</p>
+          ) : regular.length === 0 ? (
+            <p className="text-xs text-muted-foreground">{t('rag.access.noUsers')}</p>
+          ) : (
+            <div className="grid max-h-44 gap-1 overflow-y-auto sm:grid-cols-2">
+              {regular.map((u) => (
+                <label key={u.username} className="flex items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={users.includes(u.username.toLowerCase())}
+                    onChange={() => toggle(u.username.toLowerCase())}
+                  />
+                  <span className="truncate">{u.display_name || u.username}</span>
+                </label>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
 
 /** Create/edit form. `editing` is the base being changed, or null for a new one
  *  — the id field only appears for new bases, since it is immutable afterwards
@@ -120,6 +189,8 @@ function BaseFormDialog({
             name: editing.name,
             description: editing.description,
             language: editing.language,
+            restricted: !!editing.access?.restricted,
+            users: editing.access?.users ?? [],
           }
         : EMPTY,
     );
@@ -132,6 +203,7 @@ function BaseFormDialog({
             name: form.name,
             description: form.description,
             language: form.language,
+            access: { restricted: form.restricted, users: form.users },
           })
         : createRagBase({
             name: form.name,
@@ -152,7 +224,8 @@ function BaseFormDialog({
     onError: (e) => setError((e as Error).message),
   });
 
-  const set = (k: keyof FormState, v: string) => setForm((f) => ({ ...f, [k]: v }));
+  const set = (k: 'id' | 'name' | 'description' | 'language', v: string) =>
+    setForm((f) => ({ ...f, [k]: v }));
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -206,6 +279,13 @@ function BaseFormDialog({
             <p className="text-xs text-muted-foreground/80">
               {t('rag.bases.idFixed', { id: editing.id })}
             </p>
+          )}
+          {editing && (
+            <AccessEditor
+              restricted={form.restricted}
+              users={form.users}
+              onChange={(restricted, users) => setForm((f) => ({ ...f, restricted, users }))}
+            />
           )}
           {error && <p className="text-xs text-destructive-foreground">{error}</p>}
           <div className="flex flex-wrap justify-end gap-2">
@@ -297,6 +377,15 @@ function BaseCard({
           <span className="min-w-0 flex-1 truncate text-sm font-semibold tracking-[-0.01em]">
             {base.name}
           </span>
+          {base.access?.restricted && (
+            <span
+              className="inline-flex shrink-0 items-center gap-1 rounded bg-muted px-1.5 py-px text-[10px] text-muted-foreground"
+              title={t('rag.access.badgeHint', { users: base.access.users.join(', ') || '—' })}
+            >
+              <LockIcon className="size-3" />
+              {t('rag.access.badge', { n: base.access.users.length })}
+            </span>
+          )}
           {base.language && (
             <span className="shrink-0 rounded bg-muted px-1.5 py-px font-mono text-[10px] uppercase text-muted-foreground">
               {base.language}

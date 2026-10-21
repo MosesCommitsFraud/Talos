@@ -1580,15 +1580,19 @@ async def do_search_knowledge(
         # several tools in flight at once.
         if document:
             sources, block = await asyncio.to_thread(
-                _search_one_document, query, document, top_k, session_id
+                _search_one_document, query, document, top_k, session_id, owner
             )
         elif top_k:
             sources, block = await asyncio.to_thread(
-                ChatProcessor(None).retrieve, query, citation_session=session_id, top_k=top_k
+                ChatProcessor(None).retrieve,
+                query,
+                citation_session=session_id,
+                top_k=top_k,
+                user=owner,
             )
         else:
             sources, block = await asyncio.to_thread(
-                ChatProcessor(None).retrieve, query, citation_session=session_id
+                ChatProcessor(None).retrieve, query, citation_session=session_id, user=owner
             )
     except Exception as e:
         from src.rag_navigate import NavigationError
@@ -1655,13 +1659,13 @@ async def do_search_knowledge(
     }
 
 
-def _search_one_document(query: str, document: str, top_k, session_id):
+def _search_one_document(query: str, document: str, top_k, session_id, owner=None):
     """search_knowledge pinned to one document: the same relevance gates as the
     ordinary path, run against that document's base with a source filter."""
     from src.chat_processor import ChatProcessor
     from src.rag_navigate import resolve_document
 
-    base, manager, row = resolve_document(document)
+    base, manager, row = resolve_document(document, user=owner)
     found, block = ChatProcessor(None, rag_base_id=base["id"]).retrieve(
         query,
         _manager=manager,
@@ -1685,7 +1689,7 @@ def _knowledge_args(content) -> Dict:
     return args if isinstance(args, dict) else {}
 
 
-async def do_list_knowledge(content: str) -> Dict:
+async def do_list_knowledge(content: str, owner: Optional[str] = None) -> Dict:
     """`list_knowledge` — which documents the knowledge base holds."""
     from src.rag_navigate import list_knowledge
 
@@ -1694,14 +1698,16 @@ async def do_list_knowledge(content: str) -> Dict:
     except ValueError:
         args = {"query": str(content or "").strip()}
     try:
-        out = await asyncio.to_thread(list_knowledge, str(args.get("query") or ""))
+        out = await asyncio.to_thread(list_knowledge, str(args.get("query") or ""), owner)
     except Exception as e:
         logger.error(f"list_knowledge failed: {e}")
         return {"error": str(e), "exit_code": 1}
     return {"output": out, "exit_code": 0}
 
 
-async def do_read_knowledge(content: str, session_id: Optional[str] = None) -> Dict:
+async def do_read_knowledge(
+    content: str, session_id: Optional[str] = None, owner: Optional[str] = None
+) -> Dict:
     """`read_knowledge` — a document's outline, or the verbatim text of a
     section / page range / time range (paged via `offset`)."""
     from src.rag_navigate import NavigationError, read_knowledge
@@ -1711,7 +1717,7 @@ async def do_read_knowledge(content: str, session_id: Optional[str] = None) -> D
     except ValueError as e:
         return {"error": f"Invalid JSON arguments: {e}", "exit_code": 1}
     try:
-        text, sources, label = await asyncio.to_thread(read_knowledge, args, session_id)
+        text, sources, label = await asyncio.to_thread(read_knowledge, args, session_id, owner)
     except NavigationError as e:
         return {"error": str(e), "exit_code": 1}
     except Exception as e:
@@ -1742,7 +1748,7 @@ async def do_read_knowledge(content: str, session_id: Optional[str] = None) -> D
     }
 
 
-async def do_grep_knowledge(content: str) -> Dict:
+async def do_grep_knowledge(content: str, owner: Optional[str] = None) -> Dict:
     """`grep_knowledge` — exact term lookup across the knowledge base."""
     from src.rag_navigate import NavigationError, grep_knowledge
 
@@ -1751,7 +1757,7 @@ async def do_grep_knowledge(content: str) -> Dict:
     except ValueError:
         args = {"pattern": str(content or "").strip()}
     try:
-        out = await asyncio.to_thread(grep_knowledge, args)
+        out = await asyncio.to_thread(grep_knowledge, args, owner)
     except NavigationError as e:
         return {"error": str(e), "exit_code": 1}
     except Exception as e:

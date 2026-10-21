@@ -2021,17 +2021,17 @@ async def execute_tool_block(
         from src.tool_implementations import do_list_knowledge
 
         desc = "list_knowledge"
-        result = await do_list_knowledge(content)
+        result = await do_list_knowledge(content, owner=owner)
     elif tool == "read_knowledge":
         from src.tool_implementations import do_read_knowledge
 
-        result = await do_read_knowledge(content, session_id=session_id)
+        result = await do_read_knowledge(content, session_id=session_id, owner=owner)
         desc = f"read_knowledge: {result.get('label') or 'error'}"
     elif tool == "grep_knowledge":
         from src.tool_implementations import do_grep_knowledge
 
         desc = "grep_knowledge"
-        result = await do_grep_knowledge(content)
+        result = await do_grep_knowledge(content, owner=owner)
     elif tool == "delegate":
         from src.subagents import run_tasks
 

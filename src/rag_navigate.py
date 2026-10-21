@@ -67,14 +67,14 @@ def _external() -> bool:
         return False
 
 
-def _bases() -> List[Tuple[Dict[str, Any], Any]]:
-    """Chat-enabled bases with a healthy manager, in registry order."""
-    from src.rag_registry import chat_enabled, list_bases
+def _bases(user: Optional[str] = None) -> List[Tuple[Dict[str, Any], Any]]:
+    """Chat-enabled bases ``user`` may access, with a healthy manager, in registry order."""
+    from src.rag_registry import can_access, chat_enabled, list_bases
     from src.rag_singleton import get_rag_manager
 
     out = []
     for base in list_bases():
-        if not chat_enabled(base):
+        if not chat_enabled(base) or not can_access(base, user):
             continue
         try:
             manager = get_rag_manager(base["id"])
@@ -102,7 +102,9 @@ def _norm(name: str) -> str:
     return re.sub(r"\s+", " ", str(name or "")).strip().lower()
 
 
-def resolve_document(name: str) -> Tuple[Dict[str, Any], Any, Dict[str, Any]]:
+def resolve_document(
+    name: str, user: Optional[str] = None
+) -> Tuple[Dict[str, Any], Any, Dict[str, Any]]:
     """Find the document a model means by ``name``.
 
     The model sees documents by their filename label, so match on that first,
@@ -114,7 +116,7 @@ def resolve_document(name: str) -> Tuple[Dict[str, Any], Any, Dict[str, Any]]:
         raise NavigationError("Pass the document's name as `document`.")
     # Strip a leading "[3] " citation label the model may have copied along.
     wanted = re.sub(r"^\[\d+\]\s*", "", wanted)
-    rows = [(b, m, r) for b, m in _bases() for r in _documents(b, m)]
+    rows = [(b, m, r) for b, m in _bases(user) for r in _documents(b, m)]
     if not rows:
         raise NavigationError("The knowledge base is empty or unavailable.")
     for test in (
@@ -319,12 +321,12 @@ def _size(chars: int) -> str:
 # ---------------------------------------------------------------------------
 
 
-def list_knowledge(query: str = "") -> str:
+def list_knowledge(query: str = "", user: Optional[str] = None) -> str:
     if _external():
         return (
             "Browsing is not available for the external knowledge provider; use search_knowledge."
         )
-    bases = _bases()
+    bases = _bases(user)
     if not bases:
         return "No knowledge base is available."
     needle = _norm(query)
@@ -464,7 +466,7 @@ def _figure_lines(sec: Dict[str, Any]) -> List[str]:
 
 
 def read_knowledge(
-    args: Dict[str, Any], citation_session: Optional[str] = None
+    args: Dict[str, Any], citation_session: Optional[str] = None, user: Optional[str] = None
 ) -> Tuple[str, List[Dict[str, Any]], str]:
     """Returns (supplied text, rag_sources, short label for the tool row)."""
     if _external():
@@ -472,7 +474,9 @@ def read_knowledge(
             "Reading whole documents is not available for the external knowledge "
             "provider; use search_knowledge."
         )
-    base, manager, row = resolve_document(str(args.get("document") or args.get("name") or ""))
+    base, manager, row = resolve_document(
+        str(args.get("document") or args.get("name") or ""), user=user
+    )
     sections = build_sections(_ordered_chunks(manager, row["source"]))
     if not sections:
         raise NavigationError(f"{row.get('filename')} has no readable text in the index.")
@@ -560,7 +564,7 @@ def read_knowledge(
     return status + "\n\n" + page, sources, label
 
 
-def grep_knowledge(args: Dict[str, Any]) -> str:
+def grep_knowledge(args: Dict[str, Any], user: Optional[str] = None) -> str:
     if _external():
         return "Exact term lookup is not available for the external knowledge provider; use search_knowledge."
     pattern = str(args.get("pattern") or args.get("query") or "").strip()
@@ -574,7 +578,7 @@ def grep_knowledge(args: Dict[str, Any]) -> str:
     # model needs the list of sections to read, not just the first 40 snippets.
     summary = ""
     if doc:
-        base, manager, row = resolve_document(doc)
+        base, manager, row = resolve_document(doc, user=user)
         per_section: List[str] = []
         for sec in build_sections(_ordered_chunks(manager, row["source"])):
             low = sec["text"].lower()
@@ -604,7 +608,7 @@ def grep_knowledge(args: Dict[str, Any]) -> str:
             summary = "Sections with hits: " + ", ".join(per_section) + "\n"
     else:
         per_doc: Dict[str, int] = {}
-        for base, manager in _bases():
+        for base, manager in _bases(user):
             for h in manager.grep_chunks(pattern, limit=500, exclude_scopes=["sql"]) or []:
                 count += 1
                 name = str(h.get("filename") or "")
@@ -616,7 +620,9 @@ def grep_knowledge(args: Dict[str, Any]) -> str:
         # result lists the sections to read instead of costing another round.
         if len(per_doc) == 1:
             try:
-                scoped = grep_knowledge({"pattern": pattern, "document": next(iter(per_doc))})
+                scoped = grep_knowledge(
+                    {"pattern": pattern, "document": next(iter(per_doc))}, user=user
+                )
             except NavigationError:
                 scoped = ""
             if "occurrence(s)" in scoped.split("\n", 1)[0]:

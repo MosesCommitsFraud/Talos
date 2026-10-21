@@ -171,6 +171,8 @@ class RagBaseUpdate(BaseModel):
     description: str | None = None
     language: str | None = None
     chat_enabled: bool | None = None
+    # {"restricted": bool, "users": [...]} — who may retrieve from this base.
+    access: dict | None = None
 
 
 class RagBaseConfigUpdate(BaseModel):
@@ -431,6 +433,7 @@ def setup_rag_routes():
                 description=body.description,
                 language=body.language,
                 chat_enabled=body.chat_enabled,
+                access=body.access,
             )
         except RagNotFound:
             raise HTTPException(404, f"Unknown knowledge base '{base_id}'")

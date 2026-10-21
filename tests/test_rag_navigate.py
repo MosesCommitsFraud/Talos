@@ -111,7 +111,7 @@ def kb(monkeypatch):
     ]
     manager = FakeManager({"/docs/Handbuch.pdf": manual, "/docs/Workshop.mp4": video})
     base = {"id": "default", "name": "Wissen"}
-    monkeypatch.setattr(nav, "_bases", lambda: [(base, manager)])
+    monkeypatch.setattr(nav, "_bases", lambda user=None: [(base, manager)])
     monkeypatch.setattr(nav, "_external", lambda: False)
     nav._doc_cache.clear()
     cited = []

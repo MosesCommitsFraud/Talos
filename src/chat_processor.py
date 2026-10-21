@@ -422,6 +422,7 @@ class ChatProcessor:
         citation_session: Optional[str] = None,
         sources: Optional[List[str]] = None,
         top_k: Optional[int] = None,
+        user: Optional[str] = None,
     ) -> Tuple[List[Dict[str, Any]], str]:
         """Search the knowledge base and build the injectable context block.
 
@@ -438,6 +439,10 @@ class ChatProcessor:
 
         Returns ``(sources, content)`` — ``([], "")`` when nothing clears the
         bar. ``prefix`` is prepended to ``content`` inside the size budget.
+
+        ``user`` limits the search to the bases that user may access (see
+        ``rag_registry.can_access``); without one, restricted bases are skipped.
+        With ``_manager`` the caller has already resolved (and checked) the base.
         """
         try:
             # External provider (e.g. RagFlow) replaces the internal Qdrant
@@ -451,10 +456,10 @@ class ChatProcessor:
                     rag_manager = None
             else:
                 if _manager is None:
-                    from src.rag_registry import chat_enabled, list_bases
+                    from src.rag_registry import can_access, chat_enabled, list_bases
                     from src.rag_singleton import get_rag_manager
 
-                    bases = [b for b in list_bases() if chat_enabled(b)]
+                    bases = [b for b in list_bases() if chat_enabled(b) and can_access(b, user)]
                     if not bases:
                         return [], ""
                     limit = max_chars
@@ -898,7 +903,10 @@ class ChatProcessor:
                 "conversation."
             )
             rag_sources, rag_content = self.retrieve(
-                search_query, prefix=context_prompt, citation_session=getattr(session, "id", None)
+                search_query,
+                prefix=context_prompt,
+                citation_session=getattr(session, "id", None),
+                user=owner,
             )
             if rag_content:
                 preface.append(untrusted_context_message("retrieved documents", rag_content))

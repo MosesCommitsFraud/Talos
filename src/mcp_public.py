@@ -1435,6 +1435,14 @@ def call_tool(
         # which the REST service (src/rag_api.py) shares and which must stay
         # unrestricted for in-instance callers.
         rag_bases = mcp_settings.rag_bases()
+        # Restricted knowledge bases follow the token owner's own access, on
+        # top of what the administrator shares over MCP at all.
+        from src.rag_registry import blocked_ids
+
+        blocked = blocked_ids(owner)
+        if blocked:
+            shared = set(_known_collection_ids()) if rag_bases is None else rag_bases
+            rag_bases = shared - blocked
         # rag_list_collections is left out: it takes no arguments, and it is
         # filtered where it is dispatched below. Refusing it when nothing is
         # shared would deny the client the one call that says so.

@@ -1285,6 +1285,15 @@ const de: typeof en = {
       sameContentAs: 'Gleicher Inhalt wie „{{name}}“.',
       hasDuplicates: 'Nicht doppelt indexierte Kopien: {{names}}',
     },
+    access: {
+      title: 'Zugriff',
+      all: 'Alle Nutzer',
+      restricted: 'Nur ausgewählte Nutzer',
+      hint: 'Admins haben immer Zugriff. Ohne Auswahl ist die Wissensdatenbank nur für Admins durchsuchbar — im Chat, über die Wissens-Tools des Agenten und über MCP.',
+      noUsers: 'Es gibt keine Nutzer ohne Admin-Rechte.',
+      badge: 'eingeschränkt · {{n}}',
+      badgeHint: 'Nur Admins und: {{users}}',
+    },
     outcome: {
       indexed: '{{n}} neu',
       updated: '{{n}} neue Version(en)',

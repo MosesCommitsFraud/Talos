@@ -1278,6 +1278,15 @@ const en = {
       sameContentAs: 'Same content as "{{name}}".',
       hasDuplicates: 'Copies not indexed twice: {{names}}',
     },
+    access: {
+      title: 'Access',
+      all: 'All users',
+      restricted: 'Selected users only',
+      hint: 'Admins always have access. With nobody selected, only admins can search this knowledge base — in chat, through the agent\'s knowledge tools and over MCP.',
+      noUsers: 'There are no users without admin rights.',
+      badge: 'restricted · {{n}}',
+      badgeHint: 'Only admins and: {{users}}',
+    },
     outcome: {
       indexed: '{{n}} new',
       updated: '{{n}} new version(s)',
