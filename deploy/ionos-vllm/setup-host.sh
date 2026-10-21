@@ -38,6 +38,8 @@ nvidia-smi -L
 if ! command -v docker >/dev/null 2>&1; then
   curl -fsSL https://get.docker.com | sh
 fi
+# The calling user runs ./run.sh without sudo (takes effect on next login).
+[ -n "${SUDO_USER:-}" ] && usermod -aG docker "$SUDO_USER"
 
 if ! command -v nvidia-ctk >/dev/null 2>&1; then
   curl -fsSL https://nvidia.github.io/libnvidia-container/gpgkey \
