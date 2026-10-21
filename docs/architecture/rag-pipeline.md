@@ -208,6 +208,14 @@ Large-corpus filter overhead and multi-process deployment require load validatio
 - **Versions.** Each version is recorded with hash, size and chunk count; the last
   `RAG_KEEP_VERSIONS` (default 3) stored upload files are kept and can be restored
   from the document's detail view.
+- **Replace.** An uploaded document can be replaced by any other file
+  (`POST /api/rag/documents/replace`): the worker indexes the new file first and
+  deletes the old document only after that succeeded. Documents from an indexed
+  directory are replaced in the directory instead.
+- **Duplicates.** The document list reports `duplicate_count` (other listed
+  documents with the same SHA-256), computed at read time, and the UI can filter
+  by it. Only byte-identical files count; a re-saved or re-exported file is a
+  different file.
 - **Tombstones.** A directory sync removes documents whose file is gone from disk;
   deleted documents keep a `deleted` row.
 - **Parse cache.** Docling/VLM/ASR output is stored under
