@@ -12,9 +12,9 @@ served-model-name: qwen3.8-27b
 
 tensor-parallel-size: 1
 gpu-memory-utilization: 0.90
-# Native is 262144; half of that keeps the KV cache large enough for 64
-# parallel sequences. Raise it if long documents get cut off.
-max-model-len: 131072
+# The model's native maximum. The KV cache on one H200 holds ~1.49M tokens,
+# so ~5 requests can use the full length at once; shorter ones share the rest.
+max-model-len: 262144
 max-num-seqs: 64
 enable-prefix-caching: true
 

@@ -1,8 +1,9 @@
-# vLLM on a remote GPU host (e.g. IONOS), reachable only through Tailscale.
+# vLLM on a remote GPU host (e.g. IONOS), reachable via Tailscale or SSH tunnel.
 #
-# vLLM shares the network namespace of the tailscale container and publishes
-# no ports, so the OpenAI API is reachable only from the tailnet — never from
-# the public internet. Talos connects to http://<tailscale-ip>:8000/v1.
+# vLLM shares the network namespace of the tailscale container and is never
+# reachable from the public internet: only from the tailnet, and on the host's
+# loopback for the SSH tunnel. Talos connects to http://<tailscale-ip>:8000/v1,
+# or through spark-tunnel/ to http://llm-tunnel:8000/v1.
 #
 # One model runs at a time; its settings are in models/<name>.yaml.
 #
@@ -39,8 +40,11 @@ services:
       - NET_ADMIN
       - NET_RAW
     ports:
-      # WireGuard/UDP only. The vLLM port 8000 is intentionally NOT published.
+      # WireGuard/UDP. The vLLM port 8000 is NOT published to the internet.
       - "41641:41641/udp"
+      # Loopback only — the end point of the SSH tunnel for networks that
+      # block Tailscale (see spark-tunnel/).
+      - "127.0.0.1:8000:8000"
 
   vllm:
     image: vllm/vllm-openai:${VLLM_IMAGE_TAG:-v0.32.0}

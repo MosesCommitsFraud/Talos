@@ -126,6 +126,33 @@ Messwerte für den Vergleich gehören in
 `docs/benchmarks/Modelltest_Spark_vs_H200.xlsx`; die Startparameter für das
 Blatt „Setups“ stehen in der jeweiligen `models/*.yaml`.
 
+## Alternative: SSH-Tunnel statt Tailscale
+
+Wenn die Firewall am Talos-Host Tailscale sperrt (`curl https://controlplane.tailscale.com/key`
+→ `000`), aber ausgehend Port 22 offen ist, läuft die Verbindung über
+`spark-tunnel/`: ein kleiner Container im Talos-Netzwerk, der per SSH einen
+Tunnel zu `127.0.0.1:8000` auf dem IONOS-Server hält und sich bei Abbruch neu
+verbindet.
+
+Auf dem Talos-Host:
+
+```bash
+cd spark-tunnel
+./setup.sh <ionos-ip>          # gibt eine Zeile für authorized_keys aus
+```
+
+Die ausgegebene Zeile auf dem IONOS-Server an `~/.ssh/authorized_keys`
+anhängen. Durch `restrict,port-forwarding,permitopen=…,command="/bin/false"`
+kann der Schlüssel nur diesen einen Tunnel öffnen, keine Shell.
+
+```bash
+docker compose up -d --build
+docker exec talos curl -s -o /dev/null -w '%{http_code}\n' http://llm-tunnel:8000/v1/models   # 401 = Tunnel steht
+```
+
+In Talos dann als Base URL `http://llm-tunnel:8000/v1` eintragen, sonst wie
+in Abschnitt 3.
+
 ## Troubleshooting
 
 - **Tool-Calls kommen als Text:** `tool-call-parser` in der YAML passt nicht

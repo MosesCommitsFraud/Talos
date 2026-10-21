@@ -1,0 +1,26 @@
+# SSH tunnel from the Talos host to vLLM on the IONOS server, for networks
+# that block Tailscale. Only outbound port 22 is needed.
+#
+# The container joins the Talos network and publishes nothing, so only Talos
+# reaches the model — at http://llm-tunnel:8000/v1.
+#
+#   ./setup.sh <ionos-ip>       # key pair, pinned host key, .env
+#   docker compose up -d --build
+
+services:
+  llm-tunnel:
+    build: .
+    container_name: llm-tunnel
+    restart: unless-stopped
+    volumes:
+      - ./ssh:/ssh:ro
+    command: >
+      -L 0.0.0.0:8000:127.0.0.1:8000
+      ${IONOS_USER:-moritz}@${IONOS_HOST:?run ./setup.sh first}
+    networks:
+      - talos
+
+networks:
+  talos:
+    external: true
+    name: ${TALOS_NETWORK:-app_default}
