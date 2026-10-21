@@ -2519,6 +2519,7 @@ class PreviewHandler(BaseHTTPRequestHandler):
                             "created_at": 0.0,
                             "updated_at": 0.0,
                             "override_count": 0,
+                            "access": {"restricted": True, "users": ["anna"]},
                             "content_count": len(_RAG_DOCS),
                             "chunk_count": sum(d["chunks"] for d in _RAG_DOCS),
                         }
@@ -2530,7 +2531,18 @@ class PreviewHandler(BaseHTTPRequestHandler):
             self._send_json({"jobs": _RAG_JOBS})
             return
         if path == "/api/rag/documents":
-            self._send_json({"available": True, "documents": [_rag_doc_row(d) for d in _RAG_DOCS]})
+            self._send_json(
+                {
+                    "available": True,
+                    "documents": [_rag_doc_row(d) for d in _RAG_DOCS],
+                    "sparse": {
+                        "model": "Qdrant/bm25",
+                        "indexed_language": "english",
+                        "configured_language": "german",
+                        "stale": True,
+                    },
+                }
+            )
             return
         if path == "/api/rag/documents/detail":
             doc_id = parse_qs(parsed.query).get("doc_id", [""])[0]

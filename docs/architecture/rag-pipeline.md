@@ -231,6 +231,29 @@ Large-corpus filter overhead and multi-process deployment require load validatio
 
 Back up `documents.sqlite3` together with Qdrant and the generation manifests.
 
+### Keyword-search language
+
+The BM25 side stems and drops stopwords in the knowledge base's language
+(registry `language`, e.g. `de` → German Snowball). Query and stored vectors must
+use the same stemmer, so each collection records the language its sparse vectors
+were built with (`collection_meta.sparse_language` in the register); search and
+ingest use that one. Collections that existed before this was per base are
+recorded as English. When the configured language differs, the content view shows
+a *Rebuild* action (`POST /api/rag/sparse/rebuild`, worker job) that re-encodes only
+the sparse vectors in place — no parsing, no dense embedding — and then switches
+the recorded language. Only `Qdrant/bm25` takes a language; other sparse models
+ignore it.
+
+### Access
+
+A knowledge base is open to all users or restricted to selected users (registry
+`access: {"restricted", "users"}`); admins always have access. Chat injection,
+`search_knowledge`, `list/read/grep_knowledge` and public MCP (per token owner)
+only reach bases the user may access, and a caller without a known user never
+reaches a restricted base. The admin `/api/rag/*` routes and the external REST API
+(`src/rag_api.py`, its own key) are not user-scoped; figure assets served by
+`/api/personal/rag-asset` are not either.
+
 Validation includes real HTML, DOCX and CSV files through Docling-Haystack, a local
 Qdrant store, a local tokenizer, interrupted writes, and Chat/MCP budget regressions.
 `python -m scripts.rag_structure_smoke_eval` offers a synthetic BM25 comparison.

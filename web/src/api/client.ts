@@ -1235,6 +1235,8 @@ export const fetchRagDocuments = (ragId?: string, scope?: string) =>
     scopes?: RagScope[];
     scope?: string;
     error?: string;
+    /** Keyword (BM25) side: language the vectors were built with vs. configured. */
+    sparse?: RagSparseStatus | null;
   }>(
     withRag(
       scope ? `/api/rag/documents?scope=${encodeURIComponent(scope)}` : '/api/rag/documents',
@@ -1283,6 +1285,15 @@ export async function replaceRagDocument(
   }
   return res.json();
 }
+export interface RagSparseStatus {
+  model: string;
+  indexed_language: string | null;
+  configured_language: string | null;
+  stale: boolean;
+}
+/** Re-encode the base's keyword (BM25) vectors in its configured language. */
+export const rebuildRagSparse = (ragId?: string) =>
+  postJSON<{ ok: boolean; job_id?: string }>(withRag('/api/rag/sparse/rebuild', ragId));
 /** Adopt documents indexed before the register existed (hashes every file). */
 export const syncRagRegister = (ragId?: string) =>
   postJSON<{ ok: boolean; job_id?: string }>(withRag('/api/rag/register/sync', ragId));

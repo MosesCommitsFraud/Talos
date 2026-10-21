@@ -17,6 +17,7 @@ import {
   personalReload,
   personalUpload,
   ragSearch,
+  rebuildRagSparse,
   syncRagRegister,
   type RagDocument,
 } from '@/api/client';
@@ -236,6 +237,23 @@ export function RagContent({ baseId }: { baseId: string }) {
           <p className="text-xs text-muted-foreground">{t('rag.content.empty')}</p>
         ) : (
           <div className="space-y-1">
+            {docs.data?.sparse?.stale && (
+              <div className="mb-2 flex flex-wrap items-center gap-2 rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs text-amber-700 dark:text-amber-400">
+                <span className="min-w-0 flex-1">
+                  {t('rag.sparse.stale', {
+                    indexed: t(`rag.sparse.lang.${docs.data.sparse.indexed_language}`, docs.data.sparse.indexed_language ?? ''),
+                    configured: t(`rag.sparse.lang.${docs.data.sparse.configured_language}`, docs.data.sparse.configured_language ?? ''),
+                  })}
+                </span>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => run(() => rebuildRagSparse(ragId), t('rag.sparse.queued'))}
+                >
+                  {t('rag.sparse.rebuild')}
+                </Button>
+              </div>
+            )}
             {unregistered > 0 && (
               <div className="mb-2 flex flex-wrap items-center gap-2 rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs text-amber-700 dark:text-amber-400">
                 <span className="min-w-0 flex-1">{t('rag.doc.unregistered', { n: unregistered })}</span>

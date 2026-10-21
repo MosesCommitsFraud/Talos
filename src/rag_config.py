@@ -84,6 +84,15 @@ def effective_config(base_id: Optional[str] = None) -> Dict[str, Any]:
     """
     cfg = global_config()
     cfg.update(overrides_for(base_id))
+    # The base's language is catalogue metadata, not a pipeline setting, but
+    # the keyword (BM25) side stems and filters stopwords by it — so it travels
+    # with the config into the app instance and the ingest worker alike.
+    try:
+        from src.rag_registry import get_base
+
+        cfg["base_language"] = str(get_base(base_id).get("language") or "")
+    except Exception:
+        cfg.setdefault("base_language", "")
     return cfg
 
 

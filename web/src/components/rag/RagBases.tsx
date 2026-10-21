@@ -94,11 +94,14 @@ interface FormState {
   users: string[];
 }
 
+/** Languages the keyword (BM25) stemmer supports, as base language codes. */
+const BASE_LANGUAGES = ['de', 'en', 'fr', 'es', 'it', 'nl', 'pt', 'da', 'sv', 'no', 'fi'];
+
 const EMPTY: FormState = {
   id: '',
   name: '',
   description: '',
-  language: '',
+  language: 'de',
   restricted: false,
   users: [],
 };
@@ -258,11 +261,26 @@ function BaseFormDialog({
           <div className="grid gap-4 sm:grid-cols-2">
             <label className="block space-y-1.5">
               <span className="text-[13px] font-semibold">{t('rag.bases.language')}</span>
-              <Input
+              {/* Drives keyword-search stemming and stopwords, so it is a
+                  choice from the languages that stemmer supports. An older
+                  free-text value stays selectable rather than being dropped. */}
+              <Select
+                className="w-full text-sm"
                 value={form.language}
-                placeholder="de"
-                onChange={(e) => set('language', e.target.value)}
+                onChange={(v) => set('language', v)}
+                options={[
+                  ...BASE_LANGUAGES.map((code) => ({
+                    value: code,
+                    label: t(`rag.bases.languages.${code}`),
+                  })),
+                  ...(form.language && !BASE_LANGUAGES.includes(form.language)
+                    ? [{ value: form.language, label: form.language }]
+                    : []),
+                ]}
               />
+              <span className="block text-xs text-muted-foreground/80">
+                {t('rag.bases.languageHint')}
+              </span>
             </label>
             {!editing && (
               <label className="block space-y-1.5">
@@ -381,9 +399,10 @@ function BaseCard({
             <span
               className="inline-flex shrink-0 items-center gap-1 rounded bg-muted px-1.5 py-px text-[10px] text-muted-foreground"
               title={t('rag.access.badgeHint', { users: base.access.users.join(', ') || '—' })}
+              aria-label={t('rag.access.badge', { n: base.access.users.length })}
             >
               <LockIcon className="size-3" />
-              {t('rag.access.badge', { n: base.access.users.length })}
+              {base.access.users.length}
             </span>
           )}
           {base.language && (

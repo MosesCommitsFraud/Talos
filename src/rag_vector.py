@@ -1261,8 +1261,48 @@ _SPARSE_EMBEDDERS: Dict[Tuple[str, str], Any] = {}
 _SPARSE_LOCK = threading.Lock()
 
 
-def _shared_sparse_embedder(kind: str, model: str):
-    key = (kind, model)
+# Base language (ISO code or name) → FastEmbed BM25 Snowball language.
+_BM25_LANGUAGES: Dict[str, str] = {
+    "ar": "arabic",
+    "da": "danish",
+    "de": "german",
+    "el": "greek",
+    "en": "english",
+    "es": "spanish",
+    "fi": "finnish",
+    "fr": "french",
+    "hu": "hungarian",
+    "it": "italian",
+    "nb": "norwegian",
+    "nl": "dutch",
+    "no": "norwegian",
+    "pt": "portuguese",
+    "ro": "romanian",
+    "ru": "russian",
+    "sv": "swedish",
+    "ta": "tamil",
+    "tr": "turkish",
+    "deutsch": "german",
+}
+# What every collection built before per-base languages was stemmed with.
+_LEGACY_SPARSE_LANGUAGE = "english"
+
+
+def bm25_language(value: Optional[str]) -> str:
+    """The BM25 stemmer/stopword language for a base language; English when unknown."""
+    key = str(value or "").strip().lower().replace("_", "-")
+    if key in set(_BM25_LANGUAGES.values()):
+        return key
+    return _BM25_LANGUAGES.get(key.split("-")[0], _LEGACY_SPARSE_LANGUAGE)
+
+
+def _is_bm25(model: str) -> bool:
+    return "bm25" in (model or "").lower()
+
+
+def _shared_sparse_embedder(kind: str, model: str, language: Optional[str] = None):
+    language = language if _is_bm25(model) else None
+    key = (kind, model, language or "")
     emb = _SPARSE_EMBEDDERS.get(key)
     if emb is not None:
         return emb
@@ -1276,7 +1316,7 @@ def _shared_sparse_embedder(kind: str, model: str):
         )
 
         cls = FastembedSparseTextEmbedder if kind == "text" else FastembedSparseDocumentEmbedder
-        emb = cls(model=model)
+        emb = cls(model=model, model_kwargs={"language": language} if language else None)
         emb.warm_up()
         _SPARSE_EMBEDDERS[key] = emb
         return emb
@@ -1559,15 +1599,155 @@ class VectorRAG:
             )
         return self._dense_d
 
-    def _sparse_text_embedder(self):
-        if self._sparse_q is None:
-            self._sparse_q = _shared_sparse_embedder("text", self._sparse_model)
+    # Query and stored sparse vectors must come from the same stemmer, so both
+    # use the language the collection was *built* with (recorded in the
+    # register), not the one the base is configured for. A language change takes
+    # effect when ``rebuild_sparse`` has re-encoded every chunk and flips it.
+    _SPARSE_LANGUAGE_TTL = 10.0
+
+    def _configured_sparse_language(self) -> Optional[str]:
+        if not _is_bm25(getattr(self, "_sparse_model", _DEFAULT_SPARSE_MODEL)):
+            return None
+        return bm25_language(self._cfg.get("base_language"))
+
+    def _indexed_sparse_language(self) -> Optional[str]:
+        if not _is_bm25(getattr(self, "_sparse_model", _DEFAULT_SPARSE_MODEL)):
+            return None
+        cached = getattr(self, "_sparse_lang_cache", None)
+        if cached and time.monotonic() - cached[0] < self._SPARSE_LANGUAGE_TTL:
+            return cached[1]
+        register = self._register()
+        language = None
+        if register is not None:
+            language = register.get_meta(self.collection_name, "sparse_language")
+            if not language:
+                # First sight of this collection: an existing one was built
+                # before languages were per base (English); a new, empty one
+                # starts with the configured language straight away.
+                has_chunks = bool(self._store.count_documents()) if self._store else False
+                language = (
+                    _LEGACY_SPARSE_LANGUAGE if has_chunks else self._configured_sparse_language()
+                )
+                register.set_meta(self.collection_name, "sparse_language", language)
+        language = language or self._configured_sparse_language()
+        self._sparse_lang_cache = (time.monotonic(), language)
+        return language
+
+    def _sparse_text_embedder(self, language: Optional[str] = None):
+        language = language or self._indexed_sparse_language()
+        if self._sparse_q is None or getattr(self, "_sparse_q_lang", None) != language:
+            self._sparse_q = _shared_sparse_embedder("text", self._sparse_model, language)
+            self._sparse_q_lang = language
         return self._sparse_q
 
-    def _sparse_doc_embedder(self):
-        if self._sparse_d is None:
-            self._sparse_d = _shared_sparse_embedder("doc", self._sparse_model)
+    def _sparse_doc_embedder(self, language: Optional[str] = None):
+        language = language or self._indexed_sparse_language()
+        if self._sparse_d is None or getattr(self, "_sparse_d_lang", None) != language:
+            self._sparse_d = _shared_sparse_embedder("doc", self._sparse_model, language)
+            self._sparse_d_lang = language
         return self._sparse_d
+
+    def sparse_status(self) -> Dict[str, Any]:
+        """Which language the keyword side is built with vs. configured for."""
+        indexed = self._indexed_sparse_language()
+        configured = self._configured_sparse_language()
+        return {
+            "model": getattr(self, "_sparse_model", _DEFAULT_SPARSE_MODEL),
+            "indexed_language": indexed,
+            "configured_language": configured,
+            "stale": bool(indexed and configured and indexed != configured),
+        }
+
+    def rebuild_sparse(self, progress_cb=None, batch_size: int = 256) -> Dict[str, Any]:
+        """Re-encode every chunk's sparse (BM25) vector in the configured language.
+
+        Only the keyword vectors change: no parsing, no dense embedding, no
+        payload rewrite. The collection's recorded language flips once every
+        chunk is done, so searches keep matching the stored vectors throughout.
+        """
+        from haystack import Document
+
+        target = self._configured_sparse_language()
+        if not target:
+            return {"success": True, "updated": 0, "message": "Sparse model has no language"}
+        embedder = self._sparse_doc_embedder(target)
+        client = getattr(self._store, "_client", None)
+        updated = 0
+
+        def encode(items):
+            docs = [Document(content=_embed_text(meta, content)) for content, meta in items]
+            return [d.sparse_embedding for d in embedder.run(documents=docs)["documents"]]
+
+        if client is not None and hasattr(client, "update_vectors"):
+            from haystack_integrations.document_stores.qdrant.document_store import (
+                SPARSE_VECTORS_NAME,
+            )
+            from qdrant_client.http import models
+
+            total = client.count(self.collection_name, exact=True).count
+            offset = None
+            while True:
+                points, offset = client.scroll(
+                    self.collection_name,
+                    limit=batch_size,
+                    offset=offset,
+                    with_payload=True,
+                    with_vectors=False,
+                )
+                if not points:
+                    break
+                vectors = encode(
+                    [
+                        (
+                            (p.payload or {}).get("content") or "",
+                            (p.payload or {}).get("meta") or {},
+                        )
+                        for p in points
+                    ]
+                )
+                client.update_vectors(
+                    self.collection_name,
+                    points=[
+                        models.PointVectors(
+                            id=p.id,
+                            vector={
+                                SPARSE_VECTORS_NAME: models.SparseVector(
+                                    indices=v.indices, values=v.values
+                                )
+                            },
+                        )
+                        for p, v in zip(points, vectors)
+                    ],
+                    wait=True,
+                )
+                updated += len(points)
+                if progress_cb:
+                    progress_cb({"processed": updated, "total": total, "indexed_count": 0})
+                if offset is None:
+                    break
+        else:
+            # Stores without partial vector updates (tests: in-memory store).
+            from dataclasses import replace
+
+            from haystack.document_stores.types import DuplicatePolicy
+
+            docs = self._store.filter_documents()
+            vectors = encode([(d.content or "", d.meta or {}) for d in docs])
+            self._store.write_documents(
+                [replace(d, sparse_embedding=v) for d, v in zip(docs, vectors)],
+                policy=DuplicatePolicy.OVERWRITE,
+            )
+            updated = len(docs)
+        register = self._register()
+        if register is not None:
+            register.set_meta(self.collection_name, "sparse_language", target)
+        self._sparse_lang_cache = (time.monotonic(), target)
+        return {
+            "success": True,
+            "updated": updated,
+            "language": target,
+            "message": f"Re-encoded {updated} chunk(s) for {target} keyword search",
+        }
 
     def _hybrid_retriever(self):
         if self._retriever is None:
@@ -4677,6 +4857,7 @@ class VectorRAG:
             register = self._register()
             if register is not None:
                 register.drop_collection(self.collection_name)
+            self._sparse_lang_cache = None
             self._retriever = None
             # Drop the visual collection too so a re-index (e.g. a VL-model swap
             # that changes the image vector dimension) starts clean.
@@ -4707,6 +4888,7 @@ class VectorRAG:
                 "collection_name": self.collection_name,
                 "vector_backend": self._backend,
                 "sparse_model": self._sparse_model,
+                "sparse_language": self._indexed_sparse_language(),
                 "embedding_dim": self._dim,
                 "rerank_enabled": bool(self._conf("rerank_url", "RERANK_URL")),
                 "rerank_model": self._conf("rerank_model", "RERANK_MODEL"),

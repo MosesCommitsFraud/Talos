@@ -96,6 +96,12 @@ CREATE TABLE IF NOT EXISTS documents (
 );
 CREATE INDEX IF NOT EXISTS documents_source ON documents (collection, source);
 CREATE INDEX IF NOT EXISTS documents_sha ON documents (collection, content_sha256);
+CREATE TABLE IF NOT EXISTS collection_meta (
+    collection TEXT NOT NULL,
+    key TEXT NOT NULL,
+    value TEXT,
+    PRIMARY KEY (collection, key)
+);
 CREATE TABLE IF NOT EXISTS versions (
     collection TEXT NOT NULL,
     doc_id TEXT NOT NULL,
@@ -509,10 +515,28 @@ class DocumentRegister:
             if row["origin"] == origin and is_within(row["source"], directory)
         ]
 
+    def get_meta(self, collection: str, key: str) -> Optional[str]:
+        """A fact about a collection as a whole (e.g. its sparse-vector language)."""
+        with self._connect() as db:
+            row = db.execute(
+                "SELECT value FROM collection_meta WHERE collection=? AND key=?",
+                (collection, key),
+            ).fetchone()
+        return row["value"] if row else None
+
+    def set_meta(self, collection: str, key: str, value: Optional[str]) -> None:
+        with self._connect() as db:
+            db.execute(
+                "INSERT INTO collection_meta (collection, key, value) VALUES (?, ?, ?) "
+                "ON CONFLICT(collection, key) DO UPDATE SET value=excluded.value",
+                (collection, key, value),
+            )
+
     def drop_collection(self, collection: str) -> None:
         with self._connect() as db:
             db.execute("DELETE FROM documents WHERE collection=?", (collection,))
             db.execute("DELETE FROM versions WHERE collection=?", (collection,))
+            db.execute("DELETE FROM collection_meta WHERE collection=?", (collection,))
 
 
 # ---------------------------------------------------------------------------

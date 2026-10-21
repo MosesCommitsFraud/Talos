@@ -882,10 +882,15 @@ def setup_rag_routes():
             if scope not in SCOPE_IDS:
                 raise HTTPException(404, f"Unknown sub-index '{scope}'")
             return {"available": True, "scope": scope, "documents": rag.list_documents(scope=scope)}
+        try:
+            sparse = rag.sparse_status()
+        except Exception:
+            sparse = None
         return {
             "available": True,
             "documents": rag.list_documents(exclude_scopes=SCOPE_IDS),
             "scopes": describe_scopes(rag),
+            "sparse": sparse,
         }
 
     @router.get("/documents/chunks")
@@ -1009,6 +1014,17 @@ def setup_rag_routes():
             job = rag_worker.start_index_files([(file_path, meta)], owner=None, base_id=rag_id)
         except Exception:
             rd.delete_managed_file(file_path)
+            raise HTTPException(503, "Ingest queue unavailable — is Redis running?")
+        return {"ok": True, "job_id": job.get("id"), "status": job.get("status")}
+
+    @router.post("/sparse/rebuild")
+    def rebuild_sparse_vectors(rag_id: str | None = None):
+        """Re-encode the keyword (BM25) vectors in the base's language (worker job)."""
+        from src import rag_worker
+
+        try:
+            job = rag_worker.start_rebuild_sparse(rag_id)
+        except Exception:
             raise HTTPException(503, "Ingest queue unavailable — is Redis running?")
         return {"ok": True, "job_id": job.get("id"), "status": job.get("status")}
 

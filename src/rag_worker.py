@@ -279,9 +279,43 @@ def sync_register_job(
     return result
 
 
+def rebuild_sparse_job(
+    config_snapshot: Dict[str, Any], base_id: Optional[str] = None
+) -> Dict[str, Any]:
+    """Re-encode a base's keyword (BM25) vectors in its configured language."""
+    from rq import get_current_job
+
+    _apply_snapshot(config_snapshot)
+    job = get_current_job()
+    rag = _fresh_rag(base_id, config_snapshot)
+    result = rag.rebuild_sparse(progress_cb=_progress_saver(job))
+    _finalize(job, {**result, "total": result.get("updated", 0)})
+    return result
+
+
 # ---------------------------------------------------------------------------
 # Enqueue helpers (called by the FastAPI app)
 # ---------------------------------------------------------------------------
+
+
+def start_rebuild_sparse(base_id: Optional[str] = None) -> Dict[str, Any]:
+    job = _queue().enqueue(
+        "src.rag_worker.rebuild_sparse_job",
+        _snapshot(base_id),
+        base_id,
+        job_timeout=_JOB_TIMEOUT,
+        meta={
+            "type": "rebuild_sparse",
+            "directory": "",
+            "owner": None,
+            "base_id": base_id or "default",
+            "indexed_count": 0,
+            "failed_count": 0,
+            "current_file": "",
+            "message": "Queued",
+        },
+    )
+    return _job_to_dict(job)
 
 
 def start_sync_register(base_id: Optional[str] = None) -> Dict[str, Any]:
