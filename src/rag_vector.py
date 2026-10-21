@@ -3811,7 +3811,19 @@ class VectorRAG:
 
         try:
             stat = os.stat(fpath)
-            sha = rd.file_sha256(fpath)
+            if (
+                live
+                and not force
+                and live["source"] == meta["source"]
+                and live.get("content_sha256")
+                and live.get("size_bytes") == stat.st_size
+                and live.get("mtime") == stat.st_mtime
+            ):
+                # Same path, size and mtime: trust the stored hash instead of
+                # re-reading every (possibly multi-GB) file on each sync.
+                sha = live["content_sha256"]
+            else:
+                sha = rd.file_sha256(fpath)
         except OSError as e:
             error = f"{type(e).__name__}: {e}"
             if not (live and live["status"] == rd.INDEXED):

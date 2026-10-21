@@ -345,3 +345,20 @@ def test_detail_reindex_and_restore_routes(env, monkeypatch):
 
     missing = client.get("/api/rag/documents/detail", params={"doc_id": "d_nope"})
     assert missing.status_code == 404
+
+
+def test_directory_sync_does_not_rehash_untouched_files(env, monkeypatch):
+    rag, _, tmp_path = env
+    share = tmp_path / "share"
+    share.mkdir()
+    (share / "big.md").write_text("video transcript stand-in", encoding="utf-8")
+    rag.index_personal_documents(str(share))
+    hashed = []
+    real = rd.file_sha256
+    monkeypatch.setattr(rd, "file_sha256", lambda p: hashed.append(p) or real(p))
+    assert rag.index_personal_documents(str(share))["outcomes"]["unchanged"] == 1
+    assert hashed == []
+    (share / "big.md").write_text("changed transcript", encoding="utf-8")
+    os.utime(share / "big.md", (2_000_000_000, 2_000_000_000))
+    assert rag.index_personal_documents(str(share))["outcomes"]["updated"] == 1
+    assert len(hashed) == 1
