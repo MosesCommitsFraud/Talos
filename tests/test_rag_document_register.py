@@ -244,8 +244,12 @@ def test_sync_register_adopts_legacy_chunks_without_merging_same_names(env):
     external.write_text("Handbuch", encoding="utf-8")
     rag._write_documents(
         [
-            Document(content="Sitzung Mai", meta={"source": str(older), "filename": "Protokoll.md"}),
-            Document(content="Sitzung Juni", meta={"source": str(newer), "filename": "Protokoll.md"}),
+            Document(
+                content="Sitzung Mai", meta={"source": str(older), "filename": "Protokoll.md"}
+            ),
+            Document(
+                content="Sitzung Juni", meta={"source": str(newer), "filename": "Protokoll.md"}
+            ),
             Document(content="Handbuch", meta={"source": str(external), "filename": "handbuch.md"}),
         ],
         replace_sources=True,
@@ -289,3 +293,55 @@ def test_doc_id_is_case_slash_and_unicode_insensitive():
     assert rd.make_doc_id(decomposed) == rd.make_doc_id("prüfbericht.pdf")
     assert rd.make_doc_id("a\\b.md") == rd.make_doc_id("A/B.md")
     assert rd.make_doc_id("x.md", scope="sql") != rd.make_doc_id("x.md")
+
+
+def test_detail_reindex_and_restore_routes(env, monkeypatch):
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    import src.rag_singleton as singleton
+    import src.rag_worker as worker
+    from core.middleware import require_admin
+    from routes.rag_routes import setup_rag_routes
+
+    rag, uploads, _ = env
+    old_path, meta = upload(uploads, "Plan.md", "plan one", "a")
+    rag.index_files([(old_path, meta)])
+    new_path, meta = upload(uploads, "Plan.md", "plan two", "b")
+    rag.index_files([(new_path, meta)])
+    queued = []
+    monkeypatch.setattr(singleton, "get_rag_manager", lambda rag_id=None, **kw: rag)
+    monkeypatch.setattr(
+        worker,
+        "start_index_files",
+        lambda files, owner=None, base_id=None: queued.append(files) or {"id": "j1"},
+    )
+    app = FastAPI()
+    app.include_router(setup_rag_routes())
+    app.dependency_overrides[require_admin] = lambda: None
+    client = TestClient(app)
+
+    doc_id = rd.make_doc_id("Plan.md")
+    detail = client.get("/api/rag/documents/detail", params={"doc_id": doc_id}).json()
+    assert detail["version"] == 2
+    assert detail["content_sha256"] == rd.text_sha256("plan two")
+    assert detail["source"] == new_path
+
+    assert (
+        client.post("/api/rag/documents/reindex", json={"doc_id": doc_id, "reparse": True}).json()[
+            "job_id"
+        ]
+        == "j1"
+    )
+    path, spec = queued[-1][0]
+    assert path == new_path and spec["_force"] and spec["_reparse"]
+
+    client.post("/api/rag/documents/restore", json={"doc_id": doc_id, "version": 1})
+    path, spec = queued[-1][0]
+    assert path == old_path
+    rag.index_files(queued[-1])
+    assert contents(rag) == ["plan one"]
+    assert rag.document_detail(doc_id=doc_id)["version"] == 3
+
+    missing = client.get("/api/rag/documents/detail", params={"doc_id": "d_nope"})
+    assert missing.status_code == 404

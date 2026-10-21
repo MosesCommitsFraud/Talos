@@ -445,6 +445,7 @@ def create_app() -> FastAPI:
             _personal_upload_dir_for_owner,
             _unique_personal_upload_path,
         )
+        from src.rag_documents import upload_identity
 
         upload_dir = _personal_upload_dir_for_owner("kb-" + str(entry.get("id")))
         redact_override: Optional[bool] = None
@@ -485,6 +486,7 @@ def create_app() -> FastAPI:
                     "stored_filename": stored_name,
                     "directory": upload_dir,
                     "type": os.path.splitext(safe_name)[1].lower(),
+                    **upload_identity(upload.filename),
                 }
                 if redact_override is not None:
                     meta["redact_pii"] = redact_override

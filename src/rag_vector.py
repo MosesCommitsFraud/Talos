@@ -4244,6 +4244,38 @@ class VectorRAG:
             ],
         }
 
+    def requeue_spec(
+        self, doc_id: str, *, reparse: bool = False, version: Optional[int] = None
+    ) -> Tuple[str, Dict[str, Any]]:
+        """``(path, meta)`` to queue for re-indexing a document or restoring a version.
+
+        Raises ``LookupError`` when the document or the retained file is gone.
+        """
+        from src import rag_documents as rd
+
+        register = self._register()
+        row = register.get(self.collection_name, doc_id) if register else None
+        if not row or row["status"] == rd.DELETED:
+            raise LookupError("Document is not in the register")
+        path = row["source"]
+        if version is not None:
+            kept = register.version(self.collection_name, doc_id, int(version))
+            if not kept or not kept["file_retained"]:
+                raise LookupError(f"Version {version} has no retained file")
+            path = kept["source"]
+        if not os.path.isfile(path):
+            raise LookupError("The stored file is no longer on disk")
+        meta = {
+            **(row.get("ingest_meta") or {}),
+            "source": path,
+            "logical_path": row["logical_path"],
+            "origin": row["origin"],
+            "_force": True,
+            "_reparse": bool(reparse),
+        }
+        meta.setdefault("filename", row["display_name"])
+        return path, meta
+
     def delete_document(
         self, source: Optional[str] = None, doc_id: Optional[str] = None
     ) -> Dict[str, Any]:

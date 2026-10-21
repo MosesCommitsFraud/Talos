@@ -11,6 +11,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Reques
 from core.constants import BASE_DIR, PERSONAL_DIR
 from core.middleware import require_admin
 from src.auth_helpers import require_user
+from src.rag_documents import upload_identity
 from src.rag_singleton import get_rag_manager
 from src.request_models import DirectoryRequest
 from src.upload_handler import secure_filename
@@ -382,6 +383,7 @@ def setup_personal_routes(personal_docs_manager, rag_manager, rag_available):
                     "stored_filename": stored_name,
                     "directory": upload_dir,
                     "type": ext,
+                    **upload_identity(upload.filename),
                 }
                 if redact_override is not None:
                     file_meta["redact_pii"] = redact_override

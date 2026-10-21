@@ -187,6 +187,7 @@ def setup_sql_routes():
             _personal_upload_dir_for_owner,
             _unique_personal_upload_path,
         )
+        from src.rag_documents import upload_identity
 
         upload_dir = _personal_upload_dir_for_owner("sql_knowledge")
         to_index = []
@@ -215,6 +216,7 @@ def setup_sql_routes():
                             "directory": upload_dir,
                             "type": ext,
                             "scope": SQL_KNOWLEDGE_SCOPE,
+                            **upload_identity(upload.filename),
                         },
                     )
                 )

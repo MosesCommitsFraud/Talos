@@ -750,6 +750,16 @@ def setup_rag_routes():
             import logging
 
             logging.getLogger(__name__).warning("upload purge failed: %s", e)
+        # Cached parses reference the figure/keyframe assets the purge just
+        # removed, so they must go too.
+        try:
+            parse_cache = rag._parse_cache()
+            if parse_cache is not None:
+                parse_cache.clear()
+        except Exception as e:
+            import logging
+
+            logging.getLogger(__name__).warning("parse cache purge failed: %s", e)
         freed_mb = round(purged.get("freed_bytes", 0) / (1024 * 1024), 1)
         return {
             "ok": True,
@@ -884,6 +894,72 @@ def setup_rag_routes():
         if not rag or not getattr(rag, "healthy", False):
             return {"available": False, "chunks": [], "error": last_init_error()}
         return {"available": True, "source": source, "chunks": rag.get_document_chunks(source)}
+
+    @router.get("/documents/detail")
+    def document_detail(
+        doc_id: str | None = None, source: str | None = None, rag_id: str | None = None
+    ):
+        """Register view of one document: id, hash, versions, duplicates, warnings."""
+        from src.rag_singleton import get_rag_manager
+
+        rag = _resolve_rag(rag_id, get_rag_manager)
+        if not rag or not getattr(rag, "healthy", False):
+            raise HTTPException(503, "RAG is not available")
+        if not doc_id and not source:
+            raise HTTPException(400, "Pass doc_id or source")
+        detail = rag.document_detail(doc_id=doc_id, source=source)
+        if not detail:
+            raise HTTPException(404, "Document is not in the register")
+        return detail
+
+    class DocumentAction(BaseModel):
+        doc_id: str
+        reparse: bool = False
+        version: int | None = None
+
+    def _queue_document(body: DocumentAction, rag_id: str | None, restore: bool):
+        from src import rag_worker
+        from src.rag_singleton import get_rag_manager
+
+        rag = _resolve_rag(rag_id, get_rag_manager)
+        if not rag or not getattr(rag, "healthy", False):
+            raise HTTPException(503, "RAG is not available")
+        if restore and body.version is None:
+            raise HTTPException(400, "Pass the version to restore")
+        try:
+            spec = rag.requeue_spec(
+                body.doc_id,
+                reparse=body.reparse,
+                version=body.version if restore else None,
+            )
+        except LookupError as e:
+            raise HTTPException(404, str(e))
+        try:
+            job = rag_worker.start_index_files([spec], owner=None, base_id=rag_id)
+        except Exception:
+            raise HTTPException(503, "Ingest queue unavailable — is Redis running?")
+        return {"ok": True, "job_id": job.get("id"), "status": job.get("status")}
+
+    @router.post("/documents/reindex")
+    def reindex_document(body: DocumentAction, rag_id: str | None = None):
+        """Re-index one document now; ``reparse`` also bypasses the parse cache."""
+        return _queue_document(body, rag_id, restore=False)
+
+    @router.post("/documents/restore")
+    def restore_document_version(body: DocumentAction, rag_id: str | None = None):
+        """Make a retained older version current again (indexed as a new version)."""
+        return _queue_document(body, rag_id, restore=True)
+
+    @router.post("/register/sync")
+    def sync_document_register(rag_id: str | None = None):
+        """Adopt documents indexed before the register existed (worker job)."""
+        from src import rag_worker
+
+        try:
+            job = rag_worker.start_sync_register(rag_id)
+        except Exception:
+            raise HTTPException(503, "Ingest queue unavailable — is Redis running?")
+        return {"ok": True, "job_id": job.get("id"), "status": job.get("status")}
 
     @router.get("/documents/search")
     def search_document_chunks(q: str, limit: int = 200, rag_id: str | None = None):

@@ -179,6 +179,8 @@ def _progress_saver(job):
                 "stage": str(info.get("stage") or ""),
                 "current_file": info.get("file", ""),
                 "errors": (info.get("errors") or [])[-10:],
+                # Register outcomes so far (unchanged / new version / duplicate …).
+                "outcomes": dict(info.get("outcomes") or {}),
                 "message": "Indexing",
             }
         )
@@ -213,6 +215,9 @@ def _finalize(job, result: Dict[str, Any]) -> None:
             "stage": "",
             "current_file": "",
             "errors": errors,
+            "outcomes": dict(result.get("outcomes") or {}),
+            # Per-file register results (capped in VectorRAG._tally).
+            "files": list(result.get("files") or []),
             "message": message,
         }
     )
@@ -260,9 +265,43 @@ def ingest_files_job(
     return result
 
 
+def sync_register_job(
+    config_snapshot: Dict[str, Any], base_id: Optional[str] = None
+) -> Dict[str, Any]:
+    """Adopt legacy chunks into the document register (hashes every file)."""
+    from rq import get_current_job
+
+    _apply_snapshot(config_snapshot)
+    job = get_current_job()
+    rag = _fresh_rag(base_id, config_snapshot)
+    result = rag.sync_register(progress_cb=_progress_saver(job))
+    _finalize(job, {**result, "total": result.get("registered", 0)})
+    return result
+
+
 # ---------------------------------------------------------------------------
 # Enqueue helpers (called by the FastAPI app)
 # ---------------------------------------------------------------------------
+
+
+def start_sync_register(base_id: Optional[str] = None) -> Dict[str, Any]:
+    job = _queue().enqueue(
+        "src.rag_worker.sync_register_job",
+        _snapshot(base_id),
+        base_id,
+        job_timeout=_JOB_TIMEOUT,
+        meta={
+            "type": "sync_register",
+            "directory": "",
+            "owner": None,
+            "base_id": base_id or "default",
+            "indexed_count": 0,
+            "failed_count": 0,
+            "current_file": "",
+            "message": "Queued",
+        },
+    )
+    return _job_to_dict(job)
 
 
 def start_index_directory(
@@ -357,6 +396,8 @@ def _job_to_dict(job) -> Dict[str, Any]:
         "current_file": meta.get("current_file", ""),
         "message": message,
         "errors": meta.get("errors", []),
+        "outcomes": meta.get("outcomes", {}),
+        "files": meta.get("files", []),
         "created_at": _ts(job.enqueued_at),
         "started_at": _ts(job.started_at),
         "ended_at": _ts(job.ended_at),
