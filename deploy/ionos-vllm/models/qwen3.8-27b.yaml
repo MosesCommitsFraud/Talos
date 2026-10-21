@@ -1,0 +1,27 @@
+# Qwen3.8-27B, FP8 — dense, ~31 GB weights. Fits one H200 with plenty of KV
+# cache left. Same model as the Spark baseline (setup S4 in
+# docs/benchmarks/Modelltest_Spark_vs_H200.xlsx).
+#
+# Keys are `vllm serve` flags without the leading `--`. Host, port and API key
+# come from docker-compose.yml.
+
+model: Qwen/Qwen3.8-27B-FP8
+# Talos switches on its Qwen sampling profiles and the reasoning-effort knob
+# only when the served name contains "qwen" (src/llm_core.py).
+served-model-name: qwen3.8-27b
+
+tensor-parallel-size: 1
+gpu-memory-utilization: 0.90
+# Native is 262144; half of that keeps the KV cache large enough for 64
+# parallel sequences. Raise it if long documents get cut off.
+max-model-len: 131072
+max-num-seqs: 64
+enable-prefix-caching: true
+
+enable-auto-tool-choice: true
+tool-call-parser: qwen3_coder
+reasoning-parser: qwen3
+
+# Optional, once the base setup works — faster decoding if the checkpoint
+# ships MTP weights (vLLM logs an error at startup otherwise):
+# speculative-config: '{"method": "mtp", "num_speculative_tokens": 3}'

@@ -1,0 +1,25 @@
+# GLM-5.3-Flash — MoE, ~320B total / 18B active.
+#
+# nvidia/GLM-5.3-Flash-NVFP4 (the link in the test plan) runs on Blackwell
+# only (B200/GB200); an H200 has no FP4 kernels for it. On Hopper the
+# official FP8 checkpoint is the one to use: ~306 GiB of weights, so it needs
+# 4× H200. It does not fit on 1 or 2.
+#
+# Flags follow https://recipes.vllm.ai/zai-org/GLM-5.3-Flash. Hopper can't use
+# an FP8 KV cache for this model, so --kv-cache-dtype stays at the default.
+
+model: zai-org/GLM-5.3-Flash
+# Talos treats this as a generic OpenAI model: no Qwen sampling profile,
+# thinking off is sent as chat_template_kwargs.enable_thinking=false.
+served-model-name: glm-5.3-flash
+
+tensor-parallel-size: 4
+gpu-memory-utilization: 0.90
+max-model-len: 131072
+max-num-seqs: 32
+enable-prefix-caching: true
+speculative-config: '{"method": "mtp", "num_speculative_tokens": 5}'
+
+enable-auto-tool-choice: true
+tool-call-parser: glm47
+reasoning-parser: glm47

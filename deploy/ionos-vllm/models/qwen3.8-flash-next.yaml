@@ -1,0 +1,31 @@
+# Qwen3.8-Flash-Next, FP8 — MoE, 125B total / 6B active, plus a 51B n-gram
+# embedding table. 172.8 GiB of weights: does NOT fit one H200 (141 GB).
+# vLLM keeps the n-gram table in host RAM by default (~51 GB, the 260 GB of the
+# VM are enough), which still leaves ~125 GiB per GPU at TP1 — no room for KV
+# cache. Needs at least 2× H200.
+#
+# Flags follow https://recipes.vllm.ai/Qwen/Qwen3.8-Flash-Next (H200 section):
+# expert parallel + Triton MoE backend, because plain TP doesn't work with the
+# 128-wide FP8 blocks on Hopper. TP2 is not in the recipe — if it fails to
+# load, try 4 GPUs.
+
+model: Qwen/Qwen3.8-Flash-Next-FP8
+# Must contain "qwen", see qwen3.8-27b.yaml.
+served-model-name: qwen3.8-flash-next
+
+tensor-parallel-size: 2
+enable-expert-parallel: true
+moe-backend: triton
+gpu-memory-utilization: 0.85
+max-model-len: 131072
+# The recipe warns that lower values can fail with a Mamba-cache capacity
+# error at startup.
+max-num-seqs: 256
+enable-prefix-caching: true
+kv-cache-dtype: fp8
+attention-config.indexer_kv_dtype: fp8
+speculative-config: '{"method": "mtp", "num_speculative_tokens": 3}'
+
+enable-auto-tool-choice: true
+tool-call-parser: qwen3_coder
+reasoning-parser: qwen3
