@@ -362,3 +362,109 @@ def test_directory_sync_does_not_rehash_untouched_files(env, monkeypatch):
     os.utime(share / "big.md", (2_000_000_000, 2_000_000_000))
     assert rag.index_personal_documents(str(share))["outcomes"]["updated"] == 1
     assert len(hashed) == 1
+
+
+def test_replace_indexes_new_file_then_deletes_old_document(env):
+    rag, uploads, _ = env
+    old_path, meta = upload(uploads, "Richtlinie_2024.md", "Regeln 2024", "a")
+    rag.index_files([(old_path, meta)])
+    old_id = rd.make_doc_id("Richtlinie_2024.md")
+    new_path, meta = upload(uploads, "Richtlinie_2025.md", "Regeln 2025", "b")
+    result = rag.index_files([(new_path, {**meta, "_replaces": old_id})])
+    assert result["outcomes"]["replaced"] == 1
+    assert result["files"][0]["replaced"] == "Richtlinie_2024.md"
+    assert contents(rag) == ["Regeln 2025"]
+    assert [d["filename"] for d in rag.list_documents()] == ["Richtlinie_2025.md"]
+    assert not os.path.exists(old_path)
+    reg = rd.DocumentRegister(rag.persist_directory)
+    assert reg.get("kb", old_id)["status"] == "deleted"
+
+
+def test_failed_replacement_keeps_old_document(env):
+    rag, uploads, _ = env
+    old_path, meta = upload(uploads, "Handbuch.md", "Inhalt", "a")
+    rag.index_files([(old_path, meta)])
+    new_path, meta = upload(uploads, "Handbuch_neu.md", "  ", "b")
+    result = rag.index_files([(new_path, {**meta, "_replaces": rd.make_doc_id("Handbuch.md")})])
+    assert result["outcomes"]["failed"] == 1
+    assert result["outcomes"].get("replaced", 0) == 0
+    assert contents(rag) == ["Inhalt"]
+    assert os.path.exists(old_path)
+
+
+def test_replacement_with_identical_content_is_not_a_duplicate_of_the_old_one(env):
+    rag, uploads, _ = env
+    old_path, meta = upload(uploads, "Alt.md", "gleich", "a")
+    rag.index_files([(old_path, meta)])
+    new_path, meta = upload(uploads, "Neu.md", "gleich", "b")
+    result = rag.index_files([(new_path, {**meta, "_replaces": rd.make_doc_id("Alt.md")})])
+    assert result["outcomes"]["indexed"] == 1
+    [doc] = rag.list_documents()
+    assert doc["filename"] == "Neu.md" and doc["status"] == "indexed"
+    assert contents(rag) == ["gleich"]
+
+
+def test_duplicates_are_marked_on_every_copy(env):
+    rag, uploads, tmp_path = env
+    rag.index_files([upload(uploads, "A.md", "same", "a")])
+    rag.index_files([upload(uploads, "B.md", "same", "b")])
+    share = tmp_path / "share"
+    share.mkdir()
+    (share / "c.md").write_text("same", encoding="utf-8")
+    (share / "d.md").write_text("other", encoding="utf-8")
+    rag.index_personal_documents(str(share))
+    rows = {d["filename"]: d for d in rag.list_documents()}
+    assert rows["A.md"]["duplicate_count"] == 2
+    assert rows["B.md"]["status"] == "duplicate" and rows["B.md"]["duplicate_count"] == 2
+    assert rows["c.md"]["status"] == "indexed" and rows["c.md"]["duplicate_count"] == 2
+    assert rows["d.md"]["duplicate_count"] == 0
+
+
+def test_replace_route_rejects_directory_documents(env, monkeypatch, tmp_path):
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    import src.rag_singleton as singleton
+    import src.rag_worker as worker
+    from core.middleware import require_admin
+    from routes.rag_routes import setup_rag_routes
+
+    rag, uploads, _ = env
+    share = tmp_path / "share"
+    share.mkdir()
+    (share / "x.md").write_text("from share", encoding="utf-8")
+    rag.index_personal_documents(str(share))
+    old_path, meta = upload(uploads, "Plan.md", "plan", "a")
+    rag.index_files([(old_path, meta)])
+    queued = []
+    monkeypatch.setattr(singleton, "get_rag_manager", lambda rag_id=None, **kw: rag)
+    monkeypatch.setattr(
+        worker,
+        "start_index_files",
+        lambda files, owner=None, base_id=None: queued.append(files) or {"id": "j1"},
+    )
+    app = FastAPI()
+    app.include_router(setup_rag_routes())
+    app.dependency_overrides[require_admin] = lambda: None
+    client = TestClient(app)
+
+    share_id = rd.make_doc_id(os.path.abspath(share / "x.md"))
+    refused = client.post(
+        "/api/rag/documents/replace",
+        data={"doc_id": share_id},
+        files={"file": ("y.md", b"new", "text/markdown")},
+    )
+    assert refused.status_code == 400
+
+    ok = client.post(
+        "/api/rag/documents/replace",
+        data={"doc_id": rd.make_doc_id("Plan.md")},
+        files={"file": ("Plan v2.md", b"plan two", "text/markdown")},
+    )
+    assert ok.json()["job_id"] == "j1"
+    [(path, meta)] = queued[-1]
+    assert os.path.dirname(path) == str(uploads)
+    assert meta["_replaces"] == rd.make_doc_id("Plan.md")
+    assert meta["logical_path"] == "Plan v2.md"
+    rag.index_files(queued[-1])
+    assert contents(rag) == ["from share", "plan two"]

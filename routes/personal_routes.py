@@ -101,6 +101,32 @@ def _unique_personal_upload_path(
     return file_path, filename, safe_name
 
 
+async def store_upload(upload: UploadFile, upload_dir: str) -> Tuple[str, str, str]:
+    """Stream one upload into ``upload_dir`` under a collision-free name.
+
+    Returns ``(file_path, stored_name, safe_name)``; raises 413 (and removes the
+    partial file) when it exceeds ``MAX_PERSONAL_UPLOAD_BYTES``.
+    """
+    file_path, stored_name, safe_name = _unique_personal_upload_path(upload_dir, upload.filename)
+    size = 0
+    with open(file_path, "wb") as f:
+        while True:
+            chunk = await upload.read(1024 * 1024)
+            if not chunk:
+                break
+            size += len(chunk)
+            if size > MAX_PERSONAL_UPLOAD_BYTES:
+                f.close()
+                try:
+                    os.remove(file_path)
+                except OSError:
+                    pass
+                limit_mb = MAX_PERSONAL_UPLOAD_BYTES // (1024 * 1024)
+                raise HTTPException(413, f"{upload.filename}: exceeds {limit_mb} MB limit")
+            f.write(chunk)
+    return file_path, stored_name, safe_name
+
+
 def setup_personal_routes(personal_docs_manager, rag_manager, rag_available):
     """
     Setup personal documents related routes.

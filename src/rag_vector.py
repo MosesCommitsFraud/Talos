@@ -3741,7 +3741,14 @@ class VectorRAG:
 
     # Register-derived keys a caller never sets itself; stripped from the
     # metadata kept for retries so a re-index derives them afresh.
-    _DERIVED_META = ("doc_id", "content_sha256", "doc_version", "_force", "_reparse")
+    _DERIVED_META = (
+        "doc_id",
+        "content_sha256",
+        "doc_version",
+        "_force",
+        "_reparse",
+        "_replaces",
+    )
 
     def _ingest_file(
         self,
@@ -3751,6 +3758,43 @@ class VectorRAG:
         *,
         force: bool = False,
         reparse: bool = False,
+    ) -> Dict[str, Any]:
+        """Index one file; with ``_replaces`` in ``meta``, then retire that document.
+
+        Replacing is "index the new file, then delete the old document", in that
+        order: a replacement that fails to index leaves the old one searchable.
+        The replaced document is not a duplicate candidate for the new file.
+        """
+        from src import rag_documents as rd
+
+        meta = dict(meta or {})
+        replaces = meta.pop("_replaces", None)
+        register = self._register() if replaces else None
+        old = register.get(self.collection_name, replaces) if register else None
+        outcome = self._ingest_one(
+            fpath, meta, stage_cb, force=force, reparse=reparse, exclude_twin=replaces
+        )
+        if (
+            old
+            and old["status"] != rd.DELETED
+            and outcome.get("status") != "failed"
+            and outcome.get("doc_id") != replaces
+        ):
+            self.delete_document(doc_id=replaces)
+            if old["source"] != meta.get("source", fpath):
+                rd.delete_managed_file(old["source"])
+            outcome["replaced"] = old["display_name"]
+        return outcome
+
+    def _ingest_one(
+        self,
+        fpath: str,
+        meta: Dict[str, Any],
+        stage_cb=None,
+        *,
+        force: bool = False,
+        reparse: bool = False,
+        exclude_twin: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Index one file through the document register.
 
@@ -3871,7 +3915,9 @@ class VectorRAG:
             and row["origin"] == rd.ORIGIN_UPLOAD
             and not (live and live["status"] == rd.INDEXED)
         ):
-            twin = register.find_by_sha(coll, sha, scope=meta.get("scope"), exclude_doc_id=doc_id)
+            twin = register.find_by_sha(
+                coll, sha, scope=meta.get("scope"), exclude_doc_id=(doc_id, exclude_twin)
+            )
             if twin:
                 register.upsert(
                     coll,
@@ -3924,7 +3970,9 @@ class VectorRAG:
         warnings = (
             [f"{len(failures)} extraction call(s) failed, e.g. {failures[0]}"] if failures else []
         )
-        twin = register.find_by_sha(coll, sha, scope=meta.get("scope"), exclude_doc_id=doc_id)
+        twin = register.find_by_sha(
+            coll, sha, scope=meta.get("scope"), exclude_doc_id=(doc_id, exclude_twin)
+        )
         content_changed = bool(live) and live["content_sha256"] != sha
         register.upsert(
             coll,
@@ -3989,6 +4037,8 @@ class VectorRAG:
     def _tally(summary: Dict[str, Any], fpath: str, outcome: Dict[str, Any]) -> None:
         status = outcome.get("status") or "failed"
         summary["outcomes"][status] = summary["outcomes"].get(status, 0) + 1
+        if outcome.get("replaced"):
+            summary["outcomes"]["replaced"] = summary["outcomes"].get("replaced", 0) + 1
         summary["indexed_count"] += int(outcome.get("chunks") or 0)
         if status == "failed":
             summary["failed_count"] += 1
@@ -4007,6 +4057,7 @@ class VectorRAG:
                     "chunks": int(outcome.get("chunks") or 0),
                     "error": outcome.get("error"),
                     "duplicate_of": outcome.get("duplicate_of"),
+                    "replaced": outcome.get("replaced"),
                 }
             )
 
@@ -4016,6 +4067,7 @@ class VectorRAG:
         parts = [f"Indexed {summary['indexed_count']} chunks{suffix}"]
         for key, label in (
             ("updated", "new version(s)"),
+            ("replaced", "replaced"),
             ("unchanged", "unchanged"),
             ("duplicate", "duplicate(s) skipped"),
             ("deleted", "removed (missing on disk)"),
@@ -4721,6 +4773,14 @@ class VectorRAG:
                     "chunks": 0,
                     **self._public_register_fields(reg),
                 }
+            # Duplicate marking is computed from the listed rows, not stored:
+            # it stays right when one copy is deleted or changes later.
+            by_sha: Dict[str, int] = {}
+            for row in agg.values():
+                if row.get("content_sha256"):
+                    by_sha[row["content_sha256"]] = by_sha.get(row["content_sha256"], 0) + 1
+            for row in agg.values():
+                row["duplicate_count"] = by_sha.get(row.get("content_sha256") or "", 1) - 1
             return sorted(agg.values(), key=lambda r: str(r["filename"]).lower())
         except Exception as e:
             logger.error(f"list_documents failed: {e}")

@@ -302,9 +302,17 @@ class DocumentRegister:
         sha: str,
         *,
         scope: Optional[str] = None,
-        exclude_doc_id: Optional[str] = None,
+        exclude_doc_id: Any = None,
     ) -> Optional[Dict[str, Any]]:
-        """An *indexed* document with this exact content in the same scope."""
+        """An *indexed* document with this exact content in the same scope.
+
+        ``exclude_doc_id`` is one id or a collection of ids to ignore.
+        """
+        excluded = (
+            {exclude_doc_id}
+            if isinstance(exclude_doc_id, str) or exclude_doc_id is None
+            else set(exclude_doc_id)
+        )
         with self._connect() as db:
             rows = db.execute(
                 "SELECT * FROM documents WHERE collection=? AND content_sha256=? AND status=? "
@@ -313,7 +321,7 @@ class DocumentRegister:
             ).fetchall()
         for row in rows:
             data = self._row(row)
-            if data["doc_id"] == exclude_doc_id or (data.get("scope") or None) != (scope or None):
+            if data["doc_id"] in excluded or (data.get("scope") or None) != (scope or None):
                 continue
             return data
         return None

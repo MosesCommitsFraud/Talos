@@ -2,7 +2,7 @@ import os
 from datetime import datetime
 from urllib.parse import quote
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel
 
 from core.middleware import require_admin
@@ -949,6 +949,65 @@ def setup_rag_routes():
     def restore_document_version(body: DocumentAction, rag_id: str | None = None):
         """Make a retained older version current again (indexed as a new version)."""
         return _queue_document(body, rag_id, restore=True)
+
+    @router.post("/documents/replace")
+    async def replace_document(
+        doc_id: str = Form(...),
+        file: UploadFile = File(...),
+        rag_id: str | None = None,
+    ):
+        """Replace an uploaded document with another file.
+
+        The new file is indexed first and the old document is deleted only once
+        that succeeded (worker job), so a broken replacement never leaves a gap.
+        Documents from an indexed directory are replaced in the directory
+        itself — the next sync would otherwise bring the old file back.
+        """
+        from routes.personal_routes import _personal_upload_dir_for_owner, store_upload
+        from src import rag_documents as rd
+        from src import rag_worker
+        from src.rag_singleton import get_rag_manager
+
+        rag = _resolve_rag(rag_id, get_rag_manager)
+        if not rag or not getattr(rag, "healthy", False):
+            raise HTTPException(503, "RAG is not available")
+        register = rag._register()
+        row = register.get(rag.collection_name, doc_id) if register else None
+        if not row or row["status"] == rd.DELETED:
+            raise HTTPException(404, "Document is not in the register")
+        if row["origin"] == rd.ORIGIN_DIRECTORY:
+            raise HTTPException(
+                400,
+                "This document comes from an indexed directory — replace the file there; "
+                "the next directory sync picks it up.",
+            )
+        if rd.is_within(row["source"], rd.managed_uploads_dir()):
+            upload_dir = os.path.dirname(row["source"])
+        else:
+            upload_dir = _personal_upload_dir_for_owner(
+                "kb-" + rag_id if rag_id and rag_id != "default" else "global"
+            )
+        file_path, stored_name, safe_name = await store_upload(file, upload_dir)
+        meta = {
+            "source": file_path,
+            "filename": safe_name,
+            "stored_filename": stored_name,
+            "directory": upload_dir,
+            "type": os.path.splitext(safe_name)[1].lower(),
+            **rd.upload_identity(file.filename),
+            "_replaces": doc_id,
+        }
+        for key in ("owner", "scope"):
+            if row.get(key):
+                meta[key] = row[key]
+        if "redact_pii" in (row.get("ingest_meta") or {}):
+            meta["redact_pii"] = row["ingest_meta"]["redact_pii"]
+        try:
+            job = rag_worker.start_index_files([(file_path, meta)], owner=None, base_id=rag_id)
+        except Exception:
+            rd.delete_managed_file(file_path)
+            raise HTTPException(503, "Ingest queue unavailable — is Redis running?")
+        return {"ok": True, "job_id": job.get("id"), "status": job.get("status")}
 
     @router.post("/register/sync")
     def sync_document_register(rag_id: str | None = None):
