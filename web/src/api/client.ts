@@ -1135,6 +1135,11 @@ export interface RagJob {
   current_file: string;
   message: string;
   errors: { file: string; error: string }[];
+  /** Document-register outcomes: indexed / updated / reindexed / unchanged /
+   *  duplicate / skipped / failed / deleted → count. */
+  outcomes?: Record<string, number>;
+  /** Per-file register results (finished jobs only, capped server-side). */
+  files?: RagJobFile[];
   created_at: number | null;
   started_at: number | null;
   ended_at: number | null;
@@ -1145,12 +1150,58 @@ export interface RagWorkerDiag {
   multi_worker_warning: boolean;
   message: string;
 }
+export interface RagJobFile {
+  file: string;
+  status: string;
+  doc_id?: string | null;
+  version?: number | null;
+  chunks: number;
+  error?: string | null;
+  duplicate_of?: string | null;
+}
+export type RagDocumentStatus = 'indexed' | 'failed' | 'duplicate' | 'deleted';
 export interface RagDocument {
   source: string;
   filename: string;
   type: string;
   directory: string;
   chunks: number;
+  /** False for documents indexed before the document register existed. */
+  registered?: boolean;
+  doc_id?: string;
+  logical_path?: string;
+  origin?: string;
+  status?: RagDocumentStatus;
+  version?: number;
+  content_sha256?: string;
+  size_bytes?: number | null;
+  indexed_at?: number | null;
+  updated_at?: number | null;
+  duplicate_of?: string | null;
+  lane?: string;
+  parse_cached?: boolean;
+  pipeline_fingerprint?: string;
+  error?: string;
+  warnings?: string[];
+}
+export interface RagDocumentVersion {
+  version: number;
+  content_sha256: string;
+  size_bytes: number | null;
+  status: 'current' | 'superseded' | 'deleted' | string;
+  chunks: number;
+  created_at: number;
+  file_available: boolean;
+}
+export interface RagDocumentDetail extends RagDocument {
+  owner?: string | null;
+  scope?: string | null;
+  created_at?: number | null;
+  deleted_at?: number | null;
+  duplicate_of_name?: string;
+  duplicate_of_source?: string;
+  duplicates: { doc_id: string; filename: string }[];
+  versions: RagDocumentVersion[];
 }
 
 export const fetchRagJobs = () => getJSON<{ jobs: RagJob[] }>('/api/rag/jobs');
@@ -1176,6 +1227,27 @@ export const fetchRagDocuments = (ragId?: string, scope?: string) =>
       ragId,
     ),
   );
+
+/** Register view of one document: stable id, content hash, version history. */
+export const fetchRagDocumentDetail = (docId: string, ragId?: string) =>
+  getJSON<RagDocumentDetail>(
+    withRag(`/api/rag/documents/detail?doc_id=${encodeURIComponent(docId)}`, ragId),
+  );
+/** Queue a re-index of one document; `reparse` also bypasses the parse cache. */
+export const reindexRagDocument = (docId: string, reparse: boolean, ragId?: string) =>
+  postJSON<{ ok: boolean; job_id?: string }>(withRag('/api/rag/documents/reindex', ragId), {
+    doc_id: docId,
+    reparse,
+  });
+/** Make a retained older version current again (indexed as a new version). */
+export const restoreRagDocumentVersion = (docId: string, version: number, ragId?: string) =>
+  postJSON<{ ok: boolean; job_id?: string }>(withRag('/api/rag/documents/restore', ragId), {
+    doc_id: docId,
+    version,
+  });
+/** Adopt documents indexed before the register existed (hashes every file). */
+export const syncRagRegister = (ragId?: string) =>
+  postJSON<{ ok: boolean; job_id?: string }>(withRag('/api/rag/register/sync', ragId));
 
 /** One indexed chunk, as stored in Qdrant — the ground truth the retriever
  *  sees. Used by the /rag explorer's debug/edit view. */

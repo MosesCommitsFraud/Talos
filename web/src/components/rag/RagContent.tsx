@@ -1,5 +1,13 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { BoxesIcon, FileTextIcon, FolderOpenIcon, SearchIcon, UploadCloudIcon } from 'lucide-react';
+import {
+  AlertTriangleIcon,
+  BoxesIcon,
+  ChevronRightIcon,
+  FileTextIcon,
+  FolderOpenIcon,
+  SearchIcon,
+  UploadCloudIcon,
+} from 'lucide-react';
 import { useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
@@ -9,6 +17,7 @@ import {
   personalReload,
   personalUpload,
   ragSearch,
+  syncRagRegister,
   type RagDocument,
 } from '@/api/client';
 import { cn } from '@/lib/utils';
@@ -17,6 +26,7 @@ import { Page, Row, Section } from '../SettingsDialog';
 import { Button } from '../ui/button';
 import { Input } from '../ui/misc';
 import { Select } from '../ui/select';
+import { RagDocumentDetail } from './RagDocumentDetail';
 import { RagExplorer } from './RagExplorer';
 
 interface SearchHit {
@@ -48,6 +58,7 @@ export function RagContent({ baseId }: { baseId: string }) {
   const [hits, setHits] = useState<SearchHit[] | null>(null);
   const [searchErr, setSearchErr] = useState('');
   const [explorerOpen, setExplorerOpen] = useState(false);
+  const [openDoc, setOpenDoc] = useState<string | null>(null);
 
   const docs = useQuery({
     queryKey: ['rag-documents', baseId],
@@ -86,6 +97,8 @@ export function RagContent({ baseId }: { baseId: string }) {
   };
 
   const list: RagDocument[] = docs.data?.documents ?? [];
+  // Indexed before the document register existed: no id/hash/version yet.
+  const unregistered = list.filter((d) => d.registered === false).length;
 
   return (
     <Page className="gap-5 p-0">
@@ -183,26 +196,91 @@ export function RagContent({ baseId }: { baseId: string }) {
           <p className="text-xs text-muted-foreground">{t('rag.content.empty')}</p>
         ) : (
           <div className="space-y-1">
-            {list.map((d) => (
-              <div
-                key={d.source}
-                className="flex items-center gap-2 rounded-lg border border-border/60 px-3 py-1.5 text-xs"
-              >
-                <FileTextIcon className="size-3.5 shrink-0 text-muted-foreground" />
-                <span className="min-w-0 truncate" title={d.source}>
-                  {d.filename}
-                </span>
-                <span className="ml-auto shrink-0 tabular-nums text-muted-foreground">
-                  {t('settings.rag.chunksN', { n: d.chunks })}
-                </span>
-                <button
-                  className="shrink-0 text-muted-foreground hover:text-destructive-foreground"
-                  onClick={() => remove.mutate(d.source)}
+            {unregistered > 0 && (
+              <div className="mb-2 flex flex-wrap items-center gap-2 rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs text-amber-700 dark:text-amber-400">
+                <span className="min-w-0 flex-1">{t('rag.doc.unregistered', { n: unregistered })}</span>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => run(() => syncRagRegister(ragId), t('rag.doc.syncQueued'))}
                 >
-                  {t('common.delete')}
-                </button>
+                  {t('rag.doc.sync')}
+                </Button>
               </div>
-            ))}
+            )}
+            {list.map((d) => {
+              const open = !!d.doc_id && openDoc === d.doc_id;
+              return (
+                <div key={d.source} className="rounded-lg border border-border/60">
+                  <div className="flex items-center gap-2 px-3 py-1.5 text-xs">
+                    <button
+                      className="flex min-w-0 flex-1 items-center gap-2 text-left disabled:cursor-default"
+                      disabled={!d.doc_id}
+                      onClick={() => setOpenDoc(open ? null : (d.doc_id ?? null))}
+                      title={d.doc_id ? t('rag.doc.showDetails') : d.source}
+                    >
+                      {d.doc_id ? (
+                        <ChevronRightIcon
+                          className={cn(
+                            'size-3.5 shrink-0 text-muted-foreground transition-transform',
+                            open && 'rotate-90',
+                          )}
+                        />
+                      ) : (
+                        <FileTextIcon className="size-3.5 shrink-0 text-muted-foreground" />
+                      )}
+                      <span className="min-w-0 truncate">{d.filename}</span>
+                      {(d.version ?? 1) > 1 && (
+                        <span className="shrink-0 rounded bg-muted px-1.5 py-px text-[10px] text-muted-foreground tabular-nums">
+                          v{d.version}
+                        </span>
+                      )}
+                      {d.status && d.status !== 'indexed' && (
+                        <span
+                          className={cn(
+                            'shrink-0 rounded px-1.5 py-px text-[10px]',
+                            d.status === 'failed'
+                              ? 'bg-destructive/10 text-destructive-foreground'
+                              : 'bg-muted text-muted-foreground',
+                          )}
+                          title={d.error || undefined}
+                        >
+                          {t(`rag.doc.status.${d.status}`, d.status)}
+                        </span>
+                      )}
+                      {d.status === 'indexed' && (d.error || (d.warnings ?? []).length > 0) && (
+                        <AlertTriangleIcon
+                          className="size-3.5 shrink-0 text-amber-600 dark:text-amber-400"
+                          aria-label={d.error || (d.warnings ?? [])[0]}
+                        />
+                      )}
+                    </button>
+                    {d.content_sha256 && (
+                      <code
+                        className="hidden shrink-0 font-mono text-[10px] text-muted-foreground/80 sm:inline"
+                        title={`SHA-256 ${d.content_sha256}`}
+                      >
+                        {d.content_sha256.slice(0, 8)}
+                      </code>
+                    )}
+                    <span className="shrink-0 tabular-nums text-muted-foreground">
+                      {t('settings.rag.chunksN', { n: d.chunks })}
+                    </span>
+                    <button
+                      className="shrink-0 text-muted-foreground hover:text-destructive-foreground"
+                      onClick={() => remove.mutate(d.source)}
+                    >
+                      {t('common.delete')}
+                    </button>
+                  </div>
+                  {open && d.doc_id && (
+                    <div className="border-t border-border/60">
+                      <RagDocumentDetail docId={d.doc_id} ragId={ragId} />
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
         )}
       </Section>

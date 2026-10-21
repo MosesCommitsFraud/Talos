@@ -185,9 +185,43 @@ removes old chunks. Failed writes retain the previous searchable generation.
 The generation manifest in `<persist_directory>/generations/` is part of the index:
 all application processes must share this directory, and backups/restores must
 include it together with Qdrant. This publication boundary covers the text collection;
-the separate pixel-vector collection retains its existing lifecycle. A directory
-reindex does not delete sources missing on disk; use explicit removal for those.
+the separate pixel-vector collection retains its existing lifecycle.
 Large-corpus filter overhead and multi-process deployment require load validation.
+
+### Document register and parse cache
+
+`src/rag_documents.py` keeps one row per *document* (Qdrant only knows chunks) in
+`<persist_directory>/documents.sqlite3`, shared by the app and the ingest worker:
+
+- **Identity.** `doc_id` is derived from the logical path, owner and scope. For
+  uploads the logical path is the original file name (the stored copy carries a
+  random suffix); for directory ingest it is the absolute path. Case, slashes and
+  Unicode normalisation don't matter. Chunks carry `doc_id`, `logical_path`,
+  `content_sha256` and `doc_version`, and a generation publication replaces by
+  `doc_id`, so a new version retires the old chunks even from another file path.
+- **What a file costs.** Before parsing, the file is hashed (SHA-256). Same hash +
+  same pipeline fingerprint → *unchanged*, nothing runs. An upload whose bytes
+  already exist under another name → *duplicate*, recorded but not indexed again;
+  it is indexed in its own right when the original is deleted or changed. New
+  bytes under the same logical path → *new version*. A failed new version leaves
+  the previous one searchable.
+- **Versions.** Each version is recorded with hash, size and chunk count; the last
+  `RAG_KEEP_VERSIONS` (default 3) stored upload files are kept and can be restored
+  from the document's detail view.
+- **Tombstones.** A directory sync removes documents whose file is gone from disk;
+  deleted documents keep a `deleted` row.
+- **Parse cache.** Docling/VLM/ASR output is stored under
+  `<persist_directory>/parse_cache/` by content hash + lane fingerprint, so changing
+  chunking, enrichment or the embedding model re-derives without re-running
+  OCR/VLM/ASR. A parse that lost VLM pages or ASR segments to endpoint errors is
+  kept for that run, reported as a warning on the document, and never cached.
+  *Re-parse* in the UI bypasses the cache; *Rebuild index* clears it.
+- **Existing indexes.** Documents indexed before the register show up as
+  unregistered; *Adopt* (worker job, `POST /api/rag/register/sync`) hashes their
+  files and writes `doc_id` into the existing chunks without re-embedding. Several
+  old uploads with the same name are never merged: the newest keeps the plain name.
+
+Back up `documents.sqlite3` together with Qdrant and the generation manifests.
 
 Validation includes real HTML, DOCX and CSV files through Docling-Haystack, a local
 Qdrant store, a local tokenizer, interrupted writes, and Chat/MCP budget regressions.

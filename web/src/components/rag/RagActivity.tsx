@@ -21,6 +21,9 @@ import { RagBaseSelect, useActiveRagBase } from './RagBases';
 import { RagExplorer } from './RagExplorer';
 
 const TERMINAL = ['completed', 'failed', 'cancelled'];
+// Register outcomes worth surfacing on a job row ("indexed" is already the
+// chunk count; failures have their own counter).
+const OUTCOME_KEYS = ['indexed', 'updated', 'reindexed', 'unchanged', 'duplicate', 'deleted'];
 
 /** Progress for one job: a real % bar when an upload total is known, an
  *  indeterminate shimmer while a directory ingest runs, full when terminal. */
@@ -224,6 +227,15 @@ export function RagActivity() {
                     {j.indexed_count > 0 && <span>{t('settings.rag.chunksIndexed', { n: j.indexed_count })}</span>}
                     {j.failed_count > 0 && <span className="text-destructive-foreground">{t('settings.rag.failedN', { n: j.failed_count })}</span>}
                   </div>
+                  {/* What the document register decided per file: a re-upload
+                      that was skipped as unchanged must not look like a no-op. */}
+                  {OUTCOME_KEYS.some((k) => (j.outcomes?.[k] ?? 0) > 0) && (
+                    <div className="mt-1 flex flex-wrap gap-x-2 gap-y-0.5 text-[10px] text-muted-foreground tabular-nums">
+                      {OUTCOME_KEYS.filter((k) => (j.outcomes?.[k] ?? 0) > 0).map((k) => (
+                        <span key={k}>{t(`rag.outcome.${k}`, { n: j.outcomes?.[k] ?? 0 })}</span>
+                      ))}
+                    </div>
+                  )}
                 </div>
               );
             })

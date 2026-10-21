@@ -2026,6 +2026,133 @@ def _models():
     ]
 
 
+
+# Document-register mock data for the /rag content view: a re-uploaded file
+# with history, a duplicate, a failed upload and a pre-register legacy file.
+_SHA_V3 = "9f2c1a7be4d05c3e8a6b1f0d2e4c6a8b0c1d3e5f7a9b2c4d6e8f0a1b3c5d7e9f"
+_RAG_DOCS = [
+    {
+        "source": "/srv/uploads/kb-default/Reisekostenrichtlinie-3fa9c2d1e0.pdf",
+        "filename": "Reisekostenrichtlinie.pdf",
+        "type": ".pdf",
+        "directory": "",
+        "chunks": 42,
+        "registered": True,
+        "doc_id": "d_5b8e0c3a91f2d4e6a7b8c9d0",
+        "logical_path": "Reisekostenrichtlinie.pdf",
+        "origin": "upload",
+        "status": "indexed",
+        "version": 3,
+        "content_sha256": _SHA_V3,
+        "size_bytes": 1843200,
+        "indexed_at": 1792500000,
+        "updated_at": 1792500000,
+        "duplicate_of": None,
+        "lane": "docling",
+        "parse_cached": True,
+        "pipeline_fingerprint": "a41c9e07d2b35f68",
+        "error": "",
+        "warnings": ["2 extraction call(s) failed, e.g. ReadTimeout: VLM page 7"],
+        "owner": None,
+        "scope": None,
+        "created_at": 1790000000,
+        "deleted_at": None,
+        "duplicate_of_name": "",
+        "duplicate_of_source": "",
+        "duplicates": [{"doc_id": "d_77aa", "filename": "Reisekosten Kopie.pdf"}],
+        "versions": [
+            {"version": 3, "content_sha256": _SHA_V3, "size_bytes": 1843200,
+             "status": "current", "chunks": 42, "created_at": 1792500000, "file_available": True},
+            {"version": 2, "content_sha256": "1e0d9c8b7a6f5e4d3c2b1a0f9e8d7c6b5a4f3e2d1c0b9a8f7e6d5c4b3a2f1e0d",
+             "size_bytes": 1790000, "status": "superseded", "chunks": 40,
+             "created_at": 1791500000, "file_available": True},
+            {"version": 1, "content_sha256": "0a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f9",
+             "size_bytes": 1650000, "status": "superseded", "chunks": 37,
+             "created_at": 1790000000, "file_available": False},
+        ],
+    },
+    {
+        "source": "/srv/uploads/kb-default/Reisekosten_Kopie-81b2c3d4e5.pdf",
+        "filename": "Reisekosten Kopie.pdf",
+        "type": ".pdf",
+        "directory": "",
+        "chunks": 0,
+        "registered": True,
+        "doc_id": "d_77aa",
+        "logical_path": "Reisekosten Kopie.pdf",
+        "origin": "upload",
+        "status": "duplicate",
+        "version": 1,
+        "content_sha256": _SHA_V3,
+        "size_bytes": 1843200,
+        "indexed_at": None,
+        "duplicate_of": "d_5b8e0c3a91f2d4e6a7b8c9d0",
+        "lane": "docling",
+        "parse_cached": False,
+        "pipeline_fingerprint": "a41c9e07d2b35f68",
+        "error": "",
+        "warnings": [],
+        "duplicate_of_name": "Reisekostenrichtlinie.pdf",
+        "duplicates": [],
+        "versions": [],
+    },
+    {
+        "source": "/srv/uploads/kb-default/scan_leer-0c9d8e7f6a.pdf",
+        "filename": "scan_leer.pdf",
+        "type": ".pdf",
+        "directory": "",
+        "chunks": 0,
+        "registered": True,
+        "doc_id": "d_c0ffee000000000000000001",
+        "logical_path": "scan_leer.pdf",
+        "origin": "upload",
+        "status": "failed",
+        "version": 1,
+        "content_sha256": "deadbeef00112233445566778899aabbccddeeff00112233445566778899aabb",
+        "size_bytes": 20480,
+        "error": "no extractable text (empty/unsupported file)",
+        "warnings": [],
+        "lane": "docling",
+        "duplicates": [],
+        "versions": [],
+    },
+    {
+        "source": "/srv/share/prices.xlsx",
+        "filename": "prices.xlsx",
+        "type": ".xlsx",
+        "directory": "/srv/share",
+        "chunks": 17,
+        "registered": False,
+    },
+]
+
+
+def _rag_doc_row(doc):
+    return {k: v for k, v in doc.items() if k not in ("versions", "duplicates")}
+
+
+_RAG_JOBS = [
+    {
+        "id": "job-preview-1",
+        "type": "index_files",
+        "status": "completed",
+        "directory": "",
+        "base_id": "default",
+        "indexed_count": 42,
+        "failed_count": 1,
+        "processed_count": 5,
+        "total_count": 5,
+        "current_file": "",
+        "message": "Indexed 42 chunks, 1 new version(s), 2 unchanged, 1 duplicate(s) skipped, 1 file(s) failed",
+        "errors": [{"file": "scan_leer.pdf", "error": "no extractable text (empty/unsupported file)"}],
+        "outcomes": {"indexed": 0, "updated": 1, "unchanged": 2, "duplicate": 1, "failed": 1},
+        "files": [],
+        "created_at": 1792500000,
+        "started_at": 1792500001,
+        "ended_at": 1792500100,
+    }
+]
+
 class PreviewHandler(BaseHTTPRequestHandler):
     server_version = "TalosUIPreview/0.1"
 
@@ -2373,31 +2500,40 @@ class PreviewHandler(BaseHTTPRequestHandler):
                 }
             )
             return
-        if path == "/api/rag/jobs":
-            self._send_json({"jobs": []})
-            return
-        if path == "/api/rag/documents":
+        if path == "/api/rag/bases":
             self._send_json(
                 {
-                    "available": True,
-                    "documents": [
+                    "bases": [
                         {
-                            "source": "/srv/uploads/handbook.pdf",
-                            "filename": "handbook.pdf",
-                            "type": ".pdf",
-                            "directory": "",
-                            "chunks": 42,
-                        },
-                        {
-                            "source": "/srv/uploads/prices.xlsx",
-                            "filename": "prices.xlsx",
-                            "type": ".xlsx",
-                            "directory": "",
-                            "chunks": 17,
-                        },
-                    ],
+                            "id": "default",
+                            "name": "Talos Knowledge Base",
+                            "description": "Preview base",
+                            "language": "de",
+                            "collection": "talos_rag",
+                            "chat_enabled": True,
+                            "created_at": 0.0,
+                            "updated_at": 0.0,
+                            "override_count": 0,
+                            "content_count": len(_RAG_DOCS),
+                            "chunk_count": sum(d["chunks"] for d in _RAG_DOCS),
+                        }
+                    ]
                 }
             )
+            return
+        if path == "/api/rag/jobs":
+            self._send_json({"jobs": _RAG_JOBS})
+            return
+        if path == "/api/rag/documents":
+            self._send_json({"available": True, "documents": [_rag_doc_row(d) for d in _RAG_DOCS]})
+            return
+        if path == "/api/rag/documents/detail":
+            doc_id = parse_qs(parsed.query).get("doc_id", [""])[0]
+            doc = next((d for d in _RAG_DOCS if d.get("doc_id") == doc_id), None)
+            if doc is None:
+                self._send_json({"detail": "Document is not in the register"}, 404)
+                return
+            self._send_json(doc)
             return
         if path == "/api/rag/documents/chunks":
             source = parse_qs(parsed.query).get("source", [""])[0]
