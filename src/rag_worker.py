@@ -99,9 +99,9 @@ def _snapshot(base_id: Optional[str] = None) -> Dict[str, Any]:
     with when it was queued — not with whatever an admin saves while it waits.
     """
     try:
-        from src.rag_config import effective_config
+        from src.rag_config import instance_config
 
-        return effective_config(base_id)
+        return instance_config(base_id)
     except Exception:
         return {}
 

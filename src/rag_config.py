@@ -84,9 +84,18 @@ def effective_config(base_id: Optional[str] = None) -> Dict[str, Any]:
     """
     cfg = global_config()
     cfg.update(overrides_for(base_id))
-    # The base's language is catalogue metadata, not a pipeline setting, but
-    # the keyword (BM25) side stems and filters stopwords by it — so it travels
-    # with the config into the app instance and the ingest worker alike.
+    return cfg
+
+
+def instance_config(base_id: Optional[str] = None) -> Dict[str, Any]:
+    """``effective_config`` plus catalogue facts the engine needs.
+
+    The base's language is catalogue metadata, not a pipeline setting (it must
+    never show up as an override in the settings form), but the keyword (BM25)
+    side stems and filters stopwords by it — so it is added here, for the app
+    instance and the ingest worker's job snapshot alike.
+    """
+    cfg = effective_config(base_id)
     try:
         from src.rag_registry import get_base
 

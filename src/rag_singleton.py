@@ -93,7 +93,7 @@ def get_rag_manager(base_id: Optional[str] = None, config: Optional[dict] = None
     """
     global rag_instance, _last_error
 
-    from src.rag_config import effective_config
+    from src.rag_config import instance_config
     from src.rag_registry import DEFAULT_ID, collection_for
 
     key = (base_id or DEFAULT_ID).strip() or DEFAULT_ID
@@ -119,7 +119,7 @@ def get_rag_manager(base_id: Optional[str] = None, config: Optional[dict] = None
         candidate = VectorRAG(
             persist_directory=persist_dir,
             collection_name=collection,
-            config=config if config is not None else effective_config(key),
+            config=config if config is not None else instance_config(key),
         )
         if not candidate.healthy:
             _last_error = candidate.last_error or "RAG init failed (no detail)"

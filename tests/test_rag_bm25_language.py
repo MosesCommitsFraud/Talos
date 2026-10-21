@@ -135,3 +135,13 @@ def test_shared_embedder_passes_the_language_only_to_bm25(monkeypatch):
         ("Qdrant/bm25", {"language": "german"}),
         ("prithivida/Splade_PP_en_v1", None),
     ]
+
+
+def test_base_language_reaches_the_engine_but_never_the_overrides(tmp_path, monkeypatch):
+    from src import rag_config, rag_registry
+
+    monkeypatch.setenv("RAG_DATA_DIR", str(tmp_path))
+    monkeypatch.setattr(rag_config, "global_config", lambda: {"rerank_url": "http://r"})
+    entry = rag_registry.create_base("Docs", language="de")
+    assert "base_language" not in rag_config.effective_config(entry["id"])
+    assert rag_config.instance_config(entry["id"])["base_language"] == "de"
