@@ -1,11 +1,19 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { CheckIcon, CopyIcon, DownloadIcon, RefreshCwIcon, RotateCcwIcon } from 'lucide-react';
-import { useState, type ReactNode } from 'react';
+import {
+  CheckIcon,
+  CopyIcon,
+  DownloadIcon,
+  FileUpIcon,
+  RefreshCwIcon,
+  RotateCcwIcon,
+} from 'lucide-react';
+import { useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   fetchRagDocumentDetail,
   ragDocumentOriginalUrl,
   reindexRagDocument,
+  replaceRagDocument,
   restoreRagDocumentVersion,
 } from '@/api/client';
 import { cn, copyTextToClipboard, timestampMs } from '@/lib/utils';
@@ -63,6 +71,7 @@ export function RagDocumentDetail({ docId, ragId }: { docId: string; ragId?: str
   const { t } = useTranslation();
   const queryClient = useQueryClient();
   const [msg, setMsg] = useState<{ text: string; ok: boolean } | null>(null);
+  const replaceInput = useRef<HTMLInputElement>(null);
 
   const detail = useQuery({
     queryKey: ['rag-document-detail', ragId ?? '', docId],
@@ -87,6 +96,12 @@ export function RagDocumentDetail({ docId, ragId }: { docId: string; ragId?: str
     onError: fail,
   });
 
+  const replace = useMutation({
+    mutationFn: (file: File) => replaceRagDocument(docId, file, ragId),
+    onSuccess: () => done(t('rag.doc.replaceQueued')),
+    onError: fail,
+  });
+
   if (detail.isLoading) {
     return <p className="px-3 py-2 text-xs text-muted-foreground">{t('common.loading', 'Loading…')}</p>;
   }
@@ -98,7 +113,7 @@ export function RagDocumentDetail({ docId, ragId }: { docId: string; ragId?: str
     );
   }
   const d = detail.data;
-  const busy = reindex.isPending || restore.isPending;
+  const busy = reindex.isPending || restore.isPending || replace.isPending;
 
   return (
     <div className="space-y-3 px-3 pt-1 pb-3 text-xs">
@@ -220,6 +235,31 @@ export function RagDocumentDetail({ docId, ragId }: { docId: string; ragId?: str
         >
           <RefreshCwIcon className="size-3.5" /> {t('rag.doc.reparse')}
         </Button>
+        {/* Directory documents are replaced in the directory; the next sync
+            would otherwise bring the old file back. */}
+        {d.origin !== 'directory' && (
+          <>
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={busy}
+              title={t('rag.doc.replaceHint')}
+              onClick={() => replaceInput.current?.click()}
+            >
+              <FileUpIcon className="size-3.5" /> {t('rag.doc.replace')}
+            </Button>
+            <input
+              ref={replaceInput}
+              type="file"
+              hidden
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) replace.mutate(file);
+                e.target.value = '';
+              }}
+            />
+          </>
+        )}
         <Button size="sm" variant="outline" onClick={() => window.open(ragDocumentOriginalUrl(d.source, ragId), '_blank')}>
           <DownloadIcon className="size-3.5" /> {t('rag.doc.original')}
         </Button>

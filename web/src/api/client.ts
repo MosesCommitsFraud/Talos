@@ -1178,6 +1178,8 @@ export interface RagDocument {
   indexed_at?: number | null;
   updated_at?: number | null;
   duplicate_of?: string | null;
+  /** How many other listed documents have exactly the same content. */
+  duplicate_count?: number;
   lane?: string;
   parse_cached?: boolean;
   pipeline_fingerprint?: string;
@@ -1245,6 +1247,30 @@ export const restoreRagDocumentVersion = (docId: string, version: number, ragId?
     doc_id: docId,
     version,
   });
+/** Replace an uploaded document with another file: the new file is indexed
+ *  first, the old document is deleted only once that succeeded. */
+export async function replaceRagDocument(
+  docId: string,
+  file: File,
+  ragId?: string,
+): Promise<{ ok: boolean; job_id?: string }> {
+  const fd = new FormData();
+  fd.append('doc_id', docId);
+  fd.append('file', file, file.name);
+  const res = await fetch(withRag('/api/rag/documents/replace', ragId), {
+    method: 'POST',
+    body: fd,
+    credentials: 'same-origin',
+  });
+  if (!res.ok) {
+    const detail = await res
+      .json()
+      .then((j) => j?.detail)
+      .catch(() => null);
+    throw new Error(detail || `Replace failed (HTTP ${res.status})`);
+  }
+  return res.json();
+}
 /** Adopt documents indexed before the register existed (hashes every file). */
 export const syncRagRegister = (ragId?: string) =>
   postJSON<{ ok: boolean; job_id?: string }>(withRag('/api/rag/register/sync', ragId));

@@ -1234,7 +1234,7 @@ const de: typeof en = {
       status: {
         indexed: 'indexiert',
         failed: 'fehlgeschlagen',
-        duplicate: 'Duplikat',
+        duplicate: 'Duplikat (nicht indexiert)',
         deleted: 'gelöscht',
       },
       origin: 'Herkunft',
@@ -1256,10 +1256,26 @@ const de: typeof en = {
       versions: 'Versionen',
       versionStatus: {
         current: 'aktuell',
-        superseded: 'ersetzt',
+        superseded: 'abgelöst',
         deleted: 'gelöscht',
       },
       restore: 'Wiederherstellen',
+      replace: 'Ersetzen',
+      replaceHint:
+        'Andere Datei hochladen: Sie wird indexiert, danach wird dieses Dokument gelöscht. Schlägt das Indexieren fehl, bleibt es erhalten.',
+      replaceQueued:
+        'Ersetzen gestartet — das alte Dokument wird gelöscht, sobald die neue Datei indexiert ist.',
+      dupGroup: '{{n}}× gleicher Inhalt',
+      dupGroupHint:
+        'Weitere Dokumente in dieser Wissensdatenbank haben exakt denselben Inhalt (gleicher SHA-256).',
+      filterEmpty: 'Keine Dokumente für diesen Filter.',
+      filter: {
+        all: 'Alle',
+        duplicates: 'Duplikate',
+        failed: 'Fehlgeschlagen',
+        warnings: 'Mit Warnungen',
+        unregistered: 'Nicht registriert',
+      },
       reindex: 'Neu indexieren',
       reparse: 'Neu parsen',
       reparseHint: 'Ignoriert den Parse-Cache und führt OCR/VLM/ASR erneut aus.',
@@ -1272,6 +1288,7 @@ const de: typeof en = {
     outcome: {
       indexed: '{{n}} neu',
       updated: '{{n}} neue Version(en)',
+      replaced: '{{n}} ersetzt',
       reindexed: '{{n}} neu abgeleitet',
       unchanged: '{{n}} unverändert',
       duplicate: '{{n}} Duplikat(e)',

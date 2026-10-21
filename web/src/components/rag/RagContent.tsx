@@ -29,6 +29,24 @@ import { Select } from '../ui/select';
 import { RagDocumentDetail } from './RagDocumentDetail';
 import { RagExplorer } from './RagExplorer';
 
+const DOC_FILTERS = ['all', 'duplicates', 'failed', 'warnings', 'unregistered'] as const;
+type DocFilter = (typeof DOC_FILTERS)[number];
+
+function matchesFilter(d: RagDocument, f: DocFilter): boolean {
+  switch (f) {
+    case 'duplicates':
+      return (d.duplicate_count ?? 0) > 0 || d.status === 'duplicate';
+    case 'failed':
+      return d.status === 'failed';
+    case 'warnings':
+      return d.status === 'indexed' && (!!d.error || (d.warnings ?? []).length > 0);
+    case 'unregistered':
+      return d.registered === false;
+    default:
+      return true;
+  }
+}
+
 interface SearchHit {
   filename?: string;
   modality?: string;
@@ -59,6 +77,7 @@ export function RagContent({ baseId }: { baseId: string }) {
   const [searchErr, setSearchErr] = useState('');
   const [explorerOpen, setExplorerOpen] = useState(false);
   const [openDoc, setOpenDoc] = useState<string | null>(null);
+  const [docFilter, setDocFilter] = useState<DocFilter>('all');
 
   const docs = useQuery({
     queryKey: ['rag-documents', baseId],
@@ -99,6 +118,14 @@ export function RagContent({ baseId }: { baseId: string }) {
   const list: RagDocument[] = docs.data?.documents ?? [];
   // Indexed before the document register existed: no id/hash/version yet.
   const unregistered = list.filter((d) => d.registered === false).length;
+  const filterCounts = Object.fromEntries(
+    DOC_FILTERS.map((f) => [f, list.filter((d) => matchesFilter(d, f)).length]),
+  ) as Record<DocFilter, number>;
+  const shown = list.filter((d) => matchesFilter(d, docFilter));
+  // Copies sit next to each other when looking at duplicates.
+  if (docFilter === 'duplicates') {
+    shown.sort((a, b) => (a.content_sha256 ?? '').localeCompare(b.content_sha256 ?? ''));
+  }
 
   return (
     <Page className="gap-5 p-0">
@@ -181,9 +208,22 @@ export function RagContent({ baseId }: { baseId: string }) {
         title={t('settings.rag.indexedDocs')}
         action={
           list.length > 0 ? (
-            <span className="text-[11px] text-muted-foreground tabular-nums">
-              {t('settings.rag.docCount', { n: list.length })}
-            </span>
+            <div className="flex items-center gap-2">
+              <Select
+                className="w-48 text-xs"
+                value={docFilter}
+                onChange={(v) => setDocFilter(v as DocFilter)}
+                options={DOC_FILTERS.filter(
+                  (f) => f === 'all' || f === docFilter || filterCounts[f] > 0,
+                ).map((f) => ({
+                  value: f,
+                  label: `${t(`rag.doc.filter.${f}`)} (${filterCounts[f]})`,
+                }))}
+              />
+              <span className="text-[11px] text-muted-foreground tabular-nums">
+                {t('settings.rag.docCount', { n: list.length })}
+              </span>
+            </div>
           ) : undefined
         }
         padded
@@ -208,7 +248,10 @@ export function RagContent({ baseId }: { baseId: string }) {
                 </Button>
               </div>
             )}
-            {list.map((d) => {
+            {shown.length === 0 && (
+              <p className="text-xs text-muted-foreground">{t('rag.doc.filterEmpty')}</p>
+            )}
+            {shown.map((d) => {
               const open = !!d.doc_id && openDoc === d.doc_id;
               return (
                 <div key={d.source} className="rounded-lg border border-border/60">
@@ -246,6 +289,14 @@ export function RagContent({ baseId }: { baseId: string }) {
                           title={d.error || undefined}
                         >
                           {t(`rag.doc.status.${d.status}`, d.status)}
+                        </span>
+                      )}
+                      {(d.duplicate_count ?? 0) > 0 && (
+                        <span
+                          className="shrink-0 rounded bg-amber-500/10 px-1.5 py-px text-[10px] text-amber-700 dark:text-amber-400"
+                          title={t('rag.doc.dupGroupHint')}
+                        >
+                          {t('rag.doc.dupGroup', { n: (d.duplicate_count ?? 0) + 1 })}
                         </span>
                       )}
                       {d.status === 'indexed' && (d.error || (d.warnings ?? []).length > 0) && (

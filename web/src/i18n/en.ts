@@ -1228,7 +1228,7 @@ const en = {
       status: {
         indexed: 'indexed',
         failed: 'failed',
-        duplicate: 'duplicate',
+        duplicate: 'duplicate (not indexed)',
         deleted: 'deleted',
       },
       origin: 'Origin',
@@ -1254,6 +1254,21 @@ const en = {
         deleted: 'deleted',
       },
       restore: 'Restore',
+      replace: 'Replace',
+      replaceHint:
+        'Upload another file: it is indexed, then this document is deleted. If indexing fails, this document stays.',
+      replaceQueued: 'Replacement queued — the old document is deleted once the new file is indexed.',
+      dupGroup: '{{n}}× same content',
+      dupGroupHint:
+        'Other documents in this knowledge base have exactly the same content (same SHA-256).',
+      filterEmpty: 'No documents match this filter.',
+      filter: {
+        all: 'All',
+        duplicates: 'Duplicates',
+        failed: 'Failed',
+        warnings: 'With warnings',
+        unregistered: 'Unregistered',
+      },
       reindex: 'Re-index',
       reparse: 'Re-parse',
       reparseHint: 'Bypasses the parse cache and runs OCR/VLM/ASR again.',
@@ -1266,6 +1281,7 @@ const en = {
     outcome: {
       indexed: '{{n}} new',
       updated: '{{n}} new version(s)',
+      replaced: '{{n}} replaced',
       reindexed: '{{n}} re-derived',
       unchanged: '{{n}} unchanged',
       duplicate: '{{n}} duplicate(s)',

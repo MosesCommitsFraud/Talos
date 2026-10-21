@@ -2128,7 +2128,12 @@ _RAG_DOCS = [
 
 
 def _rag_doc_row(doc):
-    return {k: v for k, v in doc.items() if k not in ("versions", "duplicates")}
+    row = {k: v for k, v in doc.items() if k not in ("versions", "duplicates")}
+    sha = doc.get("content_sha256")
+    row["duplicate_count"] = (
+        sum(1 for d in _RAG_DOCS if sha and d.get("content_sha256") == sha) - 1 if sha else 0
+    )
+    return row
 
 
 _RAG_JOBS = [
