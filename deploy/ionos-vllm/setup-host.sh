@@ -9,6 +9,17 @@ set -euo pipefail
 [ "$(id -u)" -eq 0 ] || { echo "Run with sudo." >&2; exit 1; }
 export DEBIAN_FRONTEND=noninteractive
 
+# Driver already loaded (e.g. from the IONOS image) but no nvidia-smi: install
+# only the userspace tools, in exactly the loaded version — a different one
+# fails with "Driver/library version mismatch".
+if [ -r /proc/driver/nvidia/version ] && ! command -v nvidia-smi >/dev/null 2>&1; then
+  major=$(grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' /proc/driver/nvidia/version | head -1 | cut -d. -f1)
+  flavor=""
+  dpkg -l | grep -qE '^ii\s+\S*nvidia\S*-server' && flavor="-server"
+  apt-get update
+  apt-get install -y "nvidia-utils-$major$flavor"
+fi
+
 if ! nvidia-smi >/dev/null 2>&1; then
   apt-get update
   apt-get install -y ubuntu-drivers-common

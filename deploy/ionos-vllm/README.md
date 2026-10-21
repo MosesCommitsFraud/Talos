@@ -23,8 +23,8 @@ offizielle Image `vllm/vllm-openai` bringt alles mit.
 | `glm-5.3-flash`      | `zai-org/GLM-5.3-Flash` (FP8) | ~330 GB   | **4× H200**  |
 
 - Die **260 GB RAM** sind Arbeitsspeicher, die Modelle müssen in den
-  **GPU-Speicher** (H200: 141 GB pro Karte). `nvidia-smi` zeigt, wie viele
-  GPUs die VM hat.
+  **GPU-Speicher** (H200: 141 GB pro Karte). Wie viele GPUs die VM hat,
+  zeigt `lspci | grep -i nvidia` (geht auch ohne Treiber) oder `nvidia-smi`.
 - **Flash-Next:** vLLM lagert die 51-B-N-Gram-Tabelle automatisch in den RAM
   aus. Trotzdem bleiben ~125 GiB pro GPU, auf einer H200 ist dann kein Platz
   mehr für den KV-Cache.
