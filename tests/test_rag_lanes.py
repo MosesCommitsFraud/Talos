@@ -238,6 +238,11 @@ def test_router_uses_vlm_lane_only_for_image_bearing_docs(monkeypatch):
     monkeypatch.setenv("VLM_URL", "http://host:8000/v1/chat/completions")
 
     class _R:
+        _extract = rv.VectorRAG._extract
+        _route_lane = rv.VectorRAG._route_lane
+        _run_lane = rv.VectorRAG._run_lane
+        _lane_fingerprint = rv.VectorRAG._lane_fingerprint
+
         def __init__(self):
             self.calls = []
 

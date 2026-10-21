@@ -232,6 +232,13 @@ class _Doc:
 
 
 class _Router:
+    # Real lane routing (no parse cache: no content hash is passed).
+    _rag = importlib.import_module("src.rag_vector").VectorRAG
+    _extract = _rag._extract
+    _route_lane = _rag._route_lane
+    _run_lane = _rag._run_lane
+    _lane_fingerprint = _rag._lane_fingerprint
+
     def _split_extracted_documents(self, docs):
         return docs
 

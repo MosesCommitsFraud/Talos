@@ -60,15 +60,23 @@ def store_filter(store, filters):
 
 
 def identity(meta):
-    return {key: meta.get(key) for key in ("source", "owner", "scope")}
+    """What one publication replaces.
+
+    Registered documents are identified by their stable ``doc_id`` (see
+    src/rag_documents.py), so a new version stored under a different file path
+    still retires the old one. Unregistered chunks keep the historical
+    source/owner/scope identity.
+    """
+    key = "doc_id" if meta.get("doc_id") else "source"
+    return {key: meta.get(key), "owner": meta.get("owner"), "scope": meta.get("scope")}
 
 
 def identity_filter(value):
+    keys = ("doc_id" if "doc_id" in value else "source", "owner", "scope")
     return {
         "operator": "AND",
         "conditions": [
-            {"field": f"meta.{key}", "operator": "==", "value": value.get(key)}
-            for key in ("source", "owner", "scope")
+            {"field": f"meta.{key}", "operator": "==", "value": value.get(key)} for key in keys
         ],
     }
 
@@ -147,11 +155,26 @@ class GenerationCatalog:
         from filelock import FileLock
 
         source = identity(documents[0].meta)
-        if not source["source"] or any(identity(d.meta) != source for d in documents):
+        if not (source.get("doc_id") or source.get("source")) or any(
+            identity(d.meta) != source for d in documents
+        ):
             raise ValueError("Generation publication requires one complete source/owner/scope.")
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with FileLock(str(self.path) + ".lock", timeout=300):
             previous = store.filter_documents(filters=store_filter(store, identity_filter(source)))
+            if source.get("doc_id") and documents[0].meta.get("source"):
+                # Chunks written before documents were registered carry no
+                # doc_id; same file, same owner/scope means same document.
+                legacy = identity_filter({**identity({**documents[0].meta, "doc_id": None})})
+                legacy["conditions"].append(
+                    {"field": "meta.doc_id", "operator": "==", "value": None}
+                )
+                seen = {d.id for d in previous}
+                previous += [
+                    d
+                    for d in store.filter_documents(filters=store_filter(store, legacy))
+                    if d.id not in seen
+                ]
             state = self.read()
             token = uuid.uuid4().hex
             id_map = {
@@ -180,6 +203,15 @@ class GenerationCatalog:
                 if {d.id for d in verified} != {d.id for d in staged}:
                     raise RuntimeError("Incomplete RAG generation; old document remains active.")
                 key = json.dumps(source, sort_keys=True)
+                # Entries whose chunks this publication retires (an older
+                # source-keyed generation of the same document) are dropped,
+                # so a failed retirement can never keep them visible.
+                retired = {d.meta.get("ingest_generation") for d in previous}
+                state["active"] = {
+                    k: r
+                    for k, r in state["active"].items()
+                    if k == key or r.get("generation") not in retired
+                }
                 state["active"][key] = {"identity": source, "generation": token}
                 state["pending"].remove(token)
                 self.save(state)

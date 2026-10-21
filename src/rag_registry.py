@@ -160,6 +160,16 @@ def collection_for(rag_id: Optional[str]) -> str:
     return str(get_base(rag_id).get("collection") or DEFAULT_COLLECTION)
 
 
+def base_for_collection(collection: str) -> Optional[str]:
+    """The base id owning a Qdrant collection (None: default/unknown)."""
+    with _lock:
+        entries = _read()
+    for entry in entries.values():
+        if str(entry.get("collection") or "") == collection:
+            return None if entry.get("id") == DEFAULT_ID else entry.get("id")
+    return None
+
+
 def create_base(
     name: str,
     description: str = "",
@@ -289,6 +299,12 @@ def _drop_collections(collection: str) -> None:
     """
     if not collection:
         return
+    try:
+        from src.rag_documents import DocumentRegister
+
+        DocumentRegister(str(registry_path().parent)).drop_collection(collection)
+    except Exception as e:
+        logger.warning("could not drop document register of %s: %s", collection, e)
     try:
         from qdrant_client import QdrantClient
 

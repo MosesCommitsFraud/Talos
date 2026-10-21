@@ -25,6 +25,7 @@ working. All Haystack imports are lazy so the MIT core stays importable without
 the optional RAG dependencies installed.
 """
 
+import contextvars
 import hashlib
 import logging
 import os
@@ -188,6 +189,36 @@ _AV_EXTS: Set[str] = {
 # The subset of ``_AV_EXTS`` that actually has a video track — only these are
 # eligible for the opt-in keyframe lane (see ``_keyframes_active``).
 _VIDEO_EXTS: Set[str] = {".mp4", ".mov", ".mkv", ".webm", ".avi", ".m4v"}
+
+# Lanes whose output is worth caching by content hash, with the settings that
+# change what they extract. Lanes not listed (plain text, code, xls,
+# OpenDocument) are cheap enough to re-run and are never cached.
+_LANE_CACHE_ENV: Dict[str, Tuple[str, ...]] = {
+    "av": (
+        "VIDEO_ASR_ENABLED",
+        "VIDEO_ASR_MODEL",
+        "VIDEO_ASR_LANGUAGE",
+        "VIDEO_ASR_PROMPT",
+        "VIDEO_ASR_CHUNK_SEC",
+        "VIDEO_ASR_CORRECT_ENABLED",
+        "RAG_LLM_MODEL",
+        "VIDEO_FRAMES_ENABLED",
+        "VIDEO_FRAMES_INTERVAL_SEC",
+        "VIDEO_FRAMES_MAX",
+        "VIDEO_FRAMES_VLM_MAX_PX",
+        "VLM_MODEL",
+        "RAG_CAPTION_LANGUAGE",
+    ),
+    "pdf_vlm": (
+        "VLM_MODEL",
+        "PDF_VLM_MAX_TOKENS",
+        "PDF_VLM_DOC_RATIO",
+        "PDF_VLM_PAGE_RATIO",
+        "RAG_CAPTION_LANGUAGE",
+    ),
+    "office_vlm": ("VLM_MODEL", "PDF_VLM_MAX_TOKENS", "RAG_CAPTION_LANGUAGE"),
+    "docling": (),
+}
 
 
 def _asr_active() -> bool:
@@ -529,6 +560,21 @@ def _docling_pdf_options(**overrides):
     return opts
 
 
+# Per-file list of swallowed extraction failures (a VLM page or ASR segment
+# that errored). Set by ``_documents_for_file``: a parse that lost pieces is
+# reported as a warning and never written to the parse cache.
+_INGEST_FAILURES: "contextvars.ContextVar[Optional[List[str]]]" = contextvars.ContextVar(
+    "rag_ingest_failures", default=None
+)
+
+
+_NO_TEXT_ERROR = "no extractable text (empty/unsupported file)"
+
+
+class _NoText(RuntimeError):
+    """A lane produced nothing to index (reported without an exception type)."""
+
+
 def _concurrent_map(fn, items: List[Any], concurrency: int, on_done=None) -> List[Any]:
     """Map ``fn`` over ``items`` with a bounded thread pool, preserving order.
 
@@ -546,7 +592,9 @@ def _concurrent_map(fn, items: List[Any], concurrency: int, on_done=None) -> Lis
     workers = max(1, min(concurrency, len(items)))
     completed = 0
     with ThreadPoolExecutor(max_workers=workers) as ex:
-        futs = {ex.submit(fn, it): i for i, it in enumerate(items)}
+        # Run each task in a copy of this context so nested fan-outs report
+        # their failures to the same per-file counter (see _INGEST_FAILURES).
+        futs = {ex.submit(contextvars.copy_context().run, fn, it): i for i, it in enumerate(items)}
         for fut in as_completed(futs):
             i = futs[fut]
             try:
@@ -554,6 +602,9 @@ def _concurrent_map(fn, items: List[Any], concurrency: int, on_done=None) -> Lis
             except Exception as e:
                 logger.warning("ingest concurrent task %s failed: %s", i, e)
                 results[i] = None
+                counter = _INGEST_FAILURES.get()
+                if counter is not None:
+                    counter.append(f"{type(e).__name__}: {e}"[:300])
             completed += 1
             if on_done:
                 try:
@@ -1432,6 +1483,23 @@ class VectorRAG:
         collection = getattr(self, "collection_name", None)
         return GenerationCatalog(directory, collection) if directory and collection else None
 
+    def _register(self):
+        """The document register (src/rag_documents.py), shared by all bases."""
+        directory = getattr(self, "persist_directory", None)
+        if not directory or not getattr(self, "collection_name", None):
+            return None
+        from src.rag_documents import DocumentRegister
+
+        return DocumentRegister(directory)
+
+    def _parse_cache(self):
+        directory = getattr(self, "persist_directory", None)
+        if not directory:
+            return None
+        from src.rag_documents import ParseCache
+
+        return ParseCache(directory)
+
     def _visible_filter(self, filters=None):
         from src.rag_generations import store_filter
 
@@ -2117,7 +2185,139 @@ class VectorRAG:
             logger.warning("Haystack context expansion failed: %s", e)
             return results
 
-    def _documents_for_file(self, path: str, meta: Dict[str, Any], stage_cb=None):
+    def _route_lane(self, path: str) -> str:
+        """Which extraction lane a file takes (see ``_documents_for_file``)."""
+        from src.docling_runtime import is_docling_format
+
+        ext = Path(path).suffix.lower()
+        if ext in _AV_EXTS:
+            return "av"
+        if _code_active() and ext in _CODE_LANGS:
+            return "code"
+        if _pdf_vlm_active() and ext in _VLM_DOC_EXTS and _file_has_images(path):
+            return "pdf_vlm" if ext == ".pdf" else "office_vlm"
+        if ext in _OPENDOCUMENT_EXTS:
+            return "opendocument"
+        if ext in {".md", ".markdown", ".txt"}:
+            return "text"
+        if ext == ".xls":
+            return "xls"
+        if is_docling_format(path):
+            return "docling"
+        return "text"
+
+    def _run_lane(self, lane: str, path: str, meta: Dict[str, Any], stage_cb=None):
+        if lane == "av":
+            return self._lane_av(path, meta, stage_cb=stage_cb)
+        if lane == "code":
+            return self._lane_code(path, _CODE_LANGS[Path(path).suffix.lower()])
+        if lane == "pdf_vlm":
+            return self._lane_pdf_vlm(path, meta, stage_cb=stage_cb)
+        if lane == "office_vlm":
+            return self._lane_office_vlm(path, meta, stage_cb=stage_cb)
+        if lane == "opendocument":
+            return self._lane_opendocument(path)
+        if lane == "xls":
+            return self._lane_xls(path)
+        if lane == "docling":
+            return self._lane_docling(path)
+        return self._lane_text(path)
+
+    def _lane_fingerprint(self, lane: str, meta: Dict[str, Any]) -> Optional[str]:
+        """Cache key part for a lane's output, or None for lanes too cheap to cache.
+
+        Lists only what changes the *extracted* content; chunking, enrichment
+        and embedding settings belong to ``_derive_fingerprint`` and never
+        invalidate a parse.
+        """
+        from src import rag_documents as rd
+
+        keys = _LANE_CACHE_ENV.get(lane)
+        if keys is None:
+            return None
+        values: Dict[str, Any] = {k: os.getenv(k, "") for k in keys}
+        values["lane"] = lane
+        values["v"] = rd.LANE_CACHE_VERSION
+        if lane == "av":
+            values["deeplink"] = meta.get("video_url") or meta.get("url") or ""
+        if lane in ("docling", "pdf_vlm", "office_vlm"):
+            try:
+                from importlib.metadata import version
+
+                values["docling"] = version("docling")
+            except Exception:
+                values["docling"] = ""
+        return rd.fingerprint(values)
+
+    def _derive_fingerprint(self, meta: Dict[str, Any]) -> Dict[str, Any]:
+        """Everything after extraction that changes what gets stored/embedded."""
+        from src import rag_documents as rd
+
+        redact = meta.get("redact_pii")
+        return {
+            "v": rd.DERIVE_VERSION,
+            "chunk": self._conf_int("chunk_max_chars", "RAG_MAX_CHUNK_CHARS", 4000),
+            "overlap": self._conf_int("chunk_overlap_chars", "RAG_CHUNK_OVERLAP_CHARS", 200),
+            "embed": self._conf("embedding_model", "EMBEDDING_MODEL"),
+            "sparse": getattr(self, "_sparse_model", _DEFAULT_SPARSE_MODEL),
+            "tokenizer": self._conf("embedding_tokenizer", "RAG_EMBEDDING_TOKENIZER"),
+            "max_tokens": self._conf_int("embedding_max_tokens", "RAG_EMBEDDING_MAX_TOKENS", 0),
+            "contextual": os.getenv("RAG_LLM_MODEL", "") if _contextual_active() else "",
+            "autokw": [
+                _env_int("RAG_AUTO_KEYWORDS_N"),
+                _env_int("RAG_AUTO_QUESTIONS_N"),
+                os.getenv("RAG_LLM_MODEL", "") if _autokw_active() else "",
+            ],
+            "redact": bool(redact) if redact is not None else bool(os.getenv("RAG_REDACT_PII")),
+            "hidden": os.getenv("PDF_HIDDEN_TEXT_FILTER", ""),
+            "pixel": os.getenv("IMAGE_EMBED_MODEL", "") if self._image_on() else "",
+        }
+
+    def _extract(
+        self,
+        path: str,
+        meta: Dict[str, Any],
+        stage_cb=None,
+        sha: Optional[str] = None,
+        reparse: bool = False,
+        report: Optional[Dict[str, Any]] = None,
+    ):
+        """Run a file's lane, through the parse cache when its content hash is known."""
+        lane = self._route_lane(path)
+        lane_fp = self._lane_fingerprint(lane, meta)
+        cache = self._parse_cache() if sha and lane_fp else None
+        if report is not None:
+            report.update(lane=lane, lane_fingerprint=lane_fp or "", parse_cached=False)
+        if cache is not None and not reparse:
+            cached = cache.get(sha, lane_fp)
+            if cached is not None:
+                if report is not None:
+                    report["parse_cached"] = True
+                return cached
+        failures: List[str] = []
+        token = _INGEST_FAILURES.set(failures)
+        try:
+            docs = self._run_lane(lane, path, meta, stage_cb=stage_cb)
+        finally:
+            _INGEST_FAILURES.reset(token)
+        if report is not None:
+            report["failures"] = failures
+        # A parse that lost pages/segments to endpoint errors is kept for this
+        # ingest but never cached: the next re-index should retry them.
+        if cache is not None and docs and not failures:
+            cache.put(sha, lane_fp, docs)
+        return docs
+
+    def _documents_for_file(
+        self,
+        path: str,
+        meta: Dict[str, Any],
+        stage_cb=None,
+        *,
+        sha: Optional[str] = None,
+        reparse: bool = False,
+        report: Optional[Dict[str, Any]] = None,
+    ):
         """Route a file to its modality lane → Haystack Documents with metadata.
 
         The single ingest chokepoint for both UI uploads and dir/API ingest. A
@@ -2131,30 +2331,13 @@ class VectorRAG:
 
         ``stage_cb(done, total)`` is forwarded to the slow VLM lanes so the queue
         can show per-page/per-image progress instead of just 0%→done.
-        """
-        from src.docling_runtime import is_docling_format
 
+        With ``sha`` (the file's content hash) the lane output goes through the
+        parse cache; ``reparse`` bypasses it. ``report`` receives the lane,
+        whether the parse came from cache, and swallowed extraction failures.
+        """
         ext = Path(path).suffix.lower()
-        if ext in _AV_EXTS:
-            docs = self._lane_av(path, meta, stage_cb=stage_cb)
-        elif _code_active() and ext in _CODE_LANGS:
-            docs = self._lane_code(path, _CODE_LANGS[ext])
-        elif _pdf_vlm_active() and ext in _VLM_DOC_EXTS and _file_has_images(path):
-            docs = (
-                self._lane_pdf_vlm(path, meta, stage_cb=stage_cb)
-                if ext == ".pdf"
-                else self._lane_office_vlm(path, meta, stage_cb=stage_cb)
-            )
-        elif ext in _OPENDOCUMENT_EXTS:
-            docs = self._lane_opendocument(path)
-        elif ext in {".md", ".markdown", ".txt"}:
-            docs = self._lane_text(path)
-        elif ext == ".xls":
-            docs = self._lane_xls(path)
-        elif is_docling_format(path):
-            docs = self._lane_docling(path)
-        else:
-            docs = self._lane_text(path)
+        docs = self._extract(path, meta, stage_cb, sha=sha, reparse=reparse, report=report)
 
         # Defensive PDF repair: a Docling/HybridChunker integration regression
         # must not turn a multi-page document into one whole-file retrieval hit.
@@ -3556,13 +3739,292 @@ class VectorRAG:
             logger.warning("visual search failed: %s", e)
             return []
 
+    # Register-derived keys a caller never sets itself; stripped from the
+    # metadata kept for retries so a re-index derives them afresh.
+    _DERIVED_META = ("doc_id", "content_sha256", "doc_version", "_force", "_reparse")
+
+    def _ingest_file(
+        self,
+        fpath: str,
+        meta: Dict[str, Any],
+        stage_cb=None,
+        *,
+        force: bool = False,
+        reparse: bool = False,
+    ) -> Dict[str, Any]:
+        """Index one file through the document register.
+
+        The register decides what work is needed before anything is parsed:
+
+        * same document, same bytes, same pipeline → ``unchanged`` (nothing runs;
+          a redundant stored copy of a re-upload is removed),
+        * new upload whose bytes already exist under another name →
+          ``duplicate`` (recorded, not indexed twice),
+        * same document, new bytes → ``updated`` (new version replaces the old
+          one atomically; older stored files are kept per ``RAG_KEEP_VERSIONS``),
+        * otherwise ``indexed``/``reindexed``; a failure leaves the previous
+          version searchable and is recorded on the document.
+
+        ``force`` skips the unchanged/duplicate shortcuts; ``reparse``
+        additionally bypasses the parse cache.
+        """
+        from src import rag_documents as rd
+
+        meta = dict(meta or {})
+        force = bool(meta.pop("_force", False)) or force
+        reparse = bool(meta.pop("_reparse", False)) or reparse
+        meta.setdefault("source", fpath)
+        meta.setdefault("filename", os.path.basename(fpath))
+        register = self._register()
+        if register is None:
+            docs = self._documents_for_file(fpath, meta, stage_cb=stage_cb)
+            if not docs:
+                return {"status": "failed", "chunks": 0, "error": _NO_TEXT_ERROR}
+            return {
+                "status": "indexed",
+                "chunks": self._write_documents(docs, replace_sources=True),
+            }
+
+        coll = self.collection_name
+        if not meta.get("logical_path"):
+            # A file already known by its stored path keeps that identity (the
+            # upload directory is also re-walked by "reload").
+            known = register.by_source(coll, meta["source"])
+            if known and known["status"] != rd.DELETED:
+                meta["logical_path"] = known["logical_path"]
+                meta["origin"] = known["origin"]
+            elif register.retained_version(coll, meta["source"]):
+                return {"status": "skipped", "chunks": 0, "reason": "older retained version"}
+        rd.stamp_identity(meta, fpath)
+        doc_id = meta["doc_id"]
+        existing = register.get(coll, doc_id)
+        live = existing if existing and existing["status"] != rd.DELETED else None
+        result: Dict[str, Any] = {"doc_id": doc_id, "chunks": 0}
+        row = {
+            "logical_path": meta["logical_path"],
+            "display_name": meta.get("filename") or os.path.basename(fpath),
+            "origin": meta.get("origin") or rd.ORIGIN_DIRECTORY,
+            "owner": meta.get("owner"),
+            "scope": meta.get("scope"),
+            "ingest_meta": {k: v for k, v in meta.items() if k not in self._DERIVED_META},
+        }
+
+        try:
+            stat = os.stat(fpath)
+            sha = rd.file_sha256(fpath)
+        except OSError as e:
+            error = f"{type(e).__name__}: {e}"
+            if not (live and live["status"] == rd.INDEXED):
+                register.upsert(
+                    coll, doc_id, **row, source=meta["source"], status=rd.FAILED, error=error
+                )
+            return {**result, "status": "failed", "error": error}
+        meta["content_sha256"] = sha
+        row.update(content_sha256=sha, size_bytes=stat.st_size, mtime=stat.st_mtime)
+        lane = self._route_lane(fpath)
+        pipeline_fp = rd.fingerprint(
+            {
+                "lane": lane,
+                "lane_fp": self._lane_fingerprint(lane, meta) or "",
+                "derive": self._derive_fingerprint(meta),
+            }
+        )
+        row.update(lane=lane, pipeline_fingerprint=pipeline_fp)
+
+        if (
+            live
+            and not force
+            and live["status"] == rd.INDEXED
+            and live["content_sha256"] == sha
+            and live["pipeline_fingerprint"] == pipeline_fp
+            and live["chunk_count"] > 0
+        ):
+            if meta["source"] != live["source"]:
+                if os.path.isfile(live["source"]):
+                    rd.delete_managed_file(meta["source"])
+                else:
+                    register.upsert(coll, doc_id, source=meta["source"])
+            return {**result, "status": "unchanged", "version": live["version"]}
+
+        if existing is None:
+            version = 1
+        elif existing["status"] == rd.DELETED or existing["content_sha256"] != sha:
+            version = int(existing["version"] or 0) + 1
+        else:
+            version = int(existing["version"] or 1)
+        result["version"] = version
+
+        if (
+            not force
+            and row["origin"] == rd.ORIGIN_UPLOAD
+            and not (live and live["status"] == rd.INDEXED)
+        ):
+            twin = register.find_by_sha(coll, sha, scope=meta.get("scope"), exclude_doc_id=doc_id)
+            if twin:
+                register.upsert(
+                    coll,
+                    doc_id,
+                    **row,
+                    source=meta["source"],
+                    version=version,
+                    status=rd.DUPLICATE,
+                    duplicate_of=twin["doc_id"],
+                    chunk_count=0,
+                    error=None,
+                    warnings=[],
+                    deleted_at=None,
+                )
+                return {**result, "status": "duplicate", "duplicate_of": twin["display_name"]}
+
+        meta["doc_version"] = version
+        report: Dict[str, Any] = {}
+        try:
+            docs = self._documents_for_file(
+                fpath, meta, stage_cb=stage_cb, sha=sha, reparse=reparse, report=report
+            )
+            if not docs:
+                raise _NoText(_NO_TEXT_ERROR)
+            chunks = self._write_documents(docs, replace_sources=True)
+        except Exception as e:
+            error = str(e) if isinstance(e, _NoText) else f"{type(e).__name__}: {e}"
+            if live and live["status"] == rd.INDEXED:
+                # The previous version stays searchable; the failed copy goes.
+                if meta["source"] != live["source"]:
+                    rd.delete_managed_file(meta["source"])
+                register.upsert(coll, doc_id, error=f"Version {version} failed: {error}")
+            else:
+                register.upsert(
+                    coll,
+                    doc_id,
+                    **row,
+                    source=meta["source"],
+                    version=version,
+                    status=rd.FAILED,
+                    duplicate_of=None,
+                    chunk_count=0,
+                    error=error,
+                    warnings=[],
+                    deleted_at=None,
+                )
+            return {**result, "status": "failed", "error": error}
+
+        failures = report.get("failures") or []
+        warnings = (
+            [f"{len(failures)} extraction call(s) failed, e.g. {failures[0]}"] if failures else []
+        )
+        twin = register.find_by_sha(coll, sha, scope=meta.get("scope"), exclude_doc_id=doc_id)
+        content_changed = bool(live) and live["content_sha256"] != sha
+        register.upsert(
+            coll,
+            doc_id,
+            **row,
+            source=meta["source"],
+            version=version,
+            status=rd.INDEXED,
+            duplicate_of=twin["doc_id"] if twin else None,
+            parse_cached=bool(report.get("parse_cached")),
+            chunk_count=chunks,
+            error=None,
+            warnings=warnings,
+            indexed_at=time.time(),
+            deleted_at=None,
+        )
+        for expired in register.record_version(
+            coll,
+            doc_id,
+            version,
+            sha=sha,
+            source=meta["source"],
+            size_bytes=stat.st_size,
+            chunk_count=chunks,
+        ):
+            rd.delete_managed_file(expired)
+        if content_changed:
+            # Uploads that were skipped as copies of the old content are no
+            # longer copies of anything indexed: index them in their own right.
+            for dup in register.duplicates_of(coll, doc_id):
+                if os.path.isfile(dup["source"]):
+                    self._ingest_file(dup["source"], dup["ingest_meta"], force=True)
+        status = "updated" if content_changed else ("reindexed" if live else "indexed")
+        return {
+            **result,
+            "status": status,
+            "chunks": chunks,
+            "parse_cached": bool(report.get("parse_cached")),
+            "warnings": warnings,
+        }
+
+    @staticmethod
+    def _new_ingest_summary() -> Dict[str, Any]:
+        return {
+            "indexed_count": 0,
+            "failed_count": 0,
+            "errors": [],
+            "outcomes": {
+                "indexed": 0,
+                "updated": 0,
+                "reindexed": 0,
+                "unchanged": 0,
+                "duplicate": 0,
+                "skipped": 0,
+                "failed": 0,
+                "deleted": 0,
+            },
+            "files": [],
+        }
+
+    @staticmethod
+    def _tally(summary: Dict[str, Any], fpath: str, outcome: Dict[str, Any]) -> None:
+        status = outcome.get("status") or "failed"
+        summary["outcomes"][status] = summary["outcomes"].get(status, 0) + 1
+        summary["indexed_count"] += int(outcome.get("chunks") or 0)
+        if status == "failed":
+            summary["failed_count"] += 1
+            summary["errors"].append(
+                {"file": os.path.basename(fpath), "error": outcome.get("error") or "failed"}
+            )
+        # Per-file results for the job view; capped so a huge directory job
+        # doesn't bloat the Redis job meta.
+        if len(summary["files"]) < 500:
+            summary["files"].append(
+                {
+                    "file": os.path.basename(fpath),
+                    "status": status,
+                    "doc_id": outcome.get("doc_id"),
+                    "version": outcome.get("version"),
+                    "chunks": int(outcome.get("chunks") or 0),
+                    "error": outcome.get("error"),
+                    "duplicate_of": outcome.get("duplicate_of"),
+                }
+            )
+
+    @staticmethod
+    def _summary_message(summary: Dict[str, Any], suffix: str = "") -> str:
+        o = summary["outcomes"]
+        parts = [f"Indexed {summary['indexed_count']} chunks{suffix}"]
+        for key, label in (
+            ("updated", "new version(s)"),
+            ("unchanged", "unchanged"),
+            ("duplicate", "duplicate(s) skipped"),
+            ("deleted", "removed (missing on disk)"),
+        ):
+            if o.get(key):
+                parts.append(f"{o[key]} {label}")
+        if summary["failed_count"]:
+            parts.append(f"{summary['failed_count']} file(s) failed")
+        return ", ".join(parts)
+
     def index_files(
         self,
         files: List[Tuple[str, Dict[str, Any]]],
         progress_cb=None,
         cancel_cb=None,
     ) -> Dict[str, Any]:
-        """Index an explicit list of ``(path, metadata)`` pairs (uploads)."""
+        """Index an explicit list of ``(path, metadata)`` pairs (uploads).
+
+        Metadata may carry ``_force`` / ``_reparse`` (re-index and restore
+        actions); they steer the register and are never stored on chunks.
+        """
         if not self.healthy:
             return {
                 "success": False,
@@ -3570,80 +4032,50 @@ class VectorRAG:
                 "failed_count": 0,
                 "message": "RAG not available",
             }
-        indexed = 0
-        failed = 0
+        summary = self._new_ingest_summary()
         processed = 0
         total = len(files)
-        errors: List[Dict[str, str]] = []
+
+        def _progress(fpath: str, **extra: Any) -> None:
+            if progress_cb:
+                progress_cb(
+                    {
+                        "file": fpath,
+                        "indexed_count": summary["indexed_count"],
+                        "failed_count": summary["failed_count"],
+                        "processed": processed,
+                        "total": total,
+                        "errors": summary["errors"],
+                        "outcomes": summary["outcomes"],
+                        **extra,
+                    }
+                )
+
         for fpath, meta in files:
             if cancel_cb and cancel_cb():
                 return {
+                    **summary,
                     "success": False,
                     "cancelled": True,
-                    "indexed_count": indexed,
-                    "failed_count": failed,
                     "processed": processed,
                     "total": total,
-                    "errors": errors,
-                    "message": f"Cancelled after {indexed} chunks",
+                    "message": f"Cancelled after {summary['indexed_count']} chunks",
                 }
 
             # Per-page/per-image sub-progress for the slow VLM lanes, so the queue
             # advances within a single large file instead of jumping 0%→done.
             def _stage(done: int, sub_total: int, stage: str = "", _fp=fpath) -> None:
-                if progress_cb:
-                    progress_cb(
-                        {
-                            "file": _fp,
-                            "indexed_count": indexed,
-                            "failed_count": failed,
-                            "processed": processed,
-                            "total": total,
-                            "sub_done": done,
-                            "sub_total": sub_total,
-                            "stage": stage,
-                            "errors": errors,
-                        }
-                    )
+                _progress(_fp, sub_done=done, sub_total=sub_total, stage=stage)
 
             try:
-                docs = self._documents_for_file(fpath, dict(meta or {}), stage_cb=_stage)
-                if docs:
-                    indexed += self._write_documents(docs, replace_sources=True)
-                else:
-                    failed += 1
-                    errors.append(
-                        {
-                            "file": os.path.basename(fpath),
-                            "error": "no extractable text (empty/unsupported file)",
-                        }
-                    )
+                outcome = self._ingest_file(fpath, dict(meta or {}), stage_cb=_stage)
             except Exception as e:
                 logger.error(f"index {fpath}: {e}")
-                failed += 1
-                errors.append(
-                    {"file": os.path.basename(fpath), "error": f"{type(e).__name__}: {e}"}
-                )
+                outcome = {"status": "failed", "error": f"{type(e).__name__}: {e}"}
+            self._tally(summary, fpath, outcome)
             processed += 1
-            if progress_cb:
-                progress_cb(
-                    {
-                        "file": fpath,
-                        "indexed_count": indexed,
-                        "failed_count": failed,
-                        "processed": processed,
-                        "total": total,
-                        "errors": errors,
-                    }
-                )
-        msg = f"Indexed {indexed} chunks" + (f", {failed} file(s) failed" if failed else "")
-        return {
-            "success": True,
-            "indexed_count": indexed,
-            "failed_count": failed,
-            "errors": errors,
-            "message": msg,
-        }
+            _progress(fpath)
+        return {**summary, "success": True, "message": self._summary_message(summary)}
 
     def index_personal_documents(
         self,
@@ -3653,88 +4085,441 @@ class VectorRAG:
         progress_cb=None,
         cancel_cb=None,
     ) -> Dict[str, Any]:
+        """Sync one directory into the base.
+
+        Unchanged files are skipped by content hash, changed files get a new
+        version, and documents whose file is gone from disk are removed
+        (tombstoned in the register) once the walk completes.
+        """
+        from src import rag_documents as rd
+
         if file_extensions is None:
             file_extensions = DEFAULT_FILE_EXTENSIONS
 
-        indexed = 0
-        failed = 0
-        errors: List[Dict[str, str]] = []
+        summary = self._new_ingest_summary()
+
+        def _progress(fpath: str, **extra: Any) -> None:
+            if progress_cb:
+                progress_cb(
+                    {
+                        "file": fpath,
+                        "indexed_count": summary["indexed_count"],
+                        "failed_count": summary["failed_count"],
+                        "errors": summary["errors"],
+                        "outcomes": summary["outcomes"],
+                        **extra,
+                    }
+                )
+
         try:
             for root, _, files in os.walk(directory):
                 for fname in files:
                     if cancel_cb and cancel_cb():
                         return {
+                            **summary,
                             "success": False,
                             "cancelled": True,
-                            "indexed_count": indexed,
-                            "failed_count": failed,
-                            "errors": errors,
-                            "message": f"Cancelled after indexing {indexed} chunks from {directory}",
+                            "message": (
+                                f"Cancelled after indexing {summary['indexed_count']} chunks "
+                                f"from {directory}"
+                            ),
                         }
                     fpath = os.path.join(root, fname)
                     ext = Path(fname).suffix.lower()
                     if ext not in file_extensions:
                         continue
+                    meta = {
+                        "source": fpath,
+                        "filename": fname,
+                        "directory": root,
+                        "type": ext,
+                    }
+                    if owner:
+                        meta["owner"] = owner
+
+                    def _stage(done: int, sub_total: int, stage: str = "", _fp=fpath) -> None:
+                        _progress(_fp, sub_done=done, sub_total=sub_total, stage=stage)
+
                     try:
-                        meta = {
-                            "source": fpath,
-                            "filename": fname,
-                            "directory": root,
-                            "type": ext,
-                        }
-                        if owner:
-                            meta["owner"] = owner
-
-                        def _stage(done: int, sub_total: int, stage: str = "", _fp=fpath) -> None:
-                            if progress_cb:
-                                progress_cb(
-                                    {
-                                        "file": _fp,
-                                        "indexed_count": indexed,
-                                        "failed_count": failed,
-                                        "sub_done": done,
-                                        "sub_total": sub_total,
-                                        "stage": stage,
-                                        "errors": errors,
-                                    }
-                                )
-
-                        docs = self._documents_for_file(fpath, meta, stage_cb=_stage)
-                        if docs:
-                            indexed += self._write_documents(docs, replace_sources=True)
+                        outcome = self._ingest_file(fpath, meta, stage_cb=_stage)
                     except Exception as e:
                         logger.error(f"index {fpath}: {e}")
-                        failed += 1
-                        errors.append({"file": fname, "error": f"{type(e).__name__}: {e}"})
-                    if progress_cb:
-                        progress_cb(
-                            {
-                                "file": fpath,
-                                "indexed_count": indexed,
-                                "failed_count": failed,
-                                "errors": errors,
-                            }
-                        )
+                        outcome = {"status": "failed", "error": f"{type(e).__name__}: {e}"}
+                    self._tally(summary, fpath, outcome)
+                    _progress(fpath)
 
-            msg = f"Indexed {indexed} chunks from {directory}" + (
-                f", {failed} file(s) failed" if failed else ""
-            )
+            register = self._register()
+            if register is not None:
+                for row in register.live_under(
+                    self.collection_name, directory, rd.ORIGIN_DIRECTORY
+                ):
+                    if not os.path.exists(row["source"]):
+                        self.delete_document(doc_id=row["doc_id"])
+                        summary["outcomes"]["deleted"] += 1
+
             return {
+                **summary,
                 "success": True,
-                "indexed_count": indexed,
-                "failed_count": failed,
-                "errors": errors,
-                "message": msg,
+                "message": self._summary_message(summary, f" from {directory}"),
             }
         except Exception as e:
             logger.error(f"index_personal_documents {directory}: {e}")
-            return {
-                "success": False,
-                "indexed_count": indexed,
-                "failed_count": failed,
-                "errors": errors,
-                "message": str(e),
+            return {**summary, "success": False, "message": str(e)}
+
+    # ------------------------------------------------------------------
+    # Document register: inspection, deletion, legacy backfill
+    # ------------------------------------------------------------------
+
+    def _register_rows(self) -> Dict[str, Dict[str, Any]]:
+        register = self._register()
+        if register is None:
+            return {}
+        try:
+            return {r["source"]: r for r in register.list(self.collection_name)}
+        except Exception as e:
+            logger.warning("document register unavailable: %s", e)
+            return {}
+
+    @staticmethod
+    def _public_register_fields(row: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+        if not row:
+            return {"registered": False}
+        return {
+            "registered": True,
+            "doc_id": row["doc_id"],
+            "logical_path": row["logical_path"],
+            "origin": row["origin"],
+            "status": row["status"],
+            "version": row["version"],
+            "content_sha256": row.get("content_sha256") or "",
+            "size_bytes": row.get("size_bytes"),
+            "indexed_at": row.get("indexed_at"),
+            "updated_at": row.get("updated_at"),
+            "duplicate_of": row.get("duplicate_of"),
+            "lane": row.get("lane") or "",
+            "parse_cached": bool(row.get("parse_cached")),
+            "pipeline_fingerprint": row.get("pipeline_fingerprint") or "",
+            "error": row.get("error") or "",
+            "warnings": row.get("warnings") or [],
+        }
+
+    def document_detail(
+        self, doc_id: Optional[str] = None, source: Optional[str] = None
+    ) -> Optional[Dict[str, Any]]:
+        """Register row, version history and duplicates of one document."""
+        register = self._register()
+        if register is None:
+            return None
+        coll = self.collection_name
+        row = register.get(coll, doc_id) if doc_id else register.by_source(coll, source or "")
+        if not row:
+            return None
+        twin = register.get(coll, row["duplicate_of"]) if row.get("duplicate_of") else None
+        return {
+            **self._public_register_fields(row),
+            "source": row["source"],
+            "filename": row["display_name"],
+            "owner": row.get("owner"),
+            "scope": row.get("scope"),
+            "chunks": row.get("chunk_count") or 0,
+            "created_at": row.get("created_at"),
+            "deleted_at": row.get("deleted_at"),
+            "duplicate_of_name": twin["display_name"] if twin else "",
+            "duplicate_of_source": twin["source"] if twin else "",
+            "duplicates": [
+                {"doc_id": d["doc_id"], "filename": d["display_name"]}
+                for d in register.duplicates_of(coll, row["doc_id"])
+            ],
+            "versions": [
+                {
+                    "version": v["version"],
+                    "content_sha256": v.get("content_sha256") or "",
+                    "size_bytes": v.get("size_bytes"),
+                    "status": v["status"],
+                    "chunks": v.get("chunk_count") or 0,
+                    "created_at": v["created_at"],
+                    "file_available": bool(v["file_retained"]) and os.path.isfile(v["source"]),
+                }
+                for v in register.versions(coll, row["doc_id"])
+            ],
+        }
+
+    def delete_document(
+        self, source: Optional[str] = None, doc_id: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Remove a document's chunks and tombstone it in the register.
+
+        Older retained upload files of the document are deleted here; the
+        current stored file is left to the caller (routes decide whether a
+        file is theirs to delete). Uploads that were skipped as duplicates of
+        this document are queued for indexing in their own right.
+        """
+        from src import rag_documents as rd
+
+        if not self.healthy:
+            return {"removed": 0}
+        register = self._register()
+        coll = self.collection_name
+        row = None
+        if register is not None:
+            row = register.get(coll, doc_id) if doc_id else register.by_source(coll, source or "")
+        if row and row["status"] == rd.DELETED:
+            row = None
+        source = source or (row or {}).get("source")
+        ids: Set[str] = set()
+        try:
+            if row:
+                ids.update(
+                    d.id
+                    for d in self._store.filter_documents(
+                        filters={"field": "meta.doc_id", "operator": "==", "value": row["doc_id"]}
+                    )
+                )
+            if source and not (row and row["status"] == rd.DUPLICATE):
+                ids.update(
+                    d.id
+                    for d in self._store.filter_documents(
+                        filters={"field": "meta.source", "operator": "==", "value": source}
+                    )
+                )
+            if ids:
+                self._store.delete_documents(list(ids))
+        except Exception as e:
+            logger.error(f"delete_document failed: {e}")
+            return {"removed": 0, "error": str(e)}
+        if source:
+            self._delete_visual(source)
+        promoted: List[str] = []
+        if row:
+            for path in register.mark_deleted(coll, row["doc_id"]):
+                if path != row["source"]:
+                    rd.delete_managed_file(path)
+            sha = row.get("content_sha256")
+            if sha and not register.sha_referenced(sha):
+                cache = self._parse_cache()
+                if cache is not None:
+                    cache.drop(sha)
+            promoted = self._promote_duplicates(row["doc_id"])
+        return {"removed": len(ids), "doc_id": (row or {}).get("doc_id"), "promoted": promoted}
+
+    def _promote_duplicates(self, doc_id: str) -> List[str]:
+        register = self._register()
+        dups = [
+            d
+            for d in register.duplicates_of(self.collection_name, doc_id)
+            if os.path.isfile(d["source"])
+        ]
+        if not dups:
+            return []
+        files = [(d["source"], {**d["ingest_meta"], "_force": True}) for d in dups]
+        try:
+            from src import rag_worker
+            from src.rag_registry import base_for_collection
+
+            rag_worker.start_index_files(
+                files, owner=None, base_id=base_for_collection(self.collection_name)
+            )
+        except Exception as e:
+            logger.warning("could not queue duplicates of %s for indexing: %s", doc_id, e)
+            for path, meta in files:
+                self._ingest_file(path, meta)
+        return [d["display_name"] for d in dups]
+
+    def _delete_visual(self, source: str) -> None:
+        """Mirror a delete into the visual collection (best-effort)."""
+        try:
+            from qdrant_client.models import FieldCondition, Filter, MatchValue
+
+            client = self._visual_qdrant()
+            existing = {c.name for c in client.get_collections().collections}
+            if self.visual_collection_name in existing:
+                client.delete(
+                    self.visual_collection_name,
+                    points_selector=Filter(
+                        must=[FieldCondition(key="source", match=MatchValue(value=source))]
+                    ),
+                )
+        except Exception as e:
+            logger.warning("visual delete_by_source failed: %s", e)
+
+    def _set_chunk_meta(self, ids: List[str], fields: Dict[str, Any]) -> None:
+        """Merge metadata into stored chunks without re-embedding them."""
+        if not ids:
+            return
+        client = getattr(self._store, "_client", None)
+        if client is not None and hasattr(client, "set_payload"):
+            from haystack_integrations.document_stores.qdrant.converters import convert_id
+
+            client.set_payload(
+                collection_name=self.collection_name,
+                payload=fields,
+                points=[convert_id(i) for i in ids],
+                key="meta",
+                wait=True,
+            )
+            return
+        # Stores without partial payload updates (tests: in-memory store).
+        from dataclasses import replace
+
+        from haystack.document_stores.types import DuplicatePolicy
+
+        wanted = set(ids)
+        docs = [d for d in self._store.filter_documents() if d.id in wanted]
+        self._store.write_documents(
+            [replace(d, meta={**(d.meta or {}), **fields}) for d in docs],
+            policy=DuplicatePolicy.OVERWRITE,
+        )
+
+    def sync_register(self, hash_files: bool = True, progress_cb=None) -> Dict[str, Any]:
+        """Bring the register in line with what is actually in the index.
+
+        Chunks written before documents were registered get a ``doc_id`` (set
+        in place, no re-embedding) and a register row with content hash,
+        size and version 1. Uploads of the same name are never merged: the
+        newest keeps the plain name, older copies get a distinct logical path
+        so a later upload can only replace one of them. Registered documents
+        whose chunks are gone from the index are marked failed so they can be
+        re-indexed.
+        """
+        from src import rag_documents as rd
+
+        if not self.healthy:
+            return {"success": False, "message": "RAG not available"}
+        register = self._register()
+        if register is None:
+            return {"success": False, "message": "No document register for this base"}
+        coll = self.collection_name
+        uploads = rd.managed_uploads_dir()
+        groups: Dict[Tuple[Any, ...], List[Any]] = {}
+        chunk_counts: Dict[str, int] = {}
+        for d in self._read_documents():
+            meta = d.meta or {}
+            if meta.get("doc_id"):
+                chunk_counts[meta["doc_id"]] = chunk_counts.get(meta["doc_id"], 0) + 1
+                continue
+            if not meta.get("source"):
+                continue
+            key = (meta["source"], meta.get("owner"), meta.get("scope"))
+            groups.setdefault(key, []).append(d)
+
+        def _mtime(path: str) -> float:
+            try:
+                return os.path.getmtime(path)
+            except OSError:
+                return 0.0
+
+        # Newest upload per (name, owner, scope) claims the plain logical name.
+        claimed: Set[str] = set()
+        ordered = sorted(groups.items(), key=lambda item: -_mtime(item[0][0]))
+        registered = 0
+        total = len(ordered)
+        for index, ((source, owner, scope), docs) in enumerate(ordered):
+            meta = docs[0].meta or {}
+            managed = rd.is_within(source, uploads)
+            if managed:
+                logical = meta.get("filename") or os.path.basename(source)
+                origin = rd.ORIGIN_UPLOAD
+            else:
+                logical = os.path.abspath(source)
+                origin = rd.ORIGIN_DIRECTORY
+            doc_id = rd.make_doc_id(logical, owner, scope)
+            taken = register.get(coll, doc_id)
+            if doc_id in claimed or (
+                taken and taken["status"] != rd.DELETED and taken["source"] != source
+            ):
+                logical = f"{logical} [{os.path.basename(source)}]"
+                doc_id = rd.make_doc_id(logical, owner, scope)
+            claimed.add(doc_id)
+            sha = size = mtime = None
+            if os.path.isfile(source):
+                size = os.path.getsize(source)
+                mtime = _mtime(source)
+                if hash_files:
+                    sha = rd.file_sha256(source)
+            fields = {
+                "doc_id": doc_id,
+                "logical_path": logical,
+                "origin": origin,
+                "doc_version": 1,
             }
+            if sha:
+                fields["content_sha256"] = sha
+            self._set_chunk_meta([d.id for d in docs], fields)
+            ingest_meta = {
+                k: v
+                for k, v in meta.items()
+                if k
+                in ("source", "filename", "stored_filename", "directory", "type", "owner", "scope")
+            }
+            ingest_meta.update(logical_path=logical, origin=origin)
+            lane = self._route_lane(source) if os.path.isfile(source) else ""
+            pipeline_fp = None
+            if lane:
+                # Assume the legacy chunks match the current pipeline so the
+                # next directory sync skips them instead of re-parsing all.
+                pipeline_fp = rd.fingerprint(
+                    {
+                        "lane": lane,
+                        "lane_fp": self._lane_fingerprint(lane, ingest_meta) or "",
+                        "derive": self._derive_fingerprint(ingest_meta),
+                    }
+                )
+            register.upsert(
+                coll,
+                doc_id,
+                logical_path=logical,
+                display_name=meta.get("filename") or os.path.basename(source),
+                origin=origin,
+                owner=owner,
+                scope=scope,
+                source=source,
+                content_sha256=sha,
+                size_bytes=size,
+                mtime=mtime,
+                version=1,
+                status=rd.INDEXED,
+                lane=lane,
+                pipeline_fingerprint=pipeline_fp,
+                chunk_count=len(docs),
+                ingest_meta=ingest_meta,
+                indexed_at=time.time(),
+            )
+            register.record_version(
+                coll, doc_id, 1, sha=sha, source=source, size_bytes=size, chunk_count=len(docs)
+            )
+            registered += 1
+            if progress_cb:
+                progress_cb({"file": source, "processed": index + 1, "total": total})
+
+        refreshed = missing = 0
+        for row in register.list(coll):
+            if row["status"] != rd.INDEXED:
+                continue
+            count = chunk_counts.get(row["doc_id"])
+            if count is None:
+                if row["doc_id"] in claimed:
+                    continue
+                register.upsert(
+                    coll,
+                    row["doc_id"],
+                    status=rd.FAILED,
+                    chunk_count=0,
+                    error="No chunks in the index any more; re-index the document.",
+                )
+                missing += 1
+            elif count != row["chunk_count"]:
+                register.upsert(coll, row["doc_id"], chunk_count=count)
+                refreshed += 1
+        return {
+            "success": True,
+            "registered": registered,
+            "refreshed": refreshed,
+            "missing": missing,
+            "message": (
+                f"Registered {registered} legacy document(s), refreshed {refreshed}, "
+                f"{missing} without chunks"
+            ),
+        }
 
     # ------------------------------------------------------------------
     # Direct text indexing (kept for compatibility)
@@ -3793,6 +4578,9 @@ class VectorRAG:
             catalog = self._generation_catalog()
             if catalog:
                 catalog.reset()
+            register = self._register()
+            if register is not None:
+                register.drop_collection(self.collection_name)
             self._retriever = None
             # Drop the visual collection too so a re-index (e.g. a VL-model swap
             # that changes the image vector dimension) starts clean.
@@ -3854,6 +4642,7 @@ class VectorRAG:
         try:
             _filters = self._build_filters(scope=scope, exclude_scopes=exclude_scopes)
             chunks = self._read_documents(filters=_filters) if _filters else self._read_documents()
+            registered = self._register_rows()
             agg: Dict[str, Dict[str, Any]] = {}
             for d in chunks:
                 meta = d.meta or {}
@@ -3869,6 +4658,25 @@ class VectorRAG:
                     }
                     agg[source] = row
                 row["chunks"] += 1
+            for source, row in agg.items():
+                row.update(self._public_register_fields(registered.get(source)))
+            # Documents with no chunks of their own (failed or skipped as a
+            # duplicate) exist only in the register but belong in the list.
+            for source, reg in registered.items():
+                if source in agg or reg["status"] == "indexed":
+                    continue
+                if scope and reg.get("scope") != scope:
+                    continue
+                if exclude_scopes and reg.get("scope") in exclude_scopes:
+                    continue
+                agg[source] = {
+                    "source": source,
+                    "filename": reg["display_name"],
+                    "type": Path(source).suffix.lower(),
+                    "directory": os.path.dirname(source),
+                    "chunks": 0,
+                    **self._public_register_fields(reg),
+                }
             return sorted(agg.values(), key=lambda r: str(r["filename"]).lower())
         except Exception as e:
             logger.error(f"list_documents failed: {e}")
@@ -4078,6 +4886,13 @@ class VectorRAG:
             ]
             if ids:
                 self._store.delete_documents(ids)
+            register = self._register()
+            if register is not None:
+                from src.rag_documents import is_within
+
+                for row in register.list(self.collection_name):
+                    if is_within(row["source"], directory):
+                        register.mark_deleted(self.collection_name, row["doc_id"])
             return {
                 "success": True,
                 "removed_count": len(ids),
@@ -4088,35 +4903,8 @@ class VectorRAG:
             return {"success": False, "message": str(e)}
 
     def delete_by_source(self, source: str) -> int:
-        """Remove all chunks whose metadata['source'] equals *source*."""
-        if not self.healthy:
-            return 0
-        try:
-            docs = self._store.filter_documents(
-                filters={"field": "meta.source", "operator": "==", "value": source}
-            )
-            ids = [d.id for d in docs]
-            if ids:
-                self._store.delete_documents(ids)
-            # Mirror the delete into the visual collection (best-effort).
-            try:
-                from qdrant_client.models import FieldCondition, Filter, MatchValue
-
-                client = self._visual_qdrant()
-                existing = {c.name for c in client.get_collections().collections}
-                if self.visual_collection_name in existing:
-                    client.delete(
-                        self.visual_collection_name,
-                        points_selector=Filter(
-                            must=[FieldCondition(key="source", match=MatchValue(value=source))]
-                        ),
-                    )
-            except Exception as e:
-                logger.warning("visual delete_by_source failed: %s", e)
-            return len(ids)
-        except Exception as e:
-            logger.error(f"delete_by_source failed: {e}")
-            return 0
+        """Remove all chunks of the document stored at *source* (see delete_document)."""
+        return int(self.delete_document(source=source).get("removed") or 0)
 
     def reindex_directory(
         self, directory: str, file_extensions: Optional[set] = None
