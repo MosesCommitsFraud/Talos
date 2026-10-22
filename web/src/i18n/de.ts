@@ -1980,9 +1980,9 @@ const de: typeof en = {
         on: 'An',
         off: 'Aus',
       },
-      laneRunning: 'Läuft mit der gespeicherten Konfiguration.',
-      laneOff: 'Ausgeschaltet.',
-      laneWaiting: 'Wartet auf: {{what}}. „Automatisch“ startet, sobald das eingetragen ist.',
+      laneRunning: 'läuft (gespeichert)',
+      laneOff: 'aus',
+      laneWaiting: 'wartet auf {{what}}',
       laneNeeds: {
         video_asr_url: 'ASR-Endpoint',
         vlm_url: 'VLM-Endpoint',

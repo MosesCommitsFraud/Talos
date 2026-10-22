@@ -344,33 +344,36 @@ export function RagSettingsForm({ ragId }: { ragId?: string }) {
             {marker(key)}
           </>
         }
-        hint={
-          <>
-            {hint}
-            {saved && (
-              <span className="mt-1 block text-[11px]">
-                {saved.active
-                  ? t('settings.rag.laneRunning')
-                  : saved.mode === 'off'
-                    ? t('settings.rag.laneOff')
-                    : t('settings.rag.laneWaiting', {
-                        what: t(`settings.rag.laneNeeds.${saved.waiting_for}`, saved.waiting_for),
-                      })}
-              </span>
-            )}
-          </>
-        }
+        hint={hint}
       >
-        <Select
-          className="w-40 text-xs"
-          value={laneModeOf(lane)}
-          onChange={(v) => set(key, v)}
-          options={[
-            { value: 'auto', label: t('settings.rag.laneMode.auto') },
-            { value: 'on', label: t('settings.rag.laneMode.on') },
-            { value: 'off', label: t('settings.rag.laneMode.off') },
-          ]}
-        />
+        <div className="flex flex-col items-end gap-1">
+          <Select
+            className="w-40 text-xs"
+            value={laneModeOf(lane)}
+            onChange={(v) => set(key, v)}
+            options={[
+              { value: 'auto', label: t('settings.rag.laneMode.auto') },
+              { value: 'on', label: t('settings.rag.laneMode.on') },
+              { value: 'off', label: t('settings.rag.laneMode.off') },
+            ]}
+          />
+          {saved && (
+            <span
+              className={cn(
+                'max-w-40 text-right text-[10px] leading-tight',
+                saved.active ? 'text-success' : 'text-muted-foreground',
+              )}
+            >
+              {saved.active
+                ? t('settings.rag.laneRunning')
+                : saved.mode === 'off'
+                  ? t('settings.rag.laneOff')
+                  : t('settings.rag.laneWaiting', {
+                      what: t(`settings.rag.laneNeeds.${saved.waiting_for}`, saved.waiting_for),
+                    })}
+            </span>
+          )}
+        </div>
       </Row>
     );
   };

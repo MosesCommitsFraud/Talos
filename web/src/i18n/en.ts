@@ -1973,9 +1973,9 @@ const en = {
         on: 'On',
         off: 'Off',
       },
-      laneRunning: 'Runs with the saved configuration.',
-      laneOff: 'Switched off.',
-      laneWaiting: 'Waiting for: {{what}}. "Automatic" starts once that is set.',
+      laneRunning: 'runs (saved)',
+      laneOff: 'off',
+      laneWaiting: 'waits for {{what}}',
       laneNeeds: {
         video_asr_url: 'ASR endpoint',
         vlm_url: 'VLM endpoint',
