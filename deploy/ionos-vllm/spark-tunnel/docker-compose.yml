@@ -2,7 +2,8 @@
 # that block Tailscale. Only outbound port 22 is needed.
 #
 # The container joins the Talos network and publishes nothing, so only Talos
-# reaches the model — at http://llm-tunnel:8000/v1.
+# reaches the models — at http://llm-tunnel:8000/v1 (main), :8001 (MoE)
+# and :8002 (small).
 #
 #   ./setup.sh <ionos-ip>       # key pair, pinned host key, .env
 #   docker compose up -d --build
@@ -16,6 +17,8 @@ services:
       - ./ssh:/ssh:ro
     command: >
       -L 0.0.0.0:8000:127.0.0.1:8000
+      -L 0.0.0.0:8001:127.0.0.1:8001
+      -L 0.0.0.0:8002:127.0.0.1:8002
       ${IONOS_USER:-moritz}@${IONOS_HOST:?run ./setup.sh first}
     networks:
       - talos

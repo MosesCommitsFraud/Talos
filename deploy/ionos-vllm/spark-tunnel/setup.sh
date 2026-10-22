@@ -22,6 +22,7 @@ echo; cat .env
 
 echo
 echo "This line goes into ~$user/.ssh/authorized_keys on the IONOS server."
-echo "It allows nothing but the tunnel to 127.0.0.1:8000 — no shell, no other ports:"
+echo "It allows nothing but the tunnel to 127.0.0.1:8000-8002 — no shell, no other ports:"
 echo
-echo "restrict,port-forwarding,permitopen=\"127.0.0.1:8000\",command=\"/bin/false\" $(cat ssh/id_ed25519.pub)"
+open='permitopen="127.0.0.1:8000",permitopen="127.0.0.1:8001",permitopen="127.0.0.1:8002"'
+echo "restrict,port-forwarding,$open,command=\"/bin/false\" $(cat ssh/id_ed25519.pub)"

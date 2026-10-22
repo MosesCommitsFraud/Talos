@@ -1,5 +1,5 @@
-# Qwen3.8-27B, FP8 — dense, ~31 GB weights. Fits one H200 with plenty of KV
-# cache left. Same model as the Spark baseline (setup S4 in
+# Qwen3.8-27B, FP8 — dense, ~31 GB weights. The main chat model (port 8000).
+# Same model as the Spark baseline (setup S4 in
 # docs/benchmarks/Modelltest_Spark_vs_H200.xlsx).
 #
 # Keys are `vllm serve` flags without the leading `--`. Host, port and API key
@@ -11,9 +11,12 @@ model: Qwen/Qwen3.8-27B-FP8
 served-model-name: qwen3.8-27b
 
 tensor-parallel-size: 1
-gpu-memory-utilization: 0.90
-# The model's native maximum. The KV cache on one H200 holds ~1.49M tokens,
-# so ~5 requests can use the full length at once; shorter ones share the rest.
+# Share of the H200 while it runs next to the MoE and the small model; the
+# three shares must add up to at most ~0.92. Alone, 0.90 gives ~1.49M tokens
+# of KV cache; at 0.38 it is ~330k (28.4 GiB weights + ~3 GiB overhead).
+gpu-memory-utilization: 0.38
+# The model's native maximum. With the shared GPU only one request can use
+# the full length at a time; shorter ones share the rest.
 max-model-len: 262144
 max-num-seqs: 64
 enable-prefix-caching: true

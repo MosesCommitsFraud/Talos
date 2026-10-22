@@ -2,16 +2,60 @@
 #
 # vLLM shares the network namespace of the tailscale container and is never
 # reachable from the public internet: only from the tailnet, and on the host's
-# loopback for the SSH tunnel. Talos connects to http://<tailscale-ip>:8000/v1,
-# or through spark-tunnel/ to http://llm-tunnel:8000/v1.
+# loopback for the SSH tunnel. Talos connects to http://<tailscale-ip>:<port>/v1,
+# or through spark-tunnel/ to http://llm-tunnel:<port>/v1.
 #
-# One model runs at a time; its settings are in models/<name>.yaml.
+# Three models share the GPU, one vLLM per model, settings in models/<name>.yaml:
+#   8000  main    MODEL_CONFIG  (default qwen3.8-27b)      chat
+#   8001  moe     MOE_CONFIG    (default qwen3.6-35b-a3b)  fast / agents
+#   8002  small   SMALL_CONFIG  (default qwen3.5-4b)       titles, utility
+# Their gpu-memory-utilization shares must add up to at most ~0.92. They load
+# one after the other (WAIT_FOR below).
 #
 #   cp .env.example .env   # fill in TS_AUTHKEY, VLLM_API_KEY
-#   ./run.sh qwen3.8-27b   # or: qwen3.8-flash-next, glm-5.3-flash
+#   ./run.sh up
 #   docker compose exec tailscale tailscale ip -4
 #
 # See README.md for the Talos side.
+
+# Shared by the three vLLM services; each sets its port, config and WAIT_FOR.
+x-vllm: &vllm
+  image: vllm/vllm-openai:${VLLM_IMAGE_TAG:-v0.32.0}
+  restart: unless-stopped
+  network_mode: service:tailscale
+  ipc: host
+  volumes:
+    - hf-cache:/root/.cache/huggingface
+    - ./models:/models:ro
+  # Waits until the model before it on the GPU (WAIT_FOR=<port>) is healthy:
+  # a model that loads while another one does mismeasures free memory. Done
+  # here and not with depends_on, because after a reboot Docker restarts the
+  # containers itself, all at once and without Compose's ordering.
+  entrypoint:
+    - /bin/sh
+    - -c
+    - |
+      if [ -n "$${WAIT_FOR:-}" ]; then
+        echo "waiting for the model on port $$WAIT_FOR"
+        until python3 -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:$$WAIT_FOR/health', timeout=5)" 2>/dev/null; do sleep 5; done
+      fi
+      exec vllm serve "$$@"
+    - vllm
+  healthcheck:
+    test: ["CMD-SHELL", "python3 -c \"import os, urllib.request; urllib.request.urlopen('http://127.0.0.1:%s/health' % os.environ['PORT'], timeout=5)\""]
+    interval: 30s
+    timeout: 10s
+    retries: 5
+    # A first start downloads the weights; `./run.sh download` beforehand
+    # keeps this short.
+    start_period: 3600s
+  deploy:
+    resources:
+      reservations:
+        devices:
+          - driver: nvidia
+            count: all
+            capabilities: [gpu]
 
 services:
   tailscale:
@@ -40,47 +84,52 @@ services:
       - NET_ADMIN
       - NET_RAW
     ports:
-      # WireGuard/UDP. The vLLM port 8000 is NOT published to the internet.
+      # WireGuard/UDP. The vLLM ports are NOT published to the internet.
       - "41641:41641/udp"
       # Loopback only — the end point of the SSH tunnel for networks that
       # block Tailscale (see spark-tunnel/).
-      - "127.0.0.1:8000:8000"
+      - "127.0.0.1:8000-8002:8000-8002"
 
   vllm:
-    image: vllm/vllm-openai:${VLLM_IMAGE_TAG:-v0.32.0}
+    <<: *vllm
     container_name: talos-llm-vllm
-    restart: unless-stopped
-    network_mode: service:tailscale
     depends_on:
       - tailscale
-    ipc: host
     environment:
       - HF_TOKEN=${HF_TOKEN:-}
-    volumes:
-      - hf-cache:/root/.cache/huggingface
-      - ./models:/models:ro
-    # Everything model-specific is in the YAML; vLLM reads it via --config and
-    # the flags below take precedence over it.
+      - PORT=8000
     command: >
       --config /models/${MODEL_CONFIG:-qwen3.8-27b}.yaml
-      --host 0.0.0.0
-      --port 8000
+      --host 0.0.0.0 --port 8000
       --api-key ${VLLM_API_KEY}
-    healthcheck:
-      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=5)"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
-      # A first start downloads the weights (GLM-5.3-Flash: ~330 GB); use
-      # `./run.sh download` beforehand to keep this short.
-      start_period: 3600s
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
+
+  vllm-moe:
+    <<: *vllm
+    container_name: talos-llm-vllm-moe
+    depends_on:
+      - vllm
+    environment:
+      - HF_TOKEN=${HF_TOKEN:-}
+      - PORT=8001
+      - WAIT_FOR=8000
+    command: >
+      --config /models/${MOE_CONFIG:-qwen3.6-35b-a3b}.yaml
+      --host 0.0.0.0 --port 8001
+      --api-key ${VLLM_API_KEY}
+
+  vllm-small:
+    <<: *vllm
+    container_name: talos-llm-vllm-small
+    depends_on:
+      - vllm-moe
+    environment:
+      - HF_TOKEN=${HF_TOKEN:-}
+      - PORT=8002
+      - WAIT_FOR=8001
+    command: >
+      --config /models/${SMALL_CONFIG:-qwen3.5-4b}.yaml
+      --host 0.0.0.0 --port 8002
+      --api-key ${VLLM_API_KEY}
 
   # Fetches weights into the shared cache without starting a server:
   #   docker compose run --rm download Qwen/Qwen3.8-27B-FP8 [more ids ...]

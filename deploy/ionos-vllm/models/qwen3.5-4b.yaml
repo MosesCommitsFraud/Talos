@@ -1,0 +1,25 @@
+# Qwen3.5-4B, BF16 — dense, ~9 GB weights. The utility model (port 8002) for
+# chat titles, classification and other short one-shot jobs; in Talos set it
+# as "Utility Model". 201 languages, German included. The newest small Qwen:
+# Qwen3.6 and 3.8 have no models below 27B.
+# https://huggingface.co/Qwen/Qwen3.5-4B
+
+model: Qwen/Qwen3.5-4B
+# Must contain "qwen", see qwen3.8-27b.yaml.
+served-model-name: qwen3.5-4b
+
+tensor-parallel-size: 1
+gpu-memory-utilization: 0.12
+# Titles and classification need short prompts only.
+max-model-len: 32768
+max-num-seqs: 32
+enable-prefix-caching: true
+# Text only: skips the vision encoder, frees its memory for KV cache.
+language-model-only: true
+# Talos already sends enable_thinking=false for titles; this makes no-thinking
+# the default for every other caller too, which is what a 4B helper is for.
+default-chat-template-kwargs: '{"enable_thinking": false}'
+
+enable-auto-tool-choice: true
+tool-call-parser: qwen3_coder
+reasoning-parser: qwen3

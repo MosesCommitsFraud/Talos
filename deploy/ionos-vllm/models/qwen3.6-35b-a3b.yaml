@@ -1,0 +1,25 @@
+# Qwen3.6-35B-A3B, FP8 — MoE, 35B total / 3B active, ~37.5 GB weights.
+# The fast model (port 8001): with 3B active parameters it generates several
+# times faster than the dense 27B, good for agents, subagents and background
+# tasks. Largest current MoE that fits next to the 27B on one H200 — the 122B
+# and Flash-Next MoEs need a GPU of their own or more.
+# https://huggingface.co/Qwen/Qwen3.6-35B-A3B-FP8
+
+model: Qwen/Qwen3.6-35B-A3B-FP8
+# Must contain "qwen", see qwen3.8-27b.yaml.
+served-model-name: qwen3.6-35b-a3b
+
+tensor-parallel-size: 1
+# ~35 GiB weights + ~4 GiB overhead, the rest is KV cache (see qwen3.8-27b.yaml).
+gpu-memory-utilization: 0.40
+max-model-len: 131072
+max-num-seqs: 64
+enable-prefix-caching: true
+
+enable-auto-tool-choice: true
+tool-call-parser: qwen3_coder
+reasoning-parser: qwen3
+
+# Optional: MTP speculative decoding per the model card, for even faster
+# output; costs a little memory.
+# speculative-config: '{"method": "qwen3_next_mtp", "num_speculative_tokens": 2}'
