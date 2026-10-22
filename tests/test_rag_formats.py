@@ -190,3 +190,72 @@ def test_subtitle_upload_is_searchable_by_time(env):  # noqa: F811
     [doc] = rag._read_documents()
     assert doc.meta["start"] == 120.0 and doc.meta["modality"] == "video"
     assert os.path.basename(doc.meta["source"]) == "Schulung-a.srt"
+
+
+# --------------------------------------------------------------- folder uploads
+
+
+def test_relative_paths_are_cleaned():
+    assert rd.clean_relative_path("Projekte\\Nord/../x/./Plan.pdf") == "Projekte/Nord/x/Plan.pdf"
+    assert rd.clean_relative_path("C:/Users/a/b.md") == "Users/a/b.md"
+    assert rd.upload_identity("Plan.pdf", "Nord/Plan.pdf") == {
+        "logical_path": "Nord/Plan.pdf",
+        "origin": "upload",
+        "folder": "Nord",
+    }
+    assert rd.upload_identity("Plan.pdf", "Plan.pdf")["logical_path"] == "Plan.pdf"
+    assert rd.upload_identity("Plan.pdf", "")["logical_path"] == "Plan.pdf"
+
+
+def test_same_name_in_different_folders_are_two_documents(env):  # noqa: F811
+    rag, uploads, _ = env
+    for folder, text, suffix in (("Nord", "Protokoll Nord", "a"), ("Sued", "Protokoll Süd", "b")):
+        path = uploads / f"Protokoll-{suffix}.md"
+        path.write_text(text, encoding="utf-8")
+        meta = {
+            "source": str(path),
+            "filename": "Protokoll.md",
+            **rd.upload_identity("Protokoll.md", f"Projekte/{folder}/Protokoll.md"),
+        }
+        rag.index_files([(str(path), meta)])
+    assert contents(rag) == ["Protokoll Nord", "Protokoll Süd"]
+    assert sorted(d["logical_path"] for d in rag.list_documents()) == [
+        "Projekte/Nord/Protokoll.md",
+        "Projekte/Sued/Protokoll.md",
+    ]
+
+
+def test_upload_route_passes_folder_paths(tmp_path, monkeypatch):
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    import routes.personal_routes as personal
+    import src.rag_worker as worker
+    from core.middleware import require_admin
+
+    monkeypatch.setattr(personal, "UPLOADS_DIR", str(tmp_path))
+    queued = []
+    monkeypatch.setattr(
+        worker,
+        "start_index_files",
+        lambda files, owner=None, base_id=None: queued.append(files) or {"id": "j1"},
+    )
+    app = FastAPI()
+    app.include_router(personal.setup_personal_routes(None, None, False))
+    app.dependency_overrides[require_admin] = lambda: None
+    client = TestClient(app)
+    res = client.post(
+        "/api/personal/upload",
+        files=[
+            ("files", ("Protokoll.md", b"nord", "text/markdown")),
+            ("files", ("Lose.md", b"lose", "text/markdown")),
+        ],
+        data={"paths": ["Projekte/Nord/Protokoll.md", ""]},
+    )
+    assert res.status_code == 200, res.text
+    [(first, nord), (_, lose)] = queued[0]
+    assert (
+        nord["logical_path"] == "Projekte/Nord/Protokoll.md" and nord["folder"] == "Projekte/Nord"
+    )
+    assert lose["logical_path"] == "Lose.md" and "folder" not in lose
+    assert os.path.dirname(first) == os.path.join(str(tmp_path), "global")

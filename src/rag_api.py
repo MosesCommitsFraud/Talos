@@ -430,6 +430,10 @@ def create_app() -> FastAPI:
     async def upload_documents(
         rag_id: str,
         files: List[UploadFile] = File(..., description="One or more files to index."),
+        paths: Optional[List[str]] = Form(
+            None,
+            description="Optional relative path per file (folder upload), same order as files.",
+        ),
         redact_pii: Optional[str] = Form(None),
     ) -> Dict[str, Any]:
         """Upload files into one knowledge base.
@@ -455,7 +459,10 @@ def create_app() -> FastAPI:
         stored: List[str] = []
         errors: List[str] = []
         to_index: List[Any] = []
-        for upload in files:
+        rel_paths = list(paths or [])
+        if len(rel_paths) != len(files):
+            rel_paths = [""] * len(files)
+        for upload, rel_path in zip(files, rel_paths):
             try:
                 file_path, stored_name, safe_name = _unique_personal_upload_path(
                     upload_dir, upload.filename
@@ -486,7 +493,7 @@ def create_app() -> FastAPI:
                     "stored_filename": stored_name,
                     "directory": upload_dir,
                     "type": os.path.splitext(safe_name)[1].lower(),
-                    **upload_identity(upload.filename),
+                    **upload_identity(upload.filename, rel_path),
                 }
                 if redact_override is not None:
                     meta["redact_pii"] = redact_override

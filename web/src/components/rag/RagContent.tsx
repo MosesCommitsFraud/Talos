@@ -5,6 +5,7 @@ import {
   ChevronRightIcon,
   FileTextIcon,
   FolderOpenIcon,
+  FolderUpIcon,
   SearchIcon,
   UploadCloudIcon,
 } from 'lucide-react';
@@ -68,6 +69,7 @@ export function RagContent({ baseId }: { baseId: string }) {
   const queryClient = useQueryClient();
   const ragId = ragIdParam(baseId);
   const fileInput = useRef<HTMLInputElement>(null);
+  const folderInput = useRef<HTMLInputElement>(null);
 
   const [dir, setDir] = useState('');
   const [msg, setMsg] = useState<{ text: string; ok: boolean } | null>(null);
@@ -141,6 +143,31 @@ export function RagContent({ baseId }: { baseId: string }) {
               type="file"
               multiple
               hidden
+              onChange={(e) => {
+                if (e.target.files?.length) {
+                  run(
+                    () =>
+                      personalUpload(Array.from(e.target.files!), {
+                        redactPii: uploadRedact,
+                        ragId,
+                      }),
+                    t('settings.rag.uploadQueued'),
+                  );
+                }
+                e.target.value = '';
+              }}
+            />
+            <Button size="sm" variant="outline" onClick={() => folderInput.current?.click()}>
+              <FolderUpIcon className="size-3.5" /> {t('settings.rag.uploadFolder')}
+            </Button>
+            {/* webkitdirectory: every file of the chosen folder, with its path
+                inside it (keeps equal names in different folders apart). */}
+            <input
+              ref={folderInput}
+              type="file"
+              multiple
+              hidden
+              {...({ webkitdirectory: '' } as Record<string, string>)}
               onChange={(e) => {
                 if (e.target.files?.length) {
                   run(
@@ -291,6 +318,14 @@ export function RagContent({ baseId }: { baseId: string }) {
                         <FileTextIcon className="size-3.5 shrink-0 text-muted-foreground" />
                       )}
                       <span className="min-w-0 truncate">{d.filename}</span>
+                      {!d.container && d.logical_path?.includes('/') && d.origin === 'upload' && (
+                        <span
+                          className="hidden shrink-0 truncate text-[10px] text-muted-foreground sm:inline"
+                          title={d.logical_path}
+                        >
+                          {d.logical_path.slice(0, d.logical_path.lastIndexOf('/'))}
+                        </span>
+                      )}
                       {d.container && (
                         <span
                           className="hidden shrink-0 truncate text-[10px] text-muted-foreground sm:inline"

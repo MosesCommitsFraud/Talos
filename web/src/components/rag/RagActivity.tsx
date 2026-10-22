@@ -13,6 +13,7 @@ import {
   type RagJob,
 } from '@/api/client';
 import { cn } from '@/lib/utils';
+import { filesFromDrop } from '@/lib/uploadItems';
 import { ragIdParam, useRagBase } from '@/state/ragBase';
 import { useRagConsole } from '@/state/ragConsole';
 import { Button } from '../ui/button';
@@ -109,8 +110,10 @@ export function RagActivity() {
   const onDrop = (e: React.DragEvent) => {
     e.preventDefault();
     setDragging(false);
-    const files = Array.from(e.dataTransfer.files ?? []);
-    if (files.length) upload.mutate(files);
+    // Folders are walked (with their paths); must start synchronously here.
+    void filesFromDrop(e.dataTransfer).then((files) => {
+      if (files.length) upload.mutate(files);
+    });
   };
 
   const list = jobs.data?.jobs ?? [];

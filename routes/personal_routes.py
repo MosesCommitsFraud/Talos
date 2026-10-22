@@ -326,6 +326,8 @@ def setup_personal_routes(personal_docs_manager, rag_manager, rag_available):
     async def upload_files_to_rag(
         request: Request,
         files: List[UploadFile] = File(...),
+        # One relative path per file ("" for loose files), from a folder upload.
+        paths: Optional[List[str]] = Form(None),
         redact_pii: Optional[str] = Form(None),
         rag_id: Optional[str] = Form(None),
         _admin: None = Depends(require_admin),
@@ -367,7 +369,10 @@ def setup_personal_routes(personal_docs_manager, rag_manager, rag_available):
         # request thread. No per-chunk work here any more.
         to_index = []
 
-        for upload in files:
+        rel_paths = list(paths or [])
+        if len(rel_paths) != len(files):
+            rel_paths = [""] * len(files)
+        for upload, rel_path in zip(files, rel_paths):
             try:
                 file_path, stored_name, safe_name = _unique_personal_upload_path(
                     upload_dir, upload.filename
@@ -409,7 +414,7 @@ def setup_personal_routes(personal_docs_manager, rag_manager, rag_available):
                     "stored_filename": stored_name,
                     "directory": upload_dir,
                     "type": ext,
-                    **upload_identity(upload.filename),
+                    **upload_identity(upload.filename, rel_path),
                 }
                 if redact_override is not None:
                     file_meta["redact_pii"] = redact_override

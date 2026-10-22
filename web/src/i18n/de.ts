@@ -2123,6 +2123,7 @@ const de: typeof en = {
       ok: 'OK',
       documents: 'Dokumente',
       uploadFiles: 'Dateien hochladen…',
+      uploadFolder: 'Ordner hochladen…',
       uploaded: 'Hochgeladen',
       uploadQueued: 'Hochgeladen — Indizierung in Warteschlange',
       reloadIndex: 'Index neu laden',

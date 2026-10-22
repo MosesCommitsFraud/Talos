@@ -1,4 +1,5 @@
 import type { Attachment, ChatEvent, ModelEndpoint, Session, SessionDetail } from './types';
+import { relativePathOf, uploadBatches } from '@/lib/uploadItems';
 
 /** Fired when any API call hits a 401 — the AuthGate listens and flips to the
  *  in-app login screen (e.g. after the server restarted and forgot all
@@ -1182,19 +1183,34 @@ export const personalReload = () => postJSON('/api/personal/reload');
 export async function personalUpload(
   files: File[],
   opts?: { redactPii?: boolean | null; ragId?: string },
-): Promise<Record<string, unknown>> {
-  const fd = new FormData();
-  for (const f of files) fd.append('files', f, f.name);
-  // Explicit per-upload PII-redaction choice; omitted → server uses the global toggle.
-  if (opts?.redactPii != null) fd.append('redact_pii', String(opts.redactPii));
-  // Which knowledge base receives the files; omitted → the default base.
-  if (opts?.ragId) fd.append('rag_id', opts.ragId);
-  const res = await fetch('/api/personal/upload', { method: 'POST', body: fd, credentials: 'same-origin' });
-  if (!res.ok) {
-    const detail = await res.json().then((j) => j?.detail).catch(() => null);
-    throw new Error(detail || `Upload failed (HTTP ${res.status})`);
+): Promise<{ uploaded: string[]; failed_count: number; errors: string[]; job_ids: string[] }> {
+  // A dropped folder can hold thousands of files: send it in several
+  // requests (each one ingest job) instead of one giant body.
+  const total = { uploaded: [] as string[], failed_count: 0, errors: [] as string[], job_ids: [] as string[] };
+  for (const batch of uploadBatches(files)) {
+    const fd = new FormData();
+    for (const f of batch) {
+      fd.append('files', f, f.name);
+      // Path inside an uploaded folder ("" for a loose file): the server
+      // uses it as the document's identity.
+      fd.append('paths', relativePathOf(f));
+    }
+    // Explicit per-upload PII-redaction choice; omitted → server uses the global toggle.
+    if (opts?.redactPii != null) fd.append('redact_pii', String(opts.redactPii));
+    // Which knowledge base receives the files; omitted → the default base.
+    if (opts?.ragId) fd.append('rag_id', opts.ragId);
+    const res = await fetch('/api/personal/upload', { method: 'POST', body: fd, credentials: 'same-origin' });
+    if (!res.ok) {
+      const detail = await res.json().then((j) => j?.detail).catch(() => null);
+      throw new Error(detail || `Upload failed (HTTP ${res.status})`);
+    }
+    const r = (await res.json()) as { uploaded?: string[]; failed_count?: number; errors?: string[]; job_id?: string };
+    total.uploaded.push(...(r.uploaded ?? []));
+    total.failed_count += Number(r.failed_count ?? 0);
+    total.errors.push(...(r.errors ?? []));
+    if (r.job_id) total.job_ids.push(r.job_id);
   }
-  return res.json();
+  return total;
 }
 
 /* ── RAG ingest jobs (RQ queue) + indexed documents ── */

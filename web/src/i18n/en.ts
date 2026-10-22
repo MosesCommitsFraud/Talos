@@ -2116,6 +2116,7 @@ const en = {
       ok: 'OK',
       documents: 'Documents',
       uploadFiles: 'Upload files…',
+      uploadFolder: 'Upload folder…',
       uploaded: 'Uploaded',
       uploadQueued: 'Uploaded — indexing queued',
       reloadIndex: 'Reload index',

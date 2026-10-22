@@ -184,14 +184,33 @@ def make_doc_id(logical_path: str, owner: Optional[str] = None, scope: Optional[
     return "d_" + hashlib.sha256(key.encode("utf-8")).hexdigest()[:24]
 
 
-def upload_identity(original_name: Optional[str]) -> Dict[str, str]:
+def clean_relative_path(value: Optional[str]) -> str:
+    """A browser-supplied relative path ("Projekte/Nord/x.pdf"), made safe:
+    forward slashes, no empty/./.. segments, no drive or root prefix."""
+    parts = []
+    for part in str(value or "").replace("\\", "/").split("/"):
+        part = part.strip()
+        if not part or part in (".", "..") or part.endswith(":"):
+            continue
+        parts.append(part)
+    return "/".join(parts[-20:])
+
+
+def upload_identity(
+    original_name: Optional[str], relative_path: Optional[str] = None
+) -> Dict[str, str]:
     """Identity metadata for an uploaded file, from the name the user chose.
 
     The stored file gets a random suffix (collision-free storage), so the
     logical path — what makes a re-upload the *same* document — is the
-    original base name, not the stored one.
+    original base name, not the stored one. A file from an uploaded folder
+    keeps its path inside that folder, so equal names in different folders
+    stay different documents.
     """
     name = os.path.basename(str(original_name or "").replace("\\", "/")).strip() or "upload"
+    rel = clean_relative_path(relative_path)
+    if rel and "/" in rel:
+        return {"logical_path": rel, "origin": ORIGIN_UPLOAD, "folder": rel.rsplit("/", 1)[0]}
     return {"logical_path": name, "origin": ORIGIN_UPLOAD}
 
 
