@@ -115,3 +115,50 @@ def test_csv_for_german_excel_uses_semicolons_and_decimal_commas():
     assert cells[COLUMNS.index("Antwortzeit [s]")] == "2,50"
     plain = to_csv(rows, excel_de=False)
     assert plain.splitlines()[1].split(",")[COLUMNS.index("TTFT [s]")] == "1.25"
+
+
+def test_detail_splits_output_and_time():
+    messages = [
+        _user("Frage"),
+        _assistant(
+            time_to_first_token=2.0,
+            response_time=10.0,
+            output_tokens=500,
+            input_tokens=8000,
+            reasoning_tokens=300,
+            answer_tokens=150,
+            tool_call_tokens=50,
+            output_split_source="proportional",
+            agent_prep_time=0.5,
+            context_build_s=1.0,
+            context_length=32000,
+            context_breakdown={"system": 2000, "messages": 1000},
+            round_profile=[
+                {"round": 1, "first_token_s": 1.0, "first_visible_s": 3.0, "stream_s": 4.0,
+                 "tools_s": 2.0, "cached_tokens": 3000},
+                {"round": 2, "first_token_s": 0.5, "first_visible_s": 1.5, "stream_s": 2.5,
+                 "cached_tokens": 3500},
+            ],
+            tool_events=[{"round": 1, "tool": "web_search", "command": "{}", "exit_code": 1}],
+        ),
+    ]
+    first, total = build_rows(messages, "chat1")
+    d = first["detail"]
+    assert (d["reasoning_tokens"], d["answer_tokens"], d["tool_call_tokens"]) == (300, 150, 50)
+    assert d["unsplit_tokens"] == 0
+    assert d["cached_tokens"] == 6500
+    assert d["time"] == {
+        "context_build": 1.0, "prep": 0.5, "wait": 1.5, "thinking": 3.0, "writing": 2.0, "tools": 2.0,
+    }
+    assert d["tools"] == {"web_search": {"calls": 1, "errors": 1}}
+    assert total["detail"]["reasoning_tokens"] == 300
+    assert total["detail"]["context_breakdown"] == {"system": 2000, "messages": 1000}
+    # The CSV ignores the detail block.
+    assert "detail" not in to_csv(build_rows(messages, "chat1"))
+
+
+def test_detail_of_old_messages_keeps_output_unsplit():
+    messages = [_user("x"), _assistant(time_to_first_token=1.0, response_time=5.0, output_tokens=200)]
+    d = build_rows(messages, "c")[0]["detail"]
+    assert d["unsplit_tokens"] == 200 and d["split_source"] == "none"
+    assert d["time"]["wait"] == 1.0 and d["time"]["writing"] == 4.0

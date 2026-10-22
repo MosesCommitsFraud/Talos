@@ -1091,18 +1091,10 @@ def setup_session_routes(session_manager: SessionManager, config: dict):
             headers={"Content-Disposition": f'attachment; filename="{out_name}"'},
         )
 
-    @router.get("/session/{sid}/metrics-export")
-    def export_session_metrics(request: Request, sid: str, format: str = "excel"):
-        """The chat's turn metrics (TTFT, response time, tokens, tokens/s, tool
-        rounds and calls) as CSV — one row per turn plus a total row, for
-        pasting into a model-test sheet. Owner-scoped, not admin-only: it
-        holds the caller's own numbers and none of the content beyond a
-        shortened question. ``format=excel`` (default) writes semicolons and
-        decimal commas for a German Excel; ``format=csv`` commas and dots."""
+    def _metric_messages(sid: str):
+        """The chat's messages (oldest first, metadata parsed) and its name —
+        what turn_metrics_export works on. Callers check ownership first."""
         from core.database import ChatMessage as DbMessage
-        from src.turn_metrics_export import build_rows, to_csv
-
-        _verify_session_owner(request, sid, session_manager)
 
         db = SessionLocal()
         try:
@@ -1150,6 +1142,35 @@ def setup_session_routes(session_manager: SessionManager, config: dict):
                             "timestamp": d.get("timestamp") or "",
                         }
                     )
+
+        return name, messages
+
+    @router.get("/session/{sid}/metrics")
+    def session_metrics(request: Request, sid: str):
+        """The same per-turn rows as /metrics-export, as JSON with their
+        ``detail`` (thinking/answer/tool-call tokens, cache hits, where the
+        time went, context) — feeds the admin metrics panel in the chat."""
+        from core.middleware import require_admin
+        from src.turn_metrics_export import build_rows
+
+        require_admin(request)
+        _verify_session_owner(request, sid, session_manager)
+        _, messages = _metric_messages(sid)
+        rows = build_rows(messages, sid)
+        return {"turns": rows[:-1], "total": rows[-1] if rows else None}
+
+    @router.get("/session/{sid}/metrics-export")
+    def export_session_metrics(request: Request, sid: str, format: str = "excel"):
+        """The chat's turn metrics (TTFT, response time, tokens, tokens/s, tool
+        rounds and calls) as CSV — one row per turn plus a total row, for
+        pasting into a model-test sheet. Owner-scoped, not admin-only: it
+        holds the caller's own numbers and none of the content beyond a
+        shortened question. ``format=excel`` (default) writes semicolons and
+        decimal commas for a German Excel; ``format=csv`` commas and dots."""
+        from src.turn_metrics_export import build_rows, to_csv
+
+        _verify_session_owner(request, sid, session_manager)
+        name, messages = _metric_messages(sid)
 
         excel_de = format != "csv"
         body = to_csv(build_rows(messages, sid), excel_de=excel_de)

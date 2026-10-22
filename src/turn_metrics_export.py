@@ -12,7 +12,12 @@ question is one line too. The column order from ``Chat-ID`` to ``Sub-Agenten``
 matches the results sheet of the model-test workbook, so that block pastes
 across in one go.
 
-Pure functions over the persisted message rows; the route lives in
+Each row also carries a ``detail`` dict the CSV leaves out: the output split
+into thinking / answer / tool-call tokens, prefix-cache hits, where the time
+went (prep, waiting for the first token, thinking, writing, tools) and the
+context window — what the admin metrics panel charts.
+
+Pure functions over the persisted message rows; the routes live in
 routes/session_routes.py.
 """
 
@@ -82,7 +87,46 @@ def _new_turn(index: int, question: str, timestamp: Any) -> Dict[str, Any]:
         "_tools": [],
         "_model": "",
         "_answered": False,
+        "_d": {
+            "reasoning_tokens": 0,
+            "answer_tokens": 0,
+            "tool_call_tokens": 0,
+            "split_sources": set(),
+            "cached_tokens": 0,
+            "prefill_tps": None,
+            "context_length": 0,
+            "context_breakdown": None,
+            "context_build_s": 0.0,
+            "prep_s": 0.0,
+            "wait_s": 0.0,
+            "thinking_s": 0.0,
+            "writing_s": 0.0,
+            "tools_s": 0.0,
+            "tools": {},
+        },
     }
+
+
+def _add_timing(d: Dict[str, Any], md: Dict[str, Any]) -> None:
+    """Where one assistant message's time went. The round profile has it per
+    round; messages from before it existed fall back to TTFT vs. the rest."""
+    d["context_build_s"] += _num(md.get("context_build_s"))
+    prep = _num(md.get("agent_prep_time"))
+    d["prep_s"] += prep
+    rounds = [r for r in (md.get("round_profile") or []) if isinstance(r, dict)]
+    if not rounds:
+        ttft = _num(md.get("time_to_first_token"))
+        d["wait_s"] += max(ttft - prep, 0.0)
+        d["writing_s"] += max(_num(md.get("response_time")) - ttft, 0.0)
+        return
+    for r in rounds:
+        first = _num(r.get("first_token_s"))
+        visible = max(_num(r.get("first_visible_s")), first)
+        stream = max(_num(r.get("stream_s")), visible)
+        d["wait_s"] += first
+        d["thinking_s"] += visible - first
+        d["writing_s"] += stream - visible
+        d["tools_s"] += _num(r.get("tools_s"))
 
 
 def _add_assistant(turn: Dict[str, Any], md: Dict[str, Any]) -> None:
@@ -106,6 +150,20 @@ def _add_assistant(turn: Dict[str, Any], md: Dict[str, Any]) -> None:
         turn["_usage_sources"].add(str(md["usage_source"]))
     if md.get("model"):
         turn["_model"] = str(md["model"])
+    d = turn["_d"]
+    for key in ("reasoning_tokens", "answer_tokens", "tool_call_tokens"):
+        d[key] += int(_num(md.get(key)))
+    if md.get("output_split_source"):
+        d["split_sources"].add(str(md["output_split_source"]))
+    for r in md.get("round_profile") or []:
+        if isinstance(r, dict):
+            d["cached_tokens"] += int(_num(r.get("cached_tokens")))
+    if _num(md.get("prefill_tps")) > 0:
+        d["prefill_tps"] = _num(md.get("prefill_tps"))
+    d["context_length"] = max(d["context_length"], int(_num(md.get("context_length"))))
+    if isinstance(md.get("context_breakdown"), dict) and md["context_breakdown"]:
+        d["context_breakdown"] = md["context_breakdown"]
+    _add_timing(d, md)
     events = [e for e in (md.get("tool_events") or []) if isinstance(e, dict)]
     rounds = [int(_num(e.get("round"))) for e in events if e.get("round") is not None]
     # Rounds count from 1; the closing answer is one more round after the last
@@ -117,6 +175,10 @@ def _add_assistant(turn: Dict[str, Any], md: Dict[str, Any]) -> None:
         name = str(e.get("tool") or "")
         if name:
             turn["_tools"].append(name)
+            stat = d["tools"].setdefault(name, {"calls": 0, "errors": 0})
+            stat["calls"] += 1
+            if e.get("exit_code") not in (None, 0):
+                stat["errors"] += 1
         if name == "delegate":
             turn["_subagents"] += _subagent_count(e)
 
@@ -128,6 +190,31 @@ def _tps_of(pairs: List[tuple]) -> Optional[float]:
     if weight <= 0:
         return sum(t for t, _ in pairs) / len(pairs)
     return sum(t * out for t, out in pairs) / weight
+
+
+def _detail(d: Dict[str, Any], output_tokens: int) -> Dict[str, Any]:
+    split = d["reasoning_tokens"] + d["answer_tokens"] + d["tool_call_tokens"]
+    sources = d["split_sources"]
+    return {
+        "reasoning_tokens": d["reasoning_tokens"],
+        "answer_tokens": d["answer_tokens"],
+        "tool_call_tokens": d["tool_call_tokens"],
+        # Output recorded before the split existed (or estimated differently
+        # than the split) — shown as its own segment rather than guessed.
+        "unsplit_tokens": max(output_tokens - split, 0),
+        "split_source": (
+            next(iter(sources)) if len(sources) == 1 else "mixed" if sources else "none"
+        ),
+        "cached_tokens": d["cached_tokens"],
+        "prefill_tps": round(d["prefill_tps"], 2) if d["prefill_tps"] else None,
+        "context_length": d["context_length"],
+        "context_breakdown": d["context_breakdown"],
+        "time": {
+            k: round(d[k + "_s"], 2)
+            for k in ("context_build", "prep", "wait", "thinking", "writing", "tools")
+        },
+        "tools": d["tools"],
+    }
 
 
 def _finish(turn: Dict[str, Any], chat_id: str) -> Dict[str, Any]:
@@ -151,6 +238,7 @@ def _finish(turn: Dict[str, Any], chat_id: str) -> Dict[str, Any]:
         "Sub-Agenten": turn["_subagents"],
         "Tools": ", ".join(turn["_tools"]),
         "usage_source": "/".join(sorted(turn["_usage_sources"])),
+        "detail": _detail(turn["_d"], turn["_out"]),
         "_tps_pairs": turn["_tps"],
     }
 
@@ -204,9 +292,43 @@ def build_rows(messages: Iterable[Dict[str, Any]], chat_id: str) -> List[Dict[st
             sorted({s for r in rows for s in r["usage_source"].split("/") if s})
         ),
     }
+    total["detail"] = _total_detail([r["detail"] for r in rows])
     for r in rows:
         r.pop("_tps_pairs", None)
     return rows + [total]
+
+
+def _total_detail(details: List[Dict[str, Any]]) -> Dict[str, Any]:
+    sources = {d["split_source"] for d in details}
+    tools: Dict[str, Dict[str, int]] = {}
+    for d in details:
+        for name, stat in d["tools"].items():
+            agg = tools.setdefault(name, {"calls": 0, "errors": 0})
+            agg["calls"] += stat["calls"]
+            agg["errors"] += stat["errors"]
+    prefill = [d["prefill_tps"] for d in details if d["prefill_tps"]]
+    return {
+        **{
+            k: sum(d[k] for d in details)
+            for k in (
+                "reasoning_tokens",
+                "answer_tokens",
+                "tool_call_tokens",
+                "unsplit_tokens",
+                "cached_tokens",
+            )
+        },
+        "split_source": next(iter(sources)) if len(sources) == 1 else "mixed",
+        "prefill_tps": round(sum(prefill) / len(prefill), 2) if prefill else None,
+        "context_length": max(d["context_length"] for d in details),
+        "context_breakdown": next(
+            (d["context_breakdown"] for d in reversed(details) if d["context_breakdown"]), None
+        ),
+        "time": {
+            k: round(sum(d["time"][k] for d in details), 2) for k in details[0]["time"]
+        },
+        "tools": tools,
+    }
 
 
 def to_csv(rows: List[Dict[str, Any]], excel_de: bool = True) -> str:
