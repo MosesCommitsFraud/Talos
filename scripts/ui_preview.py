@@ -2013,17 +2013,29 @@ def _sessions():
     ]
 
 
+# Mutable so the admin "Add models" panel can rename, toggle and delete.
+_MODEL_ENDPOINTS = [
+    {
+        "id": "mock-qwen3",
+        "name": "Mock Endpoint",
+        "base_url": "mock://preview",
+        "models": ["qwen3-llm"],
+        "model_type": "llm",
+        "is_enabled": True,
+        "has_key": False,
+        "status": "online",
+    }
+]
+
+
 def _models():
-    return [
-        {
-            "id": "mock-qwen3",
-            "name": "Mock Endpoint",
-            "base_url": "mock://preview",
-            "models": ["qwen3-llm"],
-            "model_type": "llm",
-            "is_enabled": True,
-        }
-    ]
+    # Like the real /api/models: disabled endpoints drop out of the picker.
+    return [ep for ep in _MODEL_ENDPOINTS if ep["is_enabled"]]
+
+
+def _model_endpoint(path: str):
+    ep_id = path[len("/api/model-endpoints/") :].split("/", 1)[0]
+    return next((ep for ep in _MODEL_ENDPOINTS if ep["id"] == ep_id), None)
 
 
 
@@ -2363,8 +2375,14 @@ class PreviewHandler(BaseHTTPRequestHandler):
                 }
             )
             return
-        if path in ("/api/models", "/api/model-endpoints"):
+        if path == "/api/models":
             self._send_json(_models())
+            return
+        if path == "/api/model-endpoints":
+            self._send_json(_MODEL_ENDPOINTS)
+            return
+        if path.startswith("/api/model-endpoints/") and path.endswith("/dependents"):
+            self._send_json({"dependents": ["Standard-Chat-Modell"] if _model_endpoint(path) else []})
             return
         if path == "/api/tools":
             self._send_json(
@@ -3013,6 +3031,17 @@ class PreviewHandler(BaseHTTPRequestHandler):
                 srv["is_enabled"] = fields.get("is_enabled", "true").lower() == "true"
             self._send_json({"ok": True})
             return
+        if path.startswith("/api/model-endpoints/"):
+            ep = _model_endpoint(path)
+            req = json.loads(body or b"{}")
+            if ep:
+                for key in ("name", "base_url", "model_type", "is_enabled"):
+                    if key in req:
+                        ep[key] = req[key]
+                if "api_key" in req:
+                    ep["has_key"] = bool(req["api_key"])
+            self._send_json(ep or {})
+            return
         if path == "/api/artifacts":
             req = json.loads(body or b"{}")
             for row in _LIBRARY:
@@ -3038,6 +3067,9 @@ class PreviewHandler(BaseHTTPRequestHandler):
         if path.startswith("/api/mcp/servers/"):
             srv = _mcp_find(path)
             _MCP_SERVERS[:] = [s for s in _MCP_SERVERS if s is not srv]
+        if path.startswith("/api/model-endpoints/"):
+            ep = _model_endpoint(path)
+            _MODEL_ENDPOINTS[:] = [e for e in _MODEL_ENDPOINTS if e is not ep]
         if path.startswith("/api/shared-skills/"):
             name = path[len("/api/shared-skills/") :]
             _SHARED_SKILLS[:] = [s for s in _SHARED_SKILLS if s["name"] != name]
