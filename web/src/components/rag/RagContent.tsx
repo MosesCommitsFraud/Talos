@@ -291,6 +291,14 @@ export function RagContent({ baseId }: { baseId: string }) {
                         <FileTextIcon className="size-3.5 shrink-0 text-muted-foreground" />
                       )}
                       <span className="min-w-0 truncate">{d.filename}</span>
+                      {d.container && (
+                        <span
+                          className="hidden shrink-0 truncate text-[10px] text-muted-foreground sm:inline"
+                          title={d.logical_path}
+                        >
+                          {t('rag.doc.fromContainer', { name: d.container })}
+                        </span>
+                      )}
                       {(d.version ?? 1) > 1 && (
                         <span className="shrink-0 rounded bg-muted px-1.5 py-px text-[10px] text-muted-foreground tabular-nums">
                           v{d.version}

@@ -103,6 +103,22 @@ RUN --mount=type=cache,target=/root/.cache/pip \
     python -m pip install -r requirements.txt \
     && if [ "$INSTALL_OPTIONAL" = "true" ]; then python -m pip install -r requirements-optional.txt; fi
 
+# LibreOffice (headless, no GUI) converts legacy .doc/.ppt/.rtf for RAG ingest
+# (src/rag_formats.py). Part of the optional extras: it adds several hundred MB.
+# Same CDN retry loop as the base packages above.
+RUN if [ "$INSTALL_OPTIONAL" = "true" ]; then \
+        set -eu; ok=0; \
+        for attempt in 1 2 3; do \
+            if apt-get update && apt-get install -y --no-install-recommends \
+                libreoffice-writer-nogui libreoffice-impress-nogui libreoffice-calc-nogui; \
+            then ok=1; break; fi; \
+            echo "libreoffice install failed (attempt $attempt/3), retrying in 10s"; \
+            sleep 10; \
+        done; \
+        [ "$ok" = 1 ]; \
+        rm -rf /var/lib/apt/lists/*; \
+    fi
+
 # Copy app code
 COPY . .
 

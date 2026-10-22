@@ -23,7 +23,7 @@ import { RagExplorer } from './RagExplorer';
 const TERMINAL = ['completed', 'failed', 'cancelled'];
 // Register outcomes worth surfacing on a job row ("indexed" is already the
 // chunk count; failures have their own counter).
-const OUTCOME_KEYS = ['indexed', 'updated', 'replaced', 'reindexed', 'unchanged', 'duplicate', 'deleted'];
+const OUTCOME_KEYS = ['indexed', 'container', 'updated', 'replaced', 'reindexed', 'unchanged', 'duplicate', 'deleted'];
 
 /** Progress for one job: a real % bar when an upload total is known, an
  *  indeterminate shimmer while a directory ingest runs, full when terminal. */

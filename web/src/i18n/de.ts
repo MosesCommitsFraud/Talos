@@ -1293,6 +1293,7 @@ const de: typeof en = {
         failed: 'fehlgeschlagen',
         duplicate: 'Duplikat (nicht indexiert)',
         deleted: 'gelöscht',
+        container: 'Archiv (entpackt)',
       },
       origin: 'Herkunft',
       originName: {
@@ -1317,6 +1318,8 @@ const de: typeof en = {
         deleted: 'gelöscht',
       },
       restore: 'Wiederherstellen',
+      fromContainer: 'aus {{name}}',
+      containerLabel: 'Enthalten in',
       replace: 'Ersetzen',
       replaceHint:
         'Andere Datei hochladen: Sie wird indexiert, danach wird dieses Dokument gelöscht. Schlägt das Indexieren fehl, bleibt es erhalten.',
@@ -1372,6 +1375,7 @@ const de: typeof en = {
     },
     outcome: {
       indexed: '{{n}} neu',
+      container: '{{n}} Archiv(e) entpackt',
       updated: '{{n}} neue Version(en)',
       replaced: '{{n}} ersetzt',
       reindexed: '{{n}} neu abgeleitet',
@@ -1406,8 +1410,8 @@ const de: typeof en = {
         'Diese Einstellungen gelten nur für diese Wissensdatenbank. Mit „geerbt" markierte Felder folgen den globalen Standardwerten — sobald du eines änderst, wird es zur Überschreibung für diese Datenbank.',
     },
     dropTitle: 'Dateien zum Indexieren ablegen',
-    dropHint: 'oder klicken zum Auswählen — Dokumente, Code, Bilder',
-    dropHintAv: 'oder klicken zum Auswählen — Dokumente, Code, Bilder, Audio & Video',
+    dropHint: 'oder klicken zum Auswählen — Dokumente, E-Mails, ZIP-Archive, Code, Bilder',
+    dropHintAv: 'oder klicken zum Auswählen — Dokumente, E-Mails, ZIP-Archive, Code, Bilder, Audio & Video',
     dropTarget: 'in: {{name}}',
     uploadQueued: '{{count}} Datei(en) zum Indexieren eingereiht',
     uploadFailed: '{{count}} Datei(en) abgelehnt (zu groß oder nicht lesbar)',

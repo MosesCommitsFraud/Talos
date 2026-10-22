@@ -154,6 +154,9 @@ export function RagDocumentDetail({ docId, ragId }: { docId: string; ragId?: str
         <Field label={t('rag.doc.version')}>v{d.version}</Field>
         <Field label={t('rag.doc.statusLabel')}>{t(`rag.doc.status.${d.status}`, d.status ?? '')}</Field>
         <Field label={t('rag.doc.origin')}>{t(`rag.doc.originName.${d.origin}`, d.origin ?? '')}</Field>
+        {d.container && (
+          <Field label={t('rag.doc.containerLabel')}>{d.container}</Field>
+        )}
         <Field label={t('rag.doc.logicalPath')}>
           <span className="break-all">{d.logical_path}</span>
         </Field>

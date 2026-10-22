@@ -62,6 +62,20 @@ DEFAULT_FILE_EXTENSIONS: Set[str] = {
     ".ods",
     ".xls",
     ".epub",
+    # Legacy (LibreOffice-converted) and macro Office formats
+    ".doc",
+    ".ppt",
+    ".rtf",
+    ".docm",
+    ".pptm",
+    ".xlsm",
+    # Containers: every member/attachment becomes a document of its own
+    ".zip",
+    ".eml",
+    ".msg",
+    # Subtitles: timed transcript segments without ASR
+    ".srt",
+    ".vtt",
     # Images (Docling OCR + layout)
     ".png",
     ".jpg",
@@ -190,6 +204,27 @@ _AV_EXTS: Set[str] = {
 # eligible for the opt-in keyframe lane (see ``_keyframes_active``).
 _VIDEO_EXTS: Set[str] = {".mp4", ".mov", ".mkv", ".webm", ".avi", ".m4v"}
 
+# Known plain-text formats: read directly, no content sniffing.
+_TEXT_EXTS: Set[str] = {
+    ".txt",
+    ".md",
+    ".markdown",
+    ".json",
+    ".yaml",
+    ".yml",
+    ".css",
+    ".log",
+    ".ini",
+    ".cfg",
+    ".toml",
+    ".sql",
+    ".sh",
+    ".ps1",
+    ".bat",
+    ".tex",
+    ".rst",
+}
+
 # Lanes whose output is worth caching by content hash, with the settings that
 # change what they extract. Lanes not listed (plain text, code, xls,
 # OpenDocument) are cheap enough to re-run and are never cached.
@@ -218,6 +253,14 @@ _LANE_CACHE_ENV: Dict[str, Tuple[str, ...]] = {
     ),
     "office_vlm": ("VLM_MODEL", "PDF_VLM_MAX_TOKENS", "RAG_CAPTION_LANGUAGE"),
     "docling": (),
+    # LibreOffice conversion, then whichever Office lane the result takes.
+    "convert": (
+        "PDF_VLM_ENABLED",
+        "VLM_URL",
+        "VLM_MODEL",
+        "PDF_VLM_MAX_TOKENS",
+        "RAG_CAPTION_LANGUAGE",
+    ),
 }
 
 
@@ -2384,9 +2427,25 @@ class VectorRAG:
             return "xls"
         if is_docling_format(path):
             return "docling"
-        return "text"
+        from src import rag_formats as rf
+
+        if ext in rf.EMAIL_EXTS:
+            return "email"
+        if ext in rf.SUBTITLE_EXTS:
+            return "subtitle"
+        if ext in rf.LEGACY_OFFICE or ext in rf.MACRO_OFFICE:
+            return "convert"
+        if ext in rf.ARCHIVE_EXTS:
+            return "archive"
+        if ext in _TEXT_EXTS or ext in _CODE_LANGS:
+            return "text"
+        # Anything else: text when it reads as text, otherwise MarkItDown — a
+        # binary file must never be indexed as garbage characters.
+        return "text" if rf.looks_like_text(path) else "markitdown"
 
     def _run_lane(self, lane: str, path: str, meta: Dict[str, Any], stage_cb=None):
+        if lane in ("email", "subtitle", "convert", "markitdown", "archive"):
+            return self._run_format_lane(lane, path, meta, stage_cb)
         if lane == "av":
             return self._lane_av(path, meta, stage_cb=stage_cb)
         if lane == "code":
@@ -2402,6 +2461,43 @@ class VectorRAG:
         if lane == "docling":
             return self._lane_docling(path)
         return self._lane_text(path)
+
+    def _run_format_lane(self, lane: str, path: str, meta: Dict[str, Any], stage_cb=None):
+        """Lanes for formats handled in src/rag_formats.py."""
+        from haystack.dataclasses import Document
+
+        from src import rag_formats as rf
+
+        try:
+            if lane == "email":
+                text, header = rf.email_text(path)
+                return [Document(content=text, meta=header)] if text.strip() else []
+            if lane == "subtitle":
+                raw = Path(path).read_text(encoding="utf-8-sig", errors="replace")
+                return [
+                    Document(content=text, meta={"modality": "video", "start": s, "end": e})
+                    for s, e, text in rf.subtitle_segments(rf.subtitle_cues(raw))
+                ]
+            if lane == "convert":
+                with rf.Workdir() as work:
+                    copy = rf.converted_copy(path, work)
+                    inner = self._route_lane(copy)
+                    return self._run_lane(inner, copy, meta, stage_cb=stage_cb)
+            if lane == "markitdown":
+                from src.markitdown_runtime import convert_to_markdown
+
+                text = convert_to_markdown(path)
+                if not (text or "").strip():
+                    raise _NoText(
+                        f"Unsupported format ({Path(path).suffix or 'no extension'}): "
+                        "no text could be extracted"
+                    )
+                return self._documents_from_text(text)
+            if lane == "archive":
+                raise rf.FormatError("Archives are unpacked, not read as one document")
+        except rf.FormatError as e:
+            raise _NoText(str(e)) from e
+        raise ValueError(f"unknown lane {lane}")
 
     def _lane_fingerprint(self, lane: str, meta: Dict[str, Any]) -> Optional[str]:
         """Cache key part for a lane's output, or None for lanes too cheap to cache.
@@ -2420,7 +2516,7 @@ class VectorRAG:
         values["v"] = rd.LANE_CACHE_VERSION
         if lane == "av":
             values["deeplink"] = meta.get("video_url") or meta.get("url") or ""
-        if lane in ("docling", "pdf_vlm", "office_vlm"):
+        if lane in ("docling", "pdf_vlm", "office_vlm", "convert"):
             try:
                 from importlib.metadata import version
 
@@ -4194,6 +4290,173 @@ class VectorRAG:
             "warnings": warnings,
         }
 
+    def _ingest_entry(
+        self, fpath: str, meta: Dict[str, Any], stage_cb=None, depth: int = 0
+    ) -> List[Tuple[str, Dict[str, Any]]]:
+        """Index one file; a container also indexes everything it holds.
+
+        Returns one ``(path, outcome)`` per document touched. Never raises:
+        a failure is an outcome.
+        """
+        from src import rag_formats as rf
+
+        try:
+            if Path(fpath).suffix.lower() in rf.CONTAINER_EXTS and self._register() is not None:
+                return self._ingest_container(fpath, meta, stage_cb, depth)
+            return [(fpath, self._ingest_file(fpath, meta, stage_cb=stage_cb))]
+        except Exception as e:
+            logger.error(f"index {fpath}: {e}")
+            return [(fpath, {"status": "failed", "error": f"{type(e).__name__}: {e}"})]
+
+    def _ingest_container(
+        self, fpath: str, meta: Dict[str, Any], stage_cb=None, depth: int = 0
+    ) -> List[Tuple[str, Dict[str, Any]]]:
+        """ZIP archive or e-mail: unpack, then index every member as a document.
+
+        Members get the container's logical path as prefix ("Akte.zip/Vertrag.pdf"),
+        so they keep their identity across re-uploads of the container: unchanged
+        members are skipped by hash, changed ones get a new version, and members
+        missing from the new container are removed. An e-mail is a document
+        itself (its text); an archive is listed with status ``container``.
+        """
+        from src import rag_documents as rd
+        from src import rag_formats as rf
+
+        meta = dict(meta or {})
+        force = bool(meta.get("_force"))
+        meta.setdefault("source", fpath)
+        meta.setdefault("filename", os.path.basename(fpath))
+        register = self._register()
+        coll = self.collection_name
+        if not meta.get("logical_path"):
+            known = register.by_source(coll, meta["source"])
+            if known and known["status"] != rd.DELETED:
+                meta["logical_path"] = known["logical_path"]
+                meta["origin"] = known["origin"]
+        rd.stamp_identity(meta, fpath)
+        doc_id = meta["doc_id"]
+        is_email = Path(fpath).suffix.lower() in rf.EMAIL_EXTS
+        results: List[Tuple[str, Dict[str, Any]]] = []
+
+        sha = rd.file_sha256(fpath)
+        existing = register.get(coll, doc_id)
+        if is_email:
+            # The mail's own text is a regular document (lane "email").
+            own = self._ingest_file(fpath, {k: v for k, v in meta.items() if k != "doc_id"})
+            results.append((fpath, own))
+            if own.get("status") in ("failed", "unchanged", "duplicate", "skipped"):
+                return results
+        elif (
+            existing
+            and not force
+            and existing["status"] == rd.CONTAINER
+            and existing.get("content_sha256") == sha
+        ):
+            return [(fpath, {"status": "unchanged", "doc_id": doc_id})]
+
+        container_meta = {k: v for k, v in meta.items() if k not in self._DERIVED_META}
+        if depth >= rf.MAX_DEPTH:
+            members: List[Tuple[str, Path]] = []
+            error: Optional[str] = f"Nested deeper than {rf.MAX_DEPTH} containers; not unpacked"
+        else:
+            target = Path(rd.managed_uploads_dir()) / "_extracted" / doc_id / sha[:16]
+            try:
+                members, error = rf.container_members(fpath, target), None
+            except rf.FormatError as e:
+                members, error = [], str(e)
+        if error and not is_email:
+            register.upsert(
+                coll,
+                doc_id,
+                logical_path=meta["logical_path"],
+                display_name=meta["filename"],
+                origin=meta.get("origin") or rd.ORIGIN_DIRECTORY,
+                owner=meta.get("owner"),
+                scope=meta.get("scope"),
+                source=meta["source"],
+                content_sha256=sha,
+                status=rd.FAILED,
+                chunk_count=0,
+                error=error,
+                ingest_meta=container_meta,
+            )
+            return [(fpath, {"status": "failed", "doc_id": doc_id, "error": error})]
+
+        seen: Set[str] = set()
+        for rel, path in members:
+            child = {
+                "source": str(path),
+                "filename": os.path.basename(rel),
+                "directory": str(path.parent),
+                "type": Path(rel).suffix.lower(),
+                "logical_path": f"{meta['logical_path']}/{rel}",
+                "origin": meta.get("origin") or rd.ORIGIN_DIRECTORY,
+                "container_doc_id": doc_id,
+                "container_name": meta["filename"],
+            }
+            for key in ("owner", "scope", "redact_pii"):
+                if meta.get(key) is not None:
+                    child[key] = meta[key]
+            seen.add(rd.make_doc_id(child["logical_path"], child.get("owner"), child.get("scope")))
+            results.extend(self._ingest_entry(str(path), child, stage_cb, depth + 1))
+
+        # Members dropped from a newer version of the container.
+        for row in register.children(coll, doc_id):
+            if row["doc_id"] not in seen:
+                self.delete_document(doc_id=row["doc_id"])
+                results.append((row["source"], {"status": "deleted", "doc_id": row["doc_id"]}))
+        self._prune_extracted(doc_id)
+
+        if not is_email:
+            version = (existing or {}).get("version") or 0
+            if not existing or existing.get("content_sha256") != sha:
+                version += 1
+            register.upsert(
+                coll,
+                doc_id,
+                logical_path=meta["logical_path"],
+                display_name=meta["filename"],
+                origin=meta.get("origin") or rd.ORIGIN_DIRECTORY,
+                owner=meta.get("owner"),
+                scope=meta.get("scope"),
+                source=meta["source"],
+                content_sha256=sha,
+                size_bytes=os.path.getsize(fpath),
+                mtime=os.path.getmtime(fpath),
+                version=version,
+                status=rd.CONTAINER,
+                lane="archive",
+                chunk_count=0,
+                error=None,
+                warnings=[],
+                ingest_meta=container_meta,
+                indexed_at=time.time(),
+                deleted_at=None,
+            )
+            results.append((fpath, {"status": "container", "doc_id": doc_id, "version": version}))
+        elif error:
+            register.upsert(coll, doc_id, warnings=[f"Attachments not indexed: {error}"])
+        return results
+
+    def _prune_extracted(self, doc_id: str) -> None:
+        """Drop unpacked files of a container that no document points at any more."""
+        import shutil
+
+        from src import rag_documents as rd
+
+        root = Path(rd.managed_uploads_dir()) / "_extracted" / doc_id
+        if not root.is_dir():
+            return
+        register = self._register()
+        used = {r["source"] for r in register.list(self.collection_name)}
+        for path in sorted(root.rglob("*"), key=lambda p: len(p.parts), reverse=True):
+            if path.is_file() and str(path) not in used:
+                path.unlink(missing_ok=True)
+            elif path.is_dir() and not any(path.iterdir()):
+                path.rmdir()
+        if root.is_dir() and not any(root.iterdir()):
+            shutil.rmtree(root, ignore_errors=True)
+
     @staticmethod
     def _new_ingest_summary() -> Dict[str, Any]:
         return {
@@ -4209,6 +4472,7 @@ class VectorRAG:
                 "skipped": 0,
                 "failed": 0,
                 "deleted": 0,
+                "container": 0,
             },
             "files": [],
         }
@@ -4311,12 +4575,8 @@ class VectorRAG:
             def _stage(done: int, sub_total: int, stage: str = "", _fp=fpath) -> None:
                 _progress(_fp, sub_done=done, sub_total=sub_total, stage=stage)
 
-            try:
-                outcome = self._ingest_file(fpath, dict(meta or {}), stage_cb=_stage)
-            except Exception as e:
-                logger.error(f"index {fpath}: {e}")
-                outcome = {"status": "failed", "error": f"{type(e).__name__}: {e}"}
-            self._tally(summary, fpath, outcome)
+            for path, outcome in self._ingest_entry(fpath, dict(meta or {}), stage_cb=_stage):
+                self._tally(summary, path, outcome)
             processed += 1
             _progress(fpath)
         return {**summary, "success": True, "message": self._summary_message(summary)}
@@ -4384,12 +4644,8 @@ class VectorRAG:
                     def _stage(done: int, sub_total: int, stage: str = "", _fp=fpath) -> None:
                         _progress(_fp, sub_done=done, sub_total=sub_total, stage=stage)
 
-                    try:
-                        outcome = self._ingest_file(fpath, meta, stage_cb=_stage)
-                    except Exception as e:
-                        logger.error(f"index {fpath}: {e}")
-                        outcome = {"status": "failed", "error": f"{type(e).__name__}: {e}"}
-                    self._tally(summary, fpath, outcome)
+                    for path, outcome in self._ingest_entry(fpath, meta, stage_cb=_stage):
+                        self._tally(summary, path, outcome)
                     _progress(fpath)
 
             register = self._register()
@@ -4445,6 +4701,8 @@ class VectorRAG:
             "pipeline_fingerprint": row.get("pipeline_fingerprint") or "",
             "error": row.get("error") or "",
             "warnings": row.get("warnings") or [],
+            # Unpacked from an archive or e-mail: which one.
+            "container": (row.get("ingest_meta") or {}).get("container_name") or "",
         }
 
     def document_detail(
@@ -4567,6 +4825,10 @@ class VectorRAG:
             self._delete_visual(source)
         promoted: List[str] = []
         if row:
+            for child in register.children(coll, row["doc_id"]):
+                self.delete_document(doc_id=child["doc_id"])
+                rd.delete_managed_file(child["source"])
+            self._prune_extracted(row["doc_id"])
             for path in register.mark_deleted(coll, row["doc_id"]):
                 if path != row["source"]:
                     rd.delete_managed_file(path)

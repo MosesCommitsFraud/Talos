@@ -1287,6 +1287,7 @@ const en = {
         failed: 'failed',
         duplicate: 'duplicate (not indexed)',
         deleted: 'deleted',
+        container: 'archive (unpacked)',
       },
       origin: 'Origin',
       originName: {
@@ -1311,6 +1312,8 @@ const en = {
         deleted: 'deleted',
       },
       restore: 'Restore',
+      fromContainer: 'from {{name}}',
+      containerLabel: 'Contained in',
       replace: 'Replace',
       replaceHint:
         'Upload another file: it is indexed, then this document is deleted. If indexing fails, this document stays.',
@@ -1365,6 +1368,7 @@ const en = {
     },
     outcome: {
       indexed: '{{n}} new',
+      container: '{{n}} archive(s) unpacked',
       updated: '{{n}} new version(s)',
       replaced: '{{n}} replaced',
       reindexed: '{{n}} re-derived',
@@ -1399,8 +1403,8 @@ const en = {
         'These settings apply to this knowledge base only. Fields marked "inherited" follow the global defaults — change one and it becomes an override for this base.',
     },
     dropTitle: 'Drop files to index',
-    dropHint: 'or click to choose — documents, code, images',
-    dropHintAv: 'or click to choose — documents, code, images, audio & video',
+    dropHint: 'or click to choose — documents, e-mails, ZIP archives, code, images',
+    dropHintAv: 'or click to choose — documents, e-mails, ZIP archives, code, images, audio & video',
     dropTarget: 'into: {{name}}',
     uploadQueued: 'Queued {{count}} file(s) for indexing',
     uploadFailed: '{{count}} file(s) rejected (too large or unreadable)',

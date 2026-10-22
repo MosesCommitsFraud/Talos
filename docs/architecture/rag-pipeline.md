@@ -231,6 +231,31 @@ Large-corpus filter overhead and multi-process deployment require load validatio
 
 Back up `documents.sqlite3` together with Qdrant and the generation manifests.
 
+### Formats and extraction lanes
+
+`src/rag_formats.py` covers what Docling does not read directly:
+
+| Input | Handling |
+|-------|----------|
+| `.zip` | Unpacked (limits: `RAG_ARCHIVE_MAX_MEMBERS`, `RAG_ARCHIVE_MAX_BYTES`, 3 levels deep; no path traversal, no encrypted archives). Every member is a document with logical path `Archive.zip/dir/file`; the archive is listed with status `container`. |
+| `.eml`, `.msg` | The mail text (subject, sender, recipients, date, body) is a document; attachments are unpacked like archive members. `.msg` needs the optional `extract-msg` package. |
+| `.doc`, `.ppt`, `.rtf` | Converted with LibreOffice (headless) to DOCX/PPTX, then the usual Office lanes. LibreOffice is installed with `INSTALL_OPTIONAL=true`. |
+| `.docm`, `.pptm`, `.xlsm` | Read as DOCX/PPTX/XLSX. |
+| `.srt`, `.vtt` | ~60-second timed segments, like ASR output. |
+| anything else | Text when the file reads as text, otherwise MarkItDown; a binary file is never indexed as characters. |
+
+Re-uploading a container works like any document: unchanged members are skipped,
+changed ones get a new version, members missing from the new upload are removed,
+and deleting the container deletes its members. Unpacked files live in
+`data/personal_uploads/_extracted/<doc_id>/`.
+
+Transcription (ASR), keyframes, vision transcription of image-bearing documents and
+the AST code lane have a mode: **auto** (default) runs the lane once the endpoint it
+needs is configured, **on**/**off** pin it. Settings saved before modes keep
+"on" for lanes that were on; lanes that were off are "auto". Enrichment that costs a
+model call per chunk (contextual blurbs, keywords/questions, pixel vectors) stays
+opt-in.
+
 ### Keyword-search language
 
 The BM25 side stems and drops stopwords in the knowledge base's language

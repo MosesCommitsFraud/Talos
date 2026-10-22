@@ -1243,7 +1243,7 @@ export interface RagJobFile {
   error?: string | null;
   duplicate_of?: string | null;
 }
-export type RagDocumentStatus = 'indexed' | 'failed' | 'duplicate' | 'deleted';
+export type RagDocumentStatus = 'indexed' | 'failed' | 'duplicate' | 'deleted' | 'container';
 export interface RagDocument {
   source: string;
   filename: string;
@@ -1269,6 +1269,8 @@ export interface RagDocument {
   pipeline_fingerprint?: string;
   error?: string;
   warnings?: string[];
+  /** Name of the archive or e-mail this document was unpacked from. */
+  container?: string;
 }
 export interface RagDocumentVersion {
   version: number;

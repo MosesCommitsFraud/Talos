@@ -9,3 +9,6 @@ docling
 # tree-sitter grammars for the optional AST code lane (CODE_LANE_ENABLED). When
 # absent the lane degrades to the plain length splitter, so it's safe to omit.
 tree-sitter-language-pack
+# Outlook .msg e-mails for RAG ingest (GPL-3.0). Without it .msg files are
+# rejected with a hint to save the mail as .eml.
+extract-msg

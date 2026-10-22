@@ -57,7 +57,9 @@ INDEXED = "indexed"
 FAILED = "failed"
 DUPLICATE = "duplicate"
 DELETED = "deleted"
-LIVE_STATUSES = (INDEXED, FAILED, DUPLICATE)
+# An archive whose files were unpacked into documents of their own.
+CONTAINER = "container"
+LIVE_STATUSES = (INDEXED, FAILED, DUPLICATE, CONTAINER)
 
 # Origins: how a document entered the base.
 ORIGIN_UPLOAD = "upload"
@@ -531,6 +533,14 @@ class DocumentRegister:
                 "ON CONFLICT(collection, key) DO UPDATE SET value=excluded.value",
                 (collection, key, value),
             )
+
+    def children(self, collection: str, doc_id: str) -> List[Dict[str, Any]]:
+        """Live documents unpacked from a container (archive or e-mail)."""
+        return [
+            r
+            for r in self.list(collection)
+            if (r.get("ingest_meta") or {}).get("container_doc_id") == doc_id
+        ]
 
     def drop_collection(self, collection: str) -> None:
         with self._connect() as db:
