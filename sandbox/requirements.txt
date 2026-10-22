@@ -29,7 +29,7 @@ cvxpy==1.9.2
 # SQL and embedded analytics databases
 duckdb==1.5.4
 sqlalchemy==2.0.51
-sqlglot==25.34.1
+sqlglot==30.12.0
 psycopg[binary]==3.3.4
 pymysql==1.2.0
 pymssql==2.3.13
