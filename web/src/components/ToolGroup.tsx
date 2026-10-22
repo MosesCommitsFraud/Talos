@@ -6,7 +6,7 @@ import { describeCall, groupDiffStat, joinClauses, partsToString, summarizeCalls
 import { ToolLabel } from './ToolLabel';
 import { DiffStatBadge, ToolRow } from './ToolRow';
 import { Collapse } from './ui/collapse';
-import { WidgetView } from './widgets/registry';
+import { staysInFold, WidgetView } from './widgets/registry';
 
 /** One item on a group's timeline. Only tool calls: the model's reasoning is
  *  shown beside the working timer instead of on this track. */
@@ -137,9 +137,9 @@ export function ToolGroup({ entries, settled = false }: { entries: GroupEntry[];
           // A streamed interactive answer is already drawn at its place in
           // the message (UiDraftView), so the row does not add a copy.
           !call.uiDraftId &&
-          // Settled, the turn shows its widgets itself: answer cards above the
-          // answer, result tables folded below it.
-          !settled && (
+          // Settled, the turn re-surfaces its answer cards above the answer;
+          // result tables keep their place here, between the reasoning.
+          (!settled || staysInFold(call.widget)) && (
             <WidgetView key={`w-${i}`} widget={call.widget} settled={settled} />
           ),
       )}

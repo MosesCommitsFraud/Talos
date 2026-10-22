@@ -12,9 +12,7 @@ import { builtinView } from '@/lib/builtinViews';
 export interface WidgetProps {
   data: unknown;
   version: number;
-  /** The turn that produced the widget is over. Bulky widgets (the SQL table)
-   *  fold down to their header line then, so a finished conversation reads as a
-   *  run of answers rather than a wall of result sets. */
+  /** The turn that produced the widget is over. */
   settled?: boolean;
 }
 
@@ -22,18 +20,20 @@ export interface WidgetProps {
  *  interactive UI like every render_ui answer: same frame, kit and card. The
  *  tool sends data; lib/builtinViews.ts supplies the view. */
 function builtin(type: string): ComponentType<WidgetProps> {
-  function BuiltinView({ data, version, settled }: WidgetProps) {
+  function BuiltinView({ data, version }: WidgetProps) {
     const { t } = useTranslation();
     const payload = useMemo(() => builtinView(type, data), [data]);
-    // A query result folds to its title line once the turn settles, like the
-    // tool calls around it; a table shown as the answer stays open.
+    // A query result starts folded to its title line, streaming or not: it sits
+    // in the timeline between the reasoning and the calls, and a turn with a
+    // few queries must not turn into a wall of result sets to scroll past. A
+    // table shown as the answer stays open.
     const d = (data && typeof data === 'object' ? data : {}) as { answer?: unknown; rowCount?: unknown; rows?: unknown };
     let fold: UiFold | undefined;
     if (type === 'table' && d.answer !== true) {
       const shown = Array.isArray(d.rows) ? d.rows.length : 0;
       const total = typeof d.rowCount === 'number' ? d.rowCount : shown;
       fold = {
-        open: !settled,
+        open: false,
         meta: shown < total ? t('table.showingOf', { shown, total }) : t('table.rows', { count: total }),
         expandLabel: t('table.expand'),
         collapseLabel: t('table.collapse'),
@@ -87,9 +87,10 @@ export const WidgetView = memo(function WidgetView({
   // one renders, and a new widget cannot forget to bring its own. A widget
   // interrupts a run of text, so it needs more air than a block inside the text
   // would — enough that the answer above and below reads as its own thought
-  // rather than as a caption for the card.
+  // rather than as a caption for the card. A folded result table is the
+  // exception: it is one line of the work, spaced like the tool groups.
   return (
-    <div className="my-5">
+    <div className={staysInFold(widget) ? 'my-1.5' : 'my-5'}>
       <Component data={widget.data} version={widget.version} settled={settled} />
     </div>
   );
