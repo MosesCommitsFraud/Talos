@@ -2013,6 +2013,76 @@ def _sessions():
     ]
 
 
+def _session_metrics(sid: str):
+    """Six made-up turns through the real turn_metrics_export, so the admin
+    metrics pane shows every chart (thinking split, cache, timing, tools)."""
+    from src.turn_metrics_export import build_rows
+
+    messages = []
+    shapes = [  # reasoning, answer, tool-call tokens, tools, cached share
+        (820, 410, 0, [], 0.0),
+        (1450, 380, 120, ["query_sql", "query_sql"], 0.62),
+        (300, 900, 0, [], 0.81),
+        (2100, 520, 260, ["web_search", "fetch_url", "web_search"], 0.74),
+        (640, 1210, 90, ["create_document"], 0.88),
+        (1900, 300, 180, ["query_sql", "run_python"], 0.9),
+    ]
+    for i, (reasoning, answer, tools_out, tools, cached) in enumerate(shapes, start=1):
+        out = reasoning + answer + tools_out
+        rounds = len(tools) + 1 if tools else 1
+        prompt = 6000 + i * 2500
+        profile = []
+        for r in range(1, rounds + 1):
+            profile.append(
+                {
+                    "round": r,
+                    "first_token_s": 0.4 + 0.1 * r,
+                    "first_visible_s": 0.4 + 0.1 * r + reasoning / 900 / rounds,
+                    "stream_s": 0.4 + 0.1 * r + (reasoning + answer) / 900 / rounds,
+                    "tools_s": 1.6 if r < rounds else 0,
+                    "cached_tokens": int(prompt * cached),
+                }
+            )
+        messages.append({"role": "user", "content": f"Testfrage {i}", "metadata": {}, "timestamp": ""})
+        messages.append(
+            {
+                "role": "assistant",
+                "content": "",
+                "timestamp": "",
+                "metadata": {
+                    "model": "qwen3-llm",
+                    "time_to_first_token": round(0.5 + reasoning / 900, 2),
+                    "response_time": round(sum(p["stream_s"] + p["tools_s"] for p in profile) + 0.3, 2),
+                    "output_tokens": out,
+                    "input_tokens": prompt * rounds,
+                    "context_tokens": prompt + 900 * rounds,
+                    "context_length": 65536,
+                    "tokens_per_second": 38.0 + i * 1.7,
+                    "tps_source": "backend",
+                    "prefill_tps": 2400.0 + i * 40,
+                    "usage_source": "real",
+                    "reasoning_tokens": reasoning,
+                    "answer_tokens": answer,
+                    "tool_call_tokens": tools_out,
+                    "output_split_source": "proportional",
+                    "agent_prep_time": 0.18,
+                    "context_build_s": 0.12,
+                    "context_breakdown": {
+                        "system": 3100, "tools": 4200, "skills": 600,
+                        "toolResults": 1800 * i, "messages": 900 * i,
+                    },
+                    "round_profile": profile,
+                    "tool_events": [
+                        {"round": n + 1, "tool": name, "command": "{}", "exit_code": 1 if (i, n) == (4, 1) else 0}
+                        for n, name in enumerate(tools)
+                    ],
+                },
+            }
+        )
+    rows = build_rows(messages, sid)
+    return {"turns": rows[:-1], "total": rows[-1] if rows else None}
+
+
 # Mutable so the admin "Add models" panel can rename, toggle and delete.
 _MODEL_ENDPOINTS = [
     {
@@ -2377,6 +2447,9 @@ class PreviewHandler(BaseHTTPRequestHandler):
             return
         if path == "/api/models":
             self._send_json(_models())
+            return
+        if path.startswith("/api/session/") and path.endswith("/metrics"):
+            self._send_json(_session_metrics(path.split("/")[3]))
             return
         if path == "/api/model-endpoints":
             self._send_json(_MODEL_ENDPOINTS)

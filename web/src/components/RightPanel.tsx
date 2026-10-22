@@ -1,6 +1,6 @@
 import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { DownloadIcon, Maximize2Icon, Minimize2Icon, XIcon } from 'lucide-react';
+import { DownloadIcon, GaugeIcon, Maximize2Icon, Minimize2Icon, XIcon } from 'lucide-react';
 import { downloadPreviewFile } from '@/api/client';
 import { displayName, fileTypeLabel } from '@/lib/files';
 import { useBgTasks } from '@/lib/useBgTasks';
@@ -8,8 +8,10 @@ import { useChat } from '@/state/chat';
 import { type DockPane, type DockSizes, usePrefs } from '@/state/prefs';
 import { useUi } from '@/state/ui';
 import { cn } from '@/lib/utils';
+import { useAuth } from './auth/AuthGate';
 import { FileTypeIcon } from './FileTypeIcon';
 import { AgentsIcon, PlanIcon } from './icons';
+import { MetricsPane } from './MetricsPanel';
 import { PlanPane, useSessionPlan } from './PlanCard';
 import { PreviewContent } from './PreviewPanel';
 import { SessionFilesPopover } from './SessionFilesPopover';
@@ -143,14 +145,18 @@ function Grip({
 }
 
 /** Switches for the plan and task panes, each shown once there is something
- *  to show. They sit in the dock's bar while the dock is open and in the chat
- *  header otherwise — after a turn this is the way back to its plan. */
+ *  to show, and — for admins only — the metrics pane. They sit in the dock's
+ *  bar while the dock is open and in the chat header otherwise — after a turn
+ *  this is the way back to its plan. */
 export function PaneToggles() {
   const { t } = useTranslation();
   const planOpen = useUi((s) => s.planPanelOpen);
   const setPlanOpen = useUi((s) => s.setPlanPanelOpen);
   const tasksOpen = useUi((s) => s.tasksPanelOpen);
   const setTasksOpen = useUi((s) => s.setTasksPanelOpen);
+  const metricsOpen = useUi((s) => s.metricsPanelOpen);
+  const setMetricsOpen = useUi((s) => s.setMetricsPanelOpen);
+  const isAdmin = !!useAuth()?.is_admin;
   const hasPlan = !!useSessionPlan();
   const hasTasks = useBgTasks().length > 0;
   const toggle = (on: boolean) => cn(iconBtn, on && 'bg-primary/10 text-primary hover:bg-primary/15 hover:text-primary');
@@ -182,13 +188,27 @@ export function PaneToggles() {
           </button>
         </Tooltip>
       )}
+      {(isAdmin || metricsOpen) && (
+        <Tooltip label={metricsOpen ? t('metrics.closePanel') : t('metrics.show')}>
+          <button
+            type="button"
+            aria-pressed={metricsOpen}
+            aria-label={metricsOpen ? t('metrics.closePanel') : t('metrics.show')}
+            onClick={() => setMetricsOpen(!metricsOpen)}
+            className={toggle(metricsOpen)}
+          >
+            <GaugeIcon className="size-4" />
+          </button>
+        </Tooltip>
+      )}
     </>
   );
 }
 
 type PaneDef = { key: DockPane; node: (className: string) => React.ReactNode };
 
-/** The right-hand dock: file preview, plan and task list, each its own pane.
+/** The right-hand dock: file preview, plan, task list and (admins) metrics,
+ *  each its own pane.
  *  One open → it takes the whole height; several → they stack, preview on
  *  top, with a draggable divider between neighbours. A single grip on the
  *  left edge resizes the dock as one. Above the panes sits the dock's bar:
@@ -202,6 +222,7 @@ export function RightDock() {
   const previewOpen = useUi((s) => s.artifactsOpen && !!s.preview);
   const planOpen = useUi((s) => s.planPanelOpen);
   const tasksOpen = useUi((s) => s.tasksPanelOpen);
+  const metricsOpen = useUi((s) => s.metricsPanelOpen);
   const fullscreen = useUi((s) => s.previewFullscreen);
   const setFullscreen = useUi((s) => s.setPreviewFullscreen);
   const width = usePrefs((s) => s.previewWidth);
@@ -270,6 +291,7 @@ export function RightDock() {
   if (previewOpen && !fullscreen) panes.push({ key: 'preview', node: (c) => <PreviewPane className={c} /> });
   if (planOpen) panes.push({ key: 'plan', node: (c) => <PlanPane className={cn(paneChrome, c)} /> });
   if (tasksOpen) panes.push({ key: 'tasks', node: (c) => <TasksPane className={cn(paneChrome, c)} /> });
+  if (metricsOpen && sessionId) panes.push({ key: 'metrics', node: (c) => <MetricsPane className={cn(paneChrome, c)} /> });
   const weights = dragSizes ?? sizes;
 
   return (

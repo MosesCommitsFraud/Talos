@@ -60,6 +60,10 @@ interface UiState {
    *  Opens with the first plan of a turn (see the stream handler). */
   planPanelOpen: boolean;
   setPlanPanelOpen: (open: boolean) => void;
+  /** Admin-only pane charting the open chat's turn metrics (tokens split
+   *  into thinking/answer/tool calls, timing, speed, context, tools). */
+  metricsPanelOpen: boolean;
+  setMetricsPanelOpen: (open: boolean) => void;
   /** Full-screen image viewer. Set to open a zoomable/downloadable lightbox over
    *  any image (tool output, generated image, artifact); null when closed. */
   lightbox: { src: string; label?: string } | null;
@@ -106,6 +110,8 @@ export const useUi = create<UiState>((set) => ({
   setTasksPanelOpen: (tasksPanelOpen) => set({ tasksPanelOpen }),
   planPanelOpen: false,
   setPlanPanelOpen: (planPanelOpen) => set({ planPanelOpen }),
+  metricsPanelOpen: false,
+  setMetricsPanelOpen: (metricsPanelOpen) => set({ metricsPanelOpen }),
   lightbox: null,
   openLightbox: (lightbox) => set({ lightbox }),
   closeLightbox: () => set({ lightbox: null }),
@@ -124,7 +130,7 @@ export const useUi = create<UiState>((set) => ({
   setCreateProjectOpen: (createProjectOpen) => set({ createProjectOpen }),
 }));
 
-/** Whether the right dock shows anything (preview, plan or task pane). The
- *  chat header hands its files button to the dock while it does. */
+/** Whether the right dock shows anything (preview, plan, task or metrics
+ *  pane). The chat header hands its files button to the dock while it does. */
 export const selectDockOpen = (s: UiState) =>
-  (s.artifactsOpen && !!s.preview) || s.planPanelOpen || s.tasksPanelOpen;
+  (s.artifactsOpen && !!s.preview) || s.planPanelOpen || s.tasksPanelOpen || s.metricsPanelOpen;

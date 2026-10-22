@@ -166,10 +166,10 @@ interface PrefsState {
   setArtifactsView: (v: 'list' | 'grid') => void;
 }
 
-export type DockPane = 'preview' | 'plan' | 'tasks';
+export type DockPane = 'preview' | 'plan' | 'tasks' | 'metrics';
 export type DockSizes = Record<DockPane, number>;
 /** Preview gets the most room; the plan is a short checklist. */
-export const DEFAULT_DOCK_SIZES: DockSizes = { preview: 3, plan: 1.2, tasks: 2 };
+export const DEFAULT_DOCK_SIZES: DockSizes = { preview: 3, plan: 1.2, tasks: 2, metrics: 3 };
 
 export const usePrefs = create<PrefsState>()(
   persist(

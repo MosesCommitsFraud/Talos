@@ -392,6 +392,49 @@ export async function downloadChatMetrics(sessionId: string): Promise<void> {
   await saveAttachment(res, `metriken_${sessionId}.csv`);
 }
 
+/** Where a turn's output tokens, time and context went — the `detail` block of
+ *  src/turn_metrics_export.py. Times are seconds. */
+export interface TurnMetricsDetail {
+  reasoning_tokens: number;
+  answer_tokens: number;
+  tool_call_tokens: number;
+  /** Output from before the split was recorded; not guessed into a bucket. */
+  unsplit_tokens: number;
+  split_source: 'backend' | 'proportional' | 'estimated' | 'mixed' | 'none';
+  cached_tokens: number;
+  prefill_tps: number | null;
+  context_length: number;
+  context_breakdown: Record<string, number> | null;
+  time: { context_build: number; prep: number; wait: number; thinking: number; writing: number; tools: number };
+  tools: Record<string, { calls: number; errors: number }>;
+}
+
+/** One row of the turn-metrics table (same column names as the CSV export). */
+export interface TurnMetricsRow {
+  Turn: number | 'Gesamt';
+  Frage: string;
+  Modell: string;
+  Zeitpunkt: string;
+  'TTFT [s]': number | null;
+  'Antwortzeit [s]': number;
+  'Ausgabe-Tokens': number;
+  'Input-Tokens (Summe)': number;
+  'Kontext-Tokens': number;
+  'Tokens/s': number | null;
+  Runden: number;
+  'Tool-Calls': number;
+  'Fehlerhafte Tool-Calls': number;
+  'Sub-Agenten': number;
+  usage_source: string;
+  detail: TurnMetricsDetail;
+}
+
+/** Admin: the open chat's turn metrics with their detail, for the charts. */
+export const fetchSessionMetrics = (sessionId: string) =>
+  getJSON<{ turns: TurnMetricsRow[]; total: TurnMetricsRow | null }>(
+    `/api/session/${encodeURIComponent(sessionId)}/metrics`,
+  );
+
 /** Save a response as a file, under the filename the server picked. */
 async function saveAttachment(res: Response, fallback: string): Promise<void> {
   const disposition = res.headers.get('Content-Disposition') ?? '';

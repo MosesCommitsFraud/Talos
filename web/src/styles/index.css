@@ -203,10 +203,26 @@
   --ctx-6: color-mix(in oklab, var(--primary) 30%, var(--color-white));
   --ctx-7: color-mix(in oklab, var(--primary) 22%, var(--color-white));
   --ctx-8: color-mix(in oklab, var(--primary) 14%, var(--color-white));
+
+  /* Metrics panel series (MetricsPanel.tsx). One color per meaning, shared by
+   * every chart there: answer/writing, thinking, tool calls, prep, waiting
+   * for the first token. Checked as a set for colour-blind separation in
+   * light and dark (dataviz validate_palette). */
+  --viz-answer: #2a78d6;
+  --viz-thinking: #eb6834;
+  --viz-tools: #1baf7a;
+  --viz-prep: #eda100;
+  --viz-wait: #6250d6;
+  --viz-unsplit: color-mix(in srgb, var(--foreground) 22%, transparent);
 }
 
 .dark {
   color-scheme: dark;
+  --viz-answer: #3987e5;
+  --viz-thinking: #d95926;
+  --viz-tools: #199e70;
+  --viz-prep: #c98500;
+  --viz-wait: #9085e9;
   --background: color-mix(in srgb, var(--color-neutral-950) 93%, var(--color-white));
   --foreground: var(--color-neutral-100);
   /* Shared raised-surface color: sidebar, composer, user bubble. A clear
