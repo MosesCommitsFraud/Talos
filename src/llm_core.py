@@ -2034,6 +2034,16 @@ async def stream_llm(
                                         and _ptd.get("cached_tokens") is not None
                                     ):
                                         _usage_data["cached_tokens"] = _ptd["cached_tokens"]
+                                    # Thinking share of completion_tokens, where
+                                    # the server reports it (OpenAI, some vLLM
+                                    # builds). Without it the agent loop splits
+                                    # the output by the streamed text instead.
+                                    _ctd = u.get("completion_tokens_details") or {}
+                                    if (
+                                        isinstance(_ctd, dict)
+                                        and _ctd.get("reasoning_tokens") is not None
+                                    ):
+                                        _usage_data["reasoning_tokens"] = _ctd["reasoning_tokens"]
                                     # llama.cpp puts a `timings` block alongside `usage` with the
                                     # TRUE generation speed (predicted_per_second) — pure decode,
                                     # excluding prefill/network. Pass it through so the UI shows the

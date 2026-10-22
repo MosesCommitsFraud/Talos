@@ -1621,6 +1621,58 @@ def _compute_context_breakdown(
     return {k: v for k, v in breakdown.items() if v > 0}
 
 
+def _split_round_output(
+    output_tokens: int,
+    reasoning_text: str,
+    answer_text: str,
+    native_tool_calls: list,
+    reported_reasoning: Optional[int] = None,
+) -> Dict[str, Any]:
+    """Split one round's output tokens into thinking, answer and tool calls.
+
+    The usage block only has completion_tokens as one number. Prefer the
+    server's own reasoning_tokens when it sends them; otherwise share the
+    count out by the length of what streamed through each channel. Fenced
+    (non-native) tool calls arrive as answer text and count as answer.
+    Without real usage, every part is the chars/4 estimate the rest of the
+    metrics use.
+    """
+    tool_chars = sum(
+        len(str(tc.get("name") or "")) + len(str(tc.get("arguments") or ""))
+        for tc in (native_tool_calls or [])
+        if isinstance(tc, dict)
+    )
+    chars = {
+        "reasoning": len(reasoning_text or ""),
+        "answer": len(answer_text or ""),
+        "tool_calls": tool_chars,
+    }
+    if output_tokens <= 0:
+        return {**{k: v // 4 for k, v in chars.items()}, "source": "estimated"}
+    if reported_reasoning is not None and 0 <= int(reported_reasoning) <= output_tokens:
+        reasoning = int(reported_reasoning)
+        rest = output_tokens - reasoning
+        other = chars["answer"] + chars["tool_calls"]
+        tools = round(rest * chars["tool_calls"] / other) if other else 0
+        return {
+            "reasoning": reasoning,
+            "answer": rest - tools,
+            "tool_calls": tools,
+            "source": "backend",
+        }
+    total = sum(chars.values())
+    if total <= 0:
+        return {"reasoning": 0, "answer": output_tokens, "tool_calls": 0, "source": "proportional"}
+    reasoning = round(output_tokens * chars["reasoning"] / total)
+    tools = min(output_tokens - reasoning, round(output_tokens * chars["tool_calls"] / total))
+    return {
+        "reasoning": reasoning,
+        "answer": output_tokens - reasoning - tools,
+        "tool_calls": tools,
+        "source": "proportional",
+    }
+
+
 def _compute_final_metrics(
     messages: List[Dict],
     full_response: str,
@@ -2890,6 +2942,7 @@ async def stream_agent_loop(
         round_profile.append(_rp)
         _rp_first = None
         _rp_visible = None  # first answer text or tool call (thinking is hidden in the UI)
+        _rp_reported_reasoning = None  # usage.completion_tokens_details.reasoning_tokens
         async for chunk in stream_llm_with_fallback(
             _candidates,
             messages,
@@ -3000,6 +3053,8 @@ async def stream_agent_loop(
                         _rp["prompt_tokens"] = round_input
                         _rp["cached_tokens"] = u.get("cached_tokens")
                         _rp["output_tokens"] = u.get("output_tokens", 0)
+                        if u.get("reasoning_tokens") is not None:
+                            _rp_reported_reasoning = u["reasoning_tokens"]
                         real_input_tokens += round_input
                         real_output_tokens += u.get("output_tokens", 0)
                         last_round_input_tokens = round_input
@@ -3150,6 +3205,17 @@ async def stream_agent_loop(
         _rp["first_visible_s"] = round((_rp_visible or _rp_end) - _rp_t0, 2)
         _rp["stream_s"] = round(_rp_end - _rp_t0, 2)
         _rp["_ended"] = _rp_end
+        _split = _split_round_output(
+            _rp["output_tokens"],
+            round_reasoning,
+            round_response,
+            native_tool_calls,
+            _rp_reported_reasoning,
+        )
+        _rp["reasoning_tokens"] = _split["reasoning"]
+        _rp["answer_tokens"] = _split["answer"]
+        _rp["tool_call_tokens"] = _split["tool_calls"]
+        _rp["split_source"] = _split["source"]
         logger.info(
             "[agent-perf] round %d: prompt %s tok (cached %s), first token %.1fs, "
             "first visible %.1fs, stream %.1fs, %s tok out",
@@ -4177,6 +4243,14 @@ async def stream_agent_loop(
         if "_ended" in round_profile[-1]:
             round_profile[-1]["tools_s"] = round(time.time() - round_profile[-1].pop("_ended"), 2)
         metrics["round_profile"] = round_profile
+        # The turn's output split into thinking / answer / tool calls, summed
+        # over its rounds (see _split_round_output for how each is counted).
+        for key in ("reasoning_tokens", "answer_tokens", "tool_call_tokens"):
+            metrics[key] = sum(int(r.get(key) or 0) for r in round_profile)
+        sources = {r.get("split_source") for r in round_profile if r.get("split_source")}
+        metrics["output_split_source"] = (
+            next(iter(sources)) if len(sources) == 1 else "mixed" if sources else "estimated"
+        )
     yield f"data: {json.dumps({'type': 'metrics', 'data': metrics})}\n\n"
 
     yield "data: [DONE]\n\n"
