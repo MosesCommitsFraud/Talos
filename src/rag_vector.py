@@ -1215,10 +1215,12 @@ def _apply_saved_rag_config(cfg: Optional[Dict[str, Any]] = None) -> None:
             os.environ[env_name] = value
     # Boolean toggles set explicitly (not via the truthy-skip loop) so turning
     # one back off actually clears the env in a long-lived app process.
-    os.environ["VIDEO_ASR_ENABLED"] = "true" if cfg.get("video_asr_enabled") else ""
+    from src.rag_config import lane_env
+
+    # Extraction lanes ("auto" = on once their endpoint is configured).
+    os.environ.update(lane_env(cfg))
     os.environ["VIDEO_ASR_CORRECT_ENABLED"] = "true" if cfg.get("video_asr_correct_enabled") else ""
     os.environ["IMAGE_PIXEL_ENABLED"] = "true" if cfg.get("image_pixel_enabled") else ""
-    os.environ["CODE_LANE_ENABLED"] = "true" if cfg.get("code_lane_enabled") else ""
     os.environ["CONTEXTUAL_RETRIEVAL_ENABLED"] = (
         "true" if cfg.get("contextual_retrieval_enabled") else ""
     )
@@ -1232,9 +1234,7 @@ def _apply_saved_rag_config(cfg: Optional[Dict[str, Any]] = None) -> None:
     os.environ["RAG_CONTEXT_WINDOW"] = str(int(cfg.get("context_window", 1)))
     os.environ["RAG_EMBEDDING_TOKENIZER"] = str(cfg.get("embedding_tokenizer") or "")
     os.environ["RAG_EMBEDDING_MAX_TOKENS"] = str(int(cfg.get("embedding_max_tokens") or 0))
-    os.environ["PDF_VLM_ENABLED"] = "true" if cfg.get("pdf_vlm_enabled") else ""
     os.environ["RAG_REDACT_PII"] = "true" if cfg.get("redact_pii_enabled") else ""
-    os.environ["VIDEO_FRAMES_ENABLED"] = "true" if cfg.get("video_frames_enabled") else ""
     os.environ["VIDEO_FRAMES_INTERVAL_SEC"] = str(int(cfg.get("video_frames_interval_sec") or 8))
     os.environ["VIDEO_FRAMES_MAX"] = str(int(cfg.get("video_frames_max") or 300))
 

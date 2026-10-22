@@ -869,6 +869,13 @@ export interface RagConfig {
   context_window?: number;
   embedding_tokenizer?: string;
   embedding_max_tokens?: number;
+  /** Extraction lane modes: "auto" runs a lane once its endpoint is set. */
+  video_asr_mode?: RagLaneMode;
+  video_frames_mode?: RagLaneMode;
+  pdf_vlm_mode?: RagLaneMode;
+  code_lane_mode?: RagLaneMode;
+  /** Read-only, from the server: which lanes run with the saved config. */
+  lanes?: Partial<Record<RagLane, { mode: RagLaneMode; active: boolean; waiting_for: string }>>;
   /** Advanced — per-page VLM transcription for image-heavy PDFs + its endpoint. */
   pdf_vlm_enabled?: boolean;
   vlm_url?: string;
@@ -1008,6 +1015,9 @@ export async function deleteRagBase(id: string, dropData = true): Promise<void> 
  *  defaults behind it, and `overridden` the keys this base sets itself — so a
  *  field can be marked "inherited" or "changed" without a second request.
  *  `global_keys` are infrastructure a base cannot override (one Qdrant). */
+export type RagLaneMode = 'auto' | 'on' | 'off';
+export type RagLane = 'video_asr' | 'video_frames' | 'pdf_vlm' | 'code_lane';
+
 export interface RagBaseConfig {
   rag_id: string;
   config: RagConfig;

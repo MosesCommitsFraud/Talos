@@ -111,6 +111,11 @@ class RagPipelineConfig(BaseModel):
     # Opt-in video keyframe lane: crop to the VLM-detected shared-desktop
     # region and index scene-change keyframes (needs vlm_url).
     video_frames_enabled: bool = False
+    # "auto" | "on" | "off" per extraction lane; empty = derive from the boolean.
+    video_asr_mode: str = ""
+    video_frames_mode: str = ""
+    pdf_vlm_mode: str = ""
+    code_lane_mode: str = ""
     video_frames_interval_sec: int = 8
     video_frames_max: int = 300
     # Advanced — opt-in pixel image embedding lane (off by default).
@@ -236,6 +241,21 @@ def _clamp_chars(value, default: int = 10000) -> int:
         return default
 
 
+def _modes(body) -> dict:
+    """Validated lane modes, plus the legacy booleans (= mode "on") for readers
+    that predate modes."""
+    from src.rag_config import LANE_MODES, LANES
+
+    out = {}
+    for lane, flag in LANES.items():
+        mode = str(getattr(body, f"{lane}_mode", "") or "").strip().lower()
+        if mode not in LANE_MODES:
+            mode = "on" if getattr(body, flag, False) else "auto"
+        out[f"{lane}_mode"] = mode
+        out[flag] = mode == "on"
+    return out
+
+
 def _normalize(body, current: dict) -> dict:
     """Validate + clamp a submitted pipeline config into its stored shape.
 
@@ -294,7 +314,27 @@ def _normalize(body, current: dict) -> dict:
         "context_window": max(0, min(int(body.context_window), 10)),
         "embedding_tokenizer": body.embedding_tokenizer.strip(),
         "embedding_max_tokens": max(0, min(int(body.embedding_max_tokens), 1000000)),
+        # Were accepted by the model but never stored, so the keyframe toggle
+        # silently reset on every save.
+        "video_frames_interval_sec": max(1, min(int(body.video_frames_interval_sec or 8), 600)),
+        "video_frames_max": max(1, min(int(body.video_frames_max or 300), 5000)),
+        **_modes(body),
     }
+
+
+_LANE_NAMES = ("video_asr", "video_frames", "pdf_vlm", "code_lane")
+
+
+def _lane_mode(cfg: dict, lane: str) -> str:
+    from src.rag_config import lane_mode
+
+    return lane_mode(cfg, lane)
+
+
+def _lane_status(cfg: dict) -> dict:
+    from src.rag_config import lane_status
+
+    return lane_status(cfg)
 
 
 def _public(cfg: dict) -> dict:
@@ -350,6 +390,12 @@ def _public(cfg: dict) -> dict:
         "context_window": max(0, min(int(cfg.get("context_window", 1)), 10)),
         "embedding_tokenizer": str(cfg.get("embedding_tokenizer") or ""),
         "embedding_max_tokens": max(0, min(int(cfg.get("embedding_max_tokens") or 0), 1000000)),
+        "video_frames_enabled": bool(cfg.get("video_frames_enabled", False)),
+        "video_frames_interval_sec": int(cfg.get("video_frames_interval_sec") or 8),
+        "video_frames_max": int(cfg.get("video_frames_max") or 300),
+        **{f"{lane}_mode": _lane_mode(cfg, lane) for lane in _LANE_NAMES},
+        # Read-only: which lanes run with this config and what each waits for.
+        "lanes": _lane_status(cfg),
     }
 
 

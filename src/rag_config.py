@@ -27,7 +27,8 @@ itself lives there.
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, Optional, Set
+import os
+from typing import Any, Dict, Mapping, Optional, Set
 
 logger = logging.getLogger(__name__)
 
@@ -85,6 +86,74 @@ def effective_config(base_id: Optional[str] = None) -> Dict[str, Any]:
     cfg = global_config()
     cfg.update(overrides_for(base_id))
     return cfg
+
+
+# Extraction lanes that read a file at all (speech, scanned pages, video
+# frames, code structure). Each has a mode: "auto" runs it as soon as the
+# endpoint it needs is configured, so dropping in a video or a scanned PDF
+# just works once the infrastructure exists; "on"/"off" pin it. Enrichment
+# (contextual blurbs, keywords, pixel vectors) stays explicitly opt-in: it is
+# tuning, and it costs one model call per chunk.
+LANE_MODES = ("auto", "on", "off")
+LANES: Dict[str, str] = {
+    "video_asr": "video_asr_enabled",
+    "video_frames": "video_frames_enabled",
+    "pdf_vlm": "pdf_vlm_enabled",
+    "code_lane": "code_lane_enabled",
+}
+_LANE_ENV = {
+    "video_asr": "VIDEO_ASR_ENABLED",
+    "video_frames": "VIDEO_FRAMES_ENABLED",
+    "pdf_vlm": "PDF_VLM_ENABLED",
+    "code_lane": "CODE_LANE_ENABLED",
+}
+
+
+def lane_mode(cfg: Mapping[str, Any], lane: str) -> str:
+    """A lane's mode. Configs saved before modes existed carry only the old
+    boolean: True stays "on", anything else becomes "auto"."""
+    mode = str(cfg.get(f"{lane}_mode") or "").strip().lower()
+    if mode in LANE_MODES:
+        return mode
+    return "on" if cfg.get(LANES[lane]) else "auto"
+
+
+def _endpoint(cfg: Mapping[str, Any], key: str, env_name: str, env: Mapping[str, str]) -> str:
+    return str(cfg.get(key) or env.get(env_name) or "").strip()
+
+
+def lane_status(
+    cfg: Mapping[str, Any], env: Optional[Mapping[str, str]] = None
+) -> Dict[str, Dict[str, Any]]:
+    """Per lane: mode, whether it runs, and what it is waiting for if not."""
+    env = os.environ if env is None else env
+    needs = {
+        "video_asr": _endpoint(cfg, "video_asr_url", "VIDEO_ASR_URL", env),
+        "pdf_vlm": _endpoint(cfg, "vlm_url", "VLM_URL", env),
+        "video_frames": _endpoint(cfg, "vlm_url", "VLM_URL", env),
+        "code_lane": "built-in",
+    }
+    missing = {
+        "video_asr": "video_asr_url",
+        "pdf_vlm": "vlm_url",
+        "video_frames": "vlm_url",
+        "code_lane": "",
+    }
+    out: Dict[str, Dict[str, Any]] = {}
+    for lane in ("video_asr", "pdf_vlm", "code_lane", "video_frames"):
+        mode = lane_mode(cfg, lane)
+        ready = bool(needs[lane])
+        waiting = "" if ready else missing[lane]
+        if lane == "video_frames" and ready and not out["video_asr"]["active"]:
+            ready, waiting = False, "video_asr"
+        out[lane] = {"mode": mode, "active": mode != "off" and ready, "waiting_for": waiting}
+    return out
+
+
+def lane_env(cfg: Mapping[str, Any], env: Optional[Mapping[str, str]] = None) -> Dict[str, str]:
+    """The lane toggles as the env flags the ingest code reads."""
+    status = lane_status(cfg, env)
+    return {_LANE_ENV[lane]: "true" if s["active"] else "" for lane, s in status.items()}
 
 
 def instance_config(base_id: Optional[str] = None) -> Dict[str, Any]:

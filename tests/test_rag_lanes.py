@@ -74,7 +74,10 @@ def test_router_picks_native_opendocument_lane():
     assert _route("budget.ods") == "opendocument"
 
 
-def test_router_picks_text():
+def test_router_picks_text(monkeypatch):
+    # Code goes to the plain text lane only while the AST code lane is off
+    # (its "auto" mode turns it on whenever a config is applied).
+    monkeypatch.delenv("CODE_LANE_ENABLED", raising=False)
     assert _route("module.py") == "text"
     assert _route("notes.txt") == "text"
 

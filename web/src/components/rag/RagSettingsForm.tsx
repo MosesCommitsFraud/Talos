@@ -10,6 +10,8 @@ import {
   testRagConfig,
   testRagEndpoint,
   type RagConfig,
+  type RagLane,
+  type RagLaneMode,
 } from '@/api/client';
 import { cn } from '@/lib/utils';
 import { useRagConsole } from '@/state/ragConsole';
@@ -309,6 +311,70 @@ export function RagSettingsForm({ ragId }: { ragId?: string }) {
     </Row>
   );
 
+  // Extraction lanes run in one of three modes; "auto" = as soon as the
+  // endpoint the lane needs is configured. The badge reflects the draft; the
+  // status line under the mode reports what the *saved* config does (the
+  // server also sees endpoints set through the environment).
+  const laneEndpoint: Record<RagLane, keyof RagConfig | null> = {
+    video_asr: 'video_asr_url',
+    pdf_vlm: 'vlm_url',
+    video_frames: 'vlm_url',
+    code_lane: null,
+  };
+  const laneModeOf = (lane: RagLane): RagLaneMode => {
+    const raw = draft[`${lane}_mode` as keyof RagConfig] as RagLaneMode | undefined;
+    if (raw === 'auto' || raw === 'on' || raw === 'off') return raw;
+    return draft[`${lane}_enabled` as keyof RagConfig] ? 'on' : 'auto';
+  };
+  const laneActive = (lane: RagLane): boolean => {
+    if (laneModeOf(lane) === 'off') return false;
+    if (lane === 'video_frames' && !laneActive('video_asr')) return false;
+    const key = laneEndpoint[lane];
+    if (!key) return true;
+    return !!String(draft[key] ?? '').trim() || !!loaded?.lanes?.[lane]?.active;
+  };
+  const laneRow = (lane: RagLane, label: string, hint: string) => {
+    const key = `${lane}_mode` as keyof RagConfig;
+    const saved = loaded?.lanes?.[lane];
+    return (
+      <Row
+        label={
+          <>
+            {label}
+            {marker(key)}
+          </>
+        }
+        hint={
+          <>
+            {hint}
+            {saved && (
+              <span className="mt-1 block text-[11px]">
+                {saved.active
+                  ? t('settings.rag.laneRunning')
+                  : saved.mode === 'off'
+                    ? t('settings.rag.laneOff')
+                    : t('settings.rag.laneWaiting', {
+                        what: t(`settings.rag.laneNeeds.${saved.waiting_for}`, saved.waiting_for),
+                      })}
+              </span>
+            )}
+          </>
+        }
+      >
+        <Select
+          className="w-40 text-xs"
+          value={laneModeOf(lane)}
+          onChange={(v) => set(key, v)}
+          options={[
+            { value: 'auto', label: t('settings.rag.laneMode.auto') },
+            { value: 'on', label: t('settings.rag.laneMode.on') },
+            { value: 'off', label: t('settings.rag.laneMode.off') },
+          ]}
+        />
+      </Row>
+    );
+  };
+
   const external = (draft.provider || 'internal') === 'external';
 
   return (
@@ -376,16 +442,16 @@ export function RagSettingsForm({ ragId }: { ragId?: string }) {
       {!external && (
         <Section title={t('settings.rag.processing')} padded>
           <div className="grid gap-2 sm:grid-cols-2">
-            <RagDisclosure title={t('settings.rag.asrTitle')} enabled={!!draft.video_asr_enabled}>
-              {toggle('video_asr_enabled', t('settings.rag.asrEnabled'), t('settings.rag.hint.asrEnabled'))}
-              {draft.video_asr_enabled && (
+            <RagDisclosure title={t('settings.rag.asrTitle')} enabled={laneActive('video_asr')}>
+              {laneRow('video_asr', t('settings.rag.asrEnabled'), t('settings.rag.hint.asrEnabled'))}
+              {laneModeOf('video_asr') !== 'off' && (
                 <>
                   {field('video_asr_url', t('settings.rag.asrUrl'), { hint: t('settings.rag.hint.asrUrl'), def: 'http://host:8003/v1/audio/transcriptions', test: { kind: 'asr' } })}
                   {field('video_asr_language', t('settings.rag.asrLanguage'), { hint: t('settings.rag.hint.asrLanguage'), def: 'auto' })}
                   {field('video_asr_prompt', t('settings.rag.asrPrompt'), { type: 'textarea', hint: t('settings.rag.hint.asrPrompt') })}
                   {toggle('video_asr_correct_enabled', t('settings.rag.asrCorrect'), t('settings.rag.hint.asrCorrect'))}
-                  {toggle('video_frames_enabled', t('settings.rag.videoFramesEnabled'), t('settings.rag.hint.videoFramesEnabled'))}
-                  {draft.video_frames_enabled && (
+                  {laneRow('video_frames', t('settings.rag.videoFramesEnabled'), t('settings.rag.hint.videoFramesEnabled'))}
+                  {laneActive('video_frames') && (
                     <>
                       {field('video_frames_interval_sec', t('settings.rag.videoFramesInterval'), { type: 'number', hint: t('settings.rag.hint.videoFramesInterval'), def: 8 })}
                       {field('video_frames_max', t('settings.rag.videoFramesMax'), { type: 'number', hint: t('settings.rag.hint.videoFramesMax'), def: 300 })}
@@ -403,8 +469,8 @@ export function RagSettingsForm({ ragId }: { ragId?: string }) {
                 </>
               )}
             </RagDisclosure>
-            <RagDisclosure title={t('settings.rag.codeTitle')} enabled={!!draft.code_lane_enabled}>
-              {toggle('code_lane_enabled', t('settings.rag.codeEnabled'), t('settings.rag.hint.codeEnabled'))}
+            <RagDisclosure title={t('settings.rag.codeTitle')} enabled={laneActive('code_lane')}>
+              {laneRow('code_lane', t('settings.rag.codeEnabled'), t('settings.rag.hint.codeEnabled'))}
             </RagDisclosure>
             <RagDisclosure title={t('settings.rag.queryTitle')} enabled={!!draft.query_rewrite_enabled}>
               {toggle('query_rewrite_enabled', t('settings.rag.queryRewriteEnabled'), t('settings.rag.hint.queryRewriteEnabled'))}
@@ -434,9 +500,9 @@ export function RagSettingsForm({ ragId }: { ragId?: string }) {
                 {field('context_window', t('settings.rag.contextWindow'), { type: 'number', hint: t('settings.rag.hint.contextWindow'), def: 1 })}
               </>}
             </RagDisclosure>
-            <RagDisclosure title={t('settings.rag.pdfVlmTitle')} enabled={!!draft.pdf_vlm_enabled}>
-              {toggle('pdf_vlm_enabled', t('settings.rag.pdfVlmEnabled'), t('settings.rag.hint.pdfVlmEnabled'))}
-              {draft.pdf_vlm_enabled && (
+            <RagDisclosure title={t('settings.rag.pdfVlmTitle')} enabled={laneActive('pdf_vlm')}>
+              {laneRow('pdf_vlm', t('settings.rag.pdfVlmEnabled'), t('settings.rag.hint.pdfVlmEnabled'))}
+              {laneModeOf('pdf_vlm') !== 'off' && (
                 <>
                   {field('vlm_url', t('settings.rag.vlmUrl'), { hint: t('settings.rag.hint.vlmUrl'), def: 'http://host:8000/v1/chat/completions', test: { kind: 'vlm', modelKey: 'vlm_model' } })}
                   {field('vlm_model', t('settings.rag.vlmModel'), { hint: t('settings.rag.hint.vlmModel'), def: 'qwen3-llm' })}
