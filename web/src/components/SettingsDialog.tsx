@@ -32,6 +32,11 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   addModelEndpoint,
+  updateModelEndpoint,
+  deleteModelEndpoint,
+  fetchAdminModelEndpoints,
+  fetchModelEndpointDependents,
+  type AdminModelEndpoint,
   fetchAssistants,
   createAssistant,
   updateAssistant,
@@ -780,12 +785,30 @@ function AddModelsPanel() {
   const [apiKey, setApiKey] = useState('');
   const [msg, setMsg] = useState<{ text: string; ok: boolean } | null>(null);
   const queryClient = useQueryClient();
-  const { data: endpoints } = useQuery({ queryKey: ['models'], queryFn: fetchModels });
-  const refresh = () => void queryClient.invalidateQueries({ queryKey: ['models'] });
+  // The admin list, not /api/models: that one drops disabled endpoints, so
+  // switching one off would make it vanish with no way to turn it back on.
+  const { data: endpoints } = useQuery({ queryKey: ['adminModelEndpoints'], queryFn: fetchAdminModelEndpoints });
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const refresh = () => {
+    void queryClient.invalidateQueries({ queryKey: ['models'] });
+    void queryClient.invalidateQueries({ queryKey: ['adminModelEndpoints'] });
+  };
 
   const run = async (fn: () => Promise<unknown>, ok: string) => {
     setMsg(null);
     try { await fn(); setMsg({ text: ok, ok: true }); refresh(); } catch (e) { setMsg({ text: (e as Error).message, ok: false }); }
+  };
+
+  // Deleting also resets every setting that points at this endpoint (default
+  // model, fallback chains, speech), so name those in the confirmation.
+  const removeEndpoint = async (e: AdminModelEndpoint) => {
+    const { dependents } = await fetchModelEndpointDependents(e.id).catch(() => ({ dependents: [] as string[] }));
+    const question = dependents.length
+      ? t('settings.models.deleteConfirmDeps', { name: e.name, deps: dependents.join(', ') })
+      : t('settings.models.deleteConfirm', { name: e.name });
+    if (!window.confirm(question)) return;
+    if (editingId === e.id) setEditingId(null);
+    await run(() => deleteModelEndpoint(e.id), t('settings.models.endpointDeleted'));
   };
 
   // "Lokale suchen" scans the known hosts on the usual model-server ports.
@@ -872,23 +895,92 @@ function AddModelsPanel() {
 
       <Section title={t('settings.models.configured')} padded>
         <div className="space-y-1.5">
-          {(endpoints ?? []).map((e) => (
-            <div key={e.id} className="flex items-center justify-between rounded-lg border bg-background px-3 py-2">
-              <div className="min-w-0">
-                <div className="truncate text-sm">{e.name}</div>
-                <div className="truncate text-xs text-muted-foreground">{e.base_url} · {t('settings.models.models', { count: e.models.length })}</div>
+          {(endpoints ?? []).map((e) =>
+            editingId === e.id ? (
+              <EndpointEditor key={e.id} endpoint={e} onDone={() => { setEditingId(null); refresh(); }} onCancel={() => setEditingId(null)} />
+            ) : (
+              <div key={e.id} className="flex items-center justify-between gap-2 rounded-lg border bg-background px-3 py-2">
+                <div className="min-w-0">
+                  <div className="truncate text-sm">{e.name}</div>
+                  <div className="truncate text-xs text-muted-foreground">
+                    {e.base_url} · {t('settings.models.models', { count: e.models.length })}
+                    {e.is_enabled && e.status === 'offline' && ' · ' + t('settings.models.offline')}
+                  </div>
+                </div>
+                <div className="flex shrink-0 items-center gap-1.5">
+                  <Switch
+                    checked={!!e.is_enabled}
+                    onCheckedChange={(v) => void run(() => updateModelEndpoint(e.id, { is_enabled: v }), v ? t('settings.models.endpointEnabled') : t('settings.models.endpointDisabled'))}
+                    aria-label={e.is_enabled ? t('settings.models.enabled') : t('settings.models.disabled')}
+                  />
+                  <Button size="icon-sm" variant="ghost" onClick={() => { setMsg(null); setEditingId(e.id); }} aria-label={t('common.edit')}><WrenchIcon /></Button>
+                  <Button size="icon-sm" variant="ghost" onClick={() => void removeEndpoint(e)} aria-label={t('common.delete')}><Trash2Icon /></Button>
+                </div>
               </div>
-              <span className={cn('text-xs', e.is_enabled ? 'text-success' : 'text-muted-foreground')}>
-                {e.is_enabled ? t('settings.models.enabled') : t('settings.models.disabled')}
-              </span>
-            </div>
-          ))}
+            ),
+          )}
           {(endpoints ?? []).length === 0 && <p className="text-xs text-muted-foreground">{t('settings.models.noEndpoints')}</p>}
         </div>
       </Section>
 
       <ModelDisplayNamesSection />
     </Page>
+  );
+}
+
+/** Inline edit form for one configured model endpoint. The API key is never
+ *  sent back to the browser, so an empty key field means "keep the current one". */
+function EndpointEditor({ endpoint, onDone, onCancel }: { endpoint: AdminModelEndpoint; onDone: () => void; onCancel: () => void }) {
+  const { t } = useTranslation();
+  const [name, setName] = useState(endpoint.name);
+  const [baseUrl, setBaseUrl] = useState(endpoint.base_url);
+  const [kind, setKind] = useState(endpoint.model_type || 'llm');
+  const [apiKey, setApiKey] = useState('');
+  const [clearKey, setClearKey] = useState(false);
+  const [err, setErr] = useState('');
+  const [saving, setSaving] = useState(false);
+  const kinds = [{ value: 'llm', label: t('settings.models.llm') }, { value: 'image', label: t('settings.models.image') }];
+  if (!kinds.some((k) => k.value === kind)) kinds.push({ value: kind, label: kind });
+
+  const save = async () => {
+    setErr(''); setSaving(true);
+    try {
+      const body: Parameters<typeof updateModelEndpoint>[1] = { name: name.trim(), base_url: baseUrl.trim(), model_type: kind };
+      if (clearKey) body.api_key = '';
+      else if (apiKey.trim()) body.api_key = apiKey.trim();
+      await updateModelEndpoint(endpoint.id, body);
+      onDone();
+    } catch (e) { setErr((e as Error).message); } finally { setSaving(false); }
+  };
+
+  return (
+    <div className="space-y-3 rounded-md border bg-card p-4">
+      <Row label={t('settings.models.name')}>
+        <Input className="w-64" value={name} onChange={(e) => setName(e.target.value)} />
+      </Row>
+      <Row label={t('settings.models.baseUrl')}>
+        <Input className="w-64" value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} placeholder={t('settings.models.baseUrlPlaceholder')} />
+      </Row>
+      <Row label={t('settings.models.type')}>
+        <Select className="w-64" value={kind} onChange={setKind} options={kinds} />
+      </Row>
+      <Row label={t('settings.models.apiKey')} hint={endpoint.has_key ? t('settings.models.apiKeyKeepHint') : undefined}>
+        <Input className="w-64" type="password" value={apiKey} disabled={clearKey} onChange={(e) => setApiKey(e.target.value)}
+          placeholder={endpoint.has_key ? t('settings.models.apiKeyUnchanged') : t('settings.models.apiKeyOptional')} />
+      </Row>
+      {endpoint.has_key && (
+        <Row label={t('settings.models.removeKey')}>
+          <Switch checked={clearKey} onCheckedChange={setClearKey} />
+        </Row>
+      )}
+      {err && <p className="px-1 text-xs text-destructive-foreground">{err}</p>}
+      <div className="flex justify-end gap-2">
+        <Button size="sm" variant="outline" onClick={onCancel}>{t('common.cancel')}</Button>
+        <Button size="sm" disabled={saving || !baseUrl.trim()} onClick={() => void save()}>
+          {saving ? t('common.saving') : t('settings.saveChanges')}
+        </Button>
+      </div>
+    </div>
   );
 }
 

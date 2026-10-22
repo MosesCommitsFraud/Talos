@@ -1089,6 +1089,25 @@ export async function testModelEndpoint(baseUrl: string, apiKey?: string): Promi
 
 export const discoverEndpoints = () => getJSON<Record<string, unknown>>('/api/discover');
 
+/** Admin view of every configured endpoint, disabled ones included —
+ *  /api/models only returns enabled endpoints, so it can't back a manage list. */
+export interface AdminModelEndpoint extends ModelEndpoint {
+  has_key: boolean;
+  status: 'online' | 'offline' | 'empty';
+}
+export const fetchAdminModelEndpoints = () => getJSON<AdminModelEndpoint[]>('/api/model-endpoints');
+
+export const updateModelEndpoint = (
+  id: string,
+  body: Partial<{ name: string; base_url: string; api_key: string; model_type: string; is_enabled: boolean }>,
+) => postJSON(`/api/model-endpoints/${encodeURIComponent(id)}`, body, 'PATCH');
+
+export const fetchModelEndpointDependents = (id: string) =>
+  getJSON<{ dependents: string[] }>(`/api/model-endpoints/${encodeURIComponent(id)}/dependents`);
+
+export const deleteModelEndpoint = (id: string) =>
+  postJSON(`/api/model-endpoints/${encodeURIComponent(id)}`, undefined, 'DELETE');
+
 /* ── Integrations CRUD ── */
 export const fetchIntegrationPresets = () =>
   getJSON<Record<string, { name?: string; base_url?: string;[key: string]: unknown }>>('/api/auth/integrations/presets');
