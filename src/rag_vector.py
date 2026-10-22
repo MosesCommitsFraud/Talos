@@ -613,6 +613,31 @@ _INGEST_FAILURES: "contextvars.ContextVar[Optional[List[str]]]" = contextvars.Co
 
 _NO_TEXT_ERROR = "no extractable text (empty/unsupported file)"
 
+# Below this much text, two documents sharing it says nothing (two empty
+# scans, two cover pages) — no text fingerprint is taken.
+_TEXT_FINGERPRINT_MIN_CHARS = 200
+
+
+def _text_fingerprint(docs) -> Optional[str]:
+    """SHA-256 of a document's own text, normalised so that re-saving or
+    re-exporting the same content (other bytes, same words) matches.
+
+    Figure captions are left out: they come from a vision model and differ
+    between runs of the same file.
+    """
+    import unicodedata
+
+    parts = [
+        d.content or ""
+        for d in docs
+        if (d.meta or {}).get("modality") != "figure" and not (d.meta or {}).get("image_url")
+    ]
+    text = unicodedata.normalize("NFKC", "\n".join(parts)).lower()
+    text = re.sub(r"[\W_]+", " ", text).strip()
+    if len(text) < _TEXT_FINGERPRINT_MIN_CHARS:
+        return None
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
 
 class _NoText(RuntimeError):
     """A lane produced nothing to index (reported without an exception type)."""
@@ -2614,6 +2639,8 @@ class VectorRAG:
         """
         ext = Path(path).suffix.lower()
         docs = self._extract(path, meta, stage_cb, sha=sha, reparse=reparse, report=report)
+        if report is not None:
+            report["text_sha256"] = _text_fingerprint(docs)
 
         # Defensive PDF repair: a Docling/HybridChunker integration regression
         # must not turn a multi-page document into one whole-file retrieval hit.
@@ -4218,6 +4245,45 @@ class VectorRAG:
             )
             if not docs:
                 raise _NoText(_NO_TEXT_ERROR)
+            text_sha = report.get("text_sha256")
+            # Same words, other bytes (re-saved DOCX, re-exported PDF): for a
+            # new upload that is the duplicate case too — found only now,
+            # after parsing, but still before anything is embedded.
+            text_twin = (
+                register.find_by_sha(
+                    coll,
+                    text_sha,
+                    scope=meta.get("scope"),
+                    exclude_doc_id=(doc_id, exclude_twin),
+                    column="text_sha256",
+                )
+                if text_sha
+                and not force
+                and row["origin"] == rd.ORIGIN_UPLOAD
+                and not (live and live["status"] == rd.INDEXED)
+                else None
+            )
+            if text_twin:
+                register.upsert(
+                    coll,
+                    doc_id,
+                    **row,
+                    source=meta["source"],
+                    text_sha256=text_sha,
+                    version=version,
+                    status=rd.DUPLICATE,
+                    duplicate_of=text_twin["doc_id"],
+                    parse_cached=bool(report.get("parse_cached")),
+                    chunk_count=0,
+                    error=None,
+                    warnings=[],
+                    deleted_at=None,
+                )
+                return {
+                    **result,
+                    "status": "duplicate",
+                    "duplicate_of": text_twin["display_name"],
+                }
             chunks = self._write_documents(docs, replace_sources=True)
         except Exception as e:
             error = str(e) if isinstance(e, _NoText) else f"{type(e).__name__}: {e}"
@@ -4248,6 +4314,16 @@ class VectorRAG:
         )
         twin = register.find_by_sha(
             coll, sha, scope=meta.get("scope"), exclude_doc_id=(doc_id, exclude_twin)
+        ) or (
+            register.find_by_sha(
+                coll,
+                report["text_sha256"],
+                scope=meta.get("scope"),
+                exclude_doc_id=(doc_id, exclude_twin),
+                column="text_sha256",
+            )
+            if report.get("text_sha256")
+            else None
         )
         content_changed = bool(live) and live["content_sha256"] != sha
         register.upsert(
@@ -4257,6 +4333,7 @@ class VectorRAG:
             source=meta["source"],
             version=version,
             status=rd.INDEXED,
+            text_sha256=report.get("text_sha256"),
             duplicate_of=twin["doc_id"] if twin else None,
             parse_cached=bool(report.get("parse_cached")),
             chunk_count=chunks,
@@ -4692,6 +4769,7 @@ class VectorRAG:
             "status": row["status"],
             "version": row["version"],
             "content_sha256": row.get("content_sha256") or "",
+            "text_sha256": row.get("text_sha256") or "",
             "size_bytes": row.get("size_bytes"),
             "indexed_at": row.get("indexed_at"),
             "updated_at": row.get("updated_at"),
@@ -5218,13 +5296,31 @@ class VectorRAG:
                     **self._public_register_fields(reg),
                 }
             # Duplicate marking is computed from the listed rows, not stored:
-            # it stays right when one copy is deleted or changes later.
-            by_sha: Dict[str, int] = {}
-            for row in agg.values():
-                if row.get("content_sha256"):
-                    by_sha[row["content_sha256"]] = by_sha.get(row["content_sha256"], 0) + 1
-            for row in agg.values():
-                row["duplicate_count"] = by_sha.get(row.get("content_sha256") or "", 1) - 1
+            # it stays right when one copy is deleted or changes later. Two
+            # documents are copies when they share the bytes *or* the text,
+            # transitively (a byte copy of a re-saved file is one group).
+            rows = list(agg.values())
+            parent = list(range(len(rows)))
+
+            def find(i: int) -> int:
+                while parent[i] != i:
+                    parent[i] = parent[parent[i]]
+                    i = parent[i]
+                return i
+
+            first_by_key: Dict[str, int] = {}
+            for i, row in enumerate(rows):
+                for key in ("content_sha256", "text_sha256"):
+                    value = row.get(key)
+                    if not value:
+                        continue
+                    j = first_by_key.setdefault(f"{key}:{value}", i)
+                    parent[find(i)] = find(j)
+            sizes: Dict[int, int] = {}
+            for i in range(len(rows)):
+                sizes[find(i)] = sizes.get(find(i), 0) + 1
+            for i, row in enumerate(rows):
+                row["duplicate_count"] = sizes[find(i)] - 1
             return sorted(agg.values(), key=lambda r: str(r["filename"]).lower())
         except Exception as e:
             logger.error(f"list_documents failed: {e}")

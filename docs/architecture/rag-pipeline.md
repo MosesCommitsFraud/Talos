@@ -212,10 +212,16 @@ Large-corpus filter overhead and multi-process deployment require load validatio
   (`POST /api/rag/documents/replace`): the worker indexes the new file first and
   deletes the old document only after that succeeded. Documents from an indexed
   directory are replaced in the directory instead.
-- **Duplicates.** The document list reports `duplicate_count` (other listed
-  documents with the same SHA-256), computed at read time, and the UI can filter
-  by it. Only byte-identical files count; a re-saved or re-exported file is a
-  different file.
+- **Duplicates.** Besides the file hash, every parsed document gets a
+  `text_sha256` over its normalised text (case, whitespace and punctuation folded;
+  vision captions left out; at least 200 characters). A new upload with the same
+  bytes *or* the same text as an indexed document is recorded as a duplicate — the
+  text case is found after parsing but before embedding. The document list reports
+  `duplicate_count` (copies sharing bytes or text, transitively), computed at read
+  time, and the UI can filter by it. Edited copies are not detected.
+- **Folders.** A folder uploaded from the browser keeps each file's path inside it
+  as the logical path (`Projekte/Nord/Protokoll.docx`), so equal names in
+  different folders are different documents.
 - **Tombstones.** A directory sync removes documents whose file is gone from disk;
   deleted documents keep a `deleted` row.
 - **Parse cache.** Docling/VLM/ASR output is stored under

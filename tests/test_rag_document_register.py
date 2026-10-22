@@ -468,3 +468,53 @@ def test_replace_route_rejects_directory_documents(env, monkeypatch, tmp_path):
     assert meta["logical_path"] == "Plan v2.md"
     rag.index_files(queued[-1])
     assert contents(rag) == ["from share", "plan two"]
+
+
+LONG = "Die Reisekostenrichtlinie regelt Erstattung, Pauschalen und Belege. " * 6
+
+
+def test_same_text_other_bytes_is_a_duplicate_without_embedding(env, monkeypatch):
+    rag, uploads, _ = env
+    rag.index_files([upload(uploads, "Richtlinie.md", LONG, "a")])
+    embedded = []
+    real = rag._write_documents
+    monkeypatch.setattr(
+        rag, "_write_documents", lambda docs, **kw: embedded.append(docs) or real(docs, **kw)
+    )
+    # Re-saved elsewhere: other line endings and spacing, same words.
+    resaved = LONG.replace(". ", ".\r\n  ")
+    result = rag.index_files([upload(uploads, "Richtlinie (Kopie).md", resaved, "b")])
+    assert result["outcomes"]["duplicate"] == 1
+    assert embedded == []
+    rows = {d["filename"]: d for d in rag.list_documents()}
+    assert rows["Richtlinie (Kopie).md"]["status"] == "duplicate"
+    assert rows["Richtlinie (Kopie).md"]["text_sha256"] == rows["Richtlinie.md"]["text_sha256"]
+    assert (
+        rows["Richtlinie (Kopie).md"]["content_sha256"] != rows["Richtlinie.md"]["content_sha256"]
+    )
+    # A byte copy of the re-saved file joins the same group.
+    rag.index_files([upload(uploads, "Noch eine Kopie.md", resaved, "c")])
+    counts = {d["filename"]: d["duplicate_count"] for d in rag.list_documents()}
+    assert counts == {"Richtlinie.md": 2, "Richtlinie (Kopie).md": 2, "Noch eine Kopie.md": 2}
+
+
+def test_short_texts_are_not_text_duplicates(env):
+    rag, uploads, _ = env
+    rag.index_files([upload(uploads, "A.md", "Siehe Anhang.", "a")])
+    result = rag.index_files([upload(uploads, "B.md", "Siehe  Anhang.\n", "b")])
+    assert result["outcomes"]["indexed"] == 1
+
+
+def test_register_adds_new_columns_to_an_existing_database(tmp_path):
+    import sqlite3
+
+    # The register as first released (phase 1): no text_sha256 column.
+    db = sqlite3.connect(tmp_path / rd.REGISTER_FILE)
+    old_schema = rd._SCHEMA.replace("    text_sha256 TEXT,\n", "")
+    assert old_schema != rd._SCHEMA
+    db.executescript(old_schema)
+    db.commit()
+    db.close()
+    reg = rd.DocumentRegister(str(tmp_path))
+    reg.upsert("kb", "d_1", source="/x.md", text_sha256="abc")
+    assert reg.get("kb", "d_1")["text_sha256"] == "abc"

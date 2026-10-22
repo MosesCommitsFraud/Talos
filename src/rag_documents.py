@@ -78,6 +78,7 @@ CREATE TABLE IF NOT EXISTS documents (
     scope TEXT,
     source TEXT NOT NULL,
     content_sha256 TEXT,
+    text_sha256 TEXT,
     size_bytes INTEGER,
     mtime REAL,
     version INTEGER NOT NULL DEFAULT 1,
@@ -129,6 +130,7 @@ _DOC_COLUMNS = (
     "scope",
     "source",
     "content_sha256",
+    "text_sha256",
     "size_bytes",
     "mtime",
     "version",
@@ -277,6 +279,11 @@ class DocumentRegister:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with self._connect() as db:
             db.executescript(_SCHEMA)
+            # Columns added after the first release of the register.
+            have = {r["name"] for r in db.execute("PRAGMA table_info(documents)")}
+            for column, kind in (("text_sha256", "TEXT"),):
+                if column not in have:
+                    db.execute(f"ALTER TABLE documents ADD COLUMN {column} {kind}")
 
     @contextmanager
     def _connect(self) -> Iterator[sqlite3.Connection]:
@@ -330,11 +337,16 @@ class DocumentRegister:
         *,
         scope: Optional[str] = None,
         exclude_doc_id: Any = None,
+        column: str = "content_sha256",
     ) -> Optional[Dict[str, Any]]:
         """An *indexed* document with this exact content in the same scope.
 
-        ``exclude_doc_id`` is one id or a collection of ids to ignore.
+        ``column`` is ``content_sha256`` (same bytes) or ``text_sha256`` (same
+        extracted text). ``exclude_doc_id`` is one id or a collection of ids
+        to ignore.
         """
+        if column not in ("content_sha256", "text_sha256"):
+            raise ValueError(column)
         excluded = (
             {exclude_doc_id}
             if isinstance(exclude_doc_id, str) or exclude_doc_id is None
@@ -342,7 +354,7 @@ class DocumentRegister:
         )
         with self._connect() as db:
             rows = db.execute(
-                "SELECT * FROM documents WHERE collection=? AND content_sha256=? AND status=? "
+                f"SELECT * FROM documents WHERE collection=? AND {column}=? AND status=? "
                 "ORDER BY created_at",
                 (collection, sha, INDEXED),
             ).fetchall()

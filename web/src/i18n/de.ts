@@ -1286,6 +1286,7 @@ const de: typeof en = {
       queued: 'In die Warteschlange gestellt.',
       docId: 'Dokument-ID',
       sha256: 'SHA-256',
+      textSha: 'Text-Hash',
       version: 'Version',
       statusLabel: 'Status',
       status: {
@@ -1327,7 +1328,7 @@ const de: typeof en = {
         'Ersetzen gestartet — das alte Dokument wird gelöscht, sobald die neue Datei indexiert ist.',
       dupGroup: '{{n}}× gleicher Inhalt',
       dupGroupHint:
-        'Weitere Dokumente in dieser Wissensdatenbank haben exakt denselben Inhalt (gleicher SHA-256).',
+        'Weitere Dokumente in dieser Wissensdatenbank haben dieselbe Datei (gleicher SHA-256) oder denselben Text (z. B. neu gespeicherte oder neu exportierte Kopie).',
       filterEmpty: 'Keine Dokumente für diesen Filter.',
       filter: {
         all: 'Alle',

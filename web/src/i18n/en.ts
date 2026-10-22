@@ -1280,6 +1280,7 @@ const en = {
       queued: 'Queued.',
       docId: 'Document ID',
       sha256: 'SHA-256',
+      textSha: 'Text hash',
       version: 'Version',
       statusLabel: 'Status',
       status: {
@@ -1320,7 +1321,7 @@ const en = {
       replaceQueued: 'Replacement queued — the old document is deleted once the new file is indexed.',
       dupGroup: '{{n}}× same content',
       dupGroupHint:
-        'Other documents in this knowledge base have exactly the same content (same SHA-256).',
+        'Other documents in this knowledge base have the same file (same SHA-256) or the same text (e.g. a re-saved or re-exported copy).',
       filterEmpty: 'No documents match this filter.',
       filter: {
         all: 'All',

@@ -151,6 +151,9 @@ export function RagDocumentDetail({ docId, ragId }: { docId: string; ragId?: str
         <Field label={t('rag.doc.sha256')}>
           <CopyValue value={d.content_sha256 ?? ''} />
         </Field>
+        <Field label={t('rag.doc.textSha')}>
+          <CopyValue value={d.text_sha256 ?? ''} />
+        </Field>
         <Field label={t('rag.doc.version')}>v{d.version}</Field>
         <Field label={t('rag.doc.statusLabel')}>{t(`rag.doc.status.${d.status}`, d.status ?? '')}</Field>
         <Field label={t('rag.doc.origin')}>{t(`rag.doc.originName.${d.origin}`, d.origin ?? '')}</Field>

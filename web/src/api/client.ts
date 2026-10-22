@@ -1274,6 +1274,8 @@ export interface RagDocument {
   status?: RagDocumentStatus;
   version?: number;
   content_sha256?: string;
+  /** Hash of the normalised extracted text: equal for re-saved copies. */
+  text_sha256?: string;
   size_bytes?: number | null;
   indexed_at?: number | null;
   updated_at?: number | null;
