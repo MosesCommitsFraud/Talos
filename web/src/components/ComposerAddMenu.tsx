@@ -215,10 +215,9 @@ export function ComposerAddMenu({
             className,
           )}
         >
-          {/* Drawn rather than lucide's: square ends and full-length arms, snapped
-              to whole pixels so both bars stay equally sharp at any position. */}
+          {/* Drawn rather than lucide's: full-length arms with rounded ends. */}
           <svg viewBox="0 0 14 14" aria-hidden="true" className={cn('size-[14px]', uploading && 'animate-pulse')}>
-            <path d="M7 0v14M0 7h14" stroke="currentColor" strokeWidth="2" shapeRendering="crispEdges" />
+            <path d="M7 1v12M1 7h12" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
           </svg>
         </button>
       </MenuTrigger>
