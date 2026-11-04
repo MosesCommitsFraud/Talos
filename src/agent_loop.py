@@ -40,6 +40,7 @@ from src.context_compactor import (
 )
 from src.context_optimizer import optimize_tool_output
 from src.history_replay import HEAD_KEY
+from src.knowledge_progress import STOP_SEARCHING_NOTE, KnowledgeProgress
 from src.llm_core import _detect_provider, _is_ollama_native_url, stream_llm_with_fallback
 from src.model_context import estimate_tokens
 from src.prompt_security import untrusted_context_message
@@ -2661,6 +2662,7 @@ async def stream_agent_loop(
     # Supervisor: how many times we've nudged the model after it announced
     # an action without emitting the tool call. Capped to prevent a model
     # that *can't* call the tool from looping forever.
+    _knowledge_progress = KnowledgeProgress()
     _intent_nudge_count = 0
     _MAX_INTENT_NUDGES = 2
     # Consecutive rounds that returned neither text nor a tool call. Reset by
@@ -3844,6 +3846,8 @@ async def stream_agent_loop(
             # them into the turn and still run the post-generation guards
             # (filter_used_rag_sources / append_missing_figures /
             # strip_unauthorized_figures) over everything the answer could
+            _knowledge_progress.observe(block.tool_type, result)
+
             # have drawn on. Internal underscore keys are preserved — the
             # caller strips them via public_rag_sources before the client
             # sees anything.
@@ -4125,6 +4129,13 @@ async def stream_agent_loop(
         yield _context_metrics_frame(estimate_tokens(messages), "estimated")
 
         # Emit agent_step event
+        # Reworded searches never repeat a call, so the loop-breaker above can't
+        # see them: stop when the lookups stop delivering anything new.
+        if _knowledge_progress.end_round() and not _force_answer:
+            logger.warning(f"[agent] round {round_num}: knowledge lookups found nothing new")
+            _force_answer = True
+            messages.append({"role": "system", "content": STOP_SEARCHING_NOTE})
+
         yield (f"data: {json.dumps({'type': 'agent_step', 'round': round_num + 1})}\n\n")
 
         # Separator in accumulated response
