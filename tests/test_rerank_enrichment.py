@@ -11,6 +11,8 @@ def test_reranker_uses_hidden_retrieval_document(monkeypatch):
     captured = {}
 
     class _Response:
+        status_code = 200
+
         def raise_for_status(self):
             pass
 
@@ -44,6 +46,8 @@ def _rerank_with(monkeypatch, results, candidates, k):
     """Run _rerank against a stub endpoint returning `results` verbatim."""
 
     class _Response:
+        status_code = 200
+
         def raise_for_status(self):
             pass
 
@@ -55,6 +59,59 @@ def _rerank_with(monkeypatch, results, candidates, k):
     rag = object.__new__(rv.VectorRAG)
     rag._last_rerank_error = ""
     return rag._rerank("query", candidates, k)
+
+
+def _rerank_candidates():
+    return [{"id": str(i), "document": f"doc {i}", "metadata": {}} for i in range(2)]
+
+
+def _rerank_with_status(monkeypatch, statuses):
+    """Stub endpoint answering each call with the next status; records the payloads."""
+    calls = []
+
+    def _post(_url, json, headers, timeout):
+        calls.append(json)
+        status = statuses[len(calls) - 1]
+
+        class _Response:
+            status_code = status
+
+            def raise_for_status(self):
+                if status >= 400:
+                    raise RuntimeError(f"HTTP {status}")
+
+            def json(self):
+                return {"results": [{"index": 1, "relevance_score": 0.9}]}
+
+        return _Response()
+
+    monkeypatch.setenv("RERANK_URL", "http://reranker/v1/rerank")
+    monkeypatch.setitem(sys.modules, "httpx", SimpleNamespace(post=_post))
+    rag = object.__new__(rv.VectorRAG)
+    rag._last_rerank_error = ""
+    return rag, rag._rerank("query", _rerank_candidates(), 1), calls
+
+
+def test_oversized_document_retries_with_truncation_and_keeps_the_ranking(monkeypatch):
+    rag, result, calls = _rerank_with_status(monkeypatch, [400, 200])
+    assert "truncate_prompt_tokens" not in calls[0]
+    assert calls[1]["truncate_prompt_tokens"] == -1
+    assert calls[1]["documents"] == calls[0]["documents"]
+    assert result[0]["id"] == "1"
+    assert rag._last_rerank_error == ""
+
+
+def test_endpoint_that_cannot_truncate_falls_back_to_hybrid_order(monkeypatch):
+    rag, result, calls = _rerank_with_status(monkeypatch, [400, 422])
+    assert len(calls) == 2
+    assert result[0]["id"] == "0"
+    assert "422" in rag._last_rerank_error
+
+
+def test_other_errors_do_not_retry(monkeypatch):
+    rag, result, calls = _rerank_with_status(monkeypatch, [500])
+    assert len(calls) == 1
+    assert result[0]["id"] == "0"
 
 
 def test_rerank_sorts_unsorted_provider_response(monkeypatch):

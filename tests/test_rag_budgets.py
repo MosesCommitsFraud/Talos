@@ -77,7 +77,7 @@ def test_limit_requires_matching_tokenizer_and_uses_its_lower_limit(monkeypatch)
 
 def test_consumer_budget_keeps_anchor_and_deduplicates_neighbor_windows():
     text = "# Chapter\n\n" + "word " * 1600
-    docs = split_documents([Document(content=text, meta={"source": "guide.md"})])
+    docs = split_documents([Document(content=text, meta={"source": "guide.md"})], max_chars=4000)
     assign_sections(docs)
     store = InMemoryDocumentStore()
     store.write_documents(docs)

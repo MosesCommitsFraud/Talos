@@ -16,6 +16,7 @@ from src.rag_vector import VectorRAG, _embed_text, _redact_docs
 
 
 def chunks(text, **kwargs):
+    kwargs.setdefault("max_chars", 4000)
     docs = split_documents(
         [Document(content=text, meta={"source": "manual.md", "owner": "alice"})], **kwargs
     )
@@ -31,6 +32,18 @@ def store_for(docs):
     store = InMemoryDocumentStore()
     store.write_documents(docs)
     return store
+
+
+def test_default_limit_keeps_a_typical_chapter_whole():
+    from routes.rag_routes import RagPipelineConfig
+    from src.rag_structure import DEFAULT_CHUNK_MAX_CHARS
+
+    assert DEFAULT_CHUNK_MAX_CHARS == 6000
+    assert RagPipelineConfig().chunk_max_chars == 6000
+    text = "## Kapitel\n\n" + "\n\n".join("Ein Satz im Absatz. " * 20 for _ in range(14))
+    assert 4000 < len(text) < 6000
+    assert len(split_documents([Document(content=text)])) == 1
+    assert len(split_documents([Document(content=text + text)])) == 2
 
 
 def test_long_chapter_preserves_middle_and_both_neighbors():
@@ -105,7 +118,7 @@ def test_docling_json_retains_real_heading_hierarchy_and_repeated_titles():
     native.add_text(label=DocItemLabel.TEXT, text="abcde " * 1600)
     native.add_heading(text="Setup", level=2)
     native.add_text(label=DocItemLabel.TEXT, text="Other setup.")
-    docs = split_documents(docling_documents(native.model_dump_json()))
+    docs = split_documents(docling_documents(native.model_dump_json()), max_chars=4000)
     assign_sections(docs)
     assert docs[0].meta["heading_path"] == ["Manual"]
     assert docs[1].meta["heading_path"] == ["Manual", "Setup"]

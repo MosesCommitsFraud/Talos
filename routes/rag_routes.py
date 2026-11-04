@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel
 
 from core.middleware import require_admin
+from src.rag_structure import DEFAULT_CHUNK_MAX_CHARS
 from src.settings import load_settings, save_settings
 
 
@@ -172,7 +173,7 @@ class RagPipelineConfig(BaseModel):
     # Advanced — small-to-big: inject the matched chunk's whole section.
     expand_to_parent_enabled: bool = False
     parent_max_chars: int = 12000
-    chunk_max_chars: int = 4000
+    chunk_max_chars: int = DEFAULT_CHUNK_MAX_CHARS
     chunk_overlap_chars: int = 200
     context_window: int = 1
     embedding_tokenizer: str = ""
@@ -405,7 +406,9 @@ def _public(cfg: dict) -> dict:
         "auto_questions_n": _clamp_aux(cfg.get("auto_questions_n", 0)),
         "expand_to_parent_enabled": bool(cfg.get("expand_to_parent_enabled", False)),
         "parent_max_chars": max(0, min(int(cfg.get("parent_max_chars") or 12000), 20000)),
-        "chunk_max_chars": max(1000, min(int(cfg.get("chunk_max_chars", 4000)), 20000)),
+        "chunk_max_chars": max(
+            1000, min(int(cfg.get("chunk_max_chars", DEFAULT_CHUNK_MAX_CHARS)), 20000)
+        ),
         "chunk_overlap_chars": max(0, min(int(cfg.get("chunk_overlap_chars", 200)), 999)),
         "context_window": max(0, min(int(cfg.get("context_window", 1)), 10)),
         "embedding_tokenizer": str(cfg.get("embedding_tokenizer") or ""),

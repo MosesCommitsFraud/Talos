@@ -493,7 +493,7 @@ export function RagSettingsForm({ ragId }: { ragId?: string }) {
               )}
             </RagDisclosure>
             <RagDisclosure title={t('settings.rag.parentTitle')} enabled={!!draft.expand_to_parent_enabled}>
-              {field('chunk_max_chars', t('settings.rag.chunkMaxChars'), { type: 'number', hint: t('settings.rag.hint.chunkMaxChars'), def: 4000 })}
+              {field('chunk_max_chars', t('settings.rag.chunkMaxChars'), { type: 'number', hint: t('settings.rag.hint.chunkMaxChars'), def: 6000 })}
               {field('chunk_overlap_chars', t('settings.rag.chunkOverlapChars'), { type: 'number', hint: t('settings.rag.hint.chunkOverlapChars'), def: 200 })}
               {field('embedding_tokenizer', t('settings.rag.embeddingTokenizer'), { hint: t('settings.rag.hint.embeddingTokenizer'), def: '' })}
               {field('embedding_max_tokens', t('settings.rag.embeddingMaxTokens'), { type: 'number', hint: t('settings.rag.hint.embeddingMaxTokens'), def: 0 })}

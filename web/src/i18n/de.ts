@@ -2069,7 +2069,7 @@ const de: typeof en = {
         captionLanguage: 'Sprache für Bild-/Abbildungsbeschreibungen, z. B. Deutsch. Die Beschreibung ist der einzige durchsuchbare Text einer Abbildung — sie muss in der Sprache verfasst sein, in der gesucht wird. Leer = das Vision-Modell entscheidet (es tendiert zu Englisch). Wirkt nur auf neu indizierte Dateien.',
         expandToParent: 'Optional: präzise auf kleinen Chunks matchen, aber den umgebenden Abschnitt (Geschwister-Chunks) injizieren, damit das Modell genug Kontext hat. Quellenangaben verweisen weiterhin auf den getroffenen Chunk. Standardmäßig aus; wirkt für unter diesem Build neu indexierte Dokumente.',
         parentMaxChars: 'Budget für Treffer und Nachbarn. Ist es kleiner als der Treffer, bleibt der Treffer vollständig und die Erweiterung entfällt.',
-        chunkMaxChars: 'Gemeinsame Obergrenze für Dokumenttext, standardmäßig 4.000 Zeichen. Kapitelgrenzen bleiben erhalten. Änderungen erfordern erneutes Indexieren.',
+        chunkMaxChars: 'Gemeinsame Obergrenze für Dokumenttext, standardmäßig 6.000 Zeichen. Kapitelgrenzen bleiben erhalten. Änderungen erfordern erneutes Indexieren.',
         chunkOverlapChars: 'Überlappung nur innerhalb desselben Abschnitts. Standard: 200 Zeichen. Änderungen erfordern erneutes Indexieren.',
         contextWindow: 'Direkte Nachbarn desselben Abschnitts ergänzen; der gefundene Teil bleibt erhalten. 0 deaktiviert das Nachladen. Keine automatische Aufwertung anderer Kapitel.',
         embeddingTokenizer: 'Hugging-Face-Modell-ID oder lokaler Tokenizer-Pfad, passend zum Embedding-Modell. Ohne Tokenizer ist nur das Zeichenlimit aktiv. Beim ersten Laden kann ein Download erforderlich sein.',

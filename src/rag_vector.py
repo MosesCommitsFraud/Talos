@@ -805,11 +805,13 @@ def _max_chunk_chars() -> int:
     Markdown document.  Such a chunk may fit an embedding model's token window
     while still being far too broad for useful retrieval.
     """
+    from src.rag_structure import DEFAULT_CHUNK_MAX_CHARS
+
     try:
-        value = int(os.getenv("RAG_MAX_CHUNK_CHARS", "4000") or 4000)
+        value = int(os.getenv("RAG_MAX_CHUNK_CHARS") or DEFAULT_CHUNK_MAX_CHARS)
         return max(1000, min(value, 20000))
     except Exception:
-        return 4000
+        return DEFAULT_CHUNK_MAX_CHARS
 
 
 def _bounded_text_parts(text: str, limit: int) -> List[str]:
@@ -1324,7 +1326,11 @@ def _apply_saved_rag_config(cfg: Optional[Dict[str, Any]] = None) -> None:
     os.environ["RAG_AUTO_QUESTIONS_N"] = str(int(cfg.get("auto_questions_n") or 0))
     os.environ["EXPAND_TO_PARENT_ENABLED"] = "true" if cfg.get("expand_to_parent_enabled") else ""
     os.environ["RAG_PARENT_MAX_CHARS"] = str(int(cfg.get("parent_max_chars") or 0))
-    os.environ["RAG_MAX_CHUNK_CHARS"] = str(int(cfg.get("chunk_max_chars") or 4000))
+    from src.rag_structure import DEFAULT_CHUNK_MAX_CHARS
+
+    os.environ["RAG_MAX_CHUNK_CHARS"] = str(
+        int(cfg.get("chunk_max_chars") or DEFAULT_CHUNK_MAX_CHARS)
+    )
     os.environ["RAG_CHUNK_OVERLAP_CHARS"] = str(int(cfg.get("chunk_overlap_chars", 200)))
     os.environ["RAG_CONTEXT_WINDOW"] = str(int(cfg.get("context_window", 1)))
     os.environ["RAG_EMBEDDING_TOKENIZER"] = str(cfg.get("embedding_tokenizer") or "")
@@ -2137,6 +2143,16 @@ class VectorRAG:
                 else {}
             )
             resp = httpx.post(url, json=payload, headers=headers, timeout=20)
+            if resp.status_code == 400:
+                # A single document over the model's window fails the whole batch.
+                # Scoring its start beats losing the reranking of every candidate;
+                # vLLM truncates on request, an endpoint that can't still answers 4xx.
+                resp = httpx.post(
+                    url,
+                    json={**payload, "truncate_prompt_tokens": -1},
+                    headers=headers,
+                    timeout=20,
+                )
             resp.raise_for_status()
             data = resp.json()
             raw = data.get("results") or data.get("data") or []
@@ -2582,11 +2598,14 @@ class VectorRAG:
     def _derive_fingerprint(self, meta: Dict[str, Any]) -> Dict[str, Any]:
         """Everything after extraction that changes what gets stored/embedded."""
         from src import rag_documents as rd
+        from src.rag_structure import DEFAULT_CHUNK_MAX_CHARS
 
         redact = meta.get("redact_pii")
         return {
             "v": rd.DERIVE_VERSION,
-            "chunk": self._conf_int("chunk_max_chars", "RAG_MAX_CHUNK_CHARS", 4000),
+            "chunk": self._conf_int(
+                "chunk_max_chars", "RAG_MAX_CHUNK_CHARS", DEFAULT_CHUNK_MAX_CHARS
+            ),
             "overlap": self._conf_int("chunk_overlap_chars", "RAG_CHUNK_OVERLAP_CHARS", 200),
             "embed": self._conf("embedding_model", "EMBEDDING_MODEL"),
             "sparse": getattr(self, "_sparse_model", _DEFAULT_SPARSE_MODEL),
@@ -3467,10 +3486,14 @@ class VectorRAG:
 
     def _split_extracted_documents(self, docs):
         """The one chunker for every lane, preserving metadata and figure assets."""
-        from src.rag_structure import split_documents
+        from src.rag_structure import DEFAULT_CHUNK_MAX_CHARS, split_documents
 
         limit = max(
-            1000, min(20000, self._conf_int("chunk_max_chars", "RAG_MAX_CHUNK_CHARS", 4000))
+            1000,
+            min(
+                20000,
+                self._conf_int("chunk_max_chars", "RAG_MAX_CHUNK_CHARS", DEFAULT_CHUNK_MAX_CHARS),
+            ),
         )
         overlap = max(
             0, min(limit - 1, self._conf_int("chunk_overlap_chars", "RAG_CHUNK_OVERLAP_CHARS", 200))

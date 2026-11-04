@@ -150,8 +150,8 @@ RAG is driven entirely by environment variables (see `.env.example`):
 
 Every lane reduces a file to sections, and one chunker (`rag_structure.split_documents`)
 cuts them, so a chapter is cut alike whether it came from Docling's JSON, from Markdown,
-a VLM transcript or MarkItDown. The default maximum is 4,000 characters including
-overlap (default 200).
+a VLM transcript or MarkItDown. The default maximum is 6,000 characters including
+overlap (default 200). Settings saved earlier keep the value they were saved with.
 
 - **Sections are the boundaries.** Headings start a section. A chapter title with no
   text of its own opens the section after it instead of becoming a chunk of its own;
@@ -179,7 +179,7 @@ Per-base pipeline settings override environment fallbacks:
 
 | Setting | Environment fallback | Default |
 |---------|----------------------|---------|
-| `chunk_max_chars` | `RAG_MAX_CHUNK_CHARS` | 4000 |
+| `chunk_max_chars` | `RAG_MAX_CHUNK_CHARS` | 6000 |
 | `chunk_overlap_chars` | `RAG_CHUNK_OVERLAP_CHARS` | 200 |
 | `context_window` | `RAG_CONTEXT_WINDOW` | 1 |
 | `parent_max_chars` | `RAG_PARENT_MAX_CHARS` | 12000 |
@@ -193,6 +193,10 @@ tokens, and splits further if needed. A finite tokenizer limit is respected even
 when the configured limit is larger. Without a finite tokenizer limit, set an
 explicit maximum. Metadata that alone exhausts the budget produces an error.
 The character limit alone does not guarantee compatibility with every model.
+Rerankers often have smaller windows than embedders. When one document exceeds the
+window and the endpoint answers 400, the batch is retried with
+`truncate_prompt_tokens`, so that document is scored by its start and the others
+keep their reranking. An endpoint that cannot truncate falls back to hybrid order.
 
 When expansion is enabled, Haystack's SentenceWindowRetriever adds nearby pieces
 of the same section after retrieval. It does not boost unrelated adjacent chapters.

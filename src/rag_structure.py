@@ -17,6 +17,9 @@ from copy import deepcopy
 from dataclasses import is_dataclass, replace
 
 CHUNKING_VERSION = "haystack-sections-v3"
+# Most chapters of a typical manual fit whole, and ordinary prose stays well inside
+# embedding windows (about 1,700 tokens at 6,000 characters of German).
+DEFAULT_CHUNK_MAX_CHARS = 6000
 
 # Docling reads PDFs without a heading hierarchy, so a numbered title is the only
 # level the text itself still carries ("2.1 Kosten" sits below "2 Planung").
@@ -349,7 +352,7 @@ def _overlap_start(text, cut, overlap, sentences):
     return low + space.end() if space and low + space.end() < cut else low
 
 
-def split_documents(documents, max_chars=4000, overlap=200):
+def split_documents(documents, max_chars=DEFAULT_CHUNK_MAX_CHARS, overlap=200):
     """Normalize every lane to sections and chunk those the same way.
 
     Sections are the boundaries. PDF pages are only provenance: a chapter runs
