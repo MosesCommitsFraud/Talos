@@ -10,7 +10,7 @@ function chapterBlock(scroller: HTMLElement, dbId: string) {
   return scroller.querySelector<HTMLElement>(`[data-chapter="${CSS.escape(dbId)}"]`);
 }
 
-/** The chapters of a chat as small dashes at its right edge. Hovering opens the
+/** The chapters of a chat as small dashes at its left edge. Hovering opens the
  *  list with their titles, and a click jumps to the message. The list starts with
  *  the start of the chat, so the way back to the top is always there too. */
 export function ChapterRail({
@@ -63,9 +63,9 @@ export function ChapterRail({
   return (
     <nav
       aria-label={t('messages.chapters')}
-      className="group/rail absolute top-1/2 right-3 z-20 -translate-y-1/2"
+      className="group/rail absolute top-1/2 left-3 z-20 -translate-y-1/2"
     >
-      <div aria-hidden className="flex flex-col items-end gap-1.5 py-2 ps-2">
+      <div aria-hidden className="flex flex-col items-start gap-1.5 py-2 pe-2">
         {entries.map((entry, index) => (
           <button
             key={entry.dbId ?? 'start'}
@@ -85,7 +85,7 @@ export function ChapterRail({
       </div>
       {/* Opacity, not visibility: the list's buttons stay reachable by keyboard,
           and focus inside it opens it the same way hovering does. */}
-      <div className="pointer-events-none absolute top-1/2 right-full -translate-y-1/2 pe-1 opacity-0 transition-opacity group-focus-within/rail:pointer-events-auto group-focus-within/rail:opacity-100 group-hover/rail:pointer-events-auto group-hover/rail:opacity-100">
+      <div className="pointer-events-none absolute top-1/2 left-full -translate-y-1/2 ps-1 opacity-0 transition-opacity group-focus-within/rail:pointer-events-auto group-focus-within/rail:opacity-100 group-hover/rail:pointer-events-auto group-hover/rail:opacity-100">
         <div className="dropdown-glass max-h-[60vh] w-max max-w-72 overflow-y-auto rounded-xl p-1.5">
           {entries.map((entry, index) => (
             <button
