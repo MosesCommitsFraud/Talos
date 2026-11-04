@@ -67,10 +67,11 @@ refuses new documents, and is the only state in which it can be deleted.
 database that has documents, using each one's top-k, candidates, thresholds, context
 budget and section expansion. With several databases the budget is shared and each
 passage names its database, which is what the model passes to `query_sql`. A new mini
-RAG starts with a wider top-k (12), a context budget of 16000 characters and no rerank
-floor, as ordinary overrides visible in its settings: schema files chunk into many
-small pieces, and a German question about English table names scores low without
-being irrelevant. Chat's lexical gate doesn't apply, for the same reason. "Insert
+RAG starts with a wider top-k (12), a context budget of 16000 characters, hits that
+bring their neighbours along, and no rerank floor, as ordinary overrides visible in
+its settings: schema files chunk into many small pieces, a chunk alone often lacks
+the heading or sentence that explains it, and a German question about English table
+names scores low without being irrelevant. Chat's lexical gate doesn't apply, for the same reason. "Insert
 knowledge automatically" and the query rewrite are chat options and have no effect
 here.
 

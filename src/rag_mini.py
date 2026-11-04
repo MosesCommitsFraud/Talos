@@ -43,15 +43,18 @@ logger = logging.getLogger(__name__)
 ENV_CONNECTION_ID = "env"
 
 # Where a new mini RAG starts. Its reference material is only ever looked at to
-# navigate a database, so it differs from a corpus in two ways. Schema files chunk
+# navigate a database, so it differs from a corpus in three ways. Schema files chunk
 # into many small pieces (one table per chunk is typical) and a question touches
-# several, hence the wider top-k. And a question in German about tables named in
-# English reranks low without being irrelevant, hence no rerank floor. These are
-# ordinary overrides: the base's settings show them and can change them.
+# several, hence the wider top-k. A chunk alone often lacks what explains it, the
+# heading or the sentence next to a table, hence a hit brings its neighbours. And a
+# question in German about tables named in English reranks low without being
+# irrelevant, hence no rerank floor. These are ordinary overrides: the base's
+# settings show them and can change them.
 SEED_OVERRIDES: Dict[str, Any] = {
     "chat_top_k": 12,
     "max_context_chars": 16000,
     "rerank_min_score": 0.0,
+    "expand_to_parent_enabled": True,
 }
 
 SECTION_SEPARATOR = "\n\n---\n\n"
@@ -237,7 +240,7 @@ def retrieve_sections(query: str) -> List[str]:
     ``query_sql``.
     """
     from src.rag_singleton import get_rag_manager
-    from src.rag_structure import context_location
+    from src.rag_structure import budget_context, context_location
 
     targets = search_targets()
     if not targets:
@@ -259,17 +262,32 @@ def retrieve_sections(query: str) -> List[str]:
         )
         budget = min(share, _int(cfg, "max_context_chars", share))
         left = budget
+        # Neighbouring hits share chunks once they bring their surroundings along.
+        # Same handling as chat: each chunk is sent once, and a hit's neighbours
+        # shrink to fit before the hit itself is given up.
+        seen: set = set()
+
+        def _section(hit: Dict[str, Any], label: str, body: str) -> str:
+            return "\n".join(part for part in (label, context_location(hit), body) if part)
+
         for hit in _relevant(results or [], cfg):
             filename = (hit.get("metadata") or {}).get("filename") or "doc"
             label = f"[{name}: {filename}]" if named and name else f"[{filename}]"
-            location = context_location(hit)
+            expandable = bool(hit.get("_context_documents") or hit.get("expanded"))
             body = hit.get("expanded") or hit.get("document") or ""
-            section = "\n".join(part for part in (label, location, body) if part)
+            if expandable:
+                overhead = len(_section(hit, label, body)) - len(body)
+                body = budget_context(hit, max(0, left - overhead), seen)
+                if not body:
+                    continue
+            section = _section(hit, label, body)
             if len(section) > left:
-                # Whole passages only, unless the very first would not fit at all.
-                if left == budget:
+                # Skipped rather than blocking smaller passages behind it. Only the
+                # very first may be cut, so that some context reaches the model.
+                if left == budget and not expandable:
                     sections.append(section[:budget])
-                break
+                    left = 0
+                continue
             sections.append(section)
             left -= len(section) + len(SECTION_SEPARATOR)
     return sections

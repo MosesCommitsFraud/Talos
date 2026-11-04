@@ -329,6 +329,55 @@ def test_the_expanded_section_is_what_gets_injected(conns, rags):
     assert rag_mini.retrieve_sections("q") == ["[schema.md]\nthe whole section"]
 
 
+def test_a_new_mini_rag_brings_the_neighbours_of_a_hit(conns):
+    rag_mini.sync()
+    assert rag_config.effective_config(mini_of()["id"])["expand_to_parent_enabled"] is True
+
+
+def _windowed(chunk_id, text, neighbours):
+    """A hit as `expand_context` leaves it, with its surrounding chunks attached."""
+    docs = [
+        {"id": i, "document": t, "metadata": {"split_id": n}} for n, (i, t) in enumerate(neighbours)
+    ]
+    return {
+        **hit(text),
+        "id": chunk_id,
+        "expanded": "\n\n".join(t for _, t in neighbours),
+        "_context_documents": docs,
+        "metadata": {"filename": "schema.md", "split_id": 1},
+    }
+
+
+def test_neighbouring_hits_do_not_send_the_same_chunks_twice(conns, rags):
+    rag_mini.sync()
+    window = [("c1", "heading"), ("c2", "orders table"), ("c3", "customers table")]
+    _filled(
+        rags,
+        results=[
+            _windowed("c2", "orders table", window),
+            _windowed("c3", "customers table", window),
+        ],
+    )
+    assert rag_mini.retrieve_sections("q") == [
+        "[schema.md]\nheading\n\norders table\n\ncustomers table"
+    ]
+
+
+def test_neighbours_shrink_before_a_hit_is_given_up(conns, rags):
+    rag_mini.sync()
+    rag_config.set_overrides(mini_of()["id"], {"max_context_chars": 100})
+    window = [("c1", "x" * 200), ("c2", "orders table")]
+    _filled(rags, results=[_windowed("c2", "orders table", window)])
+    assert rag_mini.retrieve_sections("q") == ["[schema.md]\norders table"]
+
+
+def test_an_oversized_passage_does_not_block_a_smaller_one_behind_it(conns, rags):
+    rag_mini.sync()
+    rag_config.set_overrides(mini_of()["id"], {"max_context_chars": 100})
+    _filled(rags, results=[hit("short"), hit("y" * 500), hit("also short")])
+    assert rag_mini.retrieve_sections("q") == ["[schema.md]\nshort", "[schema.md]\nalso short"]
+
+
 def test_a_disabled_database_and_an_empty_mini_rag_are_not_searched(conns, rags):
     conns.append({"id": "off", "name": "Off", "enabled": False})
     conns.append({"id": "empty", "name": "Empty", "enabled": True})
