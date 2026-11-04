@@ -32,11 +32,12 @@ const MAX_INPUT_HEIGHT = 220;
 
 /** Plate size for the controls pinned inside the input box. The row's padding
  *  makes up the difference to the shorter text line, so a plate and the last
- *  line of text share one centre. */
-const INLINE_CONTROL = 'size-[1.625rem]';
+ *  line of text share one centre. The small radius keeps the hover plate a
+ *  square: at this size `rounded-lg` reads as a circle. */
+const INLINE_CONTROL = 'size-[1.625rem] rounded-[7px]';
 
 /** One icon control inside the box: bright glyph, plate only on hover. */
-const CONTROL = `flex shrink-0 cursor-pointer items-center justify-center rounded-lg transition-colors active:scale-95 [&_svg]:size-[18px] [&_svg]:stroke-[2.25] ${INLINE_CONTROL}`;
+const CONTROL = `flex shrink-0 cursor-pointer items-center justify-center transition-colors active:scale-95 [&_svg]:size-[18px] [&_svg]:stroke-[2.25] ${INLINE_CONTROL}`;
 
 /** Gap the text keeps from the controls pinned inside the box. */
 const CONTROL_GAP = 8;
