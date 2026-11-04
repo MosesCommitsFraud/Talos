@@ -146,6 +146,11 @@ interface PrefsState {
   sectionSort: Record<string, SortMode>;
   /** Chats whose forks are folded away in the sidebar. */
   collapsedForks: string[];
+  /** What the chat list's filter menu chose. */
+  listGroup: ListGroup;
+  showForks: boolean;
+  showEmptySections: boolean;
+  unreadOnly: boolean;
   /** Width (px) of the right-hand dock (file preview and/or task list). */
   previewWidth: number;
   /** Relative heights of the dock's panes when several are open (flex-grow
@@ -176,10 +181,17 @@ interface PrefsState {
   toggleSectionCollapsed: (name: string) => void;
   setSectionSort: (name: string, mode: SortMode) => void;
   toggleForksCollapsed: (sessionId: string) => void;
+  setListOptions: (options: Partial<Pick<PrefsState, 'listGroup' | 'showForks' | 'showEmptySections' | 'unreadOnly'>>) => void;
+  /** Back to the list as it starts out: every filter off, default sort orders. */
+  resetListOptions: () => void;
+  /** Unfold and unfilter so that every chat is on screen. Sort orders stay. */
+  revealAllChats: () => void;
   setPreviewWidth: (px: number) => void;
   setDockSizes: (sizes: DockSizes) => void;
   setArtifactsView: (v: 'list' | 'grid') => void;
 }
+
+export type ListGroup = 'section' | 'none';
 
 export type DockPane = 'preview' | 'tasks' | 'metrics';
 export type DockSizes = Record<DockPane, number>;
@@ -211,6 +223,10 @@ export const usePrefs = create<PrefsState>()(
       collapsedSections: [],
       sectionSort: {},
       collapsedForks: [],
+      listGroup: 'section',
+      showForks: true,
+      showEmptySections: true,
+      unreadOnly: false,
       previewWidth: 480,
       dockSizes: DEFAULT_DOCK_SIZES,
       artifactsView: 'list',
@@ -294,6 +310,16 @@ export const usePrefs = create<PrefsState>()(
           ? s.collapsedForks.filter((id) => id !== sessionId)
           : [...s.collapsedForks, sessionId],
       })),
+      setListOptions: (options) => set(options),
+      resetListOptions: () => set({
+        sortMode: 'active',
+        sectionSort: {},
+        listGroup: 'section',
+        showForks: true,
+        showEmptySections: true,
+        unreadOnly: false,
+      }),
+      revealAllChats: () => set({ collapsedSections: [], collapsedForks: [], showForks: true, unreadOnly: false }),
       setPreviewWidth: (previewWidth) => set({ previewWidth }),
       setDockSizes: (dockSizes) => set({ dockSizes }),
       setArtifactsView: (artifactsView) => set({ artifactsView }),

@@ -4,13 +4,11 @@ import {
   ArrowLeftIcon,
   BriefcaseIcon,
   BugIcon,
-  CheckIcon,
   ChevronDownIcon,
   EllipsisIcon,
   FolderIcon,
   FolderMinusIcon,
   HelpCircleIcon,
-  ListFilterIcon,
   LogOutIcon,
   MessageSquareIcon,
   PanelLeftIcon,
@@ -47,6 +45,7 @@ import { Skeleton, Tooltip } from './ui/misc';
 import { KeybindingPill } from './ui/kbd';
 import { matchesBinding, useKeybinds } from '@/lib/keybinds';
 import { BrandImage } from './BrandImage';
+import { ListOptionsMenu } from './ListOptionsMenu';
 import { runSessionShortcut, SessionMenuPopup, type SessionMenuActions } from './SessionMenu';
 import { toast } from './ui/toast';
 import {
@@ -67,57 +66,12 @@ import {
  *  for users with hundreds of chats while the common case needs no click. */
 const CHAT_PAGE = 30;
 
-const SORT_KEYS: Record<SortMode, string> = {
-  active: 'sidebar.sortActive',
-  newest: 'sidebar.sortNewest',
-  name: 'sidebar.sortName',
-};
-
 function compareSessions(mode: SortMode) {
   return (a: Session, b: Session) => {
     if (mode === 'newest') return timestampMs(b.created_at) - timestampMs(a.created_at);
     if (mode === 'name') return (a.name || '').localeCompare(b.name || '');
     return timestampMs(b.last_message_at ?? b.updated_at) - timestampMs(a.last_message_at ?? a.updated_at);
   };
-}
-
-/** The filter icon that picks a list's sort order. */
-function SortMenu({
-  mode,
-  onChange,
-  className,
-}: {
-  mode: SortMode;
-  onChange: (mode: SortMode) => void;
-  className?: string;
-}) {
-  const { t } = useTranslation();
-  return (
-    <Menu>
-      <Tooltip label={t('sidebar.sortLabel', { mode: t(SORT_KEYS[mode]) })}>
-        <MenuTrigger asChild>
-          <button
-            type="button"
-            aria-label={t('sidebar.sortChats')}
-            className={cn(
-              'flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-foreground',
-              className,
-            )}
-          >
-            <ListFilterIcon className="size-3.5" />
-          </button>
-        </MenuTrigger>
-      </Tooltip>
-      <MenuPopup align="start">
-        {(Object.keys(SORT_KEYS) as SortMode[]).map((option) => (
-          <MenuItem key={option} onSelect={() => onChange(option)}>
-            <CheckIcon className={option === mode ? '' : 'invisible'} />
-            {t(SORT_KEYS[option])}
-          </MenuItem>
-        ))}
-      </MenuPopup>
-    </Menu>
-  );
 }
 
 function isTypingTarget(element: Element | null) {
@@ -586,11 +540,12 @@ function ChatRows({
   limit?: number;
 }) {
   const collapsedForks = usePrefs((s) => s.collapsedForks);
+  const showForks = usePrefs((s) => s.showForks);
   const { roots, forks } = nestForks(list);
   return (
     <>
       {roots.slice(0, limit).map((root) => {
-        const nested = forks.get(root.id) ?? [];
+        const nested = showForks ? forks.get(root.id) ?? [] : [];
         return (
           <div key={root.id}>
             <SessionRow session={root} projects={projects} sections={sections} hasForks={nested.length > 0} />
@@ -617,7 +572,17 @@ function ChatRows({
  *  for a new chat inside it. Renamed or removed from its context menu. Like a project it has no row of its own on the
  *  server — it is a label on its chats plus an entry in prefs, so both operations
  *  are a batch update of its members. */
-function SectionHeader({ name, members, sortMode }: { name: string; members: Session[]; sortMode: SortMode }) {
+function SectionHeader({
+  name,
+  members,
+  sortMode,
+  listMenu,
+}: {
+  name: string;
+  members: Session[];
+  sortMode: SortMode;
+  listMenu: Omit<React.ComponentProps<typeof ListOptionsMenu>, 'sortMode' | 'onSortChange' | 'className'>;
+}) {
   const { t } = useTranslation();
   const collapsed = usePrefs((s) => s.collapsedSections.includes(name));
   const toggle = usePrefs((s) => s.toggleSectionCollapsed);
@@ -681,9 +646,10 @@ function SectionHeader({ name, members, sortMode }: { name: string; members: Ses
             <span className="ms-1.5 shrink-0 text-[11px] tabular-nums text-muted-foreground">{members.length}</span>
           )}
           <div className="ms-auto -me-1.5 flex shrink-0 items-center">
-            <SortMenu
-              mode={sortMode}
-              onChange={(mode) => setSectionSort(name, mode)}
+            <ListOptionsMenu
+              {...listMenu}
+              sortMode={sortMode}
+              onSortChange={(mode) => setSectionSort(name, mode)}
               className="text-foreground/80"
             />
             <Tooltip label={t('sidebar.newChat')}>
@@ -972,6 +938,20 @@ function SidebarBody({ onOpenPalette, account, onOpenTicketDialog, preview }: Si
   const storedSections = usePrefs((s) => s.sections);
   const collapsedSections = usePrefs((s) => s.collapsedSections);
   const sectionSort = usePrefs((s) => s.sectionSort);
+  const collapsedForks = usePrefs((s) => s.collapsedForks);
+  const listGroup = usePrefs((s) => s.listGroup);
+  const showForks = usePrefs((s) => s.showForks);
+  const showEmptySections = usePrefs((s) => s.showEmptySections);
+  const unreadOnly = usePrefs((s) => s.unreadOnly);
+  const setListOptions = usePrefs((s) => s.setListOptions);
+  const addSection = usePrefs((s) => s.addSection);
+  const revealAllChats = usePrefs((s) => s.revealAllChats);
+  // Chats with a dot on them. Read as narrowly as this because the sidebar must
+  // not re-render on every streamed token of a running chat.
+  const completed = useChat((s) => s.completed);
+  const awaitingIds = useChat((s) =>
+    Object.entries(s.runtimes).filter(([, rt]) => rt.awaitingInput).map(([id]) => id).join(' '),
+  );
   const toggleSidebar = usePrefs((s) => s.toggleSidebar);
   const keybinds = useKeybinds();
 
@@ -988,28 +968,55 @@ function SidebarBody({ onOpenPalette, account, onOpenTicketDialog, preview }: Si
   ].sort((a, b) => a.localeCompare(b));
   // An open project narrows the list to its chats; otherwise the list is the
   // loose chats, with pinned ones floated into their own section on top.
-  const inProject = openProject !== null ? active.filter((s) => s.folder === openProject) : [];
-  const loose = active.filter((s) => !s.folder);
+  const awaiting = awaitingIds.split(' ');
+  const shown = unreadOnly
+    ? active.filter((s) => s.unread || completed[s.id] || awaiting.includes(s.id))
+    : active;
+  const inProject = openProject !== null ? shown.filter((s) => s.folder === openProject) : [];
+  const loose = shown.filter((s) => !s.folder);
   const pinned = openProject === null ? loose.filter((s) => s.is_important).sort(sorter) : [];
   const listed = openProject === null ? loose.filter((s) => !s.is_important).sort(sorter) : inProject.slice().sort(sorter);
   // Sections are the union of the labels chats carry and the ones created here
   // but still empty — the same rule as projects. Every one is offered in the
   // menu; the list itself shows empty ones outside a project only, where they
-  // were created, rather than repeating them inside every project.
+  // were created, rather than repeating them inside every project. An unread
+  // filter leaves out the empty ones too: it is a list of what needs reading.
   const sectionNames = [
     ...new Set([
       ...active.map((s) => s.section).filter((n): n is string => !!n),
       ...storedSections,
     ]),
   ].sort((a, b) => a.localeCompare(b));
-  const listedSections = sectionNames.filter(
-    (name) => openProject === null || listed.some((s) => s.section === name),
-  );
-  const rows = listed.filter((s) => !s.section);
+  const grouped = listGroup === 'section';
+  const listedSections = grouped
+    ? sectionNames.filter(
+        (name) =>
+          listed.some((s) => s.section === name)
+          || (openProject === null && showEmptySections && !unreadOnly),
+      )
+    : [];
+  const rows = grouped ? listed.filter((s) => !s.section) : listed;
+  const [creatingSection, setCreatingSection] = useState(false);
   const [visibleCount, setVisibleCount] = useState(CHAT_PAGE);
   // A different list (project / sort order) starts collapsed again.
   useEffect(() => setVisibleCount(CHAT_PAGE), [openProject, sortMode]);
   const hiddenCount = Math.max(0, nestForks(rows).roots.length - visibleCount);
+  const listMenu = {
+    onNewSection: () => setCreatingSection(true),
+    onViewAll: () => {
+      revealAllChats();
+      setVisibleCount(Infinity);
+    },
+    canViewAll:
+      hiddenCount > 0 || collapsedSections.length > 0 || collapsedForks.length > 0 || !showForks || unreadOnly,
+  };
+  const commitNewSection = (name: string) => {
+    setCreatingSection(false);
+    if (!name) return;
+    addSection(name);
+    // A section just created has to be on screen, whatever the list was set to.
+    setListOptions({ listGroup: 'section', showEmptySections: true });
+  };
   const accountLabel = auth?.display_name || auth?.username;
   const initial = (accountLabel ?? 'U').slice(0, 1).toUpperCase();
 
@@ -1104,6 +1111,18 @@ function SidebarBody({ onOpenPalette, account, onOpenTicketDialog, preview }: Si
           rise above the film grain on body::after and show as a differently
           colored band. */}
       <div className="isolate mt-3 min-h-0 flex-1 overflow-y-auto px-2">
+        {creatingSection && (
+          <input
+            autoFocus
+            placeholder={t('sidebar.sectionPlaceholder')}
+            onBlur={(e) => commitNewSection(e.target.value.trim())}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') commitNewSection(e.currentTarget.value.trim());
+              if (e.key === 'Escape') setCreatingSection(false);
+            }}
+            className="mb-3 h-7 w-full rounded-md border border-ring bg-transparent px-2 text-xs font-medium outline-none"
+          />
+        )}
         {pinned.length > 0 && (
           <div className="mb-3">
             <div className={LIST_HEADER_CLASS}>
@@ -1120,7 +1139,7 @@ function SidebarBody({ onOpenPalette, account, onOpenTicketDialog, preview }: Si
           const members = listed.filter((s) => s.section === name).sort(compareSessions(mode));
           return (
             <div key={name} className="mb-3">
-              <SectionHeader name={name} members={members} sortMode={mode} />
+              <SectionHeader name={name} members={members} sortMode={mode} listMenu={listMenu} />
               {!collapsedSections.includes(name) && (
                 <ChatRows list={members} projects={projectNames} sections={sectionNames} />
               )}
@@ -1138,12 +1157,14 @@ function SidebarBody({ onOpenPalette, account, onOpenTicketDialog, preview }: Si
                 <ArrowLeftIcon className="size-3 shrink-0" />
                 <span className="truncate">{openProject}</span>
               </button>
-              <SortMenu mode={sortMode} onChange={setSortMode} className="-mr-1.5" />
+              <ListOptionsMenu {...listMenu} sortMode={sortMode} onSortChange={setSortMode} className="-mr-1.5" />
             </div>
-          ) : (rows.length > 0 || (pinned.length === 0 && listedSections.length === 0)) && (
+          ) : (rows.length > 0 || listedSections.length === 0) && (
+            // Without a section on screen this is the only way to the filter
+            // menu, so it stays even when a filter has emptied the list below.
             <div className={cn(LIST_HEADER_CLASS, 'justify-between')}>
               <span className="text-xs font-medium text-muted-foreground">{t('sidebar.chats')}</span>
-              <SortMenu mode={sortMode} onChange={setSortMode} className="-mr-1.5" />
+              <ListOptionsMenu {...listMenu} sortMode={sortMode} onSortChange={setSortMode} className="-mr-1.5" />
             </div>
           )}
           <ChatRows list={rows} projects={projectNames} sections={sectionNames} limit={visibleCount} />
@@ -1160,7 +1181,7 @@ function SidebarBody({ onOpenPalette, account, onOpenTicketDialog, preview }: Si
           {listed.length === 0 && listedSections.length === 0 && pinned.length === 0 && (
             <div className="flex flex-col items-center gap-1.5 px-2 py-6 text-center text-xs text-muted-foreground">
               <MessageSquareIcon className="size-4 opacity-60" />
-              {t('sidebar.noChats')}
+              {t(unreadOnly ? 'sidebar.noUnreadChats' : 'sidebar.noChats')}
             </div>
           )}
         </div>

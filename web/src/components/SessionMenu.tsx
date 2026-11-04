@@ -39,11 +39,11 @@ const PARTS = {
   },
 };
 
-const POPUP_CLASS = 'w-56 rounded-xl p-1.5';
-const SUB_POPUP_CLASS = 'max-h-60 w-max min-w-32 max-w-56 overflow-y-auto rounded-lg p-1';
-const ITEM_CLASS = 'min-h-[30px] rounded-lg px-2.5 text-sm sm:min-h-[30px]';
-const SUB_ITEM_CLASS = 'min-h-[26px] gap-3 rounded-md px-2 text-[13px] sm:min-h-[26px] sm:text-[13px]';
-const SEPARATOR_CLASS = 'my-1.5';
+export const POPUP_CLASS = 'w-56 rounded-xl p-1.5';
+export const SUB_POPUP_CLASS = 'max-h-60 w-max min-w-32 max-w-56 overflow-y-auto rounded-lg p-1';
+export const ITEM_CLASS = 'min-h-[30px] rounded-lg px-2.5 text-sm sm:min-h-[30px]';
+export const SUB_ITEM_CLASS = 'min-h-[26px] gap-3 rounded-md px-2 text-[13px] sm:min-h-[26px] sm:text-[13px]';
+export const SEPARATOR_CLASS = 'my-1.5';
 const SUB_SEPARATOR_CLASS = 'my-1';
 
 /** Pressing an item's key while its menu is open runs that item. Radix closes
