@@ -137,6 +137,29 @@ During chat, retrieval is exposed two ways:
 - Directly via `routes/rag_routes.py` for explicit "search my documents" UI actions; the
   `RagSources` component (`web/src/components/RagSources.tsx`) renders the cited passages.
 
+Within a turn, a few rules keep lookups from running in circles:
+
+- **An empty search says why.** `ChatProcessor.last_miss` tells a failed search
+  (`engine_error`) from passages below the relevance bar (`below_threshold`) and an empty
+  index (`no_candidates`). Only a real miss lets the model say that nothing is stored. The
+  key terms are then looked up literally on the server, and the hits go into the tool result.
+- **Each passage comes once.** A chunk this conversation already holds this turn comes back
+  as its citation number instead of its text. Compaction and trimming reset this, and a
+  subagent keeps its own record because it doesn't share its parent's messages.
+- **Lookups stop when they stop helping.** After three rounds without a new passage or text
+  (`src/knowledge_progress.py`), the model must answer from what it has. This catches
+  reworded searches, which the loop-breaker for identical calls can't see.
+- **Two checks can judge the result** (`src/rag_gates.py`), set with `sufficiency_gate` and
+  `grounding_gate`. `sufficiency_gate` asks whether the passages cover the question,
+  `grounding_gate` whether the answer says more than its sources. `off` skips the check,
+  `shadow` (the default) judges in the background and only records the verdict, and `on`
+  waits for it: the model hears what is missing, the reader gets a note below the answer.
+  `GET /api/rag/gate-verdicts` lists the latest verdicts. Both use the utility model.
+
+`grep_knowledge` treats spelling variants as the same term (`src/rag_term_match.py`): "Strg+M"
+finds "Strg + M", "Uebersetzen" finds "Übersetzen". If the phrase occurs nowhere, it falls back
+to chunks holding all its words and says so.
+
 ## Configuration
 
 RAG is driven entirely by environment variables (see `.env.example`):
@@ -331,7 +354,8 @@ Mean context lengths were 4000, 1250 and 7273 characters respectively. This is a
 structural smoke check, not a historical Talos benchmark or production quality claim;
 neighbors increase context cost without improving this fixture's evidence coverage.
 Use `scripts/rag_eval.py` against a representative deployed corpus before changing
-retrieval defaults. Real PDF/OCR service validation and production reindexing remain
+retrieval defaults. `scripts/rag_e2e.py` runs whole turns through the agent loop and reports
+rounds, tool calls, tokens and seconds next to whether the answer was right. Real PDF/OCR service validation and production reindexing remain
 deployment steps; no production index is migrated automatically by these changes.
 
 `VectorRAG.get_stats()` and `src/rag_worker.diagnostics()` surface health, document

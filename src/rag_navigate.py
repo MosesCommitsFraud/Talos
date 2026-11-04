@@ -603,26 +603,30 @@ def grep_knowledge(args: Dict[str, Any], user: Optional[str] = None) -> str:
     pattern = str(args.get("pattern") or args.get("query") or "").strip()
     if not pattern:
         raise NavigationError("Pass the term to look for as `pattern`.")
-    needle = pattern.lower()
+    from src.rag_term_match import term_regex, word_regexes
+
+    term = term_regex(pattern)
     doc = str(args.get("document") or "").strip()
     hits: List[str] = []
     count = 0
+    # Set when the phrase occurs nowhere and these are places holding all its words.
+    all_words = False
+    failures: List[str] = []
     # Where the hits sit, as one overview line: for "everything about X" the
     # model needs the list of sections to read, not just the first 40 snippets.
     summary = ""
     if doc:
         base, manager, row = resolve_document(doc, user=user)
         per_section: List[str] = []
-        for sec in build_sections(_ordered_chunks(manager, row["source"])):
-            low = sec["text"].lower()
-            n_sec = low.count(needle)
-            if n_sec:
-                per_section.append(f"§{sec['n']} {sec['title']} ({n_sec})")
-            pos = low.find(needle)
-            while pos >= 0:
+        sections = build_sections(_ordered_chunks(manager, row["source"]))
+
+        def collect(sec: Dict[str, Any], matches: List[Any], label: str) -> None:
+            nonlocal count
+            per_section.append(f"§{sec['n']} {sec['title']}{label}")
+            for match in matches:
                 count += 1
                 if len(hits) < MAX_GREP_HITS:
-                    s, e = max(0, pos - 100), pos + len(needle) + 140
+                    s, e = max(0, match.start() - 100), match.end() + 140
                     snippet = " ".join(sec["text"][s:e].split())
                     loc = _location(sec)
                     hits.append(
@@ -630,7 +634,17 @@ def grep_knowledge(args: Dict[str, Any], user: Optional[str] = None) -> str:
                         + (f" ({loc})" if loc else "")
                         + f": …{snippet}…"
                     )
-                pos = low.find(needle, pos + len(needle))
+
+        for sec in sections:
+            matches = list(term.finditer(sec["text"]))
+            if matches:
+                collect(sec, matches, f" ({len(matches)})")
+        if not hits:
+            words = word_regexes(pattern)
+            for sec in sections:
+                if words and all(w.search(sec["text"]) for w in words):
+                    all_words = True
+                    collect(sec, [words[0].search(sec["text"])], "")
         where = f" in {row.get('filename')}"
         follow = (
             'Read the sections you need with read_knowledge {"document": ..., "section": "n"} '
@@ -641,8 +655,16 @@ def grep_knowledge(args: Dict[str, Any], user: Optional[str] = None) -> str:
             summary = "Sections with hits: " + ", ".join(per_section) + "\n"
     else:
         per_doc: Dict[str, int] = {}
+        found: List[Dict[str, Any]] = []
         for base, manager in _bases(user):
-            for h in manager.grep_chunks(pattern, limit=500, exclude_scopes=["sql"]) or []:
+            result = manager.grep_chunks(pattern, limit=500, exclude_scopes=["sql"], all_words=True)
+            if getattr(result, "error", ""):
+                failures.append(result.error)
+            found.extend(result or [])
+        exact = [h for h in found if not h.get("all_words")]
+        all_words = bool(found) and not exact
+        for h in exact or found:
+            if h:
                 count += 1
                 name = str(h.get("filename") or "")
                 per_doc[name] = per_doc.get(name, 0) + 1
@@ -669,13 +691,23 @@ def grep_knowledge(args: Dict[str, Any], user: Optional[str] = None) -> str:
             summary = (
                 "Documents with hits: " + ", ".join(f"{n} ({c})" for n, c in per_doc.items()) + "\n"
             )
+    if not hits and failures:
+        return (
+            f"The term lookup failed ({failures[0]}), so this says nothing about whether "
+            f'"{pattern}" is in the knowledge base.'
+        )
     if not hits:
         return (
             f'"{pattern}" does not occur literally{where} in the knowledge base. '
-            "grep is exact; try a shorter stem or a synonym, or use search_knowledge "
-            "for a meaning-based search."
+            "grep finds spellings of a term, not its meaning; try a shorter stem or a synonym, "
+            "or use search_knowledge for a meaning-based search."
         )
     more = f" Showing {len(hits)}." if count > len(hits) else ""
+    if all_words:
+        return (
+            f'No exact occurrence(s) of "{pattern}"{where}, but {count} place(s) hold all of '
+            f"its words, not necessarily together.{more} {follow}\n" + summary + "\n".join(hits)
+        )
     return (
         f'{count} occurrence(s) of "{pattern}"{where}.{more} {follow}\n' + summary + "\n".join(hits)
     )

@@ -1426,6 +1426,47 @@ def _shared_sparse_embedder(kind: str, model: str, language: Optional[str] = Non
 
 # Calls queue on the server, so waiting beats losing the ranking; this only stops
 # a hung reranker from blocking a search forever.
+_GREP_CACHE_TTL_S = 60
+_GREP_CACHE_MAX_CHUNKS = 20000
+
+
+def _grep_fields(doc: Any) -> Tuple[str, str, str, str]:
+    meta = doc.meta or {}
+    source = str(meta.get("source") or meta.get("filename") or "unknown")
+    return (
+        doc.content or "",
+        str(meta.get("context") or ""),
+        str(meta.get("aux_terms") or ""),
+        str(meta.get("filename") or os.path.basename(source)),
+    )
+
+
+def _grep_hit(doc: Any, pattern: Any) -> Optional[Dict[str, Any]]:
+    """One chunk's result row, with the text around the first match; None without one."""
+    for field in _grep_fields(doc):
+        match = pattern.search(field)
+        if not match:
+            continue
+        start = max(0, match.start() - 90)
+        end = match.end() + 130
+        meta = doc.meta or {}
+        source = str(meta.get("source") or meta.get("filename") or "unknown")
+        return {
+            "id": doc.id,
+            "source": source,
+            "filename": str(meta.get("filename") or os.path.basename(source)),
+            "seq": meta.get("seq", 0),
+            "page": meta.get("page"),
+            "modality": meta.get("modality", ""),
+            "snippet": (
+                ("…" if start > 0 else "")
+                + " ".join(field[start:end].split())
+                + ("…" if end < len(field) else "")
+            ),
+        }
+    return None
+
+
 class FailedSearch(list):
     """The empty result of a search that broke, so a caller can tell it from "nothing found"."""
 
@@ -5518,66 +5559,64 @@ class VectorRAG:
         limit: int = 200,
         scope: Optional[str] = None,
         exclude_scopes: Optional[List[str]] = None,
+        all_words: bool = False,
     ) -> List[Dict[str, Any]]:
         """Literal (case-insensitive) keyword scan over every indexed chunk.
 
-        Backs the ``/rag`` explorer's search box. Deliberately *not* a vector
-        search: the explorer is an audit tool, so "does this term exist in the
-        index at all, and in which file" must answer exactly — a term the
-        embedder happens to place far away would silently go missing otherwise.
-        Filename, stored text and the embedded-but-hidden enrichment (context
-        blurb, aux terms) are all matched, since any of them can be the reason a
-        chunk retrieves.
+        Backs the ``/rag`` explorer's search box and ``grep_knowledge``.
+        Deliberately *not* a vector search: the explorer is an audit tool, so
+        "does this term exist in the index at all, and in which file" must answer
+        exactly — a term the embedder happens to place far away would silently go
+        missing otherwise. Filename, stored text and the embedded-but-hidden
+        enrichment (context blurb, aux terms) are all matched, since any of them
+        can be the reason a chunk retrieves. Spelling variants count as the term
+        (see rag_term_match).
+
+        With ``all_words``, when the phrase occurs nowhere, chunks holding all of
+        its words are returned instead, each marked ``all_words``.
         """
-        needle = (query or "").strip().lower()
-        if not self.healthy or not needle:
+        from src.rag_term_match import term_regex, word_regexes
+
+        needle = (query or "").strip()
+        if not needle:
             return []
+        if not self.healthy:
+            return FailedSearch(self._last_error or "the knowledge base is not available")
         try:
-            _filters = self._build_filters(scope=scope, exclude_scopes=exclude_scopes)
-            docs = self._read_documents(filters=_filters) if _filters else self._read_documents()
-            hits: List[Dict[str, Any]] = []
-            for d in docs:
-                meta = dict(d.meta or {})
-                content = d.content or ""
-                source = str(meta.get("source") or meta.get("filename") or "unknown")
-                filename = str(meta.get("filename") or os.path.basename(source))
-                fields = (
-                    content,
-                    str(meta.get("context") or ""),
-                    str(meta.get("aux_terms") or ""),
-                    filename,
-                )
-                pos, matched = -1, ""
-                for field in fields:
-                    pos = field.lower().find(needle)
-                    if pos >= 0:
-                        matched = field
-                        break
-                if pos < 0:
-                    continue
-                start = max(0, pos - 90)
-                end = pos + len(needle) + 130
-                snippet = " ".join(matched[start:end].split())
-                hits.append(
-                    {
-                        "id": d.id,
-                        "source": source,
-                        "filename": filename,
-                        "seq": meta.get("seq", 0),
-                        "page": meta.get("page"),
-                        "modality": meta.get("modality", ""),
-                        "snippet": (
-                            ("…" if start > 0 else "")
-                            + snippet
-                            + ("…" if end < len(matched) else "")
-                        ),
-                    }
-                )
+            docs = self._grep_documents(
+                self._build_filters(scope=scope, exclude_scopes=exclude_scopes)
+            )
+            pattern = term_regex(needle)
+            hits = [h for h in (_grep_hit(d, pattern) for d in docs) if h]
+            words = word_regexes(needle) if all_words and not hits else []
+            if words:
+                for d in docs:
+                    text = "\n".join(_grep_fields(d))
+                    if all(w.search(text) for w in words):
+                        hit = _grep_hit(d, words[0])
+                        if hit:
+                            hits.append({**hit, "all_words": True})
             hits.sort(key=lambda h: (str(h["filename"]).lower(), h.get("seq") or 0))
             return hits[: max(1, int(limit))]
         except Exception as e:
             logger.error(f"grep_chunks failed: {e}")
-            return []
+            return FailedSearch(f"{type(e).__name__}: {e}")
+
+    def _grep_documents(self, filters: Optional[Dict[str, Any]]) -> List[Any]:
+        """The chunks a term lookup scans, kept briefly: one turn often runs several
+        lookups, and reading a whole collection from Qdrant is the slow part. The count
+        check notices writes from the ingest worker, which runs in another process."""
+        cache = self.__dict__.setdefault("_grep_cache", {})
+        key = repr(filters)
+        count = self._store.count_documents()
+        cached = cache.get(key)
+        if cached and cached[1] == count and time.time() - cached[0] < _GREP_CACHE_TTL_S:
+            return cached[2]
+        docs = self._read_documents(filters=filters) if filters else self._read_documents()
+        cache.pop(key, None)
+        if len(docs) <= _GREP_CACHE_MAX_CHUNKS:
+            cache[key] = (time.time(), count, docs)
+        return docs
 
     def update_chunk(self, source: str, chunk_id: str, content: str) -> bool:
         """Replace one chunk's text and re-embed it in place (same id + meta).
@@ -5595,6 +5634,7 @@ class VectorRAG:
         text = (content or "").strip()
         if not text:
             return False
+        self.__dict__.pop("_grep_cache", None)  # same count, new text
         try:
             from haystack.dataclasses import Document
 

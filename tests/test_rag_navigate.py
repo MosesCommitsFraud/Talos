@@ -71,7 +71,7 @@ class FakeManager:
         # Audit order (by page), deliberately not seq order.
         return list(reversed(self.docs[source]))
 
-    def grep_chunks(self, query, limit=200, exclude_scopes=None):
+    def grep_chunks(self, query, limit=200, exclude_scopes=None, all_words=False):
         out = []
         for s, chunks in self.docs.items():
             for c in chunks:
@@ -218,6 +218,62 @@ def test_grep_in_document_names_the_section(kb):
 def test_grep_everywhere_and_miss(kb):
     assert "Workshop.mp4" in nav.grep_knowledge({"pattern": "export"})
     assert "does not occur" in nav.grep_knowledge({"pattern": "zzz"})
+
+
+def test_grep_in_document_finds_spelling_variants(kb):
+    out = nav.grep_knowledge({"pattern": "E 4711", "document": "Handbuch.pdf"})
+    assert out.startswith("1 occurrence(s)")
+
+
+def test_grep_in_document_falls_back_to_all_words(kb):
+    pattern = "Überhitzung Fehlercode"
+    out = nav.grep_knowledge({"pattern": pattern, "document": "Handbuch.pdf"})
+    assert out.startswith(f'No exact occurrence(s) of "{pattern}"')
+    assert "not necessarily together" in out
+    assert "§3 Fehler" in out
+
+
+def test_grep_everywhere_prefers_exact_hits_and_reports_failures(monkeypatch):
+    from src.rag_vector import FailedSearch
+
+    class Exact:
+        def grep_chunks(self, query, **kw):
+            return [
+                {"filename": "a.pdf", "snippet": "exakt"},
+                {"filename": "c.pdf", "snippet": "exakt"},
+            ]
+
+    class Loose:
+        def grep_chunks(self, query, **kw):
+            return [
+                {"filename": "b.pdf", "snippet": "lose", "all_words": True},
+                {"filename": "d.pdf", "snippet": "lose", "all_words": True},
+            ]
+
+    class Broken:
+        def grep_chunks(self, query, **kw):
+            return FailedSearch("Qdrant down")
+
+    def bases(*managers):
+        monkeypatch.setattr(nav, "_bases", lambda user=None: [({"id": "x"}, m) for m in managers])
+        monkeypatch.setattr(nav, "_external", lambda: False)
+
+    bases(Exact(), Loose())
+    out = nav.grep_knowledge({"pattern": "ein wort"})
+    assert "exakt" in out
+    assert "lose" not in out
+
+    bases(Loose(), Loose())
+    assert "not necessarily together" in nav.grep_knowledge({"pattern": "ein wort"})
+
+    bases(Broken())
+    assert "The term lookup failed (Qdrant down)" in nav.grep_knowledge({"pattern": "wort"})
+
+
+def test_literal_mentions_lists_the_key_terms(kb):
+    terms, lines = nav.literal_mentions("Was bedeutet e-4711?")
+    assert "e-4711" in terms
+    assert any("e-4711" in line for line in lines)
 
 
 def test_list_knowledge_filters(kb):

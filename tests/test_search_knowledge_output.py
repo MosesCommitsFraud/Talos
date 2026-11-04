@@ -66,6 +66,14 @@ def test_empty_result_does_not_invite_general_knowledge(monkeypatch):
     assert "general knowledge" in out
 
 
+def test_grep_marks_a_miss_for_the_stall_detector(monkeypatch):
+    nav = importlib.import_module("src.rag_navigate")
+    monkeypatch.setattr(nav, "grep_knowledge", lambda args, user: '"x" does not occur literally.')
+    assert asyncio.run(ti.do_grep_knowledge('{"pattern": "x"}'))["no_hits"] is True
+    monkeypatch.setattr(nav, "grep_knowledge", lambda args, user: '1 occurrence(s) of "x".')
+    assert "no_hits" not in asyncio.run(ti.do_grep_knowledge('{"pattern": "x"}'))
+
+
 def test_a_broken_search_may_not_be_reported_as_nothing_stored():
     out = ti._empty_search_output(
         "Pivot", {"cause": "engine_error", "detail": "Qdrant down"}, ["pivot"], []

@@ -1838,7 +1838,8 @@ async def do_grep_knowledge(content: str, owner: Optional[str] = None) -> Dict:
     except Exception as e:
         logger.error(f"grep_knowledge failed: {e}")
         return {"error": str(e), "exit_code": 1}
-    return {"output": out, "exit_code": 0}
+    empty = "does not occur literally" in out or out.startswith("The term lookup failed")
+    return {"output": out, "exit_code": 0, **({"no_hits": True} if empty else {})}
 
 
 # ---------------------------------------------------------------------------
