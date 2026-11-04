@@ -832,6 +832,8 @@ export async function setUserAdmin(username: string, isAdmin: boolean): Promise<
   if (!res.ok) throw new Error(`Update failed (HTTP ${res.status})`);
 }
 
+export type RagGateMode = 'off' | 'shadow' | 'on';
+
 export interface RagConfig {
   enabled: boolean;
   provider?: string;
@@ -879,6 +881,8 @@ export interface RagConfig {
   code_lane_enabled?: boolean;
   /** Advanced — conversation-aware query rewrite before retrieval (off by default). */
   query_rewrite_enabled?: boolean;
+  sufficiency_gate?: RagGateMode;
+  grounding_gate?: RagGateMode;
   /** Advanced — ingest-time Contextual Retrieval + the LLM endpoint it uses. */
   contextual_retrieval_enabled?: boolean;
   llm_url?: string;

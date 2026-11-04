@@ -704,7 +704,7 @@ class ChatProcessor:
                     # (filter_used_rag_sources). Stripped (underscore
                     # key) before the source is emitted or saved, so
                     # it never reaches the client or the DB.
-                    "_text": (r.get("_retrieval_document") or r["document"])[:3000],
+                    "_text": (r.get("_retrieval_document") or r["document"])[:6000],
                     # Internal provenance used after generation to
                     # pair a displayed figure with the exact text
                     # page the answer actually used. Underscore keys
@@ -999,6 +999,19 @@ class ChatProcessor:
             )
             if rag_content:
                 preface.append(untrusted_context_message("retrieved documents", rag_content))
+                from src.rag_gates import sufficiency_note
+
+                _coverage_note = sufficiency_note(self._rag_cfg(), message, rag_sources, owner)
+                if _coverage_note:
+                    # Moved next to the retrieved text like the figure rule below,
+                    # so this turn's verdict stays out of the prompt's head.
+                    preface.append(
+                        {
+                            "role": "system",
+                            "content": _coverage_note,
+                            "metadata": {"source": FIGURE_RULE_SOURCE},
+                        }
+                    )
                 # Authorize inline figure embedding only when a retrieved
                 # section actually has one (keeps the rule out of context
                 # otherwise). Trusted system message, not untrusted data.

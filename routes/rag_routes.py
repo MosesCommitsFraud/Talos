@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel
 
 from core.middleware import require_admin
+from src.rag_gates import DEFAULT_GATE_MODE, gate_mode, recent_verdicts
 from src.rag_structure import (
     DEFAULT_CANDIDATE_TOP_K,
     DEFAULT_CHUNK_MAX_CHARS,
@@ -152,6 +153,9 @@ class RagPipelineConfig(BaseModel):
     # Advanced — conversation-aware query rewrite before retrieval. On by
     # default, matching chat_processor._maybe_rewrite_query.
     query_rewrite_enabled: bool = True
+    # "off" | "shadow" | "on", see src/rag_gates.py.
+    sufficiency_gate: str = DEFAULT_GATE_MODE
+    grounding_gate: str = DEFAULT_GATE_MODE
     # Advanced — ingest-time Contextual Retrieval + the LLM endpoint it uses.
     contextual_retrieval_enabled: bool = False
     llm_url: str = ""
@@ -324,6 +328,8 @@ def _normalize(body, current: dict) -> dict:
         "image_embed_model": body.image_embed_model.strip(),
         "code_lane_enabled": bool(body.code_lane_enabled),
         "query_rewrite_enabled": bool(body.query_rewrite_enabled),
+        "sufficiency_gate": gate_mode({"m": body.sufficiency_gate}, "m"),
+        "grounding_gate": gate_mode({"m": body.grounding_gate}, "m"),
         "contextual_retrieval_enabled": bool(body.contextual_retrieval_enabled),
         "llm_url": body.llm_url.strip(),
         "llm_model": body.llm_model.strip(),
@@ -400,6 +406,8 @@ def _public(cfg: dict) -> dict:
         "code_lane_enabled": bool(cfg.get("code_lane_enabled", False)),
         # Same default as the chat path, so the form shows what actually runs.
         "query_rewrite_enabled": bool(cfg.get("query_rewrite_enabled", True)),
+        "sufficiency_gate": gate_mode(cfg, "sufficiency_gate"),
+        "grounding_gate": gate_mode(cfg, "grounding_gate"),
         "contextual_retrieval_enabled": bool(cfg.get("contextual_retrieval_enabled", False)),
         "llm_url": cfg.get("llm_url", ""),
         "llm_model": cfg.get("llm_model", ""),
@@ -994,6 +1002,11 @@ def setup_rag_routes():
                 for r in results
             ],
         }
+
+    @router.get("/gate-verdicts")
+    def gate_verdicts():
+        """The sufficiency and grounding checks' latest verdicts, newest last."""
+        return {"verdicts": recent_verdicts()}
 
     @router.get("/rerank-health")
     def rerank_health():

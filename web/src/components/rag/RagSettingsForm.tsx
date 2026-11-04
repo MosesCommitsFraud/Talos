@@ -51,6 +51,7 @@ const TAB_KEYS: Record<Tab, Array<keyof RagConfig>> = {
   search: [
     'chat_top_k', 'search_top_k', 'candidate_top_k', 'rerank_min_score', 'similarity_threshold',
     'max_context_chars', 'auto_inject_enabled', 'query_rewrite_enabled',
+    'sufficiency_gate', 'grounding_gate',
     'expand_to_parent_enabled', 'parent_max_chars', 'context_window', 'query_prefix',
     'context_prompt',
   ],
@@ -568,6 +569,27 @@ export function RagSettingsForm({
     );
   };
 
+  const gate = (k: 'sufficiency_gate' | 'grounding_gate', label: string, note: string, hint: string) => (
+    <FeatureRow
+      label={label}
+      note={note}
+      hint={hint}
+      marker={marker(k)}
+      control={
+        <Segmented
+          label={label}
+          value={draft[k] ?? 'shadow'}
+          onChange={(v) => set(k, v)}
+          options={[
+            { value: 'off', label: t('settings.rag.gateMode.off') },
+            { value: 'shadow', label: t('settings.rag.gateMode.shadow') },
+            { value: 'on', label: t('settings.rag.gateMode.on') },
+          ]}
+        />
+      }
+    />
+  );
+
   const external = (draft.provider || 'internal') === 'external';
   const tabs: Tab[] = external ? ['services'] : ['services', 'ingest', 'search'];
   const shownTab = tabs.includes(tab) ? tab : tabs[0];
@@ -756,6 +778,8 @@ export function RagSettingsForm({
       <Section title={t('settings.rag.group.behavior')}>
         {toggle('auto_inject_enabled', t('settings.rag.autoInjectEnabled'), t('settings.rag.note.autoInject'), t('settings.rag.hint.autoInjectEnabled'), { dflt: true })}
         {toggle('query_rewrite_enabled', t('settings.rag.queryRewriteEnabled'), t('settings.rag.note.rewrite'), t('settings.rag.hint.queryRewriteEnabled'))}
+        {gate('sufficiency_gate', t('settings.rag.sufficiencyGate'), t('settings.rag.note.sufficiency'), t('settings.rag.hint.sufficiencyGate'))}
+        {gate('grounding_gate', t('settings.rag.groundingGate'), t('settings.rag.note.grounding'), t('settings.rag.hint.groundingGate'))}
         {toggle('expand_to_parent_enabled', t('settings.rag.expandToParent'), t('settings.rag.note.expand'), t('settings.rag.hint.expandToParent'), {
           children: draft.expand_to_parent_enabled && (
             <>

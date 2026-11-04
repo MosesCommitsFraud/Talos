@@ -535,7 +535,7 @@ def read_knowledge(
             "filename": row.get("filename"),
             "snippet": sec["text"][:400],
             "similarity": 1.0,
-            "_text": sec["text"][:3000],
+            "_text": sec["text"][:6000],
             "_id": f"{base['id']}:{first.get('id')}",
             "_source": f"{base['id']}:{row.get('source')}",
             "_page": sec["pages"][0] if sec.get("pages") else None,

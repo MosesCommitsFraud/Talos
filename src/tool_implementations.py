@@ -1642,6 +1642,12 @@ async def do_search_knowledge(
     # is not a licence to drop the marker.
     from src.citations import CITATION_RULE
     from src.prompt_security import UNTRUSTED_CONTEXT_HEADER
+    from src.rag_config import effective_config
+    from src.rag_gates import sufficiency_note
+
+    coverage_note = await asyncio.to_thread(
+        sufficiency_note, effective_config(None), query, sources, owner
+    )
 
     # The `[filename]` label on each section reads like a path, and the model has
     # a read_file tool that takes paths — so it tries to open the document to get
@@ -1672,6 +1678,7 @@ async def do_search_knowledge(
                 if miss.get("cause") == "partial"
                 else ""
             )
+            + (coverage_note + "\n\n" if coverage_note else "")
             + (CITATION_RULE + "\n\n" if any(s.get("n") for s in sources) else "")
             + "<<<SUPPLIED_CONTEXT>>>\n"
             f"{block}\n"

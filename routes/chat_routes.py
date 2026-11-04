@@ -54,6 +54,8 @@ from src.llm_core import (
     stream_llm,
 )
 from src.prompt_security import untrusted_context_message
+from src.rag_config import effective_config
+from src.rag_gates import grounding_note
 from src.request_models import ChatRequest
 from src.usage_tracking import record_turn
 
@@ -1278,6 +1280,24 @@ def setup_chat_routes(
                                     ]
                                     if _extra_fig:
                                         _rt[-1] = _rt[-1] + _extra_fig
+                                # Does the answer say more than its sources? Already
+                                # streamed, so all that's left is to say so below it.
+                                if ctx.rag_sources:
+                                    _ground_note = await asyncio.to_thread(
+                                        grounding_note,
+                                        effective_config(None),
+                                        message,
+                                        str(_rt[-1])
+                                        if isinstance(_rt, list) and _rt
+                                        else full_response,
+                                        ctx.rag_sources,
+                                        get_current_user(request),
+                                    )
+                                    if _ground_note:
+                                        full_response += _ground_note
+                                        if isinstance(_rt, list) and _rt:
+                                            _rt[-1] = _rt[-1] + _ground_note
+                                        yield f"data: {json.dumps({'delta': _ground_note})}\n\n"
                                 # Decide RAG citations now that the answer exists:
                                 # keep only sources the answer actually drew on,
                                 # then announce them at the very end (after the
