@@ -30,9 +30,9 @@ import { Tooltip } from './ui/misc';
 /** How tall the input may grow before it starts scrolling. */
 const MAX_INPUT_HEIGHT = 220;
 
-/** Plate size for the controls pinned inside the input box. It matches the
- *  input's line box (text-base × leading-relaxed = 1.625rem), so a plate sits
- *  exactly on the text line it belongs to instead of a pixel above it. */
+/** Plate size for the controls pinned inside the input box. The row's padding
+ *  makes up the difference to the shorter text line, so a plate and the last
+ *  line of text share one centre. */
 const INLINE_CONTROL = 'size-[1.625rem]';
 
 /** One icon control inside the box: bright glyph, plate only on hover. */
@@ -43,7 +43,7 @@ const CONTROL_GAP = 8;
 
 /** Typography shared by the input and its measuring twin — they have to wrap
  *  identically or the animated height lands on the wrong line count. */
-const INPUT_TEXT = 'text-base leading-relaxed';
+const INPUT_TEXT = 'text-[0.8125rem] leading-[1.25rem]';
 
 type SlashCommand = {
   name: string;
@@ -573,7 +573,7 @@ export function Composer() {
           </div>
         )}
 
-        <div ref={inputRow} className="relative px-2.5 py-1.5">
+        <div ref={inputRow} className="relative px-2.5 py-[0.5625rem]">
           {/* Text block, inset between the pinned controls below (see autoresize).
               DM Sans sits high in its line box, so the 1px puts the capitals on
               the centre line the icons share. Offset only: layout stays put. */}
