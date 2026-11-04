@@ -24,6 +24,7 @@ const FAMILY: Record<string, string> = {
   glob: 'glob',
   ls: 'ls',
   query_sql: 'sql',
+  db_memory: 'dbMemory',
   search_knowledge: 'knowledge',
   list_knowledge: 'knowledgeList',
   read_knowledge: 'knowledgeRead',
@@ -70,6 +71,26 @@ const ACTION_SUBJECT = new Set(['chatManage', 'docsManage', 'settings', 'skillMa
 
 export function toolFamily(tool: string): string {
   return FAMILY[tool] ?? 'generic';
+}
+
+const MEMORY_RECALL_ACTIONS = new Set(['view', 'list', 'read', 'show']);
+
+/** Recalling and writing a memory are one tool, but read as different things:
+ *  "Recalled a memory" against "Updated memory: <the note>". */
+function isMemoryRecall(call: ToolCall): boolean {
+  try {
+    const args: unknown = JSON.parse((call.command ?? '').trim() || '{}');
+    const action = args && typeof args === 'object' ? (args as Record<string, unknown>).action : undefined;
+    return typeof action !== 'string' || MEMORY_RECALL_ACTIONS.has(action.trim().toLowerCase());
+  } catch {
+    return false;
+  }
+}
+
+/** The family of this very call, where the action decides. */
+function callFamily(call: ToolCall): string {
+  const family = toolFamily(call.tool);
+  return family === 'dbMemory' && isMemoryRecall(call) ? 'dbMemoryRecall' : family;
 }
 
 /** First line only. `command` carries the raw tool block, and for write_file
@@ -119,7 +140,7 @@ export function callSubject(call: ToolCall): string {
     return '';
   };
 
-  switch (toolFamily(call.tool)) {
+  switch (callFamily(call)) {
     // No per-call description comes from the backend, so a row full of "Ran a
     // command" would be unreadable. Show the command itself — the group summary
     // uses its own counted phrasing and stays clean.
@@ -135,6 +156,7 @@ export function callSubject(call: ToolCall): string {
     case 'chatsList':
     case 'chatSend':
     case 'skillNew':
+    case 'dbMemoryRecall':
       return '';
     case 'skills':
     case 'chats':
@@ -174,6 +196,8 @@ export function callSubject(call: ToolCall): string {
     }
     case 'knowledgeGrep':
       return pick('pattern', 'query') || firstLine(raw);
+    case 'dbMemory':
+      return clip(pick('text'));
     case 'knowledgeRead': {
       const doc = pick('document', 'name');
       // Models send section/pages as numbers as often as strings.
@@ -280,7 +304,7 @@ export function partsToString(parts: LabelParts): string {
  *  whose plain `past` carries no subject supply that detail via `pastNamed`,
  *  the mirror of `runningNamed`. */
 export function describeCall(call: ToolCall, t: Translate, tense: 'running' | 'past'): LabelParts {
-  const family = toolFamily(call.tool);
+  const family = callFamily(call);
   const subject = callSubject(call);
   // A shell/python call names the command it ran; without one it falls back to
   // the plain "Running a command" wording.
@@ -309,7 +333,7 @@ export function describeCall(call: ToolCall, t: Translate, tense: 'running' | 'p
  *  sentence ("Searching the knowledge base for 3 …"). Families whose plain
  *  wording needs a subject supply a subject-free `brief` instead. */
 export function describeStatus(call: ToolCall, t: Translate): string {
-  const family = toolFamily(call.tool);
+  const family = callFamily(call);
   const brief = t(`toolGroup.${family}.brief`, { defaultValue: '' });
   if (brief) return brief;
   const usable = NEEDS_SUBJECT.has(family) ? 'generic' : family;
@@ -328,7 +352,7 @@ function repeatSuffix(count: number, t: Translate): string {
 function byFamily(calls: ToolCall[]): Array<{ family: string; calls: ToolCall[] }> {
   const out: Array<{ family: string; calls: ToolCall[] }> = [];
   for (const call of calls) {
-    const family = toolFamily(call.tool);
+    const family = callFamily(call);
     const last = out[out.length - 1];
     if (last && last.family === family) last.calls.push(call);
     else out.push({ family, calls: [call] });

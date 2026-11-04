@@ -1679,6 +1679,7 @@ const TOOL_META: Record<string, { cat: string; ctx: string }> = {
   manage_skills: { cat: 'Knowledge', ctx: '~200' },
   manage_rag: { cat: 'Knowledge', ctx: '~150' },
   query_sql: { cat: 'Knowledge', ctx: '~200' },
+  db_memory: { cat: 'Knowledge', ctx: '~200' },
   background_task: { cat: 'Sessions', ctx: '~200' },
   send_to_session: { cat: 'Sessions', ctx: '~100' },
   create_session: { cat: 'Sessions', ctx: '~100' },
