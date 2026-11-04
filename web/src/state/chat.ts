@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { compactSession, createSession, deleteMessages, editMessage, fetchActiveRuns, fetchArtifacts, fetchSession, queueChatMessage, resumeChat, setSessionFolder, setSessionSection, stopChatRun, streamChat, unqueueChatMessage } from '@/api/client';
+import { compactSession, createSession, deleteMessages, fetchActiveRuns, fetchArtifacts, fetchSession, forkSession, queueChatMessage, removeChapter, resumeChat, setChapter, setSessionFolder, setSessionSection, stopChatRun, streamChat, unqueueChatMessage } from '@/api/client';
 import type { Artifact, ArtifactSelection, Attachment, ChatEvent, Citation, Metrics, RagSource, ToolCall, UiDraft } from '@/api/types';
 import { documentFileName, isPreviewable, samePath } from '@/lib/files';
 import { timestampMs } from '@/lib/utils';
@@ -41,6 +41,9 @@ export interface UiMessage {
   /** This user message answered an `ask_user` card — rendered as the
    *  question/answer summary instead of a plain bubble. */
   askAnswers?: AskAnswer[];
+  /** The user marked this message as a chapter of the chat. The title is null
+   *  while the utility model is still writing it. */
+  chapter?: { title: string | null };
   /** Latest `update_plan` checklist (markdown) emitted during this turn. */
   plan?: string;
   /** Set once the user answers a pendingQuestion, so the card goes inert (a
@@ -224,8 +227,16 @@ interface ChatState {
   resumeGoal: (sessionId?: string) => Promise<void>;
   cancelGoal: () => void;
   compact: () => Promise<void>;
-  edit: (msgId: string, content: string) => Promise<void>;
-  remove: (msgId: string) => Promise<void>;
+  /** A message on its way back into the composer, for the composer to pick up. */
+  composerPrefill: ComposerPrefill | null;
+  /** Go back to a user message: it and everything after it leave the chat, and it
+   *  returns to the composer to be changed and sent again. */
+  rewindTo: (msgId: string) => void;
+  /** A new chat from this message on. Forking at a user message stops ahead of it
+   *  and puts it in the new chat's composer, since it has no answer there yet. */
+  forkFrom: (msgId: string) => Promise<{ files_forked: boolean } | undefined>;
+  pinChapter: (msgId: string, lang: string) => Promise<void>;
+  unpinChapter: (msgId: string) => Promise<void>;
   /** Drop a generated image (by its URL) from every loaded chat — it was
    *  deleted on the Artifacts page. A reload gets the same from the server. */
   forgetImage: (url: string) => void;
@@ -256,6 +267,23 @@ export interface DraftPlacement { section: string; folder: string | null }
 
 /** Where the current draft goes once its first message creates the session. */
 let draftPlacement: DraftPlacement | null = null;
+
+export interface ComposerPrefill {
+  text: string;
+  attachments: Attachment[];
+  artifactSelection?: ArtifactSelection;
+}
+
+const prefillFrom = (msg: UiMessage): ComposerPrefill => ({
+  text: msg.content,
+  attachments: msg.attachments ?? [],
+  artifactSelection: msg.artifactSelection,
+});
+
+/** Rows a rewind took off the screen, per chat. They stay on the server until the
+ *  next message is sent, so a rewind nobody follows up costs nothing: a reload
+ *  brings the chat back whole. */
+const pendingRewinds = new Map<string, string[]>();
 
 export type ChatStatus = 'working' | 'awaiting' | 'completed' | null;
 export const selectChatStatus = (id: string | null | undefined) => (s: ChatState): ChatStatus => {
@@ -533,6 +561,7 @@ export function coldLoadMessage(m: HistoryMessage, sessionId: string): UiMessage
   }
 
   const dbId = m.metadata?._db_id as string | undefined;
+  const chapter = m.metadata?.chapter as UiMessage['chapter'];
   const metrics = metricsFromMetadata(m.metadata);
   const sources = ragSourcesFromMetadata(m.metadata);
   const citations = citationsFromMetadata(m.metadata);
@@ -558,6 +587,7 @@ export function coldLoadMessage(m: HistoryMessage, sessionId: string): UiMessage
       id: uid(),
       dbId,
       role: 'assistant',
+      chapter,
       createdAt,
       content: pendingQuestion ? withoutAskedText(m.content, pendingQuestion.questions) : m.content,
       thinking: thinkingFromMetadata(m.metadata),
@@ -583,6 +613,7 @@ export function coldLoadMessage(m: HistoryMessage, sessionId: string): UiMessage
     return [...queuedBefore(roundNum), {
       id: uid(),
       dbId: terminal ? dbId : undefined,
+      chapter: terminal ? chapter : undefined,
       role: 'assistant' as const,
       createdAt,
       content: terminal && pendingQuestion ? withoutAskedText(round.content, pendingQuestion.questions) : round.content,
@@ -643,6 +674,7 @@ export const useChat = create<ChatState>((set, get) => {
   return {
   runtimes: {},
   completed: {},
+  composerPrefill: null,
   sessionId: null,
   messages: [],
   streaming: false,
@@ -784,6 +816,13 @@ export const useChat = create<ChatState>((set, get) => {
       opts?.onSessionCreated?.(sessionId);
     }
     const sid = sessionId;
+
+    // What a rewind took off the screen goes for good now that the chat moves on.
+    const rewound = pendingRewinds.get(sid);
+    if (rewound) {
+      pendingRewinds.delete(sid);
+      if (rewound.length) await deleteMessages(sid, rewound);
+    }
 
     const attachments = opts?.attachments ?? [];
     // Only a real selection travels with the message. Having the preview panel
@@ -1294,6 +1333,8 @@ export const useChat = create<ChatState>((set, get) => {
     const { sessionId, streaming } = get();
     if (!sessionId || streaming) return;
     await compactSession(sessionId);
+    // The refetch below brings a rewound chat back whole.
+    pendingRewinds.delete(sessionId);
     const detail = await fetchSession(sessionId);
     const messages = (detail.history ?? [])
       .filter((m) => m.role === 'user' || m.role === 'assistant')
@@ -1349,27 +1390,58 @@ export const useChat = create<ChatState>((set, get) => {
     void unqueueChatMessage(sessionId, id).catch(() => {});
   },
 
-  edit: async (msgId, content) => {
+  rewindTo: (msgId) => {
     const { sessionId, messages, streaming } = get();
-    if (streaming) return;
+    if (!sessionId || streaming) return;
     const idx = messages.findIndex((m) => m.id === msgId);
-    const msg = messages[idx];
-    if (!sessionId || !msg?.dbId) throw new Error('Message not editable yet');
-
-    if (msg.role !== 'user') {
-      // Assistant rows are edited in place (no resend semantics).
-      await editMessage(sessionId, msg.dbId, content);
-      writeRuntime(sessionId, (rt) => ({ messages: rt.messages.map((m) => (m.id === msgId ? { ...m, content } : m)) }));
-      return;
-    }
-
-    // Editing a user message resends the conversation from that point:
-    // drop the old turn and every later message, then send the edited text
-    // through the normal stream path with the original attachments.
-    const dropIds = messages.slice(idx).map((m) => m.dbId).filter((id): id is string => !!id);
-    await deleteMessages(sessionId, dropIds);
+    if (idx < 0) return;
+    const dropped = messages.slice(idx).map((m) => m.dbId).filter((id): id is string => !!id);
+    pendingRewinds.set(sessionId, [...(pendingRewinds.get(sessionId) ?? []), ...dropped]);
     writeRuntime(sessionId, () => ({ messages: messages.slice(0, idx) }));
-    await get().send(content, { attachments: msg.attachments, artifactSelection: msg.artifactSelection });
+    set({ composerPrefill: prefillFrom(messages[idx]) });
+  },
+
+  forkFrom: async (msgId) => {
+    const { sessionId, messages } = get();
+    const msg = messages.find((m) => m.id === msgId);
+    if (!sessionId || !msg?.dbId) return undefined;
+    const atUser = msg.role === 'user';
+    const forked = await forkSession(sessionId, { messageId: msg.dbId, before: atUser });
+    // The new chat nests under this one, which has to be unfolded to show it.
+    const prefs = usePrefs.getState();
+    if (prefs.collapsedForks.includes(sessionId)) prefs.toggleForksCollapsed(sessionId);
+    await queryClient.invalidateQueries({ queryKey: ['sessions'] });
+    await get().openSession(forked.id);
+    if (atUser) set({ composerPrefill: prefillFrom(msg) });
+    return forked;
+  },
+
+  pinChapter: async (msgId, lang) => {
+    const { sessionId, messages } = get();
+    const msg = messages.find((m) => m.id === msgId);
+    if (!sessionId || !msg?.dbId) return;
+    const patch = (chapter: UiMessage['chapter']) =>
+      writeRuntime(sessionId, (rt) => ({
+        messages: rt.messages.map((m) => (m.id === msgId ? { ...m, chapter } : m)),
+      }));
+    patch({ title: null });
+    try {
+      const { title } = await setChapter(sessionId, msg.dbId, lang);
+      patch({ title });
+    } catch (err) {
+      patch(undefined);
+      throw err;
+    }
+  },
+
+  unpinChapter: async (msgId) => {
+    const { sessionId, messages } = get();
+    const msg = messages.find((m) => m.id === msgId);
+    if (!sessionId || !msg?.dbId) return;
+    await removeChapter(sessionId, msg.dbId);
+    writeRuntime(sessionId, (rt) => ({
+      messages: rt.messages.map((m) => (m.id === msgId ? { ...m, chapter: undefined } : m)),
+    }));
   },
 
   forgetImage: (url) => {
@@ -1385,13 +1457,6 @@ export const useChat = create<ChatState>((set, get) => {
     }
   },
 
-  remove: async (msgId) => {
-    const { sessionId, messages } = get();
-    const msg = messages.find((m) => m.id === msgId);
-    if (!sessionId || !msg?.dbId) throw new Error('Message not deletable yet');
-    await deleteMessages(sessionId, [msg.dbId]);
-    writeRuntime(sessionId, (rt) => ({ messages: rt.messages.filter((m) => m.id !== msgId) }));
-  },
   };
 });
 

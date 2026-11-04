@@ -3154,9 +3154,31 @@ class PreviewHandler(BaseHTTPRequestHandler):
     def do_POST(self):
         parsed = urlparse(self.path)
         path = parsed.path
+        if path.startswith("/api/session/") and path.endswith("/chapter"):
+            session_id = path[len("/api/session/") : -len("/chapter")]
+            req = json.loads(self._read_body() or b"{}")
+            entry = next(
+                (
+                    m
+                    for m in _history_for(session_id)
+                    if m["metadata"].get("_db_id") == req.get("message_id")
+                ),
+                None,
+            )
+            title = None
+            if entry and req.get("remove"):
+                entry["metadata"].pop("chapter", None)
+            elif entry:
+                # Long enough to see the title being written.
+                time.sleep(1.5)
+                title = " ".join(str(entry["content"]).split()[:4]) or "Kapitel"
+                entry["metadata"]["chapter"] = {"title": title}
+            self._send_json({"status": "ok", "title": title})
+            return
         if path.startswith("/api/session/") and path.endswith("/fork"):
             source_id = path[len("/api/session/") : -len("/fork")]
             source = next((s for s in _sessions() if s["id"] == source_id), None)
+            forked_at = json.loads(self._read_body() or b"{}")
             fork = {
                 "id": f"preview-fork-{len(_SESSION_FORKS) + 1}",
                 "name": (source or {}).get("name", "Chat"),
@@ -3165,6 +3187,12 @@ class PreviewHandler(BaseHTTPRequestHandler):
                 "section": (source or {}).get("section"),
             }
             _SESSION_FORKS.append(fork)
+            copied = _history_for(source_id)
+            if forked_at.get("message_id"):
+                ids = [m["metadata"].get("_db_id") for m in copied]
+                stop = ids.index(forked_at["message_id"])
+                copied = copied[: stop if forked_at.get("before_message") else stop + 1]
+            _HISTORY[fork["id"]] = json.loads(json.dumps(copied))
             self._send_json(
                 {"status": "ok", "id": fork["id"], "name": fork["name"], "files_forked": True}
             )

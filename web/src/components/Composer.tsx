@@ -205,6 +205,25 @@ export function Composer() {
   // Typing during a turn queues the message, so it reads as Enter then too; the
   // stop square only stands there while there is nothing to queue.
   const hasContent = !!text.trim() || pending.length > 0;
+
+  // A message coming back from the chat (rewind, fork at a user message), to be
+  // changed and sent again. Taken out of the store here, so it lands exactly once
+  // even if the composer remounts as the chat empties.
+  const prefill = useChat((s) => s.composerPrefill);
+  useEffect(() => {
+    if (!prefill) return;
+    useChat.setState({ composerPrefill: null });
+    setText(prefill.text);
+    setPending(prefill.attachments as UploadedFile[]);
+    if (prefill.artifactSelection) setArtifactSelection(prefill.artifactSelection);
+    requestAnimationFrame(() => {
+      const el = textarea.current;
+      if (!el) return;
+      el.focus();
+      el.setSelectionRange(el.value.length, el.value.length);
+      autoresize();
+    });
+  }, [prefill, setArtifactSelection]);
   const primaryAction = hasContent ? 'send' : streaming ? 'stop' : null;
 
   const slashMatch = text.match(/^\/([^\s]*)$/);

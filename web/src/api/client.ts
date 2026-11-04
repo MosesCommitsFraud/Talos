@@ -108,9 +108,20 @@ export async function setSessionUnread(id: string, unread: boolean): Promise<voi
 
 export interface ForkResult { id: string; name: string; files_forked: boolean }
 
-/** Duplicate a chat with everything in it; see src/session_fork.py. */
-export const forkSession = (id: string) =>
-  postJSON<ForkResult>(`/api/session/${encodeURIComponent(id)}/fork`);
+/** Duplicate a chat with everything in it; see src/session_fork.py. A message id
+ *  ends the copy there, or just ahead of it with `before`. */
+export const forkSession = (id: string, at?: { messageId: string; before: boolean }) =>
+  postJSON<ForkResult>(
+    `/api/session/${encodeURIComponent(id)}/fork`,
+    at && { message_id: at.messageId, before_message: at.before },
+  );
+
+/** Make a message a chapter of its chat; the server has the title written. */
+export const setChapter = (sessionId: string, messageId: string, lang: string) =>
+  postJSON<{ title: string }>(`/api/session/${encodeURIComponent(sessionId)}/chapter`, { message_id: messageId, lang });
+
+export const removeChapter = (sessionId: string, messageId: string) =>
+  postJSON(`/api/session/${encodeURIComponent(sessionId)}/chapter`, { message_id: messageId, remove: true });
 
 export async function deleteSession(id: string): Promise<void> {
   await fetch(`/api/session/${id}`, { method: 'DELETE', credentials: 'same-origin' });

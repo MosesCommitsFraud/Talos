@@ -1,4 +1,4 @@
-import { CheckIcon, ChevronDownIcon, CopyIcon, FoldVerticalIcon, PencilIcon, ScanSearchIcon, Trash2Icon } from 'lucide-react';
+import { CheckIcon, ChevronDownIcon, CopyIcon, FoldVerticalIcon, PinIcon, RotateCcwIcon, ScanSearchIcon, Share2Icon } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { uploadDownloadUrl } from '@/api/client';
@@ -29,7 +29,8 @@ import { ImageGallery, toolImages } from './ToolRow';
 import { staysInFold, WidgetView } from './widgets/registry';
 import { Collapse } from './ui/collapse';
 import { Tooltip } from './ui/misc';
-import { Button } from './ui/button';
+import { toast } from './ui/toast';
+import { ChapterRail } from './ChapterRail';
 import { AskAnswers } from './AskUser';
 
 const formatWorkingElapsed = (startMs: number, nowMs: number) => formatDurationMs(nowMs - startMs);
@@ -691,54 +692,69 @@ function ArtifactSelectionChip({ msg }: { msg: UiMessage }) {
   );
 }
 
-function MessageActions({ msg, onEdit, copyText, canDelete = true }: { msg: UiMessage; onEdit?: () => void; copyText?: string; canDelete?: boolean }) {
+/** New chat from this message on, opened right away. */
+function ForkAction({ msg }: { msg: UiMessage }) {
   const { t } = useTranslation();
-  const remove = useChat((s) => s.remove);
-  const canMutate = !!msg.dbId;
+  const forkFrom = useChat((s) => s.forkFrom);
+  const fork = async () => {
+    try {
+      const forked = await forkFrom(msg.id);
+      if (forked && !forked.files_forked) toast('sidebar.forkFilesMissing');
+    } catch (err) {
+      console.error('Talos: forking chat failed', err);
+      toast('sidebar.forkFailed');
+    }
+  };
+  return (
+    <ActionIcon label={t('messages.forkHere')} onClick={() => void fork()}>
+      <Share2Icon className="size-3" />
+    </ActionIcon>
+  );
+}
+
+function UserActions({ msg }: { msg: UiMessage }) {
+  const { t } = useTranslation();
+  const rewindTo = useChat((s) => s.rewindTo);
+  const streaming = useChat((s) => s.streaming);
+  // An answer to a question card has no text of its own to send again.
+  const canBranch = !!msg.dbId && !msg.askAnswers;
   return (
     <>
-      <CopyAction text={copyText ?? msg.content} />
-      {onEdit && canMutate && (
-        <ActionIcon label={t('messages.editMessage')} onClick={onEdit}>
-          <PencilIcon className="size-3" />
+      <CopyAction text={msg.content} />
+      {canBranch && !streaming && (
+        <ActionIcon label={t('messages.rewind')} onClick={() => rewindTo(msg.id)}>
+          <RotateCcwIcon className="size-3" />
         </ActionIcon>
       )}
-      {canDelete && canMutate && (
-        <ActionIcon label={t('messages.deleteMessage')} destructive onClick={() => void remove(msg.id).catch(console.error)}>
-          <Trash2Icon className="size-3" />
-        </ActionIcon>
-      )}
+      {canBranch && <ForkAction msg={msg} />}
     </>
   );
 }
 
-function EditBox({ msg, onDone }: { msg: UiMessage; onDone: () => void }) {
-  const { t } = useTranslation();
-  const [draft, setDraft] = useState(msg.content);
-  const edit = useChat((s) => s.edit);
-  const save = async () => {
-    const value = draft.trim();
-    if (value && value !== msg.content) await edit(msg.id, value).catch(console.error);
-    onDone();
+function TurnActions({ anchor, copyText }: { anchor?: UiMessage; copyText: string }) {
+  const { t, i18n } = useTranslation();
+  const pinChapter = useChat((s) => s.pinChapter);
+  const unpinChapter = useChat((s) => s.unpinChapter);
+  const chapter = anchor?.chapter;
+  // Nothing to take back while the title is still being written.
+  const togglePin = () => {
+    if (!anchor || (chapter && chapter.title === null)) return;
+    const done = chapter ? unpinChapter(anchor.id) : pinChapter(anchor.id, i18n.language);
+    done.catch((err) => {
+      console.error('Talos: updating chapter failed', err);
+      toast('messages.chapterFailed');
+    });
   };
   return (
-    <div className="w-full rounded-md border border-ring bg-card p-3">
-      <textarea
-        autoFocus
-        value={draft}
-        rows={Math.min(8, Math.max(2, draft.split('\n').length))}
-        onChange={(e) => setDraft(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) void save();
-          if (e.key === 'Escape') onDone();
-        }}
-        className="w-full resize-y bg-transparent text-[15px] leading-relaxed outline-none"
-      />
-      <div className="mt-2 flex justify-end gap-2">
-        <Button variant="ghost" size="sm" onClick={onDone}>{t('messages.cancel')}</Button>
-        <Button size="sm" onClick={() => void save()}>{t('messages.save')}</Button>
-      </div>
-    </div>
+    <>
+      <CopyAction text={copyText} />
+      {anchor && <ForkAction msg={anchor} />}
+      {anchor && (
+        <ActionIcon label={t(chapter ? 'messages.unpinChapter' : 'messages.pinChapter')} onClick={togglePin}>
+          <PinIcon className={cn('size-3', chapter && 'fill-current text-foreground')} />
+        </ActionIcon>
+      )}
+    </>
   );
 }
 
@@ -917,7 +933,7 @@ function AssistantTurn({ turn, containsLast, outputs, sessionId }: { turn: UiMes
       )}
       {copyText && (
         <div className="mt-2 flex items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
-          <MessageActions msg={last} copyText={copyText} canDelete={false} />
+          <TurnActions anchor={[...turn].reverse().find((m) => m.dbId)} copyText={copyText} />
           {showMetrics && <MessageTime ts={last.createdAt} />}
         </div>
       )}
@@ -937,7 +953,6 @@ export function Messages() {
   const { t } = useTranslation();
   const sessionId = useChat((s) => s.sessionId);
   const messages = useChat((s) => s.messages);
-  const [editing, setEditing] = useState<string | null>(null);
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
   const previewFullscreen = useUi((s) => s.previewFullscreen);
   const scroller = useRef<HTMLDivElement>(null);
@@ -1023,31 +1038,29 @@ export function Messages() {
               key={block.msg.id}
               className={`group flex w-full flex-col gap-0.5 ${block.msg.askAnswers ? 'items-start' : 'ml-auto max-w-[75%] items-end'} ${index === 0 ? '' : 'mt-3'}`}
             >
-              {editing === block.msg.id ? (
-                <EditBox msg={block.msg} onDone={() => setEditing(null)} />
+              {/* Attachments sit above the text, the way they were staged
+                  in the composer. */}
+              <AttachmentList msg={block.msg} />
+              {block.msg.askAnswers ? (
+                <AskAnswers answers={block.msg.askAnswers} />
               ) : (
-                <>
-                  {/* Attachments sit above the text, the way they were staged
-                      in the composer. */}
-                  <AttachmentList msg={block.msg} />
-                  {block.msg.askAnswers ? (
-                    <AskAnswers answers={block.msg.askAnswers} />
-                  ) : (
-                    <div className="rounded-lg rounded-br-sm bg-bubble px-3 py-1 text-[15px] leading-relaxed whitespace-pre-wrap text-strong">
-                      <CollapsibleText>{block.msg.content}</CollapsibleText>
-                    </div>
-                  )}
-                  <ArtifactSelectionChip msg={block.msg} />
-                  <div className="flex items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
-                    {/* Time trails the icons, matching the assistant row. */}
-                    <MessageActions msg={block.msg} onEdit={() => setEditing(block.msg.id)} />
-                    <MessageTime ts={block.msg.createdAt} />
-                  </div>
-                </>
+                <div className="rounded-lg rounded-br-sm bg-bubble px-3 py-1 text-[15px] leading-relaxed whitespace-pre-wrap text-strong">
+                  <CollapsibleText>{block.msg.content}</CollapsibleText>
+                </div>
               )}
+              <ArtifactSelectionChip msg={block.msg} />
+              <div className="flex items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
+                {/* Time trails the icons, matching the assistant row. */}
+                <UserActions msg={block.msg} />
+                <MessageTime ts={block.msg.createdAt} />
+              </div>
             </div>
           ) : (
-            <div key={block.turn[0].id} className={`group w-full ${index === 0 ? '' : 'mt-3'}`}>
+            <div
+              key={block.turn[0].id}
+              data-chapter={block.turn.find((m) => m.chapter)?.dbId}
+              className={`group w-full scroll-mt-14 ${index === 0 ? '' : 'mt-3'}`}
+            >
               <CitationProvider citations={citationMap(block.turn.map((m) => m.citations))}>
                 <AssistantTurn
                   turn={block.turn}
@@ -1061,6 +1074,7 @@ export function Messages() {
         )}
       </div>
     </div>
+    {!previewFullscreen && <ChapterRail messages={messages} scroller={scroller} />}
     {/* Scroll-to-bottom pill — shown when scrolled away from the bottom (t3code style). */}
     {/* Hidden while the preview covers the chat: the panel sits over this
         column, and the pill must not float out from under it. */}
