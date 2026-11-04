@@ -258,9 +258,9 @@ async def auto_name_session(
 
         # The full chain keeps max_tokens generous so any model that still emits
         # a stray <think> block (despite enable_thinking=False) has headroom for
-        # it plus the actual title rather than getting clipped mid-reasoning, and
-        # 60s gives slow local models room to finish. The small model gets a
-        # short call: if it runs past that, the full chain takes over.
+        # it plus the actual title rather than getting clipped mid-reasoning. The
+        # small model gets a short call: if it writes past that, the full chain
+        # takes over. Timeout 60s gives slow local models room to finish.
         title = await llm_call_async_with_fallback(
             candidates,
             [
@@ -273,7 +273,7 @@ async def auto_name_session(
             ],
             temperature=0.3,
             max_tokens=64 if small_only else 4096,
-            timeout=20 if small_only else 60,
+            timeout=60,
             enable_thinking=False,
         )
 
