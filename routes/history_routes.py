@@ -3,7 +3,7 @@
 import json
 import logging
 import uuid
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, HTTPException, Request
 
@@ -126,6 +126,58 @@ def _without_deleted_images(history: list, session_id: str) -> list:
             entry = {**entry, "metadata": {**meta, "tool_events": events}}
         out.append(entry)
     return out
+
+
+def _chapter_text(raw: Any) -> str:
+    """The readable text of a stored message; multimodal content is a JSON list."""
+    text = raw if isinstance(raw, str) else ""
+    if text.startswith("[{"):
+        try:
+            parts = json.loads(text)
+        except ValueError:
+            return text
+        if isinstance(parts, list):
+            return " ".join(
+                str(part.get("text", ""))
+                for part in parts
+                if isinstance(part, dict) and part.get("type") == "text"
+            )
+    return text
+
+
+def _store_chapter(session, session_id: str, msg_id: str, title: Optional[str]) -> bool:
+    """Write a message's chapter, or drop it with None, in the database and in the
+    loaded history. Returns False when the message does not exist."""
+    db = SessionLocal()
+    try:
+        row = (
+            db.query(DbChatMessage)
+            .filter(DbChatMessage.id == msg_id, DbChatMessage.session_id == session_id)
+            .first()
+        )
+        if row is None:
+            return False
+        try:
+            meta = json.loads(row.meta_data) if row.meta_data else {}
+        except ValueError:
+            meta = {}
+        if title is None:
+            meta.pop("chapter", None)
+        else:
+            meta["chapter"] = {"title": title}
+        row.meta_data = json.dumps(meta)
+        db.commit()
+    finally:
+        db.close()
+    for message in session.history:
+        loaded = message.metadata if isinstance(message, ChatMessage) else message.get("metadata")
+        if isinstance(loaded, dict) and loaded.get("_db_id") == msg_id:
+            if title is None:
+                loaded.pop("chapter", None)
+            else:
+                loaded["chapter"] = {"title": title}
+            break
+    return True
 
 
 def setup_history_routes(session_manager) -> APIRouter:
@@ -618,18 +670,25 @@ def setup_history_routes(session_manager) -> APIRouter:
     async def fork_session(request: Request, session_id: str):
         """Duplicate a chat with everything in it: settings, history, documents,
         images and workspace files (files stay one copy on disk, see
-        src/session_fork.py). An optional JSON `keep_count` copies only that many
-        leading messages. `files_forked` is false when the workspace could not be
-        carried over, so the UI can say the fork is missing its files."""
+        src/session_fork.py). Optional JSON: `message_id` ends the copy at that
+        message, or ahead of it with `before_message`; `keep_count` copies only that
+        many leading messages. `files_forked` is false when the workspace could not
+        be carried over, so the UI can say the fork is missing its files."""
         _verify_session_owner(request, session_id)
         try:
             try:
                 body = await request.json()
             except ValueError:
                 body = {}
-            keep_count = body.get("keep_count") if isinstance(body, dict) else None
+            if not isinstance(body, dict):
+                body = {}
             try:
-                forked = fork_session_records(session_id, keep_count=keep_count)
+                forked = fork_session_records(
+                    session_id,
+                    keep_count=body.get("keep_count"),
+                    message_id=body.get("message_id"),
+                    before_message=bool(body.get("before_message")),
+                )
             except KeyError:
                 raise HTTPException(404, "Session not found")
             files_forked = await fork_workspace(
@@ -647,6 +706,54 @@ def setup_history_routes(session_manager) -> APIRouter:
         except Exception as e:
             logger.error(f"Fork error {session_id}: {e}")
             raise HTTPException(500, str(e))
+
+    @router.post("/api/session/{session_id}/chapter")
+    async def set_chapter(request: Request, session_id: str):
+        """Make a message a chapter of its chat, titled by the utility model, or
+        with `remove` stop it being one. The chapter lives in the message's metadata,
+        so a fork keeps it and deleting the message takes it along. Body: {message_id,
+        lang?, remove?}. Answers with the title."""
+        _verify_session_owner(request, session_id)
+        body = await request.json()
+        msg_id = body.get("message_id")
+        if not msg_id:
+            raise HTTPException(400, "message_id is required")
+        try:
+            session = session_manager.get_session(session_id)
+        except KeyError:
+            raise HTTPException(404, "Session not found")
+        if body.get("remove"):
+            if not _store_chapter(session, session_id, msg_id, None):
+                raise HTTPException(404, "Message not found")
+            return {"status": "ok", "title": None}
+
+        db = SessionLocal()
+        try:
+            rows = (
+                db.query(DbChatMessage.id, DbChatMessage.role, DbChatMessage.content)
+                .filter(DbChatMessage.session_id == session_id)
+                .order_by(DbChatMessage.timestamp, DbChatMessage.id)
+                .all()
+            )
+        finally:
+            db.close()
+        index = next((i for i, row in enumerate(rows) if row.id == msg_id), None)
+        if index is None:
+            raise HTTPException(404, "Message not found")
+        asked = next((r for r in reversed(rows[:index]) if r.role == "user"), None)
+
+        from routes.chat_helpers import generate_chapter_title
+
+        title = await generate_chapter_title(
+            session,
+            _chapter_text(asked.content) if asked else "",
+            _chapter_text(rows[index].content),
+            lang=body.get("lang"),
+        )
+        # The model call can take a while; the message may be gone by now.
+        if not _store_chapter(session, session_id, msg_id, title):
+            raise HTTPException(404, "Message not found")
+        return {"status": "ok", "title": title}
 
     @router.get("/api/conversations/topics")
     async def get_conversation_topics(request: Request) -> Dict[str, Any]:

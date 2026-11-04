@@ -307,6 +307,75 @@ async def auto_name_session(
         return False
 
 
+def _fallback_chapter_title(*texts: str) -> str:
+    """A title without a model: the first words of whatever text there is."""
+    for text in texts:
+        words = (text or "").split()[:6]
+        if words:
+            return " ".join(words)[:60]
+    return "Chat"
+
+
+async def generate_chapter_title(
+    sess, question: str, answer: str, lang: str | None = None
+) -> str:
+    """A short title for the point in a chat that a user marked as a chapter,
+    written by the same small models that title chats. Never fails: without a usable
+    answer from any of them the title is the first words of the exchange."""
+    from src.endpoint_resolver import resolve_endpoint, resolve_utility_fallback_candidates
+    from src.llm_core import llm_call_async_with_fallback
+    from src.text_helpers import strip_think
+
+    fallback = _fallback_chapter_title(question, answer)
+    try:
+        owner = getattr(sess, "owner", None)
+        utility = resolve_endpoint(
+            "utility", sess.endpoint_url, sess.model, sess.headers, owner=owner
+        )
+        candidates = _small_title_models(sess, utility, owner)
+        candidates.append(utility)
+        try:
+            candidates += resolve_utility_fallback_candidates(owner=owner)
+        except Exception:
+            pass
+        candidates.append((sess.endpoint_url, sess.model, sess.headers))
+        candidates = [c for c in candidates if c[0] and c[1]]
+        if not candidates:
+            return fallback
+
+        _lang = (lang or "").strip().lower()
+        if _lang.startswith("de"):
+            lang_instruction = " Write the title in German."
+        elif _lang.startswith("en"):
+            lang_instruction = " Write the title in English."
+        else:
+            lang_instruction = " Write the title in the language of the conversation."
+        prompt = f"User: {question[:400]}\n\nAssistant: {answer[:1500]}"
+        # Same soft switch as for chat titles: a title needs no reasoning pass.
+        if "qwen" in (candidates[0][1] or "").lower():
+            prompt += " /no_think"
+        title = await llm_call_async_with_fallback(
+            candidates,
+            [
+                {
+                    "role": "system",
+                    "content": "Generate a short chapter title (2-5 words, no quotes) naming what this exchange from a conversation is about. Reply with ONLY the title, nothing else. Do NOT include any thinking, reasoning, or explanation — just the title."
+                    + lang_instruction,
+                },
+                {"role": "user", "content": prompt},
+            ],
+            temperature=0.3,
+            max_tokens=4096,
+            timeout=60,
+            enable_thinking=False,
+        )
+        title = strip_think(title.strip().strip("\"'").strip(), prose=False, prompt_echo=False)
+        return title if title and len(title) < 80 else fallback
+    except Exception as e:
+        logger.warning(f"Chapter title failed for {sess.id}: {e}")
+        return fallback
+
+
 def try_fallback_endpoint(sess, session_id: str) -> dict | None:
     """Find an alternative working endpoint when the current one fails.
 

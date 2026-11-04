@@ -56,11 +56,18 @@ def _replacer(mapping: Dict[str, str]):
     return lambda text: pattern.sub(lambda m: mapping[m.group(0)], text)
 
 
-def fork_session_records(session_id: str, keep_count: Optional[int] = None) -> Dict[str, Any]:
-    """Duplicate one chat's records. Raises KeyError if it does not exist.
+def fork_session_records(
+    session_id: str,
+    keep_count: Optional[int] = None,
+    message_id: Optional[str] = None,
+    before_message: bool = False,
+) -> Dict[str, Any]:
+    """Duplicate one chat's records. Raises KeyError if the chat, or the message
+    asked for, does not exist.
 
-    `keep_count` limits the copy to that many leading messages. Returns the new
-    session's id, name, owner and message count.
+    `message_id` ends the copy at that message, or just ahead of it with
+    `before_message`; `keep_count` limits it to that many leading messages. Returns
+    the new session's id, name, owner and message count.
     """
     new_id = str(uuid.uuid4())
     now = datetime.now(timezone.utc)
@@ -105,7 +112,12 @@ def fork_session_records(session_id: str, keep_count: Optional[int] = None) -> D
             .order_by(ChatMessage.timestamp, ChatMessage.id)
         )
         messages = query.all()
-        if keep_count is not None:
+        if message_id is not None:
+            index = next((i for i, m in enumerate(messages) if m.id == message_id), None)
+            if index is None:
+                raise KeyError(message_id)
+            messages = messages[: index if before_message else index + 1]
+        elif keep_count is not None:
             messages = messages[: max(0, keep_count)]
         for index, message in enumerate(messages):
             # History is ordered by (timestamp, id). Ids that sort like the
