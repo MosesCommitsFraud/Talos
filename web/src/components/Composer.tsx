@@ -43,7 +43,7 @@ const CONTROL_GAP = 8;
 
 /** Typography shared by the input and its measuring twin — they have to wrap
  *  identically or the animated height lands on the wrong line count. */
-const INPUT_TEXT = 'text-[0.8125rem] leading-[1.25rem]';
+const INPUT_TEXT = 'text-[15px] leading-[1.25rem]';
 
 type SlashCommand = {
   name: string;

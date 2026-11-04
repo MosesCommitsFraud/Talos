@@ -6,7 +6,6 @@ import {
   GlobeIcon,
   MicIcon,
   PaperclipIcon,
-  PlusIcon,
   SettingsIcon,
   SparklesIcon,
   TelescopeIcon,
@@ -212,11 +211,15 @@ export function ComposerAddMenu({
           type="button"
           aria-label={t('composer.add')}
           className={cn(
-            'flex size-7 shrink-0 cursor-pointer items-center justify-center rounded-lg text-foreground/70 outline-none transition-colors hover:bg-accent hover:text-foreground focus:outline-none focus-visible:outline-none active:scale-95 [&_svg]:size-5 [&_svg]:stroke-[2.5]',
+            'flex size-7 shrink-0 cursor-pointer items-center justify-center rounded-lg text-foreground/70 outline-none transition-colors hover:bg-accent hover:text-foreground focus:outline-none focus-visible:outline-none active:scale-95',
             className,
           )}
         >
-          <PlusIcon className={uploading ? 'animate-pulse' : undefined} />
+          {/* Drawn rather than lucide's: square ends and full-length arms, snapped
+              to whole pixels so both bars stay equally sharp at any position. */}
+          <svg viewBox="0 0 14 14" aria-hidden="true" className={cn('size-[14px]', uploading && 'animate-pulse')}>
+            <path d="M7 0v14M0 7h14" stroke="currentColor" strokeWidth="2" shapeRendering="crispEdges" />
+          </svg>
         </button>
       </MenuTrigger>
       <MenuPopup align="start" className="min-w-48">
