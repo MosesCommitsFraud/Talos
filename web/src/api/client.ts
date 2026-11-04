@@ -822,9 +822,11 @@ export interface RagConfig {
   embedding_model: string;
   qdrant_url: string;
   qdrant_api_key: string;
+  qdrant_api_key_set?: boolean;
   rerank_url: string;
   rerank_model: string;
   rerank_api_key: string;
+  rerank_api_key_set?: boolean;
   sparse_model: string;
   chat_top_k: number;
   search_top_k: number;

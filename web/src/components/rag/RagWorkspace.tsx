@@ -44,6 +44,7 @@ export function RagWorkspace() {
   const setBaseId = useRagBase((s) => s.setBaseId);
   const [space, setSpaceState] = useState<Space>(spaceFromHash);
   const [tab, setTab] = useState<BaseTab>('content');
+  const [actionsEl, setActionsEl] = useState<HTMLDivElement | null>(null);
   const { bases } = useActiveRagBase();
   // Named from the routed id, not from the "active" base: the two differ for a
   // moment right after a base is created, and the header must follow the URL.
@@ -84,7 +85,7 @@ export function RagWorkspace() {
     <main className="flex min-w-0 flex-1 overflow-hidden">
       <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
         <header className="relative z-20 shrink-0 bg-transparent">
-          <div className="mx-auto flex w-full max-w-4xl items-center gap-3 px-5 py-3">
+          <div className="mx-auto flex w-full max-w-4xl flex-wrap items-center gap-x-3 gap-y-2 px-5 py-3">
             <button
               type="button"
               onClick={() =>
@@ -97,41 +98,40 @@ export function RagWorkspace() {
             >
               <ArrowLeftIcon className="size-4" />
             </button>
-            <h1 className="min-w-0 truncate text-xl font-semibold tracking-tight">{title}</h1>
-            {space.kind === 'overview' && (
-              <Button
-                size="sm"
-                variant="outline"
-                className="ml-auto"
-                onClick={() => setSpace({ kind: 'global' })}
-              >
-                <SettingsIcon className="size-3.5" /> {t('rag.globalSettings')}
-              </Button>
-            )}
-            {space.kind === 'base' && (
-              <div className="ml-auto flex shrink-0 items-center gap-1 rounded-lg border bg-card p-0.5">
-                {(['content', 'settings'] as BaseTab[]).map((k) => (
-                  <button
-                    key={k}
-                    type="button"
-                    onClick={() => setTab(k)}
-                    className={cn(
-                      'flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium transition-colors',
-                      tab === k
-                        ? 'bg-accent text-foreground'
-                        : 'text-muted-foreground hover:text-foreground',
-                    )}
-                  >
-                    {k === 'content' ? (
-                      <DatabaseIcon className="size-3.5" />
-                    ) : (
-                      <SettingsIcon className="size-3.5" />
-                    )}
-                    {t(k === 'content' ? 'rag.tab.content' : 'rag.tab.settings')}
-                  </button>
-                ))}
-              </div>
-            )}
+            <h1 className="max-w-full min-w-0 truncate text-xl font-semibold tracking-tight">{title}</h1>
+            <div className="ml-auto flex shrink-0 items-center gap-3">
+              {/* The settings form puts its save controls here. */}
+              <div ref={setActionsEl} className="flex items-center gap-2 empty:hidden" />
+              {space.kind === 'overview' && (
+                <Button size="sm" variant="outline" onClick={() => setSpace({ kind: 'global' })}>
+                  <SettingsIcon className="size-3.5" /> {t('rag.globalSettings')}
+                </Button>
+              )}
+              {space.kind === 'base' && (
+                <div className="flex shrink-0 items-center gap-1 rounded-lg border bg-card p-0.5">
+                  {(['content', 'settings'] as BaseTab[]).map((k) => (
+                    <button
+                      key={k}
+                      type="button"
+                      onClick={() => setTab(k)}
+                      className={cn(
+                        'flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium transition-colors',
+                        tab === k
+                          ? 'bg-accent text-foreground'
+                          : 'text-muted-foreground hover:text-foreground',
+                      )}
+                    >
+                      {k === 'content' ? (
+                        <DatabaseIcon className="size-3.5" />
+                      ) : (
+                        <SettingsIcon className="size-3.5" />
+                      )}
+                      {t(k === 'content' ? 'rag.tab.content' : 'rag.tab.settings')}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
         </header>
         <div className="min-h-0 flex-1 overflow-y-auto [-webkit-mask-image:linear-gradient(to_bottom,transparent_0,black_24px)] [mask-image:linear-gradient(to_bottom,transparent_0,black_24px)]">
@@ -139,12 +139,12 @@ export function RagWorkspace() {
             {space.kind === 'overview' && (
               <RagOverview onOpen={(id) => setSpace({ kind: 'base', id })} />
             )}
-            {space.kind === 'global' && <RagSettingsForm />}
+            {space.kind === 'global' && <RagSettingsForm actionsEl={actionsEl} />}
             {space.kind === 'base' &&
               (tab === 'content' ? (
                 <RagContent baseId={space.id} />
               ) : (
-                <RagSettingsForm ragId={space.id} />
+                <RagSettingsForm ragId={space.id} actionsEl={actionsEl} />
               ))}
           </div>
         </div>
