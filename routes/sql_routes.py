@@ -268,6 +268,9 @@ def setup_sql_routes():
         if not rag or not getattr(rag, "healthy", False):
             raise HTTPException(503, "RAG is not available")
         removed = rag.delete_by_source(source)
+        from src.rag_registry import invalidate_counts
+
+        invalidate_counts()
         # Best-effort disk cleanup for uploads we stored ourselves.
         try:
             from routes.personal_routes import UPLOADS_DIR

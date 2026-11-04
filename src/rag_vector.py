@@ -5292,6 +5292,16 @@ class VectorRAG:
             self._healthy = False
             return False
 
+    def point_count(self) -> Optional[int]:
+        """Stored chunks in this collection (a cheap count, no scroll), or None."""
+        if not self.healthy:
+            return None
+        try:
+            return int(self._store.count_documents())
+        except Exception as e:
+            logger.debug("point_count failed: %s", e)
+            return None
+
     def get_stats(self) -> Dict[str, Any]:
         if not self.healthy:
             return {"error": "RAG not available"}

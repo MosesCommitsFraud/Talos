@@ -433,6 +433,35 @@ def test_the_explorer_search_stays_out_of_sub_indexes_unless_asked(
     assert calls[-1]["scope"] == "sql" and "exclude_scopes" not in calls[-1]
 
 
+def test_deleting_a_document_updates_the_overview_at_once(rag_routes_client, base_with_sql_docs):
+    """The overview polls a cached count; a delete must not wait out its TTL."""
+    rag = base_with_sql_docs
+    assert rag_registry.describe(rag_registry.get_base(None))["scopes"][0]["content_count"] == 1
+
+    def _delete(source):
+        rag._documents = [d for d in rag._documents if d["source"] != source]
+        return 1
+
+    rag.delete_by_source = _delete
+    assert rag_routes_client.delete("/api/rag/documents", params={"source": "s.sql"}).status_code == 200
+    assert rag_registry.describe(rag_registry.get_base(None))["scopes"][0]["content_count"] == 0
+
+
+def test_a_change_in_another_process_outdates_the_cached_count(base_with_sql_docs):
+    """The worker and the REST service can't reach this process's cache, so the
+    collection's point count decides whether a cached row is still true."""
+    rag = base_with_sql_docs
+    rag.point_count = lambda: 67
+    assert rag_registry.describe(rag_registry.get_base(None))["content_count"] == 2
+
+    rag._documents = [d for d in rag._documents if d["source"] != "a.pdf"]
+    # Same point count: the cached row stands, this is what spares the scroll.
+    assert rag_registry.describe(rag_registry.get_base(None))["content_count"] == 2
+
+    rag.point_count = lambda: 25
+    assert rag_registry.describe(rag_registry.get_base(None))["content_count"] == 1
+
+
 def test_a_scope_id_never_collides_with_the_i18n_separators():
     """`managed_at` is used to build a translation key; ':' would be read as an
     i18next namespace separator and silently fall back to the raw token."""

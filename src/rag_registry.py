@@ -389,8 +389,13 @@ def describe(entry: Dict[str, Any], *, with_counts: bool = True) -> Dict[str, An
 # Counting documents means aggregating every chunk by source — a full scroll of
 # the collection. The catalogue is meant to be polled (it is how the calling
 # software refreshes its permission list), so the result is cached briefly.
-# Ingest is asynchronous and takes far longer than this anyway, so a count that
-# is a few seconds stale is never the surprising part.
+#
+# The cache must not outlive a change, though: a document deleted a moment ago
+# still showing in the overview is exactly the surprising part. Deletes and
+# ingests can happen in another process (the worker, the REST service), where
+# `invalidate_counts` can't reach, so each cached row also remembers the
+# collection's point count and is recounted as soon as that moved. The TTL only
+# still matters for changes that touch no chunk (a failed upload's register row).
 _COUNT_TTL_SECONDS = 30.0
 _count_cache: Dict[str, Any] = {}
 
@@ -412,10 +417,6 @@ def _counts(entry: Dict[str, Any]) -> Dict[str, Any]:
     from src.rag_singleton import get_rag_manager, last_init_error
 
     key = str(entry.get("id") or "")
-    cached = _count_cache.get(key)
-    if cached and time.monotonic() - cached[0] < _COUNT_TTL_SECONDS:
-        return dict(cached[1])
-
     try:
         rag = get_rag_manager(entry.get("id"))
     except Exception as e:  # unreachable Qdrant / embedder
@@ -427,6 +428,11 @@ def _counts(entry: Dict[str, Any]) -> Dict[str, Any]:
             "available": False,
             "error": last_init_error() or "RAG backend unavailable",
         }
+    points = _point_count(rag)
+    cached = _count_cache.get(key)
+    if cached and time.monotonic() - cached[0] < _COUNT_TTL_SECONDS and cached[2] == points:
+        return dict(cached[1])
+
     from src.rag_scopes import SCOPE_IDS, describe_scopes
 
     try:
@@ -446,7 +452,13 @@ def _counts(entry: Dict[str, Any]) -> Dict[str, Any]:
         }
         # Only successes are cached — a backend that just came back should show
         # up on the next poll, not 30 seconds later.
-        _count_cache[key] = (time.monotonic(), dict(row))
+        _count_cache[key] = (time.monotonic(), dict(row), points)
         return row
     except Exception as e:
         return {"content_count": 0, "chunk_count": 0, "available": False, "error": str(e)}
+
+
+def _point_count(rag: Any) -> Optional[int]:
+    """The collection's chunk total, the cheap "did anything change?" signal."""
+    counter = getattr(rag, "point_count", None)
+    return counter() if callable(counter) else None

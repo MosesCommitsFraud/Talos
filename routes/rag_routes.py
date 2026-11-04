@@ -1298,6 +1298,9 @@ def setup_rag_routes():
         ok = rag.delete_chunk(source, chunk_id)
         if not ok:
             raise HTTPException(404, "Chunk not found")
+        from src.rag_registry import invalidate_counts
+
+        invalidate_counts()
         return {"ok": True, "id": chunk_id}
 
     @router.delete("/documents")
@@ -1308,6 +1311,9 @@ def setup_rag_routes():
         if not rag or not getattr(rag, "healthy", False):
             raise HTTPException(503, "RAG is not available")
         removed = rag.delete_by_source(source)
+        from src.rag_registry import invalidate_counts
+
+        invalidate_counts()
         # Also drop the stored upload file so deleting a document actually frees
         # disk (big videos/PDFs). Only managed uploads — never external dirs.
         file_deleted = False

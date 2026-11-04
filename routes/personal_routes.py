@@ -500,6 +500,9 @@ def setup_personal_routes(personal_docs_manager, rag_manager, rag_available):
             if rag:
                 try:
                     removed = rag.delete_by_source(filepath)
+                    from src.rag_registry import invalidate_counts
+
+                    invalidate_counts()
                 except Exception as e:
                     logger.warning(f"RAG removal failed for {filepath}: {e}")
 
