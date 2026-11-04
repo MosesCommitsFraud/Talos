@@ -526,7 +526,7 @@ export function Composer() {
           // sets it apart, so the frame is barely there. Light mode shares the page
           // background, so a faint frame and a whisper of shadow do that job. Focus
           // changes nothing: the caret says it all.
-          '@container/composer relative rounded-2xl border border-foreground/[0.08] bg-background shadow-[0_1px_2px_rgba(0,0,0,0.03),0_6px_16px_-8px_rgba(0,0,0,0.07)] transition-colors duration-200 dark:border-foreground/[0.05] dark:bg-[color-mix(in_srgb,var(--background)_90%,white)] dark:shadow-none',
+          '@container/composer relative rounded-xl border border-foreground/[0.08] bg-background shadow-[0_1px_2px_rgba(0,0,0,0.03),0_6px_16px_-8px_rgba(0,0,0,0.07)] transition-colors duration-200 dark:border-foreground/[0.05] dark:bg-[color-mix(in_srgb,var(--background)_90%,white)] dark:shadow-none',
           dragging && 'border-primary/60 ring-2 ring-primary/30',
         )}
       >
@@ -574,8 +574,10 @@ export function Composer() {
         )}
 
         <div ref={inputRow} className="relative px-2.5 py-1.5">
-          {/* Text block, inset between the pinned controls below (see autoresize). */}
-          <div ref={inputBox} className="relative min-w-0 transition-[margin] duration-150 ease-out">
+          {/* Text block, inset between the pinned controls below (see autoresize).
+              DM Sans sits high in its line box, so the 1px puts the capitals on
+              the centre line the icons share. Offset only: layout stays put. */}
+          <div ref={inputBox} className="relative top-px min-w-0 transition-[margin] duration-150 ease-out">
           {dictating && (
             <div
               aria-live="polite"
