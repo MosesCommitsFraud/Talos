@@ -1099,8 +1099,11 @@ function SidebarBody({ onOpenPalette, account, onOpenTicketDialog, preview }: Si
       {/* The scrolling remainder, one block after the other: pinned chats, each
           section, then the chats in none. Inside an open project a way back out
           takes the top. No bottom padding: the footer divider sits flush against
-          the last chat row, and the footer supplies the space below it instead. */}
-      <div className="mt-3 min-h-0 flex-1 overflow-y-auto px-2">
+          the last chat row, and the footer supplies the space below it instead.
+          `isolate` keeps the sticky headers' z-index in here: outside, they would
+          rise above the film grain on body::after and show as a differently
+          colored band. */}
+      <div className="isolate mt-3 min-h-0 flex-1 overflow-y-auto px-2">
         {pinned.length > 0 && (
           <div className="mb-3">
             <div className={LIST_HEADER_CLASS}>
