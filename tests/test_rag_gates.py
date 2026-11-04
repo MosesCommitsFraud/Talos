@@ -142,6 +142,15 @@ def test_no_sources_means_nothing_to_check(model):
     assert model["calls"] == []
 
 
+def test_what_the_answer_cites_survives_the_length_limit():
+    sources = [
+        {"n": 1, "filename": "a.pdf", "_text": "x" * 30000},
+        {"n": 2, "filename": "b.pdf", "_text": "Zitiert"},
+    ]
+    assert "Zitiert" not in rag_gates.passages_from_sources(sources)
+    assert "Zitiert" in rag_gates.passages_from_sources(sources, "So ist es [2].")
+
+
 def test_passages_are_numbered_and_not_repeated():
     text = rag_gates.passages_from_sources(
         [

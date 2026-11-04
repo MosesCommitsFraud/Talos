@@ -182,8 +182,11 @@ def _parse_range(value: Any, parse=float) -> Optional[Tuple[float, float]]:
         text = str(value).strip()
         # A time like "1:30" contains no range dash; "1:30-2:00" does.
         bits = re.split(r"\s*(?:-|–|bis|to)\s*", text, maxsplit=1)
-        lo = parse(bits[0])
-        hi = parse(bits[1]) if len(bits) > 1 and bits[1] else lo
+        try:
+            lo = parse(bits[0])
+            hi = parse(bits[1]) if len(bits) > 1 and bits[1] else lo
+        except ValueError:
+            return None
     if lo is None or hi is None:
         return None
     return (min(lo, hi), max(lo, hi))
@@ -414,7 +417,18 @@ def _select(sections, args) -> Tuple[List[Dict[str, Any]], str]:
     if args.get("section") not in (None, ""):
         rng = _parse_range(args.get("section"))
         if not rng:
-            raise NavigationError('`section` must be a number or a range like "4-6".')
+            # Models often pass the title they saw in the outline or a citation.
+            from src.rag_term_match import term_regex
+
+            wanted = str(args.get("section")).strip()
+            title = term_regex(wanted)
+            picked = [s for s in sections if title.search(str(s.get("title") or ""))]
+            if picked:
+                return picked, f'section "{wanted}"'
+            raise NavigationError(
+                f'No section is titled "{wanted}". Pass a number or a range like "4-6"; '
+                "read_knowledge without `section` lists them."
+            )
         lo, hi = int(rng[0]), int(rng[1])
         picked = [s for s in sections if lo <= s["n"] <= hi]
         if not picked:
@@ -535,7 +549,7 @@ def read_knowledge(
             "filename": row.get("filename"),
             "snippet": sec["text"][:400],
             "similarity": 1.0,
-            "_text": sec["text"][:6000],
+            "_text": sec["text"][:12000],
             "_id": f"{base['id']}:{first.get('id')}",
             "_source": f"{base['id']}:{row.get('source')}",
             "_page": sec["pages"][0] if sec.get("pages") else None,

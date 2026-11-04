@@ -220,6 +220,27 @@ def test_grep_everywhere_and_miss(kb):
     assert "does not occur" in nav.grep_knowledge({"pattern": "zzz"})
 
 
+def test_read_finds_a_section_by_its_title(kb):
+    text, sources, label = nav.read_knowledge({"document": "Handbuch.pdf", "section": "fehler"})
+    assert "E-4711" in text
+    assert label.endswith('section "fehler"')
+
+
+def test_read_with_an_unknown_title_says_what_to_do(kb):
+    with pytest.raises(nav.NavigationError, match="No section is titled"):
+        nav.read_knowledge({"document": "Handbuch.pdf", "section": "gibt es nicht"})
+
+
+def test_a_title_with_a_dash_is_no_range(kb):
+    with pytest.raises(nav.NavigationError, match="No section is titled"):
+        nav.read_knowledge({"document": "Handbuch.pdf", "section": "Datentransfer – Ausgehend"})
+
+
+def test_pages_that_are_no_number_get_a_clear_error(kb):
+    with pytest.raises(nav.NavigationError, match="`pages` must be"):
+        nav.read_knowledge({"document": "Handbuch.pdf", "pages": "Anfang"})
+
+
 def test_grep_in_document_finds_spelling_variants(kb):
     out = nav.grep_knowledge({"pattern": "E 4711", "document": "Handbuch.pdf"})
     assert out.startswith("1 occurrence(s)")

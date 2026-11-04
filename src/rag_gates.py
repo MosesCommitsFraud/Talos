@@ -55,11 +55,17 @@ def gate_mode(cfg: Optional[Dict[str, Any]], name: str) -> str:
     return mode if mode in GATE_MODES else DEFAULT_GATE_MODE
 
 
-def passages_from_sources(sources: List[Dict[str, Any]]) -> str:
-    """The text the turn's sources put in front of the model, numbered as it saw it."""
+def passages_from_sources(sources: List[Dict[str, Any]], answer: str = "") -> str:
+    """The text the turn's sources put in front of the model, numbered as it saw it.
+
+    A long turn can read more than the check takes, so what the answer cites goes first.
+    """
+    from src.citations import cited_numbers
+
+    cited = cited_numbers(answer)
     parts = []
     seen = set()
-    for source in sources or []:
+    for source in sorted(sources or [], key=lambda s: s.get("n") not in cited):
         text = source.get("_text") or source.get("snippet") or ""
         if not text or text in seen:
             continue
@@ -260,7 +266,7 @@ def grounding_note(
 ) -> str:
     """Line to append for the reader when an answer goes beyond its sources; else empty."""
     mode = gate_mode(cfg, "grounding_gate")
-    passages = passages_from_sources(sources)
+    passages = passages_from_sources(sources, answer)
     if mode == "off" or not passages or not (answer or "").strip():
         return ""
     if mode == "shadow":
