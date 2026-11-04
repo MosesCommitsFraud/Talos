@@ -35,6 +35,7 @@ CORE_TOOLS = frozenset(
     ALWAYS_AVAILABLE
     | {
         "query_sql",
+        "db_memory",
         "search_knowledge",
         "list_knowledge",
         "read_knowledge",

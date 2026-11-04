@@ -195,6 +195,47 @@ FUNCTION_TOOL_SCHEMAS = [
     {
         "type": "function",
         "function": {
+            "name": "db_memory",
+            "description": (
+                "Your memory of the connected SQL database, shared across all users' chats. "
+                "Note what took effort to find out and will save work next time: which table or "
+                "view answers a business question, real column names, what codes mean, join "
+                "rules, quirks. Structure only: never figures, row values, customer names or "
+                "anything about a user. One short fact per note. action=view recalls your notes; "
+                "do so whenever you think they could help, for instance before finding your way "
+                "around unfamiliar tables. action=add writes a note, edit replaces the text of "
+                "one, remove deletes one. When a note proves wrong, correct it right away. Send "
+                "add/edit/remove alongside your next query_sql call, so it costs no step of its "
+                "own, and not after your final answer."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "enum": ["view", "add", "edit", "remove"],
+                        "description": "Operation to perform",
+                    },
+                    "text": {
+                        "type": "string",
+                        "description": "The note, for add and edit (at most 600 characters)",
+                    },
+                    "id": {
+                        "type": "integer",
+                        "description": "Number of the note, for edit and remove",
+                    },
+                    "database": {
+                        "type": "string",
+                        "description": "Database name, when more than one is configured",
+                    },
+                },
+                "required": ["action"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "search_knowledge",
             "description": (
                 "Search the documents indexed in this Talos instance (the knowledge base). "

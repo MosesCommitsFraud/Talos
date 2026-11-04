@@ -318,6 +318,11 @@ Build your answer from the reports, keep their [n] citations, and verify anythin
 ```
 Read-only SQL access to the configured external database(s). Use when the user asks about database data, tables, rows, reports, metrics, or SQL. Actions: `list_databases` (names of the connected databases), `list_tables` (optional `pattern` in SQL LIKE syntax, e.g. `"dbo.kunden%"`, to list only matching tables; tables that differ only in a trailing number are shown as one `stem<N>` line with their numbers), `describe` with `table`, `query`, and `knowledge` with `query` in plain words, which searches the notes uploaded for the database (schema files, catalogues, join rules) and runs no SQL. Look there whenever you think it could help. When more than one database is configured, pass `"database": "<name>"` to pick which one each call targets (omit it when only one is configured). Omit `max_rows` or pass `0` when the user wants the full result set. Only read-only SELECT/WITH/SHOW/DESCRIBE/EXPLAIN/PRAGMA statements are allowed; never ask the user for DB credentials and never reveal credentials.
 **This tool is the ONLY route to the database.** The `python`/`bash` sandbox has no network path to the DB host, so `pymssql.connect`, `psycopg2.connect` or a SQLAlchemy engine written in a code cell will always fail — do not try it, and do not treat the failure as something to work around. To analyse rows in pandas, pull them with `query_sql` (the result is written to a CSV in your workspace when it is large) and `read_csv` that file in the `python` tool.""",
+    "db_memory": """\
+```db_memory
+{"action": "add", "text": "Plan versions: mAI_Datenmodell, columns Wertbezug, WertsystemJahr, Version"}
+```
+Your memory of the connected SQL database, shared across all users' chats. Note what took effort to find out and will save work next time: which table or view answers a business question, real column names, what codes mean, join rules, quirks. Structure only: never figures, row values, customer names or anything about a user. One short fact per note, at most 600 characters. Actions: `view` recalls your notes, do so whenever you think they could help, for instance before finding your way around unfamiliar tables; `add` with `text`, `edit` with `id` and `text`, `remove` with `id`. When a note proves wrong, correct it right away. Send add/edit/remove alongside your next `query_sql` call, so it costs no step of its own, and not after your final answer. Pass `"database": "<name>"` when more than one is configured.""",
     "web_search": """\
 ```web_search
 {"query": "...", "max_results": 6, "language": "de", "time_range": "week"}
@@ -1803,6 +1808,17 @@ _FULL_ANSWER_MIN_CHARS = 600
 # Tools that only show the user something and hand the model nothing new.
 _VIEW_TOOLS = {"render_widget", "render_ui"}
 
+
+def _needs_no_reply(block) -> bool:
+    """Whether a call's result gives the model nothing to go on: a chart it drew, or
+    a note it stored."""
+    if block.tool_type == "db_memory":
+        from src.db_memory import is_write_call
+
+        return is_write_call(block.content)
+    return block.tool_type in _VIEW_TOOLS
+
+
 # ── Concurrent tool execution ────────────────────────────────────────
 # When a round contains several independent, read-only, IO-bound calls,
 # running them one after another wastes wall-clock: three web_fetches at
@@ -2323,6 +2339,16 @@ async def stream_agent_loop(
         disabled_tools.add("query_sql")
         if _relevant_tools is not None:
             _relevant_tools.discard("query_sql")
+    # The notes on the database go with it. Not discarded from disabled_tools when
+    # the button is on: a subagent's allowlist keeps it out, since its report is
+    # read by the main turn and it has no say in what stays for other chats.
+    if not force_db:
+        disabled_tools.add("db_memory")
+    if _relevant_tools is not None:
+        if force_db and "db_memory" not in disabled_tools:
+            _relevant_tools.add("db_memory")
+        else:
+            _relevant_tools.discard("db_memory")
 
     # search_knowledge mirrors that, gated by the Knowledge/Full-Knowledge mode
     # (use_rag) instead. The two gates are independent of `auto_inject_enabled`:
@@ -2527,7 +2553,12 @@ async def stream_agent_loop(
         # system prompt: the note exists only on DB turns, so prepending it
         # voided the prefix cache for the whole chat whenever the button was
         # toggled.
-        insert_before_last_user(messages, turn_context_message(_db_note))
+        _db_memory_hint = ""
+        if "db_memory" not in disabled_tools:
+            from src.db_memory import turn_hint as _db_memory_turn_hint
+
+            _db_memory_hint = _db_memory_turn_hint()
+        insert_before_last_user(messages, turn_context_message(_db_note, _db_memory_hint))
         logger.info("[db-mode] database available for this turn")
     if deep_research and not subagent:
         from src import deep_research as _deep_research
@@ -4142,7 +4173,7 @@ async def stream_agent_loop(
         if (
             not _force_answer
             and len(_round_answer_text) >= _FULL_ANSWER_MIN_CHARS
-            and all(b.tool_type in _VIEW_TOOLS for b in tool_blocks)
+            and all(_needs_no_reply(b) for b in tool_blocks)
             and all(e.get("exit_code") == 0 for e in tool_events if e.get("round") == round_num)
         ):
             logger.info("[agent] round %d: answer written and shown, ending the turn", round_num)

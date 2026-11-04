@@ -2013,6 +2013,11 @@ async def execute_tool_block(
     elif tool == "query_sql":
         desc = "query_sql"
         result = await do_query_sql(content, owner=owner, session_id=session_id)
+    elif tool == "db_memory":
+        from src.db_memory import do_db_memory
+
+        desc = "db_memory"
+        result = await do_db_memory(content, owner=owner)
     elif tool == "search_knowledge":
         result = await do_search_knowledge(content, owner=owner, session_id=session_id)
         _hits = len(result.get("rag_sources") or [])
