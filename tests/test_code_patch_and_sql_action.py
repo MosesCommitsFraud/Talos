@@ -73,8 +73,52 @@ def test_tool_name_echoed_as_action_runs_the_query():
 
 
 def test_real_actions_pass_through():
-    for action in ("query", "list_databases", "list_tables", "describe"):
+    for action in ("query", "list_databases", "list_tables", "describe", "knowledge"):
         assert _normalize_sql_action(action, {}) == action
+
+
+def test_knowledge_action_is_not_mistaken_for_sql():
+    args = {"query": "welche Tabelle hat den Umsatz"}
+    assert _normalize_sql_action("knowledge", args) == "knowledge"
+    assert _normalize_sql_action("search_knowledge", args) == "knowledge"
+
+
+async def test_knowledge_action_returns_the_sections_without_a_database(monkeypatch):
+    from src import rag_mini
+    from src.tool_implementations import do_query_sql
+
+    queries = []
+
+    def retrieve(query):
+        queries.append(query)
+        return ["[schema.md]\norders", "[schema.md]\nstatus"]
+
+    monkeypatch.setattr(rag_mini, "retrieve_sections", retrieve)
+    # No connection is needed: nothing here touches the database.
+    monkeypatch.setattr(
+        "src.tool_implementations._sql_connections",
+        lambda: pytest.fail("the knowledge action must not need a database connection"),
+    )
+    result = await do_query_sql('{"action": "knowledge", "query": "Statuscodes"}')
+    assert queries == ["Statuscodes"]
+    assert result["exit_code"] == 0
+    assert result["output"] == "[schema.md]\norders\n\n---\n\n[schema.md]\nstatus"
+
+
+async def test_knowledge_action_says_when_there_is_nothing(monkeypatch):
+    from src import rag_mini
+    from src.tool_implementations import do_query_sql
+
+    monkeypatch.setattr(rag_mini, "retrieve_sections", lambda query: [])
+    result = await do_query_sql('{"action": "knowledge", "query": "x"}')
+    assert result["exit_code"] == 0 and "nothing" in result["output"]
+
+
+async def test_knowledge_action_needs_a_query():
+    from src.tool_implementations import do_query_sql
+
+    result = await do_query_sql('{"action": "knowledge"}')
+    assert result["exit_code"] == 1
 
 
 def test_unknown_action_falls_back_to_the_payload():

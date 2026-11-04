@@ -247,34 +247,62 @@ async def test_switched_off_sources_are_not_offered(captured):
     assert "query_sql" not in available and "search_knowledge" not in available
 
 
-async def test_sql_knowledge_refresh_is_appended_not_rewritten(monkeypatch):
+async def _run_sql_turn(monkeypatch, msgs, retrieve, sql_rounds=1):
+    """A DB turn calling query_sql for `sql_rounds` rounds. Returns each round's prompt."""
     calls = []
 
-    async def fake_stream(candidates, messages, **kwargs):
+    async def fake_stream(candidates, messages, **_):
         calls.append(json.loads(json.dumps(messages, default=str)))
-        if len(calls) == 1:
-            call = {"id": "c1", "name": "query_sql", "arguments": '{"query": "SELECT 1"}'}
+        if len(calls) <= sql_rounds:
+            sql = f'{{"query": "SELECT {len(calls)}"}}'
+            call = {"id": f"c{len(calls)}", "name": "query_sql", "arguments": sql}
             yield f"data: {json.dumps({'type': 'tool_calls', 'calls': [call]})}\n\n"
         else:
             yield f"data: {json.dumps({'delta': 'Fertig.'})}\n\n"
         yield "data: [DONE]\n\n"
 
-    retrievals = iter(["[a.md]\nTabelle A", "[a.md]\nTabelle A\n\n---\n\n[b.md]\nTabelle B"])
     monkeypatch.setattr(agent_loop, "stream_llm_with_fallback", fake_stream)
-    monkeypatch.setattr(agent_loop, "_retrieve_sql_knowledge", lambda q: next(retrievals, ""))
+    monkeypatch.setattr(agent_loop, "_retrieve_sql_knowledge", retrieve)
     monkeypatch.setenv("TALOS_ASSUME_NATIVE_TOOLS", "1")
-    msgs = [{"role": "system", "content": "p"}, {"role": "user", "content": "Umsatz 2025?"}]
     async for _ in agent_loop.stream_agent_loop(
-        "http://vllm.test:8000/v1", "qwen3-llm", msgs, max_rounds=2, force_db=True
+        "http://vllm.test:8000/v1", "qwen3-llm", msgs, max_rounds=sql_rounds + 1, force_db=True
     ):
         pass
-    first, second = (_consolidate_system_messages(c) for c in calls)
-    # Round 2 starts with round 1's prompt, byte for byte.
-    assert second[: len(first)] == first
+    return calls
+
+
+async def test_sql_knowledge_search_sees_only_the_users_words(monkeypatch):
+    queries = []
+
+    def retrieve(query):
+        queries.append(query)
+        return ""
+
+    msgs = [
+        {"role": "system", "content": "Talos policy."},
+        {"role": "user", "content": "Wie viele Kunden haben wir?"},
+        {"role": "assistant", "content": "Eine lange Antwort, die nicht gesucht werden soll."},
+        {"role": "user", "content": "[1] handbuch.pdf\nText.\n\nUSER QUESTION:\nUnd im Vorjahr?"},
+    ]
+    await _run_sql_turn(monkeypatch, msgs, retrieve, sql_rounds=0)
+    assert queries == ["Und im Vorjahr?\nWie viele Kunden haben wir?"]
+
+
+async def test_sql_knowledge_is_not_searched_again_on_its_own(monkeypatch):
+    queries = []
+
+    def retrieve(query):
+        queries.append(query)
+        return "[a.md]\nTabelle A"
+
+    msgs = [{"role": "system", "content": "p"}, {"role": "user", "content": "Umsatz 2025?"}]
+    calls = await _run_sql_turn(monkeypatch, msgs, retrieve, sql_rounds=2)
+    # query_sql ran twice and left it to the model to look further.
+    assert queries == ["Umsatz 2025?"]
+    first, *later = (_consolidate_system_messages(c) for c in calls)
     assert "Tabelle A" in json.dumps(first)
-    # The refresh sits at the end and carries only the new section.
-    tail = second[-1]["content"]
-    assert "Tabelle B" in tail and "Tabelle A" not in tail
+    for prompt in later:
+        assert prompt[: len(first)] == first
 
 
 async def test_subagent_turn_offers_only_its_allowlist(captured):

@@ -18,6 +18,9 @@ TURN_CONTEXT_SOURCE = "turn context"
 # sections into the current turn (see routes/chat_helpers.build_chat_context).
 FIGURE_RULE_SOURCE = "figure rule"
 _HEADER = "[Context for this message — from the system, not written by the user]"
+# Closes the retrieved knowledge merged into the user's message, right before
+# their own words (see routes/chat_helpers.build_chat_context).
+USER_QUESTION_MARKER = "USER QUESTION:\n"
 
 
 def turn_context_message(*parts: Optional[str]) -> Optional[Dict]:

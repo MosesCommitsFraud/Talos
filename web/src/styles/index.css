@@ -434,8 +434,25 @@ body::after {
 @keyframes shimmer-sweep {
   to { background-position: -200% 0; }
 }
+/* The same sweep in plain grey, for a running chat's name in the sidebar: the
+   name stays readable and the motion alone says that something is going on. */
+.shimmer-text-muted {
+  color: var(--muted-foreground);
+  background: linear-gradient(
+    100deg,
+    var(--muted-foreground) 35%,
+    color-mix(in srgb, var(--muted-foreground) 35%, var(--foreground)) 50%,
+    var(--muted-foreground) 65%
+  );
+  background-size: 200% 100%;
+  background-clip: text;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: shimmer-sweep 1.6s linear infinite;
+}
 @media (prefers-reduced-motion: reduce) {
-  .shimmer-text { animation: none; }
+  .shimmer-text,
+  .shimmer-text-muted { animation: none; }
 }
 
 /* ── Toast ──

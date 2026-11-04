@@ -156,14 +156,16 @@ FUNCTION_TOOL_SCHEMAS = [
                 "pulling raw rows you intend to sum yourself. When the same shape of data is "
                 "split across many similarly-named tables (one per year/region/tenant), combine "
                 "them in ONE query with UNION ALL and a literal column naming the source table "
-                "— do not issue one call per table."
+                "— do not issue one call per table. action=knowledge searches the notes uploaded "
+                "for the database (schema files, catalogues, join rules) without running SQL; "
+                "look there whenever you think it could help."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "action": {
                         "type": "string",
-                        "enum": ["list_tables", "describe", "query"],
+                        "enum": ["list_tables", "describe", "query", "knowledge"],
                         "description": "Operation to perform",
                     },
                     "table": {"type": "string", "description": "Table name for describe"},
@@ -176,7 +178,10 @@ FUNCTION_TOOL_SCHEMAS = [
                     },
                     "query": {
                         "type": "string",
-                        "description": "Read-only SQL statement for action=query",
+                        "description": (
+                            "Read-only SQL statement for action=query; plain words for "
+                            "action=knowledge"
+                        ),
                     },
                     "max_rows": {
                         "type": "integer",

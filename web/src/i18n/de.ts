@@ -39,7 +39,6 @@ const de: typeof en = {
     showMoreChats: '{{count}} weitere anzeigen',
     noChats: 'Noch keine Chats',
     running: 'Generiert…',
-    working: 'Arbeitet',
     completed: 'Fertig',
     awaiting: 'Eingabe nötig',
     titlePending: 'Titel wird erstellt…',

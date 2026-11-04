@@ -49,7 +49,12 @@ from src.tool_security import (
     blocked_tools_for_owner,
     mcp_blocked_for_owner,
 )
-from src.turn_context import insert_before_last_user, turn_context_message
+from src.turn_context import (
+    TURN_CONTEXT_SOURCE,
+    USER_QUESTION_MARKER,
+    insert_before_last_user,
+    turn_context_message,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -310,7 +315,7 @@ Build your answer from the reports, keep their [n] citations, and verify anythin
 ```query_sql
 {"action": "query", "query": "SELECT ...", "max_rows": 100}
 ```
-Read-only SQL access to the configured external database(s). Use when the user asks about database data, tables, rows, reports, metrics, or SQL. Actions: `list_databases` (names of the connected databases), `list_tables` (optional `pattern` in SQL LIKE syntax, e.g. `"dbo.kunden%"`, to list only matching tables; tables that differ only in a trailing number are shown as one `stem<N>` line with their numbers), `describe` with `table`, and `query`. When more than one database is configured, pass `"database": "<name>"` to pick which one each call targets (omit it when only one is configured). Omit `max_rows` or pass `0` when the user wants the full result set. Only read-only SELECT/WITH/SHOW/DESCRIBE/EXPLAIN/PRAGMA statements are allowed; never ask the user for DB credentials and never reveal credentials.
+Read-only SQL access to the configured external database(s). Use when the user asks about database data, tables, rows, reports, metrics, or SQL. Actions: `list_databases` (names of the connected databases), `list_tables` (optional `pattern` in SQL LIKE syntax, e.g. `"dbo.kunden%"`, to list only matching tables; tables that differ only in a trailing number are shown as one `stem<N>` line with their numbers), `describe` with `table`, `query`, and `knowledge` with `query` in plain words, which searches the notes uploaded for the database (schema files, catalogues, join rules) and runs no SQL. Look there whenever you think it could help. When more than one database is configured, pass `"database": "<name>"` to pick which one each call targets (omit it when only one is configured). Omit `max_rows` or pass `0` when the user wants the full result set. Only read-only SELECT/WITH/SHOW/DESCRIBE/EXPLAIN/PRAGMA statements are allowed; never ask the user for DB credentials and never reveal credentials.
 **This tool is the ONLY route to the database.** The `python`/`bash` sandbox has no network path to the DB host, so `pymssql.connect`, `psycopg2.connect` or a SQLAlchemy engine written in a code cell will always fail — do not try it, and do not treat the failure as something to work around. To analyse rows in pandas, pull them with `query_sql` (the result is written to a CSV in your workspace when it is large) and `read_csv` that file in the `python` tool.""",
     "web_search": """\
 ```web_search
@@ -708,32 +713,32 @@ def _recent_context_for_retrieval(
     return "\n".join(collected)[:max_chars]
 
 
-def _sql_kb_query(messages: List[Dict], max_msgs: int = 4, max_chars: int = 1200) -> str:
-    """Build the SQL-knowledge retrieval query from the recent turn.
+def _sql_kb_question(messages: List[Dict], max_questions: int = 2, max_chars: int = 400) -> str:
+    """The user's own words, as the basis of every SQL-knowledge search of a turn.
 
-    Unlike the one-shot upfront retrieval (which only saw the original user
-    question), this folds in the model's own recent activity — its latest
-    query_sql attempts and the tool results/errors that came back — so the
-    refreshed knowledge tracks the table/column the model is wrestling with
-    RIGHT NOW, not just the opening wording."""
-    collected = []
+    Only theirs: the database note, the clock and the system prompt are the same
+    on every turn, and retrieved knowledge merged into the message is about
+    something else, so any of them in the query blurs it towards the same chunks
+    whatever was asked. The question before the current one comes along because
+    a follow-up ("und im Vorjahr?") means nothing alone."""
+    questions: List[str] = []
     for msg in reversed(messages):
+        if msg.get("role") != "user":
+            continue
+        if (msg.get("metadata") or {}).get("source") == TURN_CONTEXT_SOURCE:
+            continue
         content = msg.get("content", "")
         if isinstance(content, list):
             content = " ".join(b.get("text", "") for b in content if isinstance(b, dict))
-        content = (content or "").strip()
-        if not content:
-            # Native tool calls live in tool_calls, not content — pull their args.
-            for tc in msg.get("tool_calls") or []:
-                fn = tc.get("function") or {}
-                content += f" {fn.get('name', '')} {fn.get('arguments', '')}"
-            content = content.strip()
-        if not content:
+        content = str(content or "")
+        if content.startswith(TOOL_RESULT_PREFIX):
             continue
-        collected.append(content)
-        if len(collected) >= max_msgs:
+        text = content.rpartition(USER_QUESTION_MARKER)[2].strip()
+        if text:
+            questions.append(text[:max_chars])
+        if len(questions) >= max_questions:
             break
-    return "\n".join(collected)[:max_chars]
+    return "\n".join(questions)
 
 
 _SQL_KB_SEPARATOR = "\n\n---\n\n"
@@ -1838,31 +1843,6 @@ def _tool_parallelism() -> int:
     return max(1, min(n, 8))
 
 
-# Each SQL-knowledge refresh rewrites the consolidated system block and so costs
-# a full re-prefill of the conversation. Two is enough to recover from a wrong
-# first retrieval without turning the turn into a prefill loop.
-_SQL_KB_MAX_REFRESHES = 2
-
-
-def _sql_call_missed(ev: Dict[str, Any]) -> bool:
-    """Did this query_sql event suggest the model is lost in the schema?
-
-    An outright error (exit_code != 0) is the obvious case. The subtler — and
-    more common — one is a syntactically valid query that returns ZERO rows:
-    that is what querying the wrong table, joining on the wrong key, or
-    filtering a column that holds different values than assumed looks like from
-    outside. Only the `query` action reports `row_count`, so describe/
-    list_tables events fall through to the exit-code check.
-
-    A genuinely empty answer ("no orders in 2026") also lands here, which is why
-    the caller caps refreshes at _SQL_KB_MAX_REFRESHES — a wasted retrieval is
-    far cheaper than a turn that never finds the right table.
-    """
-    if ev.get("exit_code") not in (None, 0):
-        return True
-    return ev.get("row_count") == 0
-
-
 def _build_actions_snapshot(tool_events: list, limit: int = 8000) -> str:
     """Compact record of what the agent actually did this turn, for the
     verifier to judge against. One block per tool execution: the command and
@@ -2530,7 +2510,10 @@ async def stream_agent_loop(
             "If you are unsure, one targeted lookup is fine; if it finds nothing, that "
             "is the answer — say so in one sentence and, if the question may be about "
             "something public, answer from your knowledge or the web instead of "
-            "searching further tables. Never use python/bash to reach the database."
+            "searching further tables. Never use python/bash to reach the database. "
+            "Uploaded notes on this database can be searched with `query_sql` action "
+            "`knowledge`; look there whenever you think they could help, for instance when "
+            "a result shows a table, column or value you can't place."
             + _db_list_note
             + (" Dialect: " + " ".join(_dialect_notes) if _dialect_notes else "")
         )
@@ -2706,15 +2689,7 @@ async def stream_agent_loop(
     # closing remark while the substantial answer sits in an earlier (folded)
     # round — the final message must be the complete deliverable.
     _final_restate_nudged = False
-    # DB mode: a single reference-material message holding sql-scoped RAG chunks.
-    # Inserted lazily on the first round that finds a hit, then left ALONE unless
-    # the model actually gets stuck on the schema — see the refresh block in the
-    # round loop for why rewriting it is so expensive.
-    _sql_kb_msg = None
-    _sql_kb_attempted = False  # retrieval ran at least once (it may have found nothing)
-    _sql_kb_refreshes = 0
-    _sql_kb_seconds = 0.0  # last retrieval's duration, reported in the round profile
-    _sql_kb_sent: Set[str] = set()  # sections already given to the model this turn
+    _sql_kb_seconds = 0.0  # the mini RAG search's duration, reported in the round profile
 
     # Document streaming state (persists across rounds)
     _doc_acc = ""  # accumulated tool-call JSON arguments
@@ -2794,81 +2769,27 @@ async def stream_agent_loop(
                     yield f"data: {json.dumps({'type': 'compacted', 'context_length': context_length})}\n\n"
                     yield _context_metrics_frame(estimate_tokens(messages), "estimated")
 
-        # DB mode: SQL knowledge is retrieved once, right before the question
-        # (turn context), and that message is never edited afterwards.
-        #
-        # A refresh is APPENDED after the latest tool results, carrying only
-        # sections not given yet. Editing the message in place rewrote the
-        # prompt from before the question on — the question and every tool
-        # round of the turn — so vLLM re-prefilled all of it: measured ~50 s per
-        # refresh at 40k tokens. (As a system message, which stream_llm hoisted
-        # to position 0, it was worse still: a 39-round DB turn once spent ~2/3
-        # of 107 minutes re-prefilling.) Appended, a refresh costs only its own
-        # new sections.
-        #
-        # Re-retrieving is only worth that price when the model is genuinely
-        # lost in the schema, so it is gated on a query_sql MISS in the previous
-        # round (an error, or a valid query that came back empty — see
-        # _sql_call_missed) and capped at _SQL_KB_MAX_REFRESHES per turn.
-        if force_db:
-            # `_sql_kb_attempted`, not `_sql_kb_msg is None`: when no SQL
-            # knowledge is configured the retrieval returns nothing, and without
-            # this flag we'd run a fruitless vector search on every round.
-            _kb_stale = not _sql_kb_attempted or (
-                _sql_kb_refreshes < _SQL_KB_MAX_REFRESHES
-                and any(
-                    ev.get("round") == round_num - 1
-                    and ev.get("tool") == "query_sql"
-                    and _sql_call_missed(ev)
-                    for ev in tool_events
+        # DB mode: one search for the question, right before it (turn context).
+        # Everything after that is the model's call: query_sql's `knowledge` action
+        # looks in the same mini RAGs whenever a result leaves it unsure, and its
+        # answer lands at the end of the prompt like any tool result.
+        if force_db and round_num == 1:
+            # Embedding + vector search are blocking — keep the loop free.
+            _kb_t0 = time.time()
+            _kb = await asyncio.to_thread(_retrieve_sql_knowledge, _sql_kb_question(messages))
+            _sql_kb_seconds = time.time() - _kb_t0
+            # Before the first token, so it belongs to the prep time
+            # (and out of agent_model_wait_time, which is derived).
+            prep_timings["sql_knowledge"] = _sql_kb_seconds
+            if _kb:
+                insert_before_last_user(
+                    messages,
+                    turn_context_message(
+                        "Reference material for the user's database (uploaded SQL "
+                        "knowledge — use it to navigate the schema when the question "
+                        "is about their data; its presence doesn't mean it is):\n" + _kb
+                    ),
                 )
-            )
-            if _kb_stale:
-                _sql_kb_attempted = True
-                # Embedding + vector search are blocking — keep the loop free.
-                _kb_t0 = time.time()
-                _kb = await asyncio.to_thread(_retrieve_sql_knowledge, _sql_kb_query(messages))
-                _sql_kb_seconds = time.time() - _kb_t0
-                if round_num == 1:
-                    # Before the first token, so it belongs to the prep time
-                    # (and out of agent_model_wait_time, which is derived).
-                    prep_timings["sql_knowledge"] = _sql_kb_seconds
-                # Only sections the model hasn't been given yet this turn.
-                _kb_new = [
-                    part
-                    for part in (_kb.split(_SQL_KB_SEPARATOR) if _kb else [])
-                    if part.strip() and part not in _sql_kb_sent
-                ]
-                if _kb_new:
-                    _sql_kb_sent.update(_kb_new)
-                    _kb_text = _SQL_KB_SEPARATOR.join(_kb_new)
-                    if _sql_kb_msg is None and round_num == 1:
-                        _sql_kb_msg = turn_context_message(
-                            "Reference material for the user's database (uploaded SQL "
-                            "knowledge — use it to navigate the schema when the question "
-                            "is about their data; its presence doesn't mean it is):\n" + _kb_text
-                        )
-                        insert_before_last_user(messages, _sql_kb_msg)
-                    else:
-                        _sql_kb_msg = turn_context_message(
-                            "More reference material for the user's database, found for "
-                            "your latest queries (the previous one came back empty or "
-                            "failed):\n" + _kb_text
-                        )
-                        messages.append(_sql_kb_msg)
-                        _sql_kb_refreshes += 1
-                        logger.info(
-                            "[db-mode] SQL knowledge appended after a missed query "
-                            "(round %d, refresh %d/%d, %d new section(s))",
-                            round_num,
-                            _sql_kb_refreshes,
-                            _SQL_KB_MAX_REFRESHES,
-                            len(_kb_new),
-                        )
-                elif _sql_kb_msg is not None:
-                    # Nothing new to add — still counts, so a model stuck on
-                    # misses doesn't trigger a vector search every round.
-                    _sql_kb_refreshes += 1
         # Reset doc streaming state per round
         _doc_acc = ""
         _doc_opened = False
@@ -4111,12 +4032,6 @@ async def stream_agent_loop(
             if result.get("doc_id"):
                 tool_event["doc_id"] = result["doc_id"]
                 tool_event["doc_title"] = result.get("title", "")
-            # query_sql reports how many rows the statement actually produced.
-            # A successful query that returns NOTHING is the signature of a model
-            # working from the wrong table/column, so the SQL-knowledge refresh
-            # gate reads this — see the `_kb_stale` block in the round loop.
-            if isinstance(result.get("row_count"), int):
-                tool_event["row_count"] = result["row_count"]
             # Persist the file-write/edit diff so it re-renders on reload — without
             # this the diff shows live but vanishes from saved history.
             if result.get("diff"):

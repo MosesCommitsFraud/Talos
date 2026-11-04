@@ -474,8 +474,8 @@ def _spill_name(query: str) -> str:
     return f"{_SQL_SPILL_DIR}/query_{digest}.csv"
 
 
-# Aliases models reach for instead of the four real query_sql actions. Echoing
-# the tool's own name back as the action is the single most common one.
+# Aliases models reach for instead of the real query_sql actions. Echoing the
+# tool's own name back as the action is the single most common one.
 _SQL_ACTION_ALIASES = {
     "query_sql": "query",
     "sql": "query",
@@ -490,13 +490,35 @@ _SQL_ACTION_ALIASES = {
     "show_tables": "list_tables",
     "describe_table": "describe",
     "schema": "describe",
+    "search_knowledge": "knowledge",
+    "search": "knowledge",
+    "notes": "knowledge",
+    "docs": "knowledge",
 }
 
-_SQL_ACTIONS = {"query", "list_databases", "list_tables", "describe"}
+_SQL_ACTIONS = {"query", "list_databases", "list_tables", "describe", "knowledge"}
+
+
+async def _sql_knowledge(args: Dict) -> Dict:
+    """Search the mini RAGs of the enabled databases on the model's request."""
+    query = str(args.get("query") or "").strip()
+    if not query:
+        return {"error": 'The "knowledge" action needs "query", in plain words.', "exit_code": 1}
+    from src.rag_mini import SECTION_SEPARATOR, retrieve_sections
+
+    try:
+        # Embedding + vector search are blocking — keep the loop free.
+        sections = await asyncio.to_thread(retrieve_sections, query)
+    except Exception as e:
+        logger.warning("SQL knowledge search failed: %s", e)
+        return {"error": f"The notes could not be searched: {e}", "exit_code": 1}
+    if not sections:
+        return {"output": "The notes on this database have nothing on that.", "exit_code": 0}
+    return {"output": SECTION_SEPARATOR.join(sections), "exit_code": 0}
 
 
 def _normalize_sql_action(raw: str, args: Dict) -> str:
-    """Map an action alias onto one of the four real actions.
+    """Map an action alias onto one of the real actions.
 
     A wrong `action` used to hard-fail a call whose intent was unambiguous
     (`{"query": "SELECT ...", "action": "query_sql"}`), costing the model a
@@ -553,6 +575,9 @@ async def do_query_sql(
             detail = "/".join(p for p in (dt, host) if p)
             lines.append(f"{c['name']}" + (f" ({detail})" if detail else ""))
         return {"output": "Available databases:\n" + "\n".join(lines), "exit_code": 0}
+
+    if action == "knowledge":
+        return await _sql_knowledge(args)
 
     conns = _sql_connections()
     if not conns:
@@ -661,7 +686,8 @@ async def do_query_sql(
                     "error": (
                         f'Unknown action {action!r}. Use one of: "query" (with a "query" '
                         'field), "list_databases", "list_tables", "describe" (with a '
-                        '"table" field). Omit "action" entirely to run a query.'
+                        '"table" field), "knowledge" (with a "query" field in plain words). '
+                        'Omit "action" entirely to run a query.'
                     ),
                     "exit_code": 1,
                 }

@@ -163,8 +163,29 @@ const SECTION_HEADER_CLASS = 'flex h-7 items-center px-2';
 /** The Pinned and Chats headers stay in view, covering the chats scrolling past. */
 const LIST_HEADER_CLASS = cn(SECTION_HEADER_CLASS, 'sticky top-0 z-10 bg-sidebar');
 
-/** A chat row's status at its right edge. Gives way to the three dots on hover. */
-const STATUS_LABEL_CLASS = 'shrink-0 text-[11px] font-medium';
+/** A notification dot: blue when something finished or is unread, yellow when a
+ *  chat waits for the user. An SVG circle, not a rounded box: a box this small is
+ *  snapped to whole pixels and comes out uneven at fractional positions. */
+function StatusDot({
+  tone,
+  label,
+  className,
+}: {
+  tone: 'done' | 'attention';
+  label: string;
+  className?: string;
+}) {
+  return (
+    <svg
+      viewBox="0 0 8 8"
+      role="img"
+      aria-label={label}
+      className={cn('size-[7px] shrink-0', tone === 'attention' ? 'fill-warning' : 'fill-primary', className)}
+    >
+      <circle cx="4" cy="4" r="4" />
+    </svg>
+  );
+}
 
 /** The small solid triangle after a name whose contents fold away. */
 function FoldCaret({ collapsed }: { collapsed: boolean }) {
@@ -212,7 +233,7 @@ const TITLE_FADE_PX = 20;
  *  hidden portion on hover. The animation stops at the end so the full title can
  *  be read without looping, and goes the fade's width further so the last letters
  *  end up clear of it. */
-function ScrollableSessionTitle({ children }: { children: string }) {
+function ScrollableSessionTitle({ children, working }: { children: string; working?: boolean }) {
   const viewportRef = useRef<HTMLSpanElement>(null);
   const textRef = useRef<HTMLSpanElement>(null);
   const animationRef = useRef<Animation | null>(null);
@@ -272,7 +293,7 @@ function ScrollableSessionTitle({ children }: { children: string }) {
       onMouseEnter={start}
       onMouseLeave={stop}
     >
-      <span ref={textRef} className="inline-block">{children}</span>
+      <span ref={textRef} className={cn('inline-block', working && 'shimmer-text-muted')}>{children}</span>
     </span>
   );
 }
@@ -426,16 +447,13 @@ function SessionRow({
     onClick: () => void openSession(session.id),
     onDoubleClick: beginRename,
   };
-  const showUnreadDot = !!session.unread && !status;
+  // A running chat needs no dot, its title is moving. Otherwise yellow when it
+  // waits for the user, blue when it finished in the background or is unread.
+  const showDot = status === 'awaiting' || status === 'completed' || (!!session.unread && !status);
   // The room for the three dots is kept free for good where something must not
-  // move when they appear: the fork caret stays put, and the unread dot sits in
-  // their spot. Other rows only make room on hover, which gives titles more width.
-  const keepDotsRoom = !!hasForks || showUnreadDot;
-  // Same reason for a status label: invisible keeps its width, hidden frees it.
-  const statusOnHover = keepDotsRoom
-    ? 'group-hover:invisible group-has-[[data-state=open]]:invisible'
-    : 'group-hover:hidden group-has-[[data-state=open]]:hidden';
-  const statusClass = cn(STATUS_LABEL_CLASS, statusOnHover);
+  // move when they appear: the fork caret stays put, and the dot sits in their
+  // spot. Other rows only make room on hover, which gives titles more width.
+  const keepDotsRoom = !!hasForks || showDot;
 
   return (
     <ContextMenu>
@@ -478,8 +496,11 @@ function SessionRow({
                 />
               </div>
             ) : (
-              <ScrollableSessionTitle>{session.name || t('common.untitled')}</ScrollableSessionTitle>
+              <ScrollableSessionTitle working={status === 'working'}>
+                {session.name || t('common.untitled')}
+              </ScrollableSessionTitle>
             )}
+            {status === 'working' && <span className="sr-only">{t('sidebar.running')}</span>}
           </button>
           {hasForks && (
             <button
@@ -497,42 +518,25 @@ function SessionRow({
           <button
             type="button"
             tabIndex={-1}
-            aria-hidden={!status && !showUnreadDot}
+            aria-hidden
             {...openRow}
             className={cn(
               'flex h-full min-w-fit flex-1 items-center justify-end rounded-md text-left',
               !keepDotsRoom && 'pe-2 group-hover:min-w-0 group-hover:pe-0 group-has-[[data-state=open]]:min-w-0 group-has-[[data-state=open]]:pe-0',
             )}
-          >
-            {status === 'working' ? (
-              // Running turn — a shimmering "Working" label, shown even when this
-              // chat isn't the one on screen so background turns are visible.
-              <span className={cn('shimmer-text', statusClass)} aria-label={t('sidebar.running')}>
-                {t('sidebar.working')}
-              </span>
-            ) : status === 'awaiting' ? (
-              // Turn ended on a question — the chat needs the user's input.
-              <span className={cn('text-warning', statusClass)}>
-                {t('sidebar.awaiting')}
-              </span>
-            ) : status === 'completed' ? (
-              // Finished in the background — surfaced until the chat is opened.
-              <span className={cn('text-success', statusClass)}>
-                {t('sidebar.completed')}
-              </span>
-            ) : null}
-          </button>
-          {showUnreadDot && (
-            // An SVG circle, not a rounded box: a box this small is snapped to
-            // whole pixels and comes out uneven at fractional positions.
-            <svg
-              viewBox="0 0 8 8"
-              role="img"
-              aria-label={t('sidebar.unread')}
-              className="pointer-events-none absolute inset-y-0 right-[13px] my-auto size-[7px] fill-primary group-hover:hidden group-has-[[data-state=open]]:hidden"
-            >
-              <circle cx="4" cy="4" r="4" />
-            </svg>
+          />
+          {showDot && (
+            <StatusDot
+              tone={status === 'awaiting' ? 'attention' : 'done'}
+              label={t(
+                status === 'awaiting'
+                  ? 'sidebar.awaiting'
+                  : status === 'completed'
+                    ? 'sidebar.completed'
+                    : 'sidebar.unread',
+              )}
+              className="pointer-events-none absolute inset-y-0 right-[13px] my-auto group-hover:hidden group-has-[[data-state=open]]:hidden"
+            />
           )}
           <Menu>
             <MenuTrigger asChild>
@@ -781,21 +785,18 @@ function ProjectRow({
           )}
         >
           <FolderIcon className="size-3.5 shrink-0 text-muted-foreground" />
-          <span className="min-w-0 flex-1 truncate">{name}</span>
-          {status === 'working' ? (
-            <span className="shimmer-text shrink-0 text-[11px] font-medium" title={t('sidebar.projectWorking')}>
-              {t('sidebar.working')}
-            </span>
-          ) : status ? (
-            // Quieter than a label: a dot in the same palette the rows use.
-            <span
-              title={t(status === 'awaiting' ? 'sidebar.projectAwaiting' : 'sidebar.projectCompleted')}
-              className={cn(
-                'size-1.5 shrink-0 rounded-full',
-                status === 'awaiting' ? 'bg-warning' : 'bg-success',
-              )}
+          <span
+            className={cn('min-w-0 flex-1 truncate', status === 'working' && 'shimmer-text-muted')}
+            title={status === 'working' ? t('sidebar.projectWorking') : undefined}
+          >
+            {name}
+          </span>
+          {(status === 'awaiting' || status === 'completed') && (
+            <StatusDot
+              tone={status === 'awaiting' ? 'attention' : 'done'}
+              label={t(status === 'awaiting' ? 'sidebar.projectAwaiting' : 'sidebar.projectCompleted')}
             />
-          ) : null}
+          )}
           <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground">{members.length}</span>
         </button>
       </ContextMenuTrigger>
@@ -866,10 +867,16 @@ function SearchBar({ onOpen, shortcut }: { onOpen: () => void; shortcut?: string
     <button
       type="button"
       onClick={onOpen}
-      className="group/nav mb-1.5 flex h-[30px] w-full items-center gap-2 rounded-lg border border-input px-2.5 text-sm shadow-xs/5 outline-none transition-colors hover:bg-sidebar-accent focus-visible:border-ring dark:bg-input/20"
+      className="group/nav mb-1.5 flex h-[30px] w-full items-center gap-2.5 rounded-lg border border-input px-[calc(0.5rem-1px)] text-sm shadow-xs/5 outline-none transition-colors hover:bg-sidebar-accent focus-visible:border-ring dark:bg-input/20"
     >
-      <SearchIcon className="size-4 shrink-0 opacity-80" />
-      <span className="min-w-0 flex-1 truncate text-left">{t('sidebar.search')}</span>
+      {/* Same slot as a NavRow's icon, and the padding above nets out the border,
+          so icon and label line up with the rows below. */}
+      <span className="flex size-5 shrink-0 items-center justify-center">
+        <SearchIcon className="size-[18px] opacity-80" />
+      </span>
+      {/* DM Sans sits high in its line box: with the line centered, its capitals
+          have 2 px more room below than above, which one pixel down evens out. */}
+      <span className="relative top-px min-w-0 flex-1 truncate text-left">{t('sidebar.search')}</span>
       {shortcut && (
         <span className="opacity-0 transition-opacity group-hover/nav:opacity-100 group-focus-visible/nav:opacity-100">
           <KeybindingPill value={shortcut} />

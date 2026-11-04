@@ -88,9 +88,17 @@ Chat's lexical gate doesn't apply, because a question and the table it needs may
 knowledge automatically" and the query rewrite are chat options and have no effect
 here.
 
+**During a turn.** With the database switch on, the agent loop searches once before
+the first model call, using only the user's own words: the current question and the
+one before it, so that a follow-up makes sense. After that the model decides. `query_sql`
+with `action: "knowledge"` and `query` in plain words runs the same search whenever a
+result shows a table, column or value it can't place. Nothing searches on its own
+during the turn, and the answer lands at the end of the prompt like any tool result.
+
 **Nothing else reads it.** `list_bases()` leaves mini RAGs out unless asked, so chat,
 `rag_navigate`, the MCP tools and this REST service don't see them, and this service
-answers 404 for their ids. The one way in from outside is `rag_query`'s `scope: "sql"`,
+answers 404 for their ids. Inside a chat only the database switch opens them, through
+`query_sql`. The one way in from outside is `rag_query`'s `scope: "sql"`,
 which only works after an administrator named it in `mcp_rag_allowed_scopes`.
 
 ### Older schema files

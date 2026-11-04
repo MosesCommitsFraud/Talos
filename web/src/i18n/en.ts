@@ -37,7 +37,6 @@ const en = {
     showMoreChats: 'Show {{count}} more',
     noChats: 'No chats yet',
     running: 'Generating…',
-    working: 'Working',
     completed: 'Done',
     awaiting: 'Needs you',
     titlePending: 'Generating title…',

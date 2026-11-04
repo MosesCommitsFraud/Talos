@@ -32,6 +32,7 @@ from src.prompt_security import untrusted_context_message
 from src.settings import get_setting
 from src.turn_context import (
     FIGURE_RULE_SOURCE,
+    USER_QUESTION_MARKER,
     insert_before_last_user,
     turn_context_message,
 )
@@ -833,7 +834,7 @@ async def build_chat_context(
                         else ""
                     )
                     + "".join(rule + "\n\n" for rule in figure_rules)
-                    + "USER QUESTION:\n"
+                    + USER_QUESTION_MARKER
                 )
                 if isinstance(current, str):
                     messages[target_idx]["content"] = prefix + current
