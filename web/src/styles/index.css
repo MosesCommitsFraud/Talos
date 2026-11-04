@@ -434,21 +434,25 @@ body::after {
 @keyframes shimmer-sweep {
   to { background-position: -200% 0; }
 }
-/* The same sweep in plain grey, for a running chat's name in the sidebar: the
-   name stays readable and the motion alone says that something is going on. */
+/* A grey band over the text's own color, for a running chat's name in the sidebar:
+   the name keeps its color and only the passing wave says something is going on. */
 .shimmer-text-muted {
-  color: var(--muted-foreground);
   background: linear-gradient(
     100deg,
-    var(--muted-foreground) 35%,
-    color-mix(in srgb, var(--muted-foreground) 35%, var(--foreground)) 50%,
-    var(--muted-foreground) 65%
+    currentColor 40%,
+    var(--muted-foreground) 50%,
+    currentColor 60%
   );
-  background-size: 200% 100%;
+  /* A fixed tile, not a share of the text: a share would make the grey band wider
+     than the row on a long title, and the whole name would just look grey. */
+  background-size: 300px 100%;
   background-clip: text;
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
-  animation: shimmer-sweep 1.6s linear infinite;
+  animation: shimmer-sweep-fixed 1.8s linear infinite;
+}
+@keyframes shimmer-sweep-fixed {
+  to { background-position: 300px 0; }
 }
 @media (prefers-reduced-motion: reduce) {
   .shimmer-text,
