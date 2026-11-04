@@ -146,8 +146,6 @@ def setup_stats_routes():
         if not user:
             raise HTTPException(401, "Not signed in")
         auth_mgr = getattr(request.app.state, "auth_manager", None)
-        return build_usage_detail(
-            auth_mgr, user.strip().lower(), days, tz_offset, compare=False
-        )
+        return build_usage_detail(auth_mgr, user.strip().lower(), days, tz_offset, compare=False)
 
     return router

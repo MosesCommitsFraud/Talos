@@ -8,9 +8,8 @@ from typing import Any, Dict
 from fastapi import APIRouter, HTTPException, Request
 
 from core.database import ChatMessage as DbChatMessage
-from core.database import GalleryImage
+from core.database import GalleryImage, SessionLocal
 from core.database import Session as DbSession
-from core.database import SessionLocal
 from core.models import ChatMessage
 from routes.session_routes import (
     _message_role,
@@ -108,7 +107,14 @@ def _without_deleted_images(history: list, session_id: str) -> list:
         meta = entry.get("metadata") or {}
         events = meta.get("tool_events")
         if isinstance(events, list) and any(isinstance(e, dict) and _deleted(e) for e in events):
-            image_keys = ("image_url", "image_id", "image_prompt", "image_model", "image_size", "image_quality")
+            image_keys = (
+                "image_url",
+                "image_id",
+                "image_prompt",
+                "image_model",
+                "image_size",
+                "image_quality",
+            )
             events = [
                 {k: v for k, v in e.items() if k not in image_keys}
                 if isinstance(e, dict) and _deleted(e)

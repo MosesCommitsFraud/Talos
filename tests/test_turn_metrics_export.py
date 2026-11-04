@@ -134,10 +134,21 @@ def test_detail_splits_output_and_time():
             context_length=32000,
             context_breakdown={"system": 2000, "messages": 1000},
             round_profile=[
-                {"round": 1, "first_token_s": 1.0, "first_visible_s": 3.0, "stream_s": 4.0,
-                 "tools_s": 2.0, "cached_tokens": 3000},
-                {"round": 2, "first_token_s": 0.5, "first_visible_s": 1.5, "stream_s": 2.5,
-                 "cached_tokens": 3500},
+                {
+                    "round": 1,
+                    "first_token_s": 1.0,
+                    "first_visible_s": 3.0,
+                    "stream_s": 4.0,
+                    "tools_s": 2.0,
+                    "cached_tokens": 3000,
+                },
+                {
+                    "round": 2,
+                    "first_token_s": 0.5,
+                    "first_visible_s": 1.5,
+                    "stream_s": 2.5,
+                    "cached_tokens": 3500,
+                },
             ],
             tool_events=[{"round": 1, "tool": "web_search", "command": "{}", "exit_code": 1}],
         ),
@@ -148,7 +159,12 @@ def test_detail_splits_output_and_time():
     assert d["unsplit_tokens"] == 0
     assert d["cached_tokens"] == 6500
     assert d["time"] == {
-        "context_build": 1.0, "prep": 0.5, "wait": 1.5, "thinking": 3.0, "writing": 2.0, "tools": 2.0,
+        "context_build": 1.0,
+        "prep": 0.5,
+        "wait": 1.5,
+        "thinking": 3.0,
+        "writing": 2.0,
+        "tools": 2.0,
     }
     assert d["tools"] == {"web_search": {"calls": 1, "errors": 1}}
     assert total["detail"]["reasoning_tokens"] == 300
@@ -158,7 +174,10 @@ def test_detail_splits_output_and_time():
 
 
 def test_detail_of_old_messages_keeps_output_unsplit():
-    messages = [_user("x"), _assistant(time_to_first_token=1.0, response_time=5.0, output_tokens=200)]
+    messages = [
+        _user("x"),
+        _assistant(time_to_first_token=1.0, response_time=5.0, output_tokens=200),
+    ]
     d = build_rows(messages, "c")[0]["detail"]
     assert d["unsplit_tokens"] == 200 and d["split_source"] == "none"
     assert d["time"]["wait"] == 1.0 and d["time"]["writing"] == 4.0

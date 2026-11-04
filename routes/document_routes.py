@@ -701,9 +701,7 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
                     doc.title = name
             elif path.startswith("generated-image:"):
                 image = (
-                    db.query(GalleryImage)
-                    .filter(GalleryImage.id == path.split(":", 1)[1])
-                    .first()
+                    db.query(GalleryImage).filter(GalleryImage.id == path.split(":", 1)[1]).first()
                 )
                 if not image or image.owner != user:
                     raise HTTPException(404, "Image not found")
@@ -755,9 +753,7 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
                     pass
             elif path.startswith("generated-image:"):
                 image = (
-                    db.query(GalleryImage)
-                    .filter(GalleryImage.id == path.split(":", 1)[1])
-                    .first()
+                    db.query(GalleryImage).filter(GalleryImage.id == path.split(":", 1)[1]).first()
                 )
                 if not image or image.owner != user:
                     raise HTTPException(404, "Image not found")

@@ -324,9 +324,7 @@ def _total_detail(details: List[Dict[str, Any]]) -> Dict[str, Any]:
         "context_breakdown": next(
             (d["context_breakdown"] for d in reversed(details) if d["context_breakdown"]), None
         ),
-        "time": {
-            k: round(sum(d["time"][k] for d in details), 2) for k in details[0]["time"]
-        },
+        "time": {k: round(sum(d["time"][k] for d in details), 2) for k in details[0]["time"]},
         "tools": tools,
     }
 

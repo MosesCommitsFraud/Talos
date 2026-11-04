@@ -29,10 +29,20 @@ def env(monkeypatch):
 
     workspaces = {
         "s1": [
-            {"path": "output/report.pptx", "name": "report.pptx", "size": 10, "mtime": 300.0,
-             "mime": "application/vnd.openxmlformats-officedocument.presentationml.presentation"},
-            {"path": "upload.pdf", "name": "upload.pdf", "size": 5, "mtime": 100.0,
-             "mime": "application/pdf"},
+            {
+                "path": "output/report.pptx",
+                "name": "report.pptx",
+                "size": 10,
+                "mtime": 300.0,
+                "mime": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+            },
+            {
+                "path": "upload.pdf",
+                "name": "upload.pdf",
+                "size": 5,
+                "mtime": 100.0,
+                "mime": "application/pdf",
+            },
         ]
     }
     calls = {"moved": [], "deleted": [], "workspaces": workspaces}
@@ -68,12 +78,29 @@ def env(monkeypatch):
     db = Local()
     db.add(DbSession(id="s1", name="Quarterly", owner=USER, endpoint_url="x", model="m"))
     db.add(DbSession(id="s2", name="Other user", owner="bob", endpoint_url="x", model="m"))
-    db.add(Document(id="d1", session_id="s1", title="Notes", language="markdown",
-                    current_content="# Notes\nhello", owner=USER, is_active=True))
-    db.add(GalleryImage(id="g1", filename="gen_abc.png", owner=USER, session_id="s1",
-                        is_active=True))
-    db.add(ChatMessage(id="m1", session_id="s1", role="user", content="see file",
-                       meta_data=json.dumps({"attachments": [{"sandbox_path": "upload.pdf"}]})))
+    db.add(
+        Document(
+            id="d1",
+            session_id="s1",
+            title="Notes",
+            language="markdown",
+            current_content="# Notes\nhello",
+            owner=USER,
+            is_active=True,
+        )
+    )
+    db.add(
+        GalleryImage(id="g1", filename="gen_abc.png", owner=USER, session_id="s1", is_active=True)
+    )
+    db.add(
+        ChatMessage(
+            id="m1",
+            session_id="s1",
+            role="user",
+            content="see file",
+            meta_data=json.dumps({"attachments": [{"sandbox_path": "upload.pdf"}]}),
+        )
+    )
     db.commit()
     db.close()
 
@@ -113,9 +140,19 @@ def test_pin_and_unpin(env):
 
 def test_rename_each_kind(env):
     client, calls = env
-    assert client.patch("/api/artifacts", json={"path": "document:d1", "name": "Plan"}).status_code == 200
-    assert client.patch("/api/artifacts", json={"path": "generated-image:g1", "name": "Logo"}).status_code == 200
-    client.patch("/api/artifacts", json={"path": "output/report.pptx", "session_id": "s1", "pinned": True})
+    assert (
+        client.patch("/api/artifacts", json={"path": "document:d1", "name": "Plan"}).status_code
+        == 200
+    )
+    assert (
+        client.patch(
+            "/api/artifacts", json={"path": "generated-image:g1", "name": "Logo"}
+        ).status_code
+        == 200
+    )
+    client.patch(
+        "/api/artifacts", json={"path": "output/report.pptx", "session_id": "s1", "pinned": True}
+    )
     res = client.patch(
         "/api/artifacts", json={"path": "output/report.pptx", "session_id": "s1", "name": "Q3 deck"}
     )
@@ -176,10 +213,20 @@ def test_deleted_artifacts_leave_the_chat_too(env, monkeypatch):
 
     monkeypatch.setattr(history_routes, "SessionLocal", document_routes.SessionLocal)
     history = [
-        {"role": "assistant", "content": "here", "metadata": {"tool_events": [
-            {"tool": "generate_image", "image_id": "g1", "image_url": "/api/generated-image/gen_abc.png"},
-            {"tool": "bash", "output": "ok"},
-        ]}},
+        {
+            "role": "assistant",
+            "content": "here",
+            "metadata": {
+                "tool_events": [
+                    {
+                        "tool": "generate_image",
+                        "image_id": "g1",
+                        "image_url": "/api/generated-image/gen_abc.png",
+                    },
+                    {"tool": "bash", "output": "ok"},
+                ]
+            },
+        },
         {"role": "user", "content": "hi"},
     ]
     cleaned = history_routes._without_deleted_images(history, "s1")

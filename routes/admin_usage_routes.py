@@ -252,7 +252,9 @@ def _load_aggregates(db, shift: timedelta, cutoff, owner: str = None) -> dict:
     return aggs
 
 
-def build_usage_detail(auth_manager, username: str, days: int, tz_offset: int, compare: bool = True) -> dict:
+def build_usage_detail(
+    auth_manager, username: str, days: int, tz_offset: int, compare: bool = True
+) -> dict:
     """Full usage detail for one user. `compare` adds rank/medians against
     everyone else — admin only; the self-service view leaves it out."""
     shift, today, cutoff = _window(days, tz_offset)
@@ -302,9 +304,7 @@ def build_usage_detail(auth_manager, username: str, days: int, tz_offset: int, c
 
         authored = [
             s.name
-            for s in db.query(SharedSkill.name)
-            .filter(SharedSkill.uploaded_by == username)
-            .all()
+            for s in db.query(SharedSkill.name).filter(SharedSkill.uploaded_by == username).all()
         ]
 
         totals = [ag["input_tokens"] + ag["output_tokens"] for ag in aggs.values()]
@@ -345,9 +345,7 @@ def build_usage_detail(auth_manager, username: str, days: int, tz_offset: int, c
                 if a["timed_turns"]
                 else 0,
                 "total_compute_ms": a["duration_ms"],
-                "avg_rounds": round(a["rounds"] / a["rounds_turns"], 1)
-                if a["rounds_turns"]
-                else 0,
+                "avg_rounds": round(a["rounds"] / a["rounds_turns"], 1) if a["rounds_turns"] else 0,
                 "busiest_day": busiest["date"] if busiest and busiest["tokens"] else None,
                 "busiest_day_tokens": busiest["tokens"] if busiest else 0,
             },
@@ -358,7 +356,9 @@ def build_usage_detail(auth_manager, username: str, days: int, tz_offset: int, c
             "modes": a["modes"],
             "models": a["models"],
             "skills": {"used": skills_used, "authored": authored},
-            "comparison": None if not compare else {
+            "comparison": None
+            if not compare
+            else {
                 "rank": rank,
                 "of": len(totals),
                 "median_tokens": _median(totals),

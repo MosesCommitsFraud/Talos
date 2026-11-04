@@ -20,5 +20,7 @@ def test_estimate_without_real_usage():
 
 def test_parts_always_sum_to_output():
     for reasoning, answer, args in [(1, 1, 1), (7, 3, 5), (0, 0, 9), (999, 1, 0)]:
-        s = _split_round_output(37, "r" * reasoning, "a" * answer, [{"name": "", "arguments": "t" * args}])
+        s = _split_round_output(
+            37, "r" * reasoning, "a" * answer, [{"name": "", "arguments": "t" * args}]
+        )
         assert s["reasoning"] + s["answer"] + s["tool_calls"] == 37

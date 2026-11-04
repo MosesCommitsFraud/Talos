@@ -23,7 +23,9 @@ class _Block:
 async def test_paths_are_normalised_and_deduplicated():
     from src.tool_execution import execute_tool_block
 
-    payload = json.dumps({"files": ["./output/dashboard.html", "/workspace/output/dashboard.html", "chart.png"]})
+    payload = json.dumps(
+        {"files": ["./output/dashboard.html", "/workspace/output/dashboard.html", "chart.png"]}
+    )
     _desc, result = await execute_tool_block(_Block("present_files", payload), session_id=None)
     assert result["exit_code"] == 0
     assert result["presented_files"] == ["output/dashboard.html", "chart.png"]
@@ -33,7 +35,9 @@ async def test_paths_are_normalised_and_deduplicated():
 async def test_empty_call_is_an_error_the_model_can_fix():
     from src.tool_execution import execute_tool_block
 
-    _desc, result = await execute_tool_block(_Block("present_files", '{"files": []}'), session_id=None)
+    _desc, result = await execute_tool_block(
+        _Block("present_files", '{"files": []}'), session_id=None
+    )
     assert result["exit_code"] == 1
     assert "presented_files" not in result
 
