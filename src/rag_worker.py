@@ -232,7 +232,6 @@ def ingest_directory_job(
     owner: Optional[str],
     config_snapshot: Dict[str, Any],
     base_id: Optional[str] = None,
-    scope: Optional[str] = None,
 ) -> Dict[str, Any]:
     # ``base_id`` is last and optional so jobs enqueued by an older app version
     # (three positional args) still run after a deploy — they land in the
@@ -244,9 +243,7 @@ def ingest_directory_job(
     rag = _fresh_rag(base_id, config_snapshot)
     if not rag:
         raise RuntimeError("RAG system is not available (check Qdrant / embedding config)")
-    result = rag.index_personal_documents(
-        directory, owner=owner, progress_cb=_progress_saver(job), scope=scope
-    )
+    result = rag.index_personal_documents(directory, owner=owner, progress_cb=_progress_saver(job))
     _finalize(job, result)
     return result
 
@@ -264,6 +261,32 @@ def ingest_files_job(
     if not rag:
         raise RuntimeError("RAG system is not available (check Qdrant / embedding config)")
     result = rag.index_files([(p, m) for p, m in files], progress_cb=_progress_saver(job))
+    _finalize(job, result)
+    return result
+
+
+def adopt_legacy_sql_job(
+    files: List[Tuple[str, Dict[str, Any]]],
+    moves: List[Tuple[str, str]],
+    config_snapshot: Dict[str, Any],
+    base_id: str,
+    default_snapshot: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Index the old schema files into a mini RAG, then drop them from the default
+    base. Only what actually arrived is dropped (``rag_mini.finish_adoption``)."""
+    from rq import get_current_job
+
+    import src.rag_singleton as rs
+    from src.rag_mini import finish_adoption
+
+    _apply_snapshot(config_snapshot)
+    job = get_current_job()
+    rag = _fresh_rag(base_id, config_snapshot)
+    result = rag.index_files([(p, m) for p, m in files], progress_cb=_progress_saver(job))
+    legacy = rs.get_rag_manager(None, config=default_snapshot)
+    if legacy is None:
+        raise RuntimeError(rs.last_init_error() or "The default knowledge base is not available")
+    result["moved"] = finish_adoption(rag, legacy, [(old, new) for old, new in moves])
     _finalize(job, result)
     return result
 
@@ -342,10 +365,7 @@ def start_sync_register(base_id: Optional[str] = None) -> Dict[str, Any]:
 
 
 def start_index_directory(
-    directory: str,
-    owner: Optional[str] = None,
-    base_id: Optional[str] = None,
-    scope: Optional[str] = None,
+    directory: str, owner: Optional[str] = None, base_id: Optional[str] = None
 ) -> Dict[str, Any]:
     job = _queue().enqueue(
         "src.rag_worker.ingest_directory_job",
@@ -353,9 +373,6 @@ def start_index_directory(
         owner,
         _snapshot(base_id),
         base_id,
-        # Only when set, so a worker still on the older signature keeps running
-        # every ordinary directory job during a deploy.
-        *((scope,) if scope else ()),
         job_timeout=_JOB_TIMEOUT,
         meta={
             "type": "index_directory",
@@ -387,6 +404,34 @@ def start_index_files(
             "directory": "",
             "owner": owner,
             "base_id": base_id or "default",
+            "file_count": len(files),
+            "indexed_count": 0,
+            "failed_count": 0,
+            "current_file": "",
+            "message": "Queued",
+        },
+    )
+    return _job_to_dict(job)
+
+
+def start_adopt_legacy_sql(
+    files: List[Tuple[str, Dict[str, Any]]],
+    moves: List[Tuple[str, str]],
+    base_id: str,
+) -> Dict[str, Any]:
+    job = _queue().enqueue(
+        "src.rag_worker.adopt_legacy_sql_job",
+        list(files),
+        list(moves),
+        _snapshot(base_id),
+        base_id,
+        _snapshot(None),
+        job_timeout=_JOB_TIMEOUT,
+        meta={
+            "type": "adopt_legacy_sql",
+            "directory": "",
+            "owner": None,
+            "base_id": base_id,
             "file_count": len(files),
             "indexed_count": 0,
             "failed_count": 0,

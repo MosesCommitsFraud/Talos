@@ -186,11 +186,11 @@ def rag_max_results() -> int:
 
 
 def rag_allowed_scopes() -> Set[str]:
-    """Sub-index namespaces (src/rag_scopes.py) an MCP caller may ask for.
+    """Namespaces (src/rag_scopes.py) an MCP caller may ask for.
 
     Empty by default, and empty means none. A scope is a set of documents a
-    Talos *feature* manages for itself — the SQL schema files today — which
-    ordinary retrieval deliberately never returns; `rag_query`'s `scope`
+    Talos *feature* manages for itself — the SQL schema files in the mini RAGs —
+    which ordinary retrieval deliberately never returns; `rag_query`'s `scope`
     argument was the one way past that from outside. Opening one is now a
     decision an administrator makes by name.
     """

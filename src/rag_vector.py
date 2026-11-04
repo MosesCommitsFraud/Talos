@@ -4737,14 +4737,12 @@ class VectorRAG:
         owner: Optional[str] = None,
         progress_cb=None,
         cancel_cb=None,
-        scope: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Sync one directory into the base.
 
         Unchanged files are skipped by content hash, changed files get a new
         version, and documents whose file is gone from disk are removed
-        (tombstoned in the register) once the walk completes. ``scope`` puts
-        the documents into a purpose-bound sub-index instead of the corpus.
+        (tombstoned in the register) once the walk completes.
         """
         from src import rag_documents as rd
 
@@ -4791,8 +4789,6 @@ class VectorRAG:
                     }
                     if owner:
                         meta["owner"] = owner
-                    if scope:
-                        meta["scope"] = scope
 
                     def _stage(done: int, sub_total: int, stage: str = "", _fp=fpath) -> None:
                         _progress(_fp, sub_done=done, sub_total=sub_total, stage=stage)

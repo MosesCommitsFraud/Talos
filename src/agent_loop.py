@@ -736,38 +736,20 @@ def _sql_kb_query(messages: List[Dict], max_msgs: int = 4, max_chars: int = 1200
     return "\n".join(collected)[:max_chars]
 
 
-# SQL knowledge is injected ONCE per turn (see the round loop), so the first
-# shot has to carry the whole orientation budget. Schema/catalog docs chunk into
-# many small pieces — one table per chunk is typical — and six of them rarely
-# cover the tables a real question touches. Widening the first retrieval is the
-# cheap lever: it costs context once, whereas retrieving again mid-turn costs a
-# full re-prefill of the conversation.
-_SQL_KB_K = 12
-_SQL_KB_MAX_CHARS = 16000
 _SQL_KB_SEPARATOR = "\n\n---\n\n"
 
 
-def _retrieve_sql_knowledge(
-    query: str, k: int = _SQL_KB_K, max_chars: int = _SQL_KB_MAX_CHARS
-) -> str:
-    """Search the sql-scoped RAG for chunks relevant to `query` and format them.
+def _retrieve_sql_knowledge(query: str) -> str:
+    """Search the mini RAGs of the enabled databases for `query` and format the hits.
+
+    Top-k and size budget are each mini RAG's own settings (src/rag_mini.py).
     Returns "" when nothing is configured/healthy or no query is given."""
     if not query:
         return ""
     try:
-        from src.rag_singleton import get_rag_manager
+        from src.rag_mini import retrieve_sections
 
-        _rm = get_rag_manager()
-        if not (_rm and getattr(_rm, "healthy", False)):
-            return ""
-        hits = _rm.search(query, k=k, owner=None, scope="sql")
-        if not hits:
-            return ""
-        parts = []
-        for h in hits:
-            fn = (h.get("metadata") or {}).get("filename") or "doc"
-            parts.append(f"[{fn}]\n{h.get('document', '')}")
-        return _SQL_KB_SEPARATOR.join(parts)[:max_chars]
+        return _SQL_KB_SEPARATOR.join(retrieve_sections(query))
     except Exception as _kb_err:
         logger.debug("SQL knowledge retrieval skipped: %s", _kb_err)
         return ""
@@ -3867,9 +3849,12 @@ async def stream_agent_loop(
                 # text (once) so it persists and is replayed. The card shows the
                 # options only, so this is the single visible copy of the question.
                 _auq = result["ask_user"]
-                _auq_q = "\n\n".join(
-                    q["question"] for q in _auq.get("questions") or [] if q.get("question")
-                ) or (_auq.get("question") or "").strip()
+                _auq_q = (
+                    "\n\n".join(
+                        q["question"] for q in _auq.get("questions") or [] if q.get("question")
+                    )
+                    or (_auq.get("question") or "").strip()
+                )
                 if _auq_q and _auq_q not in full_response:
                     _auq_delta = ("\n\n" if full_response.strip() else "") + _auq_q
                     full_response += _auq_delta

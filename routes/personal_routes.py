@@ -53,14 +53,30 @@ def delete_managed_upload(source: str) -> bool:
     return False
 
 
-def purge_managed_uploads() -> dict:
-    """Delete every stored RAG upload file (the big media/docs), freeing disk.
-    Leaves external indexed directories alone. Returns count + bytes freed."""
-    base = os.path.abspath(UPLOADS_DIR)
+_BASE_UPLOAD_PREFIX = "kb-"
+
+
+def base_upload_dir(base_id: str) -> str:
+    """The folder a named knowledge base's uploads are stored in."""
+    return _personal_upload_dir_for_owner(_BASE_UPLOAD_PREFIX + base_id)
+
+
+def purge_managed_uploads(base_id: str | None = None) -> dict:
+    """Delete one knowledge base's stored upload files (the big media/docs).
+
+    A named base owns exactly its own folder. The default base owns the rest,
+    everything but the folders of the named bases: rebuilding one base must never
+    take the files of another with it. Leaves external indexed directories alone.
+    Returns count + bytes freed.
+    """
+    is_default = not base_id or base_id == "default"
+    base = os.path.abspath(UPLOADS_DIR if is_default else base_upload_dir(str(base_id)))
     removed = 0
     freed = 0
     if os.path.isdir(base):
-        for root, _dirs, files in os.walk(base):
+        for root, dirs, files in os.walk(base):
+            if is_default and os.path.abspath(root) == base:
+                dirs[:] = [d for d in dirs if not d.startswith(_BASE_UPLOAD_PREFIX)]
             for name in files:
                 fp = os.path.join(root, name)
                 try:
@@ -83,22 +99,14 @@ def _personal_upload_dir_for_owner(owner: str | None) -> str:
     return upload_dir
 
 
-def _checked_ingest_scope(scope: str | None, base_id: str | None) -> str | None:
-    """The sub-index new documents go into, if any.
+def _refuse_orphaned_mini(base_id: str | None) -> None:
+    """A mini RAG is bound to a database; without one it takes no new documents."""
+    from src.rag_mini import is_orphaned
 
-    Features read their sub-index from the default base only, so a scoped
-    document anywhere else would be indexed and then never be used.
-    """
-    from src.rag_scopes import SCOPE_IDS
-
-    scope = (scope or "").strip() or None
-    if not scope:
-        return None
-    if scope not in SCOPE_IDS:
-        raise HTTPException(404, f"Unknown sub-index '{scope}'")
-    if base_id and base_id != "default":
-        raise HTTPException(400, "Sub-indexes live in the default knowledge base")
-    return scope
+    if is_orphaned(base_id):
+        raise HTTPException(
+            409, "The database of this mini RAG was removed from Integrations, so it is read-only"
+        )
 
 
 def _unique_personal_upload_path(
@@ -259,7 +267,7 @@ def setup_personal_routes(personal_docs_manager, rag_manager, rag_available):
                 get_base(base_id)
             except RagNotFound:
                 raise HTTPException(404, f"Unknown knowledge base '{base_id}'")
-        scope = _checked_ingest_scope(directory_request.scope, base_id)
+        _refuse_orphaned_mini(base_id)
         try:
             directory = _resolve_allowed_personal_dir(directory)
 
@@ -276,12 +284,8 @@ def setup_personal_routes(personal_docs_manager, rag_manager, rag_available):
             if rag:
                 from src import rag_worker
 
-                # A sub-index belongs to its feature, not to the personal documents.
-                if not scope:
-                    personal_docs_manager.add_directory(directory, index=False)
-                job = rag_worker.start_index_directory(
-                    directory, owner=None, base_id=base_id, scope=scope
-                )
+                personal_docs_manager.add_directory(directory, index=False)
+                job = rag_worker.start_index_directory(directory, owner=None, base_id=base_id)
                 return {
                     "success": True,
                     "message": f"Started RAG indexing job for {directory}",
@@ -353,7 +357,6 @@ def setup_personal_routes(personal_docs_manager, rag_manager, rag_available):
         paths: Optional[List[str]] = Form(None),
         redact_pii: Optional[str] = Form(None),
         rag_id: Optional[str] = Form(None),
-        scope: Optional[str] = Form(None),
         _admin: None = Depends(require_admin),
     ):
         """Admin-only upload into the global RAG knowledge base.
@@ -371,9 +374,6 @@ def setup_personal_routes(personal_docs_manager, rag_manager, rag_available):
 
         ``rag_id`` picks which knowledge base to ingest into; omitted means the
         default one, which is what the UI has always uploaded to.
-
-        ``scope`` puts the files into a purpose-bound sub-index instead of the
-        corpus (see src/rag_scopes.py).
         """
         base_id = (rag_id or "").strip() or None
         if base_id:
@@ -383,11 +383,9 @@ def setup_personal_routes(personal_docs_manager, rag_manager, rag_available):
                 get_base(base_id)
             except RagNotFound:
                 raise HTTPException(404, f"Unknown knowledge base '{base_id}'")
-        ingest_scope = _checked_ingest_scope(scope, base_id)
-        upload_dir = _personal_upload_dir_for_owner(
-            f"{ingest_scope}_knowledge"
-            if ingest_scope
-            else ("kb-" + base_id if base_id else "global")
+        _refuse_orphaned_mini(base_id)
+        upload_dir = (
+            base_upload_dir(base_id) if base_id else _personal_upload_dir_for_owner("global")
         )
         redact_override: Optional[bool] = None
         if redact_pii is not None and redact_pii.strip() != "":
@@ -450,8 +448,6 @@ def setup_personal_routes(personal_docs_manager, rag_manager, rag_available):
                 }
                 if redact_override is not None:
                     file_meta["redact_pii"] = redact_override
-                if ingest_scope:
-                    file_meta["scope"] = ingest_scope
                 to_index.append((file_path, file_meta))
                 uploaded_files.append(safe_name)
             except Exception as e:
@@ -460,7 +456,7 @@ def setup_personal_routes(personal_docs_manager, rag_manager, rag_available):
                 total_failed += 1
 
         # Track uploads directory
-        if uploaded_files and not ingest_scope and hasattr(personal_docs_manager, "add_directory"):
+        if uploaded_files and hasattr(personal_docs_manager, "add_directory"):
             personal_docs_manager.add_directory(upload_dir, index=False)
 
         job = None

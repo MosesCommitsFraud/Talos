@@ -227,10 +227,10 @@ DEFAULT_SETTINGS = {
     # own still wins, as does a smaller pipeline default — this only stops an
     # external client asking for twenty passages a call.
     "mcp_rag_max_results": 10,
-    # Sub-index namespaces (src/rag_scopes.py) an MCP caller may address with
-    # rag_query's `scope` argument. Empty — the default — means none: the SQL
-    # schema files and any later scope stay out of reach, exactly as they are
-    # for ordinary in-app retrieval. Naming one here opens it deliberately.
+    # Namespaces (src/rag_scopes.py) an MCP caller may address with rag_query's
+    # `scope` argument. Empty — the default — means none: the SQL schema files in
+    # the mini RAGs stay out of reach, exactly as they are for ordinary in-app
+    # retrieval. Naming one here opens it deliberately.
     "mcp_rag_allowed_scopes": [],
     "mcp_skills_enabled": True,
     # SQL-only sandbox tool. Credentials remain request-local HTTP headers.

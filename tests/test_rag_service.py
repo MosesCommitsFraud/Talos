@@ -339,7 +339,7 @@ def test_changing_a_global_default_propagates_to_inheriting_bases(global_cfg, mo
 
 
 # ---------------------------------------------------------------------------
-# Purpose-bound sub-indexes ("mini RAGs", src/rag_scopes.py)
+# Old schema files still in the default base (src/rag_scopes.py)
 # ---------------------------------------------------------------------------
 
 
@@ -366,22 +366,6 @@ def test_scoped_documents_are_not_counted_as_knowledge_base_content(base_with_sq
     assert row["chunk_count"] == 49
 
 
-def test_the_scope_is_reported_separately_with_its_own_counts(base_with_sql_docs):
-    row = rag_registry.describe(rag_registry.get_base(None))
-    sql = next(s for s in row["scopes"] if s["id"] == "sql")
-    assert sql["content_count"] == 1
-    assert sql["chunk_count"] == 18
-    assert sql["name"] and sql["purpose"] and sql["managed_at"]
-
-
-def test_an_empty_scope_is_still_listed(bases):
-    """ "The SQL schema index is empty" is the answer someone wondering why SQL
-    answers are thin actually needs."""
-    row = rag_registry.describe(rag_registry.get_base(None))
-    assert [s["id"] for s in row["scopes"]] == rag_scopes.SCOPE_IDS
-    assert all(s["content_count"] == 0 for s in row["scopes"])
-
-
 def test_the_outward_document_list_excludes_scoped_documents(base_with_sql_docs):
     c = TestClient(rag_api.create_app())
     body = c.get("/v1/rags/default/documents").json()
@@ -402,7 +386,7 @@ def rag_routes_client(base_with_sql_docs):
     return TestClient(app)
 
 
-def test_the_test_search_stays_out_of_sub_indexes_unless_asked(
+def test_the_test_search_stays_out_of_old_schema_files(
     rag_routes_client, base_with_sql_docs, monkeypatch
 ):
     calls = []
@@ -410,17 +394,10 @@ def test_the_test_search_stays_out_of_sub_indexes_unless_asked(
         base_with_sql_docs, "search", lambda q, **kw: calls.append(kw) or [], raising=True
     )
     assert rag_routes_client.get("/api/rag/search", params={"q": "orders"}).status_code == 200
-    assert calls[-1]["exclude_scopes"] == rag_scopes.SCOPE_IDS and "scope" not in calls[-1]
-
-    res = rag_routes_client.get("/api/rag/search", params={"q": "orders", "scope": "sql"})
-    assert res.status_code == 200
-    assert calls[-1]["scope"] == "sql" and "exclude_scopes" not in calls[-1]
-
-    res = rag_routes_client.get("/api/rag/search", params={"q": "orders", "scope": "nope"})
-    assert res.status_code == 404
+    assert calls[-1]["exclude_scopes"] == rag_scopes.SCOPE_IDS
 
 
-def test_the_explorer_search_stays_out_of_sub_indexes_unless_asked(
+def test_the_explorer_search_stays_out_of_old_schema_files(
     rag_routes_client, base_with_sql_docs, monkeypatch
 ):
     calls = []
@@ -428,23 +405,22 @@ def test_the_explorer_search_stays_out_of_sub_indexes_unless_asked(
         base_with_sql_docs, "grep_chunks", lambda q, **kw: calls.append(kw) or [], raising=False
     )
     rag_routes_client.get("/api/rag/documents/search", params={"q": "orders"})
-    assert calls[-1]["exclude_scopes"] == rag_scopes.SCOPE_IDS and "scope" not in calls[-1]
-    rag_routes_client.get("/api/rag/documents/search", params={"q": "orders", "scope": "sql"})
-    assert calls[-1]["scope"] == "sql" and "exclude_scopes" not in calls[-1]
+    assert calls[-1]["exclude_scopes"] == rag_scopes.SCOPE_IDS
 
 
 def test_deleting_a_document_updates_the_overview_at_once(rag_routes_client, base_with_sql_docs):
     """The overview polls a cached count; a delete must not wait out its TTL."""
     rag = base_with_sql_docs
-    assert rag_registry.describe(rag_registry.get_base(None))["scopes"][0]["content_count"] == 1
+    assert rag_registry.describe(rag_registry.get_base(None))["content_count"] == 2
 
     def _delete(source):
         rag._documents = [d for d in rag._documents if d["source"] != source]
         return 1
 
     rag.delete_by_source = _delete
-    assert rag_routes_client.delete("/api/rag/documents", params={"source": "s.sql"}).status_code == 200
-    assert rag_registry.describe(rag_registry.get_base(None))["scopes"][0]["content_count"] == 0
+    res = rag_routes_client.delete("/api/rag/documents", params={"source": "a.pdf"})
+    assert res.status_code == 200
+    assert rag_registry.describe(rag_registry.get_base(None))["content_count"] == 1
 
 
 def test_a_change_in_another_process_outdates_the_cached_count(base_with_sql_docs):
@@ -460,11 +436,3 @@ def test_a_change_in_another_process_outdates_the_cached_count(base_with_sql_doc
 
     rag.point_count = lambda: 25
     assert rag_registry.describe(rag_registry.get_base(None))["content_count"] == 1
-
-
-def test_a_scope_id_never_collides_with_the_i18n_separators():
-    """`managed_at` is used to build a translation key; ':' would be read as an
-    i18next namespace separator and silently fall back to the raw token."""
-    for meta in rag_scopes.SCOPES:
-        assert ":" not in meta["managed_at"]
-        assert "." not in meta["managed_at"]

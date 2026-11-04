@@ -347,16 +347,23 @@ def test_detail_reindex_and_restore_routes(env, monkeypatch):
     assert missing.status_code == 404
 
 
-def test_reindexing_a_sub_index_keeps_it_out_of_the_corpus(env, monkeypatch):
-    """A schema file that lost its scope would start showing up in ordinary
-    answers, so the scope has to survive the round trip through the worker."""
+def _reindex_client(rag, monkeypatch):
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
 
     import src.rag_singleton as singleton
-    import src.rag_worker as worker
     from core.middleware import require_admin
     from routes.rag_routes import setup_rag_routes
+
+    monkeypatch.setattr(singleton, "get_rag_manager", lambda rag_id=None, **kw: rag)
+    app = FastAPI()
+    app.include_router(setup_rag_routes())
+    app.dependency_overrides[require_admin] = lambda: None
+    return TestClient(app)
+
+
+def test_reindexing_a_base_covers_its_documents_and_not_old_schema_files(env, monkeypatch):
+    import src.rag_worker as worker
 
     rag, uploads, _ = env
     path, meta = upload(uploads, "schema.md", "tables and columns", "a")
@@ -364,60 +371,71 @@ def test_reindexing_a_sub_index_keeps_it_out_of_the_corpus(env, monkeypatch):
     other, meta = upload(uploads, "handbuch.md", "ordinary text", "b")
     rag.index_files([(other, meta)])
     queued = []
-    monkeypatch.setattr(singleton, "get_rag_manager", lambda rag_id=None, **kw: rag)
     monkeypatch.setattr(
         worker,
         "start_index_files",
-        lambda files, owner=None, base_id=None: queued.append(files) or {"id": "j1"},
+        lambda files, owner=None, base_id=None: queued.append((files, base_id)) or {"id": "j1"},
     )
-    app = FastAPI()
-    app.include_router(setup_rag_routes())
-    app.dependency_overrides[require_admin] = lambda: None
-    client = TestClient(app)
+    client = _reindex_client(rag, monkeypatch)
 
-    body = client.post("/api/rag/scopes/sql/reindex").json()
+    body = client.post("/api/rag/bases/manuals/reindex").json()
     assert body["queued"] == 1 and body["skipped"] == [] and body["job_id"] == "j1"
-    assert [p for p, _ in queued[0]] == [path]
-
-    rag.index_files(queued[0])
-    assert [d["source"] for d in rag.list_documents(scope="sql")] == [path]
-    assert [d["source"] for d in rag.list_documents(exclude_scopes=["sql"])] == [other]
-
-    assert client.post("/api/rag/scopes/nope/reindex").status_code == 404
+    assert [p for p, _ in queued[0][0]] == [other]
+    assert queued[0][1] == "manuals"
 
 
-def test_a_vanished_file_is_reported_not_fatal_when_reindexing_a_sub_index(env, monkeypatch):
-    from fastapi import FastAPI
-    from fastapi.testclient import TestClient
-
-    import src.rag_singleton as singleton
+def test_a_vanished_file_is_reported_not_fatal_when_reindexing_a_base(env, monkeypatch):
     import src.rag_worker as worker
-    from core.middleware import require_admin
-    from routes.rag_routes import setup_rag_routes
 
     rag, uploads, _ = env
-    path, meta = upload(uploads, "schema.md", "tables", "a")
-    rag.index_files([(path, {**meta, "scope": "sql"})])
+    path, meta = upload(uploads, "handbuch.md", "text", "a")
+    rag.index_files([(path, meta)])
     os.remove(path)
-    monkeypatch.setattr(singleton, "get_rag_manager", lambda rag_id=None, **kw: rag)
     monkeypatch.setattr(
         worker, "start_index_files", lambda *a, **k: pytest.fail("nothing to queue")
     )
-    app = FastAPI()
-    app.include_router(setup_rag_routes())
-    app.dependency_overrides[require_admin] = lambda: None
-    body = TestClient(app).post("/api/rag/scopes/sql/reindex").json()
-    assert body["queued"] == 0 and body["skipped"] == ["schema.md"]
+    body = _reindex_client(rag, monkeypatch).post("/api/rag/bases/default/reindex").json()
+    assert body["queued"] == 0 and body["skipped"] == ["handbuch.md"]
 
 
-def test_a_directory_can_be_synced_into_a_sub_index(env):
-    rag, _, tmp_path = env
-    share = tmp_path / "schemas"
-    share.mkdir()
-    (share / "erp.md").write_text("tables of the erp", encoding="utf-8")
-    rag.index_personal_documents(str(share), scope="sql")
-    assert [d["filename"] for d in rag.list_documents(scope="sql")] == ["erp.md"]
-    assert rag.list_documents(exclude_scopes=["sql"]) == []
+def test_old_schema_files_move_to_a_mini_rag_with_their_history_left_behind(env):
+    """The whole move against real registers: parsed and chunked anew by the target
+    base, gone from the corpus's collection, and searchable there as ordinary
+    documents without a scope."""
+    from src import rag_mini
+
+    legacy, uploads, tmp_path = env
+    path, meta = upload(uploads, "schema.md", "tables and columns", "a")
+    legacy.index_files([(path, {**meta, "scope": "sql"})])
+    other, meta = upload(uploads, "handbuch.md", "ordinary text", "b")
+    legacy.index_files([(other, meta)])
+
+    target = object.__new__(VectorRAG)
+    target._cfg = legacy._cfg
+    target.persist_directory = legacy.persist_directory
+    target.collection_name = "talos_kb_db_abc123"
+    target._store = InMemoryDocumentStore()
+    target._healthy = True
+    target._dense_doc_embedder = lambda: Embedder()
+    target._sparse_doc_embedder = lambda: Embedder()
+    target._delete_visual = lambda source: None
+
+    upload_dir = uploads / "kb-db-abc123"
+    upload_dir.mkdir()
+    files, moves, skipped = rag_mini.plan_adoption(legacy, str(upload_dir))
+    assert skipped == [] and len(files) == 1
+    target.index_files(files)
+    assert rag_mini.finish_adoption(target, legacy, moves) == 1
+
+    assert contents(target) == ["tables and columns"]
+    assert contents(legacy) == ["ordinary text"]
+    moved = target.list_documents()
+    assert [d["filename"] for d in moved] == ["schema.md"]
+    assert target.list_documents(scope="sql") == []
+    assert legacy.list_documents(scope="sql") == []
+    assert moved[0]["source"] == os.path.join(str(upload_dir), os.path.basename(path))
+    assert os.path.isfile(moved[0]["source"]) and not os.path.exists(path)
+    assert os.path.isfile(other)
 
 
 def test_directory_sync_does_not_rehash_untouched_files(env, monkeypatch):

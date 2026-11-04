@@ -168,8 +168,12 @@ def test_scopes_match_the_mintable_token_scopes():
 def test_update_rag_needs_its_own_scope():
     """Triggering a re-index is not something a read token may do."""
     empty = FakeSkills(index=[])
-    assert "update_rag" not in {t["name"] for t in mcp_public.list_tools(ALL | {SQL}, skills_manager=empty)}
-    assert {t["name"] for t in mcp_public.list_tools({RAG_UPDATE}, skills_manager=empty)} == {"update_rag"}
+    assert "update_rag" not in {
+        t["name"] for t in mcp_public.list_tools(ALL | {SQL}, skills_manager=empty)
+    }
+    assert {t["name"] for t in mcp_public.list_tools({RAG_UPDATE}, skills_manager=empty)} == {
+        "update_rag"
+    }
 
     text, is_error = call("update_rag", {}, scopes=ALL)
     assert is_error is True
@@ -197,12 +201,13 @@ def test_rag_query_excludes_the_sql_namespace_by_default(fake_rag):
     assert fake_rag.search_calls[0]["scope"] is None
 
 
-def test_rag_query_with_explicit_scope_drops_the_default_exclusion(fake_rag):
+def test_rag_query_with_explicit_scope_drops_the_default_exclusion(fake_rag, monkeypatch):
     """The tool body's own contract, which the REST service shares.
 
     Whether an *MCP* caller may name a scope at all is a separate question,
     answered by `mcp_rag_allowed_scopes` — see tests/test_mcp_settings.py.
     """
+    monkeypatch.setattr("src.rag_mini.search_targets", lambda: [("", None, "sql")])
     mcp_public._tool_rag_query({"query": "schema", "scope": "sql"})
     assert fake_rag.search_calls[0]["scope"] == "sql"
     assert fake_rag.search_calls[0]["exclude_scopes"] is None

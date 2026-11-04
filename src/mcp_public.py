@@ -71,11 +71,9 @@ SNIPPET_CHARS = 800
 SKILL_TOOL_PREFIX = "skill_"
 MAX_SKILL_TOOLS = 60
 
-# Purpose-bound sub-indexes (the SQL schema files) are injected separately by
-# the feature that owns them — see src/rag_scopes.py. They are noise in ordinary
-# retrieval, so the default search excludes them exactly as the chat pipeline
-# does. Derived from the scope catalogue so a new scope is excluded everywhere
-# by adding one entry there.
+# SQL schema files that have not moved to a mini RAG yet (src/rag_scopes.py) still
+# sit in the default base. They are noise in ordinary retrieval, so the default
+# search excludes them exactly as the chat pipeline does.
 DEFAULT_EXCLUDE_SCOPES = list(SCOPE_IDS)
 
 
@@ -543,9 +541,7 @@ def _tool_update_rag(args: Dict[str, Any]) -> str:
     """
     target = _collection_arg(args)
     what = f"knowledge base {target!r}" if target else "all knowledge bases"
-    return (
-        f"update_rag is not implemented yet — no re-index of {what} was started."
-    )
+    return f"update_rag is not implemented yet — no re-index of {what} was started."
 
 
 def _rag(base_id: Optional[str] = None):
@@ -662,7 +658,7 @@ def _apply_rag_policy(
       base — which may be exactly the one being withheld — so the search is
       pointed at the allowed set instead.
     * **Scopes.** `scope` addresses a sub-index a Talos feature manages for
-      itself (the SQL schema files — see `src/rag_scopes.py`), which ordinary
+      itself (the SQL schema files — see `src/rag_mini.py`), which ordinary
       retrieval never returns. Unless the administrator named that scope, the
       argument is refused rather than quietly dropped: a caller that thinks it
       is reading the schema index should not be handed ordinary passages that
@@ -750,9 +746,17 @@ def _tool_rag_query(args: Dict[str, Any]) -> str:
         # rewriting by language here would only remove correct hits.
         logger.debug("rag_query language hint %r (not used for retrieval)", language)
 
+    # The schema namespace lives in the mini RAGs now, plus whatever hasn't moved
+    # out of the default base yet. `(base id, scope)` per place to search.
+    targets: List[tuple] = [(cid, scope) for cid in collections]
+    if scope in DEFAULT_EXCLUDE_SCOPES:
+        from src.rag_mini import search_targets
+
+        targets = [(base_id, sub) for _, base_id, sub in search_targets()]
+
     hits: List[Dict[str, Any]] = []
     failures: List[str] = []
-    for cid in collections:
+    for cid, target_scope in targets:
         label = cid or _default_collection_id()
         rag = _rag(cid)
         if rag is None:
@@ -771,7 +775,7 @@ def _tool_rag_query(args: Dict[str, Any]) -> str:
                 k=k,
                 owner=owner,
                 candidate_k=candidate_k,
-                scope=scope,
+                scope=target_scope,
                 exclude_scopes=exclude,
             )
             or []
@@ -785,10 +789,10 @@ def _tool_rag_query(args: Dict[str, Any]) -> str:
     if failures and not hits:
         raise ToolError(
             _rag_unavailable_text()
-            + (f" (unreachable: {', '.join(failures)})" if len(collections) > 1 else "")
+            + (f" (unreachable: {', '.join(failures)})" if len(targets) > 1 else "")
         )
 
-    if len(collections) > 1:
+    if len(targets) > 1:
         # Each base reranked its own candidates with the same cross-encoder, so
         # the scores are comparable and one merged ordering is meaningful.
         hits.sort(key=_hit_rank, reverse=True)

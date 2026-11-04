@@ -1,72 +1,26 @@
 """rag_scopes.py
 
-Purpose-bound sub-indexes ("mini RAGs") inside a knowledge base.
+Namespaces that used to live inside a knowledge base's collection.
 
-A knowledge base normally holds documents someone uploaded to answer questions
-from. A *scope* is different: a small set of documents a Talos feature manages
-for its own use, living in the same Qdrant collection but tagged with
-``meta.scope`` so ordinary retrieval never sees them.
-
-Today there is exactly one — the SQL schema files, which are injected only when
-the SQL source is active (``routes/sql_routes.py``, ``src/agent_loop.py``).
-They were being counted and listed as if a user had put them in the knowledge
-base, which is misleading: the base looks bigger than the corpus a user can
-search. So they are counted and listed apart, and the /rag workspace gives each
-scope its own space with the same document tools as a knowledge base.
-
-Scopes live in the default base, which is the one the owning features read from.
-
-Adding a scope means adding an entry here and tagging the documents on ingest.
-Nothing else in the knowledge-base UI has to know about it.
+SQL schema files were once indexed into the default base, tagged with
+``meta.scope == "sql"``. They now live in mini RAGs, one per database
+(``src/rag_mini.py``), but a deployment that has not moved them yet still holds
+such documents. So every ordinary read keeps excluding these namespaces, and this
+list is the one place that says which they are.
 """
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import List
 
-# One entry per purpose-bound sub-index.
-#
-# ``managed_at`` is where the scope is administered.
-SCOPES: List[Dict[str, str]] = [
-    {
-        "id": "sql",
-        "name": "SQL schema",
-        "purpose": (
-            "Schema files for the connected SQL databases. Retrieved only while "
-            "the SQL knowledge source is active, so the model can navigate the "
-            "database — never mixed into ordinary knowledge-base answers."
-        ),
-        "managed_at": "rag-workspace",
-    },
-]
+SQL_SCOPE = "sql"
 
-SCOPE_IDS: List[str] = [s["id"] for s in SCOPES]
+SCOPE_IDS: List[str] = [SQL_SCOPE]
 
 
-def scope(scope_id: str) -> Optional[Dict[str, str]]:
-    return next((s for s in SCOPES if s["id"] == scope_id), None)
-
-
-def describe_scopes(rag) -> List[Dict[str, Any]]:
-    """Every known scope with its live document/chunk counts for one base.
-
-    A scope with nothing in it is still listed: "the SQL schema index is empty"
-    is exactly the answer someone wondering why SQL answers are thin needs.
-    Counting failures degrade to zero rather than raising — the scope panel is
-    informational and must not take the page down with it.
-    """
-    rows: List[Dict[str, Any]] = []
-    for meta in SCOPES:
-        docs: List[Dict[str, Any]] = []
-        try:
-            docs = rag.list_documents(scope=meta["id"]) or []
-        except Exception:
-            docs = []
-        rows.append(
-            {
-                **meta,
-                "content_count": len(docs),
-                "chunk_count": sum(int(d.get("chunks") or 0) for d in docs),
-            }
-        )
-    return rows
+def legacy_document_count(rag) -> int:
+    """Schema files still waiting in this base. Informational, so a failure is 0."""
+    try:
+        return len(rag.list_documents(scope=SQL_SCOPE) or [])
+    except Exception:
+        return 0

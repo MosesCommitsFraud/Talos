@@ -20,6 +20,12 @@ is the one store both processes can read.
 The ``default`` entry is seeded on first read and pinned to the historical
 ``talos_rag`` collection, so every existing document, route and chat call keeps
 working with no migration.
+
+A *mini RAG* is an ordinary entry with ``kind: "mini"``, bound to one SQL database
+from Settings → Integrations (``src/rag_mini.py``). It has its own collection and
+pipeline settings like any base, but only the SQL feature reads it, so
+``list_bases()`` leaves it out unless a caller asks for it: chat, MCP and the
+outward REST service can't reach one by accident.
 """
 
 from __future__ import annotations
@@ -45,6 +51,8 @@ DEFAULT_COLLECTION = "talos_rag"
 # other tools stays legible, and so ``talos_rag_visual`` (the pixel lane of the
 # default base) can never be mistaken for a registered base's collection.
 COLLECTION_PREFIX = "talos_kb_"
+
+MINI_KIND = "mini"
 
 _ID_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,62}$")
 _lock = threading.RLock()
@@ -130,17 +138,27 @@ class RagConflict(ValueError):
     """The id is already taken."""
 
 
-def list_bases() -> List[Dict[str, Any]]:
-    """Every registered base, default first, then newest-created first."""
+def is_mini(entry: Dict[str, Any]) -> bool:
+    return entry.get("kind") == MINI_KIND
+
+
+def list_bases(include_mini: bool = False) -> List[Dict[str, Any]]:
+    """Every registered base, default first, then newest-created first.
+
+    Mini RAGs only with ``include_mini``: they belong to the SQL feature, not to
+    anything that walks the catalogue to decide what to search or expose.
+    """
     with _lock:
         entries = _read()
-    rows = list(entries.values())
+    rows = [e for e in entries.values() if include_mini or not is_mini(e)]
     rows.sort(key=lambda e: (e.get("id") != DEFAULT_ID, -float(e.get("created_at") or 0)))
     return rows
 
 
 def chat_enabled(entry: Dict[str, Any]) -> bool:
     """Preserve historical default-only retrieval for existing catalogues."""
+    if is_mini(entry):
+        return False
     return bool(entry.get("chat_enabled", entry.get("id") == DEFAULT_ID))
 
 
@@ -209,8 +227,9 @@ def create_base(
     description: str = "",
     language: str = "",
     rag_id: Optional[str] = None,
+    connection_id: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """Register a new knowledge base.
+    """Register a new knowledge base (a mini RAG when ``connection_id`` is given).
 
     Writes the catalogue entry only. The Qdrant collection is created the first
     time the base is opened (``rag_singleton.get_rag_manager`` → Haystack's
@@ -236,6 +255,9 @@ def create_base(
         "created_at": now,
         "updated_at": now,
     }
+    if connection_id:
+        entry["kind"] = MINI_KIND
+        entry["connection_id"] = connection_id
     with _lock:
         entries = _read()
         if new_id in entries:
@@ -380,6 +402,9 @@ def describe(entry: Dict[str, Any], *, with_counts: bool = True) -> Dict[str, An
         # shipping the whole (partly secret) config on a list call.
         "override_count": len(entry.get("overrides") or {}),
     }
+    if is_mini(entry):
+        row["kind"] = MINI_KIND
+        row["connection_id"] = entry.get("connection_id")
     if not with_counts:
         return row
     row.update(_counts(entry))
@@ -433,13 +458,13 @@ def _counts(entry: Dict[str, Any]) -> Dict[str, Any]:
     if cached and time.monotonic() - cached[0] < _COUNT_TTL_SECONDS and cached[2] == points:
         return dict(cached[1])
 
-    from src.rag_scopes import SCOPE_IDS, describe_scopes
+    from src.rag_scopes import SCOPE_IDS, legacy_document_count
 
     try:
-        # Purpose-bound sub-indexes (the SQL schema files) are excluded: they
-        # are not part of the corpus a user searches, and counting them makes
-        # the base look bigger than what it can actually answer from. They are
-        # reported separately as ``scopes``.
+        # Schema files uploaded before mini RAGs existed still sit in the default
+        # base, tagged with a scope. They are not part of the corpus a user
+        # searches, so they aren't counted; ``legacy_sql_count`` says they exist
+        # until they have moved to a mini RAG.
         docs = rag.list_documents(exclude_scopes=SCOPE_IDS)
         # ``list_documents`` returns one row per source file with a ``chunks``
         # tally, so the two counts come out of a single scroll.
@@ -448,8 +473,9 @@ def _counts(entry: Dict[str, Any]) -> Dict[str, Any]:
             "content_count": len(docs),
             "chunk_count": chunks,
             "available": True,
-            "scopes": describe_scopes(rag),
         }
+        if key == DEFAULT_ID:
+            row["legacy_sql_count"] = legacy_document_count(rag)
         # Only successes are cached — a backend that just came back should show
         # up on the next poll, not 30 seconds later.
         _count_cache[key] = (time.monotonic(), dict(row), points)

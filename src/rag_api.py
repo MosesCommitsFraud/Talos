@@ -135,12 +135,17 @@ class SearchRequest(BaseModel):
 
 
 def _entry(rag_id: str) -> Dict[str, Any]:
-    from src.rag_registry import RagNotFound, get_base
+    from src.rag_registry import RagNotFound, get_base, is_mini
 
     try:
-        return get_base(rag_id)
+        entry = get_base(rag_id)
     except RagNotFound:
         raise HTTPException(404, f"Unknown knowledge base '{rag_id}'")
+    # A mini RAG belongs to the SQL feature; the catalogue here doesn't list it,
+    # so it can't be addressed by guessing its id either.
+    if is_mini(entry):
+        raise HTTPException(404, f"Unknown knowledge base '{rag_id}'")
+    return entry
 
 
 def _rag_or_503(rag_id: str):

@@ -1,20 +1,13 @@
 import logging
-import os
 import uuid
-from typing import List
 
-from fastapi import APIRouter, File, HTTPException, Query, Request, UploadFile
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
 from core.middleware import require_admin
 from src.settings import load_settings, save_settings
 
 logger = logging.getLogger(__name__)
-
-# Knowledge files uploaded here are indexed into the shared RAG store tagged
-# with meta.scope=="sql", so they're retrieved only when the SQL source is on
-# and never pollute the ordinary knowledge base.
-SQL_KNOWLEDGE_SCOPE = "sql"
 
 
 class SqlConnectionIn(BaseModel):
@@ -63,6 +56,17 @@ def _load_connections(settings: dict) -> list[dict]:
         migrated.setdefault("name", "default")
         return [migrated]
     return []
+
+
+def _sync_mini_rags() -> None:
+    """Each database has its mini RAG (src/rag_mini.py). Listing the bases syncs too,
+    so a failure here must not fail saving the connection."""
+    try:
+        from src.rag_mini import sync
+
+        sync()
+    except Exception as e:
+        logger.warning("mini RAG sync failed: %s", e)
 
 
 def setup_sql_routes():
@@ -130,6 +134,7 @@ def setup_sql_routes():
         # Drop the legacy single-dict key so it can't shadow the list.
         settings.pop("sql_database", None)
         save_settings(settings)
+        _sync_mini_rags()
         return {"databases": [_public_conn(c) for c in out]}
 
     @router.delete("/config")
@@ -144,6 +149,7 @@ def setup_sql_routes():
         settings["sql_databases"] = conns
         settings.pop("sql_database", None)
         save_settings(settings)
+        _sync_mini_rags()
         return {"databases": [_public_conn(c) for c in conns]}
 
     @router.post("/test")
@@ -164,125 +170,5 @@ def setup_sql_routes():
         if result.get("exit_code") == 0:
             return {"ok": True, "output": result.get("output", "")}
         return {"ok": False, "error": result.get("error", "Connection failed")}
-
-    # ── SQL knowledge: a small scoped RAG over uploaded schema files ──
-    # Whenever SQL is enabled in chat, the most relevant chunks of these files
-    # are retrieved and injected so the model can navigate the database.
-
-    @router.get("/knowledge")
-    def list_sql_knowledge(request: Request):
-        require_admin(request)
-        from src.rag_singleton import get_rag_manager, last_init_error
-
-        rag = get_rag_manager()
-        if not rag or not getattr(rag, "healthy", False):
-            return {"available": False, "documents": [], "error": last_init_error()}
-        return {"available": True, "documents": rag.list_documents(scope=SQL_KNOWLEDGE_SCOPE)}
-
-    @router.post("/knowledge/upload")
-    async def upload_sql_knowledge(request: Request, files: List[UploadFile] = File(...)):
-        require_admin(request)
-        from routes.personal_routes import (
-            MAX_PERSONAL_UPLOAD_BYTES,
-            _personal_upload_dir_for_owner,
-            _unique_personal_upload_path,
-        )
-        from src.rag_documents import upload_identity
-
-        upload_dir = _personal_upload_dir_for_owner("sql_knowledge")
-        to_index = []
-        uploaded_files: List[str] = []
-        total_failed = 0
-        for upload in files:
-            try:
-                file_path, stored_name, safe_name = _unique_personal_upload_path(
-                    upload_dir, upload.filename
-                )
-                content_bytes = await upload.read(MAX_PERSONAL_UPLOAD_BYTES + 1)
-                if len(content_bytes) > MAX_PERSONAL_UPLOAD_BYTES:
-                    logger.warning("Rejected oversized SQL knowledge upload: %r", upload.filename)
-                    total_failed += 1
-                    continue
-                with open(file_path, "wb") as f:
-                    f.write(content_bytes)
-                ext = os.path.splitext(safe_name)[1].lower()
-                to_index.append(
-                    (
-                        file_path,
-                        {
-                            "source": file_path,
-                            "filename": safe_name,
-                            "stored_filename": stored_name,
-                            "directory": upload_dir,
-                            "type": ext,
-                            "scope": SQL_KNOWLEDGE_SCOPE,
-                            **upload_identity(upload.filename),
-                        },
-                    )
-                )
-                uploaded_files.append(safe_name)
-            except Exception as e:
-                logger.error("Failed to store SQL knowledge upload %s: %s", upload.filename, e)
-                total_failed += 1
-
-        job = None
-        if to_index:
-            from src import rag_worker
-
-            try:
-                job = rag_worker.start_index_files(to_index, owner=None)
-            except Exception as e:
-                logger.error("Failed to enqueue SQL knowledge ingest job: %s", e)
-                raise HTTPException(
-                    503,
-                    "Files were saved but the ingest queue is unavailable — is "
-                    "Redis (rag-redis) running and REDIS_URL correct?",
-                )
-
-        return {
-            "success": True,
-            "uploaded": uploaded_files,
-            "failed_count": total_failed,
-            "job_id": (job or {}).get("id"),
-            "status": (job or {}).get("status", "queued" if to_index else "idle"),
-        }
-
-    @router.get("/knowledge/original")
-    def download_sql_knowledge(request: Request, source: str = Query(...)):
-        """Download an uploaded schema file exactly as it was ingested."""
-        require_admin(request)
-        from routes.rag_routes import original_file_response
-        from src.rag_singleton import get_rag_manager
-
-        rag = get_rag_manager()
-        if not rag or not getattr(rag, "healthy", False):
-            raise HTTPException(503, "RAG is not available")
-        return original_file_response(source, rag.list_documents(scope=SQL_KNOWLEDGE_SCOPE))
-
-    @router.delete("/knowledge")
-    def delete_sql_knowledge(request: Request, source: str = Query(...)):
-        require_admin(request)
-        from src.rag_singleton import get_rag_manager
-
-        rag = get_rag_manager()
-        if not rag or not getattr(rag, "healthy", False):
-            raise HTTPException(503, "RAG is not available")
-        removed = rag.delete_by_source(source)
-        from src.rag_registry import invalidate_counts
-
-        invalidate_counts()
-        # Best-effort disk cleanup for uploads we stored ourselves.
-        try:
-            from routes.personal_routes import UPLOADS_DIR
-
-            abs_target = os.path.abspath(source)
-            base_abs = os.path.abspath(UPLOADS_DIR)
-            if os.path.commonpath([abs_target, base_abs]) == base_abs and os.path.isfile(
-                abs_target
-            ):
-                os.remove(abs_target)
-        except Exception as e:
-            logger.debug("SQL knowledge disk cleanup skipped: %s", e)
-        return {"deleted": removed > 0, "removed_count": removed, "source": source}
 
     return router
