@@ -1797,6 +1797,69 @@ def _usage_row(name: str, days: int) -> dict:
     }
 
 
+def _rag_config() -> dict:
+    return {
+        "enabled": True,
+        "provider": "internal",
+        "external_url": "",
+        "external_api_key_set": False,
+        "external_dataset_id": "",
+        "external_top_k": 5,
+        "embedding_url": "http://your-host:8001/v1/embeddings",
+        "embedding_model": "qwen3-embed",
+        "qdrant_url": "http://qdrant:6333",
+        "qdrant_api_key_set": False,
+        "rerank_url": "http://your-host:8002/v1/rerank",
+        "rerank_model": "qwen3-reranker",
+        "rerank_api_key_set": False,
+        "sparse_model": "Qdrant/bm25",
+        "chat_top_k": 5,
+        "search_top_k": 5,
+        "candidate_top_k": 40,
+        "similarity_threshold": 0.0,
+        "rerank_min_score": 0.3,
+        "max_context_chars": 18000,
+        "query_prefix": "",
+        "context_prompt": "",
+        "redact_pii_enabled": False,
+        "vlm_url": "http://your-host:8000/v1/chat/completions",
+        "video_asr_url": "",
+        "video_asr_mode": "auto",
+        "pdf_vlm_mode": "auto",
+        "video_frames_mode": "auto",
+        "code_lane_mode": "off",
+        "lanes": {
+            "video_asr": {"mode": "auto", "active": False, "waiting_for": "video_asr_url"},
+            "pdf_vlm": {"mode": "auto", "active": True, "waiting_for": ""},
+            "code_lane": {"mode": "off", "active": False, "waiting_for": ""},
+            "video_frames": {"mode": "auto", "active": False, "waiting_for": "video_asr"},
+        },
+    }
+
+
+_RAG_BASE_OVERRIDES: dict = {}
+
+
+def _rag_base_config(base_id: str) -> dict:
+    overrides = _RAG_BASE_OVERRIDES.get(base_id, {})
+    return {
+        "rag_id": base_id,
+        "config": {**_rag_config(), **overrides},
+        "inherited": _rag_config(),
+        "overridden": sorted(overrides),
+        "global_keys": [
+            "enabled",
+            "provider",
+            "qdrant_url",
+            "qdrant_api_key",
+            "external_url",
+            "external_api_key",
+            "external_dataset_id",
+            "external_top_k",
+        ],
+    }
+
+
 def _rag_chunks(source: str) -> list:
     """Fake indexed chunks so the RAG explorer (list, inspector, search) is
     clickable in the preview harness."""
@@ -2608,45 +2671,10 @@ class PreviewHandler(BaseHTTPRequestHandler):
         # The per-user reads are POSTs — usernames are emails and stay out of
         # the URL. See do_POST.
         if path == "/api/rag/config":
-            self._send_json(
-                {
-                    "enabled": True,
-                    "provider": "internal",
-                    "external_url": "",
-                    "external_api_key_set": False,
-                    "external_dataset_id": "",
-                    "external_top_k": 5,
-                    "embedding_url": "http://your-host:8001/v1/embeddings",
-                    "embedding_model": "qwen3-embed",
-                    "qdrant_url": "http://qdrant:6333",
-                    "qdrant_api_key_set": False,
-                    "rerank_url": "http://your-host:8002/v1/rerank",
-                    "rerank_model": "qwen3-reranker",
-                    "rerank_api_key_set": False,
-                    "sparse_model": "Qdrant/bm25",
-                    "chat_top_k": 5,
-                    "search_top_k": 5,
-                    "candidate_top_k": 40,
-                    "similarity_threshold": 0.0,
-                    "rerank_min_score": 0.3,
-                    "max_context_chars": 18000,
-                    "query_prefix": "",
-                    "context_prompt": "",
-                    "redact_pii_enabled": False,
-                    "vlm_url": "http://your-host:8000/v1/chat/completions",
-                    "video_asr_url": "",
-                    "video_asr_mode": "auto",
-                    "pdf_vlm_mode": "auto",
-                    "video_frames_mode": "auto",
-                    "code_lane_mode": "off",
-                    "lanes": {
-                        "video_asr": {"mode": "auto", "active": False, "waiting_for": "video_asr_url"},
-                        "pdf_vlm": {"mode": "auto", "active": True, "waiting_for": ""},
-                        "code_lane": {"mode": "off", "active": False, "waiting_for": ""},
-                        "video_frames": {"mode": "auto", "active": False, "waiting_for": "video_asr"},
-                    },
-                }
-            )
+            self._send_json(_rag_config())
+            return
+        if path.startswith("/api/rag/bases/") and path.endswith("/config"):
+            self._send_json(_rag_base_config(path[len("/api/rag/bases/") : -len("/config")]))
             return
         if path == "/api/rag/jobs/diagnostics":
             self._send_json(
@@ -3143,6 +3171,18 @@ class PreviewHandler(BaseHTTPRequestHandler):
     def do_PUT(self):
         body = self._read_body()
         path = urlparse(self.path).path
+        if path.startswith("/api/rag/bases/") and path.endswith("/config"):
+            base_id = path[len("/api/rag/bases/") : -len("/config")]
+            payload = json.loads(body or b"{}")
+            inherit = set(payload.get("inherit") or ())
+            defaults = _rag_config()
+            _RAG_BASE_OVERRIDES[base_id] = {
+                k: v
+                for k, v in (payload.get("config") or {}).items()
+                if k not in inherit and k != "lanes" and defaults.get(k) != v
+            }
+            self._send_json(_rag_base_config(base_id))
+            return
         if path.startswith("/api/shared-skills/") and path.endswith("/enabled"):
             name = path[len("/api/shared-skills/") : -len("/enabled")]
             try:
