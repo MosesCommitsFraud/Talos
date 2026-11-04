@@ -1424,7 +1424,9 @@ def _shared_sparse_embedder(kind: str, model: str, language: Optional[str] = Non
         return emb
 
 
-_RERANK_TIMEOUT_S = 20
+# Calls queue on the server, so waiting beats losing the ranking; this only stops
+# a hung reranker from blocking a search forever.
+_RERANK_TIMEOUT_S = 180
 _RERANK_FAILURE_WINDOW_S = 3600
 _rerank_failures: "deque[Tuple[float, str]]" = deque(maxlen=500)
 _rerank_failures_lock = threading.Lock()

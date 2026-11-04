@@ -136,8 +136,8 @@ def test_timeout_has_a_readable_reason_even_with_an_empty_message(monkeypatch):
     monkeypatch.setitem(sys.modules, "httpx", SimpleNamespace(post=_post))
     rag = object.__new__(rv.VectorRAG)
     result = rag._rerank("query", _rerank_candidates(), 1)
-    assert result[0]["rerank_error"] == "timed out after 20 s"
-    assert rag._last_rerank_error == "timed out after 20 s"
+    assert result[0]["rerank_error"] == "timed out after 180 s"
+    assert rag._last_rerank_error == "timed out after 180 s"
 
 
 def test_successful_rerank_reports_no_failure(monkeypatch):

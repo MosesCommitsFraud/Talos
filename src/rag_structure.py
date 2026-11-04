@@ -26,7 +26,7 @@ DEFAULT_CHUNK_MAX_CHARS = 4000
 DEFAULT_CONTEXT_MAX_CHARS = 18000
 # Chunks one search hands the reranker. Its time grows with this number and with
 # chunk length, and calls queue behind each other: 40 chunks of 6,000 characters took
-# 16 s alone on Qwen3-Reranker-4B and 32 s with two at once, past the client timeout.
+# 16 s alone on Qwen3-Reranker-4B and 32 s with two at once.
 DEFAULT_CANDIDATE_TOP_K = 20
 
 # Docling reads PDFs without a heading hierarchy, so a numbered title is the only
