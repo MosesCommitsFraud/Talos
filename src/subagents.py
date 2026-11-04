@@ -413,8 +413,10 @@ class _Run:
 
 
 async def _run_one(run: _Run, ctx: Dict[str, Any]) -> int:
+    from src import citations
     from src.agent_loop import stream_agent_loop
 
+    citations.set_delivery_scope(f"subagent-{id(run)}")
     sink: Dict[str, Any] = {}
     target = run.target
     max_rounds = _int_setting("subagent_max_rounds", 12, 2, 40)

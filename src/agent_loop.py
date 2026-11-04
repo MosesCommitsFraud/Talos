@@ -2593,6 +2593,9 @@ async def stream_agent_loop(
                     reserve_tokens,
                 )
                 messages = trimmed_messages
+                from src import citations as _delivered_passages
+
+                _delivered_passages.forget_delivered(session_id)
     except Exception as e:
         logger.warning("[agent] Soft context trim skipped: %s", e)
     prep_timings["context_trim"] = time.time() - _t3
@@ -2659,10 +2662,10 @@ async def stream_agent_loop(
     _call_sig_counts: collections.Counter = collections.Counter()
     _THINK_RE = re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE)
     _force_answer = False  # set by loop-breaker → next round runs with NO tools
+    _knowledge_progress = KnowledgeProgress()
     # Supervisor: how many times we've nudged the model after it announced
     # an action without emitting the tool call. Capped to prevent a model
     # that *can't* call the tool from looping forever.
-    _knowledge_progress = KnowledgeProgress()
     _intent_nudge_count = 0
     _MAX_INTENT_NUDGES = 2
     # Consecutive rounds that returned neither text nor a tool call. Reset by
@@ -2758,6 +2761,9 @@ async def stream_agent_loop(
                     _did_compact = False
                 if _did_compact:
                     _mid_turn_compactions += 1
+                    from src import citations as _delivered_passages
+
+                    _delivered_passages.forget_delivered(session_id)
                     if wire_sink is not None:
                         wire_sink.update(messages=messages, compacted=True)
                     # The last reported real usage describes a context that no
@@ -3840,14 +3846,14 @@ async def stream_agent_loop(
             if "plan_update" in result:
                 yield f"data: {json.dumps({'type': 'plan_update', 'data': result['plan_update']})}\n\n"
 
+            _knowledge_progress.observe(block.tool_type, result)
+
             # search_knowledge retrieved sources mid-turn. On the auto-inject
             # path the turn's sources are known before generation; here they
             # only exist once the model asks. Emit them so the caller can merge
             # them into the turn and still run the post-generation guards
             # (filter_used_rag_sources / append_missing_figures /
             # strip_unauthorized_figures) over everything the answer could
-            _knowledge_progress.observe(block.tool_type, result)
-
             # have drawn on. Internal underscore keys are preserved — the
             # caller strips them via public_rag_sources before the client
             # sees anything.
@@ -4123,12 +4129,6 @@ async def stream_agent_loop(
             round_reasoning=round_reasoning,
         )
 
-        # Tool output just landed in the message list — that's the single
-        # biggest jump in occupancy a turn makes, so refresh the meter now
-        # instead of waiting for the next round's usage report.
-        yield _context_metrics_frame(estimate_tokens(messages), "estimated")
-
-        # Emit agent_step event
         # Reworded searches never repeat a call, so the loop-breaker above can't
         # see them: stop when the lookups stop delivering anything new.
         if _knowledge_progress.end_round() and not _force_answer:
@@ -4136,6 +4136,12 @@ async def stream_agent_loop(
             _force_answer = True
             messages.append({"role": "system", "content": STOP_SEARCHING_NOTE})
 
+        # Tool output just landed in the message list — that's the single
+        # biggest jump in occupancy a turn makes, so refresh the meter now
+        # instead of waiting for the next round's usage report.
+        yield _context_metrics_frame(estimate_tokens(messages), "estimated")
+
+        # Emit agent_step event
         yield (f"data: {json.dumps({'type': 'agent_step', 'round': round_num + 1})}\n\n")
 
         # Separator in accumulated response

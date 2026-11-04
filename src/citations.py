@@ -18,14 +18,16 @@ Entries are public (safe for the client and the DB):
 
 from __future__ import annotations
 
+import contextvars
 import re
 import threading
-from typing import Dict, List, Optional
+from typing import Dict, Iterable, List, Optional
 from urllib.parse import urlparse
 
 _MAX_SESSIONS = 500
 _lock = threading.Lock()
 _turns: Dict[str, dict] = {}
+_delivery_scope: contextvars.ContextVar = contextvars.ContextVar("rag_delivery_scope", default="")
 
 # "[3]", "[3, 5]", "[3][5]" — citation numbers are 1..999.
 _MARKER_RE = re.compile(r"\[(\d{1,3}(?:\s*,\s*\d{1,3})*)\]")
@@ -47,7 +49,39 @@ def begin_turn(session_id: Optional[str]) -> None:
         _turns.pop(session_id, None)
         if len(_turns) >= _MAX_SESSIONS:
             _turns.pop(next(iter(_turns)))
-        _turns[session_id] = {"keys": {}, "items": []}
+        _turns[session_id] = {"keys": {}, "items": [], "delivered": {}}
+
+
+def set_delivery_scope(scope: str) -> contextvars.Token:
+    """Name the conversation the current task feeds: a subagent shares the turn's
+    numbers but has its own messages, so what its parent has read isn't in its context."""
+    return _delivery_scope.set(scope)
+
+
+def reset_delivery_scope(token: contextvars.Token) -> None:
+    _delivery_scope.reset(token)
+
+
+def was_delivered(session_id: Optional[str], key: str) -> bool:
+    """Whether this conversation already holds the text of a source this turn."""
+    with _lock:
+        turn = _turns.get(session_id or "")
+        return bool(turn) and key in turn["delivered"].get(_delivery_scope.get(), ())
+
+
+def mark_delivered(session_id: Optional[str], keys: Iterable[str]) -> None:
+    with _lock:
+        turn = _turns.get(session_id or "")
+        if turn:
+            turn["delivered"].setdefault(_delivery_scope.get(), set()).update(keys)
+
+
+def forget_delivered(session_id: Optional[str]) -> None:
+    """Compaction dropped the passages from context, so they can't be pointed at any more."""
+    with _lock:
+        turn = _turns.get(session_id or "")
+        if turn:
+            turn["delivered"].pop(_delivery_scope.get(), None)
 
 
 def active(session_id: Optional[str]) -> bool:
@@ -104,12 +138,16 @@ def cite_web(
     return cite(session_id, "web:" + (url or "").rstrip("/"), entry)
 
 
-def cite_rag(session_id: Optional[str], source: dict) -> Optional[int]:
-    """Number a retrieved knowledge-base section (a rag_sources dict)."""
+def rag_key(source: dict) -> str:
     key = source.get("_id") or "|".join(
         str(x)
         for x in (source.get("filename"), source.get("_page"), (source.get("snippet") or "")[:80])
     )
+    return "rag:" + str(key)
+
+
+def cite_rag(session_id: Optional[str], source: dict) -> Optional[int]:
+    """Number a retrieved knowledge-base section (a rag_sources dict)."""
     entry = {
         "kind": "rag",
         "title": source.get("filename") or "",
@@ -120,4 +158,4 @@ def cite_rag(session_id: Optional[str], source: dict) -> Optional[int]:
             entry[k] = source[k]
     if source.get("_page") is not None:
         entry["page"] = source["_page"]
-    return cite(session_id, "rag:" + str(key), entry)
+    return cite(session_id, rag_key(source), entry)

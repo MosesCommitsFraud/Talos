@@ -728,6 +728,7 @@ class ChatProcessor:
             # UI can show exactly this section behind the marker.
             from src import citations as _citations
 
+            _delivery_keys: Dict[int, str] = {}
             for _src in rag_sources:
                 # Chunk ids are only unique within one knowledge base; the caller
                 # prefixes them with the base id afterwards, so do the same for
@@ -740,6 +741,7 @@ class ChatProcessor:
                 _n = _citations.cite_rag(citation_session, _key_src)
                 if _n is not None:
                     _src["n"] = _n
+                    _delivery_keys[id(_src)] = _citations.rag_key(_key_src)
 
             # Inject the expanded parent section when small-to-big is
             # on (r["expanded"]); otherwise the matched chunk. The
@@ -785,7 +787,18 @@ class ChatProcessor:
                 }
                 for s, r in zip(rag_sources, relevant)
             ]
-            text_entries = [e for e in entries if not e["figure"]]
+            # A passage this conversation already holds this turn costs tokens and
+            # adds nothing: the model gets its number instead of the text again.
+            # Figures stay, since their Markdown line has to be at hand to embed.
+            repeated = [
+                e
+                for e in entries
+                if not e["figure"]
+                and id(e["source"]) in _delivery_keys
+                and _citations.was_delivered(citation_session, _delivery_keys[id(e["source"])])
+            ]
+            repeated_ids = {id(e) for e in repeated}
+            text_entries = [e for e in entries if not e["figure"] and id(e) not in repeated_ids]
             fig_entries = [e for e in entries if e["figure"]]
 
             # Figure sections (caption + image_url, tiny) ride at the END of
@@ -871,17 +884,35 @@ class ChatProcessor:
                     max_chars,
                 )
 
+            if repeated:
+                labels = ", ".join(
+                    f"[{e['source']['n']}] {e['source']['filename']}" for e in repeated
+                )
+                note = f"Already supplied earlier in this turn, not repeated here: {labels}."
+                body = f"{body}{sep}{note}" if body else note
+
             rag_content = prefix_block + body
             if fig_block:
                 rag_content += sep + fig_block
                 logger.info("RAG: injected %s figure section(s) with image_url", len(protected))
-            if kept or protected:
+            if kept or protected or repeated:
                 rag_sources = [
-                    e["source"] for e in entries if id(e) in kept_ids or id(e) in protected_ids
+                    e["source"]
+                    for e in entries
+                    if id(e) in kept_ids or id(e) in protected_ids or id(e) in repeated_ids
                 ]
+            _citations.mark_delivered(
+                citation_session,
+                [
+                    _delivery_keys[id(e["source"])]
+                    for e in entries
+                    if id(e) in kept_ids and id(e["source"]) in _delivery_keys
+                ],
+            )
             return rag_sources, rag_content
         except Exception as e:
             logger.warning(f"RAG retrieval failed: {e}")
+            self.last_miss = {"cause": "engine_error", "detail": f"{type(e).__name__}: {e}"}
             return [], ""
 
     def build_context_preface(
@@ -912,7 +943,6 @@ class ChatProcessor:
 
         # Add preset system prompt if specified
         if preset_system_prompt:
-            self.last_miss = {"cause": "engine_error", "detail": f"{type(e).__name__}: {e}"}
             preface.append({"role": "system", "content": preset_system_prompt})
         # The current date/time is NOT part of the preface: the clock changes
         # every minute and the preface precedes the whole history, so it would
