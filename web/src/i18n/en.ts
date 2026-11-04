@@ -353,6 +353,8 @@ const en = {
   messages: {
     copy: 'Copy',
     copied: 'Copied',
+    showMore: 'Show more',
+    showLess: 'Show less',
     editMessage: 'Edit & resend',
     deleteMessage: 'Delete message',
     cancel: 'Cancel',

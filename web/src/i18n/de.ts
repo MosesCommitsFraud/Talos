@@ -356,6 +356,8 @@ const de: typeof en = {
   messages: {
     copy: 'Kopieren',
     copied: 'Kopiert',
+    showMore: 'Mehr anzeigen',
+    showLess: 'Weniger anzeigen',
     editMessage: 'Bearbeiten & senden',
     deleteMessage: 'Nachricht löschen',
     cancel: 'Abbrechen',

@@ -2,6 +2,7 @@ import { useTranslation } from 'react-i18next';
 import { uploadDownloadUrl } from '@/api/client';
 import { useChat } from '@/state/chat';
 import { AttachmentTile } from './AttachmentTile';
+import { CollapsibleText } from './CollapsibleText';
 
 /** Messages typed during a turn, as the bubbles they will become, waiting right
  *  above the input. The turn takes them in at its next round boundary; "Send
@@ -31,7 +32,7 @@ export function QueuedMessages() {
           )}
           {item.text && (
             <div className="max-w-[85%] rounded-[14px] bg-bubble px-3.5 py-2 text-[15px] leading-relaxed break-words whitespace-pre-wrap text-strong">
-              {item.text}
+              <CollapsibleText>{item.text}</CollapsibleText>
             </div>
           )}
           <div className="mt-1 flex items-center gap-3 pe-1 text-xs text-muted-foreground">

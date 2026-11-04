@@ -13,6 +13,7 @@ import { UiDraftView } from './interactive/UiDraftView';
 import { usePrefs } from '@/state/prefs';
 import { useUi } from '@/state/ui';
 import { AttachmentTile, openUploadViewer } from './AttachmentTile';
+import { CollapsibleText } from './CollapsibleText';
 import { OutputCard } from './OutputCard';
 import { CitationProvider, citationMap, citedNumbers } from './Citations';
 import { Markdown } from './Markdown';
@@ -1033,7 +1034,7 @@ export function Messages() {
                     <AskAnswers answers={block.msg.askAnswers} />
                   ) : (
                     <div className="rounded-lg rounded-br-sm bg-bubble px-3 py-1 text-[15px] leading-relaxed whitespace-pre-wrap text-strong">
-                      {block.msg.content}
+                      <CollapsibleText>{block.msg.content}</CollapsibleText>
                     </div>
                   )}
                   <ArtifactSelectionChip msg={block.msg} />
