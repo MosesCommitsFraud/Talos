@@ -32,7 +32,7 @@ flowchart LR
   C --> D[rag_worker<br/>ingest_directory_job]
   D --> E[VectorRAG.index_personal_documents]
   E --> F[document_processor<br/>extract text]
-  F --> G[Docling splitter<br/>chunk into passages]
+  F --> G[Structure-aware chunker<br/>sections into passages]
   G --> H[dense + sparse<br/>document embedders]
   H --> I[(Qdrant collection)]
   D -. progress snapshots .-> C
@@ -45,7 +45,7 @@ Step by step:
 2. **Walk & extract** — `VectorRAG.index_personal_documents` walks the directory,
    filters by extension, and calls `document_processor` to turn each file into text.
    PDFs, Office docs, and images (via a vision-language model) are all supported.
-3. **Chunk** — text is split into passages by the Docling-backed splitter.
+3. **Chunk** — sections are cut into passages by the one chunker every format shares.
 4. **Embed** — each passage is embedded by **both** the dense document embedder and the
    sparse document embedder.
 5. **Upsert** — passages + vectors + metadata (`source`, `filename`, `owner`, `type`, …)
@@ -148,12 +148,32 @@ RAG is driven entirely by environment variables (see `.env.example`):
 
 ### Structured chunks and safe reindexing
 
-Markdown and Docling's structured JSON feed the same Haystack character splitter.
-The default maximum is 4,000 characters including overlap (default 200). Headings
-define section boundaries; page, sheet, slide and timed-segment provenance is
-preserved. Tables repeat their header when split across chunks. Oversized rows
-can continue across chunks; an oversized header is split without repetition.
-Docling remains the extraction layer for rich documents and OCR/layout paths.
+Every lane reduces a file to sections, and one chunker (`rag_structure.split_documents`)
+cuts them, so a chapter is cut alike whether it came from Docling's JSON, from Markdown,
+a VLM transcript or MarkItDown. The default maximum is 4,000 characters including
+overlap (default 200).
+
+- **Sections are the boundaries.** Headings start a section. A chapter title with no
+  text of its own opens the section after it instead of becoming a chunk of its own;
+  a heading directly above a table stays on the table.
+- **Long sections** are cut into even parts at the strongest boundary near each even
+  cut point: paragraph, then sentence or line, clause, word.
+- **Overlap** repeats whole sentences, and only where text was cut apart. A paragraph
+  boundary, or a sentence too long for the overlap, starts the next chunk cleanly.
+- **PDF pages are provenance, not boundaries.** A chapter runs across a page break, and
+  each chunk records the pages of its own text (`page`, `pages`). A paragraph that layout
+  analysis tore apart mid-sentence is rejoined. Slides, sheets, code symbols and timed
+  segments are real units and stay apart.
+- **Tables** repeat their header when split across chunks. Oversized rows can continue
+  across chunks; an oversized header is split without repetition.
+
+Docling reads PDFs with a flat heading level, so a numbered title ("2.1 Kosten") gets its
+level from the number; unnumbered PDF headings stay flat, which affects the section path
+but not the cuts. When Docling fails or reads nothing from a format MarkItDown knows,
+MarkItDown's Markdown takes over.
+
+Changing this bumps `DERIVE_VERSION`: stored documents are re-derived on their next
+re-index, reusing cached vision and ASR output.
 
 Per-base pipeline settings override environment fallbacks:
 

@@ -48,9 +48,12 @@ PARSE_CACHE_DIR = "parse_cache"
 # Bump when extraction output changes shape for the same input and config
 # (a lane fix that should invalidate cached parses).
 LANE_CACHE_VERSION = 1
+# Bump when ``docling_documents`` changes: cached Docling parses are redone, while
+# cached vision and ASR output, which is expensive and still valid, is kept.
+DOCLING_STRUCTURE_VERSION = 2
 # Bump when chunking/enrichment/embedding-input semantics change so stored
 # documents with an older fingerprint are re-derived instead of skipped.
-DERIVE_VERSION = 1
+DERIVE_VERSION = 2
 
 # Statuses a register row can have.
 INDEXED = "indexed"

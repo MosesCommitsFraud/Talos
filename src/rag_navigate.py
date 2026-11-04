@@ -289,7 +289,7 @@ def _join(chunks: List[Dict[str, Any]]) -> str:
             cut = int(_num(meta.get("repeated_header_chars")) or 0)
             text = text[cut:] if 0 < cut < len(text) else text
             out.append(text)
-        elif prev_end is not None and start is not None and start < prev_end:
+        elif prev_end is not None and start is not None and start <= prev_end:
             out.append(text[int(prev_end - start) :])
         else:
             if out:

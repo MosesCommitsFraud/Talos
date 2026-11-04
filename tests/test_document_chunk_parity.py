@@ -24,9 +24,12 @@ def test_extracted_text_matches_markdown_with_overlap(tmp_path):
 
     assert [d.content for d in rich] == [d.content for d in markdown]
     assert len(rich) == 2
-    assert rich[0].content[-200:] == rich[1].content[:200]
+    shared = rich[0].meta["source_end"] - rich[1].meta["split_idx_start"]
+    assert 0 < shared <= 200
+    assert rich[0].content[-shared:] == rich[1].content[:shared]
+    assert rich[1].content.startswith("word")  # The overlap starts on a whole word.
     assert all(len(d.content) <= 4000 for d in rich)
-    assert rich[0].content + rich[1].content[200:] == text
+    assert rich[0].content + rich[1].content[shared:] == text
     assert all(d.meta["page"] == 3 and d.meta["dl_meta"] == meta["dl_meta"] for d in rich)
 
 

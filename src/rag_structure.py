@@ -1,15 +1,36 @@
-"""Format adapters and a shared Haystack character splitter.
+"""Format adapters and the one structure-aware chunker every lane shares.
+
+Every extractor (Docling, Markdown, VLM transcription, MarkItDown, ...) reduces a
+file to sections, and ``split_documents`` chunks those the same way, so a chapter
+is cut alike whether it arrived as .docx, .pdf, .html or .md.
 
 Imports stay lazy: importing the application does not initialize RAG or OCR.
 """
 
+import bisect
 import hashlib
 import json
+import math
+import re
 from collections import defaultdict
 from copy import deepcopy
 from dataclasses import is_dataclass, replace
 
-CHUNKING_VERSION = "haystack-sections-v2"
+CHUNKING_VERSION = "haystack-sections-v3"
+
+# Docling reads PDFs without a heading hierarchy, so a numbered title is the only
+# level the text itself still carries ("2.1 Kosten" sits below "2 Planung").
+_NUMBERED_HEADING = re.compile(r"\s*(\d+(?:\.\d+)*)\.?\s+\S")
+# Words whose trailing dot does not end a sentence (single letters are handled
+# separately, which covers "z. B.", "d. h.", "u. a.").
+_ABBREVIATIONS = frozenset(
+    "abs abt bzw ca dr etc evtl fa ggf inkl max min mio mrd nr prof rd sog str tel "
+    "usw vgl vs zzgl zzt".split()
+)
+_SENTENCE_END = re.compile(
+    r"[.!?\u2026][\"'\u201c\u201d\u00bb)\]]*\s+"
+    r"(?=[\"'\u201e\u00ab(\[]?[^\W_a-z\u00e4\u00f6\u00fc\u00df])"
+)
 
 
 def clean_content_metadata(meta, transform):
@@ -49,8 +70,12 @@ def heading_path(meta):
     )
 
 
-def markdown_sections(text):
-    """Return exact source slices and a positional heading hierarchy."""
+def markdown_sections(text, stack=(), ordinal=0):
+    """Return exact source slices and a positional heading hierarchy.
+
+    ``stack``/``ordinal`` resume the hierarchy of an earlier document, for page
+    transcripts where a chapter simply continues on the next page.
+    """
     from markdown_it import MarkdownIt
 
     tokens = MarkdownIt().parse(text)
@@ -62,9 +87,8 @@ def markdown_sections(text):
     for i, token in enumerate(tokens):
         if token.type == "heading_open" and token.map:
             headings.append((starts[token.map[0]], int(token.tag[1:]), tokens[i + 1].content))
-    stack = []
+    stack = list(stack)
     cursor = 0
-    ordinal = 0
     for offset, level, title in headings:
         if offset > cursor:
             yield text[cursor:offset], list(stack), ordinal
@@ -76,32 +100,71 @@ def markdown_sections(text):
         yield text[cursor:], list(stack), ordinal
 
 
+def _docling_label(item):
+    # Enum str behavior differs between docling-core releases.
+    label = getattr(item, "label", None)
+    return getattr(label, "value", str(label or ""))
+
+
+def _numbered_levels(items):
+    """Heading levels from the numbering, when the extractor reports one flat level."""
+    headers = [item for item in items if _docling_label(item) == "section_header"]
+    if len({int(getattr(item, "level", 1) or 1) for item in headers}) != 1:
+        return {}
+    levels = {}
+    for item in headers:
+        match = _NUMBERED_HEADING.match(getattr(item, "text", "") or "")
+        if match:
+            levels[item.self_ref] = match.group(1).count(".") + 1
+    return levels if len(set(levels.values())) > 1 else {}
+
+
+def _docling_unit_key(native):
+    """Formats whose Docling "pages" are real units, kept apart by the chunker."""
+    mimetype = str(getattr(getattr(native, "origin", None), "mimetype", "") or "")
+    if "presentation" in mimetype:
+        return "slide"
+    if "spreadsheet" in mimetype or "ms-excel" in mimetype:
+        return "sheet"
+    return None
+
+
 def docling_documents(serialized):
     """Consume lossless Docling JSON, keeping layout provenance and heading IDs."""
     from docling_core.types.doc import DoclingDocument
     from haystack import Document
 
     native = DoclingDocument.model_validate_json(serialized)
+    items = [item for item, _depth in native.iterate_items()]
+    levels = _numbered_levels(items)
+    unit_key = _docling_unit_key(native)
     stack = []
     ordinal = 0
     documents = []
-    for item, _depth in native.iterate_items():
-        label = str(getattr(item, "label", ""))
-        # Enum str behavior differs between docling-core releases.
-        label = getattr(getattr(item, "label", None), "value", label)
+    for item in items:
+        label = _docling_label(item)
         if label in {"page_header", "page_footer"}:
             continue
         if label in {"title", "section_header"}:
             ordinal += 1
-            level = int(getattr(item, "level", 1) or 1)
+            # A document title sits above its top-level headings, as "# Title"
+            # above "## Chapter" does in Markdown.
+            level = (
+                0
+                if label == "title"
+                else levels.get(item.self_ref) or int(getattr(item, "level", 1) or 1)
+            )
             title = getattr(item, "text", "")
             stack = [entry for entry in stack if entry[0] < level]
             stack.append((level, title, ordinal))
-            content = f"{'#' * min(level, 6)} {title}"
+            content = f"{'#' * max(1, min(level, 6))} {title}"
         elif label == "table":
             content = item.export_to_markdown(doc=native)
         elif label == "picture":
             content = item.caption_text(native)
+        elif label == "list_item":
+            text = getattr(item, "text", "")
+            content = f"{getattr(item, 'marker', '') or '-'} {text}" if text.strip() else ""
         else:
             content = getattr(item, "text", "")
         if not content or not content.strip():
@@ -117,6 +180,8 @@ def docling_documents(serialized):
         }
         if pages:
             meta.update(page=pages[0], pages=pages)
+            if unit_key:
+                meta[unit_key] = pages[0]
         if label == "table":
             meta["block_type"] = "table"
             meta["block_id"] = str(item.self_ref)
@@ -124,30 +189,186 @@ def docling_documents(serialized):
     return documents
 
 
-def split_documents(documents, max_chars=4000, overlap=200):
-    """Normalize sections, then use the same Haystack splitter for every lane.
+def page_list(meta):
+    pages = meta.get("pages")
+    if isinstance(pages, list) and pages:
+        return pages
+    page = meta.get("page")
+    return [page] if page is not None else []
 
-    Page, sheet, slide, symbol and timed-segment boundaries remain provenance
-    boundaries. Parts can still share a section across pages.
+
+def _stamp_pages(meta, spans, start, end):
+    """Give a chunk exactly the pages its own text came from."""
+    pages = sorted(
+        {
+            page
+            for span_start, span_end, span_pages in spans
+            if span_start < end and start < span_end
+            for page in span_pages
+        },
+        key=lambda page: (isinstance(page, str), page),
+    )
+    if not pages:
+        return
+    meta["page"] = pages[0]
+    if len(pages) > 1 or "pages" in meta:
+        meta["pages"] = pages
+
+
+def _block_glue(before, before_pages, after, after_pages):
+    """A paragraph torn apart by PDF layout analysis is one paragraph again.
+
+    Extractors end a block at the bottom of a page or a layout region, even
+    mid-sentence. Left as two paragraphs, the chunker would take that tear for its
+    best place to cut. Only blocks with page provenance qualify: in Word or
+    Markdown a paragraph break is the author's.
+    """
+    tail = before.rstrip()[-1:]
+    head = after.lstrip()[:1]
+    torn = (
+        before_pages and after_pages and (tail.isalnum() or tail in {",", "-"}) and head.islower()
+    )
+    return " " if torn else "\n\n"
+
+
+def _heading_only(text):
+    """True when a block holds nothing but heading lines."""
+    if not text.strip() or len(text) > 1000:
+        return False
+    from markdown_it import MarkdownIt
+
+    return all(
+        token.type in {"heading_open", "inline", "heading_close"}
+        for token in MarkdownIt().parse(text)
+    )
+
+
+def _fold_lone_headings(groups):
+    """A chapter title without text of its own opens the section after it.
+
+    Otherwise "# Teil 2" followed directly by "## Kapitel 1" becomes a vector
+    holding only the title, cut off from the chapter it introduces. Slides and
+    sheets are real units, so a title-only slide stays what it is.
+    """
+    out = []
+    pending = None
+    for group in groups:
+        key, doc, spans = group
+        if key is None:
+            out.append(group)
+            continue
+        if pending is not None:
+            if pending[0][2][:-1] == key[2][:-1]:
+                lead = pending[1].content.rstrip() + "\n\n"
+                shift = len(lead)
+                items = pending[1].meta.get("dl_meta", {}).get("doc_items", [])
+                if items:
+                    dl_meta = doc.meta.setdefault("dl_meta", {})
+                    dl_meta["doc_items"] = items + dl_meta.get("doc_items", [])
+                spans = pending[2] + [(s + shift, e + shift, p) for s, e, p in spans]
+                doc = replace(doc, content=lead + doc.content)
+                group = [key, doc, spans]
+            else:
+                out.append(pending)
+            pending = None
+        if _heading_only(doc.content):
+            pending = group
+        else:
+            out.append(group)
+    if pending is not None:
+        out.append(pending)
+    return out
+
+
+def _sentence_starts(text):
+    """Offsets where a sentence begins, skipping "z. B.", "Nr. 5" and "1. Schritt"."""
+    starts = []
+    for match in _SENTENCE_END.finditer(text):
+        before = re.search(r"[^\W\d_]*\d*$", text[max(0, match.start() - 12) : match.start()])
+        word = before.group(0) if before else ""
+        if text[match.start()] == "." and (
+            len(word) <= 1 or word.isdigit() or word.lower() in _ABBREVIATIONS
+        ):
+            continue
+        starts.append(match.end())
+    return starts
+
+
+def _cut_marks(text):
+    """Allowed chunk ends, strongest first: paragraph, sentence or line, clause, word."""
+    paragraphs = [m.end() for m in re.finditer(r"\n[ \t]*\n\s*", text)]
+    sentences = sorted(set(_sentence_starts(text)) | {m.end() for m in re.finditer(r"\n", text)})
+    clauses = [m.end() for m in re.finditer(r"[;:,]\s+", text)]
+    words = [m.end() for m in re.finditer(r"\s+", text)]
+    return [paragraphs, sentences, clauses, words]
+
+
+def _chunk_ranges(total, marks, max_chars, overlap):
+    """Cut text into even parts at the strongest boundary near each even cut point.
+
+    Evening out keeps a chapter just over the limit from losing a stray last
+    sentence to a chunk of its own. Parts stay short enough to take the overlap.
+    """
+    room = max_chars - overlap
+    ranges = []
+    start = 0
+    while total - start > (room if ranges else max_chars):
+        remaining = total - start
+        target = start + remaining / math.ceil(remaining / room)
+        floor = start + (target - start) / 2
+        limit = start + (room if ranges else max_chars)
+        cut = None
+        for positions in marks:
+            low = bisect.bisect_right(positions, floor)
+            high = bisect.bisect_right(positions, limit)
+            if low < high:
+                cut = min(positions[low:high], key=lambda p: abs(p - target))
+                break
+        cut = cut or limit  # Unbroken text has no boundary to respect.
+        ranges.append((start, cut))
+        start = cut
+    ranges.append((start, total))
+    return ranges
+
+
+def _overlap_start(text, cut, overlap, sentences):
+    """Where the next chunk starts: whole sentences before ``cut``, never a word stump.
+
+    A paragraph boundary needs no overlap, and neither does a sentence boundary
+    when the sentence before it does not fit: nothing was cut apart there.
+    """
+    if overlap <= 0 or re.search(r"\n[ \t]*\n\s*$", text[max(0, cut - 8) : cut]):
+        return cut
+    low = max(0, cut - overlap)
+    first = bisect.bisect_left(sentences, low)
+    if first < len(sentences) and sentences[first] < cut:
+        return sentences[first]
+    if first < len(sentences) and sentences[first] == cut:
+        return cut
+    space = re.search(r"\s+", text[low:cut])
+    return low + space.end() if space and low + space.end() < cut else low
+
+
+def split_documents(documents, max_chars=4000, overlap=200):
+    """Normalize every lane to sections and chunk those the same way.
+
+    Sections are the boundaries. PDF pages are only provenance: a chapter runs
+    across a page break like it runs across one in Word, and each chunk records
+    the pages of its own text. Slides, sheets, symbols and timed segments are
+    real units and stay apart.
     """
     from haystack import Document
-    from haystack.components.preprocessors import RecursiveDocumentSplitter
 
     overlap = min(overlap, max_chars - 1)
-    splitter = RecursiveDocumentSplitter(
-        split_length=max_chars - overlap,
-        split_overlap=0,
-        split_unit="char",
-        separators=["\n\n", "\n", ". ", "! ", "? ", "; ", " "],
-    )
-    splitter.warm_up()
     groups = []
+    last_text = None
     serial = 0
+    carried = []
     for position, doc in enumerate(documents):
         meta = deepcopy(doc.meta or {})
         text = doc.content or ""
         if meta.get("modality") == "figure":
-            groups.append((None, doc))
+            groups.append([None, doc, []])
             continue
         if not text.strip():
             continue
@@ -162,24 +383,26 @@ def split_documents(documents, max_chars=4000, overlap=200):
         else:
             pieces = []
             parse_headings = not meta.get("symbol") and not meta.get("literal_text")
-            sections = markdown_sections(text) if parse_headings else [(text, [], 0)]
-            local_ids = {}
+            resume = meta.pop("continues_section", False)
+            sections = (
+                markdown_sections(text, carried if resume else (), serial)
+                if parse_headings
+                else [(text, [], serial)]
+            )
             for body, stack, ordinal in sections:
+                serial = max(serial, ordinal)
+                if resume:
+                    carried = stack
                 if not body.strip():
                     continue
-                for _level, _title, local in stack:
-                    if local not in local_ids:
-                        serial += 1
-                        local_ids[local] = f"md-{position}-{serial}"
-                section = local_ids.get(ordinal, f"unit-{position}")
                 pieces.append(
                     (
                         body,
                         {
                             **meta,
                             "heading_path": [h[1] for h in stack],
-                            "section_path": [local_ids[h[2]] for h in stack],
-                            "section_ordinal": section,
+                            "section_path": [f"md-{h[2]}" for h in stack],
+                            "section_ordinal": f"md-{ordinal}" if stack else f"unit-{position}",
                             "structure_source": "markdown" if stack else "fallback",
                         },
                     )
@@ -187,25 +410,32 @@ def split_documents(documents, max_chars=4000, overlap=200):
         for body, part_meta in pieces:
             locality = tuple(
                 str(part_meta.get(k, ""))
-                for k in ("page", "slide", "sheet", "start", "end", "symbol", "block_id")
+                for k in ("slide", "sheet", "start", "end", "symbol", "block_id")
             )
             key = (
                 str(part_meta["section_ordinal"]),
                 tuple(part_meta.get("heading_path", [])),
                 locality,
             )
-            if groups and groups[-1][0] == key:
-                prior = groups[-1][1]
-                prior = replace(prior, content=prior.content + "\n\n" + body)
-                groups[-1] = (key, prior)
+            pages = page_list(part_meta)
+            if last_text is not None and groups[last_text][0] == key:
+                prior_key, prior, spans = groups[last_text]
+                glue = _block_glue(prior.content, spans[-1][2], body, pages)
+                offset = len(prior.content) + len(glue)
+                spans.append((offset, offset + len(body), pages))
+                prior = replace(prior, content=prior.content + glue + body)
+                groups[last_text] = [prior_key, prior, spans]
                 prior.meta.setdefault("dl_meta", {}).setdefault("doc_items", []).extend(
                     part_meta.get("dl_meta", {}).get("doc_items", [])
                 )
             else:
-                groups.append((key, Document(content=body, meta=part_meta)))
+                groups.append(
+                    [key, Document(content=body, meta=part_meta), [(0, len(body), pages)]]
+                )
+                last_text = len(groups) - 1
     out = []
     offsets = defaultdict(int)
-    for key, group in groups:
+    for key, group, spans in _fold_lone_headings(groups):
         if key is None:
             out.append(group)
             continue
@@ -217,52 +447,57 @@ def split_documents(documents, max_chars=4000, overlap=200):
             if not group.meta.get("literal_text")
             else [(0, len(group.content), False)]
         )
-        for unit_start, unit_end, is_table in units:
+        base = offsets[section_key]
+        lead = ""
+        for index, (unit_start, unit_end, is_table) in enumerate(units):
             unit = replace(group, content=group.content[unit_start:unit_end])
             if is_table:
-                for content, start, end, prefix in table_parts(unit.content, max_chars):
+                # A heading directly above a table belongs on the table's first part.
+                for content, start, end, prefix in table_parts(unit.content, max_chars - len(lead)):
                     meta = deepcopy(group.meta)
+                    first = unit_start + start - len(lead)
                     meta.update(
                         block_type="table",
-                        table_id=f"{section_key}:{offsets[section_key] + unit_start}",
+                        table_id=f"{section_key}:{base + unit_start}",
                         repeated_header_chars=prefix,
                         table_header="".join(unit.content.splitlines(keepends=True)[:2]),
-                        split_idx_start=offsets[section_key] + unit_start + start,
-                        source_end=offsets[section_key] + unit_start + end,
+                        split_idx_start=base + first,
+                        source_end=base + unit_start + end,
                         chunking_version=CHUNKING_VERSION,
                         chunk_max_chars=max_chars,
                         chunk_overlap_chars=0,
                     )
-                    out.append(Document(content=content, meta=meta))
+                    _stamp_pages(meta, spans, first, unit_start + end)
+                    out.append(Document(content=lead + content, meta=meta))
+                    lead = ""
                 continue
-            out.extend(
-                _split_text_unit(
-                    unit, splitter, max_chars, overlap, offsets[section_key] + unit_start
+            if not unit.content.strip():
+                continue
+            if index + 1 < len(units) and units[index + 1][2] and _heading_only(unit.content):
+                lead = unit.content
+                continue
+            for chunk in _split_text_unit(unit, max_chars, overlap, base + unit_start):
+                _stamp_pages(
+                    chunk.meta,
+                    spans,
+                    chunk.meta["split_idx_start"] - base,
+                    chunk.meta["source_end"] - base,
                 )
-            )
+                out.append(chunk)
         offsets[section_key] += len(group.content) + 2
     return out
 
 
-def _split_text_unit(group, splitter, max_chars, overlap, offset):
+def _split_text_unit(group, max_chars, overlap, offset):
     from haystack import Document
 
-    pieces = splitter.run(documents=[group])["documents"]
-    # Haystack recursively preserves small blocks (including headings).
-    # Pack those blocks so a heading need not become a standalone vector.
-    ranges = []
-    for piece in pieces:
-        start = piece.meta["split_idx_start"]
-        end = start + len(piece.content)
-        capacity = max_chars if len(ranges) == 1 else max_chars - overlap
-        if ranges and end - ranges[-1][0] <= capacity:
-            ranges[-1] = (ranges[-1][0], end)
-        else:
-            ranges.append((start, end))
+    text = group.content
+    marks = _cut_marks(text)
     out = []
-    for index, (start, end) in enumerate(ranges):
-        start = max(0, start - overlap) if index else start
-        chunk = Document(content=group.content[start:end], meta=deepcopy(group.meta))
+    for index, (start, end) in enumerate(_chunk_ranges(len(text), marks, max_chars, overlap)):
+        if index:
+            start = _overlap_start(text, start, overlap, marks[1])
+        chunk = Document(content=text[start:end], meta=deepcopy(group.meta))
         chunk.meta["split_idx_start"] = start + offset
         chunk.meta["source_end"] = end + offset
         chunk.meta["chunking_version"] = CHUNKING_VERSION
@@ -486,7 +721,7 @@ def context_location(result):
         {
             int(page)
             for record in records
-            for page in (record.get("pages") or [record.get("page")])
+            for page in page_list(record)
             if isinstance(page, (int, float)) and not isinstance(page, bool)
         }
     )

@@ -5,7 +5,13 @@ from copy import deepcopy
 from haystack import Document
 from haystack.document_stores.in_memory import InMemoryDocumentStore
 
-from src.rag_structure import assign_sections, docling_documents, expand_context, split_documents
+from src.rag_structure import (
+    assign_sections,
+    docling_documents,
+    expand_context,
+    page_list,
+    split_documents,
+)
 from src.rag_vector import VectorRAG, _embed_text, _redact_docs
 
 
@@ -137,7 +143,7 @@ def test_redaction_also_cleans_heading_and_original_docling_text():
     assert doc.meta["dl_meta"]["doc_items"][0]["orig"] == "[email]"
 
 
-def test_section_continues_across_pages_but_page_provenance_stays_local():
+def test_section_runs_across_a_page_break_and_records_both_pages():
     raw = [
         Document(
             content=text,
@@ -149,11 +155,266 @@ def test_section_continues_across_pages_but_page_provenance_stays_local():
                 "heading_path": ["Chapter"],
             },
         )
-        for page, text in [(1, "first page"), (2, "second page")]
+        for page, text in [(1, "First page."), (2, "Second page.")]
     ]
     docs = split_documents(raw)
     assign_sections(docs)
-    assert [d.meta["page"] for d in docs] == [1, 2]
-    result = expand_context(store_for(docs), [hit(docs[1])])[0]
-    assert result["expanded"] == "first page\n\nsecond page"
-    assert [s["page"] for s in result["expanded_sources"]] == [1, 2]
+    assert [d.content for d in docs] == ["First page.\n\nSecond page."]
+    assert docs[0].meta["page"] == 1
+    assert docs[0].meta["pages"] == [1, 2]
+
+
+def test_long_section_chunks_name_only_the_pages_of_their_own_text():
+    raw = [
+        Document(
+            content="Satz auf dieser Seite. " * 120,
+            meta={
+                "page": page,
+                "section_ordinal": 1,
+                "section_path": [1],
+                "heading_path": ["Chapter"],
+            },
+        )
+        for page in (1, 2, 3)
+    ]
+    docs = split_documents(raw)
+    assert docs[0].meta["page"] == 1
+    assert docs[-1].meta["page"] > 1
+    assert 3 in page_list(docs[-1].meta) and 1 not in page_list(docs[-1].meta)
+
+
+def test_sentence_torn_by_a_page_break_is_one_paragraph_again():
+    section = {"section_ordinal": 1, "section_path": [1], "heading_path": ["Kapitel"]}
+    raw = [
+        Document(content="Der Satz geht über die", meta={**section, "page": 1, "pages": [1]}),
+        Document(content="Seitengrenze hinaus.", meta={**section, "page": 2, "pages": [2]}),
+        Document(content="endet hier", meta={**section, "page": 2, "pages": [2]}),
+        Document(content="Neuer Absatz auf Seite 3.", meta={**section, "page": 3, "pages": [3]}),
+    ]
+    docs = split_documents(raw)
+    assert docs[0].content == (
+        "Der Satz geht über die\n\nSeitengrenze hinaus.\n\nendet hier\n\nNeuer Absatz auf Seite 3."
+    )
+    raw[1].content = "seitengrenze hinaus."
+    raw[2].content = "kein Riss auf derselben Seite."
+    docs = split_documents(raw)
+    assert docs[0].content == (
+        "Der Satz geht über die seitengrenze hinaus.\n\n"
+        "kein Riss auf derselben Seite.\n\nNeuer Absatz auf Seite 3."
+    )
+    assert docs[0].meta["pages"] == [1, 2, 3]
+
+
+def test_tear_needs_page_provenance_so_word_paragraphs_stay_as_written():
+    section = {"section_ordinal": 1, "section_path": [1], "heading_path": ["Kapitel"]}
+    same_page = [
+        Document(content="Umsatz, Menge,", meta={**section, "page": 4, "pages": [4]}),
+        Document(content="jeweils mit Nummer.", meta={**section, "page": 4, "pages": [4]}),
+    ]
+    assert split_documents(same_page)[0].content == "Umsatz, Menge, jeweils mit Nummer."
+    word = [
+        Document(content="Umsatz, Menge,", meta=dict(section)),
+        Document(content="jeweils mit Nummer.", meta=dict(section)),
+    ]
+    assert split_documents(word)[0].content == "Umsatz, Menge,\n\njeweils mit Nummer."
+
+
+def test_chapter_title_without_text_opens_its_first_subchapter():
+    docs = chunks(
+        "# Teil 1\n\nIntro.\n\n# Teil 2\n\n## Kapitel A\n\nText A.\n\n## Kapitel B\n\nText B."
+    )
+    assert [d.content.strip() for d in docs] == [
+        "# Teil 1\n\nIntro.",
+        "# Teil 2\n\n## Kapitel A\n\nText A.",
+        "## Kapitel B\n\nText B.",
+    ]
+    assert docs[1].meta["heading_path"] == ["Teil 2", "Kapitel A"]
+
+
+def test_docling_chapter_title_folds_the_same_way():
+    from docling_core.types.doc import DocItemLabel, DoclingDocument
+
+    native = DoclingDocument(name="manual")
+    native.add_heading(text="Teil 2", level=1)
+    native.add_heading(text="Kapitel A", level=2)
+    native.add_text(label=DocItemLabel.TEXT, text="Text A.")
+    docs = split_documents(docling_documents(native.model_dump_json()))
+    assert [d.content for d in docs] == ["# Teil 2\n\n## Kapitel A\n\nText A."]
+    assert docs[0].meta["heading_path"] == ["Teil 2", "Kapitel A"]
+
+
+def test_lone_heading_at_the_end_is_kept():
+    docs = chunks("# Teil 1\n\nIntro.\n\n# Anhang\n")
+    assert [d.content.strip() for d in docs] == ["# Teil 1\n\nIntro.", "# Anhang"]
+
+
+def test_heading_directly_above_a_table_stays_on_the_table():
+    table = "| A | B |\n| --- | --- |\n" + "| 1 | 2 |\n" * 900
+    docs = chunks("## Kosten\n\n" + table)
+    assert docs[0].content.startswith("## Kosten\n\n| A | B |")
+    assert all(d.meta["block_type"] == "table" for d in docs)
+    assert all(d.content.split("\n")[0] == "| A | B |" for d in docs[1:])
+    assert all(len(d.content) <= 4000 for d in docs)
+    result = expand_context(store_for(docs), [hit(docs[1])], max_chars=20000, window=5)[0]
+    assert result["expanded"] == "## Kosten\n\n" + table
+
+
+def test_long_section_is_cut_between_paragraphs_without_a_stray_tail():
+    paragraphs = [f"Absatz {i}: " + "Das ist ein Satz. " * 40 for i in range(6)]
+    text = "## Kapitel\n\n" + "\n\n".join(paragraphs)
+    assert 4000 < len(text) < 7600  # Just over the limit, two parts are enough.
+    docs = chunks(text)
+    assert len(docs) == 2
+    sizes = [len(d.content) for d in docs]
+    assert min(sizes) > max(sizes) * 0.6
+    assert docs[1].content.startswith("Absatz ")
+    assert docs[0].content + docs[1].content == text  # Paragraph cut: no overlap needed.
+
+
+def test_paragraph_longer_than_a_chunk_is_cut_at_sentences_with_whole_overlap():
+    sentences = [f"Satz nummer {i} beschreibt die Sache z. B. genauer." for i in range(300)]
+    docs = chunks("## Kapitel\n\n" + " ".join(sentences))
+    assert len(docs) > 1
+    assert all(len(d.content) <= 4000 for d in docs)
+    for doc in docs[1:]:
+        assert doc.content.startswith("Satz nummer ")
+    for prev, doc in zip(docs, docs[1:]):
+        shared = prev.meta["source_end"] - doc.meta["split_idx_start"]
+        assert 0 < shared <= 200
+        assert prev.content.endswith(doc.content[:shared])
+    result = expand_context(store_for(docs), [hit(docs[1])], max_chars=40000, window=20)[0]
+    assert result["expanded"] == "## Kapitel\n\n" + " ".join(sentences)
+
+
+def test_abbreviations_and_ordinals_do_not_end_sentences():
+    from src.rag_structure import _sentence_starts
+
+    text = "Das gilt z. B. hier und Nr. 5 dort. Danach kommt der 1. Schritt und mehr! Ende."
+    assert [text[i:].split()[0] for i in _sentence_starts(text)] == ["Danach", "Ende."]
+
+
+def test_page_transcripts_continue_the_chapter_of_the_previous_page():
+    raw = [
+        Document(
+            content="# Handbuch\n\n## Kapitel\n\nAnfang.",
+            meta={"page": 1, "modality": "pdf_page", "continues_section": True},
+        ),
+        Document(
+            content="Fortsetzung.\n\n## Weiter\n\nRest.",
+            meta={"page": 2, "modality": "pdf_page", "continues_section": True},
+        ),
+    ]
+    docs = split_documents(raw)
+    assign_sections(docs)
+    assert docs[0].meta["heading_path"] == ["Handbuch", "Kapitel"]
+    assert "Fortsetzung." in docs[0].content
+    assert docs[0].meta["pages"] == [1, 2]
+    assert docs[1].meta["heading_path"] == ["Handbuch", "Weiter"]
+    assert docs[1].meta["page"] == 2
+    assert all("continues_section" not in d.meta for d in docs)
+
+
+def test_extra_vision_pages_do_not_inherit_a_chapter():
+    raw = [
+        Document(content="# Kapitel\n\nText.", meta={"page": 1}),
+        Document(content="Screenshot.", meta={"page": 1, "modality": "pdf_page"}),
+    ]
+    docs = split_documents(raw)
+    assert [d.meta["heading_path"] for d in docs] == [["Kapitel"], []]
+
+
+def test_figure_between_pages_does_not_split_the_section():
+    section = {"section_ordinal": 1, "section_path": [1], "heading_path": ["Kapitel"]}
+    figure = Document(content="Bild.", meta={"modality": "figure", "page": 1})
+    raw = [
+        Document(content="Seite eins.", meta={**section, "page": 1}),
+        figure,
+        Document(content="Seite zwei.", meta={**section, "page": 2}),
+    ]
+    docs = split_documents(raw)
+    assert [d.content for d in docs] == ["Seite eins.\n\nSeite zwei.", "Bild."]
+    assert docs[1] is figure
+
+
+def test_old_cached_vlm_page_count_is_not_read_as_a_page_list():
+    from src.rag_structure import context_location
+
+    assert page_list({"page": 2, "pages": 12}) == [2]
+    result = {"metadata": {}, "expanded_sources": [{"page": 2, "pages": 12}]}
+    assert context_location(result) == "Context pages: 2"
+
+
+def _docling_with_pages(mimetype):
+    from docling_core.types.doc import BoundingBox, DocItemLabel, DoclingDocument, ProvenanceItem
+    from docling_core.types.doc.document import DocumentOrigin
+
+    native = DoclingDocument(
+        name="deck",
+        origin=DocumentOrigin(mimetype=mimetype, binary_hash=1, filename="deck"),
+    )
+    box = BoundingBox(l=0, t=0, r=1, b=1)
+    for page in (1, 2):
+        native.add_page(page_no=page, size={"width": 10, "height": 10})
+        prov = ProvenanceItem(page_no=page, bbox=box, charspan=(0, 1))
+        native.add_text(label=DocItemLabel.TEXT, text=f"Inhalt {page}.", prov=prov)
+    return native.model_dump_json()
+
+
+def test_slides_stay_apart_while_pdf_pages_join():
+    pptx = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+    slides = split_documents(docling_documents(_docling_with_pages(pptx)))
+    assert [d.content for d in slides] == ["Inhalt 1.", "Inhalt 2."]
+    assert [d.meta["slide"] for d in slides] == [1, 2]
+    pages = split_documents(docling_documents(_docling_with_pages("application/pdf")))
+    assert [d.content for d in pages] == ["Inhalt 1.\n\nInhalt 2."]
+
+
+def test_flat_numbered_pdf_headings_get_their_hierarchy_from_the_numbers():
+    from docling_core.types.doc import DocItemLabel, DoclingDocument
+
+    native = DoclingDocument(name="manual")
+    for title, text in (("1 Planung", "A."), ("1.1 Kosten", "B."), ("2 Export", "C.")):
+        native.add_heading(text=title, level=1)
+        native.add_text(label=DocItemLabel.TEXT, text=text)
+    docs = split_documents(docling_documents(native.model_dump_json()))
+    assert [d.meta["heading_path"] for d in docs] == [
+        ["1 Planung"],
+        ["1 Planung", "1.1 Kosten"],
+        ["2 Export"],
+    ]
+
+
+def test_explicit_docling_levels_are_never_overridden_by_numbering():
+    from docling_core.types.doc import DocItemLabel, DoclingDocument
+
+    native = DoclingDocument(name="manual")
+    native.add_heading(text="1.1 Tief nummeriert", level=1)
+    native.add_text(label=DocItemLabel.TEXT, text="A.")
+    native.add_heading(text="2 Unter", level=2)
+    native.add_text(label=DocItemLabel.TEXT, text="B.")
+    docs = split_documents(docling_documents(native.model_dump_json()))
+    assert docs[1].meta["heading_path"] == ["1.1 Tief nummeriert", "2 Unter"]
+
+
+def test_docling_document_title_sits_above_top_level_headings():
+    from docling_core.types.doc import DocItemLabel, DoclingDocument
+
+    native = DoclingDocument(name="manual")
+    native.add_title(text="Handbuch")
+    native.add_heading(text="Kapitel", level=1)
+    native.add_text(label=DocItemLabel.TEXT, text="Text.")
+    docs = split_documents(docling_documents(native.model_dump_json()))
+    assert [d.content for d in docs] == ["# Handbuch\n\n# Kapitel\n\nText."]
+    assert docs[0].meta["heading_path"] == ["Handbuch", "Kapitel"]
+
+
+def test_docling_list_items_keep_their_markers():
+    from docling_core.types.doc import DoclingDocument
+
+    native = DoclingDocument(name="manual")
+    group = native.add_list_group()
+    native.add_list_item(text="Erster Punkt", marker="1.", parent=group)
+    native.add_list_item(text="Zweiter Punkt", marker="", parent=group)
+    docs = split_documents(docling_documents(native.model_dump_json()))
+    assert docs[0].content.startswith("1. Erster Punkt\n\n")
+    assert docs[0].content.split("\n\n")[1].endswith("Zweiter Punkt")
