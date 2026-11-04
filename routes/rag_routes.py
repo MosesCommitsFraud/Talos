@@ -57,17 +57,37 @@ def clean_document_text(chunks: list[dict]) -> str:
 
     No dump header, chunk headings, situating context or keyword enrichment,
     and no figure descriptions (those are the ingest's words, not the
-    document's) — only the document's own text in page/sequence order."""
+    document's) — only the document's own text in page/sequence order.
+
+    Chunks of one section rejoin by their source offsets, so a paragraph that was
+    cut comes back whole. Chunks without offsets fall back to matching the overlap."""
     parts: list[str] = []
+    prev_section = prev_end = None
     for c in chunks:
         if c.get("modality") == "figure":
             continue
-        text = (c.get("content") or "").strip()
-        if parts and text:
-            text = _strip_chunk_overlap(parts[-1], text)
-        if text:
-            parts.append(text)
-    return "\n\n".join(parts) + "\n"
+        meta = c.get("metadata") or {}
+        section = meta.get("section_id")
+        start = meta.get("split_idx_start")
+        text = c.get("content") or ""
+        if (
+            parts
+            and section
+            and section == prev_section
+            and start is not None
+            and prev_end is not None
+            and start <= prev_end
+        ):
+            parts[-1] += text[max(prev_end - start, meta.get("repeated_header_chars") or 0) :]
+        else:
+            # Unstripped: the next chunk's offsets count this one's whitespace.
+            if parts and text.strip():
+                kept = _strip_chunk_overlap(parts[-1].rstrip(), text.strip())
+                text = text if kept == text.strip() else kept
+            if text.strip():
+                parts.append(text)
+        prev_section, prev_end = section, meta.get("source_end")
+    return "\n\n".join(part.strip() for part in parts) + "\n"
 
 
 class RagPipelineConfig(BaseModel):
