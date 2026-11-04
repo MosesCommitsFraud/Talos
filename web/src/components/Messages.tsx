@@ -1029,7 +1029,16 @@ export function Messages() {
     // when the chat column (not the viewport) gets narrow.
    <div className="@container/chat relative flex min-h-0 flex-1 flex-col">
     <div ref={scroller} onScroll={onScroll} className="flex-1 overflow-y-auto [scrollbar-gutter:stable]" role="log" aria-live="polite">
-      <div className="mx-auto flex w-full max-w-[800px] flex-col px-4 pb-6 pt-14">
+      <div
+        className="mx-auto flex w-full max-w-[800px] flex-col px-4 pb-6 pt-14"
+        // The chapter dashes need room beside the text. Whatever margin centering
+        // already leaves counts towards it, so this only bites in a narrow column.
+        style={
+          messages.some((m) => m.chapter && m.dbId)
+            ? { paddingInlineStart: 'max(1rem, calc(3rem - max(0px, (100cqw - 800px) / 2)))' }
+            : undefined
+        }
+      >
         {blocks.map((block, index) =>
           block.kind === 'user' ? (
             // An answer to a question card reads as part of the assistant's flow
