@@ -211,7 +211,7 @@ export function ComposerAddMenu({
           type="button"
           aria-label={t('composer.add')}
           className={cn(
-            'flex size-7 shrink-0 cursor-pointer items-center justify-center rounded-lg text-foreground/80 outline-none transition-colors hover:bg-accent hover:text-foreground focus:outline-none focus-visible:outline-none active:scale-95 dark:text-foreground/60 dark:hover:text-foreground',
+            'flex size-7 shrink-0 cursor-pointer items-center justify-center rounded-lg text-foreground/80 outline-none transition-colors hover:bg-accent hover:text-foreground focus:outline-none focus-visible:outline-none active:scale-95',
             className,
           )}
         >

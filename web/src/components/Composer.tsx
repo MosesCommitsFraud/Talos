@@ -93,7 +93,7 @@ function MicButton({
           CONTROL,
           status === 'recording'
             ? 'animate-pulse bg-red-500/10 text-red-500 hover:bg-red-500/20'
-            : 'text-foreground/80 hover:bg-accent hover:text-foreground disabled:opacity-50 dark:text-foreground/60 dark:hover:text-foreground',
+            : 'text-foreground/80 hover:bg-accent hover:text-foreground disabled:opacity-50',
         )}
       >
         {status === 'finalizing' ? <Loader2Icon className="animate-spin" /> : <MicIcon />}
@@ -127,8 +127,8 @@ function PrimaryAction({
         aria-label={label}
         className={cn(
           CONTROL,
-          'composer-control-in hover:bg-accent hover:text-foreground dark:hover:text-foreground',
-          kind === 'stop' ? 'text-foreground dark:text-foreground/80' : 'text-foreground/90',
+          'composer-control-in hover:bg-accent hover:text-foreground',
+          kind === 'stop' ? 'text-foreground' : 'text-foreground/90',
         )}
       >
         {kind === 'stop' ? (
