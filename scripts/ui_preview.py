@@ -2105,6 +2105,24 @@ def _user_storage(name: str) -> dict:
 # chats it forked off (each entry is its own override set plus a name).
 _SESSION_EDITS: dict[str, dict] = {}
 
+_USER_MEMORY_PREFS: dict[str, object] = {}
+_USER_MEMORIES: list[dict] = [
+    {
+        "id": 1,
+        "title": "Antwortstil",
+        "text": "Bevorzugt kurze Antworten auf Deutsch, ohne Einleitung.",
+        "created_at": "2026-11-03T09:30:00",
+        "updated_at": "2026-11-03T09:30:00",
+    },
+    {
+        "id": 2,
+        "title": "Rolle",
+        "text": "Entwickelt Talos und betreibt die Modelle auf einem DGX Spark.",
+        "created_at": "2026-11-02T14:00:00",
+        "updated_at": "2026-11-02T14:00:00",
+    },
+]
+
 
 def _memory(note_id: int, connection_id: str, text: str, author: str = "preview-admin") -> dict:
     return {
@@ -2800,6 +2818,16 @@ class PreviewHandler(BaseHTTPRequestHandler):
         if path == "/api/admin/memories":
             self._send_json(_memories_overview())
             return
+        if path == "/api/memories":
+            self._send_json(
+                {"limits": {"title": 80, "text": 600, "entries": 50}, "entries": _USER_MEMORIES}
+            )
+            return
+        if path == "/api/prefs/memories_enabled":
+            self._send_json(
+                {"key": "memories_enabled", "value": _USER_MEMORY_PREFS.get("memories_enabled")}
+            )
+            return
         if path == "/api/sql/config":
             self._send_json(
                 {
@@ -3326,6 +3354,19 @@ class PreviewHandler(BaseHTTPRequestHandler):
         if path == "/api/chat":
             self._send_json({"response": "This is a local UI preview response."})
             return
+        if path == "/api/memories":
+            data = json.loads(body or b"{}")
+            _USER_MEMORIES.append(
+                {
+                    "id": max((m["id"] for m in _USER_MEMORIES), default=0) + 1,
+                    "title": data.get("title") or data["text"][:60],
+                    "text": data["text"],
+                    "created_at": "2026-11-04T16:00:00",
+                    "updated_at": "2026-11-04T16:00:00",
+                }
+            )
+            self._send_json({"ok": True})
+            return
         if path == "/api/admin/memories":
             data = json.loads(body or b"{}")
             next_id = max((n["id"] for n in _MEMORIES), default=0) + 1
@@ -3428,6 +3469,11 @@ class PreviewHandler(BaseHTTPRequestHandler):
     def do_PUT(self):
         body = self._read_body()
         path = urlparse(self.path).path
+        if path == "/api/prefs/memories_enabled":
+            value = json.loads(body or b"{}").get("value")
+            _USER_MEMORY_PREFS["memories_enabled"] = value
+            self._send_json({"key": "memories_enabled", "value": value})
+            return
         if path.startswith("/api/rag/bases/") and path.endswith("/config"):
             base_id = path[len("/api/rag/bases/") : -len("/config")]
             payload = json.loads(body or b"{}")
@@ -3454,6 +3500,16 @@ class PreviewHandler(BaseHTTPRequestHandler):
     def do_PATCH(self):
         body = self._read_body()
         path = urlparse(self.path).path
+        if path.startswith("/api/memories/"):
+            entry = next(m for m in _USER_MEMORIES if m["id"] == int(path.rsplit("/", 1)[1]))
+            data = json.loads(body or b"{}")
+            entry.update(
+                title=data.get("title") or entry["title"],
+                text=data.get("text") or entry["text"],
+                updated_at="2026-11-04T16:00:00",
+            )
+            self._send_json({"ok": True})
+            return
         if path.startswith("/api/admin/memories/"):
             note = next(n for n in _MEMORIES if n["id"] == int(path.rsplit("/", 1)[1]))
             note.update(
@@ -3524,6 +3580,16 @@ class PreviewHandler(BaseHTTPRequestHandler):
     def do_DELETE(self):
         parsed = urlparse(self.path)
         path = parsed.path
+        if path == "/api/memories":
+            removed = len(_USER_MEMORIES)
+            _USER_MEMORIES.clear()
+            self._send_json({"ok": True, "removed": removed})
+            return
+        if path.startswith("/api/memories/"):
+            gone = int(path.rsplit("/", 1)[1])
+            _USER_MEMORIES[:] = [m for m in _USER_MEMORIES if m["id"] != gone]
+            self._send_json({"ok": True})
+            return
         if path.startswith("/api/admin/memories/"):
             gone = int(path.rsplit("/", 1)[1])
             _MEMORIES[:] = [n for n in _MEMORIES if n["id"] != gone]

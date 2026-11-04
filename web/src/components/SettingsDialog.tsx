@@ -96,9 +96,10 @@ import { useAuth } from './auth/AuthGate';
 import { UsersPanel } from './settings/UsersPanel';
 import { UsagePanel } from './settings/UsagePanel';
 import { McpServersPanel } from './settings/McpServersPanel';
+import { MemoryPanel } from './settings/MemoryPanel';
 
 export type Panel =
-  | 'appearance' | 'personalization' | 'shortcuts' | 'account' | 'usage'
+  | 'appearance' | 'personalization' | 'memory' | 'shortcuts' | 'account' | 'usage'
   | 'models' | 'ai' | 'assistants' | 'integrations' | 'web' | 'mcp' | 'mcpServers' | 'tools' | 'skills'
   | 'rag' | 'users' | 'tickets' | 'memories' | 'system';
 
@@ -1681,6 +1682,7 @@ const TOOL_META: Record<string, { cat: string; ctx: string }> = {
   manage_rag: { cat: 'Knowledge', ctx: '~150' },
   query_sql: { cat: 'Knowledge', ctx: '~200' },
   db_memory: { cat: 'Knowledge', ctx: '~200' },
+  memory: { cat: 'Knowledge', ctx: '~200' },
   background_task: { cat: 'Sessions', ctx: '~200' },
   send_to_session: { cat: 'Sessions', ctx: '~100' },
   create_session: { cat: 'Sessions', ctx: '~100' },
@@ -2197,6 +2199,7 @@ export function SettingsDialog({
   const userNav: Array<{ id: Panel; label: string; icon: React.ReactNode }> = [
     { id: 'appearance', label: t('settings.nav.appearance'), icon: <PaletteIcon /> },
     { id: 'personalization', label: t('settings.nav.personalization'), icon: <SparklesIcon /> },
+    { id: 'memory', label: t('settings.nav.memory'), icon: <BrainIcon /> },
     { id: 'shortcuts', label: t('settings.nav.shortcuts'), icon: <KeyboardIcon /> },
     { id: 'account', label: t('settings.nav.account'), icon: <UserIcon /> },
     { id: 'usage', label: t('settings.nav.usage'), icon: <BarChart3Icon /> },
@@ -2362,6 +2365,7 @@ export function SettingsDialog({
               {panel === 'appearance' && <AppearancePanel />}
               {panel === 'shortcuts' && <ShortcutsPanel />}
               {panel === 'personalization' && <PersonalizationPanel />}
+              {panel === 'memory' && <MemoryPanel />}
               {panel === 'account' && <AccountPanel />}
               {panel === 'usage' && <UsagePanel />}
               {panel === 'skills' && <SharedSkillsPanel />}

@@ -24,7 +24,8 @@ const FAMILY: Record<string, string> = {
   glob: 'glob',
   ls: 'ls',
   query_sql: 'sql',
-  db_memory: 'dbMemory',
+  db_memory: 'memory',
+  memory: 'memory',
   search_knowledge: 'knowledge',
   list_knowledge: 'knowledgeList',
   read_knowledge: 'knowledgeRead',
@@ -90,7 +91,7 @@ function isMemoryRecall(call: ToolCall): boolean {
 /** The family of this very call, where the action decides. */
 function callFamily(call: ToolCall): string {
   const family = toolFamily(call.tool);
-  return family === 'dbMemory' && isMemoryRecall(call) ? 'dbMemoryRecall' : family;
+  return family === 'memory' && isMemoryRecall(call) ? 'memoryRecall' : family;
 }
 
 /** First line only. `command` carries the raw tool block, and for write_file
@@ -156,7 +157,7 @@ export function callSubject(call: ToolCall): string {
     case 'chatsList':
     case 'chatSend':
     case 'skillNew':
-    case 'dbMemoryRecall':
+    case 'memoryRecall':
       return '';
     case 'skills':
     case 'chats':
@@ -196,8 +197,8 @@ export function callSubject(call: ToolCall): string {
     }
     case 'knowledgeGrep':
       return pick('pattern', 'query') || firstLine(raw);
-    case 'dbMemory':
-      return clip(pick('text'));
+    case 'memory':
+      return clip(pick('title', 'text'));
     case 'knowledgeRead': {
       const doc = pick('document', 'name');
       // Models send section/pages as numbers as often as strings.

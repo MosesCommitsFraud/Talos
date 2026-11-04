@@ -1653,6 +1653,33 @@ export const updateMemory = (id: number, text: string) =>
 
 export const deleteMemory = (id: number) => postJSON(`/api/admin/memories/${id}`, undefined, 'DELETE');
 
+/* ── What the assistant remembers about the signed-in user ──
+   routes/user_memory_routes.py. The switch is the pref `memories_enabled`. */
+export interface UserMemoryEntry {
+  id: number;
+  title: string;
+  text: string;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
+export interface UserMemories {
+  limits: { title: number; text: number; entries: number };
+  entries: UserMemoryEntry[];
+}
+
+export const fetchUserMemories = () => getJSON<UserMemories>('/api/memories');
+
+export const addUserMemory = (title: string, text: string) =>
+  postJSON('/api/memories', { title, text });
+
+export const updateUserMemory = (id: number, title: string, text: string) =>
+  postJSON(`/api/memories/${id}`, { title, text }, 'PATCH');
+
+export const deleteUserMemory = (id: number) => postJSON(`/api/memories/${id}`, undefined, 'DELETE');
+
+export const deleteAllUserMemories = () => postJSON('/api/memories', undefined, 'DELETE');
+
 /* ── External MCP servers Talos connects to as a client ──
    routes/mcp_routes.py. Admin-only: a stdio server runs an arbitrary command
    inside the app container. Writes take form fields, the tool list takes JSON. */
