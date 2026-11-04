@@ -164,6 +164,9 @@
   --secondary-foreground: var(--color-neutral-800);
   --muted: --alpha(var(--color-black) / 4%);
   --muted-foreground: color-mix(in srgb, var(--color-neutral-500) 90%, var(--color-black));
+  /* The band passing over a running chat's name. Muted text is too close to the
+   * near-black names here to read as movement, so it goes a good step lighter. */
+  --shimmer-wave: var(--color-neutral-400);
   --accent: --alpha(var(--color-black) / 4%);
   --accent-foreground: var(--color-neutral-800);
   --destructive: var(--color-red-500);
@@ -249,6 +252,7 @@
   --secondary-foreground: var(--color-neutral-100);
   --muted: --alpha(var(--color-white) / 4%);
   --muted-foreground: color-mix(in srgb, var(--color-neutral-500) 90%, var(--color-white));
+  --shimmer-wave: var(--muted-foreground);
   --accent: --alpha(var(--color-white) / 4%);
   --accent-foreground: var(--color-neutral-100);
   --destructive: color-mix(in srgb, var(--color-red-500) 90%, var(--color-white));
@@ -440,7 +444,7 @@ body::after {
   background: linear-gradient(
     100deg,
     currentColor 40%,
-    var(--muted-foreground) 50%,
+    var(--shimmer-wave) 50%,
     currentColor 60%
   );
   /* A fixed tile, not a share of the text: a share would make the grey band wider
