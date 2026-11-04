@@ -6,7 +6,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import quote
 
 from src.prompt_security import UNTRUSTED_CONTEXT_POLICY, untrusted_context_message
-from src.rag_structure import DEFAULT_CONTEXT_MAX_CHARS
+from src.rag_structure import DEFAULT_CANDIDATE_TOP_K, DEFAULT_CONTEXT_MAX_CHARS
 from src.turn_context import FIGURE_RULE_SOURCE
 
 logger = logging.getLogger(__name__)
@@ -524,7 +524,9 @@ class ChatProcessor:
             # RAG is a global admin-managed knowledge base. Do not owner-filter here:
             # when enabled, indexed knowledge is available to every user.
             rag_k = min(int(top_k) if top_k else self._rag_k_setting("chat_top_k", 5), 20)
-            candidate_k = max(rag_k, min(self._rag_k_setting("candidate_top_k", 40), 100))
+            candidate_k = max(
+                rag_k, min(self._rag_k_setting("candidate_top_k", DEFAULT_CANDIDATE_TOP_K), 100)
+            )
             rerank_min = self._rag_float_setting("rerank_min_score", self.RAG_RERANK_MIN_SCORE)
             sim_threshold = self._rag_float_setting(
                 "similarity_threshold", self.RAG_SIMILARITY_THRESHOLD

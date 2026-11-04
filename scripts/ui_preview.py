@@ -1855,7 +1855,7 @@ def _rag_config() -> dict:
         "sparse_model": "Qdrant/bm25",
         "chat_top_k": 5,
         "search_top_k": 5,
-        "candidate_top_k": 40,
+        "candidate_top_k": 20,
         "similarity_threshold": 0.0,
         "rerank_min_score": 0.3,
         "max_context_chars": 18000,

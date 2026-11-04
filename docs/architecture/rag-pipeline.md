@@ -104,8 +104,10 @@ flowchart LR
 
 Key behaviours worth knowing:
 
-- **Candidate over-fetch.** `search` fetches `candidate_k` (default `k * 5`) candidates
-  from Qdrant, then reranks down to `k`. More candidates → better reranking, more cost.
+- **Candidate over-fetch.** `search` fetches `candidate_k` candidates from Qdrant, then
+  reranks down to `k`. Callers pass the `candidate_top_k` setting (default 20). Rerank time
+  grows with the number and length of the chunks, and concurrent calls queue: on
+  Qwen3-Reranker-4B, 40 chunks of 3,000 characters took 8 s alone and 24 s with three at once.
 - **Asymmetric query prefix.** When `RAG_QUERY_PREFIX` is set (e.g. for Qwen3-Embedding),
   it is prepended to the **dense query only** — documents are embedded without it, and the
   sparse/BM25 side always uses the raw query terms.

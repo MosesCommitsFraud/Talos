@@ -6,7 +6,11 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel
 
 from core.middleware import require_admin
-from src.rag_structure import DEFAULT_CHUNK_MAX_CHARS, DEFAULT_CONTEXT_MAX_CHARS
+from src.rag_structure import (
+    DEFAULT_CANDIDATE_TOP_K,
+    DEFAULT_CHUNK_MAX_CHARS,
+    DEFAULT_CONTEXT_MAX_CHARS,
+)
 from src.settings import load_settings, save_settings
 
 
@@ -108,7 +112,7 @@ class RagPipelineConfig(BaseModel):
     sparse_model: str = ""
     chat_top_k: int = 5
     search_top_k: int = 5
-    candidate_top_k: int = 40
+    candidate_top_k: int = DEFAULT_CANDIDATE_TOP_K
     similarity_threshold: float = 0.0
     rerank_min_score: float = 0.30
     max_context_chars: int = DEFAULT_CONTEXT_MAX_CHARS
@@ -235,7 +239,7 @@ def _clamp_k(value: int, default: int = 5) -> int:
         return default
 
 
-def _clamp_candidate_k(value: int, default: int = 40) -> int:
+def _clamp_candidate_k(value: int, default: int = DEFAULT_CANDIDATE_TOP_K) -> int:
     try:
         return max(1, min(int(value), 100))
     except Exception:
@@ -378,7 +382,7 @@ def _public(cfg: dict) -> dict:
         "sparse_model": cfg.get("sparse_model", ""),
         "chat_top_k": _clamp_k(cfg.get("chat_top_k", 5)),
         "search_top_k": _clamp_k(cfg.get("search_top_k", 5)),
-        "candidate_top_k": _clamp_candidate_k(cfg.get("candidate_top_k", 40)),
+        "candidate_top_k": _clamp_candidate_k(cfg.get("candidate_top_k", DEFAULT_CANDIDATE_TOP_K)),
         "similarity_threshold": _clamp_float(cfg.get("similarity_threshold", 0.0), 0.0),
         "rerank_min_score": _clamp_float(cfg.get("rerank_min_score", 0.30), 0.30),
         "max_context_chars": _clamp_chars(cfg.get("max_context_chars", DEFAULT_CONTEXT_MAX_CHARS)),
@@ -954,7 +958,9 @@ def setup_rag_routes():
         # a base may set its own top-k.
         cfg = effective_config(rag_id)
         final_k = _clamp_k(k if k is not None else cfg.get("search_top_k", 5))
-        candidate_k = max(final_k, _clamp_candidate_k(cfg.get("candidate_top_k", 40)))
+        candidate_k = max(
+            final_k, _clamp_candidate_k(cfg.get("candidate_top_k", DEFAULT_CANDIDATE_TOP_K))
+        )
         # Keep old schema files out, exactly as the chat pipeline does — otherwise
         # this test box returns chunks a real answer would never be built from.
         from src.rag_scopes import SCOPE_IDS

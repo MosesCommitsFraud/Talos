@@ -765,10 +765,12 @@ def _tool_rag_query(args: Dict[str, Any]) -> str:
         cfg = _search_config(cid)
         # Retrieve a wider candidate set than we return so the reranker has
         # something to work with — same ratio the /api/rag/search route uses.
+        from src.rag_structure import DEFAULT_CANDIDATE_TOP_K
+
         try:
-            candidate_k = max(k, min(int(cfg.get("candidate_top_k", 40)), 100))
+            candidate_k = max(k, min(int(cfg.get("candidate_top_k", DEFAULT_CANDIDATE_TOP_K)), 100))
         except (TypeError, ValueError):
-            candidate_k = max(k, 40)
+            candidate_k = max(k, DEFAULT_CANDIDATE_TOP_K)
         results = (
             rag.search(
                 query,

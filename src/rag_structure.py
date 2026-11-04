@@ -24,6 +24,11 @@ DEFAULT_CHUNK_MAX_CHARS = 6000
 # that size, and about 5,000 tokens of German, so small next to model contexts.
 DEFAULT_CONTEXT_MAX_CHARS = 18000
 
+# Chunks one search hands the reranker. Its time grows with this number and with
+# chunk length, and calls queue behind each other: 40 chunks of 6,000 characters took
+# 16 s alone on Qwen3-Reranker-4B and 32 s with two at once, past the client timeout.
+DEFAULT_CANDIDATE_TOP_K = 20
+
 # Docling reads PDFs without a heading hierarchy, so a numbered title is the only
 # level the text itself still carries ("2.1 Kosten" sits below "2 Planung").
 _NUMBERED_HEADING = re.compile(r"\s*(\d+(?:\.\d+)*)\.?\s+\S")

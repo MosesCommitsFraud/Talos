@@ -341,10 +341,12 @@ def create_app() -> FastAPI:
         rag = _rag_or_503(rag_id)
         cfg = _search_config(rag_id)
         k = _clamp_k(body.k if body.k is not None else cfg.get("search_top_k", 5))
+        from src.rag_structure import DEFAULT_CANDIDATE_TOP_K
+
         try:
-            candidate_k = max(k, min(int(cfg.get("candidate_top_k", 40)), 100))
+            candidate_k = max(k, min(int(cfg.get("candidate_top_k", DEFAULT_CANDIDATE_TOP_K)), 100))
         except (TypeError, ValueError):
-            candidate_k = max(k, 40)
+            candidate_k = max(k, DEFAULT_CANDIDATE_TOP_K)
         scope = (body.scope or "").strip() or None
         results = rag.search(
             query,

@@ -275,7 +275,7 @@ def retrieve_sections(query: str) -> List[str]:
     ``query_sql``.
     """
     from src.rag_singleton import get_rag_manager
-    from src.rag_structure import budget_context, context_location
+    from src.rag_structure import DEFAULT_CANDIDATE_TOP_K, budget_context, context_location
 
     targets = search_targets()
     if not targets:
@@ -291,7 +291,7 @@ def retrieve_sections(query: str) -> List[str]:
         if not (rag and getattr(rag, "healthy", False)):
             continue
         k = max(1, min(_int(cfg, "chat_top_k", 12), _MAX_TOP_K))
-        candidate_k = max(k, min(_int(cfg, "candidate_top_k", 40), 100))
+        candidate_k = max(k, min(_int(cfg, "candidate_top_k", DEFAULT_CANDIDATE_TOP_K), 100))
         results = rag.search(
             query, k=k, owner=None, candidate_k=candidate_k, **({"scope": scope} if scope else {})
         )
