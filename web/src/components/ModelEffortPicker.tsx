@@ -22,11 +22,8 @@ import { useReasoningEfforts } from './EffortPicker';
  *  Stays mounted while hidden so the default-model effect keeps running. */
 export function ModelEffortPicker({
   visible = true,
-  placement = 'inside',
 }: {
   visible?: boolean;
-  /** Inside the input box (new-chat bar) or in the quieter row beneath it. */
-  placement?: 'inside' | 'outside';
 }) {
   const { t } = useTranslation();
   const { data: endpoints } = useQuery({ queryKey: ['models'], queryFn: fetchModels });
@@ -74,11 +71,10 @@ export function ModelEffortPicker({
           // Roomier than the old ghost pickers, but it steps down outside the
           // box, where it sits next to the disclaimer rather than the send key.
           className={cn(
-            'flex min-w-0 shrink items-center whitespace-nowrap rounded-lg border border-transparent font-medium text-foreground/80 outline-none transition-colors hover:bg-accent hover:text-foreground focus:outline-none focus-visible:outline-none dark:text-foreground/70',
-            placement === 'inside' ? 'h-7 gap-1.5 px-2.5 text-sm' : 'h-6 gap-1.5 px-2 text-xs',
+            'flex h-6 min-w-0 shrink items-center gap-1.5 whitespace-nowrap rounded-lg border border-transparent px-2 text-xs font-medium text-foreground/80 outline-none transition-colors hover:bg-accent hover:text-foreground focus:outline-none focus-visible:outline-none dark:text-foreground/70',
           )}
         >
-          <QwenIcon className={cn('shrink-0', placement === 'inside' ? 'size-4' : 'size-3.5')} />
+          <QwenIcon className="size-3.5 shrink-0" />
           <span className="min-w-0 max-w-32 truncate text-left md:max-w-56">{modelLabel}</span>
           {/* The effort reads as a qualifier of the model, not a second control. */}
           <span className={cn('shrink-0 font-normal', reasoning ? 'text-muted-foreground' : 'text-muted-foreground/70')}>

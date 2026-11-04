@@ -194,9 +194,6 @@ export function Composer() {
   const queryClient = useQueryClient();
   const { data: caps } = useQuery({ queryKey: ['capabilities'], queryFn: fetchCapabilities, staleTime: 60_000 });
 
-  // A draft with no session yet is the new-chat screen: the box grows into the
-  // hero layout that carries its own control row.
-  const hero = sessionId === null;
   // Typing during a turn queues the message, so it reads as Enter then too; the
   // stop square only stands there while there is nothing to queue.
   const hasContent = !!text.trim() || pending.length > 0;
@@ -317,25 +314,15 @@ export function Composer() {
     const inner = row.clientWidth - parseFloat(pad.paddingLeft) - parseFloat(pad.paddingRight);
     const lead = inputLead.current?.offsetWidth ?? 0;
     const trail = inputTrail.current?.offsetWidth ?? 0;
-    const measure = (width: number) => {
-      twin.style.width = `${Math.max(1, width)}px`;
-      return twin.scrollHeight;
-    };
-    // Two widths: the narrow lane between the pinned controls, and the full
-    // box. Whether the text has outgrown its lane is decided at the NARROW
-    // width only — deciding it at whatever width is currently applied would
-    // oscillate, since widening can drop the very line that caused the switch.
+    // The text keeps to the lane between the pinned controls, also once it
+    // wraps, so the box grows by exactly the lines it needs.
     const lanePad = (lead ? lead + CONTROL_GAP : 0) + (trail ? trail + CONTROL_GAP : 0);
-    const laneHeight = measure(inner - lanePad);
-    const lineHeight = parseFloat(getComputedStyle(twin).lineHeight) || laneHeight;
-    const overflows = laneHeight > lineHeight + 1;
-    const height = Math.min(overflows ? measure(inner) : laneHeight, MAX_INPUT_HEIGHT);
-    // Margins, not a re-render: this runs on every keystroke, and CSS animates
-    // the text sliding over the controls for free.
-    box.style.marginInlineStart = overflows || !lead ? '0px' : `${lead + CONTROL_GAP}px`;
-    box.style.marginInlineEnd = overflows || !trail ? '0px' : `${trail + CONTROL_GAP}px`;
-    const controlRow = Math.max(inputLead.current?.offsetHeight ?? 0, inputTrail.current?.offsetHeight ?? 0);
-    box.style.marginBottom = overflows && controlRow ? `${controlRow + CONTROL_GAP}px` : '0px';
+    twin.style.width = `${Math.max(1, inner - lanePad)}px`;
+    const height = Math.min(twin.scrollHeight, MAX_INPUT_HEIGHT);
+    // Margins, not a re-render: this runs on every keystroke, and the controls
+    // appearing or leaving moves the text by CSS transition for free.
+    box.style.marginInlineStart = lead ? `${lead + CONTROL_GAP}px` : '0px';
+    box.style.marginInlineEnd = trail ? `${trail + CONTROL_GAP}px` : '0px';
     el.style.height = `${height}px`;
     // A scrollbar while the box is still growing is just the animation lagging
     // the content; only a genuinely capped input scrolls.
@@ -350,7 +337,7 @@ export function Composer() {
     window.addEventListener('resize', onResize);
     return () => window.removeEventListener('resize', onResize);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hero, caps?.voice, primaryAction, dictating, prefs.visibility.composerAttach, prefs.deepResearch]);
+  }, [caps?.voice, primaryAction, dictating, prefs.visibility.composerAttach, prefs.deepResearch]);
 
   const attach = async (files: FileList | File[]) => {
     const list = Array.from(files);
@@ -535,13 +522,11 @@ export function Composer() {
       <QueuedMessages />
       <div
         className={cn(
-          // Light mode: the box shares the page background and is defined by its
-          // frame alone. Dark mode keeps the raised --card panel, where a flush
-          // box would disappear. Focus changes nothing: the caret says it all.
-          // The faint lift in light mode: the box shares the page background, so
-          // a whisper of shadow is what separates it from the message stream.
-          // Dark mode drops it — the --card step already does that job there.
-          'group/composer @container/composer relative rounded-[18px] border border-foreground/14 bg-background shadow-[0_1px_2px_rgba(0,0,0,0.03),0_6px_16px_-8px_rgba(0,0,0,0.07)] transition-colors duration-200 dark:border-foreground/10 dark:bg-card dark:shadow-none',
+          // Dark mode: a panel clearly lighter than the page, which is all that
+          // sets it apart, so the frame is barely there. Light mode shares the page
+          // background, so a faint frame and a whisper of shadow do that job. Focus
+          // changes nothing: the caret says it all.
+          '@container/composer relative rounded-2xl border border-foreground/[0.08] bg-background shadow-[0_1px_2px_rgba(0,0,0,0.03),0_6px_16px_-8px_rgba(0,0,0,0.07)] transition-colors duration-200 dark:border-foreground/[0.05] dark:bg-[color-mix(in_srgb,var(--background)_90%,white)] dark:shadow-none',
           dragging && 'border-primary/60 ring-2 ring-primary/30',
         )}
       >
@@ -588,11 +573,8 @@ export function Composer() {
           </div>
         )}
 
-        <div ref={inputRow} className={cn('relative', hero ? 'px-3.5 pb-1 pt-3' : 'p-2.5')}>
-          {/* Text block. In the conversation layout it starts out inset between
-              the pinned controls below and widens over them once it wraps —
-              autoresize animates those margins, so the text flows into the full
-              width instead of stranding a gutter beside the growing box. */}
+        <div ref={inputRow} className="relative px-2.5 py-1.5">
+          {/* Text block, inset between the pinned controls below (see autoresize). */}
           <div ref={inputBox} className="relative min-w-0 transition-[margin] duration-150 ease-out">
           {dictating && (
             <div
@@ -659,12 +641,10 @@ export function Composer() {
             style={{ maxHeight: MAX_INPUT_HEIGHT }}
           />
           </div>
-          {/* Conversation layout: the controls are pinned to the bottom of the
-              box — add on the left, Enter/stop and mic on the right — so a
-              growing text block can slide over them instead of pushing them
-              around. The new-chat box carries its controls in the row below. */}
-          {!hero && prefs.visibility.composerAttach && (
-            <div ref={inputLead} className="absolute bottom-2.5 start-2.5 flex items-center gap-1">
+          {/* The controls are pinned to the bottom of the box: add on the left,
+              Enter/stop and mic on the right, on the last line of the text. */}
+          {prefs.visibility.composerAttach && (
+            <div ref={inputLead} className="absolute bottom-1.5 start-2.5 flex items-center gap-1">
               <ComposerAddMenu
                 onAttach={() => fileInput.current?.click()}
                 uploading={uploading}
@@ -674,45 +654,10 @@ export function Composer() {
               <DeepResearchChip />
             </div>
           )}
-          {!hero && (
-            <div ref={inputTrail} className="absolute bottom-2.5 end-2.5 flex items-center gap-1">
-              {trailingControls}
-            </div>
-          )}
-        </div>
-
-        {/* New-chat layout: every control sits inside the box, Claude-style —
-            the add menu (which carries the knowledge and plan switches) on the
-            left, model+effort, Enter/stop and the mic on the right. */}
-        {hero && (
-          // ps-2 rather than ps-3.5: the button plate insets its glyph by 6px,
-          // so this is what puts the + glyph on the same left edge as the text
-          // above it.
-          <div className="flex min-w-0 items-center gap-1 ps-2 pe-2.5 pb-2.5">
-            <input
-              ref={fileInput}
-              type="file"
-              multiple
-              hidden
-              onChange={(e) => { if (e.target.files) void attach(e.target.files); e.target.value = ''; }}
-            />
-            <div className="flex min-w-0 flex-1 items-center gap-1">
-              {prefs.visibility.composerAttach && (
-                <ComposerAddMenu
-                  onAttach={() => fileInput.current?.click()}
-                  uploading={uploading}
-                  showMic={!!caps?.voice}
-                  className={INLINE_CONTROL}
-                />
-              )}
-              <DeepResearchChip />
-            </div>
-            <div className="flex shrink-0 items-center gap-1">
-              <ModelEffortPicker visible={prefs.visibility.composerModelPicker} />
-              {trailingControls}
-            </div>
+          <div ref={inputTrail} className="absolute bottom-1.5 end-2.5 flex items-center gap-1">
+            {trailingControls}
           </div>
-        )}
+        </div>
       </div>
 
       {goal && !['completed', 'cancelled'].includes(goal.status) && (
@@ -731,29 +676,25 @@ export function Composer() {
       )}
       {commandError && <p className="mt-1 text-center text-xs text-destructive">{commandError}</p>}
 
-      {/* Control row — under the input card once a conversation is running.
-          Everything else moved inside the box or into the add menu, so the
-          left half is free for the AI disclaimer and the right holds the
-          model+effort picker with the context meter, all on one centre line. */}
-      {!hero && (
-        <div className="mt-2 flex min-w-0 flex-nowrap items-center justify-between gap-3">
-          <input
-            ref={fileInput}
-            type="file"
-            multiple
-            hidden
-            onChange={(e) => { if (e.target.files) void attach(e.target.files); e.target.value = ''; }}
-          />
+      {/* Control row under the box: the AI disclaimer once a conversation is
+          running, and the model+effort picker with the context meter. */}
+      <div className="mt-2 flex min-w-0 flex-nowrap items-center justify-between gap-3">
+        <input
+          ref={fileInput}
+          type="file"
+          multiple
+          hidden
+          onChange={(e) => { if (e.target.files) void attach(e.target.files); e.target.value = ''; }}
+        />
 
-          <p className="min-w-0 truncate ps-1 text-xs text-muted-foreground/70">{t('composer.aiDisclaimer')}</p>
+        {sessionId && <p className="min-w-0 truncate ps-1 text-xs text-muted-foreground/70">{t('composer.aiDisclaimer')}</p>}
 
-          <div className="me-2 flex shrink-0 flex-nowrap items-center justify-end gap-1">
-            <ModelEffortPicker visible={prefs.visibility.composerModelPicker} placement="outside" />
+        <div className="ms-auto me-2 flex shrink-0 flex-nowrap items-center justify-end gap-1">
+          <ModelEffortPicker visible={prefs.visibility.composerModelPicker} />
 
-            {prefs.visibility.contextMeter && <ContextMeter />}
-          </div>
+          {sessionId && prefs.visibility.contextMeter && <ContextMeter />}
         </div>
-      )}
+      </div>
       {dictation.error && !dictating && (
         <p className="mt-1 text-center text-[11px] leading-tight text-red-500">
           {dictation.error === 'mic-denied'
