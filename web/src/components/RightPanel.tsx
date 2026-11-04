@@ -1,6 +1,6 @@
 import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { DownloadIcon, GaugeIcon, Maximize2Icon, Minimize2Icon, XIcon } from 'lucide-react';
+import { DownloadIcon, GaugeIcon, LayersIcon, Maximize2Icon, Minimize2Icon, XIcon } from 'lucide-react';
 import { downloadPreviewFile } from '@/api/client';
 import { displayName, fileTypeLabel } from '@/lib/files';
 import { useBgTasks } from '@/lib/useBgTasks';
@@ -10,9 +10,7 @@ import { useUi } from '@/state/ui';
 import { cn } from '@/lib/utils';
 import { useAuth } from './auth/AuthGate';
 import { FileTypeIcon } from './FileTypeIcon';
-import { AgentsIcon, PlanIcon } from './icons';
 import { MetricsPane } from './MetricsPanel';
-import { PlanPane, useSessionPlan } from './PlanCard';
 import { PreviewContent } from './PreviewPanel';
 import { SessionFilesPopover } from './SessionFilesPopover';
 import { TasksPane } from './TasksPanel';
@@ -144,37 +142,20 @@ function Grip({
   );
 }
 
-/** Switches for the plan and task panes, each shown once there is something
- *  to show, and — for admins only — the metrics pane. They sit in the dock's
- *  bar while the dock is open and in the chat header otherwise — after a turn
- *  this is the way back to its plan. */
+/** Switches for the task pane, shown once there is something to show, and —
+ *  for admins only — the metrics pane. They sit in the dock's bar while the
+ *  dock is open and in the chat header otherwise. */
 export function PaneToggles() {
   const { t } = useTranslation();
-  const planOpen = useUi((s) => s.planPanelOpen);
-  const setPlanOpen = useUi((s) => s.setPlanPanelOpen);
   const tasksOpen = useUi((s) => s.tasksPanelOpen);
   const setTasksOpen = useUi((s) => s.setTasksPanelOpen);
   const metricsOpen = useUi((s) => s.metricsPanelOpen);
   const setMetricsOpen = useUi((s) => s.setMetricsPanelOpen);
   const isAdmin = !!useAuth()?.is_admin;
-  const hasPlan = !!useSessionPlan();
   const hasTasks = useBgTasks().length > 0;
   const toggle = (on: boolean) => cn(iconBtn, on && 'bg-primary/10 text-primary hover:bg-primary/15 hover:text-primary');
   return (
     <>
-      {(hasPlan || planOpen) && (
-        <Tooltip label={planOpen ? t('plan.closePanel') : t('plan.show')}>
-          <button
-            type="button"
-            aria-pressed={planOpen}
-            aria-label={planOpen ? t('plan.closePanel') : t('plan.show')}
-            onClick={() => setPlanOpen(!planOpen)}
-            className={toggle(planOpen)}
-          >
-            <PlanIcon className="size-4" />
-          </button>
-        </Tooltip>
-      )}
       {(hasTasks || tasksOpen) && (
         <Tooltip label={tasksOpen ? t('tasks.closePanel') : t('tasks.show')}>
           <button
@@ -184,7 +165,7 @@ export function PaneToggles() {
             onClick={() => setTasksOpen(!tasksOpen)}
             className={toggle(tasksOpen)}
           >
-            <AgentsIcon className="size-4" />
+            <LayersIcon className="size-4" />
           </button>
         </Tooltip>
       )}
@@ -207,20 +188,19 @@ export function PaneToggles() {
 
 type PaneDef = { key: DockPane; node: (className: string) => React.ReactNode };
 
-/** The right-hand dock: file preview, plan, task list and (admins) metrics,
- *  each its own pane.
+/** The right-hand dock: file preview, task list and (admins) metrics, each its
+ *  own pane.
  *  One open → it takes the whole height; several → they stack, preview on
  *  top, with a draggable divider between neighbours. A single grip on the
  *  left edge resizes the dock as one. Above the panes sits the dock's bar:
  *  the chat's files button (handed over from the chat header, so the title
- *  there gets the whole column) and switches for the plan and task panes.
+ *  there gets the whole column) and the switches for its panes.
  *  Full-screen preview lifts out of the dock and covers the chat column (App
  *  gives it a positioned box that stops at the sidebar). */
 export function RightDock() {
   const { t } = useTranslation();
   const sessionId = useChat((s) => s.sessionId);
   const previewOpen = useUi((s) => s.artifactsOpen && !!s.preview);
-  const planOpen = useUi((s) => s.planPanelOpen);
   const tasksOpen = useUi((s) => s.tasksPanelOpen);
   const metricsOpen = useUi((s) => s.metricsPanelOpen);
   const fullscreen = useUi((s) => s.previewFullscreen);
@@ -289,7 +269,6 @@ export function RightDock() {
 
   const panes: PaneDef[] = [];
   if (previewOpen && !fullscreen) panes.push({ key: 'preview', node: (c) => <PreviewPane className={c} /> });
-  if (planOpen) panes.push({ key: 'plan', node: (c) => <PlanPane className={cn(paneChrome, c)} /> });
   if (tasksOpen) panes.push({ key: 'tasks', node: (c) => <TasksPane className={cn(paneChrome, c)} /> });
   if (metricsOpen && sessionId) panes.push({ key: 'metrics', node: (c) => <MetricsPane className={cn(paneChrome, c)} /> });
   const weights = dragSizes ?? sizes;
