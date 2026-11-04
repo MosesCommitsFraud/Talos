@@ -115,6 +115,8 @@ def test_failures_are_told_apart_from_nothing_found():
         ("Strasse", "Hauptstraße"),
         ("Datenart", "alle Datenarten"),
         ("MX-404", "Fehler MX 404 erscheint"),
+        ("Werte erfassen (Planung)", "Werte erfassen – Planung"),
+        ("Werte erfassen Planung", "Werte erfassen (Planung)"),
     ],
 )
 def test_same_term(term, text):

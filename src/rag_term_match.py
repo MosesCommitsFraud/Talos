@@ -10,8 +10,8 @@ from __future__ import annotations
 import re
 from typing import List, Pattern
 
-# What may stand between two parts of a term.
-_GAP = r"[\s\-‐‑–—_+/.]*"
+# What may stand between two parts of a term: spaces, dashes, "+", brackets, ...
+_GAP = r"[\W_]*"
 _SPELLINGS = {
     "ä": "(?:ä|ae)",
     "ö": "(?:ö|oe)",
