@@ -31,7 +31,11 @@ def _fake_model(monkeypatch, tool_rounds=1):
     async def fake_stream(candidates, messages, **kwargs):
         calls.append(json.loads(json.dumps(messages, default=str)))
         if len(calls) <= tool_rounds:
-            call = {"id": f"c{len(calls)}", "name": "web_search", "arguments": json.dumps({"query": f"q{len(calls)}"})}
+            call = {
+                "id": f"c{len(calls)}",
+                "name": "web_search",
+                "arguments": json.dumps({"query": f"q{len(calls)}"}),
+            }
             yield f"data: {json.dumps({'type': 'tool_calls', 'calls': [call]})}\n\n"
         else:
             yield f"data: {json.dumps({'delta': 'Fertig.'})}\n\n"
@@ -71,7 +75,9 @@ async def test_queued_message_reaches_the_next_round_and_keeps_the_prompt_prefix
     delivered = [e for e in events if e.get("type") == "queued_message"]
     assert delivered == [{"type": "queued_message", "id": "m1", "text": "Bitte auch 2024 prüfen."}]
     metrics = [e["data"] for e in events if e.get("type") == "metrics"][-1]
-    assert metrics["queued_messages"] == [{"id": "m1", "text": "Bitte auch 2024 prüfen.", "round": 2}]
+    assert metrics["queued_messages"] == [
+        {"id": "m1", "text": "Bitte auch 2024 prüfen.", "round": 2}
+    ]
     # Stored with the turn, so later turns replay it verbatim.
     turn = collect_turn_messages(sink["messages"], "Fertig.")
     assert any("Bitte auch 2024 prüfen." in str(m.get("content")) for m in turn)

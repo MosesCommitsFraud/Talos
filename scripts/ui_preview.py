@@ -3198,7 +3198,9 @@ class PreviewHandler(BaseHTTPRequestHandler):
         if path.startswith("/api/chat/queue/"):
             session_id = path[len("/api/chat/queue/") :]
             payload = json.loads(body or b"{}")
-            _QUEUED.setdefault(session_id, []).append({"id": payload["id"], "text": payload["text"]})
+            _QUEUED.setdefault(session_id, []).append(
+                {"id": payload["id"], "text": payload["text"]}
+            )
             self._send_json({"queued": True})
             return
         if path.endswith("/delete-messages"):
