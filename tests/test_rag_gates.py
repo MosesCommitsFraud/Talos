@@ -29,10 +29,29 @@ def model(monkeypatch):
 SOURCES = [{"n": 1, "filename": "a.pdf", "_text": "Der Export startet über den Button Export."}]
 
 
-def test_unknown_or_missing_mode_falls_back_to_shadow():
-    assert rag_gates.gate_mode({}, "grounding_gate") == "shadow"
-    assert rag_gates.gate_mode({"grounding_gate": "banana"}, "grounding_gate") == "shadow"
-    assert rag_gates.gate_mode({"grounding_gate": "ON"}, "grounding_gate") == "on"
+def test_grounding_is_on_and_sufficiency_logs_unless_set_otherwise():
+    assert rag_gates.gate_mode({}, "grounding_gate") == "on"
+    assert rag_gates.gate_mode({}, "sufficiency_gate") == "shadow"
+    assert rag_gates.gate_mode({"grounding_gate": "banana"}, "grounding_gate") == "on"
+    assert rag_gates.gate_mode({"sufficiency_gate": "banana"}, "sufficiency_gate") == "shadow"
+    assert rag_gates.gate_mode({"grounding_gate": "OFF"}, "grounding_gate") == "off"
+
+
+def test_grounding_asks_the_model_that_answered(monkeypatch):
+    asked = []
+
+    def _call(url, model_name, messages, **kwargs):
+        asked.append((url, model_name, kwargs.get("headers")))
+        return json.dumps({"unsupported": []})
+
+    monkeypatch.setattr("src.llm_core.llm_call", _call)
+    monkeypatch.setattr(
+        "src.endpoint_resolver.resolve_endpoint",
+        lambda *a, **k: ("http://small/v1/chat/completions", "helper-4b", {}),
+    )
+    main = ("http://main/v1/chat/completions", "main-27b", {"X": "1"})
+    rag_gates.grounding_note({"grounding_gate": "on"}, "F", "Antwort", SOURCES, None, main)
+    assert asked == [main]
 
 
 def test_sufficiency_passes_only_when_everything_is_covered(model):
@@ -102,7 +121,7 @@ def test_grounding_still_reports_numbers_when_the_model_fails(model):
 def test_shadow_changes_nothing_and_records_the_verdict(model):
     model["reply"] = json.dumps({"covered": "none", "missing": "alles"})
     before = len(rag_gates.recent_verdicts())
-    assert rag_gates.sufficiency_note({}, "F", SOURCES) == ""
+    assert rag_gates.sufficiency_note({"sufficiency_gate": "shadow"}, "F", SOURCES) == ""
     rag_gates.settle(5)
     latest = rag_gates.recent_verdicts()
     assert len(latest) == before + 1

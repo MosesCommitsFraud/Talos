@@ -6,7 +6,12 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel
 
 from core.middleware import require_admin
-from src.rag_gates import DEFAULT_GATE_MODE, gate_mode, recent_verdicts
+from src.rag_gates import (
+    DEFAULT_GROUNDING_GATE,
+    DEFAULT_SUFFICIENCY_GATE,
+    gate_mode,
+    recent_verdicts,
+)
 from src.rag_structure import (
     DEFAULT_CANDIDATE_TOP_K,
     DEFAULT_CHUNK_MAX_CHARS,
@@ -154,8 +159,8 @@ class RagPipelineConfig(BaseModel):
     # default, matching chat_processor._maybe_rewrite_query.
     query_rewrite_enabled: bool = True
     # "off" | "shadow" | "on", see src/rag_gates.py.
-    sufficiency_gate: str = DEFAULT_GATE_MODE
-    grounding_gate: str = DEFAULT_GATE_MODE
+    sufficiency_gate: str = DEFAULT_SUFFICIENCY_GATE
+    grounding_gate: str = DEFAULT_GROUNDING_GATE
     # Advanced — ingest-time Contextual Retrieval + the LLM endpoint it uses.
     contextual_retrieval_enabled: bool = False
     llm_url: str = ""
@@ -328,8 +333,10 @@ def _normalize(body, current: dict) -> dict:
         "image_embed_model": body.image_embed_model.strip(),
         "code_lane_enabled": bool(body.code_lane_enabled),
         "query_rewrite_enabled": bool(body.query_rewrite_enabled),
-        "sufficiency_gate": gate_mode({"m": body.sufficiency_gate}, "m"),
-        "grounding_gate": gate_mode({"m": body.grounding_gate}, "m"),
+        "sufficiency_gate": gate_mode(
+            {"sufficiency_gate": body.sufficiency_gate}, "sufficiency_gate"
+        ),
+        "grounding_gate": gate_mode({"grounding_gate": body.grounding_gate}, "grounding_gate"),
         "contextual_retrieval_enabled": bool(body.contextual_retrieval_enabled),
         "llm_url": body.llm_url.strip(),
         "llm_model": body.llm_model.strip(),

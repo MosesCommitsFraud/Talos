@@ -1294,7 +1294,8 @@ def setup_chat_routes(
                                         if isinstance(_rt, list) and _rt
                                         else full_response,
                                         ctx.rag_sources,
-                                        get_current_user(request),
+                                        _user,
+                                        (sess.endpoint_url, sess.model, sess.headers),
                                     )
                                     if _ground_note:
                                         full_response += _ground_note

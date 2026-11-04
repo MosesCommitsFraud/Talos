@@ -152,9 +152,11 @@ Within a turn, a few rules keep lookups from running in circles:
 - **Two checks can judge the result** (`src/rag_gates.py`), set with `sufficiency_gate` and
   `grounding_gate`. `sufficiency_gate` asks whether the passages cover the question,
   `grounding_gate` whether the answer says more than its sources. `off` skips the check,
-  `shadow` (the default) judges in the background and only records the verdict, and `on`
-  waits for it: the model hears what is missing, the reader gets a note below the answer.
-  `GET /api/rag/gate-verdicts` lists the latest verdicts. Both use the utility model.
+  `shadow` judges in the background and only records the verdict, and `on` waits for it: the
+  model hears what is missing, the reader gets a note below the answer. The grounding check
+  is on by default and uses the model that answered; a 4B helper model flagged a third of
+  sound answers in testing. The sufficiency check logs only by default and uses the utility
+  model. `GET /api/rag/gate-verdicts` lists the latest verdicts.
 
 `grep_knowledge` treats spelling variants as the same term (`src/rag_term_match.py`): "Strg+M"
 finds "Strg + M", "Uebersetzen" finds "Übersetzen". If the phrase occurs nowhere, it falls back

@@ -1,7 +1,12 @@
-"""Two checks around a knowledge answer, each asked of the utility model.
+"""Two checks around a knowledge answer.
 
-Sufficiency, before the answer: do the retrieved passages cover the question?
-Grounding, after the answer: does the answer say anything the passages don't?
+Sufficiency, before the answer: do the retrieved passages cover the question? Asked of
+the utility model.
+
+Grounding, after the answer: does the answer say anything the passages don't? Asked of
+the model that wrote the answer, because a small helper model isn't up to it: on one
+real document with 39 answers and 22 forgeries, a 4B model flagged 12 sound answers and
+missed 4 forgeries where a 27B model flagged 1 and missed 1.
 
 Each runs in one of three modes (rag_pipeline ``sufficiency_gate``, ``grounding_gate``):
 ``off``; ``shadow`` judges in the background and only records the verdict, so nothing
@@ -19,12 +24,14 @@ import threading
 import time
 from collections import deque
 from concurrent.futures import Future, ThreadPoolExecutor
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
 GATE_MODES = ("off", "shadow", "on")
-DEFAULT_GATE_MODE = "shadow"
+DEFAULT_SUFFICIENCY_GATE = "shadow"
+DEFAULT_GROUNDING_GATE = "on"
+_DEFAULTS = {"sufficiency_gate": DEFAULT_SUFFICIENCY_GATE, "grounding_gate": DEFAULT_GROUNDING_GATE}
 _MAX_PASSAGE_CHARS = 24000
 _MAX_ANSWER_CHARS = 6000
 
@@ -51,8 +58,9 @@ _GROUNDING_PROMPT = (
 
 
 def gate_mode(cfg: Optional[Dict[str, Any]], name: str) -> str:
-    mode = str((cfg or {}).get(name) or DEFAULT_GATE_MODE).strip().lower()
-    return mode if mode in GATE_MODES else DEFAULT_GATE_MODE
+    default = _DEFAULTS[name]
+    mode = str((cfg or {}).get(name) or default).strip().lower()
+    return mode if mode in GATE_MODES else default
 
 
 def passages_from_sources(sources: List[Dict[str, Any]], answer: str = "") -> str:
@@ -83,13 +91,19 @@ def _parse_json(text: str) -> Dict[str, Any]:
     return json.loads(cleaned[start : end + 1])
 
 
-def _ask(system: str, user: str, owner: Optional[str], max_tokens: int) -> Dict[str, Any]:
+def _ask(
+    system: str,
+    user: str,
+    owner: Optional[str],
+    max_tokens: int,
+    endpoint: Optional[Tuple[str, str, Optional[Dict[str, str]]]] = None,
+) -> Dict[str, Any]:
     from src.endpoint_resolver import resolve_endpoint
     from src.llm_core import llm_call
 
-    url, model, headers = resolve_endpoint("utility", owner=owner)
+    url, model, headers = endpoint or resolve_endpoint("utility", owner=owner)
     if not url or not model:
-        raise RuntimeError("no utility model configured")
+        raise RuntimeError("no model configured")
     if "qwen" in model.lower():
         user += " /no_think"
     out = llm_call(
@@ -145,7 +159,11 @@ def unsupported_numbers(answer: str, sources_text: str, question: str = "") -> L
 
 
 def check_grounding(
-    question: str, answer: str, passages: str, owner: Optional[str] = None
+    question: str,
+    answer: str,
+    passages: str,
+    owner: Optional[str] = None,
+    endpoint: Optional[Tuple[str, str, Optional[Dict[str, str]]]] = None,
 ) -> Dict[str, Any]:
     started = time.time()
     visible = re.sub(r"<think(?:ing)?>[\s\S]*?</think(?:ing)?>", "", answer or "", flags=re.I)
@@ -156,7 +174,8 @@ def check_grounding(
             f"Question: {question}\n\nPassages:\n{passages[:_MAX_PASSAGE_CHARS]}\n\n"
             f"Answer:\n{visible.strip()[:_MAX_ANSWER_CHARS]}",
             owner,
-            300,
+            400,
+            endpoint,
         )
         claims = data.get("unsupported")
         if not isinstance(claims, list):
@@ -263,16 +282,20 @@ def grounding_note(
     answer: str,
     sources: List[Dict[str, Any]],
     owner: Optional[str] = None,
+    endpoint: Optional[Tuple[str, str, Optional[Dict[str, str]]]] = None,
 ) -> str:
-    """Line to append for the reader when an answer goes beyond its sources; else empty."""
+    """Line to append for the reader when an answer goes beyond its sources; else empty.
+
+    ``endpoint`` is the (url, model, headers) that wrote the answer.
+    """
     mode = gate_mode(cfg, "grounding_gate")
     passages = passages_from_sources(sources, answer)
     if mode == "off" or not passages or not (answer or "").strip():
         return ""
     if mode == "shadow":
-        run_in_shadow(check_grounding, question, answer, passages, owner)
+        run_in_shadow(check_grounding, question, answer, passages, owner, endpoint)
         return ""
-    verdict = record(check_grounding(question, answer, passages, owner), question, mode)
+    verdict = record(check_grounding(question, answer, passages, owner, endpoint), question, mode)
     if verdict["passed"]:
         return ""
     german = re.search(r"\b(der|die|das|und|nicht|ist|ein|eine)\b", answer, re.I)

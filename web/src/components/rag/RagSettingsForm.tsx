@@ -578,7 +578,7 @@ export function RagSettingsForm({
       control={
         <Segmented
           label={label}
-          value={draft[k] ?? 'shadow'}
+          value={draft[k] ?? (k === 'grounding_gate' ? 'on' : 'shadow')}
           onChange={(v) => set(k, v)}
           options={[
             { value: 'off', label: t('settings.rag.gateMode.off') },
