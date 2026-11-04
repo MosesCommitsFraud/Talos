@@ -36,6 +36,7 @@ CORE_TOOLS = frozenset(
     | {
         "query_sql",
         "db_memory",
+        "memory",
         "search_knowledge",
         "list_knowledge",
         "read_knowledge",

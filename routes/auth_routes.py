@@ -464,6 +464,16 @@ def setup_auth_routes(auth_manager: AuthManager) -> APIRouter:
                 "Failed to rename user prefs %s -> %s: %s", old_username, new_username, e
             )
 
+        # So is what the assistant remembers about them: one file per user.
+        try:
+            from src.user_memory import rename_owner as rename_memory_owner
+
+            rename_memory_owner(old_username, new_username)
+        except Exception as e:
+            logger.warning(
+                "Failed to rename memory file %s -> %s: %s", old_username, new_username, e
+            )
+
         ok = auth_manager.rename_user(old_username, new_username, user)
         if not ok:
             raise HTTPException(400, "Cannot rename user")

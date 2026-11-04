@@ -291,6 +291,13 @@ class AuthManager:
                 logger.info(f"Revoked {removed} API token(s) owned by deleted user '{username}'")
         except Exception:
             logger.warning(f"Failed to revoke API tokens for deleted user '{username}'")
+        # What the assistant remembered about this person goes with them.
+        try:
+            from src.user_memory import remove_all as remove_user_memories
+
+            remove_user_memories(username)
+        except Exception:
+            logger.warning(f"Failed to remove memories of deleted user '{username}'")
         logger.info(
             f"Deleted user '{username}' (by {requesting_user}); revoked {revoked} active session(s)"
         )

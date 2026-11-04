@@ -66,6 +66,8 @@ TOOL_TAGS = {
     # The assistant's own notes on a database, shared by all users
     # (see src/db_memory.py)
     "db_memory",
+    # What the assistant remembers about this user (see src/user_memory.py)
+    "memory",
     # Knowledge-base retrieval the model asks for itself (the counterpart to
     # auto-injection — see rag_pipeline.auto_inject_enabled)
     "search_knowledge",

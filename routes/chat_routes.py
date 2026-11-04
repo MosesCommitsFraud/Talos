@@ -872,6 +872,7 @@ def setup_chat_routes(
                 {
                     "search_chats",  # past chat history
                     "manage_skills",  # skill presets tied to user
+                    "memory",  # what the assistant remembers about the user
                 }
             )
 
