@@ -4,11 +4,7 @@ import json
 from pathlib import Path
 
 import pytest
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
 
-from core.database import Base
 from src import agent_loop, db_memory, interactive_ui, rag_mini
 
 ONE_DB = [{"id": "c1", "name": "macs", "enabled": True}]
@@ -16,12 +12,9 @@ TWO_DBS = ONE_DB + [{"id": "c2", "name": "crm", "enabled": True}]
 
 
 @pytest.fixture
-def notes(monkeypatch):
-    engine = create_engine(
-        "sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool
-    )
-    Base.metadata.create_all(engine)
-    monkeypatch.setattr(db_memory, "SessionLocal", sessionmaker(bind=engine))
+def notes(monkeypatch, tmp_path):
+    monkeypatch.setattr(db_memory, "_DIR", str(tmp_path))
+    monkeypatch.setattr(db_memory, "_old_table_checked", True)
     monkeypatch.setattr(rag_mini, "connections", lambda: list(ONE_DB))
 
 
@@ -48,14 +41,10 @@ async def test_notes_reach_every_user_and_record_the_author(notes):
     await _call(owner="anna", action="add", text="Datenart 1 ist Absatz")
     assert "Datenart 1 ist Absatz" in (await _call(owner="ben", action="view"))["output"]
 
-    db = db_memory.SessionLocal()
-    assert db.get(db_memory.DbMemoryEntry, 1).created_by == "anna"
-    db.close()
+    assert db_memory.overview()["databases"][0]["entries"][0]["created_by"] == "anna"
     await _call(owner="ben", action="edit", id=1, text="Datenart 1: Absatz")
-    db = db_memory.SessionLocal()
-    entry = db.get(db_memory.DbMemoryEntry, 1)
-    assert (entry.created_by, entry.updated_by) == ("anna", "ben")
-    db.close()
+    entry = db_memory.overview()["databases"][0]["entries"][0]
+    assert (entry["created_by"], entry["updated_by"]) == ("anna", "ben")
 
 
 async def test_action_names_models_reach_for(notes):
@@ -356,3 +345,158 @@ async def test_notes_of_a_removed_database_stay_in_reach_of_admins(admin_api, mo
 def test_the_routes_are_mounted_in_the_app():
     source = (Path(__file__).parent.parent / "app.py").read_text(encoding="utf-8")
     assert "setup_db_memory_routes()" in source
+
+
+# ── The files ───────────────────────────────────────────────────────────────
+
+
+def _file(connection_id="c1"):
+    return Path(db_memory._path(connection_id))
+
+
+async def test_every_database_has_its_own_readable_file(notes, monkeypatch):
+    monkeypatch.setattr(rag_mini, "connections", lambda: list(TWO_DBS))
+    await _call(owner="anna", action="add", text="nur macs", database="macs")
+    await _call(owner="ben", action="add", text="nur crm", database="crm")
+
+    macs = _file("c1").read_text(encoding="utf-8")
+    assert "## #1\n" in macs and "\nnur macs\n" in macs and "created_by=anna" in macs
+    assert "nur crm" not in macs
+    assert "nur crm" in _file("c2").read_text(encoding="utf-8")
+
+
+async def test_changes_update_the_file_in_place(notes):
+    await _call(action="add", text="alt")
+    await _call(action="add", text="bleibt")
+    await _call(owner="ben", action="edit", id=1, text="neu")
+    content = _file().read_text(encoding="utf-8")
+    assert "\nneu\n" in content and "alt" not in content and "updated_by=ben" in content
+
+    await _call(action="remove", id=1)
+    content = _file().read_text(encoding="utf-8")
+    assert "neu" not in content and "\nbleibt\n" in content
+    assert [p.name for p in _file().parent.iterdir()] == ["c1.md"]
+
+
+async def test_numbers_are_unique_across_databases_and_never_reused(notes, monkeypatch):
+    monkeypatch.setattr(rag_mini, "connections", lambda: list(TWO_DBS))
+    await _call(action="add", text="a", database="macs")
+    assert (await _call(action="add", text="b", database="crm"))["output"] == "Noted as #2."
+    assert (await _call(action="remove", id=2))["exit_code"] == 0
+    assert (await _call(action="add", text="c", database="crm"))["output"] == "Noted as #3."
+    assert (await _call(action="edit", id=1, text="a2"))["exit_code"] == 0
+    assert "#1 a2" in (await _call(action="view", database="macs"))["output"]
+
+
+async def test_hand_edits_on_the_server_are_picked_up(notes):
+    _file().parent.mkdir(parents=True, exist_ok=True)
+    _file().write_text("# Notizen\n\n## #5\nvon Hand\nzweite Zeile\n", encoding="utf-8")
+    assert "#5 von Hand zweite Zeile" in (await _call(action="view"))["output"]
+    assert (await _call(action="add", text="neu"))["output"] == "Noted as #6."
+
+
+async def test_a_note_cannot_pose_as_another_in_the_file(notes):
+    await _call(action="add", text="## #9 Falsch")
+    await _call(action="add", text="echt")
+    entries = db_memory.overview()["databases"][0]["entries"]
+    assert [(e["id"], e["text"]) for e in entries] == [(1, "## #9 Falsch"), (2, "echt")]
+
+
+async def test_a_connection_id_cannot_leave_the_directory(notes, monkeypatch):
+    weird = "../../evil"
+    monkeypatch.setattr(
+        rag_mini, "connections", lambda: [{"id": weird, "name": "x", "enabled": True}]
+    )
+    await _call(action="add", text="n")
+    assert Path(db_memory._path(weird)).parent == Path(db_memory._DIR)
+    assert db_memory.overview()["databases"][0]["id"] == weird  # and it reads back
+
+
+def test_two_chats_writing_at_once_lose_nothing(notes):
+    import threading
+
+    threads = [
+        threading.Thread(target=db_memory._run, args=({"action": "add", "text": f"n{i}"}, "anna"))
+        for i in range(30)
+    ]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    entries = db_memory.overview()["databases"][0]["entries"]
+    assert len(entries) == 30 and len({e["id"] for e in entries}) == 30
+
+
+async def test_an_unreadable_file_is_not_overwritten(notes):
+    await _call(action="add", text="n")
+    _file().write_bytes(b"\xff\xfe kaputt")
+    assert "could not be accessed" in (await _call(action="add", text="m"))["error"]
+    assert db_memory.turn_hint() == ""
+    assert _file().read_bytes() == b"\xff\xfe kaputt"
+
+
+def _old_table(monkeypatch, rows):
+    from sqlalchemy import create_engine, text
+    from sqlalchemy.pool import StaticPool
+
+    import core.database
+
+    engine = create_engine(
+        "sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool
+    )
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                "CREATE TABLE db_memory_entries (id INTEGER PRIMARY KEY, connection_id VARCHAR, "
+                "text TEXT, created_by VARCHAR, updated_by VARCHAR, created_at DATETIME, "
+                "updated_at DATETIME)"
+            )
+        )
+        for row in rows:
+            conn.execute(
+                text(
+                    "INSERT INTO db_memory_entries VALUES (:id, :cid, :text, :by, :by, "
+                    "'2026-11-04 15:00:00.123456', '2026-11-04 15:00:00.123456')"
+                ),
+                row,
+            )
+    monkeypatch.setattr(core.database, "engine", engine)
+    monkeypatch.setattr(db_memory, "_old_table_checked", False)
+    return engine
+
+
+async def test_notes_of_the_old_table_are_taken_over_once(notes, monkeypatch):
+    from sqlalchemy import text
+
+    engine = _old_table(
+        monkeypatch,
+        [
+            {"id": 3, "cid": "c1", "text": "alte Notiz", "by": "anna"},
+            {"id": 7, "cid": "c1", "text": "noch eine", "by": None},
+        ],
+    )
+    entries = db_memory.overview()["databases"][0]["entries"]
+    assert [(e["id"], e["text"], e["created_by"]) for e in entries] == [
+        (3, "alte Notiz", "anna"),
+        (7, "noch eine", None),
+    ]
+    assert entries[0]["created_at"] == "2026-11-04T15:00:00"
+    assert (await _call(action="add", text="neu"))["output"] == "Noted as #8."
+
+    # A removal stays removed the next time the app starts.
+    assert (await _call(action="remove", id=3))["exit_code"] == 0
+    monkeypatch.setattr(db_memory, "_old_table_checked", False)
+    assert "alte Notiz" not in (await _call(action="view"))["output"]
+    # And the table itself was only read.
+    with engine.connect() as conn:
+        assert conn.execute(text("SELECT COUNT(*) FROM db_memory_entries")).scalar() == 2
+
+
+async def test_no_old_table_is_fine(notes, monkeypatch):
+    from sqlalchemy import create_engine
+
+    import core.database
+
+    monkeypatch.setattr(core.database, "engine", create_engine("sqlite://"))
+    monkeypatch.setattr(db_memory, "_old_table_checked", False)
+    assert "(no notes yet)" in (await _call(action="view"))["output"]

@@ -12,6 +12,11 @@ must stay the same for the prefix cache), and nothing is put into the prompt una
 A budget keeps a recall cheap: when it is used up, the model has to tidy up before
 adding more.
 
+Every database has one Markdown file, data/memories/databases/<connection id>.md, and
+each change updates it in place (src/memory_file.py). The connection's id never
+changes, so renaming a database keeps its notes. A note's number is unique across all
+databases, so changing one needs no database name.
+
 Connections are global in Talos, so notes cross users by design. That is why they
 are for structure only, and why a recall says they are reference material: nothing in
 a database row may become an instruction to another user's chat.
@@ -22,14 +27,23 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 from typing import Any, Dict, List, Optional, Tuple
 
-from core.database import DbMemoryEntry, SessionLocal
+from src import memory_file
+from src.constants import DATA_DIR
+from src.memory_file import Entry
+from src.memory_file import clean as _clean
 
 logger = logging.getLogger(__name__)
 
 MAX_ENTRY_CHARS = 600
 MAX_TOTAL_CHARS = 4000
+
+_DIR = os.path.join(DATA_DIR, "memories", "databases")
+_HEADING = "Database notes"
+_OLD_TABLE = "db_memory_entries"
+_old_table_checked = False
 
 _ACTION_ALIASES = {
     "list": "view",
@@ -76,26 +90,82 @@ def _enabled_connections() -> List[Dict[str, Any]]:
     return [c for c in connections() if c.get("enabled")]
 
 
-def _clean(text: Any) -> str:
-    # One line per note: a stored line break could otherwise pose as a new section
-    # of the prompt it is shown in.
-    return " ".join(str(text or "").split())
+def _path(connection_id: str) -> str:
+    return os.path.join(_DIR, memory_file.file_name(connection_id))
 
 
-def _entries(db, connection_id: str) -> List[DbMemoryEntry]:
-    return (
-        db.query(DbMemoryEntry)
-        .filter(DbMemoryEntry.connection_id == connection_id)
-        .order_by(DbMemoryEntry.id)
-        .all()
-    )
+def _stored_ids() -> List[str]:
+    try:
+        names = os.listdir(_DIR)
+    except FileNotFoundError:
+        return []
+    return sorted(memory_file.key_of(n) for n in names if memory_file.is_memory_file(n))
 
 
-def _lines(rows: List[DbMemoryEntry]) -> str:
+def _entries(connection_id: str) -> List[Entry]:
+    return memory_file.read(_path(connection_id))[0]
+
+
+def _next_id() -> int:
+    """Past every number any database's file has given out."""
+    return max([1, *(memory_file.read(_path(cid))[1] for cid in _stored_ids())])
+
+
+def _save(connection_id: str, entries: List[Entry], next_id: int) -> None:
+    memory_file.write(_path(connection_id), entries, next_id, _HEADING)
+
+
+def _table_stamp(value: Any) -> str:
+    return str(value or "").replace(" ", "T")[:19]
+
+
+def _take_over_old_table() -> None:
+    """Notes used to live in a table. Copy them over once; the table stays as it was.
+    A database that already has a file is left alone, so this can't undo a removal."""
+    global _old_table_checked
+    if _old_table_checked:
+        return
+    _old_table_checked = True
+    try:
+        from sqlalchemy import inspect, text
+
+        from core.database import engine
+
+        if not inspect(engine).has_table(_OLD_TABLE):
+            return
+        with engine.connect() as conn:
+            rows = conn.execute(
+                text(
+                    "SELECT id, connection_id, text, created_by, updated_by, created_at, "
+                    f"updated_at FROM {_OLD_TABLE} ORDER BY id"
+                )
+            ).fetchall()
+        by_connection: Dict[str, List[Entry]] = {}
+        for row in rows:
+            by_connection.setdefault(row.connection_id, []).append(
+                Entry(
+                    row.id,
+                    _clean(row.text),
+                    created_at=_table_stamp(row.created_at),
+                    updated_at=_table_stamp(row.updated_at),
+                    created_by=row.created_by or "",
+                    updated_by=row.updated_by or "",
+                )
+            )
+        next_id = max([r.id for r in rows], default=0) + 1
+        for connection_id, entries in by_connection.items():
+            if not os.path.exists(_path(connection_id)):
+                _save(connection_id, entries, next_id)
+                logger.info("db_memory: took over %d note(s) of %s", len(entries), connection_id)
+    except Exception as e:
+        logger.warning("db_memory: could not take over the old table: %s", e)
+
+
+def _lines(rows: List[Entry]) -> str:
     return "\n".join(f"#{r.id} {r.text}" for r in rows)
 
 
-def _used(rows: List[DbMemoryEntry]) -> int:
+def _used(rows: List[Entry]) -> int:
     return sum(len(r.text) for r in rows)
 
 
@@ -127,14 +197,14 @@ def _error(message: str) -> Dict[str, Any]:
     return {"error": message, "exit_code": 1}
 
 
-def _full_message(name: str, used: int, needed: int, rows: List[DbMemoryEntry]) -> Dict[str, Any]:
+def _full_message(name: str, used: int, needed: int, rows: List[Entry]) -> Dict[str, Any]:
     return _error(
         f"The notes on {name} are full ({used} of {MAX_TOTAL_CHARS} characters, this needs "
         f"{needed} more). Shorten or remove notes first:\n{_lines(rows)}"
     )
 
 
-def _view(db, conns: List[Dict[str, Any]], requested: str) -> Dict[str, Any]:
+def _view(conns: List[Dict[str, Any]], requested: str) -> Dict[str, Any]:
     if requested:
         conn, err = _pick_connection(conns, requested)
         if conn is None:
@@ -144,64 +214,74 @@ def _view(db, conns: List[Dict[str, Any]], requested: str) -> Dict[str, Any]:
         return _error("No SQL databases are configured.")
     parts = [_RECALL_NOTE]
     for conn in conns:
-        rows = _entries(db, conn["id"])
+        rows = _entries(conn["id"])
         body = _lines(rows) or "(no notes yet)"
         head = f"{conn['name']} ({_used(rows)} of {MAX_TOTAL_CHARS} characters used)"
         parts.append(f"{head}:\n{body}")
     return {"output": "\n\n".join(parts), "exit_code": 0}
 
 
-def _add(db, conn: Dict[str, Any], text: str, owner: Optional[str]) -> Dict[str, Any]:
-    rows = _entries(db, conn["id"])
+def _add(conn: Dict[str, Any], text: str, owner: Optional[str]) -> Dict[str, Any]:
+    rows = _entries(conn["id"])
     same = next((r for r in rows if r.text == text), None)
     if same is not None:
         return {"output": f"Already noted as #{same.id}.", "exit_code": 0}
     used = _used(rows)
     if used + len(text) > MAX_TOTAL_CHARS:
         return _full_message(conn["name"], used, len(text), rows)
-    entry = DbMemoryEntry(
-        connection_id=conn["id"], text=text, created_by=owner or None, updated_by=owner or None
+    entry_id = _next_id()
+    stamp = memory_file.now()
+    rows.append(
+        Entry(
+            entry_id,
+            text,
+            created_at=stamp,
+            updated_at=stamp,
+            created_by=owner or "",
+            updated_by=owner or "",
+        )
     )
-    db.add(entry)
-    db.commit()
-    return {"output": f"Noted as #{entry.id}.", "exit_code": 0}
+    _save(conn["id"], rows, entry_id + 1)
+    return {"output": f"Noted as #{entry_id}.", "exit_code": 0}
 
 
-def _find_entry(db, conns: List[Dict[str, Any]], raw_id: Any):
+def _find_entry(conns: List[Dict[str, Any]], raw_id: Any):
+    """(connection, its entries, the entry, the file's next id, problem)."""
     entry_id = _entry_id(raw_id)
     if entry_id is None:
-        return None, 'This action needs "id", the number of the note.'
-    entry = db.get(DbMemoryEntry, entry_id)
-    if entry is None or entry.connection_id not in {c["id"] for c in conns}:
-        return None, f"There is no note #{entry_id}."
-    return entry, ""
+        return None, [], None, 0, 'This action needs "id", the number of the note.'
+    for conn in conns:
+        rows, next_id = memory_file.read(_path(conn["id"]))
+        entry = next((r for r in rows if r.id == entry_id), None)
+        if entry is not None:
+            return conn, rows, entry, next_id, ""
+    return None, [], None, 0, f"There is no note #{entry_id}."
 
 
 def _edit(
-    db, conns: List[Dict[str, Any]], raw_id: Any, text: str, owner: Optional[str]
+    conns: List[Dict[str, Any]], raw_id: Any, text: str, owner: Optional[str]
 ) -> Dict[str, Any]:
-    entry, err = _find_entry(db, conns, raw_id)
+    conn, rows, entry, next_id, err = _find_entry(conns, raw_id)
     if entry is None:
         return _error(err)
-    rows = _entries(db, entry.connection_id)
     others = _used([r for r in rows if r.id != entry.id])
     if others + len(text) > MAX_TOTAL_CHARS:
-        name = next(c["name"] for c in conns if c["id"] == entry.connection_id)
-        return _full_message(name, others + len(entry.text), len(text) - len(entry.text), rows)
+        return _full_message(
+            conn["name"], others + len(entry.text), len(text) - len(entry.text), rows
+        )
     entry.text = text
-    entry.updated_by = owner or None
-    db.commit()
+    entry.updated_by = owner or ""
+    entry.updated_at = memory_file.now()
+    _save(conn["id"], rows, next_id)
     return {"output": f"Note #{entry.id} changed.", "exit_code": 0}
 
 
-def _remove(db, conns: List[Dict[str, Any]], raw_id: Any) -> Dict[str, Any]:
-    entry, err = _find_entry(db, conns, raw_id)
+def _remove(conns: List[Dict[str, Any]], raw_id: Any) -> Dict[str, Any]:
+    conn, rows, entry, next_id, err = _find_entry(conns, raw_id)
     if entry is None:
         return _error(err)
-    entry_id = entry.id
-    db.delete(entry)
-    db.commit()
-    return {"output": f"Note #{entry_id} removed.", "exit_code": 0}
+    _save(conn["id"], [r for r in rows if r.id != entry.id], next_id)
+    return {"output": f"Note #{entry.id} removed.", "exit_code": 0}
 
 
 def _text_problem(action: str, text: str) -> str:
@@ -227,18 +307,16 @@ def _run(args: Dict[str, Any], owner: Optional[str]) -> Dict[str, Any]:
             return _error(problem)
 
     conns = _enabled_connections()
-    db = SessionLocal()
-    try:
+    with memory_file.LOCK:
+        _take_over_old_table()
         if action == "view":
-            return _view(db, conns, requested)
+            return _view(conns, requested)
         if action == "add":
             conn, err = _pick_connection(conns, requested)
-            return _add(db, conn, text, owner) if conn else _error(err)
+            return _add(conn, text, owner) if conn else _error(err)
         if action == "edit":
-            return _edit(db, conns, args.get("id"), text, owner)
-        return _remove(db, conns, args.get("id"))
-    finally:
-        db.close()
+            return _edit(conns, args.get("id"), text, owner)
+        return _remove(conns, args.get("id"))
 
 
 async def do_db_memory(content: str, owner: Optional[str] = None) -> Dict[str, Any]:
@@ -258,33 +336,28 @@ async def do_db_memory(content: str, owner: Optional[str] = None) -> Dict[str, A
 # ---------------------------------------------------------------------------
 
 
-def _known_connections(db) -> List[Dict[str, Any]]:
+def _known_connections() -> List[Dict[str, Any]]:
     """Every database notes can belong to. Unlike the model, an admin also reaches
     the notes of a switched-off database and of one that no longer exists."""
     from src.rag_mini import connections
 
     known = [{**c, "removed": False} for c in connections()]
     seen = {c["id"] for c in known}
-    stored = sorted(cid for (cid,) in db.query(DbMemoryEntry.connection_id).distinct())
     known += [
         {"id": cid, "name": cid, "enabled": False, "removed": True}
-        for cid in stored
+        for cid in _stored_ids()
         if cid not in seen
     ]
     return known
 
 
-def _iso(value) -> Optional[str]:
-    return value.isoformat() if value else None
-
-
 def overview() -> Dict[str, Any]:
     """All notes by database, with who wrote them and how much room is left."""
-    db = SessionLocal()
-    try:
+    with memory_file.LOCK:
+        _take_over_old_table()
         databases = []
-        for conn in _known_connections(db):
-            rows = _entries(db, conn["id"])
+        for conn in _known_connections():
+            rows = _entries(conn["id"])
             databases.append(
                 {
                     "id": conn["id"],
@@ -296,22 +369,20 @@ def overview() -> Dict[str, Any]:
                         {
                             "id": r.id,
                             "text": r.text,
-                            "created_by": r.created_by,
-                            "updated_by": r.updated_by,
-                            "created_at": _iso(r.created_at),
-                            "updated_at": _iso(r.updated_at),
+                            "created_by": r.created_by or None,
+                            "updated_by": r.updated_by or None,
+                            "created_at": r.created_at or None,
+                            "updated_at": r.updated_at or None,
                         }
                         for r in rows
                     ],
                 }
             )
-        return {
-            "entry_limit": MAX_ENTRY_CHARS,
-            "total_limit": MAX_TOTAL_CHARS,
-            "databases": databases,
-        }
-    finally:
-        db.close()
+    return {
+        "entry_limit": MAX_ENTRY_CHARS,
+        "total_limit": MAX_TOTAL_CHARS,
+        "databases": databases,
+    }
 
 
 def admin_add(connection_id: str, text: Any, owner: Optional[str]) -> Dict[str, Any]:
@@ -319,14 +390,12 @@ def admin_add(connection_id: str, text: Any, owner: Optional[str]) -> Dict[str, 
     problem = _text_problem("add", text)
     if problem:
         return _error(problem)
-    db = SessionLocal()
-    try:
-        conn = next((c for c in _known_connections(db) if c["id"] == connection_id), None)
+    with memory_file.LOCK:
+        _take_over_old_table()
+        conn = next((c for c in _known_connections() if c["id"] == connection_id), None)
         if conn is None or conn["removed"]:
             return _error(f"There is no database '{connection_id}'.")
-        return _add(db, conn, text, owner)
-    finally:
-        db.close()
+        return _add(conn, text, owner)
 
 
 def admin_edit(entry_id: int, text: Any, owner: Optional[str]) -> Dict[str, Any]:
@@ -334,19 +403,15 @@ def admin_edit(entry_id: int, text: Any, owner: Optional[str]) -> Dict[str, Any]
     problem = _text_problem("edit", text)
     if problem:
         return _error(problem)
-    db = SessionLocal()
-    try:
-        return _edit(db, _known_connections(db), entry_id, text, owner)
-    finally:
-        db.close()
+    with memory_file.LOCK:
+        _take_over_old_table()
+        return _edit(_known_connections(), entry_id, text, owner)
 
 
 def admin_remove(entry_id: int) -> Dict[str, Any]:
-    db = SessionLocal()
-    try:
-        return _remove(db, _known_connections(db), entry_id)
-    finally:
-        db.close()
+    with memory_file.LOCK:
+        _take_over_old_table()
+        return _remove(_known_connections(), entry_id)
 
 
 def turn_hint() -> str:
@@ -354,15 +419,9 @@ def turn_hint() -> str:
     Empty when there are none, so a look can't come up with nothing."""
     try:
         ids = [c["id"] for c in _enabled_connections()]
-        db = SessionLocal()
-        try:
-            count = (
-                db.query(DbMemoryEntry).filter(DbMemoryEntry.connection_id.in_(ids)).count()
-                if ids
-                else 0
-            )
-        finally:
-            db.close()
+        with memory_file.LOCK:
+            _take_over_old_table()
+            count = sum(len(_entries(cid)) for cid in ids)
     except Exception as e:
         logger.warning("db_memory notes not available: %s", e)
         return ""

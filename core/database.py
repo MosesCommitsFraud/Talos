@@ -707,20 +707,6 @@ class UiDataSource(Base):
     __table_args__ = (Index("ix_ui_data_sources_ui_source", "ui_id", "source_id", unique=True),)
 
 
-class DbMemoryEntry(TimestampMixin, Base):
-    """One note the assistant keeps on a SQL database, shared by all users.
-    Bound to the connection's stable id, so renaming a database keeps its notes.
-    See src/db_memory.py."""
-
-    __tablename__ = "db_memory_entries"
-
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    connection_id = Column(String, nullable=False, index=True)
-    text = Column(Text, nullable=False)
-    created_by = Column(String, nullable=True)
-    updated_by = Column(String, nullable=True)
-
-
 class CrewMember(TimestampMixin, Base):
     """A custom AI persona ('crew member') with its own personality, model, tools, and memory scope."""
 
