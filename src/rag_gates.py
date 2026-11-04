@@ -29,7 +29,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 logger = logging.getLogger(__name__)
 
 GATE_MODES = ("off", "shadow", "on")
-DEFAULT_SUFFICIENCY_GATE = "shadow"
+DEFAULT_SUFFICIENCY_GATE = "off"
 DEFAULT_GROUNDING_GATE = "on"
 _DEFAULTS = {"sufficiency_gate": DEFAULT_SUFFICIENCY_GATE, "grounding_gate": DEFAULT_GROUNDING_GATE}
 _MAX_PASSAGE_CHARS = 24000

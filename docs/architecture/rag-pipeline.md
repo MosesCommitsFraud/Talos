@@ -155,8 +155,9 @@ Within a turn, a few rules keep lookups from running in circles:
   `shadow` judges in the background and only records the verdict, and `on` waits for it: the
   model hears what is missing, the reader gets a note below the answer. The grounding check
   is on by default and uses the model that answered; a 4B helper model flagged a third of
-  sound answers in testing. The sufficiency check logs only by default and uses the utility
-  model. `GET /api/rag/gate-verdicts` lists the latest verdicts.
+  sound answers in testing. The sufficiency check is off by default and uses the utility
+  model, where the same 4B model called about half of the sound retrievals incomplete.
+  `GET /api/rag/gate-verdicts` lists the latest verdicts.
 
 `grep_knowledge` treats spelling variants as the same term (`src/rag_term_match.py`): "Strg+M"
 finds "Strg + M", "Uebersetzen" finds "Übersetzen". If the phrase occurs nowhere, it falls back

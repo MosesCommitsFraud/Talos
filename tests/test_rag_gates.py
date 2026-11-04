@@ -29,12 +29,18 @@ def model(monkeypatch):
 SOURCES = [{"n": 1, "filename": "a.pdf", "_text": "Der Export startet über den Button Export."}]
 
 
-def test_grounding_is_on_and_sufficiency_logs_unless_set_otherwise():
+def test_grounding_is_on_and_sufficiency_off_unless_set_otherwise():
     assert rag_gates.gate_mode({}, "grounding_gate") == "on"
-    assert rag_gates.gate_mode({}, "sufficiency_gate") == "shadow"
+    assert rag_gates.gate_mode({}, "sufficiency_gate") == "off"
     assert rag_gates.gate_mode({"grounding_gate": "banana"}, "grounding_gate") == "on"
-    assert rag_gates.gate_mode({"sufficiency_gate": "banana"}, "sufficiency_gate") == "shadow"
+    assert rag_gates.gate_mode({"sufficiency_gate": "banana"}, "sufficiency_gate") == "off"
     assert rag_gates.gate_mode({"grounding_gate": "OFF"}, "grounding_gate") == "off"
+    assert rag_gates.gate_mode({"sufficiency_gate": "shadow"}, "sufficiency_gate") == "shadow"
+
+
+def test_sufficiency_asks_nobody_by_default(model):
+    assert rag_gates.sufficiency_note({}, "F", SOURCES) == ""
+    assert model["calls"] == []
 
 
 def test_grounding_asks_the_model_that_answered(monkeypatch):
