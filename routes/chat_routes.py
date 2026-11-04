@@ -1151,6 +1151,7 @@ def setup_chat_routes(
                         reasoning_effort=reasoning_effort,
                         wire_sink=_wire_sink,
                         deep_research=do_research,
+                        inbox=lambda: agent_runs.take_queued(session),
                     ):
                         if chunk.startswith("data: ") and not chunk.startswith("data: [DONE]"):
                             try:
@@ -1355,20 +1356,27 @@ def setup_chat_routes(
                     # outer finally from running and left _active_streams
                     # with a stale entry).
                     try:
-                        if full_response or thinking_response:
+                        # Keep exactly what happened up to the stop, also a
+                        # turn that so far only called tools and wrote no text.
+                        _stopped_wire = _turn_wire_record(sess, _wire_sink)
+                        _worked = any(
+                            m.get("role") == "tool" or m.get("tool_calls")
+                            for m in (_stopped_wire or {}).get("messages", [])
+                        )
+                        if full_response or thinking_response or _worked:
                             logger.info(
                                 "Client disconnected mid-stream for session %s, saving partial response (%d chars)",
                                 session,
                                 len(full_response),
                             )
                             _stopped_md_base = {"stopped": True, "model": sess.model}
+                            if _wire_sink.get("queued_messages"):
+                                _stopped_md_base["queued_messages"] = _wire_sink["queued_messages"]
                             if thinking_response.strip():
                                 _stopped_md_base["thinking"] = thinking_response.strip()
                             _stopped_content2, _stopped_md2 = clean_thinking_for_save(
                                 full_response, _stopped_md_base
                             )
-                            # Keep exactly what happened up to the stop.
-                            _stopped_wire = _turn_wire_record(sess, _wire_sink)
                             if _stopped_wire:
                                 stamp_answer(_stopped_wire, _stopped_content2)
                                 _stopped_md2 = {**(_stopped_md2 or {}), WIRE_KEY: _stopped_wire}
@@ -1443,8 +1451,30 @@ def setup_chat_routes(
     @router.post("/api/chat/stop/{session_id}")
     async def chat_stop(request: Request, session_id: str) -> Dict[str, Any]:
         _verify_session_owner(request, session_id)
-        stopped = agent_runs.stop(session_id)
+        # Answers once the partial answer is saved, so what the client sends next
+        # finds the interrupted turn in the history.
+        stopped = await agent_runs.stop_and_wait(session_id)
         return {"stopped": stopped}
+
+    # ------------------------------------------------------------------ #
+    # POST /api/chat/queue — hand a running turn a message for its next round.
+    # `queued: false` means no turn is running; the client then sends it as a
+    # turn of its own, as it does with anything the turn never picked up.
+    # ------------------------------------------------------------------ #
+    @router.post("/api/chat/queue/{session_id}")
+    async def chat_queue(request: Request, session_id: str) -> Dict[str, Any]:
+        _verify_session_owner(request, session_id)
+        body = await request.json()
+        item_id = str(body.get("id") or "").strip()
+        text = str(body.get("text") or "").strip()
+        if not item_id or not text:
+            raise HTTPException(400, "Queued message needs an id and text")
+        return {"queued": agent_runs.enqueue(session_id, {"id": item_id, "text": text})}
+
+    @router.delete("/api/chat/queue/{session_id}/{item_id}")
+    async def chat_unqueue(request: Request, session_id: str, item_id: str) -> Dict[str, Any]:
+        _verify_session_owner(request, session_id)
+        return {"withdrawn": agent_runs.withdraw(session_id, item_id)}
 
     # ------------------------------------------------------------------ #
     # GET /api/chat/stream_status — check if a stream is active for a session

@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 
 
 class _Run:
-    __slots__ = ("buffer", "subscribers", "status", "task", "evict_task", "started_at")
+    __slots__ = ("buffer", "subscribers", "status", "task", "evict_task", "started_at", "inbox")
 
     def __init__(self) -> None:
         self.buffer: list = []  # ordered SSE event strings (replay log)
@@ -36,6 +36,9 @@ class _Run:
         # Monotonic start stamp so a reconnecting client can restore the elapsed
         # "working for" timer instead of restarting it from zero.
         self.started_at: float = time.monotonic()
+        # Messages the user queued during this run, waiting for the agent loop's
+        # next round boundary (see take_queued).
+        self.inbox: list = []
 
 
 _RUNS: Dict[str, _Run] = {}
@@ -336,6 +339,58 @@ def stop(session_id: str) -> bool:
     """Cancel an in-flight run (the wrapped generator saves its partial)."""
     run = _RUNS.get(session_id)
     if run and run.task and not run.task.done():
+        run.inbox.clear()
         run.task.cancel()
         return True
     return False
+
+
+# How long a stop waits for the run to save what it had. Past this the caller
+# gets its answer anyway; the save still happens, it just isn't awaited.
+_STOP_WAIT_S = 10.0
+
+
+async def stop_and_wait(session_id: str) -> bool:
+    """Cancel an in-flight run and wait until its partial answer is saved.
+
+    A message sent right after a stop has to find the interrupted turn in the
+    history. If it overtook the save, its context would lack the turn, and the
+    turn's answer would land behind the new question."""
+    run = _RUNS.get(session_id)
+    task = run.task if run else None
+    if not stop(session_id) or task is None:
+        return False
+    await asyncio.wait({task}, timeout=_STOP_WAIT_S)
+    return True
+
+
+def enqueue(session_id: str, item: dict) -> bool:
+    """Hand a run a message for its next round boundary. False when no run is in
+    flight: then there is no turn to add it to, and it needs a turn of its own."""
+    run = _RUNS.get(session_id)
+    if run is None or run.status != "running":
+        return False
+    run.inbox.append(item)
+    return True
+
+
+def withdraw(session_id: str, item_id: str) -> bool:
+    """Take a queued message back. False once the agent has already received it."""
+    run = _RUNS.get(session_id)
+    if run is None:
+        return False
+    kept = [item for item in run.inbox if item.get("id") != item_id]
+    removed = len(kept) != len(run.inbox)
+    run.inbox[:] = kept
+    return removed
+
+
+def take_queued(session_id: str) -> list:
+    """Everything queued for this run so far, in order. Each message is handed
+    out once."""
+    run = _RUNS.get(session_id)
+    if run is None or not run.inbox:
+        return []
+    items = list(run.inbox)
+    run.inbox.clear()
+    return items

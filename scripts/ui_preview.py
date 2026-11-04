@@ -1399,6 +1399,8 @@ def _delegate_stream() -> bytes:
             "exit_code": 0,
         },
         {"type": "plan_update", "data": {"plan": _MOCK_PLAN.format("x", "x", "x", "x", " ")}},
+        {"type": "agent_step", "round": 2},
+        ": inbox",
         {"delta": "Alle drei Quellen beschreiben den Export gleich: Einstellungen › Export [1], "},
         {
             "delta": "Format CSV [2]; Handbuch B ergänzt einen Zeitplan [3], im Workshop ab 0:12:40 [4]."
@@ -1728,6 +1730,8 @@ def _form_fields(body: bytes, ctype: str) -> dict[str, str]:
 # In-memory shared-skills store for the settings panel preview.
 # Files posted to /api/upload during this preview run: id -> (name, mime, bytes).
 _UPLOADS: dict[str, tuple[str, str, bytes]] = {}
+# Messages queued during a mock turn, per session, until its next round.
+_QUEUED: dict[str, list[dict]] = {}
 
 _SHARED_SKILLS: list[dict] = [
     {
@@ -2501,19 +2505,27 @@ class PreviewHandler(BaseHTTPRequestHandler):
     def _send_json(self, data, status: int = 200):
         self._send(status, _json_bytes(data))
 
-    def _send_event_stream(self, body: bytes):
+    def _send_event_stream(self, body: bytes, session_id: str = ""):
         """Drip mock SSE events so running/queue UI states can be previewed."""
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream")
         self.send_header("Cache-Control", "no-store")
         self.send_header("Access-Control-Allow-Origin", "*")
         self.end_headers()
+        _QUEUED.pop(session_id, None)
         for event in body.split(b"\n\n"):
             if not event:
                 continue
             if event.startswith(b": sleep "):
                 # Mock-only pause: hold a tool "running" while the tray polls.
                 time.sleep(float(event[len(b": sleep ") :]))
+                continue
+            if event == b": inbox":
+                # Mock-only round boundary: deliver what was queued meanwhile,
+                # the way the agent loop does before its next round.
+                for item in _QUEUED.pop(session_id, []):
+                    self.wfile.write(_sse({"type": "queued_message", **item}).encode("utf-8"))
+                    self.wfile.flush()
                 continue
             self.wfile.write(event + b"\n\n")
             self.wfile.flush()
@@ -3179,9 +3191,15 @@ class PreviewHandler(BaseHTTPRequestHandler):
             _record_turn(session_id, message, ask_answers)
             if "subagent" in message.lower() or "delegate" in message.lower():
                 _start_mock_subagents(session_id)
-                self._send_event_stream(_delegate_stream())
+                self._send_event_stream(_delegate_stream(), session_id)
                 return
             self._send_event_stream(_preview_stream(message))
+            return
+        if path.startswith("/api/chat/queue/"):
+            session_id = path[len("/api/chat/queue/") :]
+            payload = json.loads(body or b"{}")
+            _QUEUED.setdefault(session_id, []).append({"id": payload["id"], "text": payload["text"]})
+            self._send_json({"queued": True})
             return
         if path.endswith("/delete-messages"):
             # /api/session/{id}/delete-messages — drop the rows so history stays
@@ -3382,6 +3400,11 @@ class PreviewHandler(BaseHTTPRequestHandler):
     def do_DELETE(self):
         parsed = urlparse(self.path)
         path = parsed.path
+        if path.startswith("/api/chat/queue/"):
+            session_id, _, item_id = path[len("/api/chat/queue/") :].partition("/")
+            _QUEUED[session_id] = [q for q in _QUEUED.get(session_id, []) if q["id"] != item_id]
+            self._send_json({"withdrawn": True})
+            return
         if path == "/api/artifacts":
             target = parse_qs(parsed.query).get("path", [""])[0]
             _LIBRARY[:] = [r for r in _LIBRARY if r["path"] != target]

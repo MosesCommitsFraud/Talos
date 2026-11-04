@@ -15,7 +15,7 @@ import os
 import re
 import tempfile
 import time
-from typing import Any, AsyncGenerator, Dict, List, Optional, Set
+from typing import Any, AsyncGenerator, Callable, Dict, List, Optional, Set
 from urllib.parse import urlparse
 
 from src.agent_tools import (
@@ -1472,6 +1472,37 @@ def _append_tool_results(
 # the "toolResults" context-meter category.
 TOOL_RESULT_PREFIX = "[Tool execution results]"
 
+# Opens a message the user queued while the turn was running. The model has to
+# know it is an addition, or it reads as a new request replacing the open one.
+QUEUED_MESSAGE_NOTE = (
+    "The user sent this message while you were working. Take it into account as "
+    "you continue. Your earlier task is still open unless this message changes it."
+)
+
+
+def _append_queued_message(messages: List[Dict], text: str) -> Optional[Dict]:
+    """Add a message the user queued mid-turn to the end of the conversation,
+    and return it if it became a message of its own.
+
+    After text-protocol tool results the last message is already a user message
+    that no request has carried yet. Extending it avoids two user messages in a
+    row, which some chat templates reject, and still changes nothing the model
+    server has seen."""
+    content = f"{QUEUED_MESSAGE_NOTE}\n\n{text}"
+    last = messages[-1] if messages else None
+    if (
+        isinstance(last, dict)
+        and last.get("role") == "user"
+        and isinstance(last.get("content"), str)
+        and last["content"].startswith(TOOL_RESULT_PREFIX)
+    ):
+        last["content"] = f"{last['content']}\n\n{content}"
+        return None
+    message = {"role": "user", "content": content}
+    messages.append(message)
+    return message
+
+
 # Maps a preface message's metadata.source label to a context-meter category.
 # System-role messages are always "system"; untagged user/assistant/tool turns
 # fall through to "messages".
@@ -1962,8 +1993,13 @@ async def stream_agent_loop(
     tool_allowlist: Optional[Set[str]] = None,
     subagent: bool = False,
     deep_research: bool = False,
+    inbox: Optional[Callable[[], List[Dict[str, Any]]]] = None,
 ) -> AsyncGenerator[str, None]:
     """Streaming agent loop generator.
+
+    `inbox` returns the messages the user queued since it was last called. They
+    join the conversation before the next round, so the model sees them at the
+    next opportunity without the turn being interrupted.
 
     `deep_research` runs the turn as a research project (src/deep_research.py):
     the protocol goes into the turn context and subagents started by this turn
@@ -1984,6 +2020,7 @@ async def stream_agent_loop(
       - data: {"type": "tool_start", "tool": "...", ...}    (before execution)
       - data: {"type": "tool_output", "tool": "...", ...}   (after execution)
       - data: {"type": "agent_step", "round": N}            (next round)
+      - data: {"type": "queued_message", "id": "...", ...}  (queued message delivered)
       - data: {"type": "metrics", "data": {...}}            (final metrics)
       - data: [DONE]                                        (end)
     """
@@ -2608,6 +2645,8 @@ async def stream_agent_loop(
     first_token_received = False
     tool_events = []  # Persist tool executions for history reload
     round_texts = []  # Cleaned text per round for history reload
+    queued_messages: List[Dict[str, Any]] = []  # delivered mid-turn, for history reload
+    _queued_pins: List[Dict] = []  # their messages, kept verbatim by compaction
     # Completion-verifier state (mechanism 3a). _effectful_used flips on when
     # a tool that produces a checkable artifact runs; the verifier only fires
     # on such turns and at most _VERIFIER_MAX_ROUNDS times.
@@ -2693,6 +2732,19 @@ async def stream_agent_loop(
         round_response = ""
         if wire_sink is not None:
             wire_sink["round_text"] = ""
+
+        # ── Messages queued during the turn ──
+        # At the end of the list, so the prompt so far stays a stable prefix, and
+        # ahead of compaction, which then pins them like the original question.
+        if round_num > 1 and inbox is not None:
+            for _queued in inbox():
+                _queued_msg = _append_queued_message(messages, str(_queued.get("text") or ""))
+                if _queued_msg is not None:
+                    _queued_pins.append(_queued_msg)
+                queued_messages.append({**_queued, "round": round_num})
+                if wire_sink is not None:
+                    wire_sink["queued_messages"] = queued_messages
+                yield f"data: {json.dumps({'type': 'queued_message', **_queued})}\n\n"
         round_reasoning = (
             ""  # reasoning_content deltas (DeepSeek-thinking, vLLM --reasoning-parser)
         )
@@ -2721,7 +2773,7 @@ async def stream_agent_loop(
                         model,
                         messages,
                         headers=headers,
-                        pinned=[m for m in (_pinned_query_msg,) if m is not None],
+                        pinned=[m for m in (_pinned_query_msg, *_queued_pins) if m is not None],
                         result_prefix=TOOL_RESULT_PREFIX,
                     )
                 except Exception as _ce:
@@ -4224,6 +4276,8 @@ async def stream_agent_loop(
         tool_schemas=all_tool_schemas,
         system_segments=system_segments,
     )
+    if queued_messages:
+        metrics["queued_messages"] = queued_messages
     if round_profile:
         if "_ended" in round_profile[-1]:
             round_profile[-1]["tools_s"] = round(time.time() - round_profile[-1].pop("_ended"), 2)
