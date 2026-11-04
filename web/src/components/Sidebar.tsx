@@ -185,7 +185,7 @@ function SessionRow({ session, projects }: { session: Session; projects: string[
           onDoubleClick={beginRename}
           className={cn(
             'group relative my-px flex w-full items-center gap-2 rounded-lg px-2 py-1 text-left text-sm transition-colors',
-            session.id === activeId ? 'bg-sidebar-active text-strong' : 'hover:bg-sidebar-accent',
+            session.id === activeId ? 'bg-sidebar-active' : 'hover:bg-sidebar-accent',
           )}
         >
           {pinned && <PinIcon className="size-3 shrink-0 -rotate-45 text-muted-foreground" />}
@@ -367,7 +367,7 @@ function ProjectRow({
           onDoubleClick={() => { setDraft(name); setRenaming(true); }}
           className={cn(
             'group my-px flex w-full items-center gap-2 rounded-lg px-2 py-1 text-left text-sm transition-colors',
-            active ? 'bg-sidebar-active text-strong' : 'hover:bg-sidebar-accent',
+            active ? 'bg-sidebar-active' : 'hover:bg-sidebar-accent',
           )}
         >
           <FolderIcon className="size-3.5 shrink-0 text-muted-foreground" />
@@ -434,9 +434,7 @@ function NavRow({
       aria-current={active ? 'page' : undefined}
       className={cn(
         'group/nav my-px flex h-[30px] w-full items-center gap-2.5 rounded-lg px-2 text-sm transition-colors [&_svg]:size-[18px] [&_svg]:shrink-0',
-        emphasis || active
-          ? 'bg-sidebar-active text-strong hover:bg-sidebar-active'
-          : 'text-foreground/80 hover:bg-sidebar-accent hover:text-foreground',
+        emphasis || active ? 'bg-sidebar-active' : 'hover:bg-sidebar-accent',
       )}
     >
       <span className="flex size-5 shrink-0 items-center justify-center">{icon}</span>
@@ -458,7 +456,7 @@ function SearchBar({ onOpen, shortcut }: { onOpen: () => void; shortcut?: string
     <button
       type="button"
       onClick={onOpen}
-      className="group/nav mb-1.5 flex h-[30px] w-full items-center gap-2 rounded-lg border border-input px-2.5 text-sm text-muted-foreground shadow-xs/5 outline-none transition-colors hover:bg-sidebar-accent hover:text-foreground focus-visible:border-ring dark:bg-input/20"
+      className="group/nav mb-1.5 flex h-[30px] w-full items-center gap-2 rounded-lg border border-input px-2.5 text-sm shadow-xs/5 outline-none transition-colors hover:bg-sidebar-accent focus-visible:border-ring dark:bg-input/20"
     >
       <SearchIcon className="size-4 shrink-0 opacity-80" />
       <span className="min-w-0 flex-1 truncate text-left">{t('sidebar.search')}</span>
@@ -586,7 +584,7 @@ function SidebarBody({ onOpenPalette, account, onOpenTicketDialog, preview }: Si
   const initial = (accountLabel ?? 'U').slice(0, 1).toUpperCase();
 
   return (
-    <div className="flex h-full w-full flex-col bg-sidebar text-foreground/70">
+    <div className="flex h-full w-full flex-col bg-sidebar text-strong">
       {/* Header — the wordmark, at the same height as the rail's expand button
           so nothing below shifts when the sidebar collapses. */}
       <div className="flex h-12 shrink-0 items-center px-3">
@@ -734,7 +732,7 @@ function SidebarBody({ onOpenPalette, account, onOpenTicketDialog, preview }: Si
             <button
               type="button"
               onClick={() => setVisibleCount((n) => n + CHAT_PAGE)}
-              className="my-1 flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-xs text-muted-foreground hover:bg-accent hover:text-foreground"
+              className="my-1 flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-xs hover:bg-accent"
             >
               <ChevronDownIcon className="size-3.5" />
               {t('sidebar.showMoreChats', { count: Math.min(hiddenCount, CHAT_PAGE) })}
@@ -771,7 +769,7 @@ function SidebarBody({ onOpenPalette, account, onOpenTicketDialog, preview }: Si
                   <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-primary/15 text-[10px] font-semibold text-primary">
                     {initial}
                   </span>
-                  <span className="min-w-0 truncate text-[13px] text-foreground/95 dark:text-inherit">{accountLabel ?? t('sidebar.user')}</span>
+                  <span className="min-w-0 truncate text-[13px]">{accountLabel ?? t('sidebar.user')}</span>
                   <ChevronDownIcon className="size-3.5 shrink-0 text-muted-foreground" />
                 </button>
               }
