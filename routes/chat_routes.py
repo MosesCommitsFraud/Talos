@@ -107,8 +107,16 @@ _AUTO_NAME_REGISTER_WAIT_S = 10  # the stream registers a moment after schedulin
 _AUTO_NAME_MAX_WAIT_S = 600  # a very long agent run still gets its title eventually
 
 
-async def _auto_name_after_stream(session_manager, sess, session_id: str, lang=None) -> None:
-    """Generate the chat title after the session's active stream has ended."""
+async def _auto_name_for_stream(session_manager, sess, session_id: str, lang=None) -> None:
+    """Generate the title of a chat that is streaming its first answer.
+
+    A small model is asked right away, since it does not compete with the
+    answer. Without one, or when it fails, the title waits for the stream to
+    end: fired in parallel on the chat model, the request would take one of the
+    server's few slots and its prefill while the user waits for the first token.
+    """
+    if await auto_name_session(session_manager, sess, lang=lang, small_only=True):
+        return
     loop = asyncio.get_running_loop()
     register_by = loop.time() + _AUTO_NAME_REGISTER_WAIT_S
     while session_id not in _active_streams and loop.time() < register_by:
@@ -744,16 +752,10 @@ def setup_chat_routes(
             ask_answers=ask_answers,
         )
 
-        # Auto-name the session once its first response is over. Scheduled now
-        # (the user message is in history) so the title still comes when the
-        # stream fails or is interrupted, but it runs only after the stream has
-        # ended: fired in parallel, the title request competed with the answer
-        # for the model server's few slots and its prefill, right when the
-        # user is waiting for the first token.
+        # Scheduled now (the user message is in history) so the title still
+        # comes when the stream fails or is interrupted.
         if not incognito and not compare_mode and needs_auto_name(sess.name):
-            asyncio.create_task(
-                _auto_name_after_stream(session_manager, sess, session, lang=ui_lang)
-            )
+            asyncio.create_task(_auto_name_for_stream(session_manager, sess, session, lang=ui_lang))
 
         _research_flags = {"do": do_research}  # Mutable container for generator scope
 

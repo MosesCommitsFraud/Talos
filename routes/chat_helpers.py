@@ -156,12 +156,40 @@ def needs_auto_name(name: str) -> bool:
     return False
 
 
-async def auto_name_session(session_manager, sess, lang: str | None = None):
+def _small_title_models(sess, utility: tuple, owner: str | None) -> list:
+    """The small models that can title this chat: the Utility model, then the
+    subagent model. The chat's own model is never one of them, so a request to
+    these does not compete with the answer being generated."""
+    models = [utility]
+    try:
+        from src.endpoint_resolver import resolve_endpoint_by_id
+        from src.settings import get_setting
+
+        ep_id = str(get_setting("subagent_endpoint_id", "") or "").strip()
+        if ep_id:
+            model = str(get_setting("subagent_model", "") or "").strip() or None
+            hit = resolve_endpoint_by_id(ep_id, model, owner)
+            if hit:
+                models.append(hit)
+    except Exception as e:
+        logger.debug(f"[auto-name] subagent model not available: {e}")
+    return [m for m in models if m[0] and m[1] and (m[0], m[1]) != (sess.endpoint_url, sess.model)]
+
+
+async def auto_name_session(
+    session_manager, sess, lang: str | None = None, small_only: bool = False
+) -> bool:
     """Generate a short title for a session from its first user message.
 
     `lang` is the UI language ("de"/"en") the title should be written in, so
     a German UI gets German titles and English gets English. Falls back to the
     language of the message when unset/unknown.
+
+    `small_only` asks only the small models, for a call made while the chat
+    model is still answering. It leaves the session untitled when there is no
+    small model or it gives no usable title.
+
+    Returns whether the session got a name.
     """
     try:
         # Find first user message
@@ -182,31 +210,33 @@ async def auto_name_session(session_manager, sess, lang: str | None = None):
                 break
 
         if not first_msg:
-            return
+            return False
 
-        # Auto-naming runs on the Utility model (the small, fast model meant for
-        # titles and background tasks). When no Utility model is configured,
+        # Auto-naming runs on a small model: the Utility model (meant for titles
+        # and background tasks), or else the subagent model. With neither,
         # resolve_endpoint hands back the session's own chat model. Utility
         # fallbacks and then the session model stay in the chain so an offline
-        # utility endpoint never leaves a chat untitled. Reasoning is disabled
+        # small endpoint never leaves a chat untitled. Reasoning is disabled
         # either way — a title needs no <think> pass.
         from src.endpoint_resolver import resolve_endpoint, resolve_utility_fallback_candidates
         from src.llm_core import llm_call_async_with_fallback
 
         owner = getattr(sess, "owner", None)
-        t_url, t_model, t_headers = resolve_endpoint(
+        utility = resolve_endpoint(
             "utility", sess.endpoint_url, sess.model, sess.headers, owner=owner
         )
-        candidates = [(t_url, t_model, t_headers)]
-        try:
-            candidates += resolve_utility_fallback_candidates(owner=owner)
-        except Exception:
-            pass
-        candidates.append((sess.endpoint_url, sess.model, sess.headers))
+        candidates = _small_title_models(sess, utility, owner)
+        if not small_only:
+            candidates.append(utility)
+            try:
+                candidates += resolve_utility_fallback_candidates(owner=owner)
+            except Exception:
+                pass
+            candidates.append((sess.endpoint_url, sess.model, sess.headers))
         candidates = [c for c in candidates if c[0] and c[1]]
         if not candidates:
             logger.debug("[auto-name] No model provided, skipping")
-            return
+            return False
         t_model = candidates[0][1]
 
         # `/no_think` is a Qwen3 soft switch that disables reasoning; belt-and
@@ -226,10 +256,11 @@ async def auto_name_session(session_manager, sess, lang: str | None = None):
         else:
             lang_instruction = " Write the title in the same language as the message."
 
-        # max_tokens kept generous so any model that still emits a stray
-        # <think> block (despite enable_thinking=False) has headroom for it
-        # plus the actual title rather than getting clipped mid-reasoning.
-        # Timeout 60s gives slow local models room to finish.
+        # The full chain keeps max_tokens generous so any model that still emits
+        # a stray <think> block (despite enable_thinking=False) has headroom for
+        # it plus the actual title rather than getting clipped mid-reasoning, and
+        # 60s gives slow local models room to finish. The small model gets a
+        # short call: if it runs past that, the full chain takes over.
         title = await llm_call_async_with_fallback(
             candidates,
             [
@@ -241,8 +272,8 @@ async def auto_name_session(session_manager, sess, lang: str | None = None):
                 {"role": "user", "content": user_prompt},
             ],
             temperature=0.3,
-            max_tokens=4096,
-            timeout=60,
+            max_tokens=64 if small_only else 4096,
+            timeout=20 if small_only else 60,
             enable_thinking=False,
         )
 
@@ -258,17 +289,22 @@ async def auto_name_session(session_manager, sess, lang: str | None = None):
         # trimmed version of the first message rather than leaving the
         # placeholder — that is the "partially works" case users notice.
         if not title or len(title) >= 80:
+            if small_only:
+                return False  # the full chain still gets its turn
             words = first_msg.split()[:6]
             title = " ".join(words).strip()[:60] if words else ""
 
         if title:
             session_manager.update_session_name(sess.id, title)
-            logger.info(f"Auto-named session {sess.id}: {title}")
+            logger.info(f"Auto-named session {sess.id} with {t_model}: {title}")
+            return True
+        return False
 
     except Exception as e:
         import traceback
 
         logger.error(f"Auto-name failed for {sess.id}: {e}\n{traceback.format_exc()}")
+        return False
 
 
 def try_fallback_endpoint(sess, session_id: str) -> dict | None:
