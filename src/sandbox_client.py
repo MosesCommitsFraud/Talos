@@ -174,6 +174,30 @@ def delete_workspace_sync(owner: str | None, session_id: str | None) -> bool:
         return False
 
 
+async def fork_workspace(
+    *, owner: str | None, session_id: str, target_session_id: str
+) -> bool:
+    """Give a forked chat the source chat's workspace, as hard links rather than
+    copies. Never raises: a fork without its files beats no fork, and False lets
+    the caller say so. True also when there is no sandbox and so nothing to carry."""
+    if not sandbox_enabled():
+        return True
+    user_path = quote(safe_user_id(owner), safe="")
+    session_path = quote(session_id, safe="")
+    try:
+        async with httpx.AsyncClient(
+            headers=_SANDBOX_HEADERS, timeout=httpx.Timeout(SANDBOX_TIMEOUT, connect=10.0)
+        ) as client:
+            resp = await client.post(
+                f"{SANDBOX_URL}/users/{user_path}/workspaces/{session_path}/fork",
+                json={"target_chat_id": target_session_id},
+            )
+            resp.raise_for_status()
+        return True
+    except Exception:
+        return False
+
+
 async def list_artifacts(*, owner: str | None, session_id: str | None) -> list[dict[str, Any]]:
     """List files in a chat's sandbox workspace (uploads + generated results)."""
     if not session_id:

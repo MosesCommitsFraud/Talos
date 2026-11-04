@@ -137,6 +137,15 @@ interface PrefsState {
    *  until the first chat moves into it, and the only place a project's
    *  description lives. */
   projects: Project[];
+  /** Sidebar sections. Like a project, a section is a label on its chats; this
+   *  list is what keeps one on screen while it has none. */
+  sections: string[];
+  /** Sections folded shut in the sidebar. */
+  collapsedSections: string[];
+  /** Sort order a section was given; the others follow `sortMode`. */
+  sectionSort: Record<string, SortMode>;
+  /** Chats whose forks are folded away in the sidebar. */
+  collapsedForks: string[];
   /** Width (px) of the right-hand dock (file preview and/or task list). */
   previewWidth: number;
   /** Relative heights of the dock's panes when several are open (flex-grow
@@ -161,6 +170,12 @@ interface PrefsState {
   addProject: (name: string, description?: string) => void;
   /** Follow a project through a rename; `to === null` drops it from the list. */
   renameProjectPref: (from: string, to: string | null) => void;
+  addSection: (name: string) => void;
+  /** Follow a section through a rename; `to === null` drops it from the list. */
+  renameSectionPref: (from: string, to: string | null) => void;
+  toggleSectionCollapsed: (name: string) => void;
+  setSectionSort: (name: string, mode: SortMode) => void;
+  toggleForksCollapsed: (sessionId: string) => void;
   setPreviewWidth: (px: number) => void;
   setDockSizes: (sizes: DockSizes) => void;
   setArtifactsView: (v: 'list' | 'grid') => void;
@@ -192,6 +207,10 @@ export const usePrefs = create<PrefsState>()(
       micDeviceId: null,
       sidebarCollapsed: false,
       projects: [],
+      sections: [],
+      collapsedSections: [],
+      sectionSort: {},
+      collapsedForks: [],
       previewWidth: 480,
       dockSizes: DEFAULT_DOCK_SIZES,
       artifactsView: 'list',
@@ -251,6 +270,30 @@ export const usePrefs = create<PrefsState>()(
         // point — the project is gone, not renamed.
         return { projects: to ? [...rest, { ...moved, name: to }] : rest };
       }),
+      addSection: (name) => set((s) => (s.sections.includes(name) ? {} : { sections: [...s.sections, name] })),
+      renameSectionPref: (from, to) => set((s) => {
+        const keep = (list: string[]) => list.filter((n) => n !== from && n !== to);
+        const { [from]: sort, ...sectionSort } = s.sectionSort;
+        if (to && sort) sectionSort[to] = sort;
+        return {
+          sectionSort,
+          sections: to ? [...keep(s.sections), to] : keep(s.sections),
+          collapsedSections: to && s.collapsedSections.includes(from)
+            ? [...keep(s.collapsedSections), to]
+            : keep(s.collapsedSections),
+        };
+      }),
+      toggleSectionCollapsed: (name) => set((s) => ({
+        collapsedSections: s.collapsedSections.includes(name)
+          ? s.collapsedSections.filter((n) => n !== name)
+          : [...s.collapsedSections, name],
+      })),
+      setSectionSort: (name, mode) => set((s) => ({ sectionSort: { ...s.sectionSort, [name]: mode } })),
+      toggleForksCollapsed: (sessionId) => set((s) => ({
+        collapsedForks: s.collapsedForks.includes(sessionId)
+          ? s.collapsedForks.filter((id) => id !== sessionId)
+          : [...s.collapsedForks, sessionId],
+      })),
       setPreviewWidth: (previewWidth) => set({ previewWidth }),
       setDockSizes: (dockSizes) => set({ dockSizes }),
       setArtifactsView: (artifactsView) => set({ artifactsView }),

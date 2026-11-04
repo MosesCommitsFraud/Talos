@@ -90,6 +90,28 @@ export async function setSessionFolder(id: string, folder: string | null): Promi
   if (!res.ok) throw new Error(`setSessionFolder: ${res.status} ${await res.text()}`);
 }
 
+export async function setSessionSection(id: string, section: string | null): Promise<void> {
+  const fd = new FormData();
+  fd.set('section', section ?? '');
+  // An explicit flag for the same reason as clear_folder above.
+  if (!section) fd.set('clear_section', 'true');
+  const res = await fetch(`/api/session/${id}`, { method: 'PATCH', body: fd, credentials: 'same-origin' });
+  if (!res.ok) throw new Error(`setSessionSection: ${res.status} ${await res.text()}`);
+}
+
+export async function setSessionUnread(id: string, unread: boolean): Promise<void> {
+  const fd = new FormData();
+  fd.set('unread', String(unread));
+  const res = await fetch(`/api/session/${id}`, { method: 'PATCH', body: fd, credentials: 'same-origin' });
+  if (!res.ok) throw new Error(`setSessionUnread: ${res.status} ${await res.text()}`);
+}
+
+export interface ForkResult { id: string; name: string; files_forked: boolean }
+
+/** Duplicate a chat with everything in it; see src/session_fork.py. */
+export const forkSession = (id: string) =>
+  postJSON<ForkResult>(`/api/session/${encodeURIComponent(id)}/fork`);
+
 export async function deleteSession(id: string): Promise<void> {
   await fetch(`/api/session/${id}`, { method: 'DELETE', credentials: 'same-origin' });
 }

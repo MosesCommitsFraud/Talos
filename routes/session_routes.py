@@ -306,6 +306,9 @@ def setup_session_routes(session_manager: SessionManager, config: dict):
         db = SessionLocal()
         try:
             folder_map = {}
+            section_map = {}
+            unread_map = {}
+            forked_from_map = {}
             token_map = {}
             important_map = {}
             created_map = {}
@@ -317,6 +320,9 @@ def setup_session_routes(session_manager: SessionManager, config: dict):
                 db.query(
                     DbSession.id,
                     DbSession.folder,
+                    DbSession.section,
+                    DbSession.unread,
+                    DbSession.forked_from,
                     DbSession.total_input_tokens,
                     DbSession.total_output_tokens,
                     DbSession.is_important,
@@ -331,6 +337,9 @@ def setup_session_routes(session_manager: SessionManager, config: dict):
             )
             for row in rows:
                 folder_map[row.id] = row.folder
+                section_map[row.id] = row.section
+                unread_map[row.id] = bool(row.unread)
+                forked_from_map[row.id] = row.forked_from
                 token_map[row.id] = (row.total_input_tokens or 0) + (row.total_output_tokens or 0)
                 important_map[row.id] = row.is_important or False
                 created_map[row.id] = row.created_at.isoformat() if row.created_at else None
@@ -381,6 +390,9 @@ def setup_session_routes(session_manager: SessionManager, config: dict):
                 "rag": s.rag,
                 "archived": s.archived,
                 "folder": folder_map.get(s.id),
+                "section": section_map.get(s.id),
+                "unread": unread_map.get(s.id, False),
+                "forked_from": forked_from_map.get(s.id),
                 "total_tokens": token_map.get(s.id, 0),
                 "is_important": important_map.get(s.id, False),
                 "created_at": created_map.get(s.id),
@@ -587,6 +599,9 @@ def setup_session_routes(session_manager: SessionManager, config: dict):
         name: str = Form(None),
         folder: str = Form(None),
         clear_folder: str = Form(None),
+        section: str = Form(None),
+        clear_section: str = Form(None),
+        unread: str = Form(None),
         model: str = Form(None),
         endpoint_url: str = Form(None),
         endpoint_id: str = Form(None),
@@ -615,6 +630,24 @@ def setup_session_routes(session_manager: SessionManager, config: dict):
                     db_session.updated_at = datetime.utcnow()
                     db.commit()
                     result["folder"] = new_folder
+            finally:
+                db.close()
+        # Section label and unread flag. Removal is an explicit flag for the same
+        # reason as clear_folder above.
+        truthy = ("1", "true", "yes", "on")
+        wants_clear_section = str(clear_section or "").strip().lower() in truthy
+        if wants_clear_section or section is not None or unread is not None:
+            db = SessionLocal()
+            try:
+                db_session = db.query(DbSession).filter(DbSession.id == sid).first()
+                if db_session:
+                    if wants_clear_section or section is not None:
+                        db_session.section = None if (wants_clear_section or not section) else section
+                        result["section"] = db_session.section
+                    if unread is not None:
+                        db_session.unread = unread.strip().lower() in truthy
+                        result["unread"] = db_session.unread
+                    db.commit()
             finally:
                 db.close()
         # Switch model/endpoint mid-session

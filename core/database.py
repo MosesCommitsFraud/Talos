@@ -124,6 +124,14 @@ class Session(TimestampMixin, Base):
 
     # Organization
     folder = Column(String, nullable=True, default=None)
+    # A sidebar section: a plain label grouping chats, like `folder` but with no
+    # project page behind it.
+    section = Column(String, nullable=True, default=None)
+    # Marked unread by the user; cleared when the chat is opened.
+    unread = Column(Boolean, default=False)
+    # The chat this one was forked from. A plain id, no foreign key: the fork
+    # outlives its source and just stops being nested under it in the sidebar.
+    forked_from = Column(String, nullable=True, default=None)
 
     # Headers stored as JSON
     headers = Column(JSON, default=dict)
@@ -180,6 +188,9 @@ class Session(TimestampMixin, Base):
             "message_count": self.message_count,
             "is_important": self.is_important,
             "folder": self.folder,
+            "section": self.section,
+            "unread": bool(self.unread),
+            "forked_from": self.forked_from,
             "total_input_tokens": self.total_input_tokens or 0,
             "total_output_tokens": self.total_output_tokens or 0,
             "crew_member_id": self.crew_member_id,
@@ -1099,6 +1110,29 @@ def _migrate_add_folder_column():
         logging.getLogger(__name__).warning(f"Migration check for folder failed: {e}")
 
 
+def _migrate_add_section_unread_columns():
+    """Add the sidebar section label, unread flag and fork source to sessions."""
+    import sqlite3
+
+    db_path = DATABASE_URL.replace("sqlite:///", "")
+    if not os.path.exists(db_path):
+        return
+    try:
+        conn = sqlite3.connect(db_path)
+        cursor = conn.execute("PRAGMA table_info(sessions)")
+        columns = [row[1] for row in cursor.fetchall()]
+        if "section" not in columns:
+            conn.execute("ALTER TABLE sessions ADD COLUMN section TEXT")
+        if "unread" not in columns:
+            conn.execute("ALTER TABLE sessions ADD COLUMN unread BOOLEAN DEFAULT 0")
+        if "forked_from" not in columns:
+            conn.execute("ALTER TABLE sessions ADD COLUMN forked_from TEXT")
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        logging.getLogger(__name__).warning(f"Migration check for section/unread failed: {e}")
+
+
 def _migrate_add_token_columns():
     """Add cumulative token tracking columns to sessions table."""
     import sqlite3
@@ -1807,6 +1841,7 @@ def init_db():
     _migrate_add_document_archived_column()
     _migrate_add_last_message_at_column()
     _migrate_add_folder_column()
+    _migrate_add_section_unread_columns()
     _migrate_add_token_columns()
     _migrate_add_mode_column()
     _migrate_add_multiuser_owner_columns()

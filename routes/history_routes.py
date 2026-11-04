@@ -17,6 +17,8 @@ from routes.session_routes import (
     _reject_compact_during_active_run,
     _verify_session_owner,
 )
+from src.sandbox_client import fork_workspace
+from src.session_fork import fork_session_records
 from src.topic_analyzer import analyze_topics
 
 logger = logging.getLogger(__name__)
@@ -614,39 +616,31 @@ def setup_history_routes(session_manager) -> APIRouter:
 
     @router.post("/api/session/{session_id}/fork")
     async def fork_session(request: Request, session_id: str):
-        """Create a new session with messages copied up to keep_count."""
+        """Duplicate a chat with everything in it: settings, history, documents,
+        images and workspace files (files stay one copy on disk, see
+        src/session_fork.py). An optional JSON `keep_count` copies only that many
+        leading messages. `files_forked` is false when the workspace could not be
+        carried over, so the UI can say the fork is missing its files."""
         _verify_session_owner(request, session_id)
         try:
-            body = await request.json()
-            keep_count = body.get("keep_count", 0)
-
-            # Get the source session
-            source = session_manager.sessions.get(session_id)
-            if not source:
+            try:
+                body = await request.json()
+            except ValueError:
+                body = {}
+            keep_count = body.get("keep_count") if isinstance(body, dict) else None
+            try:
+                forked = fork_session_records(session_id, keep_count=keep_count)
+            except KeyError:
                 raise HTTPException(404, "Session not found")
-
-            # Create new session
-            new_id = str(uuid.uuid4())
-            fork_name = f"\u2add {source.name}"
-            new_session = session_manager.create_session(
-                session_id=new_id,
-                name=fork_name,
-                endpoint_url=source.endpoint_url,
-                model=source.model,
-                rag=False,
-                owner=getattr(source, "owner", None),
+            files_forked = await fork_workspace(
+                owner=forked["owner"], session_id=session_id, target_session_id=forked["id"]
             )
-
-            # Copy messages up to keep_count
-            msgs_to_copy = source.history[:keep_count]
-            for msg in msgs_to_copy:
-                new_session.add_message(ChatMessage(msg.role, msg.content, msg.metadata))
-
             return {
                 "status": "ok",
-                "id": new_id,
-                "name": fork_name,
-                "kept": len(msgs_to_copy),
+                "id": forked["id"],
+                "name": forked["name"],
+                "kept": forked["message_count"],
+                "files_forked": files_forked,
             }
         except HTTPException:
             raise

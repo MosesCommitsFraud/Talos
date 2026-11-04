@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { compactSession, createSession, deleteMessages, editMessage, fetchActiveRuns, fetchArtifacts, fetchSession, queueChatMessage, resumeChat, stopChatRun, streamChat, unqueueChatMessage } from '@/api/client';
+import { compactSession, createSession, deleteMessages, editMessage, fetchActiveRuns, fetchArtifacts, fetchSession, queueChatMessage, resumeChat, setSessionFolder, setSessionSection, stopChatRun, streamChat, unqueueChatMessage } from '@/api/client';
 import type { Artifact, ArtifactSelection, Attachment, ChatEvent, Citation, Metrics, RagSource, ToolCall, UiDraft } from '@/api/types';
 import { documentFileName, isPreviewable, samePath } from '@/lib/files';
 import { timestampMs } from '@/lib/utils';
@@ -197,6 +197,8 @@ interface ChatState {
 
   setPendingModel: (m: ChatState['pendingModel']) => void;
   newChat: () => void;
+  /** A fresh draft that lands in this section (and project) once it is sent. */
+  newChatIn: (placement: DraftPlacement) => void;
   openSession: (id: string) => Promise<void>;
   send: (text: string, opts?: { attachments?: Attachment[]; artifactSelection?: ArtifactSelection; askAnswers?: AskAnswer[]; onSessionCreated?: (id: string) => void; goalIteration?: boolean; targetSessionId?: string; resume?: boolean; resumeElapsedMs?: number | null }) => Promise<void>;
   /** Reattach to a turn that is still running server-side for `id` (after a
@@ -250,6 +252,11 @@ export const selectPendingQuestion = (s: ChatState): UiMessage | null => {
 /** Sidebar status for a chat row: 'working' while a turn streams, 'awaiting'
  *  when a turn ended on a question and needs the user, 'completed' once it
  *  finishes in the background until the chat is opened, else null. */
+export interface DraftPlacement { section: string; folder: string | null }
+
+/** Where the current draft goes once its first message creates the session. */
+let draftPlacement: DraftPlacement | null = null;
+
 export type ChatStatus = 'working' | 'awaiting' | 'completed' | null;
 export const selectChatStatus = (id: string | null | undefined) => (s: ChatState): ChatStatus => {
   if (!id) return null;
@@ -648,6 +655,12 @@ export const useChat = create<ChatState>((set, get) => {
   newChat: () => {
     // Switch to a fresh draft without aborting any in-flight turn — that turn
     // keeps streaming into its own runtime and can be returned to.
+    draftPlacement = null;
+    activate(null);
+  },
+
+  newChatIn: (placement) => {
+    draftPlacement = placement;
     activate(null);
   },
 
@@ -756,6 +769,15 @@ export const useChat = create<ChatState>((set, get) => {
       if (!pm) throw new Error('No model selected');
       const session = await createSession({ endpointId: pm.endpointId, model: pm.model });
       sessionId = session.id;
+      const placement = draftPlacement;
+      draftPlacement = null;
+      if (placement) {
+        // Before the chat shows up in the sidebar, so it never appears elsewhere first.
+        await Promise.all([
+          setSessionSection(session.id, placement.section),
+          placement.folder ? setSessionFolder(session.id, placement.folder) : undefined,
+        ]).catch((err) => console.error('Talos: placing new chat failed', err));
+      }
       // Seed an empty runtime and activate it before the user message lands.
       writeRuntime(sessionId, () => emptyRuntime());
       activate(sessionId);

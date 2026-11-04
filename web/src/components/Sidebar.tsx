@@ -6,9 +6,9 @@ import {
   BugIcon,
   CheckIcon,
   ChevronDownIcon,
+  EllipsisIcon,
   FolderIcon,
   FolderMinusIcon,
-  FolderPlusIcon,
   HelpCircleIcon,
   ListFilterIcon,
   LogOutIcon,
@@ -16,12 +16,10 @@ import {
   PanelLeftIcon,
   PencilIcon,
   PinIcon,
-  PinOffIcon,
   PlusIcon,
   SearchIcon,
   SettingsIcon,
   ShapesIcon,
-  Trash2Icon,
 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -29,10 +27,13 @@ import {
   archiveSession,
   deleteSession,
   fetchSessions,
+  forkSession,
   logout,
   markImportant,
   renameSession,
   setSessionFolder,
+  setSessionSection,
+  setSessionUnread,
 } from '@/api/client';
 import { useAuth } from './auth/AuthGate';
 import type { Session } from '@/api/types';
@@ -40,20 +41,19 @@ import { selectChatStatus, selectFolderStatus, useChat } from '@/state/chat';
 import { usePrefs, type SortMode } from '@/state/prefs';
 import { useUi } from '@/state/ui';
 import { brand } from '@/lib/brand';
-import { cn, formatRelativeTime, timestampMs } from '@/lib/utils';
+import { cn, timestampMs } from '@/lib/utils';
 import { anyTitlePending, isTitlePending, placeholderTitleText } from '@/lib/sessionTitle';
 import { Skeleton, Tooltip } from './ui/misc';
 import { KeybindingPill } from './ui/kbd';
 import { matchesBinding, useKeybinds } from '@/lib/keybinds';
 import { BrandImage } from './BrandImage';
+import { runSessionShortcut, SessionMenuPopup, type SessionMenuActions } from './SessionMenu';
+import { toast } from './ui/toast';
 import {
   ContextMenu,
   ContextMenuItem,
   ContextMenuPopup,
   ContextMenuSeparator,
-  ContextMenuSub,
-  ContextMenuSubPopup,
-  ContextMenuSubTrigger,
   ContextMenuTrigger,
   Menu,
   MenuItem,
@@ -73,12 +73,150 @@ const SORT_KEYS: Record<SortMode, string> = {
   name: 'sidebar.sortName',
 };
 
-/** Truncates normally, then slowly pans only the hidden portion on hover. The
- *  animation stops at the end so the full title can be read without looping. */
-function ScrollableSessionTitle({ children, className }: { children: string; className?: string }) {
+function compareSessions(mode: SortMode) {
+  return (a: Session, b: Session) => {
+    if (mode === 'newest') return timestampMs(b.created_at) - timestampMs(a.created_at);
+    if (mode === 'name') return (a.name || '').localeCompare(b.name || '');
+    return timestampMs(b.last_message_at ?? b.updated_at) - timestampMs(a.last_message_at ?? a.updated_at);
+  };
+}
+
+/** The filter icon that picks a list's sort order. */
+function SortMenu({
+  mode,
+  onChange,
+  className,
+}: {
+  mode: SortMode;
+  onChange: (mode: SortMode) => void;
+  className?: string;
+}) {
+  const { t } = useTranslation();
+  return (
+    <Menu>
+      <Tooltip label={t('sidebar.sortLabel', { mode: t(SORT_KEYS[mode]) })}>
+        <MenuTrigger asChild>
+          <button
+            type="button"
+            aria-label={t('sidebar.sortChats')}
+            className={cn(
+              'flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-foreground',
+              className,
+            )}
+          >
+            <ListFilterIcon className="size-3.5" />
+          </button>
+        </MenuTrigger>
+      </Tooltip>
+      <MenuPopup align="start">
+        {(Object.keys(SORT_KEYS) as SortMode[]).map((option) => (
+          <MenuItem key={option} onSelect={() => onChange(option)}>
+            <CheckIcon className={option === mode ? '' : 'invisible'} />
+            {t(SORT_KEYS[option])}
+          </MenuItem>
+        ))}
+      </MenuPopup>
+    </Menu>
+  );
+}
+
+function isTypingTarget(element: Element | null) {
+  return element instanceof HTMLElement
+    && (element.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(element.tagName));
+}
+
+/** The chat menu's letters, live while the mouse rests on a row. Never while
+ *  something is being typed: with the cursor in the composer the letter belongs
+ *  there, and a "d" must not delete a chat because the mouse happens to sit on it.
+ *  An open menu or dialog answers for itself. */
+function useHoverShortcuts(run: (key: string) => boolean, enabled: boolean) {
+  const runRef = useRef(run);
+  runRef.current = run;
+  const stopRef = useRef<(() => void) | null>(null);
+  const stop = () => {
+    stopRef.current?.();
+    stopRef.current = null;
+  };
+  useEffect(() => stop, []);
+  useEffect(() => {
+    if (!enabled) stop();
+  }, [enabled]);
+  return {
+    onMouseEnter: () => {
+      stop();
+      const onKeyDown = (event: KeyboardEvent) => {
+        if (event.defaultPrevented || event.repeat) return;
+        if (event.ctrlKey || event.metaKey || event.altKey || event.shiftKey || event.key.length !== 1) return;
+        if (isTypingTarget(document.activeElement)) return;
+        if (document.querySelector('[role="menu"],[role="dialog"],[role="alertdialog"]')) return;
+        if (runRef.current(event.key.toLowerCase())) event.preventDefault();
+      };
+      window.addEventListener('keydown', onKeyDown);
+      stopRef.current = () => window.removeEventListener('keydown', onKeyDown);
+    },
+    onMouseLeave: stop,
+  };
+}
+
+/** A section's header: no surface of its own, so it scrolls along with its chats. */
+const SECTION_HEADER_CLASS = 'flex h-7 items-center px-2';
+/** The Pinned and Chats headers stay in view, covering the chats scrolling past. */
+const LIST_HEADER_CLASS = cn(SECTION_HEADER_CLASS, 'sticky top-0 z-10 bg-sidebar');
+
+/** A chat row's status at its right edge. Gives way to the three dots on hover. */
+const STATUS_LABEL_CLASS = 'shrink-0 text-[11px] font-medium';
+
+/** The small solid triangle after a name whose contents fold away. */
+function FoldCaret({ collapsed }: { collapsed: boolean }) {
+  return (
+    <svg
+      viewBox="0 0 8 8"
+      aria-hidden
+      className={cn('size-2 shrink-0 fill-current transition-transform', collapsed && '-rotate-90')}
+    >
+      <path d="M1 2.25h6L4 6.25z" />
+    </svg>
+  );
+}
+
+/** Splits a list of chats into top-level rows and the forks nested under each.
+ *  Forks of forks sit flat under the chat they all started from, since the
+ *  sidebar has no width for deeper indents. A fork whose source is not in this
+ *  list (deleted, archived, pinned or filed elsewhere) is simply a row of its own. */
+function nestForks(list: Session[]) {
+  const byId = new Map(list.map((s) => [s.id, s]));
+  const rootOf = (session: Session) => {
+    const seen = new Set([session.id]);
+    let current = session;
+    for (;;) {
+      const parent = current.forked_from ? byId.get(current.forked_from) : undefined;
+      if (!parent || seen.has(parent.id)) return current;
+      seen.add(parent.id);
+      current = parent;
+    }
+  };
+  const roots: Session[] = [];
+  const forks = new Map<string, Session[]>();
+  for (const session of list) {
+    const root = rootOf(session);
+    if (root === session) roots.push(session);
+    else forks.set(root.id, [...(forks.get(root.id) ?? []), session]);
+  }
+  return { roots, forks };
+}
+
+/** Width of the fade a clipped title ends in. */
+const TITLE_FADE_PX = 20;
+
+/** A title too long for its row ends in a short fade, then slowly pans only the
+ *  hidden portion on hover. The animation stops at the end so the full title can
+ *  be read without looping, and goes the fade's width further so the last letters
+ *  end up clear of it. */
+function ScrollableSessionTitle({ children }: { children: string }) {
   const viewportRef = useRef<HTMLSpanElement>(null);
   const textRef = useRef<HTMLSpanElement>(null);
   const animationRef = useRef<Animation | null>(null);
+  const [overflows, setOverflows] = useState(false);
 
   const stop = () => {
     animationRef.current?.cancel();
@@ -90,8 +228,9 @@ function ScrollableSessionTitle({ children, className }: { children: string; cla
     const viewport = viewportRef.current;
     const text = textRef.current;
     if (!viewport || !text) return;
-    const distance = Math.ceil(text.scrollWidth - viewport.clientWidth);
-    if (distance <= 1) return;
+    const hidden = Math.ceil(text.offsetWidth - viewport.clientWidth);
+    if (hidden <= 1) return;
+    const distance = hidden + TITLE_FADE_PX;
     // Roughly 22 px/s plus a short initial pause: calm enough to read, without
     // making moderately long titles take forever to reveal.
     const duration = Math.max(4_000, (distance / 22) * 1_000 + 1_200);
@@ -107,10 +246,29 @@ function ScrollableSessionTitle({ children, className }: { children: string; cla
 
   useEffect(() => stop, []);
 
+  // Fading only what is actually clipped: the row makes room for the three dots
+  // on hover, so a title can start overflowing without having changed.
+  useEffect(() => {
+    const viewport = viewportRef.current;
+    const text = textRef.current;
+    if (!viewport || !text) return;
+    const measure = () => setOverflows(text.offsetWidth > viewport.clientWidth + 1);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(viewport);
+    observer.observe(text);
+    return () => observer.disconnect();
+  }, []);
+
   return (
     <span
       ref={viewportRef}
-      className={cn('min-w-0 flex-1 overflow-hidden whitespace-nowrap', className)}
+      className="min-w-0 flex-1 overflow-hidden whitespace-nowrap"
+      style={
+        overflows
+          ? { maskImage: `linear-gradient(to right, black calc(100% - ${TITLE_FADE_PX}px), transparent)` }
+          : undefined
+      }
       onMouseEnter={start}
       onMouseLeave={stop}
     >
@@ -119,24 +277,39 @@ function ScrollableSessionTitle({ children, className }: { children: string; cla
   );
 }
 
-function SessionRow({ session, projects }: { session: Session; projects: string[] }) {
+function SessionRow({
+  session,
+  projects,
+  sections,
+  hasForks,
+}: {
+  session: Session;
+  projects: string[];
+  sections: string[];
+  /** Forks are nested under this row, so it gets the caret that folds them. */
+  hasForks?: boolean;
+}) {
   const { t } = useTranslation();
   const activeId = useChat((s) => s.sessionId);
   const status = useChat(selectChatStatus(session.id));
   const openSession = useChat((s) => s.openSession);
   const newChat = useChat((s) => s.newChat);
   const queryClient = useQueryClient();
-  // 'rename' edits the chat name; 'project' types a new project to move into.
-  const [mode, setMode] = useState<'idle' | 'rename' | 'project'>('idle');
+  // 'rename' edits the chat name; 'project' and 'section' type a new one to move into.
+  const [mode, setMode] = useState<'idle' | 'rename' | 'project' | 'section'>('idle');
   const [draft, setDraft] = useState('');
   const addProject = usePrefs((s) => s.addProject);
+  const addSection = usePrefs((s) => s.addSection);
+  const forksCollapsed = usePrefs((s) => s.collapsedForks.includes(session.id));
+  const toggleForksCollapsed = usePrefs((s) => s.toggleForksCollapsed);
   const pinned = !!session.is_important;
+  const isActive = session.id === activeId;
+  const unread = !!session.unread || status === 'completed';
   const titlePending = isTitlePending(session);
 
   const refresh = () => queryClient.invalidateQueries({ queryKey: ['sessions'] });
 
   const beginRename = () => { setDraft(session.name); setMode('rename'); };
-  const beginNewProject = () => { setDraft(''); setMode('project'); };
 
   // Refresh either way: on failure the list snaps back to what the server
   // actually has, instead of showing a move that never happened.
@@ -144,6 +317,71 @@ function SessionRow({ session, projects }: { session: Session; projects: string[
     void setSessionFolder(session.id, project)
       .catch((err) => console.error('Talos: moving chat to project failed', err))
       .finally(refresh);
+  const moveToSection = (section: string | null) =>
+    void setSessionSection(session.id, section)
+      .catch((err) => console.error('Talos: moving chat to section failed', err))
+      .finally(refresh);
+
+  const markRead = () => {
+    useChat.setState((s) => {
+      if (!s.completed[session.id]) return s;
+      const completed = { ...s.completed };
+      delete completed[session.id];
+      return { completed };
+    });
+    if (session.unread) {
+      void setSessionUnread(session.id, false)
+        .catch((err) => console.error('Talos: marking chat read failed', err))
+        .finally(refresh);
+    }
+  };
+
+  // Opening a chat is what reads it. Only on arrival, not whenever the flag is
+  // set, or marking the chat on screen as unread would undo itself at once.
+  useEffect(() => {
+    if (isActive) markRead();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isActive]);
+
+  const fork = async () => {
+    try {
+      const forked = await forkSession(session.id);
+      await refresh();
+      // The new chat opens, so it has to be on screen as well.
+      if (forksCollapsed) toggleForksCollapsed(session.id);
+      void openSession(forked.id);
+      if (!forked.files_forked) toast('sidebar.forkFilesMissing');
+    } catch (err) {
+      console.error('Talos: forking chat failed', err);
+      toast('sidebar.forkFailed');
+    }
+  };
+
+  const menuActions: SessionMenuActions = {
+    togglePin: () => void markImportant(session.id, !pinned).then(refresh),
+    toggleUnread: () => {
+      if (unread) markRead();
+      else void setSessionUnread(session.id, true).then(refresh);
+    },
+    rename: beginRename,
+    fork: () => void fork(),
+    moveToSection,
+    newSection: () => { setDraft(''); setMode('section'); },
+    moveToProject,
+    newProject: () => { setDraft(''); setMode('project'); },
+    archive: () => void archiveSession(session.id).then(refresh),
+    remove: () => {
+      void deleteSession(session.id).then(() => {
+        if (isActive) newChat();
+        refresh();
+      });
+    },
+  };
+
+  const hoverShortcuts = useHoverShortcuts(
+    (key) => runSessionShortcut(key, menuActions, pinned),
+    mode === 'idle',
+  );
 
   const commit = async () => {
     const value = draft.trim();
@@ -156,22 +394,268 @@ function SessionRow({ session, projects }: { session: Session; projects: string[
         catch (err) { console.error('Talos: creating project failed', err); }
         refresh();
       }
+    } else if (mode === 'section') {
+      if (value && value !== (session.section ?? '')) {
+        try { await setSessionSection(session.id, value); addSection(value); }
+        catch (err) { console.error('Talos: creating section failed', err); }
+        refresh();
+      }
     }
   };
 
   if (mode !== 'idle') {
+    const placeholders = { rename: undefined, project: 'sidebar.projectPlaceholder', section: 'sidebar.sectionPlaceholder' };
+    const placeholder = placeholders[mode];
     return (
       <input
         autoFocus
         value={draft}
-        placeholder={mode === 'project' ? t('sidebar.projectPlaceholder') : undefined}
+        placeholder={placeholder && t(placeholder)}
         onChange={(e) => setDraft(e.target.value)}
         onBlur={() => void commit()}
         onKeyDown={(e) => {
           if (e.key === 'Enter') void commit();
           if (e.key === 'Escape') setMode('idle');
         }}
-        className="mx-0.5 my-px w-[calc(100%-4px)] rounded-lg border border-ring bg-transparent px-2 py-1.5 text-sm outline-none"
+        className="my-px h-[30px] w-full rounded-md border border-ring bg-transparent px-2 text-sm outline-none"
+      />
+    );
+  }
+
+  const openRow = {
+    onClick: () => void openSession(session.id),
+    onDoubleClick: beginRename,
+  };
+  const showUnreadDot = !!session.unread && !status;
+  // The room for the three dots is kept free for good where something must not
+  // move when they appear: the fork caret stays put, and the unread dot sits in
+  // their spot. Other rows only make room on hover, which gives titles more width.
+  const keepDotsRoom = !!hasForks || showUnreadDot;
+  // Same reason for a status label: invisible keeps its width, hidden frees it.
+  const statusOnHover = keepDotsRoom
+    ? 'group-hover:invisible group-has-[[data-state=open]]:invisible'
+    : 'group-hover:hidden group-has-[[data-state=open]]:hidden';
+  const statusClass = cn(STATUS_LABEL_CLASS, statusOnHover);
+
+  return (
+    <ContextMenu>
+      {/* The highlight lives on a wrapper: title, fold caret, the rest of the row
+          and the three dots are buttons side by side, since a button cannot hold
+          another. A right-click marks the wrapper itself, the dots' menu marks its
+          trigger inside. On hover the wrapper makes room for the dots. */}
+      <ContextMenuTrigger asChild>
+        <div
+          {...hoverShortcuts}
+          className={cn(
+            'group relative my-px flex h-[30px] items-center rounded-md text-sm transition-colors',
+            keepDotsRoom
+              ? 'pe-7'
+              : 'hover:pe-7 data-[state=open]:pe-7 has-[[data-state=open]]:pe-7 has-[:focus-visible]:pe-7 [@media(hover:none)]:pe-7',
+            isActive
+              ? 'bg-sidebar-active'
+              : 'hover:bg-sidebar-accent data-[state=open]:bg-sidebar-accent has-[[data-state=open]]:bg-sidebar-accent',
+          )}
+        >
+          <button
+            type="button"
+            {...openRow}
+            className={cn(
+              'flex h-full min-w-0 items-center gap-2 rounded-md ps-2 text-left',
+              titlePending && 'flex-1',
+            )}
+          >
+            {pinned && <PinIcon className="size-3 shrink-0 -rotate-45 text-muted-foreground" />}
+            {/* Until the model has written a title, the row shows a skeleton
+                instead of the placeholder ("Chat: <first words>") the backend
+                parks on the session — a title that changes under the user reads
+                worse than one that is visibly still loading. */}
+            {titlePending ? (
+              <div className="min-w-0 flex-1">
+                <Skeleton
+                  className="my-[3px] h-3.5"
+                  text={placeholderTitleText(session.name)}
+                  label={t('sidebar.titlePending')}
+                />
+              </div>
+            ) : (
+              <ScrollableSessionTitle>{session.name || t('common.untitled')}</ScrollableSessionTitle>
+            )}
+          </button>
+          {hasForks && (
+            <button
+              type="button"
+              aria-expanded={!forksCollapsed}
+              aria-label={t(forksCollapsed ? 'sidebar.showForks' : 'sidebar.hideForks')}
+              onClick={() => toggleForksCollapsed(session.id)}
+              className="flex h-full w-5 shrink-0 items-center justify-center text-muted-foreground transition-colors hover:text-foreground"
+            >
+              <FoldCaret collapsed={forksCollapsed} />
+            </button>
+          )}
+          {/* The rest of the row opens the chat as well; a mouse target only, the
+              title's button is the one in the tab order. */}
+          <button
+            type="button"
+            tabIndex={-1}
+            aria-hidden={!status && !showUnreadDot}
+            {...openRow}
+            className={cn(
+              'flex h-full min-w-fit flex-1 items-center justify-end rounded-md text-left',
+              !keepDotsRoom && 'pe-2 group-hover:min-w-0 group-hover:pe-0 group-has-[[data-state=open]]:min-w-0 group-has-[[data-state=open]]:pe-0',
+            )}
+          >
+            {status === 'working' ? (
+              // Running turn — a shimmering "Working" label, shown even when this
+              // chat isn't the one on screen so background turns are visible.
+              <span className={cn('shimmer-text', statusClass)} aria-label={t('sidebar.running')}>
+                {t('sidebar.working')}
+              </span>
+            ) : status === 'awaiting' ? (
+              // Turn ended on a question — the chat needs the user's input.
+              <span className={cn('text-warning', statusClass)}>
+                {t('sidebar.awaiting')}
+              </span>
+            ) : status === 'completed' ? (
+              // Finished in the background — surfaced until the chat is opened.
+              <span className={cn('text-success', statusClass)}>
+                {t('sidebar.completed')}
+              </span>
+            ) : null}
+          </button>
+          {showUnreadDot && (
+            // An SVG circle, not a rounded box: a box this small is snapped to
+            // whole pixels and comes out uneven at fractional positions.
+            <svg
+              viewBox="0 0 8 8"
+              role="img"
+              aria-label={t('sidebar.unread')}
+              className="pointer-events-none absolute inset-y-0 right-[13px] my-auto size-[7px] fill-primary group-hover:hidden group-has-[[data-state=open]]:hidden"
+            >
+              <circle cx="4" cy="4" r="4" />
+            </svg>
+          )}
+          <Menu>
+            <MenuTrigger asChild>
+              <button
+                type="button"
+                aria-label={t('sidebar.chatOptions')}
+                className="absolute inset-y-0 right-1 my-auto flex size-6 items-center justify-center rounded-md text-muted-foreground opacity-0 outline-none transition-opacity hover:bg-foreground/10 hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100 group-data-[state=open]:opacity-100 data-[state=open]:bg-foreground/10 data-[state=open]:text-foreground data-[state=open]:opacity-100 [@media(hover:none)]:opacity-100"
+              >
+                <EllipsisIcon className="size-4" />
+              </button>
+            </MenuTrigger>
+            <SessionMenuPopup
+              kind="dropdown"
+              align="start"
+              session={session}
+              unread={unread}
+              projects={projects}
+              sections={sections}
+              actions={menuActions}
+            />
+          </Menu>
+        </div>
+      </ContextMenuTrigger>
+      <SessionMenuPopup
+        kind="context"
+        session={session}
+        unread={unread}
+        projects={projects}
+        sections={sections}
+        actions={menuActions}
+      />
+    </ContextMenu>
+  );
+}
+
+/** Chats with their forks nested underneath, joined by a thin rounded line.
+ *  `limit` caps the top-level rows; forks come along with their chat. */
+function ChatRows({
+  list,
+  projects,
+  sections,
+  limit,
+}: {
+  list: Session[];
+  projects: string[];
+  sections: string[];
+  limit?: number;
+}) {
+  const collapsedForks = usePrefs((s) => s.collapsedForks);
+  const { roots, forks } = nestForks(list);
+  return (
+    <>
+      {roots.slice(0, limit).map((root) => {
+        const nested = forks.get(root.id) ?? [];
+        return (
+          <div key={root.id}>
+            <SessionRow session={root} projects={projects} sections={sections} hasForks={nested.length > 0} />
+            {!collapsedForks.includes(root.id) && nested.map((fork, index) => (
+              <div key={fork.id} className="relative ps-5">
+                {index < nested.length - 1 && (
+                  <span aria-hidden className="absolute inset-y-0 left-2 border-l border-muted-foreground/40" />
+                )}
+                <span
+                  aria-hidden
+                  className="absolute -top-px left-2 h-[17px] w-[11px] rounded-bl-[6px] border-b border-l border-muted-foreground/40"
+                />
+                <SessionRow session={fork} projects={projects} sections={sections} />
+              </div>
+            ))}
+          </div>
+        );
+      })}
+    </>
+  );
+}
+
+/** A section's own block header: name and fold caret, its sort order, and a plus
+ *  for a new chat inside it. Renamed or removed from its context menu. Like a project it has no row of its own on the
+ *  server — it is a label on its chats plus an entry in prefs, so both operations
+ *  are a batch update of its members. */
+function SectionHeader({ name, members, sortMode }: { name: string; members: Session[]; sortMode: SortMode }) {
+  const { t } = useTranslation();
+  const collapsed = usePrefs((s) => s.collapsedSections.includes(name));
+  const toggle = usePrefs((s) => s.toggleSectionCollapsed);
+  const setSectionSort = usePrefs((s) => s.setSectionSort);
+  const newChatIn = useChat((s) => s.newChatIn);
+  const openProject = useUi((s) => s.openProject);
+  const setView = useUi((s) => s.setView);
+  const renameSectionPref = usePrefs((s) => s.renameSectionPref);
+  const queryClient = useQueryClient();
+  const [renaming, setRenaming] = useState(false);
+  const [draft, setDraft] = useState(name);
+
+  const setSection = async (target: string | null) => {
+    try {
+      await Promise.all(members.map((s) => setSessionSection(s.id, target)));
+      renameSectionPref(name, target);
+    } catch (err) {
+      console.error('Talos: updating section failed', err);
+    } finally {
+      void queryClient.invalidateQueries({ queryKey: ['sessions'] });
+    }
+  };
+
+  const commitRename = async () => {
+    const value = draft.trim();
+    setRenaming(false);
+    if (value && value !== name) await setSection(value);
+  };
+
+  if (renaming) {
+    return (
+      <input
+        autoFocus
+        value={draft}
+        placeholder={t('sidebar.sectionPlaceholder')}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={() => void commitRename()}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') void commitRename();
+          if (e.key === 'Escape') { setDraft(name); setRenaming(false); }
+        }}
+        className="h-7 w-full rounded-md border border-ring bg-transparent px-2 text-xs font-medium outline-none"
       />
     );
   }
@@ -179,121 +663,47 @@ function SessionRow({ session, projects }: { session: Session; projects: string[
   return (
     <ContextMenu>
       <ContextMenuTrigger asChild>
-        <button
-          type="button"
-          onClick={() => void openSession(session.id)}
-          onDoubleClick={beginRename}
-          className={cn(
-            'group relative my-px flex w-full items-center gap-2 rounded-lg px-2 py-1 text-left text-sm transition-colors',
-            session.id === activeId ? 'bg-sidebar-active' : 'hover:bg-sidebar-accent',
+        <div className={SECTION_HEADER_CLASS}>
+          <button
+            type="button"
+            onClick={() => toggle(name)}
+            aria-expanded={!collapsed}
+            className="flex h-full min-w-0 items-center gap-1.5 text-left text-xs font-medium"
+          >
+            <span className="min-w-0 truncate">{name}</span>
+            <FoldCaret collapsed={collapsed} />
+          </button>
+          {collapsed && members.length > 0 && (
+            <span className="ms-1.5 shrink-0 text-[11px] tabular-nums text-muted-foreground">{members.length}</span>
           )}
-        >
-          {pinned && <PinIcon className="size-3 shrink-0 -rotate-45 text-muted-foreground" />}
-          {/* Until the model has written a title, the row shows a skeleton
-              instead of the placeholder ("Chat: <first words>") the backend
-              parks on the session — a title that changes under the user reads
-              worse than one that is visibly still loading. */}
-          {titlePending ? (
-            /* flex-1 like the real title, so the status label / hover timestamp
-               keep sitting at the right edge of the row. */
-            <div className="min-w-0 flex-1">
-              <Skeleton
-                className="my-[3px] h-3.5"
-                text={placeholderTitleText(session.name)}
-                label={t('sidebar.titlePending')}
-              />
-            </div>
-          ) : (
-            /* When the hover timestamp overlays the row (idle only — status
-               labels reserve their own space), mask the title's tail to
-               transparent so the text fades out under the time, regardless
-               of the row's background color. */
-            <ScrollableSessionTitle
-              className={
-                status
-                  ? undefined
-                  : 'group-hover:[mask-image:linear-gradient(to_right,black_calc(100%-7rem),transparent_calc(100%-2rem))]'
-              }
-            >
-              {session.name || t('common.untitled')}
-            </ScrollableSessionTitle>
-          )}
-          {status === 'working' ? (
-            // Running turn — a shimmering "Working" label, shown even when this
-            // chat isn't the one on screen so background turns are visible.
-            <span className="shimmer-text shrink-0 text-[11px] font-medium" aria-label={t('sidebar.running')}>
-              {t('sidebar.working')}
-            </span>
-          ) : status === 'awaiting' ? (
-            // Turn ended on a question — the chat needs the user's input.
-            <span className="shrink-0 text-[11px] font-medium text-warning">
-              {t('sidebar.awaiting')}
-            </span>
-          ) : status === 'completed' ? (
-            // Finished in the background — surfaced until the chat is opened.
-            <span className="shrink-0 text-[11px] font-medium text-success">
-              {t('sidebar.completed')}
-            </span>
-          ) : (
-            // Out of flow so the title gets the full row width; fades in on
-            // hover over the title's tail, which the mask above fades out —
-            // no colored backdrop needed.
-            <span className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-2 text-[11px] text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100">
-              {formatRelativeTime(session.updated_at)}
-            </span>
-          )}
-        </button>
+          <div className="ms-auto -me-1.5 flex shrink-0 items-center">
+            <SortMenu
+              mode={sortMode}
+              onChange={(mode) => setSectionSort(name, mode)}
+              className="text-foreground/80"
+            />
+            <Tooltip label={t('sidebar.newChat')}>
+              <button
+                type="button"
+                aria-label={t('sidebar.newChat')}
+                onClick={() => { newChatIn({ section: name, folder: openProject }); setView('chat'); }}
+                className="flex size-6 shrink-0 items-center justify-center rounded-md text-foreground/80 transition-colors hover:bg-sidebar-accent hover:text-foreground"
+              >
+                <PlusIcon className="size-4" />
+              </button>
+            </Tooltip>
+          </div>
+        </div>
       </ContextMenuTrigger>
       <ContextMenuPopup>
-        <ContextMenuItem onSelect={beginRename}>
-          <PencilIcon /> {t('sidebar.rename')}
-        </ContextMenuItem>
-        <ContextMenuItem onSelect={() => void markImportant(session.id, !pinned).then(refresh)}>
-          {pinned ? <PinOffIcon /> : <PinIcon />} {t(pinned ? 'sidebar.unpin' : 'sidebar.pin')}
-        </ContextMenuItem>
-        {/* Getting a chat back out has its own row: burying it at the bottom of
-            the "Move to project" submenu made it look like a one-way trip. */}
-        {session.folder && (
-          <ContextMenuItem onSelect={() => moveToProject(null)}>
-            <FolderMinusIcon /> {t('sidebar.removeFromProject')}
-          </ContextMenuItem>
-        )}
-        <ContextMenuSub>
-          <ContextMenuSubTrigger>
-            <FolderIcon /> {t('sidebar.moveToProject')}
-          </ContextMenuSubTrigger>
-          <ContextMenuSubPopup>
-            {projects.map((name) => (
-              <ContextMenuItem key={name} onSelect={() => moveToProject(name)}>
-                <CheckIcon className={name === session.folder ? '' : 'invisible'} />
-                <span className="truncate">{name}</span>
-              </ContextMenuItem>
-            ))}
-            {session.folder && (
-              <ContextMenuItem onSelect={() => moveToProject(null)}>
-                <CheckIcon className="invisible" /> {t('sidebar.noProject')}
-              </ContextMenuItem>
-            )}
-            {projects.length > 0 && <ContextMenuSeparator />}
-            <ContextMenuItem onSelect={beginNewProject}>
-              <FolderPlusIcon /> {t('sidebar.newProject')}
-            </ContextMenuItem>
-          </ContextMenuSubPopup>
-        </ContextMenuSub>
-        <ContextMenuItem onSelect={() => void archiveSession(session.id).then(refresh)}>
-          <ArchiveIcon /> {t('sidebar.archive')}
+        <ContextMenuItem onSelect={() => { setDraft(name); setRenaming(true); }}>
+          <PencilIcon /> {t('sidebar.renameSection')}
         </ContextMenuItem>
         <ContextMenuSeparator />
-        <ContextMenuItem
-          variant="destructive"
-          onSelect={() => {
-            void deleteSession(session.id).then(() => {
-              if (session.id === activeId) newChat();
-              refresh();
-            });
-          }}
-        >
-          <Trash2Icon /> {t('common.delete')}
+        {/* Deletes the section only — its chats move back to the flat list. */}
+        <ContextMenuItem onSelect={() => void setSection(null)}>
+          <FolderMinusIcon /> {t('sidebar.deleteSection')}
+          <span className="ms-auto ps-2 text-[11px] text-muted-foreground">{t('sidebar.deleteSectionHint')}</span>
         </ContextMenuItem>
       </ContextMenuPopup>
     </ContextMenu>
@@ -552,14 +962,13 @@ function SidebarBody({ onOpenPalette, account, onOpenTicketDialog, preview }: Si
   const setSortMode = usePrefs((s) => s.setSortMode);
   const visibility = usePrefs((s) => s.visibility);
   const storedProjects = usePrefs((s) => s.projects);
+  const storedSections = usePrefs((s) => s.sections);
+  const collapsedSections = usePrefs((s) => s.collapsedSections);
+  const sectionSort = usePrefs((s) => s.sectionSort);
   const toggleSidebar = usePrefs((s) => s.toggleSidebar);
   const keybinds = useKeybinds();
 
-  const sorter = (a: Session, b: Session) => {
-    if (sortMode === 'newest') return timestampMs(b.created_at) - timestampMs(a.created_at);
-    if (sortMode === 'name') return (a.name || '').localeCompare(b.name || '');
-    return timestampMs(b.last_message_at ?? b.updated_at) - timestampMs(a.last_message_at ?? a.updated_at);
-  };
+  const sorter = compareSessions(sortMode);
 
   const active = (sessions ?? []).filter((s) => !s.archived);
   // Projects are the union of the labels the server knows about (a label exists
@@ -575,11 +984,25 @@ function SidebarBody({ onOpenPalette, account, onOpenTicketDialog, preview }: Si
   const inProject = openProject !== null ? active.filter((s) => s.folder === openProject) : [];
   const loose = active.filter((s) => !s.folder);
   const pinned = openProject === null ? loose.filter((s) => s.is_important).sort(sorter) : [];
-  const rows = openProject === null ? loose.filter((s) => !s.is_important).sort(sorter) : inProject.slice().sort(sorter);
+  const listed = openProject === null ? loose.filter((s) => !s.is_important).sort(sorter) : inProject.slice().sort(sorter);
+  // Sections are the union of the labels chats carry and the ones created here
+  // but still empty — the same rule as projects. Every one is offered in the
+  // menu; the list itself shows empty ones outside a project only, where they
+  // were created, rather than repeating them inside every project.
+  const sectionNames = [
+    ...new Set([
+      ...active.map((s) => s.section).filter((n): n is string => !!n),
+      ...storedSections,
+    ]),
+  ].sort((a, b) => a.localeCompare(b));
+  const listedSections = sectionNames.filter(
+    (name) => openProject === null || listed.some((s) => s.section === name),
+  );
+  const rows = listed.filter((s) => !s.section);
   const [visibleCount, setVisibleCount] = useState(CHAT_PAGE);
   // A different list (project / sort order) starts collapsed again.
   useEffect(() => setVisibleCount(CHAT_PAGE), [openProject, sortMode]);
-  const hiddenCount = Math.max(0, rows.length - visibleCount);
+  const hiddenCount = Math.max(0, nestForks(rows).roots.length - visibleCount);
   const accountLabel = auth?.display_name || auth?.username;
   const initial = (accountLabel ?? 'U').slice(0, 1).toUpperCase();
 
@@ -666,68 +1089,54 @@ function SidebarBody({ onOpenPalette, account, onOpenTicketDialog, preview }: Si
         </div>
       </div>
 
-      {/* Chats — the scrolling remainder. Its header doubles as the way back out
-          of an open project. */}
-      <div className="mt-3 flex min-h-0 flex-1 flex-col">
-        <div className="flex items-center justify-between px-4 pb-1">
-          {openProject === null ? (
-            // Names whichever group comes first in the list below — pinned
-            // chats float to the top, and the rest get their own "Chats"
-            // heading further down.
-            <span className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
-              {pinned.length > 0 && <PinIcon className="size-3 -rotate-45" />}
-              {t(pinned.length > 0 ? 'sidebar.pinned' : 'sidebar.chats')}
-            </span>
-          ) : (
-            <button
-              type="button"
-              onClick={() => setOpenProject(null)}
-              className="-ml-1 flex min-w-0 items-center gap-1 rounded px-1 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
-            >
-              <ArrowLeftIcon className="size-3 shrink-0" />
-              <span className="truncate">{openProject}</span>
-            </button>
-          )}
-          <Menu>
-            <Tooltip label={t('sidebar.sortLabel', { mode: t(SORT_KEYS[sortMode]) })}>
-              <MenuTrigger asChild>
-                <button
-                  type="button"
-                  aria-label={t('sidebar.sortChats')}
-                  className="-mr-1.5 flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-foreground"
-                >
-                  <ListFilterIcon className="size-3.5" />
-                </button>
-              </MenuTrigger>
-            </Tooltip>
-            <MenuPopup align="start">
-              {(Object.keys(SORT_KEYS) as SortMode[]).map((mode) => (
-                <MenuItem key={mode} onSelect={() => setSortMode(mode)}>
-                  <CheckIcon className={mode === sortMode ? '' : 'invisible'} />
-                  {t(SORT_KEYS[mode])}
-                </MenuItem>
-              ))}
-            </MenuPopup>
-          </Menu>
-        </div>
-        {/* No bottom padding: the footer divider sits flush against the last
-            chat row, and the footer supplies the space below it instead. */}
-        <div className="min-h-0 flex-1 overflow-y-auto px-2">
-          {pinned.length > 0 && (
-            <>
-              {/* No heading of its own — the section header above already reads
-                  "Pinned" whenever these rows are present. */}
-              {pinned.map((s) => (
-                <SessionRow key={s.id} session={s} projects={projectNames} />
-              ))}
-              {rows.length > 0 && (
-                <div className="px-2 pt-2 pb-0.5 text-xs font-medium text-muted-foreground">{t('sidebar.chats')}</div>
+      {/* The scrolling remainder, one block after the other: pinned chats, each
+          section, then the chats in none. Inside an open project a way back out
+          takes the top. No bottom padding: the footer divider sits flush against
+          the last chat row, and the footer supplies the space below it instead. */}
+      <div className="mt-3 min-h-0 flex-1 overflow-y-auto px-2">
+        {pinned.length > 0 && (
+          <div className="mb-3">
+            <div className={LIST_HEADER_CLASS}>
+              <span className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+                <PinIcon className="size-3 -rotate-45" />
+                {t('sidebar.pinned')}
+              </span>
+            </div>
+            <ChatRows list={pinned} projects={projectNames} sections={sectionNames} />
+          </div>
+        )}
+        {listedSections.map((name) => {
+          const mode = sectionSort[name] ?? sortMode;
+          const members = listed.filter((s) => s.section === name).sort(compareSessions(mode));
+          return (
+            <div key={name} className="mb-3">
+              <SectionHeader name={name} members={members} sortMode={mode} />
+              {!collapsedSections.includes(name) && (
+                <ChatRows list={members} projects={projectNames} sections={sectionNames} />
               )}
-            </>
+            </div>
+          );
+        })}
+        <div>
+          {openProject !== null ? (
+            <div className={cn(LIST_HEADER_CLASS, 'justify-between')}>
+              <button
+                type="button"
+                onClick={() => setOpenProject(null)}
+                className="-ml-1 flex min-w-0 items-center gap-1 rounded px-1 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
+              >
+                <ArrowLeftIcon className="size-3 shrink-0" />
+                <span className="truncate">{openProject}</span>
+              </button>
+              <SortMenu mode={sortMode} onChange={setSortMode} className="-mr-1.5" />
+            </div>
+          ) : (rows.length > 0 || (pinned.length === 0 && listedSections.length === 0)) && (
+            <div className={cn(LIST_HEADER_CLASS, 'justify-between')}>
+              <span className="text-xs font-medium text-muted-foreground">{t('sidebar.chats')}</span>
+              <SortMenu mode={sortMode} onChange={setSortMode} className="-mr-1.5" />
+            </div>
           )}
-          {rows.slice(0, visibleCount).map((s) => (
-            <SessionRow key={s.id} session={s} projects={projectNames} />
-          ))}
+          <ChatRows list={rows} projects={projectNames} sections={sectionNames} limit={visibleCount} />
           {hiddenCount > 0 && (
             <button
               type="button"
@@ -738,7 +1147,7 @@ function SidebarBody({ onOpenPalette, account, onOpenTicketDialog, preview }: Si
               {t('sidebar.showMoreChats', { count: Math.min(hiddenCount, CHAT_PAGE) })}
             </button>
           )}
-          {rows.length === 0 && pinned.length === 0 && (
+          {listed.length === 0 && listedSections.length === 0 && pinned.length === 0 && (
             <div className="flex flex-col items-center gap-1.5 px-2 py-6 text-center text-xs text-muted-foreground">
               <MessageSquareIcon className="size-4 opacity-60" />
               {t('sidebar.noChats')}

@@ -2101,23 +2101,31 @@ def _user_storage(name: str) -> dict:
     }
 
 
+# What the sidebar's chat menu changed: per-session field overrides, and the
+# chats it forked off (each entry is its own override set plus a name).
+_SESSION_EDITS: dict[str, dict] = {}
+_SESSION_FORKS: list[dict] = []
+
+
 def _sessions():
     now = int(time.time())
-    return [
-        {
-            "id": "preview-session",
-            "name": PREVIEW_SESSION_NAME,
-            "model": "qwen3-llm",
-            "endpoint_url": "mock://preview",
-            "created_at": now,
-            "updated_at": now,
-            "last_accessed": now,
-            "message_count": 2,
-            "archived": False,
-            "rag": False,
-            "mode": "chat",
-        }
+    base = {
+        "model": "qwen3-llm",
+        "endpoint_url": "mock://preview",
+        "created_at": now,
+        "updated_at": now,
+        "last_accessed": now,
+        "message_count": 2,
+        "archived": False,
+        "rag": False,
+        "mode": "chat",
+    }
+    rows = [
+        {**base, "id": "preview-session", "name": PREVIEW_SESSION_NAME},
+        *({**base, **fork} for fork in _SESSION_FORKS),
     ]
+    edited = [{**row, **_SESSION_EDITS.get(row["id"], {})} for row in rows]
+    return [row for row in edited if not row.get("archived")]
 
 
 def _session_metrics(sid: str):
@@ -3058,6 +3066,28 @@ class PreviewHandler(BaseHTTPRequestHandler):
     def do_POST(self):
         parsed = urlparse(self.path)
         path = parsed.path
+        if path.startswith("/api/session/") and path.endswith("/fork"):
+            source_id = path[len("/api/session/") : -len("/fork")]
+            source = next((s for s in _sessions() if s["id"] == source_id), None)
+            fork = {
+                "id": f"preview-fork-{len(_SESSION_FORKS) + 1}",
+                "name": (source or {}).get("name", "Chat"),
+                "forked_from": source_id,
+                "folder": (source or {}).get("folder"),
+                "section": (source or {}).get("section"),
+            }
+            _SESSION_FORKS.append(fork)
+            self._send_json({"status": "ok", "id": fork["id"], "name": fork["name"], "files_forked": True})
+            return
+        if path.startswith("/api/session/") and path.endswith(("/important", "/archive")):
+            session_id = path[len("/api/session/") :].rsplit("/", 1)[0]
+            if path.endswith("/archive"):
+                _SESSION_EDITS.setdefault(session_id, {})["archived"] = True
+            else:
+                fields = _form_fields(self._read_body(), self.headers.get("Content-Type", ""))
+                _SESSION_EDITS.setdefault(session_id, {})["is_important"] = fields.get("important") == "true"
+            self._send_json({"status": "ok"})
+            return
         if path == "/api/mcp/servers":
             f = _form_fields(self._read_body(), self.headers.get("Content-Type", ""))
             srv = {
@@ -3354,6 +3384,19 @@ class PreviewHandler(BaseHTTPRequestHandler):
     def do_PATCH(self):
         body = self._read_body()
         path = urlparse(self.path).path
+        if path.startswith("/api/session/"):
+            fields = _form_fields(body, self.headers.get("Content-Type", ""))
+            edits = _SESSION_EDITS.setdefault(path[len("/api/session/") :], {})
+            if "name" in fields:
+                edits["name"] = fields["name"]
+            if "folder" in fields:
+                edits["folder"] = None if fields.get("clear_folder") else fields["folder"]
+            if "section" in fields:
+                edits["section"] = None if fields.get("clear_section") else fields["section"]
+            if "unread" in fields:
+                edits["unread"] = fields["unread"] == "true"
+            self._send_json({"ok": True})
+            return
         if path.startswith("/api/rag/bases/db-"):
             rag_id = path[len("/api/rag/bases/") :]
             target = json.loads(body or b"{}").get("connection_id")

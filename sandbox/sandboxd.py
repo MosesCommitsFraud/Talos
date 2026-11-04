@@ -7,6 +7,7 @@ import os
 import shlex
 import shutil
 import signal
+import stat
 import subprocess
 import threading
 import time
@@ -132,6 +133,10 @@ class FileEditRequest(BaseModel):
 
 class PathRequest(BaseModel):
     path: str
+
+
+class ForkWorkspaceRequest(BaseModel):
+    target_chat_id: str
 
 
 class MoveRequest(BaseModel):
@@ -649,6 +654,68 @@ def delete_workspace_route(user_id: str, chat_id: str) -> dict[str, Any]:
     return {"ok": True, "deleted": existed, "workspace": str(workspace)}
 
 
+def _unshare_file(name: str, path: Path) -> None:
+    """Give a file its own data before it is overwritten in place.
+
+    A forked workspace holds hard links to the source chat's files, so they exist
+    once on disk until one side changes. Writing through a link would change the
+    other chat's file as well; this swaps the link for a private copy first. Runs
+    as the sandbox account, like everything else the workspace's contents decide.
+    """
+    try:
+        info = path.lstat()
+    except OSError:
+        return
+    if not stat.S_ISREG(info.st_mode) or info.st_nlink < 2:
+        return
+    tmp = path.with_name(f".talos-unshare-{uuid.uuid4().hex}")
+    _run(["gosu", name, "sh", "-c", 'cp -p -- "$1" "$2" && mv -f -- "$2" "$1"', "sh", str(path), str(tmp)])
+
+
+def _unshare_mentioned(name: str, workspace: Path, text: str) -> None:
+    """Unshare every linked file a piece of code or a shell command names.
+
+    Code runs as the sandbox account and can overwrite a file in place without the
+    daemon seeing it, so this is the only moment to step in. Unsharing everything
+    up front would copy all of a fork's files on its first `ls`; going by the names
+    catches `prs.save("report.pptx")` and `sed -i` while files that are only read
+    or listed stay shared. A name built at runtime is not caught.
+    """
+    if not text:
+        return
+    for dirpath, dirnames, filenames in os.walk(workspace):
+        dirnames[:] = [d for d in dirnames if d not in SKIP_DIRS]
+        for filename in filenames:
+            if filename in text:
+                try:
+                    _unshare_file(name, Path(dirpath) / filename)
+                except HTTPException:
+                    pass
+
+
+@app.post("/users/{user_id}/workspaces/{chat_id}/fork")
+def fork_workspace_route(user_id: str, chat_id: str, req: ForkWorkspaceRequest) -> dict[str, Any]:
+    """Fill a forked chat's workspace with hard links to this chat's files, so the
+    fork sees every file while each exists once on disk. Deleting a file on one
+    side leaves the other's in place; overwrites go through _unshare_file. Runs as
+    the sandbox account: the tree is user-controlled and must not be walked as root.
+    A chat that never used the sandbox has nothing to fork."""
+    source = workspace_path(user_id, chat_id)
+    if source.is_symlink() or not source.is_dir():
+        return {"ok": True, "forked": False}
+    name, source = _workspace(user_id, chat_id)
+    _name, target = _workspace(user_id, req.target_chat_id)
+    _run(["gosu", name, "cp", "-a", "--link", "--", f"{source}/.", str(target)])
+    # A link to the kernel's socket would connect the fork to this chat's kernel.
+    _kernel_sock_path(target).unlink(missing_ok=True)
+    try:
+        rel_cwd = _get_session_cwd(user_id, chat_id, source).relative_to(source.resolve())
+        _set_session_cwd(user_id, req.target_chat_id, target, str(rel_cwd))
+    except (HTTPException, ValueError):
+        pass
+    return {"ok": True, "forked": True, "workspace": str(target)}
+
+
 @app.post("/users/{user_id}/workspaces/{chat_id}/upload", response_model=WorkspaceResponse)
 async def upload_file_route(user_id: str, chat_id: str, file: UploadFile = File(...)) -> WorkspaceResponse:
     # Use _workspace so the workspace dir is owned by the sandbox user — otherwise
@@ -656,6 +723,7 @@ async def upload_file_route(user_id: str, chat_id: str, file: UploadFile = File(
     name, workspace = _workspace(user_id, chat_id)
     filename = Path(file.filename or "upload.bin").name.replace("/", "_").replace("\\", "_")
     target = workspace / filename
+    _unshare_file(name, target)
     with target.open("wb") as out:
         shutil.copyfileobj(file.file, out)
     _run(["chown", f"{name}:{name}", str(target)])
@@ -724,6 +792,8 @@ async def execute_route(
     wait: float | None = None,
     tail: int | None = None,
 ) -> dict[str, Any]:
+    name, workspace = _workspace(user_id, chat_id)
+    _unshare_mentioned(name, workspace, req.command)
     proc = await _start_process(user_id, chat_id, req)
     if wait is not None:
         try:
@@ -1069,6 +1139,7 @@ async def exec_route(user_id: str, chat_id: str, req: ExecRequest) -> ExecRespon
         env = {"TALOS_CELL_SRC": src}
     else:
         command = req.command
+    _unshare_mentioned(name, workspace, (env or {}).get("TALOS_CELL_SRC") or command)
     started_at = time.time()
     proc = await _start_process(user_id, chat_id, ExecuteRequest(command=command, env=env))
     try:
@@ -1181,6 +1252,7 @@ async def kernel_execute_route(user_id: str, chat_id: str, req: CellRequest) -> 
     if not Path(rec["sock"]).exists():
         return ExecResponse(user_id=user_id, chat_id=chat_id, linux_user=name, workspace=str(workspace), stdout="", stderr="kernel: failed to start", exit_code=1)
     code_id = _remember_cell_code(user_id, chat_id, src)
+    _unshare_mentioned(name, workspace, src)
     started_at = time.time()
     timeout = int(req.timeout or 0)
     try:
@@ -1317,6 +1389,7 @@ def write_file_route(user_id: str, chat_id: str, req: FileWriteRequest) -> dict[
         old = ""
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
+        _unshare_file(name, path)
         path.write_text(req.content, encoding="utf-8")
         # chown the file AND any parent dirs we just created up to the workspace,
         # so the agent (running as the user) can write alongside them afterwards.
@@ -1444,6 +1517,7 @@ def edit_file_route(user_id: str, chat_id: str, req: FileEditRequest) -> dict[st
             return {"error": f"edit_file: {req.path}: {err}. Read the file and match it exactly.", "exit_code": 1, "path": str(path)}
     if new == old:
         return {"error": f"edit_file: {req.path}: edits produced no change", "exit_code": 1, "path": str(path)}
+    _unshare_file(name, path)
     path.write_text(new, encoding="utf-8")
     _run(["chown", f"{name}:{name}", str(path)])
     n = len(edits)
@@ -1577,6 +1651,8 @@ def _resolve_show_image_path(name: str, workspace: Path, raw: str) -> Path | Non
     try:
         dest_dir.mkdir(parents=True, exist_ok=True)
         dest = dest_dir / resolved.name
+        if dest != resolved:
+            _unshare_file(name, dest)
         shutil.copyfile(resolved, dest)
         subprocess.run(["chown", "-R", f"{name}:{name}", str(dest_dir)], capture_output=True)
     except OSError:

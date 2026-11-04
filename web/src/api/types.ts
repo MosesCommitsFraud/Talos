@@ -12,6 +12,12 @@ export interface Session {
   is_important?: boolean;
   /** Flat folder/workspace name, or null/empty when ungrouped. */
   folder?: string | null;
+  /** Sidebar section the chat is filed under, or null/empty when it has none. */
+  section?: string | null;
+  /** Marked unread by the user; cleared when the chat is opened. */
+  unread?: boolean;
+  /** The chat this one was forked from; it nests under that chat in the sidebar. */
+  forked_from?: string | null;
 }
 
 export interface ModelEndpoint {
