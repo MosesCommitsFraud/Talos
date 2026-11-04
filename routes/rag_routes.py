@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel
 
 from core.middleware import require_admin
-from src.rag_structure import DEFAULT_CHUNK_MAX_CHARS
+from src.rag_structure import DEFAULT_CHUNK_MAX_CHARS, DEFAULT_CONTEXT_MAX_CHARS
 from src.settings import load_settings, save_settings
 
 
@@ -111,7 +111,7 @@ class RagPipelineConfig(BaseModel):
     candidate_top_k: int = 40
     similarity_threshold: float = 0.0
     rerank_min_score: float = 0.30
-    max_context_chars: int = 10000
+    max_context_chars: int = DEFAULT_CONTEXT_MAX_CHARS
     query_prefix: str = ""
     context_prompt: str = ""
     # Auto-inject retrieved context into the prompt on every RAG/Full-Knowledge
@@ -255,7 +255,7 @@ def _clamp_float(value, default: float, lo: float = 0.0, hi: float = 1.0) -> flo
         return default
 
 
-def _clamp_chars(value, default: int = 10000) -> int:
+def _clamp_chars(value, default: int = DEFAULT_CONTEXT_MAX_CHARS) -> int:
     try:
         return max(500, min(int(value), 100000))
     except Exception:
@@ -379,7 +379,7 @@ def _public(cfg: dict) -> dict:
         "candidate_top_k": _clamp_candidate_k(cfg.get("candidate_top_k", 40)),
         "similarity_threshold": _clamp_float(cfg.get("similarity_threshold", 0.0), 0.0),
         "rerank_min_score": _clamp_float(cfg.get("rerank_min_score", 0.30), 0.30),
-        "max_context_chars": _clamp_chars(cfg.get("max_context_chars", 10000)),
+        "max_context_chars": _clamp_chars(cfg.get("max_context_chars", DEFAULT_CONTEXT_MAX_CHARS)),
         "query_prefix": cfg.get("query_prefix", ""),
         "context_prompt": cfg.get("context_prompt", ""),
         "auto_inject_enabled": bool(cfg.get("auto_inject_enabled", True)),

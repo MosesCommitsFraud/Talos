@@ -6,6 +6,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import quote
 
 from src.prompt_security import UNTRUSTED_CONTEXT_POLICY, untrusted_context_message
+from src.rag_structure import DEFAULT_CONTEXT_MAX_CHARS
 from src.turn_context import FIGURE_RULE_SOURCE
 
 logger = logging.getLogger(__name__)
@@ -464,7 +465,9 @@ class ChatProcessor:
                         return [], ""
                     limit = max_chars
                     if limit is None:
-                        limit = int(self._rag_cfg().get("max_context_chars") or 10000)
+                        limit = int(
+                            self._rag_cfg().get("max_context_chars") or DEFAULT_CONTEXT_MAX_CHARS
+                        )
                     limit = max(500, min(limit, 100000))
                     blocks, sources = [], []
                     used = len(prefix) + 2 if prefix else 0
@@ -755,9 +758,11 @@ class ChatProcessor:
 
             if max_chars is None:
                 try:
-                    max_chars = int(self._rag_cfg().get("max_context_chars") or 10000)
+                    max_chars = int(
+                        self._rag_cfg().get("max_context_chars") or DEFAULT_CONTEXT_MAX_CHARS
+                    )
                 except Exception:
-                    max_chars = 10000
+                    max_chars = DEFAULT_CONTEXT_MAX_CHARS
             max_chars = max(500, min(max_chars, 100000))
 
             fig_block = sep.join(e["sec"] for e in protected)

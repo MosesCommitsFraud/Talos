@@ -7,6 +7,7 @@ from unittest.mock import patch
 
 from src import rag_registry
 from src.chat_processor import ChatProcessor
+from src.rag_structure import DEFAULT_CONTEXT_MAX_CHARS
 
 
 class FakeIndex:
@@ -124,7 +125,7 @@ class ChatSelectionTests(unittest.TestCase):
         self.assertEqual({s["rag_id"] for s in sources}, {"default", "manuals"})
         self.assertEqual(len({s["_id"] for s in sources}), 2)
         self.assertIn("Knowledge base: Manuals", content)
-        self.assertLessEqual(len(content), 10000)
+        self.assertLessEqual(len(content), DEFAULT_CONTEXT_MAX_CHARS)
         for index in self.indexes.values():
             self.assertEqual(index.calls[0]["exclude_scopes"], ["sql"])
 

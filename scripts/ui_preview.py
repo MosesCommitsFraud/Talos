@@ -2629,7 +2629,7 @@ class PreviewHandler(BaseHTTPRequestHandler):
                     "candidate_top_k": 40,
                     "similarity_threshold": 0.0,
                     "rerank_min_score": 0.3,
-                    "max_context_chars": 10000,
+                    "max_context_chars": 18000,
                     "query_prefix": "",
                     "context_prompt": "",
                     "redact_pii_enabled": False,

@@ -46,6 +46,16 @@ def test_default_limit_keeps_a_typical_chapter_whole():
     assert len(split_documents([Document(content=text + text)])) == 2
 
 
+def test_default_context_budget_holds_three_full_chunks():
+    from routes.rag_routes import RagPipelineConfig, _clamp_chars
+    from src.rag_structure import DEFAULT_CHUNK_MAX_CHARS, DEFAULT_CONTEXT_MAX_CHARS
+
+    assert DEFAULT_CONTEXT_MAX_CHARS == 18000
+    assert RagPipelineConfig().max_context_chars == 18000
+    assert _clamp_chars("kaputt") == 18000
+    assert DEFAULT_CONTEXT_MAX_CHARS >= 3 * DEFAULT_CHUNK_MAX_CHARS
+
+
 def test_long_chapter_preserves_middle_and_both_neighbors():
     docs = chunks("# Chapter\n\n" + "abcde " * 1600)
     assert len(docs) == 3

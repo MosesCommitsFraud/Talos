@@ -179,6 +179,7 @@ Per-base pipeline settings override environment fallbacks:
 
 | Setting | Environment fallback | Default |
 |---------|----------------------|---------|
+| `max_context_chars` | none | 18000 |
 | `chunk_max_chars` | `RAG_MAX_CHUNK_CHARS` | 6000 |
 | `chunk_overlap_chars` | `RAG_CHUNK_OVERLAP_CHARS` | 200 |
 | `context_window` | `RAG_CONTEXT_WINDOW` | 1 |

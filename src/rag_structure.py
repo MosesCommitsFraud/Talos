@@ -20,6 +20,9 @@ CHUNKING_VERSION = "haystack-sections-v3"
 # Most chapters of a typical manual fit whole, and ordinary prose stays well inside
 # embedding windows (about 1,700 tokens at 6,000 characters of German).
 DEFAULT_CHUNK_MAX_CHARS = 6000
+# Retrieved text injected into one chat turn: room for several whole chunks at
+# that size, and about 5,000 tokens of German, so small next to model contexts.
+DEFAULT_CONTEXT_MAX_CHARS = 18000
 
 # Docling reads PDFs without a heading hierarchy, so a numbered title is the only
 # level the text itself still carries ("2.1 Kosten" sits below "2 Planung").
