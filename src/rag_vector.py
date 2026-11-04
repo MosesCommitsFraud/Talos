@@ -1964,7 +1964,9 @@ class VectorRAG:
         if not query or not isinstance(query, str):
             return []
         try:
-            fetch_k = max(int(candidate_k or k * 5), k)
+            from src.rag_structure import DEFAULT_CANDIDATE_TOP_K
+
+            fetch_k = max(int(candidate_k or DEFAULT_CANDIDATE_TOP_K), k)
             # Qwen3-Embedding recommends an instruction prefix on the *query*
             # (e.g. "Instruct: Given a query, retrieve relevant passages\nQuery: ")
             # while documents are embedded without one. Applied to the dense
