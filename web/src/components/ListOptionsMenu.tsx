@@ -9,6 +9,7 @@ import {
   SEPARATOR_CLASS,
   SUB_ITEM_CLASS,
   SUB_POPUP_CLASS,
+  SUB_POPUP_OFFSET,
 } from './SessionMenu';
 import { Tooltip } from './ui/misc';
 import {
@@ -68,7 +69,7 @@ function SubRow({ label, value, children }: { label: string; value?: string; chi
         <span className="flex-1 whitespace-nowrap pe-4">{label}</span>
         {value && <span className="shrink-0 whitespace-nowrap text-xs text-muted-foreground">{value}</span>}
       </MenuSubTrigger>
-      <MenuSubPopup className={SUB_POPUP_CLASS} sideOffset={4}>
+      <MenuSubPopup className={SUB_POPUP_CLASS} sideOffset={SUB_POPUP_OFFSET}>
         {children}
       </MenuSubPopup>
     </MenuSub>

@@ -40,6 +40,9 @@ const PARTS = {
 };
 
 export const POPUP_CLASS = 'w-56 rounded-xl p-1.5';
+/** A submenu's offset counts from its row, which sits inside the parent's padding
+ *  and border (about 7 px), not from the parent's edge. 11 leaves a 4 px gap. */
+export const SUB_POPUP_OFFSET = 11;
 export const SUB_POPUP_CLASS = 'max-h-60 w-max min-w-32 max-w-56 overflow-y-auto rounded-lg p-1';
 export const ITEM_CLASS = 'min-h-[30px] rounded-lg px-2.5 text-sm sm:min-h-[30px]';
 export const SUB_ITEM_CLASS = 'min-h-[26px] gap-3 rounded-md px-2 text-[13px] sm:min-h-[26px] sm:text-[13px]';
@@ -127,7 +130,7 @@ function LabelSubmenu({
       <SubTrigger className={ITEM_CLASS}>
         <span className="min-w-0 flex-1 truncate">{label}</span>
       </SubTrigger>
-      <SubPopup className={SUB_POPUP_CLASS} sideOffset={4} onKeyDown={pressShortcut}>
+      <SubPopup className={SUB_POPUP_CLASS} sideOffset={SUB_POPUP_OFFSET} onKeyDown={pressShortcut}>
         {current && row(keyAt(0), noneLabel, () => onPick(null))}
         {options.map((name, index) =>
           row(keyAt(index + offset), name, () => onPick(name), name === current),
