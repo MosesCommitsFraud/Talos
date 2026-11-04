@@ -404,10 +404,7 @@ function ProjectRow({
   );
 }
 
-/** Primary nav row (New / Projects / Artifacts / Customize). `anim` names the
- *  small move the icon makes while the row is hovered — see `.nav-row` in
- *  index.css. "New" takes none: it is the row people hit without looking, and
- *  the one that should read as a plain button. */
+/** Primary nav row (New / Projects / Artifacts / Customize). */
 /* Every row in the sidebar carries `my-px` and a matching notch off its own
  * padding: the pitch of the list is unchanged, but two highlighted rows next to
  * each other (the hovered one and the selected one) are separated by a hairline
@@ -415,7 +412,6 @@ function ProjectRow({
 function NavRow({
   icon,
   label,
-  anim,
   onClick,
   emphasis,
   active,
@@ -425,7 +421,6 @@ function NavRow({
   label: string;
   /** Keybinding revealed at the row's right edge on hover. */
   shortcut?: string;
-  anim?: 'lift' | 'shapes' | 'tilt';
   onClick?: () => void;
   /** The "New" row sits a shade brighter — it is the sidebar's primary action. */
   emphasis?: boolean;
@@ -438,13 +433,13 @@ function NavRow({
       onClick={onClick}
       aria-current={active ? 'page' : undefined}
       className={cn(
-        'nav-row group/nav my-px flex h-[30px] w-full items-center gap-2.5 rounded-lg px-2 text-sm transition-colors [&_svg]:size-[18px] [&_svg]:shrink-0',
+        'group/nav my-px flex h-[30px] w-full items-center gap-2.5 rounded-lg px-2 text-sm transition-colors [&_svg]:size-[18px] [&_svg]:shrink-0',
         emphasis || active
           ? 'bg-sidebar-active text-strong hover:bg-sidebar-active'
           : 'text-foreground/80 hover:bg-sidebar-accent hover:text-foreground',
       )}
     >
-      <span className={cn('flex size-5 shrink-0 items-center justify-center', anim && `nav-anim-${anim}`)}>{icon}</span>
+      <span className="flex size-5 shrink-0 items-center justify-center">{icon}</span>
       <span className="min-w-0 flex-1 truncate text-left">{label}</span>
       {shortcut && (
         <span className="opacity-0 transition-opacity group-hover/nav:opacity-100 group-focus-visible/nav:opacity-100">
@@ -614,21 +609,18 @@ function SidebarBody({ onOpenPalette, account, onOpenTicketDialog, preview }: Si
           onClick={() => { newChat(); setView('chat'); }}
         />
         <NavRow
-          anim="lift"
           icon={<ArchiveIcon />}
           label={t('sidebar.projects')}
           active={view === 'projects'}
           onClick={() => setView('projects')}
         />
         <NavRow
-          anim="shapes"
           icon={<ShapesIcon />}
           label={t('sidebar.artifacts')}
           active={view === 'artifacts'}
           onClick={() => setView('artifacts')}
         />
         <NavRow
-          anim="tilt"
           icon={<BriefcaseIcon />}
           label={t('sidebar.customize')}
           active={view === 'customize'}
