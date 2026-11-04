@@ -199,6 +199,8 @@ class RagBaseUpdate(BaseModel):
     chat_enabled: bool | None = None
     # {"restricted": bool, "users": [...]} — who may retrieve from this base.
     access: dict | None = None
+    # Mini RAGs only: the database from Integrations this one belongs to.
+    connection_id: str | None = None
 
 
 class RagBaseConfigUpdate(BaseModel):
@@ -511,8 +513,15 @@ def setup_rag_routes():
                 chat_enabled=None if mini else body.chat_enabled,
                 access=None if mini else body.access,
             )
+            if body.connection_id is not None:
+                from src import rag_mini
+
+                rag_mini.rebind(base_id, body.connection_id)
+                entry = get_base(base_id)
         except RagNotFound:
             raise HTTPException(404, f"Unknown knowledge base '{base_id}'")
+        except ValueError as e:
+            raise HTTPException(400, str(e))
         return describe(entry)
 
     @router.delete("/bases/{base_id}")

@@ -1387,7 +1387,12 @@ const en = {
       database: 'Database: {{name}}',
       disabled: 'disabled',
       orphaned:
-        'The database was removed from Integrations. This mini RAG is no longer retrieved and takes no new documents. You can delete it.',
+        'The database was removed from Integrations. This mini RAG is no longer retrieved and takes no new documents. Choose another database in its settings or delete it.',
+      dbLabel: 'Database',
+      dbPick: 'Choose a database…',
+      dbHint:
+        'Which database from Integrations this mini RAG belongs to. Saved at once. If the chosen database already has a mini RAG, the two trade databases; documents and settings stay with each mini RAG.',
+      dbChanged: 'Now belongs to {{name}}.',
       noDatabases:
         'No database yet. Add one under Settings → Integrations and its mini RAG appears by itself.',
       nameFollows: 'The name comes from the database in Integrations.',

@@ -2392,21 +2392,30 @@ _RAG_DOCS = [
 ]
 
 
-def _mini_base(rag_id, name, connection, docs, chunks):
-    """A mini RAG as /api/rag/bases reports it. `connection=None`: database removed."""
+_MINI_CONNECTIONS = {
+    "erp": {"id": "erp", "name": "ERP", "enabled": True},
+    "crm": {"id": "crm", "name": "CRM", "enabled": False},
+}
+# rag id -> connection id; "removed" is a database no longer in Integrations.
+_MINI_BINDINGS = {"db-erp": "erp", "db-crm": "crm", "db-alt": "removed"}
+
+
+def _mini_base(rag_id, docs, chunks):
+    """A mini RAG as /api/rag/bases reports it."""
+    connection = _MINI_CONNECTIONS.get(_MINI_BINDINGS[rag_id])
     return {
         "id": rag_id,
         "kind": "mini",
-        "connection_id": rag_id[3:],
-        "connection": connection and {"id": rag_id[3:], "name": name, **connection},
-        "name": name,
+        "connection_id": _MINI_BINDINGS[rag_id],
+        "connection": connection,
+        "name": connection["name"] if connection else "Altsystem",
         "description": "",
         "language": "de",
         "collection": "talos_kb_" + rag_id.replace("-", "_"),
         "chat_enabled": False,
         "created_at": 0.0,
         "updated_at": 0.0,
-        "override_count": 3,
+        "override_count": 7,
         "access": {"restricted": False, "users": []},
         "content_count": docs,
         "chunk_count": chunks,
@@ -2819,9 +2828,9 @@ class PreviewHandler(BaseHTTPRequestHandler):
                             "chunk_count": sum(d["chunks"] for d in _RAG_DOCS),
                             "legacy_sql_count": len(_RAG_SQL_DOCS),
                         },
-                        _mini_base("db-erp", "ERP", {"enabled": True}, 1, 18),
-                        _mini_base("db-crm", "CRM", {"enabled": False}, 0, 0),
-                        _mini_base("db-alt", "Altsystem", None, 2, 40),
+                        _mini_base("db-erp", 1, 18),
+                        _mini_base("db-crm", 0, 0),
+                        _mini_base("db-alt", 2, 40),
                     ]
                 }
             )
@@ -3322,6 +3331,16 @@ class PreviewHandler(BaseHTTPRequestHandler):
     def do_PATCH(self):
         body = self._read_body()
         path = urlparse(self.path).path
+        if path.startswith("/api/rag/bases/db-"):
+            rag_id = path[len("/api/rag/bases/") :]
+            target = json.loads(body or b"{}").get("connection_id")
+            if target:
+                for other, bound in _MINI_BINDINGS.items():
+                    if bound == target:
+                        _MINI_BINDINGS[other] = _MINI_BINDINGS[rag_id]
+                _MINI_BINDINGS[rag_id] = target
+            self._send_json(_mini_base(rag_id, 0, 0))
+            return
         if path.startswith("/api/mcp/servers/"):
             srv = _mcp_find(path)
             if srv and path.endswith("/tools"):

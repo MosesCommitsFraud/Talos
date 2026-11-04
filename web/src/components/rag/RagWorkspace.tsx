@@ -6,7 +6,7 @@ import { useRagBase } from '@/state/ragBase';
 import { useUi } from '@/state/ui';
 import { Button } from '../ui/button';
 import { RagActivity } from './RagActivity';
-import { MiniRagNote, RagOverview, useActiveRagBase } from './RagBases';
+import { MiniRagDatabase, MiniRagNote, RagOverview, useActiveRagBase } from './RagBases';
 import { RagContent } from './RagContent';
 import { RagSettingsForm } from './RagSettingsForm';
 
@@ -173,6 +173,7 @@ export function RagWorkspace() {
             )}
             {space.kind === 'global' && <RagSettingsForm actionsEl={actionsEl} />}
             {routed?.kind === 'mini' && <MiniRagNote base={routed} />}
+            {routed?.kind === 'mini' && tab === 'settings' && <MiniRagDatabase base={routed} />}
             {space.kind === 'base' &&
               (tab === 'content' ? (
                 <RagContent baseId={space.id} />

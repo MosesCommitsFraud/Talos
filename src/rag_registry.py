@@ -288,6 +288,41 @@ def set_overrides(rag_id: str, overrides: Dict[str, Any]) -> Dict[str, Any]:
     return entry
 
 
+def set_connection(rag_id: str, connection_id: str) -> Optional[Dict[str, Any]]:
+    """Bind a mini RAG to a database, keeping one mini RAG per database.
+
+    A mini RAG already bound to that database takes over what this one had, in one
+    write, so no moment exists with two on the same database. Returns that other
+    entry, or None if there was none.
+    """
+    with _lock:
+        entries = _read()
+        entry = entries.get((rag_id or "").strip())
+        if entry is None:
+            raise RagNotFound(rag_id)
+        if not is_mini(entry):
+            raise ValueError("only a mini RAG is bound to a database")
+        previous = entry.get("connection_id")
+        if previous == connection_id:
+            return None
+        other = next(
+            (
+                e
+                for e in entries.values()
+                if is_mini(e) and e is not entry and e.get("connection_id") == connection_id
+            ),
+            None,
+        )
+        now = time.time()
+        entry["connection_id"] = connection_id
+        entry["updated_at"] = now
+        if other is not None:
+            other["connection_id"] = previous
+            other["updated_at"] = now
+        _write(entries)
+    return other
+
+
 def update_base(
     rag_id: str,
     name: Optional[str] = None,

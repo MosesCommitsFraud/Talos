@@ -11,10 +11,11 @@ document tools. All of that comes from being an ordinary entry in
 
 The binding is by construction: entries are created from the configured databases
 (``sync``) and there is no way to create one otherwise. A database's id never
-changes, so renaming it keeps the binding. Removing a database does not delete its
-mini RAG, because uploaded files should not vanish as a side effect of editing a
-connection list. The mini RAG then counts as orphaned: it takes no new documents,
-is not retrieved, and can be deleted by hand.
+changes, so renaming it keeps the binding. An administrator can move a mini RAG to
+another configured database (``rebind``), but never to none. Removing a database
+does not delete its mini RAG, because uploaded files should not vanish as a side
+effect of editing a connection list. The mini RAG then counts as orphaned: it takes
+no new documents, is not retrieved, and can be moved to a database or deleted by hand.
 """
 
 from __future__ import annotations
@@ -29,9 +30,12 @@ from src.rag_registry import (
     RagConflict,
     RagNotFound,
     create_base,
+    delete_base,
+    describe,
     get_base,
     is_mini,
     list_bases,
+    set_connection,
     set_overrides,
     slugify,
     update_base,
@@ -162,6 +166,26 @@ def sync() -> List[Dict[str, Any]]:
     return conns
 
 
+def rebind(base_id: str, connection_id: str) -> None:
+    """Move a mini RAG to another database from Integrations.
+
+    Every database keeps exactly one mini RAG, and no documents are lost: if the
+    target already has one, the two trade places. If the one that moved had no
+    database left, the other is orphaned by the trade; that one is deleted when it
+    is empty, since there is nothing in it to keep.
+    """
+    conns = connections()
+    if not any(c["id"] == connection_id for c in conns):
+        raise ValueError(f"Unknown database '{connection_id}'")
+    displaced = set_connection(base_id, connection_id)
+    sync()
+    if displaced is None or any(c["id"] == displaced.get("connection_id") for c in conns):
+        return
+    row = describe(displaced)
+    if row.get("available") and not row.get("content_count"):
+        delete_base(str(displaced["id"]))
+
+
 def annotate(row: Dict[str, Any], conns: List[Dict[str, Any]]) -> Dict[str, Any]:
     """Add the bound database to a described mini RAG; ``None`` means orphaned."""
     if row.get("kind") == "mini":
@@ -194,8 +218,6 @@ def search_targets() -> List[Tuple[str, Optional[str], Optional[str]]]:
     files for as long as they have not moved. Empty ones are skipped: searching
     them would only cost a query embedding each.
     """
-    from src.rag_registry import describe
-
     by_connection = {e.get("connection_id"): e for e in _mini_entries()}
     targets: List[Tuple[str, Optional[str], Optional[str]]] = []
     for conn in connections():

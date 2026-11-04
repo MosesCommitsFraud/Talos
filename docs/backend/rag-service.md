@@ -63,6 +63,11 @@ its stable id. Removing a database does not delete uploaded files as a side effe
 its mini RAG becomes orphaned (`connection: null`), which means it is not retrieved,
 refuses new documents, and is the only state in which it can be deleted.
 
+Its settings tab can move a mini RAG to another configured database
+(`PATCH /api/rag/bases/<id>` with `connection_id`), but never to none. If the target
+already has one, the two trade databases and each keeps its documents and settings.
+When that would orphan an empty mini RAG, the empty one is deleted.
+
 **Retrieval.** `rag_mini.retrieve_sections` searches the mini RAG of every enabled
 database that has documents, using each one's top-k, candidates, thresholds, context
 budget and section expansion. With several databases the budget is shared and each

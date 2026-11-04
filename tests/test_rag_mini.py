@@ -178,6 +178,87 @@ def test_an_orphan_takes_no_new_documents(conns, rags, tmp_path, monkeypatch):
     assert res.status_code == 409
 
 
+def test_it_can_move_to_another_database_and_the_two_trade_places(conns, admin):
+    conns.append({"id": "def456", "name": "CRM", "enabled": True})
+    rag_mini.sync()
+    erp, crm = mini_of("abc123")["id"], mini_of("def456")["id"]
+    res = admin.patch(f"/api/rag/bases/{erp}", json={"connection_id": "def456"})
+    assert res.status_code == 200
+    assert res.json()["connection_id"] == "def456" and res.json()["name"] == "CRM"
+    assert mini_of("def456")["id"] == erp
+    assert mini_of("abc123")["id"] == crm and mini_of("abc123")["name"] == "ERP"
+    # One per database, even after syncing again.
+    rag_mini.sync()
+    assert len(rag_registry.list_bases(include_mini=True)) == 3
+
+
+def test_moving_keeps_collection_settings_and_documents_with_the_mini_rag(conns):
+    conns.append({"id": "def456", "name": "CRM", "enabled": True})
+    rag_mini.sync()
+    before = mini_of("abc123")
+    rag_config.set_overrides(before["id"], {"chat_top_k": 3})
+    rag_mini.rebind(before["id"], "def456")
+    after = rag_registry.get_base(before["id"])
+    assert after["collection"] == before["collection"]
+    assert rag_config.effective_config(before["id"])["chat_top_k"] == 3
+
+
+def test_retrieval_follows_the_new_binding(conns, rags):
+    conns.append({"id": "off", "name": "Off", "enabled": False})
+    rag_mini.sync()
+    moved = _filled(rags, results=[hit("orders")])
+    rag_mini.rebind(mini_of("abc123")["id"], "off")
+    assert rag_mini.retrieve_sections("q") == []
+    assert not moved.search_calls
+
+
+def test_an_orphan_can_be_given_a_database_again(conns, rags):
+    rag_mini.sync()
+    orphan = mini_of()["id"]
+    rags[orphan] = FakeRag(documents=[{"source": "s", "filename": "s.md", "chunks": 1}])
+    conns[:] = [{"id": "new", "name": "ERP neu", "enabled": True}]
+    rag_mini.sync()
+    empty = mini_of("new")["id"]
+    assert rag_mini.is_orphaned(orphan)
+
+    rag_mini.rebind(orphan, "new")
+
+    assert not rag_mini.is_orphaned(orphan)
+    assert rag_registry.get_base(orphan)["name"] == "ERP neu"
+    # The empty one that was created for the new database has nothing to keep.
+    with pytest.raises(rag_registry.RagNotFound):
+        rag_registry.get_base(empty)
+
+
+def test_a_mini_rag_with_documents_is_not_deleted_by_a_trade(conns, rags):
+    rag_mini.sync()
+    orphan = mini_of()["id"]
+    conns[:] = [{"id": "new", "name": "ERP neu", "enabled": True}]
+    rag_mini.sync()
+    filled = mini_of("new")["id"]
+    rags[filled] = FakeRag(documents=[{"source": "s", "filename": "s.md", "chunks": 1}])
+
+    rag_mini.rebind(orphan, "new")
+
+    assert rag_mini.is_orphaned(filled)
+    assert not rag_mini.is_orphaned(orphan)
+
+
+def test_the_new_database_must_be_one_from_integrations(conns, admin):
+    rag_mini.sync()
+    rag_id = mini_of()["id"]
+    res = admin.patch(f"/api/rag/bases/{rag_id}", json={"connection_id": "nope"})
+    assert res.status_code == 400
+    assert mini_of()["id"] == rag_id
+
+
+def test_only_a_mini_rag_can_be_moved(conns, admin):
+    rag_mini.sync()
+    res = admin.patch("/api/rag/bases/default", json={"connection_id": "abc123"})
+    assert res.status_code == 400
+    assert not rag_registry.is_mini(rag_registry.get_base("default"))
+
+
 def test_it_can_only_be_deleted_once_its_database_is_gone(conns, admin):
     rag_mini.sync()
     rag_id = mini_of()["id"]

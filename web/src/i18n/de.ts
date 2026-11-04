@@ -1394,7 +1394,12 @@ const de: typeof en = {
       database: 'Datenbank: {{name}}',
       disabled: 'deaktiviert',
       orphaned:
-        'Die Datenbank wurde aus den Integrationen entfernt. Dieses Mini-RAG wird nicht mehr abgerufen und nimmt keine neuen Dokumente an. Du kannst es löschen.',
+        'Die Datenbank wurde aus den Integrationen entfernt. Dieses Mini-RAG wird nicht mehr abgerufen und nimmt keine neuen Dokumente an. Wähle in seinen Einstellungen eine andere Datenbank oder lösche es.',
+      dbLabel: 'Datenbank',
+      dbPick: 'Datenbank wählen…',
+      dbHint:
+        'Bestimmt, zu welcher Datenbank aus den Integrationen dieses Mini-RAG gehört. Wird sofort gespeichert. Hat die gewählte Datenbank schon ein Mini-RAG, tauschen die beiden ihre Datenbank; Dokumente und Einstellungen bleiben beim jeweiligen Mini-RAG.',
+      dbChanged: 'Gehört jetzt zu {{name}}.',
       noDatabases:
         'Noch keine Datenbank eingetragen. Trage unter Einstellungen → Integrationen eine ein, dann entsteht ihr Mini-RAG von selbst.',
       nameFollows: 'Der Name kommt von der Datenbank in den Integrationen.',

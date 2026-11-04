@@ -991,6 +991,8 @@ export const updateRagBase = (
     language?: string;
     chat_enabled?: boolean;
     access?: RagBaseAccess;
+    /** Mini RAGs only: the database from Integrations it belongs to. */
+    connection_id?: string;
   },
 ) => postJSON<RagBase>(`/api/rag/bases/${encodeURIComponent(id)}`, body, 'PATCH');
 

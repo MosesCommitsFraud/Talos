@@ -408,6 +408,52 @@ export function MiniRagNote({ base }: { base: RagBase }) {
   );
 }
 
+/** The settings tab's choice of database. Saved at once rather than with the form:
+ *  it isn't a pipeline setting, and it changes what the rest of the form belongs to. */
+export function MiniRagDatabase({ base }: { base: RagBase }) {
+  const { t } = useTranslation();
+  const queryClient = useQueryClient();
+  const { data } = useRagBases();
+  const [msg, setMsg] = useState<{ text: string; ok: boolean } | null>(null);
+  // Every database has a mini RAG, so together they name all the choices.
+  const connections = (data?.bases ?? []).flatMap((b) =>
+    b.kind === 'mini' && b.connection ? [b.connection] : [],
+  );
+  const move = useMutation({
+    mutationFn: (connectionId: string) => updateRagBase(base.id, { connection_id: connectionId }),
+    onSuccess: async (updated) => {
+      await queryClient.refetchQueries({ queryKey: ['rag-bases'] });
+      setMsg({ text: t('rag.mini.dbChanged', { name: updated.name }), ok: true });
+    },
+    onError: (e) => setMsg({ text: (e as Error).message, ok: false }),
+  });
+  return (
+    <div className="mb-5 space-y-1.5 rounded-md border border-border/60 p-3.5">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <span className="text-[13px] font-semibold">{t('rag.mini.dbLabel')}</span>
+        <Select
+          className="w-64 max-w-full text-sm"
+          value={base.connection?.id ?? ''}
+          onChange={(v) => {
+            if (v && v !== base.connection?.id) move.mutate(v);
+          }}
+          options={[
+            ...(base.connection ? [] : [{ value: '', label: t('rag.mini.dbPick') }]),
+            ...connections.map((c) => ({
+              value: c.id,
+              label: c.enabled ? c.name : `${c.name} (${t('rag.mini.disabled')})`,
+            })),
+          ]}
+        />
+      </div>
+      <p className="text-xs text-muted-foreground/80">{t('rag.mini.dbHint')}</p>
+      {msg && (
+        <p className={cn('text-xs', msg.ok ? 'text-success' : 'text-destructive-foreground')}>{msg.text}</p>
+      )}
+    </div>
+  );
+}
+
 /** Schema files from before there was one mini RAG per database. They keep being
  *  retrieved until an administrator says which database they describe, which the
  *  system can't know as soon as there is more than one. */
