@@ -232,6 +232,9 @@ def test_stopping_one_subagent_keeps_the_others(jobs_dir, monkeypatch):
 
 def test_a_queued_subagent_stopped_before_it_starts_never_runs(jobs_dir, monkeypatch):
     calls = []
+    # A holds the only slot until it is stopped, so B stays queued however long
+    # the test takes to get to it. run_tasks resolves the models on a worker thread
+    # first, so no fixed number of event-loop turns gets the jobs registered.
     slow = _slow_for("langsam")
 
     async def counting(endpoint_url, model, messages, **kw):
@@ -246,14 +249,18 @@ def test_a_queued_subagent_stopped_before_it_starts_never_runs(jobs_dir, monkeyp
         call = asyncio.create_task(
             sub.run_tasks(
                 json.dumps(
-                    {"tasks": [{"title": "A", "prompt": "erst"}, {"title": "B", "prompt": "zweit"}]}
+                    {
+                        "tasks": [
+                            {"title": "A", "prompt": "langsam"},
+                            {"title": "B", "prompt": "zweit"},
+                        ]
+                    }
                 ),
                 session_id="s1",
             )
         )
-        await asyncio.sleep(0)
-        b = next(r for r in bg_jobs.list_for_session("s1") if r["command"] == "B")
-        assert sub.stop(b["id"])
+        await _stop_when_running("B")()
+        await _stop_when_running("A")()
         return await asyncio.wait_for(call, 5)
 
     out = asyncio.run(main())

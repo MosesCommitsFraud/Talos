@@ -53,7 +53,10 @@ def test_every_skill_example_is_a_valid_call(skill, index, call):
     else:
         from src.interactive_ui import normalize
 
-        assert normalize(call)["sources"]
+        # Spelled out in every example, though `[]` is fine for a tool that shows
+        # no data of its own (a calculator, a timer), as the skill itself says.
+        assert "sources" in call
+        assert isinstance(normalize(call)["sources"], list)
 
 
 def test_read_skill_loads_system_skills_without_any_switch():
