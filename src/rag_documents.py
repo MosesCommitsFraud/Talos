@@ -53,7 +53,7 @@ LANE_CACHE_VERSION = 1
 DOCLING_STRUCTURE_VERSION = 2
 # Bump when chunking/enrichment/embedding-input semantics change so stored
 # documents with an older fingerprint are re-derived instead of skipped.
-DERIVE_VERSION = 2
+DERIVE_VERSION = 3
 
 # Statuses a register row can have.
 INDEXED = "indexed"

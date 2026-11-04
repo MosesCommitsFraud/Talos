@@ -282,6 +282,89 @@ def test_heading_directly_above_a_table_stays_on_the_table():
     assert result["expanded"] == "## Kosten\n\n" + table
 
 
+def test_yaml_front_matter_is_text_of_the_first_section_and_no_heading():
+    head = "---\ndoc_id: macs-00\ntitel: Glossar\nschlagworte: [a, b]\n---\n\n"
+    docs = chunks(head + "# Titel\n\nIntro.\n\n## Eins\n\nText.")
+    assert [d.content.strip() for d in docs] == [head + "# Titel\n\nIntro.", "## Eins\n\nText."]
+    assert docs[0].meta["heading_path"] == ["Titel"]
+    assert docs[1].meta["heading_path"] == ["Titel", "Eins"]
+
+
+def test_front_matter_followed_by_text_opens_no_chapter():
+    head = "---\r\ndoc_id: x\r\n---\r\n"
+    docs = chunks(head + "Vorwort.\r\n\r\n# Titel\r\n\r\nText.")
+    assert docs[0].content.strip() == (head + "Vorwort.").strip()
+    assert docs[0].meta["heading_path"] == []
+    assert docs[1].meta["heading_path"] == ["Titel"]
+
+
+def test_rule_above_ordinary_setext_text_is_no_front_matter():
+    docs = chunks("---\nEin ganz normaler Satz ohne Schluessel\n---\n\nText.")
+    assert docs[-1].meta["heading_path"] == ["Ein ganz normaler Satz ohne Schluessel"]
+
+
+def test_rules_never_become_chunks_or_chunk_tails():
+    docs = chunks(
+        "---\n\n# Titel\n\nIntro.\n\n---\n\n## Eins\n\n| A |\n|---|\n| 1 |\n\n***\n\n"
+        "## Zwei\n\nText.\n\n- - -\n\n## Drei\n\nEnde.\n"
+    )
+    assert [d.content.strip() for d in docs] == [
+        "# Titel\n\nIntro.",
+        "## Eins\n\n| A |\n|---|\n| 1 |",
+        "## Zwei\n\nText.",
+        "## Drei\n\nEnde.",
+    ]
+
+
+def test_title_and_rule_still_open_the_chapter_below():
+    docs = chunks("# Teil 2\n\n---\n\n## Kapitel\n\nText.")
+    assert len(docs) == 1
+    assert docs[0].meta["heading_path"] == ["Teil 2", "Kapitel"]
+
+
+def test_short_text_around_a_table_rides_with_it():
+    table = "| A | B |\n|---|---|\n| 1 | 2 |\n"
+    text = (
+        f"## Kosten\n\nEs gilt:\n\n{table}\n**Regel:** Kosten sind netto.\n\n---\n\n## Rest\n\nX."
+    )
+    docs = chunks(text)
+    assert docs[0].content == f"## Kosten\n\nEs gilt:\n\n{table}\n**Regel:** Kosten sind netto."
+    assert docs[0].meta["block_type"] == "table"
+    assert docs[1].content == "## Rest\n\nX."
+    assert docs[0].meta["source_end"] - docs[0].meta["split_idx_start"] == len(docs[0].content)
+
+
+def test_long_prose_around_a_table_keeps_its_own_vector():
+    prose = "Das ist ein Satz. " * 40
+    table = "| A |\n|---|\n| 1 |\n"
+    docs = chunks(f"## Kosten\n\n{prose}\n\n{table}\n{prose}")
+    assert [d.meta.get("block_type") for d in docs] == [None, "table", None]
+    assert docs[1].content == table
+
+
+def test_note_goes_on_the_last_part_of_a_long_table_and_comes_back_once():
+    table = "| A | B |\n| --- | --- |\n" + "| 1 | 2 |\n" * 900
+    text = "## Kosten\n\n" + table + "\nGilt netto.\n"
+    docs = chunks(text)
+    assert docs[-1].meta["block_type"] == "table"
+    assert docs[-1].content.endswith("| 1 | 2 |\n\nGilt netto.\n")
+    assert all(len(d.content) <= 4000 for d in docs)
+    result = expand_context(store_for(docs), [hit(docs[1])], max_chars=20000, window=5)[0]
+    assert result["expanded"] == text
+
+
+def test_short_text_between_two_tables_introduces_the_second():
+    one = "| A |\n|---|\n| 1 |\n"
+    two = "| B |\n|---|\n| 2 |\n"
+    docs = chunks(f"## Kosten\n\n{one}\nUnd weiter:\n\n{two}")
+    assert [d.content for d in docs] == [f"## Kosten\n\n{one}", f"\nUnd weiter:\n\n{two}"]
+
+
+def test_literal_text_keeps_its_rules():
+    docs = split_documents([Document(content="---\n", meta={"literal_text": True})])
+    assert [d.content for d in docs] == ["---\n"]
+
+
 def test_long_section_is_cut_between_paragraphs_without_a_stray_tail():
     paragraphs = [f"Absatz {i}: " + "Das ist ein Satz. " * 40 for i in range(6)]
     text = "## Kapitel\n\n" + "\n\n".join(paragraphs)

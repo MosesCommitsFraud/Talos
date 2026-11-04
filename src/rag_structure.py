@@ -16,7 +16,7 @@ from collections import defaultdict
 from copy import deepcopy
 from dataclasses import is_dataclass, replace
 
-CHUNKING_VERSION = "haystack-sections-v3"
+CHUNKING_VERSION = "haystack-sections-v4"
 # Most chapters of a typical manual fit whole, and ordinary prose stays well inside
 # embedding windows (about 1,700 tokens at 6,000 characters of German).
 DEFAULT_CHUNK_MAX_CHARS = 6000
@@ -37,6 +37,22 @@ _SENTENCE_END = re.compile(
     r"[.!?\u2026][\"'\u201c\u201d\u00bb)\]]*\s+"
     r"(?=[\"'\u201e\u00ab(\[]?[^\W_a-z\u00e4\u00f6\u00fc\u00df])"
 )
+# YAML front matter between "---" lines. Markdown alone reads the opening line as a
+# rule and everything up to the closing line as one long heading.
+_FRONTMATTER = re.compile(
+    r"\A\ufeff?---[ \t]*\r?\n(.*?)^(?:---|\.\.\.)[ \t]*(?:\r?\n|\Z)", re.DOTALL | re.MULTILINE
+)
+_FRONTMATTER_KEY = re.compile(r"[\w.-]+[ \t]*:(?:\s|$)")
+_FRONTMATTER_MORE = re.compile(r"[ \t]|-\s|#")
+# Rules that close a text block, which carry no content of their own. A rule directly
+# under a line of text would be a Setext heading, hence the blank line.
+_TRAILING_RULES = re.compile(
+    r"(?:(?:\A|\n[ \t\r]*\n) {0,3}(?:(?:-[ \t]*){3,}|(?:\*[ \t]*){3,}|(?:_[ \t]*){3,}))+\s*\Z"
+)
+# Text this short next to a table explains that table ("Es gilt:", "Regel: ..."). On
+# its own it is a fragment the search finds without the table it is about. Longer
+# prose stays apart, so it keeps a vector of its own.
+_TABLE_NOTE_CHARS = 500
 
 
 def clean_content_metadata(meta, transform):
@@ -76,18 +92,32 @@ def heading_path(meta):
     )
 
 
+def _frontmatter_end(text):
+    """Where YAML front matter at the very start of ``text`` ends, else 0."""
+    match = _FRONTMATTER.match(text)
+    if not match:
+        return 0
+    lines = [line for line in match.group(1).splitlines() if line.strip()]
+    if not lines or not _FRONTMATTER_KEY.match(lines[0]):
+        return 0
+    if all(_FRONTMATTER_KEY.match(line) or _FRONTMATTER_MORE.match(line) for line in lines):
+        return match.end()
+    return 0
+
+
 def markdown_sections(text, stack=(), ordinal=0):
     """Return exact source slices and a positional heading hierarchy.
 
     ``stack``/``ordinal`` resume the hierarchy of an earlier document, for page
-    transcripts where a chapter simply continues on the next page.
+    transcripts where a chapter simply continues on the next page. Front matter
+    is text of the section it opens, so its title and keywords stay searchable.
     """
     from markdown_it import MarkdownIt
 
-    tokens = MarkdownIt().parse(text)
-    lines = text.splitlines(keepends=True)
-    starts = [0]
-    for line in lines:
+    lead = _frontmatter_end(text)
+    tokens = MarkdownIt().parse(text[lead:])
+    starts = [lead]
+    for line in text[lead:].splitlines(keepends=True):
         starts.append(starts[-1] + len(line))
     headings = []
     for i, token in enumerate(tokens):
@@ -96,12 +126,12 @@ def markdown_sections(text, stack=(), ordinal=0):
     stack = list(stack)
     cursor = 0
     for offset, level, title in headings:
-        if offset > cursor:
+        if offset > cursor and (cursor or text[lead:offset].strip()):
             yield text[cursor:offset], list(stack), ordinal
+            cursor = offset
         ordinal += 1
         stack = [entry for entry in stack if entry[0] < level]
         stack.append((level, title, ordinal))
-        cursor = offset
     if cursor < len(text):
         yield text[cursor:], list(stack), ordinal
 
@@ -238,15 +268,34 @@ def _block_glue(before, before_pages, after, after_pages):
 
 
 def _heading_only(text):
-    """True when a block holds nothing but heading lines."""
+    """True when a block holds nothing but heading lines (and rules between them)."""
     if not text.strip() or len(text) > 1000:
         return False
     from markdown_it import MarkdownIt
 
     return all(
-        token.type in {"heading_open", "inline", "heading_close"}
+        token.type in {"heading_open", "inline", "heading_close", "hr"}
         for token in MarkdownIt().parse(text)
     )
+
+
+def _rules_only(text):
+    """True when a block holds nothing but thematic breaks such as ``---``."""
+    if not text.strip() or len(text) > 1000:
+        return False
+    from markdown_it import MarkdownIt
+
+    return all(token.type == "hr" for token in MarkdownIt().parse(text))
+
+
+def _table_note(group, units, index, room):
+    """The short closing text of a section, when it directly follows this table."""
+    if index + 2 != len(units) or group.meta.get("literal_text"):
+        return ""
+    start, end, _ = units[index + 1]
+    note = _TRAILING_RULES.sub("", group.content[start:end])
+    fits = 0 < len(note.strip()) <= _TABLE_NOTE_CHARS and len(note) <= room
+    return note if fits and not _rules_only(note) else ""
 
 
 def _fold_lone_headings(groups):
@@ -262,6 +311,8 @@ def _fold_lone_headings(groups):
         key, doc, spans = group
         if key is None:
             out.append(group)
+            continue
+        if not doc.meta.get("literal_text") and _rules_only(doc.content):
             continue
         if pending is not None:
             if pending[0][2][:-1] == key[2][:-1]:
@@ -453,13 +504,25 @@ def split_documents(documents, max_chars=DEFAULT_CHUNK_MAX_CHARS, overlap=200):
             if not group.meta.get("literal_text")
             else [(0, len(group.content), False)]
         )
+        literal = group.meta.get("literal_text")
         base = offsets[section_key]
         lead = ""
+        taken = None
         for index, (unit_start, unit_end, is_table) in enumerate(units):
+            if index == taken:
+                continue
             unit = replace(group, content=group.content[unit_start:unit_end])
             if is_table:
-                # A heading directly above a table belongs on the table's first part.
-                for content, start, end, prefix in table_parts(unit.content, max_chars - len(lead)):
+                # A heading or short text directly above a table belongs on its first
+                # part, a short closing text on its last.
+                parts = list(table_parts(unit.content, max_chars - len(lead)))
+                used = len(parts[-1][0]) + (len(lead) if len(parts) == 1 else 0)
+                note = _table_note(group, units, index, max_chars - used)
+                if note:
+                    taken = index + 1
+                    content, start, end, prefix = parts[-1]
+                    parts[-1] = (content + note, start, end + len(note), prefix)
+                for content, start, end, prefix in parts:
                     meta = deepcopy(group.meta)
                     first = unit_start + start - len(lead)
                     meta.update(
@@ -477,11 +540,18 @@ def split_documents(documents, max_chars=DEFAULT_CHUNK_MAX_CHARS, overlap=200):
                     out.append(Document(content=lead + content, meta=meta))
                     lead = ""
                 continue
-            if not unit.content.strip():
+            if not unit.content.strip() or (not literal and _rules_only(unit.content)):
                 continue
-            if index + 1 < len(units) and units[index + 1][2] and _heading_only(unit.content):
+            if (
+                index + 1 < len(units)
+                and units[index + 1][2]
+                and len(unit.content) <= max_chars // 2
+                and (len(unit.content.strip()) <= _TABLE_NOTE_CHARS or _heading_only(unit.content))
+            ):
                 lead = unit.content
                 continue
+            if not literal:
+                unit = replace(unit, content=_TRAILING_RULES.sub("", unit.content))
             for chunk in _split_text_unit(unit, max_chars, overlap, base + unit_start):
                 _stamp_pages(
                     chunk.meta,
