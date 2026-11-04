@@ -204,6 +204,17 @@ def _remove(db, conns: List[Dict[str, Any]], raw_id: Any) -> Dict[str, Any]:
     return {"output": f"Note #{entry_id} removed.", "exit_code": 0}
 
 
+def _text_problem(action: str, text: str) -> str:
+    if not text:
+        return f'The "{action}" action needs "text", the note itself.'
+    if len(text) > MAX_ENTRY_CHARS:
+        return (
+            f"A note holds at most {MAX_ENTRY_CHARS} characters, this one has {len(text)}. "
+            "Keep to one fact per note."
+        )
+    return ""
+
+
 def _run(args: Dict[str, Any], owner: Optional[str]) -> Dict[str, Any]:
     action = _action(args)
     if action not in _ACTIONS:
@@ -211,13 +222,9 @@ def _run(args: Dict[str, Any], owner: Optional[str]) -> Dict[str, Any]:
     requested = str(args.get("database") or "").strip()
     text = _clean(args.get("text"))
     if action in ("add", "edit"):
-        if not text:
-            return _error(f'The "{action}" action needs "text", the note itself.')
-        if len(text) > MAX_ENTRY_CHARS:
-            return _error(
-                f"A note holds at most {MAX_ENTRY_CHARS} characters, this one has {len(text)}. "
-                "Keep to one fact per note."
-            )
+        problem = _text_problem(action, text)
+        if problem:
+            return _error(problem)
 
     conns = _enabled_connections()
     db = SessionLocal()
@@ -244,6 +251,102 @@ async def do_db_memory(content: str, owner: Optional[str] = None) -> Dict[str, A
     except Exception as e:
         logger.warning("db_memory failed: %s", e)
         return _error(f"The notes could not be accessed: {e}")
+
+
+# ---------------------------------------------------------------------------
+# The admin page (routes/db_memory_routes.py)
+# ---------------------------------------------------------------------------
+
+
+def _known_connections(db) -> List[Dict[str, Any]]:
+    """Every database notes can belong to. Unlike the model, an admin also reaches
+    the notes of a switched-off database and of one that no longer exists."""
+    from src.rag_mini import connections
+
+    known = [{**c, "removed": False} for c in connections()]
+    seen = {c["id"] for c in known}
+    stored = sorted(cid for (cid,) in db.query(DbMemoryEntry.connection_id).distinct())
+    known += [
+        {"id": cid, "name": cid, "enabled": False, "removed": True}
+        for cid in stored
+        if cid not in seen
+    ]
+    return known
+
+
+def _iso(value) -> Optional[str]:
+    return value.isoformat() if value else None
+
+
+def overview() -> Dict[str, Any]:
+    """All notes by database, with who wrote them and how much room is left."""
+    db = SessionLocal()
+    try:
+        databases = []
+        for conn in _known_connections(db):
+            rows = _entries(db, conn["id"])
+            databases.append(
+                {
+                    "id": conn["id"],
+                    "name": conn["name"],
+                    "enabled": conn["enabled"],
+                    "removed": conn["removed"],
+                    "used": _used(rows),
+                    "entries": [
+                        {
+                            "id": r.id,
+                            "text": r.text,
+                            "created_by": r.created_by,
+                            "updated_by": r.updated_by,
+                            "created_at": _iso(r.created_at),
+                            "updated_at": _iso(r.updated_at),
+                        }
+                        for r in rows
+                    ],
+                }
+            )
+        return {
+            "entry_limit": MAX_ENTRY_CHARS,
+            "total_limit": MAX_TOTAL_CHARS,
+            "databases": databases,
+        }
+    finally:
+        db.close()
+
+
+def admin_add(connection_id: str, text: Any, owner: Optional[str]) -> Dict[str, Any]:
+    text = _clean(text)
+    problem = _text_problem("add", text)
+    if problem:
+        return _error(problem)
+    db = SessionLocal()
+    try:
+        conn = next((c for c in _known_connections(db) if c["id"] == connection_id), None)
+        if conn is None or conn["removed"]:
+            return _error(f"There is no database '{connection_id}'.")
+        return _add(db, conn, text, owner)
+    finally:
+        db.close()
+
+
+def admin_edit(entry_id: int, text: Any, owner: Optional[str]) -> Dict[str, Any]:
+    text = _clean(text)
+    problem = _text_problem("edit", text)
+    if problem:
+        return _error(problem)
+    db = SessionLocal()
+    try:
+        return _edit(db, _known_connections(db), entry_id, text, owner)
+    finally:
+        db.close()
+
+
+def admin_remove(entry_id: int) -> Dict[str, Any]:
+    db = SessionLocal()
+    try:
+        return _remove(db, _known_connections(db), entry_id)
+    finally:
+        db.close()
 
 
 def turn_hint() -> str:

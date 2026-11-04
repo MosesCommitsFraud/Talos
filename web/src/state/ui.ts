@@ -7,9 +7,10 @@ import type { ArtifactSelection } from '@/api/types';
 /** Top-level surface shown in the main column. `chat` is the default; `rag`
  *  swaps in the full-screen knowledge-base workspace (deep-linkable at `#/rag`),
  *  `users` in the admin user/usage workspace (`#/users`), `tickets` in the
- *  admin support-ticket workspace (`#/tickets`), and `projects` / `artifacts` /
- *  `customize` in the three pages the sidebar's primary nav opens. */
-export type AppView = 'chat' | 'rag' | 'users' | 'tickets' | 'projects' | 'artifacts' | 'customize';
+ *  admin support-ticket workspace (`#/tickets`), `memories` in the admin page for
+ *  the model's notes on the databases (`#/memories`), and `projects` / `artifacts`
+ *  / `customize` in the three pages the sidebar's primary nav opens. */
+export type AppView = 'chat' | 'rag' | 'users' | 'tickets' | 'memories' | 'projects' | 'artifacts' | 'customize';
 
 export interface PreviewFile {
   sessionId: string;
@@ -34,7 +35,7 @@ function viewFromHash(): AppView {
   // (`#/rag/<id>`, `#/rag/global`) to deep-link one base, and all of them still
   // resolve to the `rag` view.
   const slug = location.hash.replace(/^#\/?/, '').split('/')[0];
-  return slug === 'rag' || slug === 'users' || slug === 'tickets' || slug === 'projects' || slug === 'artifacts' || slug === 'customize'
+  return slug === 'rag' || slug === 'users' || slug === 'tickets' || slug === 'memories' || slug === 'projects' || slug === 'artifacts' || slug === 'customize'
     ? slug
     : 'chat';
 }

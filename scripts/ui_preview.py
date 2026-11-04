@@ -2104,6 +2104,63 @@ def _user_storage(name: str) -> dict:
 # What the sidebar's chat menu changed: per-session field overrides, and the
 # chats it forked off (each entry is its own override set plus a name).
 _SESSION_EDITS: dict[str, dict] = {}
+
+
+def _memory(note_id: int, connection_id: str, text: str, author: str = "preview-admin") -> dict:
+    return {
+        "id": note_id,
+        "connection_id": connection_id,
+        "text": text,
+        "created_by": author,
+        "updated_by": author,
+        "created_at": "2026-11-03T09:30:00",
+        "updated_at": "2026-11-03T09:30:00",
+    }
+
+
+_MEMORIES: list[dict] = [
+    _memory(
+        1,
+        "p1",
+        "Planversionen stehen in mAI_Datenmodell: Spalten Wertbezug, WertsystemJahr, Version.",
+        "anna",
+    ),
+    _memory(
+        2,
+        "p1",
+        "Datenarten nennen ihre Tabelle in Datenartentabellenname und die Wertspalte in "
+        "Datenartenspaltenname; Absatz ist Datenart 1.",
+        "ben",
+    ),
+    _memory(3, "gone", "Kunden stehen in dbo.kunden, die ID heißt kdnr.", "anna"),
+]
+
+
+def _memories_overview() -> dict:
+    """The admin page's data: a live database, an empty one and a removed one."""
+
+    def database(conn_id, name, enabled=True, removed=False):
+        notes = [n for n in _MEMORIES if n["connection_id"] == conn_id]
+        return {
+            "id": conn_id,
+            "name": name,
+            "enabled": enabled,
+            "removed": removed,
+            "used": sum(len(n["text"]) for n in notes),
+            "entries": notes,
+        }
+
+    return {
+        "entry_limit": 600,
+        "total_limit": 4000,
+        "databases": [
+            database("p1", "sales"),
+            database("p2", "crm"),
+            database("gone", "gone", enabled=False, removed=True),
+        ],
+    }
+
+
 _SESSION_FORKS: list[dict] = []
 
 
@@ -2740,6 +2797,9 @@ class PreviewHandler(BaseHTTPRequestHandler):
             # voice so the mic button shows (streaming needs a real sidecar).
             self._send_json({"rag": True, "sql": True, "voice": True, "voice_streaming": False})
             return
+        if path == "/api/admin/memories":
+            self._send_json(_memories_overview())
+            return
         if path == "/api/sql/config":
             self._send_json(
                 {
@@ -3077,7 +3137,9 @@ class PreviewHandler(BaseHTTPRequestHandler):
                 "section": (source or {}).get("section"),
             }
             _SESSION_FORKS.append(fork)
-            self._send_json({"status": "ok", "id": fork["id"], "name": fork["name"], "files_forked": True})
+            self._send_json(
+                {"status": "ok", "id": fork["id"], "name": fork["name"], "files_forked": True}
+            )
             return
         if path.startswith("/api/session/") and path.endswith(("/important", "/archive")):
             session_id = path[len("/api/session/") :].rsplit("/", 1)[0]
@@ -3085,7 +3147,9 @@ class PreviewHandler(BaseHTTPRequestHandler):
                 _SESSION_EDITS.setdefault(session_id, {})["archived"] = True
             else:
                 fields = _form_fields(self._read_body(), self.headers.get("Content-Type", ""))
-                _SESSION_EDITS.setdefault(session_id, {})["is_important"] = fields.get("important") == "true"
+                _SESSION_EDITS.setdefault(session_id, {})["is_important"] = (
+                    fields.get("important") == "true"
+                )
             self._send_json({"status": "ok"})
             return
         if path == "/api/mcp/servers":
@@ -3262,6 +3326,12 @@ class PreviewHandler(BaseHTTPRequestHandler):
         if path == "/api/chat":
             self._send_json({"response": "This is a local UI preview response."})
             return
+        if path == "/api/admin/memories":
+            data = json.loads(body or b"{}")
+            next_id = max((n["id"] for n in _MEMORIES), default=0) + 1
+            _MEMORIES.append(_memory(next_id, data["connection_id"], data["text"]))
+            self._send_json({"ok": True})
+            return
         if path == "/api/sql/test":
             # Failure shape: HTTP 200 + ok:false — the settings Test button
             # must surface the error, not report "Connection OK".
@@ -3384,6 +3454,15 @@ class PreviewHandler(BaseHTTPRequestHandler):
     def do_PATCH(self):
         body = self._read_body()
         path = urlparse(self.path).path
+        if path.startswith("/api/admin/memories/"):
+            note = next(n for n in _MEMORIES if n["id"] == int(path.rsplit("/", 1)[1]))
+            note.update(
+                text=json.loads(body or b"{}")["text"],
+                updated_by="preview-admin",
+                updated_at="2026-11-04T16:00:00",
+            )
+            self._send_json({"ok": True})
+            return
         if path.startswith("/api/session/"):
             fields = _form_fields(body, self.headers.get("Content-Type", ""))
             edits = _SESSION_EDITS.setdefault(path[len("/api/session/") :], {})
@@ -3445,6 +3524,11 @@ class PreviewHandler(BaseHTTPRequestHandler):
     def do_DELETE(self):
         parsed = urlparse(self.path)
         path = parsed.path
+        if path.startswith("/api/admin/memories/"):
+            gone = int(path.rsplit("/", 1)[1])
+            _MEMORIES[:] = [n for n in _MEMORIES if n["id"] != gone]
+            self._send_json({"ok": True})
+            return
         if path.startswith("/api/chat/queue/"):
             session_id, _, item_id = path[len("/api/chat/queue/") :].partition("/")
             _QUEUED[session_id] = [q for q in _QUEUED.get(session_id, []) if q["id"] != item_id]

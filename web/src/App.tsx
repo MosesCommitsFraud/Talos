@@ -19,6 +19,7 @@ import { CreateProjectDialog } from './components/CreateProjectDialog';
 import { UsersWorkspace } from './components/users/UsersWorkspace';
 import { TicketsWorkspace } from './components/tickets/TicketsWorkspace';
 import { TicketDialog } from './components/tickets/TicketDialog';
+import { MemoriesWorkspace } from './components/memories/MemoriesWorkspace';
 import { Lightbox } from './components/Lightbox';
 import { PendingQuestion } from './components/AskUser';
 import { AuthGate } from './components/auth/AuthGate';
@@ -112,6 +113,8 @@ export default function App() {
               <UsersWorkspace />
             ) : view === 'tickets' ? (
               <TicketsWorkspace />
+            ) : view === 'memories' ? (
+              <MemoriesWorkspace />
             ) : view === 'projects' ? (
               <ProjectsWorkspace />
             ) : view === 'artifacts' ? (
@@ -159,6 +162,7 @@ export default function App() {
             onOpenRag={() => setView('rag')}
             onOpenUsers={() => setView('users')}
             onOpenTickets={() => setView('tickets')}
+            onOpenMemories={() => setView('memories')}
           />
           <SettingsDialog
             open={!!settings}
@@ -168,6 +172,7 @@ export default function App() {
             onOpenRag={() => setView('rag')}
             onOpenUsers={() => setView('users')}
             onOpenTickets={() => setView('tickets')}
+            onOpenMemories={() => setView('memories')}
           />
           <ArchiveDialog open={archiveOpen} onClose={() => setArchiveOpen(false)} />
           <HelpDialog open={helpOpen} onClose={() => setHelpOpen(false)} />

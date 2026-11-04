@@ -797,6 +797,10 @@ app.include_router(setup_mcp_routes(mcp_manager))
 from routes.sql_routes import setup_sql_routes
 
 app.include_router(setup_sql_routes())
+
+from routes.db_memory_routes import setup_db_memory_routes
+
+app.include_router(setup_db_memory_routes())
 logger.info("MCP routes initialized")
 
 from routes.sandbox_routes import setup_sandbox_routes

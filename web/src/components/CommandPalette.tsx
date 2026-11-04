@@ -10,6 +10,7 @@ import {
   SettingsIcon,
   SquarePenIcon,
   SunIcon,
+  BrainIcon,
   TicketIcon,
   UsersIcon,
 } from 'lucide-react';
@@ -36,7 +37,7 @@ interface PaletteGroup {
   items: PaletteEntry[];
 }
 
-export function CommandPalette({ open, onClose, onOpenSettings, onOpenRag, onOpenUsers, onOpenTickets }: { open: boolean; onClose: () => void; onOpenSettings?: () => void; onOpenRag?: () => void; onOpenUsers?: () => void; onOpenTickets?: () => void }) {
+export function CommandPalette({ open, onClose, onOpenSettings, onOpenRag, onOpenUsers, onOpenTickets, onOpenMemories }: { open: boolean; onClose: () => void; onOpenSettings?: () => void; onOpenRag?: () => void; onOpenUsers?: () => void; onOpenTickets?: () => void; onOpenMemories?: () => void }) {
   const { t } = useTranslation();
   const [query, setQuery] = useState('');
   const [selected, setSelected] = useState(0);
@@ -79,6 +80,9 @@ export function CommandPalette({ open, onClose, onOpenSettings, onOpenRag, onOpe
         : []),
       ...(auth?.is_admin && onOpenTickets
         ? [{ id: 'tickets', label: t('palette.openTickets'), icon: <TicketIcon />, run: () => { onOpenTickets(); onClose(); } }]
+        : []),
+      ...(auth?.is_admin && onOpenMemories
+        ? [{ id: 'memories', label: t('palette.openMemories'), icon: <BrainIcon />, run: () => { onOpenMemories(); onClose(); } }]
         : []),
     ].filter((a) => !q || a.label.toLowerCase().includes(q));
 

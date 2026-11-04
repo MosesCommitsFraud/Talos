@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   BarChart3Icon,
   BotIcon,
+  BrainIcon,
   ChevronRightIcon,
   DatabaseIcon,
   DownloadIcon,
@@ -99,7 +100,7 @@ import { McpServersPanel } from './settings/McpServersPanel';
 export type Panel =
   | 'appearance' | 'personalization' | 'shortcuts' | 'account' | 'usage'
   | 'models' | 'ai' | 'assistants' | 'integrations' | 'web' | 'mcp' | 'mcpServers' | 'tools' | 'skills'
-  | 'rag' | 'users' | 'tickets' | 'system';
+  | 'rag' | 'users' | 'tickets' | 'memories' | 'system';
 
 /* ── Shared layout (Claude settings design) ──
    Flat and dense: a bold section heading over a hairline-divided list of rows,
@@ -2164,6 +2165,7 @@ export function SettingsDialog({
   onOpenRag,
   onOpenUsers,
   onOpenTickets,
+  onOpenMemories,
 }: {
   open: boolean;
   onClose: () => void;
@@ -2176,6 +2178,7 @@ export function SettingsDialog({
    *  analytics and storage management, so it lives at `/users`. */
   onOpenUsers?: () => void;
   onOpenTickets?: () => void;
+  onOpenMemories?: () => void;
 }) {
   const { t } = useTranslation();
   const [panel, setPanel] = useState<Panel>(initialPanel ?? 'appearance');
@@ -2216,6 +2219,7 @@ export function SettingsDialog({
     { id: 'rag', label: t('settings.nav.rag'), icon: <DatabaseIcon /> },
     { id: 'users', label: t('settings.nav.users'), icon: <UsersIcon /> },
     { id: 'tickets', label: t('settings.nav.tickets'), icon: <TicketIcon /> },
+    { id: 'memories', label: t('settings.nav.memories'), icon: <BrainIcon /> },
   ];
 
   // These two entries route to their dedicated workspaces instead of swapping
@@ -2229,6 +2233,9 @@ export function SettingsDialog({
       onClose();
     } else if (id === 'tickets' && onOpenTickets) {
       onOpenTickets();
+      onClose();
+    } else if (id === 'memories' && onOpenMemories) {
+      onOpenMemories();
       onClose();
     } else {
       setPanel(id);

@@ -1616,6 +1616,43 @@ export async function deleteTicket(id: string): Promise<void> {
   if (!res.ok) throw new Error(`Delete failed (HTTP ${res.status})`);
 }
 
+/* ── What the model remembers about the databases ──
+   routes/db_memory_routes.py. Admin-only. */
+export interface MemoryEntry {
+  id: number;
+  text: string;
+  created_by: string | null;
+  updated_by: string | null;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
+export interface MemoryDatabase {
+  id: string;
+  name: string;
+  enabled: boolean;
+  /** The connection is gone from the settings; its notes are still stored. */
+  removed: boolean;
+  used: number;
+  entries: MemoryEntry[];
+}
+
+export interface MemoriesOverview {
+  entry_limit: number;
+  total_limit: number;
+  databases: MemoryDatabase[];
+}
+
+export const fetchMemories = () => getJSON<MemoriesOverview>('/api/admin/memories');
+
+export const addMemory = (connectionId: string, text: string) =>
+  postJSON('/api/admin/memories', { connection_id: connectionId, text });
+
+export const updateMemory = (id: number, text: string) =>
+  postJSON(`/api/admin/memories/${id}`, { text }, 'PATCH');
+
+export const deleteMemory = (id: number) => postJSON(`/api/admin/memories/${id}`, undefined, 'DELETE');
+
 /* ── External MCP servers Talos connects to as a client ──
    routes/mcp_routes.py. Admin-only: a stdio server runs an arbitrary command
    inside the app container. Writes take form fields, the tool list takes JSON. */

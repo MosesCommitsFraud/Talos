@@ -1,6 +1,7 @@
 """db_memory (src/db_memory.py): the assistant's notes on a database, across chats."""
 
 import json
+from pathlib import Path
 
 import pytest
 from sqlalchemy import create_engine
@@ -255,3 +256,103 @@ async def test_subagents_neither_see_nor_write_notes(notes, monkeypatch):
     assert "db_memory" not in names[0] and "query_sql" in names[0]
     assert not any("holds 1 note" in str(m.get("content")) for m in prompts[0])
     assert "vom Subagenten" not in (await _call(action="view"))["output"]
+
+
+# ── The admin page ──────────────────────────────────────────────────────────
+
+
+@pytest.fixture
+def admin_api(notes, monkeypatch):
+    from fastapi import FastAPI, HTTPException
+    from fastapi.testclient import TestClient
+
+    from routes import db_memory_routes
+
+    state = {"admin": True}
+
+    def require_admin(request):
+        if not state["admin"]:
+            raise HTTPException(status_code=403, detail="Admin only")
+
+    monkeypatch.setattr(db_memory_routes, "require_admin", require_admin)
+    monkeypatch.setattr(db_memory_routes, "effective_user", lambda request: "root")
+    app = FastAPI()
+    app.include_router(db_memory_routes.setup_db_memory_routes())
+    return TestClient(app), state
+
+
+def test_non_admins_get_nothing(admin_api):
+    client, state = admin_api
+    state["admin"] = False
+    assert client.get("/api/admin/memories").status_code == 403
+    assert (
+        client.post("/api/admin/memories", json={"connection_id": "c1", "text": "x"}).status_code
+        == 403
+    )
+    assert client.patch("/api/admin/memories/1", json={"text": "x"}).status_code == 403
+    assert client.delete("/api/admin/memories/1").status_code == 403
+
+
+async def test_admin_sees_every_database_with_authors_and_usage(admin_api, monkeypatch):
+    client, _ = admin_api
+    await _call(owner="anna", action="add", text="Absatz: c1")
+    body = client.get("/api/admin/memories").json()
+    assert (body["entry_limit"], body["total_limit"]) == (600, 4000)
+    database = body["databases"][0]
+    assert (database["name"], database["used"], database["removed"]) == ("macs", 10, False)
+    note = database["entries"][0]
+    assert (note["id"], note["text"], note["created_by"]) == (1, "Absatz: c1", "anna")
+    assert note["created_at"]
+
+
+def test_admin_adds_edits_removes(admin_api):
+    client, _ = admin_api
+    added = client.post("/api/admin/memories", json={"connection_id": "c1", "text": "Neu\n\nzeile"})
+    assert added.status_code == 200
+
+    entries = client.get("/api/admin/memories").json()["databases"][0]["entries"]
+    assert entries[0]["text"] == "Neu zeile" and entries[0]["created_by"] == "root"
+
+    assert client.patch("/api/admin/memories/1", json={"text": "Geändert"}).status_code == 200
+    assert (
+        client.get("/api/admin/memories").json()["databases"][0]["entries"][0]["text"] == "Geändert"
+    )
+
+    assert client.delete("/api/admin/memories/1").status_code == 200
+    assert client.get("/api/admin/memories").json()["databases"][0]["entries"] == []
+
+
+def test_admin_gets_clear_errors(admin_api):
+    client, _ = admin_api
+    assert client.delete("/api/admin/memories/9").status_code == 404
+    assert client.patch("/api/admin/memories/9", json={"text": "x"}).status_code == 404
+    assert (
+        client.post("/api/admin/memories", json={"connection_id": "weg", "text": "x"}).status_code
+        == 404
+    )
+    too_long = client.post("/api/admin/memories", json={"connection_id": "c1", "text": "x" * 601})
+    assert too_long.status_code == 400 and "at most 600" in too_long.json()["detail"]
+    assert (
+        client.post("/api/admin/memories", json={"connection_id": "c1", "text": " "}).status_code
+        == 400
+    )
+
+
+async def test_notes_of_a_removed_database_stay_in_reach_of_admins(admin_api, monkeypatch):
+    client, _ = admin_api
+    await _call(action="add", text="alte Notiz")
+    monkeypatch.setattr(rag_mini, "connections", lambda: [])
+
+    database = client.get("/api/admin/memories").json()["databases"][0]
+    assert database["removed"] is True and database["entries"][0]["text"] == "alte Notiz"
+    assert "no note #1" in (await _call(action="remove", id=1))["error"]  # the model: no
+    assert (
+        client.post("/api/admin/memories", json={"connection_id": "c1", "text": "x"}).status_code
+        == 404
+    )
+    assert client.delete("/api/admin/memories/1").status_code == 200  # an admin: yes
+
+
+def test_the_routes_are_mounted_in_the_app():
+    source = (Path(__file__).parent.parent / "app.py").read_text(encoding="utf-8")
+    assert "setup_db_memory_routes()" in source
