@@ -93,7 +93,7 @@ function MicButton({
           CONTROL,
           status === 'recording'
             ? 'animate-pulse bg-red-500/10 text-red-500 hover:bg-red-500/20'
-            : 'text-foreground/80 hover:bg-accent hover:text-foreground disabled:opacity-50',
+            : 'text-foreground/80 hover:bg-accent hover:text-foreground disabled:opacity-50 dark:text-foreground/90 dark:hover:text-foreground',
         )}
       >
         {status === 'finalizing' ? <Loader2Icon className="animate-spin" /> : <MicIcon />}
