@@ -1798,6 +1798,11 @@ _VERIFIER_EFFECTFUL_TOOLS = {
 }
 _VERIFIER_MAX_ROUNDS = 2  # cap re-verify cycles per turn — never loop forever
 
+# Below this a round's text is commentary on the way to the answer, not the answer.
+_FULL_ANSWER_MIN_CHARS = 600
+# Tools that only show the user something and hand the model nothing new.
+_VIEW_TOOLS = {"render_widget", "render_ui"}
+
 # ── Concurrent tool execution ────────────────────────────────────────
 # When a round contains several independent, read-only, IO-bound calls,
 # running them one after another wastes wall-clock: three web_fetches at
@@ -3337,7 +3342,7 @@ async def stream_agent_loop(
             _empty_rounds = 0  # the round produced something; guard resets
         if (
             tool_blocks
-            and len(_round_answer_text) >= 600
+            and len(_round_answer_text) >= _FULL_ANSWER_MIN_CHARS
             and _round_answer_text.endswith("?")
             and not any(b.tool_type == "ask_user" for b in tool_blocks)
         ):
@@ -3510,7 +3515,7 @@ async def stream_agent_loop(
             _needs_restate = (
                 not _force_answer
                 and round_num > 1
-                and _prior_max >= 600
+                and _prior_max >= _FULL_ANSWER_MIN_CHARS
                 and len(_final_text) < _prior_max // 2
             )
             if _needs_restate and _final_restate_nudged:
@@ -4128,6 +4133,22 @@ async def stream_agent_loop(
             round_num,
             round_reasoning=round_reasoning,
         )
+
+        # A written answer plus its chart is a finished turn. The chart's result
+        # tells the model not to repeat its values, so another round only yields a
+        # closing remark, and the completeness nudge then makes the model write the
+        # whole answer again. The answer's text is already in the assistant message
+        # above, so the stored turn must not add it a second time.
+        if (
+            not _force_answer
+            and len(_round_answer_text) >= _FULL_ANSWER_MIN_CHARS
+            and all(b.tool_type in _VIEW_TOOLS for b in tool_blocks)
+            and all(e.get("exit_code") == 0 for e in tool_events if e.get("round") == round_num)
+        ):
+            logger.info("[agent] round %d: answer written and shown, ending the turn", round_num)
+            if wire_sink is not None:
+                wire_sink["round_text"] = ""
+            break
 
         # Reworded searches never repeat a call, so the loop-breaker above can't
         # see them: stop when the lookups stop delivering anything new.
