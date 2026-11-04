@@ -43,31 +43,51 @@ The `default` base is seeded automatically and pinned to the historical
 `talos_rag` collection, so everything indexed before this existed stays where it
 was and Talos chat is unaffected. It cannot be deleted.
 
-## Purpose-bound sub-indexes ("mini RAGs")
+## Mini RAGs
 
-Some Talos features keep a small set of documents inside a knowledge base for
-their own use, tagged with `meta.scope` so ordinary retrieval never returns
-them. Today there is exactly one: the SQL schema files, injected only while the
-SQL knowledge source is active.
+Every SQL database in Settings → Integrations has its own *mini RAG*: a small
+knowledge base for that database's schema, catalogue and join files. It is retrieved
+only while the SQL source is active, so the model can find its way around the
+database.
 
-They are **not** part of the corpus and are reported separately everywhere —
-`content_count`/`chunk_count` cover the searchable documents, and a `scopes`
-array carries each sub-index with its own counts, its purpose, and where it is
-administered. `GET /api/rag/documents?scope=sql` lists one.
+Apart from that it **is** a knowledge base: a registry entry with `kind: "mini"`, its
+own Qdrant collection and its own pipeline settings. It takes the same parsing,
+chunking and enrichment, has the same settings form and the same document tools
+(upload, folders, versions, replace, re-index, explorer, test search), and the
+/rag workspace opens it at `#/rag/<id>` like any base. There is no second code path.
 
-The /rag workspace gives each sub-index its own space (`#/rag/mini/<id>`) with
-the same tools as a knowledge base: upload, folders and directories, version
-history, replace, per-document and bulk re-index, the chunk explorer and a test
-search. Passing `scope` to `/api/personal/upload`, `/api/personal/add_directory`,
-`/api/rag/search` and `/api/rag/documents/search` targets the sub-index, and
-`POST /api/rag/scopes/<id>/reindex` re-indexes all of it. Sub-indexes live in the
-default base, the one their features read from, so a scoped upload into any other
-base is refused.
+**Always bound to a database.** `src/rag_mini.py` creates the entries from the
+configured databases when the catalogue is listed or the connections are saved, and
+there is no other way to create one. The name follows the database, the binding uses
+its stable id. Removing a database does not delete uploaded files as a side effect:
+its mini RAG becomes orphaned (`connection: null`), which means it is not retrieved,
+refuses new documents, and is the only state in which it can be deleted.
 
-The catalogue lives in `src/rag_scopes.py`; adding a scope means adding an entry
-there and tagging the documents on ingest. Every exclusion — the document list,
-the explorer's keyword scan, the test search box, the MCP tools and this REST
-service — derives from that one list.
+**Retrieval.** `rag_mini.retrieve_sections` searches the mini RAG of every enabled
+database that has documents, using each one's top-k, candidates, thresholds, context
+budget and section expansion. With several databases the budget is shared and each
+passage names its database, which is what the model passes to `query_sql`. A new mini
+RAG starts with a wider top-k (12), a context budget of 16000 characters and no rerank
+floor, as ordinary overrides visible in its settings: schema files chunk into many
+small pieces, and a German question about English table names scores low without
+being irrelevant. Chat's lexical gate doesn't apply, for the same reason. "Insert
+knowledge automatically" and the query rewrite are chat options and have no effect
+here.
+
+**Nothing else reads it.** `list_bases()` leaves mini RAGs out unless asked, so chat,
+`rag_navigate`, the MCP tools and this REST service don't see them, and this service
+answers 404 for their ids. The one way in from outside is `rag_query`'s `scope: "sql"`,
+which only works after an administrator named it in `mcp_rag_allowed_scopes`.
+
+### Older schema files
+
+Schema files used to live in the default base, tagged `meta.scope == "sql"`. Such
+documents stay there, excluded from every ordinary read (`src/rag_scopes.py`) and
+still retrieved, until an administrator moves them, since only they know which
+database the files describe. The default base reports them as `legacy_sql_count`,
+the /rag overview offers the move, and `POST /api/rag/bases/<id>/adopt-legacy-sql`
+runs it as a worker job: the file is copied, indexed anew with the mini RAG's
+settings, and the original is removed only once that succeeded.
 
 ## Per-base pipeline settings
 

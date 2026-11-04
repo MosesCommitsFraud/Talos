@@ -141,6 +141,14 @@ export const useUi = create<UiState>((set, get) => ({
   setCreateProjectOpen: (createProjectOpen) => set({ createProjectOpen }),
 }));
 
+/** Open one knowledge base in the /rag workspace from anywhere else in the app.
+ *  The hash comes first: the workspace reads it when it mounts, and listens for
+ *  it when it is already showing. */
+export function openRagBase(id: string) {
+  location.hash = `#/rag/${encodeURIComponent(id)}`;
+  useUi.setState({ view: 'rag' });
+}
+
 /** Whether the right dock shows anything (preview, plan, task or metrics
  *  pane). The chat header hands its files button to the dock while it does. */
 export const selectDockOpen = (s: UiState) =>

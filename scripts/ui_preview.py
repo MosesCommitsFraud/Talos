@@ -331,8 +331,18 @@ def _library_seed() -> list[dict]:
     sid, sname = "preview-session", PREVIEW_SESSION_NAME
     rows = [
         ("summary.md", "text/markdown", now - 3600, "document"),
-        ("deck.pptx", "application/vnd.openxmlformats-officedocument.presentationml.presentation", now - 2 * day, "workspace"),
-        ("revenue.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", now - 9 * day, "workspace"),
+        (
+            "deck.pptx",
+            "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+            now - 2 * day,
+            "workspace",
+        ),
+        (
+            "revenue.xlsx",
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            now - 9 * day,
+            "workspace",
+        ),
         ("chart.png", "image/png", now - 20 * day, "workspace"),
         ("result.csv", "text/csv", now - 45 * day, "workspace"),
         ("notes.txt", "text/plain", now - 80 * day, "workspace"),
@@ -671,8 +681,14 @@ _MOCK_ASK = {
             "question": "Welcher Zeitraum soll ausgewertet werden?",
             "header": "Zeitraum",
             "options": [
-                {"label": "Letzte 12 Monate (empfohlen)", "description": "Genug Daten für Saisonalität."},
-                {"label": "Aktuelles Quartal", "description": "Schneller, aber ohne Vorjahresvergleich."},
+                {
+                    "label": "Letzte 12 Monate (empfohlen)",
+                    "description": "Genug Daten für Saisonalität.",
+                },
+                {
+                    "label": "Aktuelles Quartal",
+                    "description": "Schneller, aber ohne Vorjahresvergleich.",
+                },
             ],
         },
         {"question": "Gibt es sonst noch etwas, das ich wissen sollte?"},
@@ -682,13 +698,23 @@ _MOCK_ASK = {
 
 def _ask_stream() -> bytes:
     first = _MOCK_ASK["questions"][0]
-    payload = {**_MOCK_ASK, "question": first["question"], "options": first["options"], "multi": True}
+    payload = {
+        **_MOCK_ASK,
+        "question": first["question"],
+        "options": first["options"],
+        "multi": True,
+    }
     events: list[dict | str] = [
         {"delta": "Bevor ich loslege, brauche ich ein paar Entscheidungen.\n\n"},
         # The real loop also streams the questions as text (for replay).
         {"delta": "\n\n".join(q["question"] for q in _MOCK_ASK["questions"])},
         {"type": "tool_start", "tool": "ask_user", "command": json.dumps(_MOCK_ASK)},
-        {"type": "tool_output", "tool": "ask_user", "output": "Awaiting their answer.", "exit_code": 0},
+        {
+            "type": "tool_output",
+            "tool": "ask_user",
+            "output": "Awaiting their answer.",
+            "exit_code": 0,
+        },
         {"type": "ask_user", "data": payload},
         "[DONE]",
     ]
@@ -699,10 +725,17 @@ def _record_ask_turn(session_id: str, message: str) -> None:
     hist = _HISTORY.setdefault(session_id, [])
     hist.append(_entry("user", message or "(empty)"))
     asked = "\n\n".join(q["question"] for q in _MOCK_ASK["questions"])
-    entry = _entry("assistant", "Bevor ich loslege, brauche ich ein paar Entscheidungen.\n\n" + asked)
+    entry = _entry(
+        "assistant", "Bevor ich loslege, brauche ich ein paar Entscheidungen.\n\n" + asked
+    )
     entry["metadata"]["tool_events"] = [
-        {"tool": "ask_user", "command": json.dumps(_MOCK_ASK), "output": "Awaiting their answer.",
-         "exit_code": 0, "ask_user": _MOCK_ASK}
+        {
+            "tool": "ask_user",
+            "command": json.dumps(_MOCK_ASK),
+            "output": "Awaiting their answer.",
+            "exit_code": 0,
+            "ask_user": _MOCK_ASK,
+        }
     ]
     hist.append(entry)
 
@@ -1653,12 +1686,17 @@ def _mcp_status(srv: dict) -> dict:
     total = len(srv["tools"]) if connected else 0
     disabled = len(srv["disabled"])
     return {
-        **{k: srv[k] for k in ("id", "name", "transport", "command", "args", "env", "url", "is_enabled")},
+        **{
+            k: srv[k]
+            for k in ("id", "name", "transport", "command", "args", "env", "url", "is_enabled")
+        },
         "status": "connected" if connected else ("error" if srv["is_enabled"] else "disconnected"),
         "tool_count": total,
         "disabled_tool_count": disabled,
         "enabled_tool_count": max(0, total - disabled),
-        "error": "spawn npx ENOENT: command failed to start" if srv["is_enabled"] and failed else None,
+        "error": "spawn npx ENOENT: command failed to start"
+        if srv["is_enabled"] and failed
+        else None,
         "auth_url": None,
         "has_oauth": False,
         "needs_oauth": False,
@@ -1681,7 +1719,9 @@ def _form_fields(body: bytes, ctype: str) -> dict[str, str]:
         if b'name="' not in header_blob or b'filename="' in header_blob:
             continue
         name = header_blob.split(b'name="')[1].split(b'"')[0].decode()
-        fields[name] = data[:-2].decode("utf-8", errors="replace") if data.endswith(b"\r\n") else data.decode()
+        fields[name] = (
+            data[:-2].decode("utf-8", errors="replace") if data.endswith(b"\r\n") else data.decode()
+        )
     return fields
 
 
@@ -2106,7 +2146,9 @@ def _session_metrics(sid: str):
                     "cached_tokens": int(prompt * cached),
                 }
             )
-        messages.append({"role": "user", "content": f"Testfrage {i}", "metadata": {}, "timestamp": ""})
+        messages.append(
+            {"role": "user", "content": f"Testfrage {i}", "metadata": {}, "timestamp": ""}
+        )
         messages.append(
             {
                 "role": "assistant",
@@ -2115,7 +2157,9 @@ def _session_metrics(sid: str):
                 "metadata": {
                     "model": "qwen3-llm",
                     "time_to_first_token": round(0.5 + reasoning / 900, 2),
-                    "response_time": round(sum(p["stream_s"] + p["tools_s"] for p in profile) + 0.3, 2),
+                    "response_time": round(
+                        sum(p["stream_s"] + p["tools_s"] for p in profile) + 0.3, 2
+                    ),
                     "output_tokens": out,
                     "input_tokens": prompt * rounds,
                     "context_tokens": prompt + 900 * rounds,
@@ -2131,12 +2175,20 @@ def _session_metrics(sid: str):
                     "agent_prep_time": 0.18,
                     "context_build_s": 0.12,
                     "context_breakdown": {
-                        "system": 3100, "tools": 4200, "skills": 600,
-                        "toolResults": 1800 * i, "messages": 900 * i,
+                        "system": 3100,
+                        "tools": 4200,
+                        "skills": 600,
+                        "toolResults": 1800 * i,
+                        "messages": 900 * i,
                     },
                     "round_profile": profile,
                     "tool_events": [
-                        {"round": n + 1, "tool": name, "command": "{}", "exit_code": 1 if (i, n) == (4, 1) else 0}
+                        {
+                            "round": n + 1,
+                            "tool": name,
+                            "command": "{}",
+                            "exit_code": 1 if (i, n) == (4, 1) else 0,
+                        }
                         for n, name in enumerate(tools)
                     ],
                 },
@@ -2169,7 +2221,6 @@ def _models():
 def _model_endpoint(path: str):
     ep_id = path[len("/api/model-endpoints/") :].split("/", 1)[0]
     return next((ep for ep in _MODEL_ENDPOINTS if ep["id"] == ep_id), None)
-
 
 
 # Document-register mock data for the /rag content view: a re-uploaded file
@@ -2206,14 +2257,33 @@ _RAG_DOCS = [
         "duplicate_of_source": "",
         "duplicates": [{"doc_id": "d_77aa", "filename": "Reisekosten Kopie.pdf"}],
         "versions": [
-            {"version": 3, "content_sha256": _SHA_V3, "size_bytes": 1843200,
-             "status": "current", "chunks": 42, "created_at": 1792500000, "file_available": True},
-            {"version": 2, "content_sha256": "1e0d9c8b7a6f5e4d3c2b1a0f9e8d7c6b5a4f3e2d1c0b9a8f7e6d5c4b3a2f1e0d",
-             "size_bytes": 1790000, "status": "superseded", "chunks": 40,
-             "created_at": 1791500000, "file_available": True},
-            {"version": 1, "content_sha256": "0a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f9",
-             "size_bytes": 1650000, "status": "superseded", "chunks": 37,
-             "created_at": 1790000000, "file_available": False},
+            {
+                "version": 3,
+                "content_sha256": _SHA_V3,
+                "size_bytes": 1843200,
+                "status": "current",
+                "chunks": 42,
+                "created_at": 1792500000,
+                "file_available": True,
+            },
+            {
+                "version": 2,
+                "content_sha256": "1e0d9c8b7a6f5e4d3c2b1a0f9e8d7c6b5a4f3e2d1c0b9a8f7e6d5c4b3a2f1e0d",
+                "size_bytes": 1790000,
+                "status": "superseded",
+                "chunks": 40,
+                "created_at": 1791500000,
+                "file_available": True,
+            },
+            {
+                "version": 1,
+                "content_sha256": "0a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f9",
+                "size_bytes": 1650000,
+                "status": "superseded",
+                "chunks": 37,
+                "created_at": 1790000000,
+                "file_available": False,
+            },
         ],
     },
     {
@@ -2322,6 +2392,27 @@ _RAG_DOCS = [
 ]
 
 
+def _mini_base(rag_id, name, connection, docs, chunks):
+    """A mini RAG as /api/rag/bases reports it. `connection=None`: database removed."""
+    return {
+        "id": rag_id,
+        "kind": "mini",
+        "connection_id": rag_id[3:],
+        "connection": connection and {"id": rag_id[3:], "name": name, **connection},
+        "name": name,
+        "description": "",
+        "language": "de",
+        "collection": "talos_kb_" + rag_id.replace("-", "_"),
+        "chat_enabled": False,
+        "created_at": 0.0,
+        "updated_at": 0.0,
+        "override_count": 3,
+        "access": {"restricted": False, "users": []},
+        "content_count": docs,
+        "chunk_count": chunks,
+    }
+
+
 _RAG_SQL_DOCS = [
     {
         **_RAG_DOCS[0],
@@ -2362,7 +2453,9 @@ _RAG_JOBS = [
         "total_count": 5,
         "current_file": "",
         "message": "Indexed 42 chunks, 1 new version(s), 2 unchanged, 1 duplicate(s) skipped, 1 file(s) failed",
-        "errors": [{"file": "scan_leer.pdf", "error": "no extractable text (empty/unsupported file)"}],
+        "errors": [
+            {"file": "scan_leer.pdf", "error": "no extractable text (empty/unsupported file)"}
+        ],
         "outcomes": {"indexed": 0, "updated": 1, "unchanged": 2, "duplicate": 1, "failed": 1},
         "files": [],
         "created_at": 1792500000,
@@ -2370,6 +2463,7 @@ _RAG_JOBS = [
         "ended_at": 1792500100,
     }
 ]
+
 
 class PreviewHandler(BaseHTTPRequestHandler):
     server_version = "TalosUIPreview/0.1"
@@ -2586,7 +2680,9 @@ class PreviewHandler(BaseHTTPRequestHandler):
             self._send_json(_MODEL_ENDPOINTS)
             return
         if path.startswith("/api/model-endpoints/") and path.endswith("/dependents"):
-            self._send_json({"dependents": ["Standard-Chat-Modell"] if _model_endpoint(path) else []})
+            self._send_json(
+                {"dependents": ["Standard-Chat-Modell"] if _model_endpoint(path) else []}
+            )
             return
         if path == "/api/tools":
             self._send_json(
@@ -2721,17 +2817,11 @@ class PreviewHandler(BaseHTTPRequestHandler):
                             "access": {"restricted": True, "users": ["anna"]},
                             "content_count": len(_RAG_DOCS),
                             "chunk_count": sum(d["chunks"] for d in _RAG_DOCS),
-                            "scopes": [
-                                {
-                                    "id": "sql",
-                                    "name": "SQL schema",
-                                    "purpose": "Schema files for the connected SQL databases.",
-                                    "managed_at": "rag-workspace",
-                                    "content_count": len(_RAG_SQL_DOCS),
-                                    "chunk_count": sum(d["chunks"] for d in _RAG_SQL_DOCS),
-                                }
-                            ],
-                        }
+                            "legacy_sql_count": len(_RAG_SQL_DOCS),
+                        },
+                        _mini_base("db-erp", "ERP", {"enabled": True}, 1, 18),
+                        _mini_base("db-crm", "CRM", {"enabled": False}, 0, 0),
+                        _mini_base("db-alt", "Altsystem", None, 2, 40),
                     ]
                 }
             )
@@ -2740,12 +2830,12 @@ class PreviewHandler(BaseHTTPRequestHandler):
             self._send_json({"jobs": _RAG_JOBS})
             return
         if path == "/api/rag/documents":
-            scope = parse_qs(parsed.query).get("scope", [""])[0]
+            rag_id = parse_qs(parsed.query).get("rag_id", [""])[0]
+            docs = _RAG_SQL_DOCS if rag_id.startswith("db-") else _RAG_DOCS
             self._send_json(
                 {
                     "available": True,
-                    "scope": scope or None,
-                    "documents": [_rag_doc_row(d) for d in (_RAG_SQL_DOCS if scope else _RAG_DOCS)],
+                    "documents": [_rag_doc_row(d) for d in docs],
                     "sparse": {
                         "model": "Qdrant/bm25",
                         "indexed_language": "english",
@@ -2852,45 +2942,45 @@ class PreviewHandler(BaseHTTPRequestHandler):
             if path.endswith("/preview"):
                 self._send_json({"detail": "Sandbox not available"}, 404)
                 return
-            listing = (
-                {
-                    "artifacts": [
-                        {
-                            "path": "summary.md",
-                            "size": len(_SAMPLE_ARTIFACTS["summary.md"][0]),
-                            "mime": "text/markdown",
-                        },
-                        {
-                            "path": "result.csv",
-                            "size": len(_SAMPLE_ARTIFACTS["result.csv"][0]),
-                            "mime": "text/csv",
-                        },
-                        {
-                            "path": "notes.txt",
-                            "size": len(_SAMPLE_ARTIFACTS["notes.txt"][0]),
-                            "mime": "text/plain",
-                        },
-                        {
-                            "path": "chart.png",
-                            "size": len(_SAMPLE_ARTIFACTS["chart.png"][0]),
-                            "mime": "image/png",
-                            "is_image": True,
-                        },
-                        {
-                            "path": "revenue.xlsx",
-                            "size": len(_SAMPLE_ARTIFACTS["revenue.xlsx"][0]),
-                            "mime": _SAMPLE_ARTIFACTS["revenue.xlsx"][1],
-                        },
-                        {
-                            "path": "deck.pptx",
-                            "size": len(_SAMPLE_ARTIFACTS["deck.pptx"][0]),
-                            "mime": _SAMPLE_ARTIFACTS["deck.pptx"][1],
-                        },
-                    ]
-                }
-            )
+            listing = {
+                "artifacts": [
+                    {
+                        "path": "summary.md",
+                        "size": len(_SAMPLE_ARTIFACTS["summary.md"][0]),
+                        "mime": "text/markdown",
+                    },
+                    {
+                        "path": "result.csv",
+                        "size": len(_SAMPLE_ARTIFACTS["result.csv"][0]),
+                        "mime": "text/csv",
+                    },
+                    {
+                        "path": "notes.txt",
+                        "size": len(_SAMPLE_ARTIFACTS["notes.txt"][0]),
+                        "mime": "text/plain",
+                    },
+                    {
+                        "path": "chart.png",
+                        "size": len(_SAMPLE_ARTIFACTS["chart.png"][0]),
+                        "mime": "image/png",
+                        "is_image": True,
+                    },
+                    {
+                        "path": "revenue.xlsx",
+                        "size": len(_SAMPLE_ARTIFACTS["revenue.xlsx"][0]),
+                        "mime": _SAMPLE_ARTIFACTS["revenue.xlsx"][1],
+                    },
+                    {
+                        "path": "deck.pptx",
+                        "size": len(_SAMPLE_ARTIFACTS["deck.pptx"][0]),
+                        "mime": _SAMPLE_ARTIFACTS["deck.pptx"][1],
+                    },
+                ]
+            }
             # Deleting on the Artifacts page removes the file here too.
-            listing["artifacts"] = [a for a in listing["artifacts"] if a["path"] not in _LIBRARY_DELETED]
+            listing["artifacts"] = [
+                a for a in listing["artifacts"] if a["path"] not in _LIBRARY_DELETED
+            ]
             self._send_json(listing)
             return
         if path == "/api/assistants":
@@ -3193,7 +3283,7 @@ class PreviewHandler(BaseHTTPRequestHandler):
             _SHARED_SKILLS.sort(key=lambda s: s["name"])
             self._send_json({"ok": True})
             return
-        if path.startswith("/api/rag/scopes/") and path.endswith("/reindex"):
+        if path.startswith("/api/rag/bases/") and path.endswith(("/reindex", "/adopt-legacy-sql")):
             self._send_json(
                 {"ok": True, "queued": len(_RAG_SQL_DOCS), "skipped": [], "job_id": "preview"}
             )

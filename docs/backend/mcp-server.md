@@ -217,7 +217,7 @@ as a logged-in browser session, so the two get their own policy.
 | `mcp_rag_allowed` | Base ids shared in selected mode. A withheld base is missing from `rag_list_collections` and refused by name, with the allowed ids in the error. A caller that names no base searches the allowed ones rather than falling through to `default`. |
 | `mcp_rag_tools` | Which `rag_*` tools are offered. Default is all four; dropping `rag_get_document` leaves a caller able to search and cite passages but not to pull whole documents out of the instance. |
 | `mcp_rag_max_results` | Ceiling on the passages one `rag_query` returns (1–20). A smaller request, or a smaller pipeline default, still wins. |
-| `mcp_rag_allowed_scopes` | Sub-index namespaces (`src/rag_scopes.py`) an MCP caller may name in `rag_query`'s `scope`. **Empty by default, and empty means none** — the SQL schema index is not reachable from outside unless it is named here. Asking for a withheld scope is refused, not silently downgraded to an ordinary search. |
+| `mcp_rag_allowed_scopes` | Namespaces (`src/rag_scopes.py`) an MCP caller may name in `rag_query`'s `scope`. **Empty by default, and empty means none** — the SQL schema files (the databases' mini RAGs, see [RAG service](rag-service.md)) are not reachable from outside unless `sql` is named here. Asking for a withheld scope is refused, not silently downgraded to an ordinary search. |
 | `mcp_skills_enabled` | Off removes the whole `skills_*` family. |
 | `mcp_skills_inherit` | On (default) = exactly the library enabled in Settings → Skills goes out. Off = only `mcp_skills_allowed` does. |
 | `mcp_skills_allowed` | Skill names shared in selected mode. Gated names are refused with "not shared over MCP" so a client stops re-spelling them. |

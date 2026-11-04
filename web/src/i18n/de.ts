@@ -1384,22 +1384,25 @@ const de: typeof en = {
       duplicate: '{{n}} Duplikat(e)',
       deleted: '{{n}} entfernt',
     },
-    scopes: {
+    mini: {
       title: 'Mini-RAGs',
       badge: 'Mini-RAG',
       intro:
-        'Kleine Indizes, die eine {{brand}}-Funktion für ihren eigenen Zweck hält. Sie tauchen in der normalen Suche nie auf und zählen oben nicht als Dokumente mit.',
-      empty: 'leer',
-      plusMini: 'zusätzlich Mini-RAG: {{names}}',
-      reindexAll: 'Alle neu indexieren',
-      reindexQueued: '{{n}} Datei(en) werden neu indexiert.',
-      reindexPartial: '{{n}} Datei(en) werden neu indexiert. Datei nicht mehr vorhanden: {{names}}',
-      item: {
-        sql: {
-          name: 'SQL-Schema',
-          purpose:
-            'Schema-Dateien der verbundenen SQL-Datenbanken. Werden nur abgerufen, solange die SQL-Wissensquelle aktiv ist, damit sich das Modell in der Datenbank zurechtfindet — nie in normale Wissens-Antworten gemischt.',
-        },
+        'Jede Datenbank aus den Integrationen hat ihr eigenes kleines RAG für Schema- und Navigationsdateien. Es verhält sich wie eine Wissensdatenbank, wird aber nur abgerufen, solange die SQL-Wissensquelle aktiv ist.',
+      purpose:
+        'Schema-, Katalog- und Join-Dateien dieser Datenbank. Werden nur abgerufen, solange die SQL-Wissensquelle aktiv ist, damit sich das Modell in der Datenbank zurechtfindet — nie in normale Wissens-Antworten gemischt.',
+      database: 'Datenbank: {{name}}',
+      disabled: 'deaktiviert',
+      orphaned:
+        'Die Datenbank wurde aus den Integrationen entfernt. Dieses Mini-RAG wird nicht mehr abgerufen und nimmt keine neuen Dokumente an. Du kannst es löschen.',
+      noDatabases:
+        'Noch keine Datenbank eingetragen. Trage unter Einstellungen → Integrationen eine ein, dann entsteht ihr Mini-RAG von selbst.',
+      nameFollows: 'Der Name kommt von der Datenbank in den Integrationen.',
+      legacy: {
+        text: '{{n}} ältere SQL-Schema-Datei(en) gehören noch zu keiner Datenbank. Sie werden weiter abgerufen, bis du sie übernimmst.',
+        action: 'In „{{name}}“ übernehmen',
+        queued: '{{n}} Datei(en) werden übernommen und neu indexiert.',
+        partial: '{{n}} Datei(en) werden übernommen. Datei nicht mehr vorhanden: {{names}}',
       },
     },
     settings: {
@@ -1416,6 +1419,9 @@ const de: typeof en = {
     uploadQueued: '{{count}} Datei(en) zum Indexieren eingereiht',
     uploadFailed: '{{count}} Datei(en) abgelehnt (zu groß oder nicht lesbar)',
     rebuildIndex: 'Index neu aufbauen',
+    reindexAll: 'Alle neu indexieren',
+    reindexQueued: '{{n}} Datei(en) werden neu indexiert.',
+    reindexPartial: '{{n}} Datei(en) werden neu indexiert. Datei nicht mehr vorhanden: {{names}}',
     rebuildConfirmTitle: 'Index löschen und neu aufbauen?',
     rebuildConfirmAction: 'Löschen & neu aufbauen',
     rebuildConfirm: 'Index neu aufbauen? Verwirft alle Vektoren UND löscht die hochgeladenen Dateien (Videos, PDFs) aus der Wissensdatenbank. Externe indexierte Ordner bleiben erhalten. Kann nicht rückgängig gemacht werden.',
@@ -1826,15 +1832,9 @@ const de: typeof en = {
       removeConfirm: 'SQL-Datenbankkonfiguration entfernen?',
       removed: 'Entfernt',
       contextTitle: 'SQL-Wissen',
-      contextHint: 'Lade Schema-Dokumente, Datenkataloge oder Join-Hinweise hoch — alles, was dem Modell hilft, die Datenbank zu navigieren. Die Dateien werden indexiert und durchsucht; sobald SQL im Chat aktiviert ist, werden automatisch die für die Frage relevantesten Teile eingefügt.',
-      knowledgeUpload: 'Dateien hochladen',
-      knowledgeUploading: 'Wird hochgeladen…',
-      knowledgeQueued: '{{count}} Datei(en) zur Indexierung eingereiht.',
-      knowledgeEmpty: 'Noch keine SQL-Wissensdateien.',
-      knowledgeChunks: '{{count}} Abschnitt(e) indexiert',
-      knowledgeDelete: '{{name}} löschen',
-      knowledgeDownload: 'Originaldatei {{name}} herunterladen',
-      knowledgeUnavailable: 'RAG ist nicht konfiguriert — richte die Embedding/Qdrant-Pipeline in den RAG-Einstellungen ein, um SQL-Wissensdateien zu nutzen.',
+      contextHint: 'Jede Datenbank hat ein eigenes Mini-RAG für Schema-Dokumente, Datenkataloge oder Join-Hinweise — alles, was dem Modell hilft, sie zu navigieren. Sobald SQL im Chat aktiviert ist, werden automatisch die für die Frage relevantesten Teile eingefügt.',
+      knowledgeEmpty: 'Noch keine Datenbank eingetragen.',
+      knowledgeOpen: 'Mini-RAG öffnen',
     },
     web: {
       backend: 'Such-Backend',

@@ -1,7 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   AlertTriangleIcon,
-  BoxesIcon,
   DatabaseIcon,
   LockIcon,
   PencilIcon,
@@ -12,6 +11,7 @@ import {
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
+  adoptLegacySql,
   createRagBase,
   deleteRagBase,
   fetchRagBases,
@@ -75,13 +75,16 @@ export function RagBaseSelect({
       size="sm"
       value={value}
       onChange={onChange}
-      options={bases.map((b) => ({
-        value: b.id,
-        label:
-          b.content_count == null
-            ? b.name
-            : `${b.name} · ${t('rag.bases.docCount', { n: b.content_count })}`,
-      }))}
+      options={bases.map((b) => {
+        const name = b.kind === 'mini' ? `${t('rag.mini.badge')}: ${b.name}` : b.name;
+        return {
+          value: b.id,
+          label:
+            b.content_count == null
+              ? name
+              : `${name} · ${t('rag.bases.docCount', { n: b.content_count })}`,
+        };
+      })}
     />
   );
 }
@@ -181,6 +184,7 @@ function BaseFormDialog({
 }) {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
+  const mini = editing?.kind === 'mini';
   const [form, setForm] = useState<FormState>(EMPTY);
   const [error, setError] = useState('');
   useEffect(() => {
@@ -243,9 +247,13 @@ function BaseFormDialog({
             <Input
               autoFocus
               value={form.name}
+              disabled={mini}
               placeholder={t('rag.bases.namePlaceholder')}
               onChange={(e) => set('name', e.target.value)}
             />
+            {mini && (
+              <span className="block text-xs text-muted-foreground/80">{t('rag.mini.nameFollows')}</span>
+            )}
           </label>
           <label className="block space-y-1.5">
             <span className="text-[13px] font-semibold">{t('rag.bases.description')}</span>
@@ -299,7 +307,7 @@ function BaseFormDialog({
               {t('rag.bases.idFixed', { id: editing.id })}
             </p>
           )}
-          {editing && (
+          {editing && !mini && (
             <AccessEditor
               restricted={form.restricted}
               users={form.users}
@@ -367,6 +375,94 @@ function DeleteDialog({
   );
 }
 
+/** Which database a mini RAG belongs to, and what that means for it right now. */
+function MiniRagBinding({ base }: { base: RagBase }) {
+  const { t } = useTranslation();
+  if (!base.connection) {
+    return (
+      <p className="flex items-start gap-1.5 text-xs text-amber-700 dark:text-amber-400">
+        <AlertTriangleIcon className="mt-px size-3.5 shrink-0" />
+        {t('rag.mini.orphaned')}
+      </p>
+    );
+  }
+  return (
+    <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+      <DatabaseIcon className="size-3.5 shrink-0" />
+      <span className="min-w-0 truncate">{t('rag.mini.database', { name: base.connection.name })}</span>
+      {!base.connection.enabled && (
+        <span className="shrink-0 rounded bg-muted px-1.5 py-px text-[10px]">{t('rag.mini.disabled')}</span>
+      )}
+    </p>
+  );
+}
+
+/** Above a mini RAG's own space: what it is for, and the database it is bound to. */
+export function MiniRagNote({ base }: { base: RagBase }) {
+  const { t } = useTranslation();
+  return (
+    <div className="mb-5 space-y-1.5">
+      <p className="text-[13px] leading-snug text-muted-foreground">{t('rag.mini.purpose')}</p>
+      <MiniRagBinding base={base} />
+    </div>
+  );
+}
+
+/** Schema files from before there was one mini RAG per database. They keep being
+ *  retrieved until an administrator says which database they describe, which the
+ *  system can't know as soon as there is more than one. */
+function LegacySqlBanner({ count, minis }: { count: number; minis: RagBase[] }) {
+  const { t } = useTranslation();
+  const queryClient = useQueryClient();
+  const targets = minis.filter((m) => m.connection);
+  const [picked, setPicked] = useState('');
+  const [msg, setMsg] = useState<{ text: string; ok: boolean } | null>(null);
+  const target = targets.some((m) => m.id === picked) ? picked : (targets[0]?.id ?? '');
+  const adopt = useMutation({
+    mutationFn: () => adoptLegacySql(target),
+    onSuccess: (r) => {
+      setMsg({
+        text:
+          r.skipped.length > 0
+            ? t('rag.mini.legacy.partial', { n: r.queued, names: r.skipped.join(', ') })
+            : t('rag.mini.legacy.queued', { n: r.queued }),
+        ok: r.skipped.length === 0,
+      });
+      void queryClient.invalidateQueries({ queryKey: ['rag-jobs'] });
+      void queryClient.invalidateQueries({ queryKey: ['rag-bases'] });
+    },
+    onError: (e) => setMsg({ text: (e as Error).message, ok: false }),
+  });
+  return (
+    <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2.5 text-xs text-amber-700 dark:text-amber-400">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="min-w-0 flex-1 basis-64">{t('rag.mini.legacy.text', { n: count })}</span>
+        {targets.length === 0 ? (
+          <span>{t('rag.mini.noDatabases')}</span>
+        ) : (
+          <>
+            {targets.length > 1 && (
+              <Select
+                className="w-44 text-xs"
+                size="sm"
+                value={target}
+                onChange={setPicked}
+                options={targets.map((m) => ({ value: m.id, label: m.name }))}
+              />
+            )}
+            <Button size="sm" variant="outline" disabled={adopt.isPending} onClick={() => adopt.mutate()}>
+              {t('rag.mini.legacy.action', { name: targets.find((m) => m.id === target)?.name ?? '' })}
+            </Button>
+          </>
+        )}
+      </div>
+      {msg && (
+        <p className={cn('mt-1.5', msg.ok ? 'text-success' : 'text-destructive-foreground')}>{msg.text}</p>
+      )}
+    </div>
+  );
+}
+
 /** One knowledge base as a card: what it holds, in which language, and how far
  *  its pipeline differs from the global defaults. */
 function BaseCard({
@@ -387,7 +483,9 @@ function BaseCard({
     mutationFn: (enabled: boolean) => updateRagBase(base.id, { chat_enabled: enabled }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['rag-bases'] }),
   });
-  const nonEmptyScopes = (base.scopes ?? []).filter((s) => s.content_count > 0);
+  const mini = base.kind === 'mini';
+  // A mini RAG goes with its database; only an orphaned one can be deleted here.
+  const deletable = !isDefault && (!mini || !base.connection);
   return (
     <div className="group flex flex-col overflow-hidden rounded-md border bg-card text-card-foreground transition-colors hover:border-ring/50">
       <button type="button" onClick={onOpen} className="flex-1 px-4 py-3.5 text-left">
@@ -412,8 +510,8 @@ function BaseCard({
             </span>
           )}
         </span>
-        <span className="mt-1.5 line-clamp-2 block min-h-[2rem] text-xs text-muted-foreground/80">
-          {base.description || t('rag.bases.noDescription')}
+        <span className="mt-1.5 line-clamp-2 min-h-[2rem] text-xs text-muted-foreground/80">
+          {base.description || (mini ? t('rag.mini.purpose') : t('rag.bases.noDescription'))}
         </span>
         <span className="mt-2 block text-[11px] text-muted-foreground tabular-nums">
           {base.available === false
@@ -423,29 +521,24 @@ function BaseCard({
                 chunks: base.chunk_count ?? 0,
               })}
         </span>
-        {/* Sub-indexes are counted separately from the corpus above, so say so
-            rather than letting the card look like it is missing documents. */}
-        {nonEmptyScopes.length > 0 && (
-          <span className="mt-1 block text-[11px] text-muted-foreground/80">
-            {t('rag.scopes.plusMini', {
-              names: nonEmptyScopes
-                .map((s) => t(`rag.scopes.item.${s.id}.name`, s.name))
-                .join(', '),
-            })}
-          </span>
-        )}
       </button>
       <div className="border-t border-border/60 px-4 py-3">
-        <label className="flex items-center justify-between gap-3 text-xs">
-          {t('rag.bases.chatEnabled')}
-          <Switch
-            checked={base.chat_enabled ?? isDefault}
-            disabled={toggle.isPending}
-            onCheckedChange={(enabled) => toggle.mutate(enabled)}
-            aria-label={t('rag.bases.chatEnabledFor', { name: base.name })}
-          />
-        </label>
-        {toggle.error && <p role="alert" className="mt-2 text-xs text-destructive-foreground">{toggle.error.message}</p>}
+        {mini ? (
+          <MiniRagBinding base={base} />
+        ) : (
+          <>
+            <label className="flex items-center justify-between gap-3 text-xs">
+              {t('rag.bases.chatEnabled')}
+              <Switch
+                checked={base.chat_enabled ?? isDefault}
+                disabled={toggle.isPending}
+                onCheckedChange={(enabled) => toggle.mutate(enabled)}
+                aria-label={t('rag.bases.chatEnabledFor', { name: base.name })}
+              />
+            </label>
+            {toggle.error && <p role="alert" className="mt-2 text-xs text-destructive-foreground">{toggle.error.message}</p>}
+          </>
+        )}
       </div>
       <div className="flex items-center gap-1 border-t border-border/60 px-2 py-1.5">
         <code className="min-w-0 flex-1 truncate px-1 font-mono text-[10px] text-muted-foreground">
@@ -468,7 +561,7 @@ function BaseCard({
         <Button size="icon-sm" variant="ghost" aria-label={t('common.edit')} onClick={onEdit}>
           <PencilIcon className="size-3.5" />
         </Button>
-        {!isDefault && (
+        {deletable && (
           <Button size="icon-sm" variant="ghost" aria-label={t('common.delete')} onClick={onDelete}>
             <Trash2Icon className="size-3.5" />
           </Button>
@@ -484,21 +577,28 @@ function BaseCard({
  *  knowledge bases exist and what is in them", while a base's own space
  *  answers "what is inside this one and how is it tuned".
  */
-export function RagOverview({
-  onOpen,
-  onOpenScope,
-}: {
-  onOpen: (id: string) => void;
-  onOpenScope: (id: string) => void;
-}) {
+export function RagOverview({ onOpen }: { onOpen: (id: string) => void }) {
   const { t } = useTranslation();
   const { data, isLoading } = useRagBases();
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<RagBase | null>(null);
   const [deleting, setDeleting] = useState<RagBase | null>(null);
-  const bases = data?.bases ?? [];
-  // Sub-indexes live in the default base; every other base reports them empty.
-  const scopes = bases.find((b) => b.id === DEFAULT_RAG_BASE)?.scopes ?? [];
+  const all = data?.bases ?? [];
+  const bases = all.filter((b) => b.kind !== 'mini');
+  const minis = all.filter((b) => b.kind === 'mini');
+  const legacyCount = all.find((b) => b.id === DEFAULT_RAG_BASE)?.legacy_sql_count ?? 0;
+  const card = (b: RagBase) => (
+    <BaseCard
+      key={b.id}
+      base={b}
+      onOpen={() => onOpen(b.id)}
+      onEdit={() => {
+        setEditing(b);
+        setFormOpen(true);
+      }}
+      onDelete={() => setDeleting(b)}
+    />
+  );
 
   return (
     <div className="space-y-3">
@@ -520,54 +620,22 @@ export function RagOverview({
         <p className="text-xs text-muted-foreground">{t('common.loading')}</p>
       ) : (
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-          {bases.map((b) => (
-            <BaseCard
-              key={b.id}
-              base={b}
-              onOpen={() => onOpen(b.id)}
-              onEdit={() => {
-                setEditing(b);
-                setFormOpen(true);
-              }}
-              onDelete={() => setDeleting(b)}
-            />
-          ))}
+          {bases.map(card)}
         </div>
       )}
 
-      {scopes.length > 0 && (
+      {!isLoading && (
         <section className="space-y-2 pt-5">
           <div>
-            <h2 className="text-[15px] font-semibold tracking-[-0.01em]">{t('rag.scopes.title')}</h2>
-            <p className="mt-0.5 text-xs text-muted-foreground">{t('rag.scopes.intro')}</p>
+            <h2 className="text-[15px] font-semibold tracking-[-0.01em]">{t('rag.mini.title')}</h2>
+            <p className="mt-0.5 text-xs text-muted-foreground">{t('rag.mini.intro')}</p>
           </div>
-          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-            {scopes.map((s) => (
-              <button
-                key={s.id}
-                type="button"
-                onClick={() => onOpenScope(s.id)}
-                className="rounded-md border bg-card px-4 py-3.5 text-left text-card-foreground transition-colors hover:border-ring/50"
-              >
-                <span className="flex items-center gap-2">
-                  <BoxesIcon className="size-4 shrink-0 text-muted-foreground" />
-                  {/* Server-side catalogue is English; fall back to it when a
-                      locale has no wording of its own for this scope. */}
-                  <span className="min-w-0 flex-1 truncate text-sm font-semibold tracking-[-0.01em]">
-                    {t(`rag.scopes.item.${s.id}.name`, s.name)}
-                  </span>
-                </span>
-                <span className="mt-1.5 line-clamp-3 block text-xs text-muted-foreground/80">
-                  {t(`rag.scopes.item.${s.id}.purpose`, s.purpose)}
-                </span>
-                <span className="mt-2 block text-[11px] text-muted-foreground tabular-nums">
-                  {s.content_count === 0
-                    ? t('rag.scopes.empty')
-                    : t('rag.bases.counts', { docs: s.content_count, chunks: s.chunk_count })}
-                </span>
-              </button>
-            ))}
-          </div>
+          {legacyCount > 0 && <LegacySqlBanner count={legacyCount} minis={minis} />}
+          {minis.length === 0 ? (
+            <p className="text-xs text-muted-foreground">{t('rag.mini.noDatabases')}</p>
+          ) : (
+            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">{minis.map(card)}</div>
+          )}
         </section>
       )}
 

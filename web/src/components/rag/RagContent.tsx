@@ -62,11 +62,8 @@ interface SearchHit {
  *  This is the working surface of the /rag management area — the settings for
  *  the same base live on their own tab, so filling a base and tuning it never
  *  compete for the same screen.
- *
- *  With `scope` it is the same surface for one purpose-bound sub-index instead
- *  of the base's corpus.
  */
-export function RagContent({ baseId, scope }: { baseId: string; scope?: string }) {
+export function RagContent({ baseId }: { baseId: string }) {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
   const ragId = ragIdParam(baseId);
@@ -85,8 +82,8 @@ export function RagContent({ baseId, scope }: { baseId: string; scope?: string }
   const [docFilter, setDocFilter] = useState<DocFilter>('all');
 
   const docs = useQuery({
-    queryKey: ['rag-documents', baseId, scope ?? ''],
-    queryFn: () => fetchRagDocuments(ragId, scope),
+    queryKey: ['rag-documents', baseId],
+    queryFn: () => fetchRagDocuments(ragId),
     refetchInterval: 5000,
   });
 
@@ -115,7 +112,7 @@ export function RagContent({ baseId, scope }: { baseId: string; scope?: string }
   const search = () => {
     setSearchErr('');
     setHits(null);
-    void ragSearch(searchQ, searchK, ragId, scope)
+    void ragSearch(searchQ, searchK, ragId)
       .then((r) => setHits(((r as { results?: SearchHit[] }).results ?? []) as SearchHit[]))
       .catch((e) => setSearchErr((e as Error).message));
   };
@@ -134,11 +131,6 @@ export function RagContent({ baseId, scope }: { baseId: string; scope?: string }
 
   return (
     <Page className="gap-5 p-0">
-      {scope && (
-        <p className="text-[13px] leading-snug text-muted-foreground">
-          {t(`rag.scopes.item.${scope}.purpose`, '')}
-        </p>
-      )}
       <Section title={t('rag.content.add')} padded>
         <div className="space-y-3">
           <div className="flex flex-wrap items-center gap-2">
@@ -157,7 +149,6 @@ export function RagContent({ baseId, scope }: { baseId: string; scope?: string }
                       personalUpload(Array.from(e.target.files!), {
                         redactPii: uploadRedact,
                         ragId,
-                        scope,
                       }),
                     t('settings.rag.uploadQueued'),
                   );
@@ -183,7 +174,6 @@ export function RagContent({ baseId, scope }: { baseId: string; scope?: string }
                       personalUpload(Array.from(e.target.files!), {
                         redactPii: uploadRedact,
                         ragId,
-                        scope,
                       }),
                     t('settings.rag.uploadQueued'),
                   );
@@ -191,17 +181,13 @@ export function RagContent({ baseId, scope }: { baseId: string; scope?: string }
                 e.target.value = '';
               }}
             />
-            {/* Refreshes the personal-documents listing, which a sub-index is
-                not part of. Its re-index is in the activity rail. */}
-            {!scope && (
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => run(personalReload, t('settings.rag.reindexStarted'))}
-              >
-                {t('settings.rag.reloadIndex')}
-              </Button>
-            )}
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => run(personalReload, t('settings.rag.reindexStarted'))}
+            >
+              {t('settings.rag.reloadIndex')}
+            </Button>
             <Button size="sm" variant="outline" onClick={() => setExplorerOpen(true)}>
               <FolderOpenIcon className="size-3.5" /> {t('rag.explorer.open')}
             </Button>
@@ -231,7 +217,7 @@ export function RagContent({ baseId, scope }: { baseId: string; scope?: string }
               variant="outline"
               disabled={!dir.trim()}
               onClick={() =>
-                run(() => personalAddDirectory(dir, ragId, scope), t('settings.rag.directoryAdded'))
+                run(() => personalAddDirectory(dir, ragId), t('settings.rag.directoryAdded'))
               }
             >
               {t('common.add')}
@@ -463,7 +449,7 @@ export function RagContent({ baseId, scope }: { baseId: string; scope?: string }
         </div>
       </Section>
 
-      <RagExplorer open={explorerOpen} onOpenChange={setExplorerOpen} scope={scope} />
+      <RagExplorer open={explorerOpen} onOpenChange={setExplorerOpen} />
     </Page>
   );
 }

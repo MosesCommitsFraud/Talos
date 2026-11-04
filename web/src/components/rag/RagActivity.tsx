@@ -10,12 +10,12 @@ import {
   fetchRagWorkerDiag,
   personalUpload,
   ragRebuildIndex,
-  reindexRagScope,
+  reindexRagBase,
   type RagJob,
 } from '@/api/client';
 import { cn } from '@/lib/utils';
 import { filesFromDrop } from '@/lib/uploadItems';
-import { DEFAULT_RAG_BASE, ragIdParam, useRagBase } from '@/state/ragBase';
+import { ragIdParam, useRagBase } from '@/state/ragBase';
 import { useRagConsole } from '@/state/ragConsole';
 import { Button } from '../ui/button';
 import { Dialog, DialogContent } from '../ui/dialog';
@@ -64,10 +64,8 @@ function JobProgress({ j }: { j: RagJob }) {
 
 /** Right-hand activity rail for the /rag workspace: the drop zone, an index
  *  rebuild, live worker/queue status with per-item progress, and an error
- *  console — pinned so it stays put while the settings column scrolls.
- *
- *  With `scope`, drops and re-indexing act on that sub-index instead of a base. */
-export function RagActivity({ scope }: { scope?: string }) {
+ *  console — pinned so it stays put while the settings column scrolls. */
+export function RagActivity() {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
   const fileInput = useRef<HTMLInputElement>(null);
@@ -78,14 +76,10 @@ export function RagActivity({ scope }: { scope?: string }) {
 
   // Drops and rebuilds act on the base selected in the workspace, not always
   // the default one.
-  const { baseId, base, bases } = useActiveRagBase();
+  const { baseId, base } = useActiveRagBase();
   const setBaseId = useRagBase((s) => s.setBaseId);
-  // Sub-indexes live in the default base, whichever one is selected.
-  const ragId = scope ? undefined : ragIdParam(baseId);
-  const scopeMeta = bases.find((b) => b.id === DEFAULT_RAG_BASE)?.scopes?.find((s) => s.id === scope);
-  const targetName = scope
-    ? t(`rag.scopes.item.${scope}.name`, scopeMeta?.name ?? scope)
-    : base?.name;
+  const ragId = ragIdParam(baseId);
+  const targetName = base?.name;
 
   const jobs = useQuery({ queryKey: ['rag-jobs'], queryFn: fetchRagJobs, refetchInterval: 1500 });
   const diag = useQuery({ queryKey: ['rag-worker-diag'], queryFn: fetchRagWorkerDiag, refetchInterval: 5000 });
@@ -96,7 +90,7 @@ export function RagActivity({ scope }: { scope?: string }) {
   };
 
   const upload = useMutation({
-    mutationFn: (files: File[]) => personalUpload(files, { ragId, scope }),
+    mutationFn: (files: File[]) => personalUpload(files, { ragId }),
     onSuccess: (r, files) => {
       const failed = Number((r as { failed_count?: number })?.failed_count ?? 0);
       const errs = (r as { errors?: string[] })?.errors;
@@ -114,14 +108,14 @@ export function RagActivity({ scope }: { scope?: string }) {
     onSuccess: (r) => { setMsg({ text: r.message || t('rag.rebuildDone'), ok: true }); refresh(); },
     onError: (e) => setMsg({ text: (e as Error).message, ok: false }),
   });
-  const reindexScope = useMutation({
-    mutationFn: () => reindexRagScope(scope as string),
+  const reindex = useMutation({
+    mutationFn: () => reindexRagBase(baseId),
     onSuccess: (r) => {
       setMsg({
         text:
           r.skipped.length > 0
-            ? t('rag.scopes.reindexPartial', { n: r.queued, names: r.skipped.join(', ') })
-            : t('rag.scopes.reindexQueued', { n: r.queued }),
+            ? t('rag.reindexPartial', { n: r.queued, names: r.skipped.join(', ') })
+            : t('rag.reindexQueued', { n: r.queued }),
         ok: r.skipped.length === 0,
       });
       refresh();
@@ -183,30 +177,23 @@ export function RagActivity({ scope }: { scope?: string }) {
       {/* The rail is visible from every space, including the overview where no
           base is open — so the target is switchable here rather than only by
           navigating into a base. Hidden while only one base exists. */}
-      {!scope && (
-        <div
-          className="shrink-0"
-          onClick={(e) => e.stopPropagation()}
-        >
-          <RagBaseSelect className="w-full max-w-none" value={baseId} onChange={setBaseId} />
-        </div>
-      )}
+      <div
+        className="shrink-0"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <RagBaseSelect className="w-full max-w-none" value={baseId} onChange={setBaseId} />
+      </div>
 
       <div className="grid shrink-0 grid-cols-1 gap-2">
         <Button className="w-full min-w-0" size="sm" variant="outline" onClick={() => setExplorerOpen(true)}>
           <FolderOpenIcon /> {t('rag.explorer.open')}
         </Button>
-        {/* A rebuild recreates the base's whole collection, which is far more
-            than a sub-index should be able to trigger from its own screen. */}
-        {scope ? (
-          <Button className="w-full min-w-0" size="sm" variant="outline" disabled={reindexScope.isPending} onClick={() => reindexScope.mutate()}>
-            <RefreshCwIcon className={cn(reindexScope.isPending && 'animate-spin')} /> {t('rag.scopes.reindexAll')}
-          </Button>
-        ) : (
-          <Button className="w-full min-w-0" size="sm" variant="outline" disabled={rebuild.isPending} onClick={() => setRebuildConfirmOpen(true)}>
-            <RefreshCwIcon className={cn(rebuild.isPending && 'animate-spin')} /> {t('rag.rebuildIndex')}
-          </Button>
-        )}
+        <Button className="w-full min-w-0" size="sm" variant="outline" disabled={reindex.isPending} onClick={() => reindex.mutate()}>
+          <RefreshCwIcon className={cn(reindex.isPending && 'animate-spin')} /> {t('rag.reindexAll')}
+        </Button>
+        <Button className="w-full min-w-0" size="sm" variant="outline" disabled={rebuild.isPending} onClick={() => setRebuildConfirmOpen(true)}>
+          <RefreshCwIcon className={cn(rebuild.isPending && 'animate-spin')} /> {t('rag.rebuildIndex')}
+        </Button>
       </div>
       <div className="flex shrink-0 items-center justify-between rounded-md border border-border/60 bg-muted/25 px-2.5 py-2">
         <span className="text-[11px] font-medium text-muted-foreground">{t('rag.workerStatus')}</span>
@@ -294,7 +281,7 @@ export function RagActivity({ scope }: { scope?: string }) {
         </div>
       </div>
 
-      <RagExplorer open={explorerOpen} onOpenChange={setExplorerOpen} scope={scope} />
+      <RagExplorer open={explorerOpen} onOpenChange={setExplorerOpen} />
       <Dialog open={rebuildConfirmOpen} onOpenChange={setRebuildConfirmOpen}>
         <DialogContent title={t('rag.rebuildConfirmTitle')} className="w-[min(480px,92vw)]">
           <div className="space-y-5 px-5 py-4">

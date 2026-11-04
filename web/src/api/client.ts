@@ -953,20 +953,14 @@ export interface RagBase {
   override_count?: number;
   /** Who may retrieve from this base. Admins always may. */
   access?: RagBaseAccess;
-  /** Purpose-bound sub-indexes inside this base (see RagScope). */
-  scopes?: RagScope[];
-}
-
-/** A "mini RAG": documents a Talos feature keeps in the base for its own use,
- *  tagged with a scope so ordinary retrieval never returns them. */
-export interface RagScope {
-  id: string;
-  name: string;
-  purpose: string;
-  /** Where the scope is administered, e.g. "rag-workspace". */
-  managed_at: string;
-  content_count: number;
-  chunk_count: number;
+  /** A mini RAG (src/rag_mini.py): a small base bound to one SQL database, which
+   *  only the SQL feature reads. Absent on an ordinary knowledge base. */
+  kind?: 'mini';
+  connection_id?: string;
+  /** The bound database from Integrations; null once it has been removed there. */
+  connection?: { id: string; name: string; enabled: boolean } | null;
+  /** Default base only: schema files that have not moved to a mini RAG yet. */
+  legacy_sql_count?: number;
 }
 
 /** Append `rag_id` only when a base is actually named, so the URLs a plain
@@ -1173,25 +1167,27 @@ export const deleteIntegration = (id: string) =>
   postJSON(`/api/auth/integrations/${encodeURIComponent(id)}`, undefined, 'DELETE');
 
 /* ── RAG documents ── */
-export const ragSearch = (q: string, k: number, ragId?: string, scope?: string) =>
-  getJSON<Record<string, unknown>>(
-    withRag(
-      `/api/rag/search?q=${encodeURIComponent(q)}&k=${k}${scope ? `&scope=${encodeURIComponent(scope)}` : ''}`,
-      ragId,
-    ),
-  );
-export const personalAddDirectory = (directory: string, ragId?: string, scope?: string) =>
-  postJSON('/api/personal/add_directory', { directory, rag_id: ragId, scope });
-/** Re-index every document of one purpose-bound sub-index. */
-export const reindexRagScope = (scope: string) =>
-  postJSON<{ ok: boolean; queued: number; skipped: string[]; job_id?: string | null }>(
-    `/api/rag/scopes/${encodeURIComponent(scope)}/reindex`,
-  );
+export const ragSearch = (q: string, k: number, ragId?: string) =>
+  getJSON<Record<string, unknown>>(withRag(`/api/rag/search?q=${encodeURIComponent(q)}&k=${k}`, ragId));
+export const personalAddDirectory = (directory: string, ragId?: string) =>
+  postJSON('/api/personal/add_directory', { directory, rag_id: ragId });
+export interface RagQueuedFiles {
+  ok: boolean;
+  queued: number;
+  skipped: string[];
+  job_id?: string | null;
+}
+/** Re-index every document of one base with its current settings. */
+export const reindexRagBase = (id: string) =>
+  postJSON<RagQueuedFiles>(`/api/rag/bases/${encodeURIComponent(id)}/reindex`);
+/** Move the schema files still in the default base into this mini RAG. */
+export const adoptLegacySql = (id: string) =>
+  postJSON<RagQueuedFiles>(`/api/rag/bases/${encodeURIComponent(id)}/adopt-legacy-sql`);
 export const personalReload = () => postJSON('/api/personal/reload');
 
 export async function personalUpload(
   files: File[],
-  opts?: { redactPii?: boolean | null; ragId?: string; scope?: string },
+  opts?: { redactPii?: boolean | null; ragId?: string },
 ): Promise<{ uploaded: string[]; failed_count: number; errors: string[]; job_ids: string[] }> {
   // A dropped folder can hold thousands of files: send it in several
   // requests (each one ingest job) instead of one giant body.
@@ -1208,8 +1204,6 @@ export async function personalUpload(
     if (opts?.redactPii != null) fd.append('redact_pii', String(opts.redactPii));
     // Which knowledge base receives the files; omitted → the default base.
     if (opts?.ragId) fd.append('rag_id', opts.ragId);
-    // A purpose-bound sub-index instead of the corpus; omitted → the corpus.
-    if (opts?.scope) fd.append('scope', opts.scope);
     const res = await fetch('/api/personal/upload', { method: 'POST', body: fd, credentials: 'same-origin' });
     if (!res.ok) {
       const detail = await res.json().then((j) => j?.detail).catch(() => null);
@@ -1331,21 +1325,14 @@ export async function deleteRagJob(id: string): Promise<void> {
 }
 /** The base's ordinary corpus. Purpose-bound sub-indexes are excluded and
  *  reported under `scopes`; pass `scope` to list one of them instead. */
-export const fetchRagDocuments = (ragId?: string, scope?: string) =>
+export const fetchRagDocuments = (ragId?: string) =>
   getJSON<{
     available: boolean;
     documents: RagDocument[];
-    scopes?: RagScope[];
-    scope?: string;
     error?: string;
     /** Keyword (BM25) side: language the vectors were built with vs. configured. */
     sparse?: RagSparseStatus | null;
-  }>(
-    withRag(
-      scope ? `/api/rag/documents?scope=${encodeURIComponent(scope)}` : '/api/rag/documents',
-      ragId,
-    ),
-  );
+  }>(withRag('/api/rag/documents', ragId));
 
 /** Register view of one document: stable id, content hash, version history. */
 export const fetchRagDocumentDetail = (docId: string, ragId?: string) =>
@@ -1434,12 +1421,9 @@ export interface RagChunkHit {
   snippet: string;
 }
 /** Literal keyword scan across every indexed chunk (explorer search box). */
-export const searchRagChunks = (q: string, ragId?: string, scope?: string) =>
+export const searchRagChunks = (q: string, ragId?: string) =>
   getJSON<{ available: boolean; query: string; count: number; hits: RagChunkHit[]; error?: string }>(
-    withRag(
-      `/api/rag/documents/search?q=${encodeURIComponent(q)}${scope ? `&scope=${encodeURIComponent(scope)}` : ''}`,
-      ragId,
-    ),
+    withRag(`/api/rag/documents/search?q=${encodeURIComponent(q)}`, ragId),
   );
 export const fetchRagChunks = (source: string, ragId?: string) =>
   getJSON<{ available: boolean; source: string; chunks: RagChunk[]; error?: string }>(
@@ -1490,30 +1474,6 @@ export const deleteSqlConfig = (id?: string) =>
   postJSON(`/api/sql/config${id ? `?id=${encodeURIComponent(id)}` : ''}`, undefined, 'DELETE');
 export const testSqlConfig = (id?: string) =>
   postJSON<{ ok?: boolean; error?: string; output?: string }>(`/api/sql/test${id ? `?id=${encodeURIComponent(id)}` : ''}`);
-
-/* ── SQL knowledge (scoped mini-RAG over uploaded schema files) ── */
-export const fetchSqlKnowledge = () =>
-  getJSON<{ available: boolean; documents: RagDocument[]; error?: string }>('/api/sql/knowledge');
-export async function uploadSqlKnowledge(files: File[]): Promise<Record<string, unknown>> {
-  const fd = new FormData();
-  for (const f of files) fd.append('files', f, f.name);
-  const res = await fetch('/api/sql/knowledge/upload', { method: 'POST', body: fd, credentials: 'same-origin' });
-  if (!res.ok) {
-    const detail = await res.json().then((j) => j?.detail).catch(() => null);
-    throw new Error(detail || `Upload failed (HTTP ${res.status})`);
-  }
-  return res.json();
-}
-/** Download URL for an uploaded schema file, exactly as it was ingested. */
-export const sqlKnowledgeOriginalUrl = (source: string) =>
-  `/api/sql/knowledge/original?source=${encodeURIComponent(source)}`;
-export async function deleteSqlKnowledge(source: string): Promise<void> {
-  const res = await fetch(`/api/sql/knowledge?source=${encodeURIComponent(source)}`, {
-    method: 'DELETE',
-    credentials: 'same-origin',
-  });
-  if (!res.ok) throw new Error(`Delete failed (HTTP ${res.status})`);
-}
 
 /* ── Built-in agent tools ── */
 export interface BuiltinTool { id: string; enabled: boolean }

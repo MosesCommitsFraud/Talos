@@ -1377,22 +1377,25 @@ const en = {
       duplicate: '{{n}} duplicate(s)',
       deleted: '{{n}} removed',
     },
-    scopes: {
+    mini: {
       title: 'Mini RAGs',
       badge: 'mini RAG',
       intro:
-        'Small indexes a {{brand}} feature keeps for its own use. They are never returned by ordinary search and are not counted as documents above.',
-      empty: 'empty',
-      plusMini: 'plus mini RAG: {{names}}',
-      reindexAll: 'Re-index all',
-      reindexQueued: 'Re-indexing {{n}} file(s).',
-      reindexPartial: 'Re-indexing {{n}} file(s). File no longer there: {{names}}',
-      item: {
-        sql: {
-          name: 'SQL schema',
-          purpose:
-            'Schema files for the connected SQL databases. Retrieved only while the SQL knowledge source is active, so the model can navigate the database — never mixed into ordinary knowledge-base answers.',
-        },
+        'Every database from Integrations has its own small RAG for schema and navigation files. It behaves like a knowledge base, but is only retrieved while the SQL knowledge source is active.',
+      purpose:
+        'Schema, catalogue and join files of this database. Retrieved only while the SQL knowledge source is active, so the model can navigate the database — never mixed into ordinary knowledge-base answers.',
+      database: 'Database: {{name}}',
+      disabled: 'disabled',
+      orphaned:
+        'The database was removed from Integrations. This mini RAG is no longer retrieved and takes no new documents. You can delete it.',
+      noDatabases:
+        'No database yet. Add one under Settings → Integrations and its mini RAG appears by itself.',
+      nameFollows: 'The name comes from the database in Integrations.',
+      legacy: {
+        text: '{{n}} older SQL schema file(s) do not belong to a database yet. They keep being retrieved until you move them.',
+        action: 'Move to “{{name}}”',
+        queued: 'Moving and re-indexing {{n}} file(s).',
+        partial: 'Moving {{n}} file(s). File no longer there: {{names}}',
       },
     },
     settings: {
@@ -1409,6 +1412,9 @@ const en = {
     uploadQueued: 'Queued {{count}} file(s) for indexing',
     uploadFailed: '{{count}} file(s) rejected (too large or unreadable)',
     rebuildIndex: 'Rebuild index',
+    reindexAll: 'Re-index all',
+    reindexQueued: 'Re-indexing {{n}} file(s).',
+    reindexPartial: 'Re-indexing {{n}} file(s). File no longer there: {{names}}',
     rebuildConfirmTitle: 'Delete and rebuild index?',
     rebuildConfirmAction: 'Delete & rebuild',
     rebuildConfirm: 'Rebuild the index? This drops all vectors AND deletes the uploaded files (videos, PDFs) from the knowledge base. External indexed folders are kept. This cannot be undone.',
@@ -1819,15 +1825,9 @@ const en = {
       removeConfirm: 'Remove the SQL database configuration?',
       removed: 'Removed',
       contextTitle: 'SQL knowledge',
-      contextHint: 'Upload schema docs, data dictionaries, join hints — anything that helps the model navigate the database. Files are indexed and searched; whenever SQL is enabled in chat, the parts most relevant to the question are pulled in automatically.',
-      knowledgeUpload: 'Upload files',
-      knowledgeUploading: 'Uploading…',
-      knowledgeQueued: '{{count}} file(s) queued for indexing.',
-      knowledgeEmpty: 'No SQL knowledge files yet.',
-      knowledgeChunks: '{{count}} chunk(s) indexed',
-      knowledgeDelete: 'Delete {{name}}',
-      knowledgeDownload: 'Download original file {{name}}',
-      knowledgeUnavailable: 'RAG is not configured — set up the embedding/Qdrant pipeline in the RAG settings to use SQL knowledge files.',
+      contextHint: 'Every database has its own mini RAG for schema docs, data dictionaries, join hints — anything that helps the model navigate it. Whenever SQL is enabled in chat, the parts most relevant to the question are pulled in automatically.',
+      knowledgeEmpty: 'No database yet.',
+      knowledgeOpen: 'Open mini RAG',
     },
     web: {
       backend: 'Search backend',

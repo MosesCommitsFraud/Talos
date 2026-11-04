@@ -57,10 +57,6 @@ import {
   fetchTotpStatus,
   importData,
   logout,
-  fetchSqlKnowledge,
-  uploadSqlKnowledge,
-  deleteSqlKnowledge,
-  sqlKnowledgeOriginalUrl,
   saveAppSettings,
   saveDisabledTools,
   saveSqlConfig,
@@ -86,6 +82,7 @@ import {
 } from '@/api/client';
 import type { AssistantEndpoint } from '@/api/types';
 import { applyDensity, applyLang, applyTheme, usePrefs, type Density, type Lang, type LlmLang, type Theme, type Visibility } from '@/state/prefs';
+import { openRagBase } from '@/state/ui';
 import { LANGUAGES } from '@/i18n';
 import { cn } from '@/lib/utils';
 import { Button } from './ui/button';
@@ -1105,7 +1102,7 @@ function AiDefaultsPanel() {
 
 /* ── Integrations (web search + integration CRUD) ── */
 
-function IntegrationsPanel() {
+function IntegrationsPanel({ onClose }: { onClose: () => void }) {
   const { t } = useTranslation();
   const { data: integrations } = useQuery({ queryKey: ['integrations'], queryFn: fetchIntegrations });
   const { data: presets } = useQuery({ queryKey: ['intg-presets'], queryFn: fetchIntegrationPresets });
@@ -1180,93 +1177,46 @@ function IntegrationsPanel() {
       </Section>
 
       <SqlDatabaseSection />
-      <SqlContextSection />
+      <SqlMiniRagSection onClose={onClose} />
     </Page>
   );
 }
 
-/** Upload schema/navigation files for the SQL databases. They're indexed as a
- *  small scoped RAG (meta.scope="sql"); whenever the SQL source is on in chat,
- *  the chunks most relevant to the question are retrieved and injected so the
- *  model can navigate the database (see agent_loop force_db note). */
-function SqlContextSection() {
+/** Every database has its own mini RAG for schema and navigation files. Whenever
+ *  the SQL source is on in chat, the chunks most relevant to the question are
+ *  retrieved so the model can navigate that database. It is managed like any
+ *  knowledge base, so this only points there. */
+function SqlMiniRagSection({ onClose }: { onClose: () => void }) {
   const { t } = useTranslation();
-  const queryClient = useQueryClient();
-  const fileInput = useRef<HTMLInputElement>(null);
-  const [msg, setMsg] = useState<{ text: string; ok: boolean } | null>(null);
-  const { data } = useQuery({ queryKey: ['sql-knowledge'], queryFn: fetchSqlKnowledge });
-  const refresh = () => void queryClient.invalidateQueries({ queryKey: ['sql-knowledge'] });
-
-  const upload = useMutation({
-    mutationFn: (files: File[]) => uploadSqlKnowledge(files),
-    onSuccess: (r) => {
-      const names = Array.isArray((r as { uploaded?: unknown }).uploaded) ? (r as { uploaded: string[] }).uploaded : [];
-      setMsg({ text: t('settings.sql.knowledgeQueued', { count: names.length }), ok: true });
-      refresh();
-    },
-    onError: (e) => setMsg({ text: (e as Error).message, ok: false }),
-  });
-  const remove = useMutation({
-    mutationFn: (source: string) => deleteSqlKnowledge(source),
-    onSuccess: refresh,
-    onError: (e) => setMsg({ text: (e as Error).message, ok: false }),
-  });
-
-  const docs = data?.documents ?? [];
+  const { data } = useQuery({ queryKey: ['rag-bases'], queryFn: fetchRagBases });
+  const minis = (data?.bases ?? []).filter((b) => b.kind === 'mini' && b.connection);
   return (
     <Section title={t('settings.sql.contextTitle')} padded>
-
-      {data && !data.available ? (
-        <p className="text-xs text-destructive-foreground">{data.error || t('settings.sql.knowledgeUnavailable')}</p>
-      ) : (
-        <>
-          <input
-            ref={fileInput}
-            type="file"
-            multiple
-            hidden
-            onChange={(e) => { if (e.target.files?.length) upload.mutate(Array.from(e.target.files)); e.target.value = ''; }}
-          />
-          <div className="flex flex-wrap items-center gap-2">
-            <Button size="sm" disabled={upload.isPending} onClick={() => fileInput.current?.click()}>
-              <PlusIcon /> {upload.isPending ? t('settings.sql.knowledgeUploading') : t('settings.sql.knowledgeUpload')}
-            </Button>
-            <Button size="sm" variant="outline" onClick={refresh}>{t('common.refresh')}</Button>
-            {msg && <span className={cn('text-xs', msg.ok ? 'text-success' : 'text-destructive-foreground')}>{msg.text}</span>}
-          </div>
-
-          <div className="mt-3 space-y-1.5">
-            {docs.length === 0 && <p className="text-xs text-muted-foreground">{t('settings.sql.knowledgeEmpty')}</p>}
-            {docs.map((d) => (
-              <div key={d.source} className="flex items-center gap-3 rounded-lg border bg-background px-3 py-2">
-                <FileTextIcon className="size-4 shrink-0 text-muted-foreground" />
-                <div className="min-w-0 flex-1">
-                  <div className="truncate text-sm">{d.filename}</div>
-                  <div className="truncate text-xs text-muted-foreground">{t('settings.sql.knowledgeChunks', { count: d.chunks })}</div>
-                </div>
-                <a
-                  href={sqlKnowledgeOriginalUrl(d.source)}
-                  download
-                  aria-label={t('settings.sql.knowledgeDownload', { name: d.filename })}
-                  title={t('settings.sql.knowledgeDownload', { name: d.filename })}
-                  className="flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
-                >
-                  <DownloadIcon className="size-3.5" />
-                </a>
-                <button
-                  type="button"
-                  aria-label={t('settings.sql.knowledgeDelete', { name: d.filename })}
-                  disabled={remove.isPending}
-                  onClick={() => remove.mutate(d.source)}
-                  className="flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-destructive-foreground"
-                >
-                  <Trash2Icon className="size-3.5" />
-                </button>
+      <p className="mb-3 text-xs text-muted-foreground/80">{t('settings.sql.contextHint')}</p>
+      <div className="space-y-1.5">
+        {minis.length === 0 && <p className="text-xs text-muted-foreground">{t('settings.sql.knowledgeEmpty')}</p>}
+        {minis.map((m) => (
+          <div key={m.id} className="flex items-center gap-3 rounded-lg border bg-background px-3 py-2">
+            <FileTextIcon className="size-4 shrink-0 text-muted-foreground" />
+            <div className="min-w-0 flex-1">
+              <div className="truncate text-sm">{m.name}</div>
+              <div className="truncate text-xs text-muted-foreground">
+                {t('rag.bases.counts', { docs: m.content_count ?? 0, chunks: m.chunk_count ?? 0 })}
               </div>
-            ))}
+            </div>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => {
+                onClose();
+                openRagBase(m.id);
+              }}
+            >
+              {t('settings.sql.knowledgeOpen')}
+            </Button>
           </div>
-        </>
-      )}
+        ))}
+      </div>
     </Section>
   );
 }
@@ -1315,7 +1265,12 @@ function SqlDatabaseSection() {
   const run = (fn: () => Promise<unknown>, ok: string) => {
     setMsg(null);
     fn()
-      .then(() => { setMsg({ text: ok, ok: true }); void queryClient.invalidateQueries({ queryKey: ['sql-config'] }); })
+      .then(() => {
+        setMsg({ text: ok, ok: true });
+        void queryClient.invalidateQueries({ queryKey: ['sql-config'] });
+        // Each database has a mini RAG, so the list of those just changed too.
+        void queryClient.invalidateQueries({ queryKey: ['rag-bases'] });
+      })
       .catch((e) => setMsg({ text: (e as Error).message, ok: false }));
   };
   const save = () => run(async () => {
@@ -1476,9 +1431,8 @@ const RAG_MCP_TOOLS = ['rag_query', 'rag_list_collections', 'rag_list_documents'
 const WEB_MCP_TOOLS = ['web_search', 'web_fetch'];
 const SKILLS_MCP_TOOLS = ['skills_list', 'skills_search', 'skills_get', 'skills_read_reference'];
 
-/** Purpose-bound sub-indexes a caller could ask for by name. Mirrors SCOPES in
- *  src/rag_scopes.py; listed statically rather than fetched, because the live
- *  list only comes attached to a base's whole document listing. */
+/** Namespaces a caller could ask for by name. Mirrors SCOPE_IDS in
+ *  src/rag_scopes.py. `sql` reaches the mini RAGs of the databases. */
 const RAG_MCP_SCOPES = ['sql'];
 
 /** Tick-list over one family's tools. An unset setting means every tool, the
@@ -1524,7 +1478,8 @@ function McpPanel() {
   const ragOn = !!s.value('mcp_rag_enabled');
   const ragInherit = !!s.value('mcp_rag_inherit');
 
-  const bases = baseData?.bases ?? [];
+  // Mini RAGs aren't reachable over MCP as bases; the scopes below open them.
+  const bases = (baseData?.bases ?? []).filter((b) => b.kind !== 'mini');
   const ragAllowed: string[] = Array.isArray(s.value('mcp_rag_allowed'))
     ? (s.value('mcp_rag_allowed') as string[])
     : [];
@@ -2405,7 +2360,7 @@ export function SettingsDialog({
               {panel === 'models' && <AddModelsPanel />}
               {panel === 'ai' && <AiDefaultsPanel />}
               {panel === 'assistants' && <AssistantsPanel />}
-              {panel === 'integrations' && <IntegrationsPanel />}
+              {panel === 'integrations' && <IntegrationsPanel onClose={onClose} />}
               {panel === 'web' && <WebPanel />}
               {panel === 'mcp' && <McpPanel />}
               {panel === 'mcpServers' && <McpServersPanel />}
