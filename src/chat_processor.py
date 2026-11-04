@@ -303,11 +303,29 @@ def _add_surviving_anchor_companions(
     ]
 
 
+def _merge_misses(misses: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """The one cause to report when several knowledge bases found nothing.
+
+    A broken search outranks the rest, because it means the answer may well be
+    stored: ``engine_error`` (the search failed), ``below_threshold`` (passages
+    came back, none relevant enough), ``no_candidates`` (the index returned nothing),
+    ``no_bases`` (nothing to search in).
+    """
+    order = ("engine_error", "below_threshold", "no_candidates", "no_bases")
+    for cause in order:
+        found = [m for m in misses if m.get("cause") == cause]
+        if found:
+            return max(found, key=lambda m: float(m.get("best_score") or 0.0))
+    return {"cause": "no_bases"}
+
+
 class ChatProcessor:
     def __init__(self, personal_docs_manager, skills_manager=None, *, rag_base_id=None):
         self.personal_docs_manager = personal_docs_manager
         self.skills_manager = skills_manager
         self.rag_base_id = rag_base_id
+        # Why the last retrieve() found nothing; see _merge_misses for the causes.
+        self.last_miss: Dict[str, Any] = {}
 
     # OpenWebUI-style RAG: inject the top retrieved/reranked chunks instead of
     # dropping everything behind a hard similarity gate. Embedding/reranker
@@ -444,7 +462,9 @@ class ChatProcessor:
         ``user`` limits the search to the bases that user may access (see
         ``rag_registry.can_access``); without one, restricted bases are skipped.
         With ``_manager`` the caller has already resolved (and checked) the base.
+        ``last_miss`` says why a search came back empty.
         """
+        self.last_miss = {}
         try:
             # External provider (e.g. RagFlow) replaces the internal Qdrant
             # manager but returns the same result shape, so everything below
@@ -462,7 +482,9 @@ class ChatProcessor:
 
                     bases = [b for b in list_bases() if chat_enabled(b) and can_access(b, user)]
                     if not bases:
+                        self.last_miss = {"cause": "no_bases"}
                         return [], ""
+                    misses: List[Dict[str, Any]] = []
                     limit = max_chars
                     if limit is None:
                         limit = int(
@@ -475,6 +497,12 @@ class ChatProcessor:
                         try:
                             manager = get_rag_manager(base["id"])
                             if manager is None:
+                                misses.append(
+                                    {
+                                        "cause": "engine_error",
+                                        "detail": f"{base['name']} is not available",
+                                    }
+                                )
                                 continue
                             # Apply relevance and pixel gates within each base:
                             # different bases may use different embedding spaces.
@@ -495,6 +523,7 @@ class ChatProcessor:
                                 citation_session=citation_session,
                             )
                             if not block:
+                                misses.append(getattr(processor, "last_miss", {}) or {})
                                 continue
                             block = header + block
                             if used + len(block) + (7 if blocks else 0) > limit:
@@ -512,13 +541,20 @@ class ChatProcessor:
                             logger.warning(
                                 "Chat retrieval failed for base %s: %s", base["id"], error
                             )
+                            misses.append({"cause": "engine_error", "detail": str(error)})
                     if not blocks:
+                        self.last_miss = _merge_misses(misses)
                         return [], ""
+                    broken = [m for m in misses if m.get("cause") == "engine_error"]
+                    if broken:
+                        # Passages came back, but not from everywhere.
+                        self.last_miss = {"cause": "partial", "detail": broken[0].get("detail", "")}
                     return sources, ((prefix + "\n\n") if prefix else "") + "\n\n---\n\n".join(
                         blocks
                     )
                 rag_manager = _manager
             if not rag_manager:
+                self.last_miss = {"cause": "no_bases"}
                 return [], ""
 
             # RAG is a global admin-managed knowledge base. Do not owner-filter here:
@@ -551,6 +587,9 @@ class ChatProcessor:
                     exclude_scopes=["sql"],
                     **pinned,
                 )
+            if getattr(results, "error", ""):
+                self.last_miss = {"cause": "engine_error", "detail": results.error}
+                return [], ""
 
             # Decide which retrieved chunks are relevant enough to inject.
             # When nothing clears the bar we inject NOTHING — no forced
@@ -636,6 +675,18 @@ class ChatProcessor:
             # prose used the exact native or synthetic anchor.
             relevant = _pixel_gate_figures(relevant, rag_manager, search_query)
             if not relevant:
+                self.last_miss = (
+                    {
+                        "cause": "below_threshold",
+                        "candidates": len(results),
+                        "best_score": max(
+                            float(r.get("rerank_score") or r.get("similarity") or 0.0)
+                            for r in results
+                        ),
+                    }
+                    if results
+                    else {"cause": "no_candidates"}
+                )
                 return [], ""
 
             logger.info(
@@ -861,6 +912,7 @@ class ChatProcessor:
 
         # Add preset system prompt if specified
         if preset_system_prompt:
+            self.last_miss = {"cause": "engine_error", "detail": f"{type(e).__name__}: {e}"}
             preface.append({"role": "system", "content": preset_system_prompt})
         # The current date/time is NOT part of the preface: the clock changes
         # every minute and the preface precedes the whole history, so it would

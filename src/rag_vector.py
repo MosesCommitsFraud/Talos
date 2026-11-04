@@ -1426,6 +1426,14 @@ def _shared_sparse_embedder(kind: str, model: str, language: Optional[str] = Non
 
 # Calls queue on the server, so waiting beats losing the ranking; this only stops
 # a hung reranker from blocking a search forever.
+class FailedSearch(list):
+    """The empty result of a search that broke, so a caller can tell it from "nothing found"."""
+
+    def __init__(self, error: str):
+        super().__init__()
+        self.error = error
+
+
 _RERANK_TIMEOUT_S = 180
 _RERANK_FAILURE_WINDOW_S = 3600
 _rerank_failures: "deque[Tuple[float, str]]" = deque(maxlen=500)
@@ -1960,7 +1968,7 @@ class VectorRAG:
         sources: Optional[List[str]] = None,
     ) -> List[Dict[str, Any]]:
         if not self.healthy:
-            return []
+            return FailedSearch(self._last_error or "the knowledge base is not available")
         if not query or not isinstance(query, str):
             return []
         try:
@@ -2023,7 +2031,7 @@ class VectorRAG:
             return top
         except Exception as e:
             logger.error(f"search failed: {e}")
-            return []
+            return FailedSearch(f"{type(e).__name__}: {e}")
 
     # How far (seconds) a video keyframe may sit outside a transcript hit's
     # time window and still ride along as its companion.

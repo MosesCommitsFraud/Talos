@@ -51,9 +51,10 @@ def test_empty_result_stays_a_plain_answer(monkeypatch):
     """No hits means no context block — and no path guidance to attach it to."""
     out = _run("nothing", [], "", monkeypatch)
 
-    assert "No indexed document matched" in out["output"]
+    assert "returned no passage" in out["output"]
     assert "SUPPLIED_CONTEXT" not in out["output"]
     assert out["rag_sources"] == []
+    assert out["no_hits"] is True
 
 
 def test_empty_result_does_not_invite_general_knowledge(monkeypatch):
@@ -63,3 +64,65 @@ def test_empty_result_does_not_invite_general_knowledge(monkeypatch):
     assert "another source" not in out
     assert "literal" in out
     assert "general knowledge" in out
+
+
+def test_a_broken_search_may_not_be_reported_as_nothing_stored():
+    out = ti._empty_search_output(
+        "Pivot", {"cause": "engine_error", "detail": "Qdrant down"}, ["pivot"], []
+    )
+    assert "Qdrant down" in out
+    assert "Do NOT tell the user that nothing is stored" in out
+    assert "tell the user that nothing on this is stored" not in out
+
+
+def test_passages_below_the_bar_are_told_apart_from_an_empty_index():
+    below = ti._empty_search_output(
+        "Pivot", {"cause": "below_threshold", "candidates": 12}, ["pivot"], []
+    )
+    assert "12 passage(s)" in below
+    assert "none is relevant enough" in below
+    empty = ti._empty_search_output("Pivot", {"cause": "no_candidates"}, ["pivot"], [])
+    assert "returned no passage" in empty
+
+
+def test_no_knowledge_base_is_not_a_miss():
+    out = ti._empty_search_output("Pivot", {"cause": "no_bases"}, [], [])
+    assert "No knowledge base is available" in out
+    assert "try" not in out.lower()
+
+
+def test_literal_mentions_come_marked_as_untrusted_and_point_at_read_knowledge():
+    out = ti._empty_search_output(
+        "Pivot", {"cause": "no_candidates"}, ["pivot"], ['- "pivot" in a.pdf: Eine Pivot ...']
+    )
+    assert "read_knowledge" in out
+    assert out.index("read_knowledge") < out.index("<<<SUPPLIED_CONTEXT>>>")
+    assert "in a.pdf" in out.split("<<<SUPPLIED_CONTEXT>>>")[1]
+
+
+def test_empty_search_uses_the_literal_lookup(monkeypatch):
+    nav = importlib.import_module("src.rag_navigate")
+    monkeypatch.setattr(
+        nav,
+        "literal_mentions",
+        lambda query, document, owner: (["pivot"], ['- "pivot" in a.pdf: Text']),
+    )
+    out = _run("Pivot", [], "", monkeypatch)
+    assert "in a.pdf" in out["output"]
+    assert out["no_hits"] is True
+
+
+def test_a_part_of_the_knowledge_base_that_failed_is_mentioned(monkeypatch):
+    class _ChatProcessor:
+        def __init__(self, _docs_manager):
+            self.last_miss = {"cause": "partial", "detail": "Handbuch is not available"}
+
+        def retrieve(self, _query, **_kwargs):
+            return [{"filename": "d.docx"}], "[d.docx]\nbody"
+
+    monkeypatch.setattr(
+        importlib.import_module("src.chat_processor"), "ChatProcessor", _ChatProcessor
+    )
+    out = asyncio.run(ti.do_search_knowledge('{"query": "x"}'))["output"]
+    assert "Handbuch is not available" in out
+    assert out.index("Handbuch") < out.index("<<<SUPPLIED_CONTEXT>>>")

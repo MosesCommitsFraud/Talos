@@ -1605,21 +1605,16 @@ async def do_search_knowledge(
         # stream itself — so it must run off-loop now that a round can have
         # several tools in flight at once.
         if document:
-            sources, block = await asyncio.to_thread(
+            sources, block, miss = await asyncio.to_thread(
                 _search_one_document, query, document, top_k, session_id, owner
             )
-        elif top_k:
-            sources, block = await asyncio.to_thread(
-                ChatProcessor(None).retrieve,
-                query,
-                citation_session=session_id,
-                top_k=top_k,
-                user=owner,
-            )
         else:
+            processor = ChatProcessor(None)
+            extra = {"top_k": top_k} if top_k else {}
             sources, block = await asyncio.to_thread(
-                ChatProcessor(None).retrieve, query, citation_session=session_id, user=owner
+                processor.retrieve, query, citation_session=session_id, user=owner, **extra
             )
+            miss = getattr(processor, "last_miss", {}) or {}
     except Exception as e:
         from src.rag_navigate import NavigationError
 
@@ -1629,22 +1624,17 @@ async def do_search_knowledge(
         return {"error": str(e), "exit_code": 1}
 
     if not sources:
-        # Not an error, but not a licence to answer from general knowledge
-        # either: the old wording ("use another source") was read as exactly
-        # that, and the model filled the gap with invented facts. Steer it to
-        # retry with the user's literal question / single terms, then report
-        # the gap instead of papering over it.
+        try:
+            from src.rag_navigate import literal_mentions
+
+            terms, mentions = await asyncio.to_thread(literal_mentions, query, document, owner)
+        except Exception as e:
+            logger.warning(f"literal fallback after an empty search failed: {e}")
+            terms, mentions = [], []
         return {
-            "output": (
-                f'No indexed document matched "{query}". Before concluding that the '
-                "knowledge base has nothing: search again with the user's literal "
-                "question, and with the single key term on its own (e.g. just "
-                "'Pivot'); for a name, code or menu item also try grep_knowledge "
-                "with its word stem. If those also come back empty, tell the user that nothing "
-                "on this is stored in the knowledge base. Do NOT fill the gap from "
-                "general knowledge and present it as their documentation."
-            ),
+            "output": _empty_search_output(query, miss, terms, mentions),
             "rag_sources": [],
+            "no_hits": True,
         }
 
     # Retrieved document text is untrusted input (prompt-injection surface), so
@@ -1676,6 +1666,12 @@ async def do_search_knowledge(
             "empty or mark it 'nicht hinterlegt' / 'not stored' — never fill it from "
             "general knowledge, and never put a source citation on anything the "
             "passages don't say.\n\n"
+            + (
+                f"Part of the knowledge base could not be searched ({miss.get('detail')}), so "
+                "something may be missing from these passages.\n\n"
+                if miss.get("cause") == "partial"
+                else ""
+            )
             + (CITATION_RULE + "\n\n" if any(s.get("n") for s in sources) else "")
             + "<<<SUPPLIED_CONTEXT>>>\n"
             f"{block}\n"
@@ -1685,6 +1681,51 @@ async def do_search_knowledge(
     }
 
 
+def _empty_search_output(query: str, miss: Dict, terms: List[str], mentions: List[str]) -> str:
+    """What the model reads when a search found nothing. The cause decides what it may
+    conclude: a broken search says nothing about what is stored, a miss does. The
+    literal lookup already ran here, so the model needn't spend rounds on it."""
+    cause = miss.get("cause")
+    if cause == "engine_error":
+        lead = (
+            f"The knowledge search failed ({miss.get('detail')}), so this says nothing about "
+            f'whether the documents cover "{query}". Do NOT tell the user that nothing is '
+            "stored: tell them the knowledge search is unavailable right now."
+        )
+    elif cause == "no_bases":
+        return (
+            "No knowledge base is available for this chat, so nothing could be searched. "
+            "Tell the user; do not present general knowledge as their documentation."
+        )
+    elif cause == "below_threshold":
+        lead = (
+            f'The search returned {miss.get("candidates")} passage(s) for "{query}", but none '
+            "is relevant enough to use."
+        )
+    else:
+        lead = f'The knowledge base returned no passage for "{query}".'
+    if mentions:
+        from src.prompt_security import UNTRUSTED_CONTEXT_HEADER
+
+        return (
+            f"{lead} The key terms do occur literally in these places. If one fits the "
+            "question, open that document with read_knowledge; if none does, tell the user "
+            "that nothing on this is stored. Do NOT fill the gap from general knowledge.\n\n"
+            f"{UNTRUSTED_CONTEXT_HEADER}\n<<<SUPPLIED_CONTEXT>>>\n"
+            + "\n".join(mentions)
+            + "\n<<<END_SUPPLIED_CONTEXT>>>"
+        )
+    if cause == "engine_error":
+        return lead
+    looked_up = f" ({', '.join(terms)})" if terms else ""
+    return (
+        f"{lead} The key terms{looked_up} don't occur literally anywhere either. Try at most "
+        "one more search with a synonym; if that is empty too, tell the user that nothing on "
+        "this is stored in the knowledge base. Do NOT fill the gap from general knowledge "
+        "and present it as their documentation."
+    )
+
+
 def _search_one_document(query: str, document: str, top_k, session_id, owner=None):
     """search_knowledge pinned to one document: the same relevance gates as the
     ordinary path, run against that document's base with a source filter."""
@@ -1692,7 +1733,8 @@ def _search_one_document(query: str, document: str, top_k, session_id, owner=Non
     from src.rag_navigate import resolve_document
 
     base, manager, row = resolve_document(document, user=owner)
-    found, block = ChatProcessor(None, rag_base_id=base["id"]).retrieve(
+    processor = ChatProcessor(None, rag_base_id=base["id"])
+    found, block = processor.retrieve(
         query,
         _manager=manager,
         citation_session=session_id,
@@ -1707,7 +1749,7 @@ def _search_one_document(query: str, document: str, top_k, session_id, owner=Non
         for key in ("_id", "_anchor_id", "_source"):
             if source.get(key) is not None:
                 source[key] = f"{base['id']}:{source[key]}"
-    return found, block
+    return found, block, getattr(processor, "last_miss", {}) or {}
 
 
 def _knowledge_args(content) -> Dict:

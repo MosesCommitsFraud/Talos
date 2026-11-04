@@ -564,6 +564,39 @@ def read_knowledge(
     return status + "\n\n" + page, sources, label
 
 
+def literal_mentions(
+    query: str,
+    document: str = "",
+    user: Optional[str] = None,
+    max_terms: int = 3,
+    max_hits: int = 3,
+) -> Tuple[List[str], List[str]]:
+    """Where a query's key terms occur literally: the fallback when a search finds nothing.
+
+    Returns the terms looked up (longest first, as the most distinctive) and one line
+    per hit. Empty for the external provider, which has no term lookup.
+    """
+    if _external():
+        return [], []
+    from src.chat_processor import _content_tokens
+
+    terms = sorted(set(_content_tokens(query)), key=len, reverse=True)[:max_terms]
+    wanted = os.path.basename(document).lower() if document else ""
+    lines: List[str] = []
+    for term in terms:
+        shown = 0
+        for _base, manager in _bases(user):
+            for hit in manager.grep_chunks(term, limit=50, exclude_scopes=["sql"]) or []:
+                name = str(hit.get("filename") or "")
+                if wanted and name.lower() != wanted:
+                    continue
+                if shown < max_hits:
+                    page = f", p. {hit['page']}" if hit.get("page") is not None else ""
+                    lines.append(f'- "{term}" in {name}{page}: {hit.get("snippet")}')
+                shown += 1
+    return terms, lines
+
+
 def grep_knowledge(args: Dict[str, Any], user: Optional[str] = None) -> str:
     if _external():
         return "Exact term lookup is not available for the external knowledge provider; use search_knowledge."
