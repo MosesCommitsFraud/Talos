@@ -36,7 +36,10 @@ const MAX_INPUT_HEIGHT = 220;
  *  square: at this size `rounded-lg` reads as a circle. */
 const INLINE_CONTROL = 'size-[1.625rem] rounded-[7px]';
 
-/** One icon control inside the box: bright glyph, plate only on hover. */
+/** Icons in the box stand at the ends of the scale, a step past the text colour. */
+const CONTROL_COLOR = 'text-neutral-900 dark:text-white';
+
+/** One icon control inside the box: plate only on hover. */
 const CONTROL = `flex shrink-0 cursor-pointer items-center justify-center transition-colors active:scale-95 [&_svg]:size-[18px] [&_svg]:stroke-[2.25] ${INLINE_CONTROL}`;
 
 /** Gap the text keeps from the controls pinned inside the box. */
@@ -93,7 +96,7 @@ function MicButton({
           CONTROL,
           status === 'recording'
             ? 'animate-pulse bg-red-500/10 text-red-500 hover:bg-red-500/20'
-            : 'text-foreground/80 hover:bg-accent hover:text-foreground disabled:opacity-50 dark:text-foreground/90 dark:hover:text-foreground',
+            : `${CONTROL_COLOR} hover:bg-accent disabled:opacity-50`,
         )}
       >
         {status === 'finalizing' ? <Loader2Icon className="animate-spin" /> : <MicIcon />}
@@ -127,8 +130,8 @@ function PrimaryAction({
         aria-label={label}
         className={cn(
           CONTROL,
-          'composer-control-in hover:bg-accent hover:text-foreground',
-          kind === 'stop' ? 'text-foreground' : 'text-foreground/90',
+          'composer-control-in hover:bg-accent',
+          CONTROL_COLOR,
         )}
       >
         {kind === 'stop' ? (
