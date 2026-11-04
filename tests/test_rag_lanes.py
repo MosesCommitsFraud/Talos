@@ -394,6 +394,66 @@ def test_opendocument_presentation_is_chunked_per_slide(tmp_path):
     assert [d.meta["page"] for d in docs] == [1, 2]
 
 
+def test_opendocument_tables_stay_tables(tmp_path):
+    path = tmp_path / "t.odt"
+    content = (
+        '<office:document-content xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" '
+        'xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0" '
+        'xmlns:table="urn:oasis:names:tc:opendocument:xmlns:table:1.0"><office:body><office:text>'
+        '<text:h text:outline-level="2">Kosten</text:h><text:p>Davor.</text:p>'
+        "<table:table><table:table-row>"
+        "<table:table-cell><text:p>Art</text:p></table:table-cell>"
+        "<table:table-cell><text:p>Wert</text:p></table:table-cell></table:table-row>"
+        "<table:table-row><table:table-cell><text:p>Miete</text:p></table:table-cell>"
+        "<table:table-cell><text:p>10</text:p></table:table-cell></table:table-row></table:table>"
+        "<text:p>Danach.</text:p></office:text></office:body></office:document-content>"
+    )
+    with zipfile.ZipFile(path, "w") as z:
+        z.writestr("content.xml", content)
+
+    class _R:
+        class _Doc:
+            def __init__(self, content):
+                self.content = content
+                self.meta = {}
+
+        def _documents_from_text(self, text):
+            return [self._Doc(text)] if text else []
+
+    docs = rv.VectorRAG._lane_opendocument(_R(), str(path))
+
+    assert docs[0].content == (
+        "## Kosten\n\nDavor.\n\n| Art | Wert |\n| --- | --- |\n| Miete | 10 |\n\nDanach."
+    )
+
+
+def test_markitdown_takes_over_when_docling_fails(monkeypatch):
+    class _R:
+        def _lane_docling(self, path):
+            raise RuntimeError("backend missing")
+
+        def _documents_from_text(self, text):
+            return [text]
+
+    monkeypatch.setattr(
+        "src.markitdown_runtime.convert_to_markdown", lambda path: "# Aus MarkItDown"
+    )
+    assert rv._docling_or_markitdown(_R(), "file.docx") == ["# Aus MarkItDown"]
+
+
+def test_docling_error_surfaces_when_no_library_can_read_the_file(monkeypatch):
+    class _R:
+        def _lane_docling(self, path):
+            raise RuntimeError("backend missing")
+
+    monkeypatch.setattr("src.markitdown_runtime.convert_to_markdown", lambda path: None)
+    with pytest.raises(RuntimeError, match="backend missing"):
+        rv._docling_or_markitdown(_R(), "file.docx")
+    # PDFs are not MarkItDown's: the original error is the useful one.
+    with pytest.raises(RuntimeError, match="backend missing"):
+        rv._docling_or_markitdown(_R(), "file.pdf")
+
+
 # ── Phase 5: pixel image lane gating + VL embed parsing ──
 
 

@@ -6,7 +6,7 @@ vLLM cross-encoder reranker.
 
 Pipeline:
   * Parsing + chunking : Docling structure + native text readers, followed by
-    one section-aware Haystack RecursiveDocumentSplitter for every lane.
+    one section-aware chunker for every lane (``rag_structure.split_documents``).
   * Dense embeddings   : vLLM (OpenAI-compatible) via Haystack ``OpenAI*Embedder``.
   * Sparse embeddings  : FastEmbed BM25/IDF via Haystack ``Fastembed*SparseEmbedder``.
   * Vector store       : Qdrant with named dense+sparse vectors; server-side RRF
@@ -741,6 +741,30 @@ def _is_primary_retrieval_document(meta: Dict[str, Any]) -> bool:
     return meta.get("modality") != "figure" or meta.get("synthetic_anchor") is True
 
 
+def _docling_or_markitdown(rag, path: str):
+    """Docling first; MarkItDown's Markdown runs through the same chunker."""
+    from src.markitdown_runtime import convert_to_markdown, is_markitdown_format
+
+    error = None
+    try:
+        docs = rag._lane_docling(path)
+        if docs:
+            return docs
+    except Exception as e:
+        error = e
+    text = convert_to_markdown(path) if is_markitdown_format(path) else None
+    if (text or "").strip():
+        logger.warning(
+            "docling read nothing from %s (%s); using MarkItDown",
+            os.path.basename(path),
+            error or "empty result",
+        )
+        return rag._documents_from_text(text)
+    if error is not None:
+        raise error
+    return []
+
+
 def _openai_chat_url(raw_url: str) -> str:
     """Accept either an OpenAI-compatible base URL or the full chat route."""
     url = (raw_url or "").strip().rstrip("/")
@@ -1066,12 +1090,13 @@ def _attach_pdf_visual_context(docs) -> None:
         if caption:
             by_page.setdefault(page, []).append(caption)
 
+    from src.rag_structure import page_list
+
     for d in docs:
         meta = d.meta or {}
-        page = meta.get("page")
-        if meta.get("modality") != "pdf_page" or not isinstance(page, int):
+        if meta.get("modality") != "pdf_page":
             continue
-        captions = by_page.get(page) or []
+        captions = [c for page in page_list(meta) for c in by_page.get(page, [])]
         if captions:
             meta["_visual_context"] = "\n\n".join(captions)[:cap]
 
@@ -1108,12 +1133,14 @@ def _mark_synthetic_figure_anchors(docs) -> None:
     they contain no independent visual meaning and must never compete as
     standalone answer passages.
     """
+    from src.rag_structure import page_list
+
     text_pages = {
-        (d.meta or {}).get("page")
+        page
         for d in docs
-        if (d.meta or {}).get("modality") != "figure"
-        and isinstance((d.meta or {}).get("page"), int)
-        and (d.content or "").strip()
+        if (d.meta or {}).get("modality") != "figure" and (d.content or "").strip()
+        for page in page_list(d.meta or {})
+        if isinstance(page, int)
     }
     has_document_text = any(
         (d.meta or {}).get("modality") != "figure" and (d.content or "").strip() for d in docs
@@ -2484,7 +2511,7 @@ class VectorRAG:
         if lane == "xls":
             return self._lane_xls(path)
         if lane == "docling":
-            return self._lane_docling(path)
+            return _docling_or_markitdown(self, path)
         return self._lane_text(path)
 
     def _run_format_lane(self, lane: str, path: str, meta: Dict[str, Any], stage_cb=None):
@@ -2548,6 +2575,8 @@ class VectorRAG:
                 values["docling"] = version("docling")
             except Exception:
                 values["docling"] = ""
+        if lane in ("docling", "convert"):
+            values["structure"] = rd.DOCLING_STRUCTURE_VERSION
         return rd.fingerprint(values)
 
     def _derive_fingerprint(self, meta: Dict[str, Any]) -> Dict[str, Any]:
@@ -2627,8 +2656,10 @@ class VectorRAG:
           * image-bearing PDF/Office (VLM lane on) → ``_lane_pdf_vlm`` /
             ``_lane_office_vlm`` (vision transcription; auto-selected only when
             the file actually has images)
-          * rich docs/images → ``_lane_docling`` (layout-aware HybridChunk)
-          * plain text/code/json → ``_lane_text`` (length splitter)
+          * rich docs/images → ``_lane_docling`` (structure from Docling JSON)
+          * plain text/code/json → ``_lane_text`` (structure from Markdown headings)
+
+        Every lane ends in ``split_documents``, the one chunker for all formats.
 
         ``stage_cb(done, total)`` is forwarded to the slow VLM lanes so the queue
         can show per-page/per-image progress instead of just 0%→done.
@@ -2934,7 +2965,8 @@ class VectorRAG:
         )
         vlm_docs = [
             Document(
-                content=t, meta={"modality": "pdf_page", "page": idxs[k] + 1, "pages": n_pages}
+                content=t,
+                meta={"modality": "pdf_page", "page": idxs[k] + 1, "page_count": n_pages},
             )
             for k, t in enumerate(texts)
             if t
@@ -2953,6 +2985,10 @@ class VectorRAG:
                 )
                 docs = list(self._lane_docling(path)) + vlm_docs
             else:
+                # The whole file in reading order: a chapter continues across
+                # transcribed pages, as it does in a Docling parse.
+                for doc in vlm_docs:
+                    doc.meta["continues_section"] = True
                 docs = list(vlm_docs)
         else:
             # Mixed/text doc: cheap Docling text + vision only on the image pages.
@@ -3276,11 +3312,33 @@ class VectorRAG:
                 pieces.append(child.tail or "")
             return "".join(pieces)
 
+        def _table_rows(table) -> List[List[str]]:
+            rows = []
+            for row in table.iter():
+                if _local(row.tag) != "table-row":
+                    continue
+                cells = [
+                    " ".join(_blocks(cell))
+                    for cell in row
+                    if _local(cell.tag) in {"table-cell", "covered-table-cell"}
+                ]
+                if any(cells):
+                    rows.append(cells)
+            return rows
+
         def _blocks(parent) -> List[str]:
+            from src.rag_tables import rows_markdown
+
             blocks: List[str] = []
-            for node in parent.iter():
+            for node in parent:
                 local = _local(node.tag)
+                if local == "table":
+                    table = rows_markdown(_table_rows(node)).strip()
+                    if table:
+                        blocks.append(table)
+                    continue
                 if local not in {"h", "p"}:
+                    blocks.extend(_blocks(node))
                     continue
                 value = re.sub(r"[ \t]+", " ", _text(node)).strip()
                 if not value:
@@ -3313,16 +3371,7 @@ class VectorRAG:
             if ext == ".ods":
                 from src.rag_tables import rows_markdown
 
-                rows = []
-                for row in node.iter(f"{{{table_ns}}}table-row"):
-                    cells = [
-                        " ".join(_blocks(cell))
-                        for cell in row
-                        if _local(cell.tag) in {"table-cell", "covered-table-cell"}
-                    ]
-                    if any(cells):
-                        rows.append(cells)
-                unit_docs = self._documents_from_text(rows_markdown(rows))
+                unit_docs = self._documents_from_text(rows_markdown(_table_rows(node)))
             else:
                 unit_docs = self._documents_from_text("\n\n".join(_blocks(node)))
             if unit_key:
@@ -3334,7 +3383,7 @@ class VectorRAG:
         return docs
 
     def _lane_docling(self, path: str):
-        """Rich docs/images → lossless structure; Haystack owns final chunking."""
+        """Rich docs/images → lossless structure; ``split_documents`` chunks it."""
         from haystack_integrations.components.converters.docling import DoclingConverter
 
         from src.rag_structure import docling_documents
@@ -3417,7 +3466,7 @@ class VectorRAG:
         return [Document(content=text)]
 
     def _split_extracted_documents(self, docs):
-        """Share Markdown chunking while preserving metadata and figure assets."""
+        """The one chunker for every lane, preserving metadata and figure assets."""
         from src.rag_structure import split_documents
 
         limit = max(
