@@ -334,6 +334,23 @@ def test_a_new_mini_rag_brings_the_neighbours_of_a_hit(conns):
     assert rag_config.effective_config(mini_of()["id"])["expand_to_parent_enabled"] is True
 
 
+def test_a_new_mini_rag_starts_tuned_for_schema_files(conns):
+    rag_mini.sync()
+    cfg = rag_config.effective_config(mini_of()["id"])
+    assert cfg["parent_max_chars"] == 4000
+    assert cfg["auto_keywords_n"] == 5
+    assert cfg["redact_pii_enabled"] is False
+
+
+def test_its_starting_values_do_not_follow_a_later_global_change(conns, monkeypatch):
+    """Equal to the global value today, but redaction turned on globally later must
+    not start rewriting the identifiers in schema files."""
+    monkeypatch.setattr(rag_config, "global_config", lambda: {"redact_pii_enabled": False})
+    rag_mini.sync()
+    monkeypatch.setattr(rag_config, "global_config", lambda: {"redact_pii_enabled": True})
+    assert rag_config.effective_config(mini_of()["id"])["redact_pii_enabled"] is False
+
+
 def _windowed(chunk_id, text, neighbours):
     """A hit as `expand_context` leaves it, with its surrounding chunks attached."""
     docs = [

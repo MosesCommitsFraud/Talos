@@ -67,11 +67,19 @@ refuses new documents, and is the only state in which it can be deleted.
 database that has documents, using each one's top-k, candidates, thresholds, context
 budget and section expansion. With several databases the budget is shared and each
 passage names its database, which is what the model passes to `query_sql`. A new mini
-RAG starts with a wider top-k (12), a context budget of 16000 characters, hits that
-bring their neighbours along, and no rerank floor, as ordinary overrides visible in
-its settings: schema files chunk into many small pieces, a chunk alone often lacks
-the heading or sentence that explains it, and a German question about English table
-names scores low without being irrelevant. Chat's lexical gate doesn't apply, for the same reason. "Insert
+RAG starts with these values, as ordinary overrides visible in its settings:
+
+| Setting | Start | Why |
+| --- | --- | --- |
+| Chat top-k | 12 | Schema files chunk into many small pieces, and a question touches several. |
+| Context budget | 16000 characters | Room for those hits. |
+| Expand to section | on, at most 4000 characters | A chunk often lacks the heading or sentence that explains it, but one hit must not take most of the budget. |
+| Rerank floor | 0 | A German question about English table names scores low without being irrelevant. |
+| Auto keywords | 5 per chunk | Connects business terms to technical names. One LLM call per chunk at ingest; without an ingest LLM it does nothing. |
+| PII redaction | off | It would rewrite identifiers and sample values into placeholders. |
+
+They are stored as given, so they don't follow a later change of the global value.
+Chat's lexical gate doesn't apply, because a question and the table it needs may share no word. "Insert
 knowledge automatically" and the query rewrite are chat options and have no effect
 here.
 

@@ -32,6 +32,7 @@ from src.rag_registry import (
     get_base,
     is_mini,
     list_bases,
+    set_overrides,
     slugify,
     update_base,
 )
@@ -43,18 +44,29 @@ logger = logging.getLogger(__name__)
 ENV_CONNECTION_ID = "env"
 
 # Where a new mini RAG starts. Its reference material is only ever looked at to
-# navigate a database, so it differs from a corpus in three ways. Schema files chunk
-# into many small pieces (one table per chunk is typical) and a question touches
-# several, hence the wider top-k. A chunk alone often lacks what explains it, the
-# heading or the sentence next to a table, hence a hit brings its neighbours. And a
-# question in German about tables named in English reranks low without being
-# irrelevant, hence no rerank floor. These are ordinary overrides: the base's
-# settings show them and can change them.
+# navigate a database, so it differs from a corpus:
+#
+# * Schema files chunk into many small pieces (one table per chunk is typical) and
+#   a question touches several, hence the wider top-k.
+# * A chunk alone often lacks what explains it, the heading or the sentence next to
+#   a table, hence a hit brings its neighbours. They stay small, or one hit would
+#   take most of the context budget and leave no room for the other tables.
+# * A question in German about tables named in English reranks low without being
+#   irrelevant, hence no rerank floor, and generated keywords to connect the
+#   business term to the technical name. The corpus is small enough to afford the
+#   one LLM call per chunk, and without an ingest LLM the setting does nothing.
+# * Redaction would rewrite identifiers (`AB1234567`, long numeric ids, the URLs in
+#   sample values) into placeholders, hence off even if it is on globally.
+#
+# These are ordinary overrides: the base's settings show them and can change them.
 SEED_OVERRIDES: Dict[str, Any] = {
     "chat_top_k": 12,
     "max_context_chars": 16000,
     "rerank_min_score": 0.0,
     "expand_to_parent_enabled": True,
+    "parent_max_chars": 4000,
+    "auto_keywords_n": 5,
+    "redact_pii_enabled": False,
 }
 
 SECTION_SEPARATOR = "\n\n---\n\n"
@@ -111,8 +123,6 @@ def _mini_entries() -> List[Dict[str, Any]]:
 
 
 def _create(connection: Dict[str, Any]) -> Dict[str, Any]:
-    from src.rag_config import set_overrides
-
     language = str(get_base(DEFAULT_ID).get("language") or "")
     stem = "db-" + slugify(connection["id"])[:50]
     for attempt in range(100):
@@ -126,6 +136,9 @@ def _create(connection: Dict[str, Any]) -> Dict[str, Any]:
             )
         except RagConflict:
             continue
+        # Stored as they are, not through rag_config.set_overrides, which drops a
+        # value equal to today's global one: these must not follow a later global
+        # change, or turning redaction on globally would reach the schema files.
         set_overrides(entry["id"], SEED_OVERRIDES)
         logger.info("Mini RAG %s created for database %s", entry["id"], connection["name"])
         return entry
