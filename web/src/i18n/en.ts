@@ -1269,6 +1269,7 @@ const en = {
       empty: 'Nothing indexed yet — upload files or add a directory.',
       tryRetrieval: 'Try a search',
       noHits: 'No passage matched.',
+      rerankFailed: 'Reranker failed, these hits are in hybrid search order: {{error}}',
     },
     doc: {
       showDetails: 'Show details',
@@ -2177,6 +2178,7 @@ const en = {
       queueEmpty: 'No jobs.',
       clearJobs: 'Clear finished/failed',
       noWorker: 'No ingest worker running — start the rag-ingest-worker container.',
+      rerankFailing: 'Reranker failed {{count}}× in the last hour, last at {{time}}: {{error}}. Those searches ran without reranking.',
       indexedDocs: 'Indexed documents',
       noDocs: 'No documents indexed yet.',
       ragUnavailable: 'RAG unavailable — check Qdrant/embedding.',

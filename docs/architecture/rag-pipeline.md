@@ -115,6 +115,9 @@ Key behaviours worth knowing:
   before reranking.
 - **Reranking is optional.** `_rerank` calls an external reranker if `RERANK_URL` is set;
   otherwise the fused similarity order is returned as-is.
+- **A failed rerank doesn't fail the search.** After an error or the 20 s timeout, `search`
+  returns the fused order. Each hit then carries `rerank_error`, the test search shows it, and
+  the RAG console reports failures of the last hour from `GET /api/rag/rerank-health`.
 - **Qwen3 rerankers need a server-side template.** vLLM applies a prompt template on
   `/v1/rerank` only when started with `--chat-template`. Without it, query and passage are
   concatenated and the scores are close to meaningless, with no error anywhere. Use

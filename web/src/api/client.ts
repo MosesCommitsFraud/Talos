@@ -1319,6 +1319,13 @@ export interface RagDocumentDetail extends RagDocument {
 
 export const fetchRagJobs = () => getJSON<{ jobs: RagJob[] }>('/api/rag/jobs');
 export const fetchRagWorkerDiag = () => getJSON<RagWorkerDiag>('/api/rag/jobs/diagnostics');
+export interface RerankHealth {
+  failures_last_hour: number;
+  /** Unix time in seconds. */
+  last_failed_at: number | null;
+  last_error: string;
+}
+export const fetchRerankHealth = () => getJSON<RerankHealth>('/api/rag/rerank-health');
 export const cancelRagJob = (id: string) => postJSON(`/api/rag/jobs/${id}/cancel`);
 export const clearRagJobs = () => postJSON('/api/rag/jobs/clear');
 export async function deleteRagJob(id: string): Promise<void> {

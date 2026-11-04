@@ -448,6 +448,10 @@ def _reset_rag():
     # Clear every knowledge base, not just the default one — an embedding or
     # Qdrant config change invalidates all of them equally.
     _rs.reset()
+    # Earlier failures say nothing about the endpoint the new settings point at.
+    from src.rag_vector import clear_rerank_failures
+
+    clear_rerank_failures()
     try:
         from src.embeddings import reset_http_embed_state
 
@@ -975,6 +979,7 @@ def setup_rag_routes():
         return {
             "ok": True,
             "count": len(results),
+            "rerank_error": next((r["rerank_error"] for r in results if r.get("rerank_error")), ""),
             "results": [
                 {
                     "filename": (r.get("metadata") or {}).get("filename")
@@ -989,6 +994,12 @@ def setup_rag_routes():
                 for r in results
             ],
         }
+
+    @router.get("/rerank-health")
+    def rerank_health():
+        from src.rag_vector import rerank_failure_summary
+
+        return rerank_failure_summary()
 
     @router.get("/jobs")
     def list_rag_jobs():

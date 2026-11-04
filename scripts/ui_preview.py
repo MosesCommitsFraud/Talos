@@ -2799,6 +2799,9 @@ class PreviewHandler(BaseHTTPRequestHandler):
         if path.startswith("/api/rag/bases/") and path.endswith("/config"):
             self._send_json(_rag_base_config(path[len("/api/rag/bases/") : -len("/config")]))
             return
+        if path == "/api/rag/rerank-health":
+            self._send_json({"failures_last_hour": 0, "last_failed_at": None, "last_error": ""})
+            return
         if path == "/api/rag/jobs/diagnostics":
             self._send_json(
                 {

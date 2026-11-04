@@ -77,6 +77,7 @@ export function RagContent({ baseId }: { baseId: string }) {
   const [searchK, setSearchK] = useState(5);
   const [hits, setHits] = useState<SearchHit[] | null>(null);
   const [searchErr, setSearchErr] = useState('');
+  const [rerankErr, setRerankErr] = useState('');
   const [explorerOpen, setExplorerOpen] = useState(false);
   const [openDoc, setOpenDoc] = useState<string | null>(null);
   const [docFilter, setDocFilter] = useState<DocFilter>('all');
@@ -111,9 +112,14 @@ export function RagContent({ baseId }: { baseId: string }) {
 
   const search = () => {
     setSearchErr('');
+    setRerankErr('');
     setHits(null);
     void ragSearch(searchQ, searchK, ragId)
-      .then((r) => setHits(((r as { results?: SearchHit[] }).results ?? []) as SearchHit[]))
+      .then((r) => {
+        const res = r as { results?: SearchHit[]; rerank_error?: string };
+        setHits(res.results ?? []);
+        setRerankErr(res.rerank_error ?? '');
+      })
       .catch((e) => setSearchErr((e as Error).message));
   };
 
@@ -418,6 +424,11 @@ export function RagContent({ baseId }: { baseId: string }) {
             </Button>
           </div>
           {searchErr && <p className="text-xs text-destructive-foreground">{searchErr}</p>}
+          {rerankErr && (
+            <p className="text-xs text-amber-600 dark:text-amber-400">
+              {t('rag.content.rerankFailed', { error: rerankErr })}
+            </p>
+          )}
           {/* Rendered as rows rather than raw JSON: this is the view an admin
               uses to judge retrieval quality, so the score and the passage
               have to be readable at a glance. */}

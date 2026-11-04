@@ -32,6 +32,7 @@ import os
 import re
 import threading
 import time
+from collections import deque
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
 
@@ -1423,6 +1424,42 @@ def _shared_sparse_embedder(kind: str, model: str, language: Optional[str] = Non
         return emb
 
 
+_RERANK_TIMEOUT_S = 20
+_RERANK_FAILURE_WINDOW_S = 3600
+_rerank_failures: "deque[Tuple[float, str]]" = deque(maxlen=500)
+_rerank_failures_lock = threading.Lock()
+
+
+def _rerank_failure_reason(error: Exception) -> str:
+    # str() of a timeout can be empty, which would read as "no error".
+    if "timeout" in type(error).__name__.lower():
+        return f"timed out after {_RERANK_TIMEOUT_S} s"
+    return str(error) or type(error).__name__
+
+
+def _record_rerank_failure(reason: str) -> None:
+    with _rerank_failures_lock:
+        _rerank_failures.append((time.time(), reason))
+
+
+def clear_rerank_failures() -> None:
+    with _rerank_failures_lock:
+        _rerank_failures.clear()
+
+
+def rerank_failure_summary() -> Dict[str, Any]:
+    """Failed rerank calls of the last hour across all knowledge bases in this process."""
+    cutoff = time.time() - _RERANK_FAILURE_WINDOW_S
+    with _rerank_failures_lock:
+        recent = [f for f in _rerank_failures if f[0] >= cutoff]
+    last_at, last_error = recent[-1] if recent else (None, "")
+    return {
+        "failures_last_hour": len(recent),
+        "last_failed_at": last_at,
+        "last_error": last_error,
+    }
+
+
 class VectorRAG:
     """Haystack + Qdrant hybrid RAG. Public API kept stable for callers."""
 
@@ -2142,7 +2179,7 @@ class VectorRAG:
                 if self._conf("rerank_api_key", "RERANK_API_KEY")
                 else {}
             )
-            resp = httpx.post(url, json=payload, headers=headers, timeout=20)
+            resp = httpx.post(url, json=payload, headers=headers, timeout=_RERANK_TIMEOUT_S)
             if resp.status_code == 400:
                 # A single document over the model's window fails the whole batch.
                 # Scoring its start beats losing the reranking of every candidate;
@@ -2151,7 +2188,7 @@ class VectorRAG:
                     url,
                     json={**payload, "truncate_prompt_tokens": -1},
                     headers=headers,
-                    timeout=20,
+                    timeout=_RERANK_TIMEOUT_S,
                 )
             resp.raise_for_status()
             data = resp.json()
@@ -2184,11 +2221,16 @@ class VectorRAG:
                     reverse=True,
                 )
                 return ranked[:k]
-            self._last_rerank_error = "Rerank response contained no ranked results"
+            reason = "Rerank response contained no ranked results"
         except Exception as e:
-            self._last_rerank_error = str(e)
-            logger.warning("Rerank failed, using hybrid ranking: %s", e)
-        return candidates[:k]
+            reason = _rerank_failure_reason(e)
+        # The search still answers in hybrid order, so nothing else would show that
+        # the ranking got worse. Each hit carries the reason because concurrent
+        # searches share this instance and can't read it back from there.
+        self._last_rerank_error = reason
+        _record_rerank_failure(reason)
+        logger.warning("Rerank failed, using hybrid ranking: %s", reason)
+        return [{**c, "rerank_error": reason} for c in candidates[:k]]
 
     def test_reranker(self) -> Dict[str, Any]:
         url = self._conf("rerank_url", "RERANK_URL")

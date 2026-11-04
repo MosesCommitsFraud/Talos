@@ -397,6 +397,40 @@ def test_the_test_search_stays_out_of_old_schema_files(
     assert calls[-1]["exclude_scopes"] == rag_scopes.SCOPE_IDS
 
 
+def test_the_test_search_reports_a_failed_rerank(rag_routes_client, base_with_sql_docs):
+    base_with_sql_docs._results = [
+        {"document": "x", "metadata": {}, "similarity": 0.5, "rerank_error": "timed out after 20 s"}
+    ]
+    res = rag_routes_client.get("/api/rag/search", params={"q": "orders"})
+    assert res.json()["rerank_error"] == "timed out after 20 s"
+
+
+def test_the_test_search_has_no_rerank_error_after_a_good_rerank(
+    rag_routes_client, base_with_sql_docs
+):
+    base_with_sql_docs._results = [
+        {"document": "x", "metadata": {}, "similarity": 0.5, "rerank_score": 0.9}
+    ]
+    res = rag_routes_client.get("/api/rag/search", params={"q": "orders"})
+    assert res.json()["rerank_error"] == ""
+
+
+def test_rerank_health_reports_failures_until_the_settings_change(rag_routes_client):
+    from src import rag_vector
+
+    rag_vector.clear_rerank_failures()
+    rag_vector._record_rerank_failure("timed out after 20 s")
+    body = rag_routes_client.get("/api/rag/rerank-health").json()
+    assert body["failures_last_hour"] == 1
+    assert body["last_error"] == "timed out after 20 s"
+
+    from routes.rag_routes import _reset_rag
+
+    _reset_rag()
+    body = rag_routes_client.get("/api/rag/rerank-health").json()
+    assert body["failures_last_hour"] == 0
+
+
 def test_the_explorer_search_stays_out_of_old_schema_files(
     rag_routes_client, base_with_sql_docs, monkeypatch
 ):

@@ -1275,6 +1275,7 @@ const de: typeof en = {
       empty: 'Noch nichts indexiert — Dateien hochladen oder ein Verzeichnis hinzufügen.',
       tryRetrieval: 'Suche ausprobieren',
       noHits: 'Keine Passage gefunden.',
+      rerankFailed: 'Reranker ausgefallen, die Treffer stehen in der Reihenfolge der Hybrid-Suche: {{error}}',
     },
     doc: {
       showDetails: 'Details anzeigen',
@@ -2184,6 +2185,7 @@ const de: typeof en = {
       queueEmpty: 'Keine Jobs.',
       clearJobs: 'Erledigte/fehlgeschlagene löschen',
       noWorker: 'Kein Ingest-Worker aktiv — starte den rag-ingest-worker-Container.',
+      rerankFailing: 'Reranker in der letzten Stunde {{count}}× ausgefallen, zuletzt um {{time}}: {{error}}. Diese Suchen liefen ohne Reranking.',
       indexedDocs: 'Indizierte Dokumente',
       noDocs: 'Noch keine Dokumente indiziert.',
       ragUnavailable: 'RAG nicht verfügbar — Qdrant/Embedding prüfen.',

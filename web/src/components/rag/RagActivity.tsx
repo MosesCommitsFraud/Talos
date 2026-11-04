@@ -8,6 +8,7 @@ import {
   deleteRagJob,
   fetchRagJobs,
   fetchRagWorkerDiag,
+  fetchRerankHealth,
   personalUpload,
   ragRebuildIndex,
   reindexRagBase,
@@ -83,6 +84,7 @@ export function RagActivity() {
 
   const jobs = useQuery({ queryKey: ['rag-jobs'], queryFn: fetchRagJobs, refetchInterval: 1500 });
   const diag = useQuery({ queryKey: ['rag-worker-diag'], queryFn: fetchRagWorkerDiag, refetchInterval: 5000 });
+  const rerank = useQuery({ queryKey: ['rag-rerank-health'], queryFn: fetchRerankHealth, refetchInterval: 15000 });
   const refresh = () => {
     void queryClient.invalidateQueries({ queryKey: ['rag-jobs'] });
     void queryClient.invalidateQueries({ queryKey: ['rag-documents'] });
@@ -139,6 +141,17 @@ export function RagActivity() {
   // when OK), then every job error, newest first.
   const consoleLines: { key: string; text: string; warn?: boolean; ok?: boolean }[] = [];
   if (diag.data && workerCount === 0) consoleLines.push({ key: 'no-worker', text: t('settings.rag.noWorker'), warn: true });
+  if (rerank.data?.failures_last_hour && rerank.data.last_failed_at) {
+    consoleLines.push({
+      key: 'rerank-failing',
+      warn: true,
+      text: t('settings.rag.rerankFailing', {
+        count: rerank.data.failures_last_hour,
+        time: new Date(rerank.data.last_failed_at * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        error: rerank.data.last_error,
+      }),
+    });
+  }
   for (const l of testLines) {
     consoleLines.push({ key: `test-${l.id}`, text: l.text, ok: l.tone === 'ok' });
   }
