@@ -113,6 +113,13 @@ Key behaviours worth knowing:
   before reranking.
 - **Reranking is optional.** `_rerank` calls an external reranker if `RERANK_URL` is set;
   otherwise the fused similarity order is returned as-is.
+- **Qwen3 rerankers need a server-side template.** vLLM applies a prompt template on
+  `/v1/rerank` only when started with `--chat-template`. Without it, query and passage are
+  concatenated and the scores are close to meaningless, with no error anywhere. Use
+  `examples/pooling/score/template/qwen3_vl_reranker.jinja` from the vLLM repository (or
+  `qwen3_reranker.jinja` for the text-only model). `python scripts/check_reranker.py --url
+  <rerank-url> --compare` reports whether the template is active and checks the order on
+  fixed German and English cases.
 - **Multi-tenant filtering.** `owner`, `scope`, and `exclude_scopes` become Qdrant
   filters so users only retrieve their own (or in-scope) passages.
 
