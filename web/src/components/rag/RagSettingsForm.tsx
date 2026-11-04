@@ -710,7 +710,7 @@ export function RagSettingsForm({
 
       <Section title={t('settings.rag.group.chunking')}>
         <div className="grid gap-3 pt-2 @lg:grid-cols-2">
-          {field('chunk_max_chars', t('settings.rag.chunkMaxChars'), { type: 'number', hint: t('settings.rag.hint.chunkMaxChars'), def: 6000 })}
+          {field('chunk_max_chars', t('settings.rag.chunkMaxChars'), { type: 'number', hint: t('settings.rag.hint.chunkMaxChars'), def: 4000 })}
           {field('chunk_overlap_chars', t('settings.rag.chunkOverlapChars'), { type: 'number', hint: t('settings.rag.hint.chunkOverlapChars'), def: 200 })}
           {field('embedding_tokenizer', t('settings.rag.embeddingTokenizer'), { hint: t('settings.rag.hint.embeddingTokenizer') })}
           {field('embedding_max_tokens', t('settings.rag.embeddingMaxTokens'), { type: 'number', hint: t('settings.rag.hint.embeddingMaxTokens'), def: 0 })}

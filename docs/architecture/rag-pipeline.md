@@ -162,7 +162,7 @@ RAG is driven entirely by environment variables (see `.env.example`):
 
 Every lane reduces a file to sections, and one chunker (`rag_structure.split_documents`)
 cuts them, so a chapter is cut alike whether it came from Docling's JSON, from Markdown,
-a VLM transcript or MarkItDown. The default maximum is 6,000 characters including
+a VLM transcript or MarkItDown. The default maximum is 4,000 characters including
 overlap (default 200). Settings saved earlier keep the value they were saved with.
 
 - **Sections are the boundaries.** Headings start a section. A chapter title with no
@@ -192,7 +192,7 @@ Per-base pipeline settings override environment fallbacks:
 | Setting | Environment fallback | Default |
 |---------|----------------------|---------|
 | `max_context_chars` | none | 18000 |
-| `chunk_max_chars` | `RAG_MAX_CHUNK_CHARS` | 6000 |
+| `chunk_max_chars` | `RAG_MAX_CHUNK_CHARS` | 4000 |
 | `chunk_overlap_chars` | `RAG_CHUNK_OVERLAP_CHARS` | 200 |
 | `context_window` | `RAG_CONTEXT_WINDOW` | 1 |
 | `parent_max_chars` | `RAG_PARENT_MAX_CHARS` | 12000 |

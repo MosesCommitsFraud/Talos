@@ -2109,7 +2109,7 @@ const en = {
         captionLanguage: 'Language for image/figure captions, e.g. German. A caption is the only searchable text a figure has, so it must be written in the language people search in. Empty = let the vision model infer (it tends to default to English). Changing this only affects newly indexed files.',
         expandToParent: 'Opt-in: match precise small chunks but inject the surrounding section (sibling chunks) so the model has enough context. Citations still point at the matched chunk. Off by default; benefits documents re-indexed under this build.',
         parentMaxChars: 'Budget for the hit and its neighbors. If smaller than the hit, the complete hit is retained without expansion.',
-        chunkMaxChars: 'Shared document text limit, 6,000 characters by default. Section boundaries are preserved. Changes require reindexing.',
+        chunkMaxChars: 'Shared document text limit, 4,000 characters by default. Section boundaries are preserved. Changes require reindexing.',
         chunkOverlapChars: 'Overlap only within a section. Default: 200 characters. Changes require reindexing.',
         contextWindow: 'Include direct neighbors in the same section, preserving the matched part. 0 disables expansion. Other chapters are not automatically boosted.',
         embeddingTokenizer: 'Hugging Face model ID or local tokenizer path matching the embedding model. Without a tokenizer, only the character limit applies. The first load may require a download.',

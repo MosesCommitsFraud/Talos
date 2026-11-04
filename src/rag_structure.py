@@ -17,13 +17,13 @@ from copy import deepcopy
 from dataclasses import is_dataclass, replace
 
 CHUNKING_VERSION = "haystack-sections-v4"
-# Most chapters of a typical manual fit whole, and ordinary prose stays well inside
-# embedding windows (about 1,700 tokens at 6,000 characters of German).
-DEFAULT_CHUNK_MAX_CHARS = 6000
+# Ordinary prose stays well inside embedding and reranker windows (about 1,150 tokens
+# at 4,000 characters of German). Rerank time grows with chunk length, so this limit
+# also bounds how long a search waits on the reranker.
+DEFAULT_CHUNK_MAX_CHARS = 4000
 # Retrieved text injected into one chat turn: room for several whole chunks at
 # that size, and about 5,000 tokens of German, so small next to model contexts.
 DEFAULT_CONTEXT_MAX_CHARS = 18000
-
 # Chunks one search hands the reranker. Its time grows with this number and with
 # chunk length, and calls queue behind each other: 40 chunks of 6,000 characters took
 # 16 s alone on Qwen3-Reranker-4B and 32 s with two at once, past the client timeout.

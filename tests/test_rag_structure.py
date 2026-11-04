@@ -38,10 +38,10 @@ def test_default_limit_keeps_a_typical_chapter_whole():
     from routes.rag_routes import RagPipelineConfig
     from src.rag_structure import DEFAULT_CHUNK_MAX_CHARS
 
-    assert DEFAULT_CHUNK_MAX_CHARS == 6000
-    assert RagPipelineConfig().chunk_max_chars == 6000
-    text = "## Kapitel\n\n" + "\n\n".join("Ein Satz im Absatz. " * 20 for _ in range(14))
-    assert 4000 < len(text) < 6000
+    assert DEFAULT_CHUNK_MAX_CHARS == 4000
+    assert RagPipelineConfig().chunk_max_chars == 4000
+    text = "## Kapitel\n\n" + "\n\n".join("Ein Satz im Absatz. " * 20 for _ in range(9))
+    assert 3000 < len(text) < 4000
     assert len(split_documents([Document(content=text)])) == 1
     assert len(split_documents([Document(content=text + text)])) == 2
 

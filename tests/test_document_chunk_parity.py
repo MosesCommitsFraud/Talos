@@ -12,7 +12,7 @@ def _rag():
 
 
 def test_extracted_text_matches_markdown_with_overlap(tmp_path):
-    words = [f"word{i}" for i in range(1000)]
+    words = [f"word{i}" for i in range(620)]
     text = " ".join(words)
     path = tmp_path / "sample.md"
     path.write_text(text, encoding="utf-8")
@@ -28,7 +28,7 @@ def test_extracted_text_matches_markdown_with_overlap(tmp_path):
     assert 0 < shared <= 200
     assert rich[0].content[-shared:] == rich[1].content[:shared]
     assert rich[1].content.startswith("word")  # The overlap starts on a whole word.
-    assert all(len(d.content) <= 6000 for d in rich)
+    assert all(len(d.content) <= 4000 for d in rich)
     assert rich[0].content + rich[1].content[shared:] == text
     assert all(d.meta["page"] == 3 and d.meta["dl_meta"] == meta["dl_meta"] for d in rich)
 
@@ -60,5 +60,5 @@ def test_docx_router_uses_shared_splitter(monkeypatch):
 
     docs = rag._documents_for_file("sample.docx", {})
 
-    assert len(docs) == 2
-    assert all(len(d.content) <= 6000 for d in docs)
+    assert len(docs) == 3
+    assert all(len(d.content) <= 4000 for d in docs)
