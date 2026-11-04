@@ -63,6 +63,9 @@ class DirectoryRequest(BaseModel):
     rag_id: str | None = Field(
         None, description="Knowledge base to index into; omitted means the default one"
     )
+    scope: str | None = Field(
+        None, description="Purpose-bound sub-index to index into; omitted means the corpus"
+    )
 
 
 # Response Models

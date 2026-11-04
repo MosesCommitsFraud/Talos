@@ -259,3 +259,56 @@ def test_upload_route_passes_folder_paths(tmp_path, monkeypatch):
     )
     assert lose["logical_path"] == "Lose.md" and "folder" not in lose
     assert os.path.dirname(first) == os.path.join(str(tmp_path), "global")
+    assert "scope" not in nord
+
+
+def _scoped_upload_client(tmp_path, monkeypatch, queued):
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    import routes.personal_routes as personal
+    import src.rag_registry as registry
+    import src.rag_worker as worker
+    from core.middleware import require_admin
+
+    monkeypatch.setattr(personal, "UPLOADS_DIR", str(tmp_path))
+    monkeypatch.setattr(registry, "get_base", lambda base_id=None: {"id": base_id})
+    monkeypatch.setattr(
+        worker,
+        "start_index_files",
+        lambda files, owner=None, base_id=None: queued.append(files) or {"id": "j1"},
+    )
+    app = FastAPI()
+    app.include_router(personal.setup_personal_routes(None, None, False))
+    app.dependency_overrides[require_admin] = lambda: None
+    return TestClient(app)
+
+
+def test_upload_route_puts_files_into_a_sub_index(tmp_path, monkeypatch):
+    queued = []
+    client = _scoped_upload_client(tmp_path, monkeypatch, queued)
+    res = client.post(
+        "/api/personal/upload",
+        files=[("files", ("schema.sql", b"create table t(id int)", "text/plain"))],
+        data={"scope": "sql"},
+    )
+    assert res.status_code == 200, res.text
+    [(path, meta)] = queued[0]
+    assert meta["scope"] == "sql"
+    # The same folder the SQL settings panel has always uploaded to.
+    assert os.path.dirname(path) == os.path.join(str(tmp_path), "sql_knowledge")
+
+
+def test_upload_route_refuses_a_sub_index_it_could_not_serve(tmp_path, monkeypatch):
+    queued = []
+    client = _scoped_upload_client(tmp_path, monkeypatch, queued)
+    files = [("files", ("schema.sql", b"x", "text/plain"))]
+    unknown = client.post("/api/personal/upload", files=files, data={"scope": "nope"})
+    assert unknown.status_code == 404
+    # The SQL feature reads the default base only, so anywhere else the file
+    # would be indexed and then never used.
+    elsewhere = client.post(
+        "/api/personal/upload", files=files, data={"scope": "sql", "rag_id": "other"}
+    )
+    assert elsewhere.status_code == 400
+    assert queued == []

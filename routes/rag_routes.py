@@ -843,9 +843,55 @@ def setup_rag_routes():
             ),
         }
 
-    @router.get("/search")
-    def test_search(q: str, k: int | None = None, rag_id: str | None = None):
+    def _checked_scope(scope: str | None) -> str | None:
+        from src.rag_scopes import SCOPE_IDS
+
+        if scope and scope not in SCOPE_IDS:
+            raise HTTPException(404, f"Unknown sub-index '{scope}'")
+        return scope or None
+
+    @router.post("/scopes/{scope_id}/reindex")
+    def reindex_scope(scope_id: str, reparse: bool = False):
+        """Re-index every document of one sub-index (worker job).
+
+        Sub-indexes live in the default base. A document whose stored file is
+        gone can't be re-indexed; it stays as it is and is reported as skipped.
+        """
+        from src import rag_worker
         from src.rag_singleton import get_rag_manager
+
+        _checked_scope(scope_id)
+        rag = _resolve_rag(None, get_rag_manager)
+        if not rag or not getattr(rag, "healthy", False):
+            raise HTTPException(503, "RAG is not available")
+        specs = []
+        skipped = []
+        for doc in rag.list_documents(scope=scope_id):
+            try:
+                specs.append(rag.requeue_spec(doc.get("doc_id") or "", reparse=reparse))
+            except LookupError:
+                skipped.append(doc.get("filename") or doc.get("source"))
+        if not specs:
+            return {"ok": True, "queued": 0, "skipped": skipped, "job_id": None}
+        try:
+            job = rag_worker.start_index_files(specs, owner=None)
+        except Exception:
+            raise HTTPException(503, "Ingest queue unavailable — is Redis running?")
+        return {
+            "ok": True,
+            "queued": len(specs),
+            "skipped": skipped,
+            "job_id": job.get("id"),
+            "status": job.get("status"),
+        }
+
+    @router.get("/search")
+    def test_search(
+        q: str, k: int | None = None, rag_id: str | None = None, scope: str | None = None
+    ):
+        from src.rag_singleton import get_rag_manager
+
+        scope = _checked_scope(scope)
 
         rag = _resolve_rag(rag_id, get_rag_manager)
         if not rag or not getattr(rag, "healthy", False):
@@ -859,9 +905,10 @@ def setup_rag_routes():
         cfg = effective_config(rag_id)
         final_k = _clamp_k(k if k is not None else cfg.get("search_top_k", 5))
         candidate_k = max(final_k, _clamp_candidate_k(cfg.get("candidate_top_k", 40)))
-        # Exclude the purpose-bound sub-indexes, exactly as the chat pipeline
-        # does — otherwise this test box returns schema chunks that a real
-        # answer would never be built from.
+        # Without a scope, exclude the purpose-bound sub-indexes exactly as the
+        # chat pipeline does — otherwise this test box returns schema chunks
+        # that a real answer would never be built from. With one, search only
+        # that sub-index, as the feature that owns it does.
         from src.rag_scopes import SCOPE_IDS
 
         results = rag.search(
@@ -869,7 +916,7 @@ def setup_rag_routes():
             k=final_k,
             owner=None,
             candidate_k=candidate_k,
-            exclude_scopes=SCOPE_IDS,
+            **({"scope": scope} if scope else {"exclude_scopes": SCOPE_IDS}),
         )
         return {
             "ok": True,
@@ -943,18 +990,22 @@ def setup_rag_routes():
         from src.rag_scopes import SCOPE_IDS, describe_scopes
         from src.rag_singleton import get_rag_manager, last_init_error
 
+        scope = _checked_scope(scope)
         rag = _resolve_rag(rag_id, get_rag_manager)
         if not rag or not getattr(rag, "healthy", False):
             # Don't 503 — the UI shows a friendly state with the real reason.
             return {"available": False, "documents": [], "scopes": [], "error": last_init_error()}
-        if scope:
-            if scope not in SCOPE_IDS:
-                raise HTTPException(404, f"Unknown sub-index '{scope}'")
-            return {"available": True, "scope": scope, "documents": rag.list_documents(scope=scope)}
         try:
             sparse = rag.sparse_status()
         except Exception:
             sparse = None
+        if scope:
+            return {
+                "available": True,
+                "scope": scope,
+                "documents": rag.list_documents(scope=scope),
+                "sparse": sparse,
+            }
         return {
             "available": True,
             "documents": rag.list_documents(exclude_scopes=SCOPE_IDS),
@@ -1109,18 +1160,23 @@ def setup_rag_routes():
         return {"ok": True, "job_id": job.get("id"), "status": job.get("status")}
 
     @router.get("/documents/search")
-    def search_document_chunks(q: str, limit: int = 200, rag_id: str | None = None):
+    def search_document_chunks(
+        q: str, limit: int = 200, rag_id: str | None = None, scope: str | None = None
+    ):
         """Keyword scan across every indexed chunk (explorer search box)."""
         from src.rag_scopes import SCOPE_IDS
         from src.rag_singleton import get_rag_manager, last_init_error
 
+        scope = _checked_scope(scope)
         rag = _resolve_rag(rag_id, get_rag_manager)
         if not rag or not getattr(rag, "healthy", False):
             return {"available": False, "hits": [], "error": last_init_error()}
-        # Same exclusion as the document list: the explorer inspects the corpus,
-        # not the sub-indexes other features own.
+        # Same split as the document list: the explorer inspects either the
+        # corpus or one sub-index, never both at once.
         hits = rag.grep_chunks(
-            q, limit=max(1, min(int(limit or 200), 1000)), exclude_scopes=SCOPE_IDS
+            q,
+            limit=max(1, min(int(limit or 200), 1000)),
+            **({"scope": scope} if scope else {"exclude_scopes": SCOPE_IDS}),
         )
         return {"available": True, "query": q, "count": len(hits), "hits": hits}
 
@@ -1132,15 +1188,12 @@ def setup_rag_routes():
         is checked against the index before it ever reaches the filesystem, so
         the query parameter can't be used to read arbitrary paths.
         """
-        from src.rag_scopes import SCOPE_IDS
         from src.rag_singleton import get_rag_manager
 
         rag = _resolve_rag(rag_id, get_rag_manager)
         if not rag or not getattr(rag, "healthy", False):
             raise HTTPException(503, "RAG is not available")
-        # Sub-index files are served by the feature that owns them (the SQL
-        # panel), so they are not in this screen's allow-list.
-        return original_file_response(source, rag.list_documents(exclude_scopes=SCOPE_IDS))
+        return original_file_response(source, rag.list_documents())
 
     @router.get("/documents/export")
     def export_document(source: str, rag_id: str | None = None, annotated: bool = False):

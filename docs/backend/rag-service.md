@@ -52,8 +52,17 @@ SQL knowledge source is active.
 
 They are **not** part of the corpus and are reported separately everywhere —
 `content_count`/`chunk_count` cover the searchable documents, and a `scopes`
-array carries each sub-index with its own counts, its purpose, and where the
-owning feature is administered. `GET /api/rag/documents?scope=sql` lists one.
+array carries each sub-index with its own counts, its purpose, and where it is
+administered. `GET /api/rag/documents?scope=sql` lists one.
+
+The /rag workspace gives each sub-index its own space (`#/rag/mini/<id>`) with
+the same tools as a knowledge base: upload, folders and directories, version
+history, replace, per-document and bulk re-index, the chunk explorer and a test
+search. Passing `scope` to `/api/personal/upload`, `/api/personal/add_directory`,
+`/api/rag/search` and `/api/rag/documents/search` targets the sub-index, and
+`POST /api/rag/scopes/<id>/reindex` re-indexes all of it. Sub-indexes live in the
+default base, the one their features read from, so a scoped upload into any other
+base is refused.
 
 The catalogue lives in `src/rag_scopes.py`; adding a scope means adding an entry
 there and tagging the documents on ingest. Every exclusion — the document list,

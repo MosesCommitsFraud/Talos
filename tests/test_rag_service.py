@@ -389,6 +389,50 @@ def test_the_outward_document_list_excludes_scoped_documents(base_with_sql_docs)
     assert all("schema.sql" != d["filename"] for d in body["documents"])
 
 
+@pytest.fixture
+def rag_routes_client(base_with_sql_docs):
+    from fastapi import FastAPI
+
+    from core.middleware import require_admin
+    from routes.rag_routes import setup_rag_routes
+
+    app = FastAPI()
+    app.include_router(setup_rag_routes())
+    app.dependency_overrides[require_admin] = lambda: None
+    return TestClient(app)
+
+
+def test_the_test_search_stays_out_of_sub_indexes_unless_asked(
+    rag_routes_client, base_with_sql_docs, monkeypatch
+):
+    calls = []
+    monkeypatch.setattr(
+        base_with_sql_docs, "search", lambda q, **kw: calls.append(kw) or [], raising=True
+    )
+    assert rag_routes_client.get("/api/rag/search", params={"q": "orders"}).status_code == 200
+    assert calls[-1]["exclude_scopes"] == rag_scopes.SCOPE_IDS and "scope" not in calls[-1]
+
+    res = rag_routes_client.get("/api/rag/search", params={"q": "orders", "scope": "sql"})
+    assert res.status_code == 200
+    assert calls[-1]["scope"] == "sql" and "exclude_scopes" not in calls[-1]
+
+    res = rag_routes_client.get("/api/rag/search", params={"q": "orders", "scope": "nope"})
+    assert res.status_code == 404
+
+
+def test_the_explorer_search_stays_out_of_sub_indexes_unless_asked(
+    rag_routes_client, base_with_sql_docs, monkeypatch
+):
+    calls = []
+    monkeypatch.setattr(
+        base_with_sql_docs, "grep_chunks", lambda q, **kw: calls.append(kw) or [], raising=False
+    )
+    rag_routes_client.get("/api/rag/documents/search", params={"q": "orders"})
+    assert calls[-1]["exclude_scopes"] == rag_scopes.SCOPE_IDS and "scope" not in calls[-1]
+    rag_routes_client.get("/api/rag/documents/search", params={"q": "orders", "scope": "sql"})
+    assert calls[-1]["scope"] == "sql" and "exclude_scopes" not in calls[-1]
+
+
 def test_a_scope_id_never_collides_with_the_i18n_separators():
     """`managed_at` is used to build a translation key; ':' would be read as an
     i18next namespace separator and silently fall back to the raw token."""

@@ -347,6 +347,79 @@ def test_detail_reindex_and_restore_routes(env, monkeypatch):
     assert missing.status_code == 404
 
 
+def test_reindexing_a_sub_index_keeps_it_out_of_the_corpus(env, monkeypatch):
+    """A schema file that lost its scope would start showing up in ordinary
+    answers, so the scope has to survive the round trip through the worker."""
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    import src.rag_singleton as singleton
+    import src.rag_worker as worker
+    from core.middleware import require_admin
+    from routes.rag_routes import setup_rag_routes
+
+    rag, uploads, _ = env
+    path, meta = upload(uploads, "schema.md", "tables and columns", "a")
+    rag.index_files([(path, {**meta, "scope": "sql"})])
+    other, meta = upload(uploads, "handbuch.md", "ordinary text", "b")
+    rag.index_files([(other, meta)])
+    queued = []
+    monkeypatch.setattr(singleton, "get_rag_manager", lambda rag_id=None, **kw: rag)
+    monkeypatch.setattr(
+        worker,
+        "start_index_files",
+        lambda files, owner=None, base_id=None: queued.append(files) or {"id": "j1"},
+    )
+    app = FastAPI()
+    app.include_router(setup_rag_routes())
+    app.dependency_overrides[require_admin] = lambda: None
+    client = TestClient(app)
+
+    body = client.post("/api/rag/scopes/sql/reindex").json()
+    assert body["queued"] == 1 and body["skipped"] == [] and body["job_id"] == "j1"
+    assert [p for p, _ in queued[0]] == [path]
+
+    rag.index_files(queued[0])
+    assert [d["source"] for d in rag.list_documents(scope="sql")] == [path]
+    assert [d["source"] for d in rag.list_documents(exclude_scopes=["sql"])] == [other]
+
+    assert client.post("/api/rag/scopes/nope/reindex").status_code == 404
+
+
+def test_a_vanished_file_is_reported_not_fatal_when_reindexing_a_sub_index(env, monkeypatch):
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    import src.rag_singleton as singleton
+    import src.rag_worker as worker
+    from core.middleware import require_admin
+    from routes.rag_routes import setup_rag_routes
+
+    rag, uploads, _ = env
+    path, meta = upload(uploads, "schema.md", "tables", "a")
+    rag.index_files([(path, {**meta, "scope": "sql"})])
+    os.remove(path)
+    monkeypatch.setattr(singleton, "get_rag_manager", lambda rag_id=None, **kw: rag)
+    monkeypatch.setattr(
+        worker, "start_index_files", lambda *a, **k: pytest.fail("nothing to queue")
+    )
+    app = FastAPI()
+    app.include_router(setup_rag_routes())
+    app.dependency_overrides[require_admin] = lambda: None
+    body = TestClient(app).post("/api/rag/scopes/sql/reindex").json()
+    assert body["queued"] == 0 and body["skipped"] == ["schema.md"]
+
+
+def test_a_directory_can_be_synced_into_a_sub_index(env):
+    rag, _, tmp_path = env
+    share = tmp_path / "schemas"
+    share.mkdir()
+    (share / "erp.md").write_text("tables of the erp", encoding="utf-8")
+    rag.index_personal_documents(str(share), scope="sql")
+    assert [d["filename"] for d in rag.list_documents(scope="sql")] == ["erp.md"]
+    assert rag.list_documents(exclude_scopes=["sql"]) == []
+
+
 def test_directory_sync_does_not_rehash_untouched_files(env, monkeypatch):
     rag, _, tmp_path = env
     share = tmp_path / "share"

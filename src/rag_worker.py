@@ -232,6 +232,7 @@ def ingest_directory_job(
     owner: Optional[str],
     config_snapshot: Dict[str, Any],
     base_id: Optional[str] = None,
+    scope: Optional[str] = None,
 ) -> Dict[str, Any]:
     # ``base_id`` is last and optional so jobs enqueued by an older app version
     # (three positional args) still run after a deploy — they land in the
@@ -243,7 +244,9 @@ def ingest_directory_job(
     rag = _fresh_rag(base_id, config_snapshot)
     if not rag:
         raise RuntimeError("RAG system is not available (check Qdrant / embedding config)")
-    result = rag.index_personal_documents(directory, owner=owner, progress_cb=_progress_saver(job))
+    result = rag.index_personal_documents(
+        directory, owner=owner, progress_cb=_progress_saver(job), scope=scope
+    )
     _finalize(job, result)
     return result
 
@@ -339,7 +342,10 @@ def start_sync_register(base_id: Optional[str] = None) -> Dict[str, Any]:
 
 
 def start_index_directory(
-    directory: str, owner: Optional[str] = None, base_id: Optional[str] = None
+    directory: str,
+    owner: Optional[str] = None,
+    base_id: Optional[str] = None,
+    scope: Optional[str] = None,
 ) -> Dict[str, Any]:
     job = _queue().enqueue(
         "src.rag_worker.ingest_directory_job",
@@ -347,6 +353,9 @@ def start_index_directory(
         owner,
         _snapshot(base_id),
         base_id,
+        # Only when set, so a worker still on the older signature keeps running
+        # every ordinary directory job during a deploy.
+        *((scope,) if scope else ()),
         job_timeout=_JOB_TIMEOUT,
         meta={
             "type": "index_directory",

@@ -10,9 +10,11 @@ for its own use, living in the same Qdrant collection but tagged with
 Today there is exactly one — the SQL schema files, which are injected only when
 the SQL source is active (``routes/sql_routes.py``, ``src/agent_loop.py``).
 They were being counted and listed as if a user had put them in the knowledge
-base, which is misleading in both directions: the base looks bigger than the
-corpus a user can search, and the schema files look deletable from a screen that
-is not where they are managed.
+base, which is misleading: the base looks bigger than the corpus a user can
+search. So they are counted and listed apart, and the /rag workspace gives each
+scope its own space with the same document tools as a knowledge base.
+
+Scopes live in the default base, which is the one the owning features read from.
 
 Adding a scope means adding an entry here and tagging the documents on ingest.
 Nothing else in the knowledge-base UI has to know about it.
@@ -24,9 +26,7 @@ from typing import Any, Dict, List, Optional
 
 # One entry per purpose-bound sub-index.
 #
-# ``managed_at`` is where the feature that owns it is actually administered —
-# the knowledge-base UI shows the scope read-only and points there, rather than
-# offering an upload/delete that would bypass the owning feature.
+# ``managed_at`` is where the scope is administered.
 SCOPES: List[Dict[str, str]] = [
     {
         "id": "sql",
@@ -36,7 +36,7 @@ SCOPES: List[Dict[str, str]] = [
             "the SQL knowledge source is active, so the model can navigate the "
             "database — never mixed into ordinary knowledge-base answers."
         ),
-        "managed_at": "sql-settings",
+        "managed_at": "rag-workspace",
     },
 ]
 
