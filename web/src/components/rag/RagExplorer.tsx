@@ -13,7 +13,7 @@ import {
   updateRagChunk,
 } from '@/api/client';
 import { cn } from '@/lib/utils';
-import { ragIdParam } from '@/state/ragBase';
+import { DEFAULT_RAG_BASE, ragIdParam } from '@/state/ragBase';
 import { useUi } from '@/state/ui';
 import { Markdown } from '../Markdown';
 import { Button } from '../ui/button';
@@ -182,10 +182,12 @@ function ChunkCard({ source, chunk, highlight, ragId }: { source: string; chunk:
 /** Full file list + chunk inspector for the /rag workspace. Opens from the
  *  activity rail. Read shows the exact text stored in Qdrant; editing re-embeds
  *  a single chunk in place. */
-export function RagExplorer({ open, onOpenChange }: { open: boolean; onOpenChange: (v: boolean) => void }) {
+export function RagExplorer({ open, onOpenChange, scope }: { open: boolean; onOpenChange: (v: boolean) => void; scope?: string }) {
   const { t } = useTranslation();
-  // The explorer inspects whichever knowledge base the workspace is on.
-  const { baseId } = useActiveRagBase();
+  // The explorer inspects whichever knowledge base the workspace is on, or one
+  // sub-index, which always lives in the default base.
+  const { baseId: activeBase } = useActiveRagBase();
+  const baseId = scope ? DEFAULT_RAG_BASE : activeBase;
   const ragId = ragIdParam(baseId);
   const [selected, setSelected] = useState<string | null>(null);
   const [highlighted, setHighlighted] = useState<string | null>(null);
@@ -196,7 +198,7 @@ export function RagExplorer({ open, onOpenChange }: { open: boolean; onOpenChang
   useEffect(() => {
     setSelected(null);
     setHighlighted(null);
-  }, [baseId]);
+  }, [baseId, scope]);
   // Content search hits Qdrant for every chunk, so it runs on a debounced copy
   // of the box rather than on every keystroke; filenames filter instantly.
   const [debounced, setDebounced] = useState('');
@@ -206,15 +208,15 @@ export function RagExplorer({ open, onOpenChange }: { open: boolean; onOpenChang
     return () => clearTimeout(id);
   }, [filter]);
 
-  const docs = useQuery({ queryKey: ['rag-documents', baseId], queryFn: () => fetchRagDocuments(ragId), enabled: open });
+  const docs = useQuery({ queryKey: ['rag-documents', baseId, scope ?? ''], queryFn: () => fetchRagDocuments(ragId, scope), enabled: open });
   const chunks = useQuery({
     queryKey: ['rag-chunks', baseId, selected],
     queryFn: () => fetchRagChunks(selected as string, ragId),
     enabled: open && !!selected,
   });
   const search = useQuery({
-    queryKey: ['rag-chunk-search', baseId, debounced],
-    queryFn: () => searchRagChunks(debounced, ragId),
+    queryKey: ['rag-chunk-search', baseId, scope ?? '', debounced],
+    queryFn: () => searchRagChunks(debounced, ragId, scope),
     enabled: open && debounced.length >= 2,
   });
 

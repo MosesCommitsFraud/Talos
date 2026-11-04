@@ -2322,6 +2322,24 @@ _RAG_DOCS = [
 ]
 
 
+_RAG_SQL_DOCS = [
+    {
+        **_RAG_DOCS[0],
+        "source": "/srv/uploads/sql_knowledge/schema_erp-7c1d2e3f4a.sql",
+        "filename": "schema_erp.sql",
+        "type": ".sql",
+        "chunks": 18,
+        "doc_id": "d_sql0a1b2c3d4e5f6a7b8c9d0e",
+        "logical_path": "schema_erp.sql",
+        "version": 1,
+        "warnings": [],
+        "scope": "sql",
+        "duplicates": [],
+        "versions": [],
+    }
+]
+
+
 def _rag_doc_row(doc):
     row = {k: v for k, v in doc.items() if k not in ("versions", "duplicates")}
     sha = doc.get("content_sha256")
@@ -2703,6 +2721,16 @@ class PreviewHandler(BaseHTTPRequestHandler):
                             "access": {"restricted": True, "users": ["anna"]},
                             "content_count": len(_RAG_DOCS),
                             "chunk_count": sum(d["chunks"] for d in _RAG_DOCS),
+                            "scopes": [
+                                {
+                                    "id": "sql",
+                                    "name": "SQL schema",
+                                    "purpose": "Schema files for the connected SQL databases.",
+                                    "managed_at": "rag-workspace",
+                                    "content_count": len(_RAG_SQL_DOCS),
+                                    "chunk_count": sum(d["chunks"] for d in _RAG_SQL_DOCS),
+                                }
+                            ],
                         }
                     ]
                 }
@@ -2712,10 +2740,12 @@ class PreviewHandler(BaseHTTPRequestHandler):
             self._send_json({"jobs": _RAG_JOBS})
             return
         if path == "/api/rag/documents":
+            scope = parse_qs(parsed.query).get("scope", [""])[0]
             self._send_json(
                 {
                     "available": True,
-                    "documents": [_rag_doc_row(d) for d in _RAG_DOCS],
+                    "scope": scope or None,
+                    "documents": [_rag_doc_row(d) for d in (_RAG_SQL_DOCS if scope else _RAG_DOCS)],
                     "sparse": {
                         "model": "Qdrant/bm25",
                         "indexed_language": "english",
@@ -2727,7 +2757,7 @@ class PreviewHandler(BaseHTTPRequestHandler):
             return
         if path == "/api/rag/documents/detail":
             doc_id = parse_qs(parsed.query).get("doc_id", [""])[0]
-            doc = next((d for d in _RAG_DOCS if d.get("doc_id") == doc_id), None)
+            doc = next((d for d in _RAG_DOCS + _RAG_SQL_DOCS if d.get("doc_id") == doc_id), None)
             if doc is None:
                 self._send_json({"detail": "Document is not in the register"}, 404)
                 return
@@ -3162,6 +3192,11 @@ class PreviewHandler(BaseHTTPRequestHandler):
             )
             _SHARED_SKILLS.sort(key=lambda s: s["name"])
             self._send_json({"ok": True})
+            return
+        if path.startswith("/api/rag/scopes/") and path.endswith("/reindex"):
+            self._send_json(
+                {"ok": True, "queued": len(_RAG_SQL_DOCS), "skipped": [], "job_id": "preview"}
+            )
             return
         if path.startswith("/api/"):
             self._send_json({"ok": True})

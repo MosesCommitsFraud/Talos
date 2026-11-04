@@ -1378,16 +1378,15 @@ const en = {
       deleted: '{{n}} removed',
     },
     scopes: {
-      title: 'Purpose-bound sub-indexes',
+      title: 'Mini RAGs',
       badge: 'mini RAG',
       intro:
-        'Small indexes a {{brand}} feature keeps in this knowledge base for its own use. They are never returned by ordinary search and are not counted as documents above.',
+        'Small indexes a {{brand}} feature keeps for its own use. They are never returned by ordinary search and are not counted as documents above.',
       empty: 'empty',
-      managedAt: 'Managed in {{where}}',
       plusMini: 'plus mini RAG: {{names}}',
-      where: {
-        'sql-settings': 'Settings → SQL',
-      },
+      reindexAll: 'Re-index all',
+      reindexQueued: 'Re-indexing {{n}} file(s).',
+      reindexPartial: 'Re-indexing {{n}} file(s). File no longer there: {{names}}',
       item: {
         sql: {
           name: 'SQL schema',

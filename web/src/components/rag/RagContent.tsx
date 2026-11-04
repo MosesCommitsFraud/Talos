@@ -1,7 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   AlertTriangleIcon,
-  BoxesIcon,
   ChevronRightIcon,
   FileTextIcon,
   FolderOpenIcon,
@@ -63,8 +62,11 @@ interface SearchHit {
  *  This is the working surface of the /rag management area — the settings for
  *  the same base live on their own tab, so filling a base and tuning it never
  *  compete for the same screen.
+ *
+ *  With `scope` it is the same surface for one purpose-bound sub-index instead
+ *  of the base's corpus.
  */
-export function RagContent({ baseId }: { baseId: string }) {
+export function RagContent({ baseId, scope }: { baseId: string; scope?: string }) {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
   const ragId = ragIdParam(baseId);
@@ -83,8 +85,8 @@ export function RagContent({ baseId }: { baseId: string }) {
   const [docFilter, setDocFilter] = useState<DocFilter>('all');
 
   const docs = useQuery({
-    queryKey: ['rag-documents', baseId],
-    queryFn: () => fetchRagDocuments(ragId),
+    queryKey: ['rag-documents', baseId, scope ?? ''],
+    queryFn: () => fetchRagDocuments(ragId, scope),
     refetchInterval: 5000,
   });
 
@@ -113,7 +115,7 @@ export function RagContent({ baseId }: { baseId: string }) {
   const search = () => {
     setSearchErr('');
     setHits(null);
-    void ragSearch(searchQ, searchK, ragId)
+    void ragSearch(searchQ, searchK, ragId, scope)
       .then((r) => setHits(((r as { results?: SearchHit[] }).results ?? []) as SearchHit[]))
       .catch((e) => setSearchErr((e as Error).message));
   };
@@ -132,6 +134,11 @@ export function RagContent({ baseId }: { baseId: string }) {
 
   return (
     <Page className="gap-5 p-0">
+      {scope && (
+        <p className="text-[13px] leading-snug text-muted-foreground">
+          {t(`rag.scopes.item.${scope}.purpose`, '')}
+        </p>
+      )}
       <Section title={t('rag.content.add')} padded>
         <div className="space-y-3">
           <div className="flex flex-wrap items-center gap-2">
@@ -150,6 +157,7 @@ export function RagContent({ baseId }: { baseId: string }) {
                       personalUpload(Array.from(e.target.files!), {
                         redactPii: uploadRedact,
                         ragId,
+                        scope,
                       }),
                     t('settings.rag.uploadQueued'),
                   );
@@ -175,6 +183,7 @@ export function RagContent({ baseId }: { baseId: string }) {
                       personalUpload(Array.from(e.target.files!), {
                         redactPii: uploadRedact,
                         ragId,
+                        scope,
                       }),
                     t('settings.rag.uploadQueued'),
                   );
@@ -182,13 +191,17 @@ export function RagContent({ baseId }: { baseId: string }) {
                 e.target.value = '';
               }}
             />
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => run(personalReload, t('settings.rag.reindexStarted'))}
-            >
-              {t('settings.rag.reloadIndex')}
-            </Button>
+            {/* Refreshes the personal-documents listing, which a sub-index is
+                not part of. Its re-index is in the activity rail. */}
+            {!scope && (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => run(personalReload, t('settings.rag.reindexStarted'))}
+              >
+                {t('settings.rag.reloadIndex')}
+              </Button>
+            )}
             <Button size="sm" variant="outline" onClick={() => setExplorerOpen(true)}>
               <FolderOpenIcon className="size-3.5" /> {t('rag.explorer.open')}
             </Button>
@@ -218,7 +231,7 @@ export function RagContent({ baseId }: { baseId: string }) {
               variant="outline"
               disabled={!dir.trim()}
               onClick={() =>
-                run(() => personalAddDirectory(dir, ragId), t('settings.rag.directoryAdded'))
+                run(() => personalAddDirectory(dir, ragId, scope), t('settings.rag.directoryAdded'))
               }
             >
               {t('common.add')}
@@ -397,48 +410,6 @@ export function RagContent({ baseId }: { baseId: string }) {
         )}
       </Section>
 
-      {/* Purpose-bound sub-indexes. Listed apart from the corpus above, and
-          read-only: they belong to the feature that fills them, and deleting
-          one from here would silently break that feature. */}
-      {(docs.data?.scopes ?? []).length > 0 && (
-        <Section title={t('rag.scopes.title')} padded>
-          <p className="pb-2 text-xs text-muted-foreground/80">{t('rag.scopes.intro')}</p>
-          <div className="space-y-2">
-            {(docs.data?.scopes ?? []).map((s) => (
-              <div key={s.id} className="rounded-lg border border-border/60 px-3 py-2.5">
-                <div className="flex flex-wrap items-center gap-2">
-                  <BoxesIcon className="size-3.5 shrink-0 text-muted-foreground" />
-                  {/* Server-side catalogue is English; fall back to it when a
-                      locale has no wording of its own for this scope. */}
-                  <span className="text-[13px] font-semibold">
-                    {t(`rag.scopes.item.${s.id}.name`, s.name)}
-                  </span>
-                  <span className="rounded bg-muted px-1.5 py-px font-mono text-[10px] text-muted-foreground">
-                    {t('rag.scopes.badge')}
-                  </span>
-                  <span className="ml-auto shrink-0 text-[11px] text-muted-foreground tabular-nums">
-                    {s.content_count === 0
-                      ? t('rag.scopes.empty')
-                      : t('rag.bases.counts', {
-                          docs: s.content_count,
-                          chunks: s.chunk_count,
-                        })}
-                  </span>
-                </div>
-                <p className="mt-1 text-xs text-muted-foreground/80">
-                  {t(`rag.scopes.item.${s.id}.purpose`, s.purpose)}
-                </p>
-                <p className="mt-1 text-[11px] text-muted-foreground">
-                  {t('rag.scopes.managedAt', {
-                    where: t(`rag.scopes.where.${s.managed_at}`, s.managed_at),
-                  })}
-                </p>
-              </div>
-            ))}
-          </div>
-        </Section>
-      )}
-
       <Section title={t('rag.content.tryRetrieval')} padded>
         <div className="space-y-2">
           <div className="flex gap-2">
@@ -492,7 +463,7 @@ export function RagContent({ baseId }: { baseId: string }) {
         </div>
       </Section>
 
-      <RagExplorer open={explorerOpen} onOpenChange={setExplorerOpen} />
+      <RagExplorer open={explorerOpen} onOpenChange={setExplorerOpen} scope={scope} />
     </Page>
   );
 }

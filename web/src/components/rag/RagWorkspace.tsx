@@ -2,7 +2,7 @@ import { ArrowLeftIcon, DatabaseIcon, SettingsIcon } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { cn } from '@/lib/utils';
-import { useRagBase } from '@/state/ragBase';
+import { DEFAULT_RAG_BASE, useRagBase } from '@/state/ragBase';
 import { useUi } from '@/state/ui';
 import { Button } from '../ui/button';
 import { RagActivity } from './RagActivity';
@@ -12,12 +12,16 @@ import { RagSettingsForm } from './RagSettingsForm';
 
 /** Which space of the knowledge-base workspace is showing.
  *
- *  Three, deliberately separate: the catalogue of bases, one base's own area
- *  (its content and its settings), and the global defaults every base inherits.
- *  Mixing the catalogue with a settings form is what made the old single-page
- *  panel hard to read once more than one base existed.
+ *  Deliberately separate: the catalogue of bases, one base's own area (its
+ *  content and its settings), the global defaults every base inherits, and a
+ *  mini RAG's own area. Mixing the catalogue with a settings form is what made
+ *  the old single-page panel hard to read once more than one base existed.
  */
-type Space = { kind: 'overview' } | { kind: 'base'; id: string } | { kind: 'global' };
+type Space =
+  | { kind: 'overview' }
+  | { kind: 'base'; id: string }
+  | { kind: 'global' }
+  | { kind: 'mini'; id: string };
 type BaseTab = 'content' | 'settings';
 
 function spaceFromHash(): Space {
@@ -25,12 +29,15 @@ function spaceFromHash(): Space {
   const parts = location.hash.replace(/^#\/?/, '').split('/');
   if (parts[0] !== 'rag' || !parts[1]) return { kind: 'overview' };
   if (parts[1] === 'global') return { kind: 'global' };
+  // The extra segment keeps this apart from a base that happens to be called "mini".
+  if (parts[1] === 'mini' && parts[2]) return { kind: 'mini', id: decodeURIComponent(parts[2]) };
   return { kind: 'base', id: decodeURIComponent(parts[1]) };
 }
 
 function hashFor(space: Space): string {
   if (space.kind === 'overview') return '#/rag';
   if (space.kind === 'global') return '#/rag/global';
+  if (space.kind === 'mini') return `#/rag/mini/${encodeURIComponent(space.id)}`;
   return `#/rag/${encodeURIComponent(space.id)}`;
 }
 
@@ -95,12 +102,19 @@ export function RagWorkspace() {
     if (space.kind === 'base') setBaseId(space.id);
   }, [space, setBaseId]);
 
+  const miniId = space.kind === 'mini' ? space.id : undefined;
   const title =
     space.kind === 'overview'
       ? t('rag.title')
       : space.kind === 'global'
         ? t('rag.globalTitle')
-        : (routed?.name ?? space.id);
+        : space.kind === 'mini'
+          ? t(
+              `rag.scopes.item.${space.id}.name`,
+              bases.find((b) => b.id === DEFAULT_RAG_BASE)?.scopes?.find((s) => s.id === space.id)
+                ?.name ?? space.id,
+            )
+          : (routed?.name ?? space.id);
 
   return (
     <main className="flex min-w-0 flex-1 overflow-hidden">
@@ -122,6 +136,11 @@ export function RagWorkspace() {
               <ArrowLeftIcon className="size-4" />
             </button>
             <h1 className="max-w-full min-w-0 truncate text-xl font-semibold tracking-tight">{title}</h1>
+            {miniId && (
+              <span className="shrink-0 rounded bg-muted px-1.5 py-px font-mono text-[10px] text-muted-foreground">
+                {t('rag.scopes.badge')}
+              </span>
+            )}
             <div className="ml-auto flex shrink-0 items-center gap-3">
               {/* The settings form puts its save controls here. */}
               <div ref={setActionsEl} className="flex items-center gap-2 empty:hidden" />
@@ -162,9 +181,13 @@ export function RagWorkspace() {
         <div className="min-h-0 flex-1 overflow-y-auto [-webkit-mask-image:linear-gradient(to_bottom,transparent_0,black_24px)] [mask-image:linear-gradient(to_bottom,transparent_0,black_24px)]">
           <div className="mx-auto w-full max-w-4xl px-5 pt-6 pb-5">
             {space.kind === 'overview' && (
-              <RagOverview onOpen={(id) => setSpace({ kind: 'base', id })} />
+              <RagOverview
+                onOpen={(id) => setSpace({ kind: 'base', id })}
+                onOpenScope={(id) => setSpace({ kind: 'mini', id })}
+              />
             )}
             {space.kind === 'global' && <RagSettingsForm actionsEl={actionsEl} />}
+            {space.kind === 'mini' && <RagContent baseId={DEFAULT_RAG_BASE} scope={space.id} />}
             {space.kind === 'base' &&
               (tab === 'content' ? (
                 <RagContent baseId={space.id} />
@@ -176,7 +199,7 @@ export function RagWorkspace() {
       </div>
 
       {/* Right: pinned activity rail (drop zone, queue with progress, console). */}
-      <RagActivity />
+      <RagActivity scope={miniId} />
     </main>
   );
 }

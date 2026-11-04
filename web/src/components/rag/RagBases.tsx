@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   AlertTriangleIcon,
+  BoxesIcon,
   DatabaseIcon,
   LockIcon,
   PencilIcon,
@@ -483,13 +484,21 @@ function BaseCard({
  *  knowledge bases exist and what is in them", while a base's own space
  *  answers "what is inside this one and how is it tuned".
  */
-export function RagOverview({ onOpen }: { onOpen: (id: string) => void }) {
+export function RagOverview({
+  onOpen,
+  onOpenScope,
+}: {
+  onOpen: (id: string) => void;
+  onOpenScope: (id: string) => void;
+}) {
   const { t } = useTranslation();
   const { data, isLoading } = useRagBases();
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<RagBase | null>(null);
   const [deleting, setDeleting] = useState<RagBase | null>(null);
   const bases = data?.bases ?? [];
+  // Sub-indexes live in the default base; every other base reports them empty.
+  const scopes = bases.find((b) => b.id === DEFAULT_RAG_BASE)?.scopes ?? [];
 
   return (
     <div className="space-y-3">
@@ -524,6 +533,42 @@ export function RagOverview({ onOpen }: { onOpen: (id: string) => void }) {
             />
           ))}
         </div>
+      )}
+
+      {scopes.length > 0 && (
+        <section className="space-y-2 pt-5">
+          <div>
+            <h2 className="text-[15px] font-semibold tracking-[-0.01em]">{t('rag.scopes.title')}</h2>
+            <p className="mt-0.5 text-xs text-muted-foreground">{t('rag.scopes.intro')}</p>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+            {scopes.map((s) => (
+              <button
+                key={s.id}
+                type="button"
+                onClick={() => onOpenScope(s.id)}
+                className="rounded-md border bg-card px-4 py-3.5 text-left text-card-foreground transition-colors hover:border-ring/50"
+              >
+                <span className="flex items-center gap-2">
+                  <BoxesIcon className="size-4 shrink-0 text-muted-foreground" />
+                  {/* Server-side catalogue is English; fall back to it when a
+                      locale has no wording of its own for this scope. */}
+                  <span className="min-w-0 flex-1 truncate text-sm font-semibold tracking-[-0.01em]">
+                    {t(`rag.scopes.item.${s.id}.name`, s.name)}
+                  </span>
+                </span>
+                <span className="mt-1.5 line-clamp-3 block text-xs text-muted-foreground/80">
+                  {t(`rag.scopes.item.${s.id}.purpose`, s.purpose)}
+                </span>
+                <span className="mt-2 block text-[11px] text-muted-foreground tabular-nums">
+                  {s.content_count === 0
+                    ? t('rag.scopes.empty')
+                    : t('rag.bases.counts', { docs: s.content_count, chunks: s.chunk_count })}
+                </span>
+              </button>
+            ))}
+          </div>
+        </section>
       )}
 
       <BaseFormDialog

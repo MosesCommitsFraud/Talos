@@ -958,13 +958,12 @@ export interface RagBase {
 }
 
 /** A "mini RAG": documents a Talos feature keeps in the base for its own use,
- *  tagged with a scope so ordinary retrieval never returns them. Read-only
- *  here — each one is administered by the feature that owns it. */
+ *  tagged with a scope so ordinary retrieval never returns them. */
 export interface RagScope {
   id: string;
   name: string;
   purpose: string;
-  /** Where the owning feature is administered, e.g. "settings:sql". */
+  /** Where the scope is administered, e.g. "rag-workspace". */
   managed_at: string;
   content_count: number;
   chunk_count: number;
@@ -1174,17 +1173,25 @@ export const deleteIntegration = (id: string) =>
   postJSON(`/api/auth/integrations/${encodeURIComponent(id)}`, undefined, 'DELETE');
 
 /* ── RAG documents ── */
-export const ragSearch = (q: string, k: number, ragId?: string) =>
+export const ragSearch = (q: string, k: number, ragId?: string, scope?: string) =>
   getJSON<Record<string, unknown>>(
-    withRag(`/api/rag/search?q=${encodeURIComponent(q)}&k=${k}`, ragId),
+    withRag(
+      `/api/rag/search?q=${encodeURIComponent(q)}&k=${k}${scope ? `&scope=${encodeURIComponent(scope)}` : ''}`,
+      ragId,
+    ),
   );
-export const personalAddDirectory = (directory: string, ragId?: string) =>
-  postJSON('/api/personal/add_directory', { directory, rag_id: ragId });
+export const personalAddDirectory = (directory: string, ragId?: string, scope?: string) =>
+  postJSON('/api/personal/add_directory', { directory, rag_id: ragId, scope });
+/** Re-index every document of one purpose-bound sub-index. */
+export const reindexRagScope = (scope: string) =>
+  postJSON<{ ok: boolean; queued: number; skipped: string[]; job_id?: string | null }>(
+    `/api/rag/scopes/${encodeURIComponent(scope)}/reindex`,
+  );
 export const personalReload = () => postJSON('/api/personal/reload');
 
 export async function personalUpload(
   files: File[],
-  opts?: { redactPii?: boolean | null; ragId?: string },
+  opts?: { redactPii?: boolean | null; ragId?: string; scope?: string },
 ): Promise<{ uploaded: string[]; failed_count: number; errors: string[]; job_ids: string[] }> {
   // A dropped folder can hold thousands of files: send it in several
   // requests (each one ingest job) instead of one giant body.
@@ -1201,6 +1208,8 @@ export async function personalUpload(
     if (opts?.redactPii != null) fd.append('redact_pii', String(opts.redactPii));
     // Which knowledge base receives the files; omitted → the default base.
     if (opts?.ragId) fd.append('rag_id', opts.ragId);
+    // A purpose-bound sub-index instead of the corpus; omitted → the corpus.
+    if (opts?.scope) fd.append('scope', opts.scope);
     const res = await fetch('/api/personal/upload', { method: 'POST', body: fd, credentials: 'same-origin' });
     if (!res.ok) {
       const detail = await res.json().then((j) => j?.detail).catch(() => null);
@@ -1425,9 +1434,12 @@ export interface RagChunkHit {
   snippet: string;
 }
 /** Literal keyword scan across every indexed chunk (explorer search box). */
-export const searchRagChunks = (q: string, ragId?: string) =>
+export const searchRagChunks = (q: string, ragId?: string, scope?: string) =>
   getJSON<{ available: boolean; query: string; count: number; hits: RagChunkHit[]; error?: string }>(
-    withRag(`/api/rag/documents/search?q=${encodeURIComponent(q)}`, ragId),
+    withRag(
+      `/api/rag/documents/search?q=${encodeURIComponent(q)}${scope ? `&scope=${encodeURIComponent(scope)}` : ''}`,
+      ragId,
+    ),
   );
 export const fetchRagChunks = (source: string, ragId?: string) =>
   getJSON<{ available: boolean; source: string; chunks: RagChunk[]; error?: string }>(

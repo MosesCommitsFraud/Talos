@@ -1385,16 +1385,15 @@ const de: typeof en = {
       deleted: '{{n}} entfernt',
     },
     scopes: {
-      title: 'Zweckgebundene Teil-Indizes',
+      title: 'Mini-RAGs',
       badge: 'Mini-RAG',
       intro:
-        'Kleine Indizes, die eine {{brand}}-Funktion in dieser Wissensdatenbank für ihren eigenen Zweck hält. Sie tauchen in der normalen Suche nie auf und zählen oben nicht als Dokumente mit.',
+        'Kleine Indizes, die eine {{brand}}-Funktion für ihren eigenen Zweck hält. Sie tauchen in der normalen Suche nie auf und zählen oben nicht als Dokumente mit.',
       empty: 'leer',
-      managedAt: 'Verwaltet unter {{where}}',
       plusMini: 'zusätzlich Mini-RAG: {{names}}',
-      where: {
-        'sql-settings': 'Einstellungen → SQL',
-      },
+      reindexAll: 'Alle neu indexieren',
+      reindexQueued: '{{n}} Datei(en) werden neu indexiert.',
+      reindexPartial: '{{n}} Datei(en) werden neu indexiert. Datei nicht mehr vorhanden: {{names}}',
       item: {
         sql: {
           name: 'SQL-Schema',
