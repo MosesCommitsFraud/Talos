@@ -61,12 +61,33 @@ export function RagWorkspace() {
     [setBaseId],
   );
 
-  // Back/forward between deep-linked bases.
+  // Anything that replaces the form inside this workspace asks first, as
+  // leaving the workspace does through `setView`.
+  const guarded = (proceed: () => void) => {
+    const guard = useUi.getState().leaveGuard;
+    if (guard) guard(proceed);
+    else proceed();
+  };
+
+  // Back/forward between deep-linked bases. The browser has already moved the
+  // URL by now, so it goes back to the current space until the user has decided.
   useEffect(() => {
-    const onHash = () => setSpaceState(spaceFromHash());
+    const onHash = () => {
+      const next = spaceFromHash();
+      const guard = useUi.getState().leaveGuard;
+      if (!guard) {
+        setSpaceState(next);
+        return;
+      }
+      history.replaceState(null, '', hashFor(space));
+      guard(() => {
+        history.replaceState(null, '', hashFor(next));
+        setSpaceState(next);
+      });
+    };
     window.addEventListener('hashchange', onHash);
     return () => window.removeEventListener('hashchange', onHash);
-  }, []);
+  }, [space]);
 
   // Entering the workspace at #/rag/<id> must select that base before the
   // panels below read it.
@@ -89,7 +110,9 @@ export function RagWorkspace() {
             <button
               type="button"
               onClick={() =>
-                space.kind === 'overview' ? setView('chat') : setSpace({ kind: 'overview' })
+                space.kind === 'overview'
+                  ? setView('chat')
+                  : guarded(() => setSpace({ kind: 'overview' }))
               }
               aria-label={
                 space.kind === 'overview' ? t('rag.backToChat') : t('rag.backToOverview')
@@ -113,7 +136,9 @@ export function RagWorkspace() {
                     <button
                       key={k}
                       type="button"
-                      onClick={() => setTab(k)}
+                      onClick={() => {
+                        if (k !== tab) guarded(() => setTab(k));
+                      }}
                       className={cn(
                         'flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium transition-colors',
                         tab === k

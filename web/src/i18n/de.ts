@@ -2023,6 +2023,9 @@ const de: typeof en = {
       },
       saved: 'Gespeichert',
       discard: 'Verwerfen',
+      leaveTitle: 'Änderungen speichern?',
+      leaveText: 'Du hast diese Einstellungen geändert, aber noch nicht gespeichert.',
+      leaveDiscard: 'Nicht speichern',
       secretSet: 'Gespeichert',
       testSavedHint: 'Prüft die gespeicherten Einstellungen. Einzelne Dienste testest du mit „Testen“ auch ungespeichert.',
       laneMode: {

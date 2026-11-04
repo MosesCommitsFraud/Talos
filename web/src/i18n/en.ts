@@ -2016,6 +2016,9 @@ const en = {
       },
       saved: 'Saved',
       discard: 'Discard',
+      leaveTitle: 'Save changes?',
+      leaveText: 'You changed these settings but have not saved them yet.',
+      leaveDiscard: "Don't save",
       secretSet: 'Saved',
       testSavedHint: 'Checks the saved settings. Use "Test" on a single service to try unsaved values.',
       laneMode: {

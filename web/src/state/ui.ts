@@ -43,6 +43,10 @@ interface UiState {
   /** Which top-level surface is shown (chat vs. the /rag workspace). */
   view: AppView;
   setView: (view: AppView) => void;
+  /** Set by a form while it holds unsaved work. Leaving goes through it, and it
+   *  calls `proceed` once the user has decided; if they stay, it never does. */
+  leaveGuard: ((proceed: () => void) => void) | null;
+  setLeaveGuard: (guard: ((proceed: () => void) => void) | null) => void;
   /** Right-side preview panel. The session's file list lives in the chat
    *  header's file menu; the panel only ever shows `preview`. */
   artifactsOpen: boolean;
@@ -88,20 +92,27 @@ interface UiState {
   setCreateProjectOpen: (open: boolean) => void;
 }
 
-export const useUi = create<UiState>((set) => ({
+export const useUi = create<UiState>((set, get) => ({
   view: viewFromHash(),
   setView: (view) => {
-    // Keep the URL hash in sync so the workspace is shareable/refresh-safe,
-    // without pulling in a router.
-    if (typeof history !== 'undefined') {
-      history.replaceState(
-        null,
-        '',
-        view === 'chat' ? location.pathname + location.search : `#/${view}`,
-      );
-    }
-    set({ view });
+    const go = () => {
+      // Keep the URL hash in sync so the workspace is shareable/refresh-safe,
+      // without pulling in a router.
+      if (typeof history !== 'undefined') {
+        history.replaceState(
+          null,
+          '',
+          view === 'chat' ? location.pathname + location.search : `#/${view}`,
+        );
+      }
+      set({ view });
+    };
+    const { leaveGuard, view: current } = get();
+    if (leaveGuard && view !== current) leaveGuard(go);
+    else go();
   },
+  leaveGuard: null,
+  setLeaveGuard: (leaveGuard) => set({ leaveGuard }),
   artifactsOpen: false,
   setArtifactsOpen: (artifactsOpen) => set(artifactsOpen ? { artifactsOpen } : { artifactsOpen, previewFullscreen: false }),
   previewFullscreen: false,

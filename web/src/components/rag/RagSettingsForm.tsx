@@ -16,8 +16,10 @@ import {
 } from '@/api/client';
 import { cn } from '@/lib/utils';
 import { useRagConsole } from '@/state/ragConsole';
+import { useUi } from '@/state/ui';
 import { Page, Section, Segmented } from '../SettingsDialog';
 import { Button } from '../ui/button';
+import { Dialog, DialogContent, DialogSection } from '../ui/dialog';
 import { Input, Switch, Textarea, Tooltip } from '../ui/misc';
 
 interface EndpointTest {
@@ -257,6 +259,24 @@ export function RagSettingsForm({
   });
   const test = useMutation({ mutationFn: testRagConfig });
 
+  const dirty =
+    !!draft && (inherit.size > 0 || JSON.stringify(draft) !== JSON.stringify(baseline));
+
+  // While there is something to lose, leaving waits for the user's answer. A
+  // closing tab can't wait for this dialog, so it gets the browser's own prompt.
+  const setLeaveGuard = useUi((s) => s.setLeaveGuard);
+  const [pendingLeave, setPendingLeave] = useState<(() => void) | null>(null);
+  useEffect(() => {
+    if (!dirty) return;
+    const onBeforeUnload = (e: BeforeUnloadEvent) => e.preventDefault();
+    window.addEventListener('beforeunload', onBeforeUnload);
+    setLeaveGuard((proceed) => setPendingLeave(() => proceed));
+    return () => {
+      window.removeEventListener('beforeunload', onBeforeUnload);
+      setLeaveGuard(null);
+    };
+  }, [dirty, setLeaveGuard]);
+
   if (!draft) {
     return (
       <Page className="p-0 sm:px-0">
@@ -264,8 +284,6 @@ export function RagSettingsForm({
       </Page>
     );
   }
-
-  const dirty = inherit.size > 0 || JSON.stringify(draft) !== JSON.stringify(baseline);
 
   const discard = () => {
     setDraft(baseline);
@@ -787,6 +805,63 @@ export function RagSettingsForm({
   return (
     <Page className="@container gap-6 p-0 sm:px-0">
       {actionsEl && createPortal(actions, actionsEl)}
+
+      <Dialog
+        open={!!pendingLeave}
+        onOpenChange={(open) => {
+          if (!open && !save.isPending) setPendingLeave(null);
+        }}
+      >
+        <DialogContent
+          className="w-[min(440px,92vw)]"
+          title={t('settings.rag.leaveTitle')}
+          description={t('settings.rag.leaveText')}
+        >
+          <DialogSection className="flex flex-col gap-3">
+            {save.isError && (
+              <p role="alert" className="text-xs text-destructive-foreground">
+                {(save.error as Error).message}
+              </p>
+            )}
+            <div className="flex flex-wrap justify-end gap-2">
+              <Button
+                size="sm"
+                variant="ghost"
+                disabled={save.isPending}
+                onClick={() => setPendingLeave(null)}
+              >
+                {t('common.cancel')}
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={save.isPending}
+                onClick={() => {
+                  discard();
+                  pendingLeave?.();
+                  setPendingLeave(null);
+                }}
+              >
+                {t('settings.rag.leaveDiscard')}
+              </Button>
+              <Button
+                size="sm"
+                disabled={save.isPending}
+                onClick={() =>
+                  save.mutate(draft, {
+                    onSuccess: () => {
+                      pendingLeave?.();
+                      setPendingLeave(null);
+                    },
+                  })
+                }
+              >
+                {save.isPending ? t('common.saving') : t('common.save')}
+              </Button>
+            </div>
+          </DialogSection>
+        </DialogContent>
+      </Dialog>
 
       {perBase ? (
         <p className="text-[13px] leading-snug text-muted-foreground">{t('rag.settings.baseIntro')}</p>
