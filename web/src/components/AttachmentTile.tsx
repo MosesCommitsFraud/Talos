@@ -1,5 +1,7 @@
-import { previewKind } from '@/lib/files';
+import { useState } from 'react';
+import { fileTypeLabel, previewKind } from '@/lib/files';
 import { useThumbnail } from '@/lib/thumbnails';
+import { cn } from '@/lib/utils';
 import { useUi } from '@/state/ui';
 import { FileTypeIcon } from './FileTypeIcon';
 
@@ -70,25 +72,86 @@ export function FilePreviewFace({
   );
 }
 
-/** One attachment as a square tile — the composer strip and the sent-message
- *  strip share it, so a file looks the same before and after it is sent. */
+/** Edge of an attachment tile. A sent image may grow to twice this wide. */
+export const ATTACHMENT_TILE_SIZE = 120;
+
+/** Natural shape of images already seen, so a tile reopened later (or the sent
+ *  copy of a tile from the composer) has its final width from the first paint
+ *  and the strip doesn't rewrap under the reader. */
+const imageAspects = new Map<string, number>();
+
+/** A document's face: its name, with the type as a badge underneath. */
+function DocumentFace({ name, mime }: { name: string; mime?: string }) {
+  return (
+    <div className="flex size-full min-w-0 flex-col justify-between gap-1.5 p-2.5 text-left">
+      <span className="line-clamp-4 text-xs leading-snug font-medium [overflow-wrap:anywhere] text-strong">{name}</span>
+      <span className="self-start rounded-md border border-foreground/15 px-1.5 py-px text-[10px] leading-4 font-medium tracking-wide text-muted-foreground">
+        {fileTypeLabel(name, mime)}
+      </span>
+    </div>
+  );
+}
+
+/** One attachment as a tile — the composer strip and the sent-message strip
+ *  share it, so a file looks the same before and after it is sent.
+ *
+ *  Always `size` tall and at least `size` wide. An image is shown whole; with
+ *  `dynamic` a landscape one widens up to 2:1, so a sent row fills according to
+ *  what is in it rather than as a row of identical boxes. */
 export function AttachmentTile({
   url,
   name,
   mime,
-  size = 56,
+  size = ATTACHMENT_TILE_SIZE,
+  dynamic = false,
 }: {
   url: string;
   name: string;
   mime?: string;
   size?: number;
+  dynamic?: boolean;
 }) {
+  const kind = previewKind(name, mime);
+  const isImage = kind === 'image';
+  const isPdf = kind === 'pdf';
+  const maxWidth = dynamic ? size * 2 : size;
+  const thumb = useThumbnail(isImage || isPdf ? url : '', name, mime, isImage ? maxWidth : size, size, isImage ? 'contain' : 'cover');
+  const [aspect, setAspect] = useState(() => imageAspects.get(url));
+  const width = dynamic && isImage && aspect ? Math.round(Math.min(maxWidth, Math.max(size, size * aspect))) : size;
+  const showsFile = (isImage || isPdf) && !thumb.failed;
   return (
     <div
-      className="overflow-hidden rounded-lg border bg-muted"
-      style={{ width: size, height: size }}
+      className="relative max-w-full overflow-hidden rounded-xl border border-foreground/12 bg-muted/60 transition-[width] duration-200 ease-out dark:bg-foreground/[0.04]"
+      style={{ width, height: size }}
     >
-      <FilePreviewFace url={url} name={name} mime={mime} width={size} height={size} />
+      {showsFile ? (
+        // The box stays mounted while the thumbnail is generated: it is what
+        // the observer watches, and it holds the tile's shape meanwhile.
+        <div ref={thumb.ref} className="size-full">
+          {thumb.src && (
+            <img
+              src={thumb.src}
+              alt=""
+              decoding="async"
+              onLoad={(e) => {
+                if (!isImage || !e.currentTarget.naturalHeight) return;
+                const measured = e.currentTarget.naturalWidth / e.currentTarget.naturalHeight;
+                imageAspects.set(url, measured);
+                setAspect(measured);
+              }}
+              // A tiny icon stays its own size rather than being blown up.
+              className={cn('size-full', isImage ? 'object-scale-down' : 'object-cover')}
+            />
+          )}
+          {isPdf && (
+            <span className="absolute start-1.5 bottom-1.5 rounded-md bg-background/85 px-1.5 py-px text-[10px] leading-4 font-medium tracking-wide text-muted-foreground backdrop-blur-sm">
+              {fileTypeLabel(name, mime)}
+            </span>
+          )}
+        </div>
+      ) : (
+        <DocumentFace name={name} mime={mime} />
+      )}
     </div>
   );
 }

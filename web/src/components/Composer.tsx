@@ -1,6 +1,5 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
-  ArrowUpIcon,
   CirclePauseIcon,
   CircleStopIcon,
   CornerDownLeftIcon,
@@ -14,19 +13,17 @@ import {
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
-import { fetchCapabilities, uploadDownloadUrl, uploadFiles, type UploadedFile } from '@/api/client';
-import type { ArtifactSelection } from '@/api/types';
+import { fetchCapabilities, uploadFiles, type UploadedFile } from '@/api/client';
 import { useChat } from '@/state/chat';
 import { usePrefs } from '@/state/prefs';
 import { useUi } from '@/state/ui';
 import { cn } from '@/lib/utils';
 import { useDictation } from '@/lib/useDictation';
 import { artifactSelectionLocator } from '@/lib/artifactSelection';
-import { previewKind } from '@/lib/files';
 import { ContextMeter } from './ContextMeter';
-import { FilePreviewFace, hasVisualPreview, openUploadViewer } from './AttachmentTile';
-import { FileTypeIcon } from './FileTypeIcon';
 import { ComposerAddMenu, DeepResearchChip } from './ComposerAddMenu';
+import { ComposerAttachments } from './ComposerAttachments';
+import { QueuedMessages } from './QueuedMessages';
 import { ModelEffortPicker } from './ModelEffortPicker';
 import { Tooltip } from './ui/misc';
 
@@ -38,8 +35,10 @@ const MAX_INPUT_HEIGHT = 220;
  *  exactly on the text line it belongs to instead of a pixel above it. */
 const INLINE_CONTROL = 'size-[1.625rem]';
 
-/** Gap the text keeps from the controls pinned inside the box (matches the
- *  box's own 8px inset, so the add button is evenly spaced all round). */
+/** One icon control inside the box: bright glyph, plate only on hover. */
+const CONTROL = `flex shrink-0 cursor-pointer items-center justify-center rounded-lg transition-colors active:scale-95 [&_svg]:size-[18px] [&_svg]:stroke-[2.25] ${INLINE_CONTROL}`;
+
+/** Gap the text keeps from the controls pinned inside the box. */
 const CONTROL_GAP = 8;
 
 /** Typography shared by the input and its measuring twin — they have to wrap
@@ -71,16 +70,14 @@ const SLASH_COMMANDS: SlashCommand[] = [
   { name: 'skill', description: 'Create a reusable skill from a workflow or description', takesText: true },
 ];
 
-/** Dictate button, now inside the input box beside the send control. The
- *  microphone chooser that used to sit next to it moved into the add menu. */
+/** Dictate button, the rightmost control in the input box. The microphone
+ *  chooser that used to sit next to it moved into the add menu. */
 function MicButton({
   status,
   onClick,
-  hero,
 }: {
   status: 'idle' | 'recording' | 'finalizing';
   onClick: () => void;
-  hero?: boolean;
 }) {
   const { t } = useTranslation();
   const label = status === 'recording' ? t('composer.dictateStop') : t('composer.dictate');
@@ -92,11 +89,10 @@ function MicButton({
         disabled={status === 'finalizing'}
         aria-label={label}
         className={cn(
-          'flex shrink-0 cursor-pointer items-center justify-center rounded-full transition-colors active:scale-95',
-          hero ? 'size-8 [&_svg]:size-4' : `${INLINE_CONTROL} [&_svg]:size-4`,
+          CONTROL,
           status === 'recording'
             ? 'animate-pulse bg-red-500/10 text-red-500 hover:bg-red-500/20'
-            : 'text-foreground/45 hover:bg-accent hover:text-foreground/70 disabled:opacity-50 dark:text-foreground/35 dark:hover:text-foreground/60',
+            : 'text-foreground/70 hover:bg-accent hover:text-foreground disabled:opacity-50',
         )}
       >
         {status === 'finalizing' ? <Loader2Icon className="animate-spin" /> : <MicIcon />}
@@ -105,25 +101,38 @@ function MicButton({
   );
 }
 
-/** Stop control shown while a turn streams. Same treatment as the send glyph it
- *  replaces — plate-only hover, glyph tracking the composer frame — so the swap
- *  doesn't change the control's weight mid-turn. */
-function StopButton({ onClick, hero }: { onClick: () => void; hero?: boolean }) {
+/** The control left of the mic. While a turn runs on an empty box it is the
+ *  filled rounded square that stops it; once there is something to send it is
+ *  Enter; on an idle, empty box there is nothing to act on, so it isn't there. */
+function PrimaryAction({
+  kind,
+  onStop,
+  onSend,
+}: {
+  kind: 'stop' | 'send' | null;
+  onStop: () => void;
+  onSend: () => void;
+}) {
   const { t } = useTranslation();
+  if (!kind) return null;
+  const label = kind === 'stop' ? t('composer.stop') : t('composer.send');
   return (
-    <Tooltip label={t('composer.stop')} side="top">
+    <Tooltip label={label} side="top">
       <button
+        // Keyed, so each swap plays the small entrance instead of morphing.
+        key={kind}
         type="button"
-        onClick={onClick}
-        aria-label={t('composer.stop')}
-        className={cn(
-          'flex shrink-0 cursor-pointer items-center justify-center rounded-sm text-foreground/20 transition-colors hover:bg-accent active:scale-95 group-focus-within/composer:text-foreground/40 dark:text-foreground/10 dark:group-focus-within/composer:text-foreground/20',
-          hero ? 'size-8' : INLINE_CONTROL,
-        )}
+        onClick={kind === 'stop' ? onStop : onSend}
+        aria-label={label}
+        className={cn(CONTROL, 'composer-control-in text-foreground/90 hover:bg-accent hover:text-foreground')}
       >
-        <svg width={hero ? 16 : 15} height={hero ? 16 : 15} viewBox="0 0 12 12" fill="none" aria-hidden="true">
-          <rect x="1.5" y="1.5" width="9" height="9" rx="2" stroke="currentColor" strokeWidth="1.4" />
-        </svg>
+        {kind === 'stop' ? (
+          <svg viewBox="0 0 12 12" aria-hidden="true" className="!size-3">
+            <rect width="12" height="12" rx="3" fill="currentColor" />
+          </svg>
+        ) : (
+          <CornerDownLeftIcon aria-hidden="true" />
+        )}
       </button>
     </Tooltip>
   );
@@ -158,12 +167,6 @@ export function Composer() {
   const [dragging, setDragging] = useState(false);
   const [slashIndex, setSlashIndex] = useState(0);
   const [commandError, setCommandError] = useState('');
-  const [queuedMessages, setQueuedMessages] = useState<Array<{
-    id: string;
-    text: string;
-    attachments: UploadedFile[];
-    artifactSelection?: ArtifactSelection;
-  }>>([]);
   const dragDepth = useRef(0);
   const textarea = useRef<HTMLTextAreaElement>(null);
   const mirror = useRef<HTMLDivElement>(null);
@@ -178,6 +181,7 @@ export function Composer() {
   const sessionId = useChat((s) => s.sessionId);
   const send = useChat((s) => s.send);
   const stop = useChat((s) => s.stop);
+  const enqueue = useChat((s) => s.enqueue);
   const goal = useChat((s) => s.goal);
   const startGoal = useChat((s) => s.startGoal);
   const pauseGoal = useChat((s) => s.pauseGoal);
@@ -193,9 +197,10 @@ export function Composer() {
   // A draft with no session yet is the new-chat screen: the box grows into the
   // hero layout that carries its own control row.
   const hero = sessionId === null;
-  // Typing during a turn queues the message, so the send control stays a send
-  // control; the stop disc only replaces it while there is nothing to queue.
-  const showStop = streaming && !text.trim() && pending.length === 0;
+  // Typing during a turn queues the message, so it reads as Enter then too; the
+  // stop square only stands there while there is nothing to queue.
+  const hasContent = !!text.trim() || pending.length > 0;
+  const primaryAction = hasContent ? 'send' : streaming ? 'stop' : null;
 
   const slashMatch = text.match(/^\/([^\s]*)$/);
   const slashItems = slashMatch
@@ -232,24 +237,6 @@ export function Composer() {
     if (rowTop < visibleTop) menu.scrollTop = Math.max(0, visibleTop - rowHeight);
     else if (rowBottom > visibleBottom) menu.scrollTop = visibleTop + rowHeight;
   }, [slashIndex, slashItems.length]);
-
-  // Messages submitted during a turn wait in FIFO order. Removing the item
-  // before send prevents this effect from dispatching it twice when the store
-  // updates several times during send setup.
-  useEffect(() => {
-    if (streaming || queuedMessages.length === 0) return;
-    const next = queuedMessages[0];
-    setQueuedMessages((items) => items.filter((item) => item.id !== next.id));
-    void send(next.text, { attachments: next.attachments, artifactSelection: next.artifactSelection });
-  }, [streaming, queuedMessages, send]);
-
-  const steerQueuedMessage = (id: string) => {
-    setQueuedMessages((items) => {
-      const selected = items.find((item) => item.id === id);
-      return selected ? [selected, ...items.filter((item) => item.id !== id)] : items;
-    });
-    stop();
-  };
 
   const executeImmediate = async (name: string) => {
     setCommandError('');
@@ -356,14 +343,14 @@ export function Composer() {
   };
 
   // Widths change without the text changing: mount, viewport resize, and the
-  // control set itself (mic appearing once capabilities load, send ↔ stop).
+  // control set itself (mic appearing once capabilities load, Enter ↔ stop ↔ none).
   useEffect(() => {
     autoresize();
     const onResize = () => autoresize();
     window.addEventListener('resize', onResize);
     return () => window.removeEventListener('resize', onResize);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hero, caps?.voice, showStop, dictating, prefs.visibility.composerAttach, prefs.deepResearch]);
+  }, [hero, caps?.voice, primaryAction, dictating, prefs.visibility.composerAttach, prefs.deepResearch]);
 
   const attach = async (files: FileList | File[]) => {
     const list = Array.from(files);
@@ -431,7 +418,7 @@ export function Composer() {
     };
   }, []);
 
-  const submit = async () => {
+  const submit = async (later = false) => {
     const value = text.trim();
     const match = value.match(/^\/(\w+)(?:\s+([\s\S]*))?$/);
     if (streaming) {
@@ -443,12 +430,7 @@ export function Composer() {
         setCommandError('Add a question after /btw.');
         return;
       }
-      setQueuedMessages((items) => [...items, {
-        id: crypto.randomUUID(),
-        text: queuedText,
-        attachments: pending,
-        artifactSelection: artifactSelection ?? undefined,
-      }]);
+      enqueue(queuedText, { attachments: pending, artifactSelection: artifactSelection ?? undefined, later });
       setText('');
       setPending([]);
       setArtifactSelection(null);
@@ -512,6 +494,30 @@ export function Composer() {
     void queryClient.refetchQueries({ queryKey: ['sessions'], type: 'active' });
   };
 
+  // Enter, stop and mic: the same controls in the same order in both layouts.
+  const trailingControls = (
+    <div className="flex items-center gap-2.5">
+      <PrimaryAction
+        kind={primaryAction}
+        onStop={stop}
+        onSend={() => {
+          // Mirrors the Enter key: confirm a running dictation, send otherwise.
+          if (dictation.status === 'recording') dictation.confirm();
+          else void submit();
+        }}
+      />
+      {caps?.voice && (
+        <MicButton
+          status={dictation.status}
+          onClick={() => {
+            if (dictation.status === 'recording') dictation.confirm();
+            else if (dictation.status === 'idle') void dictation.start();
+          }}
+        />
+      )}
+    </div>
+  );
+
   return (
     <div className="mx-auto w-full max-w-[800px] px-4 pb-2">
       {/* Drop overlay — covers only the chat area (portaled into <main>, which is
@@ -526,43 +532,16 @@ export function Composer() {
         </div>,
         dropZone,
       )}
-      {queuedMessages.length > 0 && (
-        <div className="mb-2 space-y-1.5" aria-label={t('composer.queuedMessages')}>
-          {queuedMessages.map((item) => (
-            <div key={item.id} className="flex items-center gap-2 rounded-lg border bg-muted/50 px-3 py-2 text-xs">
-              <span className="shrink-0 font-medium text-muted-foreground">{t('composer.queued')}</span>
-              <span className="min-w-0 flex-1 truncate">{item.text}</span>
-              <Tooltip label={t('composer.steerNow')} side="top">
-                <button
-                  type="button"
-                  onClick={() => steerQueuedMessage(item.id)}
-                  aria-label={t('composer.steerNow')}
-                  className="flex size-6 shrink-0 items-center justify-center rounded-sm text-muted-foreground hover:bg-accent hover:text-foreground"
-                >
-                  <ArrowUpIcon className="size-3.5" />
-                </button>
-              </Tooltip>
-              <button
-                type="button"
-                onClick={() => setQueuedMessages((items) => items.filter((queued) => queued.id !== item.id))}
-                aria-label={t('composer.removeQueued')}
-                className="flex size-6 shrink-0 items-center justify-center rounded-sm text-muted-foreground hover:bg-accent hover:text-destructive"
-              >
-                <XIcon className="size-3.5" />
-              </button>
-            </div>
-          ))}
-        </div>
-      )}
+      <QueuedMessages />
       <div
         className={cn(
           // Light mode: the box shares the page background and is defined by its
-          // frame alone, which steps darker while focused. Dark mode keeps the
-          // raised --card panel, where a flush box would disappear.
+          // frame alone. Dark mode keeps the raised --card panel, where a flush
+          // box would disappear. Focus changes nothing: the caret says it all.
           // The faint lift in light mode: the box shares the page background, so
           // a whisper of shadow is what separates it from the message stream.
           // Dark mode drops it — the --card step already does that job there.
-          'group/composer @container/composer relative rounded-[10px] border border-foreground/14 bg-background shadow-[0_1px_2px_rgba(0,0,0,0.03),0_6px_16px_-8px_rgba(0,0,0,0.07)] transition-colors duration-200 focus-within:border-foreground/32 dark:border-foreground/10 dark:bg-card dark:shadow-none dark:focus-within:border-foreground/20',
+          'group/composer @container/composer relative rounded-[18px] border border-foreground/14 bg-background shadow-[0_1px_2px_rgba(0,0,0,0.03),0_6px_16px_-8px_rgba(0,0,0,0.07)] transition-colors duration-200 dark:border-foreground/10 dark:bg-card dark:shadow-none',
           dragging && 'border-primary/60 ring-2 ring-primary/30',
         )}
       >
@@ -594,53 +573,11 @@ export function Composer() {
             ))}
           </div>
         )}
-        {/* Staged attachments: an image shows itself, anything else shows the
-            glyph with its type baked in (PDF, XLSX, PY…) next to the name. The
-            remove button only surfaces on hover/focus, so a full strip reads as
-            content rather than as a row of close boxes. */}
-        {pending.length > 0 && (
-          <div className="flex flex-wrap gap-2 px-3 pt-2.5">
-            {pending.map((f) => {
-              const name = String(f.name ?? f.id);
-              const isImage = previewKind(name, f.mime) === 'image';
-              return (
-                <div key={f.id} className="group/att relative">
-                  <Tooltip label={name} side="top">
-                    {/* Images and PDFs open their viewer straight from the
-                        composer — the same click they answer once sent. */}
-                    <button
-                      type="button"
-                      onClick={() => openUploadViewer({ url: uploadDownloadUrl(f.id), name, mime: f.mime, sessionId })}
-                      className={cn(
-                        'block text-left transition-opacity',
-                        hasVisualPreview(name, f.mime) ? 'cursor-pointer hover:opacity-80' : 'cursor-default',
-                      )}
-                    >
-                      {isImage ? (
-                        <div className="size-12 overflow-hidden rounded-lg border bg-muted">
-                          <FilePreviewFace url={uploadDownloadUrl(f.id)} name={name} mime={f.mime} width={48} height={48} />
-                        </div>
-                      ) : (
-                        <div className="flex h-12 max-w-48 items-center gap-2 rounded-lg border bg-muted px-2.5 text-xs">
-                          <FileTypeIcon path={name} mime={f.mime} className="size-5 shrink-0 text-muted-foreground" />
-                          <span className="min-w-0 truncate">{name}</span>
-                        </div>
-                      )}
-                    </button>
-                  </Tooltip>
-                  <button
-                    type="button"
-                    aria-label={t('composer.removeFile', { name })}
-                    onClick={() => setPending((p) => p.filter((x) => x.id !== f.id))}
-                    className="absolute -right-1.5 -top-1.5 flex size-4 items-center justify-center rounded-full border bg-background text-muted-foreground opacity-0 transition-opacity hover:text-foreground focus-visible:opacity-100 group-hover/att:opacity-100"
-                  >
-                    <XIcon className="size-2.5" />
-                  </button>
-                </div>
-              );
-            })}
-          </div>
-        )}
+        <ComposerAttachments
+          files={pending}
+          sessionId={sessionId}
+          onRemove={(id) => setPending((p) => p.filter((x) => x.id !== id))}
+        />
         {artifactSelection && (
           <div className="flex flex-wrap gap-1.5 px-3 pt-2.5">
             <span className="inline-flex items-center gap-1.5 rounded-lg border border-primary/25 bg-primary/5 px-2 py-1 text-xs">
@@ -651,7 +588,7 @@ export function Composer() {
           </div>
         )}
 
-        <div ref={inputRow} className={cn('relative', hero ? 'px-3 pb-1 pt-2' : 'p-2')}>
+        <div ref={inputRow} className={cn('relative', hero ? 'px-3.5 pb-1 pt-3' : 'p-2.5')}>
           {/* Text block. In the conversation layout it starts out inset between
               the pinned controls below and widens over them once it wraps —
               autoresize animates those margins, so the text flows into the full
@@ -689,7 +626,7 @@ export function Composer() {
             value={text}
             rows={1}
             autoFocus
-            placeholder={placeholder}
+            placeholder={streaming ? t('composer.placeholderRunning') : placeholder}
             aria-label={t('composer.messageInput')}
             onChange={(e) => { setText(e.target.value); autoresize(); }}
             onKeyDown={(e) => {
@@ -708,7 +645,7 @@ export function Composer() {
               }
               if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault();
-                void submit();
+                void submit(e.ctrlKey || e.metaKey);
               }
             }}
             onPaste={(e) => {
@@ -723,11 +660,11 @@ export function Composer() {
           />
           </div>
           {/* Conversation layout: the controls are pinned to the bottom of the
-              box — add on the left, mic and send/stop on the right — so a
+              box — add on the left, Enter/stop and mic on the right — so a
               growing text block can slide over them instead of pushing them
               around. The new-chat box carries its controls in the row below. */}
           {!hero && prefs.visibility.composerAttach && (
-            <div ref={inputLead} className="absolute bottom-2 start-2 flex items-center gap-1">
+            <div ref={inputLead} className="absolute bottom-2.5 start-2.5 flex items-center gap-1">
               <ComposerAddMenu
                 onAttach={() => fileInput.current?.click()}
                 uploading={uploading}
@@ -738,52 +675,20 @@ export function Composer() {
             </div>
           )}
           {!hero && (
-            <div ref={inputTrail} className="absolute bottom-2 end-2 flex items-center gap-1">
-              {caps?.voice && (
-                <MicButton
-                  status={dictation.status}
-                  onClick={() => {
-                    if (dictation.status === 'recording') dictation.confirm();
-                    else if (dictation.status === 'idle') void dictation.start();
-                  }}
-                />
-              )}
-              {showStop ? (
-                <StopButton onClick={stop} />
-              ) : (
-                <button
-                  type="button"
-                  aria-label={t('composer.send')}
-                  onClick={() => {
-                    // Mirrors the Enter key: confirm a running dictation, send otherwise.
-                    if (dictation.status === 'recording') dictation.confirm();
-                    else void submit();
-                  }}
-                  className={cn(
-                    // Tracks the box border: foreground/10 resting, /20 while the
-                    // composer is focused, so glyph and frame read as one control.
-                    // The hover plate is always there — a glyph with no hit feedback
-                    // reads as decoration. Only the plate reacts: the glyph keeps
-                    // tracking the composer frame so the two stay one control.
-                    'flex shrink-0 cursor-pointer items-center justify-center rounded-sm text-foreground/20 transition-colors group-focus-within/composer:text-foreground/40 hover:bg-accent active:scale-95 dark:text-foreground/10 dark:group-focus-within/composer:text-foreground/20',
-                    INLINE_CONTROL,
-                  )}
-                >
-                  <CornerDownLeftIcon aria-hidden="true" className="size-4" />
-                </button>
-              )}
+            <div ref={inputTrail} className="absolute bottom-2.5 end-2.5 flex items-center gap-1">
+              {trailingControls}
             </div>
           )}
         </div>
 
         {/* New-chat layout: every control sits inside the box, Claude-style —
             the add menu (which carries the knowledge and plan switches) on the
-            left, model+effort and the send control on the right. */}
+            left, model+effort, Enter/stop and the mic on the right. */}
         {hero && (
-          // px-1.5 rather than px-3: the button plate insets its glyph by 6px,
+          // ps-2 rather than ps-3.5: the button plate insets its glyph by 6px,
           // so this is what puts the + glyph on the same left edge as the text
-          // above it, with the same 12px to the bottom of the box.
-          <div className="flex min-w-0 items-center gap-1 ps-1.5 pe-2 pb-2">
+          // above it.
+          <div className="flex min-w-0 items-center gap-1 ps-2 pe-2.5 pb-2.5">
             <input
               ref={fileInput}
               type="file"
@@ -797,29 +702,14 @@ export function Composer() {
                   onAttach={() => fileInput.current?.click()}
                   uploading={uploading}
                   showMic={!!caps?.voice}
+                  className={INLINE_CONTROL}
                 />
               )}
               <DeepResearchChip />
             </div>
-            <div className="flex shrink-0 items-center gap-2">
+            <div className="flex shrink-0 items-center gap-1">
               <ModelEffortPicker visible={prefs.visibility.composerModelPicker} />
-              {showStop ? (
-                <StopButton hero onClick={stop} />
-              ) : empty && pending.length === 0 && caps?.voice && !dictating ? (
-                <MicButton hero status={dictation.status} onClick={() => void dictation.start()} />
-              ) : (
-                <button
-                  type="button"
-                  aria-label={t('composer.send')}
-                  onClick={() => {
-                    if (dictation.status === 'recording') dictation.confirm();
-                    else void submit();
-                  }}
-                  className="flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-[10px] bg-primary text-primary-foreground transition-colors hover:bg-primary/90 active:scale-95"
-                >
-                  <ArrowUpIcon aria-hidden="true" className="size-4" />
-                </button>
-              )}
+              {trailingControls}
             </div>
           </div>
         )}

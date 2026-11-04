@@ -438,31 +438,6 @@ body::after {
   .shimmer-text { animation: none; }
 }
 
-/* ── Sidebar nav icons ──
-   Projects / Artifacts / Customize each answer the hover with one small move —
-   the box lid lifts off, the shapes turn a few degrees, the case tips. A couple
-   of pixels is the whole point: it says the row is live without pulling the eye
-   away from what the reader was doing. */
-.nav-row [class*='nav-anim-'] > svg {
-  transition: transform 200ms cubic-bezier(0.2, 0.8, 0.3, 1);
-}
-/* The archive icon's lid is its first path — moving only that leaves the box
-   itself planted, so the gesture reads as opening rather than as a jump. */
-.nav-row .nav-anim-lift > svg > :first-child {
-  transition: transform 200ms cubic-bezier(0.2, 0.8, 0.3, 1);
-  transform-box: fill-box;
-  transform-origin: center;
-}
-.nav-row:hover .nav-anim-lift > svg > :first-child { transform: translateY(-1.5px); }
-.nav-row:hover .nav-anim-shapes > svg { transform: rotate(15deg); }
-.nav-row:hover .nav-anim-tilt > svg { transform: rotate(-7deg); }
-@media (prefers-reduced-motion: reduce) {
-  .nav-row [class*='nav-anim-'] > svg,
-  .nav-row .nav-anim-lift > svg > :first-child { transition: none; }
-  .nav-row:hover [class*='nav-anim-'] > svg,
-  .nav-row:hover .nav-anim-lift > svg > :first-child { transform: none; }
-}
-
 /* ── Toast ──
    The bottom-left confirmation pill. It rises from below the corner it lives
    in, so the motion reads as the toast arriving rather than as the layout
@@ -562,6 +537,49 @@ body::after {
 }
 @media (prefers-reduced-motion: reduce) {
   .digit-roll { animation: none; }
+}
+
+/* ── Composer attachments and controls ──
+   A tile arrives with a small lift. A removed one fades while its width and the
+   gap after it collapse, so its neighbours slide into the hole; when it was the
+   last one the strip folds away with it, so the box doesn't jump. */
+.composer-control-in {
+  animation: composer-control-in 120ms ease-out;
+}
+@keyframes composer-control-in {
+  from { opacity: 0; transform: scale(0.8); }
+  to { opacity: 1; transform: none; }
+}
+.attachment-tile-in {
+  animation: attachment-tile-in 180ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+@keyframes attachment-tile-in {
+  from { opacity: 0; transform: scale(0.92); }
+  to { opacity: 1; transform: none; }
+}
+.attachment-tile-leaving {
+  overflow: hidden;
+  pointer-events: none;
+  animation: attachment-tile-out 200ms cubic-bezier(0.4, 0, 0.2, 1) forwards;
+}
+@keyframes attachment-tile-out {
+  from { opacity: 1; width: 120px; margin-inline-end: 0; transform: scale(1); }
+  to { opacity: 0; width: 0; margin-inline-end: -0.5rem; transform: scale(0.88); }
+}
+.attachment-strip-leaving {
+  overflow: hidden;
+  animation: attachment-strip-out 200ms cubic-bezier(0.4, 0, 0.2, 1) forwards;
+}
+@keyframes attachment-strip-out {
+  from { max-height: 130px; padding-top: 0.625rem; }
+  to { max-height: 0; padding-top: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .composer-control-in,
+  .attachment-tile-in { animation: none; }
+  /* Not `none`: the tile only leaves the DOM when its animation ends. */
+  .attachment-tile-leaving,
+  .attachment-strip-leaving { animation-duration: 1ms; }
 }
 
 /* ── Disclosure open/close ──

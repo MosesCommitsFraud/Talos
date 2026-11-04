@@ -635,15 +635,15 @@ function formatSize(bytes?: number): string {
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 }
 
-/** What was sent with the message, as square preview tiles above the bubble:
- *  images and PDFs show their own first face, everything else its type glyph.
- *  Each tile downloads the file; the name and size live in the tooltip, where
- *  they don't cost a line of chat width. */
+/** What was sent with the message, as preview tiles above the bubble: rows of
+ *  one height that wrap from the right, an image as wide as its shape asks for
+ *  (up to 2:1), a PDF its first page, a document its name and type. Each tile
+ *  downloads the file; the size lives in the tooltip. */
 function AttachmentList({ msg }: { msg: UiMessage }) {
   const sessionId = useChat((s) => s.sessionId);
   if (!msg.attachments?.length) return null;
   return (
-    <div className="mb-1 flex max-w-full flex-wrap justify-end gap-1.5">
+    <div className="mb-1.5 flex max-w-full flex-wrap justify-end gap-2">
       {msg.attachments.map((file) => {
         const name = file.name || file.id;
         const url = uploadDownloadUrl(file.id);
@@ -658,9 +658,9 @@ function AttachmentList({ msg }: { msg: UiMessage }) {
               download
               aria-label={label}
               onClick={(e) => { if (openUploadViewer({ url, name, mime: file.mime, sessionId })) e.preventDefault(); }}
-              className="cursor-pointer transition-opacity hover:opacity-80"
+              className="max-w-full cursor-pointer rounded-xl transition-opacity hover:opacity-85"
             >
-              <AttachmentTile url={url} name={name} mime={file.mime} />
+              <AttachmentTile url={url} name={name} mime={file.mime} dynamic />
             </a>
           </Tooltip>
         );

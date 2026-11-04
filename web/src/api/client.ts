@@ -1787,6 +1787,26 @@ export async function resumeChat(opts: {
  *  so the UI can reattach to background runs it knows nothing about. `elapsedMs`
  *  is how long that turn has already been going (server-measured span, rebased
  *  on the local clock by the caller) so the working timer survives a reload. */
+/** Stop a running turn. Resolves once the server has saved what it had. */
+export async function stopChatRun(sessionId: string): Promise<void> {
+  await fetch(`/api/chat/stop/${sessionId}`, { method: 'POST', credentials: 'same-origin' });
+}
+
+/** Hand a running turn a message for its next round boundary. */
+export async function queueChatMessage(sessionId: string, id: string, text: string): Promise<void> {
+  await fetch(`/api/chat/queue/${sessionId}`, {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ id, text }),
+  });
+}
+
+/** Take a queued message back, if the turn hasn't received it yet. */
+export async function unqueueChatMessage(sessionId: string, id: string): Promise<void> {
+  await fetch(`/api/chat/queue/${sessionId}/${id}`, { method: 'DELETE', credentials: 'same-origin' });
+}
+
 export async function fetchActiveRuns(): Promise<{ sessionId: string; elapsedMs: number | null }[]> {
   try {
     const data = await getJSON<{ sessions?: string[]; elapsed_ms?: Record<string, number> }>('/api/chat/active_runs');

@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { compactSession, createSession, deleteMessages, editMessage, fetchActiveRuns, fetchArtifacts, fetchSession, resumeChat, streamChat } from '@/api/client';
+import { compactSession, createSession, deleteMessages, editMessage, fetchActiveRuns, fetchArtifacts, fetchSession, queueChatMessage, resumeChat, stopChatRun, streamChat, unqueueChatMessage } from '@/api/client';
 import type { Artifact, ArtifactSelection, Attachment, ChatEvent, Citation, Metrics, RagSource, ToolCall, UiDraft } from '@/api/types';
 import { documentFileName, isPreviewable, samePath } from '@/lib/files';
 import { timestampMs } from '@/lib/utils';
@@ -14,6 +14,8 @@ export interface UiMessage {
   dbId?: string;
   role: 'user' | 'assistant';
   content: string;
+  /** Typed during a running turn and taken in by it at a round boundary. */
+  queuedMidTurn?: boolean;
   /** Wall-clock (ms) the message was created — drives the relative timestamp
    *  shown under the bubble. Stamped live on send; cold-loaded turns read it
    *  from the backend's metadata.timestamp. */
@@ -145,7 +147,21 @@ interface SessionRuntime {
    *  sidebar "Needs you" status and suppresses the "Done" badge. */
   awaitingInput: boolean;
   goal: GoalRun | null;
+  /** Messages typed during a turn, oldest first, until the turn takes them in
+   *  or they get a turn of their own. */
+  queued: QueuedMessage[];
 }
+
+export interface QueuedMessage {
+  id: string;
+  text: string;
+  attachments: Attachment[];
+  artifactSelection?: ArtifactSelection;
+}
+
+/** A stop in flight per session: resolves once the server has saved the
+ *  interrupted turn, so what is sent next finds it in the history. */
+const stopsInFlight = new Map<string, Promise<void>>();
 
 export interface GoalRun {
   objective: string;
@@ -153,7 +169,7 @@ export interface GoalRun {
   iteration: number;
 }
 
-const emptyRuntime = (): SessionRuntime => ({ messages: [], streaming: false, turnStartedAt: null, abort: null, awaitingInput: false, goal: null });
+const emptyRuntime = (): SessionRuntime => ({ messages: [], streaming: false, turnStartedAt: null, abort: null, awaitingInput: false, goal: null, queued: [] });
 
 interface ChatState {
   /** Per-session live state. Outlives chat switches so background turns keep
@@ -195,6 +211,12 @@ interface ChatState {
    *  mid-turn keeps streaming instead of silently dropping the turn. */
   hydrateActiveRuns: () => Promise<void>;
   stop: () => void;
+  /** Queue a message typed during a turn. `later` keeps it for after this turn;
+   *  otherwise the turn takes it in at its next round boundary. */
+  enqueue: (text: string, opts?: { attachments?: Attachment[]; artifactSelection?: ArtifactSelection; later?: boolean }) => void;
+  /** Interrupt the turn and send this queued message right away. */
+  sendQueuedNow: (id: string) => void;
+  removeQueued: (id: string) => void;
   startGoal: (objective: string) => Promise<void>;
   pauseGoal: () => void;
   resumeGoal: (sessionId?: string) => Promise<void>;
@@ -268,7 +290,8 @@ const rememberLastSession = (id: string | null) => {
  *  replays from the start on reconnect, so these get rebuilt. */
 const dropUnsavedTail = (messages: UiMessage[]): UiMessage[] => {
   let end = messages.length;
-  while (end > 0 && messages[end - 1].role === 'assistant' && !messages[end - 1].dbId) end -= 1;
+  // A message delivered mid-turn is replayed with the turn, like its bubbles.
+  while (end > 0 && !messages[end - 1].dbId && (messages[end - 1].role === 'assistant' || messages[end - 1].queuedMidTurn)) end -= 1;
   return end === messages.length ? messages : messages.slice(0, end);
 };
 
@@ -510,11 +533,21 @@ export function coldLoadMessage(m: HistoryMessage, sessionId: string): UiMessage
   const pendingQuestion = pendingQuestionFromMetadata(m.metadata);
   const plan = planFromMetadata(m.metadata);
   const roundTexts = m.metadata?.round_texts;
+  // Messages this turn took in while it ran.
+  const rawQueued = m.metadata?.queued_messages;
+  const queuedMessages = (Array.isArray(rawQueued) ? rawQueued as Array<{ text?: unknown; round?: unknown }> : []).map((q) => ({
+    round: q.round,
+    message: { id: uid(), role: 'user' as const, content: String(q.text ?? ''), createdAt, queuedMidTurn: true },
+  }));
+  // Ahead of the round that first saw them, where they stood when it streamed.
+  const queuedBefore = (round: number): UiMessage[] =>
+    queuedMessages.filter((q) => q.round === round).map((q) => q.message);
 
   // Single-round / no-tool replies don't persist round_texts — keep the flat
-  // one-bubble shape the live stream also produced for them.
+  // one-bubble shape the live stream also produced for them. A stopped turn has
+  // no rounds either, so what it took in stands ahead of its one bubble.
   if (!Array.isArray(roundTexts) || roundTexts.length <= 1) {
-    return [{
+    return [...queuedMessages.map((q) => q.message), {
       id: uid(),
       dbId,
       role: 'assistant',
@@ -536,11 +569,11 @@ export function coldLoadMessage(m: HistoryMessage, sessionId: string): UiMessage
   // AssistantTurn treats as the turn's answer.
   const rounds = roundTexts.map((rt) => splitThinking(String(rt ?? '')));
   const lastIdx = rounds.length - 1;
-  return rounds.map((round, i) => {
+  return rounds.flatMap((round, i) => {
     const roundNum = i + 1;
     const roundTools = tools?.filter((t) => t.round === roundNum);
     const terminal = i === lastIdx;
-    return {
+    return [...queuedBefore(roundNum), {
       id: uid(),
       dbId: terminal ? dbId : undefined,
       role: 'assistant' as const,
@@ -553,7 +586,7 @@ export function coldLoadMessage(m: HistoryMessage, sessionId: string): UiMessage
       citations: terminal ? citations : undefined,
       pendingQuestion: terminal ? pendingQuestion : undefined,
       plan: terminal ? plan : undefined,
-    };
+    }];
   });
 }
 
@@ -832,6 +865,9 @@ export const useChat = create<ChatState>((set, get) => {
       ? activePreview.path.slice('document:'.length)
       : undefined;
     try {
+      // The bubble is up already; the request waits for a stop still being
+      // saved, or it would overtake the turn it interrupted.
+      await stopsInFlight.get(sid);
       // Two transports, one event handler: a new turn POSTs and reads the
       // response stream, a resume subscribes to the detached server-side run
       // (which replays everything it has emitted so far, then goes live).
@@ -875,6 +911,21 @@ export const useChat = create<ChatState>((set, get) => {
             case 'agent_step':
               startNewRound();
               break;
+            case 'queued_message': {
+              // The turn took it in: from here on it is part of the transcript,
+              // ahead of the round that answers it. Replayed on a resume, hence
+              // the check.
+              const id = String(ev.id);
+              startNewRound();
+              writeRuntime(sid, (rt) => {
+                const queued = rt.queued.filter((item) => item.id !== id);
+                if (rt.messages.some((m) => m.id === id)) return { queued };
+                const at = rt.messages.findIndex((m) => m.id === aiId);
+                const message: UiMessage = { id, role: 'user', content: String(ev.text ?? ''), createdAt: Date.now(), queuedMidTurn: true };
+                return { queued, messages: [...rt.messages.slice(0, at), message, ...rt.messages.slice(at)] };
+              });
+              break;
+            }
             case 'tool_start':
               patchAi((m) => ({
                 tools: [...(m.tools ?? []), { tool: String(ev.tool), command: ev.command as string | undefined, status: 'running' }],
@@ -1149,7 +1200,15 @@ export const useChat = create<ChatState>((set, get) => {
         // setTimeout avoids re-entering send() before this turn's cleanup settles.
         const rt = get().runtimes[sid];
         const goal = rt?.goal;
-        if (goal?.status === 'running' && !rt.awaitingInput) {
+        // What the turn didn't take in gets a turn of its own, ahead of the goal
+        // runner, which picks up again once that one ends.
+        const next = rt?.queued[0];
+        if (next) {
+          writeRuntime(sid, (current) => ({ queued: current.queued.filter((item) => item.id !== next.id) }));
+          setTimeout(() => {
+            void get().send(next.text, { attachments: next.attachments, artifactSelection: next.artifactSelection, targetSessionId: sid });
+          }, 0);
+        } else if (goal?.status === 'running' && !rt.awaitingInput) {
           const answer = [...rt.messages].reverse().find((m) => m.role === 'assistant' && m.content.trim())?.content ?? '';
           if (/\[GOAL_COMPLETE\]/i.test(answer)) {
             writeRuntime(sid, () => ({
@@ -1223,8 +1282,49 @@ export const useChat = create<ChatState>((set, get) => {
   stop: () => {
     const { sessionId, runtimes } = get();
     if (!sessionId) return;
-    runtimes[sessionId]?.abort?.abort();
-    fetch(`/api/chat/stop/${sessionId}`, { method: 'POST', credentials: 'same-origin' }).catch(() => {});
+    const sid = sessionId;
+    const stopping = stopChatRun(sid)
+      .catch(() => {})
+      .finally(() => {
+        if (stopsInFlight.get(sid) === stopping) stopsInFlight.delete(sid);
+      });
+    stopsInFlight.set(sid, stopping);
+    runtimes[sid]?.abort?.abort();
+  },
+
+  enqueue: (text, opts) => {
+    const { sessionId } = get();
+    if (!sessionId) return;
+    const item: QueuedMessage = {
+      id: uid(),
+      text,
+      attachments: opts?.attachments ?? [],
+      artifactSelection: opts?.artifactSelection,
+    };
+    writeRuntime(sessionId, (rt) => ({ queued: [...rt.queued, item] }));
+    // Plain text can join the running turn. Attachments and selections need the
+    // full preprocessing of a turn, so those wait for one of their own.
+    if (!opts?.later && !item.attachments.length && !item.artifactSelection && text.trim()) {
+      void queueChatMessage(sessionId, item.id, text).catch(() => {});
+    }
+  },
+
+  sendQueuedNow: (id) => {
+    const { sessionId } = get();
+    if (!sessionId) return;
+    // First in line: the end of the interrupted turn sends it.
+    writeRuntime(sessionId, (rt) => {
+      const item = rt.queued.find((queued) => queued.id === id);
+      return item ? { queued: [item, ...rt.queued.filter((queued) => queued.id !== id)] } : {};
+    });
+    get().stop();
+  },
+
+  removeQueued: (id) => {
+    const { sessionId } = get();
+    if (!sessionId) return;
+    writeRuntime(sessionId, (rt) => ({ queued: rt.queued.filter((item) => item.id !== id) }));
+    void unqueueChatMessage(sessionId, id).catch(() => {});
   },
 
   edit: async (msgId, content) => {

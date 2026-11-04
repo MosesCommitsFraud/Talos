@@ -14,7 +14,9 @@ import { useEffect, useState } from 'react';
 import type { PDFDocumentLoadingTask, PDFDocumentProxy, PDFWorker } from 'pdfjs-dist';
 import { previewKind } from '@/lib/files';
 
-/** Rendered thumbnails, keyed by source URL + box size. Bounded and LRU-ish:
+export type ThumbnailFit = 'cover' | 'contain';
+
+/** Rendered thumbnails, keyed by source URL + box size + fit. Bounded and LRU-ish:
  *  entries are a few KB each, but a long session shouldn't grow without end. */
 const CACHE_LIMIT = 150;
 const cache = new Map<string, string>();
@@ -86,7 +88,20 @@ function cover(source: CanvasImageSource, sw: number, sh: number, width: number,
   return encode(canvas);
 }
 
-async function imageThumb(url: string, width: number, height: number): Promise<string> {
+/** Shrink `source` to fit inside the box, keeping its shape — for tiles that
+ *  show a screenshot whole. The result's own size carries the aspect ratio. */
+function contain(source: CanvasImageSource, sw: number, sh: number, width: number, height: number): string {
+  const scale = Math.min(width / sw, height / sh);
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.max(1, Math.round(sw * scale));
+  canvas.height = Math.max(1, Math.round(sh * scale));
+  const context = canvas.getContext('2d', { alpha: true });
+  if (!context) throw new Error('no 2d context');
+  context.drawImage(source, 0, 0, canvas.width, canvas.height);
+  return encode(canvas);
+}
+
+async function imageThumb(url: string, width: number, height: number, fit: ThumbnailFit): Promise<string> {
   const res = await fetch(url, { credentials: 'same-origin' });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   const blob = await res.blob();
@@ -95,7 +110,9 @@ async function imageThumb(url: string, width: number, height: number): Promise<s
     // Already tile-sized (icons, small generated images): re-encoding would
     // cost more than it saves, so let the browser load the file itself.
     if (bitmap.width <= width && bitmap.height <= height) return url;
-    return cover(bitmap, bitmap.width, bitmap.height, width, height);
+    return fit === 'contain'
+      ? contain(bitmap, bitmap.width, bitmap.height, width, height)
+      : cover(bitmap, bitmap.width, bitmap.height, width, height);
   } finally {
     bitmap.close();
   }
@@ -133,19 +150,19 @@ async function pdfThumb(url: string, width: number, height: number): Promise<str
   }
 }
 
-function build(url: string, name: string, mime: string | undefined, width: number, height: number): Promise<string> {
+function build(url: string, name: string, mime: string | undefined, width: number, height: number, fit: ThumbnailFit): Promise<string> {
   const kind = previewKind(name, mime);
   if (kind === 'pdf') return lane(() => pdfThumb(url, width, height));
-  return lane(() => imageThumb(url, width, height));
+  return lane(() => imageThumb(url, width, height, fit));
 }
 
 /** Deduplicated across tiles: the same file shown twice renders once. */
-function thumbnail(key: string, url: string, name: string, mime: string | undefined, width: number, height: number): Promise<string> {
+function thumbnail(key: string, url: string, name: string, mime: string | undefined, width: number, height: number, fit: ThumbnailFit): Promise<string> {
   const cached = cache.get(key);
   if (cached) return Promise.resolve(cached);
   let pending = inflight.get(key);
   if (!pending) {
-    pending = build(url, name, mime, width, height)
+    pending = build(url, name, mime, width, height, fit)
       .then((dataUrl) => {
         remember(key, dataUrl);
         return dataUrl;
@@ -165,11 +182,20 @@ export interface Thumbnail {
   failed: boolean;
 }
 
-/** A downscaled face for `url`, generated lazily and cached across mounts. */
-export function useThumbnail(url: string, name: string, mime: string | undefined, width: number, height: number): Thumbnail {
+/** A downscaled face for `url`, generated lazily and cached across mounts.
+ *  `fit` applies to images: `cover` crops to the box, `contain` keeps the whole
+ *  picture. A PDF page is always cropped to the box. */
+export function useThumbnail(
+  url: string,
+  name: string,
+  mime: string | undefined,
+  width: number,
+  height: number,
+  fit: ThumbnailFit = 'cover',
+): Thumbnail {
   const boxWidth = devicePixels(width);
   const boxHeight = devicePixels(height);
-  const key = `${url}|${boxWidth}x${boxHeight}`;
+  const key = `${url}|${boxWidth}x${boxHeight}|${fit}`;
   const [node, setNode] = useState<HTMLElement | null>(null);
   const [src, setSrc] = useState<string | undefined>(() => cache.get(key));
   const [failed, setFailed] = useState(false);
@@ -184,7 +210,7 @@ export function useThumbnail(url: string, name: string, mime: string | undefined
     if (!node || cache.has(key)) return;
     let cancelled = false;
     const start = () => {
-      thumbnail(key, url, name, mime, boxWidth, boxHeight).then(
+      thumbnail(key, url, name, mime, boxWidth, boxHeight, fit).then(
         (dataUrl) => { if (!cancelled) setSrc(dataUrl); },
         () => { if (!cancelled) setFailed(true); },
       );
@@ -207,7 +233,7 @@ export function useThumbnail(url: string, name: string, mime: string | undefined
       cancelled = true;
       observer.disconnect();
     };
-  }, [node, key, url, name, mime, boxWidth, boxHeight]);
+  }, [node, key, url, name, mime, boxWidth, boxHeight, fit]);
 
   return { ref: setNode, src, failed };
 }
