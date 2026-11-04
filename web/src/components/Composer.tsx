@@ -37,7 +37,7 @@ const MAX_INPUT_HEIGHT = 220;
 const INLINE_CONTROL = 'size-[1.625rem] rounded-[7px]';
 
 /** Icons in the box stand at the ends of the scale, a step past the text colour. */
-const CONTROL_COLOR = 'text-neutral-900 dark:text-white';
+const CONTROL_COLOR = 'text-neutral-700 dark:text-white';
 
 /** One icon control inside the box: plate only on hover. */
 const CONTROL = `flex shrink-0 cursor-pointer items-center justify-center transition-colors active:scale-95 [&_svg]:size-[18px] [&_svg]:stroke-[2.25] ${INLINE_CONTROL}`;
@@ -686,9 +686,8 @@ export function Composer() {
       )}
       {commandError && <p className="mt-1 text-center text-xs text-destructive">{commandError}</p>}
 
-      {/* Control row under the box: the AI disclaimer once a conversation is
-          running, and the model+effort picker with the context meter. */}
-      <div className="mt-2 flex min-w-0 flex-nowrap items-center justify-between gap-3">
+      {/* Control row under the box: the model+effort picker with the context meter. */}
+      <div className="mt-2 flex min-w-0 flex-nowrap items-center justify-end gap-3">
         <input
           ref={fileInput}
           type="file"
@@ -697,9 +696,7 @@ export function Composer() {
           onChange={(e) => { if (e.target.files) void attach(e.target.files); e.target.value = ''; }}
         />
 
-        {sessionId && <p className="min-w-0 truncate ps-1 text-xs text-muted-foreground/70">{t('composer.aiDisclaimer')}</p>}
-
-        <div className="ms-auto me-2 flex shrink-0 flex-nowrap items-center justify-end gap-1">
+        <div className="me-2 flex shrink-0 flex-nowrap items-center justify-end gap-1">
           <ModelEffortPicker visible={prefs.visibility.composerModelPicker} />
 
           {sessionId && prefs.visibility.contextMeter && <ContextMeter />}

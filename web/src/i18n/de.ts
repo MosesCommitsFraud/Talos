@@ -275,7 +275,6 @@ const de: typeof en = {
     deepResearch: 'Deep Research',
     deepResearchOff: 'Deep Research – zum Ausschalten klicken',
     deepResearchHint: 'Plant die Frage, schickt parallele Recherche-Agenten los und schreibt einen Bericht mit Quellen. Dauert einige Minuten.',
-    aiDisclaimer: '{{brand}} ist KI und kann Fehler machen. Bitte Antworten prüfen.',
     skills: {
       none: 'Noch keine Skills hochgeladen',
       manage: 'Skills verwalten',

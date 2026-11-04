@@ -272,7 +272,6 @@ const en = {
     deepResearch: 'Deep research',
     deepResearchOff: 'Deep research — click to turn off',
     deepResearchHint: 'Plans the question, sends parallel research agents and writes a cited report. Takes several minutes.',
-    aiDisclaimer: '{{brand}} is AI and can make mistakes. Please double-check responses.',
     skills: {
       none: 'No skills uploaded yet',
       manage: 'Manage skills',
