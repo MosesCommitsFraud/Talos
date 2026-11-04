@@ -68,11 +68,9 @@ export function ModelEffortPicker({
         <button
           type="button"
           aria-label={t('modelPicker.switchModel')}
-          // Roomier than the old ghost pickers, but it steps down outside the
-          // box, where it sits next to the disclaimer rather than the send key.
-          className={cn(
-            'flex h-6 min-w-0 shrink items-center gap-1.5 whitespace-nowrap rounded-lg border border-transparent px-2 text-xs font-medium text-foreground/80 outline-none transition-colors hover:bg-accent hover:text-foreground focus:outline-none focus-visible:outline-none dark:text-foreground/70',
-          )}
+          // Full text colour for the model, so it stands clearly above the muted
+          // effort beside it in both themes.
+          className="flex h-6 min-w-0 shrink items-center gap-1.5 whitespace-nowrap rounded-lg border border-transparent px-2 text-xs font-medium text-foreground outline-none transition-colors hover:bg-accent focus:outline-none focus-visible:outline-none"
         >
           <QwenIcon className="size-3.5 shrink-0" />
           <span className="min-w-0 max-w-32 truncate text-left md:max-w-56">{modelLabel}</span>
