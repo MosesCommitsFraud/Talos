@@ -21,6 +21,7 @@ odfpy==1.4.1
 # Math, optimization, statistics, and equation solving
 sympy==1.14.0
 statsmodels==0.14.6
+autots==1.0.4
 scikit-learn==1.9.0
 networkx==3.6.1
 pulp==2.9.0
