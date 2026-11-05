@@ -13,6 +13,7 @@ import errno
 import json
 import mimetypes
 import os
+import re
 import shutil
 import signal
 import subprocess
@@ -2684,9 +2685,28 @@ _APP_SETTINGS = {
     "mcp_web_inherit": True,
     "mcp_skills_enabled": True,
     "mcp_skills_inherit": True,
+    "mcp_update_rag_open": False,
     "rag_git_repos": [],
 }
 _GIT_RUNS = {}
+_API_TOKENS = [
+    {
+        "id": "a1b2c3d4",
+        "name": "MACS Agenten",
+        "owner": "preview",
+        "token_prefix": "ody_x7Qa",
+        "scopes": ["rag:read", "skills:read"],
+        "is_active": True,
+        "last_used_at": "2026-11-04T16:20:00",
+        "created_at": "2026-10-01T09:00:00",
+    }
+]
+_TOKEN_PROFILES = {
+    "mcp_update": ["rag:update"],
+    "mcp": ["rag:read", "skills:read"],
+    "mcp_web": ["rag:read", "skills:read", "web:read"],
+    "mcp_sql": ["sql:read"],
+}
 
 
 def _save_git_repos(raw):
@@ -2980,6 +3000,9 @@ class PreviewHandler(BaseHTTPRequestHandler):
             return
         if path == "/api/rag/git-sync":
             self._send_json({"repos": _git_sync_status()})
+            return
+        if path == "/api/tokens":
+            self._send_json(_API_TOKENS)
             return
         if path == "/api/auth/status":
             # auth_enabled False ⇒ the React AuthGate renders the app directly.
@@ -3442,6 +3465,24 @@ class PreviewHandler(BaseHTTPRequestHandler):
                 return
             _APP_SETTINGS.update(body)
             self._send_json(_APP_SETTINGS)
+            return
+        if path == "/api/tokens":
+            # Multipart form, and all the page sends is these two short fields.
+            body = self._read_body().decode("utf-8", "replace")
+            fields = dict(re.findall(r'name="(\w+)"\r\n\r\n([^\r]*)\r\n', body))
+            raw = "ody_preview_" + "x" * 32
+            row = {
+                "id": f"t{len(_API_TOKENS)}",
+                "name": fields.get("name", ""),
+                "owner": "preview",
+                "token_prefix": raw[:8],
+                "scopes": _TOKEN_PROFILES.get(fields.get("profile", ""), ["chat"]),
+                "is_active": True,
+                "last_used_at": None,
+                "created_at": "2026-11-05T12:00:00",
+            }
+            _API_TOKENS.append(row)
+            self._send_json({**row, "token": raw})
             return
         if path.startswith("/api/rag/git-sync/"):
             repo_id = path[len("/api/rag/git-sync/") :]
@@ -3940,6 +3981,11 @@ class PreviewHandler(BaseHTTPRequestHandler):
             return
         parsed = urlparse(self.path)
         path = parsed.path
+        if path.startswith("/api/tokens/"):
+            token_id = path[len("/api/tokens/") :]
+            _API_TOKENS[:] = [t for t in _API_TOKENS if t["id"] != token_id]
+            self._send_json({"status": "deleted"})
+            return
         if path == "/api/memories":
             removed = len(_USER_MEMORIES)
             _USER_MEMORIES.clear()

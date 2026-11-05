@@ -98,6 +98,7 @@ import { UsersPanel } from './settings/UsersPanel';
 import { UsagePanel } from './settings/UsagePanel';
 import { McpServersPanel } from './settings/McpServersPanel';
 import { GitSyncSection } from './settings/GitSyncSection';
+import { ApiTokensSection } from './settings/ApiTokensSection';
 import { MemoryPanel } from './settings/MemoryPanel';
 
 export type Panel =
@@ -1626,7 +1627,11 @@ function McpPanel() {
         bases={baseData?.bases ?? []}
         dirty={s.dirty}
         onChange={(repos) => s.setValue('rag_git_repos', repos)}
-      />
+      >
+        <BoolRow s={s} k="mcp_update_rag_open" label={t('settings.mcp.git.openOnLan')} />
+      </GitSyncSection>
+
+      <ApiTokensSection />
 
       <Section
         title={t('settings.mcp.skills')}

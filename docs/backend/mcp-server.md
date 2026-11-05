@@ -32,9 +32,10 @@ endpoint survives a restart and needs no sticky sessions behind a proxy.
 
 ## Authentication
 
-Reuses the existing `ody_` API tokens (**Admin → API Tokens**). The token goes
-in an `Authorization: Bearer` header; `AuthMiddleware` in `app.py` validates it
-before the request reaches the MCP route.
+Reuses the existing `ody_` API tokens, generated under **Settings → MCP Server**. Only
+a hash is stored, so a token is shown once, when it is generated, and a lost one is
+revoked and replaced. The token goes in an `Authorization: Bearer` header;
+`AuthMiddleware` in `app.py` validates it before the request reaches the MCP route.
 
 Three scopes gate the tool catalogue, and a token only ever *sees* the tools it
 may call:
@@ -114,10 +115,11 @@ so the exact list depends on the token's owner.
   point the instance at any host and have it fetch and index what is there. The
   token profile `mcp_update` carries only this scope, for a CI job that calls it
   after a push. **Sync now** on the settings page needs no token. A caller on the
-  local network can do without one too, if `rag:update` is added to `MCP_OPEN_SCOPES`;
-  it is not in the default because this tool changes and removes documents, so it would
-  be open to everyone in that network. Narrow `MCP_OPEN_NETWORKS` to the calling server
-  when you do.
+  local network can do without one too, once `mcp_update_rag_open` is switched on. It is
+  off by default because this tool changes and removes documents, so it would be open
+  to everyone in that network; narrow `MCP_OPEN_NETWORKS` to the calling server when
+  you use it. The switch only ever applies to a caller inside that network, judged
+  by its address, and a forwarded request never counts as one.
 
 The repositories are set up under **Settings → MCP Server**: URL, branch, an optional
 access token, which one is the default, and which folder goes to which knowledge base
@@ -271,6 +273,7 @@ as a logged-in browser session, so the two get their own policy.
 | `mcp_skills_allowed` | Skill names shared in selected mode. Gated names are refused with "not shared over MCP" so a client stops re-spelling them. |
 | `mcp_skills_tools` | Which `skills_*` tools are offered. |
 | `mcp_skills_per_skill_tools` | On (default) = each published skill is also its own `skill_<slug>` tool. Off keeps the `skills_*` tools but stops a large library filling a client's palette — and stops the catalogue listing every procedure by name. |
+| `mcp_update_rag_open` | On = a caller on the token-free network may start `update_rag` without a token. Off (default) = it takes one everywhere. |
 | `rag_git_repos` | The Git repositories `update_rag` syncs from, see [above](#update-from-git-ragupdate). Validated on save: http(s) only, no credentials in the URL. |
 | `mcp_rate_limit_per_minute` | `tools/call` ceiling per API token; 0 (default) = no limit. In-process and per worker — it exists to stop one token walking the index in a loop, not as a distributed quota. Over the limit the caller gets a tool result saying so, not a transport error, so the model waits instead of treating the session as broken. |
 

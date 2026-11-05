@@ -1240,6 +1240,37 @@ export const reindexRagBase = (id: string) =>
 export const adoptLegacySql = (id: string) =>
   postJSON<RagQueuedFiles>(`/api/rag/bases/${encodeURIComponent(id)}/adopt-legacy-sql`);
 
+/* ── API tokens (routes/api_token_routes.py) ── */
+
+export interface ApiToken {
+  id: string;
+  name: string;
+  owner: string | null;
+  token_prefix: string;
+  scopes: string[];
+  is_active: boolean;
+  last_used_at: string | null;
+  created_at: string | null;
+}
+
+export const fetchApiTokens = () => getJSON<ApiToken[]>('/api/tokens');
+
+/** The answer is the only time the full token exists: only its hash is stored. */
+export async function createApiToken(name: string, profile: string): Promise<ApiToken & { token: string }> {
+  const body = new FormData();
+  body.set('name', name);
+  body.set('profile', profile);
+  const res = await fetch('/api/tokens', { method: 'POST', body, credentials: 'same-origin' });
+  if (!res.ok) {
+    const detail = await res.json().then((e) => e.detail).catch(() => '');
+    throw new Error(typeof detail === 'string' && detail ? detail : `HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
+export const deleteApiToken = (id: string) =>
+  postJSON(`/api/tokens/${encodeURIComponent(id)}`, undefined, 'DELETE');
+
 /* ── Git sync of the knowledge bases (src/rag_git_sync.py) ── */
 
 /** Mapping target: the mini RAG of the default database, resolved at each sync. */

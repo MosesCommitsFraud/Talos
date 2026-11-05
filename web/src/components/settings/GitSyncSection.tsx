@@ -81,11 +81,14 @@ export function GitSyncSection({
   bases,
   dirty,
   onChange,
+  children,
 }: {
   repos: GitRepoConfig[];
   bases: RagBase[];
   dirty: boolean;
   onChange: (repos: GitRepoConfig[]) => void;
+  /** Further rows for the section's head, from the page that owns the draft. */
+  children?: React.ReactNode;
 }) {
   const { t } = useTranslation();
   const { data } = useQuery({
@@ -128,6 +131,7 @@ export function GitSyncSection({
         )}
       >
         <p className="pb-2 text-[13px] leading-snug text-muted-foreground">{t('settings.mcp.git.hint')}</p>
+        {children}
         {repos.length === 0 && <Row label={t('settings.mcp.git.empty')} />}
       </Section>
 

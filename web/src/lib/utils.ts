@@ -31,19 +31,25 @@ export function formatDurationMs(ms: number): string {
 }
 
 /** Clipboard write that also works in insecure contexts (plain-HTTP LAN
- *  hosts), where navigator.clipboard is undefined. */
-export async function copyTextToClipboard(text: string): Promise<void> {
+ *  hosts), where navigator.clipboard is undefined. Resolves to whether it worked. */
+export async function copyTextToClipboard(text: string): Promise<boolean> {
   try {
     await navigator.clipboard.writeText(text);
+    return true;
   } catch {
     const area = document.createElement('textarea');
     area.value = text;
     area.style.position = 'fixed';
     area.style.left = '-9999px';
-    document.body.appendChild(area);
+    // Inside an open dialog: its focus trap would take the focus back from anything
+    // outside it, and the selection with it, so nothing would be copied.
+    const host = document.activeElement?.closest('[role="dialog"]') ?? document.body;
+    host.appendChild(area);
+    area.focus();
     area.select();
-    document.execCommand('copy');
+    const copied = document.execCommand('copy');
     area.remove();
+    return copied;
   }
 }
 
