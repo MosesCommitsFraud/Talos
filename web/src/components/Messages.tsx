@@ -585,7 +585,7 @@ export function TurnBody({ turn, showThinking, hideContentFor, settled }: { turn
   );
 }
 
-function ActionIcon({
+export function ActionIcon({
   label,
   onClick,
   children,
@@ -612,7 +612,7 @@ function ActionIcon({
   );
 }
 
-function CopyAction({ text }: { text: string }) {
+export function CopyAction({ text }: { text: string }) {
   const { t } = useTranslation();
   const [copied, setCopied] = useState(false);
   const copy = async () => {

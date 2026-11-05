@@ -1,12 +1,14 @@
+import { XIcon } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { uploadDownloadUrl } from '@/api/client';
 import { useChat } from '@/state/chat';
 import { AttachmentTile } from './AttachmentTile';
 import { CollapsibleText } from './CollapsibleText';
+import { ActionIcon, CopyAction } from './Messages';
 
 /** Messages typed during a turn, as the bubbles they will become, waiting right
  *  above the input. The turn takes them in at its next round boundary; "Send
- *  now" interrupts it instead. */
+ *  now" interrupts it instead, the X takes the message back. */
 export function QueuedMessages() {
   const { t } = useTranslation();
   const queued = useChat((s) => (s.sessionId ? s.runtimes[s.sessionId]?.queued : undefined));
@@ -35,18 +37,15 @@ export function QueuedMessages() {
               <CollapsibleText>{item.text}</CollapsibleText>
             </div>
           )}
-          <div className="mt-1 flex items-center gap-3 pe-1 text-xs text-muted-foreground">
-            <button
-              type="button"
-              onClick={() => remove(item.id)}
-              className="cursor-pointer opacity-0 transition-[opacity,color] group-hover/queued:opacity-100 hover:text-foreground focus-visible:opacity-100 [@media(hover:none)]:opacity-100"
-            >
-              {t('composer.removeQueued')}
-            </button>
+          <div className="mt-1 flex items-center gap-0.5 pe-1 text-xs text-muted-foreground">
+            {item.text && <CopyAction text={item.text} />}
+            <ActionIcon label={t('composer.removeQueued')} onClick={() => remove(item.id)}>
+              <XIcon className="size-3" />
+            </ActionIcon>
             <button
               type="button"
               onClick={() => sendNow(item.id)}
-              className="cursor-pointer transition-colors hover:text-foreground"
+              className="ms-1.5 cursor-pointer transition-colors hover:text-foreground"
             >
               {t('composer.sendNow')}
             </button>
