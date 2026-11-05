@@ -530,8 +530,12 @@ async def serve_generated_image(filename: str, request: Request):
                 _row = _db.query(_GI).filter(_GI.filename == filename).first()
                 # Generated-but-not-yet-imported images have no row → allow.
                 # Row exists with a different owner → 404 (don't confirm existence).
+                # A chat in a project is open to everyone in it, images included.
                 if _row is not None and _row.owner and _row.owner != _user:
-                    raise HTTPException(status_code=404, detail="Image not found")
+                    from src.projects import is_member, project_of_session
+
+                    if not is_member(project_of_session(_row.session_id), _user):
+                        raise HTTPException(status_code=404, detail="Image not found")
                 # Deleted from the Artifacts page → gone everywhere.
                 if _row is not None and _row.is_active is False:
                     raise HTTPException(status_code=404, detail="Image not found")
