@@ -16,12 +16,11 @@ import { cn } from '@/lib/utils';
 import { Button } from '../ui/button';
 import { SearchInput } from '../ui/search';
 import { Switch } from '../ui/misc';
+import { useAuth } from '../auth/AuthGate';
+import { McpServersPanel } from '../settings/McpServersPanel';
 import { EmptyState, Page } from './parts';
 
-/** Tabs the page will grow into. Only Skills is wired today; the others are
- *  listed so the page's shape doesn't change when they land. */
-const TABS = ['skills'] as const;
-type Tab = (typeof TABS)[number];
+type Tab = 'skills' | 'connectors';
 
 function SkillRow({
   skill,
@@ -75,14 +74,19 @@ function SkillRow({
   );
 }
 
-/** The /customize page: what the assistant knows how to do. Skills for now —
- *  the same shared SKILL.md library the settings dialog manages, given room to
- *  breathe (search, descriptions, per-skill enable). */
+/** The /customize page: what the assistant knows how to do and what it can reach.
+ *  Skills is the shared SKILL.md library the settings dialog manages, given room
+ *  to breathe (search, descriptions, per-skill enable). Connectors are the MCP
+ *  servers: admin-only, because /api/mcp is and a stdio connector runs a process
+ *  on the host. */
 export function CustomizeWorkspace() {
   const { t } = useTranslation();
   const qc = useQueryClient();
+  const auth = useAuth();
   const fileRef = useRef<HTMLInputElement>(null);
-  const [tab, setTab] = useState<Tab>('skills');
+  const tabs: Tab[] = auth?.is_admin ? ['skills', 'connectors'] : ['skills'];
+  const [selectedTab, setTab] = useState<Tab>('skills');
+  const tab: Tab = tabs.includes(selectedTab) ? selectedTab : 'skills';
   const [query, setQuery] = useState('');
   const [error, setError] = useState('');
   const { data, isLoading } = useQuery({ queryKey: ['sharedSkills'], queryFn: fetchSharedSkills });
@@ -127,32 +131,34 @@ export function CustomizeWorkspace() {
     <Page
       title={t('sidebar.customize')}
       actions={
-        <>
-          <SearchInput
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder={t('customize.searchPlaceholder')}
-            wrapperClassName="w-56"
-          />
-          <input
-            ref={fileRef}
-            type="file"
-            accept=".md,.zip,text/markdown,application/zip"
-            className="hidden"
-            onChange={(e) => {
-              const f = e.target.files?.[0];
-              if (f) void upload(f);
-              e.target.value = '';
-            }}
-          />
-          <Button onClick={() => fileRef.current?.click()}>
-            <PlusIcon /> {t('customize.addSkill')}
-          </Button>
-        </>
+        tab === 'skills' ? (
+          <>
+            <SearchInput
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder={t('customize.searchPlaceholder')}
+              wrapperClassName="w-56"
+            />
+            <input
+              ref={fileRef}
+              type="file"
+              accept=".md,.zip,text/markdown,application/zip"
+              className="hidden"
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (f) void upload(f);
+                e.target.value = '';
+              }}
+            />
+            <Button onClick={() => fileRef.current?.click()}>
+              <PlusIcon /> {t('customize.addSkill')}
+            </Button>
+          </>
+        ) : undefined
       }
       belowTitle={
         <div className="flex items-center gap-1">
-          {TABS.map((id) => (
+          {tabs.map((id) => (
             <button
               key={id}
               type="button"
@@ -170,34 +176,40 @@ export function CustomizeWorkspace() {
         </div>
       }
     >
-      <p className="mb-3 text-xs text-muted-foreground">{t('settings.skills.intro')}</p>
-      {error && <p className="mb-3 text-xs text-destructive-foreground">{error}</p>}
-      {isLoading && <p className="py-16 text-center text-sm text-muted-foreground">{t('common.loading')}</p>}
-      {!isLoading && skills.length === 0 && (
-        <EmptyState
-          icon={<BookOpenIcon />}
-          title={t(needle ? 'customize.noMatches' : 'customize.emptyTitle')}
-          hint={needle ? undefined : t('customize.emptyHint')}
-          action={
-            needle ? undefined : (
-              <Button onClick={() => fileRef.current?.click()}>
-                <PlusIcon /> {t('customize.addSkill')}
-              </Button>
-            )
-          }
-        />
-      )}
-      {skills.length > 0 && (
-        <div className="overflow-hidden rounded-xl border bg-card">
-          {skills.map((s) => (
-            <SkillRow
-              key={s.name}
-              skill={s}
-              onToggle={(enabled) => toggle.mutate({ name: s.name, enabled })}
-              onDelete={() => void remove(s)}
+      {tab === 'connectors' ? (
+        <McpServersPanel className="px-0 pb-0 sm:px-0" />
+      ) : (
+        <>
+          <p className="mb-3 text-xs text-muted-foreground">{t('settings.skills.intro')}</p>
+          {error && <p className="mb-3 text-xs text-destructive-foreground">{error}</p>}
+          {isLoading && <p className="py-16 text-center text-sm text-muted-foreground">{t('common.loading')}</p>}
+          {!isLoading && skills.length === 0 && (
+            <EmptyState
+              icon={<BookOpenIcon />}
+              title={t(needle ? 'customize.noMatches' : 'customize.emptyTitle')}
+              hint={needle ? undefined : t('customize.emptyHint')}
+              action={
+                needle ? undefined : (
+                  <Button onClick={() => fileRef.current?.click()}>
+                    <PlusIcon /> {t('customize.addSkill')}
+                  </Button>
+                )
+              }
             />
-          ))}
-        </div>
+          )}
+          {skills.length > 0 && (
+            <div className="overflow-hidden rounded-xl border bg-card">
+              {skills.map((s) => (
+                <SkillRow
+                  key={s.name}
+                  skill={s}
+                  onToggle={(enabled) => toggle.mutate({ name: s.name, enabled })}
+                  onDelete={() => void remove(s)}
+                />
+              ))}
+            </div>
+          )}
+        </>
       )}
     </Page>
   );

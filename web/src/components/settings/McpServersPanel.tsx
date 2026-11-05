@@ -387,7 +387,7 @@ function AddServer({ onAdded }: { onAdded: () => void }) {
   );
 }
 
-export function McpServersPanel() {
+export function McpServersPanel({ className }: { className?: string }) {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
   const { data: servers, isLoading, error } = useQuery({
@@ -399,7 +399,7 @@ export function McpServersPanel() {
   const refresh = () => void queryClient.invalidateQueries({ queryKey: SERVERS_KEY });
 
   return (
-    <Page>
+    <Page className={className}>
       <Section title={t('settings.mcpServers.title')} padded>
         <p className="pb-3 text-[13px] text-muted-foreground">{t('settings.mcpServers.intro')}</p>
         {isLoading ? (

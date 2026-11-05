@@ -49,7 +49,8 @@ nh3
 python-dateutil
 cryptography
 bcrypt
-mcp
+# Below 2: mcp 2 drops @server.list_tools() (mcp_servers/) and streamablehttp_client (src/mcp_manager.py).
+mcp<2
 pyotp
 qrcode[pil]
 croniter
