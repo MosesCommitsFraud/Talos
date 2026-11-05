@@ -2056,7 +2056,7 @@ const de: typeof en = {
       git: {
         title: 'Wissen aus Git aktualisieren (update_rag)',
         empty: 'Noch kein Repository eingerichtet.',
-        hint: 'Das Werkzeug update_rag bringt die Wissensdatenbanken auf den Stand des Repositorys: neue und geänderte Dateien werden indexiert, aus dem Repository entfernte verschwinden auch hier. Hochgeladene Dateien und Dateien aus anderen Repositorys bleiben unberührt. Der Aufruf braucht einen Token mit dem Scope rag:update.',
+        hint: 'Das Werkzeug update_rag bringt die Wissensdatenbanken auf den Stand des Repositorys: neue und geänderte Dateien werden indexiert, aus dem Repository entfernte verschwinden auch hier. Ein Upload mit demselben Namen oder Inhalt wie eine Repository-Datei wird durch sie ersetzt. Andere Uploads und Dateien aus anderen Repositorys bleiben unberührt.',
         add: 'Repository hinzufügen',
         newRepo: 'Neues Repository',
         remove: 'Repository entfernen',

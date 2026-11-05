@@ -304,7 +304,8 @@ _TOOL_DEFS: List[Dict[str, Any]] = [
         "description": (
             "Bring the knowledge bases in step with the Git repository configured in "
             "Talos: new and changed files are indexed, files that left the repository "
-            "are removed. Documents from uploads or other repositories are not touched. "
+            "are removed. An upload with the name or content of a repository file is "
+            "replaced by it; other uploads and other repositories are not touched. "
             "Fire-and-forget: the call only starts the job and returns straight away "
             "with its id."
         ),

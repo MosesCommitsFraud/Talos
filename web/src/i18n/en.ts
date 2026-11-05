@@ -2049,7 +2049,7 @@ const en = {
       git: {
         title: 'Update knowledge from Git (update_rag)',
         empty: 'No repository set up yet.',
-        hint: 'The update_rag tool brings the knowledge bases in step with the repository: new and changed files are indexed, files removed from the repository disappear here too. Uploaded files and files from other repositories are not touched. Calling it takes a token with the rag:update scope.',
+        hint: 'The update_rag tool brings the knowledge bases in step with the repository: new and changed files are indexed, files removed from the repository disappear here too. An upload with the same name or content as a repository file is replaced by it. Other uploads and files from other repositories are not touched.',
         add: 'Add repository',
         newRepo: 'New repository',
         remove: 'Remove repository',

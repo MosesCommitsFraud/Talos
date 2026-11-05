@@ -113,7 +113,11 @@ so the exact list depends on the token's owner.
   repository from the administrator's list, never a URL: otherwise a token could
   point the instance at any host and have it fetch and index what is there. The
   token profile `mcp_update` carries only this scope, for a CI job that calls it
-  after a push.
+  after a push. **Sync now** on the settings page needs no token. A caller on the
+  local network can do without one too, if `rag:update` is added to `MCP_OPEN_SCOPES`;
+  it is not in the default because this tool changes and removes documents, so it would
+  be open to everyone in that network. Narrow `MCP_OPEN_NETWORKS` to the calling server
+  when you do.
 
 The repositories are set up under **Settings → MCP Server**: URL, branch, an optional
 access token, which one is the default, and which folder goes to which knowledge base
@@ -123,16 +127,22 @@ files to the normal ingest:
 - **What a repository owns.** A synced document has origin `git` in the document
   register and carries the repository's id. Its logical path is
   `git/<repo id>/<path in the repo>`, so equal names from two repositories stay two
-  documents. A sync adds, updates and removes only documents with its own id; uploads
-  and other repositories are out of its reach. Removing a repository from the list
-  leaves its documents where they are.
-- **No duplicates.** Unchanged files cost a hash at most. A file whose content is
-  already indexed in that base is recorded as a duplicate, as with an upload. If the
-  other copy is deleted, the duplicate takes its place, which is also how manually
-  uploaded files are handed over to the repository: delete the upload, and the Git
-  copy is indexed. Until then a changed file in the repository sits next to the old
-  upload, because the upload is not the sync's to touch. A rename replaces the old
-  document instead of counting as its duplicate.
+  documents. A sync adds, updates and removes only documents with its own id; other
+  repositories are out of its reach. Removing a repository from the list leaves its
+  documents where they are.
+- **A changed file replaces its old version.** Unchanged files cost a hash at most, a
+  changed one becomes a new version of the same document, and a rename replaces the
+  old document.
+- **Uploads of the same document are taken over.** An upload in that base with the
+  name or the content of a repository file is the same document, and the repository's
+  version replaces it once it has been indexed, so nobody has to delete anything and
+  no old version stays next to the new one. The run's message names them. A folder
+  upload has to match the path as well, so `Nord/x.md` is not `x.md`. Uploads under
+  other names with other content, personal documents and members of an archive stay
+  untouched. A later upload of a file the repository holds is replaced by the next
+  sync: the repository decides.
+- **No duplicates.** Content that another repository already holds in that base is
+  recorded as a duplicate, not indexed twice, and takes its place if that copy goes.
 - **Removing needs the whole picture.** If the fetch fails, a configured folder is
   missing or a target base is gone, nothing is removed in that run, and the job says
   why. A renamed folder or a typo in a mapping must not empty a knowledge base. A

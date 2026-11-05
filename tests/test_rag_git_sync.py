@@ -241,7 +241,7 @@ def test_pointing_a_folder_at_another_base_moves_its_documents(env):
 # ---------------------------------------------------------------------------
 
 
-def test_uploads_are_not_touched(env):
+def test_uploads_of_other_documents_are_not_touched(env):
     bases, tmp = env
     stored = upload(bases["default"], tmp, "manuell.md", "Von Hand hochgeladenes Wissen.")
     repo = Repo(tmp)
@@ -295,18 +295,170 @@ def test_equal_names_from_two_repositories_stay_two_documents(env):
 # ---------------------------------------------------------------------------
 
 
-def test_content_already_uploaded_is_not_indexed_twice(env):
+def test_a_change_in_the_repository_replaces_an_uploaded_copy_without_any_deleting(env):
+    """The whole point: upload first, repository later, and nobody cleans up by hand."""
     bases, tmp = env
+    rag = bases["default"]
+    stored = upload(rag, tmp, "handbuch.md", "Erste Fassung des Handbuchs.")
+    repo = Repo(tmp)
+    repo.write("Knowledge/handbuch.md", "Erste Fassung des Handbuchs.")
+    repo.commit()
+
+    first = gs.run(plan_for(repo), bases.__getitem__)
+
+    assert first["outcomes"]["taken_over"] == 1
+    assert "handbuch.md" in first["message"]
+    assert contents(rag) == ["Erste Fassung des Handbuchs."]
+    assert not stored.exists()
+
+    repo.write("Knowledge/handbuch.md", "Zweite Fassung des Handbuchs.")
+    repo.commit()
+    second = gs.run(plan_for(repo), bases.__getitem__)
+
+    assert second["outcomes"]["updated"] == 1
+    assert contents(rag) == ["Zweite Fassung des Handbuchs."]
+    [row] = rag._register().list("kb-default")
+    assert row["origin"] == rd.ORIGIN_GIT
+
+
+def test_an_upload_of_an_older_version_is_replaced_by_its_name(env):
+    bases, tmp = env
+    rag = bases["default"]
+    upload(rag, tmp, "Handbuch.md", "Alte Fassung, hochgeladen vor dem Repository.")
+    repo = Repo(tmp)
+    repo.write("Knowledge/unter/handbuch.md", "Neue Fassung aus dem Repository.")
+    repo.commit()
+
+    result = gs.run(plan_for(repo), bases.__getitem__)
+
+    assert contents(rag) == ["Neue Fassung aus dem Repository."]
+    assert result["outcomes"]["taken_over"] == 1
+    assert result["outcomes"].get("replaced", 0) == 0
+
+
+def test_an_upload_with_the_same_content_is_replaced_whatever_its_name(env):
+    bases, tmp = env
+    rag = bases["default"]
     text = "Dieses Dokument wurde schon einmal hochgeladen."
-    upload(bases["default"], tmp, "manuell.md", text)
+    upload(rag, tmp, "manuell.md", text)
     repo = Repo(tmp)
     repo.write("Knowledge/kopie.md", text)
     repo.commit()
 
     result = gs.run(plan_for(repo), bases.__getitem__)
 
-    assert result["outcomes"]["duplicate"] == 1
-    assert contents(bases["default"]) == [text]
+    assert result["outcomes"]["taken_over"] == 1
+    assert result["outcomes"].get("duplicate", 0) == 0
+    assert contents(rag) == [text]
+    assert names(rag) == ["kopie.md"]
+
+
+def test_a_copy_recorded_before_takeover_existed_is_cleaned_up_when_the_file_changes(env):
+    bases, tmp = env
+    rag = bases["default"]
+    text = "Dieses Dokument wurde schon einmal hochgeladen."
+    upload(rag, tmp, "manuell.md", text)
+    repo = Repo(tmp)
+    repo.write("Knowledge/kopie.md", text)
+    repo.commit()
+    # What an instance holds after a sync that only recorded the duplicate.
+    plan = plan_for(repo)
+    checkout, _ = gs.fetch(plan)
+    [(path, meta)] = gs._wanted_files(plan, checkout)[0]["default"].values()
+    rag.index_files([(path, meta)])
+    row = rag._register().get("kb-default", rd.make_doc_id(meta["logical_path"]))
+    assert row["status"] == rd.DUPLICATE
+
+    repo.write("Knowledge/kopie.md", "Die Datei hat sich im Repository geändert.")
+    repo.commit()
+    gs.run(plan_for(repo), bases.__getitem__)
+
+    assert contents(rag) == ["Die Datei hat sich im Repository geändert."]
+
+
+def test_an_upload_skipped_as_a_copy_does_not_come_back_with_the_old_content(env):
+    bases, tmp = env
+    rag = bases["default"]
+    repo = Repo(tmp)
+    repo.write("Knowledge/handbuch.md", "Erste Fassung des Handbuchs.")
+    repo.commit()
+    gs.run(plan_for(repo), bases.__getitem__)
+    upload(rag, tmp, "handbuch.md", "Erste Fassung des Handbuchs.")
+
+    repo.write("Knowledge/handbuch.md", "Zweite Fassung des Handbuchs.")
+    repo.commit()
+    gs.run(plan_for(repo), bases.__getitem__)
+
+    assert contents(rag) == ["Zweite Fassung des Handbuchs."]
+    assert names(rag) == ["handbuch.md"]
+
+
+def test_a_failed_index_keeps_the_upload(env, monkeypatch):
+    bases, tmp = env
+    rag = bases["default"]
+    stored = upload(rag, tmp, "handbuch.md", "Alte Fassung, hochgeladen vor dem Repository.")
+    repo = Repo(tmp)
+    repo.write("Knowledge/handbuch.md", "Neue Fassung aus dem Repository.")
+    repo.commit()
+
+    def broken(*args, **kwargs):
+        raise RuntimeError("embedder down")
+
+    monkeypatch.setattr(rag, "_write_documents", broken)
+    result = gs.run(plan_for(repo), bases.__getitem__)
+
+    assert result["success"] is False
+    assert stored.is_file()
+    assert contents(rag) == ["Alte Fassung, hochgeladen vor dem Repository."]
+    assert "taken_over" not in result["outcomes"]
+
+
+def test_a_folder_upload_needs_the_same_path_and_personal_files_stay(env):
+    bases, tmp = env
+    rag = bases["default"]
+    other_folder = tmp / "uploads" / "nord.md"
+    other_folder.write_text("Ein anderes Dokument im Ordner Nord.", encoding="utf-8")
+    rag.index_files(
+        [
+            (
+                str(other_folder),
+                {
+                    "source": str(other_folder),
+                    "filename": "handbuch.md",
+                    "type": ".md",
+                    **rd.upload_identity("handbuch.md", "Nord/handbuch.md"),
+                },
+            )
+        ]
+    )
+    personal = tmp / "uploads" / "privat.md"
+    personal.write_text("Eine persönliche Notiz von Anna.", encoding="utf-8")
+    rag.index_files(
+        [
+            (
+                str(personal),
+                {
+                    "source": str(personal),
+                    "filename": "handbuch.md",
+                    "type": ".md",
+                    "owner": "anna",
+                    **rd.upload_identity("handbuch.md"),
+                },
+            )
+        ]
+    )
+    repo = Repo(tmp)
+    repo.write("Knowledge/handbuch.md", "Das Handbuch aus dem Repository.")
+    repo.commit()
+
+    result = gs.run(plan_for(repo), bases.__getitem__)
+
+    assert "taken_over" not in result["outcomes"]
+    assert contents(rag) == [
+        "Das Handbuch aus dem Repository.",
+        "Ein anderes Dokument im Ordner Nord.",
+        "Eine persönliche Notiz von Anna.",
+    ]
 
 
 def test_the_same_file_twice_in_a_repository_is_indexed_once(env):
@@ -322,23 +474,20 @@ def test_the_same_file_twice_in_a_repository_is_indexed_once(env):
     assert contents(bases["default"]) == [text]
 
 
-def test_deleting_the_upload_lets_the_git_copy_take_over(env):
-    """How an instance hands manually uploaded files over to the repository."""
+def test_content_another_repository_holds_is_not_indexed_twice(env):
     bases, tmp = env
-    text = "Dieses Dokument wurde schon einmal hochgeladen."
-    upload(bases["default"], tmp, "manuell.md", text)
-    repo = Repo(tmp)
-    repo.write("Knowledge/kopie.md", text)
-    repo.commit()
-    gs.run(plan_for(repo), bases.__getitem__)
+    text = "Beide Repositorys enthalten denselben Text."
+    first, second = Repo(tmp, "first"), Repo(tmp, "second")
+    first.write("Knowledge/a.md", text)
+    first.commit()
+    second.write("Knowledge/b.md", text)
+    second.commit()
+    gs.run(plan_for(first), bases.__getitem__)
 
-    rag = bases["default"]
-    upload_id = rd.make_doc_id("manuell.md")
-    rag.delete_document(doc_id=upload_id)
+    result = gs.run(plan_for(second), bases.__getitem__)
 
-    assert contents(rag) == [text]
-    [row] = rag._register().list("kb-default")
-    assert row["origin"] == rd.ORIGIN_GIT and row["status"] == rd.INDEXED
+    assert result["outcomes"]["duplicate"] == 1
+    assert contents(bases["default"]) == [text]
 
 
 # ---------------------------------------------------------------------------

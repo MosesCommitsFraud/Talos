@@ -15,13 +15,19 @@ A synced document has origin ``git`` in the document register and carries the
 repository's id in its metadata (``rag_documents.GIT_REPO_META``). Its logical path
 is ``git/<repo id>/<path in the repo>``, so equal file names from two repositories
 are different documents. A sync adds, updates and removes only documents marked with
-its own repository. Uploads and other repositories are out of reach by construction.
+its own repository, so other repositories are out of reach by construction. So are
+uploads, with one exception, below.
 
 Duplicates
 ----------
-Git documents take part in the register's content check exactly as uploads do: a file
-whose content is already indexed in that base is recorded as a duplicate, not indexed
-twice. When the other copy goes, the duplicate takes its place (``_promote_duplicates``).
+An update must not take anyone's hand, so a file that was uploaded before it came from
+Git is taken over: an upload in the same base with the name or the content of a
+repository file is the same document, and the repository's version replaces it. Nobody
+has to delete anything, and no old version stays behind next to the new one. Uploads
+under other names with other content stay untouched. Beyond that, Git documents take
+part in the register's content check as uploads do: content another repository already
+holds is recorded as a duplicate, not indexed twice, and takes its place when that copy
+goes (``_promote_duplicates``).
 
 Removing
 --------
@@ -449,6 +455,49 @@ def _file_meta(repo_id: str, path: str, rel: str) -> Dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
+def _shared_uploads(register, collection: str) -> List[Dict[str, Any]]:
+    """Uploads a sync may take over: not someone's personal file, not a namespace of a
+    feature, and not a member of an archive, which belongs to the archive."""
+    return [
+        row
+        for row in register.list(collection)
+        if row["origin"] == rd.ORIGIN_UPLOAD
+        and row["status"] in (rd.INDEXED, rd.DUPLICATE)
+        and not row.get("owner")
+        and not row.get("scope")
+        and not (row.get("ingest_meta") or {}).get("container_doc_id")
+    ]
+
+
+def _same_document(
+    logical_path: str,
+    sha: str,
+    current: Optional[Dict[str, Any]],
+    uploads: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    """The uploads that are this repository file under another origin.
+
+    Same name, because that is what makes two uploads one document in the register
+    (``upload_identity``), and it finds the older version a repository has moved on
+    from. A folder upload must match the path as well, so ``Nord/x.md`` is not ``x.md``.
+    Same content, because it is then the same document whatever it is called. And the
+    upload this file was recorded as a copy of, whose content it may have left behind.
+    """
+    rel = rd.normalize_logical_path(logical_path.split("/", 2)[-1])
+    twin = (current or {}).get("duplicate_of")
+    matches = []
+    for upload in uploads:
+        name = rd.normalize_logical_path(upload["logical_path"])
+        if (
+            rel == name
+            or rel.endswith("/" + name)
+            or (sha and upload.get("content_sha256") == sha)
+            or upload["doc_id"] == twin
+        ):
+            matches.append(upload)
+    return matches
+
+
 def sync_base(
     rag,
     repo_id: str,
@@ -462,26 +511,45 @@ def sync_base(
     The register decides what is work: unchanged files cost a hash at most. Only
     documents marked with ``repo_id`` are ever removed, and a new file with the content
     of one that left is a rename, which replaces it rather than being its duplicate.
+    An upload of the same document is taken over (``_same_document``), once the file
+    that replaces it has been indexed.
     """
     register = rag._register()
     if register is None:
         raise GitSyncError("The document register is unavailable")
-    current = register.live_from_repo(repo_id, rag.collection_name)
-    known = {row["doc_id"] for row in current}
+    coll = rag.collection_name
+    current = register.live_from_repo(repo_id, coll)
+    by_id = {row["doc_id"]: row for row in current}
     gone = [row for row in current if row["doc_id"] not in files] if prune else []
     gone_by_sha = {row["content_sha256"]: row for row in gone if row.get("content_sha256")}
+    uploads = _shared_uploads(register, coll)
 
     queue: List[Tuple[str, Dict[str, Any]]] = []
     renamed = set()
+    takeovers: List[Tuple[str, Dict[str, Any]]] = []
+    primaries = set()
     for doc_id, (path, meta) in files.items():
-        old = (
-            gone_by_sha.pop(rd.file_sha256(path), None)
-            if gone_by_sha and doc_id not in known
-            else None
-        )
+        sha = rd.file_sha256(path) if gone_by_sha or uploads else ""
+        old = gone_by_sha.pop(sha, None) if doc_id not in by_id else None
+        matches = _same_document(meta["logical_path"], sha, by_id.get(doc_id), uploads)
+        uploads = [u for u in uploads if u not in matches]
+        # A skipped copy holds no chunks, and deleting it now keeps it from being
+        # indexed in its own right when the document it copies is replaced.
+        for copy in [m for m in matches if m["status"] == rd.DUPLICATE]:
+            rag.delete_document(doc_id=copy["doc_id"])
+            rd.delete_managed_file(copy["source"])
+            takeovers.append((doc_id, copy))
+        indexed = [m for m in matches if m["status"] != rd.DUPLICATE]
         if old:
             meta = {**meta, "_replaces": old["doc_id"]}
             renamed.add(old["doc_id"])
+        elif indexed:
+            # The one with this content first: the register must not take the new file
+            # for a copy of it. A failed index keeps it, like any replacement.
+            indexed.sort(key=lambda m: m.get("content_sha256") != sha)
+            meta = {**meta, "_replaces": indexed[0]["doc_id"]}
+            primaries.add(indexed[0]["doc_id"])
+        takeovers += [(doc_id, m) for m in indexed]
         queue.append((path, meta))
 
     result = rag.index_files(queue, progress_cb=progress_cb)
@@ -496,6 +564,25 @@ def sync_base(
             result["errors"].append({"file": row["display_name"], "error": outcome["error"]})
         else:
             result["outcomes"]["deleted"] = result["outcomes"].get("deleted", 0) + 1
+
+    # Only where the repository's file arrived: a failed one leaves the upload in place.
+    taken_over: List[str] = []
+    for doc_id, upload in takeovers:
+        row = register.get(coll, doc_id) or {}
+        if row.get("status") not in (rd.INDEXED, rd.DUPLICATE) or row.get("error"):
+            continue
+        still_there = (register.get(coll, upload["doc_id"]) or {}).get("status") != rd.DELETED
+        if still_there:
+            rag.delete_document(doc_id=upload["doc_id"])
+            rd.delete_managed_file(upload["source"])
+        taken_over.append(upload["display_name"])
+        if upload["doc_id"] in primaries:
+            # Counted as a takeover, not as a rename.
+            result["outcomes"]["replaced"] = max(0, result["outcomes"].get("replaced", 0) - 1)
+    if taken_over:
+        logger.info("Git sync of %s took over uploads in %s: %s", repo_id, coll, taken_over)
+        result["outcomes"]["taken_over"] = len(taken_over)
+        result["taken_over"] = taken_over
     return result
 
 
@@ -563,6 +650,7 @@ def _message(
         ("updated", "updated"),
         ("reindexed", "re-indexed"),
         ("replaced", "renamed"),
+        ("taken_over", "upload(s) replaced"),
         ("unchanged", "unchanged"),
         ("duplicate", "duplicate"),
         ("deleted", "removed"),
@@ -602,6 +690,7 @@ def run(
     outcomes: Dict[str, int] = {}
     errors: List[Dict[str, str]] = []
     files: List[Dict[str, Any]] = []
+    taken_over: List[str] = []
     indexed = failed = 0
     for base in targets:
         try:
@@ -621,12 +710,16 @@ def run(
         failed += int(result.get("failed_count") or 0)
         errors += result.get("errors") or []
         files += result.get("files") or []
+        taken_over += result.get("taken_over") or []
         for key, count in (result.get("outcomes") or {}).items():
             outcomes[key] = outcomes.get(key, 0) + int(count or 0)
 
     errors += [{"file": plan["url"].rsplit("/", 1)[-1], "error": p} for p in problems]
     failed += len(problems)
     message = _message(plan, commit, outcomes, problems)
+    if taken_over:
+        # An upload left the base, so whoever reads this should see which.
+        message += f" (replaced: {', '.join(sorted(taken_over)[:5])})"
     _write_state(
         repo_id,
         {
