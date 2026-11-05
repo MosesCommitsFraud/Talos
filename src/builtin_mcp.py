@@ -201,8 +201,13 @@ async def _is_npx_package_cached(npx_path, package_spec, timeout_s=5):
     "exited 0 with non-empty stdout" as proof of a working cached copy.
     Anything else (non-zero exit, empty stdout, timeout, missing npx,
     network error) means we should skip the server.
+
+    This runs the third party package, so it gets the same safe environment
+    as the real connect instead of the app's secrets.
     """
     try:
+        from mcp.client.stdio import get_default_environment
+
         proc = await asyncio.create_subprocess_exec(
             npx_path,
             "--no-install",
@@ -210,8 +215,9 @@ async def _is_npx_package_cached(npx_path, package_spec, timeout_s=5):
             "--version",
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            env=get_default_environment(),
         )
-    except (OSError, ValueError):
+    except (ImportError, OSError, ValueError):
         return False
     try:
         stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=timeout_s)

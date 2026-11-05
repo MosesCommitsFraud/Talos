@@ -128,6 +128,21 @@ async def test_startup_gives_the_app_env_to_talos_scripts_only(monkeypatch):
     assert not manager.calls["builtin_browser"].get("inherit_app_env")
 
 
+async def test_npx_cache_probe_does_not_get_the_app_secret(monkeypatch):
+    monkeypatch.setenv(SECRET, "hunter2")
+    real_exec = asyncio.create_subprocess_exec
+    # Stands in for the npx package: it prints a version only if the secret is
+    # absent, so the probe reports "cached" only when nothing leaked.
+    fake_package = f"import os; print('' if {SECRET!r} in os.environ else '1.0.0')"
+
+    async def _run_fake_package(_npx, *_args, **kwargs):
+        return await real_exec(sys.executable, "-c", fake_package, **kwargs)
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", _run_fake_package)
+
+    assert await builtin_mcp._is_npx_package_cached("npx", "@playwright/mcp@latest")
+
+
 async def test_reconnecting_a_builtin_keeps_the_app_environment(monkeypatch):
     manager = McpManager()
     calls = {}
