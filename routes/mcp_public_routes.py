@@ -36,6 +36,7 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse, Response
 
+from core.net_trust import client_in_networks, mcp_open_networks
 from src import mcp_public
 
 logger = logging.getLogger(__name__)
@@ -148,7 +149,29 @@ def _caller_context(request: Request) -> Tuple[set, Optional[str], str]:
             f"session:{user}",
         )
 
-    return _anonymous_context()
+    scopes, owner, label = _anonymous_context()
+    if _may_update_without_token(request):
+        scopes = scopes | {mcp_public.SCOPE_RAG_UPDATE}
+    return scopes, owner, label
+
+
+def _may_update_without_token(request: Request) -> bool:
+    """The administrator's switch, for a caller on the token-free network only.
+
+    Judged here against the caller's address rather than added to the anonymous
+    scopes, which also apply with AUTH_ENABLED=false: there a request from the public
+    internet is anonymous too, and must not be able to change documents.
+    """
+    from src import mcp_settings
+
+    if not mcp_settings.update_rag_open():
+        return False
+    client = getattr(request, "client", None)
+    return client_in_networks(
+        client.host if client else None,
+        getattr(request, "headers", {}),
+        mcp_open_networks(),
+    )
 
 
 def _anonymous_scopes() -> set:
@@ -235,7 +258,7 @@ def _instructions() -> str:
     web = "/".join(n for n in mcp_settings.WEB_TOOLS if on(n))
     if web:
         parts.append(f"Use {web} for anything public.")
-    parts.append("All tools are read-only.")
+    parts.append("All tools are read-only, apart from update_rag where it is offered.")
     return " ".join(p if p.endswith(".") else p + "." for p in parts)
 
 

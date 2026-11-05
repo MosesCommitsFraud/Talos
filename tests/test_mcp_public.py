@@ -945,6 +945,89 @@ def test_anonymous_scopes_and_owner_are_configurable(monkeypatch):
     assert "moritz" in label
 
 
+def _peer(host, headers=None):
+    request = _request(api_token=False)
+    request.client = types.SimpleNamespace(host=host)
+    request.headers = headers or {}
+    return request
+
+
+@pytest.fixture
+def update_rag_open(monkeypatch):
+    """The switch in Settings → MCP Server, on, with the default network settings."""
+    from src import mcp_settings
+
+    monkeypatch.setattr(mcp_settings, "update_rag_open", lambda: True)
+    for name in ("MCP_OPEN", "MCP_OPEN_NETWORKS", "MCP_OPEN_SCOPES"):
+        monkeypatch.delenv(name, raising=False)
+
+
+def test_update_rag_needs_a_token_on_the_lan_unless_the_switch_is_on(monkeypatch):
+    from routes.mcp_public_routes import _caller_context
+    from src import mcp_settings
+
+    monkeypatch.delenv("MCP_OPEN_SCOPES", raising=False)
+    monkeypatch.setattr(mcp_settings, "_get", lambda key, default: default)
+
+    assert RAG_UPDATE not in _caller_context(_peer("192.168.10.42"))[0]
+
+
+def test_the_switch_opens_update_rag_for_the_lan(update_rag_open):
+    from routes.mcp_public_routes import _caller_context
+
+    assert RAG_UPDATE in _caller_context(_peer("192.168.10.42"))[0]
+
+
+def test_the_switch_never_reaches_the_internet(update_rag_open):
+    """With AUTH_ENABLED=false a public caller gets here too, anonymous like the LAN."""
+    from routes.mcp_public_routes import _caller_context
+
+    assert RAG_UPDATE not in _caller_context(_peer("8.8.8.8"))[0]
+
+
+def test_the_switch_does_not_trust_a_forwarded_request(update_rag_open):
+    """Behind a proxy every visitor has the proxy's local address."""
+    from routes.mcp_public_routes import _caller_context
+
+    request = _peer("192.168.10.42", {"x-forwarded-for": "8.8.8.8"})
+    assert RAG_UPDATE not in _caller_context(request)[0]
+
+
+def test_the_switch_needs_an_address(update_rag_open):
+    from routes.mcp_public_routes import _caller_context
+
+    assert RAG_UPDATE not in _caller_context(_request(api_token=False))[0]
+
+
+def test_the_switch_follows_the_network_settings(update_rag_open, monkeypatch):
+    from routes.mcp_public_routes import _caller_context
+
+    monkeypatch.setenv("MCP_OPEN_NETWORKS", "192.168.10.42/32")
+    assert RAG_UPDATE in _caller_context(_peer("192.168.10.42"))[0]
+    assert RAG_UPDATE not in _caller_context(_peer("192.168.10.43"))[0]
+
+    monkeypatch.setenv("MCP_OPEN", "false")
+    assert RAG_UPDATE not in _caller_context(_peer("192.168.10.42"))[0]
+
+
+def test_the_switch_gives_a_narrow_token_nothing(update_rag_open):
+    from routes.mcp_public_routes import _caller_context
+
+    request = _request(scopes=(RAG,))
+    request.client = types.SimpleNamespace(host="192.168.10.42")
+    request.headers = {}
+    assert _caller_context(request)[0] == {RAG}
+
+
+def test_the_lan_is_offered_update_rag_once_the_switch_is_on(update_rag_open):
+    out = handle(
+        {"jsonrpc": "2.0", "id": 2, "method": "tools/list"},
+        request=_peer("192.168.10.42"),
+        sm=FakeSkills(index=[]),
+    )
+    assert "update_rag" in {t["name"] for t in out["result"]["tools"]}
+
+
 def test_a_token_still_wins_over_the_anonymous_default(monkeypatch):
     """MCP_OPEN removes the requirement; it must not override a presented
     identity, or a narrow token would silently gain scopes."""

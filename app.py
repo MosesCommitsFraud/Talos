@@ -171,12 +171,11 @@ if LOCALHOST_BYPASS:
     )
 
 from core.net_trust import (
-    DEFAULT_PRIVATE_NETWORKS,
-    client_in_networks,
-    parse_networks,
+    PROXY_FORWARD_HEADERS as _PROXY_FWD_HEADERS,
 )
 from core.net_trust import (
-    PROXY_FORWARD_HEADERS as _PROXY_FWD_HEADERS,
+    client_in_networks,
+    mcp_open_networks,
 )
 
 # --- Token-free MCP from the local network ----------------------------------
@@ -196,9 +195,7 @@ from core.net_trust import (
 # Set MCP_OPEN=false to require a token again, or narrow MCP_OPEN_NETWORKS to
 # the one server that should have it (e.g. 192.168.10.42/32).
 MCP_OPEN = os.getenv("MCP_OPEN", "true").lower() != "false"
-_MCP_OPEN_NETWORKS = (
-    parse_networks(os.getenv("MCP_OPEN_NETWORKS") or DEFAULT_PRIVATE_NETWORKS) if MCP_OPEN else []
-)
+_MCP_OPEN_NETWORKS = mcp_open_networks()
 if MCP_OPEN:
     logger.info(
         "Token-free MCP is on: POST /mcp answers without a token for clients in %s "

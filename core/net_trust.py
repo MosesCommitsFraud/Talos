@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import ipaddress
 import logging
+import os
 from typing import Iterable, List, Mapping, Optional
 
 logger = logging.getLogger(__name__)
@@ -55,6 +56,13 @@ def parse_networks(raw: Optional[str]) -> List[ipaddress._BaseNetwork]:
         except ValueError:
             logger.warning("Ignoring unparseable network %r", item)
     return out
+
+
+def mcp_open_networks() -> List[ipaddress._BaseNetwork]:
+    """Where `POST /mcp` answers without a token. Empty with MCP_OPEN=false."""
+    if os.getenv("MCP_OPEN", "true").lower() == "false":
+        return []
+    return parse_networks(os.getenv("MCP_OPEN_NETWORKS") or DEFAULT_PRIVATE_NETWORKS)
 
 
 def client_in_networks(

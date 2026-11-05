@@ -197,6 +197,16 @@ def rag_allowed_scopes() -> Set[str]:
     return {s.strip() for s in _list("mcp_rag_allowed_scopes") if s.strip()}
 
 
+def update_rag_open() -> bool:
+    """Whether a caller on the token-free network may start update_rag without a token.
+
+    Off by default: it changes and removes documents, which the rest of what that
+    network gets for free doesn't. `routes/mcp_public_routes.py` applies it, because
+    only there is the caller's address known.
+    """
+    return _bool("mcp_update_rag_open", False)
+
+
 # ── Skills ──
 
 

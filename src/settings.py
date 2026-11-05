@@ -235,6 +235,9 @@ DEFAULT_SETTINGS = {
     # Git repositories update_rag syncs the knowledge bases from, one of them the
     # default, each saying which folder goes to which base (src/rag_git_sync.py).
     "rag_git_repos": [],
+    # True = a caller on the token-free network (MCP_OPEN_NETWORKS) may start
+    # update_rag without a token. From anywhere else it always takes one.
+    "mcp_update_rag_open": False,
     "mcp_skills_enabled": True,
     # SQL-only sandbox tool. Credentials remain request-local HTTP headers.
     "mcp_sql_enabled": True,
