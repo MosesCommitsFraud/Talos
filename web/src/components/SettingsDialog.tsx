@@ -82,6 +82,7 @@ import {
   type SqlConfig,
 } from '@/api/client';
 import type { AssistantEndpoint } from '@/api/types';
+import type { GitRepoConfig } from '@/api/client';
 import { applyDensity, applyLang, applyTheme, usePrefs, type Density, type Lang, type LlmLang, type Theme, type Visibility } from '@/state/prefs';
 import { openRagBase } from '@/state/ui';
 import { LANGUAGES } from '@/i18n';
@@ -96,6 +97,7 @@ import { useAuth } from './auth/AuthGate';
 import { UsersPanel } from './settings/UsersPanel';
 import { UsagePanel } from './settings/UsagePanel';
 import { McpServersPanel } from './settings/McpServersPanel';
+import { GitSyncSection } from './settings/GitSyncSection';
 import { MemoryPanel } from './settings/MemoryPanel';
 
 export type Panel =
@@ -1618,6 +1620,13 @@ function McpPanel() {
           ))}
         </Section>
       )}
+
+      <GitSyncSection
+        repos={Array.isArray(s.value('rag_git_repos')) ? (s.value('rag_git_repos') as GitRepoConfig[]) : []}
+        bases={baseData?.bases ?? []}
+        dirty={s.dirty}
+        onChange={(repos) => s.setValue('rag_git_repos', repos)}
+      />
 
       <Section
         title={t('settings.mcp.skills')}

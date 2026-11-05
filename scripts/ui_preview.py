@@ -2676,6 +2676,59 @@ _MINI_CONNECTIONS = {
 # rag id -> connection id; "removed" is a database no longer in Integrations.
 _MINI_BINDINGS = {"db-erp": "erp", "db-crm": "crm", "db-alt": "removed"}
 
+# Saved settings of the preview: the Git repositories, and what their last runs said.
+_APP_SETTINGS = {
+    "mcp_rag_enabled": True,
+    "mcp_rag_inherit": True,
+    "mcp_web_enabled": True,
+    "mcp_web_inherit": True,
+    "mcp_skills_enabled": True,
+    "mcp_skills_inherit": True,
+    "rag_git_repos": [],
+}
+_GIT_RUNS = {}
+
+
+def _save_git_repos(raw):
+    """What src/rag_git_sync.normalize_repos does, as far as the page can see it."""
+    repos = []
+    for item in raw:
+        url = str(item.get("url") or "").strip().rstrip("/")
+        if not url.startswith(("http://", "https://")):
+            return f"Not an http(s) repository URL: {url}"
+        repos.append(
+            {
+                **item,
+                "url": url,
+                "id": url.rsplit("/", 1)[-1].lower() + "-1d5597eb",
+                "exclude": [p.strip() for p in item.get("exclude", []) if p.strip()],
+            }
+        )
+    if repos and not any(r.get("default") for r in repos):
+        repos[0]["default"] = True
+    _APP_SETTINGS["rag_git_repos"] = repos
+    return None
+
+
+def _git_sync_status():
+    now = time.time()
+    rows = []
+    for repo in _APP_SETTINGS["rag_git_repos"]:
+        run = _GIT_RUNS.get(repo["id"])
+        running = bool(run and now - run["started_at"] < 6)
+        rows.append(
+            {
+                "id": repo["id"],
+                "url": repo["url"],
+                "default": repo["default"],
+                "last": None if not run or running else run["last"],
+                "job": {"id": "job-git", "status": "running", "message": "Indexing"}
+                if running
+                else None,
+            }
+        )
+    return rows
+
 
 def _mini_base(rag_id, docs, chunks):
     """A mini RAG as /api/rag/bases reports it."""
@@ -2921,7 +2974,12 @@ class PreviewHandler(BaseHTTPRequestHandler):
             self._send(200, _placeholder_png(source), "image/png")
             return
         if path == "/api/auth/settings":
-            self._send_json({"auth_enabled": False, "user": "preview", "is_admin": True})
+            self._send_json(
+                {"auth_enabled": False, "user": "preview", "is_admin": True, **_APP_SETTINGS}
+            )
+            return
+        if path == "/api/rag/git-sync":
+            self._send_json({"repos": _git_sync_status()})
             return
         if path == "/api/auth/status":
             # auth_enabled False ⇒ the React AuthGate renders the app directly.
@@ -3376,6 +3434,28 @@ class PreviewHandler(BaseHTTPRequestHandler):
             return
         parsed = urlparse(self.path)
         path = parsed.path
+        if path == "/api/auth/settings":
+            body = json.loads(self._read_body() or b"{}")
+            error = _save_git_repos(body.pop("rag_git_repos")) if "rag_git_repos" in body else None
+            if error:
+                self._send_json({"detail": error}, 400)
+                return
+            _APP_SETTINGS.update(body)
+            self._send_json(_APP_SETTINGS)
+            return
+        if path.startswith("/api/rag/git-sync/"):
+            repo_id = path[len("/api/rag/git-sync/") :]
+            _GIT_RUNS[repo_id] = {
+                "started_at": time.time(),
+                "last": {
+                    "ok": True,
+                    "finished_at": time.time() + 6,
+                    "commit": "b85b384105d50cbc96bd03366715c4cb47cee2e4",
+                    "message": "ai-context@b85b384, 4 new",
+                },
+            }
+            self._send_json({"ok": True, "job_id": "job-git", "already_queued": False})
+            return
         if path.startswith("/api/session/") and path.endswith("/chapter"):
             session_id = path[len("/api/session/") : -len("/chapter")]
             req = json.loads(self._read_body() or b"{}")

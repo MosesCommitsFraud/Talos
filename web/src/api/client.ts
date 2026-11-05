@@ -557,7 +557,11 @@ export async function saveAppSettings(patch: AppSettings): Promise<void> {
     body: JSON.stringify(patch),
     credentials: 'same-origin',
   });
-  if (!res.ok) throw new Error(`Save failed (HTTP ${res.status})`);
+  if (!res.ok) {
+    // The server says what's wrong with a value it refused, e.g. a repository URL.
+    const detail = await res.json().then((e) => e.detail).catch(() => '');
+    throw new Error(typeof detail === 'string' && detail ? detail : `Save failed (HTTP ${res.status})`);
+  }
 }
 
 /* ── Per-user preferences (server-side key/value store) ── */
@@ -1235,6 +1239,35 @@ export const reindexRagBase = (id: string) =>
 /** Move the schema files still in the default base into this mini RAG. */
 export const adoptLegacySql = (id: string) =>
   postJSON<RagQueuedFiles>(`/api/rag/bases/${encodeURIComponent(id)}/adopt-legacy-sql`);
+
+/* ── Git sync of the knowledge bases (src/rag_git_sync.py) ── */
+
+/** Mapping target: the mini RAG of the default database, resolved at each sync. */
+export const GIT_DEFAULT_DB_TARGET = '@default-db';
+
+/** One entry of the `rag_git_repos` setting. `id` comes from the server on save. */
+export interface GitRepoConfig {
+  id?: string;
+  url: string;
+  branch: string;
+  token: string;
+  default: boolean;
+  exclude: string[];
+  mappings: { folder: string; base: string }[];
+}
+
+export interface GitSyncRepo {
+  id: string;
+  url: string;
+  default: boolean;
+  last: { ok: boolean; finished_at: number; message: string; commit?: string } | null;
+  job: { id: string; status: string; message: string } | null;
+}
+
+export const fetchGitSync = () => getJSON<{ repos: GitSyncRepo[] }>('/api/rag/git-sync');
+export const startGitSync = (id: string) =>
+  postJSON<{ ok: boolean; job_id: string; already_queued: boolean }>(`/api/rag/git-sync/${encodeURIComponent(id)}`);
+
 export const personalReload = () => postJSON('/api/personal/reload');
 
 export async function personalUpload(
