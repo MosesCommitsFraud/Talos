@@ -25,6 +25,7 @@ seaborn
 plotly
 scikit-learn
 statsmodels
+autots==1.0.4
 chromadb-client
 qdrant-client
 fastembed

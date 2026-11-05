@@ -2,9 +2,11 @@
 """MCP (Model Context Protocol) server management routes."""
 
 import html
+import importlib.util
 import json
 import logging
 import os
+import sys
 import urllib.parse
 import uuid
 from pathlib import Path
@@ -21,6 +23,17 @@ from src.mcp_manager import McpManager
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/mcp", tags=["mcp"])
+
+# Connectors that ship with Talos: one click, no command to know. The id is also
+# the server id, which keeps the tool names readable (mcp__autots__forecast).
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent
+CONNECTOR_PRESETS = {
+    "autots": {
+        "name": "AutoTS",
+        "module": "autots",
+        "script": "mcp_servers/autots_server.py",
+    },
+}
 
 
 def _mcp_oauth_base_dir() -> Path:
@@ -280,6 +293,73 @@ def setup_mcp_routes(mcp_manager: McpManager):
             "needs_oauth": needs_oauth,
             "needs_auth": needs_auth,
             "auth_url": status.get("auth_url"),
+        }
+
+    @router.get("/presets")
+    def list_presets(request: Request):
+        """Connectors that ship with Talos, and whether each can be added."""
+        require_admin(request)
+        db = SessionLocal()
+        try:
+            added = {srv.id for srv in db.query(McpServer).all()}
+        finally:
+            db.close()
+        return [
+            {
+                "id": preset_id,
+                "name": preset["name"],
+                "available": importlib.util.find_spec(preset["module"]) is not None,
+                "added": preset_id in added,
+            }
+            for preset_id, preset in CONNECTOR_PRESETS.items()
+        ]
+
+    @router.post("/presets/{preset_id}")
+    async def add_preset(preset_id: str, request: Request):
+        """Add a shipped connector. It runs with no extra environment, so it gets
+        the MCP defaults and none of the app's secrets."""
+        require_admin(request)
+        preset = CONNECTOR_PRESETS.get(preset_id)
+        if not preset:
+            raise HTTPException(404, "Unknown connector")
+        if importlib.util.find_spec(preset["module"]) is None:
+            raise HTTPException(409, f"{preset['module']} is not installed in this image")
+
+        args = [str(_PROJECT_ROOT / preset["script"])]
+        db = SessionLocal()
+        try:
+            if db.query(McpServer).filter(McpServer.id == preset_id).first():
+                raise HTTPException(409, "Connector is already added")
+            db.add(
+                McpServer(
+                    id=preset_id,
+                    name=preset["name"],
+                    transport="stdio",
+                    command=sys.executable,
+                    args=json.dumps(args),
+                    env="{}",
+                    is_enabled=True,
+                )
+            )
+            db.commit()
+        finally:
+            db.close()
+
+        connected = await mcp_manager.connect_server(
+            server_id=preset_id,
+            name=preset["name"],
+            transport="stdio",
+            command=sys.executable,
+            args=args,
+            env={},
+        )
+        status = mcp_manager.get_server_status(preset_id)
+        return {
+            "id": preset_id,
+            "connected": connected,
+            "status": status.get("status", "disconnected"),
+            "tool_count": status.get("tool_count", 0),
+            "error": status.get("error"),
         }
 
     @router.post("/servers/{server_id}/reconnect")

@@ -3343,6 +3343,10 @@ class PreviewHandler(BaseHTTPRequestHandler):
         if path == "/api/mcp/servers":
             self._send_json([_mcp_status(s) for s in _MCP_SERVERS])
             return
+        if path == "/api/mcp/presets":
+            added = any(s["id"] == "autots" for s in _MCP_SERVERS)
+            self._send_json([{"id": "autots", "name": "AutoTS", "available": True, "added": added}])
+            return
         if path.startswith("/api/mcp/servers/") and path.endswith("/tools"):
             srv = _mcp_find(path)
             self._send_json(
@@ -3441,6 +3445,26 @@ class PreviewHandler(BaseHTTPRequestHandler):
                 "tools": [
                     ("list_targets", "List analysis targets known to this server."),
                     ("analyze", "Run an analysis on a target and return findings."),
+                ],
+            }
+            _MCP_SERVERS.append(srv)
+            st = _mcp_status(srv)
+            self._send_json({**st, "connected": st["status"] == "connected"})
+            return
+        if path == "/api/mcp/presets/autots":
+            srv = {
+                "id": "autots",
+                "name": "AutoTS",
+                "transport": "stdio",
+                "command": "python",
+                "args": ["/app/mcp_servers/autots_server.py"],
+                "env": {},
+                "url": None,
+                "is_enabled": True,
+                "disabled": [],
+                "tools": [
+                    ("forecast", "Forecast time series with an automatic model search."),
+                    ("plot_forecast", "Draw a forecast with its history and bounds as an image."),
                 ],
             }
             _MCP_SERVERS.append(srv)

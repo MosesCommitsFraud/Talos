@@ -3,8 +3,10 @@ import { ChevronDownIcon, PlusIcon, RefreshCwIcon, Trash2Icon } from 'lucide-rea
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
+  addMcpPreset,
   addMcpServer,
   deleteMcpServer,
+  fetchMcpPresets,
   fetchMcpServers,
   fetchMcpServerTools,
   reconnectMcpServer,
@@ -387,6 +389,47 @@ function AddServer({ onAdded }: { onAdded: () => void }) {
   );
 }
 
+/** Connectors that ship with Talos: added with one click, no command to know. */
+function Presets({ onAdded }: { onAdded: () => void }) {
+  const { t } = useTranslation();
+  const { data: presets, refetch } = useQuery({ queryKey: ['mcp-presets'], queryFn: fetchMcpPresets });
+  const [busy, setBusy] = useState('');
+  const [problem, setProblem] = useState('');
+  const open = (presets ?? []).filter((p) => !p.added);
+  if (open.length === 0 && !problem) return null;
+
+  const add = (id: string) => {
+    setBusy(id);
+    setProblem('');
+    void addMcpPreset(id)
+      .then((r) => { if (r.status === 'error') setProblem(r.error ?? r.status); })
+      .catch((e) => setProblem((e as Error).message))
+      .finally(() => { setBusy(''); void refetch(); onAdded(); });
+  };
+
+  return (
+    <Section title={t('settings.mcpServers.presetsTitle')} padded>
+      <div className="space-y-1.5">
+        {open.map((p) => (
+          <div key={p.id} className="flex items-center gap-3 rounded-lg border bg-background px-3 py-2">
+            <div className="min-w-0 flex-1">
+              <div className="truncate text-sm">{p.name}</div>
+              <div className="text-xs text-muted-foreground">
+                {t(`settings.mcpServers.preset.${p.id}`, { defaultValue: '' })}
+                {!p.available && ` ${t('settings.mcpServers.presetUnavailable')}`}
+              </div>
+            </div>
+            <Button size="sm" variant="outline" disabled={!!busy || !p.available} onClick={() => add(p.id)}>
+              <PlusIcon /> {busy === p.id ? t('settings.mcpServers.connecting') : t('settings.mcpServers.add')}
+            </Button>
+          </div>
+        ))}
+      </div>
+      {problem && <p className="pt-2 text-xs text-destructive-foreground">{problem}</p>}
+    </Section>
+  );
+}
+
 export function McpServersPanel({ className }: { className?: string }) {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
@@ -414,6 +457,7 @@ export function McpServersPanel({ className }: { className?: string }) {
           </div>
         )}
       </Section>
+      <Presets onAdded={refresh} />
       <Section title={t('settings.mcpServers.addTitle')} padded>
         <AddServer onAdded={refresh} />
       </Section>

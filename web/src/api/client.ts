@@ -1883,6 +1883,14 @@ export const addMcpServer = (s: McpServerInput) => {
     '/api/mcp/servers', fields);
 };
 
+export interface McpPreset { id: string; name: string; available: boolean; added: boolean }
+
+export const fetchMcpPresets = () => getJSON<McpPreset[]>('/api/mcp/presets');
+
+export const addMcpPreset = (id: string) =>
+  sendForm<{ id: string; connected: boolean; status: string; tool_count: number; error?: string | null }>(
+    `/api/mcp/presets/${encodeURIComponent(id)}`, {});
+
 export const setMcpServerEnabled = (id: string, enabled: boolean) =>
   sendForm(`/api/mcp/servers/${encodeURIComponent(id)}`, { is_enabled: String(enabled) }, 'PATCH');
 
