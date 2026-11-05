@@ -69,6 +69,12 @@ ORIGIN_UPLOAD = "upload"
 ORIGIN_DIRECTORY = "directory"
 ORIGIN_TEXT = "text"
 ORIGIN_LEGACY = "legacy"
+# From a Git repository (src/rag_git_sync.py), which one is under GIT_REPO_META.
+ORIGIN_GIT = "git"
+# Origins whose content is checked against what the base already holds. A directory
+# is left out: its files are expected to stand on their own where they are.
+DEDUPED_ORIGINS = (ORIGIN_UPLOAD, ORIGIN_GIT)
+GIT_REPO_META = "git_repo"
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS documents (
@@ -550,6 +556,19 @@ class DocumentRegister:
             for row in self.list(collection)
             if row["origin"] == origin and is_within(row["source"], directory)
         ]
+
+    def live_from_repo(
+        self, repo_id: str, collection: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
+        """Live documents one Git repository brought in, in one base or all of them."""
+        query = "SELECT * FROM documents WHERE origin=? AND status != 'deleted'"
+        params: List[Any] = [ORIGIN_GIT]
+        if collection is not None:
+            query += " AND collection=?"
+            params.append(collection)
+        with self._connect() as db:
+            rows = [self._row(r) for r in db.execute(query, params).fetchall()]
+        return [r for r in rows if (r.get("ingest_meta") or {}).get(GIT_REPO_META) == repo_id]
 
     def get_meta(self, collection: str, key: str) -> Optional[str]:
         """A fact about a collection as a whole (e.g. its sparse-vector language)."""

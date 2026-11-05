@@ -93,8 +93,9 @@ above exist for.
 
 ## Tools
 
-Every tool is **read-only**, except `update_rag` (below). There is no ingest,
-no delete, no skill authoring.
+Every tool is **read-only**, except `update_rag` (below), which starts a job against
+a source the administrator configured. There is no direct ingest, no delete, no skill
+authoring.
 An outward-facing endpoint held open by a long-lived bearer token is the wrong
 place to accept mutations, and skills in particular have a deliberate
 publish/audit review step (`routes/skills_routes.py`) that a write tool would
@@ -103,12 +104,49 @@ route around.
 The static catalogue is ten tools; the per-skill tools below are appended to it,
 so the exact list depends on the token's owner.
 
-### Re-index trigger (`rag:update`)
+### Update from Git (`rag:update`)
 
-- **`update_rag`** — lets an external caller start a refresh of the knowledge
-  base inside Talos with a single call (fire-and-forget; optional
-  `collection`, omit for all). **Placeholder:** the tool is listed and
-  scope-gated, but does not start anything yet.
+- **`update_rag`** — brings the knowledge bases in step with a Git repository
+  (fire-and-forget, returns the job id). Optional arguments: `repo`, the id of a
+  configured repository (omit for the default one), and `collection`, one knowledge
+  base (omit for every base the repository feeds). A caller can only name a
+  repository from the administrator's list, never a URL: otherwise a token could
+  point the instance at any host and have it fetch and index what is there. The
+  token profile `mcp_update` carries only this scope, for a CI job that calls it
+  after a push.
+
+The repositories are set up under **Settings → MCP Server**: URL, branch, an optional
+access token, which one is the default, and which folder goes to which knowledge base
+or mini RAG. The worker (`src/rag_git_sync.py`) then runs a shallow fetch and hands the
+files to the normal ingest:
+
+- **What a repository owns.** A synced document has origin `git` in the document
+  register and carries the repository's id. Its logical path is
+  `git/<repo id>/<path in the repo>`, so equal names from two repositories stay two
+  documents. A sync adds, updates and removes only documents with its own id; uploads
+  and other repositories are out of its reach. Removing a repository from the list
+  leaves its documents where they are.
+- **No duplicates.** Unchanged files cost a hash at most. A file whose content is
+  already indexed in that base is recorded as a duplicate, as with an upload. If the
+  other copy is deleted, the duplicate takes its place, which is also how manually
+  uploaded files are handed over to the repository: delete the upload, and the Git
+  copy is indexed. Until then a changed file in the repository sits next to the old
+  upload, because the upload is not the sync's to touch. A rename replaces the old
+  document instead of counting as its duplicate.
+- **Removing needs the whole picture.** If the fetch fails, a configured folder is
+  missing or a target base is gone, nothing is removed in that run, and the job says
+  why. A renamed folder or a typo in a mapping must not empty a knowledge base. A
+  document deleted by hand comes back with the next sync: the repository decides.
+- **What is read.** Folders match regardless of case. Everything an indexed directory
+  takes, plus `.sql`, minus archives and the `readme.*` pattern, which can be changed
+  per repository. Symlinks are never followed: git checks them out as plain files.
+- **The token** is stored like the other integration keys in the settings file, stays
+  out of the job queue, and reaches git only through its environment, so it never
+  appears on a command line, in a URL or in `.git/config`. With a token, git follows no
+  redirects, so it can't be sent to another host.
+
+The last run of each repository is kept in `data/rag/git_sync/<repo id>.json` and shown
+on the settings page, because finished jobs expire from the queue.
 
 ### RAG (`rag:read`)
 
@@ -223,6 +261,7 @@ as a logged-in browser session, so the two get their own policy.
 | `mcp_skills_allowed` | Skill names shared in selected mode. Gated names are refused with "not shared over MCP" so a client stops re-spelling them. |
 | `mcp_skills_tools` | Which `skills_*` tools are offered. |
 | `mcp_skills_per_skill_tools` | On (default) = each published skill is also its own `skill_<slug>` tool. Off keeps the `skills_*` tools but stops a large library filling a client's palette — and stops the catalogue listing every procedure by name. |
+| `rag_git_repos` | The Git repositories `update_rag` syncs from, see [above](#update-from-git-ragupdate). Validated on save: http(s) only, no credentials in the URL. |
 | `mcp_rate_limit_per_minute` | `tools/call` ceiling per API token; 0 (default) = no limit. In-process and per worker — it exists to stop one token walking the index in a loop, not as a distributed quota. Over the limit the caller gets a tool result saying so, not a transport error, so the model waits instead of treating the session as broken. |
 
 There is **one** skill library. Selected mode narrows which of the existing
@@ -297,6 +336,7 @@ curl -sS https://<talos-host>/mcp -H "Authorization: Bearer ody_..." -H "Content
 | --- | --- |
 | `src/mcp_public.py` | tool catalogue, scope gating, dispatch — transport-free and unit-tested |
 | `src/mcp_settings.py` | the administrator's policy: which tools are offered, and whether web / RAG / skills inherit the web-UI settings |
+| `src/rag_git_sync.py` | what `update_rag` starts: fetching a repository and mirroring its folders into the knowledge bases |
 | `routes/mcp_public_routes.py` | JSON-RPC / HTTP shell |
 | `routes/api_token_routes.py` | mints the `rag:read` / `skills:read` / `web:read` scopes |
 | `src/web_search.py` | SearxNG client, domain policy, SSRF guard — wrapped, not reimplemented |

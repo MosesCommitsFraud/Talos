@@ -4382,7 +4382,7 @@ class VectorRAG:
 
         if (
             not force
-            and row["origin"] == rd.ORIGIN_UPLOAD
+            and row["origin"] in rd.DEDUPED_ORIGINS
             and not (live and live["status"] == rd.INDEXED)
         ):
             twin = register.find_by_sha(
@@ -4426,7 +4426,7 @@ class VectorRAG:
                 )
                 if text_sha
                 and not force
-                and row["origin"] == rd.ORIGIN_UPLOAD
+                and row["origin"] in rd.DEDUPED_ORIGINS
                 and not (live and live["status"] == rd.INDEXED)
                 else None
             )

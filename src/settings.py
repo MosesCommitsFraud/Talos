@@ -232,6 +232,9 @@ DEFAULT_SETTINGS = {
     # the mini RAGs stay out of reach, exactly as they are for ordinary in-app
     # retrieval. Naming one here opens it deliberately.
     "mcp_rag_allowed_scopes": [],
+    # Git repositories update_rag syncs the knowledge bases from, one of them the
+    # default, each saying which folder goes to which base (src/rag_git_sync.py).
+    "rag_git_repos": [],
     "mcp_skills_enabled": True,
     # SQL-only sandbox tool. Credentials remain request-local HTTP headers.
     "mcp_sql_enabled": True,

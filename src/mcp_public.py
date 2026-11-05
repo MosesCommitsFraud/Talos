@@ -13,10 +13,12 @@ plumbing lives in `routes/mcp_public_routes.py`; keeping the tools here means
 they stay unit-testable without a server, and a stdio wrapper could reuse them
 verbatim.
 
-Everything here is READ-ONLY, with one planned exception: `update_rag`, which
-will let an external caller kick off a re-index inside Talos (currently a
-no-op placeholder, behind its own `rag:update` scope). Nothing in this module
-writes to Qdrant, to the skills directory, or to the settings store: an outward-facing endpoint reached
+Everything here is READ-ONLY, with one exception: `update_rag`, which lets an
+external caller start a sync of the knowledge bases from a Git repository the
+administrator configured (src/rag_git_sync.py), behind its own `rag:update` scope.
+The job does the writing, and the caller decides neither where it fetches from nor
+what it may touch. Nothing else in this module writes to Qdrant, to the skills
+directory, or to the settings store: an outward-facing endpoint reached
 with a long-lived bearer token is the wrong place to accept mutations, and the
 skills flow in particular has a deliberate publish/audit review step
 (routes/skills_routes.py) that a write tool would route around.
@@ -298,20 +300,29 @@ _TOOL_DEFS: List[Dict[str, Any]] = [
     {
         "_scope": SCOPE_RAG_UPDATE,
         "name": "update_rag",
-        "title": "Refresh the knowledge base",
+        "title": "Update the knowledge bases from Git",
         "description": (
-            "Ask Talos to re-index its knowledge base from its document "
-            "sources. Fire-and-forget: the call only starts the process inside "
-            "Talos and returns straight away. Not implemented yet — the call is "
-            "accepted but nothing is started."
+            "Bring the knowledge bases in step with the Git repository configured in "
+            "Talos: new and changed files are indexed, files that left the repository "
+            "are removed. Documents from uploads or other repositories are not touched. "
+            "Fire-and-forget: the call only starts the job and returns straight away "
+            "with its id."
         ),
-        "annotations": {"readOnlyHint": False, "destructiveHint": False, "idempotentHint": True},
+        "annotations": {"readOnlyHint": False, "destructiveHint": True, "idempotentHint": True},
         "inputSchema": {
             "type": "object",
             "properties": {
+                "repo": {
+                    "type": "string",
+                    "description": (
+                        "Id of a repository configured in Talos. Omit for the default repository."
+                    ),
+                },
                 "collection": {
                     "type": "string",
-                    "description": "Knowledge-base id to refresh. Omit for all of them.",
+                    "description": (
+                        "Knowledge-base id to update. Omit for every base the repository feeds."
+                    ),
                 },
             },
         },
@@ -533,15 +544,27 @@ def scope_for_tool(name: str) -> Optional[str]:
 
 
 def _tool_update_rag(args: Dict[str, Any]) -> str:
-    """Placeholder for the remote re-index trigger.
+    """Start a Git sync (src/rag_git_sync.py) and return at once.
 
-    Will hand off to a background ingest process in Talos and return at once;
-    for now it only acknowledges the call so clients can be wired up against
-    the final tool name and scope.
+    A caller names a configured repository at most, never a URL.
     """
-    target = _collection_arg(args)
-    what = f"knowledge base {target!r}" if target else "all knowledge bases"
-    return f"update_rag is not implemented yet — no re-index of {what} was started."
+    from src import rag_git_sync
+
+    repo = str(args.get("repo") or "").strip() or None
+    try:
+        job = rag_git_sync.start(repo, _collection_arg(args))
+    except rag_git_sync.GitSyncError as e:
+        raise ToolError(str(e))
+    plan = job["plan"]
+    bases = ", ".join(sorted({m["base"] for m in plan["mappings"]})) or "none"
+    state = "was already queued" if job.get("already_queued") else "started"
+    lines = [
+        f"Update of {bases} from {plan['url']} {state} (job {job['id']}).",
+        "It runs in the background: the documents change once it has finished.",
+    ]
+    if plan["problems"]:
+        lines.append("Nothing will be removed in this run: " + "; ".join(plan["problems"]) + ".")
+    return "\n".join(lines)
 
 
 def _rag(base_id: Optional[str] = None):

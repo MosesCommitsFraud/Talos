@@ -962,6 +962,30 @@ def setup_rag_routes():
             "status": job.get("status"),
         }
 
+    @router.get("/git-sync")
+    def git_sync_status():
+        """The configured Git repositories, each with its last run and any job under
+        way. Reads the saved settings, so a repository appears here once saved."""
+        from src import rag_git_sync
+
+        return {"repos": rag_git_sync.status()}
+
+    @router.post("/git-sync/{repo_id}")
+    def git_sync_start(repo_id: str):
+        """Sync one configured repository now, what ``update_rag`` does from outside."""
+        from src import rag_git_sync
+
+        try:
+            job = rag_git_sync.start(repo_id)
+        except rag_git_sync.GitSyncError as e:
+            raise HTTPException(400, str(e))
+        return {
+            "ok": True,
+            "job_id": job.get("id"),
+            "status": job.get("status"),
+            "already_queued": bool(job.get("already_queued")),
+        }
+
     @router.get("/search")
     def test_search(q: str, k: int | None = None, rag_id: str | None = None):
         from src.rag_singleton import get_rag_manager
@@ -1182,6 +1206,12 @@ def setup_rag_routes():
                 400,
                 "This document comes from an indexed directory — replace the file there; "
                 "the next directory sync picks it up.",
+            )
+        if row["origin"] == rd.ORIGIN_GIT:
+            raise HTTPException(
+                400,
+                "This document comes from a Git repository — change the file there; "
+                "the next update picks it up.",
             )
         if rd.is_within(row["source"], rd.managed_uploads_dir()):
             upload_dir = os.path.dirname(row["source"])

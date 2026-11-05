@@ -47,6 +47,8 @@ TOKEN_PROFILES = {
     "mcp": ["rag:read", "skills:read"],
     "mcp_web": ["rag:read", "skills:read", "web:read"],
     "mcp_sql": ["sql:read"],
+    # Only the update_rag trigger: for the CI job that calls it after a push.
+    "mcp_update": ["rag:update"],
 }
 
 

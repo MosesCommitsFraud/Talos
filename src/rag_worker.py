@@ -291,6 +291,27 @@ def adopt_legacy_sql_job(
     return result
 
 
+def git_sync_job(plan: Dict[str, Any], snapshots: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
+    """Bring the knowledge bases in step with a Git repository (src/rag_git_sync.py).
+
+    One job for all bases of a run, each indexed with its own settings.
+    """
+    from rq import get_current_job
+
+    from src import rag_git_sync
+
+    job = get_current_job()
+
+    def rag_for(base_id: str):
+        snapshot = snapshots.get(base_id) or {}
+        _apply_snapshot(snapshot)
+        return _fresh_rag(base_id, snapshot)
+
+    result = rag_git_sync.run(plan, rag_for, progress_cb=_progress_saver(job))
+    _finalize(job, result)
+    return result
+
+
 def sync_register_job(
     config_snapshot: Dict[str, Any], base_id: Optional[str] = None
 ) -> Dict[str, Any]:
@@ -322,6 +343,46 @@ def rebuild_sparse_job(
 # ---------------------------------------------------------------------------
 # Enqueue helpers (called by the FastAPI app)
 # ---------------------------------------------------------------------------
+
+
+def start_git_sync(plan: Dict[str, Any]) -> Dict[str, Any]:
+    """Queue a sync of one repository.
+
+    A job for the same target that hasn't started yet will see the newest commit
+    anyway, so a caller triggering in a loop adds nothing to the queue. One already
+    running may have fetched before the commit the caller means, so that doesn't count.
+    """
+    from src.rag_registry import list_bases
+
+    queue = _queue()
+    for waiting in queue.jobs:
+        meta = waiting.meta or {}
+        if (
+            meta.get("type") == "git_sync"
+            and meta.get("repo_id") == plan["repo_id"]
+            and meta.get("only_base") == plan.get("only_base")
+        ):
+            return {**_job_to_dict(waiting), "already_queued": True}
+    snapshots = {str(b["id"]): _snapshot(str(b["id"])) for b in list_bases(include_mini=True)}
+    job = queue.enqueue(
+        "src.rag_worker.git_sync_job",
+        plan,
+        snapshots,
+        job_timeout=_JOB_TIMEOUT,
+        meta={
+            "type": "git_sync",
+            "directory": plan["url"],
+            "owner": None,
+            "base_id": plan.get("only_base") or "default",
+            "repo_id": plan["repo_id"],
+            "only_base": plan.get("only_base"),
+            "indexed_count": 0,
+            "failed_count": 0,
+            "current_file": "",
+            "message": "Queued",
+        },
+    )
+    return _job_to_dict(job)
 
 
 def start_rebuild_sparse(base_id: Optional[str] = None) -> Dict[str, Any]:
@@ -470,6 +531,7 @@ def _job_to_dict(job) -> Dict[str, Any]:
         # Which knowledge base this job ingests into, so the queue view can
         # label rows once more than one base exists.
         "base_id": meta.get("base_id") or "default",
+        "repo_id": meta.get("repo_id"),
         "indexed_count": int(meta.get("indexed_count") or 0),
         "failed_count": int(meta.get("failed_count") or 0),
         # Files done / total (uploads carry a known total → a real % bar; dir

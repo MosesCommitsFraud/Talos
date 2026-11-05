@@ -166,6 +166,16 @@ def sync() -> List[Dict[str, Any]]:
     return conns
 
 
+def default_base_id() -> Optional[str]:
+    """The mini RAG of the default database: the first enabled one, as in chat."""
+    conns = sync()
+    by_connection = {e.get("connection_id"): e for e in _mini_entries()}
+    for conn in conns:
+        if conn["enabled"] and conn["id"] in by_connection:
+            return str(by_connection[conn["id"]]["id"])
+    return None
+
+
 def rebind(base_id: str, connection_id: str) -> None:
     """Move a mini RAG to another database from Integrations.
 

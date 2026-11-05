@@ -625,6 +625,13 @@ def setup_auth_routes(auth_manager: AuthManager) -> APIRouter:
                 except (TypeError, ValueError):
                     raise HTTPException(400, f"{key} must be an integer")
                 val = max(lo, min(val, hi))
+            if key == "rag_git_repos":
+                from src.rag_git_sync import normalize_repos
+
+                try:
+                    val = normalize_repos(val)
+                except ValueError as e:
+                    raise HTTPException(400, str(e))
             current[key] = val
         _save_settings(current)
         return current

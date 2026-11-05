@@ -121,6 +121,16 @@ def mini_of(connection_id="abc123"):
 # ---------------------------------------------------------------------------
 
 
+def test_default_base_is_the_mini_rag_of_the_first_enabled_database(conns):
+    conns[0]["enabled"] = False
+    conns.append({"id": "def456", "name": "CRM", "enabled": True})
+    conns.append({"id": "ghi789", "name": "BI", "enabled": True})
+    assert rag_mini.default_base_id() == "db-def456"
+    for conn in conns:
+        conn["enabled"] = False
+    assert rag_mini.default_base_id() is None
+
+
 def test_every_database_gets_exactly_one_with_its_own_collection(conns):
     conns.append({"id": "def456", "name": "CRM", "enabled": False})
     rag_mini.sync()

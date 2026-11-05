@@ -184,10 +184,49 @@ def test_update_rag_needs_its_own_scope():
     assert RAG_UPDATE in ALLOWED_SCOPES
 
 
-def test_update_rag_is_a_placeholder_for_now():
-    text, is_error = call("update_rag", {"collection": "handbook"}, scopes={RAG_UPDATE})
+def test_update_rag_starts_a_sync_of_what_the_caller_names(monkeypatch):
+    from src import rag_git_sync
+
+    seen = {}
+
+    def start(repo, base):
+        seen.update(repo=repo, base=base)
+        plan = {
+            "url": "https://git.example/ai-context",
+            "mappings": [{"folder": "sql", "base": "handbook"}],
+            "problems": [],
+        }
+        return {"id": "job-1", "plan": plan}
+
+    monkeypatch.setattr(rag_git_sync, "start", start)
+    text, is_error = call(
+        "update_rag", {"repo": "ai-context-1", "collection": "handbook"}, scopes={RAG_UPDATE}
+    )
     assert is_error is False
-    assert "not implemented" in text and "'handbook'" in text
+    assert seen == {"repo": "ai-context-1", "base": "handbook"}
+    assert "job-1" in text and "handbook" in text and "https://git.example/ai-context" in text
+
+
+def test_update_rag_says_so_when_nothing_is_configured(monkeypatch):
+    from src import rag_git_sync
+
+    monkeypatch.setattr(rag_git_sync, "configured_repos", lambda: [])
+    text, is_error = call("update_rag", {}, scopes={RAG_UPDATE})
+    assert is_error is True
+    assert "No Git repository is configured" in text
+
+
+def test_update_rag_cannot_be_pointed_at_a_url(monkeypatch):
+    """Only ids from the administrator's list: a URL is just an unknown id."""
+    from src import rag_git_sync
+
+    repos = rag_git_sync.normalize_repos(
+        [{"url": "https://git.example/ai-context", "mappings": [{"folder": "sql", "base": "x"}]}]
+    )
+    monkeypatch.setattr(rag_git_sync, "configured_repos", lambda: repos)
+    text, is_error = call("update_rag", {"repo": "https://evil.example/repo"}, scopes={RAG_UPDATE})
+    assert is_error is True
+    assert "Unknown repository" in text
 
 
 # ---------------------------------------------------------------------------
