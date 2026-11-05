@@ -1,22 +1,22 @@
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { usePrefs } from '@/state/prefs';
+import { createProject } from '@/api/client';
+import { useProjects } from '@/lib/useProjects';
 import { useUi } from '@/state/ui';
 import { Button } from './ui/button';
 import { Dialog, DialogContent, DialogSection } from './ui/dialog';
 
-/** "Create a project": a name and what the project is for. Both live in prefs —
- *  the server only ever learns the name, and only once a chat is moved into the
- *  project (a project is a folder label on its chats). Creating one therefore
- *  can't fail, and opens the new, empty project right away. */
+/** "Create a project": a name and what it is for. Whoever creates it manages who
+ *  else is in it. Opens the new project's page right away. */
 export function CreateProjectDialog() {
   const { t } = useTranslation();
   const open = useUi((s) => s.createProjectOpen);
   const setOpen = useUi((s) => s.setCreateProjectOpen);
   const setOpenProject = useUi((s) => s.setOpenProject);
   const setView = useUi((s) => s.setView);
-  const projects = usePrefs((s) => s.projects);
-  const addProject = usePrefs((s) => s.addProject);
+  const { data: projects } = useProjects();
+  const queryClient = useQueryClient();
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
 
@@ -27,15 +27,20 @@ export function CreateProjectDialog() {
   }, [open]);
 
   const trimmed = name.trim();
-  const duplicate = projects.some((p) => p.name === trimmed);
-  const canCreate = !!trimmed && !duplicate;
+  const duplicate = (projects ?? []).some((p) => p.name === trimmed && p.is_creator);
+  const creating = useMutation({
+    mutationFn: () => createProject(trimmed, description.trim()),
+    onSuccess: async (project) => {
+      await queryClient.invalidateQueries({ queryKey: ['projects'] });
+      setOpenProject(project.id);
+      setView('projects');
+      setOpen(false);
+    },
+  });
+  const canCreate = !!trimmed && !duplicate && !creating.isPending;
 
   const create = () => {
-    if (!canCreate) return;
-    addProject(trimmed, description.trim() || undefined);
-    setOpenProject(trimmed);
-    setView('projects');
-    setOpen(false);
+    if (canCreate) creating.mutate();
   };
 
   return (
@@ -72,6 +77,9 @@ export function CreateProjectDialog() {
               className="w-full resize-y rounded-lg border border-input bg-transparent px-3 py-2 text-sm outline-none transition-shadow focus:border-ring focus:ring-[3px] focus:ring-ring/25 dark:bg-input/20"
             />
           </div>
+          {creating.error && (
+            <p role="alert" className="text-xs text-destructive-foreground">{(creating.error as Error).message}</p>
+          )}
           <div className="flex justify-end gap-2 pt-1">
             <Button variant="outline" onClick={() => setOpen(false)}>
               {t('common.cancel')}

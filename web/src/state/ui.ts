@@ -40,6 +40,19 @@ function viewFromHash(): AppView {
     : 'chat';
 }
 
+/** `#/projects/<id>` opens that project's page on load. */
+function projectFromHash(): string | null {
+  if (typeof location === 'undefined') return null;
+  const [slug, id] = location.hash.replace(/^#\/?/, '').split('/');
+  return slug === 'projects' && id ? decodeURIComponent(id) : null;
+}
+
+function hashFor(view: AppView, openProject: string | null): string {
+  if (view === 'chat') return location.pathname + location.search;
+  if (view === 'projects' && openProject) return `#/projects/${encodeURIComponent(openProject)}`;
+  return `#/${view}`;
+}
+
 interface UiState {
   /** Which top-level surface is shown (chat vs. the /rag workspace). */
   view: AppView;
@@ -80,9 +93,8 @@ interface UiState {
   closePreview: () => void;
   artifactSelection: ArtifactSelection | null;
   setArtifactSelection: (selection: ArtifactSelection | null) => void;
-  /** Project whose chats the sidebar list is narrowed to; null = loose chats.
-   *  Shared state rather than the sidebar's own, because the Projects page
-   *  opens a project too. */
+  /** Id of the project on screen. The Projects page shows it, and the sidebar list
+   *  narrows to the user's chats in it; null = the list of projects, loose chats. */
   openProject: string | null;
   setOpenProject: (name: string | null) => void;
   /** The "Create a project" modal — opened from the sidebar's + and from the
@@ -101,7 +113,7 @@ export const useUi = create<UiState>((set, get) => ({
         history.replaceState(
           null,
           '',
-          view === 'chat' ? location.pathname + location.search : `#/${view}`,
+          hashFor(view, get().openProject),
         );
       }
       set({ view });
@@ -132,8 +144,13 @@ export const useUi = create<UiState>((set, get) => ({
   closePreview: () => set({ preview: null, artifactsOpen: false, previewFullscreen: false }),
   artifactSelection: null,
   setArtifactSelection: (artifactSelection) => set({ artifactSelection }),
-  openProject: null,
-  setOpenProject: (openProject) => set({ openProject }),
+  openProject: projectFromHash(),
+  setOpenProject: (openProject) => {
+    set({ openProject });
+    if (typeof history !== 'undefined' && get().view === 'projects') {
+      history.replaceState(null, '', hashFor('projects', openProject));
+    }
+  },
   createProjectOpen: false,
   setCreateProjectOpen: (createProjectOpen) => set({ createProjectOpen }),
 }));

@@ -24,7 +24,7 @@ const QUERY_KEY = ['userMemories'];
 /** Stored on one line (src/user_memory.py), so the limit applies to this. */
 const oneLine = (text: string) => text.split(/\s+/).filter(Boolean).join(' ');
 
-function MemoryEditor({
+export function MemoryEditor({
   initial,
   limits,
   onSave,
@@ -89,7 +89,7 @@ function MemoryEditor({
   );
 }
 
-function MemoryRow({ entry, onEdit, onDelete }: { entry: UserMemoryEntry; onEdit: () => void; onDelete: () => void }) {
+export function MemoryRow({ entry, onEdit, onDelete }: { entry: UserMemoryEntry; onEdit: () => void; onDelete: () => void }) {
   const { t } = useTranslation();
   return (
     <div className="group flex items-start gap-2 border-t border-border/60 py-2.5">

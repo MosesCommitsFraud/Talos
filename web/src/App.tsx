@@ -12,6 +12,7 @@ import { ArchiveDialog } from './components/ArchiveDialog';
 import { HelpDialog } from './components/HelpDialog';
 import { RightDock } from './components/RightPanel';
 import { RagWorkspace } from './components/rag/RagWorkspace';
+import { ProjectPage, ReadOnlyChatNotice } from './components/pages/ProjectPage';
 import { ProjectsWorkspace } from './components/pages/ProjectsWorkspace';
 import { ArtifactsWorkspace } from './components/pages/ArtifactsWorkspace';
 import { CustomizeWorkspace } from './components/pages/CustomizeWorkspace';
@@ -68,6 +69,8 @@ export default function App() {
   const [ticketOpen, setTicketOpen] = useState(false);
   const view = useUi((s) => s.view);
   const setView = useUi((s) => s.setView);
+  const openProject = useUi((s) => s.openProject);
+  const readOnlyChat = useChat((s) => (s.sessionId ? s.readOnlyChats[s.sessionId] : undefined));
   const theme = usePrefs((s) => s.theme);
   const density = usePrefs((s) => s.density);
   const lang = usePrefs((s) => s.lang);
@@ -116,7 +119,11 @@ export default function App() {
             ) : view === 'memories' ? (
               <MemoriesWorkspace />
             ) : view === 'projects' ? (
-              <ProjectsWorkspace />
+              // With the dock, for the files a project's page opens beside it.
+              <div className="relative flex min-w-0 flex-1">
+                {openProject ? <ProjectPage key={openProject} projectId={openProject} /> : <ProjectsWorkspace />}
+                <RightDock />
+              </div>
             ) : view === 'artifacts' ? (
               <ArtifactsWorkspace />
             ) : view === 'customize' ? (
@@ -148,7 +155,7 @@ export default function App() {
                       }}
                     />
                     <PendingQuestion />
-                    <Composer />
+                    {readOnlyChat ? <ReadOnlyChatNotice chat={readOnlyChat} /> : <Composer />}
                   </div>
                 </main>
                 <RightDock />

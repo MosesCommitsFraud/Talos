@@ -1,6 +1,6 @@
 import { create } from 'zustand';
-import { compactSession, createSession, deleteMessages, fetchActiveRuns, fetchArtifacts, fetchSession, forkSession, queueChatMessage, removeChapter, resumeChat, setChapter, setSessionFolder, setSessionSection, stopChatRun, streamChat, unqueueChatMessage } from '@/api/client';
-import type { Artifact, ArtifactSelection, Attachment, ChatEvent, Citation, Metrics, RagSource, ToolCall, UiDraft } from '@/api/types';
+import { compactSession, createSession, deleteMessages, fetchActiveRuns, fetchArtifacts, fetchSession, forkSession, queueChatMessage, removeChapter, resumeChat, setChapter, setSessionProject, setSessionSection, stopChatRun, streamChat, unqueueChatMessage } from '@/api/client';
+import type { Artifact, ArtifactSelection, Attachment, ChatEvent, Citation, Metrics, RagSource, ToolCall, UiDraft, SessionDetail } from '@/api/types';
 import { documentFileName, isPreviewable, samePath } from '@/lib/files';
 import { timestampMs } from '@/lib/utils';
 import { queryClient } from '@/lib/queryClient';
@@ -195,6 +195,9 @@ interface ChatState {
    *  agent round, t3code-style, instead of resetting per assistant bubble. */
   turnStartedAt: number | null;
   goal: GoalRun | null;
+  /** Chats opened that are someone else's, in a shared project: readable only.
+   *  By chat id. A chat runs as its owner, and only they write in it. */
+  readOnlyChats: Record<string, { name: string; owner: string | null; projectId: string | null }>;
   /** Model used when the next send has to create a session first. */
   pendingModel: { endpointId: string; model: string } | null;
 
@@ -202,6 +205,8 @@ interface ChatState {
   newChat: () => void;
   /** A fresh draft that lands in this section (and project) once it is sent. */
   newChatIn: (placement: DraftPlacement) => void;
+  /** The draft stays a draft but no longer goes anywhere in particular. */
+  clearDraftPlacement: () => void;
   openSession: (id: string) => Promise<void>;
   send: (text: string, opts?: { attachments?: Attachment[]; artifactSelection?: ArtifactSelection; askAnswers?: AskAnswer[]; onSessionCreated?: (id: string) => void; goalIteration?: boolean; targetSessionId?: string; resume?: boolean; resumeElapsedMs?: number | null }) => Promise<void>;
   /** Reattach to a turn that is still running server-side for `id` (after a
@@ -263,7 +268,21 @@ export const selectPendingQuestion = (s: ChatState): UiMessage | null => {
 /** Sidebar status for a chat row: 'working' while a turn streams, 'awaiting'
  *  when a turn ended on a question and needs the user, 'completed' once it
  *  finishes in the background until the chat is opened, else null. */
-export interface DraftPlacement { section: string; folder: string | null }
+export interface DraftPlacement { section?: string | null; projectId?: string | null }
+
+/** Keep track of whether a chat just loaded is someone else's. */
+function noteReadOnly(detail: SessionDetail) {
+  useChat.setState((s) => {
+    const { [detail.id]: known, ...rest } = s.readOnlyChats;
+    if (!detail.readOnly) return known ? { readOnlyChats: rest } : s;
+    return {
+      readOnlyChats: {
+        ...rest,
+        [detail.id]: { name: detail.name, owner: detail.owner, projectId: detail.projectId },
+      },
+    };
+  });
+}
 
 /** Where the current draft goes once its first message creates the session. */
 let draftPlacement: DraftPlacement | null = null;
@@ -680,6 +699,7 @@ export const useChat = create<ChatState>((set, get) => {
   streaming: false,
   turnStartedAt: null,
   goal: null,
+  readOnlyChats: {},
   pendingModel: null,
 
   setPendingModel: (pendingModel) => set({ pendingModel }),
@@ -696,6 +716,8 @@ export const useChat = create<ChatState>((set, get) => {
     activate(null);
   },
 
+  clearDraftPlacement: () => { draftPlacement = null; },
+
   openSession: async (id) => {
     // Opening a chat means going to the chat. A workspace that was on screen
     // (Artifacts, Projects, Customize, RAG…) covers the whole column, so
@@ -708,13 +730,15 @@ export const useChat = create<ChatState>((set, get) => {
     // is authoritative and richer than a refetch (it holds the live-streamed
     // thinking/tool detail). Only cold-load from the server when we have none;
     // a full reload (runtimes empty) is what re-syncs from the backend.
-    if (get().runtimes[id]) return;
+    // Someone else's chat is the exception: nothing here keeps it current.
+    if (get().runtimes[id] && !get().readOnlyChats[id]) return;
 
     const detail = await fetchSession(id);
     // A later click may have switched sessions while we were fetching.
     if (get().sessionId !== id) return;
     // Guard against a turn that started streaming into this id meanwhile.
     if (get().runtimes[id]?.streaming) return;
+    noteReadOnly(detail);
 
     const messages = (detail.history ?? [])
       .filter((m) => m.role === 'user' || m.role === 'assistant')
@@ -760,13 +784,15 @@ export const useChat = create<ChatState>((set, get) => {
 
   restoreLastSession: async () => {
     const id = lastSessionId();
-    if (!id || get().sessionId) return;
+    // A draft that belongs somewhere (a project's page is open) stays that draft.
+    if (!id || get().sessionId || draftPlacement) return;
     // Already have live state for it (a background run was reattached first) —
     // just point the view at it rather than clobbering it with cold history.
     if (get().runtimes[id]) { activate(id); return; }
     try {
       const detail = await fetchSession(id);
-      if (get().sessionId || get().runtimes[id]) return;
+      if (get().sessionId || get().runtimes[id] || draftPlacement) return;
+      noteReadOnly(detail);
       const messages = (detail.history ?? [])
         .filter((m) => m.role === 'user' || m.role === 'assistant')
         .flatMap((m) => coldLoadMessage(m as HistoryMessage, id));
@@ -806,9 +832,11 @@ export const useChat = create<ChatState>((set, get) => {
       if (placement) {
         // Before the chat shows up in the sidebar, so it never appears elsewhere first.
         await Promise.all([
-          setSessionSection(session.id, placement.section),
-          placement.folder ? setSessionFolder(session.id, placement.folder) : undefined,
+          placement.section ? setSessionSection(session.id, placement.section) : undefined,
+          placement.projectId ? setSessionProject(session.id, placement.projectId) : undefined,
         ]).catch((err) => console.error('Talos: placing new chat failed', err));
+        // Sent from the project's page, which makes way for the chat.
+        if (placement.projectId) useUi.getState().setView('chat');
       }
       // Seed an empty runtime and activate it before the user message lands.
       writeRuntime(sessionId, () => emptyRuntime());

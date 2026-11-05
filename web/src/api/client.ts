@@ -37,8 +37,22 @@ export const fetchVersionUpdates = () =>
   );
 
 export async function fetchSession(id: string): Promise<SessionDetail> {
-  const data = await getJSON<Omit<SessionDetail, 'id'> & { id?: string }>(`/api/history/${id}`);
-  return { id: data.id ?? id, name: data.name ?? '', history: Array.isArray(data.history) ? data.history : [] };
+  const data = await getJSON<{
+    id?: string;
+    name?: string;
+    history?: SessionDetail['history'];
+    read_only?: boolean;
+    owner?: string | null;
+    project_id?: string | null;
+  }>(`/api/history/${id}`);
+  return {
+    id: data.id ?? id,
+    name: data.name ?? '',
+    history: Array.isArray(data.history) ? data.history : [],
+    readOnly: !!data.read_only,
+    owner: data.owner ?? null,
+    projectId: data.project_id ?? null,
+  };
 }
 
 interface ApiModelItem {
@@ -79,15 +93,14 @@ export async function renameSession(id: string, name: string): Promise<void> {
   await fetch(`/api/session/${id}`, { method: 'PATCH', body: fd, credentials: 'same-origin' });
 }
 
-export async function setSessionFolder(id: string, folder: string | null): Promise<void> {
+export async function setSessionProject(id: string, projectId: string | null): Promise<void> {
   const fd = new FormData();
-  fd.set('folder', folder ?? '');
-  // Taking a chat out of its folder is sent as an explicit flag: an empty
-  // `folder` value is indistinguishable from "field not sent" by the time it
-  // has been through a form parser, so removal quietly did nothing.
-  if (!folder) fd.set('clear_folder', 'true');
+  // Taking a chat out is an explicit flag: an empty value is indistinguishable
+  // from "field not sent" by the time it has been through a form parser.
+  if (projectId) fd.set('project_id', projectId);
+  else fd.set('clear_project', 'true');
   const res = await fetch(`/api/session/${id}`, { method: 'PATCH', body: fd, credentials: 'same-origin' });
-  if (!res.ok) throw new Error(`setSessionFolder: ${res.status} ${await res.text()}`);
+  if (!res.ok) throw new Error(`setSessionProject: ${res.status} ${await res.text()}`);
 }
 
 export async function setSessionSection(id: string, section: string | null): Promise<void> {
@@ -1690,6 +1703,117 @@ export const updateUserMemory = (id: number, title: string, text: string) =>
 export const deleteUserMemory = (id: number) => postJSON(`/api/memories/${id}`, undefined, 'DELETE');
 
 export const deleteAllUserMemories = () => postJSON('/api/memories', undefined, 'DELETE');
+
+/* ── Projects ──
+   routes/project_routes.py. Everyone in a project reads its chats and works in its
+   files and memories; only the creator changes the project or who is in it. */
+
+export interface ProjectSummary {
+  id: string;
+  name: string;
+  description: string;
+  owner: string | null;
+  is_creator: boolean;
+  member_count: number;
+  chat_count: number;
+  created_at: string | null;
+  updated_at: string | null;
+  last_active_at: string | null;
+}
+
+export interface ProjectChat {
+  id: string;
+  name: string;
+  owner: string | null;
+  owner_display_name: string | null;
+  message_count: number;
+  last_message_at: string | null;
+}
+
+export interface ProjectMember {
+  username: string;
+  display_name: string | null;
+  is_creator: boolean;
+}
+
+export interface ProjectFile {
+  path: string;
+  name?: string;
+  size?: number;
+  mime?: string;
+  mtime?: number;
+  source?: string;
+  version?: number;
+  /** A chat id, or the project's `ref` for what lives in the shared workspace. */
+  session_id: string;
+}
+
+export interface ProjectFiles {
+  ref: string;
+  dirs: string[];
+  artifacts: ProjectFile[];
+  error?: string;
+}
+
+const projectUrl = (id: string, rest = '') => `/api/projects/${encodeURIComponent(id)}${rest}`;
+
+export const fetchProjects = async () =>
+  (await getJSON<{ projects: ProjectSummary[] }>('/api/projects')).projects;
+
+export const fetchProject = (id: string) => getJSON<ProjectSummary>(projectUrl(id));
+
+export const createProject = (name: string, description = '') =>
+  postJSON<ProjectSummary>('/api/projects', { name, description });
+
+export const updateProject = (id: string, change: { name?: string; description?: string }) =>
+  postJSON<ProjectSummary>(projectUrl(id), change, 'PATCH');
+
+export const deleteProject = (id: string) => postJSON(projectUrl(id), undefined, 'DELETE');
+
+export const fetchProjectChats = async (id: string) =>
+  (await getJSON<{ chats: ProjectChat[] }>(projectUrl(id, '/chats'))).chats;
+
+export const fetchProjectMembers = async (id: string) =>
+  (await getJSON<{ members: ProjectMember[] }>(projectUrl(id, '/members'))).members;
+
+export const fetchProjectCandidates = async (id: string) =>
+  (await getJSON<{ users: Array<{ username: string; display_name: string | null }> }>(
+    projectUrl(id, '/candidates'),
+  )).users;
+
+export const addProjectMember = (id: string, username: string) =>
+  postJSON(projectUrl(id, '/members'), { username });
+
+export const removeProjectMember = (id: string, username: string) =>
+  postJSON(projectUrl(id, `/members/${encodeURIComponent(username)}`), undefined, 'DELETE');
+
+export const fetchProjectFiles = (id: string) => getJSON<ProjectFiles>(projectUrl(id, '/files'));
+
+export const createProjectFolder = (id: string, path: string) =>
+  postJSON(projectUrl(id, '/folders'), { path });
+
+export async function uploadProjectFile(id: string, file: File, folder = ''): Promise<void> {
+  const fd = new FormData();
+  fd.set('file', file);
+  fd.set('folder', folder);
+  const res = await fetch(projectUrl(id, '/files'), { method: 'POST', body: fd, credentials: 'same-origin' });
+  if (!res.ok) {
+    let detail = `HTTP ${res.status}`;
+    try { detail = (await res.json()).detail || detail; } catch { /* noop */ }
+    throw new Error(detail);
+  }
+}
+
+export const fetchProjectMemories = (id: string) => getJSON<UserMemories>(projectUrl(id, '/memories'));
+
+export const addProjectMemory = (id: string, title: string, text: string) =>
+  postJSON(projectUrl(id, '/memories'), { title, text });
+
+export const updateProjectMemory = (id: string, entry: number, title: string, text: string) =>
+  postJSON(projectUrl(id, `/memories/${entry}`), { title, text }, 'PATCH');
+
+export const deleteProjectMemory = (id: string, entry: number) =>
+  postJSON(projectUrl(id, `/memories/${entry}`), undefined, 'DELETE');
 
 /* ── External MCP servers Talos connects to as a client ──
    routes/mcp_routes.py. Admin-only: a stdio server runs an arbitrary command

@@ -18,6 +18,7 @@ from routes.session_routes import (
     _session_read_access,
     _verify_session_owner,
 )
+from src.projects import project_of_session
 from src.sandbox_client import fork_workspace
 from src.session_fork import fork_session_records
 from src.topic_analyzer import analyze_topics
@@ -271,6 +272,7 @@ def setup_history_routes(session_manager) -> APIRouter:
             # Someone else's chat in a shared project: theirs to write in.
             "read_only": read_only,
             "owner": getattr(session, "owner", None),
+            "project_id": project_of_session(session_id),
         }
 
     @router.post("/api/session/{session_id}/truncate")

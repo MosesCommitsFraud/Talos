@@ -2182,6 +2182,196 @@ def _memories_overview() -> dict:
 _SESSION_FORKS: list[dict] = []
 
 
+# --- Projects (routes/project_routes.py) -------------------------------------
+_PROJECT_ROWS = [
+    {
+        "id": "p-web",
+        "name": "Website-Relaunch",
+        "description": "Neue Website bis Mai: Inhalte, Design und Texte an einem Ort.",
+        "owner": "preview",
+        "members": ["mara", "sam"],
+        "chats": [
+            {
+                "id": "project-chat-mara",
+                "name": "Struktur der Startseite",
+                "owner": "mara",
+                "owner_display_name": "Mara Klein",
+            },
+            {
+                "id": "project-chat-sam",
+                "name": "Texte für die Produktseite",
+                "owner": "sam",
+                "owner_display_name": "Sam Ito",
+            },
+        ],
+        "files": [
+            {"path": "output/startseite.md", "name": "startseite.md", "size": 2048, "mime": "text/markdown", "mtime": 1762300000},
+            {"path": "output/entwuerfe/hero.txt", "name": "hero.txt", "size": 240, "mime": "text/plain", "mtime": 1762290000},
+            {"path": "sitemap.csv", "name": "sitemap.csv", "size": 512, "mime": "text/csv", "mtime": 1762280000},
+        ],
+        "dirs": ["output", "output/entwuerfe", "recherche"],
+        "memories": [
+            {
+                "id": 1,
+                "title": "Launch-Termin",
+                "text": "Die neue Website geht am 12. Mai live.",
+                "created_at": "2026-11-03T10:00:00",
+                "updated_at": "2026-11-03T10:00:00",
+            }
+        ],
+    },
+    {
+        "id": "p-joined",
+        "name": "Messe 2027",
+        "description": "Standplanung und Einladungen.",
+        "owner": "mara",
+        "members": ["preview"],
+        "chats": [],
+        "files": [],
+        "dirs": [],
+        "memories": [],
+    },
+]
+_SESSION_PROJECTS: dict = {}
+_USER_NAMES = {"preview": "Preview", "mara": "Mara Klein", "sam": "Sam Ito", "jonas": None}
+
+
+def _project_summary(row: dict) -> dict:
+    own = [sid for sid, pid in _SESSION_PROJECTS.items() if pid == row["id"]]
+    return {
+        "id": row["id"],
+        "name": row["name"],
+        "description": row["description"],
+        "owner": row["owner"],
+        "is_creator": row["owner"] == "preview",
+        "member_count": len(row["members"]) + 1,
+        "chat_count": len(row["chats"]) + len(own),
+        "created_at": "2026-11-01T09:00:00",
+        "updated_at": "2026-11-04T09:00:00",
+        "last_active_at": "2026-11-04T16:00:00",
+    }
+
+
+def _project_api(method: str, path: str, data: dict):
+    """(status, payload) for /api/projects…; the shape of routes/project_routes.py."""
+    parts = path.split("/")[3:]
+    if not parts:
+        if method == "POST":
+            row = {
+                "id": f"p-{len(_PROJECT_ROWS) + 1}",
+                "name": data["name"],
+                "description": data.get("description", ""),
+                "owner": "preview",
+                "members": [],
+                "chats": [],
+                "files": [],
+                "dirs": [],
+                "memories": [],
+            }
+            _PROJECT_ROWS.append(row)
+            return 200, _project_summary(row)
+        return 200, {"projects": [_project_summary(r) for r in _PROJECT_ROWS]}
+    row = next((r for r in _PROJECT_ROWS if r["id"] == parts[0]), None)
+    if row is None:
+        return 404, {"detail": "Project not found"}
+    section = parts[1] if len(parts) > 1 else ""
+    if not section:
+        if method == "PATCH":
+            row.update({k: v for k, v in data.items() if v is not None})
+        elif method == "DELETE":
+            _PROJECT_ROWS.remove(row)
+            return 200, {"ok": True}
+        return 200, _project_summary(row)
+    if section == "chats":
+        own = [
+            {
+                "id": sid,
+                "name": PREVIEW_SESSION_NAME,
+                "owner": "preview",
+                "owner_display_name": "Preview",
+                "message_count": 2,
+                "last_message_at": "2026-11-04T16:00:00",
+            }
+            for sid, pid in _SESSION_PROJECTS.items()
+            if pid == row["id"]
+        ]
+        foreign = [
+            {**c, "message_count": 4, "last_message_at": "2026-11-04T12:00:00"} for c in row["chats"]
+        ]
+        return 200, {"chats": own + foreign}
+    if section == "members":
+        if method == "POST":
+            row["members"].append(data["username"])
+            return 200, {"ok": True}
+        if method == "DELETE":
+            row["members"].remove(parts[2])
+            return 200, {"ok": True}
+        everyone = [
+            {"username": row["owner"], "is_creator": True},
+            *({"username": m, "is_creator": False} for m in row["members"]),
+        ]
+        return 200, {"members": [{**m, "display_name": _USER_NAMES.get(m["username"])} for m in everyone]}
+    if section == "candidates":
+        taken = {row["owner"], *row["members"]}
+        return 200, {
+            "users": [
+                {"username": u, "display_name": d} for u, d in _USER_NAMES.items() if u not in taken
+            ]
+        }
+    if section == "files":
+        if method == "POST":
+            row["files"].append(
+                {"path": "hochgeladen.txt", "name": "hochgeladen.txt", "size": 10, "mime": "text/plain", "mtime": 1762310000}
+            )
+            return 200, {"ok": True, "path": "hochgeladen.txt"}
+        ref = f"project:{row['id']}"
+        return 200, {
+            "ref": ref,
+            "dirs": row["dirs"],
+            "artifacts": [
+                *({**f, "source": "workspace", "session_id": ref} for f in row["files"]),
+                *(
+                    [
+                        {
+                            "path": "document:doc-briefing",
+                            "name": "Briefing",
+                            "mime": "text/markdown",
+                            "source": "document",
+                            "session_id": "project-chat-mara",
+                            "mtime": 1762305000,
+                        }
+                    ]
+                    if row["id"] == "p-web"
+                    else []
+                ),
+            ],
+        }
+    if section == "folders":
+        row["dirs"].append(data["path"])
+        return 200, {"ok": True, "path": data["path"]}
+    if section == "memories":
+        entries = row["memories"]
+        if method == "POST":
+            entries.append(
+                {
+                    "id": max((m["id"] for m in entries), default=0) + 1,
+                    "title": data.get("title") or data["text"][:60],
+                    "text": data["text"],
+                    "created_at": "2026-11-04T16:00:00",
+                    "updated_at": "2026-11-04T16:00:00",
+                }
+            )
+        elif method == "PATCH":
+            entry = next(m for m in entries if m["id"] == int(parts[2]))
+            entry.update({k: v for k, v in data.items() if v})
+        elif method == "DELETE":
+            entries[:] = [m for m in entries if m["id"] != int(parts[2])]
+        else:
+            return 200, {"limits": {"title": 80, "text": 600, "entries": 50}, "entries": entries}
+        return 200, {"ok": True}
+    return 404, {"detail": "not found"}
+
+
 def _sessions():
     now = int(time.time())
     base = {
@@ -2629,10 +2819,20 @@ class PreviewHandler(BaseHTTPRequestHandler):
         except OSError as exc:
             self._send_json({"error": str(exc)}, 500)
 
+    def _project_request(self, method: str):
+        body = self._read_body() if method != "GET" else b""
+        content_type = self.headers.get("Content-Type", "")
+        data = json.loads(body or b"{}") if "json" in content_type else {}
+        status, payload = _project_api(method, urlparse(self.path).path, data)
+        self._send_json(payload, status)
+
     def do_OPTIONS(self):
         self._send(204, b"")
 
     def do_GET(self):
+        if urlparse(self.path).path.startswith("/api/projects"):
+            self._project_request("GET")
+            return
         parsed = urlparse(self.path)
         path = parsed.path
 
@@ -2769,8 +2969,23 @@ class PreviewHandler(BaseHTTPRequestHandler):
             self._send_json(
                 {
                     "id": session_id,
-                    "name": PREVIEW_SESSION_NAME,
+                    "name": next(
+                        (
+                            c["name"]
+                            for r in _PROJECT_ROWS
+                            for c in r["chats"]
+                            if c["id"] == session_id
+                        ),
+                        PREVIEW_SESSION_NAME,
+                    ),
                     "history": _history_for(session_id),
+                    "read_only": session_id.startswith("project-chat-"),
+                    "owner": session_id.rsplit("-", 1)[-1]
+                    if session_id.startswith("project-chat-")
+                    else "preview",
+                    "project_id": "p-web"
+                    if session_id.startswith("project-chat-")
+                    else _SESSION_PROJECTS.get(session_id),
                 }
             )
             return
@@ -3152,6 +3367,9 @@ class PreviewHandler(BaseHTTPRequestHandler):
         self._serve_file(STATIC / path.lstrip("/"))
 
     def do_POST(self):
+        if urlparse(self.path).path.startswith("/api/projects"):
+            self._project_request("POST")
+            return
         parsed = urlparse(self.path)
         path = parsed.path
         if path.startswith("/api/session/") and path.endswith("/chapter"):
@@ -3526,6 +3744,9 @@ class PreviewHandler(BaseHTTPRequestHandler):
         self._send_json({"ok": True})
 
     def do_PATCH(self):
+        if urlparse(self.path).path.startswith("/api/projects"):
+            self._project_request("PATCH")
+            return
         body = self._read_body()
         path = urlparse(self.path).path
         if path.startswith("/api/memories/"):
@@ -3552,8 +3773,12 @@ class PreviewHandler(BaseHTTPRequestHandler):
             edits = _SESSION_EDITS.setdefault(path[len("/api/session/") :], {})
             if "name" in fields:
                 edits["name"] = fields["name"]
-            if "folder" in fields:
-                edits["folder"] = None if fields.get("clear_folder") else fields["folder"]
+            if "project_id" in fields or "clear_project" in fields:
+                session_id = path[len("/api/session/") :]
+                edits["project_id"] = fields.get("project_id") or None
+                _SESSION_PROJECTS.pop(session_id, None)
+                if edits["project_id"]:
+                    _SESSION_PROJECTS[session_id] = edits["project_id"]
             if "section" in fields:
                 edits["section"] = None if fields.get("clear_section") else fields["section"]
             if "unread" in fields:
@@ -3606,6 +3831,9 @@ class PreviewHandler(BaseHTTPRequestHandler):
         self._send_json({"ok": True})
 
     def do_DELETE(self):
+        if urlparse(self.path).path.startswith("/api/projects"):
+            self._project_request("DELETE")
+            return
         parsed = urlparse(self.path)
         path = parsed.path
         if path == "/api/memories":

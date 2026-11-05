@@ -712,12 +712,16 @@ function ForkAction({ msg }: { msg: UiMessage }) {
   );
 }
 
+/** Someone else's chat in a shared project: only they write in it. */
+const useReadOnlyChat = () => useChat((s) => !!s.sessionId && !!s.readOnlyChats[s.sessionId]);
+
 function UserActions({ msg }: { msg: UiMessage }) {
   const { t } = useTranslation();
   const rewindTo = useChat((s) => s.rewindTo);
   const streaming = useChat((s) => s.streaming);
+  const readOnly = useReadOnlyChat();
   // An answer to a question card has no text of its own to send again.
-  const canBranch = !!msg.dbId && !msg.askAnswers;
+  const canBranch = !!msg.dbId && !msg.askAnswers && !readOnly;
   return (
     <>
       <CopyAction text={msg.content} />
@@ -736,6 +740,7 @@ function TurnActions({ anchor, copyText }: { anchor?: UiMessage; copyText: strin
   const pinChapter = useChat((s) => s.pinChapter);
   const unpinChapter = useChat((s) => s.unpinChapter);
   const chapter = anchor?.chapter;
+  const readOnly = useReadOnlyChat();
   // Nothing to take back while the title is still being written.
   const togglePin = () => {
     if (!anchor || (chapter && chapter.title === null)) return;
@@ -748,8 +753,8 @@ function TurnActions({ anchor, copyText }: { anchor?: UiMessage; copyText: strin
   return (
     <>
       <CopyAction text={copyText} />
-      {anchor && <ForkAction msg={anchor} />}
-      {anchor && (
+      {anchor && !readOnly && <ForkAction msg={anchor} />}
+      {anchor && !readOnly && (
         <ActionIcon label={t(chapter ? 'messages.unpinChapter' : 'messages.pinChapter')} onClick={togglePin}>
           <PinIcon className={cn('size-3', chapter && 'fill-current text-foreground')} />
         </ActionIcon>

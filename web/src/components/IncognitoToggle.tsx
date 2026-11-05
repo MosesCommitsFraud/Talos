@@ -85,7 +85,9 @@ export function IncognitoToggle() {
 
   const { data: sessions } = useQuery({ queryKey: ['sessions'], queryFn: fetchSessions });
   const session = sessions?.find((s) => s.id === sessionId);
-  const title = session?.name ?? '';
+  // Someone else's chat in a shared project isn't in the user's own list.
+  const readOnly = useChat((s) => (sessionId ? s.readOnlyChats[sessionId] : undefined));
+  const title = session?.name ?? readOnly?.name ?? '';
   // Placeholder name → the naming model is still working; show a skeleton
   // rather than a title that will be swapped out a second later.
   // (While the list itself is loading there is no name to judge, so the header
@@ -163,6 +165,10 @@ export function IncognitoToggle() {
                 text={placeholderTitleText(session?.name)}
                 label={t('chatHeader.titlePending')}
               />
+            </div>
+          ) : readOnly ? (
+            <div className="flex h-7 min-w-0 items-center px-2 text-sm font-medium">
+              <span className="truncate">{title}</span>
             </div>
           ) : sessionId ? (
             // pointer-events only on the title and chevron, so the empty space

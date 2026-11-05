@@ -23,16 +23,21 @@ import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   archiveSession,
+  createProject,
+  deleteProject,
   deleteSession,
   fetchSessions,
   forkSession,
   logout,
   markImportant,
   renameSession,
-  setSessionFolder,
+  setSessionProject,
   setSessionSection,
   setSessionUnread,
+  updateProject,
+  type ProjectSummary,
 } from '@/api/client';
+import { useMoveStoredProjects, useProjects } from '@/lib/useProjects';
 import { useAuth } from './auth/AuthGate';
 import type { Session } from '@/api/types';
 import { selectChatStatus, selectFolderStatus, useChat } from '@/state/chat';
@@ -252,6 +257,9 @@ function ScrollableSessionTitle({ children, working }: { children: string; worki
   );
 }
 
+/** A project as the chat menu offers it. */
+type ProjectOption = { value: string; label: string };
+
 function SessionRow({
   session,
   projects,
@@ -259,7 +267,7 @@ function SessionRow({
   hasForks,
 }: {
   session: Session;
-  projects: string[];
+  projects: ProjectOption[];
   sections: string[];
   /** Forks are nested under this row, so it gets the caret that folds them. */
   hasForks?: boolean;
@@ -273,7 +281,6 @@ function SessionRow({
   // 'rename' edits the chat name; 'project' and 'section' type a new one to move into.
   const [mode, setMode] = useState<'idle' | 'rename' | 'project' | 'section'>('idle');
   const [draft, setDraft] = useState('');
-  const addProject = usePrefs((s) => s.addProject);
   const addSection = usePrefs((s) => s.addSection);
   const forksCollapsed = usePrefs((s) => s.collapsedForks.includes(session.id));
   const toggleForksCollapsed = usePrefs((s) => s.toggleForksCollapsed);
@@ -288,10 +295,16 @@ function SessionRow({
 
   // Refresh either way: on failure the list snaps back to what the server
   // actually has, instead of showing a move that never happened.
+  const refreshProjects = () => {
+    void refresh();
+    void queryClient.invalidateQueries({ queryKey: ['projects'] });
+    void queryClient.invalidateQueries({ queryKey: ['projectChats'] });
+    void queryClient.invalidateQueries({ queryKey: ['projectFiles'] });
+  };
   const moveToProject = (project: string | null) =>
-    void setSessionFolder(session.id, project)
+    void setSessionProject(session.id, project)
       .catch((err) => console.error('Talos: moving chat to project failed', err))
-      .finally(refresh);
+      .finally(refreshProjects);
   const moveToSection = (section: string | null) =>
     void setSessionSection(session.id, section)
       .catch((err) => console.error('Talos: moving chat to section failed', err))
@@ -364,10 +377,12 @@ function SessionRow({
     if (mode === 'rename') {
       if (value && value !== session.name) { await renameSession(session.id, value); refresh(); }
     } else if (mode === 'project') {
-      if (value && value !== (session.folder ?? '')) {
-        try { await setSessionFolder(session.id, value); addProject(value); }
-        catch (err) { console.error('Talos: creating project failed', err); }
-        refresh();
+      if (value) {
+        try {
+          const created = await createProject(value);
+          await setSessionProject(session.id, created.id);
+        } catch (err) { console.error('Talos: creating project failed', err); }
+        refreshProjects();
       }
     } else if (mode === 'section') {
       if (value && value !== (session.section ?? '')) {
@@ -535,7 +550,7 @@ function ChatRows({
   limit,
 }: {
   list: Session[];
-  projects: string[];
+  projects: ProjectOption[];
   sections: string[];
   limit?: number;
 }) {
@@ -656,7 +671,7 @@ function SectionHeader({
               <button
                 type="button"
                 aria-label={t('sidebar.newChat')}
-                onClick={() => { newChatIn({ section: name, folder: openProject }); setView('chat'); }}
+                onClick={() => { newChatIn({ section: name, projectId: openProject }); setView('chat'); }}
                 className="flex size-6 shrink-0 items-center justify-center rounded-md text-foreground/80 transition-colors hover:bg-sidebar-accent hover:text-foreground"
               >
                 <PlusIcon className="size-4" />
@@ -680,45 +695,53 @@ function SectionHeader({
   );
 }
 
-/** One row in the Projects section. Selecting it filters the chat list below;
- *  the context menu renames or deletes the project. A project has no row of its
- *  own on the server — it exists as a label on its chats plus an entry in prefs
- *  (which is what lets an empty one exist at all), so both operations are a
- *  batch update of its members. */
+/** One row in the Projects section. Selecting it opens the project's page and
+ *  narrows the chat list below to the user's chats in it. Its creator can rename or
+ *  delete it from the context menu. */
 function ProjectRow({
-  name,
+  project,
   members,
   active,
   onSelect,
 }: {
-  name: string;
-  /** Every chat carrying this project label, pinned ones included. */
+  project: ProjectSummary;
+  /** The user's chats in this project, pinned ones included. */
   members: Session[];
   active: boolean;
   onSelect: () => void;
 }) {
   const { t } = useTranslation();
-  const renameProjectPref = usePrefs((s) => s.renameProjectPref);
   const queryClient = useQueryClient();
   const [renaming, setRenaming] = useState(false);
-  const [draft, setDraft] = useState(name);
+  const [draft, setDraft] = useState(project.name);
   const status = useChat(selectFolderStatus(members.map((s) => s.id)));
+  const name = project.name;
 
-  const setFolder = async (target: string | null) => {
-    try {
-      await Promise.all(members.map((s) => setSessionFolder(s.id, target)));
-      renameProjectPref(name, target);
-    } catch (err) {
-      console.error('Talos: updating project failed', err);
-    } finally {
-      void queryClient.invalidateQueries({ queryKey: ['sessions'] });
-    }
+  const refresh = () => {
+    void queryClient.invalidateQueries({ queryKey: ['projects'] });
+    void queryClient.invalidateQueries({ queryKey: ['project', project.id] });
+    void queryClient.invalidateQueries({ queryKey: ['sessions'] });
   };
-
+  const beginRename = () => {
+    if (!project.is_creator) return;
+    setDraft(name);
+    setRenaming(true);
+  };
   const commitRename = async () => {
     const value = draft.trim();
     setRenaming(false);
-    if (value && value !== name) await setFolder(value);
+    if (!value || value === name) return;
+    try { await updateProject(project.id, { name: value }); }
+    catch (err) { console.error('Talos: renaming project failed', err); }
+    refresh();
+  };
+  const remove = async () => {
+    if (!window.confirm(t('projects.deleteConfirm', { name }))) return;
+    try {
+      await deleteProject(project.id);
+      if (useUi.getState().openProject === project.id) useUi.getState().setOpenProject(null);
+    } catch (err) { console.error('Talos: deleting project failed', err); }
+    refresh();
   };
 
   if (renaming) {
@@ -738,43 +761,43 @@ function ProjectRow({
     );
   }
 
+  const row = (
+    <button
+      type="button"
+      onClick={onSelect}
+      onDoubleClick={beginRename}
+      className={cn(
+        'group my-px flex w-full items-center gap-2 rounded-lg px-2 py-1 text-left text-sm transition-colors',
+        active ? 'bg-sidebar-active' : 'hover:bg-sidebar-accent',
+      )}
+    >
+      <FolderIcon className="size-3.5 shrink-0 text-muted-foreground" />
+      <span
+        className={cn('min-w-0 flex-1 truncate', status === 'working' && 'shimmer-text-muted')}
+        title={status === 'working' ? t('sidebar.projectWorking') : undefined}
+      >
+        {name}
+      </span>
+      {(status === 'awaiting' || status === 'completed') && (
+        <StatusDot
+          tone={status === 'awaiting' ? 'attention' : 'done'}
+          label={t(status === 'awaiting' ? 'sidebar.projectAwaiting' : 'sidebar.projectCompleted')}
+        />
+      )}
+      <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground">{project.chat_count}</span>
+    </button>
+  );
+  if (!project.is_creator) return row;
   return (
     <ContextMenu>
-      <ContextMenuTrigger asChild>
-        <button
-          type="button"
-          onClick={onSelect}
-          onDoubleClick={() => { setDraft(name); setRenaming(true); }}
-          className={cn(
-            'group my-px flex w-full items-center gap-2 rounded-lg px-2 py-1 text-left text-sm transition-colors',
-            active ? 'bg-sidebar-active' : 'hover:bg-sidebar-accent',
-          )}
-        >
-          <FolderIcon className="size-3.5 shrink-0 text-muted-foreground" />
-          <span
-            className={cn('min-w-0 flex-1 truncate', status === 'working' && 'shimmer-text-muted')}
-            title={status === 'working' ? t('sidebar.projectWorking') : undefined}
-          >
-            {name}
-          </span>
-          {(status === 'awaiting' || status === 'completed') && (
-            <StatusDot
-              tone={status === 'awaiting' ? 'attention' : 'done'}
-              label={t(status === 'awaiting' ? 'sidebar.projectAwaiting' : 'sidebar.projectCompleted')}
-            />
-          )}
-          <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground">{members.length}</span>
-        </button>
-      </ContextMenuTrigger>
+      <ContextMenuTrigger asChild>{row}</ContextMenuTrigger>
       <ContextMenuPopup>
-        <ContextMenuItem onSelect={() => { setDraft(name); setRenaming(true); }}>
+        <ContextMenuItem onSelect={beginRename}>
           <PencilIcon /> {t('sidebar.renameProject')}
         </ContextMenuItem>
         <ContextMenuSeparator />
-        {/* Deletes the project only — its chats move back to the flat list. */}
-        <ContextMenuItem variant="destructive" onSelect={() => void setFolder(null)}>
+        <ContextMenuItem variant="destructive" onSelect={() => void remove()}>
           <FolderMinusIcon /> {t('sidebar.deleteProject')}
-          <span className="ms-auto ps-2 text-[11px] text-muted-foreground">{t('sidebar.deleteProjectHint')}</span>
         </ContextMenuItem>
       </ContextMenuPopup>
     </ContextMenu>
@@ -934,7 +957,8 @@ function SidebarBody({ onOpenPalette, account, onOpenTicketDialog, preview }: Si
   const sortMode = usePrefs((s) => s.sortMode);
   const setSortMode = usePrefs((s) => s.setSortMode);
   const visibility = usePrefs((s) => s.visibility);
-  const storedProjects = usePrefs((s) => s.projects);
+  const { data: projects } = useProjects();
+  useMoveStoredProjects();
   const storedSections = usePrefs((s) => s.sections);
   const collapsedSections = usePrefs((s) => s.collapsedSections);
   const sectionSort = usePrefs((s) => s.sectionSort);
@@ -958,26 +982,21 @@ function SidebarBody({ onOpenPalette, account, onOpenTicketDialog, preview }: Si
   const sorter = compareSessions(sortMode);
 
   const active = (sessions ?? []).filter((s) => !s.archived);
-  // Projects are the union of the labels the server knows about (a label exists
-  // as long as a chat carries it) and the ones created here but still empty.
-  const projectNames = [
-    ...new Set([
-      ...active.map((s) => s.folder).filter((f): f is string => !!f),
-      ...storedProjects.map((p) => p.name),
-    ]),
-  ].sort((a, b) => a.localeCompare(b));
+  const sortedProjects = (projects ?? []).slice().sort((a, b) => a.name.localeCompare(b.name));
+  const projectOptions = sortedProjects.map((p) => ({ value: p.id, label: p.name }));
+  const openProjectName = sortedProjects.find((p) => p.id === openProject)?.name ?? '';
   // An open project narrows the list to its chats; otherwise the list is the
   // loose chats, with pinned ones floated into their own section on top.
   const awaiting = awaitingIds.split(' ');
   const shown = unreadOnly
     ? active.filter((s) => s.unread || completed[s.id] || awaiting.includes(s.id))
     : active;
-  const inProject = openProject !== null ? shown.filter((s) => s.folder === openProject) : [];
-  const loose = shown.filter((s) => !s.folder);
+  const inProject = openProject !== null ? shown.filter((s) => s.project_id === openProject) : [];
+  const loose = shown.filter((s) => !s.project_id);
   const pinned = openProject === null ? loose.filter((s) => s.is_important).sort(sorter) : [];
   const listed = openProject === null ? loose.filter((s) => !s.is_important).sort(sorter) : inProject.slice().sort(sorter);
   // Sections are the union of the labels chats carry and the ones created here
-  // but still empty — the same rule as projects. Every one is offered in the
+  // but still empty. Every one is offered in the
   // menu; the list itself shows empty ones outside a project only, where they
   // were created, rather than repeating them inside every project. An unread
   // filter leaves out the empty ones too: it is a list of what needs reading.
@@ -1046,8 +1065,8 @@ function SidebarBody({ onOpenPalette, account, onOpenTicketDialog, preview }: Si
         <NavRow
           icon={<ArchiveIcon />}
           label={t('sidebar.projects')}
-          active={view === 'projects'}
-          onClick={() => setView('projects')}
+          active={view === 'projects' && openProject === null}
+          onClick={() => { setOpenProject(null); setView('projects'); }}
         />
         <NavRow
           icon={<ShapesIcon />}
@@ -1080,21 +1099,19 @@ function SidebarBody({ onOpenPalette, account, onOpenTicketDialog, preview }: Si
           </Tooltip>
         </div>
         <div className="max-h-44 overflow-y-auto">
-          {projectNames.map((name) => (
+          {sortedProjects.map((project) => (
             <ProjectRow
-              key={name}
-              name={name}
-              members={active.filter((s) => s.folder === name)}
-              active={name === openProject}
-              // Selecting a project also leaves whichever page was open: the
-              // chats it holds are in the list below, not on that page.
+              key={project.id}
+              project={project}
+              members={active.filter((s) => s.project_id === project.id)}
+              active={project.id === openProject}
               onSelect={() => {
-                setOpenProject(name === openProject ? null : name);
-                setView('chat');
+                setOpenProject(project.id);
+                setView('projects');
               }}
             />
           ))}
-          {projectNames.length === 0 && (
+          {sortedProjects.length === 0 && (
             <div className="flex items-center gap-2 px-2 py-1.5 text-sm text-muted-foreground/80">
               <PinIcon className="size-3.5 shrink-0 -rotate-45" />
               <span className="min-w-0 truncate">{t('sidebar.noProjects')}</span>
@@ -1131,7 +1148,7 @@ function SidebarBody({ onOpenPalette, account, onOpenTicketDialog, preview }: Si
                 {t('sidebar.pinned')}
               </span>
             </div>
-            <ChatRows list={pinned} projects={projectNames} sections={sectionNames} />
+            <ChatRows list={pinned} projects={projectOptions} sections={sectionNames} />
           </div>
         )}
         {listedSections.map((name) => {
@@ -1141,7 +1158,7 @@ function SidebarBody({ onOpenPalette, account, onOpenTicketDialog, preview }: Si
             <div key={name} className="mb-3">
               <SectionHeader name={name} members={members} sortMode={mode} listMenu={listMenu} />
               {!collapsedSections.includes(name) && (
-                <ChatRows list={members} projects={projectNames} sections={sectionNames} />
+                <ChatRows list={members} projects={projectOptions} sections={sectionNames} />
               )}
             </div>
           );
@@ -1155,7 +1172,7 @@ function SidebarBody({ onOpenPalette, account, onOpenTicketDialog, preview }: Si
                 className="-ml-1 flex min-w-0 items-center gap-1 rounded px-1 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
               >
                 <ArrowLeftIcon className="size-3 shrink-0" />
-                <span className="truncate">{openProject}</span>
+                <span className="truncate">{openProjectName}</span>
               </button>
               <ListOptionsMenu {...listMenu} sortMode={sortMode} onSortChange={setSortMode} className="-mr-1.5" />
             </div>
@@ -1167,7 +1184,7 @@ function SidebarBody({ onOpenPalette, account, onOpenTicketDialog, preview }: Si
               <ListOptionsMenu {...listMenu} sortMode={sortMode} onSortChange={setSortMode} className="-mr-1.5" />
             </div>
           )}
-          <ChatRows list={rows} projects={projectNames} sections={sectionNames} limit={visibleCount} />
+          <ChatRows list={rows} projects={projectOptions} sections={sectionNames} limit={visibleCount} />
           {hiddenCount > 0 && (
             <button
               type="button"

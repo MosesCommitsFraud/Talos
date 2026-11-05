@@ -73,6 +73,7 @@ export interface SessionMenuActions {
   fork: () => void;
   moveToSection: (section: string | null) => void;
   newSection: () => void;
+  /** A project's id, or null to take the chat out. */
   moveToProject: (project: string | null) => void;
   newProject: () => void;
   archive: () => void;
@@ -108,7 +109,7 @@ function LabelSubmenu({
 }: {
   kind: keyof typeof PARTS;
   label: string;
-  options: string[];
+  options: Array<{ value: string; label: string }>;
   current: string | null;
   noneLabel: string;
   newLabel: string;
@@ -132,8 +133,8 @@ function LabelSubmenu({
       </SubTrigger>
       <SubPopup className={SUB_POPUP_CLASS} sideOffset={SUB_POPUP_OFFSET} onKeyDown={pressShortcut}>
         {current && row(keyAt(0), noneLabel, () => onPick(null))}
-        {options.map((name, index) =>
-          row(keyAt(index + offset), name, () => onPick(name), name === current),
+        {options.map(({ value, label: text }, index) =>
+          row(keyAt(index + offset), text, () => onPick(value), value === current),
         )}
         {options.length + offset > 0 && <Separator className={SUB_SEPARATOR_CLASS} />}
         {row(keyAt(options.length + offset), newLabel, onNew)}
@@ -156,7 +157,7 @@ export function SessionMenuPopup({
   session: Session;
   /** Marked unread, or finished in the background and not looked at yet. */
   unread: boolean;
-  projects: string[];
+  projects: Array<{ value: string; label: string }>;
   sections: string[];
   actions: SessionMenuActions;
 } & Pick<React.ComponentProps<typeof MenuPopup>, 'align' | 'side' | 'sideOffset'>) {
@@ -184,7 +185,7 @@ export function SessionMenuPopup({
       <LabelSubmenu
         kind={kind}
         label={t('sidebar.moveToSection')}
-        options={sections}
+        options={sections.map((name) => ({ value: name, label: name }))}
         current={session.section || null}
         noneLabel={t('sidebar.noSection')}
         newLabel={t('sidebar.newSection')}
@@ -195,7 +196,7 @@ export function SessionMenuPopup({
         kind={kind}
         label={t('sidebar.moveToProject')}
         options={projects}
-        current={session.folder || null}
+        current={session.project_id || null}
         noneLabel={t('sidebar.noProject')}
         newLabel={t('sidebar.newProject')}
         onPick={actions.moveToProject}

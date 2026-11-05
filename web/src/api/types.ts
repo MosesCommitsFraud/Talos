@@ -10,8 +10,8 @@ export interface Session {
   archived: boolean;
   /** Starred/pinned — surfaced as "Pinned" in the sidebar. */
   is_important?: boolean;
-  /** Flat folder/workspace name, or null/empty when ungrouped. */
-  folder?: string | null;
+  /** The project the chat belongs to, or null/empty when it has none. */
+  project_id?: string | null;
   /** Sidebar section the chat is filed under, or null/empty when it has none. */
   section?: string | null;
   /** Marked unread by the user; cleared when the chat is opened. */
@@ -160,6 +160,10 @@ export interface SessionDetail {
   id: string;
   name: string;
   history: HistoryMessage[];
+  /** Someone else's chat in a shared project: it can be read, not written in. */
+  readOnly: boolean;
+  owner: string | null;
+  projectId: string | null;
 }
 
 /** A structured UI payload a tool attached to its result — rendered as a real

@@ -131,11 +131,8 @@ interface PrefsState {
   micDeviceId: string | null;
   /** Compact (icon-only) sidebar mode. */
   sidebarCollapsed: boolean;
-  /** Projects listed in the sidebar. A project is only a label carried by its
-   *  chats, so the server knows about the ones that already have a member —
-   *  this list is what keeps a freshly created, still-empty project on screen
-   *  until the first chat moves into it, and the only place a project's
-   *  description lives. */
+  /** Projects as this browser knew them when they lived here. They are on the
+   *  server now; this only waits to be moved there (lib/useProjects.ts). */
   projects: Project[];
   /** Sidebar sections. Like a project, a section is a label on its chats; this
    *  list is what keeps one on screen while it has none. */
@@ -172,9 +169,8 @@ interface PrefsState {
   setKnowledge: (useRag: boolean, useDb: boolean) => void;
   setMicDeviceId: (id: string | null) => void;
   toggleSidebar: () => void;
-  addProject: (name: string, description?: string) => void;
-  /** Follow a project through a rename; `to === null` drops it from the list. */
-  renameProjectPref: (from: string, to: string | null) => void;
+  /** Their move to the server is done (lib/useProjects.ts). */
+  clearStoredProjects: () => void;
   addSection: (name: string) => void;
   /** Follow a section through a rename; `to === null` drops it from the list. */
   renameSectionPref: (from: string, to: string | null) => void;
@@ -265,27 +261,7 @@ export const usePrefs = create<PrefsState>()(
       setKnowledge: (useRag, useDb) => set({ useRag, useDb }),
       setMicDeviceId: (micDeviceId) => set({ micDeviceId }),
       toggleSidebar: () => set((s) => ({ sidebarCollapsed: !s.sidebarCollapsed })),
-      addProject: (name, description) => set((s) => {
-        const existing = s.projects.find((p) => p.name === name);
-        // Re-adding a known name only fills in a description it was missing —
-        // creating a project whose folder already has chats must not wipe it.
-        if (existing) {
-          if (!description || existing.description === description) return {};
-          return {
-            projects: s.projects.map((p) => (p.name === name ? { ...p, description } : p)),
-          };
-        }
-        return {
-          projects: [...s.projects, { name, description, createdAt: new Date().toISOString() }],
-        };
-      }),
-      renameProjectPref: (from, to) => set((s) => {
-        const moved = s.projects.find((p) => p.name === from);
-        const rest = s.projects.filter((p) => p.name !== from && p.name !== to);
-        // Carry the description across a rename; dropping it on delete is the
-        // point — the project is gone, not renamed.
-        return { projects: to ? [...rest, { ...moved, name: to }] : rest };
-      }),
+      clearStoredProjects: () => set({ projects: [] }),
       addSection: (name) => set((s) => (s.sections.includes(name) ? {} : { sections: [...s.sections, name] })),
       renameSectionPref: (from, to) => set((s) => {
         const keep = (list: string[]) => list.filter((n) => n !== from && n !== to);
