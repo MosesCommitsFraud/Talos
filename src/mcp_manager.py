@@ -34,6 +34,21 @@ def _format_mcp_connection_error(
     return raw_error
 
 
+def _stdio_child_env(env: Dict[str, str], inherit_app_env: bool = False) -> Dict[str, str]:
+    """Build the environment of a stdio MCP child process.
+
+    A child starts from the MCP SDK's safe defaults (PATH, HOME, ...) plus its
+    own configured env, because user-added servers and npx packages are third
+    party code and the app environment holds secrets (API keys, DATABASE_URL).
+    Only Talos' own server scripts set inherit_app_env: they import src.* and
+    read their configuration (Qdrant, embeddings, database) from that environment.
+    """
+    from mcp.client.stdio import get_default_environment
+
+    base = dict(os.environ) if inherit_app_env else get_default_environment()
+    return {**base, **env}
+
+
 # Caps for rendering untrusted MCP tool schemas into the agent prompt (issue #2660).
 # MCP servers are third-party/user-added, so field names and parameter counts are
 # untrusted input — bound them so an odd or hostile schema cannot distort the prompt.
@@ -119,11 +134,18 @@ class McpManager:
         args: Optional[List[str]] = None,
         env: Optional[Dict[str, str]] = None,
         url: Optional[str] = None,
+        inherit_app_env: bool = False,
     ) -> bool:
-        """Connect to an MCP server via stdio, SSE, or Streamable HTTP transport."""
+        """Connect to an MCP server via stdio, SSE, or Streamable HTTP transport.
+
+        inherit_app_env hands the app's whole environment, secrets included, to a
+        stdio child. It is for Talos' own server scripts only (_stdio_child_env).
+        """
         try:
             if transport == "stdio":
-                res = await self._connect_stdio(server_id, name, command, args or [], env or {})
+                res = await self._connect_stdio(
+                    server_id, name, command, args or [], env or {}, inherit_app_env
+                )
             elif transport == "sse":
                 res = await self._connect_sse(server_id, name, url)
             elif transport == "http":
@@ -142,7 +164,13 @@ class McpManager:
             return False
 
     async def _connect_stdio(
-        self, server_id: str, name: str, command: str, args: List[str], env: Dict[str, str]
+        self,
+        server_id: str,
+        name: str,
+        command: str,
+        args: List[str],
+        env: Dict[str, str],
+        inherit_app_env: bool = False,
     ) -> bool:
         """Connect to an MCP server via stdio transport."""
         try:
@@ -154,7 +182,7 @@ class McpManager:
             server_params = StdioServerParameters(
                 command=command,
                 args=args,
-                env={**os.environ, **env} if env else None,
+                env=_stdio_child_env(env, inherit_app_env),
             )
 
             stack = AsyncExitStack()
@@ -525,6 +553,7 @@ class McpManager:
                 command=sys.executable,
                 args=[script_path],
                 env={"PYTHONPATH": base_dir},
+                inherit_app_env=True,
             )
             if ok:
                 logger.info(f"Reconnected builtin MCP server: {name}")

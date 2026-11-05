@@ -103,6 +103,7 @@ async def register_builtin_servers(mcp_manager):
                 command=python,
                 args=[script_path],
                 env={"PYTHONPATH": base_dir},
+                inherit_app_env=True,
             )
             if ok:
                 logger.info(f"Built-in MCP server registered: {name}")
