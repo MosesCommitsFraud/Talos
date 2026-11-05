@@ -12,6 +12,7 @@ from core.database import Document, GalleryImage, SessionLocal
 from core.database import Session as DbSession
 from core.models import ChatMessage
 from core.session_manager import SessionManager
+from src import projects
 from src.auth_helpers import effective_user, get_current_user
 from src.request_models import SessionResponse
 
@@ -112,11 +113,19 @@ def _verify_session_owner(request: Request, session_id: str, session_manager=Non
         raise HTTPException(403, "Authentication required")
     db = SessionLocal()
     try:
-        row = db.query(DbSession.owner).filter(DbSession.id == session_id).first()
+        row = (
+            db.query(DbSession.owner, DbSession.project_id)
+            .filter(DbSession.id == session_id)
+            .first()
+        )
     finally:
         db.close()
     if row is not None:
         if row.owner != user:
+            raise HTTPException(404, f"Session {session_id} not found")
+        # Out of the project means out of its chats, or they would keep running in
+        # its workspace (src/projects.py).
+        if row.project_id and not projects.is_member(row.project_id, user):
             raise HTTPException(404, f"Session {session_id} not found")
         return
     # No DB row — allow the caller to act on an in-memory ghost they own.
@@ -125,6 +134,26 @@ def _verify_session_owner(request: Request, session_id: str, session_manager=Non
         if ghost is not None and getattr(ghost, "owner", None) == user:
             return
     raise HTTPException(404, f"Session {session_id} not found")
+
+
+def _session_read_access(request: Request, session_id: str) -> bool:
+    """Who may read a chat: its owner, and everyone in its project. Raises 404 for
+    the rest. Returns whether the caller may only read: a chat runs as its owner and
+    only they write in it, so every writing route stays on _verify_session_owner."""
+    user = effective_user(request)
+    db = SessionLocal()
+    try:
+        row = (
+            db.query(DbSession.owner, DbSession.project_id)
+            .filter(DbSession.id == session_id)
+            .first()
+        )
+    finally:
+        db.close()
+    if row is not None and row.owner != user and projects.is_member(row.project_id, user):
+        return True
+    _verify_session_owner(request, session_id)
+    return False
 
 
 logger = logging.getLogger(__name__)
@@ -212,6 +241,36 @@ def _pick_endpoint_for_sort(owner=None):
     if url and model:
         return url, model, headers
     return None, None, None
+
+
+def merge_pending_workspaces(project_id: str | None = None) -> None:
+    """Bring the files of chats that moved into a project to its shared workspace.
+    What the sandbox can't do now stays pending for the next boot."""
+    from src.sandbox_client import copy_workspace_into_project
+
+    db = SessionLocal()
+    try:
+        q = db.query(DbSession.id, DbSession.owner, DbSession.project_id).filter(
+            DbSession.project_id != None,  # noqa: E711
+            DbSession.workspace_merged == False,  # noqa: E712
+        )
+        if project_id:
+            q = q.filter(DbSession.project_id == project_id)
+        pending = q.all()
+    finally:
+        db.close()
+    for row in pending:
+        if not copy_workspace_into_project(
+            owner=row.owner, session_id=row.id, project_id=row.project_id
+        ):
+            logger.info("Workspace of chat %s not copied to its project yet", row.id)
+            continue
+        db = SessionLocal()
+        try:
+            db.query(DbSession).filter(DbSession.id == row.id).update({"workspace_merged": True})
+            db.commit()
+        finally:
+            db.close()
 
 
 def setup_session_routes(session_manager: SessionManager, config: dict):
@@ -309,6 +368,7 @@ def setup_session_routes(session_manager: SessionManager, config: dict):
             section_map = {}
             unread_map = {}
             forked_from_map = {}
+            project_map = {}
             token_map = {}
             important_map = {}
             created_map = {}
@@ -323,6 +383,7 @@ def setup_session_routes(session_manager: SessionManager, config: dict):
                     DbSession.section,
                     DbSession.unread,
                     DbSession.forked_from,
+                    DbSession.project_id,
                     DbSession.total_input_tokens,
                     DbSession.total_output_tokens,
                     DbSession.is_important,
@@ -340,6 +401,7 @@ def setup_session_routes(session_manager: SessionManager, config: dict):
                 section_map[row.id] = row.section
                 unread_map[row.id] = bool(row.unread)
                 forked_from_map[row.id] = row.forked_from
+                project_map[row.id] = row.project_id
                 token_map[row.id] = (row.total_input_tokens or 0) + (row.total_output_tokens or 0)
                 important_map[row.id] = row.is_important or False
                 created_map[row.id] = row.created_at.isoformat() if row.created_at else None
@@ -381,6 +443,7 @@ def setup_session_routes(session_manager: SessionManager, config: dict):
         finally:
             db.close()
 
+        my_projects = projects.ids_for(user)
         sessions = [
             {
                 "id": s.id,
@@ -393,6 +456,7 @@ def setup_session_routes(session_manager: SessionManager, config: dict):
                 "section": section_map.get(s.id),
                 "unread": unread_map.get(s.id, False),
                 "forked_from": forked_from_map.get(s.id),
+                "project_id": project_map.get(s.id),
                 "total_tokens": token_map.get(s.id, 0),
                 "is_important": important_map.get(s.id, False),
                 "created_at": created_map.get(s.id),
@@ -407,6 +471,8 @@ def setup_session_routes(session_manager: SessionManager, config: dict):
             if not s.archived
             and (s.name or "").strip() not in ("Nobody", "Incognito")
             and (s.name or "").strip() not in _HIDDEN_SYSTEM_SESSION_NAMES
+            # Their own chats in a project they have left stay with the project.
+            and (not project_map.get(s.id) or project_map[s.id] in my_projects)
         ]
 
         return sessions
@@ -605,6 +671,8 @@ def setup_session_routes(session_manager: SessionManager, config: dict):
         model: str = Form(None),
         endpoint_url: str = Form(None),
         endpoint_id: str = Form(None),
+        project_id: str = Form(None),
+        clear_project: str = Form(None),
     ):
         _verify_session_owner(request, sid)
         try:
@@ -612,6 +680,17 @@ def setup_session_routes(session_manager: SessionManager, config: dict):
         except KeyError:
             raise HTTPException(404, f"Session {sid} not found")
         result = {"id": sid}
+        # Removal is an explicit flag for the same reason as clear_folder below.
+        if str(clear_project or "").strip().lower() in ("1", "true", "yes", "on"):
+            projects.set_session_project(sid, None)
+            result["project_id"] = None
+        elif project_id:
+            # 404 like a project that doesn't exist: not theirs to know about.
+            if not projects.is_member(project_id, effective_user(request)):
+                raise HTTPException(404, "Project not found")
+            projects.set_session_project(sid, project_id)
+            result["project_id"] = project_id
+            merge_pending_workspaces(project_id)
         if name is not None:
             session_manager.update_session_name(sid, name)
             result["name"] = name

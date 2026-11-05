@@ -12,6 +12,7 @@ from pydantic import BaseModel
 
 from core.database import Document, DocumentVersion
 from core.database import Session as DbSession
+from src.projects import is_member
 
 logger = logging.getLogger(__name__)
 
@@ -83,6 +84,11 @@ def _verify_doc_owner(db, doc: Document, user: str):
     """
     if user is None:
         raise HTTPException(403, "Authentication required")
+    # A project's documents are everyone's in it, like its workspace.
+    if doc.session_id and doc.owner != user:
+        session = db.query(DbSession).filter(DbSession.id == doc.session_id).first()
+        if session and session.project_id and is_member(session.project_id, user):
+            return
     if doc.owner is not None:
         if doc.owner != user:
             raise HTTPException(404, "Document not found")

@@ -132,6 +132,13 @@ class Session(TimestampMixin, Base):
     # The chat this one was forked from. A plain id, no foreign key: the fork
     # outlives its source and just stops being nested under it in the sidebar.
     forked_from = Column(String, nullable=True, default=None)
+    # The project this chat belongs to (src/projects.py). A plain id, no foreign
+    # key: deleting a project hands its chats back explicitly.
+    project_id = Column(String, nullable=True, default=None, index=True)
+    # Whether this chat's private workspace has reached the project's shared one.
+    # False while the sandbox still has to copy it (it may be down when a chat
+    # moves in), and the boot task retries.
+    workspace_merged = Column(Boolean, default=True)
 
     # Headers stored as JSON
     headers = Column(JSON, default=dict)
@@ -191,10 +198,34 @@ class Session(TimestampMixin, Base):
             "section": self.section,
             "unread": bool(self.unread),
             "forked_from": self.forked_from,
+            "project_id": self.project_id,
             "total_input_tokens": self.total_input_tokens or 0,
             "total_output_tokens": self.total_output_tokens or 0,
             "crew_member_id": self.crew_member_id,
         }
+
+
+class Project(TimestampMixin, Base):
+    """A shared place for chats: its members see all of them, and every chat in it
+    works in one sandbox workspace and with one memory. See src/projects.py."""
+
+    __tablename__ = "projects"
+
+    id = Column(String, primary_key=True, index=True)
+    name = Column(String, nullable=False)
+    description = Column(Text, nullable=False, default="")
+    # The creator, who alone manages the members and the project itself.
+    owner = Column(String, nullable=True, index=True)
+
+
+class ProjectMember(Base):
+    """Someone the creator added. The creator has no row: `Project.owner` says so."""
+
+    __tablename__ = "project_members"
+
+    project_id = Column(String, ForeignKey("projects.id", ondelete="CASCADE"), primary_key=True)
+    username = Column(String, primary_key=True, index=True)
+    added_at = Column(DateTime, default=utcnow_naive)
 
 
 class ChatMessage(Base):
@@ -1133,6 +1164,51 @@ def _migrate_add_section_unread_columns():
         logging.getLogger(__name__).warning(f"Migration check for section/unread failed: {e}")
 
 
+def _migrate_folders_to_projects():
+    """Add the project columns to sessions and turn each folder label into a project.
+
+    A project used to be nothing but a label on its chats, per owner. Runs when the
+    column appears, so later labels stay plain labels. The chats' workspaces are
+    copied into the projects' shared ones by the boot task: the sandbox is not
+    reachable from here, so `workspace_merged` stays false until it has done so.
+    """
+    import sqlite3
+    import uuid
+
+    db_path = DATABASE_URL.replace("sqlite:///", "")
+    if not os.path.exists(db_path):
+        return
+    try:
+        conn = sqlite3.connect(db_path)
+        columns = [row[1] for row in conn.execute("PRAGMA table_info(sessions)").fetchall()]
+        if "workspace_merged" not in columns:
+            conn.execute("ALTER TABLE sessions ADD COLUMN workspace_merged BOOLEAN DEFAULT 1")
+        if "project_id" not in columns:
+            conn.execute("ALTER TABLE sessions ADD COLUMN project_id TEXT")
+            conn.execute("CREATE INDEX IF NOT EXISTS ix_sessions_project_id ON sessions(project_id)")
+            labels = conn.execute(
+                "SELECT DISTINCT owner, folder FROM sessions "
+                "WHERE folder IS NOT NULL AND folder != ''"
+            ).fetchall()
+            now = utcnow_naive().isoformat(" ")
+            for owner, folder in labels:
+                project_id = str(uuid.uuid4())
+                conn.execute(
+                    "INSERT INTO projects (id, name, description, owner, created_at, updated_at) "
+                    "VALUES (?, ?, '', ?, ?, ?)",
+                    (project_id, folder, owner, now, now),
+                )
+                conn.execute(
+                    "UPDATE sessions SET project_id = ?, workspace_merged = 0, folder = NULL "
+                    "WHERE folder = ? AND owner IS ?",
+                    (project_id, folder, owner),
+                )
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        logging.getLogger(__name__).warning(f"Migration of folders to projects failed: {e}")
+
+
 def _migrate_add_token_columns():
     """Add cumulative token tracking columns to sessions table."""
     import sqlite3
@@ -1842,6 +1918,7 @@ def init_db():
     _migrate_add_last_message_at_column()
     _migrate_add_folder_column()
     _migrate_add_section_unread_columns()
+    _migrate_folders_to_projects()
     _migrate_add_token_columns()
     _migrate_add_mode_column()
     _migrate_add_multiuser_owner_columns()

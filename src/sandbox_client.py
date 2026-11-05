@@ -25,6 +25,15 @@ def safe_user_id(owner: str | None) -> str:
     return owner or "anonymous"
 
 
+def _workspace_url(owner: str | None, session_id: str) -> str:
+    """Where a chat's workspace is. All chats of a project share the project's,
+    under a sandbox account of its own (src/projects.py)."""
+    from src.projects import sandbox_location
+
+    user_id, chat_id = sandbox_location(owner, session_id)
+    return f"{SANDBOX_URL}/users/{quote(user_id, safe='')}/workspaces/{quote(chat_id, safe='')}"
+
+
 async def exec_in_sandbox(
     *,
     owner: str | None,
@@ -38,9 +47,6 @@ async def exec_in_sandbox(
 ) -> dict[str, Any]:
     if not session_id:
         raise RuntimeError("sandbox execution requires a session_id")
-    user_id = safe_user_id(owner)
-    user_path = quote(user_id, safe="")
-    session_path = quote(session_id, safe="")
     # No read/write/pool timeout: a long compute or install must not be cut off.
     # Only the connect phase is bounded. The sandbox enforces its own limit via
     # the `timeout` field (0 = unlimited there too).
@@ -48,7 +54,7 @@ async def exec_in_sandbox(
         headers=_SANDBOX_HEADERS, timeout=httpx.Timeout(None, connect=15.0)
     ) as client:
         resp = await client.post(
-            f"{SANDBOX_URL}/users/{user_path}/workspaces/{session_path}/exec",
+            f"{_workspace_url(owner, session_id)}/exec",
             json={
                 "kind": kind,
                 "command": command,
@@ -71,12 +77,11 @@ async def file_tool_in_sandbox(
 ) -> dict[str, Any]:
     if not session_id:
         raise RuntimeError("sandbox file operation requires a session_id")
-    user_id = safe_user_id(owner)
     async with httpx.AsyncClient(
         headers=_SANDBOX_HEADERS, timeout=httpx.Timeout(SANDBOX_TIMEOUT, connect=15.0)
     ) as client:
         resp = await client.post(
-            f"{SANDBOX_URL}/users/{user_id}/workspaces/{session_id}/files/{operation}",
+            f"{_workspace_url(owner, session_id)}/files/{operation}",
             json=payload,
         )
         resp.raise_for_status()
@@ -99,14 +104,13 @@ async def upload_file_to_sandbox(
 ) -> dict[str, Any]:
     if not session_id:
         raise RuntimeError("sandbox upload requires a session_id")
-    user_id = safe_user_id(owner)
     filename = _sandbox_filename(path, display_name)
     async with httpx.AsyncClient(
         headers=_SANDBOX_HEADERS, timeout=httpx.Timeout(SANDBOX_TIMEOUT, connect=15.0)
     ) as client:
         with open(path, "rb") as f:
             resp = await client.post(
-                f"{SANDBOX_URL}/users/{user_id}/workspaces/{session_id}/upload",
+                f"{_workspace_url(owner, session_id)}/upload",
                 files={"file": (filename, f, "application/octet-stream")},
             )
         resp.raise_for_status()
@@ -127,30 +131,82 @@ async def run_cell_in_sandbox(
     """Run code in the chat's PERSISTENT Python kernel (state survives between calls)."""
     if not session_id:
         raise RuntimeError("run_cell requires a session_id")
-    user_id = safe_user_id(owner)
     async with httpx.AsyncClient(
         headers=_SANDBOX_HEADERS, timeout=httpx.Timeout(None, connect=15.0)
     ) as client:
         resp = await client.post(
-            f"{SANDBOX_URL}/users/{user_id}/workspaces/{session_id}/kernel/execute",
+            f"{_workspace_url(owner, session_id)}/kernel/execute",
             json={"code": code, "timeout": timeout, "edits": edits or [], "code_id": code_id},
         )
         resp.raise_for_status()
         return resp.json()
 
 
+def _shared_with_project(session_id: str) -> bool:
+    """A project chat has no workspace of its own: deleting the chat must leave the
+    project's alone. Only delete_project_workspace removes that one."""
+    from src.projects import project_of_session
+
+    return project_of_session(session_id) is not None
+
+
+def delete_project_workspace(project_id: str) -> bool:
+    """Delete a project's shared workspace. Best-effort, like delete_workspace."""
+    from src.projects import workspace_ref
+
+    if not sandbox_enabled():
+        return False
+    try:
+        with httpx.Client(
+            headers=_SANDBOX_HEADERS, timeout=httpx.Timeout(30.0, connect=10.0)
+        ) as client:
+            resp = client.delete(_workspace_url(None, workspace_ref(project_id)))
+            resp.raise_for_status()
+        return True
+    except Exception:
+        return False
+
+
+def copy_workspace_into_project(*, owner: str | None, session_id: str, project_id: str) -> bool:
+    """Copy a chat's private workspace into its project's. Files already there stay,
+    and the private copy remains, so a chat moved out again finds its files. Never
+    raises: False means it is still to do."""
+    from src.projects import WORKSPACE_CHAT_ID, workspace_ref
+
+    if not sandbox_enabled():
+        return True
+    source = (
+        f"{SANDBOX_URL}/users/{quote(safe_user_id(owner), safe='')}"
+        f"/workspaces/{quote(session_id, safe='')}"
+    )
+    try:
+        with httpx.Client(
+            headers=_SANDBOX_HEADERS, timeout=httpx.Timeout(SANDBOX_TIMEOUT, connect=10.0)
+        ) as client:
+            resp = client.post(
+                f"{source}/copy-into",
+                json={
+                    "target_user_id": workspace_ref(project_id),
+                    "target_chat_id": WORKSPACE_CHAT_ID,
+                },
+            )
+            resp.raise_for_status()
+        return True
+    except Exception:
+        return False
+
+
 async def delete_workspace(*, owner: str | None, session_id: str | None) -> bool:
     """Delete a chat's sandbox workspace (files + dir). Best-effort: never raise,
     so a down/disabled sandbox can't block chat deletion. Returns True on success."""
-    if not session_id or not sandbox_enabled():
+    if not session_id or not sandbox_enabled() or _shared_with_project(session_id):
         return False
-    user_id = safe_user_id(owner)
     try:
         async with httpx.AsyncClient(
             headers=_SANDBOX_HEADERS, timeout=httpx.Timeout(30.0, connect=10.0)
         ) as client:
             resp = await client.delete(
-                f"{SANDBOX_URL}/users/{user_id}/workspaces/{session_id}",
+                f"{_workspace_url(owner, session_id)}",
             )
             resp.raise_for_status()
         return True
@@ -160,14 +216,13 @@ async def delete_workspace(*, owner: str | None, session_id: str | None) -> bool
 
 def delete_workspace_sync(owner: str | None, session_id: str | None) -> bool:
     """Sync wrapper for delete_workspace, for use from non-async delete routes."""
-    if not session_id or not sandbox_enabled():
+    if not session_id or not sandbox_enabled() or _shared_with_project(session_id):
         return False
-    user_id = safe_user_id(owner)
     try:
         with httpx.Client(
             headers=_SANDBOX_HEADERS, timeout=httpx.Timeout(30.0, connect=10.0)
         ) as client:
-            resp = client.delete(f"{SANDBOX_URL}/users/{user_id}/workspaces/{session_id}")
+            resp = client.delete(f"{_workspace_url(owner, session_id)}")
             resp.raise_for_status()
         return True
     except Exception:
@@ -182,14 +237,15 @@ async def fork_workspace(
     the caller say so. True also when there is no sandbox and so nothing to carry."""
     if not sandbox_enabled():
         return True
-    user_path = quote(safe_user_id(owner), safe="")
-    session_path = quote(session_id, safe="")
+    # A fork stays in the project, and so in the workspace it already shares.
+    if _shared_with_project(session_id):
+        return True
     try:
         async with httpx.AsyncClient(
             headers=_SANDBOX_HEADERS, timeout=httpx.Timeout(SANDBOX_TIMEOUT, connect=10.0)
         ) as client:
             resp = await client.post(
-                f"{SANDBOX_URL}/users/{user_path}/workspaces/{session_path}/fork",
+                f"{_workspace_url(owner, session_id)}/fork",
                 json={"target_chat_id": target_session_id},
             )
             resp.raise_for_status()
@@ -202,17 +258,26 @@ async def list_artifacts(*, owner: str | None, session_id: str | None) -> list[d
     """List files in a chat's sandbox workspace (uploads + generated results)."""
     if not session_id:
         return []
-    user_id = safe_user_id(owner)
-    user_path = quote(user_id, safe="")
-    session_path = quote(session_id, safe="")
     async with httpx.AsyncClient(
         headers=_SANDBOX_HEADERS, timeout=httpx.Timeout(SANDBOX_TIMEOUT, connect=15.0)
     ) as client:
         resp = await client.get(
-            f"{SANDBOX_URL}/users/{user_path}/workspaces/{session_path}/artifacts",
+            f"{_workspace_url(owner, session_id)}/artifacts",
         )
         resp.raise_for_status()
         return resp.json().get("artifacts", [])
+
+
+async def list_workspace(*, owner: str | None, session_id: str) -> dict[str, Any]:
+    """A workspace's files and folders. `dirs` is what keeps an empty folder on
+    screen; an older sandbox doesn't send it, and folders then come from the paths."""
+    async with httpx.AsyncClient(
+        headers=_SANDBOX_HEADERS, timeout=httpx.Timeout(SANDBOX_TIMEOUT, connect=15.0)
+    ) as client:
+        resp = await client.get(f"{_workspace_url(owner, session_id)}/artifacts")
+        resp.raise_for_status()
+        data = resp.json()
+    return {"artifacts": data.get("artifacts", []), "dirs": data.get("dirs", [])}
 
 
 async def list_artifacts_bulk(
@@ -239,13 +304,11 @@ async def move_artifact(*, owner: str | None, session_id: str | None, src: str, 
     """Rename/move a file inside a chat's workspace. Returns True on success."""
     if not session_id:
         return False
-    user_path = quote(safe_user_id(owner), safe="")
-    session_path = quote(session_id, safe="")
     async with httpx.AsyncClient(
         headers=_SANDBOX_HEADERS, timeout=httpx.Timeout(30.0, connect=10.0)
     ) as client:
         resp = await client.post(
-            f"{SANDBOX_URL}/users/{user_path}/workspaces/{session_path}/files/move",
+            f"{_workspace_url(owner, session_id)}/files/move",
             json={"src": src, "dst": dst},
         )
         resp.raise_for_status()
@@ -257,14 +320,11 @@ async def delete_artifact(*, owner: str | None, session_id: str | None, path: st
     """Delete a file or directory in a chat's workspace. Returns True on success."""
     if not session_id:
         return False
-    user_id = safe_user_id(owner)
-    user_path = quote(user_id, safe="")
-    session_path = quote(session_id, safe="")
     async with httpx.AsyncClient(
         headers=_SANDBOX_HEADERS, timeout=httpx.Timeout(30.0, connect=10.0)
     ) as client:
         resp = await client.post(
-            f"{SANDBOX_URL}/users/{user_path}/workspaces/{session_path}/files/delete",
+            f"{_workspace_url(owner, session_id)}/files/delete",
             json={"path": path},
         )
         resp.raise_for_status()
@@ -276,14 +336,11 @@ async def download_workspace_zip(*, owner: str | None, session_id: str | None) -
     """Fetch the whole workspace as a zip archive."""
     if not session_id:
         raise RuntimeError("zip requires a session_id")
-    user_id = safe_user_id(owner)
-    user_path = quote(user_id, safe="")
-    session_path = quote(session_id, safe="")
     async with httpx.AsyncClient(
         headers=_SANDBOX_HEADERS, timeout=httpx.Timeout(None, connect=15.0)
     ) as client:
         resp = await client.get(
-            f"{SANDBOX_URL}/users/{user_path}/workspaces/{session_path}/files/zip",
+            f"{_workspace_url(owner, session_id)}/files/zip",
         )
         resp.raise_for_status()
         return resp.content
@@ -295,14 +352,11 @@ async def download_artifact(
     """Fetch a workspace file's raw bytes. Returns (content, content_type, filename)."""
     if not session_id:
         raise RuntimeError("sandbox download requires a session_id")
-    user_id = safe_user_id(owner)
-    user_path = quote(user_id, safe="")
-    session_path = quote(session_id, safe="")
     async with httpx.AsyncClient(
         headers=_SANDBOX_HEADERS, timeout=httpx.Timeout(None, connect=15.0)
     ) as client:
         resp = await client.get(
-            f"{SANDBOX_URL}/users/{user_path}/workspaces/{session_path}/files/download",
+            f"{_workspace_url(owner, session_id)}/files/download",
             params={"path": path},
         )
         resp.raise_for_status()
@@ -315,13 +369,11 @@ async def preview_office_artifact(*, owner: str | None, session_id: str | None, 
     """Render a workspace Word document to PDF in the sandbox."""
     if not session_id:
         raise RuntimeError("office preview requires a session_id")
-    user_path = quote(safe_user_id(owner), safe="")
-    session_path = quote(session_id, safe="")
     async with httpx.AsyncClient(
         headers=_SANDBOX_HEADERS, timeout=httpx.Timeout(120.0, connect=15.0)
     ) as client:
         resp = await client.get(
-            f"{SANDBOX_URL}/users/{user_path}/workspaces/{session_path}/files/office-preview",
+            f"{_workspace_url(owner, session_id)}/files/office-preview",
             params={"path": path},
         )
         resp.raise_for_status()

@@ -2357,9 +2357,16 @@ async def stream_agent_loop(
 
     # The memory of this user: off when they switched it off. Incognito turns and
     # subagents already have it in disabled_tools.
+    # A project chat uses the project's memory, which that switch has no say over.
+    from src import projects as _projects
     from src import user_memory as _user_memory
 
-    if "memory" not in disabled_tools and not _user_memory.enabled_for(owner):
+    _memory_key = _projects.memory_key(owner, session_id)
+    if (
+        "memory" not in disabled_tools
+        and _memory_key == owner
+        and not _user_memory.enabled_for(owner)
+    ):
         disabled_tools.add("memory")
     if _relevant_tools is not None and "memory" not in disabled_tools:
         _relevant_tools.add("memory")
@@ -2577,7 +2584,12 @@ async def stream_agent_loop(
     # Only the titles, so the model knows what it could look up. In the turn
     # context: they change as memories come and go, and the head must not.
     if "memory" not in disabled_tools:
-        insert_before_last_user(messages, turn_context_message(_user_memory.turn_index(owner)))
+        insert_before_last_user(
+            messages, turn_context_message(_user_memory.turn_index(_memory_key))
+        )
+    _project_note = _projects.turn_context(session_id)
+    if _project_note:
+        insert_before_last_user(messages, turn_context_message(_project_note))
     if deep_research and not subagent:
         from src import deep_research as _deep_research
 

@@ -16,10 +16,13 @@ from core.database import (
     Document,
     DocumentVersion,
     GalleryImage,
+    Project,
     SessionLocal,
 )
 from core.database import Session as DbSession
 from src.auth_helpers import effective_user, get_current_user, require_user
+from src.projects import ids_for as project_ids_for
+from src.projects import is_member, project_of_ref, workspace_ref
 
 logger = logging.getLogger(__name__)
 
@@ -453,7 +456,12 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
             # auth failures.
             if not session:
                 raise HTTPException(404, "Session not found")
-            if user and session.owner and session.owner != user:
+            if (
+                user
+                and session.owner
+                and session.owner != user
+                and not is_member(session.project_id, user)
+            ):
                 raise HTTPException(403, "Access denied")
             docs = (
                 db.query(Document)
@@ -473,10 +481,20 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
             # require_user raises 401 for a configured unauthenticated caller,
             # but returns "" for an intentionally anonymous deployment.
             user = require_user(request) or "anonymous"
+        # `project:<id>` names a project's workspace where no chat can be named.
+        project_id = project_of_ref(session_id)
+        if project_id:
+            if not is_member(project_id, user):
+                raise HTTPException(404, "Session not found")
+            return user
         session = db.query(DbSession).filter(DbSession.id == session_id).first()
         if not session:
             raise HTTPException(404, "Session not found")
-        if session.owner and user != "anonymous" and session.owner != user:
+        if session.project_id and user != "anonymous":
+            # In a project, membership decides, for the chat's owner as well.
+            if not is_member(session.project_id, user):
+                raise HTTPException(403, "Access denied")
+        elif session.owner and user != "anonymous" and session.owner != user:
             raise HTTPException(403, "Access denied")
         return session.owner or user
 
@@ -572,9 +590,20 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
         user = effective_user(request)
         db = SessionLocal()
         try:
-            session_names = dict(
-                db.query(DbSession.id, DbSession.name).filter(DbSession.owner == user).all()
+            own_sessions = (
+                db.query(DbSession.id, DbSession.name, DbSession.project_id)
+                .filter(DbSession.owner == user)
+                .all()
             )
+            session_names = {row.id: row.name for row in own_sessions}
+            # A project chat's files are the project's, listed once under its name.
+            project_refs = {
+                workspace_ref(row.id): row.name
+                for row in db.query(Project.id, Project.name)
+                .filter(Project.id.in_(project_ids_for(user)))
+                .all()
+            }
+            session_names.update(project_refs)
 
             def _with_session(artifact: Dict[str, Any], session_id: Optional[str]):
                 artifact["session_id"] = session_id
@@ -601,13 +630,21 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
                 m.artifact_key: m
                 for m in db.query(ArtifactMeta).filter(ArtifactMeta.owner == user).all()
             }
-            session_ids = list(session_names)
+            session_ids = [row.id for row in own_sessions if not row.project_id]
             uploads = _chat_upload_paths(db, session_ids)
         finally:
             db.close()
 
-        from src.sandbox_client import list_artifacts_bulk, sandbox_enabled
+        from src.sandbox_client import list_artifacts, list_artifacts_bulk, sandbox_enabled
 
+        if sandbox_enabled():
+            for ref in project_refs:
+                try:
+                    for artifact in await list_artifacts(owner=user, session_id=ref):
+                        artifact["source"] = "workspace"
+                        rows.append(_with_session(artifact, ref))
+                except Exception as e:
+                    logger.info("project workspace listing unavailable: %s", e)
         if sandbox_enabled() and session_ids:
             try:
                 workspaces = await list_artifacts_bulk(owner=user, session_ids=session_ids)

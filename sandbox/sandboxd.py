@@ -716,6 +716,47 @@ def fork_workspace_route(user_id: str, chat_id: str, req: ForkWorkspaceRequest) 
     return {"ok": True, "forked": True, "workspace": str(target)}
 
 
+class CopyWorkspaceRequest(BaseModel):
+    target_user_id: str
+    target_chat_id: str
+
+
+@app.post("/users/{user_id}/workspaces/{chat_id}/copy-into")
+def copy_workspace_route(user_id: str, chat_id: str, req: CopyWorkspaceRequest) -> dict[str, Any]:
+    """Copy a chat's files into a workspace of another account: a chat moving into a
+    project brings them along. Each side runs as its own account, the source reading
+    and the target writing, since both trees are user-controlled and must not be
+    walked as root. What the target has already stays, and so does the source."""
+    source = workspace_path(user_id, chat_id)
+    if source.is_symlink() or not source.is_dir():
+        return {"ok": True, "copied": False}
+    name, source = _workspace(user_id, chat_id)
+    target_name, target = _workspace(req.target_user_id, req.target_chat_id)
+    pack = subprocess.Popen(
+        [
+            "gosu", name, "tar", "-C", str(source),
+            "--exclude=./.talos-home", f"--exclude=./{_kernel_sock_path(source).name}",
+            "-cf", "-", ".",
+        ],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+    )
+    unpack = subprocess.run(
+        [
+            "gosu", target_name, "tar", "-C", str(target),
+            "--skip-old-files", "--no-same-owner", "-xf", "-",
+        ],
+        stdin=pack.stdout,
+        capture_output=True,
+        text=True,
+    )
+    pack.stdout.close()
+    # tar exits with 1 when a file changed while it was read, which is no failure.
+    if pack.wait() > 1 or unpack.returncode != 0:
+        raise HTTPException(500, f"Copying the workspace failed: {unpack.stderr}")
+    return {"ok": True, "copied": True}
+
+
 @app.post("/users/{user_id}/workspaces/{chat_id}/upload", response_model=WorkspaceResponse)
 async def upload_file_route(user_id: str, chat_id: str, file: UploadFile = File(...)) -> WorkspaceResponse:
     # Use _workspace so the workspace dir is owned by the sandbox user — otherwise
@@ -1718,13 +1759,23 @@ def _list_workspace_files(workspace: Path) -> list[dict[str, Any]]:
     return items[:500]
 
 
+def _list_workspace_dirs(workspace: Path) -> list[str]:
+    """Every folder in a workspace, so an empty one can be shown too."""
+    root = workspace.resolve()
+    found: list[str] = []
+    for current, dirs, _files in os.walk(root, followlinks=False):
+        dirs[:] = [d for d in dirs if d not in SKIP_DIRS and not (Path(current) / d).is_symlink()]
+        found.extend(str((Path(current) / d).relative_to(root)) for d in dirs)
+    return sorted(found)[:2000]
+
+
 @app.get("/users/{user_id}/workspaces/{chat_id}/artifacts")
 def list_artifacts_route(user_id: str, chat_id: str) -> dict[str, Any]:
     """List files in a chat's workspace (uploads, generated results, etc.) so the
     UI can show + download them."""
     _name, workspace = _workspace(user_id, chat_id)
     try:
-        return {"artifacts": _list_workspace_files(workspace)}
+        return {"artifacts": _list_workspace_files(workspace), "dirs": _list_workspace_dirs(workspace)}
     except OSError as exc:
         return {"artifacts": [], "error": str(exc)}
 

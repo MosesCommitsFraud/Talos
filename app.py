@@ -802,6 +802,10 @@ from routes.db_memory_routes import setup_db_memory_routes
 
 app.include_router(setup_db_memory_routes())
 
+from routes.project_routes import setup_project_routes
+
+app.include_router(setup_project_routes())
+
 from routes.user_memory_routes import setup_user_memory_routes
 
 app.include_router(setup_user_memory_routes())
@@ -1108,6 +1112,18 @@ async def _startup_event():
             logger.warning(f"MCP startup failed (non-critical): {type(e).__name__}: {e}")
 
     _startup_tasks.append(asyncio.create_task(_startup_mcp_connections()))
+
+    # Chats that moved into a project while the sandbox couldn't take their files,
+    # and those that became a project's when projects moved to the server.
+    async def _merge_project_workspaces():
+        try:
+            from routes.session_routes import merge_pending_workspaces
+
+            await asyncio.to_thread(merge_pending_workspaces)
+        except Exception as e:
+            logger.warning(f"Project workspace merge failed (non-critical): {e}")
+
+    _startup_tasks.append(asyncio.create_task(_merge_project_workspaces()))
 
     # Pre-warm the RAG tool index off the request path. Loading the local
     # embedding model + opening ChromaDB + indexing the built-in tools is a

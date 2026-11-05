@@ -15,6 +15,7 @@ from routes.session_routes import (
     _message_role,
     _message_text,
     _reject_compact_during_active_run,
+    _session_read_access,
     _verify_session_owner,
 )
 from src.sandbox_client import fork_workspace
@@ -185,7 +186,7 @@ def setup_history_routes(session_manager) -> APIRouter:
 
     @router.get("/api/history/{session_id}")
     async def get_session_history(request: Request, session_id: str) -> Dict[str, Any]:
-        _verify_session_owner(request, session_id)
+        read_only = _session_read_access(request, session_id)
         try:
             session = session_manager.get_session(session_id)
         except KeyError:
@@ -267,6 +268,9 @@ def setup_history_routes(session_manager) -> APIRouter:
             "model": session.model,
             "endpoint_url": session.endpoint_url,
             "name": session.name,
+            # Someone else's chat in a shared project: theirs to write in.
+            "read_only": read_only,
+            "owner": getattr(session, "owner", None),
         }
 
     @router.post("/api/session/{session_id}/truncate")

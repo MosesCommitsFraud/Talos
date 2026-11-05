@@ -2019,10 +2019,11 @@ async def execute_tool_block(
         desc = "db_memory"
         result = await do_db_memory(content, owner=owner)
     elif tool == "memory":
+        from src.projects import memory_key
         from src.user_memory import do_memory
 
         desc = "memory"
-        result = await do_memory(content, owner=owner)
+        result = await do_memory(content, owner=memory_key(owner, session_id))
     elif tool == "search_knowledge":
         result = await do_search_knowledge(content, owner=owner, session_id=session_id)
         _hits = len(result.get("rag_sources") or [])

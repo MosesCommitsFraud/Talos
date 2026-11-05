@@ -464,6 +464,16 @@ def setup_auth_routes(auth_manager: AuthManager) -> APIRouter:
                 "Failed to rename user prefs %s -> %s: %s", old_username, new_username, e
             )
 
+        # Their project memberships go by username, not in an owner column.
+        try:
+            from src.projects import rename_user as rename_project_member
+
+            rename_project_member(old_username, new_username)
+        except Exception as e:
+            logger.warning(
+                "Failed to rename project member %s -> %s: %s", old_username, new_username, e
+            )
+
         # So is what the assistant remembers about them: one file per user.
         try:
             from src.user_memory import rename_owner as rename_memory_owner
@@ -520,6 +530,15 @@ def setup_auth_routes(auth_manager: AuthManager) -> APIRouter:
         ok = auth_manager.delete_user(body.username, user)
         if not ok:
             raise HTTPException(400, "Cannot delete user")
+        # Their projects pass to the next member; those nobody is left in go.
+        try:
+            from src.projects import forget_user
+            from src.sandbox_client import delete_project_workspace
+
+            for project_id in forget_user(body.username.strip().lower()):
+                delete_project_workspace(project_id)
+        except Exception as e:
+            logger.warning("Failed to take %s out of their projects: %s", body.username, e)
         # delete_user removes the user's ApiToken rows, but the bearer-auth
         # middleware serves from an in-memory prefix->token cache that only
         # rebuilds when flagged dirty. Without this, a deleted user's already
