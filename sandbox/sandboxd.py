@@ -326,8 +326,12 @@ def workspace_path(user_id: str, chat_id: str) -> Path:
     return user_home(user_id) / "workspaces" / safe_chat
 
 
-def _session_key(user_id: str, chat_id: str) -> str:
-    return f"{user_id}:{chat_id}"
+def _session_key(user_id: str, chat_id: str, scope: str = "") -> str:
+    """The key for what a session holds in memory: working directory, Python kernel,
+    recent code. `scope` is the chat, where several share one workspace (a project's)
+    and so must not run in each other's kernel or patch each other's code."""
+    key = f"{user_id}:{chat_id}"
+    return f"{key}#{scope}" if scope else key
 
 
 def _workspace(user_id: str, chat_id: str) -> tuple[str, Path]:
@@ -448,9 +452,9 @@ def _expire_session_cwds() -> None:
             _session_cwds.pop(key, None)
 
 
-def _get_session_cwd(user_id: str, chat_id: str, workspace: Path) -> Path:
+def _get_session_cwd(user_id: str, chat_id: str, workspace: Path, scope: str = "") -> Path:
     _expire_session_cwds()
-    key = _session_key(user_id, chat_id)
+    key = _session_key(user_id, chat_id, scope)
     cwd, _ts = _session_cwds.get(key, (str(workspace), 0))
     try:
         resolved = _safe_path(workspace, cwd)
@@ -460,11 +464,13 @@ def _get_session_cwd(user_id: str, chat_id: str, workspace: Path) -> Path:
     return resolved
 
 
-def _set_session_cwd(user_id: str, chat_id: str, workspace: Path, raw_path: str) -> Path:
+def _set_session_cwd(
+    user_id: str, chat_id: str, workspace: Path, raw_path: str, scope: str = ""
+) -> Path:
     target = _safe_path(workspace, raw_path)
     if not target.is_dir():
         raise HTTPException(404, "Directory not found")
-    _session_cwds[_session_key(user_id, chat_id)] = (str(target), time.time())
+    _session_cwds[_session_key(user_id, chat_id, scope)] = (str(target), time.time())
     return target
 
 
@@ -641,16 +647,20 @@ def delete_workspace_route(user_id: str, chat_id: str) -> dict[str, Any]:
     """Remove a chat's workspace and everything in it. Called when the chat is
     deleted so files don't outlive the conversation. Idempotent — a missing
     workspace is a no-op."""
-    # Kill any persistent kernel for this chat before removing its files.
-    _stop_kernel(user_id, chat_id)
+    # Kill any persistent kernel for this chat before removing its files. A shared
+    # workspace has one per chat in it.
+    base = _session_key(user_id, chat_id)
+    for key in [k for k in _kernels if k == base or k.startswith(f"{base}#")]:
+        _stop_kernel_at(key)
     workspace = workspace_path(user_id, chat_id)
     existed = workspace.exists()
     if existed:
         shutil.rmtree(workspace, ignore_errors=True)
     _repaired_workspaces.discard(str(workspace.resolve()))
     # Drop any cached session cwd for this chat so a recreated workspace starts clean.
-    _session_cwds.pop(_session_key(user_id, chat_id), None)
-    _cell_code.pop(_session_key(user_id, chat_id), None)
+    for state in (_session_cwds, _cell_code):
+        for key in [k for k in state if k == base or k.startswith(f"{base}#")]:
+            state.pop(key, None)
     return {"ok": True, "deleted": existed, "workspace": str(workspace)}
 
 
@@ -773,22 +783,24 @@ async def upload_file_route(user_id: str, chat_id: str, file: UploadFile = File(
 
 
 @app.get("/users/{user_id}/workspaces/{chat_id}/cwd")
-def get_cwd_route(user_id: str, chat_id: str) -> dict[str, Any]:
+def get_cwd_route(user_id: str, chat_id: str, scope: str = "") -> dict[str, Any]:
     _name, workspace = _workspace(user_id, chat_id)
-    cwd = _get_session_cwd(user_id, chat_id, workspace)
+    cwd = _get_session_cwd(user_id, chat_id, workspace, scope)
     return {"cwd": str(cwd), "workspace": str(workspace)}
 
 
 @app.post("/users/{user_id}/workspaces/{chat_id}/cwd")
-def set_cwd_route(user_id: str, chat_id: str, req: CwdRequest) -> dict[str, Any]:
+def set_cwd_route(user_id: str, chat_id: str, req: CwdRequest, scope: str = "") -> dict[str, Any]:
     _name, workspace = _workspace(user_id, chat_id)
-    cwd = _set_session_cwd(user_id, chat_id, workspace, req.path)
+    cwd = _set_session_cwd(user_id, chat_id, workspace, req.path, scope)
     return {"cwd": str(cwd), "workspace": str(workspace)}
 
 
-async def _start_process(user_id: str, chat_id: str, req: ExecuteRequest) -> BackgroundProcess:
+async def _start_process(
+    user_id: str, chat_id: str, req: ExecuteRequest, scope: str = ""
+) -> BackgroundProcess:
     name, workspace = _workspace(user_id, chat_id)
-    base_cwd = _get_session_cwd(user_id, chat_id, workspace)
+    base_cwd = _get_session_cwd(user_id, chat_id, workspace, scope)
     cwd = _safe_path(workspace, req.cwd) if req.cwd else base_cwd
     if not cwd.is_dir():
         raise HTTPException(404, "Working directory not found")
@@ -1082,17 +1094,19 @@ _CELL_HISTORY = 8          # bodies kept per session (only the latest is usually
 _CELL_MAX_CHARS = 100_000  # env-var / argv ceiling; above this, use write_file + bash
 
 
-def _remember_cell_code(user_id: str, chat_id: str, src: str) -> str:
+def _remember_cell_code(user_id: str, chat_id: str, src: str, scope: str = "") -> str:
     """Store a code body and return its handle."""
-    key = _session_key(user_id, chat_id)
+    key = _session_key(user_id, chat_id, scope)
     code_id = f"cell-{uuid.uuid4().hex[:8]}"
     history = _cell_code.setdefault(key, deque(maxlen=_CELL_HISTORY))
     history.append((code_id, src))
     return code_id
 
 
-def _lookup_cell_code(user_id: str, chat_id: str, code_id: str = "") -> str | None:
-    history = _cell_code.get(_session_key(user_id, chat_id))
+def _lookup_cell_code(
+    user_id: str, chat_id: str, code_id: str = "", scope: str = ""
+) -> str | None:
+    history = _cell_code.get(_session_key(user_id, chat_id, scope))
     if not history:
         return None
     if not code_id:
@@ -1104,7 +1118,7 @@ def _lookup_cell_code(user_id: str, chat_id: str, code_id: str = "") -> str | No
 
 
 def _resolve_cell_code(
-    user_id: str, chat_id: str, code: str, edits: list[dict[str, Any]], code_id: str
+    user_id: str, chat_id: str, code: str, edits: list[dict[str, Any]], code_id: str, scope: str = ""
 ) -> tuple[str, str | None]:
     """Resolve the source to run. Returns (source, error).
 
@@ -1114,7 +1128,7 @@ def _resolve_cell_code(
     """
     if not edits:
         return code, None
-    base = _lookup_cell_code(user_id, chat_id, code_id)
+    base = _lookup_cell_code(user_id, chat_id, code_id, scope)
     if base is None:
         which = f"code_id {code_id!r}" if code_id else "the previous run"
         return "", (
@@ -1158,7 +1172,7 @@ except BaseException as exc:
 
 
 @app.post("/users/{user_id}/workspaces/{chat_id}/exec", response_model=ExecResponse)
-async def exec_route(user_id: str, chat_id: str, req: ExecRequest) -> ExecResponse:
+async def exec_route(user_id: str, chat_id: str, req: ExecRequest, scope: str = "") -> ExecResponse:
     name, workspace = _workspace(user_id, chat_id)
     artifacts_before = _artifact_snapshot(workspace)
     # timeout <= 0 means "run as long as it needs" (no limit). Otherwise it's the
@@ -1169,20 +1183,20 @@ async def exec_route(user_id: str, chat_id: str, req: ExecRequest) -> ExecRespon
     env: dict[str, str] | None = None
     if req.kind == "python":
         src, err = _resolve_cell_code(
-            user_id, chat_id, req.code or req.command, req.edits, req.code_id
+            user_id, chat_id, req.code or req.command, req.edits, req.code_id, scope
         )
         if err is not None:
             return ExecResponse(user_id=user_id, chat_id=chat_id, linux_user=name, workspace=str(workspace), stdout="", stderr=err, exit_code=1)
         if len(src) > _CELL_MAX_CHARS:
             return ExecResponse(user_id=user_id, chat_id=chat_id, linux_user=name, workspace=str(workspace), stdout="", stderr=f"python: code is {len(src)} chars (limit {_CELL_MAX_CHARS}). Save it with write_file and run it with bash instead.", exit_code=1)
-        code_id = _remember_cell_code(user_id, chat_id, src)
+        code_id = _remember_cell_code(user_id, chat_id, src, scope)
         command = f"/opt/talos-sandbox-venv/bin/python -c {shlex.quote(_PY_RUNNER_SRC)} {shlex.quote(code_id)}"
         env = {"TALOS_CELL_SRC": src}
     else:
         command = req.command
     _unshare_mentioned(name, workspace, (env or {}).get("TALOS_CELL_SRC") or command)
     started_at = time.time()
-    proc = await _start_process(user_id, chat_id, ExecuteRequest(command=command, env=env))
+    proc = await _start_process(user_id, chat_id, ExecuteRequest(command=command, env=env), scope)
     try:
         await asyncio.wait_for(asyncio.shield(proc.log_task), timeout=timeout)
     except asyncio.TimeoutError:
@@ -1197,12 +1211,19 @@ async def exec_route(user_id: str, chat_id: str, req: ExecRequest) -> ExecRespon
     return ExecResponse(user_id=user_id, chat_id=chat_id, linux_user=name, workspace=str(workspace), stdout=output, stderr="", exit_code=proc.exit_code or 0, images=images, image_note=image_note, created_artifacts=_changed_artifacts(workspace, artifacts_before), code_id=code_id)
 
 
-def _kernel_sock_path(workspace: Path) -> Path:
-    return workspace / ".talos_kernel.sock"
+def _kernel_sock_path(workspace: Path, scope: str = "") -> Path:
+    if not scope:
+        return workspace / ".talos_kernel.sock"
+    # Hashed and short: a unix socket's whole path may not pass about 108 bytes.
+    return workspace / f".talos_k_{hashlib.sha256(scope.encode('utf-8')).hexdigest()[:12]}.sock"
 
 
-def _stop_kernel(user_id: str, chat_id: str) -> None:
-    rec = _kernels.pop(_session_key(user_id, chat_id), None)
+def _stop_kernel(user_id: str, chat_id: str, scope: str = "") -> None:
+    _stop_kernel_at(_session_key(user_id, chat_id, scope))
+
+
+def _stop_kernel_at(key: str) -> None:
+    rec = _kernels.pop(key, None)
     if not rec:
         return
     proc = rec.get("proc")
@@ -1216,13 +1237,13 @@ def _stop_kernel(user_id: str, chat_id: str) -> None:
                 pass
 
 
-async def _ensure_kernel(user_id: str, chat_id: str) -> dict[str, Any]:
-    key = _session_key(user_id, chat_id)
+async def _ensure_kernel(user_id: str, chat_id: str, scope: str = "") -> dict[str, Any]:
+    key = _session_key(user_id, chat_id, scope)
     name, workspace = _workspace(user_id, chat_id)
     rec = _kernels.get(key)
     if rec and rec.get("proc") is not None and rec["proc"].poll() is None:
         return rec
-    sock = _kernel_sock_path(workspace)
+    sock = _kernel_sock_path(workspace, scope)
     try:
         if sock.exists():
             sock.unlink()
@@ -1283,16 +1304,18 @@ def _kernel_exec_sync(sock_path: str, code: str, timeout: int, name: str = "<cel
 
 
 @app.post("/users/{user_id}/workspaces/{chat_id}/kernel/execute", response_model=ExecResponse)
-async def kernel_execute_route(user_id: str, chat_id: str, req: CellRequest) -> ExecResponse:
+async def kernel_execute_route(
+    user_id: str, chat_id: str, req: CellRequest, scope: str = ""
+) -> ExecResponse:
     name, workspace = _workspace(user_id, chat_id)
     artifacts_before = _artifact_snapshot(workspace)
-    src, err = _resolve_cell_code(user_id, chat_id, req.code, req.edits, req.code_id)
+    src, err = _resolve_cell_code(user_id, chat_id, req.code, req.edits, req.code_id, scope)
     if err is not None:
         return ExecResponse(user_id=user_id, chat_id=chat_id, linux_user=name, workspace=str(workspace), stdout="", stderr=err, exit_code=1)
-    rec = await _ensure_kernel(user_id, chat_id)
+    rec = await _ensure_kernel(user_id, chat_id, scope)
     if not Path(rec["sock"]).exists():
         return ExecResponse(user_id=user_id, chat_id=chat_id, linux_user=name, workspace=str(workspace), stdout="", stderr="kernel: failed to start", exit_code=1)
-    code_id = _remember_cell_code(user_id, chat_id, src)
+    code_id = _remember_cell_code(user_id, chat_id, src, scope)
     _unshare_mentioned(name, workspace, src)
     started_at = time.time()
     timeout = int(req.timeout or 0)
@@ -1300,7 +1323,7 @@ async def kernel_execute_route(user_id: str, chat_id: str, req: CellRequest) -> 
         result = await asyncio.to_thread(_kernel_exec_sync, rec["sock"], src, timeout, code_id)
     except Exception as exc:
         # Socket dead/stuck — drop the kernel so the next call respawns it.
-        _stop_kernel(user_id, chat_id)
+        _stop_kernel(user_id, chat_id, scope)
         return ExecResponse(user_id=user_id, chat_id=chat_id, linux_user=name, workspace=str(workspace), stdout="", stderr=f"kernel: {exc}", exit_code=1)
     stdout = str(result.get("stdout") or "")
     stderr = str(result.get("stderr") or "")
@@ -1317,9 +1340,9 @@ async def kernel_execute_route(user_id: str, chat_id: str, req: CellRequest) -> 
 
 
 @app.post("/users/{user_id}/workspaces/{chat_id}/kernel/reset")
-def kernel_reset_route(user_id: str, chat_id: str) -> dict[str, Any]:
+def kernel_reset_route(user_id: str, chat_id: str, scope: str = "") -> dict[str, Any]:
     """Restart the persistent kernel (clears all in-memory state)."""
-    _stop_kernel(user_id, chat_id)
+    _stop_kernel(user_id, chat_id, scope)
     return {"ok": True}
 
 

@@ -173,6 +173,10 @@ def setup_project_routes() -> APIRouter:
             raise HTTPException(400, "The creator can't leave the project, only delete it")
         if not projects.remove_member(project_id, target):
             raise HTTPException(404, "Not in this project")
+        # Their chats stay with the project, but nothing runs in them any more.
+        for chat in projects.chats(project_id):
+            if chat["owner"] == target:
+                sandbox_client.stop_project_chat_kernel(project_id, chat["id"])
         return {"ok": True}
 
     # ---- Its chats ----

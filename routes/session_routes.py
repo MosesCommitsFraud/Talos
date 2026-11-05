@@ -243,6 +243,13 @@ def _pick_endpoint_for_sort(owner=None):
     return None, None, None
 
 
+def _stop_project_kernel(project_id: str | None, session_id: str) -> None:
+    if project_id:
+        from src.sandbox_client import stop_project_chat_kernel
+
+        stop_project_chat_kernel(project_id, session_id)
+
+
 def merge_pending_workspaces(project_id: str | None = None) -> None:
     """Bring the files of chats that moved into a project to its shared workspace.
     What the sandbox can't do now stays pending for the next boot."""
@@ -681,6 +688,7 @@ def setup_session_routes(session_manager: SessionManager, config: dict):
             raise HTTPException(404, f"Session {sid} not found")
         result = {"id": sid}
         # Removal is an explicit flag for the same reason as clear_folder below.
+        previous_project = projects.project_of_session(sid)
         if str(clear_project or "").strip().lower() in ("1", "true", "yes", "on"):
             projects.set_session_project(sid, None)
             result["project_id"] = None
@@ -691,6 +699,8 @@ def setup_session_routes(session_manager: SessionManager, config: dict):
             projects.set_session_project(sid, project_id)
             result["project_id"] = project_id
             merge_pending_workspaces(project_id)
+        if previous_project and "project_id" in result and previous_project != result["project_id"]:
+            _stop_project_kernel(previous_project, sid)
         if name is not None:
             session_manager.update_session_name(sid, name)
             result["name"] = name
@@ -816,6 +826,7 @@ def setup_session_routes(session_manager: SessionManager, config: dict):
         for sid in ids:
             try:
                 _verify_session_owner(request, sid, session_manager)
+                _stop_project_kernel(projects.project_of_session(sid), sid)
                 session_manager.delete_session(sid)
                 _owner = None
                 db = SessionLocal()
@@ -858,11 +869,13 @@ def setup_session_routes(session_manager: SessionManager, config: dict):
                         },
                     )
                 _owner = db_sess.owner if db_sess else None
+                _project = db_sess.project_id if db_sess else None
             finally:
                 db.close()
 
             # Delete the session and all its messages
             if session_manager.delete_session(sid):
+                _stop_project_kernel(_project, sid)
                 # Drop the chat's sandbox workspace so its files don't outlive it.
                 try:
                     from src.sandbox_client import delete_workspace_sync

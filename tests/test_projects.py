@@ -8,6 +8,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+import httpx
 import pytest
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
@@ -465,3 +466,171 @@ def test_copying_a_workspace_keeps_what_the_project_has(monkeypatch, tmp_path):
     assert (roots["workspace"] / "both.txt").read_text() == "from the project"
     assert not (roots["workspace"] / ".talos-home").exists()
     assert (roots["chat"] / "both.txt").read_text() == "from the chat"
+
+
+@pytest.fixture
+def sandboxd(monkeypatch, tmp_path):
+    monkeypatch.setenv("TALOS_SANDBOX_STATE", str(tmp_path / "state" / "state.json"))
+    path = Path(__file__).resolve().parent.parent / "sandbox" / "sandboxd.py"
+    spec = importlib.util.spec_from_file_location("sandboxd_scope_under_test", path)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_each_chat_in_a_workspace_has_its_own_kernel(sandboxd, tmp_path):
+    socks = {sandboxd._kernel_sock_path(tmp_path, s) for s in ("", "chat-a", "chat-b")}
+    assert len(socks) == 3
+    # A chat without a scope keeps the socket it always had.
+    assert sandboxd._kernel_sock_path(tmp_path).name == ".talos_kernel.sock"
+    # A unix socket's path holds about 108 bytes.
+    deepest = (
+        Path("/home/talos") / sandboxd.linux_user("project:" + "x" * 36) / "workspaces" / ("y" * 24)
+    )
+    long_scope = sandboxd._kernel_sock_path(deepest, "z" * 36)
+    assert len(str(long_scope)) < 104
+
+
+def test_chats_in_a_workspace_cannot_patch_each_others_code(sandboxd):
+    code_id = sandboxd._remember_cell_code("project:p", "workspace", "print('a')", "chat-a")
+    edit = [{"find": "a", "replace": "b"}]
+
+    for attempt in ("", code_id):
+        _src, error = sandboxd._resolve_cell_code(
+            "project:p", "workspace", "", edit, attempt, "chat-b"
+        )
+        assert error and "no longer in memory" in error
+    assert sandboxd._lookup_cell_code("project:p", "workspace", "", "chat-a") == "print('a')"
+
+
+def test_stopping_one_chats_kernel_leaves_the_others(sandboxd):
+    a = sandboxd._session_key("project:p", "workspace", "chat-a")
+    b = sandboxd._session_key("project:p", "workspace", "chat-b")
+    assert a != b
+    sandboxd._kernels.update({a: {"proc": None}, b: {"proc": None}})
+
+    sandboxd.kernel_reset_route("project:p", "workspace", "chat-a")
+
+    assert list(sandboxd._kernels) == [b]
+
+
+def test_deleting_a_shared_workspace_ends_every_chats_state(sandboxd, monkeypatch, tmp_path):
+    monkeypatch.setattr(sandboxd, "workspace_path", lambda user, chat: tmp_path / "gone")
+    keys = [sandboxd._session_key("project:p", "workspace", s) for s in ("a", "b")]
+    other = sandboxd._session_key("project:q", "workspace", "a")
+    for key in (*keys, other):
+        sandboxd._kernels[key] = {"proc": None}
+        sandboxd._cell_code[key] = []
+        sandboxd._session_cwds[key] = ("/x", 0.0)
+
+    sandboxd.delete_workspace_route("project:p", "workspace")
+
+    for state in (sandboxd._kernels, sandboxd._cell_code, sandboxd._session_cwds):
+        assert list(state) == [other]
+
+
+class _SandboxCalls:
+    """Stands in for httpx's clients and notes what was asked of the sandbox."""
+
+    calls: list = []
+
+    def __init__(self, *a, **k):
+        pass
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *a):
+        return False
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+    def _answer(self, url, **kw):
+        type(self).calls.append((url, kw.get("params")))
+        return httpx.Response(200, json={}, request=httpx.Request("POST", url))
+
+    def post(self, url, **kw):
+        return self._answer(url, **kw)
+
+
+class _AsyncSandboxCalls(_SandboxCalls):
+    async def post(self, url, **kw):
+        return self._answer(url, **kw)
+
+
+async def test_a_project_chat_tells_the_sandbox_which_chat_it_is(db, monkeypatch):
+    project = projects.create("anna", "Shared")
+    _chat(db, "in-project", "anna", project["id"])
+    _chat(db, "own", "anna")
+    _SandboxCalls.calls = []
+    monkeypatch.setattr(sandbox_client.httpx, "AsyncClient", _AsyncSandboxCalls)
+
+    for chat in ("in-project", "own"):
+        await sandbox_client.exec_in_sandbox(owner="anna", session_id=chat, kind="bash")
+        await sandbox_client.run_cell_in_sandbox(owner="anna", session_id=chat, code="1")
+
+    in_project, own = _SandboxCalls.calls[:2], _SandboxCalls.calls[2:]
+    assert all(params == {"scope": "in-project"} for _url, params in in_project)
+    assert all(f"/users/project%3A{project['id']}/workspaces/workspace/" in u for u, _ in in_project)
+    # A chat of its own has its workspace to itself, and the calls stay as they were.
+    assert all(params == {} for _url, params in own)
+    assert all("/users/anna/workspaces/own/" in u for u, _ in own)
+
+
+def test_a_chat_leaving_the_project_stops_only_its_kernel(db, monkeypatch):
+    project = projects.create("anna", "Shared")
+    _SandboxCalls.calls = []
+    monkeypatch.setattr(sandbox_client, "sandbox_enabled", lambda: True)
+    monkeypatch.setattr(sandbox_client.httpx, "Client", _SandboxCalls)
+
+    assert sandbox_client.stop_project_chat_kernel(project["id"], "c1")
+
+    url, params = _SandboxCalls.calls[0]
+    assert url.endswith(f"/users/project%3A{project['id']}/workspaces/workspace/kernel/reset")
+    assert params == {"scope": "c1"}
+
+
+@pytest.mark.skipif(os.name == "nt", reason="needs unix sockets")
+async def test_two_chats_in_a_workspace_run_in_separate_kernels(sandboxd, monkeypatch, tmp_path):
+    """The real kernel server, only without the account switch and the sandbox's venv."""
+    workspace = tmp_path / "shared"
+    workspace.mkdir()
+    real_popen = subprocess.Popen
+
+    class Shim:
+        def __getattr__(self, name):
+            return getattr(subprocess, name)
+
+        @staticmethod
+        def Popen(args, **kw):
+            assert args[0] == "gosu"
+            return real_popen([sys.executable, *args[3:]], **kw)
+
+    monkeypatch.setattr(sandboxd, "subprocess", Shim())
+    monkeypatch.setattr(sandboxd, "_workspace", lambda user, chat: ("acct", workspace))
+
+    async def run(scope, code):
+        result = await sandboxd.kernel_execute_route(
+            "project:p", "workspace", sandboxd.CellRequest(code=code), scope
+        )
+        assert result.exit_code == 0, result.stderr
+        return result.stdout.strip()
+
+    try:
+        await run("chat-a", "secret = 41")
+        await run("chat-b", "secret = 1")
+        assert await run("chat-a", "print(secret + 1)") == "42"
+        assert await run("chat-b", "print(secret + 1)") == "2"
+        # Each stays where it went, while the files are the same for both.
+        await run("chat-a", "import os; os.mkdir('sub'); os.chdir('sub')")
+        assert await run("chat-b", "import os; print(os.path.isdir('sub'))") == "True"
+        assert (await run("chat-a", "import os; print(os.path.basename(os.getcwd()))")) == "sub"
+        assert (await run("chat-b", "import os; print(os.path.basename(os.getcwd()))")) == "shared"
+    finally:
+        for key in list(sandboxd._kernels):
+            sandboxd._stop_kernel_at(key)

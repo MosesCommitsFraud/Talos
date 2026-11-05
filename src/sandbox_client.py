@@ -34,6 +34,16 @@ def _workspace_url(owner: str | None, session_id: str) -> str:
     return f"{SANDBOX_URL}/users/{quote(user_id, safe='')}/workspaces/{quote(chat_id, safe='')}"
 
 
+def _chat_scope(session_id: str) -> dict[str, str]:
+    """For the calls that run something: in a project's workspace, which chat this is,
+    so each keeps its own Python kernel, working directory and recent code."""
+    from src.projects import project_of_ref, project_of_session
+
+    if project_of_ref(session_id) or not project_of_session(session_id):
+        return {}
+    return {"scope": session_id}
+
+
 async def exec_in_sandbox(
     *,
     owner: str | None,
@@ -55,6 +65,7 @@ async def exec_in_sandbox(
     ) as client:
         resp = await client.post(
             f"{_workspace_url(owner, session_id)}/exec",
+            params=_chat_scope(session_id),
             json={
                 "kind": kind,
                 "command": command,
@@ -136,6 +147,7 @@ async def run_cell_in_sandbox(
     ) as client:
         resp = await client.post(
             f"{_workspace_url(owner, session_id)}/kernel/execute",
+            params=_chat_scope(session_id),
             json={"code": code, "timeout": timeout, "edits": edits or [], "code_id": code_id},
         )
         resp.raise_for_status()
@@ -161,6 +173,28 @@ def delete_project_workspace(project_id: str) -> bool:
             headers=_SANDBOX_HEADERS, timeout=httpx.Timeout(30.0, connect=10.0)
         ) as client:
             resp = client.delete(_workspace_url(None, workspace_ref(project_id)))
+            resp.raise_for_status()
+        return True
+    except Exception:
+        return False
+
+
+def stop_project_chat_kernel(project_id: str, session_id: str) -> bool:
+    """End the Python kernel a chat has in its project's workspace, for a chat that
+    leaves it or goes away. The workspace stays, and with it no one else would ever
+    stop this kernel. Best-effort, like delete_workspace."""
+    from src.projects import workspace_ref
+
+    if not sandbox_enabled():
+        return False
+    try:
+        with httpx.Client(
+            headers=_SANDBOX_HEADERS, timeout=httpx.Timeout(30.0, connect=10.0)
+        ) as client:
+            resp = client.post(
+                f"{_workspace_url(None, workspace_ref(project_id))}/kernel/reset",
+                params={"scope": session_id},
+            )
             resp.raise_for_status()
         return True
     except Exception:
