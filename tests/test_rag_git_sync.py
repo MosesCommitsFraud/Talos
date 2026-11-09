@@ -730,6 +730,28 @@ def test_token_is_never_on_the_command_line_and_is_scrubbed_from_errors(monkeypa
     assert base64.b64decode(encoded).decode() == "git:s3cret"
 
 
+@pytest.mark.parametrize(
+    "token, expected",
+    [("", "requires a login"), ("s3cret", "refused the access token")],
+)
+def test_a_refused_login_says_what_to_do(monkeypatch, tmp_path, token, expected):
+    class Done:
+        returncode = 128
+        stdout = ""
+        stderr = "fatal: could not read Username for 'https://x': terminal prompts disabled"
+
+    monkeypatch.setattr(subprocess, "run", lambda args, **kwargs: Done())
+    with pytest.raises(gs.GitSyncError, match=expected):
+        gs._git(["fetch", "https://x"], tmp_path, token)
+
+
+def test_the_host_login_is_never_used(monkeypatch):
+    """A domain-joined Windows host would otherwise sign in as whoever runs git."""
+    env = gs._git_env("")
+    key = next(k for k, v in env.items() if v == "http.emptyAuth")
+    assert env[key.replace("KEY", "VALUE")] == "false"
+
+
 def test_the_host_git_environment_is_not_inherited(monkeypatch):
     monkeypatch.setenv("GIT_SSH_COMMAND", "evil")
     env = gs._git_env("")

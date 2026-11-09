@@ -155,7 +155,10 @@ files to the normal ingest:
 - **The token** is stored like the other integration keys in the settings file, stays
   out of the job queue, and reaches git only through its environment, so it never
   appears on a command line, in a URL or in `.git/config`. With a token, git follows no
-  redirects, so it can't be sent to another host.
+  redirects, so it can't be sent to another host. The login of the machine running git
+  is never used, so a repository that needs a login needs a token, on a domain-joined
+  Windows host as much as in the container. For Azure DevOps that is a personal access
+  token with the scope *Code (Read)*.
 
 The last run of each repository is kept in `data/rag/git_sync/<repo id>.json` and shown
 on the settings page, because finished jobs expire from the queue.

@@ -301,6 +301,9 @@ def _git_env(token: str) -> Dict[str, str]:
         ("core.autocrlf", "false"),
         ("core.hooksPath", os.devnull),
         ("credential.helper", ""),
+        # Otherwise git on a domain-joined Windows host signs in as whoever runs it,
+        # and a repository that needs a token seems to work until it runs in a container.
+        ("http.emptyAuth", "false"),
         # Our own checkout; the volume may be owned by another uid.
         ("safe.directory", "*"),
     ]
@@ -328,6 +331,11 @@ def _scrub(text: str, token: str) -> str:
     return text
 
 
+# How git says the server wants credentials it didn't get. A rejected token reads the
+# same as no token: after the 401, git asks for a user name it can't prompt for.
+_LOGIN_REFUSED = ("could not read Username", "could not read Password", "Authentication failed")
+
+
 def _git(args: List[str], cwd: Path, token: str) -> str:
     try:
         done = subprocess.run(
@@ -345,6 +353,14 @@ def _git(args: List[str], cwd: Path, token: str) -> str:
         raise GitSyncError(f"git {args[0]} took longer than {GIT_TIMEOUT_SECONDS}s")
     if done.returncode != 0:
         tail = " ".join((done.stderr or "").strip().splitlines()[-3:])
+        if any(sign in tail for sign in _LOGIN_REFUSED):
+            raise GitSyncError(
+                "The repository refused the access token: it may have expired or lack read "
+                "access to the code."
+                if token
+                else "The repository requires a login. Enter an access token with read access "
+                "to the code under Settings → MCP Server."
+            )
         raise GitSyncError(_scrub(f"git {args[0]} failed: {tail}", token))
     return (done.stdout or "").strip()
 
