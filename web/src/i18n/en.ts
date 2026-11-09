@@ -1981,6 +1981,8 @@ const en = {
       toolCount: '{{enabled}}/{{total}} tools',
       toolsTitle: 'Tools ({{enabled}}/{{total}} enabled)',
       noTools: 'This server offers no tools.',
+      toolsLoadFailed: 'The tools could not be loaded ({{error}}).',
+      toolsRetry: 'Try again',
       toolsWhenConnected: 'Tools are listed once the server is connected.',
       status: {
         connected: 'Connected',

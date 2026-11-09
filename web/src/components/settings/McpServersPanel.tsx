@@ -119,7 +119,7 @@ function StatusDot({ srv }: { srv: McpServerInfo }) {
 
 function ToolsList({ srv, onChanged }: { srv: McpServerInfo; onChanged: () => void }) {
   const { t } = useTranslation();
-  const { data: tools, isLoading, refetch } = useQuery({
+  const { data: tools, isLoading, error, refetch } = useQuery({
     queryKey: ['mcp-server-tools', srv.id, srv.tool_count],
     queryFn: () => fetchMcpServerTools(srv.id),
   });
@@ -137,6 +137,14 @@ function ToolsList({ srv, onChanged }: { srv: McpServerInfo; onChanged: () => vo
     save(disabled.includes(name) ? disabled.filter((n) => n !== name) : [...disabled, name]);
 
   if (isLoading) return <p className="py-2 text-xs text-muted-foreground">{t('common.loading')}</p>;
+  if (error && !tools) {
+    return (
+      <p className="py-2 text-xs text-destructive-foreground">
+        {t('settings.mcpServers.toolsLoadFailed', { error: error.message })}{' '}
+        <button type="button" className="underline" onClick={() => void refetch()}>{t('settings.mcpServers.toolsRetry')}</button>
+      </p>
+    );
+  }
   if (list.length === 0) return <p className="py-2 text-xs text-muted-foreground">{t('settings.mcpServers.noTools')}</p>;
   return (
     <div className="pt-2">

@@ -1988,6 +1988,8 @@ const de: typeof en = {
       toolCount: '{{enabled}}/{{total}} Werkzeuge',
       toolsTitle: 'Werkzeuge ({{enabled}}/{{total}} aktiv)',
       noTools: 'Dieser Server bietet keine Werkzeuge an.',
+      toolsLoadFailed: 'Die Werkzeuge konnten nicht geladen werden ({{error}}).',
+      toolsRetry: 'Erneut versuchen',
       toolsWhenConnected: 'Werkzeuge werden angezeigt, sobald der Server verbunden ist.',
       status: {
         connected: 'Verbunden',
