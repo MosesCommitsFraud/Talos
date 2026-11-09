@@ -146,14 +146,18 @@ export default function App() {
                   <div className="relative shrink-0">
                     {/* Mirror of the header fade, shorter: messages dissolve
                         into the background instead of running into the
-                        composer. Unlayered for the same reason (see below). */}
-                    <div
-                      className="pointer-events-none absolute inset-x-0 bottom-full h-6"
-                      style={{
-                        background:
-                          'linear-gradient(to top, var(--background) 35%, rgb(from var(--background) r g b / 0) 100%)',
-                      }}
-                    />
+                        composer. Unlayered for the same reason (see below).
+                        Reserves the scroller's gutter so the scrollbar stays
+                        visible beside it, whatever width the browser gives it. */}
+                    <div className="pointer-events-none absolute inset-x-0 bottom-full h-6 overflow-hidden [scrollbar-gutter:stable]">
+                      <div
+                        className="h-full"
+                        style={{
+                          background:
+                            'linear-gradient(to top, var(--background) 35%, rgb(from var(--background) r g b / 0) 100%)',
+                        }}
+                      />
+                    </div>
                     <PendingQuestion />
                     {readOnlyChat ? <ReadOnlyChatNotice chat={readOnlyChat} /> : <Composer />}
                   </div>

@@ -144,15 +144,18 @@ export function IncognitoToggle() {
           rather than `transparent` — fading to transparent *black* tints the
           gradient. Only over a real conversation; the welcome screen has
           nothing scrolling under the controls. No z-index on purpose (see the
-          render order in App.tsx). */}
+          render order in App.tsx). Reserves the scroller's gutter so the
+          scrollbar stays visible beside it. */}
       {sessionId && (
-        <div
-          className="pointer-events-none absolute inset-x-0 top-0 h-12"
-          style={{
-            background:
-              'linear-gradient(to bottom, var(--background) 75%, rgb(from var(--background) r g b / 0) 100%)',
-          }}
-        />
+        <div className="pointer-events-none absolute inset-x-0 top-0 h-12 overflow-hidden [scrollbar-gutter:stable]">
+          <div
+            className="h-full"
+            style={{
+              background:
+                'linear-gradient(to bottom, var(--background) 75%, rgb(from var(--background) r g b / 0) 100%)',
+            }}
+          />
+        </div>
       )}
       {/* Collapsed, the sidebar's expand button floats over this corner
           (Sidebar.tsx: left-2.5, size-7), so the title starts past it. */}
