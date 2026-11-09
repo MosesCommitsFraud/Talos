@@ -131,30 +131,30 @@ export function CustomizeWorkspace() {
     <Page
       title={t('sidebar.customize')}
       actions={
-        tab === 'skills' ? (
-          <>
-            <SearchInput
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder={t('customize.searchPlaceholder')}
-              wrapperClassName="w-56"
-            />
-            <input
-              ref={fileRef}
-              type="file"
-              accept=".md,.zip,text/markdown,application/zip"
-              className="hidden"
-              onChange={(e) => {
-                const f = e.target.files?.[0];
-                if (f) void upload(f);
-                e.target.value = '';
-              }}
-            />
-            <Button onClick={() => fileRef.current?.click()}>
-              <PlusIcon /> {t('customize.addSkill')}
-            </Button>
-          </>
-        ) : undefined
+        // Hidden rather than removed on the other tab: the title row keeps its
+        // height, also where the actions wrap, so switching tabs moves nothing.
+        <div className={cn('flex items-center gap-2', tab !== 'skills' && 'invisible')}>
+          <SearchInput
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder={t('customize.searchPlaceholder')}
+            wrapperClassName="w-56"
+          />
+          <input
+            ref={fileRef}
+            type="file"
+            accept=".md,.zip,text/markdown,application/zip"
+            className="hidden"
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              if (f) void upload(f);
+              e.target.value = '';
+            }}
+          />
+          <Button onClick={() => fileRef.current?.click()}>
+            <PlusIcon /> {t('customize.addSkill')}
+          </Button>
+        </div>
       }
       belowTitle={
         <div className="flex items-center gap-1">

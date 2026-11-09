@@ -17,7 +17,7 @@ export function Page({
   children: React.ReactNode;
 }) {
   return (
-    <main className="flex min-w-0 flex-1 flex-col overflow-y-auto">
+    <main className="flex min-w-0 flex-1 flex-col overflow-y-auto [scrollbar-gutter:stable]">
       <div className="mx-auto w-full max-w-[1100px] px-8 py-8">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <h1 className="text-2xl font-semibold tracking-tight text-strong">{title}</h1>
