@@ -5,6 +5,7 @@ Manages connections to MCP (Model Context Protocol) tool servers.
 Each server exposes tools that are made available to the agent loop.
 """
 
+import asyncio
 import json
 import logging
 import os
@@ -32,6 +33,15 @@ def _format_mcp_connection_error(
         )
 
     return raw_error
+
+
+def _connection_lost(error: BaseException) -> bool:
+    """True when a call failed because the server is gone, not because of the call."""
+    import anyio
+
+    if isinstance(error, (anyio.ClosedResourceError, anyio.BrokenResourceError, anyio.EndOfStream)):
+        return True
+    return "connection closed" in str(error).lower()
 
 
 def _stdio_child_env(env: Dict[str, str], inherit_app_env: bool = False) -> Dict[str, str]:
@@ -120,6 +130,8 @@ class McpManager:
         self._sessions: Dict[str, Any] = {}
         # server_id -> exit stack (for cleanup)
         self._stacks: Dict[str, Any] = {}
+        # server_id -> (task holding a stdio/SSE connection open, event that ends it)
+        self._holders: Dict[str, Any] = {}
         # server_id -> background connect task (HTTP transport / OAuth)
         self._connect_tasks: Dict[str, Any] = {}
         # Tracking updates to tools/connections for RAG indexing / prompt cache
@@ -163,6 +175,74 @@ class McpManager:
             self._generation += 1
             return False
 
+    async def _hold_open(self, server_id: str, open_transport, status: Dict[str, Any]) -> None:
+        """Connect in a task of its own and return once the server is ready.
+
+        The SDK's connections are anyio contexts, which must be left in the task
+        that entered them and die with the scope around them. Entered from a web
+        request, behind Starlette's BaseHTTPMiddleware, they broke when the request
+        ended while the server still showed as connected. So one task holds each
+        connection from start to stop.
+        """
+        await self._release(server_id)
+        ready = asyncio.get_running_loop().create_future()
+        stop = asyncio.Event()
+        task = asyncio.create_task(self._hold(server_id, open_transport, status, ready, stop))
+        self._holders[server_id] = (task, stop)
+        try:
+            await asyncio.shield(ready)
+        except asyncio.CancelledError:
+            task.cancel()
+            raise
+
+    async def _hold(self, server_id, open_transport, status, ready, stop) -> None:
+        """The life of one connection: open, publish, wait to be told to stop."""
+        from mcp import ClientSession
+
+        try:
+            async with open_transport() as streams:
+                async with ClientSession(streams[0], streams[1]) as session:
+                    await session.initialize()
+                    listed = await session.list_tools()
+                    tools = [
+                        {
+                            "name": tool.name,
+                            "description": tool.description or "",
+                            "input_schema": getattr(tool, "inputSchema", None) or {},
+                        }
+                        for tool in listed.tools
+                    ]
+                    self._sessions[server_id] = session
+                    self._tools[server_id] = tools
+                    self._connections[server_id] = {
+                        "status": "connected",
+                        "tool_count": len(tools),
+                        **status,
+                    }
+                    if not ready.done():
+                        ready.set_result(None)
+                    await stop.wait()
+        except Exception as e:
+            if not ready.done():
+                ready.set_exception(e)
+            else:
+                logger.warning(f"MCP server {server_id} connection ended: {e!r}")
+        finally:
+            if not ready.done():
+                ready.cancel()
+
+    async def _release(self, server_id: str) -> None:
+        """End a held connection in its own task and wait until it is gone."""
+        holder = self._holders.pop(server_id, None)
+        if not holder:
+            return
+        task, stop = holder
+        stop.set()
+        try:
+            await asyncio.wait_for(task, timeout=10)
+        except Exception as e:
+            logger.warning(f"Error closing MCP server {server_id}: {e!r}")
+
     async def _connect_stdio(
         self,
         server_id: str,
@@ -174,9 +254,7 @@ class McpManager:
     ) -> bool:
         """Connect to an MCP server via stdio transport."""
         try:
-            from contextlib import AsyncExitStack
-
-            from mcp import ClientSession, StdioServerParameters
+            from mcp import StdioServerParameters
             from mcp.client.stdio import stdio_client
 
             server_params = StdioServerParameters(
@@ -185,32 +263,6 @@ class McpManager:
                 env=_stdio_child_env(env, inherit_app_env),
             )
 
-            stack = AsyncExitStack()
-            try:
-                transport = await stack.enter_async_context(stdio_client(server_params))
-                read_stream, write_stream = transport
-                session = await stack.enter_async_context(ClientSession(read_stream, write_stream))
-
-                await session.initialize()
-
-                # Discover tools
-                tools_result = await session.list_tools()
-            except Exception:
-                await stack.aclose()
-                raise
-            tools = []
-            for tool in tools_result.tools:
-                tools.append(
-                    {
-                        "name": tool.name,
-                        "description": tool.description or "",
-                        "input_schema": tool.inputSchema if hasattr(tool, "inputSchema") else {},
-                    }
-                )
-
-            self._sessions[server_id] = session
-            self._stacks[server_id] = stack
-            self._tools[server_id] = tools
             # Extract identity hints from env vars (e.g. email address, API name)
             # so tool descriptions can distinguish between multiple instances of
             # the same MCP server (e.g. two email accounts).
@@ -221,17 +273,12 @@ class McpManager:
                     identity_hints.append(v)
             identity = ", ".join(identity_hints) if identity_hints else ""
 
-            self._connections[server_id] = {
-                "status": "connected",
-                "name": name,
-                "transport": "stdio",
-                "tool_count": len(tools),
-                "identity": identity,
-            }
-
-            logger.info(
-                f"MCP server connected: {name} ({server_id}) - {len(tools)} tools via stdio"
+            await self._hold_open(
+                server_id,
+                lambda: stdio_client(server_params),
+                {"name": name, "transport": "stdio", "identity": identity},
             )
+            logger.info(f"MCP server connected: {name} ({server_id}) via stdio")
             return True
 
         except ImportError:
@@ -246,45 +293,12 @@ class McpManager:
     async def _connect_sse(self, server_id: str, name: str, url: str) -> bool:
         """Connect to an MCP server via SSE transport."""
         try:
-            from contextlib import AsyncExitStack
-
-            from mcp import ClientSession
             from mcp.client.sse import sse_client
 
-            stack = AsyncExitStack()
-            try:
-                transport = await stack.enter_async_context(sse_client(url))
-                read_stream, write_stream = transport
-                session = await stack.enter_async_context(ClientSession(read_stream, write_stream))
-
-                await session.initialize()
-
-                # Discover tools
-                tools_result = await session.list_tools()
-            except Exception:
-                await stack.aclose()
-                raise
-            tools = []
-            for tool in tools_result.tools:
-                tools.append(
-                    {
-                        "name": tool.name,
-                        "description": tool.description or "",
-                        "input_schema": tool.inputSchema if hasattr(tool, "inputSchema") else {},
-                    }
-                )
-
-            self._sessions[server_id] = session
-            self._stacks[server_id] = stack
-            self._tools[server_id] = tools
-            self._connections[server_id] = {
-                "status": "connected",
-                "name": name,
-                "transport": "sse",
-                "tool_count": len(tools),
-            }
-
-            logger.info(f"MCP server connected: {name} ({server_id}) - {len(tools)} tools via SSE")
+            await self._hold_open(
+                server_id, lambda: sse_client(url), {"name": name, "transport": "sse"}
+            )
+            logger.info(f"MCP server connected: {name} ({server_id}) via SSE")
             return True
 
         except ImportError:
@@ -302,8 +316,6 @@ class McpManager:
         """Begin a Streamable HTTP connect in the background. Returns within
         `wait` seconds: True if it connected (cached-token path), otherwise the
         flow is awaiting browser authorization and status becomes 'needs_auth'."""
-        import asyncio
-
         self._connections[server_id] = {"status": "connecting", "name": name, "transport": "http"}
         task = asyncio.create_task(self._connect_http(server_id, name, url))
         self._connect_tasks[server_id] = task
@@ -410,6 +422,8 @@ class McpManager:
         except Exception:
             pass
 
+        await self._release(server_id)
+
         stack = self._stacks.pop(server_id, None)
         if stack:
             try:
@@ -496,8 +510,18 @@ class McpManager:
                         "exit_code": 1,
                     }
             else:
-                logger.error(f"MCP tool call failed: {qualified_name}: {e}")
-                return {"error": str(e), "exit_code": 1}
+                logger.error(f"MCP tool call failed: {qualified_name}: {e!r}")
+                if _connection_lost(e):
+                    message = (
+                        f"The connection to MCP server {server_id} was lost. "
+                        "An admin can reconnect it under Customize > Connectors."
+                    )
+                    conn = self._connections.get(server_id, {})
+                    self._connections[server_id] = {**conn, "status": "error", "error": message}
+                    self._generation += 1
+                    return {"error": message, "exit_code": 1}
+                # Some SDK errors have no message, and an empty error tells nobody anything.
+                return {"error": str(e) or type(e).__name__, "exit_code": 1}
 
         return result
 
