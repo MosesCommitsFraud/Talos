@@ -17,7 +17,7 @@ from core.models import ChatMessage
 from routes.prefs_routes import _load_for_user as load_prefs_for_user
 from src import citations as _citations
 from src.auth_helpers import effective_user, get_current_user
-from src.context_compactor import maybe_compact, trim_for_context
+from src.context_compactor import get_compaction_mode, maybe_compact, trim_for_context
 from src.endpoint_resolver import normalize_base
 from src.history_replay import (
     PREFACE_KEY,
@@ -28,6 +28,7 @@ from src.history_replay import (
     stamp_answer,
 )
 from src.llm_core import normalize_model_id
+from src.model_context import get_context_length
 from src.prompt_security import untrusted_context_message
 from src.settings import get_setting
 from src.turn_context import (
@@ -966,14 +967,21 @@ async def build_chat_context(
         except Exception:
             logger.debug("Failed to add current date/time context", exc_info=True)
 
-    # Auto-compact
-    messages, context_length, was_compacted = await maybe_compact(
-        sess,
-        sess.endpoint_url,
-        sess.model,
-        messages,
-        sess.headers,
-    )
+    # Auto-compact. With `compaction_model` "main" the agent loop does it
+    # itself, right before the turn's first request: there the chat's own model
+    # writes a checkpoint from the prompt the server has cached, which needs the
+    # system prompt and tool list that only exist once the loop has built them.
+    if get_compaction_mode() == "main":
+        context_length = get_context_length(sess.endpoint_url, sess.model)
+        was_compacted = False
+    else:
+        messages, context_length, was_compacted = await maybe_compact(
+            sess,
+            sess.endpoint_url,
+            sess.model,
+            messages,
+            sess.headers,
+        )
     messages = trim_for_context(messages, context_length)
 
     if rag_sources:

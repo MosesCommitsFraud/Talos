@@ -37,8 +37,11 @@ from src.agent_tools import (
 )
 from src.context_compactor import (
     MAX_MID_TURN_COMPACTIONS,
+    RETAIN_RATIO,
     compact_mid_turn,
+    compact_with_checkpoint,
     get_compact_threshold,
+    get_compaction_mode,
     recover_from_overflow,
 )
 from src.context_optimizer import optimize_tool_output
@@ -2685,6 +2688,12 @@ async def stream_agent_loop(
     # budget when one applies, otherwise the raw model window. Used to scale
     # tool-output compression to real context pressure (see context_optimizer).
     _ctx_budget_tokens = context_length or 0
+    # Who writes the summary when the conversation has to shrink: the chat's
+    # own model as a checkpoint ("main"), or the utility model (see
+    # src/context_compactor.py). `_precompacted`: a checkpoint was written
+    # before this turn's first request.
+    _compaction_mode = get_compaction_mode()
+    _precompacted = False
     try:
         from src.context_budget import DEFAULT_HARD_MAX, compute_input_token_budget
         from src.context_compactor import trim_for_context
@@ -2717,6 +2726,43 @@ async def stream_agent_loop(
             )
             if effective_budget > 0:
                 _ctx_budget_tokens = effective_budget
+            # Checkpoint compaction ("main" mode) comes before the trim: the
+            # trim DROPS old turns once the budget is exceeded, and a
+            # conversation that is summarized first never gets there. The
+            # prefix it summarizes is the one the previous turn left in the
+            # server's cache.
+            if _compaction_mode == "main" and context_length:
+                _pre_trigger = int(get_compact_threshold() * context_length)
+                if effective_budget > 0:
+                    _pre_trigger = min(_pre_trigger, effective_budget - reserve_tokens)
+                if before_trim_tokens >= _pre_trigger > 0:
+                    logger.info(
+                        "[agent] context at %d/%d tokens before the turn — writing a checkpoint",
+                        before_trim_tokens,
+                        context_length,
+                    )
+                    _question = next(
+                        (m for m in reversed(messages) if m.get("role") == "user"), None
+                    )
+                    try:
+                        messages, _precompacted = await compact_with_checkpoint(
+                            endpoint_url,
+                            model,
+                            messages,
+                            headers=headers,
+                            pinned=[m for m in messages if m.get("_protected") or m is _question],
+                            result_prefix=TOOL_RESULT_PREFIX,
+                            tools=_core_schemas or None,
+                            tool_choice_ok=_supports_tool_choice,
+                            retain_tokens=int(RETAIN_RATIO * context_length),
+                            threshold_tokens=_pre_trigger,
+                        )
+                    except Exception as _ce:
+                        logger.warning("[agent] checkpoint before the turn failed: %s", _ce)
+                    if _precompacted:
+                        from src import citations as _delivered_passages
+
+                        _delivered_passages.forget_delivered(session_id)
             trimmed_messages = trim_for_context(
                 messages,
                 effective_budget,
@@ -2747,7 +2793,9 @@ async def stream_agent_loop(
             break
         _m[HEAD_KEY] = True
     if wire_sink is not None:
-        wire_sink.update(messages=messages, round_text="", compacted=False)
+        # A checkpoint written before the turn replaces everything before it,
+        # so the stored turn has to carry the whole conversation.
+        wire_sink.update(messages=messages, round_text="", compacted=_precompacted)
 
     # Mid-turn compaction state. The user's request for THIS turn is pinned so a
     # turn that compacts itself can never summarize away the task it is working
@@ -2755,10 +2803,16 @@ async def stream_agent_loop(
     # so hold the message object itself (matched by identity).
     _pinned_query_msg = next((m for m in reversed(messages) if m.get("role") == "user"), None)
     _mid_turn_compactions = 0
+    _last_compaction_round = 0
+    # The tool list of the latest request, which a checkpoint call has to send
+    # again to find the conversation in the server's cache.
+    _last_sent_tools: Optional[List[Dict]] = _core_schemas or None
     # Trigger in tokens, resolved once: same threshold and denominator as the
     # between-turns compactor, so "85% full" means the same thing in both.
     _compact_trigger_tokens = int(get_compact_threshold() * context_length) if context_length else 0
 
+    if _precompacted:
+        yield f"data: {json.dumps({'type': 'compacted', 'context_length': context_length})}\n\n"
     yield f"data: {json.dumps({'type': 'agent_prep', 'data': {k: round(v, 3) for k, v in prep_timings.items()}})}\n\n"
 
     # Refined frame: prompt assembly (system prompt, skills index, retrieved
@@ -2903,7 +2957,17 @@ async def stream_agent_loop(
         # carry on with the same query — the behaviour users expect from Claude/
         # ChatGPT. Keyed to the model window and `compact_threshold` (0.85), the
         # same trigger the between-turns path uses, so both agree on "full".
-        if round_num > 1 and context_length and _mid_turn_compactions < MAX_MID_TURN_COMPACTIONS:
+        # In "main" mode the chat's own model writes a checkpoint from the
+        # prompt the server has cached, after pruning large tool results (which
+        # alone is often enough). A turn may do that as often as it needs to —
+        # there is no step cap by default — but not in two rounds running: a
+        # compaction that left the context above the trigger would otherwise
+        # repeat every round. The utility mode keeps its fixed cap.
+        if _compaction_mode == "main":
+            _may_compact = round_num > 1 and round_num - _last_compaction_round > 1
+        else:
+            _may_compact = round_num > 1 and _mid_turn_compactions < MAX_MID_TURN_COMPACTIONS
+        if _may_compact and context_length:
             _used_now = last_round_input_tokens if has_real_usage else estimate_tokens(messages)
             if _used_now >= _compact_trigger_tokens:
                 logger.info(
@@ -2912,20 +2976,36 @@ async def stream_agent_loop(
                     _used_now,
                     context_length,
                 )
+                _pins = [m for m in (_pinned_query_msg, *_queued_pins) if m is not None]
                 try:
-                    messages, _did_compact = await compact_mid_turn(
-                        endpoint_url,
-                        model,
-                        messages,
-                        headers=headers,
-                        pinned=[m for m in (_pinned_query_msg, *_queued_pins) if m is not None],
-                        result_prefix=TOOL_RESULT_PREFIX,
-                    )
+                    if _compaction_mode == "main":
+                        messages, _did_compact = await compact_with_checkpoint(
+                            endpoint_url,
+                            model,
+                            messages,
+                            headers=headers,
+                            pinned=_pins,
+                            result_prefix=TOOL_RESULT_PREFIX,
+                            tools=_last_sent_tools,
+                            tool_choice_ok=_supports_tool_choice,
+                            retain_tokens=int(RETAIN_RATIO * context_length),
+                            threshold_tokens=_compact_trigger_tokens,
+                        )
+                    else:
+                        messages, _did_compact = await compact_mid_turn(
+                            endpoint_url,
+                            model,
+                            messages,
+                            headers=headers,
+                            pinned=_pins,
+                            result_prefix=TOOL_RESULT_PREFIX,
+                        )
                 except Exception as _ce:
                     logger.warning("[agent] mid-turn compaction failed: %s", _ce)
                     _did_compact = False
                 if _did_compact:
                     _mid_turn_compactions += 1
+                    _last_compaction_round = round_num
                     from src import citations as _delivered_passages
 
                     _delivered_passages.forget_delivered(session_id)
@@ -3033,6 +3113,7 @@ async def stream_agent_loop(
             _last_content = _last_user.lower()
             _wants_mcp = any(kw in _last_content for kw in _MCP_KEYWORDS)
             all_tool_schemas = mcp_schemas if (_wants_mcp and mcp_schemas) else []
+        _last_sent_tools = all_tool_schemas or None
         agent_stream_timeout = int(get_setting("agent_stream_timeout_seconds", 300) or 300)
 
         _tool_names_sent = [
@@ -3402,6 +3483,10 @@ async def stream_agent_loop(
                         headers=headers,
                         pinned=[m for m in (_pinned_query_msg, *_queued_pins) if m is not None],
                         result_prefix=TOOL_RESULT_PREFIX,
+                        mode=_compaction_mode,
+                        tools=_last_sent_tools,
+                        tool_choice_ok=_supports_tool_choice,
+                        retain_tokens=int(RETAIN_RATIO * context_length) or None,
                     )
                 except Exception as _oe:
                     logger.warning("[agent] overflow recovery failed: %s", _oe)

@@ -274,6 +274,15 @@ function TextRow({ s, k, label, hint, placeholder, type, width }: { s: Draft; k:
   );
 }
 
+/** A setting with a fixed set of values. */
+function SelectRow({ s, k, label, hint, options }: { s: Draft; k: string; label: string; hint?: string; options: { value: string; label: string }[] }) {
+  return (
+    <Row label={label} hint={hint}>
+      <Select className="w-56" value={String(s.value(k) ?? options[0]?.value ?? '')} onChange={(v) => s.setValue(k, v)} options={options} />
+    </Row>
+  );
+}
+
 /* ── Endpoint + model pickers (Default/Utility models) ── */
 
 function useEndpoints() {
@@ -1063,6 +1072,16 @@ function AiDefaultsPanel() {
 
       <Section title={t('settings.ai.contextMgmt')}>
         <TextRow s={s} k="compact_threshold" label={t('settings.ai.autoCompact')} hint={t('settings.ai.autoCompactHint')} width="w-24" />
+        <SelectRow
+          s={s}
+          k="compaction_model"
+          label={t('settings.ai.compactionModel')}
+          hint={t('settings.ai.compactionModelHint')}
+          options={[
+            { value: 'main', label: t('settings.ai.compactionModelMain') },
+            { value: 'utility', label: t('settings.ai.compactionModelUtility') },
+          ]}
+        />
         <BoolRow s={s} k="context_compression" label={t('settings.ai.toolCompression')} hint={t('settings.ai.toolCompressionHint')} />
       </Section>
 

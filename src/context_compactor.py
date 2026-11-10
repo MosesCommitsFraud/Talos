@@ -617,6 +617,271 @@ async def compact_mid_turn(
     return compacted, True
 
 
+# ── Checkpoint compaction (the chat's own model, warm prompt cache) ──
+#
+# The summary above is written by the utility model from a transcript in which
+# every message is cut to 2,000 characters, and may be 1,024 tokens long. A
+# small helper model with a small window is the wrong author for what the main
+# model has to keep working from, and most of what long tool results held is
+# gone before it even reads them.
+#
+# Here the model that is doing the work writes its own checkpoint. The request
+# is the conversation exactly as it was last sent — same system prompt, same
+# tool list, same messages — up to the point where the kept tail begins, with
+# the instruction as one more user message at the end. Everything before that
+# instruction is already in the server's prefix cache, so the call costs the
+# instruction and the checkpoint's own tokens, not a second prefill of a
+# conversation that is by definition at its largest.
+#
+# The checkpoint comes back as a user message after the system prompt, which
+# stays untouched (and cached). Nothing is moved to the front.
+
+COMPACTION_MODES = ("main", "utility")
+# Share of the context window kept verbatim behind the checkpoint.
+RETAIN_RATIO = 0.16
+# Room for the checkpoint. Generous compared with the old 1,024: it replaces
+# most of a full window, and a checkpoint cut off mid-list is worse than none.
+CHECKPOINT_MAX_TOKENS = 3000
+# The summary is written at decode speed with nothing streamed to the user, so
+# this is a wall-clock guard, not an expectation.
+CHECKPOINT_TIMEOUT_S = 900
+
+CHECKPOINT_HEADER = "[Conversation summary — earlier messages were compacted]"
+CHECKPOINT_KEY = "_checkpoint"
+
+CHECKPOINT_INSTRUCTION = """Stop working on the task for a moment. The conversation above is about to be removed to free up context, and you will carry on from a checkpoint instead. Write that checkpoint now: everything a model needs to continue this work with nothing lost that matters.
+
+Use exactly these sections, in this order. Short bullets, no paragraphs. Write "(none)" under a section that has nothing; never leave one out.
+
+## Request and intent
+- what the user asked for and how that changed; quote their wording where it matters
+
+## Facts and findings
+- what was established so far: results, numbers, names, decisions, with where each came from
+
+## Files, data and artifacts
+- exact paths, tables, documents, URLs: what each is, what was done to it
+
+## Errors and fixes
+- what went wrong, what solved it, what did not work and should not be tried again
+
+## Open tasks
+- what the user asked for that is not done yet
+
+## Current work
+- exactly what was in progress when this checkpoint was written
+
+## Next step
+- the one next action, in line with the latest request, or "(none)"
+
+## Constraints and preferences
+- rules, corrections and preferences the user gave, and anything else that must not be forgotten
+
+Rules:
+- Keep exact values exact: paths, commands, queries, error messages, identifiers, numbers, dates.
+- Write in the language the user writes in.
+- If the conversation already contains a checkpoint like this one, it is an older one: keep what is still true, drop what is outdated, and merge it into this single checkpoint.
+- Do not mention this request or that anything was summarized.
+- Output only the checkpoint. Do not call a tool."""
+
+
+def get_compaction_mode() -> str:
+    """Who writes the summary when a conversation is compacted (setting
+    `compaction_model`): the chat's own model ("main") or the utility model."""
+    try:
+        from src.settings import get_setting
+
+        mode = str(get_setting("compaction_model", "main") or "main").strip().lower()
+    except Exception:
+        return "main"
+    return mode if mode in COMPACTION_MODES else "main"
+
+
+def _checkpoint_message(summary: str) -> Dict:
+    """The checkpoint as the model reads it from now on."""
+    return {
+        "role": "user",
+        "content": (
+            f"{CHECKPOINT_HEADER}\n"
+            "This checkpoint was written automatically. It stands for the earlier part "
+            "of this conversation, which was removed to free up context. Treat it as "
+            "established background and continue from the messages that follow. Do not "
+            "mention the checkpoint.\n\n"
+            f"<checkpoint>\n{summary.strip()}\n</checkpoint>"
+        ),
+        CHECKPOINT_KEY: True,
+    }
+
+
+async def _write_checkpoint(
+    endpoint_url: str,
+    model: str,
+    prefix: List[Dict],
+    headers: Optional[Dict] = None,
+    tools: Optional[List[Dict]] = None,
+    tool_choice_ok: bool = True,
+) -> Optional[str]:
+    """Ask the chat's model for a checkpoint of `prefix`. None on failure.
+
+    `prefix` and `tools` are sent as they were in the conversation, so the
+    server finds the whole prefix in its cache. The tools ride along although
+    none may be called: they are rendered into the prompt ahead of the
+    messages, and leaving them out would change it from its first tokens on.
+    """
+    import json as _json
+
+    from src.llm_core import stream_llm
+    from src.text_helpers import strip_thinking
+
+    request = list(prefix) + [{"role": "user", "content": CHECKPOINT_INSTRUCTION}]
+    text = ""
+    try:
+        async for chunk in stream_llm(
+            endpoint_url,
+            model,
+            request,
+            headers=headers,
+            temperature=0.2,
+            max_tokens=CHECKPOINT_MAX_TOKENS,
+            tools=tools or None,
+            tool_choice="none" if (tools and tool_choice_ok) else None,
+            enable_thinking=False,
+            timeout=CHECKPOINT_TIMEOUT_S,
+        ):
+            if chunk.startswith("event: error"):
+                logger.error("Checkpoint call failed: %s", chunk.strip()[:300])
+                return None
+            if not chunk.startswith("data: {"):
+                continue
+            try:
+                data = _json.loads(chunk[6:])
+            except ValueError:
+                continue
+            if data.get("type") == "finish" and data.get("reason") == "length":
+                # A checkpoint that stops mid-list silently loses its last
+                # sections, the ones about what to do next.
+                logger.warning("Checkpoint was cut off at the length limit — not used")
+                return None
+            if "delta" in data and not data.get("thinking"):
+                text += data["delta"]
+    except Exception as exc:
+        logger.error("Checkpoint call failed: %s", exc)
+        return None
+    text = (strip_thinking(text) or "").strip()
+    return text or None
+
+
+def _retain_start(msgs: List[Dict], retain_tokens: Optional[int]) -> int:
+    """Index in `msgs` where the verbatim tail begins.
+
+    The newest messages are kept until they add up to `retain_tokens`. Counting
+    tokens rather than messages matters because sizes differ by orders of
+    magnitude: half the messages can be nearly all of the context. Without a
+    budget, or when everything fits in it, the split is the middle.
+    """
+    half = len(msgs) // 2
+    if not retain_tokens or retain_tokens <= 0:
+        return half
+    kept = 0
+    start = len(msgs)
+    for i in range(len(msgs) - 1, -1, -1):
+        kept += estimate_tokens([msgs[i]])
+        if kept > retain_tokens:
+            break
+        start = i
+    if start == 0:
+        return half  # all of it fits: still cut, or nothing is gained
+    # Keep at least the newest message; never summarize the entire list.
+    return min(start, len(msgs) - 1)
+
+
+async def compact_with_checkpoint(
+    endpoint_url: str,
+    model: str,
+    messages: List[Dict],
+    headers: Optional[Dict] = None,
+    pinned: Optional[List[Dict]] = None,
+    result_prefix: str = "",
+    tools: Optional[List[Dict]] = None,
+    tool_choice_ok: bool = True,
+    retain_tokens: Optional[int] = None,
+    threshold_tokens: Optional[int] = None,
+) -> tuple:
+    """Shrink a conversation: prune large tool results, and if that is not
+    enough, replace its older part by a checkpoint the chat's model writes.
+    Returns (messages, did_compact).
+
+    Like `compact_mid_turn`, it leaves ``session.history`` alone, never cuts
+    inside a tool batch, and keeps ``pinned`` messages verbatim.
+
+    * ``threshold_tokens`` — when pruning alone brings the conversation below
+      it, no summary is written at all.
+    * ``retain_tokens`` — how much of the newest conversation stays verbatim.
+    * ``tools`` / ``tool_choice_ok`` — the tool list of the conversation's
+      requests, for the cache (see `_write_checkpoint`).
+    """
+    before = estimate_tokens(messages)
+
+    # 1. Without a model call. Old file dumps and query results are most of the
+    #    bulk; cutting their middles out is often all it takes.
+    pruned, pruned_count = prune_tool_results(messages, result_prefix)
+    if pruned_count and threshold_tokens and estimate_tokens(pruned) < threshold_tokens:
+        logger.info(
+            "[compact] %d -> %d tokens by pruning %d tool result(s); no summary needed",
+            before,
+            estimate_tokens(pruned),
+            pruned_count,
+        )
+        return pruned, True
+
+    # 2. A checkpoint for the older part. It is written from the conversation
+    #    as it was sent (unpruned), because that is what the server has cached.
+    head_end = next((i for i, m in enumerate(messages) if m.get("role") != "system"), len(messages))
+    body = messages[head_end:]
+    if len(body) < 4:
+        return (pruned, True) if pruned_count else (messages, False)
+
+    split = _safe_split_index(body, _retain_start(body, retain_tokens), result_prefix)
+    if split is None or split == 0 or split >= len(body):
+        logger.info("[compact] no safe split point for a checkpoint")
+        return (pruned, True) if pruned_count else (messages, False)
+
+    cut = head_end + split  # index in `messages` where the kept tail begins
+    summary = await _write_checkpoint(
+        endpoint_url, model, messages[:cut], headers, tools, tool_choice_ok
+    )
+    if summary is None:
+        return (pruned, True) if pruned_count else (messages, False)
+
+    figures = _extract_figure_markdown(messages[head_end:cut])
+    if figures:
+        summary += "\n\n## Figures shown earlier (still relevant)\n" + "\n\n".join(figures)
+
+    # 3. The new conversation: the untouched system head, the checkpoint, any
+    #    pinned message that would otherwise be summarized away, and the tail —
+    #    pruned too, since it is prefilled again anyway. A pinned message that
+    #    is already in the tail stays where it is.
+    pinned_ids = {id(m) for m in (pinned or [])}
+    rescued = [m for m in messages[head_end:cut] if id(m) in pinned_ids]
+    tail, _ = prune_tool_results(messages[cut:], result_prefix)
+    compacted = _sanitize_tool_messages(
+        messages[:head_end] + [_checkpoint_message(summary)] + rescued + tail
+    )
+    after = estimate_tokens(compacted)
+    if after >= before:
+        logger.info("[compact] checkpoint was not smaller (%d -> %d), skipping", before, after)
+        return (pruned, True) if pruned_count else (messages, False)
+
+    logger.info(
+        "[compact] checkpoint: %d -> %d tokens (%d messages summarized, %d kept)",
+        before,
+        after,
+        cut - head_end,
+        len(tail),
+    )
+    return compacted, True
+
+
 # ── Pruning tool results ──
 #
 # Most of a long turn's bulk is old tool output: file contents, query results,
@@ -676,26 +941,46 @@ async def recover_from_overflow(
     headers: Optional[Dict] = None,
     pinned: Optional[List[Dict]] = None,
     result_prefix: str = "",
+    mode: str = "utility",
+    tools: Optional[List[Dict]] = None,
+    tool_choice_ok: bool = True,
+    retain_tokens: Optional[int] = None,
 ) -> tuple:
     """Shrink a conversation the model server refused as too long.
 
     Returns (messages, changed). First the large tool results are pruned, then
-    the older half is summarized. `changed` is True when either step made the
-    conversation smaller; only then is sending the request again worth it. A
-    summary that fails after pruning helped still counts: the pruned
-    conversation is returned.
+    the older part is summarized — by the chat's own model as a checkpoint
+    (`mode` "main", see `compact_with_checkpoint`) or by the utility model.
+    `changed` is True when either step made the conversation smaller; only
+    then is sending the request again worth it. A summary that fails after
+    pruning helped still counts: the pruned conversation is returned.
     """
     before = estimate_tokens(messages)
     current, pruned = prune_tool_results(messages, result_prefix)
     try:
-        compacted, did_compact = await compact_mid_turn(
-            endpoint_url,
-            model,
-            current,
-            headers=headers,
-            pinned=pinned,
-            result_prefix=result_prefix,
-        )
+        if mode == "main":
+            # The checkpoint is written from the pruned conversation here: the
+            # unpruned one is what the server just refused as too long.
+            compacted, did_compact = await compact_with_checkpoint(
+                endpoint_url,
+                model,
+                current,
+                headers=headers,
+                pinned=pinned,
+                result_prefix=result_prefix,
+                tools=tools,
+                tool_choice_ok=tool_choice_ok,
+                retain_tokens=retain_tokens,
+            )
+        else:
+            compacted, did_compact = await compact_mid_turn(
+                endpoint_url,
+                model,
+                current,
+                headers=headers,
+                pinned=pinned,
+                result_prefix=result_prefix,
+            )
     except Exception as exc:
         logger.warning("[compact] overflow recovery: summary failed: %s", exc)
         compacted, did_compact = current, False

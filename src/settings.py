@@ -34,6 +34,12 @@ DEFAULT_SETTINGS = {
     # Auto-compaction triggers when context usage crosses this fraction of the
     # model's window (0.3–0.95; values >1 are read as percent, e.g. 70 → 0.70).
     "compact_threshold": 0.85,
+    # Who writes the summary when a conversation is compacted. "main": the
+    # chat's own model writes a structured checkpoint from the prompt the
+    # server already has cached, after large old tool results were pruned
+    # (which alone is often enough). "utility": the previous behaviour, the
+    # helper model summarizes a transcript cut to 2,000 characters per message.
+    "compaction_model": "main",
     # Headroom-style compression of large tool outputs (JSON crushing, log
     # collapsing, head/tail trimming) with reversible retrieval via the
     # expand_output tool. See src/context_optimizer.py.
