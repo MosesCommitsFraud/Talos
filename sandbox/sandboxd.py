@@ -552,7 +552,16 @@ class PtyRunner:
             pass
 
 
-def _read_process_log(path: Path, offset: int = 0, tail: int | None = None) -> tuple[str, int, bool]:
+def _read_process_log(
+    path: Path, offset: int = 0, tail: int | None = None, limit: int = MAX_OUTPUT_CHARS
+) -> tuple[str, int, bool]:
+    """Text of a process log, at most `limit` characters from its start.
+
+    The default suits polling a running process. The result of a finished
+    command is read with MAX_RAW_OUTPUT_CHARS instead: the app shortens it for
+    the model and keeps its start, its end and a copy of the whole, and cutting
+    it to its first 10k characters here would lose the end — the traceback.
+    """
     if not path.exists():
         return "", 0, False
     lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
@@ -562,7 +571,7 @@ def _read_process_log(path: Path, offset: int = 0, tail: int | None = None) -> t
         selected = selected[-tail:]
     chunks: list[str] = []
     truncated = False
-    budget = MAX_OUTPUT_CHARS
+    budget = limit
     for line in selected:
         try:
             item = json.loads(line)
@@ -1206,9 +1215,13 @@ async def exec_route(user_id: str, chat_id: str, req: ExecRequest, scope: str = 
         proc.status = "killed"
         proc.exit_code = 124
         proc.finished_at = time.time()
-        output, _next, _truncated = _read_process_log(proc.log_path, offset=0)
+        output, _next, _truncated = _read_process_log(
+            proc.log_path, offset=0, limit=MAX_RAW_OUTPUT_CHARS
+        )
         return ExecResponse(user_id=user_id, chat_id=chat_id, linux_user=name, workspace=str(workspace), stdout=output, stderr="", exit_code=124, timed_out=True, created_artifacts=_changed_artifacts(workspace, artifacts_before), code_id=code_id)
-    output, _next, _truncated = _read_process_log(proc.log_path, offset=0)
+    output, _next, _truncated = _read_process_log(
+        proc.log_path, offset=0, limit=MAX_RAW_OUTPUT_CHARS
+    )
     images, image_note = _collect_new_images(workspace, started_at)
     return ExecResponse(user_id=user_id, chat_id=chat_id, linux_user=name, workspace=str(workspace), stdout=output, stderr="", exit_code=proc.exit_code or 0, images=images, image_note=image_note, created_artifacts=_changed_artifacts(workspace, artifacts_before), code_id=code_id)
 
