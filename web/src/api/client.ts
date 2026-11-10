@@ -2018,6 +2018,9 @@ export interface StreamFlags {
   artifactSelection?: import('./types').ArtifactSelection;
   /** Question/answer pairs when the message answers an ask_user card. */
   askAnswers?: { question: string; answer: string }[];
+  /** Ask for the next round of the chat's goal instead of sending text: the
+   *  server writes the round's message from the goal's own record. */
+  goalRound?: boolean;
 }
 
 /**
@@ -2049,6 +2052,7 @@ export async function streamChat(opts: {
   if (f.artifactSelection) fd.set('artifact_selection', JSON.stringify(f.artifactSelection));
   if (f.attachments?.length) fd.set('attachments', JSON.stringify(f.attachments));
   if (f.askAnswers?.length) fd.set('ask_answers', JSON.stringify(f.askAnswers));
+  if (f.goalRound) fd.set('goal_round', 'true');
 
   const tzOffsetMin = -new Date().getTimezoneOffset();
   let tzName = '';
@@ -2118,6 +2122,29 @@ export async function queueChatMessage(sessionId: string, id: string, text: stri
 export async function unqueueChatMessage(sessionId: string, id: string): Promise<void> {
   await fetch(`/api/chat/queue/${sessionId}/${id}`, { method: 'DELETE', credentials: 'same-origin' });
 }
+
+/** A chat's goal as the server keeps it (src/goals.py). */
+export interface Goal {
+  objective: string;
+  status: 'active' | 'paused' | 'blocked' | 'complete';
+  round: number;
+  /** 0 = no limit. */
+  max_rounds: number;
+  /** Why it is blocked: "reported" by the model, "round-limit", or how the
+   *  last round's turn ended ("model-error", "context-overflow", ...). */
+  reason_code?: string;
+  reason?: string;
+  evidence?: string;
+}
+
+export const fetchGoal = (sessionId: string) =>
+  getJSON<{ goal: Goal | null }>(`/api/session/${sessionId}/goal`).then((r) => r.goal);
+export const createGoal = (sessionId: string, objective: string) =>
+  postJSON<{ goal: Goal }>(`/api/session/${sessionId}/goal`, { objective }).then((r) => r.goal);
+export const changeGoal = (sessionId: string, action: 'pause' | 'resume') =>
+  postJSON<{ goal: Goal }>(`/api/session/${sessionId}/goal`, { action }, 'PATCH').then((r) => r.goal);
+export const clearGoal = (sessionId: string) =>
+  postJSON(`/api/session/${sessionId}/goal`, undefined, 'DELETE');
 
 export async function fetchActiveRuns(): Promise<{ sessionId: string; elapsedMs: number | null }[]> {
   try {

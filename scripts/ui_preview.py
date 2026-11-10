@@ -776,6 +776,85 @@ def _record_stopped_turn(session_id: str, message: str, reason: str) -> None:
     hist.append(entry)
 
 
+# ── A chat's goal (mirrors src/goals.py closely enough to preview the UI) ──
+#
+# `/goal <objective>` in the composer sets it. The mock model works two rounds
+# and completes the goal in the third; the round limit is 4, so resuming after
+# a pause still has room. Send an objective containing "blockiert" to preview a
+# goal the model reports as blocked in round 3.
+_GOALS: dict[str, dict] = {}
+_GOAL_MAX_ROUNDS = 4
+
+
+def _goal_round_prompt(goal: dict) -> str:
+    return (
+        "<goal_round>\n"
+        f"Objective: {json.dumps(goal['objective'], ensure_ascii=False)}\n"
+        f"Round: {goal['round']}/{goal['max_rounds']}\n\n"
+        "Continue working toward the objective in this same chat.\n"
+        "</goal_round>"
+    )
+
+
+def _goal_stream(session_id: str) -> bytes:
+    goal = _GOALS[session_id]
+    n = goal["round"]
+    events: list[dict | str] = [
+        {"type": "tool_start", "tool": "bash", "command": f"python step_{n}.py"},
+        {
+            "type": "tool_output",
+            "tool": "bash",
+            "command": f"python step_{n}.py",
+            "output": f"step {n} ok",
+            "exit_code": 0,
+        },
+        ": sleep 1.2",
+        {"type": "agent_step", "round": 2},
+    ]
+    if n < 3:
+        text = f"Runde {n}: Teil {n} von 3 ist erledigt. Als Nächstes folgt Teil {n + 1}."
+        events += [{"delta": text}]
+    else:
+        blocked = "blockiert" in goal["objective"].lower()
+        if blocked:
+            goal.update(
+                status="blocked",
+                reason_code="reported",
+                reason="Kein Zugriff auf die Quelldatenbank.",
+            )
+            text = (
+                "Ich komme nicht weiter: Der Zugriff auf die Quelldatenbank fehlt seit drei Runden."
+            )
+        else:
+            goal.update(status="complete", evidence="Alle drei Teile liegen in output/.")
+            text = "Das Ziel ist erreicht: Alle drei Teile sind fertig und geprüft."
+        args = json.dumps({"action": "blocked" if blocked else "complete"})
+        events += [
+            {"type": "tool_start", "tool": "update_goal", "command": args},
+            {
+                "type": "tool_output",
+                "tool": "update_goal",
+                "command": args,
+                "output": "The goal is marked. Write the closing message.",
+                "exit_code": 0,
+            },
+            {"type": "goal", "data": dict(goal)},
+            {"type": "agent_step", "round": 3},
+            {"delta": text},
+        ]
+    hist = _HISTORY.setdefault(session_id, [])
+    hist.append(_entry("user", _goal_round_prompt(goal)))
+    hist.append(_entry("assistant", text))
+    events += [
+        {"type": "metrics", "data": {"model": "mock-ui-preview", "response_time": 1.5}},
+        {"type": "goal", "data": dict(goal)},
+        "[DONE]",
+    ]
+    return "".join(
+        e + "\n\n" if isinstance(e, str) and e.startswith(":") else _sse(e) for e in events
+    ).encode("utf-8")
+
+
 def _record_ask_turn(session_id: str, message: str) -> None:
     hist = _HISTORY.setdefault(session_id, [])
     hist.append(_entry("user", message or "(empty)"))
@@ -3133,6 +3212,9 @@ class PreviewHandler(BaseHTTPRequestHandler):
                 ]
             )
             return
+        if path.startswith("/api/session/") and path.endswith("/goal"):
+            self._send_json({"goal": _GOALS.get(path[len("/api/session/") : -len("/goal")])})
+            return
         if path.startswith("/api/history/"):
             session_id = path[len("/api/history/") :]
             self._send_json(
@@ -3545,6 +3627,26 @@ class PreviewHandler(BaseHTTPRequestHandler):
             return
         parsed = urlparse(self.path)
         path = parsed.path
+        if path.startswith("/api/session/") and path.endswith("/goal"):
+            session_id = path[len("/api/session/") : -len("/goal")]
+            objective = " ".join(
+                str(json.loads(self._read_body() or b"{}").get("objective", "")).split()
+            )
+            current = _GOALS.get(session_id)
+            if not objective or (current and current["status"] in ("active", "paused")):
+                self._send_json({"detail": "This chat already has a goal."}, 409)
+                return
+            _GOALS[session_id] = {
+                "objective": objective,
+                "status": "active",
+                "round": 0,
+                "max_rounds": _GOAL_MAX_ROUNDS,
+                "reason_code": "",
+                "reason": "",
+                "evidence": "",
+            }
+            self._send_json({"goal": _GOALS[session_id]})
+            return
         if path == "/api/auth/settings":
             body = json.loads(self._read_body() or b"{}")
             error = _save_git_repos(body.pop("rag_git_repos")) if "rag_git_repos" in body else None
@@ -3801,6 +3903,22 @@ class PreviewHandler(BaseHTTPRequestHandler):
         if path == "/api/chat_stream":
             message = fields.get("message", [""])[0]
             session_id = fields.get("session", ["preview-session"])[0]
+            if fields.get("goal_round", [""])[0] == "true":
+                goal = _GOALS.get(session_id)
+                if not goal or goal["status"] != "active":
+                    self._send_json({"detail": "The goal is not running."}, 409)
+                    return
+                if goal["round"] >= goal["max_rounds"]:
+                    goal.update(
+                        status="blocked",
+                        reason_code="round-limit",
+                        reason=f"The limit of {goal['max_rounds']} rounds was reached.",
+                    )
+                    self._send_json({"detail": goal["reason"]}, 409)
+                    return
+                goal["round"] += 1
+                self._send_event_stream(_goal_stream(session_id), session_id)
+                return
             if "frage" in message.lower():
                 _record_ask_turn(session_id, message)
                 self._send_event_stream(_ask_stream())
@@ -4007,6 +4125,23 @@ class PreviewHandler(BaseHTTPRequestHandler):
             return
         body = self._read_body()
         path = urlparse(self.path).path
+        if path.startswith("/api/session/") and path.endswith("/goal"):
+            goal = _GOALS.get(path[len("/api/session/") : -len("/goal")])
+            action = json.loads(body or b"{}").get("action")
+            if not goal:
+                self._send_json({"detail": "This chat has no goal."}, 409)
+                return
+            if action == "pause" and goal["status"] == "active":
+                goal["status"] = "paused"
+            elif action == "resume" and goal["status"] in ("paused", "blocked"):
+                if goal.get("reason_code") == "round-limit":
+                    goal["max_rounds"] = goal["round"] + _GOAL_MAX_ROUNDS
+                goal.update(status="active", reason_code="", reason="")
+            else:
+                self._send_json({"detail": f"The goal is {goal['status']}."}, 409)
+                return
+            self._send_json({"goal": goal})
+            return
         if path.startswith("/api/memories/"):
             entry = next(m for m in _USER_MEMORIES if m["id"] == int(path.rsplit("/", 1)[1]))
             data = json.loads(body or b"{}")
@@ -4094,6 +4229,10 @@ class PreviewHandler(BaseHTTPRequestHandler):
             return
         parsed = urlparse(self.path)
         path = parsed.path
+        if path.startswith("/api/session/") and path.endswith("/goal"):
+            _GOALS.pop(path[len("/api/session/") : -len("/goal")], None)
+            self._send_json({"ok": True})
+            return
         if path.startswith("/api/tokens/"):
             token_id = path[len("/api/tokens/") :]
             _API_TOKENS[:] = [t for t in _API_TOKENS if t["id"] != token_id]

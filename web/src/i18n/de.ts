@@ -251,6 +251,17 @@ const de: typeof en = {
     assistant: '{{brand}}',
   },
   composer: {
+    goal: {
+      label: 'Ziel',
+      running: 'läuft',
+      paused: 'pausiert',
+      blocked: 'blockiert',
+      round: 'Runde {{round}}',
+      roundLabel: 'Ziel · Runde {{round}}: {{objective}}',
+      pause: 'Ziel pausieren',
+      resume: 'Ziel fortsetzen',
+      cancel: 'Ziel beenden',
+    },
     queuedMessages: 'Wartende Nachrichten',
     sendNow: 'Jetzt senden',
     removeQueued: 'Entfernen',

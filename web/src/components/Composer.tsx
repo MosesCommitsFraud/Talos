@@ -691,16 +691,16 @@ export function Composer() {
 
       {goal && !['completed', 'cancelled'].includes(goal.status) && (
         <div className="mt-2 flex items-center gap-2 rounded-md border bg-muted/40 px-3 py-2 text-xs">
-          <span className={cn('size-2 rounded-full', goal.status === 'running' ? 'animate-pulse bg-emerald-500' : 'bg-amber-500')} />
-          <span className="min-w-0 flex-1 truncate">
-            Goal · {goal.status} · iteration {goal.iteration} · {goal.objective}
+          <span className={cn('size-2 shrink-0 rounded-full', goal.status === 'running' ? 'animate-pulse bg-emerald-500' : goal.status === 'blocked' ? 'bg-destructive' : 'bg-amber-500')} />
+          <span className="min-w-0 flex-1 truncate" title={goal.status === 'blocked' && goal.reason ? goal.reason : goal.objective} data-goal-status={goal.status}>
+            {t('composer.goal.label')} · {t(`composer.goal.${goal.status}`)} · {t('composer.goal.round', { round: goal.maxRounds ? `${goal.iteration}/${goal.maxRounds}` : String(goal.iteration) })} · {goal.status === 'blocked' && goal.reason ? goal.reason : goal.objective}
           </span>
           {goal.status === 'running' ? (
-            <button type="button" onClick={pauseGoal} aria-label="Pause goal" className="text-muted-foreground hover:text-foreground"><CirclePauseIcon className="size-4" /></button>
-          ) : goal.status === 'paused' ? (
-            <button type="button" onClick={() => void resumeGoal()} aria-label="Resume goal" className="text-muted-foreground hover:text-foreground"><PlayIcon className="size-4" /></button>
-          ) : null}
-          <button type="button" onClick={cancelGoal} aria-label="Cancel goal" className="text-muted-foreground hover:text-destructive"><CircleStopIcon className="size-4" /></button>
+            <button type="button" onClick={pauseGoal} aria-label={t('composer.goal.pause')} className="text-muted-foreground hover:text-foreground"><CirclePauseIcon className="size-4" /></button>
+          ) : (
+            <button type="button" onClick={() => void resumeGoal()} aria-label={t('composer.goal.resume')} className="text-muted-foreground hover:text-foreground"><PlayIcon className="size-4" /></button>
+          )}
+          <button type="button" onClick={cancelGoal} aria-label={t('composer.goal.cancel')} className="text-muted-foreground hover:text-destructive"><CircleStopIcon className="size-4" /></button>
         </div>
       )}
       {commandError && <p className="mt-1 text-center text-xs text-destructive">{commandError}</p>}

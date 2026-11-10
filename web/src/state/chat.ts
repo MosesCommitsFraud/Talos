@@ -1,9 +1,10 @@
 import { create } from 'zustand';
-import { compactSession, createSession, deleteMessages, fetchActiveRuns, fetchArtifacts, fetchSession, forkSession, queueChatMessage, removeChapter, resumeChat, setChapter, setSessionProject, setSessionSection, stopChatRun, streamChat, unqueueChatMessage } from '@/api/client';
+import { changeGoal, clearGoal, compactSession, createGoal, createSession, deleteMessages, fetchActiveRuns, fetchArtifacts, fetchGoal, fetchSession, forkSession, queueChatMessage, removeChapter, resumeChat, setChapter, setSessionProject, setSessionSection, stopChatRun, streamChat, unqueueChatMessage, type Goal } from '@/api/client';
 import type { Artifact, ArtifactSelection, Attachment, ChatEvent, Citation, Metrics, RagSource, ToolCall, UiDraft, SessionDetail } from '@/api/types';
 import { documentFileName, isPreviewable, samePath } from '@/lib/files';
 import { timestampMs } from '@/lib/utils';
 import { queryClient } from '@/lib/queryClient';
+import i18n from '@/i18n';
 import { StreamSmoother } from '@/lib/streamSmoother';
 import { usePrefs } from './prefs';
 import { useUi } from './ui';
@@ -166,10 +167,38 @@ export interface QueuedMessage {
  *  interrupted turn, so what is sent next finds it in the history. */
 const stopsInFlight = new Map<string, Promise<void>>();
 
+/** A chat's goal as the page shows it. The record itself is the server's
+ *  (src/goals.py); this adds the one thing only the page knows: whether it is
+ *  the one starting the rounds. */
 export interface GoalRun {
   objective: string;
-  status: 'running' | 'paused' | 'completed' | 'cancelled';
+  /** running: this page starts the next round when one ends. paused also
+   *  covers a goal the server has as running that this page did not start or
+   *  resume — after a reload nothing continues until the user says so. */
+  status: 'running' | 'paused' | 'blocked' | 'completed' | 'cancelled';
+  /** Rounds started so far. */
   iteration: number;
+  /** 0 = no limit. */
+  maxRounds: number;
+  /** Why it is blocked, in the server's words. */
+  reason?: string;
+}
+
+/** `driving`: this page started or resumed the goal and continues it. */
+function goalFromServer(goal: Goal, driving: boolean): GoalRun {
+  const status: GoalRun['status'] =
+    goal.status === 'complete' ? 'completed'
+      : goal.status === 'blocked' ? 'blocked'
+        : goal.status === 'active' && driving ? 'running'
+          : 'paused';
+  return { objective: goal.objective, status, iteration: goal.round, maxRounds: goal.max_rounds, reason: goal.reason || undefined };
+}
+
+/** What a goal round looks like in the transcript. The message the model gets
+ *  is written by the server (`<goal_round>…`); the user sees this instead, live
+ *  and after a reload. */
+function goalRoundLabel(objective: string, round: number): string {
+  return i18n.t('composer.goal.roundLabel', { round, objective });
 }
 
 const emptyRuntime = (): SessionRuntime => ({ messages: [], streaming: false, turnStartedAt: null, abort: null, awaitingInput: false, goal: null, queued: [] });
@@ -208,7 +237,7 @@ interface ChatState {
   /** The draft stays a draft but no longer goes anywhere in particular. */
   clearDraftPlacement: () => void;
   openSession: (id: string) => Promise<void>;
-  send: (text: string, opts?: { attachments?: Attachment[]; artifactSelection?: ArtifactSelection; askAnswers?: AskAnswer[]; onSessionCreated?: (id: string) => void; goalIteration?: boolean; targetSessionId?: string; resume?: boolean; resumeElapsedMs?: number | null }) => Promise<void>;
+  send: (text: string, opts?: { attachments?: Attachment[]; artifactSelection?: ArtifactSelection; askAnswers?: AskAnswer[]; onSessionCreated?: (id: string) => void; goalIteration?: boolean; goalObjective?: string; targetSessionId?: string; resume?: boolean; resumeElapsedMs?: number | null }) => Promise<void>;
   /** Reattach to a turn that is still running server-side for `id` (after a
    *  page reload). Loads the session's history first when we have none.
    *  `elapsedMs` (how long the turn has already run) backdates the working
@@ -230,6 +259,7 @@ interface ChatState {
   startGoal: (objective: string) => Promise<void>;
   pauseGoal: () => void;
   resumeGoal: (sessionId?: string) => Promise<void>;
+  continueGoal: (sessionId: string) => Promise<void>;
   cancelGoal: () => void;
   compact: () => Promise<void>;
   /** A message on its way back into the composer, for the composer to pick up. */
@@ -542,6 +572,12 @@ function splitThinking(text: string): { thinking?: string; content: string } {
 }
 
 function displayUserContent(content: string): string {
+  if (content.startsWith('<goal_round>')) {
+    const round = /Round: (\d+)/.exec(content)?.[1] ?? '?';
+    let objective = '';
+    try { objective = JSON.parse(/Objective: (".*")/.exec(content)?.[1] ?? '""'); } catch { /* keep empty */ }
+    return goalRoundLabel(objective, Number(round) || 0);
+  }
   return content
     .split(/\n\s*\[Attachment file available to tools:/)[0]
     .split(/\n\s*\[Attached document:/)[0]
@@ -668,6 +704,15 @@ export const useChat = create<ChatState>((set, get) => {
     });
   };
 
+  /** Show the goal of a chat that was just loaded from the server. Shown, not
+   *  continued: opening a chat is looking at it, and the user resumes the goal
+   *  when they want it to go on. */
+  const loadGoal = (id: string) => {
+    void fetchGoal(id)
+      .then((g) => { if (g && !get().runtimes[id]?.goal) writeRuntime(id, () => ({ goal: goalFromServer(g, false) })); })
+      .catch(() => { /* no goal chip then */ });
+  };
+
   /** Point the view at a session and mirror its runtime (or a blank draft for
    *  the null/new-chat case). Never tears down a runtime, so the previous
    *  session keeps streaming in the background. */
@@ -745,6 +790,7 @@ export const useChat = create<ChatState>((set, get) => {
       .filter((m) => m.role === 'user' || m.role === 'assistant')
       .flatMap((m) => coldLoadMessage(m as HistoryMessage, id));
     writeRuntime(id, () => ({ ...emptyRuntime(), messages }));
+    loadGoal(id);
   },
 
   attachRun: async (id, elapsedMs) => {
@@ -762,6 +808,7 @@ export const useChat = create<ChatState>((set, get) => {
             .filter((m) => m.role === 'user' || m.role === 'assistant')
             .flatMap((m) => coldLoadMessage(m as HistoryMessage, id));
           writeRuntime(id, () => ({ ...emptyRuntime(), messages }));
+          loadGoal(id);
         }
       } catch {
         return; // session gone or not ours — nothing to reattach to
@@ -799,6 +846,7 @@ export const useChat = create<ChatState>((set, get) => {
         .flatMap((m) => coldLoadMessage(m as HistoryMessage, id));
       writeRuntime(id, () => ({ ...emptyRuntime(), messages }));
       activate(id);
+      loadGoal(id);
     } catch {
       rememberLastSession(null); // deleted or no longer ours
     }
@@ -851,6 +899,14 @@ export const useChat = create<ChatState>((set, get) => {
     if (rewound) {
       pendingRewinds.delete(sid);
       if (rewound.length) await deleteMessages(sid, rewound);
+    }
+
+    // A new goal is set on the server before its first round is asked for:
+    // the round's message comes from that record.
+    if (opts?.goalObjective) {
+      const created = await createGoal(sid, opts.goalObjective);
+      // Round 1 is the turn this very call sends.
+      writeRuntime(sid, () => ({ goal: { ...goalFromServer(created, true), iteration: 1 } }));
     }
 
     const attachments = opts?.attachments ?? [];
@@ -981,6 +1037,7 @@ export const useChat = create<ChatState>((set, get) => {
                 artifactSelection,
                 askAnswers,
                 attachments: attachments.map((file) => file.id),
+                goalRound: !!opts?.goalIteration,
               },
               signal: abort.signal,
               onEvent,
@@ -1164,6 +1221,13 @@ export const useChat = create<ChatState>((set, get) => {
               // context fields, while the final event fills in the rest.
               patchAi((m) => ({ metrics: { ...m.metrics, ...(ev.data as Metrics) } }));
               break;
+            case 'goal': {
+              // The goal after this turn, or the moment the model ended it.
+              // Whether this page keeps driving it does not change here.
+              const serverGoal = ev.data as Goal | null;
+              writeRuntime(sid, (rt) => ({ goal: serverGoal ? goalFromServer(serverGoal, rt.goal?.status === 'running') : null }));
+              break;
+            }
             case 'compacted':
               // Auto-compaction ran before this turn streamed — surface it so
               // the user knows older messages were summarized to fit context.
@@ -1242,7 +1306,16 @@ export const useChat = create<ChatState>((set, get) => {
     } catch (err) {
       // Aborted or failed mid-reveal: keep the text that actually arrived.
       smoother.flush();
-      if (!abort.signal.aborted) {
+      const answered = !!get().runtimes[sid]?.messages.find((m) => m.id === aiMsg.id)?.content;
+      if (opts?.goalIteration && !answered && !abort.signal.aborted) {
+        // No round was started: the goal reached its limit or is no longer
+        // running. That is the goal's state, not a failed answer — drop the
+        // empty round and show the goal as the server has it.
+        writeRuntime(sid, (rt) => ({ messages: rt.messages.filter((m) => m.id !== userMsg.id && m.id !== aiMsg.id) }));
+        void fetchGoal(sid)
+          .then((g) => writeRuntime(sid, () => ({ goal: g ? goalFromServer(g, false) : null })))
+          .catch(() => { /* the chip keeps its last state */ });
+      } else if (!abort.signal.aborted) {
         patchAi((m) => ({
           content: m.content || (err instanceof Error ? err.message : 'Request failed'),
           error: true,
@@ -1285,9 +1358,12 @@ export const useChat = create<ChatState>((set, get) => {
         const awaiting = get().runtimes[sid]?.awaitingInput;
         if (!awaiting && get().sessionId !== sid) set((s) => ({ completed: { ...s.completed, [sid]: true } }));
 
-        // A goal is a bounded Ralph-style loop: after each completed turn, inspect
-        // the explicit completion signal and otherwise schedule another turn.
-        // setTimeout avoids re-entering send() before this turn's cleanup settles.
+        // A goal keeps the chat working: when a turn ends and the goal is
+        // still running, the next round starts. Whether it is still running is
+        // the server's call (the `goal` event of the turn that just ended):
+        // the model ends it with update_goal, a failed turn blocks it, the
+        // round limit blocks it. setTimeout avoids re-entering send() before
+        // this turn's cleanup settles.
         const rt = get().runtimes[sid];
         const goal = rt?.goal;
         // What the turn didn't take in gets a turn of its own, ahead of the goal
@@ -1299,15 +1375,7 @@ export const useChat = create<ChatState>((set, get) => {
             void get().send(next.text, { attachments: next.attachments, artifactSelection: next.artifactSelection, targetSessionId: sid });
           }, 0);
         } else if (goal?.status === 'running' && !rt.awaitingInput) {
-          const answer = [...rt.messages].reverse().find((m) => m.role === 'assistant' && m.content.trim())?.content ?? '';
-          if (/\[GOAL_COMPLETE\]/i.test(answer)) {
-            writeRuntime(sid, () => ({
-              goal: { ...goal, status: 'completed' },
-              messages: rt.messages.map((m) => ({ ...m, content: m.content.replace(/\s*\[GOAL_COMPLETE\]\s*/gi, '') })),
-            }));
-          } else {
-            setTimeout(() => { void get().resumeGoal(sid); }, 0);
-          }
+          setTimeout(() => { void get().continueGoal(sid); }, 0);
         }
       }
     }
@@ -1316,37 +1384,39 @@ export const useChat = create<ChatState>((set, get) => {
   startGoal: async (objective) => {
     const clean = objective.trim();
     if (!clean) return;
-    // Ensure a session exists through the normal send path, then attach goal
-    // state as soon as onSessionCreated fires (or immediately for an open chat).
-    const install = (sid: string) => writeRuntime(sid, () => ({
-      goal: { objective: clean, status: 'running', iteration: 1 },
-    }));
-    const sid = get().sessionId;
-    if (sid) install(sid);
-    await get().send(
-      `GOAL: ${clean}\n\nWork autonomously toward this objective. Check your result before stopping. If the objective is fully satisfied, end with [GOAL_COMPLETE]. Otherwise state concrete progress and the next action; the goal runner will continue you. Ask the user only when genuinely blocked.`,
-      { goalIteration: true, onSessionCreated: install },
-    );
+    await get().send(goalRoundLabel(clean, 1), { goalIteration: true, goalObjective: clean });
+  },
+
+  /** The next round of a goal this page is driving. */
+  continueGoal: async (sessionId) => {
+    const rt = get().runtimes[sessionId];
+    const goal = rt?.goal;
+    if (!goal || goal.status !== 'running' || rt.streaming) return;
+    const round = goal.iteration + 1;
+    writeRuntime(sessionId, () => ({ goal: { ...goal, iteration: round } }));
+    await get().send(goalRoundLabel(goal.objective, round), { goalIteration: true, targetSessionId: sessionId });
   },
 
   pauseGoal: () => {
     const { sessionId } = get();
     if (!sessionId) return;
+    // The round in flight finishes; no further one starts.
     writeRuntime(sessionId, (rt) => rt.goal ? ({ goal: { ...rt.goal, status: 'paused' } }) : ({}));
+    void changeGoal(sessionId, 'pause').catch(() => { /* already paused or ended */ });
   },
 
   resumeGoal: async (requestedSessionId) => {
     const sessionId = requestedSessionId ?? get().sessionId;
     if (!sessionId) return;
     const rt = get().runtimes[sessionId];
-    const goal = rt?.goal;
-    if (!goal || rt.streaming || ['completed', 'cancelled'].includes(goal.status)) return;
-    const next = { ...goal, status: 'running' as const, iteration: goal.iteration + 1 };
-    writeRuntime(sessionId, () => ({ goal: next }));
-    await get().send(
-      `Continue goal (iteration ${next.iteration}): ${next.objective}\n\nReview all progress so far, perform the next useful work, and verify it. End with [GOAL_COMPLETE] only when the objective is fully satisfied. Ask the user only if genuinely blocked.`,
-      { goalIteration: true, targetSessionId: sessionId },
-    );
+    if (!rt?.goal || rt.streaming || ['completed', 'cancelled'].includes(rt.goal.status)) return;
+    // The server decides whether there is something to resume: a goal it has
+    // as running (this page just was not driving it) needs no change there.
+    let server = await fetchGoal(sessionId);
+    if (!server) { writeRuntime(sessionId, () => ({ goal: null })); return; }
+    if (server.status === 'paused' || server.status === 'blocked') server = await changeGoal(sessionId, 'resume');
+    writeRuntime(sessionId, () => ({ goal: goalFromServer(server, true) }));
+    if (server.status === 'active') await get().continueGoal(sessionId);
   },
 
   cancelGoal: () => {
@@ -1354,6 +1424,7 @@ export const useChat = create<ChatState>((set, get) => {
     if (!sessionId) return;
     const goal = runtimes[sessionId]?.goal;
     if (goal) writeRuntime(sessionId, () => ({ goal: { ...goal, status: 'cancelled' } }));
+    void clearGoal(sessionId).catch(() => { /* nothing to clear */ });
     runtimes[sessionId]?.abort?.abort();
     fetch(`/api/chat/stop/${sessionId}`, { method: 'POST', credentials: 'same-origin' }).catch(() => {});
   },

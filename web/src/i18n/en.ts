@@ -248,6 +248,17 @@ const en = {
     assistant: '{{brand}}',
   },
   composer: {
+    goal: {
+      label: 'Goal',
+      running: 'running',
+      paused: 'paused',
+      blocked: 'blocked',
+      round: 'round {{round}}',
+      roundLabel: 'Goal · round {{round}}: {{objective}}',
+      pause: 'Pause goal',
+      resume: 'Resume goal',
+      cancel: 'End goal',
+    },
     queuedMessages: 'Queued messages',
     sendNow: 'Send now',
     removeQueued: 'Remove',
