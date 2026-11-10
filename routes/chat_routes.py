@@ -41,9 +41,10 @@ from routes.model_routes import _visible_models
 from routes.session_routes import _verify_session_owner
 from src import agent_runs
 from src import citations as _citations
+from src import goal_driver as _goal_driver
 from src import goals as _goals
 from src.agent_loop import stream_agent_loop
-from src.auth_helpers import get_current_user
+from src.auth_helpers import effective_user, get_current_user
 from src.chat_helpers import coerce_message_and_session
 from src.endpoint_resolver import build_chat_url
 from src.endpoint_resolver import normalize_base as _normalize_base
@@ -646,16 +647,21 @@ def setup_chat_routes(
         # ADMIN_PRIVILEGES wholesale) so this is a no-op for them.
         _enforce_chat_privileges(request, sess)
 
-        # A goal round: the page asks for the next round of the chat's goal
-        # instead of sending text. Its wording, its number and the round limit
+        # A goal round: the next round of the chat's goal is asked for instead
+        # of text being sent — by the page when the user starts or resumes a
+        # goal, by the server itself for every round after that
+        # (src/goal_driver.py). Its wording, its number and the round limit
         # come from the goal's own record (src/goals.py), never from the
-        # client, and no round starts for a goal that is not running.
+        # request, and no round starts for a goal that is not running.
         goal_round = str(form_data.get("goal_round", "")).lower() == "true"
         if goal_round:
             try:
                 message = _goals.begin_round(session)
             except _goals.GoalError as e:
                 raise HTTPException(409, str(e))
+            # From here on the server continues this goal as this user, with
+            # this turn's switches.
+            _goal_driver.arm(session, request, form_data, effective_user(request))
 
         # Ensure session has auth headers
         resolve_session_auth(sess, session, owner=get_current_user(request))
@@ -1120,6 +1126,7 @@ def setup_chat_routes(
             else:
                 # ── Unified path: full agent loop with all tools ──
                 _agent_rounds = 0
+                _asked_user = False  # the turn ended on an ask_user question
                 _answered_by = None  # set if the selected model failed and a fallback answered
                 # Live view of this turn's messages as sent, kept current by the
                 # agent loop — stored with the answer for verbatim replay
@@ -1218,6 +1225,8 @@ def setup_chat_routes(
                                 ):
                                     if data.get("type") == "agent_step":
                                         _agent_rounds = max(_agent_rounds, data.get("round", 1))
+                                    elif data.get("type") == "ask_user":
+                                        _asked_user = True
                                     yield chunk
                                 elif data.get("type") == "rag_sources_partial":
                                     # search_knowledge retrieved mid-turn. Merge
@@ -1397,9 +1406,12 @@ def setup_chat_routes(
                                     incognito=incognito,
                                 )
                                 run_post_response_tasks(session, last_metrics)
-                            # The chat's goal after this turn: still running
-                            # (the page starts the next round), or ended by the
-                            # model's update_goal call or by how the turn ended.
+                            # The chat's goal after this turn: still running,
+                            # or ended by the model's update_goal call or by
+                            # how the turn ended. If it is still running, the
+                            # server starts the next round (after any turn of
+                            # the chat, so an answered question or a message in
+                            # between does not leave the goal standing).
                             _goal_now = _goals.get(session)
                             if _goal_now:
                                 if goal_round:
@@ -1407,7 +1419,8 @@ def setup_chat_routes(
                                         session,
                                         stop_reason=(last_metrics or {}).get("stop_reason", ""),
                                     )
-                                yield f"data: {json.dumps({'type': 'goal', 'data': _goal_now})}\n\n"
+                                _goal_driver.turn_finished(session, awaiting_user=_asked_user)
+                                yield f"data: {json.dumps({'type': 'goal', 'data': _goal_driver.view(_goal_now, session)})}\n\n"
                             _stream_set(session, status="done")
                             yield chunk
                 except (asyncio.CancelledError, GeneratorExit):
@@ -1451,13 +1464,15 @@ def setup_chat_routes(
                         logger.exception(
                             "Failed to save partial response on disconnect (session %s)", session
                         )
-                    # Stopping a goal round pauses the goal: the user said stop,
-                    # so nothing starts another round until they resume it.
-                    if goal_round:
-                        try:
-                            _goals.settle_turn(session, stopped_by_user=True)
-                        except Exception:
-                            logger.exception("Failed to pause the goal of session %s", session)
+                    # Stopping a turn in a chat with a running goal pauses the
+                    # goal: the user said stop, so nothing starts another round
+                    # until they resume it. That holds for any turn, not just a
+                    # goal round, or the server would carry on behind the stop.
+                    try:
+                        _goals.settle_turn(session, stopped_by_user=True)
+                        _goal_driver.disarm(session)
+                    except Exception:
+                        logger.exception("Failed to pause the goal of session %s", session)
                     raise
                 finally:
                     _active_streams.pop(session, None)
