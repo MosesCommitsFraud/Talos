@@ -47,9 +47,11 @@ def _setting(key: str, default):
 
 
 def turn_budget(max_rounds: int, max_tokens: int) -> Tuple[int, int]:
-    """Round and output-token limits for a deep-research turn. ``max_tokens``
-    0 means "no cap" and stays that way."""
-    rounds = max(int(max_rounds or 0), _MIN_ROUNDS)
+    """Round and output-token limits for a deep-research turn. For both, 0
+    means "no cap" and stays that way."""
+    rounds = int(max_rounds or 0)
+    if rounds > 0:
+        rounds = max(rounds, _MIN_ROUNDS)
     if max_tokens and max_tokens > 0:
         try:
             floor = int(_setting("research_max_tokens", _DEFAULT_REPORT_TOKENS))

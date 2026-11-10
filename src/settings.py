@@ -115,10 +115,15 @@ DEFAULT_SETTINGS = {
     # Own (smaller, faster) model for subagents; empty = the chat's model.
     "subagent_endpoint_id": "",
     "subagent_model": "",
-    "agent_max_rounds": 20,  # per-message agent step cap (clamped 1..200)
+    # Per-message agent step cap. 0 = no cap: a turn takes as many steps as the
+    # work needs, and what ends a turn that goes nowhere is the loop-breaker
+    # (repeated calls, lookups that find nothing new, empty rounds), not a
+    # count. Set a number (1..1000) to cap it anyway.
+    "agent_max_rounds": 0,
     # DB-mode (query_sql button) round ceiling. Big schemas need many
     # list_tables/describe/SELECT round-trips to navigate, so DB turns raise
-    # the cap to this floor. Only ever raises agent_max_rounds, never lowers it.
+    # a configured cap to this floor. Only ever raises agent_max_rounds, never
+    # lowers it, and has no effect while agent_max_rounds is 0.
     "agent_max_rounds_db": 100,
     "agent_input_token_budget": 6000,
     # Ceiling on the *auto-derived* input budget that #1230 introduced. Has

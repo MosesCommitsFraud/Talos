@@ -1110,19 +1110,17 @@ def setup_chat_routes(
                 if _initial_cit:
                     yield f"data: {json.dumps({'type': 'citations', 'data': _initial_cit})}\n\n"
                 try:
-                    from src.agent_tools import MAX_AGENT_ROUNDS as _DEFAULT_ROUNDS
                     from src.settings import get_setting
 
                     _tool_budget = int(get_setting("agent_max_tool_calls", 0))
-                    # Per-message round cap from settings; clamp defensively in
-                    # case settings.json was hand-edited to a bad value.
+                    # Per-message round cap from settings, 0 = no cap (the
+                    # default). Clamped defensively in case settings.json was
+                    # hand-edited to a bad value.
                     try:
-                        _max_rounds = int(
-                            get_setting("agent_max_rounds", _DEFAULT_ROUNDS) or _DEFAULT_ROUNDS
-                        )
+                        _max_rounds = int(get_setting("agent_max_rounds", 0) or 0)
                     except (TypeError, ValueError):
-                        _max_rounds = _DEFAULT_ROUNDS
-                    _max_rounds = max(1, min(_max_rounds, 200))
+                        _max_rounds = 0
+                    _max_rounds = max(0, min(_max_rounds, 1000))
 
                     _max_tokens = ctx.preset.max_tokens
                     if do_research:

@@ -58,6 +58,8 @@ def test_turn_budget_only_raises(monkeypatch):
     assert dr.turn_budget(120, 32000) == (120, 32000)
     # 0 = uncapped output stays uncapped.
     assert dr.turn_budget(20, 0) == (40, 0)
+    # The same for the rounds: no cap is not raised to a cap.
+    assert dr.turn_budget(0, 4096) == (0, 16384)
 
 
 @pytest.fixture

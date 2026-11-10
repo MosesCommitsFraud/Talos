@@ -9,6 +9,7 @@ The LLM decides when to use tools by writing fenced code blocks.
 import asyncio
 import base64
 import collections
+import itertools
 import json
 import logging
 import os
@@ -2560,16 +2561,17 @@ async def stream_agent_loop(
         #
         # Big schemas need many round-trips just to orient — list_tables,
         # describe on several tables, then the actual SELECT(s), often with a
-        # few corrective retries. The ordinary round cap (agent_max_rounds,
-        # default 50) can run out mid-exploration, so DB-mode turns get a
-        # higher floor (agent_max_rounds_db). Only ever RAISES the ceiling —
-        # an explicitly higher user setting is preserved.
-        try:
-            _db_rounds = int(get_setting("agent_max_rounds_db", 100) or 100)
-        except (TypeError, ValueError):
-            _db_rounds = 100
-        max_rounds = max(max_rounds, min(_db_rounds, 200))
-        logger.info("[db-mode] round ceiling raised to %d for this turn", max_rounds)
+        # few corrective retries. A configured round cap (agent_max_rounds)
+        # can run out mid-exploration, so DB-mode turns get a higher floor
+        # (agent_max_rounds_db). Only ever RAISES the ceiling — an explicitly
+        # higher user setting is preserved, and no cap (0) stays no cap.
+        if max_rounds > 0:
+            try:
+                _db_rounds = int(get_setting("agent_max_rounds_db", 100) or 100)
+            except (TypeError, ValueError):
+                _db_rounds = 100
+            max_rounds = max(max_rounds, min(_db_rounds, 1000))
+            logger.info("[db-mode] round ceiling raised to %d for this turn", max_rounds)
         _db_names = []
         _dialect_notes = []
         try:
@@ -2819,7 +2821,10 @@ async def stream_agent_loop(
     round_profile: List[Dict[str, Any]] = []
     round_response = ""
 
-    for round_num in range(1, max_rounds + 1):
+    # max_rounds <= 0 means no cap: the turn runs until the model is done or a
+    # guard below ends it (repeated calls, lookups that find nothing new, empty
+    # rounds, the tool budget, the user's stop).
+    for round_num in range(1, max_rounds + 1) if max_rounds > 0 else itertools.count(1):
         round_response = ""
         if wire_sink is not None:
             wire_sink["round_text"] = ""
