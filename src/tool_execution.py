@@ -418,6 +418,90 @@ def _truncate(text: str, limit: int = MAX_OUTPUT_CHARS) -> str:
     return text
 
 
+# ── Output of commands and scripts ──
+#
+# What a command prints is cut to MAX_OUTPUT_CHARS before the model reads it.
+# The end is the part that matters most — the traceback, the failing test, the
+# summary line, STDERR — so most of the budget goes to the end and the rest to
+# the start. The complete output is kept where the model can read it again:
+# as a file in the workspace's working-data folder when there is a workspace,
+# else in the in-memory store behind expand_output.
+
+OUTPUT_HEAD_CHARS = 3_000
+OUTPUT_TAIL_CHARS = MAX_OUTPUT_CHARS - OUTPUT_HEAD_CHARS
+# Upper bound on what is kept of one output. A runaway command can print
+# gigabytes; nobody reads past this, and it has to fit in a request body.
+_FULL_OUTPUT_MAX_CHARS = 2_000_000
+# Same folder the query_sql spill uses: the sandbox hides it from the user's
+# file list (SKIP_DIRS in sandboxd.py), so it never looks like a deliverable.
+_OUTPUT_SPILL_DIR = ".talos-data"
+
+
+def _keep_ends(text: str, where: str) -> str:
+    """Start and end of `text` with a note in between saying what is missing
+    and `where` the whole thing is."""
+    omitted = len(text) - OUTPUT_HEAD_CHARS - OUTPUT_TAIL_CHARS
+    note = (
+        f"\n\n[... {omitted:,} of {len(text):,} characters are left out here. "
+        f"{where} Do not describe the missing part before you have read it. ...]\n\n"
+    )
+    return text[:OUTPUT_HEAD_CHARS] + note + text[-OUTPUT_TAIL_CHARS:]
+
+
+def _store_full_output(text: str, tool: str) -> str:
+    """Keep `text` in the in-memory store; returns the sentence that says how
+    to read it."""
+    from src.context_optimizer import _store_original
+
+    oid = _store_original(text[:_FULL_OUTPUT_MAX_CHARS], tool)
+    return (
+        f"The complete output is stored under id `{oid}`: call expand_output with "
+        "that id and a search term or a page number."
+    )
+
+
+def shorten_output(text: str, tool: str = "") -> str:
+    """Bound a command's output, keeping its start and its end, with the
+    complete output in the in-memory store. For callers without a workspace."""
+    if len(text) <= MAX_OUTPUT_CHARS:
+        return text
+    return _keep_ends(text, _store_full_output(text, tool))
+
+
+async def shorten_output_to_workspace(
+    text: str, tool: str, owner: Optional[str], session_id: Optional[str]
+) -> str:
+    """Like `shorten_output`, but the complete output goes to a file in the
+    session's workspace, where read_file and grep reach it and it survives a
+    restart. Falls back to the store when there is no workspace to write to."""
+    if len(text) <= MAX_OUTPUT_CHARS:
+        return text
+    if session_id:
+        import hashlib
+
+        digest = hashlib.sha1(text.encode("utf-8", "replace")).hexdigest()[:10]
+        path = f"{_OUTPUT_SPILL_DIR}/{tool or 'output'}_{digest}.log"
+        try:
+            from src.sandbox_client import file_tool_in_sandbox
+
+            written = await file_tool_in_sandbox(
+                owner=owner,
+                session_id=session_id,
+                operation="write",
+                payload={"path": path, "content": text[:_FULL_OUTPUT_MAX_CHARS]},
+            )
+            if written.get("exit_code") not in (0, None):
+                raise RuntimeError(written.get("error") or "write failed")
+            return _keep_ends(
+                text,
+                f"The complete output is in `{path}`: read a part of it with read_file "
+                "(offset and limit) or search it with grep.",
+            )
+        except Exception as exc:
+            logger.warning("Saving the full %s output to the workspace failed: %s", tool, exc)
+    return _keep_ends(text, _store_full_output(text, tool))
+
+
 logger = logging.getLogger(__name__)
 
 
@@ -826,13 +910,13 @@ async def _try_sandbox_exec(
         return {
             "error": f"{tool}: timed out after {timeout}s — process killed",
             "exit_code": 124,
-            "stdout": _truncate(stdout, MAX_OUTPUT_CHARS),
-            "stderr": _truncate(stderr, MAX_OUTPUT_CHARS),
+            "stdout": shorten_output(stdout, tool),
+            "stderr": shorten_output(stderr, tool),
         }
     output = stdout
     if stderr:
         output = (output + "\nSTDERR: " + stderr).strip() if output else "STDERR: " + stderr
-    output = _truncate(output, MAX_OUTPUT_CHARS)
+    output = await shorten_output_to_workspace(output, tool, owner, session_id)
     result: Dict = {
         "output": output or "(no output)",
         "exit_code": rc,
@@ -1094,7 +1178,9 @@ async def _do_run_cell(
     if stderr:
         output = (output + "\nSTDERR: " + stderr).strip() if output else "STDERR: " + stderr
     result: Dict = {
-        "output": _truncate(output or "(no output)", MAX_OUTPUT_CHARS),
+        "output": await shorten_output_to_workspace(
+            output or "(no output)", "run_cell", owner, session_id
+        ),
         "exit_code": rc,
         "sandboxed": True,
     }
@@ -1174,14 +1260,14 @@ async def _direct_fallback(
                 return {
                     "error": f"bash: timed out after {DEFAULT_BASH_TIMEOUT}s — process killed",
                     "exit_code": 124,
-                    "stdout": _truncate(stdout, MAX_OUTPUT_CHARS),
-                    "stderr": _truncate(stderr, MAX_OUTPUT_CHARS),
+                    "stdout": shorten_output(stdout, tool),
+                    "stderr": shorten_output(stderr, tool),
                 }
             output = stdout.rstrip()
             err = stderr.rstrip()
             if err:
                 output = (output + "\nSTDERR: " + err).strip() if output else "STDERR: " + err
-            output = _truncate(output, MAX_OUTPUT_CHARS)
+            output = shorten_output(output, tool)
             return {"output": output or "(no output)", "exit_code": rc or 0}
 
         if tool == "python":
@@ -1230,14 +1316,14 @@ async def _direct_fallback(
                 return {
                     "error": f"python: timed out after {DEFAULT_PYTHON_TIMEOUT}s — process killed",
                     "exit_code": 124,
-                    "stdout": _truncate(stdout, MAX_OUTPUT_CHARS),
-                    "stderr": _truncate(stderr, MAX_OUTPUT_CHARS),
+                    "stdout": shorten_output(stdout, tool),
+                    "stderr": shorten_output(stderr, tool),
                 }
             output = stdout.rstrip()
             err = stderr.rstrip()
             if err:
                 output = (output + "\nSTDERR: " + err).strip() if output else "STDERR: " + err
-            output = _truncate(output, MAX_OUTPUT_CHARS)
+            output = shorten_output(output, tool)
             return {"output": output or "(no output)", "exit_code": rc or 0}
 
         if tool in {"read_file", "write_file", "grep", "glob", "ls"}:

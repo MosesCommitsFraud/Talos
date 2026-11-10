@@ -169,6 +169,8 @@ class BulkArtifactsRequest(BaseModel):
 
 MAX_READ_CHARS = 20_000
 MAX_OUTPUT_CHARS = 10_000
+# Ceiling for output handed to the app uncut (it does its own shortening).
+MAX_RAW_OUTPUT_CHARS = 2_000_000
 MAX_DIFF_LINES = 400
 # .talos-data holds working data the agent spilled to disk to keep it out of the
 # model's context (large query_sql result sets). It is an implementation detail
@@ -1333,7 +1335,10 @@ async def kernel_execute_route(
     images, image_note = _collect_new_images(workspace, started_at)
     return ExecResponse(
         user_id=user_id, chat_id=chat_id, linux_user=name, workspace=str(workspace),
-        stdout=_truncate(stdout, MAX_OUTPUT_CHARS), stderr=_truncate(stderr, MAX_OUTPUT_CHARS),
+        # The app shortens the output for the model and keeps its start, its end
+        # and a copy of the whole. Cutting it to its first 10k characters here
+        # would lose the end, which is where a traceback is.
+        stdout=_truncate(stdout, MAX_RAW_OUTPUT_CHARS), stderr=_truncate(stderr, MAX_RAW_OUTPUT_CHARS),
         exit_code=1 if error else 0, images=images, image_note=image_note,
         created_artifacts=_changed_artifacts(workspace, artifacts_before), code_id=code_id,
     )
