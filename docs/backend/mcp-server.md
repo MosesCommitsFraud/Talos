@@ -123,7 +123,10 @@ so the exact list depends on the token's owner.
 
 The repositories are set up under **Settings → MCP Server**: URL, branch, an optional
 access token, which one is the default, and which folder goes to which knowledge base
-or mini RAG. The worker (`src/rag_git_sync.py`) then runs a shallow fetch and hands the
+or mini RAG. The folders are not typed: the page reads them from the repository
+(`POST /api/rag/git-sync/folders`, a shallow fetch without a checkout) as soon as the
+URL is entered, and offers each top-level folder with a target to pick; one left at
+"do not sync" is not mapped. The worker (`src/rag_git_sync.py`) then runs a shallow fetch and hands the
 files to the normal ingest:
 
 - **What a repository owns.** A synced document has origin `git` in the document

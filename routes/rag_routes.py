@@ -970,6 +970,33 @@ def setup_rag_routes():
 
         return {"repos": rag_git_sync.status()}
 
+    class GitFolderProbe(BaseModel):
+        url: str
+        branch: str = ""
+        token: str = ""
+
+    # Registered before the route below, which would take "folders" for a repository id.
+    @router.post("/git-sync/folders")
+    def git_sync_folders(body: GitFolderProbe):
+        """The folders of a repository, saved or not, for the mapping to choose from.
+
+        An empty token falls back to the saved one of that repository.
+        """
+        from src import rag_git_sync
+
+        try:
+            [repo] = rag_git_sync.normalize_repos(
+                [{"url": body.url, "branch": body.branch, "token": body.token}]
+            )
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+        token = repo["token"] or rag_git_sync._token_for(repo["id"])
+        try:
+            folders = rag_git_sync.list_folders(repo["url"], repo["branch"], token)
+        except rag_git_sync.GitSyncError as e:
+            raise HTTPException(400, str(e))
+        return {"folders": folders}
+
     @router.post("/git-sync/{repo_id}")
     def git_sync_start(repo_id: str):
         """Sync one configured repository now, what ``update_rag`` does from outside."""

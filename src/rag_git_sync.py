@@ -52,6 +52,7 @@ import os
 import re
 import subprocess
 import tempfile
+import threading
 import time
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple
@@ -336,7 +337,7 @@ def _scrub(text: str, token: str) -> str:
 _LOGIN_REFUSED = ("could not read Username", "could not read Password", "Authentication failed")
 
 
-def _git(args: List[str], cwd: Path, token: str) -> str:
+def _git(args: List[str], cwd: Path, token: str, timeout: int = GIT_TIMEOUT_SECONDS) -> str:
     try:
         done = subprocess.run(
             ["git", *args],
@@ -345,12 +346,12 @@ def _git(args: List[str], cwd: Path, token: str) -> str:
             capture_output=True,
             text=True,
             errors="replace",
-            timeout=GIT_TIMEOUT_SECONDS,
+            timeout=timeout,
         )
     except FileNotFoundError:
         raise GitSyncError("git is not installed on this host")
     except subprocess.TimeoutExpired:
-        raise GitSyncError(f"git {args[0]} took longer than {GIT_TIMEOUT_SECONDS}s")
+        raise GitSyncError(f"git {args[0]} took longer than {timeout}s")
     if done.returncode != 0:
         tail = " ".join((done.stderr or "").strip().splitlines()[-3:])
         if any(sign in tail for sign in _LOGIN_REFUSED):
@@ -393,6 +394,42 @@ def fetch(plan: Dict[str, Any], token: str = "") -> Tuple[Path, str]:
     _git(["checkout", "--quiet", "--force", "--detach", "FETCH_HEAD"], checkout, token)
     _git(["clean", "--quiet", "-ffdx"], checkout, token)
     return checkout, _git(["rev-parse", "HEAD"], checkout, token)
+
+
+# Someone is waiting at the settings page for this one.
+PROBE_TIMEOUT_SECONDS = 45
+MAX_LISTED_FOLDERS = 300
+MAX_FOLDER_DEPTH = 3
+_probe_lock = threading.Lock()
+
+
+def list_folders(url: str, branch: str = "", token: str = "") -> List[str]:
+    """The folders of a repository, for the settings page to offer instead of having
+    them typed. Works before the repository is saved, so it takes its values as given.
+
+    Fetched into a directory of its own without a checkout: the worker may be syncing
+    the real one at this moment, and only the tree is needed.
+    """
+    probe = _root() / ".probe" / repo_id_for(url)
+    with _probe_lock:
+        probe.mkdir(parents=True, exist_ok=True)
+        if not (probe / ".git").is_dir():
+            _git(["init", "--quiet"], probe, token, PROBE_TIMEOUT_SECONDS)
+        _clear_stale_locks(probe)
+        _git(
+            ["fetch", "--quiet", "--depth", "1", "--no-tags", url, branch or "HEAD"],
+            probe,
+            token,
+            PROBE_TIMEOUT_SECONDS,
+        )
+        listing = _git(
+            ["ls-tree", "-r", "-d", "-z", "--name-only", "FETCH_HEAD"],
+            probe,
+            token,
+            PROBE_TIMEOUT_SECONDS,
+        )
+    folders = [f for f in listing.split("\x00") if f and f.count("/") < MAX_FOLDER_DEPTH]
+    return sorted(folders, key=str.lower)[:MAX_LISTED_FOLDERS]
 
 
 # ---------------------------------------------------------------------------

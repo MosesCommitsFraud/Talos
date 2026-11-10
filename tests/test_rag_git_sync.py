@@ -997,3 +997,59 @@ def test_saving_settings_normalizes_repositories_and_refuses_bad_ones(monkeypatc
     assert bad.status_code == 400
     assert "file:///etc" in bad.json()["detail"]
     assert saved["rag_git_repos"] == [repo]
+
+
+# ---------------------------------------------------------------------------
+# Folders for the settings page
+# ---------------------------------------------------------------------------
+
+
+def test_the_folders_of_a_repository_are_listed_without_a_checkout(env):
+    _, tmp = env
+    repo = Repo(tmp)
+    repo.write("SQL/Views/a.sql", "select 1")
+    repo.write("a/b/c/d/too-deep.md", "x")
+    repo.commit()
+
+    folders = gs.list_folders(repo.url)
+
+    assert folders == ["a", "a/b", "a/b/c", "Knowledge", "SQL", "SQL/Views"]
+    probe = gs._root() / ".probe" / gs.repo_id_for(repo.url)
+    assert [p.name for p in probe.iterdir()] == [".git"]
+    # Seen again after a change, and the worker's checkout was never created.
+    repo.write("Neu/x.md", "x")
+    repo.commit()
+    assert "Neu" in gs.list_folders(repo.url)
+    assert not gs._checkout_dir(gs.repo_id_for(repo.url)).exists()
+
+
+def test_the_folder_route_validates_and_falls_back_to_the_saved_token(monkeypatch, tmp_path):
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from core.middleware import require_admin
+    from routes.rag_routes import setup_rag_routes
+
+    seen = []
+    monkeypatch.setattr(gs, "_token_for", lambda repo_id: "saved")
+    monkeypatch.setattr(
+        gs, "list_folders", lambda url, branch, token: seen.append((url, branch, token)) or ["SQL"]
+    )
+    app = FastAPI()
+    app.include_router(setup_rag_routes())
+    app.dependency_overrides[require_admin] = lambda: None
+    client = TestClient(app)
+
+    ok = client.post("/api/rag/git-sync/folders", json={"url": "https://git.example/a/"})
+    assert ok.json() == {"folders": ["SQL"]}
+    client.post("/api/rag/git-sync/folders", json={"url": "https://git.example/a", "token": "new"})
+    assert seen == [("https://git.example/a", "", "saved"), ("https://git.example/a", "", "new")]
+
+    assert client.post("/api/rag/git-sync/folders", json={"url": "file:///etc"}).status_code == 400
+
+    def refused(url, branch, token):
+        raise gs.GitSyncError("The repository requires a login.")
+
+    monkeypatch.setattr(gs, "list_folders", refused)
+    bad = client.post("/api/rag/git-sync/folders", json={"url": "https://git.example/a"})
+    assert bad.status_code == 400 and "login" in bad.json()["detail"]

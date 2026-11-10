@@ -3484,6 +3484,14 @@ class PreviewHandler(BaseHTTPRequestHandler):
             _API_TOKENS.append(row)
             self._send_json({**row, "token": raw})
             return
+        if path == "/api/rag/git-sync/folders":
+            body = json.loads(self._read_body() or b"{}")
+            time.sleep(0.6)
+            if "private" in body.get("url", "") and not body.get("token"):
+                self._send_json({"detail": "The repository requires a login."}, 400)
+                return
+            self._send_json({"folders": ["Knowledge", "SQL", "SQL/Views", "Vorlagen"]})
+            return
         if path.startswith("/api/rag/git-sync/"):
             repo_id = path[len("/api/rag/git-sync/") :]
             _GIT_RUNS[repo_id] = {

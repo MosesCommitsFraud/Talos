@@ -1,8 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ArrowRightIcon, PlusIcon, RefreshCwIcon, Trash2Icon } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   GIT_DEFAULT_DB_TARGET,
+  fetchGitFolders,
   fetchGitSync,
   startGitSync,
   type GitRepoConfig,
@@ -71,6 +73,158 @@ function RepoStatus({ repo, live, dirty }: { repo: GitRepoConfig; live?: GitSync
   );
 }
 
+const sameFolder = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
+const probeKey = (r: GitRepoConfig) => `${r.url.trim()}\n${r.branch.trim()}\n${r.token}`;
+
+interface FolderProbe {
+  state: 'idle' | 'loading' | 'done' | 'failed';
+  folders: string[];
+  error: string;
+  /** Read the folders again, unless these exact values were just read. */
+  run: (repo: GitRepoConfig, force?: boolean) => void;
+}
+
+/**
+ * The folders of each repository, read from the repository itself so nobody has to
+ * type them. Read when the page opens and whenever URL, branch or token were edited.
+ */
+function useFolderProbes(repos: GitRepoConfig[]): FolderProbe[] {
+  const [results, setResults] = useState<Record<string, Omit<FolderProbe, 'run'>>>({});
+  const asked = useRef(new Set<string>());
+
+  const run = (repo: GitRepoConfig, force = false) => {
+    const key = probeKey(repo);
+    if (!/^https?:\/\/\S+$/.test(repo.url.trim()) || (!force && asked.current.has(key))) return;
+    asked.current.add(key);
+    setResults((r) => ({ ...r, [key]: { state: 'loading', folders: r[key]?.folders ?? [], error: '' } }));
+    fetchGitFolders(repo).then(
+      ({ folders }) => setResults((r) => ({ ...r, [key]: { state: 'done', folders, error: '' } })),
+      (e: Error) => setResults((r) => ({ ...r, [key]: { state: 'failed', folders: [], error: e.message } })),
+    );
+  };
+
+  // Once the saved repositories are there; edits are picked up when a field loses focus.
+  const loaded = repos.length > 0;
+  useEffect(() => {
+    repos.forEach((repo) => run(repo));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loaded]);
+
+  return repos.map((repo) => ({
+    ...(results[probeKey(repo)] ?? { state: 'idle' as const, folders: [], error: '' }),
+    run,
+  }));
+}
+
+/** Which folder goes where: the repository's folders, each with a target to pick. */
+function FolderMappings({
+  repo,
+  targets,
+  probe,
+  onChange,
+}: {
+  repo: GitRepoConfig;
+  targets: { value: string; label: string }[];
+  probe: FolderProbe;
+  onChange: (mappings: GitRepoConfig['mappings']) => void;
+}) {
+  const { t } = useTranslation();
+  const known = probe.state === 'done';
+  const inRepo = (folder: string) => probe.folders.find((f) => sameFolder(f, folder));
+  // Top-level folders nothing points at yet: offered, and not synced until given a target.
+  const unmapped = known
+    ? probe.folders.filter((f) => !f.includes('/') && !repo.mappings.some((m) => sameFolder(m.folder, f)))
+    : [];
+
+  const folderOptions = (current: string) => [
+    { value: '', label: t('settings.mcp.git.wholeRepo') },
+    ...probe.folders.map((f) => ({ value: f, label: f })),
+    ...(current && !inRepo(current)
+      ? [{ value: current, label: t('settings.mcp.git.missingFolder', { folder: current }) }]
+      : []),
+  ];
+
+  let status = t('settings.mcp.git.detectNeedsUrl');
+  if (probe.state === 'loading') status = t('settings.mcp.git.detecting');
+  else if (probe.state === 'failed') status = t('settings.mcp.git.detectFailed', { error: probe.error });
+  else if (known) status = t('settings.mcp.git.detected', { count: probe.folders.length });
+
+  return (
+    <Row
+      stacked
+      label={(
+        <>
+          <div>{t('settings.mcp.git.folders')}</div>
+          <div className={cn('text-[13px] leading-snug text-muted-foreground', probe.state === 'failed' && 'text-destructive')}>
+            {status}
+          </div>
+        </>
+      )}
+    >
+      <div className="flex w-full flex-col items-end gap-2">
+        {repo.mappings.map((mapping, m) => {
+          const setMapping = (change: Partial<typeof mapping>) =>
+            onChange(repo.mappings.map((x, j) => (j === m ? { ...x, ...change } : x)));
+          return (
+            <div key={m} className="flex items-center gap-2">
+              {known ? (
+                <Select
+                  className="w-44"
+                  value={inRepo(mapping.folder) ?? mapping.folder}
+                  onChange={(folder) => setMapping({ folder })}
+                  options={folderOptions(mapping.folder)}
+                />
+              ) : (
+                <Input
+                  aria-label={t('settings.mcp.git.folder')}
+                  className="w-44 font-mono text-[13px]"
+                  placeholder={t('settings.mcp.git.wholeRepo')}
+                  value={mapping.folder}
+                  onChange={(e) => setMapping({ folder: e.target.value })}
+                />
+              )}
+              <ArrowRightIcon className="size-3.5 shrink-0 text-muted-foreground" />
+              <Select className="w-72" value={mapping.base} onChange={(base) => setMapping({ base })} options={targets} />
+              <Button
+                size="sm"
+                variant="ghost"
+                aria-label={t('settings.mcp.git.removeFolder')}
+                onClick={() => onChange(repo.mappings.filter((_, j) => j !== m))}
+              >
+                <Trash2Icon className="size-3.5" />
+              </Button>
+            </div>
+          );
+        })}
+        {unmapped.map((folder) => (
+          <div key={folder} className="flex items-center gap-2">
+            <div className="w-44 truncate px-3 text-sm text-muted-foreground">{folder}</div>
+            <ArrowRightIcon className="size-3.5 shrink-0 text-muted-foreground" />
+            <Select
+              className="w-72"
+              value=""
+              onChange={(base) => { if (base) onChange([...repo.mappings, { folder, base }]); }}
+              options={[{ value: '', label: t('settings.mcp.git.notSynced') }, ...targets]}
+            />
+            {/* Keeps the selects of both kinds of row in one column. */}
+            <div className="w-9 shrink-0" />
+          </div>
+        ))}
+        <div className="flex items-center gap-1">
+          <Button size="sm" variant="ghost" disabled={probe.state === 'loading'} onClick={() => probe.run(repo, true)}>
+            <RefreshCwIcon className={probe.state === 'loading' ? 'size-3.5 animate-spin' : 'size-3.5'} />
+            {t('settings.mcp.git.detect')}
+          </Button>
+          <Button size="sm" variant="ghost" onClick={() => onChange([...repo.mappings, { folder: '', base: 'default' }])}>
+            <PlusIcon className="size-3.5" />
+            {t('settings.mcp.git.addFolder')}
+          </Button>
+        </div>
+      </div>
+    </Row>
+  );
+}
+
 /**
  * The repositories `update_rag` syncs from (src/rag_git_sync.py), edited as one
  * `rag_git_repos` setting. A repository gets its id from the server when it is saved,
@@ -105,6 +259,8 @@ export function GitSyncSection({
     const rest = repos.filter((_, i) => i !== index);
     onChange(rest.some((r) => r.default) ? rest : rest.map((r, i) => ({ ...r, default: i === 0 })));
   };
+
+  const probes = useFolderProbes(repos);
 
   // A mini RAG whose database was removed takes no new documents.
   const targets = [
@@ -151,6 +307,7 @@ export function GitSyncSection({
               placeholder="https://devops.example.com/Team/_git/repo"
               value={repo.url}
               onChange={(e) => patch(index, { url: e.target.value })}
+              onBlur={() => probes[index]?.run(repo)}
             />
           </Row>
           <Row label={t('settings.mcp.git.branch')} hint={t('settings.mcp.git.branchHint')}>
@@ -158,6 +315,7 @@ export function GitSyncSection({
               className="w-56 font-mono text-[13px]"
               value={repo.branch}
               onChange={(e) => patch(index, { branch: e.target.value })}
+              onBlur={() => probes[index]?.run(repo)}
             />
           </Row>
           <Row label={t('settings.mcp.git.token')} hint={t('settings.mcp.git.tokenHint')}>
@@ -167,53 +325,18 @@ export function GitSyncSection({
               className="w-56"
               value={repo.token}
               onChange={(e) => patch(index, { token: e.target.value })}
+              onBlur={() => probes[index]?.run(repo)}
             />
           </Row>
           <Row label={t('settings.mcp.git.default')} hint={t('settings.mcp.git.defaultHint')}>
             <Switch checked={repo.default} onCheckedChange={(on) => { if (on) makeDefault(index); }} />
           </Row>
-          <Row label={t('settings.mcp.git.folders')} hint={t('settings.mcp.git.foldersHint')} stacked>
-            <div className="flex w-full flex-col items-end gap-2">
-              {repo.mappings.map((mapping, m) => {
-                const setMapping = (change: Partial<typeof mapping>) =>
-                  patch(index, { mappings: repo.mappings.map((x, j) => (j === m ? { ...x, ...change } : x)) });
-                return (
-                  <div key={m} className="flex items-center gap-2">
-                    <Input
-                      aria-label={t('settings.mcp.git.folder')}
-                      className="w-36 font-mono text-[13px]"
-                      placeholder={t('settings.mcp.git.wholeRepo')}
-                      value={mapping.folder}
-                      onChange={(e) => setMapping({ folder: e.target.value })}
-                    />
-                    <ArrowRightIcon className="size-3.5 shrink-0 text-muted-foreground" />
-                    <Select
-                      className="w-72"
-                      value={mapping.base}
-                      onChange={(base) => setMapping({ base })}
-                      options={targets}
-                    />
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      aria-label={t('settings.mcp.git.removeFolder')}
-                      onClick={() => patch(index, { mappings: repo.mappings.filter((_, j) => j !== m) })}
-                    >
-                      <Trash2Icon className="size-3.5" />
-                    </Button>
-                  </div>
-                );
-              })}
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={() => patch(index, { mappings: [...repo.mappings, { folder: '', base: 'default' }] })}
-              >
-                <PlusIcon className="size-3.5" />
-                {t('settings.mcp.git.addFolder')}
-              </Button>
-            </div>
-          </Row>
+          <FolderMappings
+            repo={repo}
+            targets={targets}
+            probe={probes[index]}
+            onChange={(mappings) => patch(index, { mappings })}
+          />
           <Row label={t('settings.mcp.git.exclude')} hint={t('settings.mcp.git.excludeHint')}>
             {/* Not trimmed while typing, or a comma would vanish as soon as it is typed. */}
             <Input

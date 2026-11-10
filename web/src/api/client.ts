@@ -1296,6 +1296,13 @@ export interface GitSyncRepo {
 }
 
 export const fetchGitSync = () => getJSON<{ repos: GitSyncRepo[] }>('/api/rag/git-sync');
+/** The folders of a repository, saved or not; an empty token falls back to the saved one. */
+export const fetchGitFolders = (repo: Pick<GitRepoConfig, 'url' | 'branch' | 'token'>) =>
+  postJSON<{ folders: string[] }>('/api/rag/git-sync/folders', {
+    url: repo.url.trim(),
+    branch: repo.branch.trim(),
+    token: repo.token,
+  });
 export const startGitSync = (id: string) =>
   postJSON<{ ok: boolean; job_id: string; already_queued: boolean }>(`/api/rag/git-sync/${encodeURIComponent(id)}`);
 
