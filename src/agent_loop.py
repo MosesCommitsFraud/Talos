@@ -23,11 +23,12 @@ from src.agent_tools import (
     FUNCTION_TOOL_SCHEMAS,
     MAX_AGENT_ROUNDS,
     TOOL_TAGS,
+    RejectedToolCall,
     ToolBlock,
     execute_tool_block,
     format_tool_result,
-    function_call_to_tool_block,
     get_mcp_manager,
+    native_call_to_tool_block,
     parse_tool_blocks,
     set_active_document,
     set_active_model,
@@ -46,6 +47,7 @@ from src.model_context import estimate_tokens
 from src.prompt_security import untrusted_context_message
 from src.settings import get_setting, get_user_setting
 from src.tool_catalog import RUN_TOOL, unwrap_run_tool
+from src.tool_schemas import TRUNCATED_CALL_ERROR
 from src.tool_security import (
     blocked_tools_for_owner,
     mcp_blocked_for_owner,
@@ -1331,8 +1333,18 @@ def _resolve_tool_blocks(
     round_num: int,
     round_reasoning: str = "",
     native_mode: bool = False,
+    tool_schemas: Optional[List[Dict]] = None,
+    truncated: bool = False,
 ):
     """Choose native function calls or fenced code block parsing. Returns (tool_blocks, used_native).
+
+    Every native call becomes exactly one block, in the model's order: a call
+    that cannot be run (unknown tool, broken or incomplete arguments) becomes a
+    RejectedToolCall carrying the error the model reads as its result. Results
+    are paired with calls by position, so dropping one would hand every later
+    result of the round to the wrong call. `tool_schemas` are this turn's tools,
+    used to check the arguments; `truncated` says the output hit the length
+    limit, which is what usually breaks the last call's JSON.
 
     `native_mode` marks an endpoint that has a native tool-call channel. There,
     a ```bash fence in the response text is never an attempted tool call — the
@@ -1356,24 +1368,29 @@ def _resolve_tool_blocks(
                 inner = unwrap_run_tool(tc_args)
                 if inner is None:
                     tool_blocks.append(
-                        ToolBlock(
+                        RejectedToolCall(
                             RUN_TOOL,
-                            'run_tool needs {"name": "<catalog tool>", "arguments": {...}}. '
+                            str(tc_args)[:300],
+                            TRUNCATED_CALL_ERROR
+                            if truncated
+                            else 'run_tool needs {"name": "<catalog tool>", "arguments": {...}}. '
                             "Load the tool with find_tools first.",
                         )
                     )
                     continue
                 tc_name, tc_args = inner
-            block = function_call_to_tool_block(tc_name, tc_args)
-            if block:
-                tool_blocks.append(block)
-                logger.info(f"  -> converted: {tc_name} -> {block.tool_type}")
-            else:
+            block = native_call_to_tool_block(
+                tc_name, tc_args, schemas=tool_schemas, truncated=truncated
+            )
+            tool_blocks.append(block)
+            if isinstance(block, RejectedToolCall):
                 logger.warning(
-                    f"  -> FAILED to convert native call: {tc_name} args={tc_args[:200]}"
+                    f"  -> rejected native call: {tc_name} ({block.error[:120]}) "
+                    f"args={str(tc_args)[:200]}"
                 )
-        if tool_blocks:
-            used_native = True
+            else:
+                logger.info(f"  -> converted: {tc_name} -> {block.tool_type}")
+        used_native = True
     if not used_native:
         tool_blocks = parse_tool_blocks(round_response, allow_exec_fences=not native_mode)
         # Thinking-model recovery: some reasoning models route the ENTIRE turn —
@@ -1396,6 +1413,14 @@ def _resolve_tool_blocks(
             logger.info(
                 f"Agent round {round_num}: {len(tool_blocks)} fenced tool block(s) detected"
             )
+            # A fence left open by the length limit is an incomplete call. The
+            # parser accepts an unclosed fence, so without this a half-written
+            # file or script would be run as if it were whole.
+            if truncated and (round_response or "").count("```") % 2 == 1:
+                _cut = tool_blocks[-1]
+                tool_blocks[-1] = RejectedToolCall(
+                    _cut.tool_type, (_cut.content or "")[:300], TRUNCATED_CALL_ERROR
+                )
 
     resp_preview = round_response[:200].replace("\n", "\\n") if round_response else "(empty)"
     logger.info(
@@ -1466,7 +1491,10 @@ def _append_tool_results(
         ]
         messages.append(assistant_msg)
         for j, tc in enumerate(native_tool_calls):
-            result_text = tool_result_texts[j] if j < len(tool_result_texts) else ""
+            # One block per call (see _resolve_tool_blocks), so positions match.
+            # A call the round never reached still gets an answer: an empty
+            # result reads as "ran and returned nothing".
+            result_text = tool_result_texts[j] if j < len(tool_result_texts) else NOT_RUN_RESULT
             messages.append(
                 {
                     "role": "tool",
@@ -1482,6 +1510,18 @@ def _append_tool_results(
         messages.append(msg)
         messages.append({"role": "user", "content": f"{TOOL_RESULT_PREFIX}\n\n{tool_output_text}"})
 
+
+# Sent after a round that hit the output length limit before it produced an
+# answer or a tool call, which on a thinking model means the limit was spent
+# on reasoning.
+_CUT_OFF_EMPTY_ROUND_NOTE = (
+    "Your last round reached the output length limit before it produced any "
+    "answer or tool call. Reason more briefly, then make the next tool call or "
+    "write the final answer. Do not mention this instruction."
+)
+
+# Result of a native call the round ended before reaching.
+NOT_RUN_RESULT = "This call was not run."
 
 # Marker that opens the synthetic user message carrying a round's tool output
 # (text-protocol path). Used both to build that message and to classify it into
@@ -2392,6 +2432,7 @@ async def stream_agent_loop(
     # tool that is listed but refused only costs rounds. A mode switch changes
     # the list once — people keep a mode for a whole chat, so that is cheap.
     _core_schemas: List[Dict] = []
+    _catalog: List[Dict] = []
     _catalog_names: frozenset = frozenset()
     _catalog_text = ""
     if _catalog_mode:
@@ -2795,6 +2836,8 @@ async def stream_agent_loop(
             ""  # reasoning_content deltas (DeepSeek-thinking, vLLM --reasoning-parser)
         )
         native_tool_calls = []  # populated if model uses function calling
+        # The server stopped this round at the output length limit.
+        _round_truncated = False
 
         # ── Mid-turn compaction ──
         # A long agent turn can outgrow the window on its own. Between-turn
@@ -3076,6 +3119,8 @@ async def stream_agent_loop(
                         logger.info(
                             f"Agent round {round_num}: received {len(native_tool_calls)} native tool call(s)"
                         )
+                    elif data.get("type") == "finish":
+                        _round_truncated = data.get("reason") == "length"
                     elif data.get("type") == "usage":
                         u = data.get("data", {})
                         round_input = u.get("input_tokens", 0)
@@ -3279,7 +3324,16 @@ async def stream_agent_loop(
             round_num,
             round_reasoning,
             native_mode=_is_api_model,
+            tool_schemas=list(all_tool_schemas or []) + list(_catalog or mcp_schemas or []),
+            truncated=_round_truncated,
         )
+        if _round_truncated:
+            _rp["truncated"] = True
+            logger.warning(
+                "[agent] round %d was cut off at the output length limit (%d tool call(s))",
+                round_num,
+                len(tool_blocks),
+            )
 
         # Force-answer round: we told the model to STOP calling tools and
         # answer. If it ignored that and emitted a (possibly DSML) tool
@@ -3443,7 +3497,9 @@ async def stream_agent_loop(
                         {
                             "role": "system",
                             "content": (
-                                "Your last round produced nothing — no text and no "
+                                _CUT_OFF_EMPTY_ROUND_NOTE
+                                if _round_truncated
+                                else "Your last round produced nothing — no text and no "
                                 "tool call. The task is not finished. Either make "
                                 "the next tool call, or write the complete final "
                                 "answer now. If you are stuck or out of room, say "
@@ -3462,6 +3518,15 @@ async def stream_agent_loop(
                     _empty_rounds,
                 )
                 yield f"data: {json.dumps({'type': 'agent_stalled', 'round': round_num})}\n\n"
+                break
+
+            # ── Answer cut off at the length limit ────────────────────
+            # The text simply ends early and would otherwise pass as a
+            # finished answer. Say so and stop: asking the model to restate or
+            # to act on a half sentence only produces more cut-off output, and
+            # the user can continue the turn with one word.
+            if _round_truncated:
+                yield f"data: {json.dumps({'type': 'output_truncated', 'round': round_num})}\n\n"
                 break
 
             # ── Completion verifier (mechanism 3a) ────────────────────

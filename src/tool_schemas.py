@@ -8,11 +8,12 @@ Extracted from agent_tools.py to keep schema definitions separate from
 tool parsing / execution logic.
 """
 
+import difflib
 import json
 import logging
-from typing import Optional
+from typing import Dict, Iterable, List, Optional
 
-from src.agent_tools import TOOL_TAGS, ToolBlock
+from src.agent_tools import TOOL_TAGS, RejectedToolCall, ToolBlock
 from src.tool_parsing import _TOOL_NAME_MAP
 
 logger = logging.getLogger(__name__)
@@ -1918,3 +1919,112 @@ def function_call_to_tool_block(name: str, arguments: str) -> Optional[ToolBlock
         content = json.dumps(args)
 
     return ToolBlock(tool_type, content)
+
+
+# ---------------------------------------------------------------------------
+# Native function call -> ToolBlock, with a result for every call
+# ---------------------------------------------------------------------------
+
+# How much of unusable arguments is kept for the tool row and the history.
+_REJECTED_ARGS_PREVIEW = 300
+
+TRUNCATED_CALL_ERROR = (
+    "This call was not run: your output reached the length limit before its "
+    "arguments were complete. Send it again, and keep it shorter — for a large "
+    "file or script, write it in several smaller calls."
+)
+
+
+def _schema_for(tool_type: str, name: str, schemas: Optional[Iterable[Dict]]) -> Optional[Dict]:
+    """Parameter schema of a tool, from the schemas of this turn or the built-ins."""
+    for source in (schemas or (), FUNCTION_TOOL_SCHEMAS):
+        for schema in source:
+            fn = schema.get("function") or {}
+            if fn.get("name") in (tool_type, name):
+                params = fn.get("parameters")
+                return params if isinstance(params, dict) else None
+    return None
+
+
+def _known_tool_names(schemas: Optional[Iterable[Dict]]) -> List[str]:
+    names = {(s.get("function") or {}).get("name") for s in (schemas or ())}
+    names |= {(s.get("function") or {}).get("name") for s in FUNCTION_TOOL_SCHEMAS}
+    return sorted(n for n in names if n)
+
+
+def argument_problems(args: Dict, params: Optional[Dict]) -> List[str]:
+    """What stops `args` from being usable with a tool's parameter schema.
+
+    Only missing required properties count. A tool decides for itself what it
+    accepts beyond that, and several take more shapes than their schema shows.
+    """
+    if not isinstance(params, dict):
+        return []
+    missing = [
+        key
+        for key in params.get("required") or []
+        if isinstance(key, str) and args.get(key) is None
+    ]
+    return [f'missing required property "{key}"' for key in missing]
+
+
+def native_call_to_tool_block(
+    name: str,
+    arguments,
+    schemas: Optional[Iterable[Dict]] = None,
+    truncated: bool = False,
+) -> ToolBlock:
+    """Convert a native function call into a ToolBlock, never dropping it.
+
+    A call that cannot be run comes back as a RejectedToolCall whose error is
+    the tool result the model reads. `schemas` are the tools of this turn
+    (MCP and catalog tools included); `truncated` says the model's output was
+    cut off at the length limit, which is the usual reason for broken JSON.
+    """
+    name = str(name or "")
+    raw = arguments if isinstance(arguments, str) else json.dumps(arguments or {})
+    preview = raw[:_REJECTED_ARGS_PREVIEW]
+    tool_type = _TOOL_NAME_MAP.get(name, name)
+
+    known = tool_type.startswith("mcp__") or tool_type in TOOL_TAGS
+    if not known:
+        names = _known_tool_names(schemas)
+        near = difflib.get_close_matches(name, names, n=3, cutoff=0.6)
+        hint = f" Did you mean: {', '.join(near)}?" if near else ""
+        return RejectedToolCall(
+            name or "unknown",
+            preview,
+            f'unknown tool "{name}".{hint} Call only tools from your tool list.',
+        )
+
+    try:
+        args = json.loads(raw) if raw.strip() else {}
+    except (json.JSONDecodeError, TypeError) as exc:
+        if truncated:
+            return RejectedToolCall(tool_type, preview, TRUNCATED_CALL_ERROR)
+        return RejectedToolCall(
+            tool_type,
+            preview,
+            f"invalid arguments: not valid JSON ({exc}). Send the arguments as one JSON object.",
+        )
+
+    problems: List[str] = []
+    if not isinstance(args, dict):
+        problems.append(f"expected a JSON object, got {type(args).__name__}")
+        args = {}
+    params = _schema_for(tool_type, name, schemas)
+    problems += argument_problems(args, params)
+    if problems and any(p.startswith("missing") for p in problems):
+        accepted = ", ".join((params or {}).get("properties") or {})
+        sent = ", ".join(args) or "nothing"
+        return RejectedToolCall(
+            tool_type,
+            preview,
+            f"invalid arguments: {'; '.join(problems)}. "
+            f"Accepted properties: {accepted}. You sent: {sent}.",
+        )
+
+    block = function_call_to_tool_block(name, raw)
+    if block is None:
+        return RejectedToolCall(tool_type, preview, f'tool "{name}" could not be called.')
+    return block

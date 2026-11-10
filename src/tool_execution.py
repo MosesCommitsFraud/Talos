@@ -1601,6 +1601,12 @@ async def execute_tool_block(
     tool = block.tool_type
     content = block.content
 
+    # A call that was rejected before it got here (unknown tool, unusable or
+    # cut-off arguments): its error is the result, nothing is run.
+    rejected = getattr(block, "error", None)
+    if rejected:
+        return f"{tool}: not run", {"error": rejected, "exit_code": 1}
+
     # Misformatted tool call detection: model put JSON inside ```python``` (or
     # similar) without naming the tool. Common with MiniMax-style outputs.
     # Return a helpful error so the model retries with the correct format.

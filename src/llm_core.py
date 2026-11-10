@@ -1646,6 +1646,8 @@ async def stream_llm(
     Yields SSE chunks:
       - data: {"delta": "text"}           — text content
       - data: {"type": "tool_calls", ...}  — accumulated native tool calls (before DONE)
+      - data: {"type": "finish", "reason": "length"} — the output was cut off
+        at the length limit (before DONE; a normal stop sends nothing)
       - event: error                       — errors
       - data: [DONE]                       — end of stream
     """
@@ -1929,6 +1931,8 @@ async def stream_llm(
     # Accumulate native tool_calls across streaming chunks
     _tc_acc: Dict[int, Dict] = {}  # index -> {id, name, arguments}
     _tc_last_idx = [-1]  # most-recently-touched slot, for providers that omit `index`
+    # Why the server stopped generating ("stop", "tool_calls", "length", ...).
+    _finish_reason = [""]
     # For thinking models: prepend <think> to first content delta so frontend
     # can detect thinking-in-progress (some models output </think> but no <think>)
     _thinking_model = _supports_thinking(model)
@@ -1944,6 +1948,17 @@ async def stream_llm(
             return None
         calls = [_tc_acc[i] for i in sorted(_tc_acc)]
         return f"data: {json.dumps({'type': 'tool_calls', 'calls': calls})}\n\n"
+
+    def _emit_cutoff():
+        """Tell the caller the output was cut off at the length limit.
+
+        Only that case is reported: a normal stop needs no event, and a cut-off
+        one looks exactly like it otherwise — the text or the last tool call
+        simply ends early.
+        """
+        if _finish_reason[0] != "length":
+            return None
+        return f"data: {json.dumps({'type': 'finish', 'reason': 'length'})}\n\n"
 
     def _format_routed_content(parts: List[Tuple[str, bool]]) -> List[str]:
         nonlocal _first_content_sent
@@ -1992,6 +2007,9 @@ async def stream_llm(
                         tc_event = _emit_tool_calls()
                         if tc_event:
                             yield tc_event
+                        cutoff_event = _emit_cutoff()
+                        if cutoff_event:
+                            yield cutoff_event
                         yield "data: [DONE]\n\n"
                         return
 
@@ -2006,6 +2024,10 @@ async def stream_llm(
                                     if (_choices and _choices[0] is not None)
                                     else None
                                 )
+                                if _choices and isinstance(_choices[0], dict):
+                                    _fr = _choices[0].get("finish_reason")
+                                    if _fr:
+                                        _finish_reason[0] = str(_fr)
                                 # Capture usage whenever the chunk carries it and
                                 # the delta has no actual output. Some gateways /
                                 # local servers attach usage to the FINAL delta,
@@ -2224,6 +2246,9 @@ async def stream_llm(
             tc_event = _emit_tool_calls()
             if tc_event:
                 yield tc_event
+            cutoff_event = _emit_cutoff()
+            if cutoff_event:
+                yield cutoff_event
             yield "data: [DONE]\n\n"
 
     except (httpx.ConnectError, httpx.ConnectTimeout) as e:

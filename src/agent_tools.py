@@ -104,6 +104,22 @@ TOOL_TAGS = {
 
 ToolBlock = namedtuple("ToolBlock", ["tool_type", "content"])
 
+
+class RejectedToolCall(ToolBlock):
+    """A tool call that is answered with an error instead of being run.
+
+    The model called a tool that does not exist, or sent arguments that cannot
+    be used. Such a call still needs a result: without one the model never
+    learns what went wrong, and in the native protocol every later result of
+    the round would be attached to the wrong call. `error` is that result.
+    """
+
+    def __new__(cls, tool_type: str, content: str, error: str):
+        self = super().__new__(cls, tool_type, content)
+        self.error = error
+        return self
+
+
 # ---------------------------------------------------------------------------
 # MCP Manager (kept here — used by execution and agent_loop)
 # ---------------------------------------------------------------------------
@@ -179,4 +195,5 @@ from src.tool_parsing import (  # noqa: E402, F401
 from src.tool_schemas import (  # noqa: E402, F401
     FUNCTION_TOOL_SCHEMAS,
     function_call_to_tool_block,
+    native_call_to_tool_block,
 )
