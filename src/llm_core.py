@@ -3,6 +3,7 @@ import asyncio
 import hashlib
 import json
 import logging
+import random
 import re
 import threading
 import time
@@ -2287,16 +2288,81 @@ def _summarize_stream_error(err_chunk: Optional[str]) -> str:
     return "primary model failed"
 
 
-async def stream_llm_with_fallback(candidates, messages, **kwargs):
-    """Wrap stream_llm with an ordered fallback chain.
+# Statuses of a failure that is worth sending the same request again for: the
+# server was busy or briefly gone, not unwilling. A 4xx about the request
+# itself (bad key, unknown model, prompt too long) fails the same way again.
+_RETRYABLE_STATUSES = frozenset({408, 429, 500, 502, 503, 504, 529})
+_RETRY_FIRST_DELAY = 0.5
+_RETRY_MAX_DELAY = 10.0
+# A read timeout already cost the whole inactivity timeout. One more try is
+# reasonable, since the prefill of the first attempt may have been cached.
+_RETRY_AFTER_TIMEOUT = 1
 
-    `candidates` is a list of (url, model, headers). Each is tried in order,
-    but only retried on a *pre-content* failure — i.e. an ``event: error``
-    that arrives before any assistant text / tool-call data has been yielded.
-    Once a candidate has emitted real output we never switch (that would
-    duplicate streamed tokens); a later error from that candidate passes
-    through unchanged. The dead-host cooldown in stream_llm makes repeat
-    attempts at an offline primary effectively instant.
+
+def _stream_retry_limit() -> int:
+    """How often one model call is sent again after it failed before its first
+    output or came back empty (setting `llm_stream_retries`, 0 = never)."""
+    try:
+        from src.settings import get_setting
+
+        return max(0, min(int(get_setting("llm_stream_retries", 5) or 0), 10))
+    except Exception:
+        return 5
+
+
+def _stream_error_info(err_chunk: Optional[str]) -> Dict[str, Any]:
+    """The JSON payload of an `event: error` SSE chunk ({} if unreadable)."""
+    for line in (err_chunk or "").split("\n"):
+        if line.startswith("data:"):
+            try:
+                info = json.loads(line[5:].strip())
+            except Exception:
+                return {}
+            return info if isinstance(info, dict) else {}
+    return {}
+
+
+def _retry_delay(attempt: int) -> float:
+    """Wait before retry number `attempt` (1-based): doubling from half a
+    second, capped, with a little jitter so parallel turns don't line up."""
+    delay = min(_RETRY_FIRST_DELAY * (2 ** (attempt - 1)), _RETRY_MAX_DELAY)
+    return delay * random.uniform(0.9, 1.1)
+
+
+def _is_model_output(chunk: str) -> bool:
+    """Whether a data chunk carries something the model wrote: text, thinking
+    or a tool call. Usage and finish notes do not count."""
+    try:
+        data = json.loads(chunk[6:])
+    except Exception:
+        return True  # not ours to judge; never hold back an unknown chunk
+    if not isinstance(data, dict):
+        return True
+    if "delta" in data:
+        return bool(data["delta"])
+    return data.get("type") in ("tool_calls", "tool_call_delta")
+
+
+async def stream_llm_with_fallback(candidates, messages, **kwargs):
+    """Wrap stream_llm with retries and an ordered fallback chain.
+
+    `candidates` is a list of (url, model, headers). Each is tried in order.
+    Nothing is repeated once a candidate has emitted real output (that would
+    duplicate streamed tokens); a later error from it passes through unchanged.
+    Before that point:
+
+    - a busy or briefly unreachable server (see _RETRYABLE_STATUSES) gets the
+      same request again, with a growing pause, up to `llm_stream_retries`
+      times;
+    - so does a response that ends normally with nothing in it — no text, no
+      thinking, no tool call. It is a server-side hiccup far more often than a
+      model that means to say nothing, and repeating it costs nothing durable;
+    - when the retries are used up, or the error is not a transient one, the
+      next candidate is tried.
+
+    Each retry is announced with `data: {"type": "retry", ...}`. Usage and
+    finish notes of a discarded attempt are not passed on, so a caller never
+    counts tokens for an attempt it did not see.
 
     Yields the same SSE chunk protocol as stream_llm.
     """
@@ -2305,53 +2371,105 @@ async def stream_llm_with_fallback(candidates, messages, **kwargs):
         yield f"event: error\ndata: {json.dumps({'error': 'No model endpoint configured', 'status': 503})}\n\n"
         return
 
+    retry_limit = _stream_retry_limit()
     primary_model = cands[0][1]
     last_error = None
     for i, (url, model, headers) in enumerate(cands):
         is_last = i == len(cands) - 1
-        emitted = False
-        retried = False
-        async for chunk in stream_llm(url, model, messages, headers=headers, **kwargs):
-            if chunk.startswith("event: error"):
-                if not emitted and not is_last:
-                    # Pre-content failure with fallbacks left — swallow and
-                    # move to the next candidate.
-                    last_error = chunk
-                    retried = True
-                    if i == 0:
-                        logger.warning(
-                            f"[fallback] primary {model} failed before output; trying fallback"
+        attempt = 0  # retries used on this candidate
+        timeouts = 0
+        while True:
+            emitted = False
+            failed = None  # the pre-output error chunk, if any
+            held: List[str] = []  # usage / finish notes, kept until output shows
+            cut_off = False
+            async for chunk in stream_llm(url, model, messages, headers=headers, **kwargs):
+                if chunk.startswith("event: error"):
+                    if not emitted:
+                        failed = chunk
+                        break
+                    yield chunk
+                    continue
+                if chunk.startswith("data: [DONE]"):
+                    continue  # sent below, once it is clear the attempt counts
+                if not emitted and chunk.startswith("data: "):
+                    if not _is_model_output(chunk):
+                        held.append(chunk)
+                        cut_off = cut_off or '"finish"' in chunk
+                        continue
+                    # First real output from a NON-primary candidate: tell the
+                    # client the selected model failed and another answered.
+                    # Without this the fallback is invisible — a misconfigured
+                    # provider looks like it works because the reply is shown
+                    # under the originally selected model's name.
+                    if i > 0:
+                        yield (
+                            "data: "
+                            + json.dumps(
+                                {
+                                    "type": "fallback",
+                                    "selected_model": primary_model,
+                                    "answered_by": model,
+                                    "reason": _summarize_stream_error(last_error),
+                                }
+                            )
+                            + "\n\n"
                         )
-                    else:
-                        logger.warning(f"[fallback] candidate {model} failed; trying next")
-                    break
+                    emitted = True
+                    for kept in held:
+                        yield kept
+                    held = []
                 yield chunk
-                continue
-            # Any data chunk other than the terminal [DONE] means real output.
-            if chunk.startswith("data: ") and not chunk.startswith("data: [DONE]"):
-                # First real output from a NON-primary candidate: tell the client
-                # the selected model failed and another answered. Without this the
-                # fallback is invisible — a misconfigured provider looks like it
-                # works because the reply is shown under the originally selected
-                # model's name (e.g. a Bedrock/Claude endpoint that 400s every
-                # request but appears fine because another model silently answered).
-                if not emitted and i > 0:
-                    yield (
-                        "data: "
-                        + json.dumps(
-                            {
-                                "type": "fallback",
-                                "selected_model": primary_model,
-                                "answered_by": model,
-                                "reason": _summarize_stream_error(last_error),
-                            }
-                        )
-                        + "\n\n"
+
+            if emitted:
+                yield "data: [DONE]\n\n"
+                return
+
+            if failed is None:
+                # The stream ended without an error and without any output. A
+                # stop at the length limit is not a hiccup: the same request
+                # would be cut off the same way.
+                reason = "empty response"
+                retryable = not cut_off
+            else:
+                info = _stream_error_info(failed)
+                status = info.get("status")
+                reason = _summarize_stream_error(failed)
+                retryable = status in _RETRYABLE_STATUSES
+                if info.get("error") == "Read timeout":
+                    timeouts += 1
+                    retryable = timeouts <= _RETRY_AFTER_TIMEOUT
+
+            if retryable and attempt < retry_limit:
+                attempt += 1
+                delay = _retry_delay(attempt)
+                logger.warning(
+                    f"[retry] {model}: {reason}; attempt {attempt}/{retry_limit} in {delay:.1f}s"
+                )
+                yield (
+                    "data: "
+                    + json.dumps(
+                        {"type": "retry", "attempt": attempt, "of": retry_limit, "reason": reason}
                     )
-                emitted = True
-            yield chunk
-        if not retried:
-            return  # candidate finished (success, or terminal error already sent)
-    # Every candidate failed pre-content — surface the last error.
-    if last_error:
-        yield last_error
+                    + "\n\n"
+                )
+                await asyncio.sleep(delay)
+                continue
+
+            if failed is None:
+                # Still empty after every retry: hand over what there is. The
+                # caller decides what an empty round means.
+                for kept in held:
+                    yield kept
+                yield "data: [DONE]\n\n"
+                return
+            if is_last:
+                yield failed
+                return
+            # Pre-content failure with fallbacks left — move to the next one.
+            last_error = failed
+            if i == 0:
+                logger.warning(f"[fallback] primary {model} failed before output; trying fallback")
+            else:
+                logger.warning(f"[fallback] candidate {model} failed; trying next")
+            break

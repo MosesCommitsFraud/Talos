@@ -135,6 +135,10 @@ DEFAULT_SETTINGS = {
     # `compute_input_token_budget` in src/context_budget.py.
     "agent_input_token_hard_max": 200_000,
     "agent_stream_timeout_seconds": 300,
+    # How often one model call is sent again when the server was busy or
+    # briefly gone before it produced anything, or answered with nothing at
+    # all. The pause doubles from half a second to ten seconds. 0 = never.
+    "llm_stream_retries": 5,
     # Replay past turns' tool calls and outputs into the prompt, so the model
     # can see what it already did instead of only its own final prose. The data
     # is already persisted in the assistant message's metadata.tool_events; these

@@ -605,6 +605,7 @@ def setup_auth_routes(auth_manager: AuthManager) -> APIRouter:
             "subagent_max_rounds": (2, 40),
             "deep_research_subagent_max_rounds": (2, 60),
             "subagent_max_runtime_s": (60, 3600),
+            "llm_stream_retries": (0, 10),  # 0 = never retry a model call
             # Outward MCP defaults; the hard caps live in src/web_search.py.
             "mcp_web_max_results": (1, 20),
             "mcp_web_max_fetch_chars": (500, 20000),

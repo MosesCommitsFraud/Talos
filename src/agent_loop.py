@@ -3131,6 +3131,11 @@ async def stream_agent_loop(
                         )
                     elif data.get("type") == "finish":
                         _round_truncated = data.get("reason") == "length"
+                    elif data.get("type") == "retry":
+                        # The same request was sent again (busy server, empty
+                        # response). Nothing reached the model's context, so
+                        # this only shows up in the round's profile.
+                        _rp["retries"] = int(data.get("attempt") or 0)
                     elif data.get("type") == "usage":
                         u = data.get("data", {})
                         round_input = u.get("input_tokens", 0)
