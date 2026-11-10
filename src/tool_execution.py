@@ -1649,6 +1649,133 @@ async def _direct_fallback(
 # ---------------------------------------------------------------------------
 
 
+def _script_view(result: Dict) -> Tuple[bool, str, Any]:
+    """A tool result as a tool script sees it: (ok, text, structured data).
+
+    The text is what the tool said, without the markdown frame the model gets
+    around it. The data is the tool's `data` field, or the rows of a result
+    table as a list of {column: value} dicts.
+    """
+    ok = result.get("exit_code") in (0, None) and not result.get("error")
+    if not ok:
+        return False, str(result.get("error") or result.get("output") or "The call failed."), None
+    text = next(
+        (str(result[k]) for k in ("output", "results", "content", "response") if result.get(k)),
+        "",
+    )
+    data = result.get("data")
+    table = (
+        (result.get("widget") or {}).get("data") if isinstance(result.get("widget"), dict) else None
+    )
+    if data is None and isinstance(table, dict) and isinstance(table.get("rows"), list):
+        columns = [str(c) for c in table.get("columns") or []]
+        data = [dict(zip(columns, row)) for row in table["rows"] if isinstance(row, list)]
+    return True, text, data
+
+
+async def _run_tool_script(
+    content: str,
+    *,
+    session_id: Optional[str],
+    disabled_tools: Optional[set],
+    owner: Optional[str],
+    public_tool_exceptions: Optional[set],
+    workspace: Optional[str],
+) -> Tuple[str, Dict]:
+    """`run_tool_script`: a Python script that calls tools itself (see
+    src/tool_script.py). The script runs where the `python` tool runs; each of
+    its tool calls goes through execute_tool_block like any other call, so the
+    same switches and privileges apply."""
+    from src import tool_script
+    from src.tool_schemas import native_call_to_tool_block
+
+    try:
+        args = json.loads(content) if (content or "").strip().startswith("{") else {}
+    except (json.JSONDecodeError, TypeError):
+        args = {}
+    code = str(args.get("code") or "") if isinstance(args, dict) else ""
+    label = str(args.get("description") or "").strip()[:80] if isinstance(args, dict) else ""
+    desc = f"run_tool_script: {label}" if label else "run_tool_script"
+    allowed = [n for n in tool_script.SCRIPT_TOOLS if n not in (disabled_tools or set())]
+
+    from src.sandbox_client import exec_in_sandbox, file_tool_in_sandbox, sandbox_enabled
+
+    sandboxed = sandbox_enabled()
+    if sandboxed and not session_id:
+        return desc, {"error": "run_tool_script: requires a chat workspace.", "exit_code": 1}
+    local_dir = workspace or _AGENT_WORKDIR
+
+    async def run_python(source: str) -> Tuple[str, str, int]:
+        if sandboxed:
+            data = await exec_in_sandbox(
+                owner=owner, session_id=session_id, kind="python", code=source, timeout=0
+            )
+            return (
+                str(data.get("stdout") or ""),
+                str(data.get("stderr") or ""),
+                int(data.get("exit_code") or 0),
+            )
+        # No sandbox (development): the same local interpreter the `python`
+        # tool falls back to.
+        proc = await asyncio.create_subprocess_exec(
+            (sys.executable or "python"),
+            "-I",
+            "-c",
+            source,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            cwd=local_dir,
+        )
+        out, err = await proc.communicate()
+        return out.decode("utf-8", "replace"), err.decode("utf-8", "replace"), proc.returncode or 0
+
+    async def write_file(path: str, text: str) -> None:
+        if sandboxed:
+            written = await file_tool_in_sandbox(
+                owner=owner,
+                session_id=session_id,
+                operation="write",
+                payload={"path": path, "content": text},
+            )
+            if written.get("exit_code") not in (0, None):
+                raise RuntimeError(written.get("error") or "write failed")
+            return
+        target = os.path.join(local_dir, path)
+        os.makedirs(os.path.dirname(target), exist_ok=True)
+        with open(target, "w", encoding="utf-8") as fh:
+            fh.write(text)
+
+    async def call_tool(name: str, call_args: Dict[str, Any]) -> Tuple[bool, str, Any]:
+        block = native_call_to_tool_block(name, json.dumps(call_args, default=str))
+        _desc, result = await execute_tool_block(
+            block,
+            session_id=session_id,
+            disabled_tools=disabled_tools,
+            owner=owner,
+            public_tool_exceptions=public_tool_exceptions,
+            workspace=workspace,
+        )
+        return _script_view(result)
+
+    try:
+        result = await tool_script.run_script(
+            code,
+            allowed=allowed,
+            run_python=run_python,
+            write_file=write_file,
+            call_tool=call_tool,
+            max_calls=tool_script.max_calls_setting(),
+        )
+    except Exception as exc:
+        logger.warning("run_tool_script failed: %s", exc)
+        return desc, {"error": f"run_tool_script: {exc}", "exit_code": 1}
+    if result.get("output"):
+        result["output"] = await shorten_output_to_workspace(
+            result["output"], "run_tool_script", owner, session_id if sandboxed else None
+        )
+    return desc, result
+
+
 async def execute_tool_block(
     block: Any,
     session_id: Optional[str] = None,
@@ -1887,6 +2014,16 @@ async def execute_tool_block(
         }
         logger.info("Tool executed: %s", desc)
         return desc, result
+
+    if tool == "run_tool_script":
+        return await _run_tool_script(
+            content,
+            session_id=session_id,
+            disabled_tools=disabled_tools,
+            owner=owner,
+            public_tool_exceptions=public_tool_exceptions,
+            workspace=workspace,
+        )
 
     if tool == "update_goal":
         # The model ends the chat's goal: complete with evidence, or blocked

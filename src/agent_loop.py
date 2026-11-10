@@ -424,6 +424,7 @@ Ask the user a multiple-choice question when the task is genuinely ambiguous and
 **Offering a choice IS this tool.** The moment you decide to put a question to the user, it goes in an `ask_user` call — never written out in your prose. Ending a reply with "Was möchten Sie tun?" followed by a list, a row of bracketed choices like `[Option A · Option B · Option C]`, a numbered menu, or "sag mir welches" is the failure this rule exists to prevent: it LOOKS like buttons and does nothing. The user cannot click a sentence, so they have to retype an option you already knew — and you spent a turn to make them do it.
 So: either commit to a sensible default and carry on, or call `ask_user`. Those are the only two endings. Never a menu in text.""",
     "present_files": '- ```present_files``` — Hand the finished deliverable to the user as a card under your answer (preview + download). Args (JSON): {"files": ["output/report.xlsx"]}. Call once at the end with ONLY the file(s) the user asked for — never build scripts, intermediate data or helper files. Workspace path, or `document:<id>` / `generated-image:<id>`.',
+    "run_tool_script": '- ```run_tool_script``` — A Python script that calls your tools itself, for tasks that take many tool calls whose results you need not read one by one. Args (JSON): {"description": "what it does", "code": "..."}. In the code, tools.<name>(...) calls a tool with keyword arguments and returns its answer as text (`.data` has rows/objects when there are any); a failed call raises ToolError; tools.parallel([(name, {args}), ...]) makes independent calls at once. Callable: query_sql, search_knowledge, read_knowledge, grep_knowledge, list_knowledge, web_search, web_fetch, search_chats. Only what the script prints comes back. It is run again from the top after each tool call (earlier calls answered from memory), so write files after the last tool call.',
     "update_goal": '- ```update_goal``` — Report on the goal from the latest <goal_round> message. Args (JSON): {"action": "complete", "evidence": "what you checked that shows the WHOLE objective is achieved"} or {"action": "blocked", "blocked_reason": "the obstacle, what you tried, what you need from the user"}. Do not call it while work remains: end the round saying what you did and what comes next, and another round follows on its own.',
     "update_plan": '- ```update_plan``` — A live progress checklist the user sees under your reply. Your call, like `ask_user`: worth it when the request takes several distinct steps of real work (roughly three or more), noise for a question or anything one or two tool calls settle. Open with it in the same round as your first tool call, then tick each step off with `- [x]` as soon as it is done, together with the next step\'s tool calls — never in a batch at the end. Steps are short imperative phrases in the user\'s language. Args (JSON): {"plan": "- [x] done step\\n- [ ] next step"}. Always pass the COMPLETE checklist, not a diff.',
 }
@@ -2448,6 +2449,15 @@ async def stream_agent_loop(
     # tool that is listed reads as an invitation, and without a goal there is
     # nothing for it to report on. Subagents never own the chat's goal.
     from src import goals as _goals
+
+    # Tool scripts are opt-in (setting tool_scripts_enabled) and belong to the
+    # main agent; a subagent's tool set is its own short list.
+    from src import tool_script as _tool_script
+
+    if subagent or not _tool_script.enabled():
+        disabled_tools.add(_tool_script.TOOL_NAME)
+        if _relevant_tools is not None:
+            _relevant_tools.discard(_tool_script.TOOL_NAME)
 
     if subagent or not _goals.is_active(session_id or ""):
         disabled_tools.add("update_goal")

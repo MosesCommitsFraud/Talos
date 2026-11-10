@@ -599,6 +599,7 @@ def setup_auth_routes(auth_manager: AuthManager) -> APIRouter:
         _INT_RANGES = {
             "agent_max_rounds": (0, 1000),  # 0 = no cap (default)
             "goal_max_rounds": (0, 10000),  # rounds per goal; 0 = no limit
+            "tool_script_max_calls": (1, 500),  # tool calls per run_tool_script
             "agent_max_rounds_db": (1, 1000),  # DB-mode round ceiling (huge schemas)
             "agent_max_tool_calls": (0, 1000),  # 0 = unlimited
             "agent_tool_parallelism": (1, 8),  # 1 = sequential

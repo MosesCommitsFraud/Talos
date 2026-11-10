@@ -53,6 +53,9 @@ TOOL_TAGS = {
     # Report a goal complete or blocked (see src/goals.py). Only offered in a
     # chat that has a running goal.
     "update_goal",
+    # A script that calls tools itself (see src/tool_script.py). Only offered
+    # when the setting tool_scripts_enabled is on.
+    "run_tool_script",
     "present_files",
     "api_call",
     "manage_skills",

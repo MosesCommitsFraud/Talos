@@ -126,6 +126,14 @@ DEFAULT_SETTINGS = {
     # (repeated calls, lookups that find nothing new, empty rounds), not a
     # count. Set a number (1..1000) to cap it anyway.
     "agent_max_rounds": 0,
+    # Offer the model `run_tool_script`: a Python script that calls tools itself
+    # (database, web, knowledge) in a loop and prints only its conclusion, so
+    # many lookups cost one step and their raw results stay out of the context
+    # (src/tool_script.py). Off by default: it is one more tool in every prompt,
+    # so try it on your own tasks first.
+    "tool_scripts_enabled": False,
+    # Tool calls one script may make before it is stopped (endless-loop guard).
+    "tool_script_max_calls": 50,
     # How many rounds a goal may take before it stops and asks the user
     # (/goal, src/goals.py). A round is one whole turn, however many steps it
     # has. Resuming at the limit grants the same number again. 0 = no limit.

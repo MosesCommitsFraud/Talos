@@ -45,6 +45,9 @@ ALWAYS_AVAILABLE = frozenset(
         # Ends a goal (src/goals.py). Switched off by the agent loop unless the
         # chat has a running goal, so it is never offered without one.
         "update_goal",
+        # A script that calls tools itself (src/tool_script.py). Switched off by
+        # the agent loop unless tool_scripts_enabled is on.
+        "run_tool_script",
         # Marks the turn's deliverable for the UI. Whether a turn produced one
         # is only known at its end, so retrieval can't pick it from the request.
         "present_files",
@@ -119,6 +122,7 @@ BUILTIN_TOOL_DESCRIPTIONS: Dict[str, str] = {
     "update_document": "Replace the entire active document content. ONLY for full rewrites (>50% changed). Do not use for small edits — use edit_document instead.",
     "suggest_document": "Suggest changes to the active document with explanations. For code review, proofreading, feedback requests.",
     "generate_image": "Generate an AI image from a text prompt. Specify model, size, and quality. Art, illustrations, photos.",
+    "run_tool_script": "Run a Python script that calls tools itself (database, web, knowledge) in a loop and prints only its conclusion. For tasks that take many tool calls whose results need not be read one by one.",
     "update_goal": "Report the chat's goal complete (with evidence) or blocked (with the obstacle). Only when a <goal_round> message set a goal; not while work remains.",
     "update_plan": "Show the user a live progress checklist for multi-step work (roughly three or more distinct steps). Open with it alongside the first tool call, then mark each step - [x] as soon as it is done. Not for questions or tasks one or two tool calls settle.",
     "present_files": "Show the finished deliverable file(s) of this turn to the user as cards under the answer (preview + download). Only the files the user asked for — not build scripts, data dumps or helper files.",

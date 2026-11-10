@@ -13,6 +13,7 @@ import json
 import logging
 from typing import Dict, Iterable, List, Optional
 
+from src import tool_script
 from src.agent_tools import TOOL_TAGS, RejectedToolCall, ToolBlock
 from src.tool_parsing import _TOOL_NAME_MAP
 
@@ -1400,6 +1401,27 @@ FUNCTION_TOOL_SCHEMAS = [
                     }
                 },
                 "required": ["plan"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": tool_script.TOOL_NAME,
+            "description": tool_script.tool_description(tool_script.SCRIPT_TOOLS),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "description": {
+                        "type": "string",
+                        "description": "What the script does, in a few words. Write this before `code`.",
+                    },
+                    "code": {
+                        "type": "string",
+                        "description": "The Python script. Call tools as tools.<name>(...); print what you need to know.",
+                    },
+                },
+                "required": ["code"],
             },
         },
     },
