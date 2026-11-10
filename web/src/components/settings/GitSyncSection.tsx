@@ -1,9 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ArrowRightIcon, PlusIcon, RefreshCwIcon, Trash2Icon } from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
+import { ArrowRightIcon, ChevronRightIcon, PlusIcon, RefreshCwIcon, Trash2Icon } from 'lucide-react';
+import { Fragment, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   GIT_DEFAULT_DB_TARGET,
+  GIT_NONE_TARGET,
   GIT_SKILLS_TARGET,
   fetchGitFolders,
   fetchGitSync,
@@ -90,6 +91,9 @@ function RepoStatus({ repo, live, dirty }: { repo: GitRepoConfig; live?: GitSync
 }
 
 const sameFolder = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
+const parentOf = (folder: string) => folder.slice(0, Math.max(0, folder.lastIndexOf('/')));
+/** More subfolders than this are folded away until asked for. */
+const SUBFOLDERS_SHOWN = 6;
 const probeKey = (r: GitRepoConfig) => `${r.url.trim()}\n${r.branch.trim()}\n${r.token}`;
 
 interface FolderProbe {
@@ -145,12 +149,23 @@ function FolderMappings({
   onChange: (mappings: GitRepoConfig['mappings']) => void;
 }) {
   const { t } = useTranslation();
+  const [unfolded, setUnfolded] = useState<Record<string, boolean>>({});
   const known = probe.state === 'done';
   const inRepo = (folder: string) => probe.folders.find((f) => sameFolder(f, folder));
-  // Top-level folders nothing points at yet: offered, and not synced until given a target.
-  const unmapped = known
-    ? probe.folders.filter((f) => !f.includes('/') && !repo.mappings.some((m) => sameFolder(m.folder, f)))
+  const isMapped = (folder: string) => repo.mappings.some((m) => sameFolder(m.folder, folder));
+  const wholeRepo = isMapped('');
+  // Folders nothing points at yet. At the top they are not synced until given a target;
+  // inside a synced folder they go where that one goes until told otherwise.
+  const unmapped = known && !wholeRepo
+    ? probe.folders.filter((f) => !f.includes('/') && !isMapped(f))
     : [];
+  const subfolders = (m: number) => {
+    const { folder, base } = repo.mappings[m];
+    const first = repo.mappings.findIndex((x) => sameFolder(x.folder, folder)) === m;
+    if (!known || !first || base === GIT_NONE_TARGET || base === GIT_SKILLS_TARGET) return [];
+    return probe.folders.filter((f) => sameFolder(parentOf(f), folder) && !isMapped(f));
+  };
+  const withNone = [...targets, { value: GIT_NONE_TARGET, label: t('settings.mcp.git.notSynced') }];
 
   const folderOptions = (current: string) => [
     { value: '', label: t('settings.mcp.git.wholeRepo') },
@@ -181,8 +196,11 @@ function FolderMappings({
         {repo.mappings.map((mapping, m) => {
           const setMapping = (change: Partial<typeof mapping>) =>
             onChange(repo.mappings.map((x, j) => (j === m ? { ...x, ...change } : x)));
+          const below = subfolders(m);
+          const folded = below.length > SUBFOLDERS_SHOWN && !unfolded[mapping.folder.toLowerCase()];
           return (
-            <div key={m} className="flex items-center gap-2">
+            <Fragment key={m}>
+            <div className="flex items-center gap-2">
               {known ? (
                 <Select
                   className="w-44"
@@ -200,7 +218,7 @@ function FolderMappings({
                 />
               )}
               <ArrowRightIcon className="size-3.5 shrink-0 text-muted-foreground" />
-              <Select className="w-72" value={mapping.base} onChange={(base) => setMapping({ base })} options={targets} />
+              <Select className="w-72" value={mapping.base} onChange={(base) => setMapping({ base })} options={withNone} />
               <Button
                 size="sm"
                 variant="ghost"
@@ -210,6 +228,46 @@ function FolderMappings({
                 <Trash2Icon className="size-3.5" />
               </Button>
             </div>
+            {folded && (
+              <Button
+                size="sm"
+                variant="ghost"
+                className="mr-9 text-muted-foreground"
+                onClick={() => setUnfolded((u) => ({ ...u, [mapping.folder.toLowerCase()]: true }))}
+              >
+                <ChevronRightIcon className="size-3.5" />
+                {t('settings.mcp.git.showSubfolders', { count: below.length })}
+              </Button>
+            )}
+            {!folded && below.map((folder) => (
+              <div key={folder} className="flex items-center gap-2">
+                <div className="w-44 truncate pl-7 pr-3 text-sm text-muted-foreground" title={folder}>
+                  {folder.slice(folder.lastIndexOf('/') + 1)}
+                </div>
+                <ArrowRightIcon className="size-3.5 shrink-0 text-muted-foreground" />
+                <Select
+                  className="w-72"
+                  value=""
+                  onChange={(base) => {
+                    // Right below its parent, where it was picked.
+                    if (base) onChange([...repo.mappings.slice(0, m + 1), { folder, base }, ...repo.mappings.slice(m + 1)]);
+                  }}
+                  options={[
+                    {
+                      value: '',
+                      label: t('settings.mcp.git.sameAsParent', {
+                        folder: mapping.folder ? inRepo(mapping.folder) ?? mapping.folder : t('settings.mcp.git.wholeRepo'),
+                      }),
+                    },
+                    // Leaving it out is what one comes here for, so right at the top.
+                    { value: GIT_NONE_TARGET, label: t('settings.mcp.git.notSynced') },
+                    ...targets,
+                  ]}
+                />
+                <div className="w-9 shrink-0" />
+              </div>
+            ))}
+            </Fragment>
           );
         })}
         {unmapped.map((folder) => (

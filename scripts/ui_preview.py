@@ -2206,9 +2206,27 @@ _PROJECT_ROWS = [
             },
         ],
         "files": [
-            {"path": "output/startseite.md", "name": "startseite.md", "size": 2048, "mime": "text/markdown", "mtime": 1762300000},
-            {"path": "output/entwuerfe/hero.txt", "name": "hero.txt", "size": 240, "mime": "text/plain", "mtime": 1762290000},
-            {"path": "sitemap.csv", "name": "sitemap.csv", "size": 512, "mime": "text/csv", "mtime": 1762280000},
+            {
+                "path": "output/startseite.md",
+                "name": "startseite.md",
+                "size": 2048,
+                "mime": "text/markdown",
+                "mtime": 1762300000,
+            },
+            {
+                "path": "output/entwuerfe/hero.txt",
+                "name": "hero.txt",
+                "size": 240,
+                "mime": "text/plain",
+                "mtime": 1762290000,
+            },
+            {
+                "path": "sitemap.csv",
+                "name": "sitemap.csv",
+                "size": 512,
+                "mime": "text/csv",
+                "mtime": 1762280000,
+            },
         ],
         "dirs": ["output", "output/entwuerfe", "recherche"],
         "memories": [
@@ -2297,7 +2315,8 @@ def _project_api(method: str, path: str, data: dict):
             if pid == row["id"]
         ]
         foreign = [
-            {**c, "message_count": 4, "last_message_at": "2026-11-04T12:00:00"} for c in row["chats"]
+            {**c, "message_count": 4, "last_message_at": "2026-11-04T12:00:00"}
+            for c in row["chats"]
         ]
         return 200, {"chats": own + foreign}
     if section == "members":
@@ -2311,7 +2330,9 @@ def _project_api(method: str, path: str, data: dict):
             {"username": row["owner"], "is_creator": True},
             *({"username": m, "is_creator": False} for m in row["members"]),
         ]
-        return 200, {"members": [{**m, "display_name": _USER_NAMES.get(m["username"])} for m in everyone]}
+        return 200, {
+            "members": [{**m, "display_name": _USER_NAMES.get(m["username"])} for m in everyone]
+        }
     if section == "candidates":
         taken = {row["owner"], *row["members"]}
         return 200, {
@@ -2322,7 +2343,13 @@ def _project_api(method: str, path: str, data: dict):
     if section == "files":
         if method == "POST":
             row["files"].append(
-                {"path": "hochgeladen.txt", "name": "hochgeladen.txt", "size": 10, "mime": "text/plain", "mtime": 1762310000}
+                {
+                    "path": "hochgeladen.txt",
+                    "name": "hochgeladen.txt",
+                    "size": 10,
+                    "mime": "text/plain",
+                    "mtime": 1762310000,
+                }
             )
             return 200, {"ok": True, "path": "hochgeladen.txt"}
         ref = f"project:{row['id']}"
@@ -3497,7 +3524,19 @@ class PreviewHandler(BaseHTTPRequestHandler):
             if "private" in body.get("url", "") and not body.get("token"):
                 self._send_json({"detail": "The repository requires a login."}, 400)
                 return
-            self._send_json({"folders": ["Knowledge", "Skills", "SQL", "SQL/Views", "Vorlagen"]})
+            self._send_json(
+                {
+                    "folders": [
+                        "Knowledge",
+                        "Knowledge/Intern",
+                        "Knowledge/Produkt",
+                        "Skills",
+                        "SQL",
+                        "SQL/Views",
+                        "Vorlagen",
+                    ]
+                }
+            )
             return
         if path.startswith("/api/rag/git-sync/"):
             repo_id = path[len("/api/rag/git-sync/") :]

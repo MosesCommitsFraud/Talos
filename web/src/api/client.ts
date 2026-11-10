@@ -1277,6 +1277,8 @@ export const deleteApiToken = (id: string) =>
 export const GIT_DEFAULT_DB_TARGET = '@default-db';
 /** Mapping target: the shared skill library; the folder holds skills, not documents. */
 export const GIT_SKILLS_TARGET = '@skills';
+/** Mapping target: leave the folder out, for one inside a synced folder. */
+export const GIT_NONE_TARGET = '@none';
 
 /** One entry of the `rag_git_repos` setting. `id` comes from the server on save. */
 export interface GitRepoConfig {
