@@ -273,3 +273,22 @@ async def test_a_length_stop_on_the_usage_chunk_is_still_seen(monkeypatch):
         ),
     )
     assert {"type": "finish", "reason": "length"} in events
+
+
+async def test_the_turns_metrics_count_what_the_loop_had_to_do(monkeypatch):
+    calls = [
+        {"id": "c1", "name": "no_such_tool", "arguments": "{}"},
+        {"id": "c2", "name": "bash", "arguments": '{"command": "echo c'},
+    ]
+    _scripted_model(monkeypatch, [[{"type": "tool_calls", "calls": calls}], [{"delta": "Fertig."}]])
+    chunks = await _run()
+
+    metrics = [e["data"] for e in _events(chunks) if e.get("type") == "metrics"][-1]
+    # Zero entries are left out, so a clean turn stores nothing.
+    assert metrics["loop"] == {"rejected_calls": 2}
+
+
+async def test_a_clean_turn_has_no_loop_statistics(monkeypatch):
+    _scripted_model(monkeypatch, [[{"delta": "Fertig."}]])
+    metrics = [e["data"] for e in _events(await _run()) if e.get("type") == "metrics"][-1]
+    assert "loop" not in metrics and "stop_reason" not in metrics

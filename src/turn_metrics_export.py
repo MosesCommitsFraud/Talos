@@ -103,6 +103,10 @@ def _new_turn(index: int, question: str, timestamp: Any) -> Dict[str, Any]:
             "writing_s": 0.0,
             "tools_s": 0.0,
             "tools": {},
+            # What the agent loop had to do to keep the turn on track
+            # (metadata.loop, see agent_loop.loop_stats) and why it ended.
+            "loop": {},
+            "stop_reason": "",
         },
     }
 
@@ -164,6 +168,13 @@ def _add_assistant(turn: Dict[str, Any], md: Dict[str, Any]) -> None:
     if isinstance(md.get("context_breakdown"), dict) and md["context_breakdown"]:
         d["context_breakdown"] = md["context_breakdown"]
     _add_timing(d, md)
+    for key, value in (md.get("loop") or {}).items() if isinstance(md.get("loop"), dict) else ():
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            d["loop"][key] = value  # a label, e.g. which guard forced the answer
+        else:
+            d["loop"][key] = d["loop"].get(key, 0) + value
+    if md.get("stop_reason"):
+        d["stop_reason"] = str(md["stop_reason"])
     events = [e for e in (md.get("tool_events") or []) if isinstance(e, dict)]
     rounds = [int(_num(e.get("round"))) for e in events if e.get("round") is not None]
     # Rounds count from 1; the closing answer is one more round after the last
@@ -214,6 +225,8 @@ def _detail(d: Dict[str, Any], output_tokens: int) -> Dict[str, Any]:
             for k in ("context_build", "prep", "wait", "thinking", "writing", "tools")
         },
         "tools": d["tools"],
+        "loop": d["loop"],
+        "stop_reason": d["stop_reason"],
     }
 
 
@@ -326,7 +339,23 @@ def _total_detail(details: List[Dict[str, Any]]) -> Dict[str, Any]:
         ),
         "time": {k: round(sum(d["time"][k] for d in details), 2) for k in details[0]["time"]},
         "tools": tools,
+        "loop": _sum_loop(d.get("loop") or {} for d in details),
+        # Stop reasons of the turns that did not end by the model finishing.
+        "stop_reason": ", ".join(d["stop_reason"] for d in details if d.get("stop_reason")),
     }
+
+
+def _sum_loop(parts: Iterable[Dict[str, Any]]) -> Dict[str, Any]:
+    """Loop statistics of several turns added up; labels are collected."""
+    total: Dict[str, Any] = {}
+    for part in parts:
+        for key, value in part.items():
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                seen = [v for v in str(total.get(key, "")).split(", ") if v]
+                total[key] = ", ".join(seen + [str(value)])
+            else:
+                total[key] = total.get(key, 0) + value
+    return total
 
 
 def to_csv(rows: List[Dict[str, Any]], excel_de: bool = True) -> str:

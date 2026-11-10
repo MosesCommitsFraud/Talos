@@ -106,7 +106,7 @@ _AGENT_RULES = """\
 ## Rules
 - Only use tools when needed. Don't search for things you already know.
 - These exact tags execute automatically. For showing code examples, use ```shell, ```sh, ```py, etc. instead.
-- Multiple tool blocks per response OK. 60s timeout per tool, 10K char output limit.
+- Multiple tool blocks per response OK. Commands have no time limit. Long command output is shortened to its start and its end; the note inside it says where the complete output is.
 - BATCH INDEPENDENT CALLS INTO ONE RESPONSE. Whenever the next calls do NOT depend on each other's output, emit them ALL in the same response instead of one per round — several web searches, several page fetches, a knowledge search alongside a SQL query, reading five files at once. Read-only calls issued together are executed AT THE SAME TIME, so a batch of five costs about what the slowest one costs; issued one per round they cost the sum, plus a full model round-trip each. Sequence calls one at a time only when you genuinely need the first result to form the second (e.g. `list_tables` before you can `describe` the right table, or a search before you know which URL to fetch). Default to batching; it is the single biggest thing you control that makes an answer arrive sooner.
 - Code/content >15 lines → ```create_document (NOT in chat). Short snippets OK in chat.
 - Editing an existing document: ALWAYS use ```edit_document with FIND/REPLACE blocks. Do NOT rewrite the whole document with ```update_document unless genuinely changing more than half of it.
@@ -2858,6 +2858,13 @@ async def stream_agent_loop(
     # happened (and offer to continue) instead of the turn just stopping, and
     # it is still there when the chat is opened again.
     _stop_reason = ""
+    # What the loop had to do to keep the turn on track, counted for the
+    # turn's metrics (see loop_stats below): calls answered with an error
+    # instead of being run, nudges after an empty round, and which guard, if
+    # any, forced the final answer.
+    _rejected_calls = 0
+    _empty_round_nudges = 0
+    _forced_answer_by = ""
     # Whether earlier steps keep their reasoning for the next request (setting
     # `reasoning_passback`; the request builder has the final say per endpoint).
     _keep_reasoning = bool(get_setting("reasoning_passback", False))
@@ -3701,6 +3708,7 @@ async def stream_agent_loop(
             if not _round_answer_text:
                 _empty_rounds += 1
                 if _empty_rounds <= _MAX_EMPTY_ROUNDS:
+                    _empty_round_nudges += 1
                     logger.warning(
                         "[agent] empty round %d (no text, no tool calls) — nudging",
                         round_num,
@@ -3963,6 +3971,7 @@ async def stream_agent_loop(
                 else ""
             )
             _force_answer = True
+            _forced_answer_by = "repeated_calls"
             messages.append(
                 {
                     "role": "system",
@@ -4190,6 +4199,8 @@ async def stream_agent_loop(
                 yield f"data: {json.dumps({'type': 'plan_update', 'data': result['plan_update']})}\n\n"
 
             _knowledge_progress.observe(block.tool_type, result)
+            if isinstance(block, RejectedToolCall):
+                _rejected_calls += 1
             _reminder = _repeat_guard.observe(block)
             if _reminder:
                 logger.info("[agent] round %d: repeat reminder for %s", round_num, block.tool_type)
@@ -4504,6 +4515,7 @@ async def stream_agent_loop(
         if _knowledge_progress.end_round() and not _force_answer:
             logger.warning(f"[agent] round {round_num}: knowledge lookups found nothing new")
             _force_answer = True
+            _forced_answer_by = "knowledge_lookups"
             messages.append({"role": "system", "content": STOP_SEARCHING_NOTE})
 
         # Tool output just landed in the message list — that's the single
@@ -4583,6 +4595,25 @@ async def stream_agent_loop(
         metrics["queued_messages"] = queued_messages
     if _stop_reason:
         metrics["stop_reason"] = _stop_reason
+    # How the loop itself behaved this turn. Saved with the message, so a
+    # change to a prompt, a guard or the model can be judged by what it does to
+    # these numbers instead of by reading logs. Zero entries are left out.
+    loop_stats = {
+        "rejected_calls": _rejected_calls,
+        "truncated_rounds": sum(1 for r in round_profile if r.get("truncated")),
+        "retries": sum(int(r.get("retries") or 0) for r in round_profile),
+        "repeat_reminders": _repeat_guard.reminders_sent,
+        "empty_round_nudges": _empty_round_nudges,
+        "intent_nudges": _intent_nudge_count,
+        "restate_nudges": int(bool(_final_restate_nudged)),
+        "verifier_rounds": _verifier_rounds,
+        "compactions": _mid_turn_compactions + int(_precompacted),
+        "overflow_recoveries": _overflow_recoveries,
+        "forced_answer_by": _forced_answer_by,
+    }
+    loop_stats = {k: v for k, v in loop_stats.items() if v}
+    if loop_stats:
+        metrics["loop"] = loop_stats
     if round_profile:
         if "_ended" in round_profile[-1]:
             round_profile[-1]["tools_s"] = round(time.time() - round_profile[-1].pop("_ended"), 2)

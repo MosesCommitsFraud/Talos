@@ -181,3 +181,41 @@ def test_detail_of_old_messages_keeps_output_unsplit():
     d = build_rows(messages, "c")[0]["detail"]
     assert d["unsplit_tokens"] == 200 and d["split_source"] == "none"
     assert d["time"]["wait"] == 1.0 and d["time"]["writing"] == 4.0
+
+
+def test_detail_carries_what_the_loop_had_to_do_and_why_a_turn_stopped():
+    messages = [
+        _user("Frage 1"),
+        _assistant(
+            response_time=5.0,
+            output_tokens=100,
+            loop={"rejected_calls": 2, "repeat_reminders": 1, "forced_answer_by": "repeated_calls"},
+        ),
+        _user("Frage 2"),
+        _assistant(
+            response_time=5.0,
+            output_tokens=100,
+            loop={"rejected_calls": 1, "compactions": 1},
+            stop_reason="output_truncated",
+        ),
+        _user("Frage 3"),
+        _assistant(response_time=1.0, output_tokens=10),
+    ]
+    first, second, third, total = build_rows(messages, "chat1")
+
+    assert first["detail"]["loop"] == {
+        "rejected_calls": 2,
+        "repeat_reminders": 1,
+        "forced_answer_by": "repeated_calls",
+    }
+    assert first["detail"]["stop_reason"] == ""
+    assert second["detail"]["stop_reason"] == "output_truncated"
+    assert third["detail"]["loop"] == {}
+    # The totals row adds the counts up and collects the labels.
+    assert total["detail"]["loop"] == {
+        "rejected_calls": 3,
+        "repeat_reminders": 1,
+        "forced_answer_by": "repeated_calls",
+        "compactions": 1,
+    }
+    assert total["detail"]["stop_reason"] == "output_truncated"
