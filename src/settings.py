@@ -135,6 +135,18 @@ DEFAULT_SETTINGS = {
     # `compute_input_token_budget` in src/context_budget.py.
     "agent_input_token_hard_max": 200_000,
     "agent_stream_timeout_seconds": 300,
+    # Give the model back what it thought in earlier steps. A thinking model
+    # writes its reasoning before each tool call; without this, every earlier
+    # step reaches it with an empty thinking block, so the plan it made is gone
+    # by the next step. On: the reasoning of every step is sent back with the
+    # conversation (and stored with the turn, so later turns replay it
+    # byte-identical and the prefix cache stays warm). The cost is context: the
+    # thinking of all earlier steps stays in the prompt. Applies to self-hosted
+    # OpenAI-compatible servers (vLLM), whose chat template has to render it —
+    # check with scripts/reasoning_passback_probe.py. Off by default: measure
+    # answer quality and context growth with your own evaluation before
+    # switching it on.
+    "reasoning_passback": False,
     # How often one model call is sent again when the server was busy or
     # briefly gone before it produced anything, or answered with nothing at
     # all. The pause doubles from half a second to ten seconds. 0 = never.

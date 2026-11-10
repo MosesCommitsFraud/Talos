@@ -869,8 +869,36 @@ def _as_content_blocks(content) -> List[Dict]:
     return []
 
 
-def _sanitize_llm_messages(messages: List[Dict]) -> List[Dict]:
+def _is_self_hosted(url: str) -> bool:
+    """Whether `url` is an OpenAI-compatible server we run ourselves (vLLM,
+    llama.cpp) rather than a hosted API with its own rules for message fields."""
+    try:
+        host = (urlparse(url).hostname or "").lower()
+    except Exception:
+        return False
+    return bool(host) and _provider_label(url) in ("local endpoint", host)
+
+
+def reasoning_passback_enabled(url: str, provider: str = "") -> bool:
+    """Whether earlier steps' reasoning is sent back to this endpoint (setting
+    `reasoning_passback`, self-hosted OpenAI-compatible servers only)."""
+    if provider in ("anthropic", "ollama") or not _is_self_hosted(url):
+        return False
+    try:
+        from src.settings import get_setting
+
+        return bool(get_setting("reasoning_passback", False))
+    except Exception:
+        return False
+
+
+def _sanitize_llm_messages(messages: List[Dict], keep_reasoning: bool = False) -> List[Dict]:
     """Strip Talos-only metadata before sending messages to providers.
+
+    `keep_reasoning` sends an assistant message's `reasoning_content` along.
+    It goes out under both names in use: vLLM's chat templates read
+    `reasoning` (current) or `reasoning_content` (older builds), and ignore
+    the other.
 
     Per the OpenAI chat format: user/system messages must have content; a tool
     message needs content + tool_call_id; an assistant message may carry content,
@@ -895,6 +923,10 @@ def _sanitize_llm_messages(messages: List[Dict]) -> List[Dict]:
             # `content: null`, not an omitted key.
             if "content" not in item and item.get("tool_calls"):
                 item["content"] = None
+            reasoning = msg.get("reasoning_content")
+            if keep_reasoning and isinstance(reasoning, str) and reasoning.strip():
+                item["reasoning"] = reasoning
+                item["reasoning_content"] = reasoning
             if "content" in item or item.get("tool_calls"):
                 cleaned.append(item)
         elif role == "tool":
@@ -1008,7 +1040,7 @@ def _sanitize_llm_messages(messages: List[Dict]) -> List[Dict]:
 SYSTEM_NOTICE_PREFIX = "[System notice]"
 
 
-def _consolidate_system_messages(messages: List[Dict]) -> List[Dict]:
+def _consolidate_system_messages(messages: List[Dict], keep_reasoning: bool = False) -> List[Dict]:
     """Fold system messages into the single leading system turn the chat
     templates require (Qwen3.5+ rejects a system message that isn't first).
 
@@ -1043,7 +1075,7 @@ def _consolidate_system_messages(messages: List[Dict]) -> List[Dict]:
     out = ([{"role": "system", "content": "\n\n".join(sys_parts)}] if sys_parts else []) + rest
     # A converted notice can land next to a user turn; re-run the sanitizer so
     # consecutive user messages are merged exactly as everywhere else.
-    return _sanitize_llm_messages(out)
+    return _sanitize_llm_messages(out, keep_reasoning=keep_reasoning)
 
 
 def _normalize_anthropic_url(url: str) -> str:
@@ -1691,10 +1723,13 @@ async def stream_llm(
       - data: [DONE]                       — end of stream
     """
     provider = _detect_provider(url)
-    messages_copy = _sanitize_llm_messages(messages)
+    # Earlier steps' reasoning goes back to the model only where a setting
+    # asks for it and the server's chat template can render it.
+    keep_reasoning = reasoning_passback_enabled(url, provider)
+    messages_copy = _sanitize_llm_messages(messages, keep_reasoning=keep_reasoning)
 
     # One leading system turn; later system notes stay in place (cache-safe).
-    messages_copy = _consolidate_system_messages(messages_copy)
+    messages_copy = _consolidate_system_messages(messages_copy, keep_reasoning=keep_reasoning)
 
     if provider == "anthropic":
         target_url = _normalize_anthropic_url(url)

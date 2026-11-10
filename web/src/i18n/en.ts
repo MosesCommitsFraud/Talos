@@ -1866,6 +1866,8 @@ const en = {
       subagents: 'Subagents',
       subagentsEnabled: 'Allow subagents',
       subagentsEnabledHint: 'The agent may hand independent research pieces to parallel helpers (read-only tools).',
+      reasoningPassback: 'Give the reasoning of earlier steps back to the model',
+      reasoningPassbackHint: 'At every step the model reads again what it thought in the steps before, instead of empty thinking blocks. Uses more context. Only for self-hosted servers (vLLM) whose chat template supports it. Measure with your own evaluation before switching it on.',
       interactiveAnswers: 'Interactive answers in the chat',
       uiMaps: 'Maps in interactive answers',
       uiMapsHint: 'Talos fetches map tiles from the tile server below (default: OpenStreetMap), caches them and serves them to the browsers.',

@@ -1450,13 +1450,20 @@ def _append_tool_results(
     used_native: bool,
     round_num: int,
     round_reasoning: str = "",
+    keep_earlier_reasoning: bool = False,
 ):
     """Append tool execution results back into the message history for the next LLM round.
 
-    `round_reasoning` (DeepSeek / vLLM reasoning-parser deltas) is echoed
-    back via `reasoning_content` on the assistant message — DeepSeek's API
-    rejects follow-up requests in thinking mode that don't include the
-    prior reasoning.
+    `round_reasoning` (DeepSeek / vLLM reasoning-parser deltas) is recorded
+    as `reasoning_content` on the assistant message. Whether it is sent back
+    is decided where the request is built (llm_core.reasoning_passback_enabled):
+    by default it is not.
+
+    `keep_earlier_reasoning` (setting `reasoning_passback`) leaves the
+    reasoning on every earlier step too, so the model reads the whole chain it
+    actually produced and the prompt of a round is the previous prompt plus
+    what was generated since. Without it only the newest step keeps its
+    reasoning, for the reason below.
 
     NOTE: it is NOT universally ignored. Nemotron's chat template re-injects
     EVERY prior `reasoning_content` as a <think> block, and this agent loop is
@@ -1467,9 +1474,10 @@ def _append_tool_results(
     without the per-round accumulation.
     """
     # Strip reasoning_content from earlier assistant turns; only the newest keeps it.
-    for _m in messages:
-        if _m.get("role") == "assistant":
-            _m.pop("reasoning_content", None)
+    if not keep_earlier_reasoning:
+        for _m in messages:
+            if _m.get("role") == "assistant":
+                _m.pop("reasoning_content", None)
     if used_native and native_tool_calls:
         assistant_msg = {"role": "assistant"}
         # When the model emitted ONLY tool calls (no prose), content must be
@@ -2781,6 +2789,9 @@ async def stream_agent_loop(
     # files — produces distinct signatures and must never trip this; only a
     # model re-issuing the *identical* call over and over should.
     _call_sig_counts: collections.Counter = collections.Counter()
+    # Whether earlier steps keep their reasoning for the next request (setting
+    # `reasoning_passback`; the request builder has the final say per endpoint).
+    _keep_reasoning = bool(get_setting("reasoning_passback", False))
     # Rounds in a row the server refused as too long, and how often shrinking
     # the conversation got the turn going again.
     _overflow_streak = 0
@@ -2843,6 +2854,7 @@ async def stream_agent_loop(
         round_response = ""
         if wire_sink is not None:
             wire_sink["round_text"] = ""
+            wire_sink["round_reasoning"] = ""
 
         # ── Messages queued during the turn ──
         # At the end of the list, so the prompt so far stays a stable prefix, and
@@ -3210,6 +3222,8 @@ async def stream_agent_loop(
                         # round_response unchanged.
                         if data.get("thinking"):
                             round_reasoning += data["delta"]
+                            if wire_sink is not None:
+                                wire_sink["round_reasoning"] = round_reasoning
                         else:
                             if _rp_visible is None:
                                 _rp_visible = time.time()
@@ -4356,6 +4370,7 @@ async def stream_agent_loop(
             used_native,
             round_num,
             round_reasoning=round_reasoning,
+            keep_earlier_reasoning=_keep_reasoning,
         )
         # After the results, at the end of the prompt: the model reads the advice
         # right where it decides on its next call, and nothing before it changes.
@@ -4376,6 +4391,7 @@ async def stream_agent_loop(
             logger.info("[agent] round %d: answer written and shown, ending the turn", round_num)
             if wire_sink is not None:
                 wire_sink["round_text"] = ""
+                wire_sink["round_reasoning"] = ""
             break
 
         # Reworded searches never repeat a call, so the loop-breaker above can't

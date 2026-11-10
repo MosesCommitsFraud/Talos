@@ -97,10 +97,20 @@ def _turn_wire_record(sess, sink) -> Optional[Dict[str, Any]]:
     question = next((m for m in reversed(sess.history) if m.role == "user"), None)
     if question is None:
         return None
+    from src.settings import get_setting
+
+    # With reasoning sent back to the model, each step's reasoning is part of
+    # the prompt and has to be replayed with the turn.
+    keep_reasoning = bool(get_setting("reasoning_passback", False))
     turn = collect_turn_messages(
-        sink["messages"], sink.get("round_text") or "", compacted=bool(sink.get("compacted"))
+        sink["messages"],
+        sink.get("round_text") or "",
+        compacted=bool(sink.get("compacted")),
+        final_reasoning=(sink.get("round_reasoning") or "") if keep_reasoning else "",
     )
-    return make_turn_wire(turn, question.content, base=bool(sink.get("compacted")))
+    return make_turn_wire(
+        turn, question.content, base=bool(sink.get("compacted")), keep_reasoning=keep_reasoning
+    )
 
 
 _AUTO_NAME_REGISTER_WAIT_S = 10  # the stream registers a moment after scheduling

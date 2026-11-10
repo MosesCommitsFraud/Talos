@@ -340,6 +340,8 @@ PREFACE_KEY = "_preface"
 PRIOR_KEY = "_prior"
 _WIRE_VERSION = 1
 _WIRE_ALLOWED_KEYS = ("role", "content", "name", "tool_call_id", "tool_calls")
+# What the model thought before an assistant message (see make_turn_wire).
+REASONING_KEY = "reasoning_content"
 # Larger wires (inline images, huge tool output) are not stored; the turn then
 # falls back to the reconstructed replay.
 WIRE_MAX_BYTES = 16_000_000
@@ -353,10 +355,12 @@ def _content_fingerprint(content: Any) -> str:
 
 
 def collect_turn_messages(
-    messages: List[Dict], final_text: str, compacted: bool = False
+    messages: List[Dict], final_text: str, compacted: bool = False, final_reasoning: str = ""
 ) -> List[Dict]:
     """This turn's messages as sent, plus the final (or, after a stop, partial)
     answer text of the last round, which no request carried yet.
+    `final_reasoning` is what the model thought before that answer; it is only
+    kept by make_turn_wire when reasoning is sent back to the model.
 
     Normally that is everything after the prior conversation (PRIOR_KEY). After
     a mid-turn compaction it is the whole compacted conversation minus the
@@ -385,24 +389,36 @@ def collect_turn_messages(
     if (final_text or "").strip() and not (
         turn[-1].get("role") == "assistant" and (turn[-1].get("content") or "") == final_text
     ):
-        turn.append({"role": "assistant", "content": final_text})
+        final = {"role": "assistant", "content": final_text}
+        if (final_reasoning or "").strip():
+            final[REASONING_KEY] = final_reasoning
+        turn.append(final)
     return turn
 
 
 def make_turn_wire(
-    sent_messages: List[Dict], question_content: Any, base: bool = False
+    sent_messages: List[Dict],
+    question_content: Any,
+    base: bool = False,
+    keep_reasoning: bool = False,
 ) -> Optional[Dict]:
     """Package a turn's sent messages for storage, or None if too large/empty.
 
     `question_content` is the user message as stored in the session history; it
     is fingerprinted so an edited question never replays a stale turn. `base`
     marks a compacted turn that replaces everything before it.
+
+    `keep_reasoning` stores each step's reasoning with it. When reasoning is
+    sent back to the model (setting `reasoning_passback`) it is part of the
+    prompt, and a later turn has to replay it exactly or the server prefills
+    this whole turn again.
     """
+    keys = _WIRE_ALLOWED_KEYS + ((REASONING_KEY,) if keep_reasoning else ())
     clean = []
     for m in sent_messages or []:
         if not isinstance(m, dict) or not m.get("role"):
             continue
-        clean.append({k: m[k] for k in _WIRE_ALLOWED_KEYS if k in m and m[k] is not None})
+        clean.append({k: m[k] for k in keys if k in m and m[k] is not None})
         if m.get("role") == "assistant" and "content" not in clean[-1]:
             clean[-1]["content"] = None
     if not clean:

@@ -1873,6 +1873,8 @@ const de: typeof en = {
       subagents: 'Subagenten',
       subagentsEnabled: 'Subagenten erlauben',
       subagentsEnabledHint: 'Der Agent darf unabhängige Recherche-Teile an parallele Helfer abgeben (nur lesende Tools).',
+      reasoningPassback: 'Überlegungen früherer Schritte zurückgeben',
+      reasoningPassbackHint: 'Das Modell bekommt bei jedem Schritt wieder zu lesen, was es in den vorherigen Schritten gedacht hat, statt leerer Denkblöcke. Braucht mehr Kontext. Nur für selbst betriebene Server (vLLM), deren Chat-Template das unterstützt. Vor dem Einschalten mit der eigenen Auswertung messen.',
       interactiveAnswers: 'Interaktive Antworten im Chat',
       uiMaps: 'Karten in interaktiven Antworten',
       uiMapsHint: 'Talos lädt die Kartenkacheln vom unten eingestellten Kachelserver (Standard: OpenStreetMap), speichert sie zwischen und liefert sie an die Browser aus.',
