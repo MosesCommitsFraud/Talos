@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   GIT_DEFAULT_DB_TARGET,
+  GIT_SKILLS_TARGET,
   fetchGitFolders,
   fetchGitSync,
   startGitSync,
@@ -23,6 +24,7 @@ const newRepo = (isDefault: boolean): GitRepoConfig => ({
   token: '',
   default: isDefault,
   exclude: ['readme.*'],
+  skills_interval_minutes: 60,
   mappings: [
     { folder: 'knowledge', base: 'default' },
     { folder: 'sql', base: GIT_DEFAULT_DB_TARGET },
@@ -35,7 +37,12 @@ function RepoStatus({ repo, live, dirty }: { repo: GitRepoConfig; live?: GitSync
   const queryClient = useQueryClient();
   const sync = useMutation({
     mutationFn: () => startGitSync(repo.id ?? ''),
-    onSettled: () => void queryClient.invalidateQueries({ queryKey: ['git-sync'] }),
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: ['git-sync'] });
+      // The skill library is synced in the app, with no job to watch: look again shortly.
+      [3000, 10000].forEach((ms) =>
+        setTimeout(() => void queryClient.invalidateQueries({ queryKey: ['git-sync'] }), ms));
+    },
   });
   const last = live?.last;
   const running = !!live?.job;
@@ -48,6 +55,7 @@ function RepoStatus({ repo, live, dirty }: { repo: GitRepoConfig; live?: GitSync
   else if (last) hint = `${new Date(last.finished_at * 1000).toLocaleString()}: ${last.message}`;
 
   const failed = saved && !running && (sync.isError || last?.ok === false);
+  const skills = saved ? live?.skills : null;
   // In the label rather than the row's hint: the settings dialog hides hints, and this
   // is the only place that says what the last run did.
   return (
@@ -57,6 +65,14 @@ function RepoStatus({ repo, live, dirty }: { repo: GitRepoConfig; live?: GitSync
         <>
           <div>{t('settings.mcp.git.lastRun')}</div>
           <div className={cn('text-[13px] leading-snug text-muted-foreground', failed && 'text-destructive')}>{hint}</div>
+          {skills && (
+            <div className={cn('text-[13px] leading-snug text-muted-foreground', !skills.ok && 'text-destructive')}>
+              {t('settings.mcp.git.skillsRun', {
+                date: new Date(skills.finished_at * 1000).toLocaleString(),
+                message: skills.message,
+              })}
+            </div>
+          )}
           {repo.id && (
             <div className="text-[13px] leading-snug text-muted-foreground">
               {t('settings.mcp.git.repoId')} <code className="font-mono">{repo.id}</code>
@@ -265,6 +281,7 @@ export function GitSyncSection({
   // A mini RAG whose database was removed takes no new documents.
   const targets = [
     { value: GIT_DEFAULT_DB_TARGET, label: t('settings.mcp.git.defaultDb') },
+    { value: GIT_SKILLS_TARGET, label: t('settings.mcp.git.skillLibrary') },
     ...bases
       .filter((b) => b.kind !== 'mini' || b.connection)
       .map((b) => ({
@@ -337,6 +354,18 @@ export function GitSyncSection({
             probe={probes[index]}
             onChange={(mappings) => patch(index, { mappings })}
           />
+          {repo.mappings.some((m) => m.base === GIT_SKILLS_TARGET) && (
+            <Row label={t('settings.mcp.git.skillsInterval')} hint={t('settings.mcp.git.skillsIntervalHint')}>
+              <Input
+                type="number"
+                min={0}
+                className="w-24"
+                aria-label={t('settings.mcp.git.skillsInterval')}
+                value={String(repo.skills_interval_minutes ?? 60)}
+                onChange={(e) => patch(index, { skills_interval_minutes: Math.max(0, Number(e.target.value) || 0) })}
+              />
+            </Row>
+          )}
           <Row label={t('settings.mcp.git.exclude')} hint={t('settings.mcp.git.excludeHint')}>
             {/* Not trimmed while typing, or a comma would vanish as soon as it is typed. */}
             <Input

@@ -2745,6 +2745,13 @@ def _git_sync_status():
                 "job": {"id": "job-git", "status": "running", "message": "Indexing"}
                 if running
                 else None,
+                "skills": {
+                    "ok": True,
+                    "finished_at": run["started_at"] + 2,
+                    "message": "@b85b384: 2 new, 1 taken over",
+                }
+                if run and any(m.get("base") == "@skills" for m in repo.get("mappings", []))
+                else None,
             }
         )
     return rows
@@ -3490,7 +3497,7 @@ class PreviewHandler(BaseHTTPRequestHandler):
             if "private" in body.get("url", "") and not body.get("token"):
                 self._send_json({"detail": "The repository requires a login."}, 400)
                 return
-            self._send_json({"folders": ["Knowledge", "SQL", "SQL/Views", "Vorlagen"]})
+            self._send_json({"folders": ["Knowledge", "Skills", "SQL", "SQL/Views", "Vorlagen"]})
             return
         if path.startswith("/api/rag/git-sync/"):
             repo_id = path[len("/api/rag/git-sync/") :]

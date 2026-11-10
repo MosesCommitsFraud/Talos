@@ -1275,6 +1275,8 @@ export const deleteApiToken = (id: string) =>
 
 /** Mapping target: the mini RAG of the default database, resolved at each sync. */
 export const GIT_DEFAULT_DB_TARGET = '@default-db';
+/** Mapping target: the shared skill library; the folder holds skills, not documents. */
+export const GIT_SKILLS_TARGET = '@skills';
 
 /** One entry of the `rag_git_repos` setting. `id` comes from the server on save. */
 export interface GitRepoConfig {
@@ -1285,6 +1287,8 @@ export interface GitRepoConfig {
   default: boolean;
   exclude: string[];
   mappings: { folder: string; base: string }[];
+  /** How often the repository's skills are checked on their own; 0 = never. */
+  skills_interval_minutes?: number;
 }
 
 export interface GitSyncRepo {
@@ -1293,6 +1297,8 @@ export interface GitSyncRepo {
   default: boolean;
   last: { ok: boolean; finished_at: number; message: string; commit?: string } | null;
   job: { id: string; status: string; message: string } | null;
+  /** Last run of the skill library; null when no folder holds skills. */
+  skills?: { ok: boolean; finished_at: number; message: string } | null;
 }
 
 export const fetchGitSync = () => getJSON<{ repos: GitSyncRepo[] }>('/api/rag/git-sync');
@@ -1304,7 +1310,7 @@ export const fetchGitFolders = (repo: Pick<GitRepoConfig, 'url' | 'branch' | 'to
     token: repo.token,
   });
 export const startGitSync = (id: string) =>
-  postJSON<{ ok: boolean; job_id: string; already_queued: boolean }>(`/api/rag/git-sync/${encodeURIComponent(id)}`);
+  postJSON<{ ok: boolean; job_id: string | null; already_queued: boolean }>(`/api/rag/git-sync/${encodeURIComponent(id)}`);
 
 export const personalReload = () => postJSON('/api/personal/reload');
 
