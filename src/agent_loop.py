@@ -45,6 +45,7 @@ from src.knowledge_progress import STOP_SEARCHING_NOTE, KnowledgeProgress
 from src.llm_core import _detect_provider, _is_ollama_native_url, stream_llm_with_fallback
 from src.model_context import estimate_tokens
 from src.prompt_security import untrusted_context_message
+from src.repeat_guard import RepeatGuard, call_signature
 from src.settings import get_setting, get_user_setting
 from src.tool_catalog import RUN_TOOL, unwrap_run_tool
 from src.tool_schemas import TRUNCATED_CALL_ERROR
@@ -2767,6 +2768,9 @@ async def stream_agent_loop(
     # files — produces distinct signatures and must never trip this; only a
     # model re-issuing the *identical* call over and over should.
     _call_sig_counts: collections.Counter = collections.Counter()
+    # Advice before that backstop: a reminder after the 3rd and 5th identical
+    # call in a row (see src/repeat_guard.py).
+    _repeat_guard = RepeatGuard()
     _THINK_RE = re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE)
     _force_answer = False  # set by loop-breaker → next round runs with NO tools
     _knowledge_progress = KnowledgeProgress()
@@ -2829,6 +2833,7 @@ async def stream_agent_loop(
                 if _queued_msg is not None:
                     _queued_pins.append(_queued_msg)
                 queued_messages.append({**_queued, "round": round_num})
+                _repeat_guard.reset()
                 if wire_sink is not None:
                     wire_sink["queued_messages"] = queued_messages
                 yield f"data: {json.dumps({'type': 'queued_message', **_queued})}\n\n"
@@ -3708,14 +3713,11 @@ async def stream_agent_loop(
         # runaway backstop). On bail we don't give up — we force one
         # tool-free round so the model declares done or declares blocked,
         # mirroring Terminus's explicit-completion handshake.
-        _sig = "|".join(
-            sorted(f"{b.tool_type}:{(b.content or '').strip()[:120]}" for b in tool_blocks)
-        )
+        _sig = "|".join(sorted(call_signature(b) for b in tool_blocks))
         _is_repeat = _sig in _recent_call_sigs
         _recent_call_sigs.append(_sig)
         for _b in tool_blocks:
-            _bsig = f"{_b.tool_type}:{(_b.content or '').strip()[:120]}"
-            _call_sig_counts[_bsig] += 1
+            _call_sig_counts[call_signature(_b)] += 1
         # "Real" answer text = round text minus <think> blocks. Empty-think
         # rounds (just "<think>\n\n</think>" + a tool call) must not read as
         # progress, so strip think before checking.
@@ -3856,6 +3858,7 @@ async def stream_agent_loop(
         # Execute each tool block
         tool_results = []
         tool_result_texts = []  # plain text for native tool role messages
+        _round_reminders: List[str] = []
         budget_hit = False
         for i, block in enumerate(tool_blocks):
             # --- Tool budget check ---
@@ -3978,6 +3981,10 @@ async def stream_agent_loop(
                 yield f"data: {json.dumps({'type': 'plan_update', 'data': result['plan_update']})}\n\n"
 
             _knowledge_progress.observe(block.tool_type, result)
+            _reminder = _repeat_guard.observe(block)
+            if _reminder:
+                logger.info("[agent] round %d: repeat reminder for %s", round_num, block.tool_type)
+                _round_reminders.append(_reminder)
 
             # search_knowledge retrieved sources mid-turn. On the auto-inject
             # path the turn's sources are known before generation; here they
@@ -4259,6 +4266,10 @@ async def stream_agent_loop(
             round_num,
             round_reasoning=round_reasoning,
         )
+        # After the results, at the end of the prompt: the model reads the advice
+        # right where it decides on its next call, and nothing before it changes.
+        if _round_reminders:
+            messages.append({"role": "system", "content": "\n\n".join(_round_reminders)})
 
         # A written answer plus its chart is a finished turn. The chart's result
         # tells the model not to repeat its values, so another round only yields a
