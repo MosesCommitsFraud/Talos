@@ -173,6 +173,8 @@ async def test_an_overflow_that_shrinking_cannot_fix_ends_the_turn_with_the_erro
     assert len(requests) == 1
     assert len(errors) == 1
     assert {"type": "context_overflow", "round": 1} in events
+    metrics = [e["data"] for e in events if e.get("type") == "metrics"][-1]
+    assert metrics["stop_reason"] == "context_overflow"
 
 
 async def test_recovery_is_not_tried_forever(monkeypatch):
@@ -206,4 +208,6 @@ async def test_a_call_that_failed_outright_is_not_nudged(monkeypatch):
 
     assert len(requests) == 1  # no "your last round produced nothing" retries
     assert len(errors) == 1
+    metrics = [e["data"] for e in events if e.get("type") == "metrics"][-1]
+    assert metrics["stop_reason"] == "model_error"
     assert not [e for e in events if e.get("type") == "agent_stalled"]

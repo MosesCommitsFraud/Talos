@@ -200,6 +200,8 @@ async def test_an_answer_cut_off_at_the_length_limit_is_reported(monkeypatch):
 
     assert len(requests) == 1  # no nudge, no rewrite: the turn ends and says why
     assert {"type": "output_truncated", "round": 1} in _events(chunks)
+    metrics = [e["data"] for e in _events(chunks) if e.get("type") == "metrics"][-1]
+    assert metrics["stop_reason"] == "output_truncated"
 
 
 async def test_a_round_that_spent_the_limit_on_thinking_is_told_so(monkeypatch):

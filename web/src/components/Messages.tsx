@@ -1,4 +1,4 @@
-import { CheckIcon, ChevronDownIcon, CopyIcon, FoldVerticalIcon, PinIcon, RotateCcwIcon, ScanSearchIcon, Share2Icon } from 'lucide-react';
+import { CheckIcon, ChevronDownIcon, CopyIcon, FoldVerticalIcon, PinIcon, RotateCcwIcon, ScanSearchIcon, Share2Icon, TriangleAlertIcon } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { uploadDownloadUrl } from '@/api/client';
@@ -8,7 +8,7 @@ import { presentedOutputs, useSessionFiles, type SessionFile } from '@/lib/useSe
 import { describeStatus, partsToString, toolFamily, type LabelParts } from '@/lib/toolLabels';
 import { isRunning, useBgTasks } from '@/lib/useBgTasks';
 import { useChat, type UiMessage } from '@/state/chat';
-import type { UiDraft, Widget } from '@/api/types';
+import type { StopReason, UiDraft, Widget } from '@/api/types';
 import { UiDraftView } from './interactive/UiDraftView';
 import { usePrefs } from '@/state/prefs';
 import { useUi } from '@/state/ui';
@@ -27,6 +27,7 @@ import { WorkingAnimation } from './WorkingAnimation';
 import { WorkingOrb, type OrbState } from './WorkingOrb';
 import { ImageGallery, toolImages } from './ToolRow';
 import { staysInFold, WidgetView } from './widgets/registry';
+import { Button } from './ui/button';
 import { Collapse } from './ui/collapse';
 import { Tooltip } from './ui/misc';
 import { toast } from './ui/toast';
@@ -796,6 +797,37 @@ function CompactionMarker() {
  *  with one collapsible group per batch of tool calls — so the turn doesn't
  *  rearrange itself when it finishes. The live "Working for Xs" indicator is
  *  swapped for the final elapsed time. */
+/** Reasons after which saying "continue" picks the work up where it stopped.
+ *  The others need something else first (a new chat, a working model), so they
+ *  offer a retry of the same step instead. */
+const CONTINUABLE: ReadonlySet<StopReason> = new Set(['rounds_exhausted', 'budget_exceeded', 'output_truncated']);
+
+/** Shown under a turn that ended for a reason other than the model being done:
+ *  says which, and on the chat's last turn offers the way on. Without it such a
+ *  turn looks finished, or simply dead. */
+function StopNotice({ reason, actionable }: { reason: StopReason; actionable: boolean }) {
+  const { t } = useTranslation();
+  const send = useChat((s) => s.send);
+  const streaming = useChat((s) => s.streaming);
+  const readOnly = useReadOnlyChat();
+  const showAction = actionable && !readOnly && reason !== 'context_overflow';
+  return (
+    <div
+      className="mt-3 flex items-center gap-2.5 rounded-lg border border-border bg-muted/40 px-3 py-2 text-[13px] text-muted-foreground"
+      role="status"
+      data-stop-reason={reason}
+    >
+      <TriangleAlertIcon className="size-4 shrink-0" />
+      <span className="flex-1">{t(`messages.stopped.${reason}`)}</span>
+      {showAction && (
+        <Button size="sm" variant="secondary" disabled={streaming} onClick={() => void send(t('messages.stopped.continuePrompt'))}>
+          {t(CONTINUABLE.has(reason) ? 'messages.stopped.continue' : 'messages.stopped.retry')}
+        </Button>
+      )}
+    </div>
+  );
+}
+
 function AssistantTurn({ turn, containsLast, outputs, sessionId }: { turn: UiMessage[]; containsLast: boolean; outputs: SessionFile[]; sessionId: string | null }) {
   const showThinking = usePrefs((s) => s.visibility.showThinking);
   const showMetrics = usePrefs((s) => s.visibility.messageMetrics);
@@ -851,6 +883,7 @@ function AssistantTurn({ turn, containsLast, outputs, sessionId }: { turn: UiMes
   // received the turn's deltas.
   const planMsg = [...turn].reverse().find((m) => m.plan);
   const compacted = turn.some((m) => m.compacted);
+  const stopReason = [...turn].reverse().find((m) => m.metrics?.stop_reason)?.metrics?.stop_reason;
 
   if (streaming) {
     return (
@@ -936,6 +969,7 @@ function AssistantTurn({ turn, containsLast, outputs, sessionId }: { turn: UiMes
       {sessionId && presented.length > 0 && (
         <OutputCards sessionId={sessionId} files={presented} />
       )}
+      {stopReason && <StopNotice reason={stopReason} actionable={containsLast} />}
       {copyText && (
         <div className="mt-2 flex items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
           <TurnActions anchor={[...turn].reverse().find((m) => m.dbId)} copyText={copyText} />

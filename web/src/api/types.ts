@@ -244,7 +244,18 @@ export interface Metrics {
    *  (real when usage_source is "real"); the split between categories is
    *  proportional-to-estimate. */
   context_breakdown?: Partial<Record<ContextCategory, number>>;
+  /** Why the turn ended when it was not the model finishing (agent loop
+   *  STOP_REASONS). Shown under the answer, with a way to continue. */
+  stop_reason?: StopReason;
 }
+
+export type StopReason =
+  | 'rounds_exhausted'
+  | 'budget_exceeded'
+  | 'output_truncated'
+  | 'context_overflow'
+  | 'agent_stalled'
+  | 'model_error';
 
 /** Context-meter breakdown categories, in display order. */
 export type ContextCategory =

@@ -1193,6 +1193,13 @@ def setup_chat_routes(
                                     "doc_suggestions",
                                     "rounds_exhausted",
                                     "agent_stalled",
+                                    "budget_exceeded",
+                                    "output_truncated",
+                                    "context_overflow",
+                                    # Mid-turn: the conversation was summarized
+                                    # to fit, or a queued message was taken in.
+                                    "compacted",
+                                    "queued_message",
                                     "ask_user",
                                     "plan_update",
                                     "citations",

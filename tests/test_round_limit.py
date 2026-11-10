@@ -73,3 +73,17 @@ async def test_a_configured_cap_still_ends_the_turn(monkeypatch):
 
     assert len(requests) == 5
     assert {"type": "rounds_exhausted", "rounds": 5} in events
+
+
+def _stop_reason(events):
+    return [e["data"] for e in events if e.get("type") == "metrics"][-1].get("stop_reason")
+
+
+async def test_the_final_metrics_say_why_a_capped_turn_ended(monkeypatch):
+    _working_model(monkeypatch, tool_rounds=60)
+    assert _stop_reason(await _run(max_rounds=3)) == "rounds_exhausted"
+
+
+async def test_a_turn_the_model_finished_has_no_stop_reason(monkeypatch):
+    _working_model(monkeypatch, tool_rounds=2)
+    assert _stop_reason(await _run(max_rounds=0)) is None

@@ -722,6 +722,60 @@ def _ask_stream() -> bytes:
     return "".join(_sse(e) for e in events).encode("utf-8")
 
 
+# A turn that ended for a reason other than the model being done. Sending one
+# of these words previews the notice under the answer and its way on.
+_STOP_WORDS = {
+    "schrittlimit": "rounds_exhausted",
+    "werkzeuglimit": "budget_exceeded",
+    "abgeschnitten": "output_truncated",
+    "kontext voll": "context_overflow",
+    "modellfehler": "model_error",
+}
+_STOP_TEXT = "Bis hierhin: drei der fünf Tabellen sind geprüft, die Auswertung von Q3 steht noch"
+
+
+def _stop_reason_for(message: str) -> str:
+    low = message.lower()
+    return next((reason for word, reason in _STOP_WORDS.items() if word in low), "")
+
+
+def _stopped_stream(reason: str) -> bytes:
+    events: list[dict | str] = [
+        {"type": "tool_start", "tool": "bash", "command": "python check_tables.py"},
+        {
+            "type": "tool_output",
+            "tool": "bash",
+            "command": "python check_tables.py",
+            "output": "3 of 5 tables checked",
+            "exit_code": 0,
+        },
+        {"type": "agent_step", "round": 2},
+        {"delta": _STOP_TEXT},
+        {
+            "type": "metrics",
+            "data": {
+                "model": "mock-ui-preview",
+                "response_time": 2.1,
+                "input_tokens": 5200,
+                "output_tokens": 48,
+                "stop_reason": reason,
+            },
+        },
+        "[DONE]",
+    ]
+    return "".join(_sse(e) for e in events).encode("utf-8")
+
+
+def _record_stopped_turn(session_id: str, message: str, reason: str) -> None:
+    hist = _HISTORY.setdefault(session_id, [])
+    hist.append(_entry("user", message))
+    entry = _entry("assistant", _STOP_TEXT)
+    # The real backend saves the turn's metrics flat in the message metadata,
+    # which is how the notice is still there after a reload.
+    entry["metadata"]["stop_reason"] = reason
+    hist.append(entry)
+
+
 def _record_ask_turn(session_id: str, message: str) -> None:
     hist = _HISTORY.setdefault(session_id, [])
     hist.append(_entry("user", message or "(empty)"))
@@ -3750,6 +3804,11 @@ class PreviewHandler(BaseHTTPRequestHandler):
             if "frage" in message.lower():
                 _record_ask_turn(session_id, message)
                 self._send_event_stream(_ask_stream())
+                return
+            stop_reason = _stop_reason_for(message)
+            if stop_reason:
+                _record_stopped_turn(session_id, message, stop_reason)
+                self._send_event_stream(_stopped_stream(stop_reason))
                 return
             try:
                 ask_answers = json.loads(fields.get("ask_answers", [""])[0] or "null")

@@ -1528,6 +1528,16 @@ def _append_tool_results(
         messages.append({"role": "user", "content": f"{TOOL_RESULT_PREFIX}\n\n{tool_output_text}"})
 
 
+# Why a turn ended other than by the model finishing (metrics["stop_reason"]).
+STOP_REASONS = (
+    "rounds_exhausted",  # the configured step cap was reached mid-task
+    "budget_exceeded",  # the configured tool-call limit was reached
+    "output_truncated",  # the answer was cut off at the output length limit
+    "context_overflow",  # the prompt no longer fits and could not be shrunk
+    "agent_stalled",  # the model kept returning nothing
+    "model_error",  # the model call failed
+)
+
 # How many rounds in a row may be saved by shrinking the conversation after
 # the server refused it as too long.
 MAX_OVERFLOW_RECOVERIES = 2
@@ -2789,6 +2799,11 @@ async def stream_agent_loop(
     # files — produces distinct signatures and must never trip this; only a
     # model re-issuing the *identical* call over and over should.
     _call_sig_counts: collections.Counter = collections.Counter()
+    # Why the turn ended, when it was not because the model finished: one of
+    # STOP_REASONS. Travels in the final metrics, so the chat can say what
+    # happened (and offer to continue) instead of the turn just stopping, and
+    # it is still there when the chat is opened again.
+    _stop_reason = ""
     # Whether earlier steps keep their reasoning for the next request (setting
     # `reasoning_passback`; the request builder has the final say per endpoint).
     _keep_reasoning = bool(get_setting("reasoning_passback", False))
@@ -3403,6 +3418,7 @@ async def stream_agent_loop(
                 continue
             yield _overflow_chunk
             yield f"data: {json.dumps({'type': 'context_overflow', 'round': round_num})}\n\n"
+            _stop_reason = "context_overflow"
             break
         _overflow_streak = 0
 
@@ -3410,6 +3426,7 @@ async def stream_agent_loop(
         # error. Nudging the model about an "empty round" would only send the
         # same failing request again, twice.
         if _round_failed and not (round_response or round_reasoning or native_tool_calls):
+            _stop_reason = "model_error"
             break
 
         if round_num == 1:
@@ -3628,6 +3645,7 @@ async def stream_agent_loop(
                     _empty_rounds,
                 )
                 yield f"data: {json.dumps({'type': 'agent_stalled', 'round': round_num})}\n\n"
+                _stop_reason = "agent_stalled"
                 break
 
             # ── Answer cut off at the length limit ────────────────────
@@ -3637,6 +3655,7 @@ async def stream_agent_loop(
             # the user can continue the turn with one word.
             if _round_truncated:
                 yield f"data: {json.dumps({'type': 'output_truncated', 'round': round_num})}\n\n"
+                _stop_reason = "output_truncated"
                 break
 
             # ── Completion verifier (mechanism 3a) ────────────────────
@@ -4351,6 +4370,7 @@ async def stream_agent_loop(
 
         # If budget was hit, stop the loop
         if budget_hit:
+            _stop_reason = "budget_exceeded"
             break
 
         # ask_user posed a question — stop here and wait for the user's choice.
@@ -4423,6 +4443,7 @@ async def stream_agent_loop(
     # If the loop hit the round cap while still working, tell the client so it
     # can show a "Continue" affordance instead of the turn just stopping.
     if _exhausted_rounds:
+        _stop_reason = "rounds_exhausted"
         logger.info(
             "[agent] round cap (%d) reached mid-task — emitting rounds_exhausted", max_rounds
         )
@@ -4475,6 +4496,8 @@ async def stream_agent_loop(
     )
     if queued_messages:
         metrics["queued_messages"] = queued_messages
+    if _stop_reason:
+        metrics["stop_reason"] = _stop_reason
     if round_profile:
         if "_ended" in round_profile[-1]:
             round_profile[-1]["tools_s"] = round(time.time() - round_profile[-1].pop("_ended"), 2)

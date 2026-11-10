@@ -366,6 +366,7 @@ function metricsFromMetadata(metadata: Record<string, unknown> | undefined): Met
     'context_tokens',
     'usage_source',
     'context_breakdown',
+    'stop_reason',
   ];
   const metrics: Metrics = {};
   for (const key of keys) {
