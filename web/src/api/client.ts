@@ -2135,6 +2135,10 @@ export interface Goal {
   reason_code?: string;
   reason?: string;
   evidence?: string;
+  /** The server is continuing it: it starts the next round itself when a turn
+   *  ends. False for a goal found running after a server restart, until the
+   *  user resumes it. */
+  armed?: boolean;
 }
 
 export const fetchGoal = (sessionId: string) =>

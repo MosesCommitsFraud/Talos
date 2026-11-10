@@ -167,14 +167,14 @@ export interface QueuedMessage {
  *  interrupted turn, so what is sent next finds it in the history. */
 const stopsInFlight = new Map<string, Promise<void>>();
 
-/** A chat's goal as the page shows it. The record itself is the server's
- *  (src/goals.py); this adds the one thing only the page knows: whether it is
- *  the one starting the rounds. */
+/** A chat's goal as the page shows it. The record is the server's
+ *  (src/goals.py), and so are the rounds: the server starts each next one
+ *  itself (src/goal_driver.py), whether or not a page is open. */
 export interface GoalRun {
   objective: string;
-  /** running: this page starts the next round when one ends. paused also
-   *  covers a goal the server has as running that this page did not start or
-   *  resume — after a reload nothing continues until the user says so. */
+  /** running: the server is continuing it. paused also covers a goal the
+   *  server has as running but is not continuing (after a restart), which
+   *  waits until the user resumes it. */
   status: 'running' | 'paused' | 'blocked' | 'completed' | 'cancelled';
   /** Rounds started so far. */
   iteration: number;
@@ -184,12 +184,14 @@ export interface GoalRun {
   reason?: string;
 }
 
-/** `driving`: this page started or resumed the goal and continues it. */
-function goalFromServer(goal: Goal, driving: boolean): GoalRun {
+/** `continued`: whether rounds keep coming. The server says so (`armed`);
+ *  the page only assumes it for the moment between asking for a round and the
+ *  server's first word about it. */
+function goalFromServer(goal: Goal, continued: boolean = !!goal.armed): GoalRun {
   const status: GoalRun['status'] =
     goal.status === 'complete' ? 'completed'
       : goal.status === 'blocked' ? 'blocked'
-        : goal.status === 'active' && driving ? 'running'
+        : goal.status === 'active' && continued ? 'running'
           : 'paused';
   return { objective: goal.objective, status, iteration: goal.round, maxRounds: goal.max_rounds, reason: goal.reason || undefined };
 }
@@ -260,6 +262,7 @@ interface ChatState {
   pauseGoal: () => void;
   resumeGoal: (sessionId?: string) => Promise<void>;
   continueGoal: (sessionId: string) => Promise<void>;
+  followGoal: (sessionId: string) => Promise<void>;
   cancelGoal: () => void;
   compact: () => Promise<void>;
   /** A message on its way back into the composer, for the composer to pick up. */
@@ -709,7 +712,12 @@ export const useChat = create<ChatState>((set, get) => {
    *  when they want it to go on. */
   const loadGoal = (id: string) => {
     void fetchGoal(id)
-      .then((g) => { if (g && !get().runtimes[id]?.goal) writeRuntime(id, () => ({ goal: goalFromServer(g, false) })); })
+      .then((g) => {
+        if (!g || get().runtimes[id]?.goal) return;
+        writeRuntime(id, () => ({ goal: goalFromServer(g) }));
+        // The server is between two rounds of it: be there when the next starts.
+        if (g.armed && !get().runtimes[id]?.streaming) void get().followGoal(id);
+      })
       .catch(() => { /* no goal chip then */ });
   };
 
@@ -1225,7 +1233,7 @@ export const useChat = create<ChatState>((set, get) => {
               // The goal after this turn, or the moment the model ended it.
               // Whether this page keeps driving it does not change here.
               const serverGoal = ev.data as Goal | null;
-              writeRuntime(sid, (rt) => ({ goal: serverGoal ? goalFromServer(serverGoal, rt.goal?.status === 'running') : null }));
+              writeRuntime(sid, () => ({ goal: serverGoal ? goalFromServer(serverGoal) : null }));
               break;
             }
             case 'compacted':
@@ -1313,7 +1321,7 @@ export const useChat = create<ChatState>((set, get) => {
         // empty round and show the goal as the server has it.
         writeRuntime(sid, (rt) => ({ messages: rt.messages.filter((m) => m.id !== userMsg.id && m.id !== aiMsg.id) }));
         void fetchGoal(sid)
-          .then((g) => writeRuntime(sid, () => ({ goal: g ? goalFromServer(g, false) : null })))
+          .then((g) => writeRuntime(sid, () => ({ goal: g ? goalFromServer(g) : null })))
           .catch(() => { /* the chip keeps its last state */ });
       } else if (!abort.signal.aborted) {
         patchAi((m) => ({
@@ -1359,11 +1367,11 @@ export const useChat = create<ChatState>((set, get) => {
         if (!awaiting && get().sessionId !== sid) set((s) => ({ completed: { ...s.completed, [sid]: true } }));
 
         // A goal keeps the chat working: when a turn ends and the goal is
-        // still running, the next round starts. Whether it is still running is
-        // the server's call (the `goal` event of the turn that just ended):
-        // the model ends it with update_goal, a failed turn blocks it, the
-        // round limit blocks it. setTimeout avoids re-entering send() before
-        // this turn's cleanup settles.
+        // still running, the server starts the next round. The page does not
+        // ask for it; it waits for that round and shows it. Whether the goal
+        // is still running is the server's call (the `goal` event of the turn
+        // that just ended): the model ends it with update_goal, a failed turn
+        // blocks it, the round limit blocks it.
         const rt = get().runtimes[sid];
         const goal = rt?.goal;
         // What the turn didn't take in gets a turn of its own, ahead of the goal
@@ -1375,7 +1383,7 @@ export const useChat = create<ChatState>((set, get) => {
             void get().send(next.text, { attachments: next.attachments, artifactSelection: next.artifactSelection, targetSessionId: sid });
           }, 0);
         } else if (goal?.status === 'running' && !rt.awaitingInput) {
-          setTimeout(() => { void get().continueGoal(sid); }, 0);
+          setTimeout(() => { void get().followGoal(sid); }, 0);
         }
       }
     }
@@ -1387,7 +1395,33 @@ export const useChat = create<ChatState>((set, get) => {
     await get().send(goalRoundLabel(clean, 1), { goalIteration: true, goalObjective: clean });
   },
 
-  /** The next round of a goal this page is driving. */
+  /** The server is about to start the goal's next round (or has). Wait for
+   *  that turn and attach to it, so an open page shows the round live. */
+  followGoal: async (sessionId) => {
+    for (let attempt = 0; attempt < 30; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+      const rt = get().runtimes[sessionId];
+      // Paused, ended, or the user sent something of their own meanwhile:
+      // that turn's end brings us back here.
+      if (!rt?.goal || rt.goal.status !== 'running' || rt.streaming) return;
+      const run = (await fetchActiveRuns()).find((r) => r.sessionId === sessionId);
+      if (!run) continue;
+      const goal = rt.goal;
+      const round = goal.iteration + 1;
+      const label: UiMessage = { id: uid(), role: 'user', content: goalRoundLabel(goal.objective, round), createdAt: Date.now() };
+      writeRuntime(sessionId, (current) => ({ goal: { ...goal, iteration: round }, messages: [...current.messages, label] }));
+      await get().attachRun(sessionId, run.elapsedMs);
+      return;
+    }
+    // No round came. The server knows why (limit reached, round refused).
+    void fetchGoal(sessionId)
+      .then((g) => writeRuntime(sessionId, () => ({ goal: g ? goalFromServer(g) : null })))
+      .catch(() => { /* the chip keeps its last state */ });
+  },
+
+  /** Ask for a goal round from the page: the first one, and the one after a
+   *  resume. That request is what lets the server continue the goal as this
+   *  user; every later round is the server's. */
   continueGoal: async (sessionId) => {
     const rt = get().runtimes[sessionId];
     const goal = rt?.goal;
@@ -1411,7 +1445,7 @@ export const useChat = create<ChatState>((set, get) => {
     const rt = get().runtimes[sessionId];
     if (!rt?.goal || rt.streaming || ['completed', 'cancelled'].includes(rt.goal.status)) return;
     // The server decides whether there is something to resume: a goal it has
-    // as running (this page just was not driving it) needs no change there.
+    // as running but is not continuing (after a restart) needs no change there.
     let server = await fetchGoal(sessionId);
     if (!server) { writeRuntime(sessionId, () => ({ goal: null })); return; }
     if (server.status === 'paused' || server.status === 'blocked') server = await changeGoal(sessionId, 'resume');

@@ -784,6 +784,20 @@ def _record_stopped_turn(session_id: str, message: str, reason: str) -> None:
 # goal the model reports as blocked in round 3.
 _GOALS: dict[str, dict] = {}
 _GOAL_MAX_ROUNDS = 4
+# The real server starts a running goal's next round itself (src/goal_driver.py)
+# and the page attaches to it. Here: when a round ends and the goal is still
+# running, the next one is due a moment later. Until the page picks it up
+# through /api/chat/active_runs and /api/chat/resume, it has not "started".
+_GOAL_NEXT: dict[str, float] = {}
+
+
+def _goal_after_round(session_id: str) -> None:
+    goal = _GOALS.get(session_id)
+    if goal and goal["status"] == "active" and goal.get("armed"):
+        _GOAL_NEXT[session_id] = time.time() + 1.0
+    elif goal:
+        goal["armed"] = False
+        _GOAL_NEXT.pop(session_id, None)
 
 
 def _goal_round_prompt(goal: dict) -> str:
@@ -847,7 +861,7 @@ def _goal_stream(session_id: str) -> bytes:
     hist.append(_entry("assistant", text))
     events += [
         {"type": "metrics", "data": {"model": "mock-ui-preview", "response_time": 1.5}},
-        {"type": "goal", "data": dict(goal)},
+        f": goal {session_id}",
         "[DONE]",
     ]
     return "".join(
@@ -3033,6 +3047,15 @@ class PreviewHandler(BaseHTTPRequestHandler):
                 # Mock-only pause: hold a tool "running" while the tray polls.
                 time.sleep(float(event[len(b": sleep ") :]))
                 continue
+            if event.startswith(b": goal "):
+                # Mock-only: the goal as it is right now (a pause may have come
+                # in while the round streamed), as the real route sends it.
+                goal = _GOALS.get(event[len(b": goal ") :].decode("utf-8"))
+                if goal and goal["status"] != "active":
+                    goal["armed"] = False
+                self.wfile.write(_sse({"type": "goal", "data": goal}).encode("utf-8"))
+                self.wfile.flush()
+                continue
             if event == b": inbox":
                 # Mock-only round boundary: deliver what was queued meanwhile,
                 # the way the agent loop does before its next round.
@@ -3214,6 +3237,31 @@ class PreviewHandler(BaseHTTPRequestHandler):
             return
         if path.startswith("/api/session/") and path.endswith("/goal"):
             self._send_json({"goal": _GOALS.get(path[len("/api/session/") : -len("/goal")])})
+            return
+        if path == "/api/chat/active_runs":
+            due = [sid for sid, at in _GOAL_NEXT.items() if at <= time.time()]
+            self._send_json({"sessions": due, "elapsed_ms": {sid: 0 for sid in due}})
+            return
+        if path.startswith("/api/chat/resume/"):
+            session_id = path[len("/api/chat/resume/") :]
+            goal = _GOALS.get(session_id)
+            if _GOAL_NEXT.pop(session_id, None) is None or not goal or goal["status"] != "active":
+                self._send_json({"detail": "No active run for this session"}, 404)
+                return
+            if goal["round"] >= goal["max_rounds"]:
+                goal.update(
+                    status="blocked",
+                    armed=False,
+                    reason_code="round-limit",
+                    reason=f"The limit of {goal['max_rounds']} rounds was reached.",
+                )
+                self._send_json({"detail": goal["reason"]}, 404)
+                return
+            goal["round"] += 1
+            try:
+                self._send_event_stream(_goal_stream(session_id), session_id)
+            finally:
+                _goal_after_round(session_id)
             return
         if path.startswith("/api/history/"):
             session_id = path[len("/api/history/") :]
@@ -3917,7 +3965,13 @@ class PreviewHandler(BaseHTTPRequestHandler):
                     self._send_json({"detail": goal["reason"]}, 409)
                     return
                 goal["round"] += 1
-                self._send_event_stream(_goal_stream(session_id), session_id)
+                goal["armed"] = True
+                # The real run is detached from the page: it finishes, and the
+                # next round follows, even when the page goes away mid-stream.
+                try:
+                    self._send_event_stream(_goal_stream(session_id), session_id)
+                finally:
+                    _goal_after_round(session_id)
                 return
             if "frage" in message.lower():
                 _record_ask_turn(session_id, message)
@@ -4132,7 +4186,8 @@ class PreviewHandler(BaseHTTPRequestHandler):
                 self._send_json({"detail": "This chat has no goal."}, 409)
                 return
             if action == "pause" and goal["status"] == "active":
-                goal["status"] = "paused"
+                goal.update(status="paused", armed=False)
+                _GOAL_NEXT.pop(path[len("/api/session/") : -len("/goal")], None)
             elif action == "resume" and goal["status"] in ("paused", "blocked"):
                 if goal.get("reason_code") == "round-limit":
                     goal["max_rounds"] = goal["round"] + _GOAL_MAX_ROUNDS
@@ -4231,6 +4286,7 @@ class PreviewHandler(BaseHTTPRequestHandler):
         path = parsed.path
         if path.startswith("/api/session/") and path.endswith("/goal"):
             _GOALS.pop(path[len("/api/session/") : -len("/goal")], None)
+            _GOAL_NEXT.pop(path[len("/api/session/") : -len("/goal")], None)
             self._send_json({"ok": True})
             return
         if path.startswith("/api/tokens/"):
