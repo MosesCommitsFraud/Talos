@@ -617,6 +617,102 @@ async def compact_mid_turn(
     return compacted, True
 
 
+# ── Pruning tool results ──
+#
+# Most of a long turn's bulk is old tool output: file contents, query results,
+# fetched pages. Cutting the middle out of the large ones frees a lot of room
+# without a model call, and keeps what a result usually needs to stay useful —
+# how it starts, and how it ends (errors, totals, and the note that names where
+# the full output can be read again).
+#
+# It rewrites messages the model server has already seen, so everything after
+# the first pruned one is prefilled again. That is why it only runs when the
+# context has to shrink anyway: on overflow, and before a summary.
+
+PRUNE_THRESHOLD_CHARS = 8192
+PRUNE_HEAD_CHARS = 4096
+PRUNE_TAIL_CHARS = 1024
+PRUNE_MARKER = "\n\n[... the middle of this tool result was removed to free up context ...]\n\n"
+
+
+def _prune_text(text: str) -> Optional[str]:
+    """`text` with its middle removed, or None when it is small enough."""
+    if len(text) <= PRUNE_THRESHOLD_CHARS:
+        return None
+    return text[:PRUNE_HEAD_CHARS] + PRUNE_MARKER + text[-PRUNE_TAIL_CHARS:]
+
+
+def prune_tool_results(messages: List[Dict], result_prefix: str = "") -> tuple:
+    """Cut the middle out of large tool results. Returns (messages, pruned_count).
+
+    Covers native `role:"tool"` messages and, for the fenced-tool path, the
+    synthetic user message that starts with `result_prefix`. Messages are
+    replaced by copies, never changed in place, so a caller holding the old
+    list (or a pinned message) still sees what it had.
+    """
+    out: List[Dict] = []
+    pruned = 0
+    for msg in messages:
+        content = msg.get("content")
+        is_result = msg.get("role") == "tool" or (
+            bool(result_prefix)
+            and msg.get("role") == "user"
+            and isinstance(content, str)
+            and content.startswith(result_prefix)
+        )
+        shorter = _prune_text(content) if is_result and isinstance(content, str) else None
+        if shorter is None:
+            out.append(msg)
+        else:
+            out.append({**msg, "content": shorter})
+            pruned += 1
+    return (out, pruned) if pruned else (messages, 0)
+
+
+async def recover_from_overflow(
+    endpoint_url: str,
+    model: str,
+    messages: List[Dict],
+    headers: Optional[Dict] = None,
+    pinned: Optional[List[Dict]] = None,
+    result_prefix: str = "",
+) -> tuple:
+    """Shrink a conversation the model server refused as too long.
+
+    Returns (messages, changed). First the large tool results are pruned, then
+    the older half is summarized. `changed` is True when either step made the
+    conversation smaller; only then is sending the request again worth it. A
+    summary that fails after pruning helped still counts: the pruned
+    conversation is returned.
+    """
+    before = estimate_tokens(messages)
+    current, pruned = prune_tool_results(messages, result_prefix)
+    try:
+        compacted, did_compact = await compact_mid_turn(
+            endpoint_url,
+            model,
+            current,
+            headers=headers,
+            pinned=pinned,
+            result_prefix=result_prefix,
+        )
+    except Exception as exc:
+        logger.warning("[compact] overflow recovery: summary failed: %s", exc)
+        compacted, did_compact = current, False
+    if did_compact:
+        current = compacted
+    after = estimate_tokens(current)
+    changed = (pruned > 0 or did_compact) and after < before
+    logger.info(
+        "[compact] overflow recovery: %d -> %d tokens (%d result(s) pruned, summary %s)",
+        before,
+        after,
+        pruned,
+        "written" if did_compact else "not written",
+    )
+    return (current, True) if changed else (messages, False)
+
+
 def _update_session_history(session, split_point: int, summary: str):
     """Update the in-memory session history after compaction.
 

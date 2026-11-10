@@ -556,6 +556,44 @@ def _provider_label(url: str) -> str:
     return host or "provider"
 
 
+# Code on a stream error event for a request the server refused because the
+# prompt does not fit the model's context window. The agent loop reacts to it
+# by shrinking the conversation and trying again.
+CONTEXT_OVERFLOW_CODE = "context_overflow"
+
+# How servers word that refusal. Matched against the lower-cased error body.
+_CONTEXT_OVERFLOW_MARKERS = (
+    "maximum context length",  # vLLM, OpenAI
+    "context_length_exceeded",  # OpenAI error code
+    "maximum model length",  # vLLM: "longer than the maximum model length"
+    "max_model_len",
+    "context window",
+    "context size",  # llama.cpp: "exceeds the available context size"
+    "exceed_context_size",
+    "prompt is too long",  # Anthropic
+    "input is too long",
+    "too many tokens",
+    "maximum number of tokens",  # Gemini
+    "reduce the length",
+)
+
+
+def is_context_overflow(status: int, body: str) -> bool:
+    """Whether an upstream error says the prompt is too long for the model."""
+    if status == 200 or not body:
+        return False
+    text = body.lower()
+    return any(marker in text for marker in _CONTEXT_OVERFLOW_MARKERS)
+
+
+def _upstream_error_event(status: int, friendly: str, raw: str) -> Dict[str, Any]:
+    """Payload of the `event: error` chunk for a non-200 response."""
+    event: Dict[str, Any] = {"status": status, "text": friendly, "raw": raw[:500]}
+    if is_context_overflow(status, raw):
+        event["code"] = CONTEXT_OVERFLOW_CODE
+    return event
+
+
 def _format_upstream_error(status: int, body: bytes | str, url: str) -> str:
     """Turn an upstream HTTP error into a user-readable sentence.
 
@@ -1747,7 +1785,7 @@ async def stream_llm(
                 if r.status_code != 200:
                     raw = (await r.aread()).decode(errors="replace")
                     friendly = _format_upstream_error(r.status_code, raw, target_url)
-                    yield f"event: error\ndata: {json.dumps({'status': r.status_code, 'text': friendly, 'raw': raw[:500]})}\n\n"
+                    yield f"event: error\ndata: {json.dumps(_upstream_error_event(r.status_code, friendly, raw))}\n\n"
                     return
                 async for line in r.aiter_lines():
                     if not line:
@@ -1824,7 +1862,7 @@ async def stream_llm(
                 if r.status_code != 200:
                     raw = (await r.aread()).decode(errors="replace")
                     friendly = _format_upstream_error(r.status_code, raw, target_url)
-                    yield f"event: error\ndata: {json.dumps({'status': r.status_code, 'text': friendly, 'raw': raw[:500]})}\n\n"
+                    yield f"event: error\ndata: {json.dumps(_upstream_error_event(r.status_code, friendly, raw))}\n\n"
                     return
                 async for line in r.aiter_lines():
                     # SSE allows "data:value" with no space after the colon
@@ -1990,7 +2028,7 @@ async def stream_llm(
             if r.status_code != 200:
                 raw = (await r.aread()).decode(errors="replace")
                 friendly = _format_upstream_error(r.status_code, raw, target_url)
-                yield f"event: error\ndata: {json.dumps({'status': r.status_code, 'text': friendly, 'raw': raw[:500]})}\n\n"
+                yield f"event: error\ndata: {json.dumps(_upstream_error_event(r.status_code, friendly, raw))}\n\n"
                 return
 
             async for line in r.aiter_lines():

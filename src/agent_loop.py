@@ -39,11 +39,18 @@ from src.context_compactor import (
     MAX_MID_TURN_COMPACTIONS,
     compact_mid_turn,
     get_compact_threshold,
+    recover_from_overflow,
 )
 from src.context_optimizer import optimize_tool_output
 from src.history_replay import HEAD_KEY
 from src.knowledge_progress import STOP_SEARCHING_NOTE, KnowledgeProgress
-from src.llm_core import _detect_provider, _is_ollama_native_url, stream_llm_with_fallback
+from src.llm_core import (
+    CONTEXT_OVERFLOW_CODE,
+    _detect_provider,
+    _is_ollama_native_url,
+    _stream_error_info,
+    stream_llm_with_fallback,
+)
 from src.model_context import estimate_tokens
 from src.prompt_security import untrusted_context_message
 from src.repeat_guard import RepeatGuard, call_signature
@@ -1513,6 +1520,10 @@ def _append_tool_results(
         messages.append({"role": "user", "content": f"{TOOL_RESULT_PREFIX}\n\n{tool_output_text}"})
 
 
+# How many rounds in a row may be saved by shrinking the conversation after
+# the server refused it as too long.
+MAX_OVERFLOW_RECOVERIES = 2
+
 # Sent after a round that hit the output length limit before it produced an
 # answer or a tool call, which on a thinking model means the limit was spent
 # on reasoning.
@@ -2770,6 +2781,10 @@ async def stream_agent_loop(
     # files — produces distinct signatures and must never trip this; only a
     # model re-issuing the *identical* call over and over should.
     _call_sig_counts: collections.Counter = collections.Counter()
+    # Rounds in a row the server refused as too long, and how often shrinking
+    # the conversation got the turn going again.
+    _overflow_streak = 0
+    _overflow_recoveries = 0
     # Advice before that backstop: a reminder after the 3rd and 5th identical
     # call in a row (see src/repeat_guard.py).
     _repeat_guard = RepeatGuard()
@@ -2848,6 +2863,10 @@ async def stream_agent_loop(
         native_tool_calls = []  # populated if model uses function calling
         # The server stopped this round at the output length limit.
         _round_truncated = False
+        # The model call failed before any output: with an error that was
+        # shown, or (held back) because the prompt was too long.
+        _round_failed = False
+        _overflow_chunk: Optional[str] = None
 
         # ── Mid-turn compaction ──
         # A long agent turn can outgrow the window on its own. Between-turn
@@ -3042,8 +3061,19 @@ async def stream_agent_loop(
                     f"[agent] round {round_num} stream exceeded wall-clock deadline; cutting off"
                 )
                 break
-            # Forward error events from stream_llm to the frontend
             if chunk.startswith("event: error"):
+                _had_output = bool(round_response or round_reasoning or native_tool_calls)
+                # "The prompt is too long" before any output is held back: the
+                # recovery below shrinks the conversation and sends the round
+                # again, and the user only sees the error if that fails.
+                if (
+                    not _had_output
+                    and _stream_error_info(chunk).get("code") == CONTEXT_OVERFLOW_CODE
+                ):
+                    _overflow_chunk = chunk
+                    continue
+                # Forward every other error to the frontend.
+                _round_failed = not _had_output
                 yield chunk
                 continue
             if (
@@ -3316,6 +3346,57 @@ async def stream_agent_loop(
             _rp["stream_s"],
             _rp["output_tokens"],
         )
+
+        # ── The server refused the prompt as too long ─────────────────
+        # Mid-turn compaction works from an estimate and can come too late: one
+        # huge tool result, a tokenizer that counts more than we do, or the
+        # output reserve pushing the request over. Shrink the conversation
+        # (prune large tool results, summarize the older half) and send the
+        # round again. Only when that made it smaller: the same request would
+        # be refused the same way. Two attempts in a row, then the error stands.
+        if _overflow_chunk is not None:
+            _rp["overflow"] = True
+            _recovered = False
+            if _overflow_streak < MAX_OVERFLOW_RECOVERIES:
+                _overflow_streak += 1
+                logger.warning(
+                    "[agent] round %d: the server refused the prompt as too long — "
+                    "shrinking the conversation (attempt %d)",
+                    round_num,
+                    _overflow_streak,
+                )
+                try:
+                    messages, _recovered = await recover_from_overflow(
+                        endpoint_url,
+                        model,
+                        messages,
+                        headers=headers,
+                        pinned=[m for m in (_pinned_query_msg, *_queued_pins) if m is not None],
+                        result_prefix=TOOL_RESULT_PREFIX,
+                    )
+                except Exception as _oe:
+                    logger.warning("[agent] overflow recovery failed: %s", _oe)
+            if _recovered:
+                _overflow_recoveries += 1
+                from src import citations as _delivered_passages
+
+                _delivered_passages.forget_delivered(session_id)
+                if wire_sink is not None:
+                    wire_sink.update(messages=messages, compacted=True)
+                last_round_input_tokens = estimate_tokens(messages)
+                yield f"data: {json.dumps({'type': 'compacted', 'context_length': context_length})}\n\n"
+                yield _context_metrics_frame(last_round_input_tokens, "estimated")
+                continue
+            yield _overflow_chunk
+            yield f"data: {json.dumps({'type': 'context_overflow', 'round': round_num})}\n\n"
+            break
+        _overflow_streak = 0
+
+        # A call that failed outright (after its retries) has already shown its
+        # error. Nudging the model about an "empty round" would only send the
+        # same failing request again, twice.
+        if _round_failed and not (round_response or round_reasoning or native_tool_calls):
+            break
 
         if round_num == 1:
             for message in messages:
