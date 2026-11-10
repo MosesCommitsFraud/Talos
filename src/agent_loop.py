@@ -424,6 +424,7 @@ Ask the user a multiple-choice question when the task is genuinely ambiguous and
 **Offering a choice IS this tool.** The moment you decide to put a question to the user, it goes in an `ask_user` call — never written out in your prose. Ending a reply with "Was möchten Sie tun?" followed by a list, a row of bracketed choices like `[Option A · Option B · Option C]`, a numbered menu, or "sag mir welches" is the failure this rule exists to prevent: it LOOKS like buttons and does nothing. The user cannot click a sentence, so they have to retype an option you already knew — and you spent a turn to make them do it.
 So: either commit to a sensible default and carry on, or call `ask_user`. Those are the only two endings. Never a menu in text.""",
     "present_files": '- ```present_files``` — Hand the finished deliverable to the user as a card under your answer (preview + download). Args (JSON): {"files": ["output/report.xlsx"]}. Call once at the end with ONLY the file(s) the user asked for — never build scripts, intermediate data or helper files. Workspace path, or `document:<id>` / `generated-image:<id>`.',
+    "update_goal": '- ```update_goal``` — Report on the goal from the latest <goal_round> message. Args (JSON): {"action": "complete", "evidence": "what you checked that shows the WHOLE objective is achieved"} or {"action": "blocked", "blocked_reason": "the obstacle, what you tried, what you need from the user"}. Do not call it while work remains: end the round saying what you did and what comes next, and another round follows on its own.',
     "update_plan": '- ```update_plan``` — A live progress checklist the user sees under your reply. Your call, like `ask_user`: worth it when the request takes several distinct steps of real work (roughly three or more), noise for a question or anything one or two tool calls settle. Open with it in the same round as your first tool call, then tick each step off with `- [x]` as soon as it is done, together with the next step\'s tool calls — never in a batch at the end. Steps are short imperative phrases in the user\'s language. Args (JSON): {"plan": "- [x] done step\\n- [ ] next step"}. Always pass the COMPLETE checklist, not a diff.',
 }
 
@@ -2442,6 +2443,18 @@ async def stream_agent_loop(
         and not _user_memory.enabled_for(owner)
     ):
         disabled_tools.add("memory")
+
+    # update_goal only exists in a chat with a running goal (src/goals.py): a
+    # tool that is listed reads as an invitation, and without a goal there is
+    # nothing for it to report on. Subagents never own the chat's goal.
+    from src import goals as _goals
+
+    if subagent or not _goals.is_active(session_id or ""):
+        disabled_tools.add("update_goal")
+        if _relevant_tools is not None:
+            _relevant_tools.discard("update_goal")
+    elif _relevant_tools is not None:
+        _relevant_tools.add("update_goal")
     if _relevant_tools is not None and "memory" not in disabled_tools:
         _relevant_tools.add("memory")
 
@@ -4197,6 +4210,13 @@ async def stream_agent_loop(
 
             if "plan_update" in result:
                 yield f"data: {json.dumps({'type': 'plan_update', 'data': result['plan_update']})}\n\n"
+
+            # update_goal ended the chat's goal (complete or blocked). What is
+            # left is the closing message: the next round gets no tools, so the
+            # run ends there instead of carrying on with the work.
+            if block.tool_type == "update_goal" and result.get("goal"):
+                yield f"data: {json.dumps({'type': 'goal', 'data': result['goal']})}\n\n"
+                _force_answer = True
 
             _knowledge_progress.observe(block.tool_type, result)
             if isinstance(block, RejectedToolCall):

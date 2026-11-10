@@ -126,6 +126,10 @@ DEFAULT_SETTINGS = {
     # (repeated calls, lookups that find nothing new, empty rounds), not a
     # count. Set a number (1..1000) to cap it anyway.
     "agent_max_rounds": 0,
+    # How many rounds a goal may take before it stops and asks the user
+    # (/goal, src/goals.py). A round is one whole turn, however many steps it
+    # has. Resuming at the limit grants the same number again. 0 = no limit.
+    "goal_max_rounds": 256,
     # DB-mode (query_sql button) round ceiling. Big schemas need many
     # list_tables/describe/SELECT round-trips to navigate, so DB turns raise
     # a configured cap to this floor. Only ever raises agent_max_rounds, never

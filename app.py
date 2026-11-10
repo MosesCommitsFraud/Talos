@@ -660,6 +660,11 @@ session_config = {
 }
 app.include_router(setup_session_routes(session_manager, session_config))
 
+# A chat's goal (keep working on one objective round after round)
+from routes.goal_routes import setup_goal_routes
+
+app.include_router(setup_goal_routes(session_manager))
+
 # Admin Danger Zone wipes (Settings → System → Danger Zone)
 from routes.admin_wipe_routes import setup_admin_wipe_routes
 

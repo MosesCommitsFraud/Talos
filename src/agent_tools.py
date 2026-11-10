@@ -50,6 +50,9 @@ TOOL_TAGS = {
     "generate_image",
     "ask_user",
     "update_plan",
+    # Report a goal complete or blocked (see src/goals.py). Only offered in a
+    # chat that has a running goal.
+    "update_goal",
     "present_files",
     "api_call",
     "manage_skills",

@@ -41,6 +41,7 @@ from routes.model_routes import _visible_models
 from routes.session_routes import _verify_session_owner
 from src import agent_runs
 from src import citations as _citations
+from src import goals as _goals
 from src.agent_loop import stream_agent_loop
 from src.auth_helpers import get_current_user
 from src.chat_helpers import coerce_message_and_session
@@ -644,6 +645,17 @@ def setup_chat_routes(
         # Admins always have full privileges via get_privileges (returns
         # ADMIN_PRIVILEGES wholesale) so this is a no-op for them.
         _enforce_chat_privileges(request, sess)
+
+        # A goal round: the page asks for the next round of the chat's goal
+        # instead of sending text. Its wording, its number and the round limit
+        # come from the goal's own record (src/goals.py), never from the
+        # client, and no round starts for a goal that is not running.
+        goal_round = str(form_data.get("goal_round", "")).lower() == "true"
+        if goal_round:
+            try:
+                message = _goals.begin_round(session)
+            except _goals.GoalError as e:
+                raise HTTPException(409, str(e))
 
         # Ensure session has auth headers
         resolve_session_auth(sess, session, owner=get_current_user(request))
@@ -1385,6 +1397,17 @@ def setup_chat_routes(
                                     incognito=incognito,
                                 )
                                 run_post_response_tasks(session, last_metrics)
+                            # The chat's goal after this turn: still running
+                            # (the page starts the next round), or ended by the
+                            # model's update_goal call or by how the turn ended.
+                            _goal_now = _goals.get(session)
+                            if _goal_now:
+                                if goal_round:
+                                    _goal_now = _goals.settle_turn(
+                                        session,
+                                        stop_reason=(last_metrics or {}).get("stop_reason", ""),
+                                    )
+                                yield f"data: {json.dumps({'type': 'goal', 'data': _goal_now})}\n\n"
                             _stream_set(session, status="done")
                             yield chunk
                 except (asyncio.CancelledError, GeneratorExit):
@@ -1428,6 +1451,13 @@ def setup_chat_routes(
                         logger.exception(
                             "Failed to save partial response on disconnect (session %s)", session
                         )
+                    # Stopping a goal round pauses the goal: the user said stop,
+                    # so nothing starts another round until they resume it.
+                    if goal_round:
+                        try:
+                            _goals.settle_turn(session, stopped_by_user=True)
+                        except Exception:
+                            logger.exception("Failed to pause the goal of session %s", session)
                     raise
                 finally:
                     _active_streams.pop(session, None)

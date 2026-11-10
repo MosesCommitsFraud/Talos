@@ -1406,6 +1406,32 @@ FUNCTION_TOOL_SCHEMAS = [
     {
         "type": "function",
         "function": {
+            "name": "update_goal",
+            "description": "Report on the goal this chat is working toward (the objective in the latest <goal_round> message). `complete`: the WHOLE objective is achieved and you have checked it; say in `evidence` what shows that. `blocked`: the same obstacle has stopped you for several rounds; give the obstacle, what you tried and what you need from the user in `blocked_reason`. Do not call it while work remains: end the round by stating what you did and what comes next, and another round follows on its own.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "enum": ["complete", "blocked"],
+                        "description": "complete = the whole objective is achieved and checked. blocked = the same obstacle persists and you cannot get past it yourself.",
+                    },
+                    "evidence": {
+                        "type": "string",
+                        "description": "For complete: what you checked that shows the objective is achieved (files, results, numbers).",
+                    },
+                    "blocked_reason": {
+                        "type": "string",
+                        "description": "For blocked: the concrete obstacle, what you tried, and what you need from the user.",
+                    },
+                },
+                "required": ["action"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "present_files",
             "description": "Hand the finished deliverable(s) of this turn to the user: each file you name is shown as a prominent card under your answer, with preview and download. Call it once, at the end, with ONLY what the user actually asked for (the report, spreadsheet, dashboard, deck, PDF, image) — never the build scripts, intermediate data, or helper files you wrote on the way; those stay reachable in the chat's file list. Usually one file; several only when the request itself was for several (e.g. two images, a PDF plus its XLSX). Skip it when no file was the point of the request.",
             "parameters": {

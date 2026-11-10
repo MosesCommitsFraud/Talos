@@ -527,6 +527,14 @@ class SessionManager:
                 # the ghost had no rows) together with the session delete.
                 db.commit()
                 logger.info(f"Deleted session {session_id}")
+                # A deleted chat's goal goes with it (src/goals.py keeps its
+                # own small file, keyed by session id).
+                try:
+                    from src import goals
+
+                    goals.clear(session_id)
+                except Exception:
+                    logger.debug("Could not clear the goal of session %s", session_id)
                 return True
             return False
 

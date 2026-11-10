@@ -1888,6 +1888,26 @@ async def execute_tool_block(
         logger.info("Tool executed: %s", desc)
         return desc, result
 
+    if tool == "update_goal":
+        # The model ends the chat's goal: complete with evidence, or blocked
+        # with the obstacle. The rules live in src/goals.py; the result tells
+        # the model to write the closing message.
+        from src import goals
+
+        try:
+            args = json.loads(content) if (content or "").strip().startswith("{") else {}
+        except (json.JSONDecodeError, TypeError):
+            args = {}
+        if not session_id:
+            return "update_goal", {"error": "There is no running goal here.", "exit_code": 1}
+        result = goals.report(
+            session_id,
+            str(args.get("action") or ""),
+            evidence=str(args.get("evidence") or ""),
+            reason=str(args.get("blocked_reason") or args.get("reason") or ""),
+        )
+        return f"update_goal: {args.get('action') or '?'}", result
+
     if tool == "update_plan":
         import json as _json
 
