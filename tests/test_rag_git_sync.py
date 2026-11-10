@@ -158,6 +158,39 @@ def test_folders_land_in_their_bases_and_readmes_stay_out(env):
     assert len(result["commit"]) == 40
 
 
+def test_a_deselected_subfolder_stays_out_and_what_it_held_leaves(env):
+    bases, tmp = env
+    repo = Repo(tmp)
+    repo.write("Knowledge/handbuch.md", "Reisekosten werden monatlich abgerechnet.")
+    repo.write("Knowledge/Intern/gehalt.md", "Gehälter stehen in der Personalakte.")
+    repo.write("Knowledge/Skills/angebot/SKILL.md", "---\nname: angebot\n---\nSo geht es.")
+    repo.commit()
+    gs.run(plan_for(repo, [("knowledge", "default")]), bases.__getitem__)
+    assert names(bases["default"]) == ["SKILL.md", "gehalt.md", "handbuch.md"]
+
+    # As plan_sync hands them over: every mapped folder, whatever its target.
+    folders = ["knowledge", "knowledge/intern", "Knowledge/Skills"]
+    result = gs.run(plan_for(repo, [("knowledge", "default")], folders=folders), bases.__getitem__)
+
+    assert result["success"] is True and result["outcomes"]["deleted"] == 2
+    assert names(bases["default"]) == ["handbuch.md"]
+
+
+def test_a_subfolder_with_a_target_of_its_own_lands_only_there(env):
+    bases, tmp = env
+    repo = Repo(tmp)
+    repo.write("handbuch.md", "Reisekosten werden monatlich abgerechnet.")
+    repo.write("SQL/schema.md", "Die Tabelle orders enthält alle Aufträge.")
+    repo.write("SQLite/notiz.md", "Kein Unterordner von SQL.")
+    repo.commit()
+
+    plan = plan_for(repo, [("", "default"), ("sql", "db-main")], folders=["", "sql"])
+    gs.run(plan, bases.__getitem__)
+
+    assert names(bases["default"]) == ["handbuch.md", "notiz.md"]
+    assert names(bases["db-main"]) == ["schema.md"]
+
+
 def test_documents_are_marked_with_their_repository(env):
     bases, tmp = env
     repo = Repo(tmp)
@@ -771,8 +804,24 @@ def test_a_repository_without_folders_refuses_to_run(monkeypatch):
     repos = gs.normalize_repos([{"url": "https://git.example/a"}])
     monkeypatch.setattr(gs, "configured_repos", lambda: repos)
     monkeypatch.setattr(gs, "_resolve_mappings", lambda repo: ([], []))
+    monkeypatch.setattr(gs, "_has_documents", lambda repo_id: False)
     with pytest.raises(gs.GitSyncError, match="No folder"):
         gs.plan_sync()
+
+
+def test_deselecting_every_folder_still_runs_to_take_the_documents_out(monkeypatch):
+    repos = gs.normalize_repos(
+        [{"url": "https://git.example/a", "mappings": [{"folder": "x", "base": "@none"}]}]
+    )
+    monkeypatch.setattr(gs, "configured_repos", lambda: repos)
+    monkeypatch.setattr(gs, "_has_documents", lambda repo_id: True)
+    from src import rag_mini
+
+    monkeypatch.setattr(rag_mini, "sync", lambda: [])
+
+    plan = gs.plan_sync()
+
+    assert plan["mappings"] == [] and plan["cleanup"] is True and plan["folders"] == ["x"]
 
 
 def test_a_token_is_scrubbed_for_everyone_but_admins():

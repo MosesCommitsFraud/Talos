@@ -29,6 +29,14 @@ part in the register's content check as uploads do: content another repository a
 holds is recorded as a duplicate, not indexed twice, and takes its place when that copy
 goes (``_promote_duplicates``).
 
+Folders inside folders
+----------------------
+A file belongs to the most specific folder that is mapped. ``Knowledge`` mapped to a
+base and ``Knowledge/Intern`` mapped to ``NONE_TARGET`` keeps the subfolder out of the
+base; mapped to another base it lands only there, and a skill folder inside a synced
+folder is never indexed as documents. Leaving a folder out is therefore a mapping like
+any other, and what was synced from it before leaves the base on the next run.
+
 Removing
 --------
 A document that left the repository leaves the base, but only after a run that could
@@ -77,6 +85,8 @@ DEFAULT_DB_TARGET = "@default-db"
 # A mapping target meaning the shared skill library: the folder holds skills, not
 # documents, and src/git_skills_sync.py syncs it.
 SKILLS_TARGET = "@skills"
+# A mapping target meaning "leave this folder out": for a folder inside a synced one.
+NONE_TARGET = "@none"
 # How often a repository's skills are checked without anyone asking; 0 = never.
 DEFAULT_SKILLS_INTERVAL_MINUTES = 60
 MIN_SKILLS_INTERVAL_MINUTES = 5
@@ -233,7 +243,7 @@ def _resolve_mappings(repo: Dict[str, Any]) -> Tuple[List[Dict[str, str]], List[
     for mapping in repo["mappings"]:
         label = mapping["folder"] or "/"
         base = mapping["base"]
-        if base == SKILLS_TARGET:
+        if base in (SKILLS_TARGET, NONE_TARGET):
             continue
         if base == DEFAULT_DB_TARGET:
             base = rag_mini.default_base_id() or ""
@@ -262,7 +272,9 @@ def plan_sync(repo_id: Optional[str] = None, only_base: Optional[str] = None) ->
         mappings = [m for m in mappings if m["base"] == only_base]
     # Skills are the repository's as a whole, so a run narrowed to one base skips them.
     skills = not only_base and any(m["base"] == SKILLS_TARGET for m in repo["mappings"])
-    if not mappings and not problems and not skills:
+    # Every folder was deselected: the run is still needed, to take out what they held.
+    cleanup = not only_base and not mappings and not problems and _has_documents(repo["id"])
+    if not mappings and not problems and not skills and not cleanup:
         what = f" to knowledge base {only_base!r}" if only_base else ""
         raise GitSyncError(f"No folder of {repo['url']} is mapped{what}.")
     return {
@@ -271,10 +283,22 @@ def plan_sync(repo_id: Optional[str] = None, only_base: Optional[str] = None) ->
         "branch": repo["branch"],
         "exclude": repo["exclude"],
         "mappings": mappings,
+        # Every mapped folder whatever its target: a file goes to the most specific one.
+        "folders": [m["folder"] for m in repo["mappings"]],
         "problems": problems,
         "only_base": only_base,
         "skills": skills,
+        "cleanup": cleanup,
     }
+
+
+def _has_documents(repo_id: str) -> bool:
+    try:
+        register = rd.DocumentRegister(str(registry_path().parent))
+        return bool(register.live_from_repo(repo_id))
+    except Exception as e:
+        logger.warning("could not look up the documents of %s: %s", repo_id, e)
+        return False
 
 
 def start(repo_id: Optional[str] = None, only_base: Optional[str] = None) -> Dict[str, Any]:
@@ -284,7 +308,7 @@ def start(repo_id: Optional[str] = None, only_base: Optional[str] = None) -> Dic
     plan = plan_sync(repo_id, only_base)
     # A repository that only holds skills has nothing for the worker.
     job: Dict[str, Any] = {"id": None, "status": "skills"}
-    if plan["mappings"] or plan["problems"]:
+    if plan["mappings"] or plan["problems"] or plan["cleanup"]:
         try:
             job = rag_worker.start_git_sync(plan)
         except Exception as e:
@@ -495,6 +519,16 @@ def _find_folder(root: Path, folder: str) -> Optional[Path]:
     return current
 
 
+def _inside(rel: str, folder: str) -> bool:
+    rel, folder = rel.lower(), folder.lower()
+    return not folder or rel == folder or rel.startswith(folder + "/")
+
+
+def claimed_deeper(rel: str, folder: str, folders: List[str]) -> bool:
+    """Whether a path under ``folder`` belongs to a more specific mapped folder."""
+    return any(len(f) > len(folder) and _inside(rel, f) for f in folders)
+
+
 def _excluded(rel: str, patterns: List[str]) -> bool:
     name = rel.rsplit("/", 1)[-1].lower()
     rel = rel.lower()
@@ -677,6 +711,7 @@ def _wanted_files(
     extensions = _extensions()
     wanted: Dict[str, Dict[str, Tuple[str, Dict[str, Any]]]] = {}
     missing: List[str] = []
+    folders = plan.get("folders") or [m["folder"] for m in plan["mappings"]]
     for mapping in plan["mappings"]:
         files = wanted.setdefault(mapping["base"], {})
         folder = _find_folder(checkout, mapping["folder"])
@@ -684,6 +719,8 @@ def _wanted_files(
             missing.append(f"Folder '{mapping['folder']}' is not in the repository")
             continue
         for path, rel in _repo_files(checkout, folder, plan.get("exclude") or [], extensions):
+            if claimed_deeper(rel, mapping["folder"], folders):
+                continue
             meta = _file_meta(plan["repo_id"], path, rel)
             files[rd.make_doc_id(meta["logical_path"])] = (path, meta)
     return wanted, missing

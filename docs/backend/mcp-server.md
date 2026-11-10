@@ -163,6 +163,18 @@ files to the normal ingest:
   Windows host as much as in the container. For Azure DevOps that is a personal access
   token with the scope *Code (Read)*.
 
+#### Leaving folders out
+
+A file belongs to the most specific folder that is mapped. A top-level folder without a
+mapping is not synced. A folder inside a synced one goes where that one goes, unless it
+has a mapping of its own: to another target, and then it lands only there, or to
+**Do not sync** (`@none`), which keeps it out. A skill folder inside a synced folder is
+therefore never indexed as documents. The settings page lists the subfolders below each
+mapped folder with a target to pick.
+
+What a deselected folder brought in earlier leaves the base on the next sync, also when
+no folder is left: the run then only removes.
+
 #### Skills from the repository
 
 A folder mapped to **Skill library** holds skills instead of documents: every folder

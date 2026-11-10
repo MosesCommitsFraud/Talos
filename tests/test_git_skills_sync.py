@@ -173,6 +173,22 @@ def test_a_missing_folder_removes_nothing(env):
     assert set(library()) == {"a"}
 
 
+def test_a_deselected_folder_inside_the_skill_folder_brings_no_skills(env):
+    repo = Repo(env)
+    repo.write("Skills/a/SKILL.md", skill_md("a"))
+    repo.write("Skills/Entwurf/b/SKILL.md", skill_md("b"))
+    repo.commit()
+    gss.sync_repo(repo.config())
+    assert set(library()) == {"a", "b"}
+
+    config = repo.config()
+    config["mappings"].append({"folder": "skills/entwurf", "base": gs.NONE_TARGET})
+    state = gss.sync_repo(config)
+
+    assert state["ok"] is True and state["outcomes"]["removed"] == 1
+    assert set(library()) == {"a"}
+
+
 def test_a_broken_skill_is_reported_and_the_others_still_arrive(env):
     repo = Repo(env)
     repo.write("Skills/gut/SKILL.md", skill_md("gut"))

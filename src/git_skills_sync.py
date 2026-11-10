@@ -169,9 +169,13 @@ def _library_hash(name: str) -> Optional[str]:
 
 
 def _read_skills(
-    checkout: Path, folders: List[str]
+    checkout: Path, folders: List[str], mapped: Optional[List[str]] = None
 ) -> Tuple[Dict[str, Tuple[str, Dict[str, bytes]]], List[str], List[str]]:
-    """``(name -> (SKILL.md, bundle), missing folders, problems)``."""
+    """``(name -> (SKILL.md, bundle), missing folders, problems)``.
+
+    ``mapped`` is every mapped folder of the repository: a skill inside a more specific
+    one, such as a deselected subfolder, is not this folder's.
+    """
     from services.memory.shared_skills import _read_sample_skill, parse_frontmatter
 
     skills: Dict[str, Tuple[str, Dict[str, bytes]]] = {}
@@ -184,6 +188,8 @@ def _read_skills(
             continue
         for skill_dir in _skill_dirs(root):
             rel = os.path.relpath(skill_dir, checkout).replace(os.sep, "/")
+            if gs.claimed_deeper(rel, folder, mapped or []):
+                continue
             try:
                 content, files = _read_sample_skill(skill_dir)
                 name = parse_frontmatter(content)["name"]
@@ -289,7 +295,8 @@ def sync_repo(repo: Dict[str, Any], *, force: bool = True) -> Optional[Dict[str,
                 if _library_matches(repo["id"]):
                     return last
             _checkout(repo, checkout)
-            skills, missing, problems = _read_skills(checkout, folders)
+            mapped = [m["folder"] for m in repo["mappings"]]
+            skills, missing, problems = _read_skills(checkout, folders, mapped)
             prune = not missing
             outcomes, refused = apply(repo["id"], skills, prune=prune)
         except gs.GitSyncError as e:
