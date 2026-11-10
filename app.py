@@ -1261,6 +1261,21 @@ async def _startup_event():
 
     _startup_tasks.append(asyncio.create_task(_skill_audit_nightly_loop()))
 
+    # Skills kept in a Git repository (src/git_skills_sync.py). Nobody calls
+    # update_rag for a changed skill, so each repository is checked on its own
+    # interval; a tick with nothing due only reads the settings.
+    async def _git_skills_loop():
+        from src import git_skills_sync
+
+        while True:
+            try:
+                await asyncio.to_thread(git_skills_sync.check_due)
+            except Exception as e:
+                logger.warning(f"Git skill check failed: {e}")
+            await asyncio.sleep(60)
+
+    _startup_tasks.append(asyncio.create_task(_git_skills_loop()))
+
     logger.info("Application startup complete")
 
 

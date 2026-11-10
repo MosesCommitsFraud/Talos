@@ -310,6 +310,15 @@ def seed_sample_skills(source_dir: Optional[str] = None) -> int:
     ledger = _read_seed_ledger()
     written = 0
     _retire_seeded_system_skills(ledger)
+    # A skill a Git repository brought in (src/git_skills_sync.py) is that
+    # repository's from then on, also when it once was a sample: a new shipped
+    # version must not overwrite it.
+    try:
+        from src.git_skills_sync import read_ledger as _git_ledger
+
+        from_git = set(_git_ledger())
+    except Exception:
+        from_git = set()
     for entry in sorted(os.listdir(source_dir)):
         skill_dir = os.path.join(source_dir, entry)
         if not os.path.isdir(skill_dir):
@@ -324,6 +333,8 @@ def seed_sample_skills(source_dir: Optional[str] = None) -> int:
             logger.warning("Skipping sample skill %s: %s", entry, e)
             continue
 
+        if name in from_git:
+            continue
         shipped_hash = _content_hash(content)
         with SessionLocal() as db:
             row = db.get(SharedSkill, name)

@@ -74,6 +74,12 @@ SETTING = "rag_git_repos"
 # A mapping target meaning "the mini RAG of the default database": the first enabled
 # one, resolved at each sync so it follows the databases in Integrations.
 DEFAULT_DB_TARGET = "@default-db"
+# A mapping target meaning the shared skill library: the folder holds skills, not
+# documents, and src/git_skills_sync.py syncs it.
+SKILLS_TARGET = "@skills"
+# How often a repository's skills are checked without anyone asking; 0 = never.
+DEFAULT_SKILLS_INTERVAL_MINUTES = 60
+MIN_SKILLS_INTERVAL_MINUTES = 5
 DEFAULT_EXCLUDE = ["readme.*"]
 # A note to whoever edits the folder, not knowledge. .sql is on top of what a directory
 # sync takes: the schema scripts belong in a mini RAG.
@@ -138,6 +144,16 @@ def _clean_mappings(value: Any) -> List[Dict[str, str]]:
     return mappings
 
 
+def _clean_interval(value: Any) -> int:
+    try:
+        minutes = int(value or 0)
+    except (TypeError, ValueError):
+        raise ValueError("The skill check interval must be a number of minutes")
+    if minutes <= 0:
+        return 0
+    return max(MIN_SKILLS_INTERVAL_MINUTES, min(minutes, 7 * 24 * 60))
+
+
 def normalize_repos(raw: Any) -> List[Dict[str, Any]]:
     """Validate the setting into its stored shape; ``ValueError`` says what's wrong.
 
@@ -169,6 +185,9 @@ def normalize_repos(raw: Any) -> List[Dict[str, Any]]:
                 "default": bool(item.get("default")),
                 "exclude": [str(p).strip() for p in exclude if str(p).strip()],
                 "mappings": _clean_mappings(item.get("mappings")),
+                "skills_interval_minutes": _clean_interval(
+                    item.get("skills_interval_minutes", DEFAULT_SKILLS_INTERVAL_MINUTES)
+                ),
             }
         )
     default = next((r for r in repos if r["default"]), repos[0] if repos else None)
@@ -214,6 +233,8 @@ def _resolve_mappings(repo: Dict[str, Any]) -> Tuple[List[Dict[str, str]], List[
     for mapping in repo["mappings"]:
         label = mapping["folder"] or "/"
         base = mapping["base"]
+        if base == SKILLS_TARGET:
+            continue
         if base == DEFAULT_DB_TARGET:
             base = rag_mini.default_base_id() or ""
             if not base:
@@ -239,7 +260,9 @@ def plan_sync(repo_id: Optional[str] = None, only_base: Optional[str] = None) ->
     mappings, problems = _resolve_mappings(repo)
     if only_base:
         mappings = [m for m in mappings if m["base"] == only_base]
-    if not mappings and not problems:
+    # Skills are the repository's as a whole, so a run narrowed to one base skips them.
+    skills = not only_base and any(m["base"] == SKILLS_TARGET for m in repo["mappings"])
+    if not mappings and not problems and not skills:
         what = f" to knowledge base {only_base!r}" if only_base else ""
         raise GitSyncError(f"No folder of {repo['url']} is mapped{what}.")
     return {
@@ -250,6 +273,7 @@ def plan_sync(repo_id: Optional[str] = None, only_base: Optional[str] = None) ->
         "mappings": mappings,
         "problems": problems,
         "only_base": only_base,
+        "skills": skills,
     }
 
 
@@ -258,11 +282,18 @@ def start(repo_id: Optional[str] = None, only_base: Optional[str] = None) -> Dic
     from src import rag_worker
 
     plan = plan_sync(repo_id, only_base)
-    try:
-        job = rag_worker.start_git_sync(plan)
-    except Exception as e:
-        logger.error("could not queue the Git sync of %s: %s", plan["repo_id"], e)
-        raise GitSyncError("The ingest queue is unavailable. Is Redis (rag-redis) running?")
+    # A repository that only holds skills has nothing for the worker.
+    job: Dict[str, Any] = {"id": None, "status": "skills"}
+    if plan["mappings"] or plan["problems"]:
+        try:
+            job = rag_worker.start_git_sync(plan)
+        except Exception as e:
+            logger.error("could not queue the Git sync of %s: %s", plan["repo_id"], e)
+            raise GitSyncError("The ingest queue is unavailable. Is Redis (rag-redis) running?")
+    if plan["skills"]:
+        from src import git_skills_sync
+
+        git_skills_sync.start(plan["repo_id"])
     return {**job, "plan": plan}
 
 
@@ -800,7 +831,7 @@ def run(
 
 def status() -> List[Dict[str, Any]]:
     """Every configured repository with its last run and any job under way. No tokens."""
-    from src import rag_worker
+    from src import git_skills_sync, rag_worker
 
     active = [
         j
@@ -813,6 +844,12 @@ def status() -> List[Dict[str, Any]]:
             "url": repo["url"],
             "default": repo["default"],
             "last": _read_state(repo["id"]),
+            # The skill library's last run; None when no folder holds skills.
+            "skills": (
+                git_skills_sync.read_state(repo["id"])
+                if git_skills_sync.skill_folders(repo)
+                else None
+            ),
             "job": next((j for j in active if j.get("repo_id") == repo["id"]), None),
         }
         for repo in configured_repos()

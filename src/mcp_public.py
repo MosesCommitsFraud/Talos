@@ -306,6 +306,7 @@ _TOOL_DEFS: List[Dict[str, Any]] = [
             "Talos: new and changed files are indexed, files that left the repository "
             "are removed. An upload with the name or content of a repository file is "
             "replaced by it; other uploads and other repositories are not touched. "
+            "Skills the repository holds are synced into the skill library as well. "
             "Fire-and-forget: the call only starts the job and returns straight away "
             "with its id."
         ),
@@ -557,12 +558,14 @@ def _tool_update_rag(args: Dict[str, Any]) -> str:
     except rag_git_sync.GitSyncError as e:
         raise ToolError(str(e))
     plan = job["plan"]
-    bases = ", ".join(sorted({m["base"] for m in plan["mappings"]})) or "none"
-    state = "was already queued" if job.get("already_queued") else "started"
-    lines = [
-        f"Update of {bases} from {plan['url']} {state} (job {job['id']}).",
-        "It runs in the background: the documents change once it has finished.",
-    ]
+    lines = []
+    if job.get("id"):
+        bases = ", ".join(sorted({m["base"] for m in plan["mappings"]})) or "none"
+        state = "was already queued" if job.get("already_queued") else "started"
+        lines.append(f"Update of {bases} from {plan['url']} {state} (job {job['id']}).")
+    if plan.get("skills"):
+        lines.append(f"The skill library is being updated from {plan['url']}.")
+    lines.append("It runs in the background: the documents change once it has finished.")
     if plan["problems"]:
         lines.append("Nothing will be removed in this run: " + "; ".join(plan["problems"]) + ".")
     return "\n".join(lines)

@@ -163,6 +163,30 @@ files to the normal ingest:
   Windows host as much as in the container. For Azure DevOps that is a personal access
   token with the scope *Code (Read)*.
 
+#### Skills from the repository
+
+A folder mapped to **Skill library** holds skills instead of documents: every folder
+below it with a `SKILL.md` is one, its other files are the skill's bundle. They land in
+the shared skill library (`src/git_skills_sync.py`), new ones switched on.
+
+- **One skill per name.** A library skill with the name of a repository skill is taken
+  over: the repository's version replaces it and it keeps its on/off switch. That is
+  how the sample skills shipped with Talos move to the repository without ending up
+  twice, and the sample seeder leaves such a name alone from then on. A name of a
+  built-in system skill is skipped, since that one ships with the code. A name another
+  repository brought in is refused and reported.
+- **The repository decides.** A synced skill edited in the app is put back on the next
+  run, and one that left the repository leaves the library, though only after a run
+  that saw every configured folder. Skills that never came from a repository are not
+  touched.
+- **Checked on a timer.** Nobody calls `update_rag` for a changed skill, so each
+  repository is checked every `skills_interval_minutes` (default 60, 0 = never, at
+  least 5). A check is a shallow fetch; the library is only written when the commit
+  moved or a synced skill was changed in the app. Every sync of the repository,
+  `update_rag` included, syncs the skills as well.
+- **Runs in the app**, not in the ingest worker, because the library lives in the app
+  database. It uses a checkout of its own.
+
 The last run of each repository is kept in `data/rag/git_sync/<repo id>.json` and shown
 on the settings page, because finished jobs expire from the queue.
 
