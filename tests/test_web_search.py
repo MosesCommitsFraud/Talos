@@ -99,6 +99,31 @@ def test_format_handles_no_results():
     )
     assert "No results" in out
     assert "anderes wort" in out
+    # It names where searching ends instead of asking for more of it.
+    assert "saying so is the answer" in out and "Try different wording" not in out
+
+
+def test_an_empty_search_says_how_many_of_the_turn_found_nothing():
+    from src import citations
+
+    def search(session_id):
+        return web_search._format_search_results(
+            "test", {"results": []}, max_results=5, session_id=session_id
+        )
+
+    citations.begin_turn("s-empty")
+    first, second, third, fourth = (search("s-empty") for _ in range(4))
+    # A first response often sends two wordings at once; the count starts after.
+    assert first == second and web_search.NO_RESULTS in first
+    assert "3 searches without a result" in third and "4 searches" in fourth
+    # A search that finds something is not counted.
+    web_search._format_search_results("test", _payload(), max_results=5, session_id="s-empty")
+    assert "5 searches" in search("s-empty")
+
+    citations.begin_turn("s-empty")  # the next turn starts over
+    assert web_search.NO_RESULTS in search("s-empty")
+    # Outside a turn (the MCP server) nothing is counted.
+    assert all(web_search.NO_RESULTS in search("") for _ in range(4))
 
 
 # ── tool-layer argument parsing ──

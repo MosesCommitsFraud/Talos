@@ -375,6 +375,30 @@ def _pick_results(
     return picked, filtered
 
 
+# What a search without results says. It sits next to the result because that
+# is where a model reads it: the system prompt's "a source that has nothing is
+# its answer" lost against a result that said "try different wording", and a
+# search for something the web does not have was reworded 5 to 12 times.
+NO_RESULTS = (
+    "No results. One differently worded search can be worth it; when that is empty "
+    "too, the web has nothing on this, and saying so is the answer."
+)
+# From the third empty search of a turn on, the result gives the count: the
+# model cannot see from one result how long it has been at it. Two searches are
+# left out because a first response often sends two wordings at once.
+NO_RESULTS_AGAIN = (
+    "No results. That makes {n} searches without a result in this turn; when they "
+    "were after the same thing, the web has nothing on it, and saying so is the answer."
+)
+
+
+def _no_results(session_id: str) -> str:
+    from src import citations
+
+    n = citations.tally(session_id, "empty_web_search")
+    return NO_RESULTS_AGAIN.format(n=n) if n >= 3 else NO_RESULTS
+
+
 def _format_search_results(
     query: str,
     payload: Dict[str, Any],
@@ -411,7 +435,7 @@ def _format_search_results(
                 "not reachable from the allowed domains."
             )
             return "\n".join(lines)
-        lines.append("\nNo results. Try different wording or a broader query.")
+        lines.append("\n" + _no_results(session_id))
         suggestions = payload.get("suggestions") or []
         if suggestions:
             lines.append(f"Suggested queries: {', '.join(str(s) for s in suggestions[:5])}")

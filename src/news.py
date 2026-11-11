@@ -113,7 +113,10 @@ def _summary(query: str, articles: List[Dict[str, Any]], filtered: int) -> str:
         line = f'No news results for "{query}".'
         if filtered:
             return line + f" ({filtered} removed by the administrator's domain policy.)"
-        return line + " Try different wording, a wider `time_range`, or a plain web_search."
+        return (
+            line + " A wider `time_range` or a plain web_search may still find it; when "
+            "those are empty too, there is nothing to report on this."
+        )
 
     lines = [f'News: "{query}" — {len(articles)} article(s).']
     for i, article in enumerate(articles, 1):

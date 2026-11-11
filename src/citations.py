@@ -84,6 +84,20 @@ def forget_delivered(session_id: Optional[str]) -> None:
             turn["delivered"].pop(_delivery_scope.get(), None)
 
 
+def tally(session_id: Optional[str], name: str) -> int:
+    """Count one more `name` for this conversation's turn and return the total;
+    0 outside a turn. web_search counts its empty results here, so a result can
+    say how many searches have already found nothing."""
+    with _lock:
+        turn = _turns.get(session_id or "")
+        if turn is None:
+            return 0
+        counts = turn.setdefault("tallies", {})
+        key = (_delivery_scope.get(), name)
+        counts[key] = counts.get(key, 0) + 1
+        return counts[key]
+
+
 def active(session_id: Optional[str]) -> bool:
     return bool(session_id) and session_id in _turns
 

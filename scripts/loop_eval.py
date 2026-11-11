@@ -189,7 +189,7 @@ def _web_search(content: str, run: Run) -> str:
         parts.append(PY_RESULTS)
     if "postgres" in q:
         parts.append(PG_RESULTS)
-    return "\n".join(parts) if parts else "No results found for this query."
+    return "\n".join(parts) if parts else _no_results(content, run)
 
 
 PY_PAGE = (
@@ -234,7 +234,18 @@ def _web_fetch(content: str, run: Run) -> str:
 
 
 def _no_results(content: str, run: Run) -> str:
-    return "No results found for this query."
+    """A search that finds nothing, in the words the real tool uses. They depend
+    on how many searches of the turn were empty, so the run is given a turn."""
+    from src import citations, web_search
+
+    try:
+        query = str(json.loads(content).get("query") or "")
+    except (ValueError, TypeError, AttributeError):
+        query = content.strip()
+    turn = run.state.setdefault("turn", f"loop-eval-{id(run)}")
+    if not citations.active(turn):
+        citations.begin_turn(turn)
+    return web_search._format_search_results(query, {"results": []}, 8, session_id=turn)
 
 
 def _calc(content: str, run: Run) -> str:
