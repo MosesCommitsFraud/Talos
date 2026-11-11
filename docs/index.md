@@ -45,3 +45,11 @@ pip install -r requirements-docs.txt
 mkdocs serve        # live preview at http://127.0.0.1:8000
 mkdocs build        # static build → docs_build/ (served by the app at /docs)
 ```
+
+## License
+
+Talos is source-available under the
+[PolyForm Noncommercial License 1.0.0](https://polyformproject.org/licenses/noncommercial/1.0.0).
+Personal, research, educational, and other noncommercial use is allowed; commercial
+use is not. The full terms are in `LICENSE.md` at the repository root. Bundled
+third-party libraries keep their own licenses.

@@ -24,6 +24,8 @@ build/
 dev-docs/
 docs/
 *.md
+# The license terms travel with every copy of the software, including the image.
+!LICENSE.md
 *.db
 *.sqlite
 *.sqlite3
