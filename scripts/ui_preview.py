@@ -781,6 +781,13 @@ _ANSWER_TOOL = {
     "output": "report written",
     "exit_code": 0,
 }
+# The model checking its own chart (view_image), in the same turn.
+_LOOK_TOOL = {
+    "tool": "view_image",
+    "command": json.dumps({"path": "output/umsatz_q3.png", "question": "Sind die Achsen lesbar?"}),
+    "output": "umsatz_q3.png, as the vision model sees it: a bar chart with three bars.",
+    "exit_code": 0,
+}
 
 
 def _closing_line_stream() -> bytes:
@@ -788,6 +795,8 @@ def _closing_line_stream() -> bytes:
         {"delta": _ANSWER_TEXT},
         {"type": "tool_start", "tool": _ANSWER_TOOL["tool"], "command": _ANSWER_TOOL["command"]},
         {"type": "tool_output", **_ANSWER_TOOL},
+        {"type": "tool_start", "tool": _LOOK_TOOL["tool"], "command": _LOOK_TOOL["command"]},
+        {"type": "tool_output", **_LOOK_TOOL},
         {"type": "agent_step", "round": 2},
         {"delta": _CLOSING_TEXT},
         {"type": "metrics", "data": {"model": "mock-ui-preview", "response_time": 2.0}},
@@ -803,7 +812,10 @@ def _record_closing_line_turn(session_id: str, message: str) -> None:
     # How the real backend saves a multi-round turn: the text of each round,
     # and each tool event tagged with its round.
     entry["metadata"]["round_texts"] = [_ANSWER_TEXT, _CLOSING_TEXT]
-    entry["metadata"]["tool_events"] = [{**_ANSWER_TOOL, "round": 1}]
+    entry["metadata"]["tool_events"] = [
+        {**_ANSWER_TOOL, "round": 1},
+        {**_LOOK_TOOL, "round": 1},
+    ]
     hist.append(entry)
 
 
