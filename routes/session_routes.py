@@ -158,8 +158,6 @@ def _session_read_access(request: Request, session_id: str) -> bool:
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api", tags=["sessions"])
-
 
 def _current_user_is_admin(request: Request, user: str | None) -> bool:
     if not user:
@@ -282,6 +280,10 @@ def merge_pending_workspaces(project_id: str | None = None) -> None:
 
 def setup_session_routes(session_manager: SessionManager, config: dict):
     """Setup session routes with the provided manager and config"""
+    # A router of its own per call. On a shared one a second call adds every
+    # route again behind the first, which keeps answering with the manager it
+    # was set up with.
+    router = APIRouter(prefix="/api", tags=["sessions"])
 
     REQUEST_TIMEOUT = config.get("REQUEST_TIMEOUT", 20)
     OPENAI_API_KEY = config.get("OPENAI_API_KEY")
