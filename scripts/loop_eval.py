@@ -225,12 +225,36 @@ PG_PAGE = (
 )
 
 
+# A page that was a search result keeps its source number when it is fetched,
+# as in the real tool; any other page of the topic gets a number of its own.
+_SOURCE_NUMBERS = (
+    ("docs.python.org/3/whatsnew/3.13.html", 1),
+    ("python.org/downloads/release/python-3130", 2),
+    ("postgresql-17-released-2936", 3),
+    ("release-17.html", 4),
+)
+
+
 def _web_fetch(content: str, run: Run) -> str:
-    if "postgres" in content.lower():
-        return PG_PAGE
-    if "python" in content.lower():
-        return PY_PAGE
-    raise Fail("Could not fetch this URL (HTTP 404).")
+    """A fetched page in the shape the real tool returns: numbered as a source
+    and followed by the citation rule. Without the number the model has
+    nothing to cite when it goes to the official page without searching."""
+    from src import citations
+
+    low = content.lower()
+    if "postgres" in low:
+        page, n = PG_PAGE, 6
+    elif "python" in low:
+        page, n = PY_PAGE, 5
+    else:
+        raise Fail("Could not fetch this URL (HTTP 404).")
+    try:
+        url = str(json.loads(content).get("url") or "")
+    except (ValueError, TypeError, AttributeError):
+        url = content.strip()
+    n = next((number for part, number in _SOURCE_NUMBERS if part in url), n)
+    title = page.split("\n", 1)[0]
+    return f"[{n}] Fetched: {url}\nTitle: {title}\n\n{page}\n\n{citations.CITATION_RULE}"
 
 
 def _no_results(content: str, run: Run) -> str:
@@ -455,11 +479,13 @@ def _check_dokument(run: Run) -> List[str]:
 
 def _check_recherche(run: Run) -> List[str]:
     out = []
-    first_round = [c for c in run.calls if c.round == 1 and c.tool == "web_search"]
-    if run.count("web_search") < 2:
-        out.append("fewer than two searches for two topics")
-    elif len(first_round) < 2:
-        out.append("the two searches were not sent in the same response")
+    # Going straight to the two official pages is as good as searching for them:
+    # what counts is that the two independent lookups go out together.
+    lookups = [c for c in run.calls if c.tool in ("web_search", "web_fetch")]
+    if len(lookups) < 2:
+        out.append("fewer than two lookups for two topics")
+    elif len([c for c in lookups if c.round == 1]) < 2:
+        out.append("the two lookups were not sent in the same response")
     if not re.search(r"\[\d\]", run.answer):
         out.append("answer cites no source number")
     if not (_has(run.answer, "python") and _has(run.answer, "postgres")):
@@ -552,7 +578,7 @@ TASKS: List[Task] = [
     Task(
         "recherche",
         "Recherchiere: Was sind die wichtigsten Neuerungen in Python 3.13 und in PostgreSQL 17?",
-        "sends independent searches together and cites the sources",
+        "sends independent lookups together and cites the sources",
         _check_recherche,
         tools={"web_search": _web_search, "web_fetch": _web_fetch},
     ),

@@ -218,6 +218,30 @@ async def test_an_endpoint_that_stays_away_ends_the_run(endpoint, monkeypatch):
     assert shown == []  # no turn was counted as the model's failure
 
 
+def test_a_fetched_page_is_a_numbered_source_and_counts_as_a_lookup():
+    from src import citations
+
+    run = loop_eval.Run("recherche", "v")
+    page = loop_eval._web_fetch(
+        '{"url": "https://www.postgresql.org/docs/17/release-17.html"}', run
+    )
+    # The number it has as a search result, and the rule that says to cite it.
+    assert page.startswith("[4] Fetched: https://www.postgresql.org/docs/17/release-17.html\n")
+    assert "JSON_TABLE" in page and page.endswith(citations.CITATION_RULE)
+    other = loop_eval._web_fetch(
+        '{"url": "https://docs.python.org/3.13/whatsnew/changelog.html"}', run
+    )
+    assert other.startswith("[5] Fetched:")
+    with pytest.raises(loop_eval.Fail):
+        loop_eval._web_fetch('{"url": "https://example.org/"}', run)
+
+    run.texts = ["", "Python 3.13 [1] und PostgreSQL 17 [4]."]
+    run.calls = [loop_eval.Call(1, "web_fetch", "", True, True) for _ in range(2)]
+    assert loop_eval._check_recherche(run) == []
+    run.calls[1].round = 2
+    assert loop_eval._check_recherche(run) == ["the two lookups were not sent in the same response"]
+
+
 def test_the_database_answers_what_the_query_asks_for():
     october = "from dbo.orders where order_date >= '2026-10-01'"
     ask = loop_eval._sql_query
