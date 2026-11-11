@@ -87,3 +87,30 @@ async def test_the_final_metrics_say_why_a_capped_turn_ended(monkeypatch):
 async def test_a_turn_the_model_finished_has_no_stop_reason(monkeypatch):
     _working_model(monkeypatch, tool_rounds=2)
     assert _stop_reason(await _run(max_rounds=0)) is None
+
+
+# ── subagents ────────────────────────────────────────────────────────────────
+
+
+def _subagent_limit(monkeypatch, deep_research=False, **stored):
+    from src import subagents
+
+    monkeypatch.setattr(subagents, "_setting", lambda key, default: stored.get(key, default))
+    return subagents.subagent_round_limit(deep_research)
+
+
+def test_a_subagent_has_no_step_limit_by_default(monkeypatch):
+    assert DEFAULT_SETTINGS["subagent_max_rounds"] == 0
+    assert DEFAULT_SETTINGS["deep_research_subagent_max_rounds"] == 0
+    assert _subagent_limit(monkeypatch) == 0
+    assert _subagent_limit(monkeypatch, deep_research=True) == 0
+
+
+def test_a_configured_subagent_limit_applies(monkeypatch):
+    assert _subagent_limit(monkeypatch, subagent_max_rounds=12) == 12
+    # Research subagents get at least their own, larger limit.
+    stored = {"subagent_max_rounds": 12, "deep_research_subagent_max_rounds": 20}
+    assert _subagent_limit(monkeypatch, deep_research=True, **stored) == 20
+    assert _subagent_limit(monkeypatch, **stored) == 12
+    # No research limit means none, also with a limit for ordinary subagents.
+    assert _subagent_limit(monkeypatch, deep_research=True, subagent_max_rounds=12) == 0

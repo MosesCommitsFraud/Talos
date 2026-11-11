@@ -604,8 +604,8 @@ def setup_auth_routes(auth_manager: AuthManager) -> APIRouter:
             "agent_max_tool_calls": (0, 1000),  # 0 = unlimited
             "agent_tool_parallelism": (1, 8),  # 1 = sequential
             "subagent_parallelism": (1, 6),
-            "subagent_max_rounds": (2, 40),
-            "deep_research_subagent_max_rounds": (2, 60),
+            "subagent_max_rounds": (0, 1000),  # 0 = no limit (default)
+            "deep_research_subagent_max_rounds": (0, 1000),  # 0 = no limit
             "subagent_max_runtime_s": (60, 3600),
             "llm_stream_retries": (0, 10),  # 0 = never retry a model call
             # Outward MCP defaults; the hard caps live in src/web_search.py.

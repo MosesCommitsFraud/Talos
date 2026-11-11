@@ -118,10 +118,13 @@ DEFAULT_SETTINGS = {
     "ui_map_contact": "",
     "subagent_reasoning": "off",
     "subagent_parallelism": 3,
-    "subagent_max_rounds": 12,
-    # Rounds for a research subagent of a deep-research turn (src/deep_research.py):
-    # broad search, narrow search, read, cross-check.
-    "deep_research_subagent_max_rounds": 20,
+    # Steps per subagent; 0 = no limit (see subagents.subagent_round_limit).
+    # What ends a subagent that goes wrong is the repeat guard and
+    # subagent_max_runtime_s, not a count of steps.
+    "subagent_max_rounds": 0,
+    # With a limit set above, the least a research subagent of a deep-research
+    # turn gets (src/deep_research.py); 0 = no limit for those.
+    "deep_research_subagent_max_rounds": 0,
     "subagent_max_runtime_s": 900,
     # Own (smaller, faster) model for subagents; empty = the chat's model.
     "subagent_endpoint_id": "",

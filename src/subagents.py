@@ -189,6 +189,24 @@ def _int_setting(key: str, default: int, lo: int, hi: int) -> int:
         return default
 
 
+def subagent_round_limit(deep_research: bool = False) -> int:
+    """Steps a subagent may take; 0 means no limit, which is the default.
+
+    Like the chat's own turn, a subagent works until it is done: the repeat
+    guard, the context handling and `subagent_max_runtime_s` end one that goes
+    wrong. A step limit ends one that is going right as well, mid-work, and the
+    parent then gets half a report. `subagent_max_rounds` sets a limit for
+    those who want one. With a limit set, a research subagent of a deep
+    research turn gets at least `deep_research_subagent_max_rounds` (broad
+    search, narrow search, read, cross-check), where 0 again means no limit.
+    """
+    limit = _int_setting("subagent_max_rounds", 0, 0, 1000)
+    if limit and deep_research:
+        research = _int_setting("deep_research_subagent_max_rounds", 0, 0, 1000)
+        limit = max(limit, research) if research else 0
+    return limit
+
+
 def _chat_target(ctx: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "endpoint_url": ctx["endpoint_url"],
@@ -419,11 +437,7 @@ async def _run_one(run: _Run, ctx: Dict[str, Any]) -> int:
     citations.set_delivery_scope(f"subagent-{id(run)}")
     sink: Dict[str, Any] = {}
     target = run.target
-    max_rounds = _int_setting("subagent_max_rounds", 12, 2, 40)
-    if ctx.get("deep_research"):
-        # A research subagent searches broad, then narrow, then reads and
-        # cross-checks — more rounds than a quick lookup.
-        max_rounds = max(max_rounds, _int_setting("deep_research_subagent_max_rounds", 20, 2, 60))
+    max_rounds = subagent_round_limit(bool(ctx.get("deep_research")))
     try:
         async for chunk in stream_agent_loop(
             target["endpoint_url"],

@@ -96,7 +96,7 @@ def test_deep_turn_subagents_research_harder(deep_turn, monkeypatch):
     for call in calls:
         first = call["messages"][0]["content"]
         assert dr.SUBAGENT_HEAD in first
-        assert call["max_rounds"] == 20
+        assert call["max_rounds"] == 0  # no step limit by default
     # Same head for the whole wave: only the assignment differs.
     a, b = (c["messages"][0]["content"] for c in calls)
     assert a.split("Assignment:")[0] == b.split("Assignment:")[0]
@@ -114,4 +114,4 @@ def test_normal_turn_subagents_unchanged(deep_turn, monkeypatch):
     monkeypatch.setattr(agent_loop, "stream_agent_loop", fake)
     asyncio.run(sub.run_tasks(json.dumps({"tasks": [{"prompt": "Find A"}]}), session_id="s1"))
     assert dr.SUBAGENT_HEAD not in calls[0]["messages"][0]["content"]
-    assert calls[0]["max_rounds"] == 12
+    assert calls[0]["max_rounds"] == 0

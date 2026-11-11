@@ -1934,7 +1934,7 @@ const de: typeof en = {
       subagentParallelismHint: '1–6. Auf einer DGX Spark sind 2–3 sinnvoll.',
       subagentMaxRounds: 'Max. Schritte je Subagent',
       deepResearchMaxRounds: 'Max. Schritte je Subagent (Deep Research)',
-      deepResearchMaxRoundsHint: 'Recherche-Subagenten im Deep-Research-Modus suchen breit, dann gezielt, lesen und gleichen ab – dafür brauchen sie mehr Schritte.',
+      deepResearchMaxRoundsHint: 'Gilt nur, wenn oben ein Limit gesetzt ist: Recherche-Subagenten im Deep-Research-Modus bekommen dann mindestens so viele Schritte. 0 = unbegrenzt.',
       endpoint: '{{label}}-Endpunkt',
       model: '{{label}}-Modell',
       fallbacks: 'Ausweichmodelle (werden der Reihe nach versucht, wenn das primäre fehlschlägt)',

@@ -1927,7 +1927,7 @@ const en = {
       subagentParallelismHint: '1–6. On a DGX Spark, 2–3 is sensible.',
       subagentMaxRounds: 'Max steps per subagent',
       deepResearchMaxRounds: 'Max steps per subagent (deep research)',
-      deepResearchMaxRoundsHint: 'Research subagents in deep research mode search broadly, then narrowly, read and cross-check — they need more steps for that.',
+      deepResearchMaxRoundsHint: 'Only applies when a limit is set above: research subagents in deep research mode then get at least this many steps. 0 = no limit.',
       endpoint: '{{label}} endpoint',
       model: '{{label}} model',
       fallbacks: 'Fallbacks (tried in order when the primary fails)',
