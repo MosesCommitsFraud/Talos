@@ -517,7 +517,7 @@ function useSampledTokens(estimate: number, checkpoint: number): number {
  *  stream showed, in the same order and the same styling, so reopening a turn
  *  shows what watching it showed. Styled like the tool groups (trailing chevron,
  *  medium 13px, muted) so the whole stack reads as one family. */
-function ActivityFold({ turn, showThinking, durationMs, terminalId }: { turn: UiMessage[]; showThinking: boolean; durationMs: number | null; terminalId?: string }) {
+function ActivityFold({ turn, showThinking, durationMs, shownOutside }: { turn: UiMessage[]; showThinking: boolean; durationMs: number | null; shownOutside: ReadonlySet<string> }) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const label = durationMs != null ? t('messages.workedFor', { duration: formatDurationMs(durationMs) }) : t('messages.worked');
@@ -536,7 +536,7 @@ function ActivityFold({ turn, showThinking, durationMs, terminalId }: { turn: Ui
         <div className="mt-1.5">
           {/* `settled`: the turn already re-surfaces the answer-like cards
               outside this fold; only result tables stay in here, compact. */}
-          <TurnBody turn={turn} showThinking={showThinking} hideContentFor={terminalId} settled />
+          <TurnBody turn={turn} showThinking={showThinking} hideContentFor={shownOutside} settled />
         </div>
       </Collapse>
     </div>
@@ -546,9 +546,9 @@ function ActivityFold({ turn, showThinking, durationMs, terminalId }: { turn: Ui
 /** Renders a turn's segments. Shared by the streaming and settled branches so a
  *  turn doesn't visibly rearrange itself the moment it finishes — the tool
  *  groups just switch from live labels to their past-tense recap.
- *  `hideContentFor` suppresses one bubble's text (the final answer, which stays
+ *  `hideContentFor` suppresses the text of some bubbles (the answer, which stays
  *  outside the fold; or a proposed plan, which renders as a chip). */
-export function TurnBody({ turn, showThinking, hideContentFor, settled }: { turn: UiMessage[]; showThinking: boolean; hideContentFor?: string; settled?: boolean }) {
+export function TurnBody({ turn, showThinking, hideContentFor, settled }: { turn: UiMessage[]; showThinking: boolean; hideContentFor?: ReadonlySet<string>; settled?: boolean }) {
   return (
     <>
       {buildSegments(turn, showThinking).map((seg) => {
@@ -575,7 +575,7 @@ export function TurnBody({ turn, showThinking, hideContentFor, settled }: { turn
             </div>
           );
         }
-        if (seg.msg.id === hideContentFor) return null;
+        if (hideContentFor?.has(seg.msg.id)) return null;
         return (
           <div key={seg.msg.id} className={seg.msg.error ? 'text-destructive-foreground' : 'text-strong'}>
             <Markdown text={seg.msg.content} streaming={!!seg.msg.streaming} />
@@ -797,6 +797,33 @@ function CompactionMarker() {
  *  with one collapsible group per batch of tool calls — so the turn doesn't
  *  rearrange itself when it finishes. The live "Working for Xs" indicator is
  *  swapped for the final elapsed time. */
+/** An answer shorter than this is never treated as "the answer" of a turn. */
+const ANSWER_MIN_CHARS = 600;
+
+/** The round that holds the turn's real answer, when the last round does not.
+ *
+ *  A model often writes its answer, then hands over what it describes — the
+ *  document, the chart, the file — and closes with a line ("Das Dokument ist
+ *  angelegt."). The fold shows only the last round's text, so that line would
+ *  be all the user gets. The server used to make the model write the whole
+ *  answer a second time for this; now the answer it already wrote is shown
+ *  above its closing line.
+ *
+ *  Returns the longest earlier text when it is a real answer and the last one
+ *  is less than half as long; otherwise nothing, and the last text stands alone
+ *  as before. */
+function answerBody(turn: UiMessage[], terminal: UiMessage | undefined): UiMessage | undefined {
+  if (!terminal) return undefined;
+  const earlier = turn.filter((m) => m.id !== terminal.id && m.content.trim().length > 0);
+  const longest = earlier.reduce<UiMessage | undefined>(
+    (best, m) => (!best || m.content.trim().length > best.content.trim().length ? m : best),
+    undefined,
+  );
+  if (!longest) return undefined;
+  const size = longest.content.trim().length;
+  return size >= ANSWER_MIN_CHARS && terminal.content.trim().length < size / 2 ? longest : undefined;
+}
+
 /** Reasons after which saying "continue" picks the work up where it stopped.
  *  The others need something else first (a new chat, a working model), so they
  *  offer a retry of the same step instead. */
@@ -906,8 +933,9 @@ function AssistantTurn({ turn, containsLast, outputs, sessionId }: { turn: UiMes
   // complete answer (final-answer completeness nudge), so folding the earlier
   // text loses nothing.
   const terminal = [...turn].reverse().find((m) => m.content.trim().length > 0);
-  const terminalId = terminal?.id;
-  const hasFoldedCommentary = turn.some((m) => m.id !== terminalId && m.content.trim().length > 0);
+  const body = answerBody(turn, terminal);
+  const shownOutside = new Set([terminal?.id, body?.id].filter((id): id is string => !!id));
+  const hasFoldedCommentary = turn.some((m) => !shownOutside.has(m.id) && m.content.trim().length > 0);
   const hasActivity =
     hasFoldedCommentary || turn.some((m) => (m.thinking && showThinking) || (m.tools?.length ?? 0) > 0);
   const durationMs =
@@ -941,7 +969,7 @@ function AssistantTurn({ turn, containsLast, outputs, sessionId }: { turn: UiMes
     <>
       {compacted && <CompactionMarker />}
       {hasActivity && (
-        <ActivityFold turn={turn} showThinking={showThinking} durationMs={durationMs} terminalId={terminalId} />
+        <ActivityFold turn={turn} showThinking={showThinking} durationMs={durationMs} shownOutside={shownOutside} />
       )}
       {/* The turn's plan, settled: every step where the work left it. */}
       {planMsg && <PlanCard msg={planMsg} live={false} />}
@@ -950,7 +978,13 @@ function AssistantTurn({ turn, containsLast, outputs, sessionId }: { turn: UiMes
       {widgets.map((widget, i) => (
         <WidgetView key={`w-${i}`} widget={widget} settled />
       ))}
-      {/* The answer itself stays outside the fold. */}
+      {/* The answer itself stays outside the fold: the round that holds it,
+          when the turn ended on a short closing line, and then that line. */}
+      {body && (
+        <div className="text-strong" data-answer-body>
+          <Markdown text={body.content} />
+        </div>
+      )}
       {terminal && (
         <div className={terminal.error ? 'text-destructive-foreground' : 'text-strong'}>
           <Markdown text={terminal.content} />

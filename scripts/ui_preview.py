@@ -766,6 +766,47 @@ def _stopped_stream(reason: str) -> bytes:
     return "".join(_sse(e) for e in events).encode("utf-8")
 
 
+# A turn whose real answer is not its last text: the model answers, hands over
+# a document, and closes with one line. Send "schlusssatz" to preview that the
+# answer stays on screen above the closing line (Messages.tsx, answerBody).
+_ANSWER_TEXT = (
+    "## Auswertung Q3\n\n" + "Der Umsatz der Region Süd lag im dritten Quartal über dem Vorjahr. "
+    "Die abgeschlossenen Aufträge verteilen sich gleichmäßig auf die drei Monate, "
+    "der September war der stärkste. " * 5
+)
+_CLOSING_TEXT = "Das Dokument ist angelegt."
+_ANSWER_TOOL = {
+    "tool": "bash",
+    "command": "python build_report.py",
+    "output": "report written",
+    "exit_code": 0,
+}
+
+
+def _closing_line_stream() -> bytes:
+    events: list[dict | str] = [
+        {"delta": _ANSWER_TEXT},
+        {"type": "tool_start", "tool": _ANSWER_TOOL["tool"], "command": _ANSWER_TOOL["command"]},
+        {"type": "tool_output", **_ANSWER_TOOL},
+        {"type": "agent_step", "round": 2},
+        {"delta": _CLOSING_TEXT},
+        {"type": "metrics", "data": {"model": "mock-ui-preview", "response_time": 2.0}},
+        "[DONE]",
+    ]
+    return "".join(_sse(e) for e in events).encode("utf-8")
+
+
+def _record_closing_line_turn(session_id: str, message: str) -> None:
+    hist = _HISTORY.setdefault(session_id, [])
+    hist.append(_entry("user", message))
+    entry = _entry("assistant", _ANSWER_TEXT + "\n\n" + _CLOSING_TEXT)
+    # How the real backend saves a multi-round turn: the text of each round,
+    # and each tool event tagged with its round.
+    entry["metadata"]["round_texts"] = [_ANSWER_TEXT, _CLOSING_TEXT]
+    entry["metadata"]["tool_events"] = [{**_ANSWER_TOOL, "round": 1}]
+    hist.append(entry)
+
+
 def _record_stopped_turn(session_id: str, message: str, reason: str) -> None:
     hist = _HISTORY.setdefault(session_id, [])
     hist.append(_entry("user", message))
@@ -3976,6 +4017,10 @@ class PreviewHandler(BaseHTTPRequestHandler):
             if "frage" in message.lower():
                 _record_ask_turn(session_id, message)
                 self._send_event_stream(_ask_stream())
+                return
+            if "schlusssatz" in message.lower():
+                _record_closing_line_turn(session_id, message)
+                self._send_event_stream(_closing_line_stream())
                 return
             stop_reason = _stop_reason_for(message)
             if stop_reason:
