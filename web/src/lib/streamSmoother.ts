@@ -1,9 +1,8 @@
-/** Evens out streamed text so it appears word by word, at a steady pace,
- *  instead of in the bursts the model and network actually deliver. A dense
- *  model at ~8 tok/s hands us a clump of characters every ~120ms, which reads
- *  as choppy; the smoother parks incoming text in a queue and releases it on
- *  animation frames at a rate derived from the backlog, one whole word at a
- *  time — half a word, or half a `**bold**` marker, never shows.
+/** Evens out streamed text so it appears letter-by-letter instead of in the
+ *  bursts the model and network actually deliver. A dense model at ~8 tok/s
+ *  hands us a clump of characters every ~120ms, which reads as choppy; the
+ *  smoother parks incoming text in a queue and releases it on every animation
+ *  frame at a rate derived from the backlog.
  *
  *  Thinking and answer text share one queue so their order is preserved — a
  *  round's thinking always finishes revealing before its answer starts. */
@@ -31,21 +30,14 @@ const MAX_BACKLOG = 400;
  *  blocked; drop the animation and emit everything rather than fast-forwarding
  *  through a whole message. */
 const STALL_MS = 400;
-/** How long an unfinished word may wait for its end before it is shown as is. */
-const WORD_WAIT_MS = 180;
-/** Longest run without whitespace that is held back as "one word". */
-const WORD_HOLD = 32;
 
 export class StreamSmoother {
   private queue: Segment[] = [];
   private pending = 0;
-  /** Budget not yet spent, carried between frames: slow rates still add up, and
-   *  a long word is paid for over several frames. */
+  /** Sub-character remainder carried between frames, so slow rates still add up. */
   private carry = 0;
   private raf: number | null = null;
   private lastFrame = 0;
-  /** When text last arrived, on the animation-frame clock. */
-  private lastPush = 0;
 
   constructor(private readonly sink: SmootherSink) {}
 
@@ -55,7 +47,6 @@ export class StreamSmoother {
     if (tail && tail.thinking === thinking) tail.text += text;
     else this.queue.push({ text, thinking });
     this.pending += text.length;
-    this.lastPush = performance.now();
     if (this.pending > MAX_BACKLOG) this.emit(this.pending - MAX_BACKLOG);
     this.schedule();
   }
@@ -100,37 +91,12 @@ export class StreamSmoother {
       return;
     }
     const cps = Math.min(MAX_CPS, Math.max(MIN_CPS, (this.pending / DRAIN_MS) * 1000));
-    // The budget is still counted in characters, so the pace is the one the
-    // backlog asks for; it is only spent a whole word at a time.
-    let budget = Math.min(this.carry + (cps * dt) / 1000, this.pending);
-    for (;;) {
-      const word = this.nextWord(now);
-      if (!word || word > budget) break;
-      this.emit(word);
-      budget -= word;
-    }
-    this.carry = budget;
+    const budget = this.carry + (cps * dt) / 1000;
+    const chars = Math.floor(budget);
+    this.carry = budget - chars;
+    if (chars > 0) this.emit(Math.min(chars, this.pending));
     if (this.pending) this.raf = requestAnimationFrame(this.tick);
   };
-
-  /** Length of the next piece to release: one word with the whitespace after
-   *  it, so text lands word by word instead of letter by letter. Zero while the
-   *  word at the head is still arriving.
-   *
-   *  A word counts as finished when whitespace follows it, when text of the
-   *  other kind is queued behind it, or when nothing has arrived for a moment
-   *  (the model paused, or this is the last word before a tool call). A run
-   *  with no whitespace at all — a long URL, a language written without spaces
-   *  — is not held back past WORD_HOLD characters. */
-  private nextWord(now: number): number {
-    const head = this.queue[0];
-    if (!head) return 0;
-    const match = /^\s*\S+\s+/.exec(head.text);
-    if (match) return match[0].length;
-    const complete = this.queue.length > 1 || now - this.lastPush > WORD_WAIT_MS;
-    if (complete || head.text.length > WORD_HOLD) return head.text.length;
-    return 0;
-  }
 
   /** Hand `count` characters to the sink, one call per run of same-kind text. */
   private emit(count: number): void {
