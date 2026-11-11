@@ -317,9 +317,7 @@ def _fallback_chapter_title(*texts: str) -> str:
     return "Chat"
 
 
-async def generate_chapter_title(
-    sess, question: str, answer: str, lang: str | None = None
-) -> str:
+async def generate_chapter_title(sess, question: str, answer: str, lang: str | None = None) -> str:
     """A short title for the point in a chat that a user marked as a chapter,
     written by the same small models that title chats. Never fails: without a usable
     answer from any of them the title is the first words of the exchange."""

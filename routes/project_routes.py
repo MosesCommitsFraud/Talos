@@ -229,7 +229,10 @@ def setup_project_routes() -> APIRouter:
                 workspace = await sandbox_client.list_workspace(owner=user, session_id=ref)
                 result["dirs"] = workspace["dirs"]
                 artifacts = [
-                    *({**a, "source": "workspace", "session_id": ref} for a in workspace["artifacts"]),
+                    *(
+                        {**a, "source": "workspace", "session_id": ref}
+                        for a in workspace["artifacts"]
+                    ),
                     *artifacts,
                 ]
             except Exception as e:
@@ -269,7 +272,9 @@ def setup_project_routes() -> APIRouter:
         user = _member(request, project_id)
         ref = projects.workspace_ref(project_id)
         folder = folder.strip().strip("/")
-        name = PurePosixPath((file.filename or "upload.bin").replace("\\", "/")).name or "upload.bin"
+        name = (
+            PurePosixPath((file.filename or "upload.bin").replace("\\", "/")).name or "upload.bin"
+        )
         tmp_dir = tempfile.mkdtemp(prefix="talos-project-upload-")
         tmp_path = os.path.join(tmp_dir, "upload.bin")
         try:

@@ -85,7 +85,9 @@ def env(monkeypatch, tmp_path):
         ],
     }
     # Same timestamp on purpose: history order then depends on the ids alone.
-    db.add(ChatMessage(id="z-first", session_id=SOURCE, role="user", content="hi", timestamp=SAME_TIME))
+    db.add(
+        ChatMessage(id="z-first", session_id=SOURCE, role="user", content="hi", timestamp=SAME_TIME)
+    )
     db.add(
         ChatMessage(
             id="a-second",
@@ -264,7 +266,9 @@ def daemon(monkeypatch, tmp_path):
 @needs_cp
 def test_forked_workspace_is_hard_links_not_copies(daemon):
     module, roots = daemon
-    result = module.fork_workspace_route("u", "source", module.ForkWorkspaceRequest(target_chat_id="fork"))
+    result = module.fork_workspace_route(
+        "u", "source", module.ForkWorkspaceRequest(target_chat_id="fork")
+    )
     assert result["forked"] is True
     original = roots["source"] / "output" / "report.txt"
     linked = roots["fork"] / "output" / "report.txt"
@@ -276,7 +280,9 @@ def test_forked_workspace_is_hard_links_not_copies(daemon):
 def test_chat_without_a_workspace_has_nothing_to_fork(daemon, tmp_path):
     module, roots = daemon
     shutil.rmtree(roots["source"])
-    result = module.fork_workspace_route("u", "source", module.ForkWorkspaceRequest(target_chat_id="fork"))
+    result = module.fork_workspace_route(
+        "u", "source", module.ForkWorkspaceRequest(target_chat_id="fork")
+    )
     assert result["forked"] is False
 
 

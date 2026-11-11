@@ -27,7 +27,13 @@ class _Manager:
 
     def __init__(self):
         self.session = SimpleNamespace(
-            id=SID, name="Report", owner="alice", endpoint_url="http://llm", model="m", headers={}, history=[]
+            id=SID,
+            name="Report",
+            owner="alice",
+            endpoint_url="http://llm",
+            model="m",
+            headers={},
+            history=[],
         )
 
     def get_session(self, session_id):
@@ -53,8 +59,12 @@ def env(monkeypatch, tmp_path):
 
     db = local()
     db.add(DbSession(id=SID, name="Report", endpoint_url="http://llm", model="m", owner="alice"))
-    texts = [("m1", "user", "Wie tief ist der See?"), ("m2", "assistant", "Etwa 40 Meter."),
-             ("m3", "user", "Und wie kalt?"), ("m4", "assistant", "Rund 4 Grad am Grund.")]
+    texts = [
+        ("m1", "user", "Wie tief ist der See?"),
+        ("m2", "assistant", "Etwa 40 Meter."),
+        ("m3", "user", "Und wie kalt?"),
+        ("m4", "assistant", "Rund 4 Grad am Grund."),
+    ]
     for msg_id, role, content in texts:
         db.add(ChatMessage(id=msg_id, session_id=SID, role=role, content=content, timestamp=AT))
     db.commit()
@@ -192,4 +202,7 @@ async def test_title_falls_back_when_the_model_fails(monkeypatch):
 
     monkeypatch.setattr(llm_core, "llm_call_async_with_fallback", boom)
     sess = SimpleNamespace(id="x", owner="a", endpoint_url="http://c", model="c", headers={})
-    assert await chat_helpers.generate_chapter_title(sess, "Wie tief ist es", "40 m") == "Wie tief ist es"
+    assert (
+        await chat_helpers.generate_chapter_title(sess, "Wie tief ist es", "40 m")
+        == "Wie tief ist es"
+    )

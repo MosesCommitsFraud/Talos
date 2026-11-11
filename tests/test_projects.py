@@ -57,9 +57,7 @@ class _Request:
 
 class _Auth:
     def list_users(self):
-        return [
-            {"username": u, "display_name": u.title()} for u in ("anna", "ben", "cara")
-        ]
+        return [{"username": u, "display_name": u.title()} for u in ("anna", "ben", "cara")]
 
 
 @pytest.fixture
@@ -135,9 +133,10 @@ async def test_memory_of_a_project_chat_is_the_projects_alone(db):
     await user_memory.do_memory(
         json.dumps({"action": "add", "title": "Domain", "text": "Launch is in May"}), owner=key
     )
-    assert "Launch is in May" in (
-        await user_memory.do_memory(json.dumps({"action": "view"}), owner=key)
-    )["output"]
+    assert (
+        "Launch is in May"
+        in (await user_memory.do_memory(json.dumps({"action": "view"}), owner=key))["output"]
+    )
     assert user_memory.listing("anna")["entries"] == []
     assert "Domain" in user_memory.turn_index(key)
     assert "shared" in user_memory.turn_index(key)
@@ -382,9 +381,7 @@ def test_folder_labels_become_projects_once(monkeypatch, tmp_path):
 
     path = tmp_path / "old.db"
     conn = sqlite3.connect(path)
-    conn.execute(
-        "CREATE TABLE sessions (id TEXT PRIMARY KEY, name TEXT, owner TEXT, folder TEXT)"
-    )
+    conn.execute("CREATE TABLE sessions (id TEXT PRIMARY KEY, name TEXT, owner TEXT, folder TEXT)")
     conn.execute(
         "CREATE TABLE projects (id TEXT PRIMARY KEY, name TEXT, description TEXT, owner TEXT, "
         "created_at TEXT, updated_at TEXT)"
@@ -576,7 +573,9 @@ async def test_a_project_chat_tells_the_sandbox_which_chat_it_is(db, monkeypatch
 
     in_project, own = _SandboxCalls.calls[:2], _SandboxCalls.calls[2:]
     assert all(params == {"scope": "in-project"} for _url, params in in_project)
-    assert all(f"/users/project%3A{project['id']}/workspaces/workspace/" in u for u, _ in in_project)
+    assert all(
+        f"/users/project%3A{project['id']}/workspaces/workspace/" in u for u, _ in in_project
+    )
     # A chat of its own has its workspace to itself, and the calls stay as they were.
     assert all(params == {} for _url, params in own)
     assert all("/users/anna/workspaces/own/" in u for u, _ in own)

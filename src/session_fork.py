@@ -185,7 +185,7 @@ def _forked_artifact_key(
 ) -> Optional[str]:
     """The fork's ArtifactMeta key for one of the source chat's, else None."""
     if key.startswith(f"{session_id}/"):
-        return f"{new_id}/{key[len(session_id) + 1:]}"
+        return f"{new_id}/{key[len(session_id) + 1 :]}"
     for prefix in ("document:", "generated-image:"):
         if key.startswith(prefix):
             new_item = mapping.get(key[len(prefix) :])

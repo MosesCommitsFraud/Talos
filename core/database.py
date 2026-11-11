@@ -1185,7 +1185,9 @@ def _migrate_folders_to_projects():
             conn.execute("ALTER TABLE sessions ADD COLUMN workspace_merged BOOLEAN DEFAULT 1")
         if "project_id" not in columns:
             conn.execute("ALTER TABLE sessions ADD COLUMN project_id TEXT")
-            conn.execute("CREATE INDEX IF NOT EXISTS ix_sessions_project_id ON sessions(project_id)")
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS ix_sessions_project_id ON sessions(project_id)"
+            )
             labels = conn.execute(
                 "SELECT DISTINCT owner, folder FROM sessions "
                 "WHERE folder IS NOT NULL AND folder != ''"

@@ -263,9 +263,7 @@ def delete_workspace_sync(owner: str | None, session_id: str | None) -> bool:
         return False
 
 
-async def fork_workspace(
-    *, owner: str | None, session_id: str, target_session_id: str
-) -> bool:
+async def fork_workspace(*, owner: str | None, session_id: str, target_session_id: str) -> bool:
     """Give a forked chat the source chat's workspace, as hard links rather than
     copies. Never raises: a fork without its files beats no fork, and False lets
     the caller say so. True also when there is no sandbox and so nothing to carry."""

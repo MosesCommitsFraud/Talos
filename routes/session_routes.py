@@ -733,7 +733,9 @@ def setup_session_routes(session_manager: SessionManager, config: dict):
                 db_session = db.query(DbSession).filter(DbSession.id == sid).first()
                 if db_session:
                     if wants_clear_section or section is not None:
-                        db_session.section = None if (wants_clear_section or not section) else section
+                        db_session.section = (
+                            None if (wants_clear_section or not section) else section
+                        )
                         result["section"] = db_session.section
                     if unread is not None:
                         db_session.unread = unread.strip().lower() in truthy
