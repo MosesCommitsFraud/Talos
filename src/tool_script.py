@@ -169,6 +169,8 @@ class _Tools:
     def __getattr__(self, name):
         if name.startswith("_"):
             raise AttributeError(name)
+        if name == "ToolError":  # `from tools import ToolError`
+            return ToolError
 
         def call(*positional, **args):
             if positional:
@@ -220,7 +222,9 @@ class _Tools:
 
 
 tools = _Tools()
-_code = _b64.b64decode({code_b64!r}).decode("utf-8")
+# `import tools` and `from tools import web_fetch` are how some scripts begin.
+_sys.modules["tools"] = tools
+_code =_b64.b64decode({code_b64!r}).decode("utf-8")
 _status = 0
 with _ctx.redirect_stdout(_OUT), _ctx.redirect_stderr(_OUT):
     try:

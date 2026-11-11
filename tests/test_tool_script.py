@@ -197,6 +197,21 @@ async def test_one_bare_argument_is_the_tools_main_one(harness):
     assert "keyword arguments" in twice["output"]
 
 
+async def test_a_script_may_import_the_tools(harness):
+    """A script that began with `import tools` ended in ModuleNotFoundError."""
+    h = harness(
+        lambda name, args: (name == "web_fetch", "ok" if name == "web_fetch" else "leer", None)
+    )
+    result = await h.run(
+        "import tools\n"
+        "from tools import web_fetch, ToolError\n"
+        "print(tools.web_fetch(url='https://a.test'), web_fetch(url='https://b.test'))\n"
+        "try:\n    tools.query_sql('select 1')\nexcept ToolError as e:\n    print('Fehler:', e)\n"
+    )
+    assert result["exit_code"] == 0 and result["output"].startswith("ok ok\nFehler: leer")
+    assert [args.get("url") for _, args in h.calls] == ["https://a.test", "https://b.test", None]
+
+
 def test_every_tool_a_script_can_call_has_a_main_argument_that_exists():
     # agent_tools first: it loads the schemas in the right order.
     from src import agent_tools, tool_script  # noqa: F401
