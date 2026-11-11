@@ -36,6 +36,9 @@ ALWAYS_AVAILABLE = frozenset(
         "glob",
         "ls",  # code-navigation tools (admin-gated by tool_security)
         "show_image",  # display a workspace image inline (charts/plots/results)
+        # Lets the model look at an image it made. Switched off by the agent
+        # loop unless a vision model is configured.
+        "view_image",
         "run_cell",  # persistent Python kernel (stateful, Jupyter-like) for iterative work
         "api_call",  # For configured integrations (Miniflux, Gitea, Linkding, etc.)
         # Ask the user a multiple-choice question for a decision/clarification.
@@ -114,6 +117,7 @@ BUILTIN_TOOL_DESCRIPTIONS: Dict[str, str] = {
     "glob": "Find FILES by glob pattern (e.g. '**/*.py'), newest first. Use to locate files by name/extension — prefer over bash find/ls.",
     "ls": "List a directory's entries (folders then files with sizes). Use to see what's in a folder — prefer over bash ls.",
     "show_image": "Display an image from the workspace to the user inline in chat (click-to-enlarge + download). Use to present a finished chart, plot, diagram, or visual result after saving it with python/seaborn.",
+    "view_image": "Look at an image in the workspace yourself: a vision model describes the file and answers a question about it. Use to check a chart, plot or rendered page before showing it to the user.",
     "run_cell": "Run Python in a persistent, stateful kernel (Jupyter-like) where variables and loaded data survive between calls. Use for iterative data analysis: load data once, then explore/transform/plot it across multiple cells without reloading.",
     "write_file": "Write/create or fully rewrite a file ON DISK (source code, configs, project files). Use for new files or full rewrites — NOT create_document (editor panel) and NOT a bash heredoc.",
     "edit_file": "Edit an existing file ON DISK by exact string replacement (fix a bug, change a function). Shows a diff. The tool for changing files on disk — NOT edit_document (editor panel) and NOT bash sed/heredoc.",

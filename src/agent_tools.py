@@ -36,6 +36,7 @@ TOOL_TAGS = {
     "glob",
     "ls",
     "show_image",
+    "view_image",
     "run_cell",
     "create_document",
     "update_document",

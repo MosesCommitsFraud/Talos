@@ -147,6 +147,27 @@ FUNCTION_TOOL_SCHEMAS = [
     {
         "type": "function",
         "function": {
+            "name": "view_image",
+            "description": "Look at an image in your workspace yourself, for example a chart or page you just made, to check it before you show it. A vision model looks at the file and answers your `question` about it, so ask for what you need to know: whether labels are readable, whether anything overlaps or is cut off, what the values in it are. What you get back is its description in text. To show an image to the user, use `show_image`.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "Workspace-relative path to the image file",
+                    },
+                    "question": {
+                        "type": "string",
+                        "description": "What you want to know about the image. Without it you get a general description.",
+                    },
+                },
+                "required": ["path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "query_sql",
             "description": (
                 "Read-only access to the configured external SQL database. Use for database "

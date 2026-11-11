@@ -1135,6 +1135,118 @@ async def _do_show_image(
     }
 
 
+def view_image_available(owner: Optional[str]) -> bool:
+    """Whether view_image can work: vision is on and a vision model is set."""
+    try:
+        from src.settings import get_setting, get_user_setting
+
+        if not get_user_setting("vision_enabled", owner or "", True):
+            return False
+        model = get_user_setting("vision_model", owner or "", get_setting("vision_model", ""))
+        return bool(str(model or "").strip())
+    except Exception:
+        return False
+
+
+_VIEW_IMAGE_PROMPT = (
+    "An assistant made or was given this image ({name}) and wants to check it. {question}\n"
+    "Report only what is visible. Be specific about text, numbers, labels and layout, "
+    "and say plainly if something is cut off, overlapping, empty or unreadable."
+)
+_VIEW_IMAGE_DEFAULT_QUESTION = "Describe what it shows and point out anything that looks wrong."
+_VIEW_IMAGE_SUFFIXES = {
+    "image/png": ".png",
+    "image/jpeg": ".jpg",
+    "image/gif": ".gif",
+    "image/webp": ".webp",
+}
+
+
+async def _do_view_image(
+    content: str,
+    *,
+    session_id: Optional[str],
+    owner: Optional[str],
+) -> Dict:
+    """Let the model look at a workspace image: the vision model describes the
+    file and answers the model's question. The answer is text, so the chat's
+    own model does not have to take images and the conversation stays text."""
+    raw = (content or "").strip()
+    path, question = "", ""
+    if raw.startswith("{"):
+        try:
+            args = json.loads(raw)
+            path = str(args.get("path", "")).strip()
+            question = str(args.get("question", "")).strip()
+        except (json.JSONDecodeError, TypeError):
+            path = raw.split("\n", 1)[0].strip()
+    else:
+        path, _, question = raw.partition("\n")
+        path, question = path.strip(), question.strip()
+    if not path:
+        return {"error": "view_image: a workspace-relative image path is required", "exit_code": 1}
+    if not view_image_available(owner):
+        return {"error": "view_image: no vision model is configured", "exit_code": 1}
+
+    from src.sandbox_client import file_tool_in_sandbox, sandbox_enabled
+
+    if not sandbox_enabled() or not session_id:
+        return {"error": "view_image: requires the sandbox (no session available)", "exit_code": 1}
+    try:
+        data = await file_tool_in_sandbox(
+            owner=owner,
+            session_id=session_id,
+            operation="image",
+            payload={"path": path},
+        )
+    except Exception as exc:
+        logger.warning("view_image sandbox read failed: %s", exc)
+        return {"error": f"view_image: {exc}", "exit_code": 1}
+    data_url = data.get("data_url") if isinstance(data, dict) else ""
+    if not data_url or data.get("exit_code") not in (0, None):
+        error = data.get("error") if isinstance(data, dict) else ""
+        return {"error": error or "view_image: failed to read image", "exit_code": 1}
+
+    import base64
+    import tempfile
+
+    header, _, encoded = str(data_url).partition(",")
+    mime = header[5:].split(";", 1)[0].lower() if header.startswith("data:") else ""
+    suffix = _VIEW_IMAGE_SUFFIXES.get(mime)
+    if not suffix:
+        return {
+            "error": f"view_image: cannot look at {mime or 'this file type'}; "
+            "save the image as PNG or JPEG",
+            "exit_code": 1,
+        }
+    name = data.get("name") or path
+    prompt = _VIEW_IMAGE_PROMPT.format(name=name, question=question or _VIEW_IMAGE_DEFAULT_QUESTION)
+    tmp = tempfile.NamedTemporaryFile(suffix=suffix, delete=False)
+    try:
+        tmp.write(base64.b64decode(encoded))
+        tmp.close()
+        from src.document_processor import analyze_image_with_vl_result
+
+        seen = await asyncio.to_thread(analyze_image_with_vl_result, tmp.name, prompt, owner)
+    except Exception as exc:
+        logger.warning("view_image analysis failed: %s", exc)
+        return {"error": f"view_image: {exc}", "exit_code": 1}
+    finally:
+        try:
+            tmp.close()
+            os.unlink(tmp.name)
+        except OSError:
+            pass
+    text = str((seen or {}).get("text") or "").strip()
+    if not (seen or {}).get("model") or not text:
+        # The helper reports its own failures as a bracketed note without a model.
+        return {
+            "error": "view_image: " + (text.strip("[]") or "the vision model gave no answer"),
+            "exit_code": 1,
+        }
+    return {"output": f"{name}, as the vision model sees it:\n{text}", "exit_code": 0}
+
+
 async def _do_run_cell(
     content: str,
     *,
@@ -2329,6 +2441,9 @@ async def execute_tool_block(
     elif tool == "show_image":
         result = await _do_show_image(content, session_id=session_id, owner=owner)
         desc = result.get("output") or result.get("error") or "show_image"
+    elif tool == "view_image":
+        result = await _do_view_image(content, session_id=session_id, owner=owner)
+        desc = "view_image"
     elif tool == "run_cell":
         result = await _do_run_cell(content, session_id=session_id, owner=owner)
         desc = "run_cell"

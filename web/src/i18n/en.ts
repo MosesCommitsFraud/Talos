@@ -594,6 +594,14 @@ const en = {
       summary_one: '{{verb}} Python code',
       summary_other: '{{verb}} {{count}} Python snippets',
     },
+    look: {
+      brief: 'Looking at an image',
+      verbPast: 'Looked at',
+      running: 'Looking at {{subject}}',
+      past: '{{verb}} {{subject}}',
+      summary_one: '{{verb}} {{subject}}',
+      summary_other: '{{verb}} {{count}} images',
+    },
     read: {
       brief: 'Reading a file',
       verbPast: 'Read',

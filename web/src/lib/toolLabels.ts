@@ -40,6 +40,7 @@ const FAMILY: Record<string, string> = {
   render_widget: 'ui',
   generate_image: 'image',
   show_image: 'image',
+  view_image: 'look',
   browse_skills: 'skills',
   read_skill: 'skills',
   manage_skills: 'skillManage',
@@ -172,6 +173,7 @@ export function callSubject(call: ToolCall): string {
       const files = Array.isArray(args.files) ? args.files.filter((f): f is string => typeof f === 'string') : [];
       return clip(files.map(basename).join(', '));
     }
+    case 'look':
     case 'read':
     case 'write':
     case 'edit':
@@ -244,13 +246,13 @@ export function callSubject(call: ToolCall): string {
 /** Families whose wording is built around a subject ("Reading {{subject}}").
  *  Without one they would render a dangling "Reading " / "Searched for ", so
  *  they fall back to the generic tool-name phrasing instead. */
-const NEEDS_SUBJECT = new Set(['present', 'read', 'write', 'edit', 'ls', 'grep', 'glob', 'fetch']);
+const NEEDS_SUBJECT = new Set(['present', 'look', 'read', 'write', 'edit', 'ls', 'grep', 'glob', 'fetch']);
 
 /** Families whose subject is a FILE. The UI prints those at full text
  *  brightness — the filename is what a reader scans the row for. Grep patterns
  *  and shell commands are subjects too, but they are long and would light up
  *  half the line. */
-const FILE_SUBJECT = new Set(['present', 'read', 'write', 'edit', 'ls']);
+const FILE_SUBJECT = new Set(['present', 'look', 'read', 'write', 'edit', 'ls']);
 
 /** A label cut into styled pieces. Position cannot do this job: English fronts
  *  the verb ("Edited test.py"), German ends on the participle ("test.py

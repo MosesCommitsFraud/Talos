@@ -600,6 +600,14 @@ const de: typeof en = {
       summary_one: 'Python-Code {{verb}}',
       summary_other: '{{count}} Python-Snippets {{verb}}',
     },
+    look: {
+      brief: 'Sieht sich ein Bild an',
+      verbPast: 'angesehen',
+      running: 'Sieht sich {{subject}} an',
+      past: '{{subject}} {{verb}}',
+      summary_one: '{{subject}} {{verb}}',
+      summary_other: '{{count}} Bilder {{verb}}',
+    },
     read: {
       brief: 'Liest eine Datei',
       verbPast: 'gelesen',

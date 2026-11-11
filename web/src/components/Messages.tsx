@@ -239,7 +239,7 @@ const FAMILY_ORB: Record<string, OrbState> = {
   command: 'working', code: 'working', task: 'working', expand: 'working',
   sql: 'connecting', api: 'connecting', fetch: 'connecting', weather: 'connecting', models: 'connecting',
   chatNew: 'connecting', chatsList: 'connecting', chatSend: 'connecting', chatManage: 'connecting',
-  read: 'weaving',
+  read: 'weaving', look: 'weaving',
   write: 'shaping', edit: 'shaping', document: 'shaping', image: 'shaping', skillNew: 'shaping', ui: 'shaping',
   skillManage: 'shaping', docsManage: 'shaping', settings: 'shaping', admin: 'shaping',
   plan: 'solving', ask: 'listening',

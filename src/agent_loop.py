@@ -245,6 +245,11 @@ Read a file and return its contents.""",
 <workspace-relative image path>
 ```
 Display an image from your workspace to the user — rendered inline in the chat with click-to-enlarge and a download button. Use this to PRESENT a finished chart/plot/diagram/visual. First create the image (e.g. with python + seaborn: `fig.savefig('chart.png')`), then call show_image with that path. The path must be inside your workspace (relative, e.g. `chart.png` or `output/chart.png`) — never `/tmp` or an absolute path. One image per call.""",
+    "view_image": """\
+```view_image
+{"path": "chart.png", "question": "Are all axis labels readable?"}
+```
+Look at an image in your workspace yourself, for example a chart or page you just made, to check it before you show it. A vision model looks at the file and answers your `question` about it, so ask for what you need to know: whether labels are readable, whether anything overlaps or is cut off, what the values in it are. What you get back is its description in text. To show an image to the user, use `show_image`.""",
     "write_file": """\
 ```write_file
 <file path>
@@ -2503,6 +2508,15 @@ async def stream_agent_loop(
         disabled_tools.add(_tool_script.TOOL_NAME)
         if _relevant_tools is not None:
             _relevant_tools.discard(_tool_script.TOOL_NAME)
+
+    # view_image needs a vision model (Settings, Vision); without one the
+    # tool could only answer that it cannot see.
+    from src.tool_execution import view_image_available
+
+    if not view_image_available(owner):
+        disabled_tools.add("view_image")
+        if _relevant_tools is not None:
+            _relevant_tools.discard("view_image")
 
     if subagent or not _goals.is_active(session_id or ""):
         disabled_tools.add("update_goal")
