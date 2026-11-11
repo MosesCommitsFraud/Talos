@@ -174,14 +174,52 @@ async def test_an_error_in_the_script_shows_its_traceback_with_script_line_numbe
     assert "ValueError: kaputt" in result["output"]
 
 
+async def test_one_bare_argument_is_the_tools_main_one(harness):
+    """`tools.web_fetch(url)` is what a model writes about as often as the
+    keyword form; refusing it cost a failed script and another round."""
+    h = harness(lambda name, args: (True, "ok", None))
+    result = await h.run(
+        "tools.web_fetch('https://a.test')\n"
+        "tools.web_fetch('https://b.test', max_chars=20000)\n"
+        "tools.query_sql('select 1')\n"
+        "tools.search_knowledge('Urlaub', k=3)\n"
+        "print('fertig')\n"
+    )
+    assert result["exit_code"] == 0 and result["output"].startswith("fertig")
+    assert h.calls == [
+        ("web_fetch", {"url": "https://a.test"}),
+        ("web_fetch", {"max_chars": 20000, "url": "https://b.test"}),
+        ("query_sql", {"action": "query", "query": "select 1"}),
+        ("search_knowledge", {"k": 3, "query": "Urlaub"}),
+    ]
+    # Given twice, it is not guessed at.
+    twice = await h.run("tools.web_fetch('https://a.test', url='https://b.test')\n")
+    assert "keyword arguments" in twice["output"]
+
+
+def test_every_tool_a_script_can_call_has_a_main_argument_that_exists():
+    # agent_tools first: it loads the schemas in the right order.
+    from src import agent_tools, tool_script  # noqa: F401
+    from src.tool_schemas import FUNCTION_TOOL_SCHEMAS
+
+    schemas = {s["function"]["name"]: s["function"]["parameters"] for s in FUNCTION_TOOL_SCHEMAS}
+    assert set(tool_script.POSITIONAL) == set(tool_script.SCRIPT_TOOLS)
+    for name, (first, extra) in tool_script.POSITIONAL.items():
+        assert {first, *extra} <= set(schemas[name]["properties"]), name
+        assert set(schemas[name].get("required") or []) <= {first, *extra}, name
+
+
 async def test_only_the_listed_tools_can_be_called_and_arguments_are_keywords(harness):
     h = harness(lambda name, args: (True, "ok", None))
     unknown = await h.run("tools.bash(command='rm -rf /')\n")
     assert "unknown tool 'bash'" in unknown["output"] and "query_sql" in unknown["output"]
     assert h.calls == []
 
-    positional = await h.run("tools.web_fetch('https://a.test')\n")
-    assert "keyword arguments" in positional["output"]
+    assert "unknown tool 'bash'" in (await h.run("tools.bash('ls')\n"))["output"]
+
+    two = await h.run("tools.web_fetch('https://a.test', 2000)\n")
+    assert "keyword arguments, e.g. tools.web_fetch(url=...)" in two["output"]
+    assert h.calls == []
 
     # A single dict is accepted as the arguments, since that is how tool calls look.
     as_dict = await h.run("print(tools.web_fetch({'url': 'https://a.test'}))\n")

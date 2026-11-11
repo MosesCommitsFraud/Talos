@@ -53,6 +53,21 @@ SCRIPT_TOOLS: Tuple[str, ...] = (
     "search_chats",
 )
 
+# What one bare argument means: `tools.web_fetch(url)` is how a model writes
+# the call about as often as `tools.web_fetch(url=url)`, and there is only one
+# thing it can mean. The second entry is what goes with it (a bare string to
+# query_sql is a query to run).
+POSITIONAL: Dict[str, Tuple[str, Dict[str, Any]]] = {
+    "query_sql": ("query", {"action": "query"}),
+    "search_knowledge": ("query", {}),
+    "read_knowledge": ("document", {}),
+    "grep_knowledge": ("pattern", {}),
+    "list_knowledge": ("query", {}),
+    "web_search": ("query", {}),
+    "web_fetch": ("url", {}),
+    "search_chats": ("query", {}),
+}
+
 DEFAULT_MAX_CALLS = 50
 # Calls of one `tools.parallel([...])` carried out at the same time.
 PARALLEL_LIMIT = 4
@@ -93,6 +108,7 @@ import base64 as _b64, contextlib as _ctx, io as _io, json as _json, os as _os, 
 
 _MARK = {mark!r}
 _ALLOWED = {allowed!r}
+_POSITIONAL = {positional!r}
 try:
     with open({results_path!r}, encoding="utf-8") as _fh:
         _RESULTS = _json.load(_fh)
@@ -156,10 +172,18 @@ class _Tools:
 
         def call(*positional, **args):
             if positional:
+                if name not in _ALLOWED:
+                    self._answer(name, {{}})  # says which tools there are
+                first, extra = _POSITIONAL.get(name) or (None, {{}})
                 if len(positional) == 1 and isinstance(positional[0], dict) and not args:
                     args = positional[0]
+                elif len(positional) == 1 and first and first not in args:
+                    # One bare argument is the tool's main one.
+                    args = dict(extra, **args)
+                    args[first] = positional[0]
                 else:
-                    raise TypeError("tools.%s() takes keyword arguments, e.g. tools.%s(query=...)" % (name, name))
+                    raise TypeError("tools.%s() takes keyword arguments, e.g. tools.%s(%s=...)"
+                                    % (name, name, first or "query"))
             known, _index = self._answer(name, args)
             if known is None:
                 _emit({{"calls": [{{"name": name, "args": _norm(args)}}]}}, {paused})
@@ -215,6 +239,7 @@ def build_program(code: str, mark: str, allowed: Iterable[str], results_path: st
     return _WRAPPER.format(
         mark=mark,
         allowed=list(allowed),
+        positional={name: list(POSITIONAL[name]) for name in allowed if name in POSITIONAL},
         results_path=results_path,
         code_b64=base64.b64encode(code.encode("utf-8")).decode("ascii"),
         paused=_PAUSED,
@@ -353,7 +378,8 @@ def tool_description(allowed: Iterable[str]) -> str:
         "combine them, fetch a list of pages and take one fact from each, page through search "
         "results. For one or two calls, call the tools directly instead. "
         "Inside the script, `tools.<name>(...)` calls that tool with the same arguments it "
-        "takes as a tool, given as keyword arguments, and returns its answer as text (with "
+        "takes as a tool, given as keyword arguments (one bare argument is taken as the tool's "
+        "main one, e.g. `tools.web_fetch(url)`), and returns its answer as text (with "
         "`.data` holding rows or objects when the tool returns structured data). A failed call "
         "raises `ToolError`; catch it to carry on. `tools.parallel([(name, {args}), ...])` makes "
         "independent calls at once and returns their results in order, None for a failed one. "
