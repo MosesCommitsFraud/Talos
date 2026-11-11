@@ -100,6 +100,7 @@ class Run:
     output_tokens: int = 0
     seconds: float = 0.0
     error: str = ""
+    unreachable: bool = False  # the endpoint dropped out: not a measurement
     problems: List[str] = field(default_factory=list)
     state: Dict[str, Any] = field(default_factory=dict)  # for fixtures
 
@@ -598,6 +599,28 @@ def _preface(prompt: str) -> List[Dict[str, Any]]:
         ]
 
 
+class ModelGone(Exception):
+    """The endpoint stopped answering and did not come back."""
+
+
+# Seconds to wait before a turn the endpoint dropped out of is run again.
+RECONNECT_WAITS = (30, 60, 120, 300, 600)
+_GATEWAY_STATUS = (502, 503, 504)
+
+
+def _stream_error(chunk: str) -> Dict[str, Any]:
+    """What an ``event: error`` chunk of the model stream says."""
+    try:
+        info = json.loads(chunk.partition("data: ")[2].strip())
+    except ValueError:
+        info = None
+    return info if isinstance(info, dict) else {"error": chunk.strip()}
+
+
+async def _pause(seconds: float) -> None:
+    await asyncio.sleep(seconds)
+
+
 async def run_task(task: Task, variant: str, loop_args: Dict[str, Any], opts) -> Run:
     """One whole turn. Settings must already be overridden by the caller."""
     from src import agent_loop
@@ -651,6 +674,14 @@ async def run_task(task: Task, variant: str, loop_args: Dict[str, Any], opts) ->
 
     async def consume():
         async for chunk in agent_loop.stream_agent_loop(opts.url, opts.model, messages, **kwargs):
+            if chunk.startswith("event: error"):
+                # The model call failed. Even if the loop gets its round
+                # through on another try, this turn did not run cleanly.
+                info = _stream_error(chunk)
+                run.error = str(info.get("error") or "model error")[:300]
+                if info.get("status") in _GATEWAY_STATUS or "reach" in run.error.lower():
+                    run.unreachable = True
+                continue
             if not chunk.startswith("data: {"):
                 continue
             event = json.loads(chunk[6:])
@@ -686,16 +717,35 @@ async def run_task(task: Task, variant: str, loop_args: Dict[str, Any], opts) ->
     return run
 
 
+async def _measured(task: Task, name: str, values: Dict[str, Any], opts) -> Run:
+    """One turn that counts. A turn the endpoint dropped out of says nothing
+    about the model, so it is run again once the endpoint answers; when it
+    stays away, the run ends with ModelGone."""
+    settings = {k: v for k, v in values.items() if not k.startswith("loop.")}
+    loop_args = {k[5:]: v for k, v in values.items() if k.startswith("loop.")}
+    for wait in (*getattr(opts, "reconnect_waits", RECONNECT_WAITS), None):
+        with settings_override(settings):
+            run = await run_task(task, name, loop_args, opts)
+        if not run.unreachable:
+            return run
+        if wait is None:
+            break
+        print(
+            f"model not reachable ({run.error}); {name} {task.key} again in {wait}s",
+            file=sys.stderr,
+            flush=True,
+        )
+        await _pause(wait)
+    raise ModelGone(run.error)
+
+
 async def run_all(tasks: List[Task], variants, opts, on_run=None) -> List[Run]:
     """Every task, every variant, ``opts.repeats`` times; variants take turns."""
     runs: List[Run] = []
     for _ in range(opts.repeats):
         for task in tasks:
             for name, values in variants:
-                settings = {k: v for k, v in values.items() if not k.startswith("loop.")}
-                loop_args = {k[5:]: v for k, v in values.items() if k.startswith("loop.")}
-                with settings_override(settings):
-                    run = await run_task(task, name, loop_args, opts)
+                run = await _measured(task, name, values, opts)
                 runs.append(run)
                 if on_run:
                     on_run(run)
@@ -847,7 +897,27 @@ def main(argv=None) -> int:
     args.headers = {"Authorization": f"Bearer {args.api_key}"} if args.api_key else None
     args.reasoning = not args.no_thinking
 
+    names = [name for name, _ in variants]
+    planned = len(tasks) * len(variants) * args.repeats
+    runs: List[Run] = []
+
+    def save() -> None:
+        if not args.save:
+            return
+        payload = {
+            "model": args.model,
+            "variants": dict(variants),
+            "repeats": args.repeats,
+            "reasoning": args.reasoning,
+            "turns": f"{len(runs)}/{planned}",
+            "totals": {v: totals([r for r in runs if r.variant == v]) for v in names},
+            "runs": [r.summary() for r in runs],
+        }
+        Path(args.save).write_text(json.dumps(payload, ensure_ascii=False, indent=2), "utf-8")
+
     def show(run: Run) -> None:
+        runs.append(run)
+        save()  # after every turn: a run that breaks off keeps what it measured
         mark = "ok  " if run.passed else "FAIL"
         why = run.error or "; ".join(run.problems)
         print(
@@ -856,21 +926,21 @@ def main(argv=None) -> int:
             flush=True,
         )
 
-    runs = asyncio.run(run_all(tasks, variants, args, on_run=show))
-    names = [name for name, _ in variants]
-    text = report(runs, names, tasks)
-    print("\n" + text)
+    gone = ""
+    try:
+        asyncio.run(run_all(tasks, variants, args, on_run=show))
+    except ModelGone as exc:
+        gone = str(exc) or "no answer"
+    print("\n" + report(runs, names, tasks))
     if args.save:
-        payload = {
-            "model": args.model,
-            "variants": dict(variants),
-            "repeats": args.repeats,
-            "reasoning": args.reasoning,
-            "totals": {v: totals([r for r in runs if r.variant == v]) for v in names},
-            "runs": [r.summary() for r in runs],
-        }
-        Path(args.save).write_text(json.dumps(payload, ensure_ascii=False, indent=2), "utf-8")
         print(f"\nSaved {len(runs)} runs to {args.save}")
+    if gone:
+        print(
+            f"\nStopped after {len(runs)} of {planned} turns: the model endpoint "
+            f"stopped answering ({gone}). The numbers above cover the turns that ran.",
+            file=sys.stderr,
+        )
+        return 2
     return 0
 
 

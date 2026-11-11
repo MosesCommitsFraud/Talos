@@ -168,6 +168,56 @@ async def test_every_variant_runs_every_task_with_its_own_settings(model, monkey
     assert "lean / rechnen: answer does not contain 6.215,97" in text
 
 
+@pytest.fixture
+def endpoint(monkeypatch):
+    """A model endpoint that is away until told otherwise."""
+    state = {"down": True, "pauses": []}
+
+    async def fake_stream(candidates, messages, **kwargs):
+        if state["down"]:
+            error = {"error": "Cannot reach http://vllm.test:8000", "status": 503}
+            yield f"event: error\ndata: {json.dumps(error)}\n\n"
+            return
+        yield f"data: {json.dumps({'delta': 'Die Gesamtsumme beträgt 6.215,97 Euro.'})}\n\n"
+        yield "data: [DONE]\n\n"
+
+    agent_runs._RUNS.clear()
+    monkeypatch.setenv("TALOS_ASSUME_NATIVE_TOOLS", "1")
+    monkeypatch.setattr(agent_loop, "stream_llm_with_fallback", fake_stream)
+    yield state
+    agent_runs._RUNS.clear()
+
+
+async def test_a_turn_the_endpoint_dropped_out_of_is_run_again(endpoint, monkeypatch):
+    async def pause(seconds):
+        endpoint["pauses"].append(seconds)
+        endpoint["down"] = False  # it is back after the first wait
+
+    monkeypatch.setattr(loop_eval, "_pause", pause)
+    shown = []
+    runs = await loop_eval.run_all(
+        [TASK["rechnen"]], [("lean", {"agent_prompt_style": "lean"})], OPTS, on_run=shown.append
+    )
+    # Only the turn that ran is in the numbers.
+    assert endpoint["pauses"] == [loop_eval.RECONNECT_WAITS[0]]
+    assert len(runs) == 1 and shown == runs
+    assert not runs[0].error and not runs[0].unreachable
+
+
+async def test_an_endpoint_that_stays_away_ends_the_run(endpoint, monkeypatch):
+    async def pause(seconds):
+        endpoint["pauses"].append(seconds)
+
+    monkeypatch.setattr(loop_eval, "_pause", pause)
+    shown = []
+    with pytest.raises(loop_eval.ModelGone, match="Cannot reach"):
+        await loop_eval.run_all(
+            [TASK["rechnen"]], [("lean", {"agent_prompt_style": "lean"})], OPTS, on_run=shown.append
+        )
+    assert endpoint["pauses"] == list(loop_eval.RECONNECT_WAITS)
+    assert shown == []  # no turn was counted as the model's failure
+
+
 def test_a_variant_is_parsed_from_the_command_line():
     assert loop_eval.parse_variant("x:agent_prompt_style=classic,loop.reasoning=false,n=3") == (
         "x",
