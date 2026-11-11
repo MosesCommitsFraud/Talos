@@ -1154,6 +1154,10 @@ _VIEW_IMAGE_PROMPT = (
     "and say plainly if something is cut off, overlapping, empty or unreadable."
 )
 _VIEW_IMAGE_DEFAULT_QUESTION = "Describe what it shows and point out anything that looks wrong."
+# The whole answer has to arrive within this time. A chart is described in
+# well under a minute on an idle server; when the vision model is the chat
+# model's own server and that is busy, the helper's two minutes were not enough.
+_VIEW_IMAGE_TIMEOUT_S = 300
 _VIEW_IMAGE_SUFFIXES = {
     "image/png": ".png",
     "image/jpeg": ".jpg",
@@ -1227,7 +1231,14 @@ async def _do_view_image(
         tmp.close()
         from src.document_processor import analyze_image_with_vl_result
 
-        seen = await asyncio.to_thread(analyze_image_with_vl_result, tmp.name, prompt, owner)
+        seen = await asyncio.to_thread(
+            analyze_image_with_vl_result,
+            tmp.name,
+            prompt,
+            owner,
+            timeout=_VIEW_IMAGE_TIMEOUT_S,
+            enable_thinking=False,
+        )
     except Exception as exc:
         logger.warning("view_image analysis failed: %s", exc)
         return {"error": f"view_image: {exc}", "exit_code": 1}
@@ -1239,9 +1250,12 @@ async def _do_view_image(
             pass
     text = str((seen or {}).get("text") or "").strip()
     if not (seen or {}).get("model") or not text:
-        # The helper reports its own failures as a bracketed note without a model.
+        # The helper reports its own failures as a bracketed note without a
+        # model, and the reason beside it.
+        why = str((seen or {}).get("error") or "").strip()
+        note = text.strip("[]") or "the vision model gave no answer"
         return {
-            "error": "view_image: " + (text.strip("[]") or "the vision model gave no answer"),
+            "error": f"view_image: {note}" + (f" ({why})" if why else ""),
             "exit_code": 1,
         }
     return {"output": f"{name}, as the vision model sees it:\n{text}", "exit_code": 0}

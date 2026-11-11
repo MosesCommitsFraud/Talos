@@ -345,9 +345,16 @@ def _resolve_vl_model(configured: str, owner: str | None = None) -> tuple:
 
 
 def analyze_image_with_vl_result(
-    image_path: str, prompt: str = "Describe this image in detail", owner: str | None = None
+    image_path: str,
+    prompt: str = "Describe this image in detail",
+    owner: str | None = None,
+    timeout: int = 120,
+    enable_thinking: bool = True,
 ) -> dict:
-    """Analyze an image and return both text and the model that produced it."""
+    """Analyze an image and return both text and the model that produced it.
+
+    When no model answered, `model` is empty, `text` is a bracketed note that
+    can stand in a document, and `error` says why."""
     logger.info(f"Analyzing image with VL model: {image_path}")
     try:
         settings = _load_vl_settings(owner)
@@ -399,7 +406,14 @@ def analyze_image_with_vl_result(
             [c for c in _vl_candidates if c and c[0] and c[1]]
         ):
             try:
-                description = llm_call(_url, _model, vl_messages, headers=_headers, timeout=120)
+                description = llm_call(
+                    _url,
+                    _model,
+                    vl_messages,
+                    headers=_headers,
+                    timeout=timeout,
+                    enable_thinking=enable_thinking,
+                )
                 logger.info("VL analysis complete with model %s", _model)
                 return {"text": description, "model": _model}
             except Exception as e:
@@ -413,7 +427,11 @@ def analyze_image_with_vl_result(
 
     except Exception as e:
         logger.error(f"VL model unavailable: {e}")
-        return {"text": "[VL model unavailable - image not analyzed]", "model": ""}
+        return {
+            "text": "[VL model unavailable - image not analyzed]",
+            "model": "",
+            "error": str(getattr(e, "detail", "") or e),
+        }
 
 
 def analyze_image_with_vl(image_path: str) -> str:

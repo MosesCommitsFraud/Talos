@@ -37,8 +37,9 @@ def world(monkeypatch):
             "exit_code": 0,
         }
 
-    def analyze(image_path, prompt="", owner=None):
+    def analyze(image_path, prompt="", owner=None, **options):
         seen["prompt"] = prompt
+        seen["options"] = options
         seen["path"] = image_path
         seen["bytes"] = open(image_path, "rb").read()
         return seen.get("answer") or {
@@ -68,6 +69,8 @@ async def test_the_vision_model_answers_the_models_question_about_the_file(world
     )
     assert world["read"] == ("image", {"path": "chart.png"})
     assert "Are the axis labels readable?" in world["prompt"]
+    # Looking and reporting needs no reasoning, and a busy server needs time.
+    assert world["options"] == {"timeout": 300, "enable_thinking": False}
     # It was given the file's bytes, and the copy is gone afterwards.
     assert world["bytes"].startswith(b"\x89PNG") and world["path"].endswith(".png")
     assert not os.path.exists(world["path"])
@@ -103,6 +106,10 @@ async def test_a_vision_model_that_does_not_answer_is_reported_not_passed_on(wor
         "error": "view_image: VL model unavailable - image not analyzed",
         "exit_code": 1,
     }
+    # With the reason, when the helper gives one.
+    world["answer"] = {**world["answer"], "error": "502: POST http://vl.test failed: timed out"}
+    _, result = await _view(path="chart.png")
+    assert result["error"].endswith("not analyzed (502: POST http://vl.test failed: timed out)")
 
 
 # ── offered only when it can work ────────────────────────────────────────────
