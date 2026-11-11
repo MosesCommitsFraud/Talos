@@ -1,4 +1,4 @@
-"""The news-card thumbnail proxy (routes/news_routes.py).
+"""The news-card thumbnail proxy and the site-icon route (routes/news_routes.py).
 
 It exists so the browser never requests an image from a publisher directly. That
 makes the app itself the fetcher, which is why every test here is about refusing
@@ -179,6 +179,78 @@ def test_a_redirect_chain_terminates(monkeypatch, client):
     )
     r = client.get("/api/news/thumbnail", params={"url": "https://pub.example/img.png"})
     assert r.status_code == 502
+
+
+# ── site icons ──
+
+
+def test_a_favicon_is_fetched_from_the_host_and_may_be_an_ico(monkeypatch, client):
+    _allow_all(monkeypatch)
+    seen = {}
+
+    def _handler(url, headers):
+        seen.update(url=url, headers=headers)
+        return _response(content_type="image/x-icon")
+
+    _transport(monkeypatch, _handler)
+    r = client.get("/api/news/favicon", params={"host": "Help.Example.com"})
+
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("image/x-icon")
+    # Only the host is the caller's; the path is fixed.
+    assert seen["url"] == "https://help.example.com/favicon.ico"
+    assert "Referer" not in seen["headers"]
+    assert r.headers["x-content-type-options"] == "nosniff"
+    assert "max-age" in r.headers["cache-control"]
+
+
+def test_an_ico_stays_out_of_the_thumbnails(monkeypatch, client):
+    """The wider set is the favicon route's alone."""
+    _allow_all(monkeypatch)
+    _transport(monkeypatch, lambda url, headers: _response(content_type="image/x-icon"))
+    r = client.get("/api/news/thumbnail", params={"url": "https://pub.example/favicon.ico"})
+    assert r.status_code == 415
+
+
+@pytest.mark.parametrize(
+    "host",
+    [
+        "",
+        "localhost",
+        "127.0.0.1",
+        "qdrant:6333",
+        "example.com/admin",
+        "https://example.com",
+        "user@example.com",
+        "exa mple.com",
+        "example.com?x=1",
+    ],
+)
+def test_only_a_bare_host_name_is_accepted_for_a_favicon(monkeypatch, client, host):
+    called = {"n": 0}
+
+    def _handler(url, headers):
+        called["n"] += 1
+        return _response()
+
+    _allow_all(monkeypatch)
+    _transport(monkeypatch, _handler)
+    assert client.get("/api/news/favicon", params={"host": host}).status_code == 400
+    assert called["n"] == 0
+
+
+def test_a_favicon_host_goes_through_the_same_guard(monkeypatch, client):
+    monkeypatch.setattr("src.web_search._validate_fetch_url", lambda url: "private address")
+    assert client.get("/api/news/favicon", params={"host": "intranet.example"}).status_code == 403
+
+
+def test_a_site_without_an_icon_is_a_415_or_502_not_an_image(monkeypatch, client):
+    """Many sites answer /favicon.ico with their HTML 404 page."""
+    _allow_all(monkeypatch)
+    _transport(monkeypatch, lambda url, headers: _response(content_type="text/html"))
+    assert client.get("/api/news/favicon", params={"host": "example.com"}).status_code == 415
+    _transport(monkeypatch, lambda url, headers: _response(status=404, content=b""))
+    assert client.get("/api/news/favicon", params={"host": "example.com"}).status_code == 502
 
 
 # ── auth ──

@@ -1,8 +1,8 @@
 """
 image_proxy.py — fetch one public image on behalf of the browser.
 
-Shared by the news thumbnails (routes/news_routes.py) and the images in
-interactive answers (routes/ui_routes.py). The browser must not fetch
+Shared by the news thumbnails and site icons (routes/news_routes.py) and the
+images in interactive answers (routes/ui_routes.py). The browser must not fetch
 third-party images itself: that is one request per image from the user's own
 IP, carrying their user-agent, to hosts they never chose to visit. So the app
 fetches the bytes and serves them from its own origin.
@@ -17,7 +17,7 @@ result or from model output, not from anything the user typed:
 """
 
 import logging
-from typing import Tuple
+from typing import Collection, Tuple
 from urllib.parse import urlparse
 
 from fastapi import HTTPException
@@ -46,9 +46,13 @@ SAFE_HEADERS = {
 }
 
 
-async def fetch_public_image(url: str, label: str = "Image") -> Tuple[bytes, str]:
+async def fetch_public_image(
+    url: str, label: str = "Image", allowed_types: Collection[str] = ALLOWED_TYPES
+) -> Tuple[bytes, str]:
     """Return (bytes, media_type) or raise HTTPException with a client-safe
-    message. `label` only prefixes log lines."""
+    message. `label` only prefixes log lines. `allowed_types` is the set of
+    response content-types let through; a caller widens it only for a kind of
+    image it knows it is asking for (a site icon is often still an .ico)."""
     import httpx
 
     from src.web_search import _validate_fetch_url
@@ -100,7 +104,7 @@ async def fetch_public_image(url: str, label: str = "Image") -> Tuple[bytes, str
 
             raw_type = response.headers.get("content-type") or ""
             media_type = raw_type.split(";")[0].strip().lower()
-            if media_type not in ALLOWED_TYPES:
+            if media_type not in allowed_types:
                 logger.info(
                     "%s rejected: content-type %r from %s",
                     label,
