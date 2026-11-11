@@ -1818,6 +1818,8 @@ async def execute_tool_block(
     # cut-off arguments): its error is the result, nothing is run.
     rejected = getattr(block, "error", None)
     if rejected:
+        if getattr(block, "skipped", False):
+            return f"{tool}: not run", {"output": rejected, "exit_code": None}
         return f"{tool}: not run", {"error": rejected, "exit_code": 1}
 
     # Misformatted tool call detection: model put JSON inside ```python``` (or

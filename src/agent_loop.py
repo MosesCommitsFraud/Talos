@@ -1888,6 +1888,27 @@ _VERIFIER_MAX_ROUNDS = 2  # cap re-verify cycles per turn — never loop forever
 _FULL_ANSWER_MIN_CHARS = 600
 # Tools that only show the user something and hand the model nothing new.
 _VIEW_TOOLS = {"render_widget", "render_ui"}
+# Calls that hand the user what the answer is about — the document it describes,
+# the file it produced, the plan it ticks off — rather than carry the work on.
+_HAND_OVER_TOOLS = _VIEW_TOOLS | {
+    "create_document",
+    "update_document",
+    "edit_document",
+    "suggest_document",
+    "present_files",
+    "show_image",
+    "update_plan",
+}
+# What a call reads as its result when the turn ended on a question before it.
+_SKIPPED_FOR_QUESTION = (
+    "Not run: your answer ended with a question to the user, so the turn ended "
+    "there. Make this call after they have answered, if it is still needed."
+)
+
+
+def _hands_over(block) -> bool:
+    """Whether a call delivers part of the answer instead of continuing the work."""
+    return block.tool_type in _HAND_OVER_TOOLS or _needs_no_reply(block)
 
 
 def _needs_no_reply(block) -> bool:
@@ -2928,10 +2949,6 @@ async def stream_agent_loop(
         re.IGNORECASE,
     )
     _awaiting_user = False  # set by ask_user → end the turn and wait for a choice
-    # One-shot: forces a rewrite when the turn is about to end on a short
-    # closing remark while the substantial answer sits in an earlier (folded)
-    # round — the final message must be the complete deliverable.
-    _final_restate_nudged = False
     _sql_kb_seconds = 0.0  # the mini RAG search's duration, reported in the round profile
 
     # Document streaming state (persists across rounds)
@@ -3688,21 +3705,49 @@ async def stream_agent_loop(
 
         # ── Question-ends-turn guard ──────────────────────────────────
         # A substantial answer that ENDS by asking the user something is a
-        # finished turn. Executing the round's remaining tool calls anyway
-        # steamrolls the user's chance to reply: the results spawn extra
-        # rounds that re-answer or contradict the question (the "asked but
-        # kept working" failure). Drop the pending calls, close their UI
-        # rows, and end the turn on the question. ask_user is exempt — it
-        # is the proper way to ask and handles turn-ending itself.
+        # finished turn. Carrying the work on anyway steamrolls the user's
+        # chance to reply: the results spawn extra rounds that re-answer or
+        # contradict the question (the "asked but kept working" failure). So
+        # calls that continue the work are not run, and the turn ends on the
+        # question. ask_user is exempt — it is the proper way to ask and
+        # handles turn-ending itself.
+        #
+        # Calls that hand over what the answer describes are a different
+        # matter: "here is the report … shall I also make a PDF?" comes with
+        # the create_document call for that very report. Dropping it left the
+        # user with an answer about a document that was never created. Those
+        # calls run, and the turn ends after them.
         _round_answer_text = _THINK_RE.sub("", cleaned_round).strip()
         if tool_blocks or _round_answer_text:
             _empty_rounds = 0  # the round produced something; guard resets
-        if (
-            tool_blocks
+        _ends_on_question = (
+            bool(tool_blocks)
             and len(_round_answer_text) >= _FULL_ANSWER_MIN_CHARS
             and _round_answer_text.endswith("?")
             and not any(b.tool_type == "ask_user" for b in tool_blocks)
-        ):
+        )
+        _end_after_tools = False
+        if _ends_on_question and any(_hands_over(b) for b in tool_blocks):
+            _skipped = [b for b in tool_blocks if not _hands_over(b)]
+            logger.info(
+                "[agent] round %d ends on a question to the user — running %d hand-over "
+                "call(s), leaving %d other call(s) out, then ending the turn",
+                round_num,
+                len(tool_blocks) - len(_skipped),
+                len(_skipped),
+            )
+            # Left-out calls stay in the list as answered calls, so every native
+            # call still gets its own result (see _resolve_tool_blocks).
+            tool_blocks = [
+                b
+                if _hands_over(b)
+                else RejectedToolCall(
+                    b.tool_type, (b.content or "")[:300], _SKIPPED_FOR_QUESTION, skipped=True
+                )
+                for b in tool_blocks
+            ]
+            _end_after_tools = True
+        elif _ends_on_question:
             logger.info(
                 "[agent] round %d wrote a full answer ending in a user-directed "
                 "question — dropping %d pending tool call(s) and ending the turn",
@@ -3870,76 +3915,13 @@ async def stream_agent_loop(
                 # Visible signal in the stream so the user knows we caught it.
                 yield f"data: {json.dumps({'type': 'agent_step', 'round': round_num + 1})}\n\n"
                 continue
-            # ── Final-answer completeness nudge ───────────────────────
-            # The UI folds earlier rounds' text away as work-in-progress;
-            # only this final round is shown prominently. If the model wrote
-            # the substantial answer mid-turn (e.g. before tool calls) and is
-            # now ending on a short closing remark, the user's visible answer
-            # would be just that remark. Force ONE rewrite so the final
-            # message is complete and self-contained. Capped at one nudge per
-            # turn; skipped on force-answer rounds.
-            _final_text = _THINK_RE.sub("", cleaned_round).strip()
-            _prior_max = max(
-                (len(_THINK_RE.sub("", str(t)).strip()) for t in round_texts[:-1]),
-                default=0,
-            )
-            _needs_restate = (
-                not _force_answer
-                and round_num > 1
-                and _prior_max >= _FULL_ANSWER_MIN_CHARS
-                and len(_final_text) < _prior_max // 2
-            )
-            if _needs_restate and _final_restate_nudged:
-                # The model got the restate nudge and still ended on a stub
-                # (weak models summarize or point at "the answer above" instead
-                # of restating). Stop trusting it: mechanically append the
-                # largest earlier round's text so the final message contains
-                # the full deliverable.
-                _best = max(
-                    (_THINK_RE.sub("", str(t)).strip() for t in round_texts[:-1]),
-                    key=len,
-                    default="",
-                )
-                if _best and _best not in _final_text:
-                    _salvage = ("\n\n" if _final_text else "") + _best
-                    logger.warning(
-                        "[agent] final-answer salvage: appending %d chars from an "
-                        "earlier round to the final message",
-                        len(_best),
-                    )
-                    yield f"data: {json.dumps({'delta': _salvage})}\n\n"
-                    full_response += _salvage
-                    round_texts[-1] = (round_texts[-1] or "") + _salvage
-                break
-            if _needs_restate and not _final_restate_nudged:
-                _final_restate_nudged = True
-                logger.info(
-                    "[agent] final-answer completeness nudge on round %d "
-                    "(final %d chars vs. earlier %d chars)",
-                    round_num,
-                    len(_final_text),
-                    _prior_max,
-                )
-                messages.append(
-                    {
-                        "role": "system",
-                        "content": (
-                            "STOP — your final message is incomplete. The user "
-                            "prominently sees ONLY this last message; everything "
-                            "you wrote in earlier rounds is collapsed as "
-                            "work-in-progress. Write the COMPLETE final answer "
-                            "now, restating all important content from earlier "
-                            "in this turn in full (structure, tables, steps, "
-                            "code — everything the user needs). Do not refer to "
-                            "earlier text, do not summarize it, do not mention "
-                            "this instruction, and do not call any tools. If "
-                            "you were about to ask the user something, put that "
-                            "question at the very end of the complete answer."
-                        ),
-                    }
-                )
-                yield f"data: {json.dumps({'type': 'agent_step', 'round': round_num + 1})}\n\n"
-                continue
+            # The turn ends here, on whatever the model wrote last. It used to
+            # be made to write its whole answer again when that was a short
+            # closing line after the real answer (which sat in an earlier round,
+            # folded away by the UI). That cost a second full generation of the
+            # answer for a display problem. The chat now keeps the earlier
+            # answer on screen itself (web/src/components/Messages.tsx,
+            # answerBody), so the model writes its answer once.
             break  # no tools — done
 
         # ── Loop-breaker (Terminus-style stall detector) ──────────────
@@ -4229,7 +4211,7 @@ async def stream_agent_loop(
                 _force_answer = True
 
             _knowledge_progress.observe(block.tool_type, result)
-            if isinstance(block, RejectedToolCall):
+            if isinstance(block, RejectedToolCall) and not block.skipped:
                 _rejected_calls += 1
             _reminder = _repeat_guard.observe(block)
             if _reminder:
@@ -4523,6 +4505,16 @@ async def stream_agent_loop(
         if _round_reminders:
             messages.append({"role": "system", "content": "\n\n".join(_round_reminders)})
 
+        # The answer ended on a question and what it hands over is delivered:
+        # the turn ends here (see the question guard above). If a hand-over call
+        # failed, the model gets the next round to put that right instead.
+        if _end_after_tools and all(
+            e.get("exit_code") in (0, None) for e in tool_events if e.get("round") == round_num
+        ):
+            if wire_sink is not None:
+                wire_sink["round_text"] = ""
+            break
+
         # A written answer plus its chart is a finished turn. The chart's result
         # tells the model not to repeat its values, so another round only yields a
         # closing remark, and the completeness nudge then makes the model write the
@@ -4635,7 +4627,6 @@ async def stream_agent_loop(
         "repeat_reminders": _repeat_guard.reminders_sent,
         "empty_round_nudges": _empty_round_nudges,
         "intent_nudges": _intent_nudge_count,
-        "restate_nudges": int(bool(_final_restate_nudged)),
         "verifier_rounds": _verifier_rounds,
         "compactions": _mid_turn_compactions + int(_precompacted),
         "overflow_recoveries": _overflow_recoveries,

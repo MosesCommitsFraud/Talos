@@ -120,9 +120,13 @@ class RejectedToolCall(ToolBlock):
     the round would be attached to the wrong call. `error` is that result.
     """
 
-    def __new__(cls, tool_type: str, content: str, error: str):
+    def __new__(cls, tool_type: str, content: str, error: str, skipped: bool = False):
         self = super().__new__(cls, tool_type, content)
         self.error = error
+        # `skipped`: nothing was wrong with the call; the turn ended before it
+        # (see the question guard in agent_loop). Shown as "not run", not as a
+        # failure.
+        self.skipped = skipped
         return self
 
 
