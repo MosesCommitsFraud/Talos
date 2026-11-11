@@ -420,6 +420,8 @@ TALOS_SQL_SANDBOX_KEY=<eigener-zufaelliger-langer-secret>
 TALOS_SQL_PORT=1433
 # Optional. Leer = jeder vom Client genannte Host wird akzeptiert.
 TALOS_SQL_ALLOWED_HOSTS=sqlserver.example.internal,*.macs.local
+# Optional. Suchdomänen, mit denen ein Kurzname vervollständigt wird.
+TALOS_SQL_DNS_SEARCH=example.internal
 ```
 
 Aus dem aktualisierten Checkout bauen und starten:
@@ -441,6 +443,18 @@ Aufrufer muss die Zugangsdaten der Datenbank selbst mitbringen, der Hostname
 muss blank sein (kein Port, kein Connection-String-Fragment), und der Port
 steht über `TALOS_SQL_PORT` fest. Wer aus einem nicht vertrauenswürdigen Netz
 erreichbar ist, setzt die Liste. DB-Verbindungen verlangen Verschlüsselung.
+
+Ein Kurzname wie `sqlserver` wird im Container nur aufgelöst, wenn der
+Docker-Host eine DNS-Suchdomäne hat — Docker reicht dessen Suchliste durch, und
+ein Server mit fester Adresse hat oft keine. Der Treiber meldet dann Fehler
+20009 („Adaptive Server is unavailable or does not exist"), obwohl derselbe
+Name auf jedem Arbeitsplatz der Domäne funktioniert. `TALOS_SQL_DNS_SEARCH`
+nimmt dafür eine oder mehrere Domänen, komma- oder leerzeichengetrennt: die
+Sandbox hängt sie der Reihe nach an einen Namen ohne Punkt und nimmt den ersten,
+der sich auflösen lässt. Volle Namen und IP-Adressen bleiben, wie sie sind, und
+ein Kurzname, den keine der Domänen kennt, wird unverändert versucht. Die
+Host-Liste gilt für beide Schreibweisen: `sqlserver` passiert sie, wenn der
+Kurzname oder der vervollständigte Name darin steht.
 
 Der übergebene SQL-Login muss auf dem SQL Server ausschließlich die benötigten
 Leserechte besitzen. Die Syntaxprüfung blockiert mehrere Statements,
@@ -509,7 +523,8 @@ docker compose logs -f talos-sql-sandbox
 Der Worker schreibt seine Diagnose nach stderr, die Sandbox liest sie und
 protokolliert sie. Ebenfalls dort: ein nicht passender Sandbox-Key, ein durch
 `TALOS_SQL_ALLOWED_HOSTS` abgewiesener Host (mit der geltenden Liste), ein
-belegtes Slot-Kontingent und ein Timeout.
+durch `TALOS_SQL_DNS_SEARCH` vervollständigter Kurzname, ein belegtes
+Slot-Kontingent und ein Timeout.
 
 Das Passwort steht in keinem der beiden Logs, und der Request-Body wird nie
 protokolliert.

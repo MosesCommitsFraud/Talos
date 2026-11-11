@@ -20,6 +20,9 @@ services:
       # Empty = every host the caller names is accepted. Narrow it when you can:
       # exact names, *.domain suffixes, or * for any.
       - TALOS_SQL_ALLOWED_HOSTS=${TALOS_SQL_ALLOWED_HOSTS:-}
+      # Domains a short host name is completed with (sqlserver -> sqlserver.corp.example).
+      # Needed where the Docker host has no DNS search list of its own.
+      - TALOS_SQL_DNS_SEARCH=${TALOS_SQL_DNS_SEARCH:-}
       - TALOS_SQL_PORT=${TALOS_SQL_PORT:-1433}
     read_only: true
     cap_drop: [ALL]

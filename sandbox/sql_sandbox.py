@@ -51,6 +51,43 @@ def host_allowed(host: str) -> bool:
     )
 
 
+def search_candidates(host: str) -> list[str]:
+    """`host` completed with each domain of TALOS_SQL_DNS_SEARCH, in order.
+
+    Only a name without a dot is completed, the way a resolver's search list
+    works; a full name or an IP address is taken as written. Empty when there is
+    nothing to try. The container needs this of its own because Docker hands it
+    the host's search list, and a server with a fixed address often has none —
+    `sqldev` then resolves on every desktop in the domain and not here.
+    """
+    if "." in host:
+        return []
+    domains = os.getenv("TALOS_SQL_DNS_SEARCH", "").replace(",", " ").split()
+    return [
+        f"{host}.{domain}"
+        for domain in (d.strip(".").lower() for d in domains)
+        if re.fullmatch(r"[a-z0-9][a-z0-9.-]*", domain)
+    ]
+
+
+async def expand_host(host: str) -> str:
+    """The first completed name that resolves, else `host` unchanged.
+
+    Unchanged also means "as before": a short name the container's own resolver
+    knows (another compose service, say) still works, and one nobody knows fails
+    in the worker with the driver's message.
+    """
+    loop = asyncio.get_running_loop()
+    for name in search_candidates(host):
+        try:
+            await asyncio.wait_for(loop.getaddrinfo(name, None), timeout=5)
+        except (OSError, UnicodeError, asyncio.TimeoutError):
+            continue
+        logger.info("host %s completed to %s by TALOS_SQL_DNS_SEARCH", host, name)
+        return name
+    return host
+
+
 @app.post("/query")
 async def query(request: Request):
     key = os.getenv("TALOS_SQL_SANDBOX_KEY", "")
@@ -80,7 +117,10 @@ async def query(request: Request):
         # No FreeTDS aliases, embedded ports or connection-string fragments.
         if not re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9.-]*", payload["host"]):
             raise ValueError()
-        if not host_allowed(payload["host"]):
+        # The list may name the host either way: as the caller wrote it or as
+        # the operator's own search domain completes it.
+        named, payload["host"] = payload["host"], await expand_host(payload["host"])
+        if not (host_allowed(named) or host_allowed(payload["host"])):
             logger.warning(
                 "rejected /query: host %s is not covered by TALOS_SQL_ALLOWED_HOSTS=%r",
                 payload["host"], os.getenv("TALOS_SQL_ALLOWED_HOSTS", ""),

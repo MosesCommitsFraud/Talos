@@ -334,6 +334,83 @@ def test_host_allow_list_rules(monkeypatch, configured_hosts, host, expected):
     assert sql_sandbox.host_allowed(host) is expected
 
 
+@pytest.mark.parametrize(
+    "search,host,expected",
+    [
+        ("", "sqldev", []),  # unset: nothing is completed
+        ("corp.example", "sqldev", ["sqldev.corp.example"]),
+        ("corp.example", "sqldev.corp.example", []),  # a full name is taken as written
+        ("corp.example", "192.168.10.16", []),
+        ("a.example, b.example", "sqldev", ["sqldev.a.example", "sqldev.b.example"]),
+        (".Corp.Example. bad_domain;x", "sqldev", ["sqldev.corp.example"]),
+    ],
+)
+def test_search_domains_complete_only_short_names(monkeypatch, search, host, expected):
+    monkeypatch.setenv("TALOS_SQL_DNS_SEARCH", search)
+    assert sql_sandbox.search_candidates(host) == expected
+
+
+@pytest.mark.parametrize(
+    "known,connected_to",
+    [
+        ({"sqldev.corp.example"}, "sqldev.corp.example"),
+        (set(), "sqldev"),  # no domain knows it: tried as written, as before
+    ],
+)
+def test_a_short_host_name_reaches_the_worker_completed(monkeypatch, known, connected_to):
+    """A server with a fixed address often has no DNS search list, and Docker
+    hands the container the host's. `sqldev` then resolves on every desktop in
+    the domain and not in the sandbox, which the driver reports as an
+    unreachable server."""
+    monkeypatch.setenv("TALOS_SQL_SANDBOX_KEY", "test-secret")
+    monkeypatch.setenv("TALOS_SQL_DNS_SEARCH", "corp.example")
+    # The list names the full host; the caller's short name must still pass.
+    monkeypatch.setenv("TALOS_SQL_ALLOWED_HOSTS", "*.corp.example, sqldev")
+    asked, captured = [], []
+
+    async def getaddrinfo(self, host, port, **kwargs):
+        asked.append(host)
+        if host not in known:
+            raise OSError("Name or service not known")
+        return [(2, 1, 6, "", ("192.0.2.16", 0))]
+
+    monkeypatch.setattr(asyncio.BaseEventLoop, "getaddrinfo", getaddrinfo)
+
+    class Process:
+        returncode = 0
+
+        async def communicate(self, data):
+            captured.append(json.loads(data))
+            return b'{"columns": [], "rows": [], "row_count": 0, "truncated": false}', b""
+
+    async def spawn(*args, **kwargs):
+        return Process()
+
+    monkeypatch.setattr(sql_sandbox.asyncio, "create_subprocess_exec", spawn)
+
+    async def run():
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=sql_sandbox.app), base_url="http://test"
+        ) as client:
+            response = await client.post(
+                "/query",
+                json={
+                    "host": "sqldev",
+                    "database": "db",
+                    "user": "u",
+                    "password": "secret",
+                    "query": "SELECT 1",
+                    "max_rows": 10,
+                },
+                headers={"X-Talos-Sandbox-Key": "test-secret"},
+            )
+            assert response.json()["row_count"] == 0
+
+    asyncio.run(run())
+    assert asked == ["sqldev.corp.example"]
+    assert captured[0]["host"] == connected_to
+
+
 def test_a_failure_is_diagnosable_from_the_logs_without_leaking_the_password(monkeypatch, capsys):
     """The caller only ever gets a fixed error code, which is too coarse to debug
     with — "query_failed" covers a wrong password, an unreachable host and a typo
