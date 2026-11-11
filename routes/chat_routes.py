@@ -43,7 +43,7 @@ from src import agent_runs
 from src import citations as _citations
 from src import goal_driver as _goal_driver
 from src import goals as _goals
-from src.agent_loop import stream_agent_loop
+from src.agent_loop import stopped_round_messages, stream_agent_loop
 from src.auth_helpers import effective_user, get_current_user
 from src.chat_helpers import coerce_message_and_session
 from src.endpoint_resolver import build_chat_url
@@ -91,9 +91,13 @@ def _parse_ask_answers(raw) -> Optional[list]:
     return pairs or None
 
 
-def _turn_wire_record(sess, sink) -> Optional[Dict[str, Any]]:
+def _turn_wire_record(sess, sink, stopped: bool = False) -> Optional[Dict[str, Any]]:
     """Package the agent loop's live view of this turn for verbatim replay,
-    paired with the question as stored in the session history."""
+    paired with the question as stored in the session history.
+
+    `stopped` says the turn was stopped midway. If that fell into a round's
+    tool calls, the record ends with those calls and what is known of their
+    results, so the next turn knows they were sent off."""
     if not sink or not sink.get("messages"):
         return None
     question = next((m for m in reversed(sess.history) if m.role == "user"), None)
@@ -109,6 +113,7 @@ def _turn_wire_record(sess, sink) -> Optional[Dict[str, Any]]:
         sink.get("round_text") or "",
         compacted=bool(sink.get("compacted")),
         final_reasoning=(sink.get("round_reasoning") or "") if keep_reasoning else "",
+        stopped_round=stopped_round_messages(sink) if stopped else None,
     )
     return make_turn_wire(
         turn, question.content, base=bool(sink.get("compacted")), keep_reasoning=keep_reasoning
@@ -1433,7 +1438,7 @@ def setup_chat_routes(
                     try:
                         # Keep exactly what happened up to the stop, also a
                         # turn that so far only called tools and wrote no text.
-                        _stopped_wire = _turn_wire_record(sess, _wire_sink)
+                        _stopped_wire = _turn_wire_record(sess, _wire_sink, stopped=True)
                         _worked = any(
                             m.get("role") == "tool" or m.get("tool_calls")
                             for m in (_stopped_wire or {}).get("messages", [])

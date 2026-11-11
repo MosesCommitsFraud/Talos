@@ -355,12 +355,20 @@ def _content_fingerprint(content: Any) -> str:
 
 
 def collect_turn_messages(
-    messages: List[Dict], final_text: str, compacted: bool = False, final_reasoning: str = ""
+    messages: List[Dict],
+    final_text: str,
+    compacted: bool = False,
+    final_reasoning: str = "",
+    stopped_round: Optional[List[Dict]] = None,
 ) -> List[Dict]:
     """This turn's messages as sent, plus the final (or, after a stop, partial)
     answer text of the last round, which no request carried yet.
     `final_reasoning` is what the model thought before that answer; it is only
     kept by make_turn_wire when reasoning is sent back to the model.
+
+    `stopped_round` is given when the stop fell into a round's tool calls (see
+    agent_loop.stopped_round_messages): the round's calls and what is known of
+    their results. They carry the round's text, so it is not added again.
 
     Normally that is everything after the prior conversation (PRIOR_KEY). After
     a mid-turn compaction it is the whole compacted conversation minus the
@@ -386,6 +394,8 @@ def collect_turn_messages(
         turn = list(messages[last_prior + 1 :])
     if not turn:
         return []
+    if stopped_round:
+        return turn + list(stopped_round)
     if (final_text or "").strip() and not (
         turn[-1].get("role") == "assistant" and (turn[-1].get("content") or "") == final_text
     ):

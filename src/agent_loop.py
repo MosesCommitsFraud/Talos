@@ -1588,6 +1588,46 @@ _CUT_OFF_EMPTY_ROUND_NOTE = (
 # Result of a native call the round ended before reaching.
 NOT_RUN_RESULT = "This call was not run."
 
+# Result of a call that had been sent off when the user stopped the turn. The
+# stored turn would otherwise not show the call at all, and the model would
+# start the next turn not knowing that, say, a document edit may have gone
+# through.
+STOPPED_RESULT = (
+    "The turn was stopped before this call's result was recorded, so its outcome is "
+    "unknown: it may have run completely, partly or not at all. If it changes "
+    "something (a file, a document, data), check what it left behind before "
+    "repeating it; a call that only reads can simply be made again if it is still "
+    "needed."
+)
+
+
+def stopped_round_messages(sink: Optional[Dict[str, Any]]) -> List[Dict]:
+    """The messages of the round a turn was stopped in, for the stored turn:
+    its calls, the results that had come in, and STOPPED_RESULT for the rest.
+    Empty when the stop did not fall into a round's tool calls. `sink` is the
+    loop's `wire_sink`."""
+    flight = (sink or {}).get("in_flight")
+    if not flight:
+        return []
+    results = list(flight["tool_results"])
+    texts = list(flight["tool_result_texts"])
+    for tool in flight["tools"][len(results) :]:
+        results.append(f"### {tool}\n{STOPPED_RESULT}")
+        texts.append(STOPPED_RESULT)
+    out: List[Dict] = []
+    _append_tool_results(
+        out,
+        flight["round_response"],
+        flight["native_tool_calls"],
+        results,
+        texts,
+        flight["used_native"],
+        flight["round_num"],
+        round_reasoning=flight["round_reasoning"],
+    )
+    return out
+
+
 # Marker that opens the synthetic user message carrying a round's tool output
 # (text-protocol path). Used both to build that message and to classify it into
 # the "toolResults" context-meter category.
@@ -3011,6 +3051,7 @@ async def stream_agent_loop(
         if wire_sink is not None:
             wire_sink["round_text"] = ""
             wire_sink["round_reasoning"] = ""
+            wire_sink["in_flight"] = None
 
         # ── Messages queued during the turn ──
         # At the end of the list, so the prompt so far stays a stable prefix, and
@@ -4117,6 +4158,19 @@ async def stream_agent_loop(
         # Execute each tool block
         tool_results = []
         tool_result_texts = []  # plain text for native tool role messages
+        if wire_sink is not None:
+            # From here until the results are in `messages`, a stop falls into
+            # the round's calls: see stopped_round_messages.
+            wire_sink["in_flight"] = {
+                "round_response": round_response,
+                "native_tool_calls": native_tool_calls,
+                "tools": [b.tool_type for b in tool_blocks],
+                "tool_results": tool_results,
+                "tool_result_texts": tool_result_texts,
+                "used_native": used_native,
+                "round_num": round_num,
+                "round_reasoning": round_reasoning,
+            }
         _round_reminders: List[str] = []
         budget_hit = False
         for i, block in enumerate(tool_blocks):
@@ -4536,6 +4590,8 @@ async def stream_agent_loop(
             round_reasoning=round_reasoning,
             keep_earlier_reasoning=_keep_reasoning,
         )
+        if wire_sink is not None:
+            wire_sink["in_flight"] = None
         # After the results, at the end of the prompt: the model reads the advice
         # right where it decides on its next call, and nothing before it changes.
         if _round_reminders:
