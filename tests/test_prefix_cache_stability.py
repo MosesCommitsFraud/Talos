@@ -241,10 +241,10 @@ async def test_switched_off_sources_are_not_offered(captured):
     assert not names & {"query_sql", "search_knowledge", "web_search", "web_fetch"}
     wire = _wire(call)
     assert "DATABASE ACCESS" not in json.dumps(wire)
-    available = next(
-        line for line in wire[0]["content"].splitlines() if line.startswith("Available tools:")
-    )
-    assert "query_sql" not in available and "search_knowledge" not in available
+    # Neither does the system prompt name them: the lean prompt lists no tools
+    # at all, the classic one lists only those of this turn.
+    system = wire[0]["content"]
+    assert "query_sql" not in system and "search_knowledge" not in system
 
 
 async def _run_sql_turn(monkeypatch, msgs, retrieve, sql_rounds=1):

@@ -40,6 +40,11 @@ DEFAULT_SETTINGS = {
     # (which alone is often enough). "utility": the previous behaviour, the
     # helper model summarizes a transcript cut to 2,000 characters per message.
     "compaction_model": "main",
+    # Wording of the system prompt and the tool descriptions, see
+    # src/prompt_style.py. "lean": one short, calm prompt without the
+    # contradictions and repetitions of the grown one. "classic": the previous
+    # texts, kept so the two can be compared on the loop figures of real turns.
+    "agent_prompt_style": "lean",
     # Headroom-style compression of large tool outputs (JSON crushing, log
     # collapsing, head/tail trimming) with reversible retrieval via the
     # expand_output tool. See src/context_optimizer.py.

@@ -28,6 +28,7 @@ def test_llm_language_prompt_covers_thinking_and_output():
 
 def test_protected_prompt_precedes_editable_prompt():
     from src.chat_processor import ChatProcessor
+    from src.prompt_security import system_policy
 
     preface, _ = ChatProcessor(None).build_context_preface(
         message="hello",
@@ -37,7 +38,7 @@ def test_protected_prompt_precedes_editable_prompt():
         agent_mode=True,
     )
 
-    assert preface[0] == {"role": "system", "content": TALOS_SYSTEM_PROMPT}
+    assert preface[0] == {"role": "system", "content": system_policy()}
     assert preface[1] == {"role": "system", "content": "editable preset"}
 
 

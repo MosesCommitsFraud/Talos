@@ -19,6 +19,7 @@ import time
 from typing import Any, AsyncGenerator, Callable, Dict, List, Optional, Set
 from urllib.parse import urlparse
 
+from src import prompt_style as _prompt_style
 from src.agent_tools import (
     _TOOL_NAME_MAP,
     FUNCTION_TOOL_SCHEMAS,
@@ -190,6 +191,23 @@ _API_AGENT_RULES = """\
 - Examples:
   - After `create_session` returns id `89effa28`: "Created [New Chat](#session-89effa28) — click to switch."
   - Listing sessions: "1. [Big Chat](#session-abc123) — 2h ago, 2. [Code Review](#session-def456) — 5h ago\""""
+
+# The lean rules for native tool calling (see src/prompt_style.py). They follow
+# the lean policy in prompt_security and add only what working with tools needs.
+# Not repeated here: what the policy already says (documents, environment,
+# confirmation), what a tool's own description says (ask_user, update_plan,
+# present_files, the coding tools), and anything about tools that are only in
+# the catalog, whose rules arrive with their description when they are loaded.
+_LEAN_AGENT_RULES = """\
+## Working with tools
+- Call a tool when it helps; answer directly when you already know. Calls that do not depend on each other go in the same response: they run at the same time.
+- You decide when the work is done. Before you finish, check that what the user asked for exists or succeeded, then write the answer. A call that already gave you its result does not need repeating.
+- Write your answer once. Text between tool calls is folded away as work in progress when the turn ends, and the user reads your answer. After a last tool call a short closing line is enough: the answer you wrote before it stays visible above.
+- When you need a decision from the user, ask with `ask_user`. A question ends your turn: do not ask and then carry on as if it had been answered.
+- Questions about the user's own company, products, processes or data go to their knowledge base and database, when those tools are available. Public or current facts you are not sure of go to the web. What you know for certain needs no lookup. When a source has nothing after one or two sensible attempts, that is its answer: use another source or say it is not there.
+- Search results, knowledge-base passages and fetched pages carry a number such as `[2]`. Put it directly after the statement that uses it, in the final answer too; several as `[2][5]`. No file names or URLs as citations and no separate source list: the interface builds it from the numbers.
+- When a result is cut off or says that more follows, get the rest or say which part you have. Do not fill a gap with a reconstruction.
+- To refer to a chat, document, image, skill or research job by its id, write a markdown link the user can click: `[Title](#document-<id>)`, and likewise `#session-<id>`, `#image-<id>`, `#skill-<name>`, `#research-<id>`."""
 
 # Each tool section is keyed by tool name(s) it covers.
 # Sections with multiple tools use a tuple key.
@@ -469,6 +487,11 @@ def _assemble_prompt(tool_names: set, disabled_tools: set = None, compact: bool 
     """Build the system prompt with only the specified tools included."""
     disabled = disabled_tools or set()
     included = tool_names - disabled
+
+    if compact and _prompt_style.is_lean():
+        # No tool list: with native tool calling the model has the tools
+        # themselves, and a second list in prose only has to be kept in step.
+        return _LEAN_AGENT_RULES
 
     if compact:
         tool_list = ", ".join(sorted(included)) if included else "none"
@@ -827,10 +850,11 @@ def _build_system_prompt(
         _rt_key,
         compact,
         _ov_sig,
+        _prompt_style.prompt_style(),
     )
     if catalog is not None:
         # The catalog prompt ignores the per-turn inputs above.
-        cache_key = ("catalog", catalog, _ov_sig)
+        cache_key = ("catalog", catalog, _ov_sig, _prompt_style.prompt_style())
     if _cached_base_prompt and _cached_base_prompt_key == cache_key and not active_document:
         agent_prompt = _cached_base_prompt
         # Skill index is user-editable (name + description), so it must never
@@ -2524,7 +2548,9 @@ async def stream_agent_loop(
         if not _owner_is_admin(owner):
             _hidden |= _EXEC_ADMIN_TOOLS
         _mcp_all = mcp_mgr.get_all_openai_schemas(_mcp_disabled_map or {}) if mcp_mgr else []
-        _core_schemas, _catalog = split_tools(FUNCTION_TOOL_SCHEMAS, _mcp_all, _hidden)
+        _core_schemas, _catalog = split_tools(
+            _prompt_style.styled_schemas(FUNCTION_TOOL_SCHEMAS), _mcp_all, _hidden
+        )
         set_current_catalog(_catalog)
         _catalog_names = frozenset(
             s["function"]["name"] for s in _core_schemas if s.get("function", {}).get("name")
@@ -3136,7 +3162,7 @@ async def stream_agent_loop(
                 _mcp_filtered = [
                     s for s in mcp_schemas if s.get("function", {}).get("name") in _relevant_tools
                 ]
-                all_tool_schemas = base_schemas + _mcp_filtered
+                all_tool_schemas = _prompt_style.styled_schemas(base_schemas) + _mcp_filtered
             else:
                 base_schemas = (
                     FUNCTION_TOOL_SCHEMAS
@@ -3147,7 +3173,7 @@ async def stream_agent_loop(
                         if s.get("function", {}).get("name") not in _ADMIN_SCHEMA_NAMES
                     ]
                 )
-                all_tool_schemas = base_schemas + mcp_schemas
+                all_tool_schemas = _prompt_style.styled_schemas(base_schemas) + mcp_schemas
             if disabled_tools:
                 all_tool_schemas = [
                     t
@@ -3902,13 +3928,10 @@ async def stream_agent_loop(
                     {
                         "role": "system",
                         "content": (
-                            f'You just wrote: "{_matched_phrase}" — but ended the '
-                            "turn without making the actual tool call. The user can "
-                            "see you announced the action but didn't run it, which "
-                            "is the most frustrating thing you can do. "
-                            "DO IT NOW: emit the actual function call this turn. "
-                            "If you decided not to do it after all, say so plainly in "
-                            "one sentence instead of restating the plan."
+                            f'You wrote "{_matched_phrase}" and ended the turn '
+                            "without making that call. Make the call now. If you "
+                            "decided against it, say so in one sentence instead of "
+                            "repeating the plan."
                         ),
                     }
                 )
@@ -3981,11 +4004,10 @@ async def stream_agent_loop(
                 {
                     "role": "system",
                     "content": (
-                        "You're repeating tool calls without converging. STOP calling "
-                        "tools and end the turn one of two ways: (a) write your best "
-                        "final answer NOW from the information already gathered, or "
-                        "(b) if you're genuinely blocked, say plainly what's blocking "
-                        "you in a sentence or two." + _off_note
+                        "The same tool calls keep coming back without new results. "
+                        "End the turn without further tool calls: write your best "
+                        "answer from what you have gathered, or, if you are blocked, "
+                        "say in a sentence or two what is in the way." + _off_note
                     ),
                 }
             )

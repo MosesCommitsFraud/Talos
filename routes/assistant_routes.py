@@ -356,9 +356,9 @@ def setup_assistant_routes(chat_processor=None, session_manager=None) -> APIRout
         # Build RAG / system-prompt preface (memory skipped — stateless API).
         # Keep the application-owned policy even if optional context assembly is
         # unavailable; assistant presets remain subordinate to it.
-        from src.prompt_security import TALOS_SYSTEM_PROMPT
+        from src.prompt_security import system_policy
 
-        preface: list[dict] = [{"role": "system", "content": TALOS_SYSTEM_PROMPT}]
+        preface: list[dict] = [{"role": "system", "content": system_policy()}]
         if chat_processor is not None:
             try:
                 # Blocking retrieval/LLM work — keep it off the event loop.
@@ -374,7 +374,7 @@ def setup_assistant_routes(chat_processor=None, session_manager=None) -> APIRout
                 )
             except Exception as e:
                 logger.warning("Assistant preface build failed: %s", e)
-                preface = [{"role": "system", "content": TALOS_SYSTEM_PROMPT}]
+                preface = [{"role": "system", "content": system_policy()}]
                 if cfg["system_prompt"]:
                     preface.append({"role": "system", "content": cfg["system_prompt"]})
 
