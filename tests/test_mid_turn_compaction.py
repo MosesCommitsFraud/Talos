@@ -17,6 +17,8 @@ import pytest
 
 from src import context_compactor as cc
 
+_REAL_SUMMARIZER = cc._summarize_older  # the fixture below replaces it
+
 
 @pytest.fixture(autouse=True)
 def _stub_summarizer(monkeypatch):
@@ -232,3 +234,44 @@ async def test_between_turns_persists_the_bare_summary(monkeypatch):
 
 def test_mid_turn_compaction_cap_is_bounded():
     assert 1 <= cc.MAX_MID_TURN_COMPACTIONS <= 5
+
+
+# ── a summary cut off at the length limit ──
+
+
+def _summary_stream(monkeypatch, *answers):
+    """The utility model answers each call with the next of `answers`:
+    (text, cut_off)."""
+    import json
+
+    from src import llm_core
+
+    budgets = []
+
+    async def fake_stream(url, model, messages, **kwargs):
+        budgets.append(kwargs["max_tokens"])
+        text, cut_off = answers[len(budgets) - 1]
+        yield f"data: {json.dumps({'delta': text})}\n\n"
+        if cut_off:
+            yield f"data: {json.dumps({'type': 'finish', 'reason': 'length'})}\n\n"
+        yield "data: [DONE]\n\n"
+
+    monkeypatch.setattr(llm_core, "stream_llm", fake_stream)
+    monkeypatch.setattr(cc, "resolve_endpoint", lambda kind: ("u", "m", None))
+    return budgets
+
+
+async def test_a_cut_off_summary_gets_one_more_try_with_twice_the_room(monkeypatch):
+    budgets = _summary_stream(
+        monkeypatch, ("### User Goal\nEin Dash", True), ("### User Goal\nEin Dashboard", False)
+    )
+    older = [{"role": "user", "content": "Bau ein Dashboard."}]
+    assert await _REAL_SUMMARIZER(older, [], "u", "m") == "### User Goal\nEin Dashboard"
+    assert budgets == [cc.SUMMARY_MAX_TOKENS, cc.SUMMARY_MAX_TOKENS * 2]
+
+
+async def test_a_summary_that_stays_cut_off_is_not_used(monkeypatch):
+    budgets = _summary_stream(monkeypatch, ("### User Goal", True), ("### User Goal", True))
+    older = [{"role": "user", "content": "Bau ein Dashboard."}]
+    assert await _REAL_SUMMARIZER(older, [], "u", "m") is None
+    assert len(budgets) == 2

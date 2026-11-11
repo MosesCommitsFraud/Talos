@@ -12,7 +12,6 @@ from typing import Any, Dict, List, Optional
 
 from core.models import ChatMessage
 from src.endpoint_resolver import resolve_endpoint
-from src.llm_core import llm_call_async
 from src.model_context import estimate_tokens, get_context_length
 
 logger = logging.getLogger(__name__)
@@ -440,6 +439,32 @@ def _summary_message(summary: str) -> Dict:
     }
 
 
+async def _stream_text(stream) -> tuple:
+    """(text, problem) of a streamed model call that is to return text only.
+
+    `problem` is "" when the call ran through, "length" when the output was cut
+    off at the token limit, and the error otherwise. Reasoning is left out."""
+    import json as _json
+
+    from src.text_helpers import strip_thinking
+
+    text = ""
+    async for chunk in stream:
+        if chunk.startswith("event: error"):
+            return "", chunk.strip()[:300]
+        if not chunk.startswith("data: {"):
+            continue
+        try:
+            data = _json.loads(chunk[6:])
+        except ValueError:
+            continue
+        if data.get("type") == "finish" and data.get("reason") == "length":
+            return "", "length"
+        if "delta" in data and not data.get("thinking"):
+            text += data["delta"]
+    return (strip_thinking(text) or "").strip(), ""
+
+
 async def _summarize_older(
     older: List[Dict],
     system_msgs: List[Dict],
@@ -479,18 +504,38 @@ async def _summarize_older(
         {"role": "user", "content": convo_text},
     ]
 
-    try:
-        summary = await llm_call_async(
-            compact_url,
-            compact_model,
-            summary_messages,
-            temperature=0.2,
-            max_tokens=SUMMARY_MAX_TOKENS,
-            headers=compact_headers,
-            timeout=30,
-        )
-    except Exception as e:
-        logger.error(f"Compaction summary failed: {e}")
+    from src.llm_core import stream_llm
+
+    # A summary that ends at the length limit has lost its last sections, the
+    # open steps and the constraints, and would stand in for the messages it
+    # replaces from then on. It gets one more try with twice the room; if that
+    # is cut off as well, there is no summary.
+    summary = None
+    for budget in (SUMMARY_MAX_TOKENS, SUMMARY_MAX_TOKENS * 2):
+        try:
+            text, problem = await _stream_text(
+                stream_llm(
+                    compact_url,
+                    compact_model,
+                    summary_messages,
+                    temperature=0.2,
+                    max_tokens=budget,
+                    headers=compact_headers,
+                    timeout=30,
+                )
+            )
+        except Exception as e:
+            logger.error(f"Compaction summary failed: {e}")
+            return None
+        if problem == "length":
+            logger.warning("Compaction summary was cut off at %d tokens", budget)
+            continue
+        if problem:
+            logger.error("Compaction summary failed: %s", problem)
+            return None
+        summary = text
+        break
+    if not summary:
         return None
 
     # Carry any figures the model showed in the summarized turns into the kept
@@ -728,46 +773,35 @@ async def _write_checkpoint(
     none may be called: they are rendered into the prompt ahead of the
     messages, and leaving them out would change it from its first tokens on.
     """
-    import json as _json
-
     from src.llm_core import stream_llm
-    from src.text_helpers import strip_thinking
 
     request = list(prefix) + [{"role": "user", "content": CHECKPOINT_INSTRUCTION}]
-    text = ""
     try:
-        async for chunk in stream_llm(
-            endpoint_url,
-            model,
-            request,
-            headers=headers,
-            temperature=0.2,
-            max_tokens=CHECKPOINT_MAX_TOKENS,
-            tools=tools or None,
-            tool_choice="none" if (tools and tool_choice_ok) else None,
-            enable_thinking=False,
-            timeout=CHECKPOINT_TIMEOUT_S,
-        ):
-            if chunk.startswith("event: error"):
-                logger.error("Checkpoint call failed: %s", chunk.strip()[:300])
-                return None
-            if not chunk.startswith("data: {"):
-                continue
-            try:
-                data = _json.loads(chunk[6:])
-            except ValueError:
-                continue
-            if data.get("type") == "finish" and data.get("reason") == "length":
-                # A checkpoint that stops mid-list silently loses its last
-                # sections, the ones about what to do next.
-                logger.warning("Checkpoint was cut off at the length limit — not used")
-                return None
-            if "delta" in data and not data.get("thinking"):
-                text += data["delta"]
+        text, problem = await _stream_text(
+            stream_llm(
+                endpoint_url,
+                model,
+                request,
+                headers=headers,
+                temperature=0.2,
+                max_tokens=CHECKPOINT_MAX_TOKENS,
+                tools=tools or None,
+                tool_choice="none" if (tools and tool_choice_ok) else None,
+                enable_thinking=False,
+                timeout=CHECKPOINT_TIMEOUT_S,
+            )
+        )
     except Exception as exc:
         logger.error("Checkpoint call failed: %s", exc)
         return None
-    text = (strip_thinking(text) or "").strip()
+    if problem == "length":
+        # A checkpoint that stops mid-list silently loses its last sections,
+        # the ones about what to do next.
+        logger.warning("Checkpoint was cut off at the length limit — not used")
+        return None
+    if problem:
+        logger.error("Checkpoint call failed: %s", problem)
+        return None
     return text or None
 
 
