@@ -1095,6 +1095,16 @@ function AiDefaultsPanel() {
         <TextRow s={s} k="agent_max_tool_calls" label={t('settings.ai.toolCallLimit')} hint={t('settings.ai.toolCallLimitHint')} type="number" width="w-24" />
         <TextRow s={s} k="agent_max_rounds" label={t('settings.ai.maxSteps')} hint={t('settings.ai.toolCallLimitHint')} type="number" width="w-24" />
         <TextRow s={s} k="agent_tool_parallelism" label={t('settings.ai.toolParallelism')} hint={t('settings.ai.toolParallelismHint')} type="number" width="w-24" />
+        <SelectRow
+          s={s}
+          k="agent_prompt_style"
+          label={t('settings.ai.promptStyle')}
+          hint={t('settings.ai.promptStyleHint')}
+          options={[
+            { value: 'lean', label: t('settings.ai.promptStyleLean') },
+            { value: 'classic', label: t('settings.ai.promptStyleClassic') },
+          ]}
+        />
         <BoolRow s={s} k="reasoning_passback" label={t('settings.ai.reasoningPassback')} hint={t('settings.ai.reasoningPassbackHint')} />
         <BoolRow s={s} k="tool_scripts_enabled" label={t('settings.ai.toolScripts')} hint={t('settings.ai.toolScriptsHint')} />
         <TextRow s={s} k="goal_max_rounds" label={t('settings.ai.goalMaxRounds')} hint={t('settings.ai.toolCallLimitHint')} type="number" width="w-24" />
