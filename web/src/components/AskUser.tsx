@@ -38,7 +38,7 @@ function draftAnswer(q: AskQuestion, d: Draft): string {
 
 /** Interactive card for an `ask_user` turn: 1-4 questions paged through one at
  *  a time. Each is free-text (no options), single- or multiple-choice; choice
- *  questions also get an "Other" row with its own text box. Every question can
+ *  questions end in a "something else" line to type into. Every question can
  *  be skipped. Submitting sends one message holding all answers, and attaches
  *  the question/answer pairs so the transcript shows them as a summary card. */
 export function AskUser({ msg }: { msg: UiMessage }) {
@@ -50,25 +50,26 @@ export function AskUser({ msg }: { msg: UiMessage }) {
   const [drafts, setDrafts] = useState<Draft[]>(() => questions.map(emptyDraft));
   const [skipped, setSkipped] = useState<boolean[]>(() => questions.map(() => false));
   const textRef = useRef<HTMLTextAreaElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
   const cardRef = useRef<HTMLDivElement>(null);
 
   const q = questions[page];
   const d = drafts[page] ?? emptyDraft();
   const freeText = q ? q.options.length === 0 : false;
-  const showText = freeText || d.other;
   const last = page === questions.length - 1;
   const disabled = !!msg.answered || streaming;
   const answer = q ? draftAnswer(q, d) : '';
 
-  // The text box gets focus whenever it appears (free-text page, or "Other"
-  // just ticked), so the user can type straight away. Otherwise the card keeps
+  // The text box gets focus whenever it is the answer (free-text page, or
+  // "something else" just ticked), so the user can type straight away. Otherwise the card keeps
   // it after a page change, or focus would drop to <body> along with the
   // unmounted control and the 1-9 / Ctrl+Enter shortcuts would stop working.
   // Focus held elsewhere (the user typing in the composer) is left alone.
   useEffect(() => {
-    if (showText) textRef.current?.focus();
+    if (freeText) textRef.current?.focus();
+    else if (d.other) inputRef.current?.focus();
     else if (!document.activeElement || document.activeElement === document.body) cardRef.current?.focus();
-  }, [showText, page]);
+  }, [freeText, d.other, page]);
 
   if (!q) return null;
 
@@ -119,7 +120,7 @@ export function AskUser({ msg }: { msg: UiMessage }) {
       return;
     }
     // Number keys pick an option while focus isn't in the text box.
-    if (e.target instanceof HTMLTextAreaElement || e.ctrlKey || e.metaKey || e.altKey) return;
+    if (e.target instanceof HTMLTextAreaElement || e.target instanceof HTMLInputElement || e.ctrlKey || e.metaKey || e.altKey) return;
     const n = Number(e.key);
     if (Number.isInteger(n) && n >= 1) {
       if (n <= q.options.length) choose(q.options[n - 1].label);
@@ -134,86 +135,141 @@ export function AskUser({ msg }: { msg: UiMessage }) {
       tabIndex={0}
       onKeyDown={onKeyDown}
       className={cn(
-        'overflow-hidden rounded-xl border border-border bg-popover text-sm shadow-sm outline-none',
+        'pop-in rounded-2xl border border-border bg-popover p-1.5 text-sm shadow-[0_1px_2px_rgba(0,0,0,0.04),0_8px_24px_-12px_rgba(0,0,0,0.18)] outline-none dark:shadow-none',
         disabled && 'opacity-60',
       )}
     >
-      <div className="flex items-start gap-3 border-b border-border bg-muted/50 px-4 py-3">
-        <div className="min-w-0 flex-1">
-          {q.header && (
-            <span className="mb-1 inline-flex rounded bg-primary/10 px-1.5 py-0.5 text-[11px] font-medium text-primary">
-              {q.header}
-            </span>
-          )}
-          <div className="text-[15px] font-medium leading-snug text-strong">{q.question}</div>
-          {q.multi && <div className="mt-0.5 text-xs text-muted-foreground">{t('askUser.chooseMany')}</div>}
-        </div>
+      <div className="px-2.5 pt-2 pb-1.5">
+        {q.header && (
+          <span className="mb-1.5 inline-flex rounded-md bg-primary/10 px-1.5 py-0.5 text-[11px] font-medium text-primary">
+            {q.header}
+          </span>
+        )}
+        <div className="text-[15px] leading-snug font-semibold text-strong">{q.question}</div>
+        {q.multi && <div className="mt-0.5 text-xs text-muted-foreground">{t('askUser.chooseMany')}</div>}
+      </div>
+
+      {/* Keyed by page, so each question's rows rise in afresh. */}
+      <div key={page}>
+        {!freeText && (
+          <div role={q.multi ? 'group' : 'radiogroup'} className="flex flex-col">
+            {q.options.map((opt, i) => (
+              <OptionRow
+                key={opt.label}
+                multi={q.multi}
+                on={d.picked.includes(opt.label)}
+                disabled={disabled}
+                label={opt.label}
+                description={opt.description}
+                onClick={() => choose(opt.label)}
+                delay={i * 40}
+              />
+            ))}
+            {/* "Something else": not a row that opens a box, but the box itself.
+                Typing in it is choosing it. */}
+            <div
+              className="fade-up flex items-center gap-2.5 rounded-lg px-2.5 py-1.5"
+              style={{ animationDelay: `${q.options.length * 40}ms` }}
+            >
+              <button
+                type="button"
+                role={q.multi ? 'checkbox' : 'radio'}
+                aria-checked={d.other}
+                aria-label={t('askUser.other')}
+                disabled={disabled}
+                onClick={toggleOther}
+                className="shrink-0 disabled:pointer-events-none"
+              >
+                <Marker multi={q.multi} on={d.other} />
+              </button>
+              <input
+                ref={inputRef}
+                value={d.text}
+                disabled={disabled}
+                onChange={(e) =>
+                  patch(q.multi ? { text: e.target.value, other: true } : { text: e.target.value, other: true, picked: [] })
+                }
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.ctrlKey && !e.metaKey && answer) {
+                    e.preventDefault();
+                    advance(false);
+                  }
+                }}
+                placeholder={t('askUser.somethingElse')}
+                aria-label={t('askUser.other')}
+                className="min-w-0 flex-1 bg-transparent text-[15px] text-strong outline-none placeholder:text-muted-foreground/70 disabled:opacity-60"
+              />
+            </div>
+          </div>
+        )}
+
+        {freeText && (
+          <div className="px-1 pt-0.5">
+            <textarea
+              ref={textRef}
+              value={d.text}
+              disabled={disabled}
+              onChange={(e) => patch({ text: e.target.value })}
+              placeholder={t('askUser.placeholder')}
+              rows={3}
+              className="fade-up w-full resize-y rounded-lg bg-muted px-3 py-2 text-[15px] text-strong outline-none placeholder:text-muted-foreground/70 focus-visible:ring-2 focus-visible:ring-ring/40 disabled:opacity-60"
+            />
+          </div>
+        )}
+      </div>
+
+      <div className="flex items-center gap-2 px-1 pt-2 pb-0.5">
         {questions.length > 1 && (
-          <div className="flex shrink-0 items-center gap-1 text-xs text-muted-foreground">
+          <div className="flex items-center gap-0.5 text-xs text-muted-foreground">
             <button
               type="button"
               aria-label={t('askUser.prev')}
               disabled={page === 0}
               onClick={() => setPage(page - 1)}
-              className="rounded p-0.5 hover:bg-accent hover:text-foreground disabled:opacity-40"
+              className="flex size-6 items-center justify-center rounded-md transition-colors hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
             >
-              <ChevronLeftIcon className="size-4" />
+              <ChevronLeftIcon className="size-3.5" />
             </button>
-            <span className="tabular-nums">{t('askUser.pageOf', { n: page + 1, total: questions.length })}</span>
+            <span className="tabular-nums" aria-label={t('askUser.pageOf', { n: page + 1, total: questions.length })}>
+              {page + 1}/{questions.length}
+            </span>
             <button
               type="button"
               aria-label={t('askUser.next')}
               disabled={last}
               onClick={() => setPage(page + 1)}
-              className="rounded p-0.5 hover:bg-accent hover:text-foreground disabled:opacity-40"
+              className="flex size-6 items-center justify-center rounded-md transition-colors hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
             >
-              <ChevronRightIcon className="size-4" />
+              <ChevronRightIcon className="size-3.5" />
             </button>
           </div>
         )}
-      </div>
-
-      {!freeText && (
-        <div role={q.multi ? 'group' : 'radiogroup'} className="divide-y divide-border">
-          {q.options.map((opt) => (
-            <OptionRow
-              key={opt.label}
-              multi={q.multi}
-              on={d.picked.includes(opt.label)}
-              disabled={disabled}
-              label={opt.label}
-              description={opt.description}
-              onClick={() => choose(opt.label)}
-            />
-          ))}
-          <OptionRow multi={q.multi} on={d.other} disabled={disabled} label={t('askUser.other')} onClick={toggleOther} />
+        <div className="ml-auto flex items-center gap-1.5">
+          <Button size="sm" variant="secondary" className="rounded-full px-3" disabled={disabled} onClick={() => advance(true)}>
+            {t('askUser.skip')}
+          </Button>
+          <Button size="sm" className="rounded-full px-3" disabled={disabled || !answer} onClick={() => advance(false)}>
+            {last ? t('askUser.submit') : t('askUser.next')}
+            <KeybindingPill value="mod+enter" className="bg-primary-foreground/20 text-primary-foreground" />
+          </Button>
         </div>
-      )}
-
-      {showText && (
-        <div className={cn('px-4', freeText ? 'pt-3' : 'pb-1 pl-11')}>
-          <textarea
-            ref={textRef}
-            value={d.text}
-            disabled={disabled}
-            onChange={(e) => patch({ text: e.target.value })}
-            placeholder={t('askUser.placeholder')}
-            rows={freeText ? 3 : 1}
-            className="w-full resize-y rounded-lg border border-input bg-background px-3 py-2 text-sm outline-none focus-visible:border-primary focus-visible:ring-2 focus-visible:ring-ring/40 disabled:opacity-60"
-          />
-        </div>
-      )}
-
-      <div className="flex items-center justify-end gap-2 px-4 py-3">
-        <Button size="sm" variant="secondary" disabled={disabled} onClick={() => advance(true)}>
-          {t('askUser.skip')}
-        </Button>
-        <Button size="sm" disabled={disabled || !answer} onClick={() => advance(false)}>
-          {last ? t('askUser.submit') : t('askUser.next')}
-          <KeybindingPill value="mod+enter" className="bg-primary-foreground/20 text-primary-foreground" />
-        </Button>
       </div>
     </div>
+  );
+}
+
+/** The round (one of) or square (any of) mark in front of an option. */
+function Marker({ multi, on }: { multi: boolean; on: boolean }) {
+  return (
+    <span
+      className={cn(
+        'flex size-4 shrink-0 items-center justify-center border-[1.5px] transition-colors',
+        multi ? 'rounded-[5px]' : 'rounded-full',
+        on ? 'border-primary bg-primary text-primary-foreground' : 'border-muted-foreground/45',
+      )}
+    >
+      {on && (multi ? <CheckIcon className="size-2.5" strokeWidth={3.5} /> : <span className="size-1.5 rounded-full bg-primary-foreground" />)}
+    </span>
   );
 }
 
@@ -224,6 +280,7 @@ function OptionRow({
   label,
   description,
   onClick,
+  delay,
 }: {
   multi: boolean;
   on: boolean;
@@ -231,6 +288,7 @@ function OptionRow({
   label: string;
   description?: string;
   onClick: () => void;
+  delay: number;
 }) {
   return (
     <button
@@ -239,19 +297,14 @@ function OptionRow({
       aria-checked={on}
       disabled={disabled}
       onClick={onClick}
-      className="flex w-full items-start gap-3 px-4 py-3 text-left transition-colors hover:bg-accent/60 disabled:pointer-events-none"
+      style={{ animationDelay: `${delay}ms` }}
+      className="fade-up flex w-full items-start gap-2.5 rounded-lg px-2.5 py-1.5 text-left transition-colors hover:bg-accent disabled:pointer-events-none"
     >
-      <span
-        className={cn(
-          'mt-0.5 flex size-[18px] shrink-0 items-center justify-center border transition-colors',
-          multi ? 'rounded' : 'rounded-full',
-          on ? 'border-primary bg-primary text-primary-foreground' : 'border-muted-foreground/50',
-        )}
-      >
-        {on && (multi ? <CheckIcon className="size-3" strokeWidth={3} /> : <span className="size-1.5 rounded-full bg-primary-foreground" />)}
+      <span className="flex h-[1.375rem] shrink-0 items-center">
+        <Marker multi={multi} on={on} />
       </span>
-      <span className="flex min-w-0 flex-col gap-0.5">
-        <span className="text-[15px] text-strong">{label}</span>
+      <span className="flex min-w-0 flex-col">
+        <span className="text-[15px] leading-[1.375rem] text-strong">{label}</span>
         {description && <span className="text-[13px] leading-snug text-muted-foreground">{description}</span>}
       </span>
     </button>

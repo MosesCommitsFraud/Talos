@@ -23,6 +23,8 @@ import { artifactSelectionLocator } from '@/lib/artifactSelection';
 import { ContextMeter } from './ContextMeter';
 import { ComposerAddMenu, DeepResearchChip } from './ComposerAddMenu';
 import { ComposerAttachments } from './ComposerAttachments';
+import { ComposerMentionMenu, mentionQuery, mentionRuns, mentionStartBefore, useMentionItems, type MentionItem } from './ComposerMentionMenu';
+import { useSessionFiles } from '@/lib/useSessionFiles';
 import { QueuedMessages } from './QueuedMessages';
 import { ModelEffortPicker } from './ModelEffortPicker';
 import { Tooltip } from './ui/misc';
@@ -231,9 +233,45 @@ export function Composer() {
     ? SLASH_COMMANDS.filter((c) => c.name.startsWith(slashMatch[1].toLowerCase()))
     : [];
 
+  // "@" reaches sources and this chat's files. Escape closes the list for the
+  // text as it stands; typing on brings it back.
+  const [mentionIndex, setMentionIndex] = useState(0);
+  const [mentionClosedFor, setMentionClosedFor] = useState<string | null>(null);
+  const mentionText = mentionClosedFor === text ? null : mentionQuery(text);
+  const mentionItems = useMentionItems(mentionText, sessionId);
+  const mentionOpen = mentionText !== null;
+  // References in the text get a tinted plate behind them (see the layer under
+  // the textarea), so it shows that "@result.csv" is a pointer and not prose.
+  const sessionFiles = useSessionFiles(sessionId);
+  const mentionNames = useMemo(
+    () => [...sessionFiles.outputs.map((f) => f.name), ...sessionFiles.inputs.map((f) => f.name ?? '')],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [sessionFiles.outputs.length, sessionFiles.inputs.length],
+  );
+  const runs = useMemo(
+    () => (text.includes('@') ? mentionRuns(text, mentionNames) : []),
+    [text, mentionNames],
+  );
+  const hasMentions = runs.some((run) => run.mention);
+  const highlight = useRef<HTMLDivElement>(null);
+
+  const pickMention = (item: MentionItem) => {
+    if (mentionText === null) return;
+    // Everything up to the "@" being typed stays; the "@…" itself becomes the
+    // file's name, or goes away once it has flipped a switch.
+    const base = text.slice(0, text.length - mentionText.length - 1);
+    item.run?.();
+    setText(base + (item.insert ?? ''));
+    requestAnimationFrame(() => {
+      autoresize();
+      textarea.current?.focus();
+    });
+  };
+
   useEffect(() => {
     setSlashIndex(0);
     previousSlashIndex.current = 0;
+    setMentionIndex(0);
   }, [text]);
   useEffect(() => {
     const menu = slashMenu.current;
@@ -585,6 +623,9 @@ export function Composer() {
             ))}
           </div>
         )}
+        {mentionOpen && (
+          <ComposerMentionMenu items={mentionItems} searching={!!mentionText} index={mentionIndex} onHover={setMentionIndex} onPick={pickMention} />
+        )}
         <ComposerAttachments
           files={pending}
           sessionId={sessionId}
@@ -630,9 +671,35 @@ export function Composer() {
               INPUT_TEXT,
             )}
           />
+          {/* Reference plates: the same text, laid out the same way, invisible but
+              for the tint behind each "@…". It sits under the textarea, whose
+              own background is transparent, and follows its scrolling. */}
+          {hasMentions && !dictating && (
+            <div
+              ref={highlight}
+              aria-hidden="true"
+              className={cn(
+                'pointer-events-none absolute inset-0 overflow-hidden break-words whitespace-pre-wrap text-transparent',
+                INPUT_TEXT,
+              )}
+            >
+              {runs.map((run, i) =>
+                run.mention ? (
+                  // The shadow widens the plate without moving a single glyph.
+                  <mark key={i} className="rounded-[5px] bg-primary/20 text-transparent shadow-[0_0_0_2px_color-mix(in_srgb,var(--primary)_20%,transparent)]">
+                    {run.text}
+                  </mark>
+                ) : (
+                  <span key={i}>{run.text}</span>
+                ),
+              )}
+              {'\n'}
+            </div>
+          )}
           <textarea
             hidden={dictating}
             ref={textarea}
+            onScroll={(e) => { if (highlight.current) highlight.current.scrollTop = e.currentTarget.scrollTop; }}
             data-composer-input
             value={text}
             rows={1}
@@ -641,6 +708,32 @@ export function Composer() {
             aria-label={t('composer.messageInput')}
             onChange={(e) => { setText(e.target.value); autoresize(); }}
             onKeyDown={(e) => {
+              // Backspace right behind a file reference removes the reference.
+              if (e.key === 'Backspace' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+                const el = e.currentTarget;
+                const caret = el.selectionStart;
+                const start = caret === el.selectionEnd ? mentionStartBefore(text, caret, mentionNames) : -1;
+                if (start >= 0) {
+                  e.preventDefault();
+                  setText(text.slice(0, start) + text.slice(caret));
+                  requestAnimationFrame(() => {
+                    el.setSelectionRange(start, start);
+                    autoresize();
+                  });
+                  return;
+                }
+              }
+              if (mentionOpen) {
+                const count = mentionItems.length;
+                if (e.key === 'Escape') { e.preventDefault(); setMentionClosedFor(text); return; }
+                if (count && e.key === 'ArrowDown') { e.preventDefault(); setMentionIndex((i) => (i + 1) % count); return; }
+                if (count && e.key === 'ArrowUp') { e.preventDefault(); setMentionIndex((i) => (i - 1 + count) % count); return; }
+                if (count && (e.key === 'Tab' || (e.key === 'Enter' && !e.shiftKey))) {
+                  e.preventDefault();
+                  pickMention(mentionItems[Math.min(mentionIndex, count - 1)]);
+                  return;
+                }
+              }
               if (slashItems.length && e.key === 'ArrowDown') {
                 e.preventDefault(); setSlashIndex((i) => (i + 1) % slashItems.length); return;
               }

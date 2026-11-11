@@ -29,6 +29,27 @@ import {
   MenuTrigger,
 } from './ui/menu';
 
+/** A row of the add menu: what it is, and a few muted words on what it does. */
+function RowText({ title, desc }: { title: string; desc?: string }) {
+  return (
+    <span className="flex min-w-0 flex-1 items-baseline gap-2">
+      <span className="shrink-0 font-medium text-strong">{title}</span>
+      {desc && <span className="min-w-0 truncate text-[13px] text-muted-foreground">{desc}</span>}
+    </span>
+  );
+}
+
+/** "Active", at the end of a switch row that is on. Always laid out, so a row
+ *  does not change width when it is flipped. */
+function ActiveMark({ on }: { on: boolean }) {
+  const { t } = useTranslation();
+  return (
+    <span className={cn('shrink-0 ps-3 text-xs font-medium text-emerald-600 dark:text-emerald-400', !on && 'invisible')}>
+      {t('composer.active')}
+    </span>
+  );
+}
+
 /** Settings-dialog request from a surface that doesn't own the dialog. App
  *  listens for it and opens the named panel. */
 export const OPEN_SETTINGS_EVENT = 'talos-open-settings';
@@ -54,7 +75,7 @@ function SkillsSubmenu() {
     <MenuSub>
       <MenuSubTrigger>
         <SparklesIcon />
-        <span className="min-w-0 flex-1 truncate">{t('settings.nav.skills')}</span>
+        <RowText title={t('settings.nav.skills')} desc={t('composer.skillsDesc')} />
       </MenuSubTrigger>
       <MenuSubPopup className="max-h-80 min-w-52 overflow-y-auto">
         {skills.length === 0 && (
@@ -102,7 +123,7 @@ function MicSubmenu() {
     <MenuSub onOpenChange={(open) => { if (open) loadDevices(); }}>
       <MenuSubTrigger>
         <MicIcon />
-        <span className="min-w-0 flex-1 truncate">{t('composer.micSelect')}</span>
+        <RowText title={t('composer.micSelect')} desc={t('composer.micDesc')} />
       </MenuSubTrigger>
       <MenuSubPopup>
         <MenuItem onSelect={() => setMicDeviceId(null)}>
@@ -151,8 +172,11 @@ function KnowledgeItems() {
         }}
       >
         {caps.rag ? <BookOpenIcon /> : <DatabaseIcon />}
-        <span className="min-w-0 flex-1 truncate">{caps.rag ? t('composer.rag') : t('composer.sql')}</span>
-        <CheckIcon className={cn('size-3.5 shrink-0 text-primary', on ? 'opacity-100' : 'opacity-0')} />
+        <RowText
+          title={caps.rag ? t('composer.mention.knowledge') : t('composer.mention.database')}
+          desc={caps.rag ? t('composer.ragDesc') : t('composer.sqlTooltip')}
+        />
+        <ActiveMark on={on} />
       </MenuItem>
     );
   }
@@ -170,8 +194,7 @@ function KnowledgeItems() {
     <MenuSub>
       <MenuSubTrigger>
         <BookOpenIcon />
-        <span className="min-w-0 flex-1 truncate">{t('composer.mode.label')}</span>
-        <span className="shrink-0 text-muted-foreground">{active.label}</span>
+        <RowText title={t('composer.mode.label')} desc={active.label} />
       </MenuSubTrigger>
       <MenuSubPopup className="min-w-40">
         {modes.map((m) => (
@@ -221,10 +244,11 @@ export function ComposerAddMenu({
           </svg>
         </button>
       </MenuTrigger>
-      <MenuPopup align="start" className="min-w-48">
+      {/* Roomier than a plain menu: every row says what it is and what it does. */}
+      <MenuPopup align="start" className="w-[22rem] max-w-[calc(100vw-1.5rem)] rounded-xl p-1.5 [&>[role^=menuitem]]:min-h-9 [&>[role^=menuitem]]:gap-2.5 [&>[role^=menuitem]]:rounded-lg">
         <MenuItem onSelect={onAttach}>
           <PaperclipIcon />
-          <span className="min-w-0 flex-1 truncate">{t('composer.attachFiles')}</span>
+          <RowText title={t('composer.attachFiles')} desc={t('composer.attachFilesDesc')} />
         </MenuItem>
         {auth?.is_admin && <SkillsSubmenu />}
         {showMic && <MicSubmenu />}
@@ -239,8 +263,8 @@ export function ComposerAddMenu({
           }}
         >
           <GlobeIcon />
-          <span className="min-w-0 flex-1 truncate">{t('composer.webSearch')}</span>
-          <CheckIcon className={cn('size-3.5 shrink-0 text-primary', useWeb ? 'opacity-100' : 'opacity-0')} />
+          <RowText title={t('composer.webSearch')} desc={t('composer.webSearchDesc')} />
+          <ActiveMark on={useWeb} />
         </MenuItem>
         {/* A mode, not a source: the next messages run as a research project
             (plan, parallel subagents, gap check, cited report). */}
@@ -249,8 +273,8 @@ export function ComposerAddMenu({
           onSelect={() => toggle('deepResearch')}
         >
           <TelescopeIcon />
-          <span className="min-w-0 flex-1 truncate">{t('composer.deepResearch')}</span>
-          <CheckIcon className={cn('size-3.5 shrink-0 text-primary', deepResearch ? 'opacity-100' : 'opacity-0')} />
+          <RowText title={t('composer.deepResearch')} desc={t('composer.deepResearchDesc')} />
+          <ActiveMark on={deepResearch} />
         </MenuItem>
       </MenuPopup>
     </Menu>

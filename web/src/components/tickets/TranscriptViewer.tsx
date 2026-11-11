@@ -14,7 +14,7 @@ import { fileExt } from '@/lib/files';
 import { coldLoadMessage, type UiMessage } from '@/state/chat';
 import { useUi } from '@/state/ui';
 import { TurnBody } from '../Messages';
-import { RagSources } from '../RagSources';
+import { TurnSources } from '../RagSources';
 import { Dialog, DialogContent } from '../ui/dialog';
 
 /** One rendered message plus the snapshot-level facts the chat store has no
@@ -279,7 +279,7 @@ export function TranscriptViewer({
                 <div className={cn('rounded-lg bg-accent/60 px-3 py-2 text-sm')}>
                   <TurnBody turn={block.items.map((x) => x.msg)} showThinking />
                   {block.items.flatMap((x) => x.msg.sources ?? []).length > 0 && (
-                    <RagSources sources={block.items.flatMap((x) => x.msg.sources ?? [])} />
+                    <TurnSources sources={block.items.flatMap((x) => x.msg.sources ?? [])} />
                   )}
                 </div>
               </div>

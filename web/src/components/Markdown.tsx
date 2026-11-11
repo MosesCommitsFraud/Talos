@@ -213,9 +213,22 @@ const MD_COMPONENTS = {
  *  token re-classifies still-incomplete code (colors flash), thrashes the DOM
  *  (janky scroll), and pops the horizontal scrollbar in and out (vertical jump).
  *  Code stays plain while it streams and colorizes once the message settles. */
-export const Markdown = memo(function Markdown({ text, streaming = false }: { text: string; streaming?: boolean }) {
+export const Markdown = memo(function Markdown({
+  text,
+  streaming = false,
+  caret = false,
+}: {
+  text: string;
+  streaming?: boolean;
+  /** Stand a caret after the last word: this is the text being written now. */
+  caret?: boolean;
+}) {
   return (
-    <div className="chat-markdown text-[15px]">
+    <div
+      className="chat-markdown text-[15px]"
+      data-streaming={streaming ? '' : undefined}
+      data-caret={streaming && caret ? '' : undefined}
+    >
       <ReactMarkdown
         remarkPlugins={REMARK_PLUGINS}
         rehypePlugins={streaming ? MATH_ONLY_PLUGINS : HIGHLIGHT_PLUGINS}

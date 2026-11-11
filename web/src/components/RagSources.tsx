@@ -1,13 +1,24 @@
-import * as TooltipPrimitive from '@radix-ui/react-tooltip';
-import { DataSourceChips } from '@/components/interactive/InlineUi';
-import type { UiSource } from '@/lib/uiFrame';
-import { ArrowUpRightIcon, FileTextIcon, ImageIcon, Maximize2Icon, PlayCircleIcon } from 'lucide-react';
-import { useCallback, useMemo, useState } from 'react';
+import {
+  ArrowUpRightIcon,
+  ChevronDownIcon,
+  DatabaseIcon,
+  FileTextIcon,
+  GlobeIcon,
+  ImageIcon,
+  PlayCircleIcon,
+  SparklesIcon,
+  TextIcon,
+  XIcon,
+} from 'lucide-react';
+import { type ReactNode, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { Citation, RagSource } from '@/api/types';
-import { PassageNav, WebSourceChips } from './Citations';
+import { safeExternalUrl, type UiSource } from '@/lib/uiFrame';
 import { useUi } from '@/state/ui';
 import { cn } from '@/lib/utils';
+import { SiteAvatar, siteHost } from './Citations';
+import { FileTypeIcon } from './FileTypeIcon';
+import { Collapse } from './ui/collapse';
 
 /** Format a seconds offset as m:ss (or h:mm:ss) for a video timestamp label. */
 function fmtTime(sec?: number): string | null {
@@ -66,9 +77,9 @@ function pageNum(s: RagSource): number {
 
 type Kind = 'file' | 'video' | 'image';
 
-/** One chip under the answer: a cited file (or figure) and the passages of it
- *  that were fed to the model. `offset` is where its passages start in the
- *  turn-wide list the hover card steps through. */
+/** One knowledge-base source of a turn: a cited file (or figure) and the
+ *  passages of it that were fed to the model. `offset` is where its passages
+ *  start in the turn-wide list. */
 interface SourceGroup {
   key: string;
   kind: Kind;
@@ -132,164 +143,313 @@ function KindIcon({ kind, className }: { kind: Kind; className?: string }) {
   return <FileTextIcon className={className} />;
 }
 
-/** Body of the hover card: which file, where in it, and the passage itself. */
-function PassageView({ group, s }: { group: SourceGroup; s: RagSource }) {
-  const { t } = useTranslation();
-  const openLightbox = useUi((st) => st.openLightbox);
-  const page = ragPage(s);
-  const where = [
-    page != null ? t('messages.citationPage', { page }) : null,
-    s.modality === 'video' ? fmtRange(s.start, s.end) : null,
-  ].filter(Boolean).join(' · ');
-  const caption = (s.image_caption || '').trim();
-  const text = s.modality === 'image' ? caption || s.snippet : s.snippet;
+const DATA_ICONS: Record<string, typeof DatabaseIcon> = {
+  sql: DatabaseIcon,
+  knowledge: FileTextIcon,
+  web: GlobeIcon,
+};
+
+/** Everything a turn rests on, in the order the list shows it: cited web
+ *  pages, the data behind its views and tables, then knowledge-base files. */
+type Entry =
+  | { key: string; type: 'web'; c: Citation }
+  | { key: string; type: 'data'; s: UiSource }
+  | { key: string; type: 'file'; g: SourceGroup };
+
+/** The host behind a data source that names a web address, for its icon. */
+function dataHost(s: UiSource): string | null {
+  const link = s.ref ? safeExternalUrl(s.ref) : null;
+  if (!link) return null;
+  try {
+    return new URL(link).hostname.replace(/^www\./i, '');
+  } catch {
+    return null;
+  }
+}
+
+/** One source's mark in the overlapping stack on the toggle: round, and ringed
+ *  in the page colour so neighbours read as separate discs. */
+function StackMark({ entry }: { entry: Entry }) {
+  const disc = 'size-3.5 rounded-full ring-[1.5px] ring-background';
+  if (entry.type === 'web') return <SiteAvatar site={siteHost(entry.c)} className={cn(disc, 'text-[8px]')} />;
+  if (entry.type === 'file' && entry.g.kind === 'image' && entry.g.passages[0].image_url) {
+    return <img src={entry.g.passages[0].image_url} alt="" loading="lazy" className={cn(disc, 'object-cover')} />;
+  }
+  const host = entry.type === 'data' ? dataHost(entry.s) : null;
+  if (host) return <SiteAvatar site={host} className={cn(disc, 'text-[8px]')} />;
+  const Icon = entry.type === 'data' ? (DATA_ICONS[entry.s.kind] ?? SparklesIcon) : null;
   return (
-    <div className="min-w-0 space-y-2">
-      <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
-        <span className="flex size-4 shrink-0 items-center justify-center rounded-full bg-muted">
-          <KindIcon kind={group.kind} className="size-2.5" />
-        </span>
-        <span className="min-w-0 truncate font-medium text-popover-foreground">{s.filename}</span>
-        {where && <span className="ml-auto shrink-0 tabular-nums">{where}</span>}
-      </div>
-      {s.modality === 'image' && s.image_url && (
-        <button
-          type="button"
-          onClick={() => openLightbox({ src: s.image_url!, label: group.label })}
-          className="block w-full overflow-hidden rounded-md border bg-muted/40"
-          aria-label={t('messages.viewImage')}
-        >
-          <img src={s.image_url} alt="" loading="lazy" className="max-h-40 w-full object-contain" />
-        </button>
-      )}
-      {text && (
-        <blockquote className="max-h-44 overflow-y-auto border-l-2 border-primary/40 pl-2.5 text-xs leading-relaxed whitespace-pre-line text-muted-foreground">
-          {text.trim()}
-        </blockquote>
-      )}
-    </div>
+    <span aria-hidden className={cn(disc, 'flex items-center justify-center bg-secondary-foreground/15 text-foreground/80 dark:bg-neutral-700')}>
+      {Icon ? <Icon className="size-2" /> : entry.type === 'file' ? <KindIcon kind={entry.g.kind} className="size-2" /> : null}
+    </span>
   );
 }
 
-/** Citations for a RAG-backed answer: one chip per knowledge-base file whose
- *  chunks were fed into the model (a figure is its own chip; a video's ASR
- *  segments are merged into time ranges). Hovering a chip opens a card with
- *  the passage itself; ‹ › (or ← →) step through every passage of the turn,
- *  starting at the hovered file's first one. */
-export function RagSources({ sources, web = [], data = [] }: { sources: RagSource[]; web?: Citation[]; data?: UiSource[] }) {
+const ROW =
+  'flex w-full items-center gap-2 rounded-md px-1.5 py-1 text-left text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground';
+const ROW_META = 'ml-auto shrink-0 pl-3 font-mono text-[10.5px] text-muted-foreground/80 tabular-nums';
+
+/** One line of the source list: mark, name, and in monospace at the right edge
+ *  where it lives — the host, the kind of data, or how much of a file was read. */
+function SourceRow({ entry, active, onPick }: { entry: Entry; active: boolean; onPick: (g: SourceGroup) => void }) {
   const { t } = useTranslation();
   const openLightbox = useUi((s) => s.openLightbox);
+
+  if (entry.type === 'web') {
+    const host = siteHost(entry.c);
+    return (
+      <a href={entry.c.url} target="_blank" rel="noreferrer" title={entry.c.snippet || undefined} className={ROW}>
+        <SiteAvatar site={host} className="size-4 rounded-[4px] text-[9px]" />
+        <span className="min-w-0 truncate">{entry.c.title || host}</span>
+        <span className={ROW_META}>{host}</span>
+      </a>
+    );
+  }
+
+  if (entry.type === 'data') {
+    const Icon = DATA_ICONS[entry.s.kind] ?? SparklesIcon;
+    const link = entry.s.ref ? safeExternalUrl(entry.s.ref) : null;
+    const host = dataHost(entry.s);
+    const body = (
+      <>
+        {host ? (
+          <SiteAvatar site={host} className="size-4 rounded-[4px] text-[9px]" />
+        ) : (
+          <Icon className="size-4 shrink-0 opacity-80" />
+        )}
+        <span className="min-w-0 truncate">{entry.s.label}</span>
+        <span className={ROW_META}>{t(`interactive.kind.${entry.s.kind}`, { defaultValue: entry.s.kind })}</span>
+      </>
+    );
+    return link ? (
+      <a href={link} target="_blank" rel="noreferrer noopener" className={ROW}>{body}</a>
+    ) : (
+      <div className={cn(ROW, 'hover:bg-transparent hover:text-muted-foreground')} title={entry.s.ref}>{body}</div>
+    );
+  }
+
+  const g = entry.g;
+  const first = g.passages[0];
+  const page = ragPage(first);
+  const meta =
+    g.passages.length > 1
+      ? t('messages.passageCount', { count: g.passages.length })
+      : g.kind === 'video'
+        ? fmtRange(first.start, first.end)
+        : page != null
+          ? t('messages.citationPage', { page })
+          : null;
+  const figure = g.kind === 'image' && first.image_url;
+  return (
+    <button
+      type="button"
+      aria-pressed={figure ? undefined : active}
+      // A figure opens; a file narrows the passages below to its own.
+      onClick={() => (figure ? openLightbox({ src: figure, label: g.label }) : onPick(g))}
+      className={cn(ROW, active && 'bg-accent text-foreground')}
+    >
+      {figure ? (
+        <img src={figure} alt="" loading="lazy" className="size-4 shrink-0 rounded-[4px] object-cover" />
+      ) : g.kind === 'video' ? (
+        <PlayCircleIcon className="size-4 shrink-0 opacity-80" />
+      ) : (
+        <FileTypeIcon path={g.label} className="size-4 shrink-0 opacity-80" />
+      )}
+      <span className="min-w-0 truncate">{g.label}</span>
+      {meta && <span className={ROW_META}>{meta}</span>}
+    </button>
+  );
+}
+
+/** One retrieved passage as a card: what it is and how long, the text itself,
+ *  and the file it was read from. */
+function ChunkCard({ group, s, index }: { group: SourceGroup; s: RagSource; index: number }) {
+  const { t, i18n } = useTranslation();
+  const openLightbox = useUi((st) => st.openLightbox);
+  const [expanded, setExpanded] = useState(false);
+  const page = ragPage(s);
+  const caption = (s.image_caption || '').trim();
+  const text = (s.modality === 'image' ? caption || s.snippet : s.snippet).trim();
+  const title =
+    s.modality === 'image'
+      ? caption.split('\n')[0] || t('messages.figure')
+      : s.modality === 'video'
+        ? (fmtRange(s.start, s.end) ?? t('messages.chunkN', { n: index + 1 }))
+        : page != null
+          ? t('messages.chunkPage', { page })
+          : t('messages.chunkN', { n: index + 1 });
+  const link = s.deeplink || s.video_url;
+  const chip =
+    'mt-2.5 inline-flex h-6 max-w-full items-center gap-1.5 rounded-full border border-border/70 bg-background/70 pr-2 pl-1.5 text-[11.5px] text-foreground/90';
+  const chipBody = (
+    <>
+      {group.kind === 'video' ? (
+        <PlayCircleIcon className="size-3.5 shrink-0 text-muted-foreground" />
+      ) : (
+        <FileTypeIcon path={s.filename} className="size-3.5 shrink-0 text-muted-foreground" />
+      )}
+      <span className="min-w-0 truncate">{s.filename}</span>
+    </>
+  );
+  return (
+    <article className="min-w-0 overflow-hidden rounded-xl border border-border/70 bg-card/60">
+      <header className="flex items-center gap-2 px-3 py-2">
+        <TextIcon aria-hidden className="size-3.5 shrink-0 text-muted-foreground" />
+        <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-strong">{title}</span>
+        <span className="shrink-0 text-xs text-muted-foreground tabular-nums">
+          {t('messages.chunkChars', { count: text.length, n: text.length.toLocaleString(i18n.language) })}
+        </span>
+      </header>
+      <div className="border-t border-border/60 px-3 pt-2.5 pb-3">
+        {s.modality === 'image' && s.image_url && (
+          <button
+            type="button"
+            onClick={() => openLightbox({ src: s.image_url!, label: group.label })}
+            className="mb-2 block w-full overflow-hidden rounded-md border bg-muted/40"
+            aria-label={t('messages.viewImage')}
+          >
+            <img src={s.image_url} alt="" loading="lazy" className="max-h-40 w-full object-contain" />
+          </button>
+        )}
+        {text && (
+          // The whole passage is one click away, without a control of its own:
+          // three lines are the preview, the text is the switch.
+          <p
+            onClick={() => setExpanded((v) => !v)}
+            className={cn(
+              'cursor-pointer text-[12.5px] leading-relaxed whitespace-pre-line text-foreground/80',
+              !expanded && 'line-clamp-3',
+            )}
+          >
+            {text}
+          </p>
+        )}
+        {link ? (
+          <a href={link} target="_blank" rel="noreferrer" className={cn(chip, 'transition-colors hover:border-border hover:bg-accent')}>
+            {chipBody}
+            <ArrowUpRightIcon className="size-3 shrink-0 text-muted-foreground" />
+          </a>
+        ) : (
+          <span className={chip}>{chipBody}</span>
+        )}
+      </div>
+    </article>
+  );
+}
+
+/** Passages shown before the rest is asked for: two rows of the grid. */
+const CHUNKS_FOLDED = 4;
+
+/** What a turn rests on, behind one quiet control in its action row: a stack of
+ *  source marks and a count. Opened, it lists every source — web pages, data,
+ *  knowledge-base files — and under the list the passages that were actually
+ *  fed to the model, one card each. Picking a file narrows the cards to it.
+ *
+ *  `children` are the turn's own action icons, which share the row. */
+export function TurnSources({
+  sources,
+  web = [],
+  data = [],
+  children,
+}: {
+  sources: RagSource[];
+  web?: Citation[];
+  data?: UiSource[];
+  children?: ReactNode;
+}) {
+  const { t } = useTranslation();
+  const [open, setOpen] = useState(false);
+  const [filter, setFilter] = useState<string | null>(null);
+  const [allChunks, setAllChunks] = useState(false);
   const groups = useMemo(() => buildGroups(sources ?? []), [sources]);
-  const flat = useMemo(() => groups.flatMap((g) => g.passages.map((s) => ({ g, s }))), [groups]);
-  const [openKey, setOpenKey] = useState<string | null>(null);
-  const [cursor, setCursor] = useState(0);
-  const step = useCallback((i: number) => setCursor(i), []);
+  const entries = useMemo<Entry[]>(
+    () => [
+      ...web.map((c): Entry => ({ key: `web:${c.n}`, type: 'web', c })),
+      ...data.map((s, i): Entry => ({ key: `data:${i}`, type: 'data', s })),
+      ...groups.map((g): Entry => ({ key: g.key, type: 'file', g })),
+    ],
+    [web, data, groups],
+  );
 
-  if (!groups.length && !web.length && !data.length) return null;
+  if (entries.length === 0) return <>{children}</>;
 
-  const current = openKey != null ? flat[Math.min(cursor, flat.length - 1)] : undefined;
+  const chunks = groups
+    .filter((g) => (filter ? g.key === filter : true))
+    .flatMap((g) => g.passages.map((s, index) => ({ g, s, index })));
+  const picked = filter ? groups.find((g) => g.key === filter) : undefined;
+  const folded = !allChunks && !filter && chunks.length > CHUNKS_FOLDED + 1;
+  const shown = folded ? chunks.slice(0, CHUNKS_FOLDED) : chunks;
 
   return (
-    <div className="mt-3 flex flex-wrap items-center gap-1.5">
-      <span className="mr-0.5 text-xs text-muted-foreground/80">{t('messages.sources')}</span>
-      <WebSourceChips citations={web} />
-      <DataSourceChips sources={data} />
-      {groups.map((g) => {
-        const isOpen = openKey === g.key;
-        // While a card is open the chip of the passage on screen lights up,
-        // so stepping past a file's last passage visibly hands over.
-        const isShown = current?.g.key === g.key;
-        const first = g.passages[0];
-        const onClick = (e: React.MouseEvent) => {
-          // Click pins the card open (also the way in on touch); figures open
-          // straight in the lightbox, the card is their preview.
-          e.preventDefault();
-          if (g.kind === 'image' && first.image_url) openLightbox({ src: first.image_url, label: g.label });
-          else {
-            setOpenKey(g.key);
-            setCursor(g.offset);
-          }
-        };
-        return (
-          <TooltipPrimitive.Root
-            key={g.key}
-            delayDuration={150}
-            open={isOpen}
-            onOpenChange={(v) => {
-              if (v) {
-                setOpenKey(g.key);
-                setCursor(g.offset);
-              } else setOpenKey((k) => (k === g.key ? null : k));
-            }}
-          >
-            <TooltipPrimitive.Trigger asChild>
-              <button
-                type="button"
-                onClick={onClick}
-                className={cn(
-                  'inline-flex h-6 max-w-[16rem] items-center gap-1.5 rounded-full border border-border/60 bg-muted/40 text-[11px] text-muted-foreground transition-colors hover:border-border hover:bg-accent hover:text-foreground',
-                  g.kind === 'image' && first.image_url ? 'pr-2.5 pl-0.5' : 'px-2.5',
-                  isShown && 'border-primary/50 bg-accent text-foreground',
-                )}
-              >
-                {g.kind === 'image' && first.image_url ? (
-                  <img src={first.image_url} alt="" loading="lazy" className="size-5 shrink-0 rounded-full object-cover" />
-                ) : (
-                  <KindIcon kind={g.kind} className="size-3 shrink-0" />
-                )}
-                <span className="truncate">{g.label}</span>
-                {g.passages.length > 1 && (
-                  <span
-                    className="-mr-1 shrink-0 rounded-full bg-background/70 px-1.5 text-[10px] leading-4 tabular-nums"
-                    title={t('messages.passageCount', { count: g.passages.length })}
+    <>
+      <div className="mt-2 flex items-center gap-1">
+        <button
+          type="button"
+          aria-expanded={open}
+          onClick={() => setOpen((v) => !v)}
+          className="-ml-1 flex h-6 shrink-0 items-center gap-1.5 rounded-md px-1 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+        >
+          <span className="flex -space-x-1">
+            {entries.slice(0, 3).map((entry) => (
+              <StackMark key={entry.key} entry={entry} />
+            ))}
+          </span>
+          <span className="tabular-nums">{t('messages.sourcesCount', { count: entries.length })}</span>
+          <ChevronDownIcon className={cn('size-3 opacity-60 transition-transform', open && 'rotate-180')} />
+        </button>
+        {children}
+      </div>
+      <Collapse open={open}>
+        <div className="pt-1.5 pb-1">
+          <div className="flex max-w-[30rem] flex-col rounded-[10px] border border-border/70 bg-muted/40 p-1">
+            {entries.map((entry) => (
+              <SourceRow
+                key={entry.key}
+                entry={entry}
+                active={filter === entry.key}
+                onPick={(g) => setFilter((k) => (k === g.key ? null : g.key))}
+              />
+            ))}
+          </div>
+          {chunks.length > 0 && (
+            <>
+              <div className="mt-3 mb-1.5 flex min-w-0 items-center gap-2 px-0.5">
+                <span className="min-w-0 truncate text-[13px] font-medium text-strong">
+                  {picked ? picked.label : t('messages.allChunks')}
+                </span>
+                <span className="shrink-0 rounded-md bg-muted px-1.5 text-xs leading-5 text-muted-foreground tabular-nums">
+                  {chunks.length}
+                </span>
+                {picked && (
+                  <button
+                    type="button"
+                    aria-label={t('messages.clearChunkFilter')}
+                    title={t('messages.clearChunkFilter')}
+                    onClick={() => setFilter(null)}
+                    className="flex size-5 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
                   >
-                    {g.passages.length}
-                  </span>
+                    <XIcon className="size-3" />
+                  </button>
                 )}
-              </button>
-            </TooltipPrimitive.Trigger>
-            <TooltipPrimitive.Portal>
-              <TooltipPrimitive.Content
-                side="top"
-                align="start"
-                sideOffset={6}
-                collisionPadding={12}
-                // Labelled so Radix doesn't mirror the stepper into its hidden
-                // screen-reader copy (a second set of key handlers).
-                aria-label={current ? `${current.s.filename}: ${current.s.snippet.slice(0, 200)}` : g.label}
-                className="z-50 w-[24rem] max-w-[calc(100vw-24px)] space-y-2.5 rounded-xl border bg-popover p-3 shadow-lg"
-              >
-                {isOpen && current && (
-                  <>
-                    <PassageView group={current.g} s={current.s} />
-                    <PassageNav index={cursor} count={flat.length} onStep={step} active={isOpen}>
-                      {current.s.deeplink && (
-                        <a
-                          href={current.s.deeplink}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="inline-flex items-center gap-0.5 text-[11px] font-medium text-primary hover:underline"
-                        >
-                          {t('messages.openVideoAt')} <ArrowUpRightIcon className="size-3" />
-                        </a>
-                      )}
-                      {current.s.modality === 'image' && current.s.image_url && (
-                        <button
-                          type="button"
-                          onClick={() => openLightbox({ src: current.s.image_url!, label: current.g.label })}
-                          className="inline-flex items-center gap-1 text-[11px] font-medium text-primary hover:underline"
-                        >
-                          <Maximize2Icon className="size-3" /> {t('messages.viewImage')}
-                        </button>
-                      )}
-                    </PassageNav>
-                  </>
-                )}
-              </TooltipPrimitive.Content>
-            </TooltipPrimitive.Portal>
-          </TooltipPrimitive.Root>
-        );
-      })}
-    </div>
+              </div>
+              <div className="grid gap-1.5 @xl/chat:grid-cols-2">
+                {shown.map(({ g, s, index }) => (
+                  <ChunkCard key={`${g.key}:${index}`} group={g} s={s} index={index} />
+                ))}
+              </div>
+              {folded && (
+                <button
+                  type="button"
+                  onClick={() => setAllChunks(true)}
+                  className="mt-1.5 rounded-md px-1.5 py-1 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                >
+                  {t('messages.moreChunks', { count: chunks.length - CHUNKS_FOLDED })}
+                </button>
+              )}
+            </>
+          )}
+        </div>
+      </Collapse>
+    </>
   );
 }

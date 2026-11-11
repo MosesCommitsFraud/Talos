@@ -1,5 +1,7 @@
 import * as TooltipPrimitive from '@radix-ui/react-tooltip';
 import { ArrowUpRightIcon, ChevronLeftIcon, ChevronRightIcon, FileTextIcon, GlobeIcon } from 'lucide-react';
+import { cn } from '@/lib/utils';
+import { FileTypeIcon } from './FileTypeIcon';
 import { Children, createContext, useContext, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { Citation } from '@/api/types';
@@ -91,11 +93,64 @@ function siteLabel(c: Citation): string {
   return (host.length >= 2 ? host[host.length - 2] : host[0]) || c.title;
 }
 
+/** Host without the "www." nobody reads: "help.magicplan.app". */
+export function siteHost(c: Citation): string {
+  return (c.site || '').replace(/^www\./i, '') || c.title;
+}
+
+/** Hosts whose icon could not be had, so each is asked for once per page
+ *  load and not again by every chip that cites the same site. */
+const noIcon = new Set<string>();
+
+/** A site's mark: its favicon, and until that has loaded (or when the site
+ *  has none) its initial on a tile whose hue comes from the host name.
+ *
+ *  The icon is not loaded from the site. It comes through the app's own image
+ *  proxy (/api/news/favicon), so the sites an answer cites never see the
+ *  reader's browser. */
+export function SiteAvatar({ site, className }: { site: string; className?: string }) {
+  const host = site.toLowerCase();
+  const usable = /^[a-z0-9.-]+\.[a-z0-9-]{2,}$/.test(host);
+  const [state, setState] = useState<'loading' | 'shown' | 'none'>(usable && !noIcon.has(host) ? 'loading' : 'none');
+  let hash = 0;
+  for (const ch of site) hash = (hash * 31 + ch.charCodeAt(0)) % 360;
+  return (
+    <span
+      aria-hidden
+      className={cn('relative inline-flex shrink-0 items-center justify-center overflow-hidden font-sans font-semibold text-white uppercase', className)}
+      style={state === 'shown' ? undefined : { background: `oklch(0.6 0.13 ${hash})` }}
+    >
+      {state !== 'shown' && (site.replace(/[^\p{L}\p{N}]/gu, '').charAt(0) || '·')}
+      {state !== 'none' && (
+        <img
+          src={`/api/news/favicon?host=${encodeURIComponent(host)}`}
+          alt=""
+          loading="lazy"
+          onLoad={() => setState('shown')}
+          onError={() => {
+            noIcon.add(host);
+            setState('none');
+          }}
+          // Over the tile, invisible until it has arrived: no broken-image
+          // glyph, and no jump when it does.
+          className={cn('absolute inset-0 size-full object-contain', state !== 'shown' && 'opacity-0')}
+        />
+      )}
+    </span>
+  );
+}
+
+/** The mark of one cited source: a site's tile, or the file type's glyph. */
+export function CitationAvatar({ c, className }: { c: Citation; className?: string }) {
+  if (c.kind === 'web') return <SiteAvatar site={siteHost(c)} className={cn('rounded-[3px] text-[8px]', className)} />;
+  return <FileTypeIcon path={c.title} className={cn('shrink-0', className)} />;
+}
+
 function SourceIcon({ c, className = 'size-3.5' }: { c: Citation; className?: string }) {
   return c.kind === 'web' ? <GlobeIcon className={className} /> : <FileTextIcon className={className} />;
 }
 
-function CitationCard({ c }: { c: Citation }) {
+export function CitationCard({ c }: { c: Citation }) {
   const { t } = useTranslation();
   const meta = [
     c.kind === 'web' ? c.site : c.title,
@@ -219,9 +274,12 @@ function CitationPill({ cites }: { cites: Citation[] }) {
         <button
           type="button"
           onClick={() => openCitation(first)}
-          className="ml-0.5 inline-flex max-w-[11rem] translate-y-[-1px] items-center gap-1 rounded-full border border-border/60 bg-muted/70 px-1.5 py-px align-middle text-[11px] leading-4 font-medium text-muted-foreground not-italic transition-colors hover:border-border hover:bg-accent hover:text-foreground"
+          // A pill beside the claim, with air on both sides so it reads as a
+          // reference and not as another word of the sentence.
+          className="cite-chip mx-1 inline-flex h-5 max-w-[13rem] -translate-y-px items-center gap-1 rounded-full border border-border/70 bg-muted/70 py-0 pr-2 pl-1 align-middle text-[11px] leading-none font-medium text-muted-foreground not-italic transition-colors hover:border-border hover:bg-accent hover:text-foreground"
         >
-          <span className="truncate">{siteLabel(first)}</span>
+          <CitationAvatar c={first} className={first.kind === 'web' ? 'size-3.5 rounded-full' : 'ml-0.5 size-3'} />
+          <span className="truncate">{first.kind === 'web' ? siteHost(first) : siteLabel(first)}</span>
           {cites.length > 1 && <span className="shrink-0 tabular-nums opacity-70">+{cites.length - 1}</span>}
         </button>
       </TooltipPrimitive.Trigger>
@@ -244,35 +302,3 @@ function CitationPill({ cites }: { cites: Citation[] }) {
   );
 }
 
-/** Cited web pages under the answer, in citation order. */
-export function WebSourceChips({ citations }: { citations: Citation[] }) {
-  return (
-    <>
-      {citations.map((c) => (
-        <TooltipPrimitive.Root key={`web:${c.n}`} delayDuration={200}>
-          <TooltipPrimitive.Trigger asChild>
-            <a
-              href={c.url}
-              target="_blank"
-              rel="noreferrer"
-              className="inline-flex max-w-[16rem] items-center gap-1 rounded-md border border-border/60 bg-muted/40 px-2 py-0.5 text-[11px] text-muted-foreground transition-colors hover:border-border hover:text-foreground"
-            >
-              <GlobeIcon className="h-3 w-3 shrink-0" />
-              <span className="truncate">{c.site || c.title}</span>
-            </a>
-          </TooltipPrimitive.Trigger>
-          <TooltipPrimitive.Portal>
-            <TooltipPrimitive.Content
-              side="top"
-              sideOffset={6}
-              collisionPadding={12}
-              className="z-50 w-[22rem] max-w-[calc(100vw-24px)] rounded-xl border bg-popover p-3 shadow-lg"
-            >
-              <CitationCard c={c} />
-            </TooltipPrimitive.Content>
-          </TooltipPrimitive.Portal>
-        </TooltipPrimitive.Root>
-      ))}
-    </>
-  );
-}

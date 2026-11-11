@@ -3,7 +3,6 @@ import { useTranslation } from 'react-i18next';
 import {
   CheckIcon,
   ChevronDownIcon,
-  ChevronRightIcon,
   CopyIcon,
   LoaderIcon,
   XIcon,
@@ -17,11 +16,13 @@ import { useBgTasks } from '@/lib/useBgTasks';
 import { useChat } from '@/state/chat';
 import { useUi } from '@/state/ui';
 import { Markdown } from './Markdown';
+import { StatusBadge, StatusDisc } from './TaskRow';
 import { ToolLabel } from './ToolLabel';
 import { Tooltip } from './ui/misc';
 
 /* The pane reads like Claude's background tasks: two sections, Running and
- * Finished, of quiet one-line cards. A card unfolds in place into a plain log of
+ * Finished, of task rows — a capsule each, with its state as a disc at the head
+ * and spelled out at the end. A card unfolds in place into a plain log of
  * what the task did, with no headings or timeline of its own. */
 
 type Outcome = 'running' | 'done' | 'failed' | 'stopped';
@@ -45,16 +46,6 @@ function Elapsed({ task }: { task: BgTask }) {
   if (!task.started_at) return null;
   const end = running ? Date.now() : (task.ended_at ?? 0) * 1000 || Date.now();
   return <span className="tabular-nums">{formatDurationMs(end - task.started_at * 1000)}</span>;
-}
-
-/** Right edge of a card: how long it took, or what went wrong instead. */
-function CardStatus({ task }: { task: BgTask }) {
-  const { t } = useTranslation();
-  const outcome = outcomeOf(task);
-  if (task.timed_out) return <span className="text-destructive-foreground">{t('tasks.timedOut')}</span>;
-  if (outcome === 'failed') return <span className="text-destructive-foreground">{t('tasks.state.failed')}</span>;
-  if (outcome === 'stopped') return <span>{t('tasks.state.stopped')}</span>;
-  return <Elapsed task={task} />;
 }
 
 /** Stops one subagent; the delegating turn carries on with the others. */
@@ -113,28 +104,45 @@ function TaskCard({ task, open, onToggle }: { task: BgTask; open: boolean; onTog
   useEffect(() => {
     if (open) setEverOpen(true);
   }, [open]);
+  const outcome = outcomeOf(task);
+  const steps = task.steps?.length ?? 0;
+  // The settled disc pops in only on a card that was seen running: a pane
+  // opened on finished work has nothing to announce.
+  const sawRunning = useRef(running);
+  if (running) sawRunning.current = true;
   return (
-    <article className="rounded-[10px] bg-foreground/[0.045] transition-colors hover:bg-foreground/[0.07] dark:bg-foreground/[0.055] dark:hover:bg-foreground/[0.08]">
-      <div className="flex items-center gap-1 pe-2">
+    <article
+      className={cn(
+        // A capsule while closed; opening relaxes the corners into a card.
+        'overflow-hidden bg-foreground/[0.045] transition-[border-radius,background-color] duration-300 hover:bg-foreground/[0.07] dark:bg-foreground/[0.055] dark:hover:bg-foreground/[0.08]',
+        open ? 'rounded-[14px]' : 'rounded-[22px]',
+      )}
+    >
+      <div className="flex items-center gap-1 pe-1.5">
         <button
           type="button"
           onClick={onToggle}
           aria-expanded={open}
-          className="flex min-w-0 flex-1 cursor-pointer items-center gap-2 py-2.5 ps-3 text-left"
+          className="flex min-h-11 min-w-0 flex-1 cursor-pointer items-center gap-2.5 py-1.5 ps-2.5 text-left"
         >
-          {!running && (
-            <ChevronRightIcon
-              aria-hidden
-              className={cn('size-3.5 shrink-0 text-muted-foreground transition-transform duration-200', open && 'rotate-90')}
-            />
-          )}
+          {/* While it runs the ring counts the steps taken so far. */}
+          <StatusDisc state={outcome} count={running && steps > 0 ? steps : undefined} animate={sawRunning.current} />
           <span className="min-w-0 flex-1">
             <span className="block truncate text-[13px] font-medium text-strong">{title}</span>
             {running && <RunningDetail task={task} />}
           </span>
-          <span className="shrink-0 ps-1 text-xs text-muted-foreground">
-            <CardStatus task={task} />
+          <span className="shrink-0 font-mono text-[11.5px] text-muted-foreground">
+            <Elapsed task={task} />
           </span>
+          {!running && (
+            <StatusBadge state={task.timed_out ? 'failed' : outcome}>
+              {task.timed_out ? t('tasks.timedOut') : t(`tasks.state.${outcome}`)}
+            </StatusBadge>
+          )}
+          <ChevronDownIcon
+            aria-hidden
+            className={cn('size-3.5 shrink-0 text-muted-foreground transition-transform duration-200', open && 'rotate-180')}
+          />
         </button>
         {canStop && (
           <Tooltip label={t('tasks.stop')}>
@@ -222,17 +230,21 @@ function TaskDetail({ task }: { task: BgTask }) {
             </button>
           )}
           {steps.length > 0 && (
-            <ol className={log}>
-              {steps.map((step, i) => {
-                const call: ToolCall = { tool: step.tool, command: step.command, status: step.status };
-                const live = step.status === 'running';
-                return (
-                  <li key={i} className={cn(live && 'shimmer-text')}>
-                    <ToolLabel parts={describeCall(call, t, live ? 'running' : 'past')} failed={step.status === 'error'} />
-                  </li>
-                );
-              })}
-            </ol>
+            // The calls it made, hung on a rail under the card's status disc.
+            <div className="-mx-0.5 grid grid-cols-[24px_1fr] gap-2.5">
+              <span aria-hidden className="mx-auto h-full w-px bg-foreground/12" />
+              <ol className="flex min-w-0 flex-col gap-1.5 py-0.5 text-xs text-muted-foreground">
+                {steps.map((step, i) => {
+                  const call: ToolCall = { tool: step.tool, command: step.command, status: step.status };
+                  const live = step.status === 'running';
+                  return (
+                    <li key={i} className={cn('fade-up min-w-0 break-words', live && 'shimmer-text')}>
+                      <ToolLabel parts={describeCall(call, t, live ? 'running' : 'past')} failed={step.status === 'error'} />
+                    </li>
+                  );
+                })}
+              </ol>
+            </div>
           )}
           {output ? (
             <div className="text-[13px]">

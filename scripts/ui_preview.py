@@ -647,6 +647,46 @@ def _rag_turn(ts_offset: int) -> dict:
     return entry
 
 
+def _web_turn(ts_offset: int) -> dict:
+    """An answer resting on web pages: the pills in the text and the source
+    list under it show each site's icon. One host has none, so the fallback
+    tile (the site's initial) is on screen as well."""
+    entry = _entry(
+        "assistant",
+        "Der AI Act ist seit August 2024 in Kraft [1]. Die Pflichten für "
+        "Hochrisiko-Systeme greifen ab August 2026 [2, 3].",
+        ts_offset,
+    )
+    entry["metadata"]["citations"] = [
+        {
+            "n": 1,
+            "kind": "web",
+            "title": "KI-Verordnung der EU tritt in Kraft",
+            "site": "www.tagesschau.de",
+            "url": "https://www.tagesschau.de/ausland/europa/ai-act-100.html",
+            "published": "2024-08-01",
+            "snippet": "Die europäische KI-Verordnung ist am 1. August 2024 in Kraft getreten.",
+        },
+        {
+            "n": 2,
+            "kind": "web",
+            "title": "AI Act: Was ab 2026 für Hochrisiko-KI gilt",
+            "site": "www.heise.de",
+            "url": "https://www.heise.de/hintergrund/ai-act-hochrisiko.html",
+            "snippet": "Ab dem 2. August 2026 gelten die Anforderungen an Hochrisiko-Systeme.",
+        },
+        {
+            "n": 3,
+            "kind": "web",
+            "title": "Zeitplan der KI-Verordnung",
+            "site": "broken-icons.example",
+            "url": "https://broken-icons.example/ai-act/zeitplan",
+            "snippet": "Übersicht der Stichtage von 2024 bis 2027.",
+        },
+    ]
+    return entry
+
+
 def _history_for(session_id: str) -> list[dict]:
     """History for a session, seeding the canonical preview session on first use."""
     if session_id not in _HISTORY:
@@ -656,6 +696,8 @@ def _history_for(session_id: str) -> list[dict]:
                 _entry("assistant", "This is mock content for local UI work.", -2 * 86400 + 12),
                 _entry("user", "Check the orders schema", -86400),
                 _cold_agent_turn(-86400 + 30),
+                _entry("user", "Seit wann gilt der AI Act?", -7200),
+                _web_turn(-7200 + 8),
                 _entry("user", "Wie oft muss die Anlage gewartet werden?", -3600),
                 _rag_turn(-3600 + 8),
             ]
@@ -3223,6 +3265,16 @@ class PreviewHandler(BaseHTTPRequestHandler):
             # Stands in for the tile proxy (routes/ui_routes.py). The preview
             # never contacts a real tile server: a generated square per tile.
             self._send(200, _placeholder_png(path), "image/png", {"Cache-Control": "max-age=86400"})
+            return
+        if path == "/api/news/favicon":
+            # Stands in for the favicon route of routes/news_routes.py: a
+            # generated square per host. A host with "broken" in it has none,
+            # so the fallback tile (the site's initial) stays reachable.
+            host = parse_qs(parsed.query).get("host", [""])[0]
+            if "broken" in host:
+                self._send_json({"error": "refused"}, 502)
+                return
+            self._send(200, _placeholder_png(host), "image/png", {"Cache-Control": "max-age=86400"})
             return
         if path == "/api/news/thumbnail":
             # Stands in for routes/news_routes.py — the news cards point their

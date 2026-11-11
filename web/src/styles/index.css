@@ -641,6 +641,58 @@ body::after {
   }
 }
 
+/* ── Arrivals ──
+   Two small entrances shared by the things that turn up in a turn: a source
+   chip pops into the sentence it backs, and rows (follow-ups, task rows, the
+   steps inside one) rise into place, staggered by `animation-delay`. */
+.pop-in {
+  animation: pop-in 250ms cubic-bezier(0.23, 1, 0.32, 1) both;
+}
+@keyframes pop-in {
+  from { opacity: 0; transform: scale(0.95); }
+  to { opacity: 1; transform: scale(1); }
+}
+.fade-up {
+  animation: fade-up 350ms cubic-bezier(0.23, 1, 0.32, 1) both;
+}
+@keyframes fade-up {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .pop-in,
+  .fade-up { animation: none; }
+}
+
+/* ── Streaming answer ──
+   While an answer is being written a thin caret stands after its last word,
+   and a source pill pops in as its marker completes. Both hang on attributes
+   only a streaming answer carries (`data-caret`, `data-streaming`), so a
+   settled answer and a reopened chat stay still. */
+.chat-markdown[data-caret] > :is(p, h1, h2, h3, h4, blockquote):last-child::after,
+.chat-markdown[data-caret] > :is(ul, ol):last-child > li:last-child:not(:has(> ul, > ol, > p))::after,
+.chat-markdown[data-caret] > :is(ul, ol):last-child > li:last-child > p:last-child::after {
+  content: "";
+  display: inline-block;
+  width: 2px;
+  height: 0.95em;
+  margin-left: 2px;
+  border-radius: 9999px;
+  background: currentColor;
+  vertical-align: -0.12em;
+  animation: fade-in 150ms ease-out both;
+}
+.chat-markdown[data-streaming] .cite-chip {
+  animation: pop-in 250ms cubic-bezier(0.23, 1, 0.32, 1) both;
+}
+@media (prefers-reduced-motion: reduce) {
+  .chat-markdown[data-streaming] .cite-chip { animation: none; }
+}
+
 /* ── Chat markdown (MIDA chat-markdown, hue-bridged) ── */
 .chat-markdown {
   min-width: 0;

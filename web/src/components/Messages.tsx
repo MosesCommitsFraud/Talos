@@ -18,7 +18,7 @@ import { OutputCard } from './OutputCard';
 import { CitationProvider, citationMap, citedNumbers } from './Citations';
 import { Markdown } from './Markdown';
 import { PlanCard } from './PlanCard';
-import { RagSources } from './RagSources';
+import { TurnSources } from './RagSources';
 import { widgetSources } from './interactive/InlineUi';
 import { RollingNumber } from './RollingNumber';
 import { TalosLogo } from './TalosLogo';
@@ -34,10 +34,21 @@ import { toast } from './ui/toast';
 import { ChapterRail } from './ChapterRail';
 import { AskAnswers } from './AskUser';
 
-const formatWorkingElapsed = (startMs: number, nowMs: number) => formatDurationMs(nowMs - startMs);
+/** Elapsed time with tenths of a second: "0.6s", "42.3s", "3m 30.6s". The
+ *  running tenth is what makes the readout look alive; a clock that moves once
+ *  a second reads as stalled next to an animation. */
+function formatWorkingElapsed(startMs: number, nowMs: number): string {
+  const total = Math.max(0, nowMs - startMs) / 1000;
+  const hours = Math.floor(total / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  // Floored, not rounded: 59.96s must not read "60.0s" a moment before "1m 0.0s".
+  const seconds = (Math.floor((total % 60) * 10) / 10).toFixed(1);
+  return [hours > 0 ? `${hours}h` : '', hours > 0 || minutes > 0 ? `${minutes}m` : '', `${seconds}s`].filter(Boolean).join(' ');
+}
 
-/** Self-ticking "Working for Xs" label — updates its own text node each second
- *  so the streaming message tree isn't re-committed every tick (t3code style). */
+/** Self-ticking "Working for X" readout, in monospace so the digits stand still
+ *  while they count. It writes its own text node ten times a second, so the
+ *  streaming message tree isn't re-committed on every tick (t3code style). */
 function WorkingTimer({ startedAt }: { startedAt: number }) {
   const ref = useRef<HTMLSpanElement>(null);
   useEffect(() => {
@@ -45,10 +56,10 @@ function WorkingTimer({ startedAt }: { startedAt: number }) {
       if (ref.current) ref.current.textContent = formatWorkingElapsed(startedAt, Date.now());
     };
     tick();
-    const id = setInterval(tick, 1000);
+    const id = setInterval(tick, 100);
     return () => clearInterval(id);
   }, [startedAt]);
-  return <span ref={ref} className="tabular-nums">{formatWorkingElapsed(startedAt, Date.now())}</span>;
+  return <span ref={ref} className="font-mono text-[11.5px] tabular-nums">{formatWorkingElapsed(startedAt, Date.now())}</span>;
 }
 
 /** Relative timestamp shown under a bubble: "just now" under a minute, "{n} min
@@ -549,9 +560,14 @@ function ActivityFold({ turn, showThinking, durationMs, shownOutside }: { turn: 
  *  `hideContentFor` suppresses the text of some bubbles (the answer, which stays
  *  outside the fold; or a proposed plan, which renders as a chip). */
 export function TurnBody({ turn, showThinking, hideContentFor, settled }: { turn: UiMessage[]; showThinking: boolean; hideContentFor?: ReadonlySet<string>; settled?: boolean }) {
+  const segments = buildSegments(turn, showThinking);
+  // The caret marks where words are landing, so it only stands after text that
+  // is the turn's newest segment — not after a remark the model has already
+  // moved on from to run a tool.
+  const lastSegment = segments[segments.length - 1];
   return (
     <>
-      {buildSegments(turn, showThinking).map((seg) => {
+      {segments.map((seg) => {
         if (seg.kind === 'activity') {
           return <ToolGroup key={`act-${seg.id}`} entries={seg.entries} settled={settled} />;
         }
@@ -578,7 +594,7 @@ export function TurnBody({ turn, showThinking, hideContentFor, settled }: { turn
         if (hideContentFor?.has(seg.msg.id)) return null;
         return (
           <div key={seg.msg.id} className={seg.msg.error ? 'text-destructive-foreground' : 'text-strong'}>
-            <Markdown text={seg.msg.content} streaming={!!seg.msg.streaming} />
+            <Markdown text={seg.msg.content} streaming={!!seg.msg.streaming} caret={seg === lastSegment} />
           </div>
         );
       })}
@@ -965,6 +981,13 @@ function AssistantTurn({ turn, containsLast, outputs, sessionId }: { turn: UiMes
   const webCited = citedNumbers(copyText)
     .map((n) => citeLookup.get(n))
     .filter((c): c is NonNullable<typeof c> => c?.kind === 'web');
+  const hasSources = sources.length > 0 || webCited.length > 0 || dataSources.length > 0;
+  const actions = copyText ? (
+    <div className="flex items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
+      <TurnActions anchor={[...turn].reverse().find((m) => m.dbId)} copyText={copyText} />
+      {showMetrics && <MessageTime ts={last.createdAt} />}
+    </div>
+  ) : null;
   return (
     <>
       {compacted && <CompactionMarker />}
@@ -1004,16 +1027,13 @@ function AssistantTurn({ turn, containsLast, outputs, sessionId }: { turn: UiMes
         <OutputCards sessionId={sessionId} files={presented} />
       )}
       {stopReason && <StopNotice reason={stopReason} actionable={containsLast} />}
-      {copyText && (
-        <div className="mt-2 flex items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
-          <TurnActions anchor={[...turn].reverse().find((m) => m.dbId)} copyText={copyText} />
-          {showMetrics && <MessageTime ts={last.createdAt} />}
-        </div>
-      )}
-      {/* RAG citations: last thing in the turn, only when the backend confirmed
-          the knowledge was used. */}
-      {(sources.length > 0 || webCited.length > 0 || dataSources.length > 0) && (
-        <RagSources sources={sources} web={webCited} data={dataSources} />
+      {/* One row under the answer: what it rests on (always there, when there is
+          anything — knowledge only when the backend confirmed it was used), then
+          the turn's actions, which wait for the pointer. */}
+      {hasSources ? (
+        <TurnSources sources={sources} web={webCited} data={dataSources}>{actions}</TurnSources>
+      ) : (
+        actions && <div className="mt-2 flex items-center">{actions}</div>
       )}
       {/* Same spot it held while streaming — last in the turn — so the mark
           stays put while it plays its final cycle out instead of jumping. */}

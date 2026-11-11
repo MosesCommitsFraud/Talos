@@ -1,7 +1,7 @@
 import { useTranslation } from 'react-i18next';
-import { LoaderCircleIcon } from 'lucide-react';
 import type { UiMessage } from '@/state/chat';
 import { cn } from '@/lib/utils';
+import { StatusBadge, StatusDisc } from './TaskRow';
 
 export interface Step {
   text: string;
@@ -28,35 +28,9 @@ function stepStates(steps: Step[], live: boolean): StepState[] {
   return steps.map((s, i) => (s.done ? 'done' : i === current ? 'current' : 'ahead'));
 }
 
-/** One step's marker in the inline checklist: a filled check once done, a
- *  spinner while it is being worked on, a dashed ring while still ahead. */
-function StepMarker({ state }: { state: StepState }) {
-  if (state === 'done') {
-    return (
-      // Disc and check in ONE svg: as a span plus a nested icon the two boxes
-      // snap to different fractional pixels (odd sizes, 125% scaling) and the
-      // check drifts off-centre. Drawn together they always rasterise as one.
-      <svg viewBox="0 0 16 16" className="size-4 shrink-0" aria-hidden>
-        <circle cx="8" cy="8" r="8" className="fill-muted-foreground/70" />
-        <path
-          d="M4.75 8.25 7 10.5 11.25 5.75"
-          fill="none"
-          className="stroke-background"
-          strokeWidth={1.75}
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        />
-      </svg>
-    );
-  }
-  if (state === 'current') {
-    return <LoaderCircleIcon className="size-4 shrink-0 animate-spin text-foreground/80" strokeWidth={2.25} />;
-  }
-  return <span className="size-4 shrink-0 rounded-full border-[1.5px] border-dashed border-muted-foreground/60" />;
-}
-
-/** The turn's `update_plan` checklist under its reply: one row per step, the
- *  step in work spinning while the turn runs. Stays with the turn once it has
+/** The turn's `update_plan` checklist under its reply, as task rows: one per
+ *  step with its number, the step in work turning while the turn runs and
+ *  each finished one ticked and marked done. Stays with the turn once it has
  *  settled (restored from the persisted tool event on reload). */
 export function PlanCard({ msg, live }: { msg: UiMessage; live: boolean }) {
   const { t } = useTranslation();
@@ -67,25 +41,36 @@ export function PlanCard({ msg, live }: { msg: UiMessage; live: boolean }) {
 
   return (
     <div
-      className="mt-3 mb-6 rounded-xl border bg-card/40 px-4 py-3"
+      className="mt-3 mb-6 overflow-hidden rounded-xl border bg-card/40"
       aria-label={`${t('plan.title')} · ${t('plan.progress', { done, total: steps.length })}`}
     >
-      <ol className="flex flex-col gap-2">
-        {steps.map((step, i) => (
-          <li key={i} className="flex items-center gap-2.5">
-            <StepMarker state={states[i]} />
-            <span
-              className={cn(
-                'min-w-0 text-sm leading-snug break-words',
-                states[i] === 'done' && 'text-muted-foreground',
-                states[i] === 'current' && 'font-medium text-foreground',
-                states[i] === 'ahead' && 'text-foreground/80',
-              )}
+      <ol>
+        {steps.map((step, i) => {
+          const state = states[i];
+          return (
+            <li
+              key={i}
+              // Rows rise in one after the other while the plan is being
+              // written; a settled or reopened plan is simply there.
+              className={cn('flex min-h-10 items-center gap-2.5 border-b border-border/70 py-1.5 pr-3 pl-2.5 last:border-0', live && 'fade-up')}
+              style={live ? { animationDelay: `${Math.min(i, 8) * 60}ms` } : undefined}
             >
-              {step.text}
-            </span>
-          </li>
-        ))}
+              <StatusDisc state={state === 'current' ? 'running' : state} count={i + 1} animate={live} />
+              <span
+                className={cn(
+                  'min-w-0 flex-1 text-[13px] leading-snug font-medium break-words',
+                  state === 'done' && 'text-muted-foreground',
+                  state === 'current' && 'text-strong',
+                  state === 'ahead' && 'text-foreground/80',
+                )}
+              >
+                {step.text}
+              </span>
+              {state === 'done' && <StatusBadge state="done">{t('tasks.state.done')}</StatusBadge>}
+              {state === 'current' && <StatusBadge state="running">{t('tasks.state.running')}</StatusBadge>}
+            </li>
+          );
+        })}
       </ol>
     </div>
   );
