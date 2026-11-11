@@ -110,6 +110,13 @@ async def query_sql(arguments, headers):
             "hostname or IP address as reachable from the Talos server.",
             True,
         )
+    # The admin's search domains travel with the call: the sandbox resolves the
+    # name, since it is the container that opens the connection.
+    from src.mcp_settings import sql_dns_search
+
+    search = sql_dns_search()
+    if search:
+        payload["dns_search"] = search
     url = os.getenv("TALOS_SQL_SANDBOX_URL", "").rstrip("/")
     key = os.getenv("TALOS_SQL_SANDBOX_KEY", "")
     if not url or not key:

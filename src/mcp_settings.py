@@ -256,6 +256,19 @@ def rate_limit_per_minute() -> int:
     return _int("mcp_rate_limit_per_minute", 0, 0, 10_000)
 
 
+def sql_dns_search() -> List[str]:
+    """Domains the SQL sandbox completes a short host name with.
+
+    Passed along with every sql_query call, so a change takes effect on save.
+    Only split here: the sandbox decides what a usable domain is and skips the
+    rest, the same way it treats its own TALOS_SQL_DNS_SEARCH.
+    """
+    val = _get("mcp_sql_dns_search", "")
+    if isinstance(val, (list, tuple)):
+        val = " ".join(str(x) for x in val)
+    return str(val or "").replace(",", " ").split()[:8]
+
+
 def tool_enabled(name: str) -> bool:
     """Whether one MCP tool is switched on for this instance.
 

@@ -317,6 +317,7 @@ as a logged-in browser session, so the two get their own policy.
 | `mcp_skills_per_skill_tools` | On (default) = each published skill is also its own `skill_<slug>` tool. Off keeps the `skills_*` tools but stops a large library filling a client's palette — and stops the catalogue listing every procedure by name. |
 | `mcp_update_rag_open` | On = a caller on the token-free network may start `update_rag` without a token. Off (default) = it takes one everywhere. |
 | `rag_git_repos` | The Git repositories `update_rag` syncs from, see [above](#update-from-git-ragupdate). Validated on save: http(s) only, no credentials in the URL. |
+| `mcp_sql_dns_search` | Domains the SQL sandbox completes a short host name with (`sqlserver` → `sqlserver.corp.example`), comma- or space-separated. Sent with every `sql_query` call, so it applies on save without a restart. See [Deployment](#deployment). |
 | `mcp_rate_limit_per_minute` | `tools/call` ceiling per API token; 0 (default) = no limit. In-process and per worker — it exists to stop one token walking the index in a loop, not as a distributed quota. Over the limit the caller gets a tool result saying so, not a transport error, so the model waits instead of treating the session as broken. |
 
 There is **one** skill library. Selected mode narrows which of the existing
@@ -448,10 +449,13 @@ Ein Kurzname wie `sqlserver` wird im Container nur aufgelöst, wenn der
 Docker-Host eine DNS-Suchdomäne hat — Docker reicht dessen Suchliste durch, und
 ein Server mit fester Adresse hat oft keine. Der Treiber meldet dann Fehler
 20009 („Adaptive Server is unavailable or does not exist"), obwohl derselbe
-Name auf jedem Arbeitsplatz der Domäne funktioniert. `TALOS_SQL_DNS_SEARCH`
-nimmt dafür eine oder mehrere Domänen, komma- oder leerzeichengetrennt: die
-Sandbox hängt sie der Reihe nach an einen Namen ohne Punkt und nimmt den ersten,
-der sich auflösen lässt. Volle Namen und IP-Adressen bleiben, wie sie sind, und
+Name auf jedem Arbeitsplatz der Domäne funktioniert. Dafür gibt es die
+DNS-Suchdomäne, einzutragen in der Oberfläche unter Einstellungen → MCP →
+„SQL Server über MCP" (`mcp_sql_dns_search`, wirkt nach dem Speichern) oder als
+`TALOS_SQL_DNS_SEARCH` am Sandbox-Container; beide nehmen eine oder mehrere
+Domänen, komma- oder leerzeichengetrennt, und die aus der Oberfläche kommen
+zuerst. Die Sandbox hängt sie der Reihe nach an einen Namen ohne Punkt und nimmt
+den ersten, der sich auflösen lässt. Volle Namen und IP-Adressen bleiben, wie sie sind, und
 ein Kurzname, den keine der Domänen kennt, wird unverändert versucht. Die
 Host-Liste gilt für beide Schreibweisen: `sqlserver` passiert sie, wenn der
 Kurzname oder der vervollständigte Name darin steht.

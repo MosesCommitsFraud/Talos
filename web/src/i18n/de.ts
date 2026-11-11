@@ -2080,6 +2080,8 @@ const de: typeof en = {
       sql: 'SQL Server über MCP',
       sqlEnabled: 'sql_query bereitstellen',
       sqlEnabledHint: 'Aus: sql_query wird weder aufgelistet noch ausgeführt, auch mit dem Token-Scope sql:read. Nach dem Speichern wirksam.',
+      sqlDnsSearch: 'DNS-Suchdomäne',
+      sqlDnsSearchHint: 'Wird an Kurznamen angehängt: mit „corp.example“ erreicht der Host „sqlserver“ den Server „sqlserver.corp.example“. Nötig, wenn der Talos-Server selbst keine Suchdomäne hat. Mehrere mit Komma trennen; volle Namen und IP-Adressen bleiben unverändert.',
       sqlDescription: 'Führt einzelne lesende SQL-Server-Abfragen in der separaten SQL-Sandbox aus. Der Client übergibt query und optional max_rows; das Ergebnis enthält Spalten, Zeilen und einen Hinweis auf gekürzte Ergebnisse.',
       sqlConnectionHint: 'Benötigt eine eingerichtete SQL-Sandbox und einen API-Token mit sql:read. MACS/MAF sendet macs-sql-host, macs-sql-database, macs-sql-user und macs-sql-password mit jedem Aufruf als HTTP-Header. Zugangsdaten werden hier nicht gespeichert.',
       webEnabled: 'web_search und web_fetch bereitstellen',

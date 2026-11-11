@@ -2073,6 +2073,8 @@ const en = {
       sql: 'SQL Server over MCP',
       sqlEnabled: 'Expose sql_query',
       sqlEnabledHint: 'Off: sql_query is neither listed nor executed, even with the sql:read token scope. Takes effect after saving.',
+      sqlDnsSearch: 'DNS search domain',
+      sqlDnsSearchHint: 'Appended to short host names: with "corp.example" the host "sqlserver" reaches "sqlserver.corp.example". Needed when the Talos server has no search domain of its own. Separate several with commas; full names and IP addresses are left as they are.',
       sqlDescription: 'Runs individual read-only SQL Server queries in the separate SQL sandbox. The client supplies query and optionally max_rows; results contain columns, rows and a truncation indicator.',
       sqlConnectionHint: 'Requires a configured SQL sandbox and an API token with sql:read. MACS/MAF sends macs-sql-host, macs-sql-database, macs-sql-user and macs-sql-password as HTTP headers with every call. Credentials are not stored here.',
       webEnabled: 'Offer web_search and web_fetch',

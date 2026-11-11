@@ -290,6 +290,10 @@ DEFAULT_SETTINGS = {
     "mcp_skills_enabled": True,
     # SQL-only sandbox tool. Credentials remain request-local HTTP headers.
     "mcp_sql_enabled": True,
+    # Domains the SQL sandbox completes a short host name with, comma- or
+    # space-separated ("corp.example": sqlserver -> sqlserver.corp.example).
+    # For a Docker host without a DNS search list of its own.
+    "mcp_sql_dns_search": "",
     # True = expose exactly the published library the web UI serves (one
     # library, no second copy). False = only the skills named in
     # mcp_skills_allowed leave the instance.

@@ -1550,6 +1550,9 @@ function McpPanel() {
 
       <Section title={t('settings.mcp.sql')}>
         <BoolRow s={s} k="mcp_sql_enabled" label={t('settings.mcp.sqlEnabled')} hint={t('settings.mcp.sqlEnabledHint')} />
+        {!!s.value('mcp_sql_enabled') && (
+          <TextRow s={s} k="mcp_sql_dns_search" label={t('settings.mcp.sqlDnsSearch')} hint={t('settings.mcp.sqlDnsSearchHint')} placeholder="corp.example" width="w-72" />
+        )}
       </Section>
 
       <Section title={t('settings.mcp.web')}>

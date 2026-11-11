@@ -350,6 +350,47 @@ def test_search_domains_complete_only_short_names(monkeypatch, search, host, exp
     assert sql_sandbox.search_candidates(host) == expected
 
 
+def test_search_domains_sent_with_the_request_come_first(monkeypatch):
+    """The admin's setting travels with the call and is tried before the
+    container's own variable; anything unusable in it is skipped."""
+    monkeypatch.setenv("TALOS_SQL_DNS_SEARCH", "env.example, ui.example")
+    assert sql_sandbox.search_candidates("sqldev", ["ui.example", 7, "bad domain", ""]) == [
+        "sqldev.ui.example",
+        "sqldev.env.example",
+    ]
+
+
+@pytest.mark.parametrize(
+    "setting,sent",
+    [
+        ("", None),  # unset: the request looks as it always did
+        ("corp.example", ["corp.example"]),
+        ("a.example, b.example", ["a.example", "b.example"]),
+    ],
+)
+def test_the_search_domain_setting_reaches_the_sandbox(configured, monkeypatch, setting, sent):
+    monkeypatch.setattr(
+        "src.settings.get_setting",
+        lambda key, default=None: setting if key == "mcp_sql_dns_search" else default,
+    )
+    bodies = []
+
+    def handle(request):
+        bodies.append(json.loads(request.content))
+        return httpx.Response(200, json={"columns": [], "rows": [], "row_count": 0})
+
+    client = httpx.AsyncClient
+    monkeypatch.setattr(
+        mcp_sql.httpx,
+        "AsyncClient",
+        lambda **kw: client(transport=httpx.MockTransport(handle), **kw),
+    )
+    text, failed = asyncio.run(mcp_sql.query_sql({"query": "SELECT 1"}, configured))
+
+    assert not failed
+    assert bodies[0].get("dns_search") == sent
+
+
 @pytest.mark.parametrize(
     "known,connected_to",
     [
@@ -357,13 +398,15 @@ def test_search_domains_complete_only_short_names(monkeypatch, search, host, exp
         (set(), "sqldev"),  # no domain knows it: tried as written, as before
     ],
 )
-def test_a_short_host_name_reaches_the_worker_completed(monkeypatch, known, connected_to):
+@pytest.mark.parametrize("source", ["container variable", "request"])
+def test_a_short_host_name_reaches_the_worker_completed(monkeypatch, known, connected_to, source):
     """A server with a fixed address often has no DNS search list, and Docker
     hands the container the host's. `sqldev` then resolves on every desktop in
     the domain and not in the sandbox, which the driver reports as an
     unreachable server."""
     monkeypatch.setenv("TALOS_SQL_SANDBOX_KEY", "test-secret")
-    monkeypatch.setenv("TALOS_SQL_DNS_SEARCH", "corp.example")
+    monkeypatch.setenv("TALOS_SQL_DNS_SEARCH", "corp.example" if source != "request" else "")
+    sent = {"dns_search": ["corp.example"]} if source == "request" else {}
     # The list names the full host; the caller's short name must still pass.
     monkeypatch.setenv("TALOS_SQL_ALLOWED_HOSTS", "*.corp.example, sqldev")
     asked, captured = [], []
@@ -401,6 +444,7 @@ def test_a_short_host_name_reaches_the_worker_completed(monkeypatch, known, conn
                     "password": "secret",
                     "query": "SELECT 1",
                     "max_rows": 10,
+                    **sent,
                 },
                 headers={"X-Talos-Sandbox-Key": "test-secret"},
             )
@@ -409,6 +453,7 @@ def test_a_short_host_name_reaches_the_worker_completed(monkeypatch, known, conn
     asyncio.run(run())
     assert asked == ["sqldev.corp.example"]
     assert captured[0]["host"] == connected_to
+    assert "dns_search" not in captured[0]
 
 
 def test_a_failure_is_diagnosable_from_the_logs_without_leaking_the_password(monkeypatch, capsys):
