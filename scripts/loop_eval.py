@@ -21,6 +21,12 @@ Code is not executed either; what it "prints" is told from what it contains,
 which is rough. When a task goes wrong in every variant, read its calls in the
 saved JSON before blaming the model: the scripted world may be the odd one.
 
+The one thing that does run is a tool script (``run_tool_script``, setting
+``tool_scripts_enabled``): the app's own machinery (``src/tool_script.py``) runs
+the model's script in a temporary directory on this machine, as an installation
+without a sandbox does, and the script's tool calls get the task's scripted
+results. The task ``viele`` is the one where a script pays off.
+
 A local model samples, so one run per task says little. ``--repeats`` runs
 every task several times per variant (default 3) and the report gives totals;
 read a difference of one or two runs as noise.
@@ -48,7 +54,9 @@ import contextlib
 import json
 import os
 import re
+import shutil
 import sys
+import tempfile
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -85,6 +93,7 @@ class Call:
     content: str
     ok: bool
     scripted: bool  # the task had a result for it
+    result: str = ""  # what the tool answered
 
 
 @dataclass
@@ -103,6 +112,7 @@ class Run:
     unreachable: bool = False  # the endpoint dropped out: not a measurement
     problems: List[str] = field(default_factory=list)
     state: Dict[str, Any] = field(default_factory=dict)  # for fixtures
+    script_calls: List[Call] = field(default_factory=list)  # made by tool scripts
 
     @property
     def tools(self) -> List[str]:
@@ -129,13 +139,21 @@ class Run:
             "model_calls": self.model_calls,
             "tool_calls": len(self.calls),
             "unexpected_tools": [c.tool for c in self.calls if not c.scripted],
+            "script_calls": [{"tool": c.tool, "ok": c.ok} for c in self.script_calls],
             "loop": self.stats,
             "stop_reason": self.stop_reason,
             "input_tokens": self.input_tokens,
             "output_tokens": self.output_tokens,
             "seconds": round(self.seconds, 1),
             "calls": [
-                {"round": c.round, "tool": c.tool, "ok": c.ok, "content": c.content[:400]}
+                {
+                    "round": c.round,
+                    "tool": c.tool,
+                    "ok": c.ok,
+                    # A script is read whole or not at all.
+                    "content": c.content[: 6000 if c.tool == "run_tool_script" else 400],
+                    "result": c.result[:800],
+                }
                 for c in self.calls
             ],
             "texts": self.texts,
@@ -235,12 +253,36 @@ _SOURCE_NUMBERS = (
 )
 
 
-def _web_fetch(content: str, run: Run) -> str:
-    """A fetched page in the shape the real tool returns: numbered as a source
-    and followed by the citation rule. Without the number the model has
-    nothing to cite when it goes to the official page without searching."""
+def _fetch_args(content: str) -> tuple:
+    """(url, max_chars) of a web_fetch call."""
+    from src.web_search import DEFAULT_FETCH_CHARS
+
+    try:
+        args = json.loads(content)
+        url, size = str(args.get("url") or ""), int(args.get("max_chars") or DEFAULT_FETCH_CHARS)
+    except (ValueError, TypeError, AttributeError):
+        url, size = content.strip(), DEFAULT_FETCH_CHARS
+    return url.strip(), max(500, size)
+
+
+def _fetched(n: int, url: str, page: str, max_chars: int) -> str:
+    """A fetched page in the shape the real tool returns: numbered as a source,
+    cut at `max_chars` with the tool's note, and followed by the citation rule.
+    Without the number the model has nothing to cite when it goes to a page
+    without searching for it."""
     from src import citations
 
+    title, text, footer = page.split("\n", 1)[0], page, ""
+    if len(text) > max_chars:
+        text = text[:max_chars].rstrip()
+        footer = (
+            f"\n\n[Truncated at {max_chars} chars. Re-call web_fetch with a larger `max_chars` "
+            "if you need more of this page.]"
+        )
+    return f"[{n}] Fetched: {url}\nTitle: {title}\n\n{text}{footer}\n\n{citations.CITATION_RULE}"
+
+
+def _web_fetch(content: str, run: Run) -> str:
     low = content.lower()
     if "postgres" in low:
         page, n = PG_PAGE, 6
@@ -248,13 +290,111 @@ def _web_fetch(content: str, run: Run) -> str:
         page, n = PY_PAGE, 5
     else:
         raise Fail("Could not fetch this URL (HTTP 404).")
-    try:
-        url = str(json.loads(content).get("url") or "")
-    except (ValueError, TypeError, AttributeError):
-        url = content.strip()
+    url, max_chars = _fetch_args(content)
     n = next((number for part, number in _SOURCE_NUMBERS if part in url), n)
-    title = page.split("\n", 1)[0]
-    return f"[{n}] Fetched: {url}\nTitle: {title}\n\n{page}\n\n{citations.CITATION_RULE}"
+    return _fetched(n, url, page, max_chars)
+
+
+# ── many pages, one figure from each ─────────────────────────────────────────
+
+SITES_URL = "https://intranet.nordwerk.example/standorte"
+# (location, staff). The largest is neither first nor last in the list.
+SITES = (
+    ("Aachen", 96),
+    ("Bremen", 64),
+    ("Chemnitz", 73),
+    ("Cottbus", 19),
+    ("Erfurt", 87),
+    ("Freiburg", 48),
+    ("Heilbronn", 57),
+    ("Kassel", 55),
+    ("Kiel", 29),
+    ("Magdeburg", 61),
+    ("Osnabrück", 34),
+    ("Paderborn", 45),
+    ("Regensburg", 212),
+    ("Rostock", 38),
+    ("Trier", 22),
+    ("Ulm", 41),
+)
+SITES_TOTAL = sum(staff for _, staff in SITES)
+SITES_LARGEST = max(SITES, key=lambda site: site[1])[0]
+
+
+def _slug(name: str) -> str:
+    return name.lower().replace("ü", "ue").replace("ö", "oe").replace("ä", "ae")
+
+
+def _sites_index() -> str:
+    lines = "\n".join(f"- {name}: {SITES_URL}/{_slug(name)}" for name, _ in SITES)
+    return (
+        "Standorte der Nordwerk GmbH\n\n"
+        f"Die Nordwerk GmbH fertigt und wartet an {len(SITES)} Standorten in Deutschland. "
+        "Jeder Standort hat eine eigene Seite mit Anschrift, Kennzahlen und Ansprechpartnern.\n\n"
+        f"{lines}\n\n"
+        "Änderungen an den Standortseiten meldet bitte an die interne Kommunikation."
+    )
+
+
+def _site_page(index: int) -> str:
+    """One location's page: a few key figures in a page of the usual text, so
+    that reading it costs what a real page costs."""
+    name, staff = SITES[index]
+    founded, hall = 1961 + (index * 7) % 55, 1800 + (index * 950) % 7400
+    return (
+        f"Standort {name} – Nordwerk GmbH\n\n"
+        f"Der Standort {name} gehört seit {founded} zur Nordwerk GmbH. Hier werden Baugruppen "
+        "für Förderanlagen montiert, geprüft und für den Versand vorbereitet; ein Teil der "
+        "Belegschaft arbeitet im Außendienst bei Kunden der Region.\n\n"
+        "Kennzahlen\n"
+        f"Gründungsjahr: {founded}\n"
+        f"Mitarbeitende: {staff}\n"
+        f"Hallenfläche: {hall} m²\n"
+        f"Schichtbetrieb: {'zweischichtig' if index % 3 else 'einschichtig'}\n\n"
+        "Anschrift und Anfahrt\n"
+        f"Nordwerk GmbH, Werk {name}, Industriestraße {12 + index * 3}. Mit dem Auto über die "
+        "Anschlussstelle Industriegebiet, danach der Beschilderung „Nordwerk“ folgen. "
+        "Besucherparkplätze liegen vor dem Verwaltungsgebäude; Lieferverkehr fährt über Tor 2 "
+        "und meldet sich an der Warenannahme. Mit öffentlichen Verkehrsmitteln fährt die "
+        "Buslinie zum Industriegebiet werktags im Halbstundentakt, von der Haltestelle sind es "
+        "fünf Minuten zu Fuß.\n\n"
+        "Arbeitszeiten und Empfang\n"
+        "Der Empfang ist montags bis freitags von 7 bis 16 Uhr besetzt. Besucher melden sich "
+        "dort an, erhalten einen Ausweis und werden abgeholt. Für die Werkhalle sind "
+        "Sicherheitsschuhe und Warnweste vorgeschrieben; beides liegt am Empfang bereit. "
+        "Fotografieren ist in der Halle nur mit Genehmigung der Standortleitung erlaubt.\n\n"
+        "Kantine und Sozialräume\n"
+        "Die Kantine hat von 11.30 bis 13.30 Uhr geöffnet und bietet täglich zwei Gerichte, "
+        "eines davon vegetarisch. Der Speiseplan hängt am Eingang aus und steht im Intranet. "
+        "Umkleiden und Duschen befinden sich im Erdgeschoss neben der Halle, ein Ruheraum im "
+        "ersten Stock des Verwaltungsgebäudes.\n\n"
+        "Arbeitssicherheit\n"
+        "Die jährliche Unterweisung findet im ersten Quartal statt, die Teilnahme ist "
+        "verpflichtend. Sammelplatz bei Alarm ist der Besucherparkplatz. Ersthelfer und "
+        "Brandschutzhelfer sind auf den Aushängen in jedem Hallenabschnitt genannt; "
+        "Beinahe-Unfälle werden über das Formular im Intranet gemeldet.\n\n"
+        "Ansprechpartner\n"
+        f"Standortleitung, Personal und Betriebsrat erreicht ihr über das Sekretariat des "
+        f"Werks {name}, Durchwahl -{100 + index}. Für Fragen zur IT ist der zentrale "
+        "Helpdesk zuständig, für Gebäude und Anlagen die Haustechnik vor Ort."
+    )
+
+
+def _site_fetch(content: str, run: Run) -> str:
+    url, max_chars = _fetch_args(content)
+    path = url.split("?")[0].rstrip("/")
+    slugs = [_slug(name) for name, _ in SITES]
+    if path == SITES_URL:
+        page = _sites_index()
+    elif path.startswith(SITES_URL + "/") and path.rsplit("/", 1)[1] in slugs:
+        index = slugs.index(path.rsplit("/", 1)[1])
+        run.state.setdefault("sites", set()).add(index)
+        page = _site_page(index)
+    else:
+        raise Fail(f"Could not fetch {url} (HTTP 404).")
+    # Sources are numbered in the order they are first read, as in the real tool.
+    numbers = run.state.setdefault("numbers", {})
+    return _fetched(numbers.setdefault(path, len(numbers) + 1), url, page, max_chars)
 
 
 def _no_results(content: str, run: Run) -> str:
@@ -554,6 +694,33 @@ def _check_sql(run: Run) -> List[str]:
     return out
 
 
+def _sites_sum(content: str, run: Run) -> str:
+    """Code that adds up the figures the model has read. What it prints is told
+    from the staff figures that appear in it."""
+    known = {staff for _, staff in SITES}
+    found = [int(n) for n in re.findall(r"(?<!\d)\d{2,3}(?!\d)", content)]
+    staff = [n for n in found if n in known]
+    if not staff:
+        return ""
+    largest = next(name for name, n in SITES if n == max(staff))
+    return f"Summe: {sum(staff)}\nGrößter Standort: {largest} ({max(staff)})"
+
+
+def _check_viele(run: Run) -> List[str]:
+    out = []
+    read = len(run.state.get("sites") or ())
+    if not _has(run.answer, rf"\b{SITES_TOTAL}\b"):
+        out.append(
+            f"answer does not contain the total {SITES_TOTAL} "
+            f"(read {read} of {len(SITES)} location pages)"
+        )
+    if not _has(run.answer, SITES_LARGEST):
+        out.append(f"answer does not name the largest location, {SITES_LARGEST}")
+    if run.model_calls > 6:
+        out.append(f"{run.model_calls} model calls for one list of pages")
+    return out
+
+
 TASKS: List[Task] = [
     Task(
         "wissen",
@@ -641,6 +808,21 @@ TASKS: List[Task] = [
         tools={"query_sql": _sql, "db_memory": lambda c, r: "No notes yet."},
         loop={"force_db": True},
     ),
+    Task(
+        "viele",
+        f"Im Intranet steht unter {SITES_URL}/ die Liste unserer Standorte, und jede "
+        "Standortseite nennt die Zahl der Mitarbeitenden. Wie viele Mitarbeitende haben wir "
+        "insgesamt, und welcher Standort ist der größte?",
+        "takes one figure from each of many pages and adds them up",
+        _check_viele,
+        tools={
+            "web_fetch": _site_fetch,
+            "web_search": _no_results,
+            "python": _sites_sum,
+            "run_cell": _sites_sum,
+            "bash": _sites_sum,
+        },
+    ),
 ]
 
 
@@ -713,39 +895,109 @@ async def _pause(seconds: float) -> None:
     await asyncio.sleep(seconds)
 
 
+# Seconds one run of a tool script may take before it is ended.
+SCRIPT_TIMEOUT_S = 120
+
+
+async def _run_script(content: str, task: Task, run: Run) -> Dict[str, Any]:
+    """`run_tool_script` for real: the app's own machinery runs the model's
+    script, here in a directory of its own that is removed afterwards. A tool
+    call the script makes gets the task's result for that tool, exactly like a
+    call the model makes itself, and is noted in `run.script_calls`."""
+    from src import tool_script
+    from src.tool_schemas import native_call_to_tool_block
+
+    try:
+        args = json.loads(content)
+    except (ValueError, TypeError):
+        args = {}
+    code = str(args.get("code") or "") if isinstance(args, dict) else ""
+    workdir = tempfile.mkdtemp(prefix="loop-eval-script-")
+
+    async def run_python(source: str):
+        proc = await asyncio.create_subprocess_exec(
+            sys.executable or "python",
+            "-I",
+            "-c",
+            source,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            cwd=workdir,
+        )
+        try:
+            out, err = await asyncio.wait_for(proc.communicate(), SCRIPT_TIMEOUT_S)
+        except asyncio.TimeoutError:
+            proc.kill()
+            await proc.wait()
+            return "", f"The script ran longer than {SCRIPT_TIMEOUT_S}s and was ended.", 1
+        return out.decode("utf-8", "replace"), err.decode("utf-8", "replace"), proc.returncode or 0
+
+    async def write_file(path: str, text: str) -> None:
+        target = Path(workdir) / path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(text, encoding="utf-8")
+
+    async def call_tool(name: str, call_args: Dict[str, Any]):
+        block = native_call_to_tool_block(name, json.dumps(call_args, default=str))
+        text = str(block.content or "")
+        fixture = task.tools.get(name) or COMMON.get(name)
+        if fixture is None:
+            run.script_calls.append(Call(run.model_calls, name, text, False, False))
+            return False, f"{name} is not available in this session.", None
+        try:
+            output = fixture(text, run)
+        except Fail as exc:
+            run.script_calls.append(Call(run.model_calls, name, text, False, True))
+            return False, str(exc), None
+        run.script_calls.append(Call(run.model_calls, name, text, True, True))
+        return True, output or "", None
+
+    try:
+        return await tool_script.run_script(
+            code,
+            allowed=tool_script.SCRIPT_TOOLS,
+            run_python=run_python,
+            write_file=write_file,
+            call_tool=call_tool,
+            max_calls=tool_script.max_calls_setting(),
+        )
+    finally:
+        shutil.rmtree(workdir, ignore_errors=True)
+
+
 async def run_task(task: Task, variant: str, loop_args: Dict[str, Any], opts) -> Run:
     """One whole turn. Settings must already be overridden by the caller."""
-    from src import agent_loop
+    from src import agent_loop, tool_script
 
     run = Run(task=task.key, variant=variant)
     real_execute = agent_loop.execute_tool_block
     real_stream = agent_loop.stream_llm_with_fallback
 
+    def note(tool, content, result, scripted=True):
+        ok = result.get("exit_code") in (0, None) and not result.get("error")
+        said = str(result.get("error") or result.get("output") or "")
+        run.calls.append(Call(run.model_calls, tool, content, ok, scripted, said))
+        return f"{tool}: {'ok' if ok else 'failed'}", result
+
     async def execute(block, **kwargs):
         tool, content = block.tool_type, str(block.content or "")
-        if getattr(block, "error", None):  # rejected by the loop: its error is the result
+        # Rejected by the loop (its error is the result), or a tool that only
+        # talks to the loop itself.
+        if getattr(block, "error", None) or tool in PASS_THROUGH:
             desc, result = await real_execute(block, **kwargs)
-            run.calls.append(Call(run.model_calls, tool, content, False, True))
+            note(tool, content, result)
             return desc, result
-        if tool in PASS_THROUGH:
-            desc, result = await real_execute(block, **kwargs)
-            ok = result.get("exit_code") in (0, None) and not result.get("error")
-            run.calls.append(Call(run.model_calls, tool, content, ok, True))
-            return desc, result
+        if tool == tool_script.TOOL_NAME:
+            return note(tool, content, await _run_script(content, task, run))
         fixture = task.tools.get(tool) or COMMON.get(tool)
         if fixture is None:
-            run.calls.append(Call(run.model_calls, tool, content, False, False))
-            return f"{tool}: failed", {
-                "error": f"{tool} is not available in this session.",
-                "exit_code": 1,
-            }
+            unavailable = {"error": f"{tool} is not available in this session.", "exit_code": 1}
+            return note(tool, content, unavailable, scripted=False)
         try:
             output = fixture(content, run)
         except Fail as exc:
-            run.calls.append(Call(run.model_calls, tool, content, False, True))
-            return f"{tool}: failed", {"error": str(exc), "exit_code": 1}
-        run.calls.append(Call(run.model_calls, tool, content, True, True))
-        return f"{tool}: ok", {"output": output or "", "exit_code": 0}
+            return note(tool, content, {"error": str(exc), "exit_code": 1})
+        return note(tool, content, {"output": output or "", "exit_code": 0})
 
     async def stream(*args, **kwargs):
         run.model_calls += 1
@@ -862,6 +1114,8 @@ def totals(runs: List[Run]) -> Dict[str, Any]:
         "nudges": sum(stat(k) for k in NUDGES),
         "forced_answers": sum(1 for r in runs if r.stats.get("forced_answer_by")),
         "unexpected_tools": sum(1 for r in runs for c in r.calls if not c.scripted),
+        "scripts": sum(r.count("run_tool_script") for r in runs),
+        "script_calls": sum(len(r.script_calls) for r in runs),
         "abnormal_ends": sum(1 for r in runs if r.stop_reason or r.error),
         "input_tokens": round(sum(r.input_tokens for r in runs) / n),
         "output_tokens": round(sum(r.output_tokens for r in runs) / n),
@@ -878,6 +1132,8 @@ ROWS = [
     ("nudges", "Nudges (total)"),
     ("forced_answers", "Forced answers (total)"),
     ("unexpected_tools", "Calls to tools the task has no use for"),
+    ("scripts", "Tool scripts run (total)"),
+    ("script_calls", "Tool calls made by scripts (total)"),
     ("abnormal_ends", "Turns that did not end normally"),
     ("input_tokens", "Input tokens per turn"),
     ("output_tokens", "Output tokens per turn"),

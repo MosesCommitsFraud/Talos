@@ -269,6 +269,100 @@ def test_the_database_answers_what_the_query_asks_for():
         ask("select count(*) from dbo.invoices")
 
 
+SITES_SCRIPT = r"""
+import re
+index = tools.web_fetch(url="https://intranet.nordwerk.example/standorte/")
+urls = re.findall(r"https://\S+/standorte/\w+", index)
+pages = tools.parallel([("web_fetch", {"url": u}) for u in urls])
+staff = {
+    u.rsplit("/", 1)[1]: int(re.search(r"Mitarbeitende: (\d+)", p).group(1))
+    for u, p in zip(urls, pages)
+}
+print("Summe", sum(staff.values()), "groesster", max(staff, key=staff.get))
+"""
+
+
+async def test_a_tool_script_is_run_and_its_calls_get_the_tasks_results(model):
+    requests = model(
+        [_call("run_tool_script", description="Standorte", code=SITES_SCRIPT)],
+        [{"delta": "Insgesamt 981 Mitarbeitende; der größte Standort ist Regensburg [14]."}],
+    )
+    with loop_eval.settings_override({"tool_scripts_enabled": True}):
+        run = await loop_eval.run_task(TASK["viele"], "scripts-on", {}, OPTS)
+
+    assert run.passed, run.problems or run.error
+    assert run.tools == ["run_tool_script"] and run.calls[0].ok and run.calls[0].scripted
+    # The list and the sixteen pages, fetched by the script and not by the model.
+    assert [(c.tool, c.ok) for c in run.script_calls] == [("web_fetch", True)] * 17
+    seen = json.dumps(requests[1], ensure_ascii=False)
+    assert "Summe 981 groesster regensburg" in seen
+    assert "Kantine" not in seen  # what the script printed came back, the pages did not
+    sums = loop_eval.totals([run])
+    assert (sums["scripts"], sums["script_calls"], sums["unexpected_tools"]) == (1, 17, 0)
+    assert len(run.summary()["script_calls"]) == 17
+
+
+async def test_a_script_call_the_task_has_no_result_for_fails_like_any_other(model):
+    code = (
+        "try:\n    tools.search_knowledge(query='Standorte')\n"
+        "except ToolError as e:\n    print('Fehler:', e)"
+    )
+    requests = model(
+        [_call("run_tool_script", code=code)],
+        [{"delta": "Dazu finde ich nichts."}],
+    )
+    with loop_eval.settings_override({"tool_scripts_enabled": True}):
+        run = await loop_eval.run_task(TASK["viele"], "scripts-on", {}, OPTS)
+
+    assert [(c.tool, c.ok, c.scripted) for c in run.script_calls] == [
+        ("search_knowledge", False, False)
+    ]
+    assert "Fehler: search_knowledge is not available in this session." in json.dumps(requests[1])
+
+
+async def test_reading_the_pages_one_by_one_is_scored_by_the_same_check(model):
+    pages = [
+        {
+            "id": f"c{i}",
+            "name": "web_fetch",
+            "arguments": json.dumps({"url": f"{loop_eval.SITES_URL}/{loop_eval._slug(name)}"}),
+        }
+        for i, (name, _) in enumerate(loop_eval.SITES[:15])
+    ]
+    requests = model(
+        [_call("web_fetch", url=loop_eval.SITES_URL + "/")],
+        [{"type": "tool_calls", "calls": pages}],
+        [{"delta": "Insgesamt 940 Mitarbeitende, am größten ist Regensburg."}],
+    )
+    run = await loop_eval.run_task(TASK["viele"], "scripts-off", {}, OPTS)
+
+    assert run.problems == ["answer does not contain the total 981 (read 15 of 16 location pages)"]
+    assert run.script_calls == [] and len(run.calls) == 16
+    read = json.dumps(requests[2], ensure_ascii=False)
+    assert "Mitarbeitende: 96" in read and "[16] Fetched:" in read
+    assert sum(staff for _, staff in loop_eval.SITES) == 981
+
+
+def test_a_page_is_cut_where_the_call_asks_for_it():
+    run = loop_eval.Run("viele", "v")
+    url = f"{loop_eval.SITES_URL}/ulm"
+    page = loop_eval._site_fetch(json.dumps({"url": url, "max_chars": 600}), run)
+    assert "[Truncated at 600 chars." in page and "Kantine" not in page
+    assert "Kantine" in loop_eval._site_fetch(json.dumps({"url": url}), run)
+    with pytest.raises(loop_eval.Fail):
+        loop_eval._site_fetch(json.dumps({"url": f"{loop_eval.SITES_URL}/berlin"}), run)
+
+
+def test_adding_up_what_was_read_gives_the_sum_of_the_figures_in_the_code():
+    run = loop_eval.Run("viele", "v")
+    figures = ", ".join(str(staff) for _, staff in loop_eval.SITES)
+    code = f"werte = [{figures}]\nfor i in range(16):\n    pass\nprint(sum(werte))"
+    assert loop_eval._sites_sum(code, run) == "Summe: 981\nGrößter Standort: Regensburg (212)"
+    # One figure left out is one figure missing from the sum.
+    assert loop_eval._sites_sum(code.replace("212, ", ""), run).startswith("Summe: 769\n")
+    assert loop_eval._sites_sum("print('hallo')", run) == ""
+
+
 def test_a_variant_is_parsed_from_the_command_line():
     assert loop_eval.parse_variant("x:agent_prompt_style=classic,loop.reasoning=false,n=3") == (
         "x",
