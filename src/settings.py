@@ -137,9 +137,11 @@ DEFAULT_SETTINGS = {
     # Offer the model `run_tool_script`: a Python script that calls tools itself
     # (database, web, knowledge) in a loop and prints only its conclusion, so
     # many lookups cost one step and their raw results stay out of the context
-    # (src/tool_script.py). Off by default: it is one more tool in every prompt,
-    # so try it on your own tasks first.
-    "tool_scripts_enabled": False,
+    # (src/tool_script.py). It is one more tool in every prompt (about 400
+    # tokens); in the loop eval's task of sixteen pages, turns that used a
+    # script took about a fifth fewer input tokens. Switch it off where such
+    # tasks do not come up.
+    "tool_scripts_enabled": True,
     # Tool calls one script may make before it is stopped (endless-loop guard).
     "tool_script_max_calls": 50,
     # How many rounds a goal may take before it stops and asks the user

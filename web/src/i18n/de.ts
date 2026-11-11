@@ -1938,7 +1938,7 @@ const de: typeof en = {
       subagentsEnabled: 'Subagenten erlauben',
       subagentsEnabledHint: 'Der Agent darf unabhängige Recherche-Teile an parallele Helfer abgeben (nur lesende Tools).',
       toolScripts: 'Werkzeug-Skripte',
-      toolScriptsHint: 'Das Modell darf ein Python-Skript schreiben, das Datenbank, Websuche und Wissensbasis selbst in einer Schleife abfragt und nur sein Ergebnis zurückgibt. Viele Abfragen kosten so einen Schritt, und die Rohdaten bleiben aus dem Kontext. Ein Werkzeug mehr in jedem Prompt, deshalb zuerst an eigenen Aufgaben ausprobieren.',
+      toolScriptsHint: 'Das Modell darf ein Python-Skript schreiben, das Datenbank, Websuche und Wissensbasis selbst in einer Schleife abfragt und nur sein Ergebnis zurückgibt. Viele Abfragen kosten so einen Schritt, und die Rohdaten bleiben aus dem Kontext. Ein Werkzeug mehr in jedem Prompt; ausschalten, wenn solche Aufgaben nicht vorkommen.',
       goalMaxRounds: 'Max. Runden pro Ziel',
       promptStyle: 'Systemprompt',
       promptStyleHint: 'Schlank: ein kurzer, ruhiger Prompt ohne Wiederholungen, die Regeln eines Werkzeugs stehen in dessen Beschreibung. Bisherig: die gewachsenen Texte, zum Vergleich. Ein Wechsel baut den Prompt-Cache jedes Chats einmal neu auf.',

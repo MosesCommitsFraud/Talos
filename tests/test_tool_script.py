@@ -308,15 +308,18 @@ async def test_the_executor_runs_a_script_and_routes_its_calls_through_the_tool_
     assert seen == [("web_search", "anna", {"query_sql"})]
 
 
-def test_the_tool_is_off_unless_the_setting_is_on(monkeypatch):
+def test_the_tool_is_on_unless_the_setting_switches_it_off(monkeypatch):
     from src import settings
 
+    assert settings.DEFAULT_SETTINGS["tool_scripts_enabled"] is True
     monkeypatch.setattr(settings, "get_setting", lambda key, default=None: default)
-    assert tool_script.enabled() is False
-    monkeypatch.setattr(
-        settings, "get_setting", lambda key, default=None: key == "tool_scripts_enabled" or default
-    )
     assert tool_script.enabled() is True
+    monkeypatch.setattr(
+        settings,
+        "get_setting",
+        lambda key, default=None: False if key == "tool_scripts_enabled" else default,
+    )
+    assert tool_script.enabled() is False
 
 
 async def test_umlauts_survive_whatever_the_platform_encoding(harness):

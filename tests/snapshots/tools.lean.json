@@ -751,6 +751,26 @@
   }
  },
  {
+  "name": "run_tool_script",
+  "description": "Run a Python script that calls your tools itself. Use it when a task takes many tool calls whose results you do not need to read one by one: look at several tables and combine them, fetch a list of pages and take one fact from each, page through search results. For one or two calls, call the tools directly instead. Inside the script, `tools.<name>(...)` calls that tool with the same arguments it takes as a tool, given as keyword arguments (one bare argument is taken as the tool's main one, e.g. `tools.web_fetch(url)`), and returns its answer as text (with `.data` holding rows or objects when the tool returns structured data). A failed call raises `ToolError`; catch it to carry on. `tools.parallel([(name, {args}), ...])` makes independent calls at once and returns their results in order, None for a failed one. A script can call: tools.query_sql, tools.search_knowledge, tools.read_knowledge, tools.grep_knowledge, tools.list_knowledge, tools.web_search, tools.web_fetch, tools.search_chats. Only what the script prints comes back to you, so print conclusions, not raw results. The script runs in your workspace like the `python` tool (pandas and the like are there). It is run again from the top after each tool call, with earlier calls answered from memory: write files, and do anything that must happen only once, after the last tool call, and keep the order of calls independent of the clock and of randomness.",
+  "parameters": {
+   "type": "object",
+   "properties": {
+    "description": {
+     "type": "string",
+     "description": "What the script does, in a few words. Write this before `code`."
+    },
+    "code": {
+     "type": "string",
+     "description": "The Python script. Call tools as tools.<name>(...); print what you need to know."
+    }
+   },
+   "required": [
+    "code"
+   ]
+  }
+ },
+ {
   "name": "present_files",
   "description": "Hand the finished deliverable of this turn to the user: each file is shown as a card under your answer, with preview and download. Call it once, at the end, with what the user asked for (the report, spreadsheet, dashboard, deck, PDF, image), not the scripts or intermediate files written on the way; those stay in the chat's file list. Usually one file; several when the request was for several. Not needed when no file was the point of the request.",
   "parameters": {

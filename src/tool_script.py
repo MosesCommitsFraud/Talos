@@ -85,7 +85,7 @@ def enabled() -> bool:
     try:
         from src.settings import get_setting
 
-        return bool(get_setting("tool_scripts_enabled", False))
+        return bool(get_setting("tool_scripts_enabled", True))
     except Exception:
         return False
 

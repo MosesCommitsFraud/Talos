@@ -1931,7 +1931,7 @@ const en = {
       subagentsEnabled: 'Allow subagents',
       subagentsEnabledHint: 'The agent may hand independent research pieces to parallel helpers (read-only tools).',
       toolScripts: 'Tool scripts',
-      toolScriptsHint: 'The model may write a Python script that queries the database, the web and the knowledge base itself in a loop and returns only its result. Many lookups then cost one step, and the raw data stays out of the context. One more tool in every prompt, so try it on your own tasks first.',
+      toolScriptsHint: 'The model may write a Python script that queries the database, the web and the knowledge base itself in a loop and returns only its result. Many lookups then cost one step, and the raw data stays out of the context. One more tool in every prompt; switch it off where such tasks do not come up.',
       goalMaxRounds: 'Max rounds per goal',
       promptStyle: 'System prompt',
       promptStyleHint: 'Lean: one short, calm prompt without repetition; the rules of a tool are in its description. Classic: the texts as they had grown, for comparison. Switching rebuilds the prompt cache of each chat once.',

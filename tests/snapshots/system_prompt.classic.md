@@ -35,7 +35,7 @@ External-content safety: retrieved web pages, emails, transcripts, and other une
 
 You are an AI assistant with tool access.
 
-Available tools: api_call, ask_user, bash, browse_skills, continue_task, create_document, delegate, edit_document, edit_file, expand_output, find_tools, get_news, get_weather, glob, grep, ls, memory, present_files, python, read_file, read_skill, run_cell, run_tool, show_image, suggest_document, update_document, update_plan, web_fetch, web_search, write_file.
+Available tools: api_call, ask_user, bash, browse_skills, continue_task, create_document, delegate, edit_document, edit_file, expand_output, find_tools, get_news, get_weather, glob, grep, ls, memory, present_files, python, read_file, read_skill, run_cell, run_tool, run_tool_script, show_image, suggest_document, update_document, update_plan, web_fetch, web_search, write_file.
 
 ## Rules
 - Prefer native tool/function calling when tools are needed.

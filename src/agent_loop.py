@@ -2540,7 +2540,7 @@ async def stream_agent_loop(
     # nothing for it to report on. Subagents never own the chat's goal.
     from src import goals as _goals
 
-    # Tool scripts are opt-in (setting tool_scripts_enabled) and belong to the
+    # Tool scripts can be switched off (setting tool_scripts_enabled) and belong to the
     # main agent; a subagent's tool set is its own short list.
     from src import tool_script as _tool_script
 
