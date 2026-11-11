@@ -179,3 +179,60 @@ def test_the_text_protocol_gets_the_note_as_a_result_block():
     assert results["role"] == "user"
     assert results["content"].startswith(agent_loop.TOOL_RESULT_PREFIX)
     assert f"### bash\n{STOPPED_RESULT}" in results["content"]
+
+
+# ── subagents ────────────────────────────────────────────────────────────────
+
+
+def _flight(call):
+    return {
+        "round_response": "",
+        "native_tool_calls": [call],
+        "tools": [call["name"]],
+        "tool_results": [],
+        "tool_result_texts": [],
+        "used_native": True,
+        "round_num": 1,
+        "round_reasoning": "",
+    }
+
+
+@pytest.mark.parametrize("stopped", [True, False])
+async def test_a_stopped_subagent_keeps_its_running_calls_for_continue_task(
+    monkeypatch, tmp_path, stopped
+):
+    from types import SimpleNamespace
+
+    from src import subagents
+
+    async def fake_loop(url, model, messages, wire_sink=None, **kwargs):
+        wire_sink.update(messages=messages, round_text="", compacted=False)
+        wire_sink["in_flight"] = _flight(_call("c1", "write_file", path="a.txt", content="x"))
+        if stopped:
+            raise asyncio.CancelledError()
+        # The loop ended the turn itself with the round still open (the tool
+        # budget does that): nothing was stopped, so nothing is unknown.
+        yield f"data: {json.dumps({'delta': 'Bericht.'})}\n\n"
+
+    monkeypatch.setattr(agent_loop, "stream_agent_loop", fake_loop)
+    run = SimpleNamespace(
+        rec={"id": "j1", "log_path": str(tmp_path / "j1.log")},
+        target={"endpoint_url": "u", "model": "m"},
+        messages=[{"role": "user", "content": "Auftrag"}],
+        kind="worker",
+        text="",
+        on_event=lambda data: None,
+    )
+    if stopped:
+        with pytest.raises(asyncio.CancelledError):
+            await subagents._run_one(run, {})
+    else:
+        await subagents._run_one(run, {})
+
+    history = subagents._load_history(run.rec)
+    assert history[0] == {"role": "user", "content": "Auftrag"}
+    if stopped:
+        assert history[-1] == {"role": "tool", "tool_call_id": "c1", "content": STOPPED_RESULT}
+        assert history[-2]["tool_calls"][0]["function"]["name"] == "write_file"
+    else:
+        assert not any(m["role"] == "tool" for m in history)

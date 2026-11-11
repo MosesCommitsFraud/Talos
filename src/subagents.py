@@ -341,15 +341,25 @@ def _history_path(rec: Dict[str, Any]) -> Path:
     return Path(rec["log_path"]).with_suffix(".history.json")
 
 
-def _save_history(rec: Dict[str, Any], sink: Dict[str, Any], final_text: str) -> None:
+def _save_history(
+    rec: Dict[str, Any], sink: Dict[str, Any], final_text: str, stopped: bool = False
+) -> None:
     """Keep the subagent's conversation as sent (incl. tool calls and results)
-    so continue_task can resume it with everything it has already read."""
+    so continue_task can resume it with everything it has already read.
+
+    `stopped` says the run did not end by itself (stopped, timed out, failed).
+    If that fell into a round's tool calls, they are kept with what is known of
+    their results, so a continued task knows they were sent off."""
     try:
         from core.atomic_io import atomic_write_json
+        from src.agent_loop import stopped_round_messages
         from src.history_replay import collect_turn_messages, make_turn_wire
 
         turn = collect_turn_messages(
-            sink.get("messages") or [], final_text, bool(sink.get("compacted"))
+            sink.get("messages") or [],
+            final_text,
+            bool(sink.get("compacted")),
+            stopped_round=stopped_round_messages(sink) if stopped else None,
         )
         wire = make_turn_wire(turn, "")
         if wire:
@@ -438,6 +448,7 @@ async def _run_one(run: _Run, ctx: Dict[str, Any]) -> int:
     sink: Dict[str, Any] = {}
     target = run.target
     max_rounds = subagent_round_limit(bool(ctx.get("deep_research")))
+    ran_through = False
     try:
         async for chunk in stream_agent_loop(
             target["endpoint_url"],
@@ -469,8 +480,9 @@ async def _run_one(run: _Run, ctx: Dict[str, Any]) -> int:
                 continue
             if isinstance(data, dict):
                 run.on_event(data)
+        ran_through = True
     finally:
-        _save_history(run.rec, sink, run.text)
+        _save_history(run.rec, sink, run.text, stopped=not ran_through)
     return 0 if run.text.strip() else 1
 
 
