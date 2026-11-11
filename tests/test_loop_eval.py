@@ -218,6 +218,33 @@ async def test_an_endpoint_that_stays_away_ends_the_run(endpoint, monkeypatch):
     assert shown == []  # no turn was counted as the model's failure
 
 
+def test_the_database_answers_what_the_query_asks_for():
+    october = "from dbo.orders where order_date >= '2026-10-01'"
+    ask = loop_eval._sql_query
+    assert ask(f"select count(*) as bestellungen {october}") == "bestellungen\n1284\n(1 row)"
+    assert ask(f"select count(*) as n, sum(total) as summe {october}") == (
+        "n,summe\n1284,187432.50\n(1 row)"
+    )
+    by_status = ask(f"select status, count(*) as cnt {october} group by status")
+    assert by_status.startswith("status,cnt\n") and "shipped,1102" in by_status
+    assert sum(n for _, n in loop_eval.SQL_STATUS) == 1284
+    assert ask(f"select count(*) {october} and status = 'cancelled'") == "anzahl\n51\n(1 row)"
+    per = ask(
+        "select count(*) filter (where status = 'pending') as pending, "
+        f"count(*) filter (where status = 'shipped') as shipped {october}"
+    )
+    assert per == "pending,shipped\n131,1102\n(1 row)"
+    # A sum over a status is not the sum of the totals.
+    mixed = ask(
+        "select count(*) as total, sum(case when status = 'cancelled' then 1 else 0 end) "
+        f"as cancelled, round(sum(total),2) as revenue {october}"
+    )
+    assert mixed == "total,cancelled,revenue\n1284,51,187432.50\n(1 row)"
+    assert "rows shown" in ask(f"select * {october}")
+    with pytest.raises(loop_eval.Fail):
+        ask("select count(*) from dbo.invoices")
+
+
 def test_a_variant_is_parsed_from_the_command_line():
     assert loop_eval.parse_variant("x:agent_prompt_style=classic,loop.reasoning=false,n=3") == (
         "x",

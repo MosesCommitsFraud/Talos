@@ -343,15 +343,70 @@ def _sql(content: str, run: Run) -> str:
         return "dbo.order_items\n  order_id int\n  product_id int\n  quantity int"
     if action == "knowledge":
         return "No notes found for this query."
-    if "count" in query and "orders" in query:
-        return "anzahl\n1284\n(1 row)"
-    if "orders" in query:
-        return (
-            "order_id,customer_id,order_date,total,status\n"
-            "1001,17,2026-10-01,249.90,shipped\n1002,23,2026-10-01,89.00,shipped\n"
-            "(2 of 1284 rows shown)"
-        )
-    raise Fail("Invalid object name.")
+    return _sql_query(query)
+
+
+# dbo.orders holds October 2026 and nothing else: 1284 orders.
+SQL_STATUS = (("cancelled", 51), ("pending", 131), ("shipped", 1102))
+
+
+def _sql_query(query: str) -> str:
+    """Answer a query by what it asks for, as far as its text tells: a query
+    for the sum or the status breakdown that only ever got the count back made
+    the model ask again and again."""
+
+    def alias(expression: str, default: str) -> str:
+        found = re.search(expression + r"[^,]*?\bas\s+(\w+)", query)
+        return found.group(1) if found else default
+
+    if "order_items" in query:
+        if "count" in query:
+            return "anzahl\n3907\n(1 row)"
+        return "order_id,product_id,quantity\n1001,4,2\n1001,9,1\n(2 of 3907 rows shown)"
+    if "orders" not in query:
+        if "customers" in query:
+            if "count" in query:
+                return "anzahl\n412\n(1 row)"
+            return "customer_id,name,city\n17,Brandt GmbH,Kassel\n(1 of 412 rows shown)"
+        raise Fail("Invalid object name.")
+    if "distinct status" in query:
+        return "status\n" + "\n".join(s for s, _ in SQL_STATUS) + "\n(3 rows)"
+    if "group by" in query and "status" in query:
+        name = alias(r"count\(", "anzahl")
+        return f"status,{name}\n" + "\n".join(f"{s},{n}" for s, n in SQL_STATUS) + "\n(3 rows)"
+
+    columns: List[tuple] = []
+    per_status = "status" in query and ("case when" in query or "filter" in query)
+    if per_status:
+        # One column per status asked for, and the total if it is asked for too.
+        whole = re.search(r"count\(\*\)\s+as\s+(\w+)", query)
+        if whole:
+            columns.append((whole.group(1), 1284))
+        columns += [(s, n) for s, n in SQL_STATUS if f"'{s}'" in query]
+    elif "count" in query:
+        total = 1284
+        one = re.search(r"where[^;]*\bstatus\s*(=|<>|!=)\s*'(\w+)'", query)
+        if one:
+            count = dict(SQL_STATUS).get(one.group(2), 0)
+            total = count if one.group(1) == "=" else 1284 - count
+        columns.append((alias(r"count\(", "anzahl"), total))
+    revenue = re.search(
+        r"sum\(\s*(?:cast\(\s*)?total\b[^,]*?\)+(?:\s*,\s*\d+\s*\))?(?:\s+as\s+(\w+))?", query
+    )
+    if revenue:
+        columns.append((revenue.group(1) or "summe", "187432.50"))
+    if "min(" in query:
+        columns.append((alias(r"min\(", "min"), "2026-10-01"))
+    if "max(" in query:
+        columns.append((alias(r"max\(", "max"), "2026-10-31"))
+    if columns:
+        names = ",".join(str(c[0]) for c in columns)
+        return f"{names}\n" + ",".join(str(c[1]) for c in columns) + "\n(1 row)"
+    return (
+        "order_id,customer_id,order_date,total,status\n"
+        "1001,17,2026-10-01,249.90,shipped\n1002,23,2026-10-01,89.00,shipped\n"
+        "(2 of 1284 rows shown)"
+    )
 
 
 def _has(text: str, *patterns: str) -> bool:
