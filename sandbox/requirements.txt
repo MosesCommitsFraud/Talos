@@ -58,3 +58,23 @@ rich==15.0.0
 pyyaml==6.0.3
 toml==0.10.2
 jsonlines==4.0.0
+
+# What the library skills' bundled scripts import (pdf, docx, xlsx). Without
+# them a skill run fell back to hand-built workarounds that took up to an hour
+# (model test 2026-11-12).
+reportlab==5.1.0
+pdfplumber==0.11.10
+pypdfium2==5.15.2
+pdf2image==1.17.0
+pytesseract==0.3.13
+defusedxml==0.7.1
+markitdown==0.1.9
+
+# Office files as they arrive in a company: PDFs to repair/split/encrypt,
+# binary Excel, password-protected Office files, Outlook mails, and public
+# holidays for planners (a computed Easter date was off by a week in the test).
+pikepdf==10.18.1
+pyxlsb==1.0.10
+msoffcrypto-tool==6.1.0
+extract-msg==0.58.2
+holidays==0.108

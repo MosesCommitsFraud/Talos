@@ -169,3 +169,26 @@ def test_the_daemon_refuses_something_that_is_not_a_zip(sandboxd):
     req = module.FileUnpackRequest(path="skills", zip_b64=base64.b64encode(b"nope").decode())
 
     assert module.unpack_route("anna", "chat-1", req)["exit_code"] == 1
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="PtyRunner needs a POSIX pty")
+def test_commands_keep_the_writable_home_through_gosu(sandboxd, monkeypatch, tmp_path):
+    """gosu resets HOME to the root-owned account home; LibreOffice then could
+    not create its profile. The command line has to set HOME again after gosu."""
+    module, _workspace = sandboxd
+    seen = {}
+
+    class FakePopen:
+        def __init__(self, args, **kw):
+            seen["args"] = args
+            self.pid = 0
+
+    monkeypatch.setattr(module.subprocess, "Popen", FakePopen)
+    home = str(tmp_path / "ws" / ".talos-home")
+    module.PtyRunner(
+        linux_user="acct", command="soffice --version", cwd=tmp_path, env={"HOME": home}
+    )
+
+    args = seen["args"]
+    assert args[:2] == ["gosu", "acct"]
+    assert args[2:4] == ["env", f"HOME={home}"]

@@ -37,6 +37,7 @@ RUN set -eu; \
     fonts-crosextra-carlito \
     fonts-liberation \
     gfortran \
+    ghostscript \
     git \
     gosu \
     htop \
@@ -54,6 +55,9 @@ RUN set -eu; \
     openssh-client \
     pandoc \
     patch \
+    pdftk-java \
+    poppler-utils \
+    qpdf \
     libpq-dev \
     libxml2-dev \
     libxslt1-dev \
@@ -73,6 +77,8 @@ RUN set -eu; \
     sysstat \
     sudo \
     telnet \
+    tesseract-ocr \
+    tesseract-ocr-deu \
     tini \
     tmux \
     tree \
@@ -105,6 +111,18 @@ RUN printf 'export PATH=/opt/talos-sandbox-venv/bin:$PATH\n' > /etc/profile.d/zz
     && ln -sf /opt/talos-sandbox-venv/bin/python  /usr/local/bin/python3 \
     && ln -sf /opt/talos-sandbox-venv/bin/pip     /usr/local/bin/pip \
     && ln -sf /opt/talos-sandbox-venv/bin/pip     /usr/local/bin/pip3
+
+# Node libraries the office skills script against: docx (Word, the docx skill's
+# primary method) and pptxgenjs (PowerPoint). The sandbox has no network at
+# runtime, so `npm install` inside a chat fails; they have to be in the image.
+# Installed globally, and NODE_PATH makes require('docx') resolve from any
+# working directory, not only from inside a project with node_modules.
+ARG DOCX_JS_VERSION=9.15.3
+ARG PPTXGENJS_VERSION=4.0.1
+RUN npm install -g --no-audit --no-fund "docx@${DOCX_JS_VERSION}" "pptxgenjs@${PPTXGENJS_VERSION}" \
+    && rm -rf /root/.npm \
+    && NODE_PATH=/usr/local/lib/node_modules node -e "require('docx'); require('pptxgenjs')"
+ENV NODE_PATH=/usr/local/lib/node_modules
 
 # Vendored dashboard libraries. The sandbox has NO network access at runtime, so
 # a generated HTML dashboard cannot pull a chart library from a CDN — the page

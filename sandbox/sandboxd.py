@@ -507,7 +507,11 @@ class PtyRunner:
             proc_env["LINES"] = "40"
             proc_env["PATH"] = f"/opt/talos-sandbox-venv/bin:{proc_env.get('PATH', '')}"
             self.process = subprocess.Popen(
-                ["gosu", linux_user, "bash", "-lc", command],
+                # gosu resets HOME to the account's passwd home, which stays
+                # root-owned (0711) — so ~/.config and ~/.cache were unwritable:
+                # LibreOffice could not create its profile and refused to start,
+                # matplotlib and dconf complained. `env` puts the chosen HOME back.
+                ["gosu", linux_user, "env", f"HOME={proc_env['HOME']}", "bash", "-lc", command],
                 stdin=slave_fd,
                 stdout=slave_fd,
                 stderr=slave_fd,
@@ -1275,7 +1279,9 @@ async def _ensure_kernel(user_id: str, chat_id: str, scope: str = "") -> dict[st
     env["HOME"] = str(workspace / ".talos-home")
     env["PATH"] = f"/opt/talos-sandbox-venv/bin:{env.get('PATH', '')}"
     proc = subprocess.Popen(
-        ["gosu", name, "/opt/talos-sandbox-venv/bin/python", "-c", _KERNEL_SERVER_SRC, str(sock), str(workspace)],
+        # `env HOME=…` after gosu, which would otherwise reset HOME to the
+        # root-owned account home (see PtyRunner).
+        ["gosu", name, "env", f"HOME={env['HOME']}", "/opt/talos-sandbox-venv/bin/python", "-c", _KERNEL_SERVER_SRC, str(sock), str(workspace)],
         cwd=str(workspace),
         env=env,
         start_new_session=True,
