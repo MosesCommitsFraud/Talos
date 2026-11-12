@@ -99,6 +99,25 @@ async def file_tool_in_sandbox(
         return resp.json()
 
 
+async def unpack_zip_in_sandbox(
+    *,
+    owner: str | None,
+    session_id: str | None,
+    dest: str,
+    zip_bytes: bytes,
+) -> dict[str, Any]:
+    """Unpack a zip under the workspace-relative folder `dest`. Binary-safe,
+    one request for the whole archive (a skill bundle can be dozens of files)."""
+    import base64
+
+    return await file_tool_in_sandbox(
+        owner=owner,
+        session_id=session_id,
+        operation="unpack",
+        payload={"path": dest, "zip_b64": base64.b64encode(zip_bytes).decode("ascii")},
+    )
+
+
 def _sandbox_filename(path: str, display_name: str | None = None) -> str:
     stored_name = Path(path).name
     return (

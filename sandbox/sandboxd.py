@@ -120,6 +120,13 @@ class FileWriteRequest(BaseModel):
     content: str = ""
 
 
+class FileUnpackRequest(BaseModel):
+    # Directory (workspace-relative) the archive is unpacked into.
+    path: str
+    # A zip archive, base64-encoded. Binary-safe, unlike files/write.
+    zip_b64: str
+
+
 class FileEditRequest(BaseModel):
     path: str
     old_string: str = ""
@@ -1961,6 +1968,57 @@ def mkdir_route(user_id: str, chat_id: str, req: PathRequest) -> dict[str, Any]:
     except OSError as exc:
         return {"error": f"mkdir: {exc}", "exit_code": 1}
     return {"output": f"Created {req.path}", "exit_code": 0}
+
+
+# A skill bundle is a few MB at most (the docx skill with its schemas is the
+# largest); the cap keeps a bad archive from filling the disk.
+MAX_UNPACK_BYTES = 64 * 1024 * 1024
+
+
+@app.post("/users/{user_id}/workspaces/{chat_id}/files/unpack")
+def unpack_route(user_id: str, chat_id: str, req: FileUnpackRequest) -> dict[str, Any]:
+    """Unpack a zip into the workspace. The app uses it to put a skill's
+    bundled scripts and templates where the agent's bash and python run: the
+    app's own disk is not visible from here."""
+    import io
+    import zipfile
+
+    name, workspace = _workspace(user_id, chat_id)
+    dest = _safe_path(workspace, req.path)
+    try:
+        data = base64.b64decode(req.zip_b64, validate=True)
+        archive = zipfile.ZipFile(io.BytesIO(data))
+    except (ValueError, zipfile.BadZipFile) as exc:
+        return {"error": f"unpack: not a zip archive ({exc})", "exit_code": 1}
+    members = [m for m in archive.infolist() if not m.is_dir()]
+    if sum(m.file_size for m in members) > MAX_UNPACK_BYTES:
+        return {"error": "unpack: archive too large", "exit_code": 1}
+    written: list[str] = []
+    try:
+        dest.mkdir(parents=True, exist_ok=True)
+        for member in members:
+            # Zip entries carrying a symlink mode are written as plain files:
+            # extracting the link itself could point outside the workspace.
+            target = _safe_path(dest, member.filename)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            _unshare_file(name, target)
+            with archive.open(member) as src, target.open("wb") as out:
+                shutil.copyfileobj(src, out)
+            if target.suffix in {".sh", ".py"}:
+                target.chmod(0o755)
+            written.append(str(target.relative_to(dest)))
+        _chown_user_chain(name, workspace, dest)
+        subprocess.run(["chown", "-R", f"{name}:{name}", str(dest)], capture_output=True)
+    except HTTPException:
+        return {"error": "unpack: an entry would land outside the target folder", "exit_code": 1}
+    except OSError as exc:
+        return {"error": f"unpack: {exc}", "exit_code": 1}
+    return {
+        "output": f"Unpacked {len(written)} file(s) to {dest}",
+        "exit_code": 0,
+        "path": str(dest),
+        "files": written,
+    }
 
 
 @app.get("/users/{user_id}/workspaces/{chat_id}/files/zip")

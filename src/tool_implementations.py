@@ -1873,6 +1873,7 @@ async def do_browse_skills(
     owner: Optional[str] = None,
     workspace: Optional[str] = None,
     disabled_tools: Optional[set] = None,
+    session_id: Optional[str] = None,
 ) -> Dict:
     """List the user's enabled skills and, for any that match the task, inline
     their full instructions so the model can follow them immediately.
@@ -1943,30 +1944,31 @@ async def do_browse_skills(
             expanded.append(f"### SKILL: {s['name']}\n{full['content']}")
         # Materialize any bundled files (references/scripts) so the model can
         # actually run them — the skill's instructions reference them by path.
-        if full and full.get("file_paths") and workspace:
+        if full and full.get("file_paths"):
+            paths = full["file_paths"]
             try:
-                import os as _os
-
-                paths = full["file_paths"]
-                dest = _os.path.join(workspace, "skills", s["name"])
-                shared_skills.materialize(s["name"], dest)
-                rel_dir = _os.path.join("skills", s["name"])
+                dest = await _place_skill_bundle(
+                    s["name"], owner=owner, session_id=session_id, workspace=workspace
+                )
+            except Exception as e:
+                logger.warning(f"browse_skills: placing the bundle of {s['name']} failed: {e}")
+                bundle_notes.append(
+                    f"- `{s['name']}`: the bundle could not be copied into the workspace; "
+                    "load the files it needs with read_skill name + path."
+                )
+                dest = None
+            if dest:
                 # Point at a couple of representative scripts rather than dumping
                 # all (a deep bundle can be dozens of files).
                 scripts = [p for p in paths if p.lower().endswith(".py")][:6]
                 script_hint = (
-                    "e.g. " + "; ".join(f"`python {_os.path.join(rel_dir, p)}`" for p in scripts)
-                    if scripts
-                    else ""
+                    "e.g. " + "; ".join(f"`python {dest}/{p}`" for p in scripts) if scripts else ""
                 )
                 bundle_notes.append(
                     f"- `{s['name']}`: {len(paths)} bundled file(s) written to "
                     f"`{dest}`. The skill's paths (e.g. `scripts/...`) are relative to "
-                    f"that directory, so prefix them with `{rel_dir}/` when you run "
-                    f"them from the workspace root. {script_hint}".rstrip()
+                    f"that directory. {script_hint}".rstrip()
                 )
-            except Exception as e:
-                logger.warning(f"browse_skills materialize failed for {s['name']}: {e}")
 
     if expanded:
         lines.append(
@@ -1989,8 +1991,58 @@ async def do_browse_skills(
     return {"results": "\n".join(lines)}
 
 
+async def _place_skill_bundle(
+    name: str,
+    *,
+    owner: Optional[str],
+    session_id: Optional[str],
+    workspace: Optional[str],
+) -> Optional[str]:
+    """Put a library skill's bundle (SKILL.md, scripts, templates) where the
+    agent's bash and python run, and return that folder's path, or None when
+    there is nowhere to put it.
+
+    With the sandbox on, the scripts run in the talos-sandbox container, which
+    cannot see the app's disk, so the bundle goes into the chat's sandbox
+    workspace under skills/<name>. Writing it to the app's workspace folder
+    instead left every bundled script (xlsx recalc.py and the like) missing for
+    the agent. Without the sandbox, the app's workspace folder is where the
+    tools run, as before."""
+    from services.memory import shared_skills
+    from src.sandbox_client import sandbox_enabled, unpack_zip_in_sandbox
+
+    if sandbox_enabled() and session_id:
+        exported = shared_skills.export_bundle(name)
+        if not exported:
+            return None
+        skill_name, data = exported
+        result = await unpack_zip_in_sandbox(
+            owner=owner, session_id=session_id, dest="skills", zip_bytes=data
+        )
+        if result.get("exit_code"):
+            raise RuntimeError(result.get("error") or "unpack failed")
+        base = str(result.get("path") or "skills").rstrip("/")
+        return f"{base}/{skill_name}"
+    if workspace:
+        import os as _os
+
+        dest = _os.path.join(workspace, "skills", name)
+        shared_skills.materialize(name, dest)
+        return dest
+    return None
+
+
+BUNDLE_NOT_PLACED = (
+    "\n\nThe bundle could not be copied into the workspace. Load the files the "
+    "skill needs with read_skill name + path and write them yourself."
+)
+
+
 async def do_read_skill(
-    content: str, owner: Optional[str] = None, workspace: Optional[str] = None
+    content: str,
+    owner: Optional[str] = None,
+    workspace: Optional[str] = None,
+    session_id: Optional[str] = None,
 ) -> Dict:
     """Load a shared (user-uploaded) skill by name, or one of its bundle files.
 
@@ -2097,18 +2149,21 @@ async def do_read_skill(
             f"\n\nBundled files (load one with read_skill name + path when the "
             f"skill refers to it):\n{listing}"
         )
-        if workspace:
-            try:
-                import os as _os
-
-                dest = _os.path.join(workspace, "skills", skill["name"])
-                shared_skills.materialize(skill["name"], dest)
-                extra += (
-                    f"\n\nThe full bundle (incl. scripts) is on disk at: {dest}\n"
-                    "Run its scripts from there with bash/python when the skill says to."
-                )
-            except Exception as e:
-                logger.warning(f"read_skill materialize failed: {e}")
+        try:
+            dest = await _place_skill_bundle(
+                skill["name"], owner=owner, session_id=session_id, workspace=workspace
+            )
+        except Exception as e:
+            logger.warning(f"read_skill: placing the bundle failed: {e}")
+            dest = None
+            extra += BUNDLE_NOT_PLACED
+        if dest:
+            extra += (
+                f"\n\nThe full bundle (incl. scripts) is on disk at: {dest}\n"
+                "Run its scripts from there with bash/python when the skill says to; "
+                "where the skill names a script by a relative path such as "
+                "scripts/x.py, it is under that folder."
+            )
     return {
         "results": (
             f"=== SKILL: {skill['name']} ===\n{skill['content']}{extra}\n\n"

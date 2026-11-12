@@ -2320,7 +2320,11 @@ async def execute_tool_block(
 
         desc = "browse_skills"
         result = await do_browse_skills(
-            content, owner=owner, workspace=workspace, disabled_tools=disabled_tools
+            content,
+            owner=owner,
+            workspace=workspace,
+            disabled_tools=disabled_tools,
+            session_id=session_id,
         )
     elif tool == "create_skill":
         from src.tool_implementations import do_create_skill
@@ -2331,7 +2335,9 @@ async def execute_tool_block(
         from src.tool_implementations import do_read_skill
 
         desc = f"read_skill: {content.split(chr(10))[0].strip()[:60]}"
-        result = await do_read_skill(content, owner=owner, workspace=workspace)
+        result = await do_read_skill(
+            content, owner=owner, workspace=workspace, session_id=session_id
+        )
     elif tool == "web_search":
         from src.tool_implementations import do_web_search
 
