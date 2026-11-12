@@ -39,6 +39,19 @@ server:
 ui:
   default_locale: ""
 
+# The default general engines (Google, DuckDuckGo, Brave, Startpage) block a
+# single server IP with CAPTCHAs or 429s after bursts of agent searches, and
+# web_search then returns nothing at all. These upstream engines ship disabled;
+# switching them on gives the search somewhere to fall back to. The names must
+# match upstream's engine list — use_default_settings merges by name.
+engines:
+  - name: bing
+    disabled: false
+  - name: qwant
+    disabled: false
+  - name: yahoo
+    disabled: false
+
 outgoing:
   request_timeout: 6.0
   max_request_timeout: 12.0
