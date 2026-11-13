@@ -1,23 +1,29 @@
 import { useQuery } from '@tanstack/react-query';
-import { CheckIcon } from 'lucide-react';
+import { CheckIcon, ChevronDownIcon } from 'lucide-react';
 import { useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { fetchAppSettings, fetchModels } from '@/api/client';
 import { useChat } from '@/state/chat';
 import { REASONING_EFFORTS, usePrefs, type ReasoningEffort } from '@/state/prefs';
 import { cn } from '@/lib/utils';
-import { Menu, MenuItem, MenuPopup, MenuSeparator, MenuSub, MenuSubPopup, MenuSubTrigger, MenuTrigger } from './ui/menu';
+import { Menu, MenuItem, MenuLabel, MenuPopup, MenuSeparator, MenuSwitch, MenuTrigger, roomyMenuClass } from './ui/menu';
 import { QwenIcon } from './ModelPicker';
 import { useReasoningEfforts } from './EffortPicker';
 
+function Tick({ on }: { on: boolean }) {
+  return <CheckIcon aria-hidden className={cn('ms-auto size-3.5 shrink-0 text-primary', on ? 'opacity-100' : 'opacity-0')} />;
+}
+
 /** Model + reasoning in one control, Claude-style: the trigger reads
- *  "<model> <effort>" and its menu lists the models, with the thinking budget
- *  behind an Effort submenu. Replaces the old pair of adjacent pickers so the
- *  composer's inner control row stays short.
+ *  "<model> <effort>" and its menu has two headed parts in the same chrome as
+ *  the composer's "+" menu: the models (name, and the endpoint it runs on at
+ *  the row's end), then how much the model thinks. With three effort levels
+ *  the choice is laid out in the menu itself, one click each, rather than
+ *  behind a submenu.
  *
  *  Models without the effort knob (Qwen3.6 and older — see `useReasoningEfforts`)
- *  get a plain Reasoning on/off row instead of the submenu, and their trigger
- *  shows "Reasoning"/"No Reasoning" in the effort slot.
+ *  get a plain Reasoning switch instead, and their trigger shows
+ *  "Reasoning"/"No Reasoning" in the effort slot.
  *
  *  Stays mounted while hidden so the default-model effect keeps running. */
 export function ModelEffortPicker({
@@ -70,7 +76,7 @@ export function ModelEffortPicker({
           aria-label={t('modelPicker.switchModel')}
           // Full text colour for the model, so it stands clearly above the muted
           // effort beside it in both themes.
-          className="flex h-6 min-w-0 shrink items-center gap-1.5 whitespace-nowrap rounded-lg border border-transparent px-2 text-xs font-medium text-foreground outline-none transition-colors hover:bg-accent focus:outline-none focus-visible:outline-none"
+          className="group/model flex h-6 min-w-0 shrink items-center gap-1.5 whitespace-nowrap rounded-full px-2 text-xs font-medium text-foreground outline-none transition-colors hover:bg-accent focus:outline-none focus-visible:outline-none data-[state=open]:bg-accent"
         >
           <QwenIcon className="size-3.5 shrink-0" />
           <span className="min-w-0 max-w-32 truncate text-left md:max-w-56">{modelLabel}</span>
@@ -78,70 +84,82 @@ export function ModelEffortPicker({
           <span className={cn('shrink-0 font-normal', reasoning ? 'text-muted-foreground' : 'text-muted-foreground/70')}>
             {effortLabel}
           </span>
+          <ChevronDownIcon className="-ms-0.5 size-3 shrink-0 text-muted-foreground/70 transition-transform group-data-[state=open]/model:rotate-180" />
         </button>
       </MenuTrigger>
 
-      <MenuPopup align="end" className="min-w-52">
+      <MenuPopup align="end" side="top" className={cn(roomyMenuClass, 'w-64 max-w-[calc(100vw-1.5rem)]')}>
+        <MenuLabel>{t('modelPicker.model')}</MenuLabel>
         {options.length === 0 && (
-          <div className="px-2 py-1 text-xs text-muted-foreground">{t('modelPicker.noEndpoints')}</div>
+          <div className="px-2 pb-1.5 text-xs text-muted-foreground">{t('modelPicker.noEndpoints')}</div>
         )}
         {options.map((o) => {
           const selected = pendingModel?.endpointId === o.endpointId && pendingModel.model === o.model;
           return (
             <MenuItem
               key={`${o.endpointId}:${o.model}`}
+              role="menuitemradio"
+              aria-checked={selected}
               onSelect={() => setPendingModel({ endpointId: o.endpointId, model: o.model })}
             >
-              <QwenIcon className="size-3.5 shrink-0 text-muted-foreground" />
-              <span className="min-w-0 flex-1 truncate">
-                {displayName(o.model)}
-                <span className="text-muted-foreground"> · {o.endpointName}</span>
-              </span>
-              <CheckIcon className={cn('size-3.5 shrink-0 text-primary', selected ? 'opacity-100' : 'opacity-0')} />
+              <QwenIcon className={cn('size-4 shrink-0', selected ? 'text-foreground' : 'text-muted-foreground')} />
+              <span className={cn('min-w-0 truncate', selected && 'font-medium text-strong')}>{displayName(o.model)}</span>
+              <span className="min-w-0 flex-1 truncate text-[11px] text-muted-foreground">{o.endpointName}</span>
+              <Tick on={selected} />
             </MenuItem>
           );
         })}
 
-        {options.length > 0 && <MenuSeparator />}
+        <MenuSeparator />
 
         {hasEffort ? (
-          <MenuSub>
-            <MenuSubTrigger>
-              <span className="min-w-0 flex-1 truncate">{t('composer.effort.label')}</span>
-              <span className="shrink-0 text-muted-foreground">{effortLabel}</span>
-            </MenuSubTrigger>
-            <MenuSubPopup className="min-w-40">
-              {levels.map((level) => (
-                <MenuItem
-                  key={level}
-                  onSelect={() => {
-                    // Picking a level is also asking for thinking — a level with
-                    // reasoning off would silently do nothing.
-                    if (!reasoning) toggle('reasoning');
-                    setEffort(level);
-                  }}
-                >
-                  <span className="min-w-0 flex-1 truncate">{t(`composer.effort.levels.${level}`)}</span>
-                  <CheckIcon
-                    className={cn(
-                      'size-3.5 shrink-0 text-primary',
-                      reasoning && effort === level ? 'opacity-100' : 'opacity-0',
-                    )}
-                  />
-                </MenuItem>
-              ))}
-              <MenuSeparator />
-              <MenuItem onSelect={() => { if (reasoning) toggle('reasoning'); }}>
-                <span className="min-w-0 flex-1 truncate">{t('composer.reasoning.off')}</span>
-                <CheckIcon className={cn('size-3.5 shrink-0 text-primary', reasoning ? 'opacity-0' : 'opacity-100')} />
+          <>
+            <MenuLabel title={t('composer.effort.help')}>{t('composer.effort.label')}</MenuLabel>
+            {levels.map((level, i) => (
+              <MenuItem
+                key={level}
+                role="menuitemradio"
+                aria-checked={reasoning && effort === level}
+                onSelect={() => {
+                  // Picking a level is also asking for thinking — a level with
+                  // reasoning off would silently do nothing.
+                  if (!reasoning) toggle('reasoning');
+                  setEffort(level);
+                }}
+              >
+                <span className="min-w-0 truncate">{t(`composer.effort.levels.${level}`)}</span>
+                {/* The two ends say which way the scale runs. */}
+                {(i === 0 || i === levels.length - 1) && (
+                  <span className="min-w-0 flex-1 truncate text-[11px] text-muted-foreground">
+                    {t(i === 0 ? 'composer.effort.faster' : 'composer.effort.smarter')}
+                  </span>
+                )}
+                <Tick on={reasoning && effort === level} />
               </MenuItem>
-            </MenuSubPopup>
-          </MenuSub>
+            ))}
+            <MenuItem
+              role="menuitemradio"
+              aria-checked={!reasoning}
+              title={t('composer.reasoning.offDesc')}
+              onSelect={() => { if (reasoning) toggle('reasoning'); }}
+            >
+              <span className="min-w-0 flex-1 truncate">{t('composer.reasoning.off')}</span>
+              <Tick on={!reasoning} />
+            </MenuItem>
+          </>
         ) : (
           // No effort knob on this model: one row for the only decision there is.
-          <MenuItem onSelect={() => toggle('reasoning')}>
+          <MenuItem
+            role="menuitemcheckbox"
+            aria-checked={reasoning}
+            title={reasoning ? t('composer.reasoning.onDesc') : t('composer.reasoning.offDesc')}
+            onSelect={(e) => {
+              e.preventDefault();
+              toggle('reasoning');
+            }}
+          >
             <span className="min-w-0 flex-1 truncate">{t('composer.reasoning.on')}</span>
-            <CheckIcon className={cn('size-3.5 shrink-0 text-primary', reasoning ? 'opacity-100' : 'opacity-0')} />
+            <MenuSwitch on={reasoning} />
           </MenuItem>
         )}
       </MenuPopup>

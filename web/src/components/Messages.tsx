@@ -1,5 +1,5 @@
-import { CheckIcon, ChevronDownIcon, CopyIcon, FoldVerticalIcon, PinIcon, RotateCcwIcon, ScanSearchIcon, Share2Icon, TriangleAlertIcon } from 'lucide-react';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { CheckIcon, ChevronDownIcon, CopyIcon, CornerDownLeftIcon, FoldVerticalIcon, PinIcon, RotateCcwIcon, ScanSearchIcon, Share2Icon, TriangleAlertIcon } from 'lucide-react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { uploadDownloadUrl } from '@/api/client';
 import { cn, copyTextToClipboard, formatDurationMs } from '@/lib/utils';
@@ -7,7 +7,7 @@ import { artifactSelectionLocator } from '@/lib/artifactSelection';
 import { presentedOutputs, useSessionFiles, type SessionFile } from '@/lib/useSessionFiles';
 import { describeStatus, partsToString, toolFamily, type LabelParts } from '@/lib/toolLabels';
 import { isRunning, useBgTasks } from '@/lib/useBgTasks';
-import { useChat, type UiMessage } from '@/state/chat';
+import { selectPendingQuestion, useChat, type UiMessage } from '@/state/chat';
 import type { StopReason, UiDraft, Widget } from '@/api/types';
 import { UiDraftView } from './interactive/UiDraftView';
 import { usePrefs } from '@/state/prefs';
@@ -1042,8 +1042,33 @@ function AssistantTurn({ turn, containsLast, outputs, sessionId }: { turn: UiMes
   );
 }
 
+/** One assistant turn with its citation table. Memoised on the identity of the
+ *  messages it holds: while an answer streams, every token replaces the store's
+ *  message list, and without this each earlier turn (markdown, source pills,
+ *  widgets) would be rendered again for a change that is not its own. */
+const TurnBlock = memo(
+  function TurnBlock({ turn, containsLast, outputs, sessionId }: { turn: UiMessage[]; containsLast: boolean; outputs: SessionFile[]; sessionId: string | null }) {
+    const citations = useMemo(() => citationMap(turn.map((m) => m.citations)), [turn]);
+    return (
+      <CitationProvider citations={citations}>
+        <AssistantTurn turn={turn} containsLast={containsLast} outputs={outputs} sessionId={sessionId} />
+      </CitationProvider>
+    );
+  },
+  (a, b) =>
+    a.containsLast === b.containsLast &&
+    a.sessionId === b.sessionId &&
+    a.outputs === b.outputs &&
+    a.turn.length === b.turn.length &&
+    a.turn.every((m, i) => m === b.turn[i]),
+);
+
 export function Messages() {
   const { t } = useTranslation();
+  // The chat is waiting for the user: a question card is up, or the turn ended
+  // on a request for input. The scroll pill says so, since that is the reason
+  // to go back down.
+  const needsInput = useChat((s) => !!selectPendingQuestion(s) || !!(s.sessionId && s.runtimes[s.sessionId]?.awaitingInput));
   const sessionId = useChat((s) => s.sessionId);
   const messages = useChat((s) => s.messages);
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
@@ -1146,7 +1171,7 @@ export function Messages() {
               {block.msg.askAnswers ? (
                 <AskAnswers answers={block.msg.askAnswers} />
               ) : (
-                <div className="rounded-lg rounded-br-sm bg-bubble px-3 py-1 text-[15px] leading-relaxed whitespace-pre-wrap text-strong">
+                <div className="selectable rounded-lg rounded-br-sm bg-bubble px-3 py-1 text-[15px] leading-relaxed whitespace-pre-wrap text-strong">
                   <CollapsibleText>{block.msg.content}</CollapsibleText>
                 </div>
               )}
@@ -1163,14 +1188,12 @@ export function Messages() {
               data-chapter={block.turn.find((m) => m.chapter)?.dbId}
               className={`group w-full scroll-mt-14 ${index === 0 ? '' : 'mt-3'}`}
             >
-              <CitationProvider citations={citationMap(block.turn.map((m) => m.citations))}>
-                <AssistantTurn
-                  turn={block.turn}
-                  containsLast={block.turn.some((m) => m.id === lastAssistantId)}
-                  outputs={outputs}
-                  sessionId={sessionId}
-                />
-              </CitationProvider>
+              <TurnBlock
+                turn={block.turn}
+                containsLast={block.turn.some((m) => m.id === lastAssistantId)}
+                outputs={outputs}
+                sessionId={sessionId}
+              />
             </div>
           ),
         )}
@@ -1185,14 +1208,30 @@ export function Messages() {
         <button
           type="button"
           onClick={scrollToBottom}
-          aria-label={t('messages.scrollToBottom')}
-          title={t('messages.scrollToBottom')}
+          aria-label={needsInput ? t('messages.inputNeeded') : t('messages.scrollToBottom')}
+          title={needsInput ? t('messages.inputNeededHint') : t('messages.scrollToBottom')}
           // Compact below @md: a round button with just the arrow, so a narrow
-          // column (preview open beside it) doesn't wrap the label.
-          className="pointer-events-auto flex size-8 items-center justify-center rounded-full border border-foreground/15 bg-card text-muted-foreground shadow-sm transition-colors hover:cursor-pointer hover:border-foreground/25 hover:text-foreground dark:border-border/60 dark:hover:border-border @md/chat:size-auto @md/chat:gap-1.5 @md/chat:px-3 @md/chat:py-1 @md/chat:text-xs"
+          // column (preview open beside it) doesn't wrap the label. When the
+          // chat waits for an answer the pill keeps its label at every width
+          // and takes the accent colour: it is a call, not a convenience.
+          className={cn(
+            'pointer-events-auto flex items-center justify-center rounded-full border shadow-sm transition-colors hover:cursor-pointer',
+            needsInput
+              ? 'h-7 gap-1.5 border-primary bg-primary px-3 text-xs font-medium text-primary-foreground hover:bg-primary/90'
+              : 'size-8 border-foreground/15 bg-card text-muted-foreground hover:border-foreground/25 hover:text-foreground dark:border-border/60 dark:hover:border-border @md/chat:h-7 @md/chat:w-auto @md/chat:gap-1.5 @md/chat:px-3 @md/chat:text-xs',
+          )}
         >
-          <ChevronDownIcon className="size-4 @md/chat:size-3.5" />
-          <span className="hidden whitespace-nowrap @md/chat:inline">{t('messages.scrollToBottom')}</span>
+          {needsInput ? (
+            <>
+              <CornerDownLeftIcon className="size-3.5" />
+              <span className="whitespace-nowrap">{t('messages.inputNeeded')}</span>
+            </>
+          ) : (
+            <>
+              <ChevronDownIcon className="size-4 @md/chat:size-3.5" />
+              <span className="hidden whitespace-nowrap @md/chat:inline">{t('messages.scrollToBottom')}</span>
+            </>
+          )}
         </button>
       </div>
     )}

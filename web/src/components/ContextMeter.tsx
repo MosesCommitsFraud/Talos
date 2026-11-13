@@ -1,12 +1,15 @@
+import * as TooltipPrimitive from '@radix-ui/react-tooltip';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { ContextCategory } from '@/api/types';
 import { useChat } from '@/state/chat';
-import { Tooltip } from './ui/misc';
+import { cn } from '@/lib/utils';
+import { RollingNumber } from './RollingNumber';
 
-/* t3code's ContextWindowMeter, bridged to Talos metrics: a small ring in the
- * composer showing how full the model's context window is, with the detail
- * panel (percent · used/max tokens, stacked category bar + legend) on hover. */
+/* A small ring in the composer showing how full the model's context window is,
+ * with a panel on hover or click: the share in large figures, the window as one
+ * stacked bar, what fills it listed largest first, and a line on what happens
+ * when it is full. */
 
 // Canonical category order. Only used to break ties between equally-sized
 // categories, so their colors don't swap between renders.
@@ -110,39 +113,75 @@ export function ContextMeter() {
   // a colored ring should mean something, not just decorate.
   const usageColor =
     percent > 90 ? 'var(--destructive)' : percent > 75 ? 'var(--warning)' : 'var(--primary)';
+  const share = (value: number) =>
+    barDenominator ? formatPercent((value / barDenominator) * 100) : '';
 
   return (
-    <Tooltip
-      side="top"
-      open={open}
-      onOpenChange={setOpen}
-      label={
-        <div className="flex w-64 flex-col gap-2 p-1.5">
-          {/* Title and the numbers sit on separate rows: crammed onto one line
-            * the token counts ("262k/262k") collide with the title and the
-            * badge as soon as the window is large or nearly full. */}
-          <div className="flex items-center gap-1.5">
-            <span className="text-xs font-medium text-muted-foreground">{t('contextMeter.title')}</span>
+    <TooltipPrimitive.Root delayDuration={250} open={open} onOpenChange={setOpen}>
+      <TooltipPrimitive.Trigger asChild>
+        <button
+          type="button"
+          onClick={() => setOpen((o) => !o)}
+          aria-label={t('contextMeter.used', { percent: formatPercent(percent) })}
+          // Sized and centred to sit level with the model picker beside it — no
+          // pt nudge, so the ring's middle lands on the button's middle.
+          className={cn(
+            'flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-full text-foreground/65 outline-none transition-colors hover:bg-accent hover:text-foreground/90 focus:outline-none focus-visible:outline-none',
+            open && 'bg-accent',
+          )}
+        >
+          <span className="relative flex size-3.5 items-center justify-center">
+            <svg viewBox="0 0 24 24" className="absolute inset-0 size-full -rotate-90 transform-gpu" aria-hidden="true">
+              <circle
+                cx="12" cy="12" r={radius} fill="none" strokeWidth="4"
+                stroke="color-mix(in oklab, var(--foreground) 20%, transparent)"
+              />
+              <circle
+                cx="12" cy="12" r={radius} fill="none" strokeWidth="4" strokeLinecap="round"
+                stroke={usageColor}
+                strokeDasharray={circumference}
+                strokeDashoffset={dashOffset}
+                className="transition-[stroke-dashoffset] duration-500 ease-out motion-reduce:transition-none"
+              />
+            </svg>
+          </span>
+        </button>
+      </TooltipPrimitive.Trigger>
+      <TooltipPrimitive.Portal>
+        <TooltipPrimitive.Content
+          side="top"
+          align="end"
+          sideOffset={8}
+          // Kept clear of the window's edges: the ring sits in the corner, and a
+          // panel centred on it would run off the screen.
+          collisionPadding={12}
+          aria-label={t('contextMeter.used', { percent: formatPercent(percent) })}
+          className="z-50 w-72 max-w-[calc(100vw-24px)] rounded-xl border bg-popover p-3 text-popover-foreground shadow-lg"
+        >
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-[13px] font-semibold text-foreground">{t('contextMeter.title')}</span>
             <span
-              className="shrink-0 rounded px-1 py-px text-[9px] font-medium uppercase tracking-wide text-muted-foreground/60 ring-1 ring-inset ring-border"
+              className="shrink-0 rounded-full bg-muted px-1.5 py-px text-[10px] font-medium text-muted-foreground"
               title={isExact ? t('contextMeter.exactHint') : t('contextMeter.estimatedHint')}
             >
               {isExact ? t('contextMeter.exact') : t('contextMeter.estimated')}
             </span>
           </div>
-          <div className="flex items-baseline gap-1.5 tabular-nums">
-            <span className="text-sm font-medium text-foreground/90">{formatPercent(percent)}</span>
+
+          {/* The share large, the two numbers it is made of beside it. */}
+          <div className="mt-2 flex items-baseline gap-2 tabular-nums">
+            <span className="text-2xl leading-none font-semibold tracking-tight" style={{ color: percent > 75 ? usageColor : 'var(--strong)' }}>
+              <RollingNumber value={percent < 10 ? Math.round(percent * 10) / 10 : Math.round(percent)} />%
+            </span>
             {usedTokens != null && maxTokens != null && (
-              <span className="whitespace-nowrap text-[11px] text-muted-foreground/70">
-                {t('contextMeter.usedOf', {
-                  used: formatTokens(usedTokens),
-                  max: formatTokens(maxTokens),
-                })}
+              <span className="min-w-0 truncate text-xs text-muted-foreground">
+                {t('contextMeter.usedOf', { used: formatTokens(usedTokens), max: formatTokens(maxTokens) })}
               </span>
             )}
           </div>
+
           <div
-            className="flex h-1.5 w-full overflow-hidden rounded-full bg-muted/60"
+            className="mt-2.5 flex h-2 w-full gap-px overflow-hidden rounded-full bg-muted"
             role="progressbar"
             aria-valuemin={0}
             aria-valuemax={100}
@@ -167,70 +206,37 @@ export function ContextMeter() {
               />
             )}
           </div>
+
           {hasBreakdown && (
-            <div className="flex flex-col gap-0.5">
+            // What fills the window, largest first: name, share of the window,
+            // tokens. Three columns so the two numbers line up down the list.
+            <dl className="mt-3 grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-x-3 gap-y-1 text-xs">
               {breakdownEntries.map((entry) => (
-                <div key={entry.key} className="flex items-center justify-between gap-2 text-[11px]">
-                  {/* min-w-0 + truncate keeps a long category label from pushing
-                    * the token count out of the panel. */}
-                  <span className="flex min-w-0 items-center gap-1.5 text-muted-foreground">
-                    <span
-                      aria-hidden="true"
-                      className="size-1.5 shrink-0 rounded-full"
-                      style={{ backgroundColor: entry.color }}
-                    />
+                <div key={entry.key} className="contents">
+                  <dt className="flex min-w-0 items-center gap-1.5 text-foreground/90">
+                    <span aria-hidden="true" className="size-2 shrink-0 rounded-[3px]" style={{ backgroundColor: entry.color }} />
                     <span className="truncate">{t(`contextMeter.categories.${entry.key}`)}</span>
-                  </span>
-                  <span className="shrink-0 whitespace-nowrap text-muted-foreground/70 tabular-nums">
-                    {formatTokens(entry.value)}
-                  </span>
+                  </dt>
+                  <dd className="text-right text-muted-foreground/70 tabular-nums">{share(entry.value)}</dd>
+                  <dd className="text-right text-muted-foreground tabular-nums">{formatTokens(entry.value)}</dd>
                 </div>
               ))}
-              <div className="flex items-center justify-between gap-2 text-[11px]">
-                <span className="flex min-w-0 items-center gap-1.5 text-muted-foreground/70">
-                  <span aria-hidden="true" className="size-1.5 shrink-0 rounded-full bg-muted-foreground/30" />
+              <div className="contents">
+                <dt className="flex min-w-0 items-center gap-1.5 text-muted-foreground">
+                  <span aria-hidden="true" className="size-2 shrink-0 rounded-[3px] bg-muted-foreground/25" />
                   <span className="truncate">{t('contextMeter.categories.freeSpace')}</span>
-                </span>
-                <span className="shrink-0 whitespace-nowrap text-muted-foreground/70 tabular-nums">
-                  {formatTokens(freeTokens)}
-                </span>
+                </dt>
+                <dd className="text-right text-muted-foreground/70 tabular-nums">{share(freeTokens ?? 0)}</dd>
+                <dd className="text-right text-muted-foreground tabular-nums">{formatTokens(freeTokens)}</dd>
               </div>
-            </div>
+            </dl>
           )}
-          <p className="text-[11px] leading-snug text-muted-foreground/70">
+
+          <p className="mt-3 border-t border-border pt-2 text-[11px] leading-snug text-muted-foreground">
             {t('contextMeter.hint')}
           </p>
-        </div>
-      }
-    >
-      <button
-        type="button"
-        onClick={() => setOpen((o) => !o)}
-        aria-label={t('contextMeter.used', { percent: formatPercent(percent) })}
-        // Sized and centred to sit level with the model picker beside it — no
-        // pt nudge, so the ring's middle lands on the button's middle.
-        className="flex size-5 shrink-0 cursor-pointer items-center justify-center rounded-md border border-transparent text-foreground/65 outline-none transition-colors hover:bg-accent hover:text-foreground/90 focus:outline-none focus-visible:outline-none"
-      >
-        <span className="relative flex size-3.5 items-center justify-center">
-          <svg
-            viewBox="0 0 24 24"
-            className="absolute inset-0 size-full -rotate-90 transform-gpu"
-            aria-hidden="true"
-          >
-            <circle
-              cx="12" cy="12" r={radius} fill="none" strokeWidth="4"
-              stroke="color-mix(in oklab, var(--foreground) 20%, transparent)"
-            />
-            <circle
-              cx="12" cy="12" r={radius} fill="none" strokeWidth="4" strokeLinecap="round"
-              stroke={usageColor}
-              strokeDasharray={circumference}
-              strokeDashoffset={dashOffset}
-              className="transition-[stroke-dashoffset] duration-500 ease-out motion-reduce:transition-none"
-            />
-          </svg>
-        </span>
-      </button>
-    </Tooltip>
+        </TooltipPrimitive.Content>
+      </TooltipPrimitive.Portal>
+    </TooltipPrimitive.Root>
   );
 }

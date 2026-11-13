@@ -36,7 +36,7 @@ const MAX_INPUT_HEIGHT = 220;
  *  makes up the difference to the shorter text line, so a plate and the last
  *  line of text share one centre. The small radius keeps the hover plate a
  *  square: at this size `rounded-lg` reads as a circle. */
-const INLINE_CONTROL = 'size-[1.625rem] rounded-[7px]';
+const INLINE_CONTROL = 'size-[1.625rem] rounded-full';
 
 /** Icons in the box stand at the ends of the scale, a step past the text colour. */
 const CONTROL_COLOR = 'text-neutral-700 dark:text-white';
@@ -769,6 +769,16 @@ export function Composer() {
             <div ref={inputLead} className="absolute bottom-1.5 start-2.5 flex items-center gap-1">
               <ComposerAddMenu
                 onAttach={() => fileInput.current?.click()}
+                // A lone slash is what opens the command list, as if typed.
+                onSlash={() => {
+                  setText('/');
+                  requestAnimationFrame(() => {
+                    const el = textarea.current;
+                    if (!el) return;
+                    el.focus();
+                    el.setSelectionRange(1, 1);
+                  });
+                }}
                 uploading={uploading}
                 showMic={!!caps?.voice}
                 className={INLINE_CONTROL}

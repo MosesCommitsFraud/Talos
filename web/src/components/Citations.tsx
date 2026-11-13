@@ -1,8 +1,8 @@
 import * as TooltipPrimitive from '@radix-ui/react-tooltip';
-import { ArrowUpRightIcon, ChevronLeftIcon, ChevronRightIcon, FileTextIcon, GlobeIcon } from 'lucide-react';
+import { ArrowUpRightIcon, ChevronLeftIcon, ChevronRightIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { FileTypeIcon } from './FileTypeIcon';
-import { Children, createContext, useContext, useEffect, useState } from 'react';
+import { createContext, useContext, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { Citation } from '@/api/types';
 import { useUi } from '@/state/ui';
@@ -146,45 +146,60 @@ export function CitationAvatar({ c, className }: { c: Citation; className?: stri
   return <FileTypeIcon path={c.title} className={cn('shrink-0', className)} />;
 }
 
-function SourceIcon({ c, className = 'size-3.5' }: { c: Citation; className?: string }) {
-  return c.kind === 'web' ? <GlobeIcon className={className} /> : <FileTextIcon className={className} />;
-}
-
+/** What a hover card says about one source, top to bottom: where it is from
+ *  (mark, host or file, and at the right edge the page or date), the page's
+ *  title, and the passage the claim rests on. Dense on purpose: the card sits
+ *  over the sentence being read and should be taken in at a glance. */
 export function CitationCard({ c }: { c: Citation }) {
   const { t } = useTranslation();
+  const web = c.kind === 'web';
   const meta = [
-    c.kind === 'web' ? c.site : c.title,
     c.page != null && c.page !== '' ? t('messages.citationPage', { page: c.page }) : null,
     c.published,
   ].filter(Boolean).join(' · ');
   return (
-    <div className="min-w-0 space-y-1">
-      <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
-        <span className="flex size-4 shrink-0 items-center justify-center rounded-full bg-muted">
-          <SourceIcon c={c} className="size-2.5" />
-        </span>
-        <span className="truncate">{meta}</span>
+    <div className="min-w-0">
+      <div className="flex min-w-0 items-center gap-1.5">
+        <CitationAvatar c={c} className={web ? 'size-4 rounded-[4px] text-[9px]' : 'size-4 text-muted-foreground'} />
+        <span className="min-w-0 truncate text-xs font-medium text-foreground">{web ? siteHost(c) : c.title}</span>
+        {meta && <span className="ml-auto shrink-0 pl-2 text-[11px] text-muted-foreground tabular-nums">{meta}</span>}
       </div>
-      {c.kind === 'web' && c.title && (
-        <div className="line-clamp-2 text-[13px] leading-snug font-semibold text-popover-foreground">{c.title}</div>
+      {web && c.title && (
+        <div className="mt-1.5 line-clamp-2 text-[13px] leading-snug font-semibold text-strong">{c.title}</div>
       )}
       {c.image_url && (
-        <img src={c.image_url} alt="" loading="lazy" className="max-h-28 rounded-md border object-contain" />
+        <img src={c.image_url} alt="" loading="lazy" className="mt-1.5 max-h-28 rounded-md border object-contain" />
       )}
       {c.snippet && (
-        <p className="line-clamp-4 text-xs leading-relaxed text-muted-foreground">{c.snippet}</p>
-      )}
-      {c.url && (
-        <a
-          href={c.url}
-          target="_blank"
-          rel="noreferrer"
-          className="inline-flex items-center gap-0.5 text-[11px] font-medium text-primary hover:underline"
+        <p
+          className={cn(
+            'selectable line-clamp-4 text-xs leading-[1.5] text-muted-foreground',
+            // A passage from a file is a quotation; a web result's line is the
+            // page describing itself.
+            web ? 'mt-1' : 'mt-1.5 border-l-2 border-border pl-2',
+          )}
         >
-          {t('messages.openSource')} <ArrowUpRightIcon className="size-3" />
-        </a>
+          {c.snippet}
+        </p>
       )}
     </div>
+  );
+}
+
+/** "Open" at the foot of a hover card, for a source that has somewhere to go. */
+export function CitationLink({ c }: { c: Citation }) {
+  const { t } = useTranslation();
+  const href = c.url || c.deeplink;
+  if (!href) return null;
+  return (
+    <a
+      href={href}
+      target="_blank"
+      rel="noreferrer"
+      className="inline-flex h-6 items-center gap-0.5 rounded-full px-2 text-[11px] font-medium text-primary transition-colors hover:bg-primary/10"
+    >
+      {t('messages.openSource')} <ArrowUpRightIcon className="size-3" />
+    </a>
   );
 }
 
@@ -216,25 +231,26 @@ export function PassageNav({
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [active, count, index, onStep]);
-  if (count < 2 && Children.toArray(children).length === 0) return null;
+  // `children` may be components that render nothing (a source without a link),
+  // so the row is always laid out and collapses on its own when it is empty.
   const btn =
-    'flex size-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground';
+    'flex size-6 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-accent hover:text-foreground';
   return (
-    <div className="-mx-1 -mb-1 flex items-center gap-1 border-t border-border/60 pt-1.5">
+    <div className="-mx-1.5 mt-2 flex items-center gap-0.5 border-t border-border/60 px-0.5 pt-1.5 empty:hidden has-[>span:only-child:empty]:hidden">
       {count > 1 && (
         <>
           <button type="button" aria-label={t('messages.prevPassage')} className={btn} onClick={() => onStep((index + count - 1) % count)}>
             <ChevronLeftIcon className="size-3.5" />
           </button>
+          <span className="px-0.5 text-[11px] text-muted-foreground tabular-nums">
+            {index + 1}/{count}
+          </span>
           <button type="button" aria-label={t('messages.nextPassage')} className={btn} onClick={() => onStep((index + 1) % count)}>
             <ChevronRightIcon className="size-3.5" />
           </button>
-          <span className="text-[11px] text-muted-foreground tabular-nums">
-            {t('messages.passageOf', { i: index + 1, n: count })}
-          </span>
         </>
       )}
-      <span className="ml-auto flex items-center gap-2 pr-1">{children}</span>
+      <span className="ml-auto flex items-center">{children}</span>
     </div>
   );
 }
@@ -292,10 +308,12 @@ function CitationPill({ cites }: { cites: Citation[] }) {
           // Radix mirrors the children into a hidden copy for screen readers
           // unless given a label — a second stepper with its own key handler.
           aria-label={cites.map((c) => c.title).join(', ')}
-          className="z-50 w-[22rem] max-w-[calc(100vw-24px)] space-y-2.5 rounded-xl border bg-popover p-3 shadow-lg"
+          className="z-50 w-80 max-w-[calc(100vw-24px)] rounded-xl border bg-popover px-3 pt-2.5 pb-2 shadow-lg"
         >
           <CitationCard key={shown.n} c={shown} />
-          <PassageNav index={idx} count={cites.length} onStep={setIdx} active={open} />
+          <PassageNav index={idx} count={cites.length} onStep={setIdx} active={open}>
+            <CitationLink c={shown} />
+          </PassageNav>
         </TooltipPrimitive.Content>
       </TooltipPrimitive.Portal>
     </TooltipPrimitive.Root>

@@ -317,7 +317,7 @@ function ChunkCard({ group, s, index }: { group: SourceGroup; s: RagSource; inde
           <p
             onClick={() => setExpanded((v) => !v)}
             className={cn(
-              'cursor-pointer text-[12.5px] leading-relaxed whitespace-pre-line text-foreground/80',
+              'selectable cursor-pointer text-[12.5px] leading-relaxed whitespace-pre-line text-foreground/80',
               !expanded && 'line-clamp-3',
             )}
           >
@@ -340,6 +340,12 @@ function ChunkCard({ group, s, index }: { group: SourceGroup; s: RagSource; inde
 /** Passages shown before the rest is asked for: two rows of the grid. */
 const CHUNKS_FOLDED = 4;
 
+/** Sources listed before the rest is asked for. A turn that searched widely
+ *  can rest on dozens; the first few say what kind of ground it stands on, and
+ *  the full list is one click away. One more than this is shown as it is: a
+ *  "show 1 more" row would take the line the source itself fits on. */
+const SOURCES_FOLDED = 5;
+
 /** What a turn rests on, behind one quiet control in its action row: a stack of
  *  source marks and a count. Opened, it lists every source — web pages, data,
  *  knowledge-base files — and under the list the passages that were actually
@@ -361,6 +367,7 @@ export function TurnSources({
   const [open, setOpen] = useState(false);
   const [filter, setFilter] = useState<string | null>(null);
   const [allChunks, setAllChunks] = useState(false);
+  const [allSources, setAllSources] = useState(false);
   const groups = useMemo(() => buildGroups(sources ?? []), [sources]);
   const entries = useMemo<Entry[]>(
     () => [
@@ -379,6 +386,11 @@ export function TurnSources({
   const picked = filter ? groups.find((g) => g.key === filter) : undefined;
   const folded = !allChunks && !filter && chunks.length > CHUNKS_FOLDED + 1;
   const shown = folded ? chunks.slice(0, CHUNKS_FOLDED) : chunks;
+  const sourcesFolded = !allSources && entries.length > SOURCES_FOLDED + 1;
+  // A picked file stays in the list even when it sits below the fold.
+  const listed = sourcesFolded
+    ? entries.filter((entry, i) => i < SOURCES_FOLDED || entry.key === filter)
+    : entries;
 
   return (
     <>
@@ -402,7 +414,7 @@ export function TurnSources({
       <Collapse open={open}>
         <div className="pt-1.5 pb-1">
           <div className="flex max-w-[30rem] flex-col rounded-[10px] border border-border/70 bg-muted/40 p-1">
-            {entries.map((entry) => (
+            {listed.map((entry) => (
               <SourceRow
                 key={entry.key}
                 entry={entry}
@@ -410,6 +422,21 @@ export function TurnSources({
                 onPick={(g) => setFilter((k) => (k === g.key ? null : g.key))}
               />
             ))}
+            {(sourcesFolded || (allSources && entries.length > SOURCES_FOLDED + 1)) && (
+              <button
+                type="button"
+                aria-expanded={allSources}
+                onClick={() => setAllSources((v) => !v)}
+                className={cn(ROW, 'mt-0.5 border-t border-border/60 rounded-t-none pt-1.5 font-medium')}
+              >
+                <ChevronDownIcon className={cn('size-4 shrink-0 opacity-70 transition-transform', allSources && 'rotate-180')} />
+                <span>
+                  {allSources
+                    ? t('messages.fewerSources')
+                    : t('messages.moreSources', { count: entries.length - listed.length })}
+                </span>
+              </button>
+            )}
           </div>
           {chunks.length > 0 && (
             <>
@@ -441,7 +468,7 @@ export function TurnSources({
                 <button
                   type="button"
                   onClick={() => setAllChunks(true)}
-                  className="mt-1.5 rounded-md px-1.5 py-1 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                  className="mt-1.5 inline-flex h-6 items-center rounded-full border border-border/70 px-2.5 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
                 >
                   {t('messages.moreChunks', { count: chunks.length - CHUNKS_FOLDED })}
                 </button>
