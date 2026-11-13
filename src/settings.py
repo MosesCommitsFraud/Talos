@@ -217,15 +217,13 @@ DEFAULT_SETTINGS = {
     # the SEARXNG_URL env var, which defaults to the bundled compose service.
     # Set this only to point at a SearxNG you run elsewhere.
     "searxng_url": "",
-    # Who answers web_search: "searxng" (free, self-hosted, the default) or a
-    # paid API — "brave", "tavily", "serper". A paid provider is used only
-    # when its key below is filled in; otherwise, and whenever it fails, the
-    # search falls back to SearxNG. See src/search_providers.py. Keys are
-    # stored encrypted and never sent back to the browser.
+    # Who answers web_search: "searxng" (free, self-hosted, the default) or
+    # one of the providers in src/search_providers.py, each with its own
+    # web_search_<id>_* settings (added below the dict from that registry). A
+    # provider is used only when its required fields are filled in; otherwise,
+    # and whenever it fails, the search falls back to SearxNG. Keys are stored
+    # encrypted and never sent back to the browser.
     "web_search_provider": "searxng",
-    "web_search_brave_api_key": "",
-    "web_search_tavily_api_key": "",
-    "web_search_serper_api_key": "",
     # Keep internal knowledge out of outbound search queries: refuses a
     # web_search whose wording is copied from the documents retrieved for the
     # same turn, and adds the matching confidentiality rule to the prompt.
@@ -372,6 +370,12 @@ DEFAULT_SETTINGS = {
         "cancel": "escape",
     },
 }
+
+# The web-search providers' own settings (keys, URLs, engine ids), one set per
+# provider in src/search_providers.py, all empty by default.
+from src.search_providers import default_settings as _search_provider_settings  # noqa: E402
+
+DEFAULT_SETTINGS.update(_search_provider_settings())
 
 DEFAULT_FEATURES = {
     "document_editor": True,

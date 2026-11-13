@@ -3295,6 +3295,11 @@ class PreviewHandler(BaseHTTPRequestHandler):
                 {"auth_enabled": False, "user": "preview", "is_admin": True, **_APP_SETTINGS}
             )
             return
+        if path == "/api/auth/search-providers":
+            from src.search_providers import provider_choices
+
+            self._send_json({"providers": provider_choices()})
+            return
         if path == "/api/rag/git-sync":
             self._send_json({"repos": _git_sync_status()})
             return

@@ -601,6 +601,17 @@ def setup_auth_routes(auth_manager: AuthManager) -> APIRouter:
             return _mask_search_keys(settings)
         return scrub_settings(settings)
 
+    @router.get("/search-providers")
+    async def search_providers(request: Request):
+        """Admin only: the web-search providers and the fields each needs,
+        so the settings page can draw them (src/search_providers.py)."""
+        user = _get_current_user(request)
+        if not user or not auth_manager.is_admin(user):
+            raise HTTPException(403, "Admin only")
+        from src.search_providers import provider_choices
+
+        return {"providers": provider_choices()}
+
     @router.post("/settings")
     async def set_settings(request: Request):
         """Admin only: update app settings."""

@@ -298,7 +298,7 @@ async def _provider_request(
         n = max(1, min(int(max_results or DEFAULT_RESULTS), MAX_RESULTS))
     except (TypeError, ValueError):
         n = DEFAULT_RESULTS
-    name, key = provider
+    name, cfg = provider
     tr = (time_range or "").strip().lower()
     cache_key = (f"provider:{name}", query, (language or "").strip(), tr, int(page or 1), n)
     cached = _search_cache.get(cache_key)
@@ -306,7 +306,7 @@ async def _provider_request(
         return {"payload": cached[1], "max_results": n}
     try:
         payload = await provider_search(
-            name, key, query, n, (language or "").strip(), tr, max(1, int(page or 1))
+            name, cfg, query, n, (language or "").strip(), tr, max(1, int(page or 1))
         )
     except ProviderError as exc:
         logger.warning("web_search: %s failed, falling back to SearxNG: %s", name, exc)

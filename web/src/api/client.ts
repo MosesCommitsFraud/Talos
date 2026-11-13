@@ -550,6 +550,18 @@ export async function deleteAssistant(id: string): Promise<void> {
 export type AppSettings = Record<string, unknown>;
 export const fetchAppSettings = () => getJSON<AppSettings>('/api/auth/settings');
 
+/** A web-search provider and the settings it needs (src/search_providers.py). */
+export interface SearchProviderField {
+  setting: string;
+  kind: 'api_key' | 'url' | 'engine_id' | 'engine' | 'domain' | 'username' | 'password' | 'config';
+  required: boolean;
+  secret: boolean;
+  placeholder: string;
+}
+export interface SearchProvider { id: string; label: string; paid: boolean; fields: SearchProviderField[] }
+export const fetchSearchProviders = () =>
+  getJSON<{ providers: SearchProvider[] }>('/api/auth/search-providers').then((d) => d.providers ?? []);
+
 export async function saveAppSettings(patch: AppSettings): Promise<void> {
   const res = await fetch('/api/auth/settings', {
     method: 'POST',
