@@ -301,6 +301,61 @@ def _adapt_sql_dialect(query: str, dialect: str) -> tuple:
     return rewritten, f"SQL Server: rewrote LIMIT {m.group(1)} as TOP {m.group(1)}"
 
 
+# Keywords that start a clause: a syntax error near one of these is about the
+# query's structure, not about using a reserved word as a name.
+_SQL_CLAUSE_WORDS = {
+    "SELECT", "FROM", "WHERE", "GROUP", "ORDER", "BY", "HAVING", "JOIN", "ON", "AND", "OR",
+    "UNION", "WITH", "AS", "INNER", "LEFT", "RIGHT", "FULL", "OUTER", "CROSS", "CASE",
+    "WHEN", "THEN", "ELSE", "END", "IN", "NOT", "IS", "NULL", "OVER", "PARTITION",
+}  # fmt: skip
+
+
+def _sql_tables_in(query: str, dialect: str) -> List[str]:
+    """The tables a query reads, as schema.table or table, in order."""
+    try:
+        import sqlglot
+        from sqlglot import exp
+
+        read = {"mssql": "tsql", "postgresql": "postgres"}.get(dialect, dialect or None)
+        tree = sqlglot.parse_one(query, read=read)
+    except Exception:
+        return []
+    ctes = {c.alias_or_name.lower() for c in tree.find_all(exp.CTE)}
+    out: List[str] = []
+    for table in tree.find_all(exp.Table):
+        name = table.name
+        if not name or name.lower() in ctes:
+            continue
+        full = f"{table.db}.{name}" if table.db else name
+        if full not in out:
+            out.append(full)
+    return out
+
+
+def _sql_columns_note(engine: Any, query: str, dialect: str, limit: int = 3) -> str:
+    """For "invalid column name": the real columns of the tables the query
+    reads. The model test showed models guessing names_de/no/c309 one query at
+    a time (up to 11 failed queries in one turn); the list ends that."""
+    try:
+        from sqlalchemy import inspect
+
+        inspector = inspect(engine)
+    except Exception:
+        return ""
+    parts = []
+    for full in _sql_tables_in(query, dialect)[:limit]:
+        schema, table = full.rsplit(".", 1) if "." in full else (None, full)
+        try:
+            cols = [c.get("name") for c in inspector.get_columns(table, schema=schema)]
+        except Exception:
+            continue
+        if cols:
+            shown = ", ".join(str(c) for c in cols[:80])
+            more = f" (+{len(cols) - 80} more)" if len(cols) > 80 else ""
+            parts.append(f"{full}: {shown}{more}")
+    return (" Columns that exist — " + "; ".join(parts) + ".") if parts else ""
+
+
 def _sql_error_hint(message: str, dialect: str) -> str:
     """A concrete next step for errors that otherwise lead to guessing loops."""
     lower = message.lower()
@@ -313,6 +368,16 @@ def _sql_error_hint(message: str, dialect: str) -> str:
     if "invalid column name" in lower or "no such column" in lower:
         hints.append('Run action "describe" with this table before querying its columns.')
     if dialect == "mssql":
+        # An alias like `AS Plan` or a column named Plan hits a T-SQL keyword
+        # ("Incorrect syntax near the keyword 'Plan'"): models used it for
+        # plan/actual comparisons and stumbled over it repeatedly.
+        keyword = re.search(r"near the keyword '([^']+)'", message, re.I)
+        if keyword and keyword.group(1).upper() not in _SQL_CLAUSE_WORDS:
+            word = keyword.group(1)
+            hints.append(
+                f"{word} is a reserved word in SQL Server: as an alias or name write it in "
+                f"brackets, [{word}], or pick another name."
+            )
         if "near 'limit'" in lower:
             hints.append("SQL Server uses SELECT TOP n, not LIMIT.")
         if "is not a recognized built-in function name" in lower:
@@ -746,9 +811,18 @@ async def do_query_sql(
                 return out
         except SQLAlchemyError as exc:
             message = str(exc)
+            dialect = getattr(getattr(engine, "dialect", None), "name", "")
+            hint = _sql_error_hint(message, dialect)
+            if (
+                engine is not None
+                and action == "query"
+                and (
+                    "invalid column name" in message.lower() or "no such column" in message.lower()
+                )
+            ):
+                hint += _sql_columns_note(engine, str(args.get("query") or ""), dialect)
             return {
-                "error": f"SQL query failed: {exc.__class__.__name__}: {message[:500]}"
-                + _sql_error_hint(message, getattr(getattr(engine, "dialect", None), "name", "")),
+                "error": f"SQL query failed: {exc.__class__.__name__}: {message[:500]}" + hint,
                 "exit_code": 1,
             }
         except Exception as exc:

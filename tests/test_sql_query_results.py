@@ -94,3 +94,34 @@ async def test_list_tables_with_pattern(db):
     out = await ti.do_query_sql(json.dumps({"action": "list_tables", "pattern": "%log%"}))
     assert out["exit_code"] == 0
     assert "log_2024" in out["output"] and "kunden" not in out["output"]
+
+
+async def test_an_unknown_column_is_answered_with_the_real_columns(db):
+    """Models guessed column names one failed query at a time (name_de for
+    des_de, up to 11 failed queries in a turn of the model test)."""
+    con, _ = db
+    con.execute("CREATE TABLE ent323 (id323 INTEGER, no TEXT, des_de TEXT)")
+    con.commit()
+    out = await ti.do_query_sql(
+        json.dumps(
+            {"query": "SELECT k.name, e.name_de FROM kunden k JOIN ent323 e ON e.id323 = k.id"}
+        )
+    )
+    assert out["exit_code"] == 1
+    assert "Columns that exist" in out["error"]
+    assert "ent323: id323, no, des_de" in out["error"]
+    assert "kunden: id, name" in out["error"]
+
+
+def test_a_reserved_word_as_alias_gets_the_bracket_hint():
+    hint = ti._sql_error_hint("Incorrect syntax near the keyword 'Plan'.", "mssql")
+    assert "[Plan]" in hint
+    # A clause keyword is a structural slip, not a name.
+    assert "brackets" not in ti._sql_error_hint(
+        "Incorrect syntax near the keyword 'FROM'.", "mssql"
+    )
+
+
+def test_tables_of_a_query_leave_out_ctes():
+    q = "WITH p AS (SELECT * FROM dbo.vccc25t02 x) SELECT * FROM p JOIN dbo.ent323 e ON 1=1"
+    assert sorted(ti._sql_tables_in(q, "mssql")) == ["dbo.ent323", "dbo.vccc25t02"]
