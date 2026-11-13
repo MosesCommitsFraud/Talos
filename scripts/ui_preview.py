@@ -3497,6 +3497,7 @@ class PreviewHandler(BaseHTTPRequestHandler):
             # Shape must match client.ts UsageStats — StatsPanel dereferences
             # every field, so an empty object crashes the whole Welcome tree.
             import datetime
+            import math
 
             today = datetime.date.today()
             self._send_json(
@@ -3509,12 +3510,15 @@ class PreviewHandler(BaseHTTPRequestHandler):
                     "longest_streak": 9,
                     "peak_hour": 10,
                     "favorite_model": "qwen3-llm",
+                    # The real endpoint's window: 39 weeks, quiet at weekends.
                     "daily": [
                         {
-                            "date": (today - datetime.timedelta(days=41 - i)).isoformat(),
-                            "count": (i * 7) % 5,
+                            "date": (today - datetime.timedelta(days=272 - i)).isoformat(),
+                            "count": 0
+                            if (today - datetime.timedelta(days=272 - i)).weekday() >= 5
+                            else max(0, round(7 + 6 * math.sin(i / 11) + (i * 7) % 6 - (i * 5) % 9)),
                         }
-                        for i in range(42)
+                        for i in range(273)
                     ],
                 }
             )
@@ -3630,6 +3634,31 @@ class PreviewHandler(BaseHTTPRequestHandler):
                 content_type="application/octet-stream",
                 headers={"Content-Disposition": f'attachment; filename="{name}"'},
             )
+            return
+        if path == "/api/search":
+            # Full-text search over the chats (the command palette's messages group).
+            needle = parse_qs(parsed.query).get("q", [""])[0].strip().lower()
+            limit = int(parse_qs(parsed.query).get("limit", ["20"])[0])
+            found = []
+            for session in _sessions() if needle else []:
+                for msg in _history_for(session["id"]):
+                    content = msg.get("content") or ""
+                    at = content.lower().find(needle)
+                    if at < 0 or msg.get("role") not in ("user", "assistant"):
+                        continue
+                    start, end = max(0, at - 50), min(len(content), at + len(needle) + 50)
+                    found.append(
+                        {
+                            "session_id": session["id"],
+                            "session_name": session.get("name") or "Untitled",
+                            "role": msg["role"],
+                            "content_snippet": ("..." if start else "")
+                            + content[start:end]
+                            + ("..." if end < len(content) else ""),
+                            "timestamp": (msg.get("metadata") or {}).get("timestamp"),
+                        }
+                    )
+            self._send_json(found[:limit])
             return
         if path == "/api/prefs/theme":
             self._send_json({})
@@ -3749,7 +3778,31 @@ class PreviewHandler(BaseHTTPRequestHandler):
             )
             return
         if path == "/api/shared-skills":
-            self._send_json({"skills": _SHARED_SKILLS, "count": len(_SHARED_SKILLS)})
+            self._send_json(
+                {"skills": _SHARED_SKILLS, "count": len(_SHARED_SKILLS), "can_manage": True}
+            )
+            return
+        if path.startswith("/api/shared-skills/") and not path.endswith("/download"):
+            # One skill to read (the Customize page's skill dialog).
+            name = path[len("/api/shared-skills/") :]
+            skill = next((s for s in _SHARED_SKILLS if s["name"] == name), None)
+            if skill is None:
+                self._send_json({"detail": "Skill not found"}, 404)
+                return
+            content = (
+                f"---\nname: {skill['name']}\ndescription: {skill['description']}\n---\n\n"
+                f"# {skill['name']}\n\n{skill['description']}\n\n"
+                "## Ablauf\n\n"
+                "1. Die Rohdaten sichten und fehlende Angaben nachfragen.\n"
+                "2. Die Gliederung aus `references/outline.md` übernehmen.\n"
+                "3. Das Ergebnis mit `scripts/build.py` erzeugen und prüfen.\n\n"
+                "## Hinweise\n\n"
+                "- Zahlen immer mit Quelle und Stand angeben.\n"
+                "- Tabellen statt Fließtext, sobald mehr als drei Werte verglichen werden.\n\n"
+                "```bash\npython scripts/build.py --input daten.csv --out bericht.pdf\n```\n"
+            )
+            paths = ["references/outline.md", "scripts/build.py", "assets/logo.svg"]
+            self._send_json({**skill, "content": content, "file_paths": paths[: skill["files"]]})
             return
         if path == "/api/mcp/servers":
             self._send_json([_mcp_status(s) for s in _MCP_SERVERS])
