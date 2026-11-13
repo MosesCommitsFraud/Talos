@@ -3516,7 +3516,9 @@ class PreviewHandler(BaseHTTPRequestHandler):
                             "date": (today - datetime.timedelta(days=272 - i)).isoformat(),
                             "count": 0
                             if (today - datetime.timedelta(days=272 - i)).weekday() >= 5
-                            else max(0, round(7 + 6 * math.sin(i / 11) + (i * 7) % 6 - (i * 5) % 9)),
+                            else max(
+                                0, round(7 + 6 * math.sin(i / 11) + (i * 7) % 6 - (i * 5) % 9)
+                            ),
                         }
                         for i in range(273)
                     ],
