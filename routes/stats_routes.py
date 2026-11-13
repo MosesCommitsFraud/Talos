@@ -16,8 +16,10 @@ from core.database import Session as DbSession
 from core.database import SessionLocal
 from src.auth_helpers import effective_user
 
-# Days of daily counts returned for the activity heatmap (~26 weeks).
-HEATMAP_DAYS = 26 * 7
+# Days of daily counts returned for the activity heatmap: 39 weeks, about nine
+# months. The home screen draws one column of squares per week across its full
+# width, so this number sets the size of a square there.
+HEATMAP_DAYS = 39 * 7
 
 
 def _streaks(days: set, today: date) -> tuple:
