@@ -23,6 +23,19 @@ async function getJSON<T>(url: string): Promise<T> {
 export const fetchSessions = () => getJSON<Session[]>('/api/sessions');
 export const fetchArchivedSessions = () => getJSON<Session[]>('/api/sessions/archived');
 
+/** One message that contains the search text, with the words around the hit. */
+export interface MessageHit {
+  session_id: string;
+  session_name: string;
+  role: 'user' | 'assistant';
+  content_snippet: string;
+  timestamp: string | null;
+}
+
+/** Full-text search over the user's own chats (routes/chat_routes.py). */
+export const searchMessages = (q: string, limit = 12) =>
+  getJSON<MessageHit[]>(`/api/search?q=${encodeURIComponent(q)}&limit=${limit}`);
+
 /** Which build this container was started from. `build` is the git sha CI
  *  compiled, or "dev-build" for a locally built image. */
 export const fetchBuildInfo = () =>
@@ -186,7 +199,7 @@ export interface UsageStats {
   /** 0–23 in the client's local time, or null with no messages yet. */
   peak_hour: number | null;
   favorite_model: string | null;
-  /** Daily message counts, oldest→today (~26 weeks) — feeds the heatmap. */
+  /** Daily message counts, oldest→today (39 weeks) — feeds the heatmap. */
   daily: { date: string; count: number }[];
 }
 
@@ -610,7 +623,21 @@ export interface SharedSkill {
 }
 
 export const fetchSharedSkills = () =>
-  getJSON<{ skills: SharedSkill[]; count: number }>('/api/shared-skills');
+  getJSON<{ skills: SharedSkill[]; count: number; can_manage?: boolean }>('/api/shared-skills');
+
+/** One skill with what the list leaves out: the SKILL.md itself and the paths
+ *  of the files bundled with it. */
+export interface SharedSkillDetail extends SharedSkill {
+  content: string;
+  file_paths: string[];
+}
+
+export const fetchSharedSkill = (name: string) =>
+  getJSON<SharedSkillDetail>(`/api/shared-skills/${encodeURIComponent(name)}`).then((skill) => ({
+    ...skill,
+    content: skill.content ?? '',
+    file_paths: skill.file_paths ?? [],
+  }));
 
 export async function uploadSharedSkill(content: string): Promise<void> {
   const res = await fetch('/api/shared-skills', {
