@@ -607,8 +607,10 @@ async def test_two_chats_in_a_workspace_run_in_separate_kernels(sandboxd, monkey
 
         @staticmethod
         def Popen(args, **kw):
+            # gosu <account> env HOME=<workspace home> <venv python> -c ...
             assert args[0] == "gosu"
-            return real_popen([sys.executable, *args[3:]], **kw)
+            assert args[2] == "env" and args[3] == f"HOME={workspace / '.talos-home'}"
+            return real_popen([sys.executable, *args[5:]], **kw)
 
     monkeypatch.setattr(sandboxd, "subprocess", Shim())
     monkeypatch.setattr(sandboxd, "_workspace", lambda user, chat: ("acct", workspace))
