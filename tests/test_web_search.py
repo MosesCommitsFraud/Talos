@@ -126,6 +126,120 @@ def test_an_empty_search_says_how_many_of_the_turn_found_nothing():
     assert all(web_search.NO_RESULTS in search("") for _ in range(4))
 
 
+def test_a_blocked_search_says_blocked_not_that_the_web_has_nothing():
+    """2026-11-12: every engine CAPTCHA'd the server IP, and "No results … the web
+    has nothing on this" made the model tell users facts did not exist."""
+    payload = {
+        "results": [],
+        "unresponsive_engines": [
+            ["duckduckgo", "CAPTCHA"],
+            ["brave", "too many requests"],
+            ["wikipedia", "timeout"],
+        ],
+    }
+    out = web_search._format_search_results("NIS2", payload, max_results=5)
+    assert "unavailable right now" in out
+    assert "duckduckgo (CAPTCHA)" in out and "brave (too many requests)" in out
+    assert "wikipedia" not in out  # a timeout is not a refusal
+    assert web_search.NO_RESULTS not in out
+
+
+def test_engines_that_only_timed_out_still_read_as_no_results():
+    payload = {"results": [], "unresponsive_engines": [["wikipedia", "timeout"]]}
+    out = web_search._format_search_results("x", payload, max_results=5)
+    assert "No results" in out
+
+
+class _FakeSearx:
+    """Stands in for httpx.AsyncClient against SearxNG, counting requests."""
+
+    calls = 0
+    active = 0
+    peak = 0
+    payload: dict = {}
+
+    def __init__(self, *a, **kw):
+        pass
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc):
+        return False
+
+    async def get(self, url, params=None, headers=None):
+        cls = type(self)
+        cls.calls += 1
+        cls.active += 1
+        cls.peak = max(cls.peak, cls.active)
+        await asyncio.sleep(0.05)
+        cls.active -= 1
+
+        class Resp:
+            status_code = 200
+
+            @staticmethod
+            def json():
+                return cls.payload
+
+        return Resp()
+
+
+@pytest.fixture
+def fake_searx(monkeypatch):
+    import httpx
+
+    class Fake(_FakeSearx):
+        calls = active = peak = 0
+        payload = _payload()
+
+    monkeypatch.setattr(httpx, "AsyncClient", Fake)
+    monkeypatch.setattr(web_search, "get_searxng_url", lambda policy=None: "http://searx")
+    monkeypatch.setattr(web_search, "SEARCH_MIN_INTERVAL", 0.0)
+    monkeypatch.setattr(web_search, "_search_cache", {})
+    monkeypatch.setattr(web_search, "_search_gate", None)
+    from src import web_leak_guard
+
+    monkeypatch.setattr(web_leak_guard, "check_query", lambda q, s: None)
+    return Fake
+
+
+def _request(query):
+    return web_search._searx_request(query, 5, "", "", "", 1, "")
+
+
+def test_a_repeated_query_is_answered_from_the_cache(fake_searx):
+    async def run():
+        await _request("cloud rechenzentrum")
+        await _request("cloud rechenzentrum")
+        await _request("anderes thema")
+
+    asyncio.run(run())
+    assert fake_searx.calls == 2
+
+
+def test_an_empty_answer_is_not_cached(fake_searx):
+    fake_searx.payload = {"results": [], "unresponsive_engines": [["brave", "too many requests"]]}
+
+    async def run():
+        await _request("x")
+        await _request("x")
+
+    asyncio.run(run())
+    assert fake_searx.calls == 2
+
+
+def test_parallel_searches_are_throttled(fake_searx, monkeypatch):
+    monkeypatch.setattr(web_search, "SEARCH_CONCURRENCY", 2)
+
+    async def run():
+        await asyncio.gather(*(_request(f"frage {i}") for i in range(8)))
+
+    asyncio.run(run())
+    assert fake_searx.calls == 8
+    assert fake_searx.peak == 2
+
+
 # ── tool-layer argument parsing ──
 
 

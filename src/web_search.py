@@ -15,12 +15,15 @@ app sits on a network that can reach vLLM, Qdrant, Redis and the LAN, so a
 URL that resolves to a private address is refused before the request is made.
 """
 
+import asyncio
+import contextlib
 import ipaddress
 import json
 import logging
 import os
 import re
 import socket
+import time
 from typing import Any, Dict, List, Optional
 from urllib.parse import urlparse
 
@@ -43,6 +46,19 @@ MAX_REDIRECTS = 5
 # passed through untouched — a user may have enabled extra engines.
 KNOWN_CATEGORIES = {"general", "news", "science", "it", "images", "videos", "map", "music"}
 KNOWN_TIME_RANGES = {"day", "week", "month", "year"}
+
+# SearxNG scrapes the public engines from one server IP. A burst of agent
+# searches (deep research sends several helpers that each search in parallel)
+# got that IP CAPTCHA'd or rate limited by DuckDuckGo, Brave, Google and
+# Startpage at once on 2026-11-12, and the search stayed empty for hours. So the
+# requests are spaced out and repeated queries are answered from a short cache.
+SEARCH_CONCURRENCY = max(1, int(os.environ.get("TALOS_SEARCH_CONCURRENCY", "2")))
+SEARCH_MIN_INTERVAL = max(0.0, float(os.environ.get("TALOS_SEARCH_MIN_INTERVAL", "1.0")))
+SEARCH_CACHE_TTL = max(0.0, float(os.environ.get("TALOS_SEARCH_CACHE_TTL", "1800")))
+SEARCH_CACHE_MAX = 256
+_search_gate: Optional[Any] = None
+_search_last_start = 0.0
+_search_cache: Dict[tuple, tuple] = {}
 
 
 def get_searxng_url(policy: Optional[Dict[str, Any]] = None) -> str:
@@ -297,13 +313,19 @@ async def _searx_request(
     if time_range in KNOWN_TIME_RANGES:
         params["time_range"] = time_range
 
+    cache_key = (base, tuple(sorted((k, str(v)) for k, v in params.items())))
+    cached = _search_cache.get(cache_key)
+    if cached and time.monotonic() - cached[0] < SEARCH_CACHE_TTL:
+        return {"payload": cached[1], "max_results": max_results}
+
     try:
-        async with httpx.AsyncClient(timeout=SEARCH_TIMEOUT, verify=llm_verify()) as client:
-            resp = await client.get(
-                f"{base}/search",
-                params=params,
-                headers={"Accept": "application/json"},
-            )
+        async with _gate():
+            async with httpx.AsyncClient(timeout=SEARCH_TIMEOUT, verify=llm_verify()) as client:
+                resp = await client.get(
+                    f"{base}/search",
+                    params=params,
+                    headers={"Accept": "application/json"},
+                )
     except httpx.ConnectError:
         return {
             "error": (
@@ -346,7 +368,58 @@ async def _searx_request(
             "exit_code": 1,
         }
 
+    # Only real answers are kept: an empty or blocked result must not stick
+    # around after the engines are back.
+    if payload.get("results") and SEARCH_CACHE_TTL > 0:
+        if len(_search_cache) >= SEARCH_CACHE_MAX:
+            _search_cache.pop(next(iter(_search_cache)))
+        _search_cache[cache_key] = (time.monotonic(), payload)
     return {"payload": payload, "max_results": max_results}
+
+
+@contextlib.asynccontextmanager
+async def _gate():
+    """At most SEARCH_CONCURRENCY requests to SearxNG at a time, and starts at
+    least SEARCH_MIN_INTERVAL seconds apart, across the whole app."""
+    global _search_gate, _search_last_start
+    loop = asyncio.get_running_loop()
+    # One semaphore per event loop: a semaphore is bound to the loop it first
+    # waited in (tests and worker threads run their own loops).
+    if _search_gate is None or _search_gate[0] is not loop:
+        _search_gate = (loop, asyncio.Semaphore(SEARCH_CONCURRENCY))
+    async with _search_gate[1]:
+        wait = _search_last_start + SEARCH_MIN_INTERVAL - time.monotonic()
+        _search_last_start = time.monotonic() + max(0.0, wait)
+        if wait > 0:
+            await asyncio.sleep(wait)
+        yield
+
+
+# Reasons SearxNG gives in `unresponsive_engines` when an engine refused us
+# rather than found nothing.
+_BLOCK_WORDS = ("captcha", "too many", "access denied", "suspended", "forbidden", "403", "429")
+
+
+def _blocked_engines(payload: Dict[str, Any]) -> List[str]:
+    """Engines that refused the query (CAPTCHA, rate limit, access denied)."""
+    out = []
+    for entry in payload.get("unresponsive_engines") or []:
+        if isinstance(entry, (list, tuple)) and entry:
+            name, reason = str(entry[0]), str(entry[1] if len(entry) > 1 else "")
+        else:
+            name, reason = str(entry), ""
+        if any(w in reason.lower() for w in _BLOCK_WORDS):
+            out.append(f"{name} ({reason})" if reason else name)
+    return out
+
+
+SEARCH_BLOCKED = (
+    "Web search is unavailable right now: the search engines refused this server's "
+    "requests ({engines}). That says nothing about whether the web has this, so do not "
+    "conclude it does not exist, and do not search again in this turn. Answer from what "
+    "you know or web_fetch a source you know, and tell the user the web search is "
+    "temporarily blocked."
+)
 
 
 def _pick_results(
@@ -434,6 +507,10 @@ def _format_search_results(
                 "Try a query that surfaces approved sources, or tell the user this topic is "
                 "not reachable from the allowed domains."
             )
+            return "\n".join(lines)
+        blocked = _blocked_engines(payload)
+        if blocked:
+            lines.append("\n" + SEARCH_BLOCKED.format(engines=", ".join(blocked[:6])))
             return "\n".join(lines)
         lines.append("\n" + _no_results(session_id))
         suggestions = payload.get("suggestions") or []
