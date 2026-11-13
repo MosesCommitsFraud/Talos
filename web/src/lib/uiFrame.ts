@@ -383,6 +383,40 @@ window.talos = {
     };
   })()
 };
+// The frame runs without allow-same-origin, so the browser's localStorage and
+// sessionStorage throw on first touch. Models still reach for them (a
+// checklist that "remembers its state" was built on localStorage twice in the
+// model test and would have lost everything). localStorage is mapped onto
+// talos.store, which does persist; sessionStorage lives as long as the view.
+(function(){
+  function storage(load, save){
+    var items = load();
+    function put(){ save(items); }
+    var api = {
+      getItem: function(k){ k = String(k); return Object.prototype.hasOwnProperty.call(items, k) ? items[k] : null; },
+      setItem: function(k, v){ items[String(k)] = String(v); put(); },
+      removeItem: function(k){ delete items[String(k)]; put(); },
+      clear: function(){ items = {}; put(); },
+      key: function(i){ var keys = Object.keys(items); return i >= 0 && i < keys.length ? keys[i] : null; }
+    };
+    Object.defineProperty(api, 'length', {get: function(){ return Object.keys(items).length; }});
+    return api;
+  }
+  function usable(name){ try { var s = window[name]; s.getItem('x'); return true; } catch (e) { return false; } }
+  var LS_KEY = '__localStorage';
+  try {
+    if (!usable('localStorage')) {
+      var ls = storage(
+        function(){ var v = window.talos.store.get(LS_KEY, {}); return v && typeof v === 'object' ? v : {}; },
+        function(items){ window.talos.store.set(LS_KEY, items); }
+      );
+      Object.defineProperty(window, 'localStorage', {value: ls, configurable: true});
+    }
+    if (!usable('sessionStorage')) {
+      Object.defineProperty(window, 'sessionStorage', {value: storage(function(){ return {}; }, function(){}), configurable: true});
+    }
+  } catch (e) { report('store', 'storage shim failed: ' + e); }
+})();
 var reqSeq = 0, pending = {};
 window.addEventListener('message', function(e){
   if (e.source !== window.parent || !e.data || e.data.type !== 'talos:ui-data-response') return;
