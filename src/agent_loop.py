@@ -95,6 +95,9 @@ def _load_mcp_disabled_map() -> Dict[str, set]:
     return disabled_map
 
 
+# Largest MCP image (as a data URL) saved with a tool event; a chart PNG is ~50-150 KB.
+_MAX_SAVED_SCREENSHOT_CHARS = 1_500_000
+
 # System prompt that tells the LLM about available tools.
 # Always injected — the LLM decides whether to use them.
 _AGENT_PREAMBLE = """\
@@ -4574,6 +4577,12 @@ async def stream_agent_loop(
                 tool_event["created_images"] = result["created_images"]
                 if result.get("image_note"):
                     tool_event["image_note"] = result["image_note"]
+            # An MCP image (AutoTS plot, browser screenshot) showed live but was
+            # gone on reload. Kept when it is of a size a chart is, so a run of
+            # full-page screenshots can't swell the saved history.
+            _shot = tool_output_data.get("screenshot")
+            if _shot and len(_shot) <= _MAX_SAVED_SCREENSHOT_CHARS:
+                tool_event["screenshot"] = _shot
             if result.get("doc_id"):
                 tool_event["doc_id"] = result["doc_id"]
                 tool_event["doc_title"] = result.get("title", "")

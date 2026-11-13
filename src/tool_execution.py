@@ -2523,6 +2523,9 @@ _FORMATTER_HANDLED_KEYS = {
     "applied",
     "error",
     "output",
+    # MCP images (base64) go to the chat, not into the model's context: echoed
+    # here they arrived cut off at 8000 characters and the model tried to decode them.
+    "images",
     # query_sql already renders its rows as a markdown table in `output`.
     # Without these, the generic `**data:**` echo below re-serialized the SAME
     # rows as indented JSON — every SQL call cost ~2x its rows in context, and

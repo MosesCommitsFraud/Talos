@@ -534,10 +534,12 @@ class McpManager:
             if hasattr(content, "text"):
                 output_parts.append(content.text)
             elif getattr(content, "type", "") == "image" and hasattr(content, "data"):
-                # Image content (e.g. Playwright screenshots)
+                # Image content (Playwright screenshots, AutoTS plots). The chat
+                # shows it to the user; the model gets only this note, since the
+                # base64 would be cut short in its context and is no use as text.
                 mime = getattr(content, "mimeType", "image/png")
                 images.append({"data": content.data, "mimeType": mime})
-                output_parts.append(f"[Screenshot captured ({mime})]")
+                output_parts.append(f"[Image ({mime}) shown to the user in the chat]")
             elif hasattr(content, "data"):
                 output_parts.append(str(content.data))
 
