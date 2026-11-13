@@ -47,11 +47,41 @@ export function Input({ className, ...props }: React.InputHTMLAttributes<HTMLInp
   return (
     <input
       className={cn(
-        'h-8 w-full rounded-lg border border-input bg-transparent px-2.5 text-sm outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30 dark:bg-input/20',
+        'h-8 w-full min-w-0 rounded-lg border border-input bg-foreground/[0.03] px-2.5 text-sm outline-none transition-colors placeholder:text-muted-foreground/70 hover:border-foreground/20 focus-visible:border-ring focus-visible:bg-transparent focus-visible:ring-2 focus-visible:ring-ring/30',
         className,
       )}
       {...props}
     />
+  );
+}
+
+/* ── Form field ──
+   One input of a form with its name over it and, where it helps, a line under
+   it saying what belongs in there. A form is a grid of these (`FormGrid`), so
+   related fields share a row on a wide panel and stack on a narrow one — a
+   field is never told apart only by a placeholder that vanishes on typing. */
+export function Field({ label, hint, className, children }: {
+  label: React.ReactNode;
+  hint?: React.ReactNode;
+  className?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <label className={cn('flex min-w-0 flex-col gap-1', className)}>
+      <span className="text-[13px] font-medium text-foreground">{label}</span>
+      {children}
+      {hint && <span className="text-xs leading-snug text-muted-foreground">{hint}</span>}
+    </label>
+  );
+}
+
+/** Two columns of fields that fold to one when the panel is narrow. A field
+ *  spans both with `className="@lg/form:col-span-2"`. */
+export function FormGrid({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) {
+  return (
+    <div className="@container/form">
+      <div className={cn('grid max-w-2xl gap-x-4 gap-y-3 @lg/form:grid-cols-2', className)} {...props} />
+    </div>
   );
 }
 
@@ -60,7 +90,7 @@ export function Textarea({ className, ...props }: React.TextareaHTMLAttributes<H
   return (
     <textarea
       className={cn(
-        'min-h-[88px] w-full resize-y rounded-lg border border-input bg-transparent px-2.5 py-2 text-sm leading-relaxed outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30 dark:bg-input/20',
+        'min-h-[88px] w-full min-w-0 resize-y rounded-lg border border-input bg-foreground/[0.03] px-2.5 py-2 text-sm leading-relaxed outline-none transition-colors placeholder:text-muted-foreground/70 hover:border-foreground/20 focus-visible:border-ring focus-visible:bg-transparent focus-visible:ring-2 focus-visible:ring-ring/30',
         className,
       )}
       {...props}

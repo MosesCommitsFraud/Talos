@@ -44,6 +44,9 @@
   --radius-3xl: calc(var(--radius) + 12px);
   --font-sans: "DM Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
   --font-mono: "Fira Code", ui-monospace, SFMono-Regular, Menlo, monospace;
+  /* Hover and press states answer in 100ms rather than Tailwind's 150ms: a
+     colour change that trails the pointer is what makes a control feel slow. */
+  --default-transition-duration: 100ms;
 }
 
 /* PDF.js text overlay keeps preview text selectable without importing the
@@ -306,19 +309,35 @@
   }
   body {
     @apply bg-background text-foreground font-sans antialiased;
+    /* The interface is not a document: labels, rows and buttons do not
+       highlight when the pointer drags across them. What a person writes or
+       reads stays selectable, see below. */
+    -webkit-user-select: none;
+    user-select: none;
+  }
+  /* Anything typed into: the composer, a title being renamed, every field. */
+  input,
+  textarea,
+  [contenteditable]:not([contenteditable="false"]) {
+    -webkit-user-select: text;
+    user-select: text;
   }
 }
 
-/* Film-grain overlay — the MIDA texture that keeps large flat surfaces alive */
-body::after {
-  content: "";
-  position: fixed;
-  inset: 0;
-  pointer-events: none;
-  opacity: 0.035;
-  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
-  background-repeat: repeat;
-  background-size: 256px 256px;
+/* Content, as opposed to interface: the words of a conversation, code, tool
+   output and opened documents can be marked and copied. `.selectable` opts a
+   block in; `.chat-markdown` is every rendered answer. */
+.selectable,
+.selectable *,
+.chat-markdown,
+.chat-markdown * {
+  -webkit-user-select: text;
+  user-select: text;
+}
+/* Controls that sit inside content (source pills, copy buttons) stay inert. */
+:is(.selectable, .chat-markdown) :is(button, [role="button"], .cite-chip, .cite-chip *) {
+  -webkit-user-select: none;
+  user-select: none;
 }
 
 /* Custom scrollbars — wider and higher-contrast than the OS overlay bars

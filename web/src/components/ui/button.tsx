@@ -2,17 +2,19 @@ import { cva, type VariantProps } from 'class-variance-authority';
 import type * as React from 'react';
 import { cn } from '@/lib/utils';
 
-/* MIDA-derived button: subtle inset top-light on filled variants, alpha
-   borders on outline, ghost = accent wash. Primary is the Talos blue. */
+/* One button shape for the whole app: a pill, as on the question card. Filled
+   variants carry a subtle inset top-light, outline an alpha border, ghost is an
+   accent wash. Primary is the Talos blue. A press answers at once — the pill
+   gives a little under the pointer — so a click never feels unregistered. */
 const buttonVariants = cva(
-  'relative inline-flex shrink-0 cursor-pointer items-center justify-center gap-2 whitespace-nowrap rounded-lg border font-medium text-sm outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:pointer-events-none disabled:opacity-60 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*="size-"])]:size-4',
+  'relative inline-flex shrink-0 cursor-pointer items-center justify-center gap-2 whitespace-nowrap rounded-full border font-medium text-sm outline-none transition-[color,background-color,border-color,transform] duration-100 active:scale-[0.97] motion-reduce:active:scale-100 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:pointer-events-none disabled:opacity-60 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*="size-"])]:size-4',
   {
     defaultVariants: { size: 'default', variant: 'default' },
     variants: {
       size: {
-        default: 'h-8 px-3',
-        sm: 'h-7 gap-1.5 px-2.5',
-        lg: 'h-9 px-3.5',
+        default: 'h-8 px-3.5',
+        sm: 'h-7 gap-1.5 px-3',
+        lg: 'h-9 px-4',
         icon: 'size-8',
         'icon-sm': 'size-7',
         'icon-lg': 'size-9',

@@ -245,10 +245,10 @@ export function AskUser({ msg }: { msg: UiMessage }) {
           </div>
         )}
         <div className="ml-auto flex items-center gap-1.5">
-          <Button size="sm" variant="secondary" className="rounded-full px-3" disabled={disabled} onClick={() => advance(true)}>
+          <Button size="sm" variant="secondary" disabled={disabled} onClick={() => advance(true)}>
             {t('askUser.skip')}
           </Button>
-          <Button size="sm" className="rounded-full px-3" disabled={disabled || !answer} onClick={() => advance(false)}>
+          <Button size="sm" disabled={disabled || !answer} onClick={() => advance(false)}>
             {last ? t('askUser.submit') : t('askUser.next')}
             <KeybindingPill value="mod+enter" className="bg-primary-foreground/20 text-primary-foreground" />
           </Button>

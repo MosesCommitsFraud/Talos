@@ -166,7 +166,7 @@ export function RagWorkspace() {
             </div>
           </div>
         </header>
-        <div className="min-h-0 flex-1 overflow-y-auto [-webkit-mask-image:linear-gradient(to_bottom,transparent_0,black_24px)] [mask-image:linear-gradient(to_bottom,transparent_0,black_24px)]">
+        <div className="min-h-0 flex-1 overflow-y-auto">
           <div className="mx-auto w-full max-w-4xl px-5 pt-6 pb-5">
             {space.kind === 'overview' && (
               <RagOverview onOpen={(id) => setSpace({ kind: 'base', id })} />

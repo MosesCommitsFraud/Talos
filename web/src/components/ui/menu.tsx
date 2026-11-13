@@ -11,7 +11,29 @@ export const popupClass =
   'dropdown-glass z-50 min-w-32 origin-[var(--radix-popper-transform-origin)] rounded-lg p-1 text-popover-foreground outline-none';
 
 export const itemClass =
-  "flex min-h-8 cursor-default select-none items-center gap-2 rounded-sm px-2 py-1 text-base text-foreground outline-none data-[disabled]:pointer-events-none data-[disabled]:opacity-60 data-[highlighted]:bg-accent data-[highlighted]:text-accent-foreground sm:min-h-7 sm:text-sm [&>svg]:-mx-0.5 [&>svg]:pointer-events-none [&>svg]:shrink-0 [&>svg:not([class*='size-'])]:size-4.5 sm:[&>svg:not([class*='size-'])]:size-4 [&>svg:not([class*='opacity-'])]:opacity-80 [&>svg:not([class*='text-'])]:text-muted-foreground data-[variant=destructive]:text-destructive-foreground data-[variant=destructive]:[&>svg:not([class*='text-'])]:text-current";
+  "flex min-h-8 cursor-default select-none items-center gap-2 rounded-sm px-2 py-1 text-base text-foreground outline-none data-[disabled]:pointer-events-none data-[disabled]:opacity-60 data-[highlighted]:bg-accent data-[highlighted]:text-accent-foreground sm:min-h-7 sm:text-sm [&>svg:not([class*='ms-auto'])]:-mx-0.5 [&>svg]:pointer-events-none [&>svg]:shrink-0 [&>svg:not([class*='size-'])]:size-4.5 sm:[&>svg:not([class*='size-'])]:size-4 [&>svg:not([class*='opacity-'])]:opacity-80 [&>svg:not([class*='text-'])]:text-muted-foreground data-[variant=destructive]:text-destructive-foreground data-[variant=destructive]:[&>svg:not([class*='text-'])]:text-current";
+
+/** The composer's "+" menu and its submenus: rows a touch taller than a plain
+ *  menu's, with a softer corner, so there is room for a switch or a value at
+ *  the end of a row. Add to a MenuPopup / MenuSubPopup's className. */
+export const roomyMenuClass =
+  "rounded-xl p-1 [&_[role^=menuitem]]:min-h-8 [&_[role^=menuitem]]:gap-2 [&_[role^=menuitem]]:rounded-md [&_[role^=menuitem]]:px-2 [&_[role^=menuitem]]:text-[13.5px] [&_[role^=menuitem]>svg:not([class*='size-'])]:size-4";
+
+/** The switch at the end of a menu row that turns something on or off. Only
+ *  the picture of one: the row is the control, and takes the click. */
+export function MenuSwitch({ on }: { on: boolean }) {
+  return (
+    <span
+      aria-hidden
+      className={cn(
+        'ms-auto flex h-4 w-7 shrink-0 items-center rounded-full p-0.5 transition-colors',
+        on ? 'bg-primary' : 'bg-foreground/20',
+      )}
+    >
+      <span className={cn('size-3 rounded-full bg-white shadow-sm transition-transform duration-150', on && 'translate-x-3')} />
+    </span>
+  );
+}
 
 export const labelClass = 'px-2 py-1.5 text-xs font-medium text-muted-foreground';
 export const separatorClass = 'mx-2 my-1 h-px bg-border';
@@ -66,10 +88,27 @@ export function MenuSubTrigger({ className, children, ...props }: DropdownMenu.D
   );
 }
 
-export function MenuSubPopup({ className, ...props }: DropdownMenu.DropdownMenuSubContentProps) {
+/** A submenu opens beside its parent with a gap between the two, never over
+ *  it: the offset clears the parent's own padding and border, and the small
+ *  lift lines the first row up with the row it opened from. */
+const SUB_SIDE_OFFSET = 10;
+const SUB_ALIGN_OFFSET = -5;
+
+export function MenuSubPopup({
+  className,
+  sideOffset = SUB_SIDE_OFFSET,
+  alignOffset = SUB_ALIGN_OFFSET,
+  ...props
+}: DropdownMenu.DropdownMenuSubContentProps) {
   return (
     <DropdownMenu.Portal>
-      <DropdownMenu.SubContent className={cn(popupClass, className)} {...props} />
+      <DropdownMenu.SubContent
+        sideOffset={sideOffset}
+        alignOffset={alignOffset}
+        collisionPadding={8}
+        className={cn(popupClass, className)}
+        {...props}
+      />
     </DropdownMenu.Portal>
   );
 }
@@ -117,10 +156,21 @@ export function ContextMenuSubTrigger({
   );
 }
 
-export function ContextMenuSubPopup({ className, ...props }: ContextMenuPrimitive.ContextMenuSubContentProps) {
+export function ContextMenuSubPopup({
+  className,
+  sideOffset = SUB_SIDE_OFFSET,
+  alignOffset = SUB_ALIGN_OFFSET,
+  ...props
+}: ContextMenuPrimitive.ContextMenuSubContentProps) {
   return (
     <ContextMenuPrimitive.Portal>
-      <ContextMenuPrimitive.SubContent className={cn(popupClass, className)} {...props} />
+      <ContextMenuPrimitive.SubContent
+        sideOffset={sideOffset}
+        alignOffset={alignOffset}
+        collisionPadding={8}
+        className={cn(popupClass, className)}
+        {...props}
+      />
     </ContextMenuPrimitive.Portal>
   );
 }
