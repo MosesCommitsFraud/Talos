@@ -2036,6 +2036,49 @@ def _tool_parallelism() -> int:
     return max(1, min(n, 8))
 
 
+_AUTO_PRESENT_EXTENSIONS = (".xlsx", ".xlsm", ".docx", ".pptx", ".pdf")
+# Names that mark a file as a step on the way, not the result.
+_AUTO_PRESENT_SKIP = re.compile(
+    r"(^|[/_.-])(tmp|temp|orig|backup|bak|preview|recalc|test)([/_.-]|$)", re.I
+)
+
+
+def _auto_present_files(created: List[str], tool_events: list) -> List[str]:
+    """The deliverable(s) to show when the model built an office file or PDF
+    this turn and never called present_files.
+
+    Conservative on purpose — a wrongly shown helper file is worse than none:
+    only office formats and PDF (charts and images already show on their own,
+    and an .html is shown only from output/), nothing under skills/ or a hidden
+    folder, nothing named like a temp or preview copy, the newest file per
+    format, at most three. Files under output/ win over files elsewhere."""
+    if any(ev.get("tool") == "present_files" for ev in tool_events):
+        return []
+    picked: Dict[str, str] = {}
+    for name in created:
+        path = str(name or "").replace("\\", "/")
+        while path.startswith("./"):
+            path = path[2:]
+        low = path.lower()
+        ext = os.path.splitext(low)[1]
+        if ":" in path or not ext:
+            continue
+        if ext not in _AUTO_PRESENT_EXTENSIONS and not (
+            ext == ".html" and low.startswith("output/")
+        ):
+            continue
+        parts = path.split("/")
+        if parts[0] == "skills" or any(p.startswith(".") for p in parts):
+            continue
+        if any(p.startswith("_") or _AUTO_PRESENT_SKIP.search(p) for p in parts):
+            continue
+        picked.pop(ext, None)
+        picked[ext] = path  # newest last
+    files = list(picked.values())
+    in_output = [f for f in files if f.lower().startswith("output/")]
+    return (in_output or files)[-3:]
+
+
 def _build_actions_snapshot(tool_events: list, limit: int = 8000) -> str:
     """Compact record of what the agent actually did this turn, for the
     verifier to judge against. One block per tool execution: the command and
@@ -2948,6 +2991,9 @@ async def stream_agent_loop(
     time_to_first_token = None
     first_token_received = False
     tool_events = []  # Persist tool executions for history reload
+    # Workspace files this turn's tools created, in order — for handing over a
+    # deliverable the model forgot to present (_auto_present_files).
+    turn_created_files: List[str] = []
     round_texts = []  # Cleaned text per round for history reload
     queued_messages: List[Dict[str, Any]] = []  # delivered mid-turn, for history reload
     _queued_pins: List[Dict] = []  # their messages, kept verbatim by compaction
@@ -4000,6 +4046,30 @@ async def stream_agent_loop(
             # answer for a display problem. The chat now keeps the earlier
             # answer on screen itself (web/src/components/Messages.tsx,
             # answerBody), so the model writes its answer once.
+            _auto = _auto_present_files(turn_created_files, tool_events)
+            if _auto:
+                # The model built the file the user asked for but did not hand
+                # it over (3 of 102 runs in the 2026-11-12 model test). Show it
+                # the way present_files would, live and in saved history.
+                _cmd = json.dumps({"files": _auto}, ensure_ascii=False)
+                _out = "Shown to the user: " + ", ".join(_auto)
+                yield (
+                    f"data: {json.dumps({'type': 'tool_start', 'tool': 'present_files', 'command': _cmd, 'round': round_num})}\n\n"
+                )
+                yield (
+                    f"data: {json.dumps({'type': 'tool_output', 'tool': 'present_files', 'command': _cmd, 'output': _out, 'exit_code': 0, 'presented_files': _auto, 'auto': True})}\n\n"
+                )
+                tool_events.append(
+                    {
+                        "round": round_num,
+                        "tool": "present_files",
+                        "command": _cmd,
+                        "output": _out,
+                        "exit_code": 0,
+                        "presented_files": _auto,
+                        "auto": True,
+                    }
+                )
             break  # no tools — done
 
         # ── Loop-breaker (Terminus-style stall detector) ──────────────
@@ -4461,6 +4531,10 @@ async def stream_agent_loop(
             if artifact_changed:
                 tool_output_data["artifacts_changed"] = True
                 tool_output_data["created_artifacts"] = created_artifacts
+                for _name in created_artifacts:
+                    if _name in turn_created_files:
+                        turn_created_files.remove(_name)
+                    turn_created_files.append(_name)
             if result.get("presented_files"):
                 tool_output_data["presented_files"] = result["presented_files"]
             # Forward a file-write diff for inline before/after rendering
