@@ -2,9 +2,11 @@ import { useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { cn } from '@/lib/utils';
 
-/** Shared visual vocabulary for the Users workspace. Deliberately matches the
- *  home screen's stat panel (components/Welcome.tsx) so the two read as the
- *  same product: muted tile, tabular numerals, primary-tinted bars. */
+/** Shared visual vocabulary for every place the app reports usage: the home
+ *  screen's activity block (components/Welcome.tsx), the admin Users page and
+ *  Settings → Usage. Flat and dense, in the manner of the settings dialog: a
+ *  ruled ledger of numbers, headed sections straight on the page, thin bars.
+ *  No cards. */
 
 export function useNum() {
   const { i18n } = useTranslation();
@@ -90,33 +92,66 @@ function ChartFrame({ onLeave, children, tip, className }: {
   );
 }
 
-export function Tile({ label, value, hint, tone }: {
+export interface Stat {
   label: string;
   value: string;
   hint?: string;
   /** `warn` flags a number that deserves attention (errors, limit pressure). */
   tone?: 'warn';
+}
+
+/** Numbers as a ledger: cells ruled off by hairlines, no boxes around them.
+ *  The same block wherever the app reports usage (home screen, the admin
+ *  Users page, Settings → Usage), so a figure looks the same in all three.
+ *  The rules are each cell's own top and left border; the outermost ones are
+ *  pulled out of view, which leaves lines only *between* cells and lets the
+ *  grid sit on any surface. */
+export function StatGrid({ stats, columns = 4, className }: {
+  stats: Stat[];
+  columns?: 2 | 3 | 4;
+  className?: string;
 }) {
   return (
-    <div className="rounded-lg bg-muted/50 px-3 py-2">
-      <div className="truncate text-xs text-muted-foreground">{label}</div>
-      <div className={cn('truncate text-sm font-semibold tabular-nums', tone === 'warn' && 'text-destructive-foreground')}>
-        {value}
-      </div>
-      {hint && <div className="truncate text-[10px] text-muted-foreground">{hint}</div>}
+    <div className={cn('@container/stats overflow-hidden border-y border-border', className)}>
+      <dl
+        className={cn(
+          '-mt-px -ml-px grid',
+          columns === 2 ? 'grid-cols-2' : columns === 3 ? 'grid-cols-3' : 'grid-cols-2 @lg/stats:grid-cols-4',
+        )}
+      >
+        {stats.map((s) => (
+          <div key={s.label} className="min-w-0 border-t border-l border-border px-3 py-2">
+            <dt className="truncate text-[11px] text-muted-foreground">{s.label}</dt>
+            <dd
+              className={cn(
+                'truncate text-[15px] leading-snug font-semibold tracking-[-0.01em] tabular-nums',
+                s.tone === 'warn' ? 'text-destructive-foreground' : 'text-strong',
+              )}
+              title={s.value}
+            >
+              {s.value}
+            </dd>
+            {s.hint && <dd className="truncate text-[11px] leading-tight text-muted-foreground">{s.hint}</dd>}
+          </div>
+        ))}
+      </dl>
     </div>
   );
 }
 
-export function Card({ title, action, children }: {
+/** A titled block of a usage page: a heading with an optional note at the
+ *  right, then content straight on the page. Blocks separate by the space
+ *  between them, not by a frame each. */
+export function Section({ title, action, children, className }: {
   title: string;
   action?: React.ReactNode;
   children: React.ReactNode;
+  className?: string;
 }) {
   return (
-    <section className="rounded-xl border bg-card p-4">
-      <div className="mb-3 flex items-center justify-between gap-3">
-        <h2 className="text-sm font-medium">{title}</h2>
+    <section className={cn('min-w-0', className)}>
+      <div className="mb-1.5 flex min-h-6 items-center justify-between gap-3">
+        <h2 className="text-[13px] font-semibold text-foreground">{title}</h2>
         {action}
       </div>
       {children}
@@ -124,38 +159,81 @@ export function Card({ title, action, children }: {
   );
 }
 
+/** A caption inside a section, for its second list ("Authored skills"). */
+export function SubLabel({ children, className }: { children: React.ReactNode; className?: string }) {
+  return (
+    <div className={cn('text-[11px] font-medium tracking-wide text-muted-foreground uppercase', className)}>
+      {children}
+    </div>
+  );
+}
+
+/** A quiet line standing in for a list that has nothing in it. */
+export function Empty({ children }: { children: React.ReactNode }) {
+  return <p className="py-1 text-xs text-muted-foreground">{children}</p>;
+}
+
 /** Horizontal bar list — the top-N breakdown used for tools, skills, modes.
- *  Bars are proportional to the largest entry, not the total, so a long tail
- *  stays visible. */
+ *  Name, a thin bar, the count: the bar is its own column so names never sit
+ *  on a coloured ground and the counts line up. Bars are proportional to the
+ *  largest entry, not the total, so a long tail stays visible. */
 export function BarList({ rows, empty }: {
   rows: Array<{ key: string; label: string; value: number; sub?: string; tone?: 'warn' }>;
   empty: string;
 }) {
   const { num } = useNum();
-  if (rows.length === 0) return <p className="py-2 text-xs text-muted-foreground">{empty}</p>;
+  if (rows.length === 0) return empty ? <Empty>{empty}</Empty> : null;
   const max = Math.max(...rows.map((r) => r.value), 1);
   return (
-    <div className="space-y-1">
+    <div className="grid grid-cols-[minmax(0,auto)_minmax(2rem,1fr)_auto] items-center gap-x-3 text-xs">
       {rows.map((r) => (
-        <div key={r.key} className="relative overflow-hidden rounded-md px-2 py-1">
-          <div
-            className="absolute inset-y-0 left-0 rounded-md"
-            style={{
-              width: `${Math.max(2, (r.value / max) * 100)}%`,
-              background: `color-mix(in srgb, var(--primary) ${r.tone === 'warn' ? 14 : 22}%, transparent)`,
-            }}
-            aria-hidden
-          />
-          <div className="relative flex items-center justify-between gap-3 text-xs">
-            <span className="min-w-0 truncate" title={r.label}>{r.label}</span>
-            <span className="shrink-0 tabular-nums text-muted-foreground">
-              {r.sub && <span className="mr-2 text-destructive-foreground">{r.sub}</span>}
-              {num(r.value)}
-            </span>
-          </div>
+        <div key={r.key} className="col-span-3 grid h-6 grid-cols-subgrid items-center">
+          <span className="min-w-0 max-w-36 truncate" title={r.label}>{r.label}</span>
+          <span className="h-1.5 overflow-hidden rounded-full bg-muted" aria-hidden>
+            <span
+              className="block h-full rounded-full"
+              style={{
+                width: `${Math.max(2, (r.value / max) * 100)}%`,
+                background: `color-mix(in srgb, var(--primary) ${r.tone === 'warn' ? 45 : 80}%, transparent)`,
+              }}
+            />
+          </span>
+          <span className="text-right tabular-nums text-muted-foreground">
+            {r.sub && <span className="mr-2 text-destructive-foreground">{r.sub}</span>}
+            {num(r.value)}
+          </span>
         </div>
       ))}
     </div>
+  );
+}
+
+/** Avatar disc with the account's initial. */
+export function UserAvatar({ name, className }: { name: string; className?: string }) {
+  return (
+    <span
+      aria-hidden
+      className={cn(
+        'flex shrink-0 items-center justify-center rounded-full bg-primary/15 font-semibold text-primary',
+        className,
+      )}
+    >
+      {name.slice(0, 1).toUpperCase()}
+    </span>
+  );
+}
+
+/** A small label after a name: role, state. */
+export function Badge({ children, tone = 'muted' }: { children: React.ReactNode; tone?: 'primary' | 'muted' }) {
+  return (
+    <span
+      className={cn(
+        'shrink-0 rounded-full px-1.5 py-px text-[10px] font-medium',
+        tone === 'primary' ? 'bg-primary/12 text-primary' : 'bg-muted text-muted-foreground',
+      )}
+    >
+      {children}
+    </span>
   );
 }
 
@@ -182,7 +260,7 @@ export function DailyChart({ daily, days }: { daily: DailyPoint[]; days: number 
 
   return (
     <ChartFrame onLeave={clear} tip={node}>
-      <div className="flex h-28 items-end gap-px" role="img" aria-label={t('users.chart.label')}>
+      <div className="flex h-24 items-end gap-px" role="img" aria-label={t('users.chart.label')}>
         {rows.map((d, i) => (
           <div
             key={d.date}
@@ -227,17 +305,25 @@ export function DailyChart({ daily, days }: { daily: DailyPoint[]; days: number 
           </div>
         ))}
       </div>
-      <div className="mt-1.5 flex items-center gap-3 text-[10px] text-muted-foreground">
-        <span className="flex items-center gap-1">
-          <i className="size-2 rounded-[2px]" style={{ background: 'color-mix(in srgb, var(--primary) 85%, transparent)' }} />
-          {t('users.chart.output')}
-        </span>
-        <span className="flex items-center gap-1">
-          <i className="size-2 rounded-[2px]" style={{ background: 'color-mix(in srgb, var(--primary) 35%, transparent)' }} />
-          {t('users.chart.input')}
-        </span>
-      </div>
     </ChartFrame>
+  );
+}
+
+/** Key for the daily chart's two shades. Sits in the heading of the section
+ *  that holds the chart, so the chart itself is nothing but bars. */
+export function DailyLegend() {
+  const { t } = useTranslation();
+  return (
+    <span className="flex items-center gap-3 text-[11px] text-muted-foreground">
+      <span className="flex items-center gap-1">
+        <i className="size-2 rounded-[2px]" style={{ background: 'color-mix(in srgb, var(--primary) 85%, transparent)' }} />
+        {t('users.chart.output')}
+      </span>
+      <span className="flex items-center gap-1">
+        <i className="size-2 rounded-[2px]" style={{ background: 'color-mix(in srgb, var(--primary) 35%, transparent)' }} />
+        {t('users.chart.input')}
+      </span>
+    </span>
   );
 }
 

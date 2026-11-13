@@ -5,10 +5,12 @@ import { useTranslation } from 'react-i18next';
 import { fetchUsageOverview, fetchUsers, type AppUser, type UsageUserRow } from '@/api/client';
 import { useUi } from '@/state/ui';
 import { cn } from '@/lib/utils';
+import { useSidebarAway } from '@/lib/useNarrowWindow';
 import { useAuth } from '../auth/AuthGate';
 import { SettingsDialog } from '../SettingsDialog';
 import { SearchInput } from '../ui/search';
-import { Tile, useNum } from './parts';
+import { Segmented } from '../ui/segmented';
+import { Badge, StatGrid, SubLabel, UserAvatar, useNum } from './parts';
 import { UserDetail } from './UserDetail';
 
 /** Windows the whole workspace is scoped to. `0` = all time, matching the
@@ -19,7 +21,10 @@ const RANGES = [
   { key: '90d', days: 90 },
   { key: 'all', days: 0 },
 ] as const;
+type RangeKey = (typeof RANGES)[number]['key'];
 
+/** One account in the rail: who, and on the same line how much — the list is
+ *  sorted by it, so the column of numbers is the ranking. */
 function UserRow({ row, selected, onSelect }: {
   row: UsageUserRow;
   selected: boolean;
@@ -27,31 +32,24 @@ function UserRow({ row, selected, onSelect }: {
 }) {
   const { t } = useTranslation();
   const { compact } = useNum();
+  const name = row.display_name || row.username;
   return (
     <button
       type="button"
+      aria-current={selected || undefined}
+      title={row.turns > 0 ? t('users.list.summary', { tokens: compact(row.total_tokens), turns: row.turns }) : t('users.list.idle')}
       onClick={onSelect}
       className={cn(
-        'flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left transition-colors',
-        selected ? 'bg-accent' : 'hover:bg-accent/60',
+        'flex h-8 w-full items-center gap-2 rounded-lg px-2 text-left text-[13px] transition-colors',
+        selected ? 'bg-sidebar-active text-strong' : 'text-foreground hover:bg-sidebar-accent',
       )}
     >
-      <div className="flex size-7 shrink-0 items-center justify-center rounded-full bg-primary/15 text-xs font-semibold text-primary">
-        {(row.display_name || row.username).slice(0, 1).toUpperCase()}
-      </div>
-      <div className="min-w-0 flex-1">
-        <div className="truncate text-sm">{row.display_name || row.username}</div>
-        <div className="truncate text-[10px] text-muted-foreground">
-          {row.turns > 0
-            ? t('users.list.summary', { tokens: compact(row.total_tokens), turns: row.turns })
-            : t('users.list.idle')}
-        </div>
-      </div>
-      {row.is_admin && (
-        <span className="shrink-0 rounded bg-primary/15 px-1 py-0.5 text-[9px] font-semibold tracking-wide text-primary">
-          {t('settings.users.admin')}
-        </span>
-      )}
+      <UserAvatar name={name} className="size-5 text-[10px]" />
+      <span className="min-w-0 flex-1 truncate">{name}</span>
+      {row.is_admin && <Badge tone="primary">{t('settings.users.admin')}</Badge>}
+      <span className={cn('shrink-0 text-xs tabular-nums', row.turns > 0 ? 'text-muted-foreground' : 'text-muted-foreground/50')}>
+        {row.turns > 0 ? compact(row.total_tokens) : '—'}
+      </span>
     </button>
   );
 }
@@ -64,7 +62,9 @@ export function UsersWorkspace() {
   const { num, compact } = useNum();
   const setView = useUi((s) => s.setView);
   const auth = useAuth();
-  const [range, setRange] = useState<(typeof RANGES)[number]>(RANGES[1]);
+  const sidebarAway = useSidebarAway();
+  const [rangeKey, setRangeKey] = useState<RangeKey>('30d');
+  const range = RANGES.find((r) => r.key === rangeKey) ?? RANGES[1];
   const [query, setQuery] = useState('');
   const [selected, setSelected] = useState<string | null>(null);
   // The account-management panel (create/rename/privileges) still lives in the
@@ -115,31 +115,38 @@ export function UsersWorkspace() {
     }
     : undefined;
 
+  const iconBtn =
+    'flex size-7 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-foreground';
+  const rangeSwitch = (
+    <Segmented<RangeKey>
+      size="sm"
+      label={t('settings.usage.period')}
+      value={rangeKey}
+      onChange={setRangeKey}
+      options={RANGES.map((r) => ({ value: r.key, label: t(`users.range.${r.key}`) }))}
+    />
+  );
+
   return (
-    <main className="flex min-w-0 flex-1 overflow-hidden">
-      {/* Left: user list + window selector. */}
-      <div className="flex w-64 shrink-0 flex-col border-r">
-        <div className="flex items-center gap-2 px-2.5 pt-3 pb-2">
-          <button
-            type="button"
-            onClick={() => setView('chat')}
-            aria-label={t('users.backToChat')}
-            className="flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-          >
+    // A container, so the layout follows the room this page really has (the
+    // window minus sidebar), not the window: side by side when there is width
+    // for both, the list on top as a short strip when there is not. The
+    // container is `main` and the layout the box inside it: an element cannot
+    // query its own size, only that of a container around it.
+    <main className="@container/users min-w-0 flex-1 overflow-hidden">
+      <div className="flex size-full min-h-0 flex-col @3xl/users:flex-row">
+      {/* The user list, with the deployment's totals under it. */}
+      <div className="flex max-h-[38%] shrink-0 flex-col border-b bg-sidebar @3xl/users:max-h-none @3xl/users:w-60 @3xl/users:border-r @3xl/users:border-b-0">
+        <div className={cn('flex h-11 shrink-0 items-center gap-1 px-2', sidebarAway && 'pl-11')}>
+          <button type="button" onClick={() => setView('chat')} aria-label={t('users.backToChat')} title={t('users.backToChat')} className={iconBtn}>
             <ArrowLeftIcon className="size-4" />
           </button>
-          <h1 className="min-w-0 flex-1 truncate text-sm font-semibold tracking-tight">{t('users.title')}</h1>
-          <button
-            type="button"
-            onClick={() => setManageOpen(true)}
-            aria-label={t('users.manageAccounts')}
-            title={t('users.manageAccounts')}
-            className="flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-          >
+          <h1 className="min-w-0 flex-1 truncate text-[13px] font-semibold text-strong">{t('users.title')}</h1>
+          <button type="button" onClick={() => setManageOpen(true)} aria-label={t('users.manageAccounts')} title={t('users.manageAccounts')} className={iconBtn}>
             <SettingsIcon className="size-4" />
           </button>
         </div>
-        <div className="px-2.5 pb-2">
+        <div className="px-2 pb-1.5">
           <SearchInput
             value={query}
             onChange={(e) => setQuery(e.target.value)}
@@ -147,7 +154,7 @@ export function UsersWorkspace() {
             aria-label={t('users.searchPlaceholder')}
           />
         </div>
-        <div className="min-h-0 flex-1 space-y-0.5 overflow-y-auto px-2 pb-2">
+        <div className="min-h-0 flex-1 space-y-px overflow-y-auto px-2 pb-2">
           {visible.map((row) => (
             <UserRow
               key={row.username}
@@ -157,57 +164,40 @@ export function UsersWorkspace() {
             />
           ))}
           {visible.length === 0 && (
-            <div className="px-2.5 py-8 text-center text-xs text-muted-foreground">{t('users.noResults')}</div>
+            <div className="px-2 py-6 text-xs text-muted-foreground">{t('users.noResults')}</div>
           )}
         </div>
         {/* Deployment totals — the baseline every per-user number is read against. */}
         {overview && (
-          <div className="border-t px-2.5 py-2.5">
-            <div className="pb-1.5 text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
-              {t('users.deployment')}
-            </div>
-            <div className="grid grid-cols-2 gap-1.5">
-              <Tile label={t('users.tiles.activeUsers')} value={num(overview.totals.active_users)} />
-              <Tile label={t('users.tiles.totalTokens')} value={compact(overview.totals.total_tokens)} />
-              <Tile label={t('users.tiles.turns')} value={num(overview.totals.turns)} />
-              <Tile label={t('users.tiles.toolCalls')} value={num(overview.totals.tool_calls)} />
-            </div>
+          <div className="hidden pt-2 @3xl/users:block">
+            <SubLabel className="px-3 pb-1.5">{t('users.deployment')}</SubLabel>
+            <StatGrid
+              columns={2}
+              className="border-b-0"
+              stats={[
+                { label: t('users.tiles.activeUsers'), value: num(overview.totals.active_users) },
+                { label: t('users.tiles.totalTokens'), value: compact(overview.totals.total_tokens) },
+                { label: t('users.tiles.turns'), value: num(overview.totals.turns) },
+                { label: t('users.tiles.toolCalls'), value: num(overview.totals.tool_calls) },
+              ]}
+            />
           </div>
         )}
       </div>
 
-      {/* Right: the selected user's detail. */}
-      <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
-        <header className="relative z-20 shrink-0 bg-transparent">
-          <div className="mx-auto flex w-full max-w-4xl items-center justify-end gap-1 px-5 py-3">
-            <div className="flex shrink-0 gap-1 rounded-lg bg-muted/50 p-0.5">
-              {RANGES.map((r) => (
-                <button
-                  key={r.key}
-                  type="button"
-                  onClick={() => setRange(r)}
-                  className={cn(
-                    'rounded-md px-2 py-0.5 text-xs transition-colors',
-                    range.key === r.key
-                      ? 'bg-background font-medium shadow-sm'
-                      : 'text-muted-foreground hover:text-foreground',
-                  )}
-                >
-                  {t(`users.range.${r.key}`)}
-                </button>
-              ))}
-            </div>
-          </div>
-        </header>
-        <div className="min-h-0 flex-1 overflow-y-auto [-webkit-mask-image:linear-gradient(to_bottom,transparent_0,black_24px)] [mask-image:linear-gradient(to_bottom,transparent_0,black_24px)]">
-          <div className="mx-auto w-full max-w-4xl px-5 pt-2 pb-5">
-            {activeAccount ? (
-              <UserDetail user={activeAccount} days={range.days} onManage={() => setManageOpen(true)} />
-            ) : (
-              <p className="pt-10 text-center text-sm text-muted-foreground">{t('users.selectPrompt')}</p>
-            )}
-          </div>
+      {/* Right: the selected user's detail. One scroller, nothing layered over
+          it — a mask or a fading header here would have the whole column
+          re-rasterised on every scrolled frame. */}
+      <div className="min-h-0 min-w-0 flex-1 overflow-y-auto [scrollbar-gutter:stable]">
+        <div className="mx-auto w-full max-w-4xl px-4 py-5 @3xl/users:px-6">
+          {activeAccount ? (
+            <UserDetail user={activeAccount} days={range.days} onManage={() => setManageOpen(true)} toolbar={rangeSwitch} />
+          ) : (
+            <p className="pt-10 text-sm text-muted-foreground">{t('users.selectPrompt')}</p>
+          )}
         </div>
+      </div>
+
       </div>
 
       <SettingsDialog open={manageOpen} onClose={() => setManageOpen(false)} scope="admin" initialPanel="users" />

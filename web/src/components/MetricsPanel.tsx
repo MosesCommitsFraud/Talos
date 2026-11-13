@@ -6,7 +6,7 @@ import { fetchSessionMetrics, type TurnMetricsRow } from '@/api/client';
 import { cn } from '@/lib/utils';
 import { useChat } from '@/state/chat';
 import { useUi } from '@/state/ui';
-import { BarList, Tile, useHoverTip, useNum } from './users/parts';
+import { BarList, StatGrid, useHoverTip, useNum } from './users/parts';
 
 /* Admin pane in the right dock: the open chat's turn metrics as charts. Same
  * rows as the CSV export (src/turn_metrics_export.py) plus their `detail` —
@@ -269,19 +269,32 @@ export function MetricsPane({ className }: { className?: string }) {
           <p className="py-8 text-center text-sm text-muted-foreground">{t('metrics.empty')}</p>
         ) : (
           <>
-            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-              <Tile label={t('metrics.kpi.output')} value={compact(outSum)} hint={t('metrics.kpi.thinkingShare', { pct: thinkingShare })} />
-              <Tile label={t('metrics.kpi.input')} value={compact(total['Input-Tokens (Summe)'])} hint={td?.cached_tokens ? t('metrics.kpi.cachedShare', { pct: Math.round((td.cached_tokens / Math.max(total['Input-Tokens (Summe)'], 1)) * 100) }) : undefined} />
-              <Tile label={t('metrics.kpi.tps')} value={avgTps != null ? num(avgTps) : '—'} hint={td?.prefill_tps ? t('metrics.kpi.prefill', { tps: num(td.prefill_tps) }) : undefined} />
-              <Tile label={t('metrics.kpi.ttft')} value={avgTtft != null ? secs(avgTtft) : '—'} />
-              <Tile label={t('metrics.kpi.time')} value={secs(total['Antwortzeit [s]'])} hint={t('metrics.kpi.rounds', { count: total.Runden })} />
-              <Tile
-                label={t('metrics.kpi.toolCalls')}
-                value={num(total['Tool-Calls'])}
-                hint={total['Fehlerhafte Tool-Calls'] ? t('metrics.errors', { count: total['Fehlerhafte Tool-Calls'] }) : undefined}
-                tone={total['Fehlerhafte Tool-Calls'] ? 'warn' : undefined}
-              />
-            </div>
+            <StatGrid
+              columns={3}
+              stats={[
+                { label: t('metrics.kpi.output'), value: compact(outSum), hint: t('metrics.kpi.thinkingShare', { pct: thinkingShare }) },
+                {
+                  label: t('metrics.kpi.input'),
+                  value: compact(total['Input-Tokens (Summe)']),
+                  hint: td?.cached_tokens
+                    ? t('metrics.kpi.cachedShare', { pct: Math.round((td.cached_tokens / Math.max(total['Input-Tokens (Summe)'], 1)) * 100) })
+                    : undefined,
+                },
+                {
+                  label: t('metrics.kpi.tps'),
+                  value: avgTps != null ? num(avgTps) : '—',
+                  hint: td?.prefill_tps ? t('metrics.kpi.prefill', { tps: num(td.prefill_tps) }) : undefined,
+                },
+                { label: t('metrics.kpi.ttft'), value: avgTtft != null ? secs(avgTtft) : '—' },
+                { label: t('metrics.kpi.time'), value: secs(total['Antwortzeit [s]']), hint: t('metrics.kpi.rounds', { count: total.Runden }) },
+                {
+                  label: t('metrics.kpi.toolCalls'),
+                  value: num(total['Tool-Calls']),
+                  hint: total['Fehlerhafte Tool-Calls'] ? t('metrics.errors', { count: total['Fehlerhafte Tool-Calls'] }) : undefined,
+                  tone: total['Fehlerhafte Tool-Calls'] ? 'warn' : undefined,
+                },
+              ]}
+            />
 
             <Card title={t('metrics.outputTitle')} hint={splitNote}>
               <ShareBar series={outSeries} values={outTotals} format={num} />
