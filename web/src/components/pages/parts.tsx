@@ -1,5 +1,6 @@
 import type * as React from 'react';
 import { cn } from '@/lib/utils';
+import { useSidebarAway } from '@/lib/useNarrowWindow';
 
 /** Shared chrome for the three sidebar pages (Projects / Artifacts /
  *  Customize): one centered column, a title row that keeps its actions on the
@@ -16,9 +17,12 @@ export function Page({
   belowTitle?: React.ReactNode;
   children: React.ReactNode;
 }) {
+  // With the sidebar out of the way its expand button floats over the page's
+  // top-left corner: the title starts below it.
+  const sidebarAway = useSidebarAway();
   return (
     <main className="flex min-w-0 flex-1 flex-col overflow-y-auto [scrollbar-gutter:stable]">
-      <div className="mx-auto w-full max-w-[1100px] px-8 py-8">
+      <div className={cn('mx-auto w-full max-w-[1100px] px-4 pb-8 sm:px-8', sidebarAway ? 'pt-12' : 'pt-8')}>
         <div className="flex flex-wrap items-center justify-between gap-3">
           <h1 className="text-2xl font-semibold tracking-tight text-strong">{title}</h1>
           {actions && <div className="flex items-center gap-2">{actions}</div>}

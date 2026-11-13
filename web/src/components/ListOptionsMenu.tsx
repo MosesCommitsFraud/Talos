@@ -85,6 +85,8 @@ export function ListOptionsMenu({
   onNewSection,
   onViewAll,
   canViewAll,
+  onMarkAllRead,
+  unreadCount,
   className,
 }: {
   sortMode: SortMode;
@@ -93,6 +95,9 @@ export function ListOptionsMenu({
   onViewAll: () => void;
   /** Something is folded away, filtered out or behind "show more". */
   canViewAll: boolean;
+  onMarkAllRead: () => void;
+  /** Chats carrying an unread dot, in the whole sidebar. */
+  unreadCount: number;
   className?: string;
 }) {
   const { t } = useTranslation();
@@ -184,6 +189,12 @@ export function ListOptionsMenu({
           />
         </SubRow>
         <MenuSeparator className={SEPARATOR_CLASS} />
+        <MenuItem className={ITEM_CLASS} disabled={unreadCount === 0} onSelect={onMarkAllRead}>
+          <span className="flex-1 whitespace-nowrap pe-4">{t('sidebar.markAllRead')}</span>
+          {unreadCount > 0 && (
+            <span className="shrink-0 text-xs tabular-nums text-muted-foreground">{unreadCount}</span>
+          )}
+        </MenuItem>
         <MenuItem
           className={ITEM_CLASS}
           onSelect={() => {

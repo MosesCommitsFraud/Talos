@@ -2,15 +2,23 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   ArchiveIcon,
   ArrowLeftIcon,
+  BrainIcon,
   BriefcaseIcon,
   BugIcon,
+  CheckIcon,
   ChevronDownIcon,
+  DatabaseIcon,
   EllipsisIcon,
   FolderIcon,
   FolderMinusIcon,
+  GaugeIcon,
+  GlobeIcon,
   HelpCircleIcon,
+  KeyboardIcon,
   LogOutIcon,
   MessageSquareIcon,
+  MonitorIcon,
+  MoonIcon,
   PanelLeftIcon,
   PencilIcon,
   PinIcon,
@@ -18,8 +26,14 @@ import {
   SearchIcon,
   SettingsIcon,
   ShapesIcon,
+  ShieldIcon,
+  SlidersHorizontalIcon,
+  SunIcon,
+  SunMoonIcon,
+  TicketIcon,
+  UsersIcon,
 } from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   archiveSession,
@@ -41,7 +55,8 @@ import { useMoveStoredProjects, useProjects } from '@/lib/useProjects';
 import { useAuth } from './auth/AuthGate';
 import type { Session } from '@/api/types';
 import { selectChatStatus, selectFolderStatus, useChat } from '@/state/chat';
-import { usePrefs, type SortMode } from '@/state/prefs';
+import { applyLang, applyTheme, usePrefs, type SortMode, type Theme } from '@/state/prefs';
+import { LANGUAGES } from '@/i18n';
 import { useUi } from '@/state/ui';
 import { brand } from '@/lib/brand';
 import { cn, timestampMs } from '@/lib/utils';
@@ -49,10 +64,11 @@ import { anyTitlePending, isTitlePending, placeholderTitleText } from '@/lib/ses
 import { Skeleton, Tooltip } from './ui/misc';
 import { KeybindingPill } from './ui/kbd';
 import { matchesBinding, useKeybinds } from '@/lib/keybinds';
+import { useNarrowWindow } from '@/lib/useNarrowWindow';
 import { BrandImage } from './BrandImage';
 import { ListOptionsMenu } from './ListOptionsMenu';
 import { runSessionShortcut, SessionMenuPopup, type SessionMenuActions } from './SessionMenu';
-import { toast } from './ui/toast';
+import { toast, toastError } from './ui/toast';
 import {
   ContextMenu,
   ContextMenuItem,
@@ -61,11 +77,14 @@ import {
   ContextMenuTrigger,
   Menu,
   MenuItem,
-  MenuLabel,
   MenuPopup,
   MenuSeparator,
+  MenuSub,
+  MenuSubPopup,
+  MenuSubTrigger,
   MenuTrigger,
 } from './ui/menu';
+import { requestSettingsPanel } from './ComposerAddMenu';
 
 /** Chats rendered before the list asks for "show more" — keeps the DOM small
  *  for users with hundreds of chats while the common case needs no click. */
@@ -875,43 +894,137 @@ function SearchBar({ onOpen, shortcut }: { onOpen: () => void; shortcut?: string
   );
 }
 
-/** The account dropdown anchored to the footer avatar. One Settings entry
- *  covers everything (account, usage, and for admins the admin and advanced
- *  groups); the rest is Help / Archive / Log out. */
+/** The account dropdown anchored to the footer avatar. Headed by who is signed
+ *  in (the username is the account's mail address), then three bands: what is
+ *  yours to set (settings, usage, language, design, shortcuts), where to turn
+ *  (help, report a problem, archive), and for admins the pages that run the
+ *  deployment. Log out stands alone at the foot. */
 function AccountMenu({
   trigger,
   authEnabled,
   username,
+  displayName,
+  isAdmin,
   actions,
+  onReport,
 }: {
   trigger: React.ReactNode;
   authEnabled: boolean;
   username: string;
+  displayName?: string | null;
+  isAdmin: boolean;
   actions: AccountActions;
+  onReport: () => void;
 }) {
   const { t } = useTranslation();
+  const setView = useUi((s) => s.setView);
+  const theme = usePrefs((s) => s.theme);
+  const setTheme = usePrefs((s) => s.setTheme);
+  const lang = usePrefs((s) => s.lang);
+  const setLang = usePrefs((s) => s.setLang);
+  const tick = (on: boolean) => (
+    <CheckIcon className={cn('ms-auto size-3.5 text-primary', on ? 'opacity-100' : 'opacity-0')} />
+  );
+  const themes: Array<{ value: Theme; label: string; icon: React.ReactNode }> = [
+    { value: 'system', label: t('settings.appearance.system'), icon: <MonitorIcon /> },
+    { value: 'light', label: t('settings.appearance.light'), icon: <SunIcon /> },
+    { value: 'dark', label: t('settings.appearance.dark'), icon: <MoonIcon /> },
+  ];
   return (
     <Menu>
       <MenuTrigger asChild>{trigger}</MenuTrigger>
-      <MenuPopup side="top" align="start" sideOffset={6} className="w-60">
-        <MenuLabel className="truncate text-foreground/70">{username}</MenuLabel>
+      <MenuPopup side="top" align="start" sideOffset={6} className="w-52">
+        <div className="px-2 pt-1 pb-1.5">
+          <div className="truncate text-xs font-semibold text-muted-foreground" title={username}>{username}</div>
+          {displayName && displayName !== username && (
+            <div className="truncate text-[11px] leading-tight text-muted-foreground/80">
+              {displayName}
+              {isAdmin && ` · ${t('settings.account.administrator')}`}
+            </div>
+          )}
+        </div>
         <MenuItem onSelect={actions.onOpenSettings}>
           <SettingsIcon /> {t('sidebar.menu.settings')}
         </MenuItem>
+        <MenuItem onSelect={() => requestSettingsPanel('usage', 'all')}>
+          <GaugeIcon /> {t('settings.nav.usage')}
+        </MenuItem>
+        <MenuSub>
+          <MenuSubTrigger>
+            <GlobeIcon /> {t('settings.appearance.language')}
+          </MenuSubTrigger>
+          <MenuSubPopup className="min-w-40">
+            {LANGUAGES.map((l) => (
+              <MenuItem key={l.value} onSelect={() => { setLang(l.value); applyLang(l.value); }}>
+                {l.label}
+                {tick(lang === l.value)}
+              </MenuItem>
+            ))}
+          </MenuSubPopup>
+        </MenuSub>
+        <MenuSub>
+          <MenuSubTrigger>
+            <SunMoonIcon /> {t('settings.appearance.theme')}
+          </MenuSubTrigger>
+          <MenuSubPopup className="min-w-40">
+            {themes.map((th) => (
+              <MenuItem key={th.value} onSelect={() => { setTheme(th.value); applyTheme(th.value); }}>
+                {th.icon} {th.label}
+                {tick(theme === th.value)}
+              </MenuItem>
+            ))}
+          </MenuSubPopup>
+        </MenuSub>
+        <MenuItem onSelect={() => requestSettingsPanel('shortcuts', 'all')}>
+          <KeyboardIcon /> {t('settings.nav.shortcuts')}
+        </MenuItem>
+        <MenuSeparator />
         <MenuItem onSelect={actions.onOpenHelp}>
           <HelpCircleIcon /> {t('sidebar.menu.help')}
+        </MenuItem>
+        <MenuItem onSelect={onReport}>
+          <BugIcon /> {t('tickets.report')}
         </MenuItem>
         <MenuItem onSelect={actions.onOpenArchive}>
           <ArchiveIcon /> {t('sidebar.menu.archive')}
         </MenuItem>
-        {authEnabled && (
+        {isAdmin && (
           <>
             <MenuSeparator />
-            <MenuItem variant="destructive" onSelect={() => void logout()}>
-              <LogOutIcon /> {t('sidebar.menu.logOut')}
-            </MenuItem>
+            <MenuSub>
+              <MenuSubTrigger>
+                <ShieldIcon /> {t('sidebar.menu.administration')}
+              </MenuSubTrigger>
+              <MenuSubPopup className="min-w-48">
+                <MenuItem onSelect={() => requestSettingsPanel('models', 'admin')}>
+                  <SlidersHorizontalIcon /> {t('sidebar.menu.adminPanel')}
+                </MenuItem>
+                <MenuItem onSelect={() => setView('users')}>
+                  <UsersIcon /> {t('users.title')}
+                </MenuItem>
+                <MenuItem onSelect={() => setView('rag')}>
+                  <DatabaseIcon /> {t('sidebar.menu.rag')}
+                </MenuItem>
+                <MenuItem onSelect={() => setView('memories')}>
+                  <BrainIcon /> {t('memories.title')}
+                </MenuItem>
+                <MenuItem onSelect={() => setView('tickets')}>
+                  <TicketIcon /> {t('sidebar.menu.tickets')}
+                </MenuItem>
+              </MenuSubPopup>
+            </MenuSub>
           </>
         )}
+        <MenuSeparator />
+        {/* Always there, so it is found where one looks for it; without
+            sign-in there is nothing to sign out of, and the row says so. */}
+        <MenuItem
+          disabled={!authEnabled}
+          title={authEnabled ? undefined : t('settings.account.authDisabled')}
+          onSelect={() => void logout()}
+        >
+          <LogOutIcon /> {t('sidebar.menu.logOut')}
+        </MenuItem>
       </MenuPopup>
     </Menu>
   );
@@ -934,7 +1047,7 @@ interface SidebarProps {
 /** The full-width sidebar contents. Rendered twice: once as the real sidebar,
  *  and once, dimmed and inert, as the hover preview of the collapsed rail —
  *  hence `preview`, which drops the wordmark the rail's expand button covers. */
-function SidebarBody({ onOpenPalette, account, onOpenTicketDialog, preview }: SidebarProps & { preview?: boolean }) {
+function SidebarBody({ onOpenPalette, account, onOpenTicketDialog, preview, onCollapse }: SidebarProps & { preview?: boolean; onCollapse?: () => void }) {
   const { t } = useTranslation();
   // While a chat is still waiting for its generated title, poll fast so the
   // skeleton is replaced the moment the backend's naming task finishes;
@@ -944,6 +1057,7 @@ function SidebarBody({ onOpenPalette, account, onOpenTicketDialog, preview }: Si
     queryFn: fetchSessions,
     refetchInterval: (query) => (anyTitlePending(query.state.data) ? 2_000 : 30_000),
   });
+  const queryClient = useQueryClient();
   const auth = useAuth();
   const newChat = useChat((s) => s.newChat);
   const view = useUi((s) => s.view);
@@ -976,7 +1090,10 @@ function SidebarBody({ onOpenPalette, account, onOpenTicketDialog, preview }: Si
   const awaitingIds = useChat((s) =>
     Object.entries(s.runtimes).filter(([, rt]) => rt.awaitingInput).map(([id]) => id).join(' '),
   );
-  const toggleSidebar = usePrefs((s) => s.toggleSidebar);
+  const togglePref = usePrefs((s) => s.toggleSidebar);
+  // As a drawer the collapse button closes the drawer; the preference is for
+  // windows wide enough to have the choice.
+  const toggleSidebar = onCollapse ?? togglePref;
   const keybinds = useKeybinds();
 
   const sorter = compareSessions(sortMode);
@@ -1020,7 +1137,36 @@ function SidebarBody({ onOpenPalette, account, onOpenTicketDialog, preview }: Si
   // A different list (project / sort order) starts collapsed again.
   useEffect(() => setVisibleCount(CHAT_PAGE), [openProject, sortMode]);
   const hiddenCount = Math.max(0, nestForks(rows).roots.length - visibleCount);
+  // Every chat with a blue dot, whatever the list is narrowed to: marked unread,
+  // or finished in the background and not looked at yet. A chat waiting on an
+  // answer (yellow dot) is not unread; its question is still open afterwards.
+  const unreadIds = active.filter((s) => s.unread || completed[s.id]).map((s) => s.id);
+  const markAllRead = () => {
+    const count = unreadIds.length;
+    if (count === 0) return;
+    const flagged = active.filter((s) => s.unread).map((s) => s.id);
+    useChat.setState((s) => {
+      const left = { ...s.completed };
+      for (const id of unreadIds) delete left[id];
+      return { completed: left };
+    });
+    // The dots go at once; the refetch below puts back any the server refused.
+    queryClient.setQueryData<typeof sessions>(['sessions'], (list) =>
+      list?.map((s) => (s.unread && !s.archived ? { ...s, unread: false } : s)),
+    );
+    void Promise.allSettled(flagged.map((id) => setSessionUnread(id, false))).then((results) => {
+      void queryClient.invalidateQueries({ queryKey: ['sessions'] });
+      if (results.some((r) => r.status === 'rejected')) {
+        console.error('Talos: marking all chats read failed', results);
+        toastError('toasts.allReadFailed');
+      } else {
+        toast('toasts.allRead', { count });
+      }
+    });
+  };
   const listMenu = {
+    onMarkAllRead: markAllRead,
+    unreadCount: unreadIds.length,
     onNewSection: () => setCreatingSection(true),
     onViewAll: () => {
       revealAllChats();
@@ -1213,15 +1359,18 @@ function SidebarBody({ onOpenPalette, account, onOpenTicketDialog, preview }: Si
           {(visibility.sidebarUserBar || visibility.sidebarSettingsBtn) && (
             <AccountMenu
               authEnabled={auth?.auth_enabled !== false}
-              username={accountLabel ?? t('sidebar.user')}
+              username={auth?.username ?? t('sidebar.user')}
+              displayName={auth?.display_name}
+              isAdmin={!!auth?.is_admin || auth?.auth_enabled === false}
               actions={account}
+              onReport={onOpenTicketDialog}
               trigger={
                 <button
                   type="button"
                   aria-label={t('sidebar.account')}
                   // Sized to its own label (capped so a long name can't crowd
                   // the icons out), not stretched across the row.
-                  className="flex min-w-0 max-w-[calc(100%-6rem)] items-center gap-1.5 rounded-sm px-2 py-1 text-left transition-colors outline-none hover:bg-sidebar-accent focus-visible:outline-none data-[state=open]:bg-sidebar-accent"
+                  className="flex min-w-0 max-w-[calc(100%-4rem)] items-center gap-1.5 rounded-full py-1 pr-2 pl-1 text-left transition-colors outline-none hover:bg-sidebar-accent focus-visible:outline-none data-[state=open]:bg-sidebar-accent"
                 >
                   <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-primary/15 text-[10px] font-semibold text-primary">
                     {initial}
@@ -1264,8 +1413,22 @@ function SidebarBody({ onOpenPalette, account, onOpenTicketDialog, preview }: Si
  *  click anywhere in the preview commits to it. */
 export function Sidebar(props: SidebarProps) {
   const { t } = useTranslation();
-  const collapsed = usePrefs((s) => s.sidebarCollapsed);
-  const toggleSidebar = usePrefs((s) => s.toggleSidebar);
+  const prefCollapsed = usePrefs((s) => s.sidebarCollapsed);
+  const togglePref = usePrefs((s) => s.toggleSidebar);
+  // A window too narrow to give the sidebar a column of its own: there it is
+  // collapsed to begin with, whatever the preference says, so the content
+  // keeps the width. It works like the collapsed sidebar always does — hover
+  // previews it, a click opens it and it stays open — only that opening it
+  // here is for this visit and leaves the preference for wide windows alone.
+  const narrow = useNarrowWindow();
+  const narrowOpen = useUi((s) => s.sidebarNarrowOpen);
+  const setNarrowOpen = useUi((s) => s.setSidebarNarrowOpen);
+  useEffect(() => { if (!narrow) setNarrowOpen(false); }, [narrow, setNarrowOpen]);
+  const collapsed = narrow ? !narrowOpen : prefCollapsed;
+  const toggleSidebar = useCallback(() => {
+    if (narrow) setNarrowOpen(!useUi.getState().sidebarNarrowOpen);
+    else togglePref();
+  }, [narrow, setNarrowOpen, togglePref]);
   const [peek, setPeek] = useState(false);
   const keybinds = useKeybinds();
   const newChat = useChat((s) => s.newChat);
@@ -1298,7 +1461,7 @@ export function Sidebar(props: SidebarProps) {
   if (!collapsed) {
     return (
       <nav className="w-64 shrink-0 border-r border-border" aria-label={t('sidebar.navLabel')}>
-        <SidebarBody {...props} />
+        <SidebarBody {...props} onCollapse={toggleSidebar} />
       </nav>
     );
   }

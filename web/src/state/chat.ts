@@ -7,7 +7,7 @@ import { queryClient } from '@/lib/queryClient';
 import i18n from '@/i18n';
 import { StreamSmoother } from '@/lib/streamSmoother';
 import { usePrefs } from './prefs';
-import { useUi } from './ui';
+import { switchDockLayout, useUi } from './ui';
 
 export interface UiMessage {
   id: string;
@@ -726,6 +726,10 @@ export const useChat = create<ChatState>((set, get) => {
    *  session keeps streaming in the background. */
   const activate = (id: string | null) => {
     const rt = (id && get().runtimes[id]) || emptyRuntime();
+    const previous = get().sessionId;
+    // A draft that turns into a chat with its first message (send seeds an
+    // empty runtime just before this) keeps the dock it was written beside.
+    const adopted = previous === null && !!id && !!get().runtimes[id] && rt.messages.length === 0;
     rememberLastSession(id);
     set((s) => {
       // Opening a chat clears its "Done" badge.
@@ -733,15 +737,14 @@ export const useChat = create<ChatState>((set, get) => {
       if (id && completed !== s.completed) delete completed[id];
       return { sessionId: id, messages: rt.messages, streaming: rt.streaming, turnStartedAt: rt.turnStartedAt, goal: rt.goal, completed };
     });
-    const preview = useUi.getState().preview;
     const artifactSelection = useUi.getState().artifactSelection;
     if (artifactSelection && artifactSelection.sessionId !== id) {
       useUi.getState().setArtifactSelection(null);
     }
-    if (preview && preview.sessionId !== id) {
-      useUi.getState().closePreview();
-      useUi.getState().setArtifactsOpen(false);
-    }
+    // Every chat has its own dock: the one being left is filed away as it
+    // stands, and the one being opened comes back the way it was left (or
+    // empty, the first time). This replaces closing a foreign preview here.
+    if (previous !== id) switchDockLayout(previous, id, adopted);
   };
 
   return {
@@ -1593,6 +1596,15 @@ export const useChat = create<ChatState>((set, get) => {
 
   };
 });
+
+// A reload is also a way of leaving a chat: file its dock layout away so the
+// chat reopens with it.
+if (typeof window !== 'undefined') {
+  window.addEventListener('pagehide', () => {
+    const id = useChat.getState().sessionId;
+    if (id) switchDockLayout(id, id, true);
+  });
+}
 
 // Dev-only handle so the store can be driven from the console / preview evals
 // (dynamic import() in DevTools resolves a second module instance under HMR).

@@ -101,6 +101,10 @@ interface UiState {
    *  Projects page's "New project" button. */
   createProjectOpen: boolean;
   setCreateProjectOpen: (open: boolean) => void;
+  /** In a narrow window the sidebar starts collapsed regardless of the saved
+   *  preference; this is the user having opened it there, for this visit. */
+  sidebarNarrowOpen: boolean;
+  setSidebarNarrowOpen: (open: boolean) => void;
 }
 
 export const useUi = create<UiState>((set, get) => ({
@@ -153,7 +157,95 @@ export const useUi = create<UiState>((set, get) => ({
   },
   createProjectOpen: false,
   setCreateProjectOpen: (createProjectOpen) => set({ createProjectOpen }),
+  sidebarNarrowOpen: false,
+  setSidebarNarrowOpen: (sidebarNarrowOpen) => set({ sidebarNarrowOpen }),
 }));
+
+/* ── Per-chat dock layout ──
+   The right dock (file preview, background tasks, metrics) belongs to the chat
+   it was opened in. Leaving a chat files its layout away under the chat's id;
+   coming back puts it up again exactly as it was left, and a chat that never
+   had anything open shows nothing. Kept in localStorage so it also survives a
+   reload. */
+
+interface DockSnapshot {
+  tasks?: boolean;
+  metrics?: boolean;
+  fullscreen?: boolean;
+  preview?: PreviewFile;
+}
+
+/** This page's layouts, complete. The stored copy below is the same minus what
+ *  cannot be fetched again after a reload. */
+const dockLayouts = new Map<string, DockSnapshot>();
+
+const DOCK_KEY = 'talos-dock-layouts';
+/** Layouts kept. Oldest go first: a chat last visited that long ago can open bare. */
+const DOCK_KEEP = 200;
+
+function readDockLayouts(): Record<string, DockSnapshot> {
+  try {
+    const parsed: unknown = JSON.parse(localStorage.getItem(DOCK_KEY) ?? '{}');
+    return parsed && typeof parsed === 'object' ? (parsed as Record<string, DockSnapshot>) : {};
+  } catch {
+    return {};
+  }
+}
+
+function writeDockLayout(id: string, snapshot: DockSnapshot | null) {
+  if (snapshot) dockLayouts.set(id, snapshot);
+  else dockLayouts.delete(id);
+  try {
+    const all = readDockLayouts();
+    // Re-inserting moves the chat to the end, so trimming drops the stalest.
+    delete all[id];
+    if (snapshot) {
+      const stored: DockSnapshot = { ...snapshot };
+      // A document draft is held in the page, not in a file: after a reload
+      // there is nothing to load it from, so only its panes are kept.
+      if (stored.preview && /^(streaming-)?document:/.test(stored.preview.path)) {
+        delete stored.preview;
+        delete stored.fullscreen;
+      } else if (stored.preview) {
+        const { sessionId, path, url, name, mime, version } = stored.preview;
+        stored.preview = { sessionId, path, url, name, mime, version };
+      }
+      if (Object.keys(stored).length > 0) all[id] = stored;
+    }
+    const ids = Object.keys(all);
+    for (const stale of ids.slice(0, Math.max(0, ids.length - DOCK_KEEP))) delete all[stale];
+    localStorage.setItem(DOCK_KEY, JSON.stringify(all));
+  } catch {
+    /* private mode or a full store: the layout just is not remembered */
+  }
+}
+
+/** Called by the chat store when the chat on screen changes. `adopt` is the one
+ *  case where nothing moves: a draft that has just become a chat by its first
+ *  message keeps what was open around it. */
+export function switchDockLayout(from: string | null, to: string | null, adopt = false) {
+  const s = useUi.getState();
+  if (from) {
+    const previewOpen = s.artifactsOpen && !!s.preview && !s.preview.streaming;
+    const snapshot: DockSnapshot = {};
+    if (s.tasksPanelOpen) snapshot.tasks = true;
+    if (s.metricsPanelOpen) snapshot.metrics = true;
+    if (previewOpen && s.preview) {
+      snapshot.preview = s.preview;
+      if (s.previewFullscreen) snapshot.fullscreen = true;
+    }
+    writeDockLayout(from, Object.keys(snapshot).length > 0 ? snapshot : null);
+  }
+  if (adopt) return;
+  const next = (to && (dockLayouts.get(to) ?? readDockLayouts()[to])) || {};
+  useUi.setState({
+    tasksPanelOpen: !!next.tasks,
+    metricsPanelOpen: !!next.metrics,
+    preview: next.preview ?? null,
+    artifactsOpen: !!next.preview,
+    previewFullscreen: !!next.preview && !!next.fullscreen,
+  });
+}
 
 /** Open one knowledge base in the /rag workspace from anywhere else in the app.
  *  The hash comes first: the workspace reads it when it mounts, and listens for

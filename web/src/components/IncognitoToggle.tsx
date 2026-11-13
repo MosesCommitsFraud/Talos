@@ -6,6 +6,7 @@ import { archiveSession, deleteSession, downloadChatDebugDump, downloadChatMetri
 import { useAuth } from './auth/AuthGate';
 import { useChat } from '@/state/chat';
 import { usePrefs } from '@/state/prefs';
+import { useSidebarAway } from '@/lib/useNarrowWindow';
 import { cn } from '@/lib/utils';
 import { isTitlePending, placeholderTitleText } from '@/lib/sessionTitle';
 import { selectDockOpen, useUi } from '@/state/ui';
@@ -74,7 +75,7 @@ export function IncognitoToggle() {
   const incognito = usePrefs((s) => s.incognito);
   const toggle = usePrefs((s) => s.toggle);
   const visible = usePrefs((s) => s.visibility.incognitoBtn);
-  const sidebarCollapsed = usePrefs((s) => s.sidebarCollapsed);
+  const sidebarCollapsed = useSidebarAway();
   const sessionId = useChat((s) => s.sessionId);
   const newChat = useChat((s) => s.newChat);
   const queryClient = useQueryClient();
