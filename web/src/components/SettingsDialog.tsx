@@ -1392,12 +1392,22 @@ function SqlDatabaseSection() {
   );
 }
 
-/* ── Web access (SearxNG backend, leak guard, domain policy) ── */
+/* ── Web access (search provider, leak guard, domain policy) ── */
+
+/** Mirrors src/search_providers.py PROVIDERS: id, label key, key setting. */
+const SEARCH_PROVIDERS: { id: string; label: string; keySetting: string }[] = [
+  { id: 'searxng', label: 'settings.web.providerSearxng', keySetting: '' },
+  { id: 'brave', label: 'settings.web.providerBrave', keySetting: 'web_search_brave_api_key' },
+  { id: 'tavily', label: 'settings.web.providerTavily', keySetting: 'web_search_tavily_api_key' },
+  { id: 'serper', label: 'settings.web.providerSerper', keySetting: 'web_search_serper_api_key' },
+];
 
 function WebPanel() {
   const { t } = useTranslation();
   const s = useSettingsDraft();
   if (!s.ready) return <Page><p className="text-sm text-muted-foreground">{t('common.loading')}</p></Page>;
+  const providerId = String(s.value('web_search_provider') || 'searxng');
+  const provider = SEARCH_PROVIDERS.find((p) => p.id === providerId);
 
   // Both lists are stored as string arrays but edited as one-per-line text —
   // admins paste domains, they don't manage rows.
@@ -1411,6 +1421,26 @@ function WebPanel() {
   return (
     <Page>
       <Section title={t('settings.web.backend')}>
+        <SelectRow
+          s={s} k="web_search_provider"
+          label={t('settings.web.provider')}
+          hint={t('settings.web.providerHint')}
+          options={SEARCH_PROVIDERS.map((p) => ({ value: p.id, label: t(p.label) }))}
+        />
+        {provider && provider.keySetting && (
+          <>
+            <TextRow
+              s={s} k={provider.keySetting}
+              type="password"
+              label={t('settings.web.apiKey', { provider: t(provider.label) })}
+              hint={t('settings.web.apiKeyHint')}
+              width="w-72"
+            />
+            {!s.value(provider.keySetting) && (
+              <p className="text-xs text-amber-600">{t('settings.web.apiKeyMissing', { provider: t(provider.label) })}</p>
+            )}
+          </>
+        )}
         <TextRow
           s={s} k="searxng_url"
           label={t('settings.web.instance')}

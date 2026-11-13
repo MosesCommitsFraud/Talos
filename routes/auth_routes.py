@@ -22,6 +22,8 @@ from src.integrations import (
     update_integration,
 )
 from src.rate_limiter import RateLimiter
+from src.search_providers import SECRET_SETTINGS as SEARCH_KEY_SETTINGS
+from src.secret_storage import encrypt
 from src.settings import (
     DEFAULT_SETTINGS,
 )
@@ -38,6 +40,19 @@ from src.settings import (
     save_settings as _save_settings,
 )
 from src.settings_scrub import scrub_settings
+
+# What an admin sees in place of a stored search API key: it says "a key is
+# set" without sending the key (or its ciphertext) to the browser.
+SEARCH_KEY_MASK = "••••••••"
+
+
+def _mask_search_keys(settings: dict) -> dict:
+    out = dict(settings)
+    for key in SEARCH_KEY_SETTINGS:
+        if out.get(key):
+            out[key] = SEARCH_KEY_MASK
+    return out
+
 
 logger = logging.getLogger(__name__)
 
@@ -583,7 +598,7 @@ def setup_auth_routes(auth_manager: AuthManager) -> APIRouter:
         user = _get_current_user(request)
         settings = _load_settings()
         if user and auth_manager.is_admin(user):
-            return settings
+            return _mask_search_keys(settings)
         return scrub_settings(settings)
 
     @router.post("/settings")
@@ -628,6 +643,18 @@ def setup_auth_routes(auth_manager: AuthManager) -> APIRouter:
                 except (TypeError, ValueError):
                     raise HTTPException(400, f"{key} must be an integer")
                 val = max(lo, min(val, hi))
+            if key in SEARCH_KEY_SETTINGS:
+                # The mask means "unchanged" (the field was shown, not edited);
+                # empty clears the key; anything else is a new key, stored
+                # encrypted.
+                if val == SEARCH_KEY_MASK:
+                    continue
+                val = encrypt(str(val or "").strip())
+            if key == "web_search_provider":
+                from src.search_providers import PROVIDERS
+
+                if str(val) not in PROVIDERS:
+                    raise HTTPException(400, f"unknown web_search_provider {val!r}")
             if key == "rag_git_repos":
                 from src.rag_git_sync import normalize_repos
 
@@ -637,7 +664,7 @@ def setup_auth_routes(auth_manager: AuthManager) -> APIRouter:
                     raise HTTPException(400, str(e))
             current[key] = val
         _save_settings(current)
-        return current
+        return _mask_search_keys(current)
 
     # ---- Integrations CRUD ----
 

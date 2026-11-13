@@ -217,6 +217,15 @@ DEFAULT_SETTINGS = {
     # the SEARXNG_URL env var, which defaults to the bundled compose service.
     # Set this only to point at a SearxNG you run elsewhere.
     "searxng_url": "",
+    # Who answers web_search: "searxng" (free, self-hosted, the default) or a
+    # paid API — "brave", "tavily", "serper". A paid provider is used only
+    # when its key below is filled in; otherwise, and whenever it fails, the
+    # search falls back to SearxNG. See src/search_providers.py. Keys are
+    # stored encrypted and never sent back to the browser.
+    "web_search_provider": "searxng",
+    "web_search_brave_api_key": "",
+    "web_search_tavily_api_key": "",
+    "web_search_serper_api_key": "",
     # Keep internal knowledge out of outbound search queries: refuses a
     # web_search whose wording is copied from the documents retrieved for the
     # same turn, and adds the matching confidentiality rule to the prompt.

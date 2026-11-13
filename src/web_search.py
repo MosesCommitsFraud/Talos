@@ -236,18 +236,34 @@ async def search(
     `policy` because it is not an inheritable web-UI setting: only the MCP
     server sets it, and a policy of None still has to keep meaning "inherit the
     admin domain lists".
+
+    When an admin chose a paid provider and entered its key (Settings -> Web,
+    src/search_providers.py), general searches go there first and fall back to
+    SearxNG if it fails. A caller policy with its own SearxNG URL, and category
+    searches (news, images …), stay on SearxNG.
     """
-    outcome = await _searx_request(
-        query=query,
-        max_results=max_results,
-        language=language,
-        category=category,
-        time_range=time_range,
-        page=page,
-        session_id=session_id,
-        policy=policy,
-        safesearch=safesearch,
-    )
+    outcome = None
+    provider = None
+    if not (policy and policy.get("searxng_url")) and (category or "general") == "general":
+        from src.search_providers import configured_provider
+
+        provider = configured_provider()
+    if provider:
+        outcome = await _provider_request(
+            provider, query, max_results, language, time_range, page, session_id
+        )
+    if outcome is None:
+        outcome = await _searx_request(
+            query=query,
+            max_results=max_results,
+            language=language,
+            category=category,
+            time_range=time_range,
+            page=page,
+            session_id=session_id,
+            policy=policy,
+            safesearch=safesearch,
+        )
     if "error" in outcome:
         return outcome
     return {
@@ -255,6 +271,51 @@ async def search(
             query, outcome["payload"], outcome["max_results"], policy, session_id=session_id
         )
     }
+
+
+async def _provider_request(
+    provider: tuple,
+    query: str,
+    max_results: int,
+    language: str,
+    time_range: str,
+    page: int,
+    session_id: str,
+) -> Optional[Dict[str, Any]]:
+    """The query against the configured paid provider, in _searx_request's
+    shape. None when the provider failed, so the caller asks SearxNG instead.
+    The leak guard and the cache apply exactly as for SearxNG."""
+    from src.search_providers import ProviderError, provider_search
+    from src.web_leak_guard import check_query
+
+    query = (query or "").strip()
+    if not query:
+        return {"error": "web_search needs a non-empty `query`.", "exit_code": 1}
+    leak = check_query(query, session_id)
+    if leak:
+        return {"error": leak, "exit_code": 1}
+    try:
+        n = max(1, min(int(max_results or DEFAULT_RESULTS), MAX_RESULTS))
+    except (TypeError, ValueError):
+        n = DEFAULT_RESULTS
+    name, key = provider
+    tr = (time_range or "").strip().lower()
+    cache_key = (f"provider:{name}", query, (language or "").strip(), tr, int(page or 1), n)
+    cached = _search_cache.get(cache_key)
+    if cached and time.monotonic() - cached[0] < SEARCH_CACHE_TTL:
+        return {"payload": cached[1], "max_results": n}
+    try:
+        payload = await provider_search(
+            name, key, query, n, (language or "").strip(), tr, max(1, int(page or 1))
+        )
+    except ProviderError as exc:
+        logger.warning("web_search: %s failed, falling back to SearxNG: %s", name, exc)
+        return None
+    if payload.get("results") and SEARCH_CACHE_TTL > 0:
+        if len(_search_cache) >= SEARCH_CACHE_MAX:
+            _search_cache.pop(next(iter(_search_cache)))
+        _search_cache[cache_key] = (time.monotonic(), payload)
+    return {"payload": payload, "max_results": n}
 
 
 async def _searx_request(
