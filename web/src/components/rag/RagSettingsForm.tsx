@@ -19,6 +19,7 @@ import { useRagConsole } from '@/state/ragConsole';
 import { useUi } from '@/state/ui';
 import { Page, Section, Segmented } from '../SettingsDialog';
 import { Button } from '../ui/button';
+import { toastSaved } from '../ui/toast';
 import { Dialog, DialogContent, DialogSection } from '../ui/dialog';
 import { Input, Switch, Textarea, Tooltip } from '../ui/misc';
 
@@ -251,6 +252,7 @@ export function RagSettingsForm({
         ? saveRagBaseConfig(ragId as string, cfg, [...inherit])
         : saveRagConfig(cfg).then(() => undefined),
     onSuccess: (_result, cfg) => {
+      toastSaved();
       setBaseline(cfg);
       setInherit(new Set());
       void queryClient.invalidateQueries({ queryKey: ['rag-config'] });

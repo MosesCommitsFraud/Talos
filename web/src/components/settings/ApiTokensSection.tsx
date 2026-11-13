@@ -5,6 +5,7 @@ import { useTranslation } from 'react-i18next';
 import { createApiToken, deleteApiToken, fetchApiTokens, type ApiToken } from '@/api/client';
 import { copyTextToClipboard } from '@/lib/utils';
 import { Button } from '../ui/button';
+import { toast } from '../ui/toast';
 import { Row, Section } from '../SettingsDialog';
 import { Input } from '../ui/misc';
 import { Select } from '../ui/select';
@@ -105,6 +106,7 @@ export function ApiTokensSection() {
   const create = useMutation({
     mutationFn: () => createApiToken(name.trim(), profile),
     onSuccess: (row) => {
+      toast('toasts.tokenCreated', { name: row.name });
       setCreated({ name: row.name, token: row.token });
       setName('');
       refresh();

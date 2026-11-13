@@ -15,6 +15,7 @@ import {
 } from '@/api/client';
 import { formatRelativeTime } from '@/lib/utils';
 import { Button } from '../ui/button';
+import { toast, toastSaved } from '../ui/toast';
 import { Input, Switch, Textarea } from '../ui/misc';
 import { Page, Row, Section } from '../SettingsDialog';
 
@@ -138,7 +139,10 @@ export function MemoryPanel() {
   const enabled = enabledPref !== false;
   const toggle = useMutation({
     mutationFn: (next: boolean) => saveUserPref(ENABLED_PREF, next),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['userPref', ENABLED_PREF] }),
+    onSuccess: () => {
+      toastSaved();
+      return qc.invalidateQueries({ queryKey: ['userPref', ENABLED_PREF] });
+    },
   });
 
   const refresh = () => qc.invalidateQueries({ queryKey: QUERY_KEY });
@@ -149,6 +153,7 @@ export function MemoryPanel() {
     setError('');
     try {
       await deleteUserMemory(entry.id);
+      toast('toasts.deleted');
       await refresh();
     } catch (e) {
       setError((e as Error).message);
@@ -160,6 +165,7 @@ export function MemoryPanel() {
     setError('');
     try {
       await deleteAllUserMemories();
+      toast('toasts.deleted');
       setEditing(null);
       await refresh();
     } catch (e) {

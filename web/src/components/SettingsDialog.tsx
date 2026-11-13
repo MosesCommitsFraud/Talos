@@ -29,7 +29,7 @@ import {
   WrenchIcon,
   XIcon,
 } from 'lucide-react';
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { createContext, useContext, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   addModelEndpoint,
@@ -91,12 +91,14 @@ import { LANGUAGES } from '@/i18n';
 import { cn } from '@/lib/utils';
 import { Button } from './ui/button';
 import { Dialog, DialogClose, DialogContent } from './ui/dialog';
-import { Input, Switch, Textarea } from './ui/misc';
+import { Field, FormGrid, Input, Switch, Textarea } from './ui/misc';
 import { Select } from './ui/select';
 import { KeybindingPill } from './ui/kbd';
 import { SearchInput } from './ui/search';
 import { useAuth } from './auth/AuthGate';
 import { UsersPanel } from './settings/UsersPanel';
+import { Segmented, useActiveBox } from './ui/segmented';
+import { toast, toastSaved, toastText } from './ui/toast';
 import { UsagePanel } from './settings/UsagePanel';
 import { McpServersPanel } from './settings/McpServersPanel';
 import { GitSyncSection } from './settings/GitSyncSection';
@@ -112,21 +114,33 @@ export type Panel =
    Flat and dense: a bold section heading over a hairline-divided list of rows,
    no cards. The dialog's content column is the only scroll container. */
 
+/** The title the dialog shows over the open panel, for sections to compare
+ *  their own heading against. Empty outside the dialog. */
+const PanelTitleContext = createContext('');
+
 /** Page body: stacks sections. Padding leaves room for the dialog's close
  *  button in the top-right corner. */
 export function Page({ children, className }: { children: React.ReactNode; className?: string }) {
-  return <div className={cn('flex flex-col gap-8 px-6 pt-0 pb-8 sm:px-10', className)}>{children}</div>;
+  // A container: rows lay out by the width this page really has, which in the
+  // dialog is the window minus its navigation, and elsewhere a page column.
+  return <div className={cn('@container/settings flex flex-col gap-8 px-6 pt-0 pb-8 sm:px-10', className)}>{children}</div>;
 }
 
 /** A titled group. Rows go inside as direct children (self-dividing);
  *  free-form content can opt into a little breathing room with `padded`. */
 export function Section({ title, action, padded, children }: { title: string; action?: React.ReactNode; padded?: boolean; children: React.ReactNode }) {
+  // A panel's first section is often named after the panel, which the dialog
+  // already prints as the page title: the heading is then left out (the row
+  // stays if it carries an action).
+  const repeatsPageTitle = useContext(PanelTitleContext) === title;
   return (
     <section>
-      <header className="flex min-h-7 items-center justify-between gap-3 pb-1">
-        <h2 className="text-[15px] font-semibold tracking-[-0.01em] text-foreground">{title}</h2>
-        {action && <div className="flex items-center">{action}</div>}
-      </header>
+      {(!repeatsPageTitle || action) && (
+        <header className="flex min-h-7 flex-wrap items-center justify-between gap-x-3 gap-y-1 pb-1">
+          <h2 className={cn('text-[15px] font-semibold tracking-[-0.01em] text-foreground', repeatsPageTitle && 'sr-only')}>{title}</h2>
+          {action && <div className="ml-auto flex items-center">{action}</div>}
+        </header>
+      )}
       <div className={cn('text-card-foreground', padded && 'pt-2 pb-1')}>
         {children}
       </div>
@@ -145,82 +159,25 @@ export function Row({ label, hint, children, stacked }: { label: React.ReactNode
   return (
     <div className={cn(
       'flex flex-col gap-2 border-t border-border/60 py-3 first:border-t-0',
-      stacked ? 'xl:flex-row xl:items-center xl:justify-between xl:gap-6' : 'sm:flex-row sm:items-center sm:justify-between sm:gap-6',
+      stacked
+        ? '@3xl/settings:flex-row @3xl/settings:items-center @3xl/settings:justify-between @3xl/settings:gap-6'
+        : '@lg/settings:flex-row @lg/settings:items-center @lg/settings:justify-between @lg/settings:gap-6',
     )}>
       <div className="min-w-0 flex-1 space-y-0.5">
         <div className="text-sm text-foreground">{label}</div>
         {hint && <p className="settings-row-hint text-[13px] leading-snug text-muted-foreground">{hint}</p>}
       </div>
       {children && <div className={cn(
-        'flex w-full shrink-0 items-center gap-2',
-        stacked ? 'xl:w-auto xl:justify-end' : 'sm:w-auto sm:justify-end',
+        'flex w-full min-w-0 shrink-0 flex-wrap items-center gap-2',
+        stacked ? '@3xl/settings:w-auto @3xl/settings:justify-end' : '@lg/settings:w-auto @lg/settings:justify-end',
       )}>{children}</div>}
     </div>
   );
 }
 
-/** Measures the box of the element matching `selector` inside `container`, for
- *  a highlight that slides between options. Re-measures when `key` changes and
- *  whenever the container resizes (density, language or font changes). */
-function useActiveBox(container: HTMLElement | null, selector: string, key: unknown) {
-  const [box, setBox] = useState<{ left: number; top: number; width: number; height: number } | null>(null);
-  useLayoutEffect(() => {
-    if (!container) return;
-    const el = container.querySelector<HTMLElement>(selector);
-    const measure = () => {
-      setBox(el ? { left: el.offsetLeft, top: el.offsetTop, width: el.offsetWidth, height: el.offsetHeight } : null);
-    };
-    measure();
-    // A scroll list keeps its own size when its rows reflow, and the active
-    // row can move without resizing, so watch every row.
-    const ro = new ResizeObserver(measure);
-    ro.observe(container);
-    for (const child of Array.from(container.children)) ro.observe(child);
-    return () => ro.disconnect();
-  }, [container, selector, key]);
-  return box;
-}
-
-/** Claude-style segmented control: a pill track with the active option raised. */
-export function Segmented<T extends string>({ value, onChange, options, label }: {
-  value: T;
-  onChange: (v: T) => void;
-  options: Array<{ value: T; label: React.ReactNode; title?: string }>;
-  label?: string;
-}) {
-  // One raised pill slides under the active option instead of each button
-  // painting its own background, so switching reads as motion.
-  const [track, setTrack] = useState<HTMLDivElement | null>(null);
-  const pill = useActiveBox(track, '[aria-checked="true"]', `${value}|${options.length}`);
-  return (
-    <div ref={setTrack} role="radiogroup" aria-label={label} className="relative inline-flex shrink-0 items-center gap-0.5 rounded-lg bg-muted/60 p-0.5">
-      {pill && (
-        <span
-          aria-hidden
-          className="absolute top-0.5 bottom-0.5 rounded-md bg-background shadow-[0_0_0_1px_var(--border)] transition-[left,width] duration-250 ease-[cubic-bezier(0.34,1.25,0.64,1)] motion-reduce:transition-none"
-          style={{ left: pill.left, width: pill.width }}
-        />
-      )}
-      {options.map((o) => (
-        <button
-          key={o.value}
-          type="button"
-          role="radio"
-          aria-checked={value === o.value}
-          title={o.title}
-          aria-label={o.title}
-          onClick={() => onChange(o.value)}
-          className={cn(
-            'relative flex h-7 min-w-8 items-center justify-center rounded-md px-2.5 text-[13px] transition-colors duration-200 [&_svg]:size-4 [&_svg]:transition-transform [&_svg]:duration-200 active:[&_svg]:scale-90',
-            value === o.value ? 'text-foreground' : 'text-muted-foreground hover:text-foreground',
-          )}
-        >
-          {o.label}
-        </button>
-      ))}
-    </div>
-  );
-}
+// The segmented control lives in ui/segmented so pages outside the dialog can
+// use it; re-exported here for the panels that import it from this module.
+export { Segmented };
 
 function SaveBar({ dirty, saving, error, onSave }: { dirty: boolean; saving: boolean; error?: string; onSave: () => void }) {
   const { t } = useTranslation();
@@ -246,6 +203,7 @@ function useSettingsDraft() {
   const save = useMutation({
     mutationFn: () => saveAppSettings(draft),
     onSuccess: () => {
+      toastSaved();
       setDraft({});
       void queryClient.invalidateQueries({ queryKey: ['app-settings'] });
     },
@@ -439,7 +397,7 @@ function AppearancePanel() {
           <Segmented<Theme>
             label={t('settings.appearance.theme')}
             value={prefs.theme}
-            onChange={(v) => { prefs.setTheme(v); applyTheme(v); }}
+            onChange={(v) => { prefs.setTheme(v); applyTheme(v); toastSaved(); }}
             options={[
               { value: 'system', label: <MonitorIcon />, title: t('settings.appearance.system') },
               { value: 'light', label: <SunIcon />, title: t('settings.appearance.light') },
@@ -451,7 +409,7 @@ function AppearancePanel() {
           <Select
             className="w-44"
             value={prefs.lang}
-            onChange={(v) => { prefs.setLang(v as Lang); applyLang(v as Lang); }}
+            onChange={(v) => { prefs.setLang(v as Lang); applyLang(v as Lang); toastSaved(); }}
             options={LANGUAGES.map((l) => ({ value: l.value, label: l.label }))}
           />
         </Row>
@@ -459,7 +417,7 @@ function AppearancePanel() {
           <Select
             className="w-44"
             value={prefs.llmLang}
-            onChange={(v) => prefs.setLlmLang(v as LlmLang)}
+            onChange={(v) => { prefs.setLlmLang(v as LlmLang); toastSaved(); }}
             options={[
               { value: 'auto', label: t('settings.appearance.languageAuto') },
               ...LANGUAGES.map((l) => ({ value: l.value, label: l.label })),
@@ -470,7 +428,7 @@ function AppearancePanel() {
           <Segmented<Density>
             label={t('settings.appearance.density')}
             value={prefs.density}
-            onChange={(v) => { prefs.setDensity(v); applyDensity(v); }}
+            onChange={(v) => { prefs.setDensity(v); applyDensity(v); toastSaved(); }}
             options={[
               { value: 'compact', label: t('settings.appearance.compact') },
               { value: 'comfortable', label: t('settings.appearance.comfortable') },
@@ -481,7 +439,7 @@ function AppearancePanel() {
         <Row label={t('settings.appearance.workingAnimation')} hint={t('settings.appearance.workingAnimationHint')}>
           <Switch
             checked={prefs.workingAnimation === 'legacy'}
-            onCheckedChange={(v) => prefs.setWorkingAnimation(v ? 'legacy' : 'orb')}
+            onCheckedChange={(v) => { prefs.setWorkingAnimation(v ? 'legacy' : 'orb'); toastSaved(); }}
           />
         </Row>
       </Section>
@@ -493,13 +451,20 @@ function AppearancePanel() {
               label={t(`settings.appearance.vis.${it.key}`)}
               hint={it.hint ? t(`settings.appearance.vis.${it.key}Hint`) : undefined}
             >
-              <Switch checked={prefs.visibility[it.key]} onCheckedChange={(v) => prefs.setVisibility(it.key, v)} />
+              <Switch
+                checked={prefs.visibility[it.key]}
+                onCheckedChange={(v) => {
+                  prefs.setVisibility(it.key, v);
+                  // The thinking switch announces itself (state/prefs.ts).
+                  if (it.key !== 'showThinking') toastSaved();
+                }}
+              />
             </Row>
           ))}
         </Section>
       ))}
       <div>
-        <Button variant="outline" size="sm" onClick={prefs.resetVisibility}>{t('settings.appearance.resetVisibility')}</Button>
+        <Button variant="outline" size="sm" onClick={() => { prefs.resetVisibility(); toast('toasts.reset'); }}>{t('settings.appearance.resetVisibility')}</Button>
       </div>
     </Page>
   );
@@ -585,6 +550,7 @@ function ShortcutsPanel() {
   const binds = data ?? {};
   const save = useMutation({
     mutationFn: (next: Record<string, string>) => saveUserPref('keybinds', next),
+    onSuccess: () => toast('toasts.shortcutSaved'),
     onSettled: () => qc.invalidateQueries({ queryKey: ['userPref', 'keybinds'] }),
   });
   if (!isSuccess) return <Page><p className="text-sm text-muted-foreground">{t('common.loading')}</p></Page>;
@@ -627,6 +593,7 @@ function PersonalizationPanel() {
   const save = useMutation({
     mutationFn: (next: UserInstructions) => saveUserPref('custom_instructions', { ...next, text: next.text.trim() }),
     onSuccess: async () => {
+      toastSaved();
       await qc.invalidateQueries({ queryKey: ['userInstructions'] });
       setDraft(null);
     },
@@ -691,6 +658,7 @@ function AccountPanel() {
       await changePassword(pw.current, pw.next);
       setPw({ current: '', next: '', confirm: '' });
       setPwMsg(t('settings.account.passwordChanged'));
+      toast('settings.account.passwordChanged');
     } catch (e) { setPwMsg((e as Error).message); }
   };
 
@@ -700,6 +668,7 @@ function AccountPanel() {
       await setDisplayName(name.trim());
       await qc.invalidateQueries({ queryKey: ['auth'] });
       setNameMsg(t('settings.account.nameSaved'));
+      toast('settings.account.nameSaved');
     } catch (e) { setNameMsg((e as Error).message); }
   };
 
@@ -739,14 +708,20 @@ function AccountPanel() {
       </Section>
 
       <Section title={t('settings.account.changePassword')} padded>
-      <div className="space-y-2">
-        <Input type="password" placeholder={t('settings.account.currentPassword')} value={pw.current} onChange={(e) => setPw({ ...pw, current: e.target.value })} />
-        <Input type="password" placeholder={t('settings.account.newPassword')} value={pw.next} onChange={(e) => setPw({ ...pw, next: e.target.value })} />
-        <Input type="password" placeholder={t('settings.account.confirmPassword')} value={pw.confirm} onChange={(e) => setPw({ ...pw, confirm: e.target.value })} />
-        <div className="flex items-center gap-3">
-          <Button size="sm" disabled={!pw.current || !pw.next} onClick={() => void savePassword()}>{t('settings.account.changeBtn')}</Button>
-          {pwMsg && <span className={cn('text-xs', pwMsg === t('settings.account.passwordChanged') ? 'text-success' : 'text-destructive-foreground')}>{pwMsg}</span>}
-        </div>
+      <FormGrid>
+        <Field label={t('settings.account.currentPassword')} className="@lg/form:col-span-2 @lg/form:max-w-[calc(50%-0.5rem)]">
+          <Input type="password" autoComplete="current-password" value={pw.current} onChange={(e) => setPw({ ...pw, current: e.target.value })} />
+        </Field>
+        <Field label={t('settings.account.newPassword')}>
+          <Input type="password" autoComplete="new-password" value={pw.next} onChange={(e) => setPw({ ...pw, next: e.target.value })} />
+        </Field>
+        <Field label={t('settings.account.confirmPassword')}>
+          <Input type="password" autoComplete="new-password" value={pw.confirm} onChange={(e) => setPw({ ...pw, confirm: e.target.value })} />
+        </Field>
+      </FormGrid>
+      <div className="mt-3 flex items-center gap-3">
+        <Button size="sm" disabled={!pw.current || !pw.next} onClick={() => void savePassword()}>{t('settings.account.changeBtn')}</Button>
+        {pwMsg && <span className={cn('text-xs', pwMsg === t('settings.account.passwordChanged') ? 'text-success' : 'text-destructive-foreground')}>{pwMsg}</span>}
       </div>
       </Section>
 
@@ -809,7 +784,7 @@ function AddModelsPanel() {
 
   const run = async (fn: () => Promise<unknown>, ok: string) => {
     setMsg(null);
-    try { await fn(); setMsg({ text: ok, ok: true }); refresh(); } catch (e) { setMsg({ text: (e as Error).message, ok: false }); }
+    try { await fn(); setMsg({ text: ok, ok: true }); toastText(ok); refresh(); } catch (e) { setMsg({ text: (e as Error).message, ok: false }); }
   };
 
   // Deleting also resets every setting that points at this endpoint (default
@@ -855,12 +830,18 @@ function AddModelsPanel() {
   return (
     <Page>
       <Section title={t('settings.models.addEndpoint')} padded>
-        <div className="space-y-2.5">
-          <div className="flex gap-2">
-            <Input placeholder={t('settings.models.baseUrlPlaceholder')} value={url} onChange={(e) => setUrl(e.target.value)} />
-            <Select value={kind} onChange={setKind} options={[{ value: 'llm', label: t('settings.models.llm') }, { value: 'image', label: t('settings.models.image') }]} />
-          </div>
-          <Input placeholder={t('settings.models.apiKeyOptional')} type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} />
+        <div className="space-y-3">
+          <FormGrid>
+            <Field label={t('settings.models.baseUrl')} hint={t('settings.models.baseUrlHint')}>
+              <Input placeholder={t('settings.models.baseUrlPlaceholder')} value={url} onChange={(e) => setUrl(e.target.value)} />
+            </Field>
+            <Field label={t('settings.models.type')} hint={t('settings.models.typeHint')}>
+              <Select className="w-full" value={kind} onChange={setKind} options={[{ value: 'llm', label: t('settings.models.llm') }, { value: 'image', label: t('settings.models.image') }]} />
+            </Field>
+            <Field label={t('settings.models.apiKeyOptional')} hint={t('settings.models.apiKeyHint')} className="@lg/form:col-span-2">
+              <Input type="password" autoComplete="off" value={apiKey} onChange={(e) => setApiKey(e.target.value)} />
+            </Field>
+          </FormGrid>
           <div className="flex flex-wrap items-center gap-2">
             <Button size="sm" disabled={!url.trim()} onClick={() => void run(() => addModelEndpoint({ baseUrl: url, apiKey: apiKey || undefined, modelType: kind }), t('settings.models.endpointAdded'))}>
               <PlusIcon /> {t('common.add')}
@@ -962,6 +943,7 @@ function EndpointEditor({ endpoint, onDone, onCancel }: { endpoint: AdminModelEn
       if (clearKey) body.api_key = '';
       else if (apiKey.trim()) body.api_key = apiKey.trim();
       await updateModelEndpoint(endpoint.id, body);
+      toastSaved();
       onDone();
     } catch (e) { setErr((e as Error).message); } finally { setSaving(false); }
   };
@@ -1159,6 +1141,7 @@ function IntegrationsPanel({ onClose }: { onClose: () => void }) {
       await createIntegration({ ...(preset ? { preset } : {}), ...form });
       setForm({ name: '', base_url: '', api_key: '' });
       setPreset('');
+      toast('toasts.added');
       refresh();
     } catch (e) { setMsg((e as Error).message); }
   };
@@ -1193,9 +1176,11 @@ function IntegrationsPanel({ onClose }: { onClose: () => void }) {
           {(integrations ?? []).length === 0 && <p className="text-xs text-muted-foreground">{t('settings.integrations.none')}</p>}
         </div>
 
-        <div className="space-y-2 border-t border-border/60 pt-3 mt-3">
+        <div className="space-y-3 border-t border-border/60 pt-3 mt-3">
           <div className="text-sm font-medium">{t('settings.integrations.addIntegration')}</div>
+          <FormGrid>
           {presetEntries.length > 0 && (
+            <Field label={t('settings.integrations.preset')} hint={t('settings.integrations.presetHint')}>
             <Select
               className="w-full"
               value={preset}
@@ -1206,10 +1191,18 @@ function IntegrationsPanel({ onClose }: { onClose: () => void }) {
               }}
               options={[{ value: '', label: t('settings.integrations.custom') }, ...presetEntries.map(([k, p]) => ({ value: k, label: String(p.name ?? k) }))]}
             />
+            </Field>
           )}
-          <Input placeholder={t('settings.integrations.name')} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
-          <Input placeholder={t('settings.integrations.baseUrl')} value={form.base_url} onChange={(e) => setForm({ ...form, base_url: e.target.value })} />
-          <Input placeholder={t('settings.integrations.apiKey')} type="password" value={form.api_key} onChange={(e) => setForm({ ...form, api_key: e.target.value })} />
+          <Field label={t('settings.integrations.name')} hint={t('settings.integrations.nameHint')}>
+            <Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
+          </Field>
+          <Field label={t('settings.integrations.baseUrl')} hint={t('settings.integrations.baseUrlHint')}>
+            <Input placeholder="https://" value={form.base_url} onChange={(e) => setForm({ ...form, base_url: e.target.value })} />
+          </Field>
+          <Field label={t('settings.integrations.apiKey')} hint={t('settings.integrations.apiKeyHint')}>
+            <Input type="password" autoComplete="off" value={form.api_key} onChange={(e) => setForm({ ...form, api_key: e.target.value })} />
+          </Field>
+          </FormGrid>
           <Button size="sm" disabled={!form.name.trim()} onClick={() => void add()}><PlusIcon /> {t('common.add')}</Button>
           {msg && <p className="text-xs text-destructive-foreground">{msg}</p>}
         </div>
@@ -1306,6 +1299,7 @@ function SqlDatabaseSection() {
     fn()
       .then(() => {
         setMsg({ text: ok, ok: true });
+        toastText(ok);
         void queryClient.invalidateQueries({ queryKey: ['sql-config'] });
         // Each database has a mini RAG, so the list of those just changed too.
         void queryClient.invalidateQueries({ queryKey: ['rag-bases'] });
@@ -1783,7 +1777,10 @@ function ToolsPanel() {
   const queryClient = useQueryClient();
   const save = useMutation({
     mutationFn: saveDisabledTools,
-    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ['builtin-tools'] }),
+    onSuccess: () => {
+      toastSaved();
+      void queryClient.invalidateQueries({ queryKey: ['builtin-tools'] });
+    },
   });
 
   if (!tools) return <Page><p className="text-sm text-muted-foreground">{t('common.loading')}</p></Page>;
@@ -1995,6 +1992,7 @@ function AssistantEditor({ initial, onDone, onCancel }: { initial: Partial<Assis
     try {
       if (initial.id) await updateAssistant(initial.id, draft);
       else await createAssistant(draft);
+      toastSaved();
       onDone();
     } catch (e) { setErr((e as Error).message); } finally { setSaving(false); }
   };
@@ -2126,6 +2124,7 @@ function SharedSkillsPanel() {
   const toggle = useMutation({
     mutationFn: ({ name, enabled }: { name: string; enabled: boolean }) =>
       setSharedSkillEnabled(name, enabled),
+    onSuccess: (_result, { name, enabled }) => toast(enabled ? 'toasts.skillOn' : 'toasts.skillOff', { name }),
     onSettled: invalidate,
   });
 
@@ -2138,6 +2137,7 @@ function SharedSkillsPanel() {
         await uploadSharedSkill(await file.text());
       }
       setMsg(t('settings.skills.uploaded'));
+      toast('settings.skills.uploaded');
       invalidate();
     } catch (e) { setMsg((e as Error).message); }
   };
@@ -2146,6 +2146,7 @@ function SharedSkillsPanel() {
     setMsg('');
     try {
       await deleteSharedSkill(s.name);
+      toast('toasts.skillDeleted', { name: s.name });
       invalidate();
     } catch (e) { setMsg((e as Error).message); }
   };
@@ -2341,11 +2342,11 @@ export function SettingsDialog({
       )}
     >
       {n.icon}
-      <span className="min-w-0 truncate">{n.label}</span>
+      <span className="min-w-0 truncate max-md:hidden">{n.label}</span>
     </button>
   );
   const GroupLabel = ({ children }: { children: React.ReactNode }) => (
-    <div className="px-2.5 pt-4 pb-1 text-xs text-muted-foreground first:pt-1">
+    <div className="px-2.5 pt-4 pb-1 text-xs text-muted-foreground first:pt-1 max-md:invisible max-md:h-0 max-md:overflow-hidden max-md:border-t max-md:p-0 max-md:pt-2 max-md:first:border-t-0">
       {children}
     </div>
   );
@@ -2371,11 +2372,13 @@ export function SettingsDialog({
       <DialogContent
         bare
         title={t('settings.title')}
-        className="h-[80vh] max-h-none min-h-[min(560px,calc(100vh-2rem))] w-[80vw] max-w-[1600px] min-w-[min(860px,calc(100vw-2rem))] rounded-xl"
+        className="h-[80vh] max-h-none min-h-[min(560px,calc(100vh-2rem))] w-[80vw] max-w-[1600px] min-w-[min(860px,calc(100vw-1rem))] rounded-xl"
       >
         <div className="flex min-h-0 flex-1">
-          <nav className="flex w-max min-w-48 shrink-0 flex-col border-r bg-sidebar">
-            <div className="w-0 min-w-full p-3 pb-2">
+          {/* Below `md` the navigation keeps its icons only (the label is the
+              row's tooltip), so the settings themselves get the width. */}
+          <nav className="flex w-max shrink-0 flex-col border-r bg-sidebar md:min-w-48">
+            <div className="w-0 min-w-full p-3 pb-2 max-md:hidden">
               <SearchInput
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
@@ -2383,11 +2386,11 @@ export function SettingsDialog({
                 aria-label={t('settings.searchPlaceholder')}
               />
             </div>
-            <div ref={setNavList}className="relative min-h-0 flex-1 space-y-px overflow-y-auto px-3 pb-3 [scrollbar-gutter:stable]">
+            <div ref={setNavList} className="relative min-h-0 flex-1 space-y-px overflow-y-auto px-3 pb-3 max-md:px-2 max-md:pt-3 md:[scrollbar-gutter:stable]">
               {navPill && (
                 <span
                   aria-hidden
-                  className="pointer-events-none absolute right-3 left-3 rounded-lg bg-accent transition-[top] duration-250 ease-[cubic-bezier(0.34,1.2,0.64,1)] motion-reduce:transition-none"
+                  className="pointer-events-none absolute right-3 left-3 rounded-lg bg-accent max-md:right-2 max-md:left-2 transition-[top] duration-250 ease-[cubic-bezier(0.34,1.2,0.64,1)] motion-reduce:transition-none"
                   style={{ top: navPill.top, height: navPill.height }}
                 />
               )}
@@ -2414,7 +2417,7 @@ export function SettingsDialog({
               )}
               {/* Zero-height copy of the unfiltered nav: keeps the sidebar at
                   its full width while the search filters out the long labels. */}
-              <div aria-hidden className="invisible h-0 overflow-hidden">
+              <div aria-hidden className="invisible h-0 overflow-hidden max-md:hidden">
                 {[
                   ...(scope === 'admin' ? [] : userNav),
                   ...(auth?.is_admin && scope !== 'user' ? [...adminNav, ...advancedNav] : []),
@@ -2435,12 +2438,20 @@ export function SettingsDialog({
           <div className="relative flex min-w-0 flex-1 flex-col">
             <DialogClose
               aria-label={t('common.close')}
-              className="absolute top-3 right-3 z-10 flex size-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+              className="absolute top-3 right-3 z-10 flex size-8 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
             >
               <XIcon className="size-4" />
             </DialogClose>
-            <div className="mt-14 mb-3 min-h-0 flex-1 overflow-y-auto overscroll-contain [scrollbar-gutter:stable]">
-            <div key={panel} className="settings-panel-in mx-auto max-w-[1100px] [&_.settings-row-hint]:hidden">
+            {/* What this page is and what it is for, in the strip beside the
+                close button: every panel opens with its name and one line of
+                explanation, so a setting is never met without its context. */}
+            <header className="shrink-0 px-6 pt-5 pr-14 pb-4 sm:px-10 sm:pr-16">
+              <h1 className="text-lg leading-tight font-semibold tracking-tight text-strong">{t(`settings.nav.${panel}`)}</h1>
+              <p className="mt-1 max-w-[70ch] text-[13px] leading-snug text-muted-foreground">{t(`settings.intro.${panel}`)}</p>
+            </header>
+            <div className="mb-3 min-h-0 flex-1 overflow-y-auto overscroll-contain [scrollbar-gutter:stable]">
+            <PanelTitleContext.Provider value={t(`settings.nav.${panel}`)}>
+            <div key={panel} className="settings-panel-in mx-auto max-w-[1100px]">
               {panel === 'appearance' && <AppearancePanel />}
               {panel === 'shortcuts' && <ShortcutsPanel />}
               {panel === 'personalization' && <PersonalizationPanel />}
@@ -2459,6 +2470,7 @@ export function SettingsDialog({
               {panel === 'users' && <UsersPanel currentUser={auth?.username} />}
               {panel === 'system' && <SystemPanel />}
             </div>
+            </PanelTitleContext.Provider>
             </div>
           </div>
         </div>

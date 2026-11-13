@@ -18,8 +18,9 @@ import {
 } from '@/api/client';
 import { cn } from '@/lib/utils';
 import { Button } from '../ui/button';
+import { toast } from '../ui/toast';
 import { Page, Row, Section } from '../SettingsDialog';
-import { Input, Switch } from '../ui/misc';
+import { Field, FormGrid, Input, Switch } from '../ui/misc';
 
 /* Mirrors the legacy admin panel's privilege keys (static/js/admin.js);
    labels come from i18n at settings.users.priv.<key>. */
@@ -297,7 +298,10 @@ export function UsersPanel({ currentUser }: { currentUser?: string }) {
   const adminCount = (users ?? []).filter((u) => u.is_admin).length;
   const create = useMutation({
     mutationFn: () => createUser(username.trim(), password, isAdmin, displayName.trim()),
-    onSuccess: () => { setUsername(''); setDisplayName(''); setPassword(''); setIsAdmin(false); refresh(); },
+    onSuccess: () => {
+      toast('toasts.userCreated', { user: username.trim() });
+      setUsername(''); setDisplayName(''); setPassword(''); setIsAdmin(false); refresh();
+    },
   });
 
   return (
@@ -317,15 +321,25 @@ export function UsersPanel({ currentUser }: { currentUser?: string }) {
       </Section>
 
       <Section title={t('settings.users.addUser')} padded>
-        <div className="space-y-2">
-          <div className="flex gap-2">
-            <Input placeholder={t('settings.users.email')} type="email" value={username} onChange={(e) => setUsername(e.target.value)} />
-            <Input placeholder={t('settings.users.displayName')} value={displayName} onChange={(e) => setDisplayName(e.target.value)} />
-          </div>
-          <Input placeholder={t('settings.users.passwordMin')} type="password" value={password} onChange={(e) => setPassword(e.target.value)} />
-          <label className="flex items-center gap-2 text-sm text-muted-foreground">
-            <Switch checked={isAdmin} onCheckedChange={setIsAdmin} /> {t('settings.users.administrator')}
-          </label>
+        <div className="space-y-3">
+          <FormGrid>
+            <Field label={t('settings.users.email')} hint={t('settings.users.emailHint')}>
+              <Input type="email" autoComplete="off" value={username} onChange={(e) => setUsername(e.target.value)} />
+            </Field>
+            <Field label={t('settings.users.displayName')} hint={t('settings.users.displayNameHint')}>
+              <Input autoComplete="off" value={displayName} onChange={(e) => setDisplayName(e.target.value)} />
+            </Field>
+            <Field label={t('settings.users.passwordMin')} hint={t('settings.users.passwordHint')}>
+              <Input type="password" autoComplete="new-password" value={password} onChange={(e) => setPassword(e.target.value)} />
+            </Field>
+            <div className="flex items-center gap-2.5 self-end pb-1.5 text-sm">
+              <Switch checked={isAdmin} onCheckedChange={setIsAdmin} aria-label={t('settings.users.administrator')} />
+              <span>
+                {t('settings.users.administrator')}
+                <span className="block text-xs text-muted-foreground">{t('settings.users.administratorHint')}</span>
+              </span>
+            </div>
+          </FormGrid>
           <Button size="sm" disabled={!username.trim() || password.length < 8 || create.isPending} onClick={() => create.mutate()}>
             <PlusIcon /> {t('settings.users.createUser')}
           </Button>
