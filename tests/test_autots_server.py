@@ -73,6 +73,38 @@ def test_search_params_stay_within_the_presets():
         server.search_params({"quality": "forever"})
 
 
+def test_forecast_length_fits_the_history():
+    assert server.forecast_length({}, 12) == 3
+    assert server.forecast_length({}, 400) == 30
+    assert server.forecast_length({}, 2) == 1
+    assert server.forecast_length({"forecast_length": 12}, 12) == 12
+    with pytest.raises(ValueError, match="12 periods"):
+        server.forecast_length({"forecast_length": 30}, 12)
+
+
+def test_sampling_error_runs_the_search_again_without_generations(monkeypatch):
+    """AutoTS 1.0.4 under pandas 3 fails this way on short series with thorough."""
+    fits = []
+
+    async def fit(data_id, length, params):
+        fits.append(dict(params))
+        if params["max_generations"]:
+            raise ValueError("Weighted sampling cannot be achieved with replace=False.")
+        return {"prediction_id": "p1"}
+
+    async def run_tool(name, arguments):
+        return {"model_name": "FFT"} if name == "get_model_params" else {"y": [1.0]}
+
+    monkeypatch.setattr(server, "_fit", fit)
+    monkeypatch.setattr(server, "run_tool", run_tool)
+    monkeypatch.setattr(server, "history_length", lambda data_id: 12)
+    out = asyncio.run(server._forecast({"data_id": "d1", "quality": "thorough"}))
+    assert [f["max_generations"] for f in fits] == [4, 0]
+    assert out["forecast_length"] == 3
+    assert out["note"]
+    assert out["model"] == "FFT"
+
+
 async def _in_client(body):
     params = StdioServerParameters(
         command=sys.executable,
@@ -121,6 +153,10 @@ def test_forecast_and_plot_through_a_real_client():
         )
         assert not again.isError, _text(again)
         assert len(json.loads(_text(again))["forecast"]["sales"]) == 3
+
+        short = await session.call_tool("forecast", {"text": _csv(days=12)})
+        assert not short.isError, _text(short)
+        assert json.loads(_text(short))["forecast_length"] == 3
 
         plot = await session.call_tool("plot_forecast", {"prediction_id": out["prediction_id"]})
         assert not plot.isError
