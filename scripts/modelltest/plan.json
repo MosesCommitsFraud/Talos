@@ -1,0 +1,424 @@
+[
+ {
+  "id": "ALG-01",
+  "q": "Was ist der Unterschied zwischen Brutto- und Nettoumsatz? Bitte in höchstens drei Sätzen.",
+  "follow": [],
+  "flags": {
+   "rag": false,
+   "db": false,
+   "web": false
+  }
+ },
+ {
+  "id": "ALG-02",
+  "q": "Ein Kredit über 25.000 € läuft 60 Monate mit 4,8 % Nominalzins p. a. (monatliche Verzinsung, Annuität). Wie hoch ist die Monatsrate?",
+  "follow": [],
+  "flags": {
+   "rag": false,
+   "db": false,
+   "web": false
+  }
+ },
+ {
+  "id": "ALG-03",
+  "q": "Formuliere diese Nachricht höflich und professionell um: „Die Lieferung ist schon wieder zu spät, das geht so nicht weiter. Klären Sie das bis Freitag.“",
+  "follow": [],
+  "flags": {
+   "rag": false,
+   "db": false,
+   "web": false
+  }
+ },
+ {
+  "id": "ALG-04",
+  "q": "Brauche ich morgen in Stuttgart einen Regenschirm?",
+  "follow": [],
+  "flags": {
+   "rag": false,
+   "db": false,
+   "web": true
+  }
+ },
+ {
+  "id": "ALG-05",
+  "q": "Mach mir eine Übersicht.",
+  "follow": [],
+  "flags": {
+   "rag": true,
+   "db": true,
+   "web": true
+  }
+ },
+ {
+  "id": "ALG-06",
+  "q": "Führe bitte sudo apt install htop aus.",
+  "follow": [],
+  "flags": {
+   "rag": false,
+   "db": false,
+   "web": false
+  }
+ },
+ {
+  "id": "ALG-07",
+  "q": "Welche Python-Version ist aktuell die neueste stabile, und was sind die drei wichtigsten Neuerungen?",
+  "follow": [],
+  "flags": {
+   "rag": false,
+   "db": false,
+   "web": true
+  }
+ },
+ {
+  "id": "ALG-08",
+  "q": "Was gibt es Neues zum EU AI Act?",
+  "follow": [],
+  "flags": {
+   "rag": false,
+   "db": false,
+   "web": true
+  }
+ },
+ {
+  "id": "ALG-09",
+  "q": "Analysiere die angehängte Datei: Umsatz gesamt, Umsatz je Produkt und Umsatzentwicklung je Monat. Zeig den Monatsverlauf als Diagramm.",
+  "follow": [
+   "Welches Produkt wächst stärker?"
+  ],
+  "flags": {
+   "rag": false,
+   "db": false,
+   "web": false,
+   "attach": "sales.csv"
+  }
+ },
+ {
+  "id": "ALG-10",
+  "q": "Zeig mir die Einwohnerzahlen der fünf größten Städte Deutschlands als Balkendiagramm.",
+  "follow": [],
+  "flags": {
+   "rag": false,
+   "db": false,
+   "web": true
+  }
+ },
+ {
+  "id": "ALG-11",
+  "q": "Bau mir einen Rechner für den Stundensatz: Jahresgehalt, produktive Arbeitstage, Stunden pro Tag und Gemeinkostenzuschlag in %.",
+  "follow": [
+   "Füge noch einen Gewinnaufschlag hinzu."
+  ],
+  "flags": {
+   "rag": false,
+   "db": false,
+   "web": false
+  }
+ },
+ {
+  "id": "ALG-12",
+  "q": "Schreib ein Python-Skript, das alle CSV-Dateien eines Ordners mit gleichen Spalten zu einer Datei zusammenführt und Duplikate entfernt.",
+  "follow": [
+   "Ergänze ein Logging, wie viele Zeilen entfernt wurden."
+  ],
+  "flags": {
+   "rag": false,
+   "db": false,
+   "web": false
+  }
+ },
+ {
+  "id": "ALG-13",
+  "q": "Erstelle mir eine Excel-Datei: Urlaubsplaner für 5 Mitarbeiter für 2027, mit den Feiertagen in Baden-Württemberg.",
+  "follow": [],
+  "flags": {
+   "rag": false,
+   "db": false,
+   "web": false
+  }
+ },
+ {
+  "id": "ALG-14",
+  "q": "Vergleiche Microsoft 365 Copilot, Google Gemini für Workspace und ChatGPT Enterprise hinsichtlich Datenschutz/DSGVO, Preis pro Nutzer und Funktionen. Als Tabelle mit Empfehlung.",
+  "follow": [
+   "Welches davon würdest du für 50 Nutzer in einem deutschen Mittelständler nehmen?"
+  ],
+  "flags": {
+   "rag": false,
+   "db": false,
+   "web": true
+  }
+ },
+ {
+  "id": "ALG-15",
+  "q": "Recherchiere für die drei größten Cloud-Anbieter (AWS, Azure, Google Cloud) jeweils, ob und wo sie Rechenzentren in Deutschland haben und welche Zertifizierungen (C5, ISO 27001) sie dort nachweisen.",
+  "follow": [],
+  "flags": {
+   "rag": false,
+   "db": false,
+   "web": true
+  }
+ },
+ {
+  "id": "ALG-16",
+  "q": "Wie ist der aktuelle Stand bei kleinen Sprachmodellen für den On-Premise-Einsatz in mittelständischen Unternehmen: Hardware, Modelle, Kosten, Risiken?",
+  "follow": [],
+  "flags": {
+   "rag": false,
+   "db": false,
+   "web": true,
+   "deep": true
+  }
+ },
+ {
+  "id": "ALG-17",
+  "q": "Welche Pflichten ergeben sich aus NIS2 für ein mittelständisches Softwareunternehmen in Deutschland, und ab wann gelten sie?",
+  "follow": [],
+  "flags": {
+   "rag": false,
+   "db": false,
+   "web": true,
+   "deep": true
+  }
+ },
+ {
+  "id": "ALG-18",
+  "q": "Erkläre mir Schritt für Schritt, wie ein Kreditantrag bei einer Bank geprüft wird.",
+  "follow": [
+   "Was genau passiert bei der Bonitätsprüfung?",
+   "Welche Rolle spielt die SCHUFA dabei?",
+   "Wie wird die Haushaltsrechnung aufgestellt?",
+   "Welche Sicherheiten verlangt eine Bank typischerweise?",
+   "Wie unterscheidet sich die Prüfung bei Selbstständigen?",
+   "Was ist der Beleihungswert bei einer Baufinanzierung?",
+   "Wie lange dauert die Prüfung normalerweise?",
+   "Aus welchen Gründen wird ein Antrag am häufigsten abgelehnt?",
+   "Fasse alles, was wir besprochen haben, in 10 Punkten zusammen."
+  ],
+  "flags": {
+   "rag": false,
+   "db": false,
+   "web": false
+  }
+ },
+ {
+  "id": "SKL-01",
+  "q": "Plan: 8.000 Stück zu 25 €. Ist: 7.500 Stück zu 27 €. Zerlege die Umsatzabweichung in Mengen- und Preisabweichung und schreib einen kurzen Abweichungskommentar für die Geschäftsleitung.",
+  "follow": [],
+  "flags": {
+   "rag": false,
+   "db": false,
+   "web": false
+  }
+ },
+ {
+  "id": "SKL-02",
+  "q": "Was ist der Unterschied zwischen Plankosten und Istkosten? Bitte in zwei Sätzen.",
+  "follow": [],
+  "flags": {
+   "rag": false,
+   "db": false,
+   "web": false
+  }
+ },
+ {
+  "id": "SKL-03",
+  "q": "Erstelle eine Abweichungsanalyse Plan gegen Ist für die Kostenstellen im letzten Geschäftsjahr und formuliere Abweichungskommentare für die drei größten Abweichungen.",
+  "follow": [
+   "Welche dieser Abweichungen ist wesentlich, und warum?"
+  ],
+  "flags": {
+   "rag": false,
+   "db": true,
+   "web": false
+  }
+ },
+ {
+  "id": "SKL-04",
+  "q": "Erstelle mir eine Excel-Datei mit einer Kostenstellenübersicht: 5 Beispiel-Kostenstellen mit Plan und Ist, Abweichung absolut und in % als Formeln, und Überschreitungen über 10 % rot markiert.",
+  "follow": [],
+  "flags": {
+   "rag": false,
+   "db": false,
+   "web": false
+  }
+ },
+ {
+  "id": "SKL-05",
+  "q": "Wie lautet die Excel-Formel für die prozentuale Abweichung, wenn der Ist-Wert in B2 und der Plan-Wert in C2 steht?",
+  "follow": [],
+  "flags": {
+   "rag": false,
+   "db": false,
+   "web": false
+  }
+ },
+ {
+  "id": "SKL-06",
+  "q": "Schreib mir ein Word-Dokument: Verfahrensanweisung für den Monatsabschluss mit Inhaltsverzeichnis, nummerierten Überschriften und Seitenzahlen.",
+  "follow": [],
+  "flags": {
+   "rag": false,
+   "db": false,
+   "web": false
+  }
+ },
+ {
+  "id": "SKL-07",
+  "q": "Nenne mir drei Agendapunkte für ein Meeting zum Monatsabschluss.",
+  "follow": [],
+  "flags": {
+   "rag": false,
+   "db": false,
+   "web": false
+  }
+ },
+ {
+  "id": "SKL-08",
+  "q": "Erstelle mir ein PDF mit einer einseitigen Checkliste für den Jahresabschluss zum Ausdrucken.",
+  "follow": [],
+  "flags": {
+   "rag": false,
+   "db": false,
+   "web": false
+  }
+ },
+ {
+  "id": "SKL-09",
+  "q": "Was ist PDF/A, und wann braucht man es in der Buchhaltung?",
+  "follow": [],
+  "flags": {
+   "rag": false,
+   "db": false,
+   "web": false
+  }
+ },
+ {
+  "id": "SKL-10",
+  "q": "Erstelle mir ein Dashboard als Datei zum Herunterladen mit Umsatz und DB 1 der letzten 12 Monate aus der Datenbank.",
+  "follow": [
+   "Füge noch eine Top-10-Kundenliste hinzu."
+  ],
+  "flags": {
+   "rag": false,
+   "db": true,
+   "web": false
+  }
+ },
+ {
+  "id": "SKL-11",
+  "q": "Zeig mir kurz im Chat, wie sich der Umsatz in den letzten 12 Monaten entwickelt hat.",
+  "follow": [],
+  "flags": {
+   "rag": false,
+   "db": true,
+   "web": false
+  }
+ },
+ {
+  "id": "SKL-12",
+  "q": "Stell den Freigabeprozess für eine Bestellanforderung als Ablaufdiagramm dar: Antrag, Prüfung durch den Abteilungsleiter, ab 5.000 € zusätzlich Geschäftsführung, danach Bestellung durch den Einkauf.",
+  "follow": [],
+  "flags": {
+   "rag": false,
+   "db": false,
+   "web": false
+  }
+ },
+ {
+  "id": "SKL-13",
+  "q": "Zeig mir Stuttgart, München und Hamburg auf einer Karte und verbinde sie mit einer Route.",
+  "follow": [],
+  "flags": {
+   "rag": false,
+   "db": false,
+   "web": false
+  }
+ },
+ {
+  "id": "SKL-14",
+  "q": "Bau mir eine Checkliste für den Monatsabschluss zum Abhaken, die sich den Stand merkt.",
+  "follow": [
+   "Füge eine Fortschrittsanzeige in Prozent hinzu."
+  ],
+  "flags": {
+   "rag": false,
+   "db": false,
+   "web": false
+  }
+ },
+ {
+  "id": "SKL-15",
+  "q": "Mach aus diesem Ablauf einen Skill für die Bibliothek: Wenn jemand nach einer Kostenstellenanalyse fragt, erst den Zeitraum klären, dann Plan und Ist aus der Datenbank holen, Abweichungen absolut und in % berechnen und alles über 10 % markieren. Nenne den Skill test-kostenstellenanalyse.",
+  "follow": [],
+  "flags": {
+   "rag": false,
+   "db": false,
+   "web": false
+  }
+ },
+ {
+  "id": "SKL-16",
+  "q": "Welche fünf Kennzahlen gehören auf ein Vertriebs-Dashboard? Nur eine kurze Liste.",
+  "follow": [],
+  "flags": {
+   "rag": false,
+   "db": false,
+   "web": false
+  }
+ },
+ {
+  "id": "MCP-01",
+  "q": "Hier sind die Monatsumsätze 2025 in T€: Jan 100, Feb 104, Mär 109, Apr 112, Mai 118, Jun 121, Jul 127, Aug 130, Sep 136, Okt 139, Nov 145, Dez 149. Erstelle mit AutoTS eine Prognose für Januar bis März 2026 mit Schwankungsbreite.",
+  "follow": [],
+  "flags": {
+   "rag": false,
+   "db": false,
+   "web": false
+  }
+ },
+ {
+  "id": "MCP-02",
+  "q": "Hier sind die Monatsumsätze 2025 in T€: Jan 100, Feb 104, Mär 109, Apr 112, Mai 118, Jun 121, Jul 127, Aug 130, Sep 136, Okt 139, Nov 145, Dez 149. Prognostiziere die nächsten 6 Monate mit AutoTS.",
+  "follow": [
+   "Zeig mir die Prognose als Diagramm."
+  ],
+  "flags": {
+   "rag": false,
+   "db": false,
+   "web": false
+  }
+ },
+ {
+  "id": "MCP-03",
+  "q": "Hole den monatlichen Nettoumsatz (Ist) der letzten 24 Monate aus der Datenbank und erstelle mit AutoTS eine Prognose für die nächsten 6 Monate.",
+  "follow": [
+   "Wie belastbar ist diese Prognose?"
+  ],
+  "flags": {
+   "rag": false,
+   "db": true,
+   "web": false
+  }
+ },
+ {
+  "id": "MCP-04",
+  "q": "Wie hoch war der Nettoumsatz im März 2026?",
+  "follow": [],
+  "flags": {
+   "rag": false,
+   "db": true,
+   "web": false
+  }
+ },
+ {
+  "id": "MCP-05",
+  "q": "Erstelle aus der angehängten Datei mit AutoTS eine Prognose des Umsatzes je Produkt für April bis Juni 2026.",
+  "follow": [],
+  "flags": {
+   "rag": false,
+   "db": false,
+   "web": false,
+   "attach": "sales.csv"
+  }
+ }
+]
