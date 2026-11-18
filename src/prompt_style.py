@@ -69,7 +69,10 @@ LEAN_TOOL_DESCRIPTIONS: Dict[str, str] = {
         "inlines the chart runtime; a CDN script tag cannot load here. Deliverables go "
         "under relative paths, not /tmp. The workspace has no network and no route to "
         "the SQL database: use `web_search`/`web_fetch` for the internet, and get rows "
-        "with `query_sql`, which writes a CSV you can read here."
+        "with `query_sql`, which writes a CSV you can read here. Public holidays come "
+        "from the `holidays` package (`holidays.Germany(subdiv='BW', years=2027)`, "
+        "`subdiv` being the federal state), not from a list out of memory: which days "
+        "apply differs by state and year."
     ),
     "run_cell": (
         "Run Python in a persistent session, like a notebook: variables, imports and "

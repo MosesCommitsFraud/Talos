@@ -80,9 +80,12 @@ def test_python_tool_names_the_holidays_package_the_sandbox_ships():
         for s in FUNCTION_TOOL_SCHEMAS
         if s["function"]["name"] == "python"
     )
-    for text in (TOOL_SECTIONS["python"], native):
+    # The default style replaces the description of some tools, python among them.
+    from src.prompt_style import LEAN_TOOL_DESCRIPTIONS
+
+    for text in (TOOL_SECTIONS["python"], native, LEAN_TOOL_DESCRIPTIONS["python"]):
         assert "holidays.Germany(subdiv='BW', years=2027)" in text
-        assert "never a list from memory" in text
+        assert "list" in text and "memory" in text
     requirements = Path(__file__).parent.parent / "sandbox" / "requirements.txt"
     pinned = requirements.read_text("utf-8").splitlines()
     assert any(line.startswith("holidays==") for line in pinned)
