@@ -441,6 +441,39 @@ def save_settings(settings: dict):
     _invalidate_caches()
 
 
+# Defaults that changed, with the value they had before. Until the prune in
+# save_settings, every save wrote all defaults into settings.json, so an
+# installation that never touched one of these still carries the old default
+# as if an admin had chosen it. The Dev system kept a step cap of 20 that way
+# after the default became "no cap", and 15 of 351 model-test runs ended on it.
+_RETIRED_DEFAULTS = {"agent_max_rounds": 20}
+# Saved in settings.json: the keys already checked, so each is dropped at most
+# once and a value an admin sets afterwards stays, even if it equals the old one.
+RETIRED_DEFAULTS_MARK = "_retired_defaults_checked"
+
+
+def drop_retired_defaults() -> list:
+    """Once per installation, remove saved values that are a former default.
+
+    Returns the keys it removed. Run at startup.
+    """
+    from core.atomic_io import atomic_write_json
+
+    saved = _raw_saved_settings()
+    checked = saved.get(RETIRED_DEFAULTS_MARK)
+    checked = checked if isinstance(checked, list) else []
+    pending = [k for k in _RETIRED_DEFAULTS if k not in checked]
+    if not pending:
+        return []
+    dropped = [k for k in pending if k in saved and saved[k] == _RETIRED_DEFAULTS[k]]
+    for key in dropped:
+        del saved[key]
+    saved[RETIRED_DEFAULTS_MARK] = sorted(set(checked) | set(pending))
+    atomic_write_json(SETTINGS_FILE, saved, indent=2)
+    _invalidate_caches()
+    return dropped
+
+
 def get_setting(key: str, default: Any = None) -> Any:
     """Read a single setting value."""
     return load_settings().get(key, default)

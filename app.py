@@ -1073,6 +1073,17 @@ async def _startup_event():
             _db.close()
     except Exception as e:
         logger.debug(f"Incognito purge skipped: {e}")
+
+    # Saved values that are only a former default, such as a step cap of 20
+    # nobody chose: removed once, so the installation follows today's default.
+    try:
+        from src.settings import drop_retired_defaults
+
+        _dropped = drop_retired_defaults()
+        if _dropped:
+            logger.info(f"Dropped former defaults from settings.json: {', '.join(_dropped)}")
+    except Exception as e:
+        logger.warning(f"Former-default cleanup skipped: {e}")
     # Strong refs to fire-and-forget startup tasks. Without this, Python may
     # GC tasks created with `asyncio.create_task(...)` before they finish.
     _startup_tasks: list[asyncio.Task] = getattr(app.state, "_startup_tasks", [])

@@ -123,3 +123,45 @@ def test_budget_scales_to_the_window_after_an_unrelated_save(_settings_file):
         st.is_setting_overridden("agent_input_token_budget"),
     )
     assert budget == 200_000
+
+
+# ── drop_retired_defaults: a former default is not a choice ──
+
+
+def test_a_step_cap_left_from_the_old_default_is_dropped(_settings_file):
+    """The default went from 20 to no cap, but files written before still said 20."""
+    _write(_settings_file, {"agent_max_rounds": 20, "agent_max_tool_calls": 7})
+    assert st.drop_retired_defaults() == ["agent_max_rounds"]
+    assert st.get_setting("agent_max_rounds") == 0
+    saved = _read(_settings_file)
+    assert "agent_max_rounds" not in saved
+    assert saved["agent_max_tool_calls"] == 7
+    assert saved[st.RETIRED_DEFAULTS_MARK] == ["agent_max_rounds"]
+
+
+def test_a_cap_an_admin_sets_afterwards_stays_even_at_the_old_value(_settings_file):
+    _write(_settings_file, {"agent_max_rounds": 20})
+    st.drop_retired_defaults()
+    settings = st.load_settings()
+    settings["agent_max_rounds"] = 20
+    st.save_settings(settings)
+    assert st.drop_retired_defaults() == []
+    assert st.get_setting("agent_max_rounds") == 20
+    assert _read(_settings_file)[st.RETIRED_DEFAULTS_MARK] == ["agent_max_rounds"]
+
+
+def test_another_cap_was_chosen_and_stays(_settings_file):
+    _write(_settings_file, {"agent_max_rounds": 50})
+    assert st.drop_retired_defaults() == []
+    assert st.get_setting("agent_max_rounds") == 50
+    assert st.drop_retired_defaults() == []
+
+
+def test_a_new_installation_is_marked_so_a_later_20_is_kept(_settings_file):
+    assert st.drop_retired_defaults() == []
+    assert _read(_settings_file) == {st.RETIRED_DEFAULTS_MARK: ["agent_max_rounds"]}
+    settings = st.load_settings()
+    settings["agent_max_rounds"] = 20
+    st.save_settings(settings)
+    assert st.drop_retired_defaults() == []
+    assert st.get_setting("agent_max_rounds") == 20
