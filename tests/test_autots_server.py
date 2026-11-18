@@ -76,10 +76,19 @@ def test_search_params_stay_within_the_presets():
 def test_forecast_length_fits_the_history():
     assert server.forecast_length({}, 12) == 3
     assert server.forecast_length({}, 400) == 30
-    assert server.forecast_length({}, 2) == 1
-    assert server.forecast_length({"forecast_length": 12}, 12) == 12
-    with pytest.raises(ValueError, match="12 periods"):
-        server.forecast_length({"forecast_length": 30}, 12)
+    assert server.forecast_length({}, 3) == 1
+    assert server.forecast_length({"forecast_length": 8}, 12) == 8
+    with pytest.raises(ValueError, match="12 periods of history, which carry at most 8"):
+        server.forecast_length({"forecast_length": 9}, 12)
+
+
+def test_three_months_carry_two_and_fewer_carry_nothing():
+    """Three monthly values per product, as in the model test (MCP-05)."""
+    assert server.forecast_length({"forecast_length": 2}, 3) == 2
+    with pytest.raises(ValueError, match="tell the user that the data is too short for 3"):
+        server.forecast_length({"forecast_length": 3}, 3)
+    with pytest.raises(ValueError, match="needs at least 3"):
+        server.forecast_length({}, 2)
 
 
 def test_sampling_error_runs_the_search_again_without_generations(monkeypatch):

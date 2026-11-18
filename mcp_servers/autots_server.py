@@ -70,8 +70,8 @@ TOOLS = [
                     "minimum": 1,
                     "maximum": MAX_FORECAST_LENGTH,
                     "description": (
-                        "How many periods to forecast, at most as many as the data has. "
-                        "Without it, a quarter of the history, up to 30."
+                        "How many periods to forecast, at most two thirds of the periods "
+                        "the data has. Without it, a quarter of the history, up to 30."
                     ),
                 },
                 "quality": {"type": "string", "enum": list(QUALITY), "default": "quick"},
@@ -154,19 +154,40 @@ def history_length(data_id):
     return len(get_cached_object(data_id, "data")["object"])
 
 
+MIN_HISTORY = 3  # AutoTS can't tell the frequency from fewer dates.
+
+
+def longest_forecast(rows):
+    """The most periods AutoTS forecasts from `rows` of history: two thirds.
+
+    It holds the forecast length back as a test set and wants half as much again
+    to train on. Measured with 3, 6 and 12 rows on both presets (2026-11-19).
+    """
+    return rows * 2 // 3
+
+
 def forecast_length(arguments, rows):
     """The periods asked for, or a quarter of the history up to 30.
 
     A fixed 30 forecast two and a half years from 12 months of data and broke
-    the model search; more periods than the data has can't be checked against it.
+    the model search. A length past the limit used to come back as AutoTS's own
+    "forecast_length is too large for training data", which names settings this
+    tool doesn't offer; a model then ran AutoTS itself and got nowhere.
     """
+    if rows < MIN_HISTORY:
+        raise ValueError(
+            f"The data has {rows} periods and a forecast needs at least {MIN_HISTORY}. "
+            "Tell the user the history is too short to forecast from."
+        )
+    limit = longest_forecast(rows)
     length = arguments.get("forecast_length")
     if length is None:
         return max(1, min(30, rows // 4))
-    if length > rows:
+    if length > limit:
         raise ValueError(
-            f"forecast_length {length} is longer than the data, which has {rows} periods. "
-            f"Forecast at most {rows} periods, or pass more history."
+            f"forecast_length {length} is too long for {rows} periods of history, "
+            f"which carry at most {limit}. Forecast at most {limit} periods or pass more "
+            f"history, and tell the user that the data is too short for {length}."
         )
     return length
 
