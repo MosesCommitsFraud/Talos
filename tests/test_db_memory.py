@@ -28,7 +28,7 @@ async def test_add_view_edit_remove(notes):
 
     view = await _call(action="view")
     assert "#1 Absatz steht in Spalte c1" in view["output"]
-    assert "25 of 4000" in view["output"]
+    assert f"25 of {db_memory.MAX_TOTAL_CHARS}" in view["output"]
 
     assert (await _call(action="edit", id=1, text="Absatz: c1"))["exit_code"] == 0
     assert "#1 Absatz: c1" in (await _call(action="view"))["output"]
@@ -68,9 +68,12 @@ async def test_limits_ask_the_model_to_tidy_up(notes):
     too_long = await _call(action="add", text="x" * (db_memory.MAX_ENTRY_CHARS + 1))
     assert "at most 600" in too_long["error"]
 
-    for i in range(6):  # 3,600 of the 4,000 characters
-        added = await _call(action="add", text=str(i) * db_memory.MAX_ENTRY_CHARS)
+    assert db_memory.MAX_TOTAL_CHARS == 12000
+    fit = db_memory.MAX_TOTAL_CHARS // db_memory.MAX_ENTRY_CHARS
+    for i in range(fit - 1):  # all but 600 of the budget
+        added = await _call(action="add", text=f"{i:02d}" * (db_memory.MAX_ENTRY_CHARS // 2))
         assert added["exit_code"] == 0
+    assert (await _call(action="add", text="y" * 500))["exit_code"] == 0
     full = await _call(action="add", text="z" * 500)
     assert "are full" in full["error"]
     assert "#1 " in full["error"]  # with the notes it can tidy up right there
@@ -286,7 +289,7 @@ async def test_admin_sees_every_database_with_authors_and_usage(admin_api, monke
     client, _ = admin_api
     await _call(owner="anna", action="add", text="Absatz: c1")
     body = client.get("/api/admin/memories").json()
-    assert (body["entry_limit"], body["total_limit"]) == (600, 4000)
+    assert (body["entry_limit"], body["total_limit"]) == (600, 12000)
     database = body["databases"][0]
     assert (database["name"], database["used"], database["removed"]) == ("macs", 10, False)
     note = database["entries"][0]

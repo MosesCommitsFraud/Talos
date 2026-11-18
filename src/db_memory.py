@@ -38,7 +38,11 @@ from src.memory_file import clean as _clean
 logger = logging.getLogger(__name__)
 
 MAX_ENTRY_CHARS = 600
-MAX_TOTAL_CHARS = 4000
+# Per database, and what one recall costs at most (about 3,500 tokens). It was 4,000
+# until the notes of a schema with 373 entities and 160 measures were full after a
+# few days: the model test saw nine attempts to add a finding fail on it, and the
+# models gave up instead of tidying up.
+MAX_TOTAL_CHARS = 12000
 
 _DIR = os.path.join(DATA_DIR, "memories", "databases")
 _HEADING = "Database notes"
