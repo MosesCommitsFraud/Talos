@@ -22,6 +22,61 @@ def test_limit_left_alone_elsewhere_or_when_ambiguous():
     assert _adapt_sql_dialect("WITH x AS (SELECT 1) SELECT * FROM x LIMIT 5", "mssql")[1] == ""
 
 
+# ── "Plan" as a name: queries from the model test that SQL Server rejected ──
+
+
+def _adapted(query):
+    return _adapt_sql_dialect(query, "mssql")
+
+
+def test_plan_as_an_alias_is_bracketed_and_strings_stay():
+    query = (
+        "SELECT z.Jahr_Monat,\n"
+        "       SUM(CASE WHEN f.Q='Plan' THEN f.W END) AS Plan,\n"
+        "       SUM(CASE WHEN f.Q='Ist' THEN f.W END) AS Ist\n"
+        "FROM (SELECT vdate, c101 AS W, 'Plan' AS Q FROM vspc26t02v01v1) f\n"
+        "INNER JOIN dbo.mAI_Zeit z ON z.vdate=f.vdate GROUP BY z.Jahr_Monat"
+    )
+    rewritten, note = _adapted(query)
+    assert rewritten == query.replace("END) AS Plan,", "END) AS [Plan],")
+    assert note == "SQL Server: wrote the reserved word Plan as [Plan]"
+
+
+def test_plan_is_bracketed_wherever_it_is_a_name():
+    rewritten, _ = _adapted(
+        "WITH ist AS (SELECT id323, SUM(c300) AS v FROM a GROUP BY id323), "
+        "plan AS (SELECT id323, SUM(c300) AS v FROM b GROUP BY id323) "
+        "SELECT p.v plan, COALESCE(j.plan, 0), SUM(j.Plan) FROM plan p "
+        "JOIN j ON j.id323 = p.id323 WHERE plan.v > 0 ORDER BY Plan"
+    )
+    assert rewritten == (
+        "WITH ist AS (SELECT id323, SUM(c300) AS v FROM a GROUP BY id323), "
+        "[plan] AS (SELECT id323, SUM(c300) AS v FROM b GROUP BY id323) "
+        "SELECT p.v [plan], COALESCE(j.[plan], 0), SUM(j.[Plan]) FROM [plan] p "
+        "JOIN j ON j.id323 = p.id323 WHERE [plan].v > 0 ORDER BY [Plan]"
+    )
+
+
+def test_plan_in_text_comments_brackets_and_longer_names_is_left_alone():
+    for query in (
+        "SELECT 'Plan 2026' AS Quelle, N'It''s the plan' AS t FROM f",
+        'SELECT c300 AS [Plan], "Plan" FROM f',
+        "SELECT plan_voll, Planwert, p.planung, @plan FROM #plan p",
+        "SELECT c300 FROM f -- Ist vs Plan je Monat\nWHERE x = 1 /* der Plan */",
+        "SELECT c300 FROM f OPTION (KEEP PLAN)",
+        "SELECT c300 FROM f OPTION (USE PLAN N'<ShowPlanXML/>')",
+    ):
+        assert _adapted(query) == (query, ""), query
+
+
+def test_plan_and_limit_in_one_query_and_other_dialects():
+    rewritten, note = _adapted("SELECT id323, SUM(c300) AS Plan FROM f GROUP BY id323 LIMIT 5")
+    assert rewritten == "SELECT TOP 5 id323, SUM(c300) AS [Plan] FROM f GROUP BY id323"
+    assert note == ("SQL Server: rewrote LIMIT 5 as TOP 5; wrote the reserved word Plan as [Plan]")
+    query = "SELECT SUM(c300) AS Plan FROM f"
+    assert _adapt_sql_dialect(query, "postgresql") == (query, "")
+
+
 def test_error_hints_and_multi_statement_message():
     assert "describe" in _sql_error_hint("Invalid column name 'yearseq'", "mssql")
     assert "list_tables" in _sql_error_hint("Invalid object name 'dim273'", "mssql")

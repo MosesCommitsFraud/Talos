@@ -278,15 +278,45 @@ _TRAILING_LIMIT_RE = re.compile(r"\s+LIMIT\s+(\d+)\s*$", re.I)
 _LEADING_SELECT_RE = re.compile(r"^SELECT\s+(DISTINCT\s+)?", re.I)
 
 
-def _adapt_sql_dialect(query: str, dialect: str) -> tuple:
-    """Rewrite the one dialect slip that recurs on every SQL Server session.
+# T-SQL keywords that models use as a name. "Plan" was the alias, column or CTE
+# name of plan/actual comparisons in 22 of 479 queries of the model test, on all
+# three models, and each was a lost round ("Incorrect syntax near the keyword 'Plan'").
+_MSSQL_RESERVED_NAMES = {"plan"}
+# OPTION (USE PLAN …), KEEP PLAN, KEEPFIXED PLAN, ROBUST PLAN: there it is the keyword.
+_MSSQL_PLAN_HINT_WORDS = {"use", "keep", "keepfixed", "robust"}
+# Comments, strings and quoted names first, so a word inside them is never a match.
+_SQL_TOKEN_RE = re.compile(
+    r"--[^\r\n]*|/\*.*?\*/|'(?:[^']|'')*'|\"[^\"]*\"|\[(?:[^\]]|\]\])*\]"
+    r"|(?<![\w@#$])[@#]{0,2}[^\W\d][\w@#$]*",
+    re.DOTALL,
+)
 
-    Models write `… LIMIT 20` out of habit; SQL Server rejects it and the round
-    is lost. A plain `SELECT … LIMIT n` (no TOP yet, no OFFSET) becomes
-    `SELECT TOP n …`. Anything more complex is left alone and gets a hint on
-    failure instead. Returns (query, note_or_empty)."""
-    if dialect != "mssql":
-        return query, ""
+
+def _bracket_reserved_names(query: str) -> tuple:
+    """Put reserved words used as names in brackets: `AS Plan` → `AS [Plan]`.
+
+    Returns (query, the words as written). Text in strings, comments and quoted
+    names is left as it is."""
+    found: List[str] = []
+    before = ""
+
+    def swap(match) -> str:
+        nonlocal before
+        token = match.group(0)
+        if token[0] in "'\"[-/":
+            return token
+        previous, before = before, token.lower()
+        if before not in _MSSQL_RESERVED_NAMES or previous in _MSSQL_PLAN_HINT_WORDS:
+            return token
+        if token not in found:
+            found.append(token)
+        return f"[{token}]"
+
+    return _SQL_TOKEN_RE.sub(swap, query), found
+
+
+def _limit_as_top(query: str) -> tuple:
+    """A plain `SELECT … LIMIT n` (no TOP yet, no OFFSET) as `SELECT TOP n …`."""
     m = _TRAILING_LIMIT_RE.search(query)
     head = _LEADING_SELECT_RE.match(query)
     if (
@@ -298,7 +328,26 @@ def _adapt_sql_dialect(query: str, dialect: str) -> tuple:
         return query, ""
     body = query[: m.start()]
     rewritten = f"{head.group(0)}TOP {m.group(1)} {body[head.end() :]}"
-    return rewritten, f"SQL Server: rewrote LIMIT {m.group(1)} as TOP {m.group(1)}"
+    return rewritten, f"rewrote LIMIT {m.group(1)} as TOP {m.group(1)}"
+
+
+def _adapt_sql_dialect(query: str, dialect: str) -> tuple:
+    """Rewrite the dialect slips that recur on every SQL Server session.
+
+    Models write `… LIMIT 20` out of habit and name a column `Plan`; SQL Server
+    rejects both and the round is lost. A plain trailing LIMIT becomes TOP, and
+    a reserved word used as a name is put in brackets. Anything more complex is
+    left alone and gets a hint on failure instead. Returns (query, note_or_empty);
+    the note goes back with the result, so the model sees what was changed."""
+    if dialect != "mssql":
+        return query, ""
+    query, limit_note = _limit_as_top(query)
+    query, names = _bracket_reserved_names(query)
+    notes = [limit_note] if limit_note else []
+    if names:
+        shown = ", ".join(f"[{name}]" for name in names)
+        notes.append(f"wrote the reserved word {', '.join(names)} as {shown}")
+    return query, ("SQL Server: " + "; ".join(notes)) if notes else ""
 
 
 # Keywords that start a clause: a syntax error near one of these is about the
