@@ -65,3 +65,24 @@ def test_ask_user_forbids_rendering_the_options_as_prose():
 
 def test_talos_system_prompt_forbids_emojis():
     assert "NO EMOJIS" in TALOS_SYSTEM_PROMPT
+
+
+def test_python_tool_names_the_holidays_package_the_sandbox_ships():
+    """Five of nine planners in the model test had wrong public holidays for
+    Baden-Württemberg, computed by hand, while the package sat unused in the sandbox."""
+    from pathlib import Path
+
+    from src.agent_loop import TOOL_SECTIONS
+    from src.tool_schemas import FUNCTION_TOOL_SCHEMAS
+
+    native = next(
+        s["function"]["description"]
+        for s in FUNCTION_TOOL_SCHEMAS
+        if s["function"]["name"] == "python"
+    )
+    for text in (TOOL_SECTIONS["python"], native):
+        assert "holidays.Germany(subdiv='BW', years=2027)" in text
+        assert "never a list from memory" in text
+    requirements = Path(__file__).parent.parent / "sandbox" / "requirements.txt"
+    pinned = requirements.read_text("utf-8").splitlines()
+    assert any(line.startswith("holidays==") for line in pinned)
