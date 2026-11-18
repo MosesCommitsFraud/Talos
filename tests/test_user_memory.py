@@ -447,6 +447,48 @@ def test_deleting_a_user_removes_their_memories(store, monkeypatch, tmp_path):
     assert not _file("anna").exists()
 
 
+# ── What belongs in a memory ──
+# In the model test of November 2026 eleven of 351 runs wrote memories nobody had
+# asked for: files and checklists built in that chat, a role guessed from one
+# question, and a list of public holidays with a wrong entry that two later
+# answers then repeated.
+
+_RULES = (
+    "what the user tells you about themselves",
+    "a single question about a topic is neither their role nor an ongoing project",
+    "Not what you built or answered in this chat",
+    "no facts about the world",
+)
+
+
+def _one_line(text):
+    return " ".join(text.split())
+
+
+def test_both_tool_descriptions_say_what_does_not_belong():
+    from src.tool_schemas import FUNCTION_TOOL_SCHEMAS
+
+    native = next(
+        s["function"]["description"]
+        for s in FUNCTION_TOOL_SCHEMAS
+        if s["function"]["name"] == "memory"
+    )
+    fenced = agent_loop.TOOL_SECTIONS["memory"]
+    for rule in _RULES:
+        assert rule in _one_line(native), rule
+        assert rule in _one_line(fenced), rule
+
+
+async def test_a_recalled_memory_is_not_a_source_of_facts(store, monkeypatch, tmp_path):
+    await _call(action="add", title="Standort", text="Arbeitet in Baden-Württemberg")
+    assert "not a source of facts" in (await _call(action="view"))["output"]
+
+    # A project's memory is where its dates and figures belong.
+    monkeypatch.setattr(user_memory, "_PROJECT_DIR", str(tmp_path / "projects"))
+    await _call(owner="project:7", action="add", title="Termin", text="Abgabe am 12. Mai")
+    assert "not a source of facts" not in (await _call(owner="project:7", action="view"))["output"]
+
+
 def threading_lock():
     import threading
 
