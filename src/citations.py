@@ -98,6 +98,15 @@ def tally(session_id: Optional[str], name: str) -> int:
         return counts[key]
 
 
+def tallied(session_id: Optional[str], name: str) -> int:
+    """What `tally` has counted for `name` so far, without counting one more."""
+    with _lock:
+        turn = _turns.get(session_id or "")
+        if turn is None:
+            return 0
+        return turn.get("tallies", {}).get((_delivery_scope.get(), name), 0)
+
+
 def active(session_id: Optional[str]) -> bool:
     return bool(session_id) and session_id in _turns
 

@@ -372,6 +372,86 @@ def test_fetch_refuses_blocked_domain(domains):
     assert "blocked-domain" in (web_search._validate_fetch_url("https://example.com/x") or "")
 
 
+# ── a fetch the site answers with an error ──
+
+
+@pytest.fixture
+def fake_site(monkeypatch):
+    """httpx.AsyncClient that answers every URL with the status set for its host."""
+    import httpx
+
+    class Site:
+        status = {}
+        requested = []
+
+        def __init__(self, *a, **kw):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return False
+
+        async def get(self, url, headers=None):
+            Site.requested.append(url)
+
+            class Resp:
+                status_code = Site.status.get(httpx.URL(url).host, 200)
+                headers = {"content-type": "text/html"}
+                text = "<html><body><p>Der Inhalt.</p></body></html>"
+
+            return Resp()
+
+    monkeypatch.setattr(httpx, "AsyncClient", Site)
+    monkeypatch.setattr(web_search, "_validate_fetch_url", lambda url, policy=None: None)
+    return Site
+
+
+def _fetch(url, session_id=""):
+    return asyncio.run(web_search.fetch(url, session_id=session_id))
+
+
+def test_a_missing_page_says_where_addresses_come_from(fake_site):
+    fake_site.status = {"example.com": 404}
+    error = _fetch("https://example.com/docs/guessed-page")["error"]
+    assert "does not exist (HTTP 404)" in error
+    assert "web_search" in error and "refused" not in error
+
+
+def test_a_refusal_names_the_site_and_another_error_does_not(fake_site):
+    fake_site.status = {"www.example.com": 403, "kaputt.example.org": 502}
+    refused = _fetch("https://www.example.com/a")["error"]
+    assert "refused (HTTP 403)" in refused and "example.com wants a login" in refused
+    broken = _fetch("https://kaputt.example.org/a")["error"]
+    assert "HTTP 502" in broken and "refused" not in broken and "does not exist" not in broken
+
+
+def test_a_site_that_refused_twice_is_not_asked_a_third_time(fake_site):
+    from src import citations
+
+    fake_site.status = {"example.com": 403, "www.example.com": 403, "example.org": 404}
+    citations.begin_turn("s-fetch")
+    # Not found is no refusal, however often it happens.
+    for _ in range(3):
+        assert "does not exist" in _fetch("https://example.org/x", "s-fetch")["error"]
+    assert "refused (HTTP 403)" in _fetch("https://example.com/a", "s-fetch")["error"]
+    assert "refused (HTTP 403)" in _fetch("https://www.example.com/b", "s-fetch")["error"]
+    before = len(fake_site.requested)
+    third = _fetch("https://example.com/c", "s-fetch")
+    assert third["exit_code"] == 1 and "Not fetched" in third["error"]
+    assert "refused 2 requests" in third["error"]
+    assert len(fake_site.requested) == before
+    # Another site is still read.
+    fake_site.status["example.net"] = 200
+    assert "Der Inhalt." in _fetch("https://example.net/", "s-fetch")["results"]
+
+    citations.begin_turn("s-fetch")  # the next turn asks again
+    assert "refused (HTTP 403)" in _fetch("https://example.com/a", "s-fetch")["error"]
+    # Outside a turn (the MCP server) nothing is remembered.
+    assert all("refused (HTTP 403)" in _fetch("https://example.com/a")["error"] for _ in range(4))
+
+
 def test_html_extraction_strips_chrome():
     pytest.importorskip("bs4")
     title, text = web_search._extract_readable(

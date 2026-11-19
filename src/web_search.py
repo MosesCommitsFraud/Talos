@@ -614,6 +614,53 @@ def _collapse(text: str, limit: int) -> str:
 
 # ── Fetch a page ──
 
+# What a failed fetch says. One sentence for every status ("may be paywalled or
+# blocking automated access, try another result") did not tell the two common
+# cases apart: in the model test of 2026-11 web_fetch failed 118 times in 382
+# calls, 61 of them a 404 on an address the model had put together itself, 35 a
+# 403, 19 of those on one site that was asked again and again.
+FETCH_NOT_FOUND = (
+    "{url} does not exist (HTTP {status}). An address written from memory or made by "
+    "changing another address often leads nowhere: take addresses from a web_search "
+    "result or from the user, and search for the page when you have neither."
+)
+FETCH_REFUSED = (
+    "{url} was refused (HTTP {status}): {host} wants a login or turns automated access "
+    "away, and its other pages usually answer the same way. Read a different source "
+    "from the search; when only this site has it, tell the user the page could not be "
+    "read."
+)
+FETCH_REFUSED_AGAIN = (
+    "Not fetched: {host} has refused {n} requests in this turn (login or bot "
+    "protection) and was not asked again. Read a different source, or tell the user "
+    "this site could not be read."
+)
+FETCH_FAILED = (
+    "{url} returned HTTP {status}, an error on the site's side. Try another result from the search."
+)
+_NOT_FOUND_STATUS = (404, 410)
+_REFUSED_STATUS = (401, 403, 429, 451)
+# One refusal can be about that one page (a private file on a storage host), so
+# a site is left alone only after the second.
+FETCH_REFUSALS_BEFORE_SKIP = 2
+
+
+def _refusal_key(url: str) -> str:
+    from src import citations
+
+    return "fetch_refused:" + citations.site_name(url)
+
+
+def _fetch_status_error(url: str, status: int, session_id: str) -> str:
+    from src import citations
+
+    if status in _NOT_FOUND_STATUS:
+        return FETCH_NOT_FOUND.format(url=url, status=status)
+    if status in _REFUSED_STATUS:
+        citations.tally(session_id, _refusal_key(url))
+        return FETCH_REFUSED.format(url=url, status=status, host=citations.site_name(url))
+    return FETCH_FAILED.format(url=url, status=status)
+
 
 async def fetch(
     url: str,
@@ -626,6 +673,8 @@ async def fetch(
     `policy` overrides the admin domain lists for this call — see `search`.
     """
     import httpx
+
+    from src import citations
 
     url = (url or "").strip()
     if not url:
@@ -659,6 +708,14 @@ async def fetch(
                 err = _validate_fetch_url(current, policy)
                 if err:
                     return {"error": err, "exit_code": 1}
+                refused = citations.tallied(session_id, _refusal_key(current))
+                if refused >= FETCH_REFUSALS_BEFORE_SKIP:
+                    return {
+                        "error": FETCH_REFUSED_AGAIN.format(
+                            host=citations.site_name(current), n=refused
+                        ),
+                        "exit_code": 1,
+                    }
                 resp = await client.get(current, headers=headers)
                 if resp.status_code in (301, 302, 303, 307, 308):
                     location = resp.headers.get("location")
@@ -684,10 +741,7 @@ async def fetch(
 
     if resp.status_code >= 400:
         return {
-            "error": (
-                f"{current} returned HTTP {resp.status_code}. The page may be paywalled or "
-                "blocking automated access — try another result from the search."
-            ),
+            "error": _fetch_status_error(current, resp.status_code, session_id),
             "exit_code": 1,
         }
 
@@ -723,8 +777,6 @@ async def fetch(
     truncated = len(text) > max_chars
     if truncated:
         text = text[:max_chars].rstrip()
-
-    from src import citations
 
     n = citations.cite_web(session_id, current, title, _collapse(text, 400))
     header = f"[{n}] Fetched: {current}" if n is not None else f"Fetched: {current}"
