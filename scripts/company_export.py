@@ -9,10 +9,8 @@ that is exported, so the same commit always gives the same copy.
 Each export is one commit on top of the company branch as it is: the files of
 the source commit minus the rules, plus the paths the company repository keeps
 for itself. Nothing is rewritten and nothing is forced, so the company history
-only ever grows. The commit says where it came from:
-
-    Talos-Company-Export: v2
-    Source-Commit: <sha on GitHub>
+only ever grows. The commit message is one line, "update v0.6.0": the release
+the source commit belongs to, and nothing else.
 
 Without --push the script only builds that commit locally and shows what it
 would change:
@@ -45,11 +43,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 RULES_PATH = "scripts/company_export.rules"
-EXPORT_VERSION = "v2"
 REF_PREFIX = "refs/company-export"
-# A first export after a long gap would otherwise put hundreds of subjects into
-# one commit message.
-MAX_SUBJECTS = 100
 SECTIONS = ("drop", "keep", "preserve")
 
 
@@ -201,34 +195,10 @@ class Export:
     message: str
 
 
-def _previous_source(git: Git, target: str) -> str | None:
-    body = git.text("log", "-1", "--grep=^Source-Commit: ", "--format=%B", target)
-    found = re.search(r"^Source-Commit: ([0-9a-f]{40})$", body, re.MULTILINE)
-    return found.group(1) if found else None
-
-
-def _message(git: Git, source: str, describe: str, previous: str | None) -> str:
-    exact = git.text("describe", "--tags", "--exact-match", source, check=False)
-    lines = [f"Release {exact} for company" if exact else f"Talos {describe} for company", ""]
-
-    known = previous and git.run("cat-file", "-e", f"{previous}^{{commit}}", check=False)
-    if known and known.returncode == 0:
-        ancestor = git.run("merge-base", "--is-ancestor", previous, source, check=False)
-        if ancestor.returncode == 0:
-            subjects = git.text(
-                "log", "--no-merges", "--format=%s", f"{previous}..{source}"
-            ).splitlines()
-            if subjects:
-                lines.append(f"Changes since the last export ({len(subjects)} commits):")
-                lines += [f"- {s}" for s in subjects[:MAX_SUBJECTS]]
-                if len(subjects) > MAX_SUBJECTS:
-                    lines.append(f"- ... and {len(subjects) - MAX_SUBJECTS} earlier commits")
-                lines.append("")
-
-    lines += [f"Talos-Company-Export: {EXPORT_VERSION}", f"Source-Commit: {source}"]
-    if exact:
-        lines.append(f"Source-Tag: {exact}")
-    return "\n".join(lines) + "\n"
+def _message(git: Git, source: str) -> str:
+    """One line and nothing else: the newest release tag the source commit contains."""
+    version = git.text("describe", "--tags", "--abbrev=0", source, check=False)
+    return f"update {version or source[:9]}\n"
 
 
 def build(
@@ -280,7 +250,7 @@ def build(
         if first_match(path, rules.drop) and not first_match(path, rules.keep):
             raise ExportError(f"internal error: {path} is in the export despite the rules")
 
-    message = _message(git, source, describe, _previous_source(git, target))
+    message = _message(git, source)
     changes = [
         (line.split("\t", 1)[0], line.split("\t", 1)[1])
         for line in git.text("diff", "--name-status", "--no-renames", target, tree).splitlines()

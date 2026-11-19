@@ -207,28 +207,30 @@ def test_export_is_one_commit_on_top_of_the_company_branch(source, company):
     assert git(company, "rev-parse", "main") == tip
 
 
-def test_commit_carries_the_company_identity_and_its_origin(source, company):
+def test_commit_carries_the_company_identity_and_a_one_line_message(source, company):
     _, result = export(source, company)
     head = git(source, "rev-parse", "HEAD")
 
     who = git(source, "log", "-1", "--format=%an <%ae> / %cn <%ce>", result.commit)
     assert who == "Erika Muster <erika@company.invalid> / Erika Muster <erika@company.invalid>"
-    body = git(source, "log", "-1", "--format=%B", result.commit)
-    assert body.splitlines()[0] == f"Talos {head[:7]} for company"
-    assert f"Talos-Company-Export: v2\nSource-Commit: {head}" in body
+    # No release tag yet, so the commit itself names the state.
+    assert git(source, "log", "-1", "--format=%B", result.commit) == f"update {head[:9]}"
     # The checkout's own identity is not what the export writes with, and stays unset.
     assert ce.Git(source).text("config", "--local", "--get-regexp", r"^user\.", check=False) == ""
 
 
-def test_a_tagged_commit_is_exported_as_a_release(source, company):
+def test_message_names_the_release_the_commit_belongs_to(source, company):
     git(source, "tag", "v1.2.3")
-    _, result = export(source, company)
-    body = git(source, "log", "-1", "--format=%B", result.commit)
-    assert body.splitlines()[0] == "Release v1.2.3 for company"
-    assert body.rstrip().endswith("Source-Tag: v1.2.3")
+    _, tagged = export(source, company)
+    assert git(source, "log", "-1", "--format=%B", tagged.commit) == "update v1.2.3"
+
+    write(source, {"app.py": "print('after the release')\n"})
+    commit(source, "Chat: answers arrive faster")
+    _, later = export(source, company)
+    assert git(source, "log", "-1", "--format=%B", later.commit) == "update v1.2.3"
 
 
-def test_push_then_the_next_export_lists_what_is_new(source, company):
+def test_push_then_the_next_export_builds_on_it(source, company):
     g, first = export(source, company)
     ce.push(g, str(company), "main", first.commit)
     assert git(company, "rev-parse", "main") == first.commit
@@ -239,8 +241,6 @@ def test_push_then_the_next_export_lists_what_is_new(source, company):
     write(source, {"app.py": "print('newer')\n", "notes.md": "not exported\n"})
     commit(source, "Chat: answers arrive faster")
     g, second = export(source, company)
-    body = git(source, "log", "-1", "--format=%B", second.commit)
-    assert "Changes since the last export (1 commits):\n- Chat: answers arrive faster" in body
     assert second.changes == [("M", "app.py")]
     ce.push(g, str(company), "main", second.commit)
     assert git(company, "rev-list", "--count", "main") == "3"
