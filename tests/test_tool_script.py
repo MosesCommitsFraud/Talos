@@ -266,11 +266,8 @@ def test_a_script_sees_plain_text_and_rows():
     assert (ok, text) == (True, "2 rows")
     assert data == [{"monat": 1, "betrag": 10}, {"monat": 2, "betrag": 20}]
 
-    assert tool_execution._script_view({"error": "Tool 'web_fetch' is disabled by user."}) == (
-        False,
-        "Tool 'web_fetch' is disabled by user.",
-        None,
-    )
+    refused = tool_execution.TOOL_NOT_AVAILABLE.format(tool="web_fetch")
+    assert tool_execution._script_view({"error": refused}) == (False, refused, None)
     assert tool_execution._script_view({"results": "3 Treffer", "exit_code": 0})[1] == "3 Treffer"
 
 

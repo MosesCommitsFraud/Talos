@@ -1774,6 +1774,16 @@ async def _direct_fallback(
 # Dispatcher
 # ---------------------------------------------------------------------------
 
+# What a call of a tool gets that is off for this turn. It used to read "Tool
+# 'x' is disabled by user", which was often untrue (a tool is also off by mode,
+# by an admin's setting or for a helper agent) and said nothing about how to go
+# on.
+TOOL_NOT_AVAILABLE = (
+    "`{tool}` is not available in this turn, so do not call it again. Carry on with "
+    "the tools you have; if the answer lacks something because of it, say so in one "
+    "sentence."
+)
+
 
 def _script_view(result: Dict) -> Tuple[bool, str, Any]:
     """A tool result as a tool script sees it: (ok, text, structured data).
@@ -1990,8 +2000,8 @@ async def execute_tool_block(
     # Reject tools that the user has disabled for this request
     if disabled_tools and tool in disabled_tools:
         desc = f"{tool}: BLOCKED"
-        result = {"error": f"Tool '{tool}' is disabled by user.", "exit_code": 1}
-        logger.info(f"Tool blocked by user: {tool}")
+        result = {"error": TOOL_NOT_AVAILABLE.format(tool=tool), "exit_code": 1}
+        logger.info(f"Tool not available in this turn: {tool}")
         return desc, result
 
     if tool in _ADMIN_TOOLS and not _owner_is_admin(owner):

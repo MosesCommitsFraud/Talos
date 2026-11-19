@@ -247,6 +247,20 @@ async def test_switched_off_sources_are_not_offered(captured):
     assert "query_sql" not in system and "search_knowledge" not in system
 
 
+async def test_the_date_note_is_told_whether_the_turn_has_web_search(captured, monkeypatch):
+    seen = []
+
+    def note(*a, **kwargs):
+        seen.append(kwargs.get("web"))
+        return "## Current date and time\nIt is 10:00."
+
+    monkeypatch.setattr("src.user_time.current_datetime_prompt", note)
+    msgs = [{"role": "system", "content": "p"}, {"role": "user", "content": "wer ist markus rühl"}]
+    await _run_turn([dict(m) for m in msgs])
+    await _run_turn([dict(m) for m in msgs], disabled_tools={"web_search", "web_fetch"})
+    assert seen == [True, False]
+
+
 async def _run_sql_turn(monkeypatch, msgs, retrieve, sql_rounds=1):
     """A DB turn calling query_sql for `sql_rounds` rounds. Returns each round's prompt."""
     calls = []

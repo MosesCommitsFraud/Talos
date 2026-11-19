@@ -110,8 +110,28 @@ def timezone_label(dt: Optional[datetime] = None) -> str:
     return f"{name}, {offset_label}" if name else offset_label
 
 
-def current_datetime_prompt(now_utc: Optional[datetime] = None) -> str:
-    """Build reusable system prompt text for date/time reasoning."""
+# Where a dated claim is looked up. Without web search the note has to say so:
+# it is the one text that sends the model to the web on every turn, and a model
+# cannot tell a switched-off tool from one it merely was not shown. In the model
+# test of 2026-11, 18 calls went to a switched-off web_search, each time to
+# check a date or a legal state "since my training may be outdated".
+_LOOK_UP_WITH_WEB = (
+    "Look it up the same way as anything else — the user's own documents if it "
+    "concerns them, otherwise the web."
+)
+_LOOK_UP_WITHOUT_WEB = (
+    "Look it up in the user's own documents if it concerns them. Web search is not "
+    "available in this turn, so do not call it: give what you cannot look up as "
+    "your last known state and say in one sentence that it is not checked against "
+    "current sources."
+)
+
+
+def current_datetime_prompt(now_utc: Optional[datetime] = None, web: bool = True) -> str:
+    """Build reusable system prompt text for date/time reasoning.
+
+    `web` says whether the model can search the web in this turn.
+    """
     if now_utc is None:
         utc_now = datetime.now(timezone.utc)
     elif now_utc.tzinfo is None:
@@ -136,7 +156,6 @@ def current_datetime_prompt(now_utc: Optional[datetime] = None) -> str:
         "be long past — that is your cutoff talking, not the present. So never "
         "answer that an event has not happened: check its date against today first, "
         "and if it has passed, look the outcome up rather than reporting your "
-        "memory. Look it up the same way as anything else — the user's own "
-        "documents if it concerns them, otherwise the web. This is about dated "
-        "claims only; it is not a reason to go looking for things you do know.\n\n"
+        f"memory. {_LOOK_UP_WITH_WEB if web else _LOOK_UP_WITHOUT_WEB} This is about "
+        "dated claims only; it is not a reason to go looking for things you do know.\n\n"
     )

@@ -913,7 +913,9 @@ def _build_system_prompt(
     try:
         from src.user_time import current_datetime_prompt
 
-        _time_message = turn_context_message(current_datetime_prompt())
+        _time_message = turn_context_message(
+            current_datetime_prompt(web="web_search" not in (disabled_tools or ()))
+        )
     except Exception:
         pass
 

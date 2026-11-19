@@ -961,7 +961,10 @@ async def build_chat_context(
         try:
             from src.user_time import current_datetime_prompt
 
-            insert_before_last_user(messages, turn_context_message(current_datetime_prompt()))
+            # Plain chat has no tools, so nothing can be looked up on the web.
+            insert_before_last_user(
+                messages, turn_context_message(current_datetime_prompt(web=False))
+            )
         except Exception:
             logger.debug("Failed to add current date/time context", exc_info=True)
 
