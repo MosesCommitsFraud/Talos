@@ -48,6 +48,39 @@ def test_host_profile_wins_over_repo(profiles, monkeypatch):
     assert branding.get_brand().name == "Host Name"
 
 
+def test_the_only_shipped_profile_is_the_default(profiles, monkeypatch):
+    _, repo = profiles
+    _profile(repo, "acme", "Acme AI", ["logo-small.svg"])
+    monkeypatch.delenv("TALOS_BRAND", raising=False)
+    assert branding.get_brand().name == "Acme AI"
+    assert branding.get_brand().logo_small.endswith("logo-small.svg")
+
+
+def test_an_unknown_name_falls_back_to_the_only_shipped_profile(profiles, monkeypatch):
+    _, repo = profiles
+    _profile(repo, "acme", "Acme AI")
+    monkeypatch.setenv("TALOS_BRAND", "typo")
+    assert branding.get_brand().name == "Acme AI"
+
+
+def test_several_shipped_profiles_leave_the_default_at_talos(profiles, monkeypatch):
+    _, repo = profiles
+    _profile(repo, "acme", "Acme AI")
+    _profile(repo, "talos", "Talos")
+    monkeypatch.delenv("TALOS_BRAND", raising=False)
+    assert branding.get_brand().name == "Talos"
+    monkeypatch.setenv("TALOS_BRAND", "acme")
+    branding.get_brand.cache_clear()
+    assert branding.get_brand().name == "Acme AI"
+
+
+def test_a_host_only_profile_does_not_become_the_default(profiles, monkeypatch):
+    host, _ = profiles
+    _profile(host, "acme", "Acme AI")
+    monkeypatch.delenv("TALOS_BRAND", raising=False)
+    assert branding.get_brand().name == "Talos"
+
+
 @pytest.mark.parametrize("value", ["missing", "../etc", ""])
 def test_unknown_or_invalid_profile_falls_back(profiles, monkeypatch, value):
     monkeypatch.setenv("TALOS_BRAND", value)

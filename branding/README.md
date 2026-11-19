@@ -1,7 +1,8 @@
 # Branding-Profile
 
 Der Code bleibt Talos; welches Profil eine Instanz zeigt, entscheidet
-`TALOS_BRAND=<ordner>` in der `.env` (ohne = `talos`).
+`TALOS_BRAND=<ordner>` in der `.env`. Ohne Angabe gilt `talos` – außer unter
+`branding/` liegt genau ein Profil, dann gilt dieses.
 
 ```
 branding/<profil>/

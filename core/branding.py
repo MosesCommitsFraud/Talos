@@ -4,8 +4,12 @@ The code base stays "Talos"; a deployment picks a profile with
 ``TALOS_BRAND=<profile>`` in .env. A profile is a folder holding an optional
 ``brand.json`` (``{"name": "..."}``) plus optional ``logo-small.*`` (favicon,
 chat marker, home screen) and ``logo-large.*`` (login screen, sidebar header).
-Anything a profile leaves out falls back to the built-in Talos defaults, so an
-unset or unknown profile renders exactly like stock Talos.
+Anything a profile leaves out falls back to the built-in Talos defaults.
+
+Without ``TALOS_BRAND`` the profile is ``talos``, unless the checkout itself
+ships exactly one profile under ``branding/``: a copy of the code that carries
+a single brand shows that brand with no configuration. An unknown or invalid
+name falls back the same way.
 
 Profiles are looked up in ``data/branding/<profile>`` first (host-only, never
 committed) and then in the repo's ``branding/<profile>``.
@@ -36,6 +40,7 @@ LOGO_TYPES = {
     ".ico": "image/x-icon",
 }
 DEFAULT_NAME = "Talos"
+_PROFILE_NAME = re.compile(r"[a-z0-9_-]+")
 
 
 @dataclass(frozen=True)
@@ -54,13 +59,8 @@ def _find_logo(folder: str, stem: str) -> str | None:
     return None
 
 
-@lru_cache(maxsize=1)
-def get_brand() -> Brand:
-    profile = (os.getenv("TALOS_BRAND") or "talos").strip().lower()
-    if not re.fullmatch(r"[a-z0-9_-]+", profile):
-        logger.warning("TALOS_BRAND=%r is not a valid profile name — using talos", profile)
-        profile = "talos"
-    folder = next(
+def _profile_folder(profile: str) -> str | None:
+    return next(
         (
             os.path.join(root, profile)
             for root in _SEARCH_ROOTS
@@ -68,9 +68,39 @@ def get_brand() -> Brand:
         ),
         None,
     )
+
+
+def _default_profile() -> str:
+    """The profile used when TALOS_BRAND names none.
+
+    Only the checkout's own ``branding/`` counts (the last search root): a
+    host-only folder under ``data/branding`` is something an admin picks with
+    TALOS_BRAND, it must not change what an unconfigured instance shows.
+    """
+    try:
+        shipped = [
+            name
+            for name in os.listdir(_SEARCH_ROOTS[-1])
+            if _PROFILE_NAME.fullmatch(name)
+            and os.path.isdir(os.path.join(_SEARCH_ROOTS[-1], name))
+        ]
+    except OSError:
+        shipped = []
+    return shipped[0] if len(shipped) == 1 else "talos"
+
+
+@lru_cache(maxsize=1)
+def get_brand() -> Brand:
+    default = _default_profile()
+    profile = (os.getenv("TALOS_BRAND") or default).strip().lower()
+    if not _PROFILE_NAME.fullmatch(profile):
+        logger.warning("TALOS_BRAND=%r is not a valid profile name — using %s", profile, default)
+        profile = default
+    folder = _profile_folder(profile)
+    if folder is None and profile != default:
+        logger.warning("Branding profile %r not found — using %s", profile, default)
+        profile, folder = default, _profile_folder(default)
     if folder is None:
-        if profile != "talos":
-            logger.warning("Branding profile %r not found — using Talos defaults", profile)
         return Brand("talos", DEFAULT_NAME, None, None)
 
     name = DEFAULT_NAME

@@ -26,7 +26,8 @@ services:
     environment:
       - TALOS_UPLOAD_DIR=/srv/uploads
       # Branding profile: name + logos from branding/<profile>/ (see core/branding.py).
-      - TALOS_BRAND=${TALOS_BRAND:-talos}
+      # Empty lets the app pick its default: talos, or the one profile the image ships.
+      - TALOS_BRAND=${TALOS_BRAND:-}
       - APP_BIND=${APP_BIND:-127.0.0.1}
       - APP_PORT=${APP_PORT:-7000}
       - AUTH_ENABLED=${AUTH_ENABLED:-true}
