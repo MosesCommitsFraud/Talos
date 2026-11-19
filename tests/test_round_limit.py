@@ -89,6 +89,34 @@ async def test_a_turn_the_model_finished_has_no_stop_reason(monkeypatch):
     assert _stop_reason(await _run(max_rounds=0)) is None
 
 
+async def test_a_capped_turn_still_hands_over_the_file_it_built(monkeypatch):
+    _working_model(monkeypatch, tool_rounds=60)
+
+    async def builds_a_file(block, **kwargs):
+        return "bash: ok", {
+            "output": "ok",
+            "exit_code": 0,
+            "created_artifacts": ["output/Liquiditaetsplan.xlsx", "output/_recalc_tmp.xlsx"],
+        }
+
+    monkeypatch.setattr(agent_loop, "execute_tool_block", builds_a_file)
+    events = await _run(max_rounds=3)
+
+    shown = [e for e in events if e.get("type") == "tool_output" and e.get("presented_files")]
+    assert [e["presented_files"] for e in shown] == [["output/Liquiditaetsplan.xlsx"]]
+    assert shown[0]["auto"] is True
+    # The card comes before the notice that the work was cut off.
+    cap = next(i for i, e in enumerate(events) if e.get("type") == "rounds_exhausted")
+    assert events.index(shown[0]) < cap
+    assert _stop_reason(events) == "rounds_exhausted"
+
+
+async def test_a_capped_turn_without_a_file_hands_nothing_over(monkeypatch):
+    _working_model(monkeypatch, tool_rounds=60)
+    events = await _run(max_rounds=3)
+    assert not [e for e in events if e.get("tool") == "present_files"]
+
+
 # ── subagents ────────────────────────────────────────────────────────────────
 
 

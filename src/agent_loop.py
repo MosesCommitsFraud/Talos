@@ -2085,6 +2085,30 @@ def _auto_present_files(created: List[str], tool_events: list) -> List[str]:
     return (in_output or files)[-3:]
 
 
+def _auto_present(created: List[str], tool_events: list, round_num: int) -> List[str]:
+    """Hand over what `_auto_present_files` picks, the way present_files would:
+    the stream frames for the live chat, and the event in `tool_events` for the
+    saved history. Nothing when there is nothing to hand over."""
+    files = _auto_present_files(created, tool_events)
+    if not files:
+        return []
+    command = json.dumps({"files": files}, ensure_ascii=False)
+    event = {
+        "tool": "present_files",
+        "command": command,
+        "output": "Shown to the user: " + ", ".join(files),
+        "exit_code": 0,
+        "presented_files": files,
+        "auto": True,
+    }
+    tool_events.append({"round": round_num, **event})
+    start = {"type": "tool_start", "tool": "present_files", "command": command, "round": round_num}
+    return [
+        f"data: {json.dumps(start)}\n\n",
+        f"data: {json.dumps({'type': 'tool_output', **event})}\n\n",
+    ]
+
+
 def _build_actions_snapshot(tool_events: list, limit: int = 8000) -> str:
     """Compact record of what the agent actually did this turn, for the
     verifier to judge against. One block per tool execution: the command and
@@ -4052,30 +4076,10 @@ async def stream_agent_loop(
             # answer for a display problem. The chat now keeps the earlier
             # answer on screen itself (web/src/components/Messages.tsx,
             # answerBody), so the model writes its answer once.
-            _auto = _auto_present_files(turn_created_files, tool_events)
-            if _auto:
-                # The model built the file the user asked for but did not hand
-                # it over (3 of 102 runs in the 2026-11-12 model test). Show it
-                # the way present_files would, live and in saved history.
-                _cmd = json.dumps({"files": _auto}, ensure_ascii=False)
-                _out = "Shown to the user: " + ", ".join(_auto)
-                yield (
-                    f"data: {json.dumps({'type': 'tool_start', 'tool': 'present_files', 'command': _cmd, 'round': round_num})}\n\n"
-                )
-                yield (
-                    f"data: {json.dumps({'type': 'tool_output', 'tool': 'present_files', 'command': _cmd, 'output': _out, 'exit_code': 0, 'presented_files': _auto, 'auto': True})}\n\n"
-                )
-                tool_events.append(
-                    {
-                        "round": round_num,
-                        "tool": "present_files",
-                        "command": _cmd,
-                        "output": _out,
-                        "exit_code": 0,
-                        "presented_files": _auto,
-                        "auto": True,
-                    }
-                )
+            # The model built the file the user asked for but did not hand it
+            # over (3 of 102 runs in the 2026-11-12 model test).
+            for _frame in _auto_present(turn_created_files, tool_events, round_num):
+                yield _frame
             break  # no tools — done
 
         # ── Loop-breaker (Terminus-style stall detector) ──────────────
@@ -4741,6 +4745,13 @@ async def stream_agent_loop(
     # can show a "Continue" affordance instead of the turn just stopping.
     if _exhausted_rounds:
         _stop_reason = "rounds_exhausted"
+        # The model never got to hand its files over: the cap ended the turn
+        # before present_files. Without this the user of a capped turn saw the
+        # notice and no file, although it was built (15 of 351 runs of the
+        # model test of 2026-11 ended at a cap of 20). It may be unfinished;
+        # the notice next to it says that the work was cut off.
+        for _frame in _auto_present(turn_created_files, tool_events, round_num):
+            yield _frame
         logger.info(
             "[agent] round cap (%d) reached mid-task — emitting rounds_exhausted", max_rounds
         )
