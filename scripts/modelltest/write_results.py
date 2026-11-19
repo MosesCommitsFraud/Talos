@@ -3,7 +3,7 @@
     python write_results.py <workbook.xlsx> <lines.txt> <grades.json> <Konfig-ID> <Tester>
 
 lines.txt is what `MT.exportLines()` of harness.js returns: one line per run,
-`key;date;chat id;<the eleven figures of the "Gesamt" row>;stop reasons`.
+`key;date;chat id;<the eleven figures of the "Gesamt" row>;stop reasons;setup notes`.
 grades.json maps a key ("ALG-01|1") to the hand-graded columns, by column
 letter: U V W X Y Z AA AB AC AD AG AH. A run without grades gets its metrics only.
 
@@ -47,14 +47,19 @@ STOP_NOTES = {
 
 
 def parse_lines(text):
-    """{key: (date, [12 metric fields], [stop notes])} from exportLines output."""
+    """{key: (date, [12 metric fields], [stop notes], setup note)} from exportLines output.
+
+    The setup note says what changed around the run (a memory it wrote, a skill
+    switched off since the test began); lines of an older harness have none.
+    """
     runs = {}
     for line in text.splitlines():
         parts = line.strip().split(";")
         if len(parts) < 14:
             continue
         stops = parts[14].split(",") if len(parts) > 14 and parts[14] else []
-        runs[parts[0]] = (parts[1], parts[2:14], stops)
+        setup = parts[15].strip() if len(parts) > 15 else ""
+        runs[parts[0]] = (parts[1], parts[2:14], stops, setup)
     return runs
 
 
@@ -96,7 +101,7 @@ def append_runs(sheet, runs, grades, config, tester):
     row = first = (max(filled) + 1) if filled else FIRST_ROW
     for key in sorted(runs, key=order):
         question, run = key.split("|")
-        date, fields, stops = runs[key]
+        date, fields, stops, setup = runs[key]
         cell = sheet.cell(row, 1)
         cell.value = datetime.datetime.strptime(date, "%d.%m.%Y")
         cell.number_format = "DD.MM.YYYY"
@@ -114,8 +119,9 @@ def append_runs(sheet, runs, grades, config, tester):
         grade = dict(grades.get(key, {}))
         if grade:
             grade = {"Y": "n.a.", "Z": "n.a.", **grade}
-        if stops:
-            grade[NOTES] = " ".join(x for x in (grade.get(NOTES), f"[{stop_note(stops)}]") if x)
+        marks = [f"[{stop_note(stops)}]" if stops else "", f"[Setup: {setup}]" if setup else ""]
+        if any(marks):
+            grade[NOTES] = " ".join(x for x in (grade.get(NOTES), *marks) if x)
         for letter, column in GRADE_COLUMNS.items():
             if letter in grade:
                 set_text(sheet.cell(row, column), grade[letter])

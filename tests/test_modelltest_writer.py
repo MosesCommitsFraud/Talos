@@ -63,6 +63,20 @@ def test_a_stop_reason_is_added_to_the_notes():
     assert sheet.cell(3, 34).value is None  # ungraded, ended normally
 
 
+def test_what_changed_around_a_run_is_added_to_the_notes():
+    setup = "Memory neu: #8 Monatsabschluss | seit Teststart: Skill ausgeschaltet: dashboard"
+    lines = LINES.replace("T1:rounds_exhausted", "T1:rounds_exhausted;" + setup) + ";;" + setup
+    sheet = _sheet()
+    writer.append_runs(sheet, writer.parse_lines(lines), GRADES, "K2", "Moritz")
+    # ALG-01 is ungraded and ended normally: the setup note stands alone.
+    assert sheet.cell(3, 34).value == f"[Setup: {setup}]"
+    assert sheet.cell(4, 34).value == (
+        f"Feiertage unvollständig. [Turn 1: Schrittlimit erreicht] [Setup: {setup}]"
+    )
+    # A run nothing changed around keeps its notes as they were.
+    assert sheet.cell(5, 34).value == "=(B2-C2)/C2, Prozentformat."
+
+
 def test_runs_that_are_already_there_are_refused():
     sheet = _sheet()
     runs = writer.parse_lines(LINES)

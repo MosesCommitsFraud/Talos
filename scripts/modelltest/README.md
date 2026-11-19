@@ -13,8 +13,11 @@ Bewertung in die Testmappe ein (Blatt „Ergebnisse“). Damit wurden K1, K2 und
 ## Ablauf
 
 1. **Vorbereiten.** In Talos als Admin anmelden. Alle Bibliotheks-Skills einschalten. Das
-   Memory des Testnutzers leeren (siehe Fallstricke). Den Wert von „Schrittlimit“
-   (`agent_max_rounds`) notieren, er gehört zur Konfiguration.
+   Memory des Testnutzers leeren (siehe Fallstricke). Das Skript hält beim Start selbst
+   fest, womit getestet wird: Schrittlimit (`agent_max_rounds`), Prompt-Stil,
+   abgeschaltete Skills und Tools, Memory-Einträge. `MT.setupNote()` gibt das als eine
+   Zeile für das Blatt „Konfigurationen“ aus, `MT.status()` zeigt es mit an. Dort
+   nachsehen, bevor die Läufe lange laufen.
 2. **Starten.** In der Konsole des Talos-Tabs `harness.js` ausführen, dann:
 
    ```js
@@ -53,9 +56,17 @@ Bewertung in die Testmappe ein (Blatt „Ergebnisse“). Damit wurden K1, K2 und
   351 Läufen und sieht in der Antwort wie ein Abbruch des Modells aus. `MT.batch` und
   `write_results.py` weisen es deshalb aus.
 - **Memory.** Die Modelle legen während der Läufe Einträge im Nutzer-Memory an, und
-  spätere Antworten richten sich danach. Vor jedem Test leeren, danach wieder.
-- **Hängende Läufe.** Shell-Befehle haben kein Zeitlimit. Bleibt ein Lauf lange ohne neue
-  Ausgabe stehen: `fetch('/api/chat/stop/<Chat-ID>', { method: 'POST' })`. Das Skript
+  spätere Antworten richten sich danach. Vor jedem Test leeren, danach wieder. Das Skript
+  vermerkt je Lauf, welchen Eintrag er angelegt hat („Memory neu: …“).
+- **Setup ändert sich mitten im Test.** Beim K4-Test wurden zwei Skills nach einer Stunde
+  abgeschaltet; die Läufe danach konnten sie nicht laden und wurden als „Skill nicht
+  gelesen“ bewertet. Das Skript vergleicht deshalb vor jedem Lauf mit dem Stand beim
+  Start und vermerkt Abweichungen („seit Teststart: Skill ausgeschaltet: …“). Die
+  Vermerke stehen im Log, in `MT.exportLines()` und landen in der Bemerkung der Mappe.
+  Ein solcher Lauf ist für die betroffene Frage nicht zu bewerten.
+- **Lange Läufe.** Recherchen mit Hilfsagenten brauchen je Runde bis zu 25 Minuten; das
+  ist Arbeit, kein Hängen. Shell und Python lagen in 616 Runden nie über 104 Sekunden.
+  Abbrechen geht mit `fetch('/api/chat/stop/<Chat-ID>', { method: 'POST' })`, das Skript
   macht dann mit der Folgefrage weiter. Im Ergebnis vermerken.
 - **Websuche.** Viele Suchen kurz hintereinander lassen SearXNG bei einzelnen Suchmaschinen
   auflaufen. Läufe mit Websuche von solchen Tagen sind nur eingeschränkt vergleichbar.
