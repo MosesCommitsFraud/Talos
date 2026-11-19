@@ -1,0 +1,55 @@
+# What the company copy of this repository contains (scripts/company_export.py).
+#
+# One pattern per line, matched against the path of every file in the exported
+# commit. `*` and `?` stay inside one path segment, `**/` spans any number of
+# folders (also none), a trailing `/**` takes everything below a folder.
+#
+#   [drop]      never goes to the company repository
+#   [keep]      exceptions to [drop]: files the product needs to run or to test
+#   [preserve]  paths that exist only in the company repository; the export
+#               leaves them as they are there
+#
+# The export only leaves files out, it never edits one. Where the company copy
+# has to behave differently, the code handles the missing file (the Docker
+# build without docs/, the only shipped branding profile as the default).
+
+[drop]
+# CI and repository automation of the GitHub project
+.github/**
+
+# Licence of the GitHub project
+LICENSE.md
+
+# Documentation: Markdown everywhere, the docs site and what builds it
+**/*.md
+docs/**
+mkdocs.yml
+requirements-docs.txt
+*.docx
+
+# Every brand ([keep] names the one that stays)
+branding/**
+
+# Demo data nothing reads
+.data/**
+.smoke/**
+
+# The export itself
+scripts/company_export.py
+scripts/company_export.rules
+tests/test_company_export.py
+
+[keep]
+# Skills are Markdown: the SKILL.md files and their references are the product
+system_skills/**
+sample_skills/**
+# The prompt tests compare against these
+tests/snapshots/**
+# Licences of bundled third-party code travel with it
+static/ui-vendor/**/LICENSE*
+# The company brand
+branding/macs/**
+
+[preserve]
+# Compose snapshots kept by hand in the company repository
+docker-file/**
