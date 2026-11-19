@@ -9,13 +9,25 @@ COPY web/ ./
 RUN pnpm run build
 
 # ---- Stage 1b: build the documentation site (docs/ → docs_build) ----
+# The docs are optional: a copy of the code without docs/ and mkdocs.yml still
+# builds, the image then has an empty docs_build and the app serves no /docs
+# (app.py mounts it only when index.html exists). COPY would fail on a missing
+# source, so the stage reads the build context through a bind mount instead.
+# That mount makes the step rerun on every context change; the pip cache mount
+# keeps the rerun to the mkdocs build itself.
 FROM python:3.12-slim AS docsbuild
 WORKDIR /docs
-COPY requirements-docs.txt ./
-RUN pip install --no-cache-dir -r requirements-docs.txt
-COPY mkdocs.yml ./
-COPY docs/ ./docs/
-RUN mkdocs build
+RUN --mount=type=bind,target=/context \
+    --mount=type=cache,target=/root/.cache/pip \
+    set -eu; \
+    mkdir -p docs_build; \
+    if [ -f /context/mkdocs.yml ] && [ -d /context/docs ]; then \
+        pip install -r /context/requirements-docs.txt; \
+        cp -r /context/mkdocs.yml /context/docs .; \
+        mkdocs build; \
+    else \
+        echo "no docs/ or mkdocs.yml in the build context: image is built without /docs"; \
+    fi
 
 # ---- Stage 1c: Node runtime for stdio MCP servers ----
 # Debian's nodejs is too old for current MCP servers (REA needs >=22.19), so the
