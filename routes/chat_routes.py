@@ -44,6 +44,7 @@ from src import citations as _citations
 from src import goal_driver as _goal_driver
 from src import goals as _goals
 from src.agent_loop import stopped_round_messages, stream_agent_loop
+from src.agent_tools import WEB_SWITCH_TOOLS
 from src.auth_helpers import effective_user, get_current_user
 from src.chat_helpers import coerce_message_and_session
 from src.endpoint_resolver import build_chat_url
@@ -912,7 +913,7 @@ def setup_chat_routes(
         # Web search turned off in the composer: the model answers without
         # reaching the internet for this turn.
         if not use_web:
-            disabled_tools.update({"web_search", "web_fetch"})
+            disabled_tools.update(WEB_SWITCH_TOOLS)
 
         # Enforce per-user privileges
         _privs = {}

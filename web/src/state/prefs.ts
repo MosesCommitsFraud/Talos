@@ -112,7 +112,8 @@ interface PrefsState {
   useRag: boolean;
   useDb: boolean;
   /** Whether the turn may reach the web. Maps to the `use_web` request flag;
-   *  when off the backend withholds web_search / web_fetch for that turn.
+   *  when off the backend withholds web_search, web_fetch, get_news and
+   *  get_weather for that turn.
    *  Default on — the composer's add menu toggles it. */
   useWeb: boolean;
   /** Model reasoning/thinking. Maps to the `reasoning` request flag; when off,

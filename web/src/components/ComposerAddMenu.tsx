@@ -328,7 +328,7 @@ export function ComposerAddMenu({
         <MenuSeparator />
         <KnowledgeItems />
         {/* Per-turn, not a deployment setting: with it off the backend withholds
-            web_search / web_fetch for the messages that follow. */}
+            web search, page fetch, news and weather for the messages that follow. */}
         <MenuItem
           role="menuitemcheckbox"
           aria-checked={useWeb}

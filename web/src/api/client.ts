@@ -2033,7 +2033,7 @@ export interface StreamFlags {
   useRag?: boolean;
   useDb?: boolean;
   /** Whether the turn may reach the web. `false` makes the backend withhold
-   *  the web_search / web_fetch tools for this turn; omitted/true leaves the
+   *  the web tools (search, fetch, news, weather) for this turn; omitted/true leaves the
    *  admin-configured toolset alone. */
   useWeb?: boolean;
   /** Model reasoning/thinking. When false the backend disables it (vLLM

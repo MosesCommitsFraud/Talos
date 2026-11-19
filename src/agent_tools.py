@@ -109,6 +109,11 @@ TOOL_TAGS = {
     "find_tools",
 }
 
+# What the composer's Web switch takes away for a turn: every built-in tool that
+# reaches the public internet. News and weather belong to it; while they stayed
+# on, a turn with "Web off" still sent the question's topic or place outside.
+WEB_SWITCH_TOOLS = frozenset({"web_search", "web_fetch", "get_news", "get_weather"})
+
 ToolBlock = namedtuple("ToolBlock", ["tool_type", "content"])
 
 

@@ -230,15 +230,19 @@ async def test_second_turn_extends_the_first_turns_prompt(captured):
 async def test_switched_off_sources_are_not_offered(captured):
     msgs = [{"role": "system", "content": "p"}, {"role": "user", "content": "wer ist markus rühl"}]
     # "Nur Chat" with web off: no database, no knowledge base, no web.
+    from src.agent_tools import TOOL_TAGS, WEB_SWITCH_TOOLS
+
+    # The Web switch covers news and weather too: they reach the internet as well.
+    assert {"web_search", "web_fetch", "get_news", "get_weather"} == WEB_SWITCH_TOOLS <= TOOL_TAGS
     await _run_turn(
         [dict(m) for m in msgs],
         use_rag=False,
         force_db=False,
-        disabled_tools={"web_search", "web_fetch"},
+        disabled_tools=set(WEB_SWITCH_TOOLS),
     )
     (call,) = captured
     names = {t["function"]["name"] for t in call["tools"]}
-    assert not names & {"query_sql", "search_knowledge", "web_search", "web_fetch"}
+    assert not names & ({"query_sql", "search_knowledge"} | WEB_SWITCH_TOOLS)
     wire = _wire(call)
     assert "DATABASE ACCESS" not in json.dumps(wire)
     # Neither does the system prompt name them: the lean prompt lists no tools
