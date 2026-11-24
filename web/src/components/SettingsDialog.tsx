@@ -1579,6 +1579,10 @@ function McpPanel() {
         )}
       </Section>
 
+      <Section title={t('settings.mcp.sandbox')}>
+        <BoolRow s={s} k="mcp_sandbox_enabled" label={t('settings.mcp.sandboxEnabled')} hint={t('settings.mcp.sandboxEnabledHint')} />
+      </Section>
+
       <Section title={t('settings.mcp.web')}>
         <BoolRow s={s} k="mcp_web_enabled" label={t('settings.mcp.webEnabled')} hint={t('settings.mcp.webEnabledHint')} />
         {webOn && (

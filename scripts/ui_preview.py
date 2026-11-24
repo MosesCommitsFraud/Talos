@@ -2955,6 +2955,7 @@ _APP_SETTINGS = {
     "mcp_skills_enabled": True,
     "mcp_skills_inherit": True,
     "mcp_sql_enabled": True,
+    "mcp_sandbox_enabled": True,
     "mcp_sql_dns_search": "",
     "mcp_update_rag_open": False,
     "rag_git_repos": [],

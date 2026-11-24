@@ -11,7 +11,7 @@ import { Input } from '../ui/misc';
 import { Select } from '../ui/select';
 
 // routes/api_token_routes.py TOKEN_PROFILES, as far as an MCP client needs them.
-const PROFILES = ['mcp_update', 'mcp', 'mcp_web', 'mcp_sql'] as const;
+const PROFILES = ['mcp_update', 'mcp', 'mcp_web', 'mcp_sql', 'mcp_sandbox'] as const;
 
 /**
  * A token just created. This is the only time it can be shown: the server keeps
