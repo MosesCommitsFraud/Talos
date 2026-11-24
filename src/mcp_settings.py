@@ -282,6 +282,10 @@ def tool_enabled(name: str) -> bool:
     """
     if name == "sql_query":
         return _bool("mcp_sql_enabled", True)
+    if name == "sandbox":
+        from src.sandbox_client import sandbox_enabled
+
+        return sandbox_enabled() and _bool("mcp_sandbox_enabled", True)
     if name in WEB_TOOLS:
         return web_enabled() and name in web_tools()
     if name in RAG_TOOLS:

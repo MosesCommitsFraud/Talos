@@ -34,6 +34,8 @@ ALLOWED_SCOPES = {
     # the public web.
     "web:read",
     "sql:read",
+    # The MCP `sandbox` tool: runs the caller's Python in the code sandbox.
+    "sandbox:exec",
     # The one MCP tool that acts rather than reads: update_rag starts a
     # re-index inside Talos. Never handed out by default.
     "rag:update",
@@ -47,6 +49,7 @@ TOKEN_PROFILES = {
     "mcp": ["rag:read", "skills:read"],
     "mcp_web": ["rag:read", "skills:read", "web:read"],
     "mcp_sql": ["sql:read"],
+    "mcp_sandbox": ["sandbox:exec"],
     # Only the update_rag trigger: for the CI job that calls it after a push.
     "mcp_update": ["rag:update"],
 }

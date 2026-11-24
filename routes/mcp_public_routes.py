@@ -60,9 +60,18 @@ INTERNAL_ERROR = -32603
 # otherwise hold the client's request open indefinitely.
 TOOL_TIMEOUT_SECONDS = 120
 
-# Guard against a client posting a huge body at an endpoint that only ever
-# needs small JSON-RPC frames.
-MAX_BODY_BYTES = 1_000_000
+# Guard against a client posting a huge body. Most frames are small JSON-RPC
+# messages; the `sandbox` tool carries its input files base64-encoded in the
+# call, so the cap leaves room for about 18 MB of files.
+MAX_BODY_BYTES = 25_000_000
+
+# The sandbox tool runs code for up to mcp_sandbox.MAX_TIMEOUT seconds, then
+# hands back its files; the general cap above would cut it off first.
+SANDBOX_TOOL_TIMEOUT_SECONDS = 600 + 120
+
+# The MCP session header (Streamable HTTP). Issued at initialize; the sandbox
+# tool keys its per-session workspace on it. Every other tool ignores it.
+SESSION_HEADER = "Mcp-Session-Id"
 
 
 def _server_version() -> str:
@@ -184,7 +193,10 @@ def _anonymous_scopes() -> set:
     would just move the surprise to the first `web_search` call. `sql:read` is
     in the default for the same reason, and opens less than it looks: the caller
     still has to bring its own SQL login in the per-request headers, and the
-    sandbox refuses any host outside TALOS_SQL_ALLOWED_HOSTS. `MCP_OPEN_SCOPES`
+    sandbox refuses any host outside TALOS_SQL_ALLOWED_HOSTS. `sandbox:exec` is in
+    it too: the code runs in the isolated sandbox, under an account of its own
+    per MCP session, without network and without a way back into the app.
+    `MCP_OPEN_SCOPES`
     narrows it; Settings → MCP can switch the web and SQL tools off for
     everyone.
     """
@@ -195,6 +207,7 @@ def _anonymous_scopes() -> set:
             mcp_public.SCOPE_SKILLS_READ,
             mcp_public.SCOPE_WEB_READ,
             mcp_public.SCOPE_SQL_READ,
+            mcp_public.SCOPE_SANDBOX_EXEC,
         }
     return {s.strip() for s in raw.replace(" ", ",").split(",") if s.strip()}
 
@@ -258,7 +271,17 @@ def _instructions() -> str:
     web = "/".join(n for n in mcp_settings.WEB_TOOLS if on(n))
     if web:
         parts.append(f"Use {web} for anything public.")
-    parts.append("All tools are read-only, apart from update_rag where it is offered.")
+    if on("sandbox"):
+        parts.append(
+            "Use sandbox to run Python on data you pass in as files: analyses, charts, "
+            "dashboards, Excel or Word files; whatever it creates comes back in the result"
+        )
+        parts.append(
+            "All tools are read-only, apart from sandbox, which works only in its own "
+            "session workspace, and update_rag where it is offered."
+        )
+    else:
+        parts.append("All tools are read-only, apart from update_rag where it is offered.")
     return " ".join(p if p.endswith(".") else p + "." for p in parts)
 
 
@@ -293,6 +316,15 @@ async def _handle_message(
     scopes, owner, label = _caller_context(request)
 
     if method == "initialize":
+        # A session only where the sandbox tool is on offer: it is the one tool
+        # that keeps anything between calls. Every other client stays stateless
+        # exactly as before.
+        from src import mcp_settings
+
+        if mcp_public.SCOPE_SANDBOX_EXEC in scopes and mcp_settings.tool_enabled("sandbox"):
+            from src.mcp_sandbox import new_session_id
+
+            request.state.mcp_session_id = new_session_id()
         return _result(
             request_id,
             {
@@ -346,6 +378,12 @@ async def _handle_message(
                 },
             )
 
+        extra: Dict[str, Any] = {}
+        if name == "sql_query":
+            extra["request_headers"] = request.headers
+        if name == "sandbox":
+            extra["session_id"] = request.headers.get(SESSION_HEADER)
+        timeout = SANDBOX_TOOL_TIMEOUT_SECONDS if name == "sandbox" else TOOL_TIMEOUT_SECONDS
         try:
             # The tools block on Qdrant/rerank HTTP and on disk reads, so keep
             # them off the event loop.
@@ -357,14 +395,18 @@ async def _handle_message(
                     granted_scopes=scopes,
                     owner=owner,
                     skills_manager=skills_manager,
-                    **({"request_headers": request.headers} if name == "sql_query" else {}),
+                    **extra,
                 ),
-                timeout=TOOL_TIMEOUT_SECONDS,
+                timeout=timeout,
             )
         except asyncio.TimeoutError:
             text, is_error = (
-                f"{name} timed out after {TOOL_TIMEOUT_SECONDS}s. "
-                "The knowledge base may be unreachable.",
+                f"{name} timed out after {timeout}s. "
+                + (
+                    "The sandbox may be unreachable."
+                    if name == "sandbox"
+                    else "The knowledge base may be unreachable."
+                ),
                 True,
             )
         except Exception as e:
@@ -374,9 +416,10 @@ async def _handle_message(
         logger.info("MCP tools/call %s by %s (error=%s)", name, label, is_error)
         # A failed tool is still a successful JSON-RPC call carrying isError —
         # that's what lets the model read the message and retry sensibly.
-        return _result(
-            request_id, {"content": [{"type": "text", "text": text}], "isError": is_error}
-        )
+        # `sandbox` answers with content blocks of its own (text plus its output
+        # files); every other tool with one string.
+        content = text if isinstance(text, list) else [{"type": "text", "text": text}]
+        return _result(request_id, {"content": content, "isError": is_error})
 
     # We advertise neither resources nor prompts, but some clients probe for
     # them regardless. Empty lists are quieter than a method-not-found error.
@@ -388,6 +431,14 @@ async def _handle_message(
         return _result(request_id, {"prompts": []})
 
     return _error(request_id, METHOD_NOT_FOUND, f"Method not found: {method}")
+
+
+def _with_session(response: Response, request: Request) -> Response:
+    """Attach the session id an `initialize` in this request handed out."""
+    session_id = getattr(request.state, "mcp_session_id", None)
+    if session_id:
+        response.headers[SESSION_HEADER] = session_id
+    return response
 
 
 def setup_mcp_public_routes(skills_manager=None) -> APIRouter:
@@ -427,7 +478,7 @@ def setup_mcp_public_routes(skills_manager=None) -> APIRouter:
             if not responses:
                 # Notifications only — nothing to answer with.
                 return Response(status_code=202)
-            return JSONResponse(content=responses)
+            return _with_session(JSONResponse(content=responses), request)
 
         if not isinstance(payload, dict):
             return JSONResponse(
@@ -438,7 +489,7 @@ def setup_mcp_public_routes(skills_manager=None) -> APIRouter:
         response = await _handle_message(payload, request, skills_manager)
         if response is None:
             return Response(status_code=202)
-        return JSONResponse(content=response)
+        return _with_session(JSONResponse(content=response), request)
 
     @router.get("/mcp")
     async def mcp_sse_unsupported() -> Response:
@@ -453,8 +504,18 @@ def setup_mcp_public_routes(skills_manager=None) -> APIRouter:
         )
 
     @router.delete("/mcp")
-    async def mcp_session_delete() -> Response:
-        """Session teardown. No sessions exist, so this is a no-op success."""
+    async def mcp_session_delete(request: Request) -> Response:
+        """Session teardown: the client ends its MCP session.
+
+        Only the sandbox tool keeps anything per session; its account and files
+        are deleted here. Without a session id, or with one that is not known,
+        there is nothing to end, which is still a success.
+        """
+        session_id = request.headers.get(SESSION_HEADER)
+        if session_id:
+            from src.mcp_sandbox import end_session
+
+            await asyncio.to_thread(end_session, session_id)
         return Response(status_code=204)
 
     return router

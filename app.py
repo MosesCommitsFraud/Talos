@@ -1105,6 +1105,14 @@ async def _startup_event():
             logger.info(f"Dropped former defaults from settings.json: {', '.join(_dropped)}")
     except Exception as e:
         logger.warning(f"Former-default cleanup skipped: {e}")
+    # Sandbox accounts of MCP sessions: removes those left from before this
+    # start, then those of sessions idle for 30 minutes (src/mcp_sandbox.py).
+    try:
+        from src.mcp_sandbox import start_reaper
+
+        start_reaper()
+    except Exception as e:
+        logger.warning(f"MCP sandbox cleanup not started: {e}")
     # Strong refs to fire-and-forget startup tasks. Without this, Python may
     # GC tasks created with `asyncio.create_task(...)` before they finish.
     _startup_tasks: list[asyncio.Task] = getattr(app.state, "_startup_tasks", [])

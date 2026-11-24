@@ -301,6 +301,9 @@ DEFAULT_SETTINGS = {
     # space-separated ("corp.example": sqlserver -> sqlserver.corp.example).
     # For a Docker host without a DNS search list of its own.
     "mcp_sql_dns_search": "",
+    # The `sandbox` tool: Python in the code sandbox for an external client, one
+    # sandbox account per MCP session (src/mcp_sandbox.py).
+    "mcp_sandbox_enabled": True,
     # True = expose exactly the published library the web UI serves (one
     # library, no second copy). False = only the skills named in
     # mcp_skills_allowed leave the instance.

@@ -13,11 +13,14 @@ plumbing lives in `routes/mcp_public_routes.py`; keeping the tools here means
 they stay unit-testable without a server, and a stdio wrapper could reuse them
 verbatim.
 
-Everything here is READ-ONLY, with one exception: `update_rag`, which lets an
+Everything here is READ-ONLY, with two exceptions. `update_rag` lets an
 external caller start a sync of the knowledge bases from a Git repository the
 administrator configured (src/rag_git_sync.py), behind its own `rag:update` scope.
 The job does the writing, and the caller decides neither where it fetches from nor
-what it may touch. Nothing else in this module writes to Qdrant, to the skills
+what it may touch. `sandbox` runs the caller's Python in the code sandbox
+(src/mcp_sandbox.py), under a sandbox account of its own per MCP session that
+is deleted when the session ends; it writes nothing outside that account.
+Nothing else in this module writes to Qdrant, to the skills
 directory, or to the settings store: an outward-facing endpoint reached
 with a long-lived bearer token is the wrong place to accept mutations, and the
 skills flow in particular has a deliberate publish/audit review step
@@ -42,6 +45,10 @@ SCOPE_RAG_READ = "rag:read"
 SCOPE_SKILLS_READ = "skills:read"
 SCOPE_WEB_READ = "web:read"
 SCOPE_SQL_READ = "sql:read"
+# Runs code. In the token-free default like sql:read: the code runs in the
+# isolated sandbox under an account of its own per MCP session, with no network
+# and no route back into the app (core/net_trust.is_sandbox_peer).
+SCOPE_SANDBOX_EXEC = "sandbox:exec"
 # Triggers a re-index rather than reading anything, so it is its own scope:
 # never part of the anonymous or browser-session defaults, only minted on
 # purpose onto a token.
@@ -153,6 +160,68 @@ _TOOL_DEFS: List[Dict[str, Any]] = [
                 "max_rows": {"type": "integer", "minimum": 1, "maximum": 1000, "default": 100},
             },
             "required": ["query"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "_scope": SCOPE_SANDBOX_EXEC,
+        "name": "sandbox",
+        "title": "Run Python in the Talos sandbox",
+        "description": (
+            "Run Python code in an isolated sandbox with pandas, numpy, matplotlib, "
+            "openpyxl, python-docx and the other libraries Talos uses for analysis, "
+            "charts, dashboards and Office files. Pass input files in `files`; they "
+            "land in the working directory, where the code reads them by name. "
+            "Every file the code creates or changes comes back in the result: images "
+            "as images, text files as text, everything else base64. Save outputs "
+            "under output/ or any relative path, never under /tmp. "
+            "Within one MCP session the working directory keeps its files between "
+            "calls, so upload once and work on it across calls; Python variables do "
+            "not survive, each call is a new process. The sandbox has no network: "
+            "fetch data with other tools and pass it in. Shell commands run via "
+            "subprocess. Returns the output (stdout and errors) and the files."
+        ),
+        "annotations": {"readOnlyHint": False, "destructiveHint": False, "openWorldHint": False},
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "code": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 100000,
+                    "description": "Python code to run.",
+                },
+                "files": {
+                    "type": "array",
+                    "description": (
+                        "Files to place in the working directory before the code runs."
+                    ),
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "name": {"type": "string", "description": "File name, e.g. data.csv."},
+                            "content": {
+                                "type": "string",
+                                "description": "The file content: plain text, or base64 for binary files.",
+                            },
+                            "encoding": {
+                                "type": "string",
+                                "enum": ["text", "base64"],
+                                "default": "text",
+                            },
+                        },
+                        "required": ["name", "content"],
+                    },
+                },
+                "timeout": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 600,
+                    "default": 120,
+                    "description": "Seconds before the run is stopped.",
+                },
+            },
+            "required": ["code"],
             "additionalProperties": False,
         },
     },
@@ -1429,8 +1498,13 @@ def call_tool(
     owner: Optional[str] = None,
     skills_manager=None,
     request_headers=None,
-) -> Tuple[str, bool]:
+    session_id: Optional[str] = None,
+) -> Tuple[Any, bool]:
     """Run one tool. Returns ``(text, is_error)``.
+
+    `text` is a string for every tool but `sandbox`, which returns a list of
+    MCP content blocks (its output files ride along as images and resources);
+    the route passes such a list through as the result's `content`.
 
     Blocking — the RAG search hits Qdrant and a rerank endpoint over HTTP, and
     the skills manager reads from disk. The HTTP route calls this in a worker
@@ -1463,6 +1537,10 @@ def call_tool(
             from src.mcp_sql import query_sql
 
             return _run_async(query_sql(arguments, request_headers))
+        if name == "sandbox":
+            from src.mcp_sandbox import run as run_sandbox
+
+            return run_sandbox(args, session_id)
         # The administrator's knowledge-base and result-size policy. Applied to
         # a *copy* of the arguments here rather than inside the tool bodies,
         # which the REST service (src/rag_api.py) shares and which must stay
