@@ -496,13 +496,26 @@ def build_user_content(
             )
         sandbox_abs_line = f"Absolute sandbox path: {sandbox_abs}\n" if sandbox_abs else ""
         tool_where = "sandbox" if upload_info.get("sandbox_path") else "server"
-        path_hint = (
-            f"\n\n[Attachment file available to tools: {display_name}]\n"
-            f"Path ({tool_where}): {tool_path}\n"
-            f"{sandbox_abs_line}"
-            "If the user asks to analyze, transform, chart, forecast, or inspect this file, use this exact path. "
-            "In the sandbox, Python and bash start in the workspace, so the relative path above should work directly."
-        )
+        from src.sandbox_client import sandbox_enabled
+
+        if not upload_info.get("sandbox_path") and sandbox_enabled():
+            # Copying it into the workspace failed (src/chat_handler.py). The
+            # upload directory is not mounted in the sandbox, so its server path
+            # would only send code looking for a file it cannot reach.
+            path_hint = (
+                f"\n\n[Attachment: {display_name}]\n"
+                "This file could not be copied into the workspace, so code cannot open it. "
+                "Answer from the text included here; if the task needs the file itself, "
+                "ask the user to attach it again."
+            )
+        else:
+            path_hint = (
+                f"\n\n[Attachment file available to tools: {display_name}]\n"
+                f"Path ({tool_where}): {tool_path}\n"
+                f"{sandbox_abs_line}"
+                "If the user asks to analyze, transform, chart, forecast, or inspect this file, use this exact path. "
+                "In the sandbox, Python and bash start in the workspace, so the relative path above should work directly."
+            )
 
         if upload_handler.is_image_file(display_name, mime):
             if content and content[0]["type"] == "text":

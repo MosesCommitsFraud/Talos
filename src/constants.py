@@ -12,9 +12,9 @@ DATA_DIR = os.path.join(BASE_DIR, "data")
 SESSIONS_FILE = os.path.join(DATA_DIR, "sessions.json")
 PERSONAL_DIR = os.path.join(DATA_DIR, "personal_docs")
 RUNBOOK_DIR = os.path.join(PERSONAL_DIR, "runbook")
-# Uploaded files live here. In Docker this is overridden to a named volume that is
-# ALSO mounted into the sandbox container (TALOS_UPLOAD_DIR=/srv/uploads), so
-# uploads sit in the sandbox and never clutter the host-bind-mounted ./data.
+# Uploaded files live here. In Docker this is overridden to a named volume
+# (TALOS_UPLOAD_DIR=/srv/uploads), so uploads never clutter the host-bind-mounted
+# ./data. The sandbox does not mount it: attachments reach a workspace as copies.
 # Falls back to data/uploads for local (non-Docker) dev.
 UPLOAD_DIR = os.getenv("TALOS_UPLOAD_DIR") or os.path.join(DATA_DIR, "uploads")
 FEATURES_FILE = os.path.join(DATA_DIR, "features.json")
