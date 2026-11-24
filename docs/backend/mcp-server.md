@@ -95,7 +95,9 @@ above exist for.
 ## Tools
 
 Every tool is **read-only**, except `update_rag` (below), which starts a job against
-a source the administrator configured. There is no direct ingest, no delete, no skill
+a source the administrator configured, and `sandbox`, which runs the caller's Python
+in a sandbox account of its own per MCP session (see *Sandbox aus Microsoft Agent
+Framework* at the end). There is no direct ingest, no delete, no skill
 authoring.
 An outward-facing endpoint held open by a long-lived bearer token is the wrong
 place to accept mutations, and skills in particular have a deliberate
@@ -298,6 +300,7 @@ as a logged-in browser session, so the two get their own policy.
 | Setting | Effect |
 | --- | --- |
 | `mcp_web_enabled` | Off removes `web_search` / `web_fetch` from the catalogue, whatever the token's scopes say. The in-app agent is unaffected. |
+| `mcp_sandbox_enabled` | Off removes `sandbox` from the catalogue and refuses calls to it. On by default. |
 | `mcp_web_inherit` | On (default) = the Web Access policy applies verbatim. Off = the `mcp_web_*` values below apply and the web-UI policy is ignored for `/mcp`. |
 | `mcp_web_searxng_url` | A different SearxNG for MCP callers. Empty = the same one the UI uses. |
 | `mcp_web_domain_allowlist` / `_blocklist` | The MCP-only domain policy. Same semantics as the web-UI lists: blocklist always wins, a non-empty allowlist is allowlist-only. |
@@ -382,7 +385,8 @@ curl -sS https://<talos-host>/mcp -H "Authorization: Bearer ody_..." -H "Content
 - **Outputs are capped** at ~24k characters per call, with an explicit
   truncation note.
 - **Calls time out after 120s** so an unreachable Qdrant or rerank endpoint
-  can't hold a client's request open.
+  can't hold a client's request open. `sandbox` gets 600s plus time to hand
+  back its files.
 - **Tracebacks never reach the client** — they're logged server-side and the
   client gets the exception type and message only.
 
@@ -393,7 +397,8 @@ curl -sS https://<talos-host>/mcp -H "Authorization: Bearer ody_..." -H "Content
 | `src/mcp_public.py` | tool catalogue, scope gating, dispatch — transport-free and unit-tested |
 | `src/mcp_settings.py` | the administrator's policy: which tools are offered, and whether web / RAG / skills inherit the web-UI settings |
 | `src/rag_git_sync.py` | what `update_rag` starts: fetching a repository and mirroring its folders into the knowledge bases |
-| `routes/mcp_public_routes.py` | JSON-RPC / HTTP shell |
+| `src/mcp_sandbox.py` | the `sandbox` tool: session accounts, files in and out, cleanup |
+| `routes/mcp_public_routes.py` | JSON-RPC / HTTP shell, `Mcp-Session-Id` for the sandbox |
 | `routes/api_token_routes.py` | mints the `rag:read` / `skills:read` / `web:read` scopes |
 | `src/web_search.py` | SearxNG client, domain policy, SSRF guard — wrapped, not reimplemented |
 | `tests/test_mcp_public.py` | scope gating, tool contracts, JSON-RPC framing |
@@ -561,3 +566,84 @@ Header nicht und übernimmt keine Zugangsdaten von vorherigen Requests.
 MAF → Talos über HTTPS betreiben und diese Header im vorgeschalteten Proxy
 nicht protokollieren. Ein echter MAF-/DB-Integrationstest benötigt den finalen
 Client-Vertrag und eine erreichbare SQL-Server-Testdatenbank.
+
+# Sandbox aus Microsoft Agent Framework
+
+Das Tool `sandbox` führt Python-Code in der Code-Sandbox aus, mit denselben
+Bibliotheken wie im Talos-Chat (pandas, matplotlib, openpyxl, python-docx, die
+Dashboard-Vorlagen unter `/opt/talos/vendor`). Talos ist dabei nur die
+Verarbeitung: Dateien kommen im Aufruf herein, erzeugte Dateien gehen im
+Ergebnis zurück, und nach dem Ende der Session ist auf Talos nichts mehr davon da.
+
+Scope `sandbox:exec`. Er gehört zu den Rechten ohne Token (`MCP_OPEN_SCOPES`
+leer), ein Client im LAN braucht also keinen Token. Für Tokens gibt es das
+Profil `mcp_sandbox`. Unter **Einstellungen → MCP → Sandbox über MCP** lässt
+sich das Tool ausschalten; standardmäßig ist es an. Ist die Code-Sandbox
+abgeschaltet (`TALOS_SANDBOX_TOOLS=false`), fehlt das Tool ebenfalls.
+
+## Aufruf
+
+```json
+{"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+ "params": {"name": "sandbox",
+            "arguments": {
+              "code": "import pandas as pd
+df = pd.read_excel('umsatz.xlsx')
+df.groupby('kunde').sum().to_excel('output/summe.xlsx')",
+              "files": [{"name": "umsatz.xlsx", "content": "<base64>", "encoding": "base64"}],
+              "timeout": 120}}}
+```
+
+- `code` (Pflicht): Python. Shell-Befehle laufen über `subprocess`.
+- `files`: Dateien fürs Arbeitsverzeichnis, `encoding` `text` (Standard) oder
+  `base64`. Nur Dateinamen, keine Ordner. Höchstens 50 pro Aufruf; der ganze
+  Request darf 25 MB groß sein, also rund 18 MB Dateien.
+- `timeout`: 1–600 Sekunden, Standard 120.
+
+Das Ergebnis enthält zuerst einen Textblock mit Exit-Code, Ausgabe und der
+Liste der erzeugten oder geänderten Dateien, danach je Datei einen Block:
+Bilder als `image`, Textdateien (CSV, JSON, HTML, Markdown, SVG …) als
+`resource` mit `text`, alles andere als `resource` mit base64-`blob`. Jeder
+Dateiblock trägt den Pfad im Arbeitsverzeichnis in `_meta.path`. Zurück gehen
+höchstens 20 Dateien, 10 MB je Datei und 15 MB insgesamt; was darüber liegt,
+steht nur mit Name und Größe im Textblock. Ein Exit-Code ungleich 0 oder ein
+Timeout ergibt `isError: true`.
+
+## Sessions
+
+Bei `initialize` gibt Talos einen `Mcp-Session-Id`-Header zurück, sofern der
+Aufrufer `sandbox` nutzen darf; die MCP-Client-Bibliotheken schicken ihn danach
+von selbst mit. Alle `sandbox`-Aufrufe einer Session laufen unter einem eigenen
+Linux-Konto mit eigenem Arbeitsverzeichnis, Dateien bleiben also zwischen den
+Aufrufen liegen. Python-Variablen nicht: jeder Aufruf ist ein neuer Prozess.
+
+Das Konto wird samt Dateien gelöscht, wenn der Client die Session beendet
+(`DELETE /mcp` mit dem Header) oder nach 30 Minuten ohne Aufruf. Beim Start
+der App werden alle MCP-Konten entfernt, die noch in der Sandbox liegen, weil
+die Sessions nur im Speicher der App stehen. Eine unbekannte Session-Id (nach
+einem Neustart oder nach Ablauf) bekommt einfach ein neues, leeres Konto; der
+Textblock sagt dann, dass frühere Dateien nicht mehr da sind. Ohne Session-Id
+bekommt jeder Aufruf ein Konto nur für sich.
+
+Das Konto heißt nach einem Hash der Session-Id (`talos_mcp_…`), nie nach der Id
+selbst: Die Id ist der Schlüssel zum Arbeitsverzeichnis und steht deshalb in
+keinem Pfad und keinem Log.
+
+## Abschottung
+
+- Die Sandbox hat kein Netz (`sandbox-net` ist intern).
+- Die App lehnt jede Anfrage von der Sandbox-Adresse ab
+  (`core/net_trust.is_sandbox_peer`), Code kommt also nicht an `/mcp` oder
+  `web_fetch` heran.
+- Der Sandbox-Daemon lehnt Aufrufe aus dem eigenen Container ab, und Nutzer-Code
+  erbt keine Variablen, deren Name auf `KEY`, `SECRET`, `TOKEN` oder
+  `PASSWORD` endet.
+- Das Upload-Volume der App ist nicht in die Sandbox eingebunden.
+
+## Auf MAF-Seite
+
+Dateien sollten nicht durch das Modell laufen. Am einfachsten gibt das MAF dem
+Modell eine eigene Funktion (etwa `run_code(code, files=[Namen])`), die die
+Dateien aus dem eigenen Speicher als base64 anhängt, `sandbox` aufruft, die
+zurückgegebenen Dateien speichert und dem Modell nur stdout und Dateinamen
+weitergibt. So bleibt base64 auch aus dem Chatverlauf draußen.
