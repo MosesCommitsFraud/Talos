@@ -34,13 +34,52 @@ app = FastAPI(title="Talos Sandbox", version="0.1.0")
 SANDBOX_KEY = os.getenv("TALOS_SANDBOX_KEY", "").strip()
 
 
+def _is_local_caller(request: Request) -> bool:
+    """Whether the request comes from inside this container.
+
+    The daemon listens on every interface so the app can reach it over
+    sandbox-net, and code run here can reach the same port: over loopback, or
+    over the container's own address, where the peer address equals the address
+    it connected to. The app always connects from another container, so a local
+    caller is code from a workspace, with or without a key.
+    """
+    import ipaddress
+
+    client = request.client.host if request.client else ""
+    if not client:
+        return False
+    try:
+        if ipaddress.ip_address(client).is_loopback:
+            return True
+    except ValueError:
+        return False
+    server = request.scope.get("server")
+    return bool(server) and server[0] == client
+
+
 @app.middleware("http")
 async def _require_sandbox_key(request: Request, call_next):
+    if request.url.path != "/health" and _is_local_caller(request):
+        from fastapi.responses import JSONResponse
+        return JSONResponse({"detail": "forbidden"}, status_code=403)
     if SANDBOX_KEY and request.url.path != "/health":
         if request.headers.get("x-talos-sandbox-key", "") != SANDBOX_KEY:
             from fastapi.responses import JSONResponse
             return JSONResponse({"detail": "unauthorized"}, status_code=401)
     return await call_next(request)
+
+
+# Environment variables the daemon needs and code in a workspace must never see.
+_SECRET_ENV_RE = re.compile(r"(KEY|SECRET|TOKEN|PASSWORD)$", re.IGNORECASE)
+
+
+def _user_env(**overrides: str) -> dict[str, str]:
+    """The daemon's environment without its secrets, for processes run as a
+    sandbox account. Copying os.environ whole handed TALOS_SANDBOX_KEY to every
+    piece of user code, which could then call this API with it."""
+    env = {k: v for k, v in os.environ.items() if not _SECRET_ENV_RE.search(k)}
+    env.update(overrides)
+    return env
 
 
 if not SANDBOX_KEY:
@@ -497,7 +536,7 @@ class PtyRunner:
         master_fd, slave_fd = pty.openpty()
         try:
             fcntl.ioctl(slave_fd, termios.TIOCSWINSZ, struct.pack("HHHH", 24, 120, 0, 0))
-            proc_env = os.environ.copy()
+            proc_env = _user_env()
             if env:
                 proc_env.update({str(k): str(v) for k, v in env.items()})
             if not env or "HOME" not in env:
@@ -621,7 +660,9 @@ def _diff(old: str, new: str, path: str) -> dict[str, Any] | None:
 
 
 def _run(args: list[str]) -> None:
-    result = subprocess.run(args, text=True, capture_output=True)
+    # Without secrets: some of these run as a sandbox account, whose other
+    # processes could read this one's environment while it runs.
+    result = subprocess.run(args, text=True, capture_output=True, env=_user_env())
     if result.returncode != 0:
         raise HTTPException(500, f"Command failed: {' '.join(args)}\n{result.stderr}")
 
@@ -772,6 +813,7 @@ def copy_workspace_route(user_id: str, chat_id: str, req: CopyWorkspaceRequest) 
         ],
         stdout=subprocess.PIPE,
         stderr=subprocess.DEVNULL,
+        env=_user_env(),
     )
     unpack = subprocess.run(
         [
@@ -781,6 +823,7 @@ def copy_workspace_route(user_id: str, chat_id: str, req: CopyWorkspaceRequest) 
         stdin=pack.stdout,
         capture_output=True,
         text=True,
+        env=_user_env(),
     )
     pack.stdout.close()
     # tar exits with 1 when a file changed while it was read, which is no failure.
@@ -1275,7 +1318,7 @@ async def _ensure_kernel(user_id: str, chat_id: str, scope: str = "") -> dict[st
             sock.unlink()
     except OSError:
         pass
-    env = os.environ.copy()
+    env = _user_env()
     env["HOME"] = str(workspace / ".talos-home")
     env["PATH"] = f"/opt/talos-sandbox-venv/bin:{env.get('PATH', '')}"
     proc = subprocess.Popen(
@@ -1911,7 +1954,7 @@ def office_preview_route(user_id: str, chat_id: str, path: str):
                     text=True,
                     timeout=90,
                     env={
-                        **os.environ,
+                        **_user_env(),
                         "HOME": str(workspace / ".talos-home"),
                         "XDG_CACHE_HOME": str(profile / "cache"),
                         "XDG_CONFIG_HOME": str(profile / "config"),

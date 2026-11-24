@@ -88,3 +88,79 @@ def client_in_networks(
     except ValueError:
         return False
     return any(addr in net for net in networks)
+
+
+# ---------------------------------------------------------------------------
+# The code sandbox as a caller
+# ---------------------------------------------------------------------------
+# The app shares the internal sandbox network with the code sandbox so it can
+# reach the sandbox daemon. The same route lets code running in a workspace
+# call the app back, and that address sits inside the private ranges above, so
+# it would count as "the local network" for token-free MCP. Nothing in the
+# sandbox has any business calling the app, so its address is refused outright.
+
+_SANDBOX_TTL_SECONDS = 30.0
+_sandbox_cache: dict = {"at": None, "addrs": frozenset()}
+
+
+def _sandbox_host() -> Optional[str]:
+    from urllib.parse import urlparse
+
+    url = os.getenv("TALOS_SANDBOX_URL", "http://talos-sandbox:7800")
+    return urlparse(url).hostname or None
+
+
+def _resolve_sandbox_addresses() -> frozenset:
+    """The sandbox host's addresses, loopback left out.
+
+    Loopback is dropped so a development setup that points TALOS_SANDBOX_URL at
+    localhost does not lock the developer's own browser out. A name that does
+    not resolve yields nothing: then there is no sandbox to come from.
+    """
+    import socket
+
+    host = _sandbox_host()
+    if not host:
+        return frozenset()
+    try:
+        infos = socket.getaddrinfo(host, None)
+    except OSError:
+        return frozenset()
+    out = set()
+    for info in infos:
+        try:
+            addr = ipaddress.ip_address(info[4][0])
+        except ValueError:
+            continue
+        if not addr.is_loopback:
+            out.add(str(addr))
+    return frozenset(out)
+
+
+async def sandbox_addresses() -> frozenset:
+    """The sandbox's current addresses, re-resolved every 30 s.
+
+    Its address changes when the container is recreated, so it is looked up
+    rather than configured. The lookup runs in a thread: an unknown name can
+    take seconds to fail, which must not stall the event loop.
+    """
+    import asyncio
+    import time
+
+    now = time.monotonic()
+    at = _sandbox_cache["at"]
+    if at is None or now - at > _SANDBOX_TTL_SECONDS:
+        _sandbox_cache["addrs"] = await asyncio.to_thread(_resolve_sandbox_addresses)
+        _sandbox_cache["at"] = now
+    return _sandbox_cache["addrs"]
+
+
+async def is_sandbox_peer(host: Optional[str]) -> bool:
+    """Whether this transport peer is the code sandbox."""
+    if not host:
+        return False
+    try:
+        addr = str(ipaddress.ip_address(host))
+    except ValueError:
+        return False
+    return addr in await sandbox_addresses()

@@ -158,6 +158,27 @@ class _RequestTimeoutMiddleware(_BaseHTTPMiddleware):
 
 app.add_middleware(_RequestTimeoutMiddleware)
 
+
+class _SandboxPeerMiddleware(_BaseHTTPMiddleware):
+    """Refuse every request from the code sandbox.
+
+    The app sits on the sandbox's internal network to reach its daemon, and code
+    in a workspace can use that route back. Its address is private, so without
+    this it would pass as the local network for token-free MCP: knowledge,
+    SQL, and web_fetch as a way out of a sandbox that has no internet. Nothing
+    in the sandbox needs the app, so the whole app is closed to it.
+    """
+
+    async def dispatch(self, request, call_next):
+        from core.net_trust import is_sandbox_peer
+
+        if await is_sandbox_peer(request.client.host if request.client else None):
+            return _JSONResponse({"detail": "Not available from the sandbox"}, status_code=403)
+        return await call_next(request)
+
+
+app.add_middleware(_SandboxPeerMiddleware)
+
 # ========= AUTH =========
 from routes.auth_routes import SESSION_COOKIE, setup_auth_routes
 
