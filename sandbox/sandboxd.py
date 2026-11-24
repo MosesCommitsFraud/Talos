@@ -360,8 +360,17 @@ while True:
 '''
 
 
+# Accounts of the outward MCP `sandbox` tool (src/mcp_sandbox.py): one per MCP
+# session, deleted when it ends. A name of their own lets the daemon find the
+# ones left over after the app restarted without touching any chat's account.
+MCP_USER_PREFIX = "mcp-"
+MCP_LINUX_PREFIX = "talos_mcp_"
+
+
 def linux_user(user_id: str) -> str:
     digest = hashlib.sha256(user_id.encode("utf-8")).hexdigest()[:16]
+    if user_id.startswith(MCP_USER_PREFIX):
+        return f"{MCP_LINUX_PREFIX}{digest}"
     return f"talos_{digest}"
 
 
@@ -725,6 +734,80 @@ def delete_workspace_route(user_id: str, chat_id: str) -> dict[str, Any]:
         for key in [k for k in state if k == base or k.startswith(f"{base}#")]:
             state.pop(key, None)
     return {"ok": True, "deleted": existed, "workspace": str(workspace)}
+
+
+def _remove_account(name: str, user_ids: set[str]) -> None:
+    """End every process of one sandbox account, then delete it and its home."""
+    for uid in user_ids:
+        for key in [k for k in _kernels if k.startswith(f"{uid}:")]:
+            _stop_kernel_at(key)
+        for pid, proc in list(_processes.items()):
+            if proc.user_id == uid:
+                try:
+                    proc.runner.kill(force=True)
+                except Exception:
+                    pass
+                _processes.pop(pid, None)
+        for state in (_session_cwds, _cell_code):
+            for key in [k for k in state if k.startswith(f"{uid}:")]:
+                state.pop(key, None)
+    subprocess.run(["pkill", "-KILL", "-u", name], capture_output=True)
+    home = HOME_ROOT / name
+    if home.exists() and not home.is_symlink():
+        shutil.rmtree(home, ignore_errors=True)
+    for path in list(_repaired_workspaces):
+        if path.startswith(f"{home}/"):
+            _repaired_workspaces.discard(path)
+    if subprocess.run(["id", "-u", name], capture_output=True).returncode == 0:
+        # A process that outlived the kill above makes userdel refuse; -f
+        # removes the account regardless, and the kill has already run.
+        subprocess.run(["userdel", "-f", name], capture_output=True)
+
+
+@app.delete("/users/{user_id}")
+def delete_mcp_user_route(user_id: str) -> dict[str, Any]:
+    """Delete an MCP session's account: processes, files and the Linux user.
+
+    Only for MCP accounts. A chat's account holds every workspace of that user,
+    and nothing in the app ever deletes one, so this route refuses them.
+    """
+    if not user_id.startswith(MCP_USER_PREFIX):
+        raise HTTPException(400, "Only MCP sandbox accounts can be deleted")
+    name = linux_user(user_id)
+    existed = (HOME_ROOT / name).exists()
+    _remove_account(name, {user_id})
+    return {"ok": True, "deleted": existed, "linux_user": name}
+
+
+class McpCleanupRequest(BaseModel):
+    keep: list[str] = []
+
+
+@app.post("/mcp-users/cleanup")
+def cleanup_mcp_users_route(req: McpCleanupRequest) -> dict[str, Any]:
+    """Delete every MCP account except those of the sessions named in `keep`.
+
+    The app calls this when it starts, with nothing to keep: sessions live in
+    its memory, so after a restart any MCP account here is left over.
+    """
+    keep = {linux_user(uid) for uid in req.keep if uid.startswith(MCP_USER_PREFIX)}
+    names = set()
+    try:
+        with open("/etc/passwd", encoding="utf-8") as f:
+            for line in f:
+                name = line.split(":", 1)[0]
+                if name.startswith(MCP_LINUX_PREFIX):
+                    names.add(name)
+    except OSError:
+        pass
+    if HOME_ROOT.exists():
+        names.update(p.name for p in HOME_ROOT.iterdir() if p.name.startswith(MCP_LINUX_PREFIX))
+    removed = []
+    for name in sorted(names - keep):
+        uids = {p.user_id for p in _processes.values() if linux_user(p.user_id) == name}
+        _remove_account(name, uids)
+        removed.append(name)
+    return {"ok": True, "removed": removed}
 
 
 def _unshare_file(name: str, path: Path) -> None:
