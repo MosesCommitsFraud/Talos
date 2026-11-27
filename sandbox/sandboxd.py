@@ -2,6 +2,7 @@ import asyncio
 import base64
 import hashlib
 import json
+import logging
 import mimetypes
 import os
 import shlex
@@ -692,6 +693,29 @@ def ensure_user(user_id: str) -> tuple[str, Path]:
     _run(["chown", "root:root", str(home)])
     home.chmod(0o711)
     return name, home
+
+
+def _lock_state_dir() -> None:
+    """Keep the daemon's state out of reach of the sandbox accounts.
+
+    The directory holds state.json and the output log of every background
+    process of every user. Only the daemon, which runs as root, reads or writes
+    either, so 0700 on the directory is enough. Its files are created with the
+    default umask and would otherwise be readable by every session account.
+    The mode is set on every start, so directories made by an older image are
+    closed too.
+    """
+    for path in (STATE_PATH.parent, PROCESS_LOG_ROOT):
+        try:
+            path.mkdir(parents=True, exist_ok=True)
+            path.chmod(0o700)
+        except OSError as e:
+            logging.getLogger("uvicorn.error").warning("could not lock down %s: %s", path, e)
+
+
+@app.on_event("startup")
+def _startup_lock_state_dir() -> None:
+    _lock_state_dir()
 
 
 @app.get("/health")

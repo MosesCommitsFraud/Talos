@@ -3,11 +3,14 @@
 Three ways out were open: the daemon's own API (over loopback, with the key the
 daemon handed to user code in its environment), the app's token-free MCP
 endpoint (the sandbox's address counted as the local network), and the shared
-uploads volume (covered in docker-compose.yml, not testable here).
+uploads volume (covered in docker-compose.yml, not testable here). A fourth
+was the daemon's state directory with every user's process logs.
 """
 
 import asyncio
+import os
 
+import pytest
 from starlette.requests import Request
 
 from core import net_trust
@@ -100,3 +103,17 @@ def test_loopback_sandbox_address_is_ignored(monkeypatch):
 def test_unresolvable_sandbox_name_yields_nothing(monkeypatch):
     monkeypatch.setenv("TALOS_SANDBOX_URL", "http://no-such-host.invalid:7800")
     assert net_trust._resolve_sandbox_addresses() == frozenset()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="needs POSIX file modes")
+def test_state_dir_is_closed_to_sandbox_accounts(monkeypatch, tmp_path):
+    # state.json and every user's background-process log live here; session
+    # accounts could read them while the directory was 0755.
+    state = tmp_path / "state"
+    state.mkdir(mode=0o755)
+    (state / "processes").mkdir(mode=0o755)
+    monkeypatch.setattr(sandboxd, "STATE_PATH", state / "state.json")
+    monkeypatch.setattr(sandboxd, "PROCESS_LOG_ROOT", state / "processes")
+    sandboxd._lock_state_dir()
+    assert (state.stat().st_mode & 0o777) == 0o700
+    assert ((state / "processes").stat().st_mode & 0o777) == 0o700
